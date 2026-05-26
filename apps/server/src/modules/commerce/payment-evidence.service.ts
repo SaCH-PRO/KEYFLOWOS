@@ -61,10 +61,11 @@ function normalizeMethod(raw?: string): string {
 export class PaymentEvidenceService {
   private readonly logger = new Logger(PaymentEvidenceService.name);
 
+  private readonly storage = new ObjectStorageService();
+
   constructor(
     @Inject(DocumentIntelligenceService) private readonly docIntel: DocumentIntelligenceService,
     @Inject(GoogleDriveService) private readonly drive: GoogleDriveService,
-    @Inject(ObjectStorageService) private readonly storage: ObjectStorageService,
     @Inject(CommerceService) private readonly commerce: CommerceService,
     @Inject(InvoiceWorkflowService) private readonly invoiceWorkflow: InvoiceWorkflowService,
   ) {}

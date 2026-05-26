@@ -16,14 +16,16 @@ import {
   FileText,
   Calculator,
   Clock,
+  Target,
 } from "lucide-react";
 import { formatCurrency, formatCurrencyCompact } from "@/lib/currency";
-import type { FinanceOverview, ExpenseSummary, RevenueOverview } from "@/lib/client";
+import type { FinanceOverview, ExpenseSummary, RevenueOverview, ExpenseBudget } from "@/lib/client";
 
 interface ModuleSnapshotCardsProps {
   overview: FinanceOverview | null;
   expenseSummary: ExpenseSummary | null;
   revenueOverview: RevenueOverview | null;
+  budgets: ExpenseBudget[];
   currency: string;
 }
 
@@ -123,6 +125,7 @@ export function ModuleSnapshotCards({
   overview,
   expenseSummary,
   revenueOverview,
+  budgets,
   currency,
 }: ModuleSnapshotCardsProps) {
   /* ── Revenue ── */
@@ -145,8 +148,14 @@ export function ModuleSnapshotCards({
   const booksRunway = overview?.cashRunwayMonths ?? null;
   const booksAccounts = overview?.cashAccountCount ?? 0;
 
+  /* ── Budgeting ── */
+  const totalBudget = budgets.reduce((s, b) => s + b.amount, 0);
+  const totalSpent = budgets.reduce((s, b) => s + b.spent, 0);
+  const overBudgetCount = budgets.filter((b) => b.isOverBudget).length;
+  const atRiskCount = budgets.filter((b) => b.isNearAlert && !b.isOverBudget).length;
+
   return (
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
       {/* Revenue */}
       <ModuleCard
         icon={TrendingUp}
@@ -221,6 +230,29 @@ export function ModuleSnapshotCards({
         ]}
         accent="emerald"
         href="/app/finance?tab=snapshot"
+        delay={0.12}
+      />
+
+      {/* Budgeting */}
+      <ModuleCard
+        icon={Target}
+        label="Budgeting"
+        heroValue={formatCurrency(totalBudget, currency)}
+        heroSub={budgets.length > 0 ? `${budgets.length} budget line${budgets.length === 1 ? "" : "s"}` : "No budgets set"}
+        metrics={[
+          {
+            label: "Spent",
+            value: formatCurrencyCompact(totalSpent, currency),
+            color: "text-rose-400",
+          },
+          {
+            label: "Status",
+            value: overBudgetCount > 0 ? `${overBudgetCount} over` : atRiskCount > 0 ? `${atRiskCount} at risk` : "On track",
+            color: overBudgetCount > 0 ? "text-rose-400" : atRiskCount > 0 ? "text-amber-400" : "text-emerald-400",
+          },
+        ]}
+        accent="violet"
+        href="/app/budgeting"
         delay={0.16}
       />
     </div>

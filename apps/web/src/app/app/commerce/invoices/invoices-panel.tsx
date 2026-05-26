@@ -237,6 +237,10 @@ export default function InvoicesPanel({
   const [paymentHistory, setPaymentHistory] = useState<Record<string, PaymentRecord[]>>({});
   const [mobileSheetFor, setMobileSheetFor] = useState<Invoice | null>(null);
   const [timelineRefreshTick, setTimelineRefreshTick] = useState(0);
+  const [pendingDriveUpload, setPendingDriveUpload] = useState<{
+    invoiceId: string;
+    templateId: string;
+  } | null>(null);
   const [dateRange, setDateRange] = useState<DateRange>(DEFAULT_DATE_RANGE);
   const { selectedIds, toggleSelected, selectAll, clearSelection } = useBulkSelection();
 

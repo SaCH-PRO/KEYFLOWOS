@@ -621,6 +621,10 @@ export async function fetchInvoices(businessId: string = DEFAULT_BUSINESS_ID) {
   return { data: res.data?.data ?? (process.env.NODE_ENV === "development" ? fallbackInvoices : []), error: res.error };
 }
 
+export async function getInvoice(invoiceId: string): Promise<ApiResult<Invoice>> {
+  return apiGetSimple<Invoice>(`/commerce/invoices/${encodeURIComponent(invoiceId)}`);
+}
+
 export async function createContact(input: {
   businessId?: string;
   firstName?: string;
@@ -5219,6 +5223,9 @@ export async function fetchExpenses(businessId: string, params?: { startDate?: s
   if (params?.page) q.set('page', String(params.page));
   if (params?.limit) q.set('limit', String(params.limit));
   return apiGetSimple<{ data: Expense[]; total: number; page: number; limit: number }>(`/expenses/businesses/${encodeURIComponent(businessId)}/expenses?${q}`);
+}
+export async function getExpense(businessId: string, expenseId: string): Promise<ApiResult<Expense>> {
+  return apiGetSimple<Expense>(`/expenses/businesses/${encodeURIComponent(businessId)}/expenses/${encodeURIComponent(expenseId)}`);
 }
 export async function createExpense(businessId: string, data: Partial<Expense>): Promise<ApiResult<Expense>> {
   return apiPost<Expense>({ path: `/expenses/businesses/${encodeURIComponent(businessId)}/expenses`, body: data });
@@ -13270,7 +13277,7 @@ export async function listGeneratedDocuments(businessId: string, params?: {
   mimeType: string;
   folderPath: string;
   generatedAt: string;
-}>>>> {
+}>>> {
   const qs = new URLSearchParams();
   if (params?.entityType) qs.append('entityType', params.entityType);
   if (params?.entityId) qs.append('entityId', params.entityId);

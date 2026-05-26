@@ -23,7 +23,7 @@ export function NewEntityMenu({ onClose }: { onClose: () => void }) {
   const items = useMemo(() => {
     const base = [
       { label: "Contact", icon: Users, href: "/app/crm/pipeline", shortcut: "⌘⇧C" },
-      { label: "Invoice", icon: Receipt, href: "/app/commerce", shortcut: "⌘⇧I" },
+      { label: "Invoice", icon: Receipt, href: "/app/commerce/invoices/new", shortcut: "⌘⇧I" },
       { label: "Quote", icon: FileText, href: "/app/commerce?tab=quotes" },
       { label: "Booking", icon: Calendar, href: "/app/bookings", shortcut: "⌘⇧B" },
       { label: "Expense", icon: Receipt, href: "/app/expenses" },

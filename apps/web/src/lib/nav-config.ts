@@ -119,7 +119,7 @@ export const operateSections: NavSection[] = [
       { label: "Overview", href: "/app/money", icon: LayoutDashboard },
       { label: "Revenue", href: "/app/commerce", icon: TrendingUp },
       { label: "Expenses", href: "/app/expenses", icon: Receipt },
-      { label: "Books", href: "/app/reports?tab=books-pnl", icon: BookOpenCheck },
+      { label: "Budgeting", href: "/app/budgeting", icon: Target },
       { label: "Reports", href: "/app/reports", icon: BarChart3 },
     ],
   },

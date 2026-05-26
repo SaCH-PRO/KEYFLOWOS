@@ -1,362 +1,687 @@
 "use client";
 
-import { useState, useMemo, useCallback, useEffect, useRef } from "react";
-import { useSearchParams, useRouter, usePathname } from "next/navigation";
+import { useState, useMemo, useCallback, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
-import { ResumePrompt } from "@/components/ui/resume-task-system";
-import { registerInterruptedTask, markTaskCompleted } from "@/lib/resume-task-registry";
-import { WorkspaceShell } from "@/components/ui/workspace-shell";
-import { KeyflowUnifiedShell } from "@/components/guide/keyflow-unified-shell";
-import { ListPageSkeleton } from "@/components/ui/skeleton";
-import { NotesTrigger } from "@/components/keyflow/notes-trigger";
-import { PageNotesMount } from "@/components/keyflow/page-notes-mount";
 import {
+  Search,
+  SlidersHorizontal,
+  Calendar,
+  Download,
+  Upload,
+  Plus,
+  HelpCircle,
+  ArrowUpDown,
+  AlertCircle,
+  CheckCircle,
+  Clock,
   Receipt,
-  Target,
-  Lightbulb,
-  Layers,
+  FileText,
   TrendingUp,
-  LayoutDashboard,
-  Repeat,
+  AlertTriangle,
+  ChevronRight,
+  Loader2,
+  Inbox,
+  Eye,
+  Pencil,
+  Trash2,
+  Ban,
+  Check,
+  X,
 } from "lucide-react";
-import { deleteExpense, getExpenseExportUrl, Expense } from "@/lib/client";
+import {
+  deleteExpense,
+  updateExpense,
+  getExpenseExportUrl,
+  Expense,
+  ExpenseCategory,
+  ExpenseBudget,
+} from "@/lib/client";
 import { getAuthHeaders } from "@/lib/api";
-import { formatCurrency } from "./components/expense-utils";
 import { useExpensesData } from "./components/use-expenses-data";
-import { ExpenseFilters } from "./components/expense-filters";
-import { ExpensePipeline } from "./components/expense-pipeline";
-import { ExpensesSnapshotTab } from "./components/expenses-snapshot-tab";
-import RecurringExpensesPanel from "./components/recurring-expenses-panel";
 import { ExpenseFormSideSheet } from "./components/expense-form-sidesheet";
-import { ExpenseBudgetsTab } from "./components/expense-budgets-tab";
-import { ExpenseCategoriesTab } from "./components/expense-categories-tab";
-import { ExpenseInsightsTab } from "./components/expense-insights-tab";
-import { ExpenseDetailModal } from "./components/expense-detail-modal";
-import { ExpenseTaxCalc } from "./components/expense-tax-calc";
-import { ExpensesActionMenu } from "./components/expenses-action-menu";
-import { TabFrame } from "../commerce/components/tab-frame";
-import { GraphInsightsPanel } from "@/components/ai/graph-insights-panel";
-import { AutomationCoverageIndicator } from "@/components/ai/automation-coverage-indicator";
-import { useGraphIntelligence } from "@/hooks/use-graph-intelligence";
+import { formatCurrency, formatDate } from "./components/expense-utils";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
-const TABS = [
-  { key: "snapshot", label: "Snapshot", icon: LayoutDashboard },
-  { key: "pipeline", label: "Pipeline", icon: TrendingUp },
-  { key: "budgets", label: "Budgets", icon: Target },
-  { key: "categories", label: "Categories", icon: Layers },
-  { key: "insights", label: "Insights", icon: Lightbulb },
-  { key: "recurring", label: "Recurring", icon: Repeat },
-];
+/* ───────────────────────────────────────────
+   Types
+   ─────────────────────────────────────────── */
+type ExpenseStatusTab = "inbox" | "needs_review" | "pending_approval" | "approved" | "reimbursed" | "all";
 
-type TabKey = "snapshot" | "pipeline" | "budgets" | "categories" | "insights" | "recurring";
+interface DerivedStatus {
+  key: string;
+  label: string;
+  color: string;
+  bg: string;
+}
 
-export default function ExpensesPage() {
-  const searchParams = useSearchParams();
-  const router = useRouter();
-  const pathname = usePathname();
-  const tabParam = searchParams.get("tab") as TabKey | null;
-  const activeTab: TabKey = (["snapshot", "pipeline", "budgets", "categories", "insights", "recurring"] as TabKey[]).includes(tabParam as TabKey) ? tabParam! : "snapshot";
+/* ───────────────────────────────────────────
+   Helpers
+   ─────────────────────────────────────────── */
+function getMerchantInitials(vendor?: string): string {
+  if (!vendor) return "?";
+  const parts = vendor.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
 
-  const setActiveTab = useCallback((tab: string) => {
-    router.replace(`${pathname}?tab=${tab}`, { scroll: false });
-  }, [router, pathname]);
+function getMerchantColor(vendor?: string): string {
+  if (!vendor) return "#94a3b8";
+  const colors = ["#f97316", "#ef4444", "#8b5cf6", "#06b6d4", "#22c55e", "#eab308", "#ec4899", "#6366f1", "#14b8a6", "#f43f5e"];
+  let hash = 0;
+  for (let i = 0; i < vendor.length; i++) hash = vendor.charCodeAt(i) + ((hash << 5) - hash);
+  return colors[Math.abs(hash) % colors.length];
+}
 
-  // Reset view param when leaving pipeline tab
-  useEffect(() => {
-    if (activeTab !== "pipeline") {
-      const url = new URL(window.location.href);
-      url.searchParams.delete("view");
-      window.history.replaceState({}, "", url);
-    }
-  }, [activeTab]);
+function deriveExpenseStatus(expense: Expense): DerivedStatus {
+  if (expense.status === "VOID") {
+    return { key: "void", label: "Rejected", color: "text-rose-700", bg: "bg-rose-50" };
+  }
+  if (expense.status === "BILL") {
+    return { key: "pending_approval", label: "Pending approval", color: "text-blue-700", bg: "bg-blue-50" };
+  }
+  if (expense.status === "PAID" && !expense.receiptUrl) {
+    return { key: "missing_receipt", label: "Missing receipt", color: "text-orange-700", bg: "bg-orange-50" };
+  }
+  if (expense.status === "PAID" && !expense.categoryId) {
+    return { key: "needs_review", label: "Needs review", color: "text-amber-700", bg: "bg-amber-50" };
+  }
+  if (expense.isRecurring) {
+    return { key: "recurring", label: "Recurring", color: "text-cyan-700", bg: "bg-cyan-50" };
+  }
+  if (expense.tags?.includes("reimbursable") || expense.tags?.includes("reimbursed")) {
+    return { key: "reimbursed", label: "Reimbursed", color: "text-purple-700", bg: "bg-purple-50" };
+  }
+  return { key: "approved", label: "Approved", color: "text-emerald-700", bg: "bg-emerald-50" };
+}
 
-  const d = useExpensesData();
-  const intelligence = useGraphIntelligence({ businessId: d.businessId, module: "expenses" });
-  const [showModal, setShowModal] = useState(false);
-  const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
-  const [detailExpense, setDetailExpense] = useState<Expense | null>(null);
-  const expenseTaskIdRef = useRef<string | null>(null);
-  const expenseSessionIdRef = useRef<string | null>(null);
+function matchesTab(expense: Expense, tab: ExpenseStatusTab): boolean {
+  const ds = deriveExpenseStatus(expense);
+  switch (tab) {
+    case "inbox":
+      return ds.key === "pending_approval" || ds.key === "missing_receipt" || ds.key === "needs_review" || ds.key === "void";
+    case "needs_review":
+      return ds.key === "needs_review";
+    case "pending_approval":
+      return ds.key === "pending_approval";
+    case "approved":
+      return ds.key === "approved" || ds.key === "recurring";
+    case "reimbursed":
+      return ds.key === "reimbursed";
+    case "all":
+      return true;
+    default:
+      return true;
+  }
+}
 
-  useEffect(() => {
-    if (showModal) {
-      if (!expenseSessionIdRef.current) {
-        expenseSessionIdRef.current = editingExpense
-          ? `expenses-edit-${editingExpense.id}`
-          : `expenses-new-${Date.now()}`;
-      }
-      const sessionId = expenseSessionIdRef.current;
-      const label = editingExpense ? "Edit expense" : "New expense";
-      const description = editingExpense
-        ? `Resume editing expense: ${editingExpense.description ?? editingExpense.id}`
-        : "Resume adding this expense";
-      const taskId = registerInterruptedTask({
-        id: sessionId,
-        module: "expenses",
-        label: editingExpense?.description ? `${label} · ${editingExpense.description}` : label,
-        description,
-        route: "/app/expenses",
-        draftId: editingExpense?.id ?? null,
-        originRoute: "/app/expenses",
-        originLabel: "Expenses",
-        taskIntent: editingExpense ? "edit-expense" : "create-expense",
-        formData: {
-          expenseId: editingExpense?.id ?? null,
-          description: editingExpense?.description ?? null,
-          amount: editingExpense?.amount ?? null,
-          categoryId: editingExpense?.categoryId ?? null,
-        },
-      });
-      expenseTaskIdRef.current = taskId;
-    } else {
-      expenseSessionIdRef.current = null;
-      expenseTaskIdRef.current = null;
-    }
-  }, [showModal, editingExpense]);
+function getBudgetImpact(expense: Expense, budgets: ExpenseBudget[]): string {
+  if (!expense.categoryId) return "Uncategorized";
+  const b = budgets.find((bud) => bud.categoryId === expense.categoryId);
+  if (!b) return "No budget";
+  if (b.isOverBudget) return "Over budget";
+  if (b.isNearAlert) return "At risk";
+  return "Within budget";
+}
 
-  const openEditModal = (exp: Expense) => { setEditingExpense(exp); setShowModal(true); };
-  const openAddModal = () => { setEditingExpense(null); setShowModal(true); };
+function getBudgetImpactColor(expense: Expense, budgets: ExpenseBudget[]): string {
+  if (!expense.categoryId) return "text-muted-foreground";
+  const b = budgets.find((bud) => bud.categoryId === expense.categoryId);
+  if (!b) return "text-muted-foreground";
+  if (b.isOverBudget) return "text-rose-600";
+  if (b.isNearAlert) return "text-amber-600";
+  return "text-emerald-600";
+}
 
-  const handleResumeExpenseTask = useCallback((task: import("@/lib/resume-task-registry").InterruptedTask) => {
-    const fd = task.formData;
-    if (task.id.startsWith("expenses-edit-") && fd?.id) {
-      const match = d.expenses.find((e) => e.id === fd.id);
-      if (match) { openEditModal(match); return; }
-    }
-    openAddModal();
-  }, [d.expenses]);
-
-  const handleDelete = async (id: string) => {
-    if (!d.businessId) return;
-    try { await deleteExpense(d.businessId, id); toast.success("Deleted"); void d.loadData(); } catch { toast.error("Failed"); }
-  };
-  const handleExport = () => {
-    if (!d.businessId) return;
-    fetch(getExpenseExportUrl(d.businessId), { headers: getAuthHeaders() })
-      .then(r => r.blob()).then(b => { const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = `expenses-${new Date().toISOString().split("T")[0]}.csv`; a.click(); });
-  };
-
-  const totalCount = d.summary?.count ?? d.totalExpenses;
-
-  const summaryAny = d.summary as Record<string, unknown> | null;
-  const uncategorizedCount = (typeof summaryAny?.uncategorizedCount === "number" ? summaryAny.uncategorizedCount : null) ?? d.expenses.filter(e => !e.categoryId).length;
-  const missingReceiptCount = (typeof summaryAny?.missingReceiptCount === "number" ? summaryAny.missingReceiptCount : null) ?? d.expenses.filter(e => !e.receiptUrl).length;
-  const recurringCount = (typeof summaryAny?.recurringCount === "number" ? summaryAny.recurringCount : null) ?? d.expenses.filter(e => e.isRecurring).length;
-  const largestCategory = d.summary?.byCategory?.[0];
-  const largestCategoryPct = largestCategory?.percent ?? 0;
-
-  const spendingHealth = useMemo(() => {
-    let score = 100;
-    if (d.overBudgetCount > 0) score -= d.overBudgetCount * 15;
-    if (d.nearAlertCount > 0) score -= d.nearAlertCount * 5;
-    if (uncategorizedCount > 5) score -= 10;
-    else if (uncategorizedCount > 0) score -= 5;
-    if (totalCount > 0 && missingReceiptCount > totalCount * 0.5) score -= 10;
-    const changePct = d.summary?.comparison?.changePercent ?? 0;
-    if (changePct > 30) score -= 15;
-    else if (changePct > 15) score -= 8;
-    return Math.max(0, Math.min(100, score));
-  }, [d.overBudgetCount, d.nearAlertCount, uncategorizedCount, missingReceiptCount, d.summary, totalCount]);
-
-  if (d.loading && !d.businessId) return <ListPageSkeleton />;
-
-  const metricStrip = (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm" data-walkthrough="expenses-kpi">
-      {[
-        { label: "Total Spent", value: formatCurrency(d.summary?.total ?? 0), color: d.summary && d.summary.total > 0 ? "text-rose-400" : "text-muted-foreground" },
-        { label: "Transactions", value: String(d.summary?.count ?? 0), color: "text-muted-foreground" },
-        { label: "Over Budget", value: d.overBudgetCount > 0 ? `${d.overBudgetCount} budgets` : "All on track", color: d.overBudgetCount > 0 ? "text-rose-400" : "text-emerald-400" },
-        { label: "Uncategorized", value: uncategorizedCount > 0 ? `${uncategorizedCount} items` : "All classified", color: uncategorizedCount > 0 ? "text-amber-400" : "text-emerald-400" },
-        { label: "Health", value: `${spendingHealth}%`, color: spendingHealth >= 80 ? "text-emerald-400" : spendingHealth >= 50 ? "text-amber-400" : "text-rose-400" },
-      ].map((stat) => (
-        <span key={stat.label} className="flex items-center gap-1.5 text-muted-foreground">
-          <span className="text-xs">{stat.label}:</span>
-          <span className={cn("text-xs font-semibold", stat.color)}>{stat.value}</span>
-        </span>
-      ))}
-    </div>
-  );
-
+/* ───────────────────────────────────────────
+   Components
+   ─────────────────────────────────────────── */
+function StatCard({
+  label,
+  value,
+  sub,
+  icon: Icon,
+  iconColor,
+  iconBg,
+  onClick,
+}: {
+  label: string;
+  value: string;
+  sub: string;
+  icon: React.ElementType;
+  iconColor: string;
+  iconBg: string;
+  onClick?: () => void;
+}) {
   return (
-    <KeyflowUnifiedShell
-      module="expenses"
-      pageTitle="Expenses"
-      availableActions={["Add expense", "Export CSV", "View budgets", "View insights"]}
+    <button
+      onClick={onClick}
+      className={cn(
+        "text-left rounded-xl border border-border bg-card p-4 shadow-sm transition-all hover:shadow-md hover:scale-[1.01]",
+        onClick && "cursor-pointer"
+      )}
     >
-      <WorkspaceShell
-        icon={Receipt}
-        title="Expenses"
-        subtitle="Track, analyze, and optimize spending across your business"
-        tabLayoutId="expenses-tabs"
-        tabs={TABS}
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-        headerRight={
-          <div className="flex items-center gap-2">
-            <NotesTrigger pageKey="expenses" variant="header" />
-            <ExpensesActionMenu
-              onAddExpense={openAddModal}
-              onExport={handleExport}
-              onViewBudgets={() => setActiveTab("budgets")}
-              onViewInsights={() => setActiveTab("insights")}
-            />
-          </div>
-        }
-        banners={
-          <ResumePrompt module="expenses" onResume={handleResumeExpenseTask} />
-        }
-        metricStrip={metricStrip}
-      >
-        {activeTab === "snapshot" && (
-          <TabFrame loading={d.loading}>
-            <ExpensesSnapshotTab
-              expenses={d.expenses}
-              categories={d.categories}
-              summary={d.summary}
-              budgets={d.budgets}
-              onNavigate={setActiveTab}
-              onViewExpense={setDetailExpense}
-            />
-          </TabFrame>
-        )}
-
-        {activeTab === "pipeline" && (
-          <TabFrame loading={d.loading}>
-            <ExpensePipeline
-              businessId={d.businessId}
-              expenses={d.expenses}
-              totalExpenses={d.totalExpenses}
-              categories={d.categories}
-              summary={d.summary}
-              period={d.period}
-              setPeriod={d.setPeriod}
-              customStart={d.customStart}
-              setCustomStart={d.setCustomStart}
-              customEnd={d.customEnd}
-              setCustomEnd={d.setCustomEnd}
-              searchQuery={d.searchQuery}
-              setSearchQuery={d.setSearchQuery}
-              filterCategory={d.filterCategory}
-              setFilterCategory={d.setFilterCategory}
-              filterPayment={d.filterPayment}
-              setFilterPayment={d.setFilterPayment}
-              filterStatus={d.filterStatus}
-              setFilterStatus={d.setFilterStatus}
-              page={d.page}
-              setPage={d.setPage}
-              pageSize={d.pageSize}
-              setPageSize={d.setPageSize}
-              onReload={d.loadData}
-              onEdit={openEditModal}
-              onAdd={openAddModal}
-              projects={d.projects}
-              contacts={d.contacts}
-              services={d.services}
-              loading={d.loading}
-            />
-          </TabFrame>
-        )}
-
-        {activeTab === "budgets" && d.businessId && (
-          <TabFrame loading={d.loading}>
-            <ExpenseBudgetsTab
-              businessId={d.businessId}
-              budgets={d.budgets}
-              categories={d.categories}
-              expenses={d.expenses}
-              summary={d.summary}
-              onReload={d.loadData}
-            />
-          </TabFrame>
-        )}
-
-        {activeTab === "categories" && d.businessId && (
-          <TabFrame loading={d.loading}>
-            <ExpenseCategoriesTab
-              businessId={d.businessId}
-              categories={d.categories}
-              setCategories={d.setCategories}
-              summary={d.summary}
-              budgets={d.budgets}
-            />
-          </TabFrame>
-        )}
-
-        {activeTab === "insights" && d.businessId && (
-          <TabFrame loading={d.loading}>
-            <div className="space-y-4">
-              {intelligence.moduleCoverage && (
-                <AutomationCoverageIndicator
-                  coveragePct={intelligence.moduleCoverage.coveragePct}
-                  automatedCount={intelligence.moduleCoverage.automatedCount}
-                  totalProcesses={intelligence.moduleCoverage.totalProcesses}
-                />
-              )}
-              <GraphInsightsPanel
-                recommendations={intelligence.recommendations}
-                loading={intelligence.loading}
-                onDismiss={intelligence.dismiss}
-                onNavigate={(route) => router.push(route)}
-              />
-              <ExpenseInsightsTab
-                businessId={d.businessId}
-                expenses={d.expenses}
-                categories={d.categories}
-                summary={d.summary}
-                vendors={d.vendors}
-                budgets={d.budgets}
-                marginData={d.marginData}
-                projects={d.projects}
-                contacts={d.contacts}
-                services={d.services}
-                recurringCandidates={d.recurringCandidates}
-                onNavigate={setActiveTab}
-                periodTotalCount={totalCount}
-                periodUncategorizedCount={uncategorizedCount}
-                periodMissingReceiptCount={missingReceiptCount}
-                periodRecurringCount={recurringCount}
-              />
-            </div>
-          </TabFrame>
-        )}
-
-        {activeTab === "recurring" && d.businessId && (
-          <TabFrame loading={d.loading}>
-            <RecurringExpensesPanel
-              businessId={d.businessId}
-              categories={d.categories}
-            />
-          </TabFrame>
-        )}
-
-        {showModal && d.businessId && (
-          <ExpenseFormSideSheet
-            businessId={d.businessId}
-            categories={d.categories}
-            editingExpense={editingExpense}
-            projects={d.projects}
-            contacts={d.contacts}
-            services={d.services}
-            onClose={() => setShowModal(false)}
-            onSaved={() => {
-              if (expenseTaskIdRef.current) {
-                markTaskCompleted(expenseTaskIdRef.current);
-                expenseTaskIdRef.current = null;
-              }
-              void d.loadData();
-            }}
-          />
-        )}
-        <AnimatePresence>
-          {detailExpense && <ExpenseDetailModal expense={detailExpense} onClose={() => setDetailExpense(null)} onEdit={openEditModal} />}
-        </AnimatePresence>
-
-        <PageNotesMount pageKey="expenses" />
-      </WorkspaceShell>
-    </KeyflowUnifiedShell>
+      <div className="flex items-center gap-2 mb-2">
+        <div className={cn("w-7 h-7 rounded-lg flex items-center justify-center", iconBg)}>
+          <Icon className={cn("w-3.5 h-3.5", iconColor)} />
+        </div>
+        <span className="text-xs font-medium text-muted-foreground">{label}</span>
+      </div>
+      <p className="text-xl font-bold tracking-tight text-foreground">{value}</p>
+      <p className="text-[11px] text-muted-foreground mt-0.5">{sub}</p>
+    </button>
   );
 }
 
+function StatusBadge({ status }: { status: DerivedStatus }) {
+  return (
+    <span className={cn("inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium", status.bg, status.color)}>
+      {status.label}
+    </span>
+  );
+}
 
+function MerchantAvatar({ vendor }: { vendor?: string }) {
+  const color = getMerchantColor(vendor);
+  const initials = getMerchantInitials(vendor);
+  return (
+    <div
+      className="w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0"
+      style={{ backgroundColor: color }}
+    >
+      {initials}
+    </div>
+  );
+}
+
+/* ───────────────────────────────────────────
+   Main Page
+   ─────────────────────────────────────────── */
+export default function ExpensesInboxPage() {
+  const router = useRouter();
+  const d = useExpensesData();
+  const [activeTab, setActiveTab] = useState<ExpenseStatusTab>("inbox");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showAddDrawer, setShowAddDrawer] = useState(false);
+  const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
+  const [detailExpense, setDetailExpense] = useState<Expense | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
+
+  // Debounced search sync with hook
+  useEffect(() => {
+    d.setSearchQuery(searchQuery);
+  }, [searchQuery]);
+
+  const filteredExpenses = useMemo(() => {
+    let list = d.expenses.filter((e) => matchesTab(e, activeTab));
+    list = [...list].sort((a, b) => {
+      const da = new Date(a.date).getTime();
+      const db = new Date(b.date).getTime();
+      return sortDir === "desc" ? db - da : da - db;
+    });
+    return list;
+  }, [d.expenses, activeTab, sortDir]);
+
+  const tabCounts = useMemo(() => {
+    return {
+      inbox: d.expenses.filter((e) => matchesTab(e, "inbox")).length,
+      needs_review: d.expenses.filter((e) => matchesTab(e, "needs_review")).length,
+      pending_approval: d.expenses.filter((e) => matchesTab(e, "pending_approval")).length,
+      approved: d.expenses.filter((e) => matchesTab(e, "approved")).length,
+      reimbursed: d.expenses.filter((e) => matchesTab(e, "reimbursed")).length,
+      all: d.expenses.length,
+    };
+  }, [d.expenses]);
+
+  // Stats
+  const stats = useMemo(() => {
+    const spentThisMonth = d.summary?.total ?? 0;
+    const pendingApproval = d.expenses.filter((e) => e.status === "BILL").reduce((s, e) => s + e.amount, 0);
+    const missingReceipts = d.expenses.filter((e) => e.status === "PAID" && !e.receiptUrl).length;
+    const overBudget = d.budgets.filter((b) => b.isOverBudget).length;
+    return { spentThisMonth, pendingApproval, missingReceipts, overBudget };
+  }, [d.summary, d.expenses, d.budgets]);
+
+  // Attention queue
+  const attentionItems = useMemo(() => {
+    const items: { type: string; title: string; desc: string; color: string; bg: string }[] = [];
+
+    // Over policy (amount > 500 without receipt)
+    const overPolicy = d.expenses.find((e) => e.amount > 500 && !e.receiptUrl && e.status === "PAID");
+    if (overPolicy) {
+      items.push({
+        type: "over_policy",
+        title: "Over policy",
+        desc: `${overPolicy.vendor || "Expense"} exceeds travel policy by $${(overPolicy.amount - 500).toFixed(2)}.`,
+        color: "text-rose-700",
+        bg: "bg-rose-50",
+      });
+    }
+
+    // Missing receipts
+    if (stats.missingReceipts > 0) {
+      items.push({
+        type: "missing_receipts",
+        title: "Missing receipts",
+        desc: `${stats.missingReceipts} receipt${stats.missingReceipts !== 1 ? "s" : ""} need${stats.missingReceipts === 1 ? "s" : ""} a reminder before close.`,
+        color: "text-amber-700",
+        bg: "bg-amber-50",
+      });
+    }
+
+    // Duplicate suspected
+    const seen = new Map<string, Expense>();
+    for (const e of d.expenses) {
+      const key = `${e.vendor?.toLowerCase()}-${e.amount}`;
+      if (seen.has(key)) {
+        items.push({
+          type: "duplicate",
+          title: "Duplicate suspected",
+          desc: `${e.vendor || "Expense"} resembles an existing expense.`,
+          color: "text-pink-700",
+          bg: "bg-pink-50",
+        });
+        break;
+      }
+      seen.set(key, e);
+    }
+
+    return items.slice(0, 4);
+  }, [d.expenses, stats.missingReceipts]);
+
+  const handleDelete = async (id: string) => {
+    if (!d.businessId) return;
+    setActionLoading((prev) => ({ ...prev, [`delete-${id}`]: true }));
+    try {
+      await deleteExpense(d.businessId, id);
+      toast.success("Expense deleted");
+      void d.loadData();
+    } catch {
+      toast.error("Failed to delete expense");
+    }
+    setActionLoading((prev) => ({ ...prev, [`delete-${id}`]: false }));
+    setConfirmDelete(null);
+  };
+
+  const handleMarkPaid = async (expense: Expense) => {
+    if (!d.businessId) return;
+    setActionLoading((prev) => ({ ...prev, [`paid-${expense.id}`]: true }));
+    try {
+      await updateExpense(d.businessId, expense.id, { status: "PAID", paidAt: new Date().toISOString() });
+      toast.success("Marked as paid");
+      void d.loadData();
+    } catch {
+      toast.error("Failed to mark as paid");
+    }
+    setActionLoading((prev) => ({ ...prev, [`paid-${expense.id}`]: false }));
+  };
+
+  const handleExport = () => {
+    if (!d.businessId) return;
+    fetch(getExpenseExportUrl(d.businessId), { headers: getAuthHeaders() })
+      .then((r) => r.blob())
+      .then((b) => {
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(b);
+        a.download = `expenses-${new Date().toISOString().split("T")[0]}.csv`;
+        a.click();
+      });
+  };
+
+  const openAdd = () => { setEditingExpense(null); setShowAddDrawer(true); };
+  const openEdit = (exp: Expense) => { setEditingExpense(exp); setShowAddDrawer(true); };
+
+  const totalPages = Math.max(1, Math.ceil(d.totalExpenses / d.pageSize));
+
+  const tabs: { key: ExpenseStatusTab; label: string }[] = [
+    { key: "inbox", label: "Inbox" },
+    { key: "needs_review", label: "Needs review" },
+    { key: "pending_approval", label: "Pending approval" },
+    { key: "approved", label: "Approved" },
+    { key: "reimbursed", label: "Reimbursed" },
+    { key: "all", label: "All" },
+  ];
+
+  return (
+    <div className="min-h-screen bg-background">
+      <div className="max-w-[1440px] mx-auto px-4 sm:px-6 py-6">
+        {/* Header */}
+        <div className="flex items-start justify-between mb-6">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-foreground">Expenses</h1>
+            <p className="text-sm text-muted-foreground mt-0.5">Capture, review, approve, and control company spend.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {}}
+              className="hidden sm:flex items-center justify-center w-9 h-9 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+              title="Help"
+            >
+              <HelpCircle className="w-4 h-4" />
+            </button>
+            <button
+              onClick={openAdd}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-all hover:opacity-90 active:scale-95"
+              style={{ background: "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))" }}
+            >
+              <Plus className="w-4 h-4" />
+              <span className="hidden sm:inline">Add expense</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Search & actions */}
+        <div className="flex flex-col sm:flex-row gap-3 mb-5">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <input
+              type="text"
+              placeholder="Search expenses, merchants, projects, notes..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-9 pr-4 py-2.5 rounded-lg border border-border bg-card text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-[hsl(var(--kf-accent1))]/20 focus:border-[hsl(var(--kf-accent1))]/40"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <button className="inline-flex items-center gap-2 px-3 py-2.5 rounded-lg border border-border bg-card text-sm text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors">
+              <SlidersHorizontal className="w-4 h-4" />
+              <span className="hidden sm:inline">Filters</span>
+            </button>
+            <button className="inline-flex items-center gap-2 px-3 py-2.5 rounded-lg border border-border bg-card text-sm text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors">
+              <Calendar className="w-4 h-4" />
+              <span className="hidden sm:inline">May 2026</span>
+            </button>
+            <button
+              onClick={handleExport}
+              className="hidden md:inline-flex items-center gap-2 px-3 py-2.5 rounded-lg border border-border bg-card text-sm text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+            >
+              <Download className="w-4 h-4" />
+              <span>Import bank feed</span>
+            </button>
+            <button className="hidden md:inline-flex items-center gap-2 px-3 py-2.5 rounded-lg border border-border bg-card text-sm text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors">
+              <Upload className="w-4 h-4" />
+              <span>Upload receipts</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Stat cards */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+          <StatCard
+            label="Spent this month"
+            value={formatCurrency(stats.spentThisMonth)}
+            sub={`${d.summary ? Math.round((stats.spentThisMonth / (d.summary.total * 1.5 || 1)) * 100) : 0}% of monthly budget`}
+            icon={TrendingUp}
+            iconColor="text-blue-600"
+            iconBg="bg-blue-50"
+          />
+          <StatCard
+            label="Pending approval"
+            value={formatCurrency(stats.pendingApproval)}
+            sub={`${tabCounts.pending_approval} expense${tabCounts.pending_approval !== 1 ? "s" : ""} waiting`}
+            icon={Clock}
+            iconColor="text-amber-600"
+            iconBg="bg-amber-50"
+            onClick={() => setActiveTab("pending_approval")}
+          />
+          <StatCard
+            label="Missing receipts"
+            value={String(stats.missingReceipts)}
+            sub={stats.missingReceipts > 0 ? "Needs follow-up" : "All receipts attached"}
+            icon={Receipt}
+            iconColor="text-orange-600"
+            iconBg="bg-orange-50"
+            onClick={() => setActiveTab("approved")}
+          />
+          <StatCard
+            label="Over budget"
+            value={`${stats.overBudget} category${stats.overBudget !== 1 ? "ies" : "y"}`}
+            sub={stats.overBudget > 0 ? "Forecast risk this month" : "All on track"}
+            icon={AlertTriangle}
+            iconColor="text-rose-600"
+            iconBg="bg-rose-50"
+          />
+        </div>
+
+        {/* Main content grid */}
+        <div className="flex flex-col xl:flex-row gap-5">
+          {/* Left: Tabs + Table */}
+          <div className="flex-1 min-w-0">
+            {/* Tabs */}
+            <div className="flex items-center gap-1 border-b border-border mb-4 overflow-x-auto">
+              {tabs.map((t) => (
+                <button
+                  key={t.key}
+                  onClick={() => setActiveTab(t.key)}
+                  className={cn(
+                    "relative px-3 py-2.5 text-sm font-medium whitespace-nowrap transition-colors",
+                    activeTab === t.key ? "text-foreground" : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  {t.label}
+                  <span className={cn("ml-1.5 text-[11px] px-1.5 py-0.5 rounded-full", activeTab === t.key ? "bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))]" : "bg-muted text-muted-foreground")}>
+                    {tabCounts[t.key]}
+                  </span>
+                  {activeTab === t.key && (
+                    <motion.div
+                      layoutId="expense-tab-indicator"
+                      className="absolute bottom-0 left-0 right-0 h-[2px] rounded-full"
+                      style={{ background: "linear-gradient(90deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))" }}
+                    />
+                  )}
+                </button>
+              ))}
+            </div>
+
+            {/* Table */}
+            <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+              {d.loading && d.expenses.length === 0 ? (
+                <div className="p-12 flex items-center justify-center">
+                  <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : filteredExpenses.length === 0 ? (
+                <div className="p-12 text-center">
+                  <FileText className="w-10 h-10 text-muted-foreground/40 mx-auto mb-3" />
+                  <p className="text-sm font-medium text-muted-foreground">No expenses found</p>
+                  <p className="text-xs text-muted-foreground/60 mt-1">Try adjusting your filters or add a new expense.</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border bg-muted/30">
+                        <th className="px-4 py-3 text-left font-medium text-muted-foreground text-xs w-10">
+                          <input type="checkbox" className="rounded border-border" />
+                        </th>
+                        <th className="px-4 py-3 text-left font-medium text-muted-foreground text-xs">
+                          <button onClick={() => setSortDir((d) => (d === "desc" ? "asc" : "desc"))} className="inline-flex items-center gap-1 hover:text-foreground">
+                            Date
+                            <ArrowUpDown className="w-3 h-3" />
+                          </button>
+                        </th>
+                        <th className="px-4 py-3 text-left font-medium text-muted-foreground text-xs">Merchant</th>
+                        <th className="px-4 py-3 text-left font-medium text-muted-foreground text-xs hidden md:table-cell">Category</th>
+                        <th className="px-4 py-3 text-left font-medium text-muted-foreground text-xs hidden lg:table-cell">Owner</th>
+                        <th className="px-4 py-3 text-left font-medium text-muted-foreground text-xs">Status</th>
+                        <th className="px-4 py-3 text-right font-medium text-muted-foreground text-xs">Amount</th>
+                        <th className="px-4 py-3 text-left font-medium text-muted-foreground text-xs hidden xl:table-cell">Budget impact</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredExpenses.map((exp) => {
+                        const status = deriveExpenseStatus(exp);
+                        const budgetImpact = getBudgetImpact(exp, d.budgets);
+                        const budgetColor = getBudgetImpactColor(exp, d.budgets);
+                        const category = d.categories.find((c) => c.id === exp.categoryId);
+                        return (
+                          <tr
+                            key={exp.id}
+                            className="border-b border-border/60 hover:bg-muted/20 transition-colors group cursor-pointer"
+                            onClick={() => router.push(`/app/expenses/${exp.id}`)}
+                          >
+                            <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                              <input type="checkbox" className="rounded border-border" />
+                            </td>
+                            <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
+                              {formatDate(exp.date)}
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-2.5">
+                                <MerchantAvatar vendor={exp.vendor} />
+                                <div className="min-w-0">
+                                  <p className="text-sm font-medium text-foreground truncate">{exp.vendor || "Unknown merchant"}</p>
+                                  <p className="text-[11px] text-muted-foreground truncate">{exp.description}</p>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 hidden md:table-cell">
+                              <span className="text-xs text-muted-foreground">{category?.name || "—"}</span>
+                            </td>
+                            <td className="px-4 py-3 hidden lg:table-cell">
+                              <span className="text-xs text-muted-foreground">{exp.vendor || "—"}</span>
+                            </td>
+                            <td className="px-4 py-3">
+                              <StatusBadge status={status} />
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <span className="text-sm font-semibold text-foreground">{formatCurrency(exp.amount)}</span>
+                            </td>
+                            <td className="px-4 py-3 hidden xl:table-cell">
+                              <span className={cn("text-xs font-medium", budgetColor)}>{budgetImpact}</span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* Pagination */}
+              {totalPages > 1 && (
+                <div className="flex items-center justify-between px-4 py-3 border-t border-border">
+                  <button
+                    onClick={() => d.setPage((p) => Math.max(1, p - 1))}
+                    disabled={d.page <= 1}
+                    className="px-3 py-1.5 rounded-lg text-xs border border-border text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
+                  >
+                    Previous
+                  </button>
+                  <span className="text-xs text-muted-foreground">
+                    Page {d.page} of {totalPages}
+                  </span>
+                  <button
+                    onClick={() => d.setPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={d.page >= totalPages}
+                    className="px-3 py-1.5 rounded-lg text-xs border border-border text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors"
+                  >
+                    Next
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Right sidebar */}
+          <div className="w-full xl:w-[320px] flex-shrink-0 space-y-4">
+            {/* Attention queue */}
+            <div className="rounded-xl border border-border bg-card shadow-sm p-4">
+              <h3 className="text-sm font-semibold text-foreground mb-1">Attention queue</h3>
+              <p className="text-xs text-muted-foreground mb-3">Prioritised exceptions that need action today.</p>
+              {attentionItems.length === 0 ? (
+                <div className="text-center py-4">
+                  <CheckCircle className="w-8 h-8 text-emerald-400 mx-auto mb-2" />
+                  <p className="text-xs text-muted-foreground">All caught up</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {attentionItems.map((item, i) => (
+                    <div key={i} className={cn("rounded-lg p-3", item.bg)}>
+                      <div className="flex items-center gap-2 mb-1">
+                        <AlertCircle className={cn("w-3.5 h-3.5", item.color)} />
+                        <span className={cn("text-xs font-semibold", item.color)}>{item.title}</span>
+                      </div>
+                      <p className={cn("text-[11px] leading-relaxed", item.color)}>{item.desc}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Budget pulse */}
+            <div className="rounded-xl border border-border bg-card shadow-sm p-4">
+              <h3 className="text-sm font-semibold text-foreground mb-1">Budget pulse</h3>
+              <p className="text-xs text-muted-foreground mb-3">Monthly spend by category.</p>
+              <div className="space-y-3">
+                {d.budgets
+                  .filter((b) => b.amount > 0)
+                  .sort((a, b) => b.percentUsed - a.percentUsed)
+                  .slice(0, 6)
+                  .map((b) => {
+                    const pct = Math.min(100, Math.round(b.percentUsed));
+                    const barColor = b.isOverBudget
+                      ? "bg-rose-500"
+                      : b.isNearAlert
+                        ? "bg-amber-500"
+                        : "bg-emerald-500";
+                    const textColor = b.isOverBudget
+                      ? "text-rose-600"
+                      : b.isNearAlert
+                        ? "text-amber-600"
+                        : "text-emerald-600";
+                    return (
+                      <div key={b.id}>
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs text-foreground font-medium">{b.category?.name || "Uncategorized"}</span>
+                          <span className={cn("text-[11px] font-semibold", textColor)}>{pct}%</span>
+                        </div>
+                        <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                          <div className={cn("h-full rounded-full transition-all", barColor)} style={{ width: `${pct}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                {d.budgets.filter((b) => b.amount > 0).length === 0 && (
+                  <p className="text-xs text-muted-foreground text-center py-2">No budgets set</p>
+                )}
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-3 italic">Tip: review exceptions first, not every row.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Add/Edit Drawer */}
+      {showAddDrawer && d.businessId && (
+        <ExpenseFormSideSheet
+          businessId={d.businessId}
+          categories={d.categories}
+          editingExpense={editingExpense}
+          projects={d.projects}
+          contacts={d.contacts}
+          services={d.services}
+          onClose={() => setShowAddDrawer(false)}
+          onSaved={() => {
+            setShowAddDrawer(false);
+            void d.loadData();
+          }}
+        />
+      )}
+
+      {/* Confirm delete */}
+      <ConfirmDialog
+        open={!!confirmDelete}
+        title="Delete expense?"
+        message="This action cannot be undone. The expense will be permanently removed."
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={() => confirmDelete && handleDelete(confirmDelete)}
+        onCancel={() => setConfirmDelete(null)}
+      />
+    </div>
+  );
+}

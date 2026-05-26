@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { FileText, Receipt, DollarSign, Wallet, TrendingDown, Clock } from "lucide-react";
+import { FileText, Receipt, DollarSign, Wallet, TrendingDown, Clock, Target } from "lucide-react";
 import { formatCurrencyCompact } from "@/lib/currency";
 import type { Invoice, Quote, Expense, ExpenseSummary, FinanceOverview, RevenueOverview } from "@/lib/client";
 
@@ -13,6 +13,7 @@ interface MoneyFlowBarProps {
   expenseSummary: ExpenseSummary | null;
   overview: FinanceOverview | null;
   revenueOverview: RevenueOverview | null;
+  budgets: { amount: number; spent: number }[];
   currency?: string;
 }
 
@@ -33,6 +34,7 @@ export function MoneyFlowBar({
   expenses,
   expenseSummary,
   overview,
+  budgets,
   currency = "TTD",
 }: MoneyFlowBarProps) {
   const quoteTotal = quotes.reduce((s, q) => s + (q.total ?? 0), 0);
@@ -43,6 +45,8 @@ export function MoneyFlowBar({
   const cash = overview?.cashBalance ?? 0;
   const expenseTotal = expenseSummary?.total ?? expenses.reduce((s, e) => s + e.amount, 0);
   const billsTotal = overview?.billsDue ?? 0;
+  const budgetTotal = budgets.reduce((s, b) => s + b.amount, 0);
+  const budgetSpent = budgets.reduce((s, b) => s + b.spent, 0);
 
   const stages: FlowStage[] = [
     {
@@ -104,6 +108,16 @@ export function MoneyFlowBar({
       href: "/app/expenses",
       color: "text-violet-500",
       bgColor: "bg-violet-500/10",
+    },
+    {
+      key: "budgeting",
+      label: "Budget",
+      icon: Target,
+      amount: budgetTotal,
+      count: budgets.length,
+      href: "/app/budgeting",
+      color: "text-teal-500",
+      bgColor: "bg-teal-500/10",
     },
   ];
 

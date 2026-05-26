@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import ReactDOM from "react-dom";
+import { createRoot } from "react-dom/client";
 import { InvoiceTemplateRenderer } from "./invoice-templates/template-renderer";
 import type { TemplateId, InvoiceTemplateData } from "./invoice-templates/template-types";
 import { buildPrintHtml } from "./invoice-templates/print-document";
@@ -49,28 +49,31 @@ export function InvoiceDriveUploader({
     container.style.width = "794px";
     document.body.appendChild(container);
 
-    ReactDOM.render(
+    const root = createRoot(container);
+    root.render(
       <InvoiceTemplateRenderer templateId={templateId} data={templateData} />,
-      container,
-      () => {
-        // After React renders, capture the HTML
-        setTimeout(() => {
-          const innerHtml = container.innerHTML;
-          document.body.removeChild(container);
-
-          // Store the HTML on the ref for the upload effect
-          if (hiddenRef.current) {
-            (hiddenRef.current as any).__capturedHtml = innerHtml;
-            setHtmlReady(true);
-          }
-        }, 500);
-      },
     );
 
+    // After React renders, capture the HTML
+    const timer = setTimeout(() => {
+      const innerHtml = container.innerHTML;
+      root.unmount();
+      if (document.body.contains(container)) {
+        document.body.removeChild(container);
+      }
+
+      // Store the HTML on the ref for the upload effect
+      if (hiddenRef.current) {
+        (hiddenRef.current as any).__capturedHtml = innerHtml;
+        setHtmlReady(true);
+      }
+    }, 500);
+
     return () => {
+      clearTimeout(timer);
       try {
         if (document.body.contains(container)) {
-          ReactDOM.unmountComponentAtNode(container);
+          root.unmount();
           document.body.removeChild(container);
         }
       } catch {

@@ -213,6 +213,10 @@ export default function QuotesPanel({
   }, [initialStatusFilter]);
   const [sortKey, setSortKey] = useState<BillingSortKey>("date-desc");
   const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null);
+  const [pendingDriveUpload, setPendingDriveUpload] = useState<{
+    quoteId: string;
+    templateId: string;
+  } | null>(null);
   const [followUpFor, setFollowUpFor] = useState<Quote | null>(null);
   const [extendDate, setExtendDate] = useState("");
   const [showConvertModal, setShowConvertModal] = useState(false);
@@ -1478,6 +1482,47 @@ export default function QuotesPanel({
           </div>
         </div>
       )}
+
+      {/* Upload created quote to Google Drive */}
+      {pendingDriveUpload && businessData && (() => {
+        const q = quotes.find((qt) => qt.id === pendingDriveUpload.quoteId);
+        if (!q) return null;
+        const templateData = buildTemplateData("quote", {
+          id: q.id,
+          number: q.quoteNumber ?? q.id.slice(0, 8),
+          status: q.status,
+          issueDate: new Date().toISOString().split("T")[0],
+          expiryDate: q.expiryDate,
+          contact: q.contact ?? null,
+          items: (q.items ?? []).map((item) => ({
+            id: item.id,
+            description: item.description,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            total: item.total,
+          })),
+          subtotal: q.subtotal ?? 0,
+          taxRate: q.taxRate ?? 0,
+          taxAmount: q.taxAmount ?? 0,
+          discountType: q.discountType,
+          discountValue: q.discountValue,
+          discountAmount: q.discountAmount ?? 0,
+          total: typeof q.total === "string" ? parseFloat(q.total) : (q.total ?? 0),
+          currency: q.currency,
+          notes: q.notes,
+        }, businessData);
+        return (
+          <InvoiceDriveUploader
+            businessId={businessId ?? ""}
+            invoiceId={q.id}
+            docType="quote"
+            templateId={pendingDriveUpload.templateId as any}
+            templateData={templateData}
+            fileName={`Quote-${q.quoteNumber ?? q.id.slice(0, 8)}-${q.contact?.lastName ?? "Client"}-${new Date().toISOString().split("T")[0]}`}
+            onComplete={() => setPendingDriveUpload(null)}
+          />
+        );
+      })()}
     </motion.div>
   );
 }

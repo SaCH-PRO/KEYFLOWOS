@@ -30,6 +30,7 @@ const LABEL_MAP: Record<string, string> = {
   bookings: "Calendar",
   books: "Books",
   budgets: "Budgets",
+  budgeting: "Budgeting",
   business: "Business",
 
   // C
@@ -179,6 +180,7 @@ const PARENT_OVERRIDES: Record<string, Array<{ label: string; href: string }>> =
   expenses: [{ label: "Financial Flow", href: "/app/money" }],
   finance: [{ label: "Financial Flow", href: "/app/money" }],
   reports: [{ label: "Financial Flow", href: "/app/money" }],
+  budgeting: [{ label: "Financial Flow", href: "/app/money" }],
 };
 
 const NO_LINK_SEGMENTS = new Set([

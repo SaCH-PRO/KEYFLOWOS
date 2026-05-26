@@ -11,6 +11,7 @@ import {
   fetchRecurringInvoices,
   fetchRevenueOverview,
   fetchCommerceStats,
+  fetchExpenseBudgets,
   type FinanceOverview,
   type Invoice,
   type Quote,
@@ -19,6 +20,7 @@ import {
   type RecurringInvoice,
   type RevenueOverview,
   type CommerceStats,
+  type ExpenseBudget,
 } from "@/lib/client";
 
 export interface MoneyHubData {
@@ -30,6 +32,7 @@ export interface MoneyHubData {
   recurring: RecurringInvoice[];
   revenueOverview: RevenueOverview | null;
   commerceStats: CommerceStats | null;
+  budgets: ExpenseBudget[];
 }
 
 export function useMoneyHub() {
@@ -43,6 +46,7 @@ export function useMoneyHub() {
     recurring: [],
     revenueOverview: null,
     commerceStats: null,
+    budgets: [],
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -58,7 +62,7 @@ export function useMoneyHub() {
     setError(null);
 
     try {
-      const [overviewRes, invoicesRes, quotesRes, expensesRes, summaryRes, recurringRes, revenueRes, commerceRes] =
+      const [overviewRes, invoicesRes, quotesRes, expensesRes, summaryRes, recurringRes, revenueRes, commerceRes, budgetsRes] =
         await Promise.all([
           fetchFinanceOverview(businessId),
           fetchInvoices(businessId),
@@ -68,6 +72,7 @@ export function useMoneyHub() {
           fetchRecurringInvoices(businessId),
           fetchRevenueOverview(businessId),
           fetchCommerceStats(businessId),
+          fetchExpenseBudgets(businessId),
         ]);
 
       const allInvoices = invoicesRes.data ?? [];
@@ -82,6 +87,7 @@ export function useMoneyHub() {
         recurring: recurringRes.data ?? [],
         revenueOverview: revenueRes.data ?? null,
         commerceStats: commerceRes.data ?? null,
+        budgets: budgetsRes.data ?? [],
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load money data");

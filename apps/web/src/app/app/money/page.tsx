@@ -120,6 +120,7 @@ export default function MoneyPage() {
             overview={data.overview}
             expenseSummary={data.expenseSummary}
             revenueOverview={data.revenueOverview}
+            budgets={data.budgets}
             currency={currency}
           />
         )}
@@ -148,6 +149,7 @@ export default function MoneyPage() {
             expenseSummary={data.expenseSummary}
             overview={data.overview}
             revenueOverview={data.revenueOverview}
+            budgets={data.budgets}
             currency={currency}
           />
         )}
