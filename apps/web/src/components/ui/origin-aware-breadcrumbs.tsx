@@ -150,7 +150,7 @@ const LABEL_MAP: Record<string, string> = {
   // Misc
   "change-orders": "Change Orders",
   contacts: "Contacts",
-  crm: "CRM",
+  crm: "Network",
   "time-tracking": "Time",
   inbox: "Inbox",
   presence: "Presence",
@@ -163,6 +163,7 @@ const LABEL_MAP: Record<string, string> = {
  * ──────────────────────────────────────────────────────────────── */
 const ROUTE_ALIASES: Record<string, string> = {
   "/app/network": "/app/network/contacts",
+  "/app/crm": "/app/network/contacts",
   "/app/crm/contacts": "/app/network/contacts",
   "/app/crm/deals": "/app/crm/deals",
   "/app/money/books": "/app/finance",
