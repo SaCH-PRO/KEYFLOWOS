@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useMemo } from "react";
-import { useSearchParams } from "next/navigation";
+import { useEffect, useRef, useMemo, useState } from "react";
 import { PageHeader } from "@/components/ui/page-header";
 import { TabNav } from "@/components/ui/tab-nav";
 import { useNavigationContext } from "@/lib/navigation-context";
@@ -77,7 +76,7 @@ export function WorkspaceShell({
   children,
 }: WorkspaceShellProps) {
   const { setCurrentMeta, current } = useNavigationContext();
-  const searchParams = useSearchParams();
+  const [queryTab, setQueryTab] = useState<string | null>(null);
   const tabRestored = useRef(false);
 
   useReturnNavigation({ restoreScrollOnMount: true });
@@ -95,9 +94,15 @@ export function WorkspaceShell({
   }, [setCurrentMeta, title]);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    const current = new URLSearchParams(window.location.search).get("tab");
+    setQueryTab(current);
+  }, []);
+
+  useEffect(() => {
     if (tabRestored.current || !tabs || !onTabChange) return;
 
-    const urlTab = searchParams.get("tab");
+    const urlTab = queryTab;
     if (urlTab && tabKeys.includes(urlTab) && urlTab !== activeTab) {
       onTabChange(urlTab);
       tabRestored.current = true;
@@ -112,7 +117,7 @@ export function WorkspaceShell({
     }
 
     tabRestored.current = true;
-  }, [tabs, onTabChange, searchParams, current, activeTab, tabKeys]);
+  }, [tabs, onTabChange, queryTab, current, activeTab, tabKeys]);
 
   useEffect(() => {
     if (activeTab) {

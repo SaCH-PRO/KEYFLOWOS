@@ -55,15 +55,22 @@ function AuthCallbackInner() {
     const handleCallback = async () => {
       try {
         const hash = window.location.hash.substring(1);
-        const params = new URLSearchParams(hash);
-        const accessToken = params.get("access_token");
+        const hashParams = new URLSearchParams(hash);
+        const accessToken = hashParams.get("access_token");
         const searchParams = new URLSearchParams(window.location.search);
-        const errorDescription = searchParams.get("error_description");
-        
+        const errorDescription =
+          searchParams.get("error_description") ??
+          hashParams.get("error_description");
+        const providerError =
+          searchParams.get("error") ?? hashParams.get("error");
+
         if (errorDescription) {
           throw new Error(errorDescription);
         }
-        
+        if (providerError) {
+          throw new Error(providerError);
+        }
+
         if (!accessToken) {
           throw new Error("No access token received");
         }

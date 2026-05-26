@@ -3,6 +3,7 @@ import { API_BASE, apiPost, apiPostSimple, apiPatch, apiPut, apiDelete, apiGet a
 import { refreshAccessToken, getStoredBusinessId } from "./workspace";
 
 const DEFAULT_BUSINESS_ID = process.env.NEXT_PUBLIC_DEMO_BUSINESS_ID ?? "biz_demo";
+const DEMO_MODE_ENABLED = process.env.NEXT_PUBLIC_ENABLE_DEMO_MODE === "true";
 
 const contactMetaSchema = z.object({
   outstandingBalance: z.number().optional(),
@@ -303,16 +304,20 @@ export type Invoice = {
 type ApiResult<T> = { data: T | null; error: string | null; planLimitReached?: PlanLimitError | null };
 
 
-const fallbackBookings: Booking[] = [
-  { id: "bk_1", startTime: new Date().toISOString(), endTime: new Date(Date.now() + 60 * 60 * 1000).toISOString(), status: "CONFIRMED" },
-  { id: "bk_2", startTime: new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString(), endTime: new Date(Date.now() + 5 * 60 * 60 * 1000).toISOString(), status: "PENDING" },
-];
+const fallbackBookings: Booking[] = DEMO_MODE_ENABLED
+  ? [
+      { id: "bk_1", startTime: new Date().toISOString(), endTime: new Date(Date.now() + 60 * 60 * 1000).toISOString(), status: "CONFIRMED" },
+      { id: "bk_2", startTime: new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString(), endTime: new Date(Date.now() + 5 * 60 * 60 * 1000).toISOString(), status: "PENDING" },
+    ]
+  : [];
 
 
-const fallbackInvoices: Invoice[] = [
-  { id: "inv_1", invoiceNumber: "INV-001", status: "PAID", total: 850, currency: "TTD", contact: { firstName: "Sarah", email: "sarah@example.com" } },
-  { id: "inv_2", invoiceNumber: "INV-002", status: "SENT", total: 600, currency: "TTD", contact: { firstName: "John", email: "john@example.com" } },
-];
+const fallbackInvoices: Invoice[] = DEMO_MODE_ENABLED
+  ? [
+      { id: "inv_1", invoiceNumber: "INV-001", status: "PAID", total: 850, currency: "TTD", contact: { firstName: "Sarah", email: "sarah@example.com" } },
+      { id: "inv_2", invoiceNumber: "INV-002", status: "SENT", total: 600, currency: "TTD", contact: { firstName: "John", email: "john@example.com" } },
+    ]
+  : [];
 
 async function apiGet<T>(path: string, schema?: z.ZodSchema<T>, fallback?: T, opts?: { signal?: AbortSignal }): Promise<ApiResult<T>> {
   try {
@@ -672,8 +677,8 @@ export async function createContact(input: {
   const body = {
     firstName: input.firstName ?? "Guest",
     lastName: input.lastName ?? "User",
-    email: input.email ?? "",
-    phone: input.phone ?? "",
+    email: input.email?.trim() || undefined,
+    phone: input.phone?.trim() || undefined,
     status: input.status ?? "LEAD",
     source: input.source ?? "",
     tags: input.tags ?? [],
@@ -717,18 +722,7 @@ export async function createContact(input: {
   });
 
   if (res.data) return res;
-
-  // Fallback: synthesize a contact so UI keeps flowing
-  const synthesized: Contact = {
-    id: `ct_${Date.now()}`,
-    firstName: body.firstName,
-    lastName: body.lastName,
-    email: body.email,
-    phone: body.phone,
-    tags: body.tags ?? [],
-  };
-
-  return { data: synthesized, error: res.error };
+  return { data: null, error: res.error ?? "Failed to create contact" };
 }
 
 export async function fetchContactEvents(
@@ -1814,9 +1808,16 @@ export async function updateContact(input: {
   archivedAt?: string | null;
 }) {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  const { businessId: _businessId, contactId: _contactId, ...body } = input;
+  if (body.email !== undefined) {
+    body.email = body.email.trim() || undefined;
+  }
+  if (body.phone !== undefined) {
+    body.phone = body.phone.trim() || undefined;
+  }
   return apiPatch<Contact>(
     `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(input.contactId)}`,
-    input,
+    body,
   );
 }
 
@@ -1858,20 +1859,7 @@ export async function createProduct(input: {
   });
 
   if (res.data) return res;
-
-  const synthesized: Product = {
-    id: `pd_${Date.now()}`,
-    name: input.name,
-    description: input.description ?? null,
-    price: input.price,
-    currency: input.currency ?? "TTD",
-    category: input.category ?? "SERVICE",
-    duration: input.duration ?? null,
-    imageUrl: input.imageUrl ?? null,
-    sku: input.sku ?? null,
-    isActive: input.isActive ?? true,
-  };
-  return { data: synthesized, error: res.error };
+  return { data: null, error: res.error ?? "Failed to create product" };
 }
 
 export async function updateProduct(input: {
@@ -1948,14 +1936,7 @@ export async function createBooking(input: {
   });
 
   if (res.data) return res;
-
-  const synthesized: Booking = {
-    id: `bk_${Date.now()}`,
-    startTime: input.startTime,
-    endTime: input.endTime,
-    status: "PENDING",
-  };
-  return { data: synthesized, error: res.error };
+  return { data: null, error: res.error ?? "Failed to create booking" };
 }
 
 export async function rescheduleBooking(bookingId: string, startTime: string, businessId?: string) {

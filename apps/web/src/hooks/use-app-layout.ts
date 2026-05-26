@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useNavigationContext } from "@/lib/navigation-context";
 import { useThemeColors } from "@/lib/theme-context";
 import { usePlanLimitHandler } from "./use-plan";
@@ -40,7 +40,6 @@ import type { CopilotModule } from "@/components/ai/copilot-panel";
 
 export interface AppLayoutState {
   pathname: string;
-  searchParams: URLSearchParams;
   copilotModule: CopilotModule;
 
   drawerSurface: DrawerSurface;
@@ -100,7 +99,6 @@ export interface AppLayoutState {
 
 export function useAppLayout(): AppLayoutState {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
   const router = useRouter();
   useNavigationContext();
 
@@ -121,6 +119,13 @@ export function useAppLayout(): AppLayoutState {
     return "cockpit";
   }, [pathname]);
 
+  const [queryTab, setQueryTab] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setQueryTab(new URLSearchParams(window.location.search).get("tab"));
+  }, [pathname]);
+
   const [drawerSurface, setDrawerSurface] = useState<DrawerSurface>(null);
 
   useEffect(() => {
@@ -130,13 +135,13 @@ export function useAppLayout(): AppLayoutState {
   const isSecondaryActive = useCallback((item: NavItem) => {
     const basePath = item.href.split("?")[0];
     if (item.matchTab) {
-      return pathname === basePath && searchParams.get("tab") === item.matchTab;
+      return pathname === basePath && queryTab === item.matchTab;
     }
     if (item.exactMatch) {
-      return pathname === basePath && !searchParams.get("tab");
+      return pathname === basePath && !queryTab;
     }
     return pathname === basePath || pathname.startsWith(basePath + "/");
-  }, [pathname, searchParams]);
+  }, [pathname, queryTab]);
 
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
@@ -259,39 +264,48 @@ export function useAppLayout(): AppLayoutState {
   }, [pathname]);
 
   useEffect(() => {
+    let canceled = false;
     const init = async () => {
-      await refreshWorkspace();
-      const user = getCachedUser();
-      void getCachedBusiness();
+      try {
+        await refreshWorkspace();
+        if (canceled) return;
+        const user = getCachedUser();
+        void getCachedBusiness();
 
-      if (user) {
-        setDisplayName(getUserDisplayName());
-        setInitials(getUserInitials());
-        if (user.avatarUrl) setAvatarUrl(user.avatarUrl);
-        setIsAdminUser(isSuperAdmin());
-        setUserEmail(user.email ?? null);
-      }
-
-      const businessId = getStoredBusinessId();
-      if (businessId) {
-        const res = await apiGet(`/identity/businesses/${businessId}`);
-        if (res.data) {
-          const data = res.data as { primaryColor?: string; secondaryColor?: string; onboardingComplete?: boolean };
-          if (data.primaryColor) setAccent1(data.primaryColor);
-          if (data.secondaryColor) setAccent2(data.secondaryColor);
-          void data.onboardingComplete;
+        if (user) {
+          setDisplayName(getUserDisplayName());
+          setInitials(getUserInitials());
+          if (user.avatarUrl) setAvatarUrl(user.avatarUrl);
+          setIsAdminUser(isSuperAdmin());
+          setUserEmail(user.email ?? null);
         }
-      }
-      const flagsRes = await apiGet<{ flags: ResolvedFeatureFlag[] }>(`/api/feature-flags`);
-      if (flagsRes.data?.flags) {
-        const map: Record<string, ResolvedFeatureFlag> = {};
-        for (const f of flagsRes.data.flags) map[f.key] = f;
-        setFeatureFlags(map);
-      }
 
-      setOnboardingChecked(true);
+        const businessId = getStoredBusinessId();
+        if (businessId) {
+          const res = await apiGet(`/identity/businesses/${businessId}`);
+          if (canceled) return;
+          if (res.data) {
+            const data = res.data as { primaryColor?: string; secondaryColor?: string; onboardingComplete?: boolean };
+            if (data.primaryColor) setAccent1(data.primaryColor);
+            if (data.secondaryColor) setAccent2(data.secondaryColor);
+            void data.onboardingComplete;
+          }
+        }
+        const flagsRes = await apiGet<{ flags: ResolvedFeatureFlag[] }>(`/api/feature-flags`);
+        if (canceled) return;
+        if (flagsRes.data?.flags) {
+          const map: Record<string, ResolvedFeatureFlag> = {};
+          for (const f of flagsRes.data.flags) map[f.key] = f;
+          setFeatureFlags(map);
+        }
+      } finally {
+        if (!canceled) setOnboardingChecked(true);
+      }
     };
     init();
+    return () => {
+      canceled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname, router]);
 
@@ -392,7 +406,6 @@ export function useAppLayout(): AppLayoutState {
 
   return {
     pathname,
-    searchParams,
     copilotModule,
     drawerSurface,
     setDrawerSurface,
