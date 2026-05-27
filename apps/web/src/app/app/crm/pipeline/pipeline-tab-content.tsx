@@ -24,6 +24,7 @@ import { PipelineDetailPanel } from "./pipeline-detail-panel";
 import { PipelineKanban } from "./pipeline-kanban";
 import { ContactsDatabase } from "./contacts-database";
 import { DuplicateDetector } from "./duplicate-detector";
+import { FocusView } from "./focus-view";
 import type { PipelineState } from "./use-contacts-pipeline";
 
 interface PipelineTabContentProps {
@@ -42,16 +43,16 @@ interface PipelineTabContentProps {
 const PIPELINE_VIEW_KEY = "kf_pipeline_view";
 
 function getStoredViewMode(): ViewMode {
-  if (typeof window === "undefined") return "list";
+  if (typeof window === "undefined") return "focus";
   try {
     const params = new URLSearchParams(window.location.search);
     const queryView = params.get("view");
-    if (queryView === "table" || queryView === "kanban" || queryView === "list") return queryView;
+    if (queryView === "focus" || queryView === "list" || queryView === "kanban" || queryView === "table" || queryView === "data-quality") return queryView;
     const stored = localStorage.getItem(PIPELINE_VIEW_KEY);
-    if (stored === "kanban" || stored === "table") return stored;
-    return "list";
+    if (stored === "focus" || stored === "list" || stored === "kanban" || stored === "table" || stored === "data-quality") return stored;
+    return "focus";
   } catch {
-    return "list";
+    return "focus";
   }
 }
 
@@ -418,7 +419,16 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
         ))}
       </div>
 
-      {viewMode === "kanban" ? (
+      {viewMode === "focus" ? (
+        <FocusView
+          contacts={displayContacts as ContactCardData[]}
+          nextActions={nextActions ?? []}
+          onViewContact={onViewEngageContact ?? (() => {})}
+          onDoAction={onDoAction ?? (() => {})}
+          onCompleteNextAction={onCompleteNextAction ?? (() => Promise.resolve())}
+          loading={loading}
+        />
+      ) : viewMode === "kanban" ? (
         <PipelineKanban state={state} />
       ) : viewMode === "table" && businessId ? (
         <ContactsDatabase
@@ -430,6 +440,11 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
           onSelectContact={selectContact}
           favoriteIds={favoriteIds}
           onToggleFavorite={handleToggleFavorite}
+        />
+      ) : viewMode === "data-quality" && businessId ? (
+        <DuplicateDetector
+          businessId={businessId}
+          onMergeComplete={handleMergeComplete}
         />
       ) : (
         <div ref={listRef}>

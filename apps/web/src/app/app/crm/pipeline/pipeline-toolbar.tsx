@@ -40,7 +40,7 @@ import type { ContactSavedView } from "@/lib/client";
 export type SortOption = "name" | "newest" | "oldest" | "revenue" | "score";
 export type SmartSegment = "high-value" | "needs-followup" | "new-this-week" | "at-risk" | "stale";
 export type ListTab = "all" | "pinned" | "recent";
-export type ViewMode = "list" | "kanban" | "table";
+export type ViewMode = "focus" | "list" | "kanban" | "table" | "data-quality";
 
 const STATUSES = ["ALL", "LEAD", "PROSPECT", "CLIENT", "LOST"] as const;
 
@@ -306,8 +306,16 @@ function PipelineToolbarInner({
         {onViewModeChange && (
           <div className="flex items-center gap-0.5 border-l border-border/30 pl-2 flex-shrink-0">
             <button
+              onClick={() => onViewModeChange("focus")}
+              className={`px-2.5 py-2 rounded-xl transition-all text-xs font-medium ${viewMode === "focus" ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]" : "text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground"}`}
+              aria-label="Focus view"
+              title="Focus view"
+            >
+              Focus
+            </button>
+            <button
               onClick={() => onViewModeChange("list")}
-              className={`p-2 rounded-xl transition-all ${viewMode === "list" ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]" : "text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground"}`}
+              className={`px-2.5 py-2 rounded-xl transition-all text-xs font-medium ${viewMode === "list" ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]" : "text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground"}`}
               aria-label="List view"
               title="List view"
             >
@@ -315,19 +323,27 @@ function PipelineToolbarInner({
             </button>
             <button
               onClick={() => onViewModeChange("kanban")}
-              className={`p-2 rounded-xl transition-all ${viewMode === "kanban" ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]" : "text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground"}`}
-              aria-label="Kanban view"
-              title="Kanban view"
+              className={`px-2.5 py-2 rounded-xl transition-all text-xs font-medium ${viewMode === "kanban" ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]" : "text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground"}`}
+              aria-label="Pipeline view"
+              title="Pipeline view"
             >
               <LayoutGrid className="w-4 h-4" />
             </button>
             <button
               onClick={() => onViewModeChange("table")}
-              className={`p-2 rounded-xl transition-all ${viewMode === "table" ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]" : "text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground"}`}
+              className={`px-2.5 py-2 rounded-xl transition-all text-xs font-medium ${viewMode === "table" ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]" : "text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground"}`}
               aria-label="Table view"
               title="Table view"
             >
               <TableIcon className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => onViewModeChange("data-quality")}
+              className={`px-2.5 py-2 rounded-xl transition-all text-xs font-medium ${viewMode === "data-quality" ? "bg-[hsl(var(--kf-accent1))]/15 text-[hsl(var(--kf-accent1))]" : "text-muted-foreground/60 hover:bg-white/[0.04] hover:text-muted-foreground"}`}
+              aria-label="Data Quality view"
+              title="Data Quality view"
+            >
+              Data
             </button>
           </div>
         )}

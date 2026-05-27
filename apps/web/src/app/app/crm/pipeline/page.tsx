@@ -4,33 +4,31 @@ export const dynamic = "force-dynamic";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import {
   Users,
   Zap,
   TrendingUp,
   Lightbulb,
-  Phone,
-  Mail,
   MessageSquare,
   ArrowRight,
+  AlertTriangle,
+  Flame,
+  CalendarPlus,
 } from "lucide-react";
-import {
-  BroadcastDrawer,
-} from "@/components/contacts";
+import { BroadcastDrawer } from "@/components/contacts";
+import { NextActionQueue } from "@/components/contacts/next-action-queue";
+import { AutopilotActions } from "@/components/contacts/autopilot-actions";
 import { KanbanSkeleton } from "@/components/ui/skeleton";
 import { WorkspaceError } from "@/components/ui/workspace-error";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { PageHeader } from "@/components/ui/page-header";
 import { NotesTrigger } from "@/components/keyflow/notes-trigger";
 import { PipelineTabContent } from "./pipeline-tab-content";
-import { ClientsMetricsStrip } from "./clients-metrics-strip";
 import { useContactsPipeline } from "./use-contacts-pipeline";
 import { KeyflowUnifiedShell } from "@/components/guide/keyflow-unified-shell";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
 import { useModuleEmit } from "@/hooks/use-module-events";
-import { useSwipeTabs } from "@/hooks/use-swipe-tabs";
 import { usePlan } from "@/hooks/use-plan";
 import { PlanLimitBanner } from "@/components/ui/upgrade-prompt";
 import { ResumePrompt } from "@/components/ui/resume-task-system";
@@ -55,16 +53,11 @@ export default function ContactsPage() {
     showBroadcast, setShowBroadcast,
     confirmState, setConfirmState,
     selectedContactsForBroadcast,
-     setSelectedIds, setSelectMode,
+    setSelectedIds, setSelectMode,
     contacts, loadContacts,
-      
-    
-       
-    
     nextActions, autopilotActions, autopilotPaused,
     setAutopilotPaused,
     handleCompleteNextAction, handleDoAction,
-     
     handleApproveAutopilot, handleDenyAutopilot,
     selectContact, loadFlowData,
   } = state;
@@ -136,13 +129,7 @@ export default function ContactsPage() {
     emitEvent("module:tab_changed", "crm", { tab: t });
   }, [crmViewTab, setCrmViewTab, emitEvent, setCurrentMeta]);
 
-  const { swipeHandlers: _swipeHandlers } = useSwipeTabs({
-    tabs: CRM_TABS,
-    activeTab: crmViewTab,
-    onTabChange: handleTabChange,
-  });
-
-  /* Leverage insights — must be BEFORE any early return */
+  /* Leverage insights */
   const leverageInsights = useMemo(() => {
     if (workspaceLoading || workspaceError) return [];
     const items: { icon: React.ElementType; label: string; detail: string; cta: string; href: string }[] = [];
@@ -153,7 +140,7 @@ export default function ContactsPage() {
         icon: Lightbulb,
         label: `${staleCount} relationship${staleCount > 1 ? "s" : ""} need attention`,
         detail: "Re-engaging dormant contacts often yields the highest ROI",
-        cta: "View",
+        cta: "Review",
         href: "#followup",
       });
     }
@@ -173,9 +160,9 @@ export default function ContactsPage() {
     if (highValueCount > 0) {
       items.push({
         icon: Zap,
-        label: `${highValueCount} high-value contact${highValueCount > 1 ? "s" : ""}`,
+        label: `${highValueCount} high-value contact${highValueCount > 1 ? "s" : ""} idle`,
         detail: "These people drive the most revenue — keep them close",
-        cta: "Review",
+        cta: "Prioritize",
         href: "#highvalue",
       });
     }
@@ -189,16 +176,17 @@ export default function ContactsPage() {
   return (
     <KeyflowUnifiedShell
       module="crm"
-      pageTitle="Contacts & Pipeline"
+      pageTitle="Contacts"
       availableActions={["Add contact", "Send broadcast", "Import contacts", "Move pipeline stage"]}
     >
-    <div className="space-y-4" aria-label="Contacts Workspace">
+    <div className="space-y-5" aria-label="Contacts Workspace">
       <ResumePrompt module="crm" />
       
+      {/* Header */}
       <PageHeader
         icon={Users}
         title="Contacts"
-        subtitle="Your people are assets. Leverage relationships to drive revenue, unlock opportunities, and build momentum."
+        subtitle="Who matters, what changed, and what should I do next?"
         titleExtra={<NotesTrigger pageKey="crm" variant="header" />}
       />
 
@@ -207,24 +195,51 @@ export default function ContactsPage() {
         return <PlanLimitBanner resourceKey="contacts" label="contacts" currentUsage={cl.current} limit={cl.limit} isUnlimited={cl.isUnlimited} nearLimit={cl.nearLimit} atLimit={cl.atLimit} upgradeTo={cl.upgradeTo} />;
       })()}
 
-      <ClientsMetricsStrip
-        totalClients={contacts.length}
-        activeClients={state.flowIntelligence?.clients ?? contacts.filter((c) => c.status === "CLIENT").length}
-        followUpsDue={state.segmentCounts["needs-followup"] ?? 0}
-        atRisk={state.segmentCounts["at-risk"] ?? 0}
-        newThisWeek={state.segmentCounts["new-this-week"] ?? 0}
-        highValue={state.segmentCounts["high-value"] ?? 0}
-        onSegmentClick={state.setActiveSegment}
-      />
+      {/* 1. Relationship Pulse */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <h2 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+            Relationship Pulse
+          </h2>
+        </div>
+        <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+          {[
+            { label: "Follow-ups due", count: state.segmentCounts["needs-followup"] ?? 0, icon: AlertTriangle, color: "text-[hsl(var(--kf-accent1))]", bg: "bg-[hsl(var(--kf-accent1))]/10", onClick: () => state.setActiveSegment("needs-followup") },
+            { label: "At risk", count: state.segmentCounts["at-risk"] ?? 0, icon: Flame, color: "text-red-400", bg: "bg-red-500/10", onClick: () => state.setActiveSegment("at-risk") },
+            { label: "High value idle", count: state.segmentCounts["high-value"] ?? 0, icon: Zap, color: "text-emerald-400", bg: "bg-emerald-500/10", onClick: () => state.setActiveSegment("high-value") },
+            { label: "Active clients", count: state.flowIntelligence?.clients ?? contacts.filter((c) => c.status === "CLIENT").length, icon: Users, color: "text-blue-400", bg: "bg-blue-500/10", onClick: () => state.setStatusFilter("CLIENT") },
+            { label: "New this week", count: state.segmentCounts["new-this-week"] ?? 0, icon: CalendarPlus, color: "text-[hsl(var(--kf-accent2))]", bg: "bg-[hsl(var(--kf-accent2))]/10", onClick: () => state.setActiveSegment("new-this-week") },
+            { label: "Total contacts", count: contacts.length, icon: TrendingUp, color: "text-muted-foreground", bg: "bg-white/[0.04]", onClick: () => state.setActiveSegment(null) },
+          ].map((metric) => (
+            <button
+              key={metric.label}
+              onClick={metric.onClick}
+              className="flex flex-col items-start gap-1.5 p-3 rounded-xl border border-border/30 bg-card/20 hover:bg-card/40 hover:border-border/50 transition-all text-left"
+            >
+              <div className={`p-1.5 rounded-lg ${metric.bg}`}>
+                <metric.icon className={`w-3.5 h-3.5 ${metric.color}`} />
+              </div>
+              <div>
+                <p className={`text-lg font-semibold leading-tight ${metric.color}`}>{metric.count}</p>
+                <p className="text-[10px] text-muted-foreground/60 mt-0.5">{metric.label}</p>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
 
-      {/* Leverage Insights */}
-      {leverageInsights.length > 0 && (
-        <div className="space-y-2">
+      {/* 2. Action Center */}
+      {(leverageInsights.length > 0 || nextActions.length > 0 || autopilotActions.length > 0) && (
+        <div className="space-y-3">
           <div className="flex items-center gap-2">
             <Zap className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Leverage Opportunities</h2>
+            <h2 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+              Action Center
+            </h2>
           </div>
+          
           <div className="grid gap-2">
+            {/* Leverage insights */}
             {leverageInsights.map((item, i) => (
               <button
                 key={i}
@@ -247,40 +262,50 @@ export default function ContactsPage() {
                 </span>
               </button>
             ))}
+
+            {/* Next actions */}
+            {nextActions.length > 0 && (
+              <div className="rounded-xl border border-border/40 bg-card/30 overflow-hidden">
+                <NextActionQueue
+                  actions={nextActions}
+                  onComplete={handleCompleteNextAction}
+                  onViewContact={handleViewEngageContact}
+                  onDoAction={handleDoAction}
+                />
+              </div>
+            )}
+
+            {/* Autopilot */}
+            {autopilotActions.length > 0 && (
+              <div className="rounded-xl border border-border/40 bg-card/30 overflow-hidden">
+                <AutopilotActions
+                  actions={autopilotActions}
+                  isPaused={autopilotPaused}
+                  onTogglePause={handleToggleAutopilotPause}
+                  onApprove={handleApproveAutopilot}
+                  onDeny={handleDenyAutopilot}
+                />
+              </div>
+            )}
           </div>
         </div>
       )}
 
-      {/* Quick Actions */}
-      <div className="flex items-center gap-2">
-        {[
-          { label: "Add contact", icon: Users, action: () => window.dispatchEvent(new Event("kf:open-quick-add-contact")) },
-          { label: "Send broadcast", icon: MessageSquare, action: () => setShowBroadcast(true) },
-          { label: "Import", icon: Phone, action: () => router.push("/app/crm/import") },
-        ].map((a) => (
-          <button
-            key={a.label}
-            onClick={a.action}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border/40 bg-card/30 hover:bg-card/50 transition-all"
-          >
-            <a.icon className="w-3.5 h-3.5" />
-            {a.label}
-          </button>
-        ))}
+      {/* 3. Contact Workspace */}
+      <div className="space-y-2">
+        <PipelineTabContent
+          state={state}
+          nextActions={nextActions}
+          autopilotActions={autopilotActions}
+          autopilotPaused={autopilotPaused}
+          onCompleteNextAction={handleCompleteNextAction}
+          onViewEngageContact={handleViewEngageContact}
+          onDoAction={handleDoAction}
+          onToggleAutopilotPause={handleToggleAutopilotPause}
+          onApproveAutopilot={handleApproveAutopilot}
+          onDenyAutopilot={handleDenyAutopilot}
+        />
       </div>
-
-      <PipelineTabContent
-        state={state}
-        nextActions={nextActions}
-        autopilotActions={autopilotActions}
-        autopilotPaused={autopilotPaused}
-        onCompleteNextAction={handleCompleteNextAction}
-        onViewEngageContact={handleViewEngageContact}
-        onDoAction={handleDoAction}
-        onToggleAutopilotPause={handleToggleAutopilotPause}
-        onApproveAutopilot={handleApproveAutopilot}
-        onDenyAutopilot={handleDenyAutopilot}
-      />
 
       <BroadcastDrawer
         isOpen={showBroadcast}
