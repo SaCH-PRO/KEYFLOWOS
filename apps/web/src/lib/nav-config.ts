@@ -99,7 +99,7 @@ export interface PrimaryNavItem {
 // ============================================================================
 
 export const primaryNav: PrimaryNavItem[] = [
-  { id: "cockpit", label: "Cockpit", icon: Zap, href: "/app/keyflow-command" },
+  { id: "cockpit", label: "Cockpit", icon: Zap, href: "/app/command-center" },
   { id: "operate", label: "Operate", icon: Briefcase },
   { id: "build", label: "Build", icon: Wrench },
   { id: "me", label: "Me", icon: User },
@@ -112,14 +112,12 @@ export const primaryNav: PrimaryNavItem[] = [
 
 export const operateSections: NavSection[] = [
   {
-    id: "intelligence-hub",
-    label: "Intelligence",
-    icon: Brain,
+    id: "os-core",
+    label: "Operating System",
+    icon: Zap,
     items: [
-      { label: "Command Center", href: "/app/intelligence", icon: Brain },
-      { label: "Growth", href: "/app/growth", icon: TrendingUp },
-      { label: "Storefront", href: "/app/storefront-intelligence", icon: Store },
-      { label: "Documents", href: "/app/document-intelligence", icon: FileText },
+      { label: "Command Center", href: "/app/command-center", icon: LayoutDashboard },
+      { label: "KEY Worker", href: "/app/key", icon: Bot },
     ],
   },
   {
@@ -127,7 +125,7 @@ export const operateSections: NavSection[] = [
     label: "Financial Flow",
     icon: Banknote,
     items: [
-      { label: "Overview", href: "/app/money", icon: LayoutDashboard },
+      { label: "Financial Flow", href: "/app/financial-flow", icon: Banknote },
       { label: "Revenue", href: "/app/commerce", icon: TrendingUp },
       { label: "Expenses", href: "/app/expenses", icon: Receipt },
       { label: "Budgeting", href: "/app/budgeting", icon: Target },
@@ -135,10 +133,23 @@ export const operateSections: NavSection[] = [
     ],
   },
   {
-    id: "network",
-    label: "Network",
+    id: "temporal-flow",
+    label: "Temporal Flow",
+    icon: Clock,
+    items: [
+      { label: "Temporal Flow", href: "/app/temporal-flow", icon: Clock },
+      { label: "Calendar", href: "/app/calendar", icon: CalendarDays },
+      { label: "Bookings", href: "/app/bookings", icon: Calendar },
+      { label: "Projects", href: "/app/projects", icon: FolderKanban },
+      { label: "Tasks", href: "/app/approvals", icon: CheckSquare },
+    ],
+  },
+  {
+    id: "people-flow",
+    label: "People Flow",
     icon: Users,
     items: [
+      { label: "People Flow", href: "/app/people-flow", icon: Users },
       { label: "Contacts", href: "/app/network/contacts", icon: Contact },
       { label: "Sequences", href: "/app/crm/sequences", icon: Send },
       { label: "Intelligence", href: "/app/crm/intelligence", icon: Brain },
@@ -146,46 +157,76 @@ export const operateSections: NavSection[] = [
     ],
   },
   {
-    id: "work",
-    label: "Work",
-    icon: BriefcaseBusiness,
+    id: "sales-flow",
+    label: "Sales Flow",
+    icon: TrendingUp,
     items: [
-      { label: "Projects", href: "/app/projects", icon: FolderKanban },
-      { label: "Time", href: "/app/time-tracking", icon: Clock },
-      { label: "Agreements", href: "/app/retainers", icon: FileSignature },
-      { label: "Tasks", href: "/app/approvals", icon: CheckSquare },
+      { label: "Sales Flow", href: "/app/sales-flow", icon: TrendingUp },
+      { label: "Commerce", href: "/app/commerce", icon: Receipt },
+      { label: "Deals", href: "/app/network/contacts", icon: Contact },
     ],
   },
   {
-    id: "schedule",
-    label: "Schedule",
-    icon: Calendar,
+    id: "marketing-flow",
+    label: "Marketing Flow",
+    icon: Megaphone,
     items: [
-      { label: "Calendar", href: "/app/calendar", icon: CalendarDays },
-      { label: "Bookings", href: "/app/bookings", icon: Calendar },
-      { label: "Calls", href: "/app/call-tasks", icon: Phone },
-    ],
-  },
-  {
-    id: "communicate",
-    label: "Communicate",
-    icon: MessageCircle,
-    items: [
-      { label: "Inbox", href: "/app/inbox", icon: Inbox },
-      { label: "Campaigns", href: "/app/marketing", icon: Megaphone },
+      { label: "Marketing Flow", href: "/app/marketing-flow", icon: Megaphone },
+      { label: "Campaigns", href: "/app/marketing", icon: Mail },
       { label: "Content", href: "/app/content-ops", icon: PenTool },
       { label: "Social", href: "/app/social", icon: Share2 },
     ],
   },
   {
-    id: "reports",
-    label: "Reports",
-    icon: BarChart3,
+    id: "operations-flow",
+    label: "Operations Flow",
+    icon: BriefcaseBusiness,
     items: [
-      { label: "Reports", href: "/app/reports", icon: BarChart3 },
-      { label: "Goals", href: "/app/goals", icon: Target },
-      { label: "Operations", href: "/app/operations", icon: Activity },
+      { label: "Operations Flow", href: "/app/operations-flow", icon: BriefcaseBusiness },
+      { label: "Projects", href: "/app/projects", icon: FolderKanban },
+      { label: "Workflows", href: "/app/workflows", icon: Layers },
+      { label: "Tasks", href: "/app/approvals", icon: CheckSquare },
+    ],
+  },
+  {
+    id: "delivery-flow",
+    label: "Delivery Flow",
+    icon: Truck,
+    items: [
+      { label: "Delivery Flow", href: "/app/delivery-flow", icon: Truck },
+      { label: "Bookings", href: "/app/bookings", icon: Calendar },
+      { label: "Projects", href: "/app/projects", icon: FolderKanban },
+    ],
+  },
+  {
+    id: "governance-flow",
+    label: "Governance Flow",
+    icon: ShieldCheck,
+    items: [
+      { label: "Governance Flow", href: "/app/governance-flow", icon: ShieldCheck },
+      { label: "Approvals", href: "/app/approvals", icon: CheckSquare },
       { label: "Compliance", href: "/app/evidence", icon: ShieldCheck },
+    ],
+  },
+  {
+    id: "intelligence-flow",
+    label: "Intelligence Flow",
+    icon: Brain,
+    items: [
+      { label: "Intelligence Flow", href: "/app/intelligence-flow", icon: Brain },
+      { label: "Growth", href: "/app/growth", icon: TrendingUp },
+      { label: "Storefront", href: "/app/storefront-intelligence", icon: Store },
+      { label: "Documents", href: "/app/document-intelligence", icon: FileText },
+    ],
+  },
+  {
+    id: "strategy-flow",
+    label: "Strategy Flow",
+    icon: Target,
+    items: [
+      { label: "Strategy Flow", href: "/app/strategy-flow", icon: Target },
+      { label: "Goals", href: "/app/goals", icon: Target },
+      { label: "Blueprint", href: "/app/blueprint", icon: FileText },
     ],
   },
 ];
@@ -280,7 +321,7 @@ export const meNav: NavItem[] = [
 // ============================================================================
 
 export const mobileBottomNav = [
-  { label: "Home", href: "/app/keyflow-command", icon: Zap },
+  { label: "Home", href: "/app/command-center", icon: Zap },
   { label: "Operate", href: "#operate", icon: Briefcase },
   { label: "AI", href: "#key", icon: Brain },
   { label: "Inbox", href: "/app/inbox", icon: Mail },

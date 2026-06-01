@@ -24,6 +24,9 @@ import { FinanceIntelligenceService } from './finance-intelligence.service';
 import { AccountantExportEmailService } from './accountant-export-email.service';
 import { ObjectStorageService } from '../../core/object-storage';
 import { PostingService, type PostingInput } from './posting.service';
+import { SafeToSpendService } from './safe-to-spend.service';
+import { CashflowForecastService } from './cashflow-forecast.service';
+import { MoneyMovesService } from './money-moves.service';
 
 /**
  * FIN2 — read-only receivables endpoints.
@@ -50,6 +53,9 @@ export class FinanceController {
     @Inject(AccountantExportEmailService) private readonly accountantExportEmail: AccountantExportEmailService,
     @Inject(PostingService) private readonly posting: PostingService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(SafeToSpendService) private readonly safeToSpend: SafeToSpendService,
+    @Inject(CashflowForecastService) private readonly cashflowForecast: CashflowForecastService,
+    @Inject(MoneyMovesService) private readonly moneyMoves: MoneyMovesService,
   ) {}
 
   // ---------- Manual Journal Entries ----------
@@ -679,6 +685,27 @@ export class FinanceController {
       expiresIn,
       generatedAt: new Date().toISOString(),
     };
+  }
+
+  // ---------- Safe to Spend ----------
+  @Get('safe-to-spend')
+  async getSafeToSpend(@Param('businessId') businessId: string) {
+    return this.safeToSpend.calculate(businessId);
+  }
+
+  // ---------- Cashflow Forecast ----------
+  @Get('cashflow-forecast')
+  async getCashflowForecast(
+    @Param('businessId') businessId: string,
+    @Query('days') days?: string,
+  ) {
+    return this.cashflowForecast.forecast(businessId, days ? parseInt(days, 10) : 90);
+  }
+
+  // ---------- Money Moves ----------
+  @Get('money-moves')
+  async getMoneyMoves(@Param('businessId') businessId: string) {
+    return this.moneyMoves.generate(businessId);
   }
 
   /**

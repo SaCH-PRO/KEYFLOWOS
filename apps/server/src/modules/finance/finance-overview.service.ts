@@ -1,6 +1,7 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { FinancialAccountSeederService } from './financial-account-seeder.service';
+import { ReceivablesService } from './receivables.service';
 
 /**
  * FIN5 — Compute the start of the current month in America/Port_of_Spain
@@ -70,6 +71,7 @@ export class FinanceOverviewService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Optional() @Inject(FinancialAccountSeederService) private readonly accountSeeder: FinancialAccountSeederService | null,
+    @Optional() @Inject(ReceivablesService) private readonly receivables: ReceivablesService | null,
   ) {}
 
   async getOverview(businessId: string): Promise<FinanceOverview> {
@@ -95,7 +97,6 @@ export class FinanceOverviewService {
       monthExpenses,
       outstandingAgg,
       overdueAgg,
-      pendingActions,
       pendingActionItems,
       taxPayable,
       lastSixExpenses,
@@ -104,6 +105,7 @@ export class FinanceOverviewService {
       missingReceiptExpenses,
       overdueInvoiceList,
       recurringBills,
+      receivablesAging,
     ] = await Promise.all([
       this.prisma.client.financialAccount.findMany({
         where: { businessId, isActive: true, type: { in: ['CASH', 'BANK', 'PAYMENT_PROCESSOR'] } },
@@ -127,9 +129,7 @@ export class FinanceOverviewService {
         _sum: { total: true },
         _count: true,
       }),
-      this.prisma.client.revenueAction.count({
-        where: { businessId, status: 'PENDING' },
-      }),
+      // pendingActions count superseded by post-upsert read below
       this.prisma.client.revenueAction.findMany({
         where: { businessId, status: 'PENDING' },
         orderBy: [{ amountAtRisk: 'desc' }, { createdAt: 'desc' }],
@@ -182,6 +182,7 @@ export class FinanceOverviewService {
         take: 5,
         select: { id: true, amount: true, vendor: true, description: true, date: true },
       }),
+      this.receivables ? this.receivables.getAging(businessId) : Promise.resolve(null),
     ]);
 
     const cashBalance = cashAccounts.reduce((sum, a) => sum + Number(a.currentBalance ?? 0), 0);
@@ -327,9 +328,9 @@ export class FinanceOverviewService {
       revenueThisMonth,
       expensesThisMonth,
       netProfitThisMonth,
-      outstandingInvoices: Number(outstandingAgg._sum.total ?? 0),
+      outstandingInvoices: receivablesAging ? receivablesAging.totalOutstanding : Number(outstandingAgg._sum.total ?? 0),
       outstandingInvoiceCount: outstandingAgg._count,
-      overdueInvoices: Number(overdueAgg._sum.total ?? 0),
+      overdueInvoices: receivablesAging ? receivablesAging.totalOverdue : Number(overdueAgg._sum.total ?? 0),
       overdueInvoiceCount: overdueAgg._count,
       billsDue: Number(billsDueAgg._sum.amount ?? 0),
       billsDueCount: billsDueAgg._count,

@@ -28,6 +28,9 @@ import { AccountantExportEmailService } from './accountant-export-email.service'
 import { SystemEmailService } from '../notifications/system-email.service';
 import { TimelineModule } from '../timeline/timeline.module';
 import { FinanceController } from './finance.controller';
+import { SafeToSpendService } from './safe-to-spend.service';
+import { CashflowForecastService } from './cashflow-forecast.service';
+import { MoneyMovesService } from './money-moves.service';
 
 /**
  * FIN1/FIN2 — Finance OS foundation + revenue/receivables read APIs.
@@ -66,6 +69,9 @@ import { FinanceController } from './finance.controller';
     FinanceIntelligenceSchedulerService,
     AccountantExportEmailService,
     SystemEmailService,
+    SafeToSpendService,
+    CashflowForecastService,
+    MoneyMovesService,
   ],
   exports: [
     PostingService,
@@ -85,6 +91,9 @@ import { FinanceController } from './finance.controller';
     ReconciliationService,
     ExpensePostingService,
     FinanceIntelligenceService,
+    SafeToSpendService,
+    CashflowForecastService,
+    MoneyMovesService,
   ],
 })
 export class FinanceModule {}

@@ -78,6 +78,11 @@ import { TimeTrackingModule } from './modules/time-tracking/time-tracking.module
 import { RetainerModule } from './modules/retainers/retainer.module';
 import { PortalModule } from './modules/portal/portal.module';
 import { ChangeOrderModule } from './modules/change-orders/change-order.module';
+import { CommandModule } from './modules/command/command.module';
+import { OsModule } from './modules/os/os.module';
+import { GovernanceModule } from './modules/governance/governance.module';
+import { TemporalModule } from './modules/temporal/temporal.module';
+import { PeopleFlowModule } from './modules/people-flow/people-flow.module';
 
 @Module({
   imports: [
@@ -156,6 +161,11 @@ import { ChangeOrderModule } from './modules/change-orders/change-order.module';
     RetainerModule,
     PortalModule,
     ChangeOrderModule,
+    CommandModule,
+    OsModule,
+    GovernanceModule,
+    TemporalModule,
+    PeopleFlowModule,
   ],
   controllers: [AppController],
   providers: [

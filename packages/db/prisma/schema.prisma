@@ -470,6 +470,17 @@ model Business {
 
   // Phase 1 MD: KEY Commands
   keyCommands          KeyCommand[]
+  commandItems         CommandItem[]
+
+  // OS-2 through OS-7: Business Knowledge Graph, Governance, Finance, Operations, Marketing, Strategy
+  entityLinks          BusinessEntityLink[]
+  businessRisks        BusinessRisk[]
+  cashReserveBuckets   CashReserveBucket[]
+  workflowTemplates    WorkflowTemplate[]
+  workflowRuns         WorkflowRun[]
+  sopDocuments         SopDocument[]
+  marketingCampaignPlans MarketingCampaignPlan[]
+  businessInitiatives  BusinessInitiative[]
 
   // Phase 0: Operating Kernel — Business Event Log, Evidence, Assignment, Content, Calls, Approvals, Assets
   businessEvents       BusinessEvent[]
@@ -5498,6 +5509,52 @@ model RevenueAction {
   @@map("revenue_actions")
 }
 
+/// Universal Command Queue — OS-1
+/// Consolidated execution queue for business actions across all modules.
+model CommandItem {
+  id                String   @id @default(cuid())
+  businessId        String   @map("business_id")
+  business          Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  sourceModule      String   @map("source_module")
+  sourceType        String?  @map("source_type")
+  sourceId          String?  @map("source_id")
+  title             String
+  description       String?
+  /// MONEY | TIME | PEOPLE | WORK | SALES | MARKETING | GOVERNANCE | STRATEGY | SYSTEM
+  category          String
+  actionType        String   @map("action_type")
+  /// OPEN | IN_PROGRESS | WAITING_APPROVAL | EXECUTED | DISMISSED | FAILED | COMPLETED
+  status            String   @default("OPEN")
+  priority          Int      @default(50)
+  urgency           Int      @default(50)
+  impactScore       Int      @default(0) @map("impact_score")
+  expectedValue     Decimal? @db.Decimal(18, 4) @map("expected_value")
+  currency          String?
+  /// 1 low, 2 medium, 3 high, 4 critical
+  riskTier          Int      @default(1)
+  requiresApproval  Boolean  @default(false) @map("requires_approval")
+  executableByKey   Boolean  @default(false) @map("executable_by_key")
+  executionTool     String?  @map("execution_tool")
+  executionPayload  Json?    @map("execution_payload")
+  /// SYSTEM | KEY | USER | WORKFLOW
+  recommendedBy     String?  @map("recommended_by")
+  /// USER | ROLE | KEY
+  ownerType         String?  @map("owner_type")
+  ownerId           String?  @map("owner_id")
+  dueAt             DateTime? @map("due_at")
+  snoozedUntil      DateTime? @map("snoozed_until")
+  completedAt       DateTime? @map("completed_at")
+  dismissedAt       DateTime? @map("dismissed_at")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  @@unique([businessId, sourceModule, sourceType, sourceId, actionType])
+  @@index([businessId, status, priority])
+  @@index([businessId, category, status])
+  @@index([businessId, sourceModule, sourceId])
+  @@map("command_items")
+}
+
 /// FIN8 — Finance intelligence detector output. One row per active
 /// detection. Mirrors into RevenueAction (FIN_*) so the same item also
 /// surfaces in KEYFLOW Today via the existing R3 action queue.
@@ -7836,4 +7893,177 @@ model ChangeOrder {
   @@index([projectId])
   @@index([projectId, status])
   @@map("change_orders")
+}
+
+/// OS-2: Business Knowledge Graph — persisted entity links
+model BusinessEntityLink {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  fromType    String   @map("from_type")
+  fromId      String   @map("from_id")
+  toType      String   @map("to_type")
+  toId        String   @map("to_id")
+  relation    String
+  strength    Int      @default(50)
+  meta        Json?
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt      @map("updated_at")
+
+  @@index([businessId, fromType, fromId])
+  @@index([businessId, toType, toId])
+  @@index([businessId, relation])
+  @@map("business_entity_links")
+}
+
+/// OS-3: Governance — Risk Register
+model BusinessRisk {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  title       String
+  description String?
+  category    String
+  severity    String
+  likelihood  String?
+  status      String   @default("OPEN")
+  ownerId     String?  @map("owner_id")
+  mitigation  String?
+  sourceType  String?  @map("source_type")
+  sourceId    String?  @map("source_id")
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt      @map("updated_at")
+
+  @@index([businessId, category, status])
+  @@map("business_risks")
+}
+
+/// OS-4: Finance — Cash Reserve Buckets (virtual allocations)
+model CashReserveBucket {
+  id            String   @id @default(cuid())
+  businessId    String   @map("business_id")
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  name          String
+  purpose       String
+  targetAmount  Decimal? @db.Decimal(18, 4) @map("target_amount")
+  currentAmount Decimal  @default(0) @db.Decimal(18, 4) @map("current_amount")
+  currency      String   @default("TTD")
+  status        String   @default("ACTIVE")
+
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt      @map("updated_at")
+
+  @@index([businessId, status])
+  @@map("cash_reserve_buckets")
+}
+
+/// OS-5: Operations — Workflow Templates
+model WorkflowTemplate {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  name        String
+  description String?
+  module      String
+  triggerType String?  @map("trigger_type")
+  status      String   @default("ACTIVE")
+  steps       Json
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt      @map("updated_at")
+
+  @@index([businessId, module, status])
+  @@map("workflow_templates")
+}
+
+/// OS-5: Operations — Workflow Runs
+model WorkflowRun {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  templateId  String?  @map("template_id")
+  sourceType  String?  @map("source_type")
+  sourceId    String?  @map("source_id")
+  status      String   @default("RUNNING")
+  currentStep Int      @default(0) @map("current_step")
+  context     Json?
+
+  startedAt   DateTime @default(now()) @map("started_at")
+  completedAt DateTime? @map("completed_at")
+  updatedAt   DateTime @updatedAt      @map("updated_at")
+
+  @@index([businessId, status])
+  @@map("workflow_runs")
+}
+
+/// OS-5: Operations — SOP Documents
+model SopDocument {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  title       String
+  department  String
+  body        String
+  status      String   @default("ACTIVE")
+  version     Int      @default(1)
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt      @map("updated_at")
+
+  @@index([businessId, department, status])
+  @@map("sop_documents")
+}
+
+/// OS-6: Marketing — Campaign Plans
+model MarketingCampaignPlan {
+  id              String   @id @default(cuid())
+  businessId      String   @map("business_id")
+  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  name            String
+  goal            String
+  audience        String?
+  offer           String?
+  channel         String?
+  status          String   @default("DRAFT")
+  budget          Decimal? @db.Decimal(18, 4)
+  expectedRevenue Decimal? @db.Decimal(18, 4) @map("expected_revenue")
+  startsAt        DateTime? @map("starts_at")
+  endsAt          DateTime? @map("ends_at")
+
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt      @map("updated_at")
+
+  @@index([businessId, status])
+  @@map("marketing_campaign_plans")
+}
+
+/// OS-7: Strategy — Business Initiatives
+model BusinessInitiative {
+  id             String   @id @default(cuid())
+  businessId     String   @map("business_id")
+  business       Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  goalId         String?  @map("goal_id")
+  title          String
+  description    String?
+  status         String   @default("PLANNED")
+  ownerId        String?  @map("owner_id")
+  expectedImpact Decimal? @db.Decimal(18, 4) @map("expected_impact")
+  startsAt       DateTime? @map("starts_at")
+  endsAt         DateTime? @map("ends_at")
+
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt      @map("updated_at")
+
+  @@index([businessId, status])
+  @@map("business_initiatives")
 }
