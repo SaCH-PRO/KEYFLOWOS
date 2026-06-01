@@ -2,6 +2,7 @@ import { Module, forwardRef } from '@nestjs/common';
 import { PrismaModule } from '../../core/prisma/prisma.module';
 import { AuthModule } from '../../core/auth/auth.module';
 import { AiModule } from '../ai/ai.module';
+import { CommandModule } from '../command/command.module';
 import { CommerceModule } from '../commerce/commerce.module';
 import { FinanceIntelligenceService } from './finance-intelligence.service';
 import { FinanceIntelligenceSchedulerService } from './finance-intelligence.scheduler';
@@ -43,7 +44,7 @@ import { MoneyMovesService } from './money-moves.service';
  * Settings) plus its sub-services.
  */
 @Module({
-  imports: [PrismaModule, AuthModule, AiModule, forwardRef(() => CommerceModule), TimelineModule],
+  imports: [PrismaModule, AuthModule, forwardRef(() => AiModule), forwardRef(() => CommerceModule), TimelineModule],
   controllers: [FinanceController],
   providers: [
     PostingService,

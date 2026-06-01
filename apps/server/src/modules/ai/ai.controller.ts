@@ -1080,17 +1080,17 @@ export class AiController {
   async executeKeyCommand(
     @Param('businessId') businessId: string,
     @Req() req: AuthenticatedRequest,
-    @Body() body: { rawInput: string; inputMode?: 'TEXT' | 'VOICE'; mode?: 'ask' | 'do' | 'plan' | 'auto' },
+    @Body() body: { rawInput: string; inputMode?: 'TEXT' | 'VOICE'; mode?: 'ask' | 'do' | 'plan' | 'draft' | 'auto' },
   ) {
     const mode = body.mode ?? 'do';
     const cmd = await this.keyCommand.receiveCommand(businessId, req.user?.id, body.rawInput, body.inputMode ?? 'TEXT', mode as any);
 
     // DO and AUTO modes generate actionable "Do It For Me" suggestions
     if (mode === 'do' || mode === 'auto') {
-      const result = await this.keyCommand.generateDoItForMe(businessId, body.rawInput);
+      const result = await this.keyCommand.generateDoItForMe(businessId, body.rawInput, req.user?.id, cmd.id);
       await (this.prisma as any).client.keyCommand.update({
         where: { id: cmd.id },
-        data: { status: 'EXECUTED', executionResult: result as any },
+        data: { status: 'EXECUTED', executionResult: { goal: result.goal, findings: result.findings, actions: result.actions, commandItemIds: result.commandItemIds } as any },
       });
       return result;
     }
@@ -1100,6 +1100,16 @@ export class AiController {
     await this.keyCommand.groundIntent(cmd.id, businessId);
     const plan = await this.keyCommand.planActions(cmd.id, intent);
     const riskLevel = this.keyCommand.classifyRisk(plan);
+
+    // DRAFT mode generates drafts without executing
+    if (mode === 'draft') {
+      const result = await this.keyCommand.generateDoItForMe(businessId, body.rawInput, req.user?.id, cmd.id);
+      await (this.prisma as any).client.keyCommand.update({
+        where: { id: cmd.id },
+        data: { status: 'PLANNED', executionResult: { goal: result.goal, findings: result.findings, actions: result.actions, commandItemIds: result.commandItemIds, mode: 'draft' } as any },
+      });
+      return { commandId: cmd.id, intent, plan, riskLevel, mode, drafts: result.actions };
+    }
 
     // PLAN mode returns the plan without executing
     if (mode === 'plan') {
@@ -1111,7 +1121,7 @@ export class AiController {
     }
 
     // ASK mode executes low-risk plans, queues high-risk for approval
-    const results = await this.keyCommand.executeApprovedPlan(cmd.id, plan, businessId);
+    const results = await this.keyCommand.executeApprovedPlan(cmd.id, plan, businessId, req.user?.id);
     return { commandId: cmd.id, intent, plan, riskLevel, results, mode };
   }
 

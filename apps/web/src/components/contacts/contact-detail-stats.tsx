@@ -17,10 +17,12 @@ import {
   HeartPulse,
   Sparkles,
   ListTodo,
+  Zap,
 } from "lucide-react";
 import { fetchContactMomentum, fetchContactMomentumHistory, type MomentumScore, type MomentumHistory } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 import type { ContactDetailData, ContactEvent, DetailQuickAction } from "./contact-detail";
+import { ContactCommandItems } from "./contact-command-items";
 
 interface ContactDetailStatsProps {
   contact: ContactDetailData;
@@ -578,6 +580,10 @@ export function ContactDetailStats({ contact, events, onSetActiveTab, onQuickAct
             </p>
           </div>
         </div>
+      </CollapsibleCard>
+
+      <CollapsibleCard icon={Zap} title="Command Queue" hasData={true}>
+        <ContactCommandItems contactId={contact.id} />
       </CollapsibleCard>
 
       {recentEvents.length > 0 && (

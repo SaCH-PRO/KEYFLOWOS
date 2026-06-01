@@ -11,7 +11,7 @@ export class TemporalController {
   ) {}
 
   @Get('overview')
-  async overview(@Param('businessId') businessId: string) {
+  async getOverview(@Param('businessId') businessId: string) {
     return this.overview.getOverview(businessId);
   }
 }

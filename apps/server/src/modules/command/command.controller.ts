@@ -3,6 +3,7 @@ import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { CommandService } from './command.service';
 import { CommandGeneratorService } from './command-generator.service';
+import { CommandSchedulerService } from './command-scheduler.service';
 import { CreateCommandItemDto } from './dto/create-command-item.dto';
 import { UpdateCommandItemDto } from './dto/update-command-item.dto';
 import { ListCommandItemsDto } from './dto/list-command-items.dto';
@@ -13,6 +14,7 @@ export class CommandController {
   constructor(
     @Inject(CommandService) private readonly commandService: CommandService,
     @Inject(CommandGeneratorService) private readonly generator: CommandGeneratorService,
+    @Inject(CommandSchedulerService) private readonly scheduler: CommandSchedulerService,
   ) {}
 
   @Get('items')
@@ -24,6 +26,8 @@ export class CommandController {
       status: query.status,
       category: query.category,
       sourceModule: query.sourceModule,
+      ownerId: query.ownerId,
+      ownerType: query.ownerType,
       limit: query.limit,
       offset: query.offset,
     });
@@ -108,5 +112,20 @@ export class CommandController {
     @Param('businessId') businessId: string,
   ) {
     return this.commandService.summary(businessId);
+  }
+
+  @Get('last-scan')
+  async lastScan(@Param('businessId') businessId: string) {
+    const lastScan = await this.scheduler.getLastScanTime(businessId);
+    const shouldAutoScan = await this.scheduler.shouldAutoScan(businessId);
+    return { lastScan, shouldAutoScan };
+  }
+
+  @Post('auto-scan')
+  async autoScan(@Param('businessId') businessId: string) {
+    const should = await this.scheduler.shouldAutoScan(businessId);
+    if (!should) return { scanned: false, reason: 'Recent scan exists' };
+    const result = await this.generator.generateForBusiness(businessId);
+    return { scanned: true, result };
   }
 }

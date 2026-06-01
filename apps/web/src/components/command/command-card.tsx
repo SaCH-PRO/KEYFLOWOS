@@ -15,9 +15,9 @@ import type { CommandItem } from "@/lib/api/command";
 
 interface CommandCardProps {
   item: CommandItem;
-  onDismiss?: (id: string) => void;
-  onApprove?: (id: string) => void;
-  onExecute?: (id: string) => void;
+  onDismiss?: (id: string) => void | Promise<void>;
+  onApprove?: (id: string) => void | Promise<void>;
+  onExecute?: (id: string) => void | Promise<void>;
 }
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -46,7 +46,7 @@ export function CommandCard({ item, onDismiss, onApprove, onExecute }: CommandCa
   const [loading, setLoading] = useState<string | null>(null);
   const color = CATEGORY_COLORS[item.category] ?? "hsl(var(--kf-accent1))";
 
-  const handleAction = async (action: string, handler?: (id: string) => Promise<void>) => {
+  const handleAction = async (action: string, handler?: (id: string) => void | Promise<void>) => {
     if (!handler) return;
     setLoading(action);
     try {

@@ -46,12 +46,14 @@ export interface CommandSummary {
 
 export async function fetchCommandItems(
   businessId: string,
-  filters?: { status?: string; category?: string; sourceModule?: string; limit?: number; offset?: number }
+  filters?: { status?: string; category?: string; sourceModule?: string; ownerId?: string; ownerType?: string; limit?: number; offset?: number }
 ): Promise<{ data: CommandItemListResponse | null; error: string | null }> {
   const params = new URLSearchParams();
   if (filters?.status) params.set("status", filters.status);
   if (filters?.category) params.set("category", filters.category);
   if (filters?.sourceModule) params.set("sourceModule", filters.sourceModule);
+  if (filters?.ownerId) params.set("ownerId", filters.ownerId);
+  if (filters?.ownerType) params.set("ownerType", filters.ownerType);
   if (filters?.limit) params.set("limit", String(filters.limit));
   if (filters?.offset) params.set("offset", String(filters.offset));
   const query = params.toString() ? `?${params.toString()}` : "";
@@ -99,4 +101,15 @@ export async function generateCommandItems(businessId: string) {
 
 export async function fetchCommandSummary(businessId: string) {
   return apiGet<CommandSummary>(`/command/businesses/${businessId}/summary`);
+}
+
+export async function fetchLastScan(businessId: string) {
+  return apiGet<{ lastScan: string | null; shouldAutoScan: boolean }>(`/command/businesses/${businessId}/last-scan`);
+}
+
+export async function autoScanCommandItems(businessId: string) {
+  return apiPost<{ scanned: boolean; reason?: string; result?: { created: number; skipped: number; total: number } }>({
+    path: `/command/businesses/${businessId}/auto-scan`,
+    body: {},
+  });
 }

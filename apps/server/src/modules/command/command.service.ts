@@ -44,6 +44,8 @@ export class CommandService {
     status?: string;
     category?: string;
     sourceModule?: string;
+    ownerId?: string;
+    ownerType?: string;
     limit?: number;
     offset?: number;
   }) {
@@ -51,6 +53,8 @@ export class CommandService {
     if (filters.status) where.status = filters.status;
     if (filters.category) where.category = filters.category;
     if (filters.sourceModule) where.sourceModule = filters.sourceModule;
+    if (filters.ownerId) where.ownerId = filters.ownerId;
+    if (filters.ownerType) where.ownerType = filters.ownerType;
 
     const [items, total] = await Promise.all([
       this.prisma.client.commandItem.findMany({

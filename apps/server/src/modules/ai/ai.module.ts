@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { AiController } from './ai.controller';
 import { AiSettingsController } from './ai-settings.controller';
 import { AiSettingsService } from './ai-settings.service';
@@ -31,7 +31,10 @@ import { RedisModule } from '../../core/redis/redis.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { BlueprintModule } from '../blueprint/blueprint.module';
 import { TimelineModule } from '../timeline/timeline.module';
+import { FinanceModule } from '../finance/finance.module';
+import { CommandModule } from '../command/command.module';
 import { KeyCommandService } from './key-command.service';
+import { KeyToolRegistryService } from './key-tool-registry.service';
 import { AutopilotRulesService } from './autopilot-rules.service';
 import { PlanExecutorService } from './plan-executor.service';
 import { FeedbackLoopService } from './feedback-loop.service';
@@ -67,7 +70,7 @@ import { CrossBusinessIntelligenceService } from './cross-business-intelligence.
 import { AiIntelligenceController } from './ai-intelligence.controller';
 
 @Module({
-  imports: [PrismaModule, RedisModule, SubscriptionsModule, BlueprintModule, TimelineModule],
+  imports: [PrismaModule, RedisModule, SubscriptionsModule, BlueprintModule, TimelineModule, forwardRef(() => FinanceModule), CommandModule],
   controllers: [AiController, AiSettingsController, OutputTemplateController, FlowController, GraphActionsController, AiUsageAdminController, AiIntelligenceController],
   providers: [
     AiListener,
@@ -90,6 +93,7 @@ import { AiIntelligenceController } from './ai-intelligence.controller';
     BusinessMatchingService,
     MatchRefreshSchedulerService,
     KeyCommandService,
+    KeyToolRegistryService,
     AutopilotRulesService,
     PlanExecutorService,
     WorkloadAggregatorService,
@@ -144,6 +148,7 @@ import { AiIntelligenceController } from './ai-intelligence.controller';
     WorkspaceRecommendationsService,
     BusinessMatchingService,
     KeyCommandService,
+    KeyToolRegistryService,
     AutopilotRulesService,
     PlanExecutorService,
     FeedbackLoopService,

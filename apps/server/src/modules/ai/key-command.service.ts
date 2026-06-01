@@ -1,12 +1,15 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { TimelineService } from '../timeline/timeline.service';
 import { ToolResult } from './key-tool.registry';
+import { KeyToolRegistryService } from './key-tool-registry.service';
+import { CommandService } from '../command/command.service';
 
 export enum KeyMode {
   ASK = 'ask',
   DO = 'do',
   PLAN = 'plan',
+  DRAFT = 'draft',
   AUTO = 'auto',
 }
 
@@ -52,6 +55,8 @@ export class KeyCommandService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(TimelineService) private readonly timeline: TimelineService,
+    @Inject(forwardRef(() => KeyToolRegistryService)) private readonly toolRegistry: KeyToolRegistryService,
+    @Inject(forwardRef(() => CommandService)) private readonly commandService: CommandService,
   ) {}
 
   async receiveCommand(
@@ -169,21 +174,17 @@ export class KeyCommandService {
     return maxRisk;
   }
 
-  async executeApprovedPlan(commandId: string, plan: KeyCommandPlan, businessId: string): Promise<ToolResult[]> {
+  async executeApprovedPlan(commandId: string, plan: KeyCommandPlan, businessId: string, userId?: string): Promise<ToolResult[]> {
     const results: ToolResult[] = [];
 
     for (const step of plan.steps) {
-      const toolFn = (await import('./key-tool.registry')).keyToolRegistry[step.module]?.[step.tool];
-      if (!toolFn) {
-        results.push({ success: false, error: `Tool ${step.module}.${step.tool} not found` });
-        continue;
-      }
-      try {
-        const result = await toolFn(businessId, step.input, this.prisma.client);
-        results.push(result);
-      } catch (e) {
-        results.push({ success: false, error: (e as Error).message });
-      }
+      const result = await this.toolRegistry.execute(
+        step.module,
+        step.tool,
+        { businessId, userId: userId ?? null, commandId, autonomyLevel: 2 },
+        step.input,
+      );
+      results.push(result);
     }
 
     const allSuccess = results.every((r) => r.success);
@@ -218,7 +219,7 @@ export class KeyCommandService {
 
   // ── Do It For Me: real business intelligence ───────────────────────────
 
-  async generateDoItForMe(businessId: string, rawInput: string): Promise<DoItForMeResult> {
+  async generateDoItForMe(businessId: string, rawInput: string, userId?: string, keyCommandId?: string): Promise<DoItForMeResult & { commandItemIds: string[] }> {
     const findings: string[] = [];
     const actions: SuggestedAction[] = [];
     const now = new Date();
@@ -431,7 +432,41 @@ export class KeyCommandService {
 
     const goal = this.inferGoal(rawInput, actions);
 
-    return { goal, findings, actions };
+    // Create CommandItems for high-value actions
+    const commandItemIds: string[] = [];
+    for (const action of actions) {
+      try {
+        const categoryMap: Record<string, string> = {
+          follow_up: 'PEOPLE',
+          invoice_reminder: 'MONEY',
+          booking_confirm: 'TIME',
+          review_request: 'MARKETING',
+          custom: 'WORK',
+        };
+        const cmdItem = await this.commandService.create(businessId, {
+          title: `${action.actionType === 'invoice_reminder' ? 'Collect' : action.actionType === 'follow_up' ? 'Follow up' : action.actionType === 'booking_confirm' ? 'Confirm' : action.actionType === 'review_request' ? 'Request review' : 'Handle'}: ${action.contactName}`,
+          description: `${action.reason}\n\nSuggested: ${action.suggestedMessage || 'No message draft'}`,
+          category: categoryMap[action.actionType] || 'WORK',
+          actionType: action.actionType,
+          sourceModule: 'KEY_AI',
+          sourceType: 'do_it_for_me',
+          sourceId: keyCommandId,
+          ownerId: action.contactId,
+          ownerType: action.contactId ? 'CONTACT' : undefined,
+          expectedValue: action.expectedValue ? String(action.expectedValue) : undefined,
+          currency: 'TTD',
+          priority: action.expectedValue && action.expectedValue > 5000 ? 80 : 60,
+          urgency: action.actionType === 'invoice_reminder' ? 80 : 50,
+          recommendedBy: 'KEY',
+          executableByKey: true,
+        });
+        commandItemIds.push(cmdItem.id);
+      } catch (err) {
+        this.logger.warn(`Failed to create CommandItem for action ${action.id}: ${(err as Error).message}`);
+      }
+    }
+
+    return { goal, findings, actions, commandItemIds };
   }
 
   private contactName(contact: any): string {

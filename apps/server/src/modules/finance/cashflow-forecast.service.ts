@@ -65,7 +65,7 @@ export class CashflowForecastService {
         },
         select: { id: true, total: true, dueDate: true, status: true },
       }),
-      this.prisma.client.expense.findMany({
+      (this.prisma.client as any).expense.findMany({
         where: {
           businessId,
           isRecurring: true,
@@ -97,7 +97,7 @@ export class CashflowForecastService {
     }));
 
     const outflowEvents: ForecastEvent[] = [
-      ...recurringExpenses.map((e) => ({
+      ...recurringExpenses.map((e: any) => ({
         date: (e.nextRunDate ?? now).toISOString().slice(0, 10),
         type: 'OUTFLOW' as const,
         source: 'recurring_bill',

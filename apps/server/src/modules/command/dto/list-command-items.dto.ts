@@ -25,6 +25,14 @@ export class ListCommandItemsDto {
   sourceModule?: string;
 
   @IsOptional()
+  @IsString()
+  ownerId?: string;
+
+  @IsOptional()
+  @IsString()
+  ownerType?: string;
+
+  @IsOptional()
   @IsInt()
   @Min(1)
   @Transform(({ value }) => (value ? parseInt(value, 10) : 25))

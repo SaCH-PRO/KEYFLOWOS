@@ -54,7 +54,7 @@ export class TemporalOverviewService {
       this.prisma.client.projectTask.count({
         where: { businessId, deletedAt: null, isCompleted: false, dueDate: { lt: todayStart } },
       }),
-      this.prisma.client.calendarEvent.count({
+      (this.prisma.client as any).calendarEvent.count({
         where: { businessId, startTime: { gte: todayStart, lt: todayEnd } },
       }),
       this.prisma.client.booking.count({

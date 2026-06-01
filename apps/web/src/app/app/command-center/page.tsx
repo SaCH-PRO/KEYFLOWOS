@@ -33,6 +33,7 @@ import {
   dismissCommandItem,
   approveCommandItem,
   executeCommandItem,
+  autoScanCommandItems,
   type CommandItem,
   type CommandSummary,
 } from "@/lib/api/command";
@@ -99,6 +100,21 @@ export default function CommandCenterPage() {
       }
       if (sumRes.data) setSummary(sumRes.data);
       setLoading(false);
+
+      // Auto-scan if stale (runs after initial render to not block UI)
+      try {
+        const scanRes = await autoScanCommandItems(businessId);
+        if (scanRes.data?.scanned && (scanRes.data.result?.created ?? 0) > 0) {
+          // Refresh if new items were created
+          const fresh = await fetchCommandItems(businessId, { limit: 50 });
+          if (!cancelled && fresh.data) {
+            setCommands(fresh.data.items);
+            setCommandTotal(fresh.data.total);
+          }
+        }
+      } catch {
+        // silently fail auto-scan
+      }
     }
     init();
     return () => { cancelled = true; };
