@@ -7,10 +7,10 @@ import { FlowShell } from "@/components/layout/flow-shell";
 export default function DeliveryFlowPage() {
   const router = useRouter();
   const sections = [
-    { label: "Orders", href: "#", icon: Package, desc: "Active and pending orders" },
-    { label: "Routes", href: "#", icon: Route, desc: "Delivery routing and scheduling" },
-    { label: "Quality Check", href: "#", icon: ClipboardCheck, desc: "QA and acceptance criteria" },
-    { label: "Deadlines", href: "#", icon: Clock, desc: "SLA and milestone tracking" },
+    { label: "Projects", href: "/app/projects", icon: Package, desc: "Active and pending delivery projects" },
+    { label: "Schedule", href: "/app/projects", icon: Route, desc: "Project timelines and scheduling" },
+    { label: "Quality Check", href: "/app/projects", icon: ClipboardCheck, desc: "QA tasks and acceptance criteria" },
+    { label: "Deadlines", href: "/app/projects", icon: Clock, desc: "Milestones and SLA tracking" },
   ];
 
   return (

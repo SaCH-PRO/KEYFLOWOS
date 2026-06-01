@@ -18,11 +18,13 @@ const PERMISSION_MODULES = [
   { key: "revenue", label: "Revenue" },
   { key: "bookings", label: "Bookings" },
   { key: "projects", label: "Projects" },
+  { key: "content", label: "Content" },
   { key: "expenses", label: "Expenses" },
-  { key: "finance", label: "Finance" },
+  { key: "automations", label: "Automations" },
+  { key: "storefront", label: "Storefront" },
   { key: "settings", label: "Settings" },
+  { key: "ai", label: "AI" },
   { key: "team", label: "Team" },
-  { key: "structure", label: "Structure" },
 ];
 
 const PERMISSION_LEVELS = ["none", "read", "write", "admin"] as const;

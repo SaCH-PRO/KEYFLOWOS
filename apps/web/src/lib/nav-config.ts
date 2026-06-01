@@ -258,6 +258,8 @@ export const buildSections: NavSection[] = [
     items: [
       { label: "Account", href: "/app/settings/profile", icon: User },
       { label: "Workspace", href: "/app/settings", icon: Building },
+      { label: "Team", href: "/app/settings/team", icon: Users },
+      { label: "Structure", href: "/app/structure", icon: Layers },
       { label: "Connections", href: "/app/settings/connections", icon: Link },
       { label: "AI", href: "/app/settings/ai", icon: Bot },
       { label: "Compliance", href: "/app/settings/compliance", icon: ShieldCheck },

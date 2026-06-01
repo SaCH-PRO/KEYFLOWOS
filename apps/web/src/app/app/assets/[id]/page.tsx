@@ -29,11 +29,13 @@ import {
   trackAssetUsage,
   deleteAsset,
 } from "@/lib/client";
+import { getStoredBusinessId } from "@/lib/workspace";
 
 export default function AssetDetailPage() {
   const router = useRouter();
   const params = useParams();
   const id = params.id as string;
+  const businessId = getStoredBusinessId();
   const [asset, setAsset] = useState<Asset | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -47,8 +49,9 @@ export default function AssetDetailPage() {
   const load = useCallback(async () => {
     if (!id) return;
     setLoading(true);
+    if (!businessId) return;
     try {
-      const res = await fetchAsset(id);
+      const res = await fetchAsset(businessId, id);
       if (res.error) throw new Error(res.error);
       setAsset(res.data ?? null);
     } catch (err) {
@@ -56,18 +59,18 @@ export default function AssetDetailPage() {
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [id, businessId]);
 
   useEffect(() => {
     load();
   }, [load]);
 
   const handleDelete = async () => {
-    if (!asset) return;
+    if (!asset || !businessId) return;
     if (!confirm("Delete this asset?")) return;
     setActionLoading("delete");
     try {
-      await deleteAsset(asset.id);
+      await deleteAsset(businessId, asset.id);
       toast.success("Asset deleted");
       router.push("/app/assets");
     } catch {
@@ -77,10 +80,10 @@ export default function AssetDetailPage() {
   };
 
   const handleUpdate = async () => {
-    if (!asset || !editForm) return;
+    if (!asset || !editForm || !businessId) return;
     setActionLoading("update");
     try {
-      await updateAsset(asset.id, {
+      await updateAsset(businessId, asset.id, {
         name: editForm.name,
         folder: editForm.folder,
       });
@@ -95,10 +98,10 @@ export default function AssetDetailPage() {
   };
 
   const handleAddTag = async () => {
-    if (!asset || !newTag.trim()) return;
+    if (!asset || !businessId || !newTag.trim()) return;
     setActionLoading("tag");
     try {
-      await tagAsset(asset.id, newTag.trim());
+      await tagAsset(businessId, asset.id, newTag.trim());
       toast.success("Tag added");
       setNewTag("");
       load();
@@ -110,10 +113,10 @@ export default function AssetDetailPage() {
   };
 
   const handleRemoveTag = async (tag: string) => {
-    if (!asset) return;
+    if (!asset || !businessId) return;
     setActionLoading(`untag-${tag}`);
     try {
-      await untagAsset(asset.id, tag);
+      await untagAsset(businessId, asset.id, tag);
       toast.success("Tag removed");
       load();
     } catch {
@@ -124,10 +127,10 @@ export default function AssetDetailPage() {
   };
 
   const handleTrackUsage = async () => {
-    if (!asset || !trackType.trim() || !trackId.trim()) return;
+    if (!asset || !businessId || !trackType.trim() || !trackId.trim()) return;
     setActionLoading("track");
     try {
-      await trackAssetUsage(asset.id, {
+      await trackAssetUsage(businessId, asset.id, {
         usedInType: trackType.trim(),
         usedInId: trackId.trim(),
       });

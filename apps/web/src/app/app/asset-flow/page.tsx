@@ -7,10 +7,10 @@ import { FlowShell } from "@/components/layout/flow-shell";
 export default function AssetFlowPage() {
   const router = useRouter();
   const sections = [
-    { label: "Inventory", href: "#", icon: Box, desc: "Stock levels and SKUs" },
-    { label: "Equipment", href: "#", icon: Wrench, desc: "Tools and machinery" },
-    { label: "Fleet", href: "#", icon: Truck, desc: "Vehicles and logistics" },
-    { label: "Utilization", href: "#", icon: BarChart3, desc: "Usage and ROI tracking" },
+    { label: "Asset Library", href: "/app/assets", icon: Box, desc: "Browse and manage all assets" },
+    { label: "Equipment", href: "/app/assets", icon: Wrench, desc: "Tools and machinery records" },
+    { label: "Fleet", href: "/app/assets", icon: Truck, desc: "Vehicles and logistics assets" },
+    { label: "Utilization", href: "/app/assets", icon: BarChart3, desc: "Usage tracking and ROI" },
   ];
 
   return (

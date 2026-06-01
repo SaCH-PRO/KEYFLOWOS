@@ -65,7 +65,7 @@ export default function AssetsPage() {
         }),
         fetchAssetFolders(businessId),
       ]);
-      if (assetsRes.data) setAssets(assetsRes.data);
+      if (assetsRes.data) setAssets(assetsRes.data.items);
       if (foldersRes.data) setFolders(foldersRes.data);
     } catch (err) {
       toast.error("Failed to load assets");
@@ -79,9 +79,10 @@ export default function AssetsPage() {
   }, [load]);
 
   const handleDelete = async (id: string) => {
+    if (!businessId) return;
     if (!confirm("Delete this asset?")) return;
     try {
-      await deleteAsset(id);
+      await deleteAsset(businessId, id);
       toast.success("Asset deleted");
       load();
     } catch {
@@ -91,9 +92,9 @@ export default function AssetsPage() {
 
   const handleUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingAsset) return;
+    if (!businessId || !editingAsset) return;
     try {
-      await updateAsset(editingAsset.id, {
+      await updateAsset(businessId, editingAsset.id, {
         name: editingAsset.name,
         folder: editingAsset.folder,
         permissions: editingAsset.permissions,
@@ -107,9 +108,9 @@ export default function AssetsPage() {
   };
 
   const handleAddTag = async (assetId: string) => {
-    if (!newTag.trim()) return;
+    if (!businessId || !newTag.trim()) return;
     try {
-      await tagAsset(assetId, newTag.trim());
+      await tagAsset(businessId, assetId, newTag.trim());
       toast.success("Tag added");
       setNewTag("");
       load();

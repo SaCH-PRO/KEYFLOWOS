@@ -27,6 +27,7 @@ import { PostingService, type PostingInput } from './posting.service';
 import { SafeToSpendService } from './safe-to-spend.service';
 import { CashflowForecastService } from './cashflow-forecast.service';
 import { MoneyMovesService } from './money-moves.service';
+import { CashReserveService } from './cash-reserve.service';
 
 /**
  * FIN2 — read-only receivables endpoints.
@@ -56,6 +57,7 @@ export class FinanceController {
     @Inject(SafeToSpendService) private readonly safeToSpend: SafeToSpendService,
     @Inject(CashflowForecastService) private readonly cashflowForecast: CashflowForecastService,
     @Inject(MoneyMovesService) private readonly moneyMoves: MoneyMovesService,
+    @Inject(CashReserveService) private readonly cashReserve: CashReserveService,
   ) {}
 
   // ---------- Manual Journal Entries ----------
@@ -527,6 +529,12 @@ export class FinanceController {
     return this.taxLiability.contributingInvoices(businessId, id);
   }
 
+  @Get('tax-calendar')
+  async taxCalendar(@Param('businessId') businessId: string, @Req() req: any) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.taxLiability.getFilingCalendar(businessId);
+  }
+
   @Post('tax-liabilities/:id/file')
   async fileTaxLiability(
     @Param('businessId') businessId: string,
@@ -749,5 +757,36 @@ export class FinanceController {
       saveRecipient: Boolean(body?.saveRecipient),
       userId: req.user.id,
     });
+  }
+
+  // ---------- Cash Reserve Buckets ----------
+  @Get('reserves')
+  async listReserves(@Param('businessId') businessId: string) {
+    return this.cashReserve.list(businessId);
+  }
+
+  @Post('reserves')
+  async createReserve(
+    @Param('businessId') businessId: string,
+    @Body() body: { name: string; purpose: string; targetAmount?: number; currentAmount?: number; currency?: string },
+  ) {
+    return this.cashReserve.create(businessId, body);
+  }
+
+  @Patch('reserves/:id')
+  async updateReserve(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Body() body: Partial<{ name: string; purpose: string; targetAmount: number; currentAmount: number; status: string }>,
+  ) {
+    return this.cashReserve.update(businessId, id, body);
+  }
+
+  @Delete('reserves/:id')
+  async deleteReserve(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+  ) {
+    return this.cashReserve.delete(businessId, id);
   }
 }

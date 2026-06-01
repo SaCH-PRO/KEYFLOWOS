@@ -13885,49 +13885,51 @@ export async function fetchAssets(
   if (opts?.folder) params.set("folder", opts.folder);
   if (opts?.tag) params.set("tag", opts.tag);
   if (opts?.search) params.set("search", opts.search);
-  return apiGetSimple<Asset[]>(
+  return apiGetSimple<{ items: Asset[]; total: number; offset: number; limit: number }>(
     `/businesses/${encodeURIComponent(businessId)}/assets?${params.toString()}`
   );
 }
 
 export async function fetchAssetFolders(businessId: string) {
   return apiGetSimple<string[]>(
-    `/businesses/${encodeURIComponent(businessId)}/assets/folders`
+    `/businesses/${encodeURIComponent(businessId)}/assets/folders/list`
   );
 }
 
-export async function fetchAsset(assetId: string) {
-  return apiGetSimple<Asset>(`/assets/${encodeURIComponent(assetId)}`);
+export async function fetchAsset(businessId: string, assetId: string) {
+  return apiGetSimple<Asset>(`/businesses/${encodeURIComponent(businessId)}/assets/${encodeURIComponent(assetId)}`);
 }
 
 export async function updateAsset(
+  businessId: string,
   assetId: string,
-  data: { name?: string; folder?: string; permissions?: string }
+  data: { name?: string; folder?: string; permissions?: string; tags?: string[]; type?: string }
 ) {
-  return apiPatch<Asset>(`/assets/${encodeURIComponent(assetId)}`, data);
+  return apiPatch<Asset>(`/businesses/${encodeURIComponent(businessId)}/assets/${encodeURIComponent(assetId)}`, data);
 }
 
-export async function tagAsset(assetId: string, tag: string) {
-  return apiPostSimple<Asset>(`/assets/${encodeURIComponent(assetId)}/tag`, { tag });
+export async function tagAsset(businessId: string, assetId: string, tag: string) {
+  return apiPostSimple<Asset>(`/businesses/${encodeURIComponent(businessId)}/assets/${encodeURIComponent(assetId)}/tag`, { tags: [tag] });
 }
 
-export async function untagAsset(assetId: string, tag: string) {
-  return apiPostSimple<Asset>(`/assets/${encodeURIComponent(assetId)}/untag`, { tag });
+export async function untagAsset(businessId: string, assetId: string, tag: string) {
+  return apiPostSimple<Asset>(`/businesses/${encodeURIComponent(businessId)}/assets/${encodeURIComponent(assetId)}/untag`, { tags: [tag] });
 }
 
 export async function trackAssetUsage(
+  businessId: string,
   assetId: string,
   data: { usedInType: string; usedInId: string }
 ) {
-  return apiPostSimple<Asset>(`/assets/${encodeURIComponent(assetId)}/track-usage`, data);
+  return apiPostSimple<Asset>(`/businesses/${encodeURIComponent(businessId)}/assets/${encodeURIComponent(assetId)}/track-usage`, data);
 }
 
-export async function deleteAsset(assetId: string) {
-  return apiDelete<Asset>(`/assets/${encodeURIComponent(assetId)}`);
+export async function deleteAsset(businessId: string, assetId: string) {
+  return apiDelete<Asset>(`/businesses/${encodeURIComponent(businessId)}/assets/${encodeURIComponent(assetId)}`);
 }
 
-export async function fetchAssetById(_businessId: string, assetId: string) {
-  return fetchAsset(assetId);
+export async function fetchAssetById(businessId: string, assetId: string) {
+  return fetchAsset(businessId, assetId);
 }
 
 export async function createAsset(

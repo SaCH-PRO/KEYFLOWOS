@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Banknote, Wallet, Receipt, FileText, Landmark, ShieldCheck, Zap, ArrowRight, TrendingUp } from "lucide-react";
+import { Banknote, Wallet, Receipt, FileText, Landmark, ShieldCheck, Zap, ArrowRight, TrendingUp, PiggyBank, Plus, Trash2, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { FlowShell } from "@/components/layout/flow-shell";
 import { MetricCard } from "@/components/ui/metric-card";
 import { apiGet } from "@/lib/api";
+import { fetchReserveBuckets, createReserveBucket, updateReserveBucket, deleteReserveBucket, type ReserveBucket } from "@/lib/api/finance";
 
 interface FinancialOverview {
   cashBalance: number;
@@ -33,17 +34,26 @@ export default function FinancialFlowPage() {
   const [loading, setLoading] = useState(true);
   const [overview, setOverview] = useState<FinancialOverview | null>(null);
   const [safe, setSafe] = useState<SafeToSpend | null>(null);
+  const [buckets, setBuckets] = useState<ReserveBucket[]>([]);
+  const [showAdd, setShowAdd] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newPurpose, setNewPurpose] = useState("");
+  const [newTarget, setNewTarget] = useState("");
+  const [newCurrent, setNewCurrent] = useState("");
+  const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
     if (!businessId) return;
     setLoading(true);
     try {
-      const [ovRes, safeRes] = await Promise.all([
+      const [ovRes, safeRes, bucketRes] = await Promise.all([
         apiGet<FinancialOverview>(`/finance/businesses/${businessId}/overview`),
         apiGet<SafeToSpend>(`/finance/businesses/${businessId}/safe-to-spend`),
+        fetchReserveBuckets(businessId),
       ]);
       if (ovRes.data) setOverview(ovRes.data);
       if (safeRes.data) setSafe(safeRes.data);
+      if (bucketRes.data) setBuckets(bucketRes.data);
     } catch {
       // fail silently
     } finally {
@@ -54,6 +64,35 @@ export default function FinancialFlowPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const handleAdd = async () => {
+    if (!businessId || !newName.trim()) return;
+    setSaving(true);
+    try {
+      const res = await createReserveBucket(businessId, {
+        name: newName.trim(),
+        purpose: newPurpose.trim() || "General reserve",
+        targetAmount: newTarget ? Number(newTarget) : undefined,
+        currentAmount: newCurrent ? Number(newCurrent) : 0,
+      });
+      if (res.data) {
+        setBuckets((prev) => [...prev, res.data!]);
+        setNewName("");
+        setNewPurpose("");
+        setNewTarget("");
+        setNewCurrent("");
+        setShowAdd(false);
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!businessId) return;
+    await deleteReserveBucket(businessId, id);
+    setBuckets((prev) => prev.filter((b) => b.id !== id));
+  };
 
   const currency = overview?.currency ?? "TTD";
 
@@ -83,6 +122,108 @@ export default function FinancialFlowPage() {
             <MetricCard label="Overdue" value={`${currency} ${(overview?.overdueInvoices ?? 0).toLocaleString()}`} icon={Receipt} iconColor="#ef4444" />
             <MetricCard label="Net Profit (MTD)" value={`${currency} ${(overview?.netProfitThisMonth ?? 0).toLocaleString()}`} icon={TrendingUp} />
           </>
+        )}
+      </div>
+
+      {/* Cash Reserve Buckets */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between">
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Cash Reserve Buckets</p>
+          <button
+            onClick={() => setShowAdd(!showAdd)}
+            className="inline-flex items-center gap-1 text-xs font-medium transition-colors hover:opacity-80"
+            style={{ color: "hsl(var(--kf-accent1))" }}
+          >
+            <Plus className="w-3 h-3" />
+            {showAdd ? "Cancel" : "Add bucket"}
+          </button>
+        </div>
+
+        {showAdd && (
+          <div className="kf-card p-3 space-y-2">
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                type="text"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                placeholder="Bucket name (e.g. Tax Reserve)"
+                className="px-3 py-2 rounded-lg border text-sm bg-background focus:outline-none focus:ring-2 focus:ring-[hsl(var(--kf-accent1))]/20"
+                style={{ borderColor: "hsl(var(--kf-border))" }}
+              />
+              <input
+                type="text"
+                value={newPurpose}
+                onChange={(e) => setNewPurpose(e.target.value)}
+                placeholder="Purpose"
+                className="px-3 py-2 rounded-lg border text-sm bg-background focus:outline-none focus:ring-2 focus:ring-[hsl(var(--kf-accent1))]/20"
+                style={{ borderColor: "hsl(var(--kf-border))" }}
+              />
+              <input
+                type="number"
+                value={newTarget}
+                onChange={(e) => setNewTarget(e.target.value)}
+                placeholder="Target amount"
+                className="px-3 py-2 rounded-lg border text-sm bg-background focus:outline-none focus:ring-2 focus:ring-[hsl(var(--kf-accent1))]/20"
+                style={{ borderColor: "hsl(var(--kf-border))" }}
+              />
+              <input
+                type="number"
+                value={newCurrent}
+                onChange={(e) => setNewCurrent(e.target.value)}
+                placeholder="Current amount"
+                className="px-3 py-2 rounded-lg border text-sm bg-background focus:outline-none focus:ring-2 focus:ring-[hsl(var(--kf-accent1))]/20"
+                style={{ borderColor: "hsl(var(--kf-border))" }}
+              />
+            </div>
+            <button
+              onClick={handleAdd}
+              disabled={!newName.trim() || saving}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-[hsl(var(--kf-accent1))] text-white hover:opacity-90 transition-opacity disabled:opacity-50"
+            >
+              {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+              Create bucket
+            </button>
+          </div>
+        )}
+
+        {buckets.length === 0 && !showAdd ? (
+          <p className="text-xs text-muted-foreground py-2">No reserve buckets yet. Add one to track tax, payroll, or other cash allocations.</p>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+            {buckets.map((bucket) => (
+              <div key={bucket.id} className="kf-card p-3 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <PiggyBank className="w-3.5 h-3.5 text-emerald-500" />
+                    <span className="text-sm font-medium">{bucket.name}</span>
+                  </div>
+                  <button
+                    onClick={() => handleDelete(bucket.id)}
+                    className="text-muted-foreground hover:text-red-500 transition-colors"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                </div>
+                <p className="text-[10px] text-muted-foreground">{bucket.purpose}</p>
+                <div className="flex items-end justify-between">
+                  <span className="text-sm font-semibold">{bucket.currency} {bucket.currentAmount.toLocaleString()}</span>
+                  {bucket.targetAmount && (
+                    <span className="text-[10px] text-muted-foreground">
+                      of {bucket.currency} {bucket.targetAmount.toLocaleString()} target
+                    </span>
+                  )}
+                </div>
+                {bucket.targetAmount && bucket.targetAmount > 0 && (
+                  <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-emerald-500 transition-all"
+                      style={{ width: `${Math.min(100, (bucket.currentAmount / bucket.targetAmount) * 100)}%` }}
+                    />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
         )}
       </div>
 

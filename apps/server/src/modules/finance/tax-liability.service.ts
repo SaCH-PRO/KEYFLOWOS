@@ -325,6 +325,28 @@ export class TaxLiabilityService {
     return row;
   }
 
+  async getFilingCalendar(businessId: string): Promise<Array<{ type: string; period: string; dueDate: string; status: string; amountDue: number; daysUntilDue: number }>> {
+    const now = new Date();
+    const liabilities = await this.prisma.client.taxLiability.findMany({
+      where: { businessId, status: { in: ['OPEN', 'FILED'] } },
+      orderBy: { periodEnd: 'asc' },
+      take: 12,
+    });
+
+    return liabilities.map((l: any) => {
+      const dueDate = l.dueDate ? new Date(l.dueDate) : new Date(new Date(l.periodEnd).getTime() + 15 * 86400000);
+      const daysUntilDue = Math.floor((dueDate.getTime() - now.getTime()) / 86400000);
+      return {
+        type: l.type,
+        period: `${new Date(l.periodStart).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })} - ${new Date(l.periodEnd).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}`,
+        dueDate: dueDate.toISOString(),
+        status: l.status,
+        amountDue: Number(l.amountDue ?? 0),
+        daysUntilDue,
+      };
+    });
+  }
+
   /**
    * Drill-down: return the invoices that contributed to the tax-collected
    * figure for this period. Used by the Tax tab to make every number

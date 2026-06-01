@@ -7,10 +7,10 @@ import { FlowShell } from "@/components/layout/flow-shell";
 export default function TeamFlowPage() {
   const router = useRouter();
   const sections = [
-    { label: "Roster", href: "#", icon: Users, desc: "Team members and roles" },
-    { label: "Schedule", href: "#", icon: Calendar, desc: "Shifts and availability" },
-    { label: "Performance", href: "#", icon: Award, desc: "Goals and reviews" },
-    { label: "Documents", href: "#", icon: FileText, desc: "Contracts and handbooks" },
+    { label: "Roster", href: "/app/settings/team", icon: Users, desc: "Team members and roles" },
+    { label: "Structure", href: "/app/structure", icon: Calendar, desc: "Org units, job roles, and assignments" },
+    { label: "Projects", href: "/app/projects", icon: Award, desc: "Project assignments and deliverables" },
+    { label: "Documents", href: "/app/assets", icon: FileText, desc: "Contracts, handbooks, and assets" },
   ];
 
   return (

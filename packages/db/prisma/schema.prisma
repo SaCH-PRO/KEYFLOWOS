@@ -208,6 +208,9 @@ model Business {
   jobRoles             JobRole[]
   orgAssignments       OrgAssignment[]
   delegationRules      DelegationRule[]
+  businessRules        BusinessRule[]
+  businessSignals      BusinessSignal[]
+  healthSnapshots      BusinessHealthSnapshot[]
 
   // Finance OS (FIN1)
   financialAccounts     FinancialAccount[]
@@ -8066,4 +8069,73 @@ model BusinessInitiative {
 
   @@index([businessId, status])
   @@map("business_initiatives")
+}
+
+/// Rule and Signal Engine — Deterministic business rules
+model BusinessRule {
+  id          String   @id @default(cuid())
+  businessId  String?  @map("business_id")
+  business    Business? @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  name        String
+  description String?
+  module      String
+  triggerType String   @map("trigger_type")
+  condition   Json
+  action      Json
+  severity    String   @default("INFO")
+  enabled     Boolean  @default(true)
+  isSystem    Boolean  @default(false) @map("is_system")
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId, module, enabled])
+  @@map("business_rules")
+}
+
+/// Rule and Signal Engine — Detected business signals
+model BusinessSignal {
+  id            String    @id @default(cuid())
+  businessId    String    @map("business_id")
+  business      Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  module        String
+  type          String
+  severity      String    @default("INFO")
+  title         String
+  description   String?
+  entityType    String?   @map("entity_type")
+  entityId      String?   @map("entity_id")
+  contactId     String?   @map("contact_id")
+  score         Int?
+  value         Decimal?  @db.Decimal(18, 4)
+  currency      String?
+  data          Json      @default("{}")
+  status        String    @default("ACTIVE")
+  firstSeenAt   DateTime  @default(now()) @map("first_seen_at")
+  lastSeenAt    DateTime  @default(now()) @map("last_seen_at")
+  resolvedAt    DateTime? @map("resolved_at")
+
+  @@index([businessId, module, status])
+  @@index([businessId, severity, status])
+  @@index([businessId, entityType, entityId])
+  @@map("business_signals")
+}
+
+/// Business Health Scores — Snapshot of health per area
+model BusinessHealthSnapshot {
+  id            String   @id @default(cuid())
+  businessId    String   @map("business_id")
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  area          String
+  score         Int
+  status        String
+  reasons       Json     @default("[]")
+  metrics       Json     @default("{}")
+  calculatedAt  DateTime @default(now()) @map("calculated_at")
+
+  @@index([businessId, area, calculatedAt])
+  @@map("business_health_snapshots")
 }

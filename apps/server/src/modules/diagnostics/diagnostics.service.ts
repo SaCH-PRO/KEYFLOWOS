@@ -1,6 +1,8 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { QueueService } from '../ai/queue.service';
+import { BusinessEventQueueService } from '../business-events/business-event.queue';
 
 export type CheckStatus = 'pass' | 'warn' | 'fail';
 
@@ -40,6 +42,8 @@ export class DiagnosticsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly eventEmitter: EventEmitter2,
+    @Inject(QueueService) private readonly aiQueue: QueueService,
+    @Inject(BusinessEventQueueService) private readonly eventQueue: BusinessEventQueueService,
   ) {}
 
   // ─────────────────────────────────────────────────────────
@@ -202,14 +206,46 @@ export class DiagnosticsService {
     };
   }
 
+  async checkQueues(): Promise<CheckResult> {
+    const start = Date.now();
+    try {
+      const [planCounts, cronCounts, eventCounts] = await Promise.all([
+        this.aiQueue.planQueue.getJobCounts('waiting', 'active', 'completed', 'failed', 'delayed'),
+        this.aiQueue.cronQueue.getJobCounts('waiting', 'active', 'completed', 'failed', 'delayed'),
+        this.eventQueue.queue.getJobCounts('waiting', 'active', 'completed', 'failed', 'delayed'),
+      ]);
+      const failed = (planCounts.failed ?? 0) + (cronCounts.failed ?? 0) + (eventCounts.failed ?? 0);
+      const waiting = (planCounts.waiting ?? 0) + (cronCounts.waiting ?? 0) + (eventCounts.waiting ?? 0);
+      const status: CheckStatus = failed > 10 ? 'fail' : failed > 0 ? 'warn' : 'pass';
+      return {
+        name: 'Background Job Queues',
+        status,
+        latencyMs: Date.now() - start,
+        checkedAt: new Date().toISOString(),
+        message: `Plan: ${planCounts.waiting} waiting / ${planCounts.failed} failed | Cron: ${cronCounts.waiting} waiting / ${cronCounts.failed} failed | Events: ${eventCounts.waiting} waiting / ${eventCounts.failed} failed`,
+        detail: `Total waiting: ${waiting}, total failed: ${failed}`,
+      };
+    } catch (err: any) {
+      return {
+        name: 'Background Job Queues',
+        status: 'fail',
+        latencyMs: Date.now() - start,
+        checkedAt: new Date().toISOString(),
+        message: 'Failed to query BullMQ queue counts',
+        detail: err.message,
+      };
+    }
+  }
+
   async checkInfrastructure(): Promise<CategoryResult> {
-    const [db, supabase, storage, uptime] = await Promise.all([
+    const [db, supabase, storage, uptime, queues] = await Promise.all([
       this.checkDatabase(),
       this.checkSupabase(),
       this.checkObjectStorage(),
       this.checkServerUptime(),
+      this.checkQueues(),
     ]);
-    const checks = [db, supabase, storage, uptime];
+    const checks = [db, supabase, storage, uptime, queues];
     return {
       category: 'Infrastructure',
       checks,

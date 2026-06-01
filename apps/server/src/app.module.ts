@@ -84,6 +84,8 @@ import { OsModule } from './modules/os/os.module';
 import { GovernanceModule } from './modules/governance/governance.module';
 import { TemporalModule } from './modules/temporal/temporal.module';
 import { PeopleFlowModule } from './modules/people-flow/people-flow.module';
+import { SopModule } from './modules/sop/sop.module';
+import { MarketingModule } from './modules/marketing/marketing.module';
 
 @Module({
   imports: [
@@ -168,6 +170,8 @@ import { PeopleFlowModule } from './modules/people-flow/people-flow.module';
     GovernanceModule,
     TemporalModule,
     PeopleFlowModule,
+    SopModule,
+    MarketingModule,
   ],
   controllers: [AppController],
   providers: [
