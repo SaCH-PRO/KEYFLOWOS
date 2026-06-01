@@ -8,7 +8,7 @@ import { TimelineService } from '../timeline/timeline.service';
 export type AccountingBasis = 'CASH' | 'ACCRUAL';
 
 interface PostingOpts {
-  tx?: Prisma.TransactionClient;
+  tx?: any;
   /** Override the basis (used by backfill to replay accrual flows). */
   basis?: AccountingBasis;
   createdById?: string | null;
@@ -74,8 +74,8 @@ export class RevenuePostingService {
     return 'CASH';
   }
 
-  private db(opts: PostingOpts): Prisma.TransactionClient {
-    return (opts.tx ?? this.prisma.client) as unknown as Prisma.TransactionClient;
+  private db(opts: PostingOpts): any {
+    return opts.tx ?? this.prisma.client;
   }
 
   private async getBasis(

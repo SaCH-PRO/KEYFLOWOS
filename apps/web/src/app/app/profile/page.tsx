@@ -18,6 +18,7 @@ import {
   Sparkles,
   Target,
   Calculator,
+  TrendingUp,
 } from "lucide-react";
 import { apiGet } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
@@ -31,10 +32,11 @@ import { IntelligenceTab } from "./components/intelligence-tab";
 import { OutputsTab } from "./components/outputs-tab";
 import { PricingTab } from "./components/pricing-tab";
 import SecuritySection from "./components/security-section";
+import { GrowthTrajectoryPanel } from "./components/growth-trajectory-panel";
 import { ProfileSectionErrorBoundary } from "./components/profile-section-error-boundary";
 import type { ProfileBusinessData, ProfileCompletenessField, StatusMessage, TabId } from "./components/profile-types";
 
-type ActiveTab = "overview" | "identity" | "readiness" | "intelligence" | "outputs" | "security" | "pricing";
+type ActiveTab = "overview" | "identity" | "readiness" | "intelligence" | "outputs" | "growth" | "security" | "pricing";
 
 function checkFieldCompletion(key: string, bd: ProfileBusinessData | null): boolean {
   if (!bd) return false;
@@ -68,6 +70,7 @@ const TAB_CONFIG: { id: ActiveTab; label: string; icon: React.ElementType; short
   { id: "readiness", label: "Readiness", shortLabel: "Ready", icon: Target, description: "Capability maturity" },
   { id: "intelligence", label: "Intelligence", shortLabel: "Intel", icon: Brain, description: "AI insights" },
   { id: "outputs", label: "Outputs", shortLabel: "Docs", icon: FileText, description: "Documents and exports" },
+  { id: "growth", label: "Growth", shortLabel: "Growth", icon: TrendingUp, description: "Trajectory and milestones" },
   { id: "pricing", label: "Pricing", shortLabel: "Price", icon: Calculator, description: "Rate calculator" },
   { id: "security", label: "Security", shortLabel: "Security", icon: Shield, description: "Preferences" },
 ];
@@ -79,6 +82,7 @@ function mapLegacyTab(tab: string): ActiveTab {
   if (tab === "profile") return "overview";
   if (tab === "brand" || tab === "business" || tab === "professional") return "identity";
   if (tab === "documents") return "outputs";
+  if (tab === "trajectory") return "growth";
   if (VALID_TABS.has(tab)) return tab as ActiveTab;
   return "overview";
 }
@@ -447,6 +451,12 @@ export default function ProfileSettingsPage() {
         {activeTab === "outputs" && (
           <motion.div key="outputs" id="tabpanel-outputs" role="tabpanel" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
             <OutputsTab businessId={businessId} businessData={businessData} profileCompleteness={profileCompleteness} />
+          </motion.div>
+        )}
+
+        {activeTab === "growth" && (
+          <motion.div key="growth" id="tabpanel-growth" role="tabpanel" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
+            <GrowthTrajectoryPanel />
           </motion.div>
         )}
 

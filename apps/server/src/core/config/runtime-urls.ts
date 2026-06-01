@@ -2,34 +2,19 @@
  * Runtime URL helpers.
  *
  * Centralizes the precedence order used to derive the public URLs the app
- * needs to embed in OAuth redirect URIs, email links, etc. — so the codebase
- * is portable across local Docker, plain Node, any PaaS, and (still) the
- * Replit dev environment.
+ * needs to embed in OAuth redirect URIs, email links, etc.
  *
  * Precedence (first non-empty wins):
  *   1. Explicit env var for the specific URL
  *      (`APP_URL`, `API_URL`, `OAUTH_REDIRECT_BASE`)
  *   2. The `PUBLIC_BASE_URL` umbrella var
- *   3. `REPLIT_DEV_DOMAIN` (so existing Replit setups still work unchanged)
- *   4. `REPLIT_DOMAINS` (first comma-separated value)
- *   5. Sensible localhost fallback
+ *   3. Sensible localhost fallback
  */
 
 function trim(s: string | undefined | null): string | undefined {
   if (!s) return undefined;
   const v = s.trim();
   return v.length > 0 ? v : undefined;
-}
-
-function fromReplitDomain(): string | undefined {
-  const dev = trim(process.env.REPLIT_DEV_DOMAIN);
-  if (dev) return `https://${dev}`;
-  const list = trim(process.env.REPLIT_DOMAINS);
-  if (list) {
-    const first = list.split(",").map((s) => s.trim()).filter(Boolean)[0];
-    if (first) return `https://${first}`;
-  }
-  return undefined;
 }
 
 function umbrellaBase(): string | undefined {
@@ -49,7 +34,6 @@ export function appUrl(): string {
   return stripTrailingSlash(
     explicit ||
       umbrellaBase() ||
-      fromReplitDomain() ||
       "http://localhost:5000",
   );
 }
@@ -63,7 +47,6 @@ export function apiUrl(): string {
   return stripTrailingSlash(
     explicit ||
       umbrellaBase() ||
-      fromReplitDomain() ||
       "http://localhost:3001",
   );
 }
@@ -113,7 +96,6 @@ export function allowedCorsOrigins(): string[] {
     trim(process.env.APP_URL),
     trim(process.env.NEXT_PUBLIC_SITE_URL),
     trim(process.env.PUBLIC_BASE_URL),
-    fromReplitDomain(),
   ]) {
     if (u) set.add(stripTrailingSlash(u));
   }

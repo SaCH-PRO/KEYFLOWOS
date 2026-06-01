@@ -878,7 +878,7 @@ export class CommerceController {
 
     const business = quote.business;
     const contact = quote.contact;
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://keyflowos.replit.app';
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:5000';
 
     if (!quote.viewToken) {
       throw new Error('Quote view token missing — cannot send email.');

@@ -41,7 +41,7 @@ const userCache = {
  * enough — that was the cause of the e2e suite flaking out wholesale.
  */
 export async function seedWorkspace(context: BrowserContext): Promise<void> {
-  // The Playwright base URL may be http://localhost:<port> or a Replit
+  // The Playwright base URL may be http://localhost:<port> or any deployed
   // preview domain; addCookies needs an explicit URL list rather than a
   // bare domain so the cookie is scoped correctly for whatever host the
   // tests are running against.

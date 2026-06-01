@@ -48,8 +48,7 @@ export class IdentitySignupService {
    * is honored ONLY when it exactly matches the env-resolved canonical
    * site URL (so calls from the same host don't accidentally drift), and
    * is otherwise ignored. Set `SITE_URL` (or `APP_URL` /
-   * `PUBLIC_BASE_URL` / Replit's `REPLIT_DEV_DOMAIN` chain via
-   * `appUrl()`) to control where verification links land.
+   * `PUBLIC_BASE_URL` via `appUrl()`) to control where verification links land.
    */
   resolveSiteUrl(requestOrigin?: string | null): string {
     const explicit = (process.env.SITE_URL || '').trim();

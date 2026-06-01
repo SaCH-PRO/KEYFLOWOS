@@ -16,7 +16,8 @@ export type InsightCategory =
   | 'automation_health'
   | 'revenue_trend'
   | 'client_risk'
-  | 'storefront_health';
+  | 'storefront_health'
+  | 'pending_bookings';
 
 export interface ProAutoInsight {
   id: string;

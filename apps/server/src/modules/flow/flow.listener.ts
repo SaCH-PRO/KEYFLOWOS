@@ -349,7 +349,7 @@ export class FlowListener implements OnModuleInit, OnModuleDestroy {
 
   private async sendCustomerNotification(
     businessId: string,
-    type: 'booking_confirmed' | 'booking_reminder' | 'booking_rescheduled' | 'booking_cancelled' | 'booking_created' | 'invoice_sent' | 'invoice_overdue' | 'payment_receipt',
+    type: 'booking_confirmed' | 'booking_reminder' | 'booking_rescheduled' | 'booking_cancelled' | 'booking_created' | 'booking_completed' | 'booking_no_show' | 'invoice_sent' | 'invoice_overdue' | 'invoice_due_soon' | 'payment_receipt' | 'payment_failed' | 'quote_sent',
     contact: { id?: string; firstName?: string | null; lastName?: string | null; email?: string | null } | undefined,
     templateData: Record<string, any>,
     dedupeKey?: string,

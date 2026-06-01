@@ -234,7 +234,7 @@ export class PaymentsService {
     const secretKey = meta.stripeSecretKey || process.env.STRIPE_SECRET_KEY;
     if (!secretKey) throw new BadRequestException('Stripe is not configured for this business');
 
-    const allowed = (process.env.PUBLIC_URL_ALLOWLIST || process.env.NEXT_PUBLIC_BASE_URL || process.env.REPLIT_DEV_DOMAIN || '')
+    const allowed = (process.env.PUBLIC_URL_ALLOWLIST || process.env.NEXT_PUBLIC_BASE_URL || '')
       .split(',').map((s) => s.trim()).filter(Boolean)
       .map((s) => s.startsWith('http') ? s : `https://${s}`);
     if (allowed.length === 0) {
@@ -1313,7 +1313,7 @@ export class PaymentsService {
       const secretKey = meta.stripeSecretKey || process.env.STRIPE_SECRET_KEY;
       if (!secretKey) throw new BadRequestException('Stripe is not configured for this business');
 
-      const allowed = (process.env.PUBLIC_URL_ALLOWLIST || process.env.NEXT_PUBLIC_BASE_URL || process.env.REPLIT_DEV_DOMAIN || '')
+      const allowed = (process.env.PUBLIC_URL_ALLOWLIST || process.env.NEXT_PUBLIC_BASE_URL || '')
         .split(',').map((s) => s.trim()).filter(Boolean)
         .map((s) => s.startsWith('http') ? s : `https://${s}`);
       if (allowed.length === 0) {

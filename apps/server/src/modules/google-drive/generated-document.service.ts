@@ -58,7 +58,7 @@ export class GeneratedDocumentService {
 
     // 3. Track in database
     const folderPath = this.resolveFolderPath(entityType);
-    const generatedDoc = await this.prisma.client.generatedDocument.create({
+    const generatedDoc = await (this.prisma.client as any).generatedDocument.create({
       data: {
         businessId,
         entityType,
@@ -85,7 +85,7 @@ export class GeneratedDocumentService {
    * Check if a document has already been uploaded for a given entity.
    */
   async exists(businessId: string, entityType: string, entityId: string): Promise<boolean> {
-    const count = await this.prisma.client.generatedDocument.count({
+    const count = await (this.prisma.client as any).generatedDocument.count({
       where: { businessId, entityType, entityId },
     });
     return count > 0;
@@ -98,7 +98,7 @@ export class GeneratedDocumentService {
     businessId: string,
     filters?: { entityType?: string; entityId?: string; limit?: number; offset?: number },
   ) {
-    return this.prisma.client.generatedDocument.findMany({
+    return (this.prisma.client as any).generatedDocument.findMany({
       where: {
         businessId,
         ...(filters?.entityType ? { entityType: filters.entityType } : {}),

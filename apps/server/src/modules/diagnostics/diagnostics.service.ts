@@ -171,46 +171,6 @@ export class DiagnosticsService {
       }
     }
 
-    // Legacy path: Replit object-storage sidecar. Only attempted when we
-    // actually appear to be running on Replit, so external hosts don't
-    // log noisy warnings about a sidecar that isn't supposed to exist.
-    const onReplit = Boolean(process.env.REPL_ID || process.env.REPLIT_DEV_DOMAIN);
-    const privateDir = process.env.PRIVATE_OBJECT_DIR;
-    const publicPaths = process.env.PUBLIC_OBJECT_SEARCH_PATHS;
-
-    if (onReplit && privateDir && publicPaths) {
-      try {
-        const res = await fetch('http://127.0.0.1:1106/credential', {
-          signal: AbortSignal.timeout(3000),
-        });
-        if (res.ok) {
-          return {
-            name: 'Object Storage',
-            status: 'pass',
-            latencyMs: elapsed(),
-            checkedAt: checkedAt(),
-            message: 'Replit Object Storage sidecar reachable',
-          };
-        }
-        return {
-          name: 'Object Storage',
-          status: 'warn',
-          latencyMs: elapsed(),
-          checkedAt: checkedAt(),
-          message: `Replit Object Storage sidecar returned HTTP ${res.status}`,
-        };
-      } catch (err: any) {
-        return {
-          name: 'Object Storage',
-          status: 'warn',
-          latencyMs: elapsed(),
-          checkedAt: checkedAt(),
-          message: 'Replit Object Storage sidecar not reachable',
-          detail: err?.message ?? String(err),
-        };
-      }
-    }
-
     // Nothing configured. Surface this as a warning so operators know
     // file uploads will fail until they wire up a backend.
     return {
@@ -220,7 +180,7 @@ export class DiagnosticsService {
       checkedAt: checkedAt(),
       message: 'Object Storage not configured',
       detail:
-        'Set S3_BUCKET (+ S3_ENDPOINT / S3_REGION / credentials) for any S3-compatible backend, or run on Replit with PRIVATE_OBJECT_DIR + PUBLIC_OBJECT_SEARCH_PATHS for the built-in sidecar.',
+        'Set S3_BUCKET (+ S3_ENDPOINT / S3_REGION / credentials) for any S3-compatible backend.',
     };
   }
 

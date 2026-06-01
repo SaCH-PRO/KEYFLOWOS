@@ -26,6 +26,7 @@ import { useGraphIntelligence } from "@/hooks/use-graph-intelligence";
 import { GraphInsightsPanel } from "@/components/ai/graph-insights-panel";
 import { AutomationCoverageIndicator } from "@/components/ai/automation-coverage-indicator";
 import { AutopilotLoops } from "./components/autopilot-loops";
+import { VisualWorkflowCanvas } from "./components/visual-workflow-canvas";
 
 
 const TABS = [
@@ -275,16 +276,21 @@ export default function FlowsPage() {
 
       <div data-walkthrough="automations-list">
         {activeTab === "flows" && (
-          <FlowList
-            businessId={businessId}
-            templateToUse={selectedTemplate}
-            onTemplateClear={() => setSelectedTemplate(null)}
-            playbooks={playbooks}
-            workflows={workflows}
-            loading={loading}
-            onPlaybooksChange={setPlaybooks}
-            onWorkflowsChange={setWorkflows}
-          />
+          <>
+            <VisualWorkflowCanvas />
+            <div className="mt-4">
+              <FlowList
+                businessId={businessId}
+                templateToUse={selectedTemplate}
+                onTemplateClear={() => setSelectedTemplate(null)}
+                playbooks={playbooks}
+                workflows={workflows}
+                loading={loading}
+                onPlaybooksChange={setPlaybooks}
+                onWorkflowsChange={setWorkflows}
+              />
+            </div>
+          </>
         )}
 
         {activeTab === "autopilot" && (

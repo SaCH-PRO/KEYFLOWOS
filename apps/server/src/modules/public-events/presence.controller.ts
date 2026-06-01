@@ -46,16 +46,13 @@ function isDoNotTrack(req: Request): boolean {
  * Allowlist of hosts whose Referer/Origin we trust to derive the
  * ingestion business id from a public-surface URL. Spec'd via
  * `PRESENCE_TRUSTED_HOSTS` (comma-separated origins or hosts) and
- * augmented with `APP_URL`. Replit preview domains and localhost are
- * permitted by default so dev/CI keep working.
+ * augmented with `APP_URL`. Localhost is permitted by default so dev/CI
+ * keep working.
  */
 function isTrustedIngestHost(host: string | null): boolean {
   if (!host) return false;
   const lower = host.toLowerCase();
   if (lower === 'localhost' || lower.startsWith('localhost:') || lower === '127.0.0.1' || lower.startsWith('127.0.0.1:')) {
-    return true;
-  }
-  if (lower.endsWith('.replit.dev') || lower.endsWith('.replit.app') || lower.endsWith('.repl.co')) {
     return true;
   }
   const cfg = (process.env.PRESENCE_TRUSTED_HOSTS || process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || '')

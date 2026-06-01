@@ -35,6 +35,7 @@ export interface PlanStep {
 }
 
 export interface AiPlanResultStep {
+  id?: string;
   order: number;
   toolName: string | null;
   module: string | null;
@@ -44,7 +45,11 @@ export interface AiPlanResultStep {
   requiresApproval: boolean;
   dependsOn: string[];
   inputPayload: Record<string, any> | null;
+  outputResult?: Record<string, any> | null;
+  errorMessage?: string | null;
   expectedBenefit: string | null;
+  startedAt?: Date | null;
+  completedAt?: Date | null;
 }
 
 export interface AiPlanResult {
@@ -54,6 +59,9 @@ export interface AiPlanResult {
   urgency: string;
   modules: string[];
   maxRiskTier: number;
+  startedAt: Date | null;
+  completedAt: Date | null;
+  createdAt: Date;
   steps: AiPlanResultStep[];
 }
 
@@ -230,6 +238,9 @@ Respond with JSON only: { "steps": [ { "order": 1, "toolName": "tool_name_or_nul
       urgency: plan.urgency,
       modules: plan.modules,
       maxRiskTier: plan.maxRiskTier,
+      startedAt: plan.startedAt,
+      completedAt: plan.completedAt,
+      createdAt: plan.createdAt,
       steps: plan.steps.map(s => ({
         order: s.order,
         toolName: s.toolName,

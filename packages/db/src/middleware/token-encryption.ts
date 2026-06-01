@@ -5,9 +5,9 @@ const PREFIX = 'enc:v1:';
 
 // Lazy-load crypto to avoid issues in browser/edge environments where this file might be imported
 let _crypto: typeof import('crypto') | null = null;
-function getCrypto() {
+function getCrypto(): typeof import('crypto') {
   if (!_crypto) _crypto = require('crypto');
-  return _crypto;
+  return _crypto!;
 }
 
 function getDerivedKey(): Buffer {
@@ -116,7 +116,7 @@ function decryptSocialData<T>(data: T): T {
 
 export const tokenEncryptionExtension = Prisma.defineExtension({
   query: {
-    Business: {
+    business: {
       async create({ args, query }) {
         if (args.data) {
           args = { ...args, data: encryptBusinessData(args.data as Record<string, unknown>) as any };
@@ -154,7 +154,7 @@ export const tokenEncryptionExtension = Prisma.defineExtension({
         return results.map(decryptBusinessData);
       },
     },
-    SocialConnection: {
+    socialConnection: {
       async create({ args, query }) {
         if (args.data) {
           args = { ...args, data: encryptSocialData(args.data as Record<string, unknown>) as any };

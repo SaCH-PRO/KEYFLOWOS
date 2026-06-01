@@ -13,7 +13,7 @@
 #    3. Continuous health monitoring — poll /readyz every 30 s.
 #    4. Auto-restart     — up to MAX_RESTARTS per service, with backoff.
 #    5. Fast-fail        — exit non-zero on repeated failure so the platform
-#                          (Docker / systemd / Replit) re-rolls the deploy.
+#                          (Docker / systemd / any host) re-rolls the deploy.
 #    6. Graceful shutdown — SIGTERM propagates to all children.
 #
 #  Usage:

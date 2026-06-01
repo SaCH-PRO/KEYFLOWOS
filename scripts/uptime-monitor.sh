@@ -11,7 +11,7 @@
 #
 # A small JSON state file tracks consecutive-failure counters between
 # runs so we can implement "fail twice in a row" semantics from any
-# scheduler (cron, GitHub Actions, Replit Scheduled Deployment, etc.).
+# scheduler (cron, GitHub Actions, etc.).
 #
 # Usage:
 #   BASE_URL=https://app.example.com scripts/uptime-monitor.sh

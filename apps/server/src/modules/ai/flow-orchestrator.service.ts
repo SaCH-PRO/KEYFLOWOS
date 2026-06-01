@@ -2896,7 +2896,7 @@ export class FlowOrchestratorService {
         if (args.severity) where.severity = args.severity;
         const items = await this.prisma.client.financeActionItem.findMany({
           where,
-          orderBy: [{ severity: 'asc' }, { createdAt: 'desc' }],
+          orderBy: [{ severity: 'asc' }, { detectedAt: 'desc' }],
           take: args.limit ?? 25,
         });
         return { items, total: items.length };

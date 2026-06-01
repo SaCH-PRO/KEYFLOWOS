@@ -112,6 +112,17 @@ export const primaryNav: PrimaryNavItem[] = [
 
 export const operateSections: NavSection[] = [
   {
+    id: "intelligence-hub",
+    label: "Intelligence",
+    icon: Brain,
+    items: [
+      { label: "Command Center", href: "/app/intelligence", icon: Brain },
+      { label: "Growth", href: "/app/growth", icon: TrendingUp },
+      { label: "Storefront", href: "/app/storefront-intelligence", icon: Store },
+      { label: "Documents", href: "/app/document-intelligence", icon: FileText },
+    ],
+  },
+  {
     id: "financial-flow",
     label: "Financial Flow",
     icon: Banknote,
@@ -120,7 +131,7 @@ export const operateSections: NavSection[] = [
       { label: "Revenue", href: "/app/commerce", icon: TrendingUp },
       { label: "Expenses", href: "/app/expenses", icon: Receipt },
       { label: "Budgeting", href: "/app/budgeting", icon: Target },
-      { label: "Reports", href: "/app/reports", icon: BarChart3 },
+      { label: "Reports", href: "/app/finance", icon: BarChart3 },
     ],
   },
   {
@@ -167,8 +178,8 @@ export const operateSections: NavSection[] = [
     ],
   },
   {
-    id: "intelligence",
-    label: "Intelligence",
+    id: "reports",
+    label: "Reports",
     icon: BarChart3,
     items: [
       { label: "Reports", href: "/app/reports", icon: BarChart3 },

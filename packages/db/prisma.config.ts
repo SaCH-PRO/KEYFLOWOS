@@ -1,5 +1,5 @@
 import { defineConfig } from '@prisma/config';
 
 export default defineConfig({
-  // Use Replit's environment variables directly
+  // Environment variables are loaded from .env or the runtime environment
 });

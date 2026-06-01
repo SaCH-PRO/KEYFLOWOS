@@ -5,7 +5,7 @@
 # Reports PASS / FAIL / SKIP per step and exits non-zero on any FAIL.
 #
 # Required env:
-#   BASE_URL          e.g. http://localhost:3001  (NestJS API; falls back to $REPLIT_DEV_DOMAIN)
+#   BASE_URL          e.g. http://localhost:3001  (NestJS API)
 #   BUSINESS_SLUG     slug of a business that has storeEnabled=true
 #   BUSINESS_ID       id of that business
 # Optional env:
@@ -24,7 +24,7 @@
 set -u
 set -o pipefail
 
-BASE_URL="${BASE_URL:-${REPLIT_DEV_DOMAIN:+https://$REPLIT_DEV_DOMAIN}}"
+BASE_URL="${BASE_URL:-http://localhost:3001}"
 BASE_URL="${BASE_URL:-http://localhost:3001}"
 BUSINESS_SLUG="${BUSINESS_SLUG:-}"
 BUSINESS_ID="${BUSINESS_ID:-}"

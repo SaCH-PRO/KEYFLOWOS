@@ -27,7 +27,7 @@ export class WebhookFormConnector extends FormPlatformConnector {
     supportsWebhook: true,
     authType: 'api_key',
     connectMode: 'webhook',
-    externalUrl: 'https://docs.replit.com',
+    externalUrl: 'https://github.com/SaCH-PRO/KEYFLOWOS',
     connectInstructions:
       'Copy your unique webhook URL and secret. Configure your form builder (Webflow, Framer, custom HTML) to POST submissions to that URL with the secret in the "x-keyflow-signature" header.',
     credentialFields: [

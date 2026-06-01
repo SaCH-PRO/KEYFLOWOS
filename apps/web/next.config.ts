@@ -33,9 +33,9 @@ ensureValidWebEnv(process.env);
 
 /**
  * Allowed dev origins for Next.js' anti-CSRF in dev mode.
- * Reads `NEXT_PUBLIC_DEV_ORIGINS` (comma-separated host names) so the same
- * codebase works on Replit, plain localhost, Docker, or any custom proxy
- * without editing this file. The Replit dev domain is auto-included if set.
+ * Reads `NEXT_PUBLIC_DEV_ORIGINS` (comma-separated host names) so developers
+ * can add their own tunnel domains (ngrok, cloudflare, etc.) without editing
+ * this file. Localhost is always permitted.
  */
 function buildAllowedDevOrigins(): string[] {
   const fromEnv = (process.env.NEXT_PUBLIC_DEV_ORIGINS || "")
@@ -43,17 +43,9 @@ function buildAllowedDevOrigins(): string[] {
     .map((s) => s.trim())
     .filter(Boolean);
 
-  const replitDev = process.env.REPLIT_DEV_DOMAIN?.trim();
-
   return Array.from(
     new Set([
       ...fromEnv,
-      ...(replitDev ? [replitDev] : []),
-      // Wildcard hosts so any Replit preview URL works on mobile devices
-      // without "Invalid Host" errors (ported from develop e91d037a).
-      "*.replit.dev",
-      "*.worf.replit.dev",
-      "*.repl.co",
       "127.0.0.1",
       "localhost",
     ]),
@@ -92,7 +84,7 @@ const nextConfig: NextConfig = {
   },
   /**
    * Same-origin API proxy. Browsers running inside an iframe / behind a
-   * preview proxy (Replit dev domain, ngrok, custom hosting) cannot
+   * preview proxy (ngrok, custom hosting) cannot
    * reach `http://localhost:3001` directly because "localhost" resolves
    * to the *user's* machine, not the dev container. We rewrite every
    * request hitting `/__api/*` on the Next dev/prod server through to

@@ -25,7 +25,6 @@ function getPublicOrigin(request: NextRequest): string {
     process.env.NEXT_PUBLIC_SITE_URL?.trim() ||
     process.env.PUBLIC_BASE_URL?.trim();
   if (explicit) return explicit.replace(/\/+$/, "");
-  if (process.env.REPLIT_DEV_DOMAIN) return `https://${process.env.REPLIT_DEV_DOMAIN}`;
   return request.nextUrl.origin;
 }
 

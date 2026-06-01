@@ -136,7 +136,7 @@ export class WorkflowTemplateService {
         rawInput: `Workflow: ${template.description}`,
         urgency: 'normal',
         scope: [template.category],
-        modules: [...new Set(resolvedSteps.map(s => s.module).filter(Boolean))],
+        modules: [...new Set(resolvedSteps.map(s => s.module).filter(Boolean))] as string[],
         maxRiskTier,
         status: 'draft',
         role: template.category === 'multi' ? 'operator' : template.category,
@@ -161,12 +161,13 @@ export class WorkflowTemplateService {
     });
 
     // Resolve dependsOnOrders → step IDs
+    const planWithSteps = plan as typeof plan & { steps: Array<{ id: string; order: number }> };
     const orderToId = new Map<number, string>();
-    for (const s of plan.steps) {
+    for (const s of planWithSteps.steps) {
       orderToId.set(s.order, s.id);
     }
 
-    for (const step of plan.steps) {
+    for (const step of planWithSteps.steps) {
       const templateStep = template.steps.find(s => s.order === step.order);
       if (templateStep && templateStep.dependsOnOrders.length > 0) {
         const depIds = templateStep.dependsOnOrders

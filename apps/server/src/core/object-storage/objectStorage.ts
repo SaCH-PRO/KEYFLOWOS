@@ -23,7 +23,7 @@ import {
  *
  * The shape mirrors the very small subset of `@google-cloud/storage`'s `File`
  * surface that the rest of the app actually used, so consumers compile
- * unchanged after the Replit-sidecar removal.
+ * unchanged after the platform abstraction.
  */
 export interface S3FileRef {
   bucket: string;
@@ -182,7 +182,7 @@ function trimSlashes(s: string): string {
 
 /**
  * Service used by the rest of the app. The public surface mirrors the
- * pre-decoupling Replit object-storage helper so existing callers
+ * original object-storage helper so existing callers
  * (`uploads.service.ts`, `routes.ts`) compile unchanged.
  */
 export class ObjectStorageService {

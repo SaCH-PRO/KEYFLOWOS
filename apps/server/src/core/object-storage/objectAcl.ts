@@ -2,7 +2,7 @@
  * ACL helpers for objects stored in any S3-compatible bucket.
  *
  * The ACL policy is persisted in the object's user-defined metadata
- * (`x-amz-meta-acl-policy`). The shape mirrors the pre-Replit-decoupling
+ * (`x-amz-meta-acl-policy`). The shape mirrors the original
  * version so existing consumers compile unchanged.
  */
 import type { S3FileRef } from "./objectStorage";

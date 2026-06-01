@@ -5,7 +5,7 @@
 # endpoints return non-empty rollups.
 #
 # Required env:
-#   BASE_URL          e.g. http://localhost:3001 (falls back to $REPLIT_DEV_DOMAIN)
+#   BASE_URL          e.g. http://localhost:3001
 #   BUSINESS_ID       id of a real business (any storeEnabled business)
 #   AUTH_TOKEN        bearer token of an OWNER/STAFF user for that business
 #                     (only required for the authenticated overview/report assertions)
@@ -17,7 +17,7 @@
 set -u
 set -o pipefail
 
-BASE_URL="${BASE_URL:-${REPLIT_DEV_DOMAIN:+https://$REPLIT_DEV_DOMAIN}}"
+BASE_URL="${BASE_URL:-http://localhost:3001}"
 BASE_URL="${BASE_URL:-http://localhost:3001}"
 BUSINESS_ID="${BUSINESS_ID:-}"
 AUTH_TOKEN="${AUTH_TOKEN:-}"

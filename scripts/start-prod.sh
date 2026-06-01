@@ -26,7 +26,7 @@ WEB_PORT="${WEB_PORT:-5000}"
 # --- resolve the release version (git SHA) and export it to children ---------
 # Order of precedence:
 #   1. GIT_COMMIT already set in the env (CI / platform override)
-#   2. .deploy-version file written by the build step (see .replit)
+#   2. .deploy-version file written by the CI/build step
 #   3. live `git rev-parse HEAD` (only works when .git is present)
 #   4. "unknown" (last resort — health endpoints will surface this)
 if [ -z "${GIT_COMMIT:-}" ]; then

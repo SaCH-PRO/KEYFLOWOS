@@ -3,15 +3,17 @@
 #
 # Usage:
 #   cp .env.example .env       # then edit values you care about
-#   docker compose up --build
+#   docker compose up -d db redis minio
+#   cd packages/db && npx prisma migrate dev
+#   pnpm dev                   # from repo root
 #
 # Brings up:
-#   db  — PostgreSQL 16 with a named volume
-#   api — NestJS backend on :3001
-#   web — Next.js frontend on :5000
+#   db     — PostgreSQL 16
+#   redis  — Redis 7 (BullMQ job queues)
+#   minio  — S3-compatible object storage
 #
-# Production-grade deploys should swap `db` for managed Postgres (Supabase,
-# RDS, Neon, etc.) and use the `web` / `api` images directly. See MIGRATION.md.
+# Production-grade deploys should swap these for managed services.
+# See DEPLOYMENT.md for platform-specific guides.
 ###############################################################################
 
 services:
@@ -32,53 +34,38 @@ services:
       timeout: 5s
       retries: 10
 
-  api:
-    build:
-      context: .
-      target: server
+  redis:
+    image: redis:7-alpine
     restart: unless-stopped
-    env_file:
-      - .env
-    environment:
-      NODE_ENV: production
-      PORT: "3001"
-      # Inside the compose network the DB host is `db`.
-      DATABASE_URL: "postgresql://keyflow:keyflow@db:5432/keyflowos?schema=public"
-      DIRECT_URL: "postgresql://keyflow:keyflow@db:5432/keyflowos?schema=public"
-    depends_on:
-      db:
-        condition: service_healthy
     ports:
-      - "3001:3001"
+      - "6379:6379"
+    volumes:
+      - keyflow_redis:/data
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3001/healthz"]
-      interval: 10s
-      timeout: 5s
-      retries: 6
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
-  web:
-    build:
-      context: .
-      target: web
+  minio:
+    image: minio/minio:latest
     restart: unless-stopped
-    env_file:
-      - .env
+    command: server /data --console-address ":9001"
     environment:
-      NODE_ENV: production
-      PORT: "5000"
-      # The browser hits the API via the published localhost port.
-      NEXT_PUBLIC_API_BASE_URL: "${NEXT_PUBLIC_API_BASE_URL:-http://localhost:3001}"
-      NEXT_PUBLIC_SITE_URL: "${NEXT_PUBLIC_SITE_URL:-http://localhost:5000}"
-    depends_on:
-      api:
-        condition: service_healthy
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
     ports:
-      - "5000:5000"
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - keyflow_minio:/data
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5000/"]
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 10s
       timeout: 5s
-      retries: 6
+      retries: 5
 
 volumes:
   keyflow_db:
+  keyflow_redis:
+  keyflow_minio:

@@ -7,7 +7,7 @@
 # point it at a sandbox / local DB only.
 #
 # Required env:
-#   API_BASE          e.g. http://localhost:5000  (defaults to $REPLIT_DEV_DOMAIN or localhost:5000)
+#   API_BASE          e.g. http://localhost:5000  (defaults to localhost:5000)
 #   AUTH_TOKEN        bearer token for an authenticated user in the target business
 #   BUSINESS_ID       business to create the invoice under
 #   CONTACT_ID        contact to bill
@@ -18,7 +18,7 @@
 
 set -euo pipefail
 
-API_BASE="${API_BASE:-${REPLIT_DEV_DOMAIN:+https://$REPLIT_DEV_DOMAIN}}"
+API_BASE="${API_BASE:-http://localhost:5000}"
 API_BASE="${API_BASE:-http://localhost:5000}"
 
 require() {

@@ -10,6 +10,7 @@ import { MoneyActivityFeed } from "./components/money-activity-feed";
 import { PipelinePreview } from "./components/pipeline-preview";
 import { FinanceIntelPanel } from "../finance/_intel-panel";
 import { ModuleSnapshotCards } from "./components/module-snapshot-cards";
+import { FinancialIntelligencePanel } from "./components/financial-intelligence-panel";
 import { formatCurrency } from "@/lib/currency";
 
 function SectionTitle({ icon: Icon, title }: { icon: React.ElementType; title: string }) {
@@ -103,7 +104,8 @@ export default function MoneyPage() {
 
   return (
     <WorkspaceShell icon={Banknote} title="Money" subtitle="Cash, revenue, expenses — one view.">
-      <div className="space-y-5">
+      <div className="flex flex-col xl:flex-row gap-6">
+        <div className="flex-1 min-w-0 space-y-5">
         {/* Module Snapshots — Revenue / Expenses / Books */}
         {loading ? (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -206,6 +208,13 @@ export default function MoneyPage() {
             />
           </>
         )}
+        </div>
+
+        <aside className="w-full xl:w-80 shrink-0 space-y-4">
+          <div className="xl:sticky xl:top-4">
+            <FinancialIntelligencePanel />
+          </div>
+        </aside>
       </div>
     </WorkspaceShell>
   );

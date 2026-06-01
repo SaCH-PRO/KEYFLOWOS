@@ -611,7 +611,7 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
 
       if (!needsApproval && invoice.contact.email) {
         try {
-          const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://keyflowos.replit.app';
+          const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:5000';
           const invoiceUrl = `${appUrl}/pay/${invoice.id}`;
 
           await this.emailService.send({

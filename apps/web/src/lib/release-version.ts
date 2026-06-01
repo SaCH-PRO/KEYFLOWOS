@@ -11,7 +11,7 @@ const execFileAsync = promisify(execFile);
  * Lookup order:
  *   1. GIT_COMMIT / REPL_COMMIT_SHA / SOURCE_COMMIT environment variable
  *      (set by the platform, CI, or scripts/start-prod.sh)
- *   2. .deploy-version file written at build time by .replit's build step,
+ *   2. .deploy-version file written at build time by the CI/build step,
  *      walking up from the current working directory until found
  *   3. live `git rev-parse HEAD` (works in dev when .git is present)
  *   4. "unknown"

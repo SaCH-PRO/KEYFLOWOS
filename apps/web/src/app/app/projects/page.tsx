@@ -21,6 +21,7 @@ import { ProjectDetail } from "./components/project-detail";
 import { useProjectsAiHub } from "./hooks/use-projects-ai-hub";
 import { PlanGenerator } from "./components/plan-generator";
 import { useProjectPlans } from "./hooks/use-project-plans";
+import { ProjectIntelligencePanel } from "./components/project-intelligence-panel";
 import { ResumePrompt } from "@/components/ui/resume-task-system";
 import { useReturnNavigation } from "@/lib/use-return-navigation";
 import { GraphInsightsPanel } from "@/components/ai/graph-insights-panel";
@@ -31,6 +32,7 @@ import { KanbanSkeleton } from "@/components/ui/skeleton";
 const TABS = [
   { key: "board", label: "Board", icon: LayoutGrid, tooltip: "Kanban board view grouped by delivery stage." },
   { key: "list", label: "List", icon: List, tooltip: "Table view of all projects with sortable columns." },
+  { key: "intelligence", label: "Intelligence", icon: Sparkles, tooltip: "AI-powered project insights and team analytics." },
   { key: "plans", label: "Plans", icon: Sparkles, tooltip: "AI-generated strategic plans from your ideas." },
   { key: "templates", label: "Templates", icon: FileStack, tooltip: "Reusable project blueprints with pre-defined tasks." },
   { key: "playbooks", label: "Playbooks", icon: Zap, tooltip: "Trigger-based event playbooks for automation." },
@@ -61,7 +63,7 @@ export default function ProjectsPage() {
   const handleProjectsAiAction = useCallback((actionKey: string) => {
     if (actionKey.startsWith("switch_tab:")) {
       const tab = actionKey.replace("switch_tab:", "");
-      if (["board", "list", "plans", "templates", "playbooks"].includes(tab)) setActiveTab(tab);
+      if (["board", "list", "intelligence", "plans", "templates", "playbooks"].includes(tab)) setActiveTab(tab);
     } else if (actionKey === "new_project") {
       setActiveTab("board");
     }
@@ -285,6 +287,10 @@ export default function ProjectsPage() {
 
         {activeTab === "plans" && (
           <PlanGenerator businessId={businessId || ""} goals={[]} />
+        )}
+
+        {activeTab === "intelligence" && (
+          <ProjectIntelligencePanel />
         )}
 
         {activeTab === "playbooks" && (
