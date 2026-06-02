@@ -57,6 +57,7 @@ import {
   Settings,
   LayoutDashboard,
   TrendingUp,
+  Camera,
 } from "lucide-react";
 import type { DormantFeatureFlagKey } from "./feature-flags";
 
@@ -118,6 +119,7 @@ export const operateSections: NavSection[] = [
     items: [
       { label: "Command Center", href: "/app/command-center", icon: LayoutDashboard },
       { label: "KEY Worker", href: "/app/key", icon: Bot },
+      { label: "Capture", href: "/app/capture", icon: Camera },
     ],
   },
   {
@@ -287,7 +289,7 @@ export const buildSections: NavSection[] = [
     label: "Automate",
     icon: Zap,
     items: [
-      { label: "Flows", href: "/app/automations", icon: RefreshCw },
+      { label: "Flows", href: "/app/flows", icon: RefreshCw },
       { label: "Workflows", href: "/app/workflows", icon: Layers },
     ],
   },
@@ -324,9 +326,9 @@ export const meNav: NavItem[] = [
 
 export const mobileBottomNav = [
   { label: "Home", href: "/app/command-center", icon: Zap },
-  { label: "Operate", href: "#operate", icon: Briefcase },
-  { label: "AI", href: "#key", icon: Brain },
   { label: "Inbox", href: "/app/inbox", icon: Mail },
+  { label: "Capture", href: "/app/capture", icon: Camera },
+  { label: "AI", href: "#key", icon: Brain },
   { label: "Me", href: "#me", icon: User },
 ];
 
