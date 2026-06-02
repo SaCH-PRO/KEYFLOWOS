@@ -7,11 +7,23 @@ import { AdapterRegistryService } from './adapters/adapter-registry.service';
 import { ContentAiService } from './content-ai.service';
 import { InboundCommunicationsService } from './inbound-communications.service';
 import { InboundCommunicationsController } from './inbound-communications.controller';
+import { InteractionClassifierService } from './interaction-classifier.service';
+import { ProfitTrajectoryService } from './profit-trajectory.service';
+import { ResponseDraftService } from './response-draft.service';
+import { ConsentService } from './consent.service';
+import { TriggerDefinitionService } from './trigger-definition.service';
+import { OmnichannelController } from './omnichannel.controller';
+import { OmnichannelProcessorService } from './omnichannel-processor.service';
 import { AiModule } from '../ai/ai.module';
+import { CommandModule } from '../command/command.module';
 
 @Module({
-  imports: [AiModule],
-  controllers: [CommunicationsController, InboundCommunicationsController],
+  imports: [AiModule, CommandModule],
+  controllers: [
+    CommunicationsController,
+    InboundCommunicationsController,
+    OmnichannelController,
+  ],
   providers: [
     ChannelConnectionService,
     OutboundContentService,
@@ -19,6 +31,12 @@ import { AiModule } from '../ai/ai.module';
     AdapterRegistryService,
     ContentAiService,
     InboundCommunicationsService,
+    InteractionClassifierService,
+    ProfitTrajectoryService,
+    ResponseDraftService,
+    ConsentService,
+    TriggerDefinitionService,
+    OmnichannelProcessorService,
   ],
   exports: [
     ChannelConnectionService,
@@ -27,6 +45,12 @@ import { AiModule } from '../ai/ai.module';
     AdapterRegistryService,
     ContentAiService,
     InboundCommunicationsService,
+    InteractionClassifierService,
+    ProfitTrajectoryService,
+    ResponseDraftService,
+    ConsentService,
+    TriggerDefinitionService,
+    OmnichannelProcessorService,
   ],
 })
 export class CommunicationsModule {}

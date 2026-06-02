@@ -14,11 +14,13 @@ import {
   Loader2,
   CheckCircle2,
   XCircle,
+  Terminal,
 } from "lucide-react";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { PageHeader } from "@/components/ui/page-header";
 import { SectionCard } from "@/components/ui/section-card";
 import { apiGet, apiPost } from "@/lib/api";
+import { fetchAiExecutionLogs, type AiExecutionLogEntry } from "@/lib/client";
 
 interface KeyCommand {
   id: string;
@@ -52,6 +54,7 @@ export default function KeyWorkerPage() {
   const [commands, setCommands] = useState<KeyCommand[]>([]);
   const [approvals, setApprovals] = useState<ApprovalItem[]>([]);
   const [governance, setGovernance] = useState<{ mode?: string; maxAutoTier?: number; blockedTools?: string[] } | null>(null);
+  const [executionLogs, setExecutionLogs] = useState<AiExecutionLogEntry[]>([]);
   const [input, setInput] = useState("");
   const [selectedMode, setSelectedMode] = useState("do");
   const [submitting, setSubmitting] = useState(false);
@@ -60,14 +63,16 @@ export default function KeyWorkerPage() {
     if (!businessId) return;
     setLoading(true);
     try {
-      const [cmdRes, appRes, govRes] = await Promise.all([
+      const [cmdRes, appRes, govRes, logRes] = await Promise.all([
         apiGet<KeyCommand[]>(`/ai/businesses/${businessId}/key/commands`),
         apiGet<{ items: ApprovalItem[] }>(`/ai/businesses/${businessId}/ai/approvals`),
         apiGet<{ mode?: string; maxAutoTier?: number; blockedTools?: string[] }>(`/ai/businesses/${businessId}/ai/governance`),
+        fetchAiExecutionLogs(businessId, { limit: 10 }),
       ]);
       if (cmdRes.data) setCommands(cmdRes.data.slice(0, 20));
       if (appRes.data) setApprovals(appRes.data.items ?? []);
       if (govRes.data) setGovernance(govRes.data);
+      if (logRes.data) setExecutionLogs(logRes.data ?? []);
     } catch {
       // silently fail
     } finally {
@@ -226,6 +231,35 @@ export default function KeyWorkerPage() {
                         <XCircle className="w-4 h-4" />
                       </button>
                     </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </SectionCard>
+
+          <SectionCard icon={Terminal} title="Execution Log" subtitle="Recent KEY actions and outcomes">
+            {executionLogs.length === 0 ? (
+              <p className="kf-text-caption py-2">No execution history yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {executionLogs.map((log) => (
+                  <div key={log.id} className="flex items-center justify-between p-3 rounded-lg border" style={{ borderColor: "hsl(var(--kf-border))" }}>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">{log.toolName ?? log.action ?? 'Unknown action'}</p>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className={`text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded ${log.success ? 'bg-emerald-500/10 text-emerald-600' : 'bg-red-500/10 text-red-600'}`}>
+                          {log.success ? 'SUCCESS' : 'FAILED'}
+                        </span>
+                        {log.riskTier && log.riskTier >= 3 && (
+                          <span className="text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded bg-red-500/10 text-red-500">
+                            Tier {log.riskTier}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <span className="text-xs text-muted-foreground flex-shrink-0">
+                      {new Date(log.createdAt).toLocaleDateString()}
+                    </span>
                   </div>
                 ))}
               </div>

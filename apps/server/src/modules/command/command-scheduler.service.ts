@@ -39,7 +39,7 @@ export class CommandSchedulerService {
 
   async getLastScanTime(businessId: string): Promise<Date | null> {
     const latest = await (this.prisma.client as any).commandItem.findFirst({
-      where: { businessId, sourceModule: 'COMMAND_GENERATOR' },
+      where: { businessId },
       orderBy: { createdAt: 'desc' },
       select: { createdAt: true },
     });

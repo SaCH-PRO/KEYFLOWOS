@@ -1,0 +1,263 @@
+import {
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Body,
+  Param,
+  Query,
+  UseGuards,
+  Request,
+} from '@nestjs/common';
+import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard } from '../../core/auth/module-scope.guard';
+import { InteractionClassifierService } from './interaction-classifier.service';
+import { ProfitTrajectoryService } from './profit-trajectory.service';
+import { ResponseDraftService } from './response-draft.service';
+import { ConsentService } from './consent.service';
+import { TriggerDefinitionService } from './trigger-definition.service';
+
+@Controller('api/communications/businesses/:businessId')
+@UseGuards(BusinessGuard, ModuleScopeGuard)
+export class OmnichannelController {
+  constructor(
+    private readonly classifier: InteractionClassifierService,
+    private readonly profit: ProfitTrajectoryService,
+    private readonly drafts: ResponseDraftService,
+    private readonly consent: ConsentService,
+    private readonly triggers: TriggerDefinitionService,
+  ) {}
+
+  // ─── Channel Accounts ───
+
+  @Get('channel-accounts')
+  async listChannelAccounts(@Param('businessId') businessId: string) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const accounts = await (this.classifier as any).prisma.client.channelAccount.findMany({
+      where: { businessId },
+      orderBy: { providerKey: 'asc' },
+    });
+    return { items: accounts };
+  }
+
+  // ─── Interaction Intents ───
+
+  @Get('intents')
+  async listIntents(
+    @Param('businessId') businessId: string,
+    @Query('status') status?: string,
+    @Query('intentType') intentType?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const prisma = (this.classifier as any).prisma.client;
+    const where: Record<string, unknown> = { businessId };
+    if (status) where.status = status;
+    if (intentType) where.intentType = intentType;
+
+    const [items, total] = await Promise.all([
+      prisma.interactionIntent.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: Math.min(parseInt(limit ?? '50', 10), 100),
+        skip: parseInt(offset ?? '0', 10),
+        include: {
+          contact: { select: { firstName: true, lastName: true, email: true, phone: true } },
+        },
+      }),
+      prisma.interactionIntent.count({ where }),
+    ]);
+
+    return { items, total };
+  }
+
+  @Post('intents/:id/score')
+  async scoreIntent(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+  ) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const prisma = (this.classifier as any).prisma.client;
+    const intent = await prisma.interactionIntent.findFirst({
+      where: { id, businessId },
+      include: { message: true, contact: true },
+    });
+    if (!intent) return { error: 'Intent not found' };
+
+    const score = await this.profit.scoreInteraction(
+      businessId,
+      intent.contactId,
+      intent.intentType,
+      intent.message?.body ?? '',
+    );
+
+    return score;
+  }
+
+  // ─── Response Drafts ───
+
+  @Get('drafts')
+  async listDrafts(
+    @Param('businessId') businessId: string,
+    @Query('status') status?: string,
+    @Query('channel') channel?: string,
+    @Query('riskTier') riskTier?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    return this.drafts.listDrafts(
+      businessId,
+      { status, channel, riskTier },
+      { skip: parseInt(offset ?? '0', 10), take: parseInt(limit ?? '50', 10) },
+    );
+  }
+
+  @Post('drafts/:id/approve')
+  async approveDraft(
+    @Param('businessId') _businessId: string,
+    @Param('id') id: string,
+    @Request() req: { user?: { sub?: string } },
+  ) {
+    const approvedById = req.user?.sub ?? 'system';
+    return this.drafts.approveDraft(id, approvedById);
+  }
+
+  @Post('drafts/:id/reject')
+  async rejectDraft(
+    @Param('businessId') _businessId: string,
+    @Param('id') id: string,
+    @Body('reason') reason: string,
+  ) {
+    return this.drafts.rejectDraft(id, reason ?? 'No reason provided');
+  }
+
+  @Post('drafts/:id/sent')
+  async markDraftSent(
+    @Param('businessId') _businessId: string,
+    @Param('id') id: string,
+  ) {
+    return this.drafts.markSent(id);
+  }
+
+  // ─── Consent ───
+
+  @Get('consent/:contactId')
+  async checkConsent(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+    @Query('channel') channel: string,
+    @Query('type') type?: string,
+  ) {
+    return this.consent.checkConsent(
+      businessId,
+      contactId,
+      channel,
+      (type as 'marketing' | 'recording') ?? 'marketing',
+    );
+  }
+
+  @Post('consent')
+  async recordConsent(
+    @Param('businessId') businessId: string,
+    @Body('contactId') contactId: string,
+    @Body('channel') channel: string,
+    @Body('consentType') consentType: string,
+    @Body('status') status: string,
+    @Body('source') source: string,
+    @Body('evidence') evidence?: string,
+  ) {
+    return this.consent.recordConsent(businessId, contactId, {
+      channel,
+      consentType: consentType as 'marketing' | 'recording' | 'all',
+      status: status as 'granted' | 'revoked' | 'pending',
+      source,
+      evidence,
+    });
+  }
+
+  // ─── Triggers ───
+
+  @Get('triggers')
+  async listTriggers(
+    @Param('businessId') businessId: string,
+    @Query('enabled') enabled?: string,
+    @Query('channel') channel?: string,
+  ) {
+    return this.triggers.listTriggers(businessId, {
+      enabled: enabled !== undefined ? enabled === 'true' : undefined,
+      channel,
+    });
+  }
+
+  @Post('triggers')
+  async createTrigger(
+    @Param('businessId') businessId: string,
+    @Body() body: { channel: string; eventType: string; name: string; condition: Record<string, unknown>; actions: Record<string, unknown>[]; enabled?: boolean },
+  ) {
+    return this.triggers.createTrigger(businessId, body);
+  }
+
+  @Patch('triggers/:id/toggle')
+  async toggleTrigger(
+    @Param('id') id: string,
+    @Body('enabled') enabled: boolean,
+  ) {
+    return this.triggers.toggleTrigger(id, enabled);
+  }
+
+  @Post('triggers/seed')
+  async seedTriggers(@Param('businessId') businessId: string) {
+    await this.triggers.seedSystemTriggers(businessId);
+    return { ok: true };
+  }
+
+  // ─── Unified Inbox ───
+
+  @Get('unified-inbox')
+  async unifiedInbox(
+    @Param('businessId') businessId: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const prisma = (this.classifier as any).prisma.client;
+    const take = Math.min(parseInt(limit ?? '50', 10), 100);
+    const skip = parseInt(offset ?? '0', 10);
+
+    const [threads, drafts, intents] = await Promise.all([
+      prisma.conversationThread.findMany({
+        where: { businessId },
+        orderBy: { updatedAt: 'desc' },
+        take,
+        skip,
+        include: {
+          messages: { orderBy: { sentAt: 'desc' }, take: 1, select: { body: true, direction: true, status: true, sentAt: true } },
+          contact: { select: { firstName: true, lastName: true, email: true, phone: true } },
+        },
+      }),
+      prisma.responseDraft.findMany({
+        where: { businessId, status: { in: ['PENDING_APPROVAL', 'APPROVED'] } },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+        include: {
+          contact: { select: { firstName: true, lastName: true, email: true, phone: true } },
+        },
+      }),
+      prisma.interactionIntent.findMany({
+        where: { businessId },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+        include: {
+          contact: { select: { firstName: true, lastName: true, email: true, phone: true } },
+        },
+      }),
+    ]);
+
+    return {
+      threads: { items: threads, total: threads.length },
+      drafts: { items: drafts, total: drafts.length },
+      intents: { items: intents, total: intents.length },
+    };
+  }
+}

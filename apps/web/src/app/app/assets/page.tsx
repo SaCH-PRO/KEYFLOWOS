@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
-  Image,
+  Image as ImageIcon,
   Plus,
   Loader2,
   Search,
@@ -14,7 +14,6 @@ import {
   Folder,
   Tag,
   X,
-  FolderOpen,
   HardDrive,
 } from "lucide-react";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
@@ -25,13 +24,12 @@ import {
   deleteAsset,
   updateAsset,
   tagAsset,
-  untagAsset,
   createAsset,
 } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 
 const TYPE_ICONS: Record<string, React.ReactNode> = {
-  image: <Image className="w-4 h-4" />,
+  image: <ImageIcon className="w-4 h-4" />,
   video: <HardDrive className="w-4 h-4" />,
   document: <Folder className="w-4 h-4" />,
   audio: <HardDrive className="w-4 h-4" />,
@@ -67,7 +65,7 @@ export default function AssetsPage() {
       ]);
       if (assetsRes.data) setAssets(assetsRes.data.items);
       if (foldersRes.data) setFolders(foldersRes.data);
-    } catch (err) {
+    } catch (_err) {
       toast.error("Failed to load assets");
     } finally {
       setLoading(false);
@@ -152,7 +150,7 @@ export default function AssetsPage() {
   const types = ["image", "video", "document", "audio", "other"];
 
   return (
-    <WorkspaceShell icon={Image} title="Assets">
+    <WorkspaceShell icon={ImageIcon} title="Assets">
       <div className="flex flex-col gap-6 p-6 max-w-7xl mx-auto">
         <div className="flex items-center justify-between">
           <div>
@@ -221,7 +219,7 @@ export default function AssetsPage() {
           </div>
         ) : assets.length === 0 ? (
           <div className="text-center py-20 border rounded-xl bg-muted/20">
-            <Image className="w-12 h-12 mx-auto text-muted-foreground mb-3" />
+            <ImageIcon className="w-12 h-12 mx-auto text-muted-foreground mb-3" />
             <h3 className="text-lg font-medium">No assets found</h3>
           </div>
         ) : (

@@ -40,8 +40,8 @@ export class DiagnosticsService {
   private readonly logger = new Logger(DiagnosticsService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly eventEmitter: EventEmitter2,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(EventEmitter2) private readonly eventEmitter: EventEmitter2,
     @Inject(QueueService) private readonly aiQueue: QueueService,
     @Inject(BusinessEventQueueService) private readonly eventQueue: BusinessEventQueueService,
   ) {}

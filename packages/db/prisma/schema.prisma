@@ -5544,6 +5544,7 @@ model CommandItem {
   /// USER | ROLE | KEY
   ownerType         String?  @map("owner_type")
   ownerId           String?  @map("owner_id")
+  contactId         String?  @map("contact_id")
   dueAt             DateTime? @map("due_at")
   snoozedUntil      DateTime? @map("snoozed_until")
   completedAt       DateTime? @map("completed_at")
@@ -8138,4 +8139,446 @@ model BusinessHealthSnapshot {
 
   @@index([businessId, area, calculatedAt])
   @@map("business_health_snapshots")
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// INTEGRATION HUB MODELS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model IntegrationProvider {
+  id            String   @id @default(cuid())
+  key           String   @unique
+  name          String
+  category      String
+  description   String?
+  logoUrl       String?  @map("logo_url")
+  authType      String   @map("auth_type") // oauth2 | api_key | webhook | manual | embedded
+  capabilities  Json     @default("[]")
+  scopes        Json     @default("[]")
+  status        String   @default("ACTIVE")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@index([category, status])
+  @@map("integration_providers")
+}
+
+model IntegrationConnection {
+  id              String   @id @default(cuid())
+  businessId      String   @map("business_id")
+  providerKey     String   @map("provider_key")
+  status          String   @default("CONNECTED") // CONNECTED | NEEDS_ATTENTION | DISCONNECTED | ERROR
+  authDataRef     String?  @map("auth_data_ref") // encrypted secret reference
+  scopes          Json     @default("[]")
+  settings        Json     @default("{}")
+  lastSyncAt      DateTime? @map("last_sync_at")
+  lastError       String?   @map("last_error")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@unique([businessId, providerKey])
+  @@index([businessId, status])
+  @@index([providerKey, status])
+  @@map("integration_connections")
+}
+
+model IntegrationSyncRun {
+  id              String   @id @default(cuid())
+  businessId      String   @map("business_id")
+  connectionId    String   @map("connection_id")
+  providerKey     String   @map("provider_key")
+  status          String   // RUNNING | SUCCESS | FAILED | PARTIAL
+  startedAt       DateTime @default(now()) @map("started_at")
+  completedAt     DateTime? @map("completed_at")
+  recordsRead     Int      @default(0) @map("records_read")
+  recordsCreated  Int      @default(0) @map("records_created")
+  recordsUpdated  Int      @default(0) @map("records_updated")
+  error           String?
+  meta            Json     @default("{}")
+
+  @@index([businessId, providerKey, startedAt])
+  @@index([connectionId, startedAt])
+  @@map("integration_sync_runs")
+}
+
+model ExternalObjectMap {
+  id              String   @id @default(cuid())
+  businessId      String   @map("business_id")
+  providerKey     String   @map("provider_key")
+  externalType    String   @map("external_type")
+  externalId      String   @map("external_id")
+  internalType    String   @map("internal_type")
+  internalId      String   @map("internal_id")
+  lastSyncedAt    DateTime? @map("last_synced_at")
+  dataHash        String?   @map("data_hash")
+
+  @@unique([businessId, providerKey, externalType, externalId])
+  @@index([businessId, internalType, internalId])
+  @@index([providerKey, externalType])
+  @@map("external_object_maps")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PRODUCT ANALYTICS MODELS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model ProductEvent {
+  id          String   @id @default(cuid())
+  userId      String?  @map("user_id")
+  businessId  String?  @map("business_id")
+  sessionId   String?  @map("session_id")
+  eventName   String   @map("event_name")
+  module      String?
+  entityType  String?  @map("entity_type")
+  entityId    String?  @map("entity_id")
+  properties  Json     @default("{}")
+  occurredAt  DateTime @default(now()) @map("occurred_at")
+
+  @@index([businessId, eventName, occurredAt])
+  @@index([userId, occurredAt])
+  @@index([module, occurredAt])
+  @@map("product_events")
+}
+
+model UserFeedback {
+  id            String   @id @default(cuid())
+  userId        String?  @map("user_id")
+  businessId    String?  @map("business_id")
+  module        String?
+  page          String?
+  feedbackType  String   @map("feedback_type") // rating | bug | request | confusion | praise | ai_quality
+  rating        Int?
+  message       String?
+  context       Json     @default("{}")
+  status        String   @default("NEW") // NEW | TRIAGED | PLANNED | SHIPPED | CLOSED
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId, module, createdAt])
+  @@index([feedbackType, status])
+  @@index([status, createdAt])
+  @@map("user_feedback")
+}
+
+model FeatureUsageDaily {
+  id            String   @id @default(cuid())
+  day           DateTime @db.Date
+  module        String
+  featureKey    String   @map("feature_key")
+  userCount     Int      @default(0) @map("user_count")
+  businessCount Int      @default(0) @map("business_count")
+  eventCount    Int      @default(0) @map("event_count")
+  successCount  Int      @default(0) @map("success_count")
+  failureCount  Int      @default(0) @map("failure_count")
+
+  @@unique([day, module, featureKey])
+  @@index([day, module])
+  @@map("feature_usage_daily")
+}
+
+model AiQualitySignal {
+  id          String   @id @default(cuid())
+  userId      String?  @map("user_id")
+  businessId  String?  @map("business_id")
+  commandId   String?  @map("command_id")
+  module      String?
+  signalType  String   @map("signal_type") // helpful | unhelpful | wrong | unsafe | incomplete | excellent
+  rating      Int?
+  comment     String?
+  context     Json     @default("{}")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([businessId, module, createdAt])
+  @@index([signalType, createdAt])
+  @@index([commandId])
+  @@map("ai_quality_signals")
+}
+
+model ProductExperiment {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  name        String
+  hypothesis  String?
+  status      String   @default("DRAFT") // DRAFT | RUNNING | PAUSED | COMPLETED
+  variants    Json
+  metrics     Json     @default("[]")
+  startedAt   DateTime?
+  endedAt     DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([status])
+  @@map("product_experiments")
+}
+
+model ProductRoadmapInsight {
+  id                String   @id @default(cuid())
+  source            String   // feedback | usage | support | ai_quality | churn | integration
+  title             String
+  summary           String
+  severity          String   @default("MEDIUM")
+  opportunityScore  Int      @default(50) @map("opportunity_score")
+  evidence          Json     @default("[]")
+  status            String   @default("NEW")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([source, status])
+  @@index([status, opportunityScore])
+  @@map("product_roadmap_insights")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PASSIVE NETWORK GROWTH MODELS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model NetworkNode {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  nodeType    String   // customer | vendor | partner | referrer | business | community
+  refType     String?  @map("ref_type")
+  refId       String?  @map("ref_id")
+  label       String
+  score       Int      @default(50)
+  data        Json     @default("{}")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId, nodeType])
+  @@index([businessId, refType, refId])
+  @@map("network_nodes")
+}
+
+model NetworkEdge {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  fromNodeId  String   @map("from_node_id")
+  toNodeId    String   @map("to_node_id")
+  edgeType    String   // referred | paid | booked | supplied | partnered | reviewed | messaged
+  strength    Int      @default(50)
+  value       Decimal? @db.Decimal(18, 4)
+  currency    String?
+  evidence    Json     @default("[]")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId, edgeType])
+  @@index([businessId, fromNodeId])
+  @@index([businessId, toNodeId])
+  @@map("network_edges")
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// OMNICHANNEL NERVOUS SYSTEM MODELS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model ChannelAccount {
+  id                String   @id @default(cuid())
+  businessId        String   @map("business_id")
+  providerKey       String   @map("provider_key") // whatsapp | gmail | outlook | twilio | instagram | facebook | tiktok | google_drive
+  displayName       String?  @map("display_name")
+  externalAccountId String?  @map("external_account_id")
+  status            String   @default("CONNECTED") // CONNECTED | NEEDS_ATTENTION | DISCONNECTED | ERROR
+  capabilities      Json     @default("[]")
+  settings          Json     @default("{}")
+  lastSyncAt        DateTime? @map("last_sync_at")
+  lastError         String?   @map("last_error")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId, providerKey, status])
+  @@map("channel_accounts")
+}
+
+model InteractionIntent {
+  id                String   @id @default(cuid())
+  businessId        String   @map("business_id")
+  messageId         String?  @map("message_id")
+  callLogId         String?  @map("call_log_id")
+  contactId         String?  @map("contact_id")
+
+  intentType        String   // new_lead | booking_request | quote_request | payment_question | complaint | support | vendor | spam | review | referral
+  confidence        Int
+  extractedData     Json     @default("{}") @map("extracted_data")
+  recommendedAction String?  @map("recommended_action")
+  profitPotential   Decimal? @db.Decimal(18, 4) @map("profit_potential")
+  currency          String?  @default("TTD")
+  riskLevel         String   @default("LOW")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  @@index([businessId, intentType, createdAt])
+  @@index([businessId, contactId])
+  @@map("interaction_intents")
+}
+
+model ResponseDraft {
+  id                String   @id @default(cuid())
+  businessId        String   @map("business_id")
+  threadId          String?  @map("thread_id")
+  messageId         String?  @map("message_id")
+  callLogId         String?  @map("call_log_id")
+  contactId         String?  @map("contact_id")
+
+  channel           String
+  purpose           String   // reply | follow_up | quote | invoice_reminder | booking_confirmation | review_request
+  body              String
+  tone              String?
+  status            String   @default("DRAFT") // DRAFT | APPROVED | SENT | REJECTED | EXPIRED
+  requiresApproval  Boolean  @default(true) @map("requires_approval")
+  riskTier          Int      @default(2) @map("risk_tier")
+  evidence          Json     @default("[]")
+  createdBy         String   @default("KEY") @map("created_by")
+  approvedById      String?  @map("approved_by_id")
+  sentAt            DateTime? @map("sent_at")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId, status, createdAt])
+  @@index([businessId, contactId])
+  @@map("response_drafts")
+}
+
+model ConsentRecord {
+  id              String   @id @default(cuid())
+  businessId      String   @map("business_id")
+  contactId       String?  @map("contact_id")
+  channel         String
+  consentType     String   @map("consent_type") // marketing | transactional | call_recording | whatsapp | sms | email
+  status          String   // granted | denied | revoked | unknown
+  source          String?  // form | verbal | imported | checkbox | system
+  evidence        Json     @default("{}")
+  grantedAt       DateTime? @map("granted_at")
+  revokedAt       DateTime? @map("revoked_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@index([businessId, contactId, channel])
+  @@index([businessId, consentType, status])
+  @@map("consent_records")
+}
+
+model TriggerDefinition {
+  id          String   @id @default(cuid())
+  businessId  String?  @map("business_id")
+  name        String
+  channel     String?
+  eventType   String   @map("event_type")
+  condition   Json     @default("{}")
+  actions     Json     @default("[]")
+  enabled     Boolean  @default(true)
+  isSystem    Boolean  @default(false) @map("is_system")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId, eventType, enabled])
+  @@index([isSystem, enabled])
+  @@map("trigger_definitions")
+}
+
+
+model MediaAsset {
+  id              String   @id @default(cuid())
+  businessId      String   @map("business_id")
+  userId          String?  @map("user_id")
+  objectPath      String   @map("object_path")
+  publicUrl       String?  @map("public_url")
+  fileName        String?  @map("file_name")
+  contentType     String   @map("content_type")
+  sizeBytes       Int?     @map("size_bytes")
+  mediaType       String   @map("media_type")
+  source          String   @default("upload")
+  captureMode     String?  @map("capture_mode")
+  status          String   @default("UPLOADED")
+  linkedEntityType String? @map("linked_entity_type")
+  linkedEntityId   String? @map("linked_entity_id")
+  contactId        String? @map("contact_id")
+  metadata        Json     @default("{}")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId, mediaType, createdAt])
+  @@index([businessId, linkedEntityType, linkedEntityId])
+  @@index([businessId, contactId])
+  @@map("media_assets")
+}
+
+model VisualIntake {
+  id              String   @id @default(cuid())
+  businessId      String   @map("business_id")
+  mediaAssetId    String   @map("media_asset_id")
+  detectedType    String?  @map("detected_type")
+  summary         String?
+  extractedText   String?  @map("extracted_text")
+  extractedData   Json     @default("{}")
+  confidenceScore Int?     @map("confidence_score")
+  profitPotential Decimal? @db.Decimal(18, 4) @map("profit_potential")
+  recommendedActions Json  @default("[]") @map("recommended_actions")
+  status          String   @default("PENDING")
+  reviewedById    String?  @map("reviewed_by_id")
+  reviewedAt      DateTime? @map("reviewed_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId, detectedType, status])
+  @@index([businessId, mediaAssetId])
+  @@map("visual_intakes")
+}
+
+model ExtractedEntity {
+  id              String   @id @default(cuid())
+  businessId      String   @map("business_id")
+  visualIntakeId  String?  @map("visual_intake_id")
+  mediaAssetId    String?  @map("media_asset_id")
+  entityType      String   @map("entity_type")
+  proposedData    Json     @default("{}") @map("proposed_data")
+  matchedEntityType String? @map("matched_entity_type")
+  matchedEntityId   String? @map("matched_entity_id")
+  matchConfidence   Int?    @map("match_confidence")
+  status          String   @default("PROPOSED")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId, entityType, status])
+  @@map("extracted_entities")
+}
+
+model VoiceSession {
+  id              String   @id @default(cuid())
+  businessId      String   @map("business_id")
+  userId          String?  @map("user_id")
+  mode            String   @default("push_to_talk")
+  status          String   @default("ACTIVE")
+  voiceKey        String?  @map("voice_key")
+  transcript      String?
+  summary         String?
+  toolCalls       Json     @default("[]") @map("tool_calls")
+  commandItems    Json     @default("[]") @map("command_items")
+  startedAt       DateTime @default(now()) @map("started_at")
+  endedAt         DateTime? @map("ended_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@index([businessId, userId, startedAt])
+  @@map("voice_sessions")
+}
+
+model KeyVoicePreference {
+  id              String   @id @default(cuid())
+  businessId      String   @map("business_id")
+  userId          String?  @map("user_id")
+  voiceKey        String   @map("voice_key")
+  displayName     String
+  provider        String
+  language        String   @default("en")
+  accent          String?
+  speakingRate    Float    @default(1.0) @map("speaking_rate")
+  pitch           Float?   @default(1.0)
+  personality     String?
+  isDefault       Boolean  @default(false) @map("is_default")
+  settings        Json     @default("{}")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId, userId])
+  @@map("key_voice_preferences")
 }

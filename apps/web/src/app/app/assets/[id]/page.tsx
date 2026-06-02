@@ -54,7 +54,7 @@ export default function AssetDetailPage() {
       const res = await fetchAsset(businessId, id);
       if (res.error) throw new Error(res.error);
       setAsset(res.data ?? null);
-    } catch (err) {
+    } catch (_err) {
       toast.error("Failed to load asset");
     } finally {
       setLoading(false);

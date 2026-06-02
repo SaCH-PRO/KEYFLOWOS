@@ -86,6 +86,11 @@ import { TemporalModule } from './modules/temporal/temporal.module';
 import { PeopleFlowModule } from './modules/people-flow/people-flow.module';
 import { SopModule } from './modules/sop/sop.module';
 import { MarketingModule } from './modules/marketing/marketing.module';
+import { IntelligenceModule } from './modules/intelligence/intelligence.module';
+import { IntegrationHubModule } from './modules/integration-hub/integration-hub.module';
+import { ProductAnalyticsModule } from './modules/product-analytics/product-analytics.module';
+import { AdminAnalyticsModule } from './modules/admin-analytics/admin-analytics.module';
+import { DeviceModule } from './modules/device/device.module';
 
 @Module({
   imports: [
@@ -172,6 +177,11 @@ import { MarketingModule } from './modules/marketing/marketing.module';
     PeopleFlowModule,
     SopModule,
     MarketingModule,
+    IntelligenceModule,
+    IntegrationHubModule,
+    ProductAnalyticsModule,
+    AdminAnalyticsModule,
+    DeviceModule,
   ],
   controllers: [AppController],
   providers: [

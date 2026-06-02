@@ -3,14 +3,12 @@
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
-  LayoutDashboard,
   Zap,
   Brain,
   Bot,
   Send,
   Loader2,
   Wallet,
-  ShieldCheck,
   Receipt,
   CheckSquare,
   Calendar,
@@ -37,6 +35,7 @@ import {
   type CommandItem,
   type CommandSummary,
 } from "@/lib/api/command";
+import { runScan } from "@/lib/api/intelligence";
 
 function HealthPill({ label, score, trend }: { label: string; score: number; trend: "up" | "down" | "flat" }) {
   const color = score >= 80 ? "bg-emerald-500/10 text-emerald-600" : score >= 60 ? "bg-amber-500/10 text-amber-600" : "bg-red-500/10 text-red-600";
@@ -124,7 +123,10 @@ export default function CommandCenterPage() {
     if (!businessId) return;
     setGenerating(true);
     try {
-      await generateCommandItems(businessId);
+      await Promise.all([
+        generateCommandItems(businessId),
+        runScan(businessId),
+      ]);
       await load();
     } finally {
       setGenerating(false);

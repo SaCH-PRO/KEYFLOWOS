@@ -6,292 +6,20 @@ import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChevronLeft } from "lucide-react";
 import { useNavigationContext } from "@/lib/navigation-context";
+import {
+  getLabel,
+  getAlias,
+  getParentOverride,
+  isNoLinkSegment,
+  isConfigSurface,
+  isDetailSurface,
+  SEMANTIC_TAB_MAP,
+} from "@/lib/semantic-routes";
 
 /* ────────────────────────────────────────────────────────────────
- * LABEL_MAP — single source of truth for breadcrumb labels.
- * Keep alphabetically sorted by key for maintainability.
+ * Breadcrumb rendering using the Semantic Route Registry.
+ * See src/lib/semantic-routes.ts for the canonical definitions.
  * ──────────────────────────────────────────────────────────────── */
-const LABEL_MAP: Record<string, string> = {
-  // Core
-  app: "Home",
-
-  // A
-  accounts: "Accounts",
-  actions: "Owed to You",
-  "ai-insights": "AI Insights",
-  analytics: "Analytics",
-  approvals: "Approvals",
-  audiences: "Audiences",
-  automations: "Automations",
-
-  // B
-  billing: "Billing",
-  blueprint: "Blueprint",
-  bookings: "Calendar",
-  books: "Books",
-  budgets: "Budgets",
-  budgeting: "Budgeting",
-  business: "Business",
-
-  // C
-  calendar: "Calendar",
-  "call-tasks": "Calls",
-  catalog: "Catalog",
-  certificates: "Certificates",
-  cohorts: "Cohorts",
-  commerce: "Revenue",
-  community: "Community",
-  compliance: "Compliance",
-  connections: "Connections",
-  "control-tower": "KEYFLOW",
-  "content-ops": "Content",
-
-  // D
-  dashboard: "Dashboard",
-  deals: "Deals",
-  developers: "Developers",
-  documents: "Documents",
-
-  // E
-  evidence: "Compliance",
-  expenses: "Expenses",
-
-  // F
-  feed: "Feed",
-  finance: "Books",
-  forms: "Forms",
-
-  // G
-  goals: "Goals",
-
-  // H
-  helpdesk: "Service",
-
-  // I
-  insights: "Insights",
-  integrations: "Integrations",
-  intelligence: "Intelligence",
-  invoices: "Invoices",
-  "api-keys": "API Keys",
-
-  // J
-  journal: "Journal",
-
-  // K
-  "keyflow-command": "Command",
-
-  // L
-  learn: "Learn",
-
-  // M
-  marketplace: "Marketplace",
-  marketing: "Content",
-  money: "Overview",
-
-  // N
-  network: "Network",
-  notes: "Notes",
-  notifications: "Notifications",
-
-  // O
-  onboarding: "Onboarding",
-  operations: "Operations",
-  "output-templates": "AI Output",
-  overview: "Overview",
-
-  // P
-  payments: "Payments",
-  performance: "Performance",
-  pipeline: "Contacts",
-  procurement: "Procurement",
-  products: "Products",
-  profile: "Profile",
-  projects: "Projects",
-
-  // Q
-  "quotes-invoices": "Quotes & Invoices",
-  quotes: "Quotes",
-
-  // R
-  recommendations: "Recommendations",
-  reconciliation: "Reconciliation",
-  recurring: "Recurring",
-  reports: "Reports",
-  "books-pnl": "Books",
-  "books-cashflow": "Books",
-  "books-balance-sheet": "Books",
-  "books-ar-aging": "Books",
-  "books-ap-aging": "Books",
-  "books-tax": "Books",
-  retainers: "Agreements",
-
-  // S
-  schedule: "Schedule",
-  security: "Security",
-  sequences: "Sequences",
-  settings: "Studio",
-  social: "Social",
-  store: "Presence",
-  studio: "Studio",
-  suppliers: "Suppliers",
-
-  // T
-  tasks: "Tasks",
-  tax: "Tax",
-  templates: "Templates",
-  timeline: "Timeline",
-
-  // U
-
-  // W
-  webhooks: "Webhooks",
-  workflows: "Workflows",
-
-  // Misc
-  "change-orders": "Change Orders",
-  contacts: "Contacts",
-  crm: "Network",
-  "time-tracking": "Time",
-  inbox: "Inbox",
-  presence: "Presence",
-  connect: "Connect",
-};
-
-/* ────────────────────────────────────────────────────────────────
- * ROUTE_ALIASES — breadcrumb links that would 404 are remapped
- * to their actual list / index pages.
- * ──────────────────────────────────────────────────────────────── */
-const ROUTE_ALIASES: Record<string, string> = {
-  "/app/network": "/app/network/contacts",
-  "/app/crm": "/app/network/contacts",
-  "/app/crm/contacts": "/app/network/contacts",
-  "/app/crm/deals": "/app/crm/deals",
-  "/app/money/books": "/app/finance",
-  "/app/money/revenue": "/app/commerce",
-  "/app/money/expenses": "/app/expenses",
-  "/app/money/cashflow": "/app/money",
-  "/app/money/intelligence": "/app/money",
-};
-
-/* ────────────────────────────────────────────────────────────────
- * NO_LINK_SEGMENTS — intermediate crumbs that are just container
- * categories without their own page. Rendered as plain text.
- * ──────────────────────────────────────────────────────────────── */
-const PARENT_OVERRIDES: Record<string, Array<{ label: string; href: string }>> = {
-  money: [{ label: "Financial Flow", href: "/app/money" }],
-  commerce: [{ label: "Financial Flow", href: "/app/money" }],
-  expenses: [{ label: "Financial Flow", href: "/app/money" }],
-  finance: [{ label: "Financial Flow", href: "/app/money" }],
-  reports: [{ label: "Financial Flow", href: "/app/money" }],
-  budgeting: [{ label: "Financial Flow", href: "/app/money" }],
-};
-
-const NO_LINK_SEGMENTS = new Set([
-  // CRM contact detail tabs have no standalone pages
-  "overview",
-  "timeline",
-  "tasks",
-  "notes",
-  "ai-insights",
-  "recommendations",
-  "quotes-invoices",
-]);
-
-/* ────────────────────────────────────────────────────────────────
- * TAB_MAP — ?tab= query params mapped to human labels per page.
- * ──────────────────────────────────────────────────────────────── */
-const TAB_MAP: Record<string, Record<string, string>> = {
-  "/app/commerce": {
-    snapshot: "Snapshot",
-    pipeline: "Pipeline",
-    recurring: "Recurring",
-  },
-  "/app/expenses": {
-    snapshot: "Snapshot",
-    pipeline: "Pipeline",
-    budgets: "Budgets",
-    categories: "Categories",
-    insights: "Insights",
-  },
-  "/app/finance": {
-    snapshot: "Snapshot",
-    cashflow: "Cashflow",
-    accounts: "Accounts",
-    journal: "Journal",
-  },
-  "/app/reports": {
-    executive: "Executive Summary",
-    pnl: "Profit & Loss",
-    revenue: "Revenue & Collections",
-    "revenue-detail": "Revenue Reports",
-    "cash-flow": "Cash Flow Forecast",
-    expenses: "Expenses & Profitability",
-    clients: "Client Portfolio",
-    bookings: "Bookings Performance",
-    marketing: "Marketing ROI",
-    "books-pnl": "Books · PnL",
-    "books-cashflow": "Books · Cashflow",
-    "books-balance-sheet": "Balance Sheet",
-    "books-ar-aging": "A/R Aging",
-    "books-ap-aging": "A/P Aging",
-    "books-tax": "Tax Summary",
-  },
-  "/app/payments": {
-    transactions: "Recent activity",
-    links: "Payment links",
-    refunds: "Refunds",
-  },
-  "/app/bookings": {
-    schedule: "Schedule",
-    performance: "Performance",
-    setup: "Setup",
-  },
-  "/app/accounting": {
-    invoices: "Invoices",
-    customers: "Customers",
-    "chart-of-accounts": "Chart of Accounts",
-  },
-  "/app/marketplace": {
-    suppliers: "Suppliers",
-  },
-  "/app/settings": {
-    profile: "Profile",
-    connections: "Connections",
-    ai: "AI",
-    compliance: "Compliance",
-    developers: "Developers",
-    billing: "Billing",
-  },
-};
-
-/* ────────────────────────────────────────────────────────────────
- * SURFACE DETECTION — controls the "Return to …" origin link.
- * ──────────────────────────────────────────────────────────────── */
-const CONFIG_SURFACES = new Set([
-  "settings",
-  "studio",
-  "onboarding",
-  "profile",
-  "branding",
-]);
-
-const DETAIL_SURFACES = new Set([
-  "contacts",
-  "deals",
-  "invoices",
-  "quotes",
-  "products",
-  "projects",
-  "bookings",
-  "sequences",
-  "call-tasks",
-  "content-ops",
-  "evidence",
-  "approvals",
-  "assets",
-  "plans",
-  "documents",
-]);
 
 function isUuid(s: string) {
   return /^[0-9a-f-]{20,}$/i.test(s);
@@ -338,20 +66,20 @@ export function OriginAwareBreadcrumbs() {
   if (crumbs.length === 0) return null;
 
   const topModule = crumbs[0];
-  const isConfigSurface = CONFIG_SURFACES.has(topModule);
-  const isDetailSurface =
-    crumbs.length > 1 && DETAIL_SURFACES.has(topModule) && crumbs.some(isUuid);
+  const configSurface = isConfigSurface(topModule);
+  const detailSurface =
+    crumbs.length > 1 && isDetailSurface(topModule) && crumbs.some(isUuid);
 
   const origin = isHydrated ? getOriginContext() : null;
   const showOriginContext =
-    (isConfigSurface || isDetailSurface) && origin && origin.route !== pathname;
+    (configSurface || detailSurface) && origin && origin.route !== pathname;
 
   /* ── Build intermediate hrefs with alias resolution ── */
   const crumbMeta = crumbs.map((segment, idx) => {
     if (isUuid(segment)) return null;
 
     const rawHref = "/app/" + crumbs.slice(0, idx + 1).join("/");
-    const aliasedHref = ROUTE_ALIASES[rawHref] ?? rawHref;
+    const aliasedHref = getAlias(rawHref) ?? rawHref;
     const hasAlias = aliasedHref !== rawHref;
 
     // Determine if this segment should be a link:
@@ -363,13 +91,13 @@ export function OriginAwareBreadcrumbs() {
       idx === crumbs.length - 1 ||
       (idx === crumbs.length - 2 && isUuid(crumbs[crumbs.length - 1]));
 
-    const isNoLink = NO_LINK_SEGMENTS.has(segment);
+    const isNoLink = isNoLinkSegment(segment);
     const isLinkable = !isLast && !isNoLink;
 
     return {
       segment,
       href: isLinkable ? aliasedHref : undefined,
-      label: LABEL_MAP[segment] || segment.charAt(0).toUpperCase() + segment.slice(1),
+      label: getLabel(segment),
       isLast,
       hasAlias,
     };
@@ -381,10 +109,10 @@ export function OriginAwareBreadcrumbs() {
   let tabLabel: string | null = null;
   if (tabParam) {
     // Find the deepest matching base path in TAB_MAP
-    const basePaths = Object.keys(TAB_MAP).sort((a, b) => b.length - a.length);
-    for (const base of basePaths) {
+    const tabMapKeys = Object.keys(SEMANTIC_TAB_MAP).sort((a, b) => b.length - a.length);
+    for (const base of tabMapKeys) {
       if (pathname === base || pathname.startsWith(base + "/")) {
-        tabLabel = TAB_MAP[base]?.[tabParam] ?? null;
+        tabLabel = SEMANTIC_TAB_MAP[base]?.[tabParam] ?? null;
         break;
       }
     }
@@ -439,7 +167,7 @@ export function OriginAwareBreadcrumbs() {
         if (!meta) return [];
         const { segment, href, label, isLast } = meta;
 
-        const parentOverride = PARENT_OVERRIDES[segment];
+        const parentOverride = getParentOverride(segment);
         const items: React.ReactNode[] = [];
 
         if (parentOverride) {
@@ -567,7 +295,7 @@ export function OriginAwareBreadcrumbs() {
                       › {tabLabel}
                     </span>
                   )}
-                  {isDetailSurface &&
+                  {detailSurface &&
                     idx ===
                       crumbs.length - (isUuid(crumbs[crumbs.length - 1]) ? 2 : 1) && (
                       <motion.span
