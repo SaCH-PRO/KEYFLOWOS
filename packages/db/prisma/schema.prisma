@@ -5567,6 +5567,8 @@ model CommandItem {
   ownerType         String?  @map("owner_type")
   ownerId           String?  @map("owner_id")
   contactId         String?  @map("contact_id")
+  entityType        String?  @map("entity_type")
+  entityId          String?  @map("entity_id")
   dueAt             DateTime? @map("due_at")
   snoozedUntil      DateTime? @map("snoozed_until")
   completedAt       DateTime? @map("completed_at")

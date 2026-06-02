@@ -45,7 +45,7 @@ import { CashReserveService } from './cash-reserve.service';
  * Settings) plus its sub-services.
  */
 @Module({
-  imports: [PrismaModule, AuthModule, forwardRef(() => AiModule), forwardRef(() => CommerceModule), TimelineModule],
+  imports: [PrismaModule, AuthModule, forwardRef(() => AiModule), forwardRef(() => CommerceModule), TimelineModule, CommandModule],
   controllers: [FinanceController],
   providers: [
     PostingService,

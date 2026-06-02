@@ -1,9 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { apiGet } from "@/lib/api";
 import { useRouter } from "next/navigation";
-import { Zap, RefreshCw, Rocket, TrendingUp, Building2, X } from "lucide-react";
+import { Zap, RefreshCw, Rocket, TrendingUp, Building2, X, Terminal } from "lucide-react";
+import { CommandQueue } from "@/components/command/command-queue";
+import {
+  fetchCommandItems,
+  dismissCommandItem,
+  approveCommandItem,
+  executeCommandItem,
+  type CommandItem,
+} from "@/lib/api/command";
 import { useControlTowerData } from "../control-tower/components/use-control-tower-data";
 import { CommandEntry } from "../control-tower/components/command-entry";
 import { DoItForMePanel } from "../control-tower/components/do-it-for-me-panel";
@@ -52,6 +60,48 @@ export default function KeyflowCommandPage() {
   const db = d.data?.dashboard;
   const snap = d.snapshot;
   const pendingApprovals = d.data?.pendingApprovals ?? 0;
+
+  // Command Queue — universal spine
+  const [commands, setCommands] = useState<CommandItem[]>([]);
+  const [commandTotal, setCommandTotal] = useState(0);
+  const [commandLoading, setCommandLoading] = useState(false);
+
+  const loadCommands = useCallback(async () => {
+    if (!d.businessId) return;
+    setCommandLoading(true);
+    try {
+      const res = await fetchCommandItems(d.businessId, { status: "OPEN", limit: 10 });
+      setCommands(res.data?.items ?? []);
+      setCommandTotal(res.data?.total ?? 0);
+    } catch (e) {
+      // silent fail — command queue is additive, not blocking
+    } finally {
+      setCommandLoading(false);
+    }
+  }, [d.businessId]);
+
+  useEffect(() => {
+    loadCommands();
+  }, [loadCommands]);
+
+  const handleDismiss = async (id: string) => {
+    if (!d.businessId) return;
+    await dismissCommandItem(d.businessId, id);
+    await loadCommands();
+    d.refreshSilent();
+  };
+  const handleApprove = async (id: string) => {
+    if (!d.businessId) return;
+    await approveCommandItem(d.businessId, id);
+    await loadCommands();
+    d.refreshSilent();
+  };
+  const handleExecute = async (id: string) => {
+    if (!d.businessId) return;
+    await executeCommandItem(d.businessId, id);
+    await loadCommands();
+    d.refreshSilent();
+  };
 
   if (d.loading) return <ListPageSkeleton />;
 
@@ -151,6 +201,36 @@ export default function KeyflowCommandPage() {
           pendingApprovals={pendingApprovals}
           momentumScore={momentumScore}
         />
+
+        {/* Command Queue — universal business spine */}
+        <section className="rounded-xl border border-border/60 bg-card/80 backdrop-blur-sm p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Terminal className="w-4 h-4 text-primary" />
+              <h3 className="text-sm font-semibold">Command Queue</h3>
+              {commandTotal > 0 && (
+                <span className="text-xs px-1.5 py-0.5 rounded-full bg-primary/10 text-primary font-medium">
+                  {commandTotal}
+                </span>
+              )}
+            </div>
+            <button
+              onClick={() => router.push("/app/command-center")}
+              className="text-xs font-medium text-primary hover:underline"
+            >
+              Open Command Center →
+            </button>
+          </div>
+          <CommandQueue
+            items={commands}
+            total={commandTotal}
+            loading={commandLoading}
+            onRefresh={loadCommands}
+            onDismiss={handleDismiss}
+            onApprove={handleApprove}
+            onExecute={handleExecute}
+          />
+        </section>
 
         {/* Today's Priorities */}
         <CockpitPriorities

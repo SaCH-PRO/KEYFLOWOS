@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { RevenueActionService } from '../commerce/revenue-action.service';
+import { CommandService } from '../command/command.service';
 
 /**
  * FIN8 — Finance intelligence detectors. Eight deterministic detectors
@@ -91,6 +92,8 @@ export class FinanceIntelligenceService {
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
     @Inject(forwardRef(() => RevenueActionService))
     private readonly revenueActions: RevenueActionService,
+    @Inject(CommandService)
+    private readonly commandService: CommandService,
   ) {}
 
   // ------------------------------------------------------------------
@@ -146,6 +149,8 @@ export class FinanceIntelligenceService {
         })
         .catch(() => undefined);
     }
+    // Resolve linked CommandItem
+    await this.dismissCommandItem(businessId, row, 'COMPLETED');
     return this.toDto(updated);
   }
 
@@ -163,6 +168,8 @@ export class FinanceIntelligenceService {
         .update({ where: { id: row.mirroredActionId }, data: { status: 'DISMISSED' } })
         .catch(() => undefined);
     }
+    // Dismiss linked CommandItem
+    await this.dismissCommandItem(businessId, row);
     return this.toDto(updated);
   }
 
@@ -704,7 +711,107 @@ export class FinanceIntelligenceService {
     } catch (e) {
       this.logger.warn(`mirror to RevenueAction failed: ${(e as Error).message}`);
     }
+    // Mirror into CommandItem — universal command spine
+    try {
+      const actionType = `FIN8_${d.kind}`;
+      const sourceType = entityType || 'finance_detection';
+      const sourceId = entityId || row.id;
+      const existingCommand = await this.prisma.client.commandItem.findUnique({
+        where: {
+          businessId_sourceModule_sourceType_sourceId_actionType: {
+            businessId,
+            sourceModule: 'finance',
+            sourceType,
+            sourceId,
+            actionType,
+          },
+        },
+      });
+      const commandData = {
+        businessId,
+        sourceModule: 'finance',
+        sourceType,
+        sourceId,
+        actionType,
+        title: d.title,
+        description: d.body,
+        category: 'MONEY',
+        priority: d.severity === 'CRITICAL' ? 90 : d.severity === 'WARNING' ? 70 : 40,
+        urgency: d.severity === 'CRITICAL' ? 90 : d.severity === 'WARNING' ? 60 : 30,
+        impactScore: d.amount ? Math.min(100, Math.round(Number(d.amount) / 100)) : 50,
+        expectedValue: d.amount ? String(d.amount) : null,
+        currency: 'TTD',
+        riskTier: d.severity === 'CRITICAL' ? 3 : d.severity === 'WARNING' ? 2 : 1,
+        requiresApproval: d.severity === 'CRITICAL',
+        executableByKey: d.severity !== 'CRITICAL',
+        executionTool: d.recommendedAction ?? undefined,
+        recommendedBy: 'SYSTEM',
+        entityType: sourceType,
+        entityId: sourceId,
+        status: 'OPEN' as const,
+      };
+      if (existingCommand) {
+        // Don't reopen dismissed/completed commands
+        if (existingCommand.status !== 'OPEN' && existingCommand.status !== 'WAITING_APPROVAL') {
+          // leave it
+        } else {
+          await this.prisma.client.commandItem.update({
+            where: { id: existingCommand.id },
+            data: {
+              title: commandData.title,
+              description: commandData.description,
+              priority: commandData.priority,
+              urgency: commandData.urgency,
+              impactScore: commandData.impactScore,
+              expectedValue: commandData.expectedValue,
+              riskTier: commandData.riskTier,
+              requiresApproval: commandData.requiresApproval,
+              status: 'OPEN',
+            },
+          });
+        }
+      } else {
+        await this.prisma.client.commandItem.create({ data: commandData });
+      }
+    } catch (e) {
+      this.logger.warn(`mirror to CommandItem failed: ${(e as Error).message}`);
+    }
     return isNew;
+  }
+
+  private async dismissCommandItem(
+    businessId: string,
+    row: { kind: string; entityType: string | null; entityId: string | null; id: string },
+    status: 'COMPLETED' | 'DISMISSED' = 'DISMISSED',
+  ) {
+    try {
+      const actionType = `FIN8_${row.kind}`;
+      const sourceType = row.entityType || 'finance_detection';
+      const sourceId = row.entityId || row.id;
+      const existing = await this.prisma.client.commandItem.findUnique({
+        where: {
+          businessId_sourceModule_sourceType_sourceId_actionType: {
+            businessId,
+            sourceModule: 'finance',
+            sourceType,
+            sourceId,
+            actionType,
+          },
+        },
+      });
+      if (existing && (existing.status === 'OPEN' || existing.status === 'WAITING_APPROVAL')) {
+        await this.prisma.client.commandItem.update({
+          where: { id: existing.id },
+          data: {
+            status,
+            dismissedAt: status === 'DISMISSED' ? new Date() : null,
+            completedAt: status === 'COMPLETED' ? new Date() : null,
+          },
+        });
+      }
+    } catch (e) {
+      this.logger.warn(`dismissCommandItem failed: ${(e as Error).message}`);
+    }
   }
 
   private toDto(r: {

@@ -1,5 +1,6 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { TimelineService } from '../timeline/timeline.service';
 import { CreateCommandItemDto } from './dto/create-command-item.dto';
 import { UpdateCommandItemDto } from './dto/update-command-item.dto';
 
@@ -7,10 +8,11 @@ import { UpdateCommandItemDto } from './dto/update-command-item.dto';
 export class CommandService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(TimelineService) private readonly timeline: TimelineService,
   ) {}
 
   async create(businessId: string, dto: CreateCommandItemDto) {
-    return this.prisma.client.commandItem.create({
+    const item = await this.prisma.client.commandItem.create({
       data: {
         businessId,
         sourceModule: dto.sourceModule,
@@ -34,10 +36,26 @@ export class CommandService {
         recommendedBy: dto.recommendedBy,
         ownerType: dto.ownerType,
         ownerId: dto.ownerId,
+        contactId: dto.contactId,
+        entityType: dto.entityType,
+        entityId: dto.entityId,
         dueAt: dto.dueAt,
         snoozedUntil: dto.snoozedUntil,
       },
     });
+    await this.timeline.recordEvent({
+      businessId,
+      module: 'command',
+      action: 'create',
+      entityType: 'command_item',
+      entityId: item.id,
+      title: dto.title,
+      detail: dto.description ?? undefined,
+      category: 'SYSTEM',
+      actorType: 'SYSTEM',
+      data: { category: dto.category, actionType: dto.actionType, priority: dto.priority },
+    });
+    return item;
   }
 
   async findMany(businessId: string, filters: {
@@ -78,8 +96,8 @@ export class CommandService {
   }
 
   async update(businessId: string, id: string, dto: UpdateCommandItemDto) {
-    await this.findOne(businessId, id);
-    return this.prisma.client.commandItem.update({
+    const existing = await this.findOne(businessId, id);
+    const item = await this.prisma.client.commandItem.update({
       where: { id },
       data: {
         ...(dto.title !== undefined && { title: dto.title }),
@@ -100,14 +118,38 @@ export class CommandService {
         ...(dto.dismissedAt !== undefined && { dismissedAt: dto.dismissedAt }),
       },
     });
+    await this.timeline.recordEvent({
+      businessId,
+      module: 'command',
+      action: 'update',
+      entityType: 'command_item',
+      entityId: id,
+      title: `Updated: ${existing.title}`,
+      category: 'SYSTEM',
+      actorType: 'USER',
+      data: { changedFields: Object.keys(dto) },
+    });
+    return item;
   }
 
   async dismiss(businessId: string, id: string) {
-    await this.findOne(businessId, id);
-    return this.prisma.client.commandItem.update({
+    const existing = await this.findOne(businessId, id);
+    const item = await this.prisma.client.commandItem.update({
       where: { id },
       data: { status: 'DISMISSED', dismissedAt: new Date() },
     });
+    await this.timeline.recordEvent({
+      businessId,
+      module: 'command',
+      action: 'dismiss',
+      entityType: 'command_item',
+      entityId: id,
+      title: `Dismissed: ${existing.title}`,
+      category: 'SYSTEM',
+      actorType: 'USER',
+      data: { previousStatus: existing.status },
+    });
+    return item;
   }
 
   async snooze(businessId: string, id: string, until: Date) {
@@ -119,16 +161,28 @@ export class CommandService {
   }
 
   async approve(businessId: string, id: string) {
-    await this.findOne(businessId, id);
-    return this.prisma.client.commandItem.update({
+    const existing = await this.findOne(businessId, id);
+    const item = await this.prisma.client.commandItem.update({
       where: { id },
       data: { status: 'EXECUTED', completedAt: new Date() },
     });
+    await this.timeline.recordEvent({
+      businessId,
+      module: 'command',
+      action: 'approve',
+      entityType: 'command_item',
+      entityId: id,
+      title: `Approved: ${existing.title}`,
+      category: 'SYSTEM',
+      actorType: 'USER',
+      data: { previousStatus: existing.status },
+    });
+    return item;
   }
 
   async execute(businessId: string, id: string, result?: Record<string, unknown>) {
-    await this.findOne(businessId, id);
-    return this.prisma.client.commandItem.update({
+    const existing = await this.findOne(businessId, id);
+    const item = await this.prisma.client.commandItem.update({
       where: { id },
       data: {
         status: 'EXECUTED',
@@ -136,11 +190,34 @@ export class CommandService {
         executionPayload: result ? { ...(result as Record<string, unknown>) } : undefined,
       },
     });
+    await this.timeline.recordEvent({
+      businessId,
+      module: 'command',
+      action: 'execute',
+      entityType: 'command_item',
+      entityId: id,
+      title: `Executed: ${existing.title}`,
+      category: 'SYSTEM',
+      actorType: existing.executableByKey ? 'AI' : 'USER',
+      data: { result },
+    });
+    return item;
   }
 
   async delete(businessId: string, id: string) {
-    await this.findOne(businessId, id);
-    return this.prisma.client.commandItem.delete({ where: { id } });
+    const existing = await this.findOne(businessId, id);
+    await this.prisma.client.commandItem.delete({ where: { id } });
+    await this.timeline.recordEvent({
+      businessId,
+      module: 'command',
+      action: 'delete',
+      entityType: 'command_item',
+      entityId: id,
+      title: `Deleted: ${existing.title}`,
+      category: 'SYSTEM',
+      actorType: 'USER',
+    });
+    return existing;
   }
 
   async summary(businessId: string) {

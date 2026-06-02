@@ -257,28 +257,120 @@ export class OmnichannelProcessorService implements OnModuleInit {
   }
 
   private async executeTriggerAction(
-    _businessId: string,
+    businessId: string,
     action: Record<string, unknown>,
-    _event: MessageReceivedEvent,
-    _thread: { id: string },
-    _intent: { id: string },
+    event: MessageReceivedEvent,
+    thread: { id: string; contactId?: string | null },
+    intent: { id: string; intentType?: string | null },
   ) {
     const type = action.type as string;
     switch (type) {
-      case 'auto_reply':
-        this.logger.log(`Auto-reply action: ${action.template}`);
+      case 'auto_reply': {
+        const template = action.template as string;
+        const body = this.resolveTemplate(template, event);
+        const draft = await this.drafts.createDraft(
+          businessId,
+          'SYSTEM',
+          {
+            channel: event.channel as 'email' | 'sms' | 'whatsapp' | 'call' | 'form',
+            purpose: `auto_reply:${template}`,
+            body,
+            tone: 'friendly',
+            requiresApproval: false,
+            riskTier: 'LOW',
+            evidence: { triggerTemplate: template, autoApproved: true },
+          },
+          { threadId: thread.id },
+        );
+        // Auto-approve and mark as sent for true auto-reply
+        await this.drafts.approveDraft(draft.id, 'SYSTEM');
+        await this.drafts.markSent(draft.id);
+        this.logger.log(`Auto-reply draft ${draft.id} created and sent for thread ${thread.id}`);
         break;
-      case 'create_command':
-        this.logger.log(`Create command action: ${action.commandType}`);
+      }
+      case 'create_command': {
+        const commandType = (action.commandType as string) ?? 'review_inbound';
+        const priority = (action.priority as string) ?? 'NORMAL';
+        const priorityNum = priority === 'HIGH' ? 80 : priority === 'CRITICAL' ? 95 : 50;
+        await this.commands.create(businessId, {
+          sourceModule: 'communications',
+          sourceType: 'trigger',
+          sourceId: intent.id,
+          title: `Inbound ${commandType.replace(/_/g, ' ')}`,
+          description: `Automated command from ${event.channel} trigger`,
+          category: 'WORK',
+          actionType: `TRIGGER_${commandType.toUpperCase()}`,
+          status: 'OPEN',
+          priority: priorityNum,
+          urgency: priorityNum,
+          impactScore: 60,
+          riskTier: 2,
+          requiresApproval: false,
+          executableByKey: true,
+          recommendedBy: 'SYSTEM',
+          contactId: thread.contactId ?? undefined,
+        });
+        this.logger.log(`Command created from trigger: ${commandType}`);
         break;
-      case 'notify_owner':
-        this.logger.log('Notify owner action');
+      }
+      case 'notify_owner': {
+        await this.commands.create(businessId, {
+          sourceModule: 'communications',
+          sourceType: 'trigger',
+          sourceId: intent.id,
+          title: `New ${event.channel} message needs attention`,
+          description: `Inbound message from ${event.from} via ${event.channel}. Trigger matched: notify owner.`,
+          category: 'WORK',
+          actionType: 'NOTIFY_OWNER',
+          status: 'OPEN',
+          priority: 85,
+          urgency: 85,
+          impactScore: 70,
+          riskTier: 2,
+          requiresApproval: false,
+          executableByKey: false,
+          recommendedBy: 'SYSTEM',
+          contactId: thread.contactId ?? undefined,
+        });
+        this.logger.log(`Owner notification command created for thread ${thread.id}`);
         break;
-      case 'send_sms':
-        this.logger.log(`Send SMS action: ${action.template}`);
+      }
+      case 'send_sms': {
+        const template = action.template as string;
+        const body = this.resolveTemplate(template, event);
+        await this.drafts.createDraft(
+          businessId,
+          'SYSTEM',
+          {
+            channel: 'sms',
+            purpose: `trigger_sms:${template}`,
+            body,
+            tone: 'friendly',
+            requiresApproval: true,
+            riskTier: 'MEDIUM',
+            evidence: { triggerTemplate: template, channel: event.channel },
+          },
+          { threadId: thread.id },
+        );
+        this.logger.log(`SMS draft created from trigger for thread ${thread.id}`);
         break;
+      }
       default:
         this.logger.warn(`Unknown trigger action: ${type}`);
+    }
+  }
+
+  private resolveTemplate(template: string, event: MessageReceivedEvent): string {
+    const name = event.from ?? 'there';
+    switch (template) {
+      case 'off_hours_ack':
+        return `Hi ${name}, thanks for reaching out! We're currently outside business hours but we'll get back to you as soon as we're back. — KEYFLOWOS`;
+      case 'missed_call':
+        return `Hi ${name}, sorry we missed your call. We'll call you back as soon as possible. — KEYFLOWOS`;
+      case 'general_ack':
+        return `Hi ${name}, thanks for your message. We've received it and will respond shortly. — KEYFLOWOS`;
+      default:
+        return `Hi ${name}, thank you for reaching out. We're reviewing your message and will get back to you shortly.`;
     }
   }
 }

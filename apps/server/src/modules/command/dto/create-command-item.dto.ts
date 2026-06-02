@@ -112,6 +112,18 @@ export class CreateCommandItemDto {
   ownerId?: string;
 
   @IsOptional()
+  @IsString()
+  contactId?: string;
+
+  @IsOptional()
+  @IsString()
+  entityType?: string;
+
+  @IsOptional()
+  @IsString()
+  entityId?: string;
+
+  @IsOptional()
   dueAt?: Date;
 
   @IsOptional()
