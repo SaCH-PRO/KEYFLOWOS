@@ -90,7 +90,10 @@ import { IntelligenceModule } from './modules/intelligence/intelligence.module';
 import { IntegrationHubModule } from './modules/integration-hub/integration-hub.module';
 import { ProductAnalyticsModule } from './modules/product-analytics/product-analytics.module';
 import { AdminAnalyticsModule } from './modules/admin-analytics/admin-analytics.module';
+import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { DeviceModule } from './modules/device/device.module';
+import { AdminPlatformModule } from './modules/admin-platform/admin-platform.module';
+import { TrashModule } from './modules/trash/trash.module';
 
 @Module({
   imports: [
@@ -181,6 +184,9 @@ import { DeviceModule } from './modules/device/device.module';
     IntegrationHubModule,
     ProductAnalyticsModule,
     AdminAnalyticsModule,
+    AnalyticsModule,
+    AdminPlatformModule,
+    TrashModule,
     DeviceModule,
   ],
   controllers: [AppController],

@@ -14492,3 +14492,399 @@ export type CrossBusinessIntelligence = z.infer<typeof crossBusinessIntelligence
 export async function fetchCrossBusinessIntelligence(): Promise<ApiResult<CrossBusinessIntelligence>> {
   return apiGet(`/ai/intelligence/cross-business`, crossBusinessIntelligenceSchema);
 }
+
+
+// === Automation Flow Studio ===
+
+const automationFlowSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().nullable().optional(),
+  category: z.string(),
+  status: z.string(),
+  goal: z.string().nullable().optional(),
+  triggerSummary: z.string().nullable().optional(),
+  riskTier: z.number(),
+  createdBy: z.string().nullable().optional(),
+  blueprintTags: z.any(),
+  metrics: z.any(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export type AutomationFlow = z.infer<typeof automationFlowSchema>;
+
+const flowRunSchema = z.object({
+  id: z.string(),
+  flowId: z.string(),
+  flowVersionId: z.string(),
+  status: z.string(),
+  startedAt: z.string(),
+  completedAt: z.string().nullable().optional(),
+  error: z.string().nullable().optional(),
+  input: z.any(),
+  output: z.any(),
+  metrics: z.any(),
+  contactId: z.string().nullable().optional(),
+  sourceEventId: z.string().nullable().optional(),
+  _count: z.object({ steps: z.number() }).optional(),
+});
+
+export type FlowRun = z.infer<typeof flowRunSchema>;
+
+const flowTemplateSchema = z.object({
+  id: z.string(),
+  key: z.string(),
+  name: z.string(),
+  description: z.string().nullable().optional(),
+  category: z.string(),
+  businessTypes: z.any(),
+  requiredConnectors: z.any(),
+  estimatedImpact: z.string().nullable().optional(),
+  riskTier: z.number(),
+  isSystem: z.boolean(),
+});
+
+export type FlowTemplate = z.infer<typeof flowTemplateSchema>;
+
+export async function fetchAutomationFlows(
+  businessId: string,
+  params?: { status?: string; category?: string; limit?: number; offset?: number },
+): Promise<ApiResult<{ items: AutomationFlow[]; total: number }>> {
+  const query = new URLSearchParams();
+  if (params?.status) query.set("status", params.status);
+  if (params?.category) query.set("category", params.category);
+  if (params?.limit) query.set("limit", String(params.limit));
+  if (params?.offset) query.set("offset", String(params.offset));
+  return apiGet(
+    `/api/flows/businesses/${encodeURIComponent(businessId)}/flows?${query.toString()}`,
+    z.object({ items: z.array(automationFlowSchema), total: z.number() }),
+    { items: [], total: 0 },
+  );
+}
+
+export async function fetchFlowTemplates(): Promise<ApiResult<FlowTemplate[]>> {
+  return apiGet(
+    `/api/flows/businesses/system/templates`,
+    z.array(flowTemplateSchema),
+    [],
+  );
+}
+
+export async function cloneFlowTemplate(
+  businessId: string,
+  templateId: string,
+): Promise<ApiResult<AutomationFlow>> {
+  return apiPost<AutomationFlow>({
+    path: `/api/flows/businesses/${encodeURIComponent(businessId)}/templates/${encodeURIComponent(templateId)}/clone`,
+    body: {},
+  });
+}
+
+export async function createAutomationFlow(
+  businessId: string,
+  data: {
+    name: string;
+    description?: string;
+    category: string;
+    goal?: string;
+    triggerSummary?: string;
+    riskTier?: number;
+    blueprintTags?: string[];
+    nodes?: unknown[];
+    edges?: unknown[];
+  },
+): Promise<ApiResult<AutomationFlow>> {
+  return apiPost<AutomationFlow>({
+    path: `/api/flows/businesses/${encodeURIComponent(businessId)}/flows`,
+    body: data,
+  });
+}
+
+export async function publishAutomationFlow(
+  businessId: string,
+  flowId: string,
+): Promise<ApiResult<AutomationFlow>> {
+  return apiPost<AutomationFlow>({
+    path: `/api/flows/businesses/${encodeURIComponent(businessId)}/flows/${encodeURIComponent(flowId)}/publish`,
+    body: {},
+  });
+}
+
+export async function deleteAutomationFlow(
+  businessId: string,
+  flowId: string,
+): Promise<ApiResult<{ deleted: boolean }>> {
+  return apiDelete(`/api/flows/businesses/${encodeURIComponent(businessId)}/flows/${encodeURIComponent(flowId)}`);
+}
+
+export async function fetchFlowRuns(
+  businessId: string,
+  flowId: string,
+  params?: { status?: string; limit?: number; offset?: number },
+): Promise<ApiResult<{ items: FlowRun[]; total: number }>> {
+  const query = new URLSearchParams();
+  if (params?.status) query.set("status", params.status);
+  if (params?.limit) query.set("limit", String(params.limit));
+  if (params?.offset) query.set("offset", String(params.offset));
+  return apiGet(
+    `/api/flows/businesses/${encodeURIComponent(businessId)}/flows/${encodeURIComponent(flowId)}/runs?${query.toString()}`,
+    z.object({ items: z.array(flowRunSchema), total: z.number() }),
+    { items: [], total: 0 },
+  );
+}
+
+
+// ── Analytics & Growth Engine ──
+
+const snapshotSchema = z.object({
+  id: z.string(),
+  businessId: z.string(),
+  snapshotType: z.string(),
+  snapshotDate: z.string(),
+  totalRevenue: z.number().nullable(),
+  invoiceCount: z.number().nullable(),
+  paidInvoiceCount: z.number().nullable(),
+  overdueInvoiceCount: z.number().nullable(),
+  totalOverdueAmount: z.number().nullable(),
+  averageInvoiceValue: z.number().nullable(),
+  collectionRate: z.number().nullable(),
+  totalContacts: z.number().nullable(),
+  newContacts: z.number().nullable(),
+  activeLeads: z.number().nullable(),
+  leadConversionRate: z.number().nullable(),
+  customerRetentionRate: z.number().nullable(),
+  totalBookings: z.number().nullable(),
+  upcomingBookings: z.number().nullable(),
+  completedBookings: z.number().nullable(),
+  noShowRate: z.number().nullable(),
+  totalQuotes: z.number().nullable(),
+  acceptedQuotes: z.number().nullable(),
+  quoteAcceptanceRate: z.number().nullable(),
+  totalDeals: z.number().nullable(),
+  openDealsValue: z.number().nullable(),
+  activeFlows: z.number().nullable(),
+  flowRuns: z.number().nullable(),
+  flowSuccessRate: z.number().nullable(),
+  messagesSent: z.number().nullable(),
+  messagesReceived: z.number().nullable(),
+  responseRate: z.number().nullable(),
+  averageResponseTimeMinutes: z.number().nullable(),
+  storefrontVisits: z.number().nullable(),
+  ordersReceived: z.number().nullable(),
+  cartAbandonmentRate: z.number().nullable(),
+  healthScore: z.number().nullable(),
+  momentumScore: z.number().nullable(),
+  growthRate: z.number().nullable(),
+  metadata: z.record(z.any()),
+  createdAt: z.string(),
+});
+
+const projectionSchema = z.object({
+  id: z.string(),
+  businessId: z.string(),
+  projectionType: z.string(),
+  period: z.string(),
+  startDate: z.string(),
+  endDate: z.string(),
+  baselineValue: z.number().nullable(),
+  baselinePeriods: z.array(z.any()),
+  projectedValues: z.array(z.any()),
+  confidenceInterval: z.record(z.any()),
+  growthAssumption: z.number().nullable(),
+  actualValues: z.array(z.any()).nullable(),
+  accuracy: z.number().nullable(),
+  metadata: z.record(z.any()),
+  createdAt: z.string(),
+});
+
+const maturityScoreSchema = z.object({
+  id: z.string(),
+  businessId: z.string(),
+  assessmentDate: z.string(),
+  revenueMaturity: z.number(),
+  customerMaturity: z.number(),
+  operationsMaturity: z.number(),
+  marketingMaturity: z.number(),
+  automationMaturity: z.number(),
+  financialMaturity: z.number(),
+  teamMaturity: z.number(),
+  dataMaturity: z.number(),
+  overallScore: z.number(),
+  percentile: z.number().nullable(),
+  stage: z.string(),
+  gaps: z.array(z.string()),
+  strengths: z.array(z.string()),
+  recommendations: z.array(z.record(z.any())),
+  createdAt: z.string(),
+});
+
+const growthInsightSchema = z.object({
+  id: z.string(),
+  businessId: z.string(),
+  category: z.string(),
+  insightType: z.string(),
+  severity: z.string(),
+  title: z.string(),
+  description: z.string().nullable(),
+  recommendation: z.string().nullable(),
+  rationale: z.string().nullable(),
+  suggestedAction: z.string().nullable(),
+  estimatedImpact: z.number().nullable(),
+  impactCurrency: z.string().nullable(),
+  actionLabel: z.string().nullable(),
+  actionRoute: z.string().nullable(),
+  dimension: z.string().nullable(),
+  dimensionKey: z.string().nullable(),
+  metrics: z.record(z.any()).nullable(),
+  status: z.string(),
+  acknowledgedAt: z.string().nullable(),
+  appliedAt: z.string().nullable(),
+  expiresAt: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export async function fetchAnalyticsOverview(
+  businessId: string,
+  days = 30,
+): Promise<ApiResult<{ snapshot: z.infer<typeof snapshotSchema> | null; totals: Record<string, number>; insights: z.infer<typeof growthInsightSchema>[] }>> {
+  return apiGet(
+    `/api/businesses/${encodeURIComponent(businessId)}/analytics/overview?days=${days}`,
+    z.object({
+      snapshot: snapshotSchema.nullable(),
+      totals: z.record(z.number()),
+      insights: z.array(growthInsightSchema),
+    }),
+    { snapshot: null, totals: {}, insights: [] },
+  );
+}
+
+export async function fetchAnalyticsSnapshots(
+  businessId: string,
+  type: string,
+  days = 30,
+): Promise<ApiResult<z.infer<typeof snapshotSchema>[]>> {
+  return apiGet(
+    `/api/businesses/${encodeURIComponent(businessId)}/analytics/snapshots?type=${encodeURIComponent(type)}&days=${days}`,
+    z.array(snapshotSchema),
+    [],
+  );
+}
+
+export async function fetchAnalyticsTrends(
+  businessId: string,
+  metric: string,
+  days = 30,
+): Promise<ApiResult<{ date: string; value: number }[]>> {
+  return apiGet(
+    `/api/businesses/${encodeURIComponent(businessId)}/analytics/trends?metric=${encodeURIComponent(metric)}&days=${days}`,
+    z.array(z.object({ date: z.string(), value: z.number() })),
+    [],
+  );
+}
+
+export async function fetchAnalyticsMetrics(
+  businessId: string,
+): Promise<ApiResult<{ key: string; label: string; type: string }[]>> {
+  return apiGet(
+    `/api/businesses/${encodeURIComponent(businessId)}/analytics/metrics`,
+    z.array(z.object({ key: z.string(), label: z.string(), type: z.string() })),
+    [],
+  );
+}
+
+export async function generateRevenueProjection(
+  businessId: string,
+  months = 3,
+): Promise<ApiResult<z.infer<typeof projectionSchema>>> {
+  return apiPost<z.infer<typeof projectionSchema>>({
+    path: `/api/businesses/${encodeURIComponent(businessId)}/analytics/projections/revenue?months=${months}`,
+    body: {},
+  });
+}
+
+export async function generateContactProjection(
+  businessId: string,
+  months = 3,
+): Promise<ApiResult<z.infer<typeof projectionSchema>>> {
+  return apiPost<z.infer<typeof projectionSchema>>({
+    path: `/api/businesses/${encodeURIComponent(businessId)}/analytics/projections/contacts?months=${months}`,
+    body: {},
+  });
+}
+
+export async function fetchProjections(
+  businessId: string,
+): Promise<ApiResult<Record<string, z.infer<typeof projectionSchema> | null>>> {
+  return apiGet(
+    `/api/businesses/${encodeURIComponent(businessId)}/analytics/projections`,
+    z.record(projectionSchema.nullable()),
+    {},
+  );
+}
+
+export async function generateInsights(businessId: string): Promise<ApiResult<{ generated: number }>> {
+  return apiPost<{ generated: number }>({
+    path: `/api/businesses/${encodeURIComponent(businessId)}/analytics/insights/generate`,
+    body: {},
+  });
+}
+
+export async function fetchInsights(
+  businessId: string,
+  params?: { type?: string; category?: string; status?: string; limit?: number; offset?: number },
+): Promise<ApiResult<{ items: z.infer<typeof growthInsightSchema>[]; total: number }>> {
+  const query = new URLSearchParams();
+  if (params?.type) query.set("type", params.type);
+  if (params?.category) query.set("category", params.category);
+  if (params?.status) query.set("status", params.status);
+  if (params?.limit) query.set("limit", String(params.limit));
+  if (params?.offset) query.set("offset", String(params.offset));
+  return apiGet(
+    `/api/businesses/${encodeURIComponent(businessId)}/analytics/insights?${query.toString()}`,
+    z.object({ items: z.array(growthInsightSchema), total: z.number() }),
+    { items: [], total: 0 },
+  );
+}
+
+export async function markInsightRead(id: string): Promise<ApiResult<z.infer<typeof growthInsightSchema>>> {
+  return apiPost<z.infer<typeof growthInsightSchema>>({
+    path: `/api/businesses/system/analytics/insights/${encodeURIComponent(id)}/read`,
+    body: {},
+  });
+}
+
+export async function dismissInsight(id: string): Promise<ApiResult<z.infer<typeof growthInsightSchema>>> {
+  return apiPost<z.infer<typeof growthInsightSchema>>({
+    path: `/api/businesses/system/analytics/insights/${encodeURIComponent(id)}/dismiss`,
+    body: {},
+  });
+}
+
+export async function assessMaturity(businessId: string): Promise<ApiResult<{ assessment: z.infer<typeof maturityScoreSchema>; dimensions: { dimension: string; score: number; maxScore: number }[]; percentile: number }>> {
+  return apiPost<{
+    assessment: z.infer<typeof maturityScoreSchema>;
+    dimensions: { dimension: string; score: number; maxScore: number }[];
+    percentile: number;
+  }>({
+    path: `/api/businesses/${encodeURIComponent(businessId)}/analytics/maturity/assess`,
+    body: {},
+  });
+}
+
+export async function fetchLatestMaturity(businessId: string): Promise<ApiResult<z.infer<typeof maturityScoreSchema> | null>> {
+  return apiGet(
+    `/api/businesses/${encodeURIComponent(businessId)}/analytics/maturity/latest`,
+    maturityScoreSchema.nullable(),
+    null,
+  );
+}
+
+export async function fetchMaturityHistory(businessId: string): Promise<ApiResult<z.infer<typeof maturityScoreSchema>[]>> {
+  return apiGet(
+    `/api/businesses/${encodeURIComponent(businessId)}/analytics/maturity/history`,
+    z.array(maturityScoreSchema),
+    [],
+  );
+}

@@ -456,7 +456,7 @@ export default function ProfileSettingsPage() {
 
         {activeTab === "growth" && (
           <motion.div key="growth" id="tabpanel-growth" role="tabpanel" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
-            <GrowthTrajectoryPanel />
+            <GrowthTrajectoryPanel businessId={businessId} />
           </motion.div>
         )}
 

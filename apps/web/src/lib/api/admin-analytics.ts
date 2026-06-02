@@ -99,20 +99,91 @@ export async function fetchAdminKeyQuality(days?: number) {
 }
 
 export async function fetchAdminFeedbackInbox(limit?: number, offset?: number) {
-  const params = new URLSearchParams();
-  if (limit) params.append("limit", String(limit));
-  if (offset) params.append("offset", String(offset));
-  const qs = params.toString() ? `?${params.toString()}` : "";
-  return apiGet<FeedbackInbox>(`/api/admin/analytics/feedback-inbox${qs}`);
+  const qs = new URLSearchParams();
+  if (limit) qs.set("limit", String(limit));
+  if (offset) qs.set("offset", String(offset));
+  return apiGet<FeedbackInbox>(`/api/admin/analytics/feedback-inbox?${qs.toString()}`);
 }
 
 export async function fetchAdminRecentEvents(limit?: number) {
   const qs = limit ? `?limit=${limit}` : "";
-  return apiGet<Array<{
-    id: string;
-    eventName: string;
-    module: string | null;
-    businessId: string | null;
-    occurredAt: string;
-  }>>(`/api/admin/analytics/recent-events${qs}`);
+  return apiGet<Array<{ id: string; eventName: string; module: string | null; businessId: string | null; occurredAt: string }>>(
+    `/api/admin/analytics/recent-events${qs}`,
+  );
+}
+
+// ── Admin Platform APIs ──
+
+export interface AdminUser {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  avatarUrl: string | null;
+  businessCount: number;
+}
+
+export interface AdminUserList {
+  items: AdminUser[];
+  total: number;
+}
+
+export async function fetchAdminUsers(search?: string, limit = 50, offset = 0) {
+  const qs = new URLSearchParams();
+  if (search) qs.set("search", search);
+  qs.set("limit", String(limit));
+  qs.set("offset", String(offset));
+  return apiGet<AdminUserList>(`/api/admin/users?${qs.toString()}`);
+}
+
+export interface AdminBusiness {
+  id: string;
+  name: string;
+  slug: string | null;
+  currency: string;
+  timezone: string;
+  owner: { id: string; email: string; name: string | null };
+  memberCount: number;
+  contactCount: number;
+  invoiceCount: number;
+}
+
+export interface AdminBusinessList {
+  items: AdminBusiness[];
+  total: number;
+}
+
+export async function fetchAdminBusinesses(search?: string, limit = 50, offset = 0) {
+  const qs = new URLSearchParams();
+  if (search) qs.set("search", search);
+  qs.set("limit", String(limit));
+  qs.set("offset", String(offset));
+  return apiGet<AdminBusinessList>(`/api/admin/businesses?${qs.toString()}`);
+}
+
+export interface AdminEvent {
+  id: string;
+  type: string;
+  action: string;
+  actorType: string;
+  actorId: string;
+  subjectType: string;
+  subjectId: string;
+  source: string;
+  riskScore: number | null;
+  businessName: string | null;
+  createdAt: string;
+}
+
+export interface AdminEventList {
+  items: AdminEvent[];
+  total: number;
+}
+
+export async function fetchAdminEvents(eventType?: string, limit = 50, offset = 0) {
+  const qs = new URLSearchParams();
+  if (eventType) qs.set("eventType", eventType);
+  qs.set("limit", String(limit));
+  qs.set("offset", String(offset));
+  return apiGet<AdminEventList>(`/api/admin/events?${qs.toString()}`);
 }

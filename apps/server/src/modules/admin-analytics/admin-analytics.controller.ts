@@ -6,10 +6,11 @@ import {
   Inject,
 } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
+import { AdminGuard } from '../../core/auth/admin.guard';
 import { AdminAnalyticsService } from './admin-analytics.service';
 
 @Controller('api/admin/analytics')
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, AdminGuard)
 export class AdminAnalyticsController {
   constructor(@Inject(AdminAnalyticsService) private readonly analytics: AdminAnalyticsService) {}
 

@@ -496,6 +496,11 @@ model Business {
   authorityGrants      AuthorityGrant[]
   timeEntries          TimeEntry[]
 
+  // Analytics & Growth Engine
+  businessSnapshots    BusinessSnapshot[]
+  maturityScores       MaturityScore[]
+  projections          Projection[]
+
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt      @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
@@ -8581,4 +8586,322 @@ model KeyVoicePreference {
 
   @@index([businessId, userId])
   @@map("key_voice_preferences")
+}
+
+model AutomationFlow {
+  id              String   @id @default(cuid())
+  businessId      String   @map("business_id")
+  name            String
+  description     String?
+  category        String
+  status          String   @default("DRAFT")
+  goal            String?
+  triggerSummary  String?  @map("trigger_summary")
+  riskTier        Int      @default(1) @map("risk_tier")
+  createdBy       String?  @map("created_by")
+  blueprintTags   Json     @default("[]") @map("blueprint_tags")
+  metrics         Json     @default("{}")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  deletedAt       DateTime? @map("deleted_at")
+
+  versions        FlowVersion[]
+  runs            FlowRun[]
+
+  @@index([businessId, deletedAt, status, category])
+  @@index([businessId, deletedAt, createdAt])
+  @@index([businessId, deletedAt, name])
+  @@map("automation_flows")
+}
+
+model FlowVersion {
+  id              String   @id @default(cuid())
+  flowId          String   @map("flow_id")
+  version         Int
+  nodes           Json
+  edges           Json
+  settings        Json     @default("{}")
+  status          String   @default("DRAFT")
+  publishedAt     DateTime? @map("published_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  flow            AutomationFlow @relation(fields: [flowId], references: [id], onDelete: Cascade)
+  runs            FlowRun[]
+
+  @@unique([flowId, version])
+  @@index([flowId, status, version])
+  @@map("flow_versions")
+}
+
+model FlowRun {
+  id              String   @id @default(cuid())
+  businessId      String   @map("business_id")
+  flowId          String   @map("flow_id")
+  flowVersionId   String   @map("flow_version_id")
+  sourceEventId   String?  @map("source_event_id")
+  contactId       String?  @map("contact_id")
+  status          String   @default("RUNNING")
+  startedAt       DateTime @default(now()) @map("started_at")
+  completedAt     DateTime? @map("completed_at")
+  currentNodeId   String?  @map("current_node_id")
+  input           Json     @default("{}")
+  output          Json     @default("{}")
+  error           String?
+  metrics         Json     @default("{}")
+  idempotencyKey  String?  @unique @map("idempotency_key")
+
+  steps           FlowRunStep[]
+  version         FlowVersion @relation(fields: [flowVersionId], references: [id], onDelete: Cascade)
+  flow            AutomationFlow @relation(fields: [flowId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, flowId, status, startedAt])
+  @@index([businessId, status, startedAt])
+  @@index([businessId, contactId])
+  @@index([idempotencyKey])
+  @@map("flow_runs")
+}
+
+model FlowRunStep {
+  id              String   @id @default(cuid())
+  runId           String   @map("run_id")
+  nodeId          String   @map("node_id")
+  nodeType        String   @map("node_type")
+  status          String   @default("PENDING")
+  input           Json     @default("{}")
+  output          Json     @default("{}")
+  error           String?
+  startedAt       DateTime? @map("started_at")
+  completedAt     DateTime? @map("completed_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+  run             FlowRun  @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId, nodeId])
+  @@index([runId, status])
+  @@map("flow_run_steps")
+}
+
+model FlowTemplate {
+  id              String   @id @default(cuid())
+  key             String   @unique
+  name            String
+  description     String?
+  category        String
+  businessTypes   Json     @default("[]") @map("business_types")
+  nodes           Json
+  edges           Json
+  requiredConnectors Json  @default("[]") @map("required_connectors")
+  estimatedImpact String?  @map("estimated_impact")
+  riskTier        Int      @default(1) @map("risk_tier")
+  isSystem        Boolean  @default(true) @map("is_system")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([category, isSystem])
+  @@index([isSystem, key])
+  @@map("flow_templates")
+}
+
+model AutomationOutcome {
+  id              String   @id @default(cuid())
+  businessId      String   @map("business_id")
+  flowId          String?  @map("flow_id")
+  agentId         String?  @map("agent_id")
+  runId           String?  @map("run_id")
+  outcomeType     String   @map("outcome_type")
+  value           Decimal? @db.Decimal(18, 4)
+  currency        String?
+  contactId       String?  @map("contact_id")
+  entityType      String?  @map("entity_type")
+  entityId        String?  @map("entity_id")
+  attribution     Json     @default("{}")
+  occurredAt      DateTime @default(now()) @map("occurred_at")
+
+  @@index([businessId, flowId, occurredAt])
+  @@index([businessId, outcomeType, occurredAt])
+  @@map("automation_outcomes")
+}
+
+model BotAgent {
+  id              String   @id @default(cuid())
+  businessId      String   @map("business_id")
+  name            String
+  purpose         String
+  channels        Json     @default("[]")
+  status          String   @default("DRAFT")
+  persona         Json     @default("{}")
+  knowledgeSources Json    @default("[]") @map("knowledge_sources")
+  allowedTools    Json     @default("[]") @map("allowed_tools")
+  blockedTopics   Json     @default("[]") @map("blocked_topics")
+  escalationRules Json     @default("{}") @map("escalation_rules")
+  riskTier        Int      @default(2) @map("risk_tier")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  deletedAt       DateTime? @map("deleted_at")
+
+  @@index([businessId, deletedAt, status])
+  @@map("bot_agents")
+}
+
+model BotConversationState {
+  id              String   @id @default(cuid())
+  businessId      String   @map("business_id")
+  botAgentId      String?  @map("bot_agent_id")
+  threadId        String   @map("thread_id")
+  contactId       String?  @map("contact_id")
+  state           String   @default("ACTIVE")
+  currentGoal     String?  @map("current_goal")
+  slots           Json     @default("{}")
+  historySummary  String?  @map("history_summary")
+  lastAction      String?  @map("last_action")
+  nextExpectedInput String? @map("next_expected_input")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@unique([businessId, threadId])
+  @@map("bot_conversation_states")
+}
+
+model KeyAgentConfig {
+  id              String   @id @default(cuid())
+  businessId      String   @map("business_id")
+  name            String
+  agentType       String   @map("agent_type")
+  status          String   @default("DRAFT")
+  channels        Json     @default("[]")
+  goals           Json     @default("[]")
+  allowedTools    Json     @default("[]") @map("allowed_tools")
+  approvalPolicy  Json     @default("{}") @map("approval_policy")
+  memoryScope     String   @default("business") @map("memory_scope")
+  knowledgeSources Json    @default("[]") @map("knowledge_sources")
+  kpis            Json     @default("[]")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  deletedAt       DateTime? @map("deleted_at")
+
+  @@index([businessId, deletedAt, agentType, status])
+  @@map("key_agent_configs")
+}
+
+model BusinessSnapshot {
+  id                String   @id @default(cuid())
+  businessId        String   @map("business_id")
+  business          Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  snapshotType      String   @map("snapshot_type") // daily | weekly | monthly
+  snapshotDate      DateTime @map("snapshot_date")
+
+  // Revenue
+  totalRevenue      Decimal? @db.Decimal(18, 4) @map("total_revenue")
+  invoiceCount      Int?     @map("invoice_count")
+  paidInvoiceCount  Int?     @map("paid_invoice_count")
+  overdueInvoiceCount Int?   @map("overdue_invoice_count")
+  totalOverdueAmount Decimal? @db.Decimal(18, 4) @map("total_overdue_amount")
+  averageInvoiceValue Decimal? @db.Decimal(18, 4) @map("average_invoice_value")
+  collectionRate    Float?   @map("collection_rate")
+
+  // Contacts & CRM
+  totalContacts     Int?     @map("total_contacts")
+  newContacts       Int?     @map("new_contacts")
+  activeLeads       Int?     @map("active_leads")
+  leadConversionRate Float?  @map("lead_conversion_rate")
+  customerRetentionRate Float? @map("customer_retention_rate")
+
+  // Bookings & Calendar
+  totalBookings     Int?     @map("total_bookings")
+  upcomingBookings  Int?     @map("upcoming_bookings")
+  completedBookings Int?     @map("completed_bookings")
+  noShowRate        Float?   @map("no_show_rate")
+
+  // Commerce
+  totalQuotes       Int?     @map("total_quotes")
+  acceptedQuotes    Int?     @map("accepted_quotes")
+  quoteAcceptanceRate Float? @map("quote_acceptance_rate")
+  totalDeals        Int?     @map("total_deals")
+  openDealsValue    Decimal? @db.Decimal(18, 4) @map("open_deals_value")
+
+  // Automation
+  activeFlows       Int?     @map("active_flows")
+  flowRuns          Int?     @map("flow_runs")
+  flowSuccessRate   Float?   @map("flow_success_rate")
+
+  // Engagement
+  messagesSent      Int?     @map("messages_sent")
+  messagesReceived  Int?     @map("messages_received")
+  responseRate      Float?   @map("response_rate")
+  averageResponseTimeMinutes Int? @map("avg_response_time_min")
+
+  // Storefront
+  storefrontVisits  Int?     @map("storefront_visits")
+  ordersReceived    Int?     @map("orders_received")
+  cartAbandonmentRate Float? @map("cart_abandonment_rate")
+
+  // Composite
+  healthScore       Int?     @map("health_score")
+  momentumScore     Int?     @map("momentum_score")
+  growthRate        Float?   @map("growth_rate")
+
+  metadata          Json     @default("{}")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  @@unique([businessId, snapshotType, snapshotDate])
+  @@index([businessId, snapshotType, snapshotDate])
+  @@index([snapshotDate])
+  @@map("business_snapshots")
+}
+
+
+model MaturityScore {
+  id                String   @id @default(cuid())
+  businessId        String   @map("business_id")
+  business          Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  assessmentDate    DateTime @map("assessment_date")
+
+  // 8 capability dimensions
+  revenueMaturity   Int      @map("revenue_maturity")
+  customerMaturity  Int      @map("customer_maturity")
+  operationsMaturity Int    @map("operations_maturity")
+  marketingMaturity Int      @map("marketing_maturity")
+  automationMaturity Int    @map("automation_maturity")
+  financialMaturity Int     @map("financial_maturity")
+  teamMaturity      Int      @map("team_maturity")
+  dataMaturity      Int      @map("data_maturity")
+
+  overallScore      Int      @map("overall_score")
+  percentile        Int?     // vs other businesses
+  stage             String   // beginner | emerging | established | advanced | mastery
+
+  gaps              Json     @default("[]")
+  strengths         Json     @default("[]")
+  recommendations   Json     @default("[]")
+
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  @@unique([businessId, assessmentDate])
+  @@index([businessId, assessmentDate])
+  @@map("maturity_scores")
+}
+
+model Projection {
+  id                String   @id @default(cuid())
+  businessId        String   @map("business_id")
+  business          Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  projectionType    String   @map("projection_type") // revenue | contacts | bookings | cashflow
+  period            String   // monthly | quarterly | annual
+  startDate         DateTime @map("start_date")
+  endDate           DateTime @map("end_date")
+
+  baselineValue     Decimal? @db.Decimal(18, 4) @map("baseline_value")
+  baselinePeriods   Json     @map("baseline_periods")
+  projectedValues   Json     @map("projected_values")
+  confidenceInterval Json    @map("confidence_interval")
+  growthAssumption  Float?   @map("growth_assumption")
+
+  actualValues      Json?    @map("actual_values")
+  accuracy          Float?   // MAPE or similar
+
+  metadata          Json     @default("{}")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  @@index([businessId, projectionType, period, startDate])
+  @@map("projections")
 }

@@ -1,24 +1,50 @@
-import { Body, Controller, Get, Inject, Param, Patch, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Inject,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Request,
+  UseGuards,
+  UsePipes,
+  ValidationPipe,
+} from '@nestjs/common';
 import { FlowService } from './flow.service';
 import { ActivityService } from './activity.service';
 import { CrossModuleAgentService } from './cross-module-agent.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { FlowEngineService } from './flow-engine.service';
+import { FlowRunnerService } from './flow-runner.service';
+import { FlowTemplateService } from './flow-template.service';
+import { CreateFlowDto, UpdateFlowDto, TestFlowDto } from './dto';
 
-@Controller('flow')
+@Controller('api/flows')
 export class FlowController {
   constructor(
     @Inject(FlowService) private readonly flowService: FlowService,
     @Inject(ActivityService) private readonly activityService: ActivityService,
     @Inject(CrossModuleAgentService) private readonly crossModuleAgent: CrossModuleAgentService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
+    private readonly engine: FlowEngineService,
+    private readonly runner: FlowRunnerService,
+    private readonly templates: FlowTemplateService,
   ) {}
+
+  // ─── Health ───
 
   @Get('health')
   health() {
     return { status: 'ok', module: 'flow' };
   }
+
+  // ─── Cockpit / Activity / Search (legacy) ───
 
   @Get('businesses/:businessId/cockpit')
   @UseGuards(AuthGuard, BusinessGuard)
@@ -137,5 +163,154 @@ export class FlowController {
     ]);
 
     return { contacts, invoices, bookings, products, projects };
+  }
+
+  // ─── Automation Flow Studio ───
+
+  @Get('businesses/:businessId/templates')
+  @UseGuards(BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('automations', 'read')
+  async listTemplates() {
+    return this.templates.findMany();
+  }
+
+  @Post('businesses/:businessId/templates/:templateId/clone')
+  @UseGuards(BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('automations', 'write')
+  @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
+  async cloneTemplate(
+    @Param('businessId') businessId: string,
+    @Param('templateId') templateId: string,
+    @Request() req: { user?: { sub?: string } },
+  ) {
+    const createdBy = req.user?.sub ?? 'system';
+    return this.templates.createFromTemplate(businessId, templateId, createdBy);
+  }
+
+  @Get('businesses/:businessId/flows')
+  @UseGuards(BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('automations', 'read')
+  async listFlows(
+    @Param('businessId') businessId: string,
+    @Query('status') status?: string,
+    @Query('category') category?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    return this.engine.findMany(businessId, {
+      status,
+      category,
+      limit: limit ? parseInt(limit, 10) : undefined,
+      offset: offset ? parseInt(offset, 10) : undefined,
+    });
+  }
+
+  @Post('businesses/:businessId/flows')
+  @UseGuards(BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('automations', 'write')
+  @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
+  async createFlow(
+    @Param('businessId') businessId: string,
+    @Request() req: { user?: { sub?: string } },
+    @Body() body: CreateFlowDto,
+  ) {
+    const createdBy = req.user?.sub ?? 'system';
+    return this.engine.createFlow(businessId, createdBy, body);
+  }
+
+  @Get('businesses/:businessId/flows/:flowId')
+  @UseGuards(BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('automations', 'read')
+  async getFlow(
+    @Param('businessId') businessId: string,
+    @Param('flowId') flowId: string,
+  ) {
+    return this.engine.findOne(businessId, flowId);
+  }
+
+  @Get('businesses/:businessId/flows/:flowId/versions')
+  @UseGuards(BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('automations', 'read')
+  async getFlowVersions(
+    @Param('businessId') businessId: string,
+    @Param('flowId') flowId: string,
+  ) {
+    return this.engine.findVersions(businessId, flowId);
+  }
+
+  @Patch('businesses/:businessId/flows/:flowId')
+  @UseGuards(BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('automations', 'write')
+  @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
+  async updateFlow(
+    @Param('businessId') businessId: string,
+    @Param('flowId') flowId: string,
+    @Body() body: UpdateFlowDto,
+  ) {
+    return this.engine.updateFlow(businessId, flowId, body);
+  }
+
+  @Post('businesses/:businessId/flows/:flowId/publish')
+  @UseGuards(BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('automations', 'write')
+  async publishFlow(
+    @Param('businessId') businessId: string,
+    @Param('flowId') flowId: string,
+  ) {
+    return this.engine.publishFlow(businessId, flowId);
+  }
+
+  @Post('businesses/:businessId/flows/:flowId/test')
+  @UseGuards(BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('automations', 'write')
+  @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
+  async testFlow(
+    @Param('businessId') businessId: string,
+    @Param('flowId') flowId: string,
+    @Body() body: TestFlowDto,
+  ) {
+    return this.runner.runFlow(businessId, flowId, {
+      ...(body.payload ?? {}),
+      contactId: body.contactId ?? null,
+      sourceEventId: body.sourceEventId ?? null,
+    });
+  }
+
+  @Get('businesses/:businessId/flows/:flowId/runs')
+  @UseGuards(BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('automations', 'read')
+  async listRuns(
+    @Param('businessId') businessId: string,
+    @Param('flowId') flowId: string,
+    @Query('status') status?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    return this.runner.findRuns(businessId, flowId, {
+      status,
+      limit: limit ? parseInt(limit, 10) : undefined,
+      offset: offset ? parseInt(offset, 10) : undefined,
+    });
+  }
+
+  @Get('businesses/:businessId/flows/:flowId/runs/:runId/steps')
+  @UseGuards(BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('automations', 'read')
+  async getRunSteps(
+    @Param('businessId') _businessId: string,
+    @Param('flowId') _flowId: string,
+    @Param('runId') runId: string,
+  ) {
+    return this.runner.findRunSteps(runId);
+  }
+
+  @Delete('businesses/:businessId/flows/:flowId')
+  @UseGuards(BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('automations', 'write')
+  async deleteFlow(
+    @Param('businessId') businessId: string,
+    @Param('flowId') flowId: string,
+  ) {
+    return this.engine.deleteFlow(businessId, flowId);
   }
 }
