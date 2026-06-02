@@ -94,6 +94,7 @@ import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { DeviceModule } from './modules/device/device.module';
 import { AdminPlatformModule } from './modules/admin-platform/admin-platform.module';
 import { TrashModule } from './modules/trash/trash.module';
+import { PushNotificationModule } from './modules/push-notifications/push-notification.module';
 
 @Module({
   imports: [
@@ -187,6 +188,7 @@ import { TrashModule } from './modules/trash/trash.module';
     AnalyticsModule,
     AdminPlatformModule,
     TrashModule,
+    PushNotificationModule,
     DeviceModule,
   ],
   controllers: [AppController],

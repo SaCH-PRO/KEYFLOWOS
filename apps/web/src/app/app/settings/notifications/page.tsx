@@ -13,11 +13,13 @@ import {
   Clock,
   AlertTriangle,
   Loader2,
+  Radio,
 } from "lucide-react";
 import { apiGet, apiPatch } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { InfoBadge } from "@/components/ui/info-badge";
 import { toast } from "sonner";
+import { usePushNotifications } from "@/hooks/use-push-notifications";
 
 interface NotificationPreferences {
   booking_confirmed: boolean;
@@ -105,7 +107,9 @@ export default function NotificationsSettingsPage() {
   const [log, setLog] = useState<NotificationLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"preferences" | "log">("preferences");
+  const [activeTab, setActiveTab] = useState<"preferences" | "log" | "push">("preferences");
+  const businessId = getStoredBusinessId();
+  const { status: pushStatus, error: pushError, subscribe, unsubscribe } = usePushNotifications(businessId);
 
   const loadData = useCallback(async () => {
     const businessId = getStoredBusinessId();
@@ -186,7 +190,7 @@ export default function NotificationsSettingsPage() {
       </div>
 
       <div className="flex gap-1 p-1 rounded-xl bg-muted/30 border border-border/40 w-fit">
-        {(["preferences", "log"] as const).map((tab) => (
+        {(["preferences", "log", "push"] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -196,7 +200,7 @@ export default function NotificationsSettingsPage() {
                 : "text-muted-foreground hover:text-foreground/80"
             }`}
           >
-            {tab === "preferences" ? "Preferences" : `Log (${log.length})`}
+            {tab === "preferences" ? "Preferences" : tab === "log" ? `Log (${log.length})` : "Push"}
           </button>
         ))}
       </div>
@@ -397,6 +401,64 @@ export default function NotificationsSettingsPage() {
 </div>
             </div>
           )}
+        </motion.div>
+      )}
+
+      {activeTab === "push" && (
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="space-y-4"
+        >
+          <div className="flex items-start gap-3 p-4 rounded-xl border"
+            style={{ background: "hsl(var(--kf-info) / 0.05)", borderColor: "hsl(var(--kf-info) / 0.15)" }}
+          >
+            <Radio className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color: "hsl(var(--kf-info))" }} />
+            <p className="kf-text-caption" style={{ color: "hsl(var(--kf-info))" }}>
+              Push notifications appear on your device even when KEYFLOWOS is not open.
+              Requires a secure context (HTTPS or localhost).
+            </p>
+          </div>
+
+          <div className="p-4 rounded-xl border border-border/40 bg-card/50">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="h-8 w-8 rounded-lg flex items-center justify-center"
+                  style={{ background: pushStatus === 'subscribed' ? "hsl(var(--kf-success) / 0.1)" : "hsl(var(--muted) / 0.3)" }}
+                >
+                  <Radio className="w-4 h-4" style={{ color: pushStatus === 'subscribed' ? "hsl(var(--kf-success))" : "hsl(var(--muted-foreground))" }} />
+                </div>
+                <div>
+                  <p className="text-sm font-medium">Browser Push Notifications</p>
+                  <p className="kf-text-caption text-muted-foreground">
+                    {pushStatus === 'subscribed' ? 'You are subscribed to push notifications' :
+                     pushStatus === 'denied' ? 'Push notifications are blocked in your browser' :
+                     pushStatus === 'unsupported' ? 'Your browser does not support push notifications' :
+                     pushStatus === 'loading' ? 'Checking status...' :
+                     'Subscribe to receive push notifications'}
+                  </p>
+                </div>
+              </div>
+              {pushStatus === 'subscribed' ? (
+                <button
+                  onClick={unsubscribe}
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium border border-border/60 bg-card hover:bg-card/80 transition-colors"
+                >
+                  Unsubscribe
+                </button>
+              ) : pushStatus === 'unsubscribed' ? (
+                <button
+                  onClick={subscribe}
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                >
+                  Subscribe
+                </button>
+              ) : null}
+            </div>
+            {pushError && (
+              <p className="mt-2 text-xs text-red-500">{pushError}</p>
+            )}
+          </div>
         </motion.div>
       )}
     </div>

@@ -34,6 +34,7 @@ model User {
   aiPlans            AiPlan[]            @relation("UserAiPlans")
   contactShares      ContactShare[]      @relation("UserContactShares")
   assignedTickets    SupportTicket[]
+  pushSubscriptions  PushSubscription[]
 
   @@map("users")
 }
@@ -560,6 +561,22 @@ model Session {
 
   @@index([userId])
   @@map("sessions")
+}
+
+model PushSubscription {
+  id        String   @id @default(cuid())
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  businessId String  @map("business_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([userId])
+  @@index([businessId])
+  @@map("push_subscriptions")
 }
 
 // ---

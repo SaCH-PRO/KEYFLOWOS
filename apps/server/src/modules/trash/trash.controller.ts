@@ -41,9 +41,9 @@ export class TrashController {
   @RequireModuleScope('settings')
   async listTrashed(
     @Param('businessId') businessId: string,
-    @Query('model') model?: string,
     @Query('limit', new DefaultValuePipe(50), ParseIntPipe) limit: number,
     @Query('offset', new DefaultValuePipe(0), ParseIntPipe) offset: number,
+    @Query('model') model?: string,
   ) {
     const where: Record<string, unknown> = { businessId, deletedAt: { not: null } };
 
@@ -82,7 +82,7 @@ export class TrashController {
     }
     const existing = await this.findUnique(model, { id, businessId, deletedAt: { not: null } });
     if (!existing) throw new NotFoundException(`Trashed ${model} not found`);
-    const restored = await this.updateModel(model, { id }, { deletedAt: null });
+    const restored = await this.updateModel(model, id, { deletedAt: null } as any);
     return { restored: true, model, id, item: restored };
   }
 
@@ -98,35 +98,35 @@ export class TrashController {
     }
     const existing = await this.findUnique(model, { id, businessId, deletedAt: { not: null } });
     if (!existing) throw new NotFoundException(`Trashed ${model} not found`);
-    await this.deleteModel(model, { id });
+    await this.deleteModel(model, id);
     return { deleted: true, model, id };
   }
 
   private async queryModel(model: TrashableModel, where: Record<string, unknown>, take: number, skip: number) {
-    const orderBy = { deletedAt: 'desc' as const };
+    const args = { where, take, skip, orderBy: { deletedAt: 'desc' as const } };
     switch (model) {
-      case 'contact': return this.prisma.client.contact.findMany({ where, take, skip, orderBy, select: { id: true, firstName: true, lastName: true, email: true, status: true, deletedAt: true } });
-      case 'deal': return this.prisma.client.deal.findMany({ where, take, skip, orderBy, select: { id: true, title: true, stageId: true, value: true, currency: true, deletedAt: true } });
-      case 'product': return this.prisma.client.product.findMany({ where, take, skip, orderBy, select: { id: true, name: true, sku: true, price: true, deletedAt: true } });
-      case 'quote': return this.prisma.client.quote.findMany({ where, take, skip, orderBy, select: { id: true, quoteNumber: true, status: true, total: true, deletedAt: true } });
-      case 'invoice': return this.prisma.client.invoice.findMany({ where, take, skip, orderBy, select: { id: true, invoiceNumber: true, status: true, total: true, deletedAt: true } });
-      case 'booking': return this.prisma.client.booking.findMany({ where, take, skip, orderBy, select: { id: true, status: true, startTime: true, endTime: true, deletedAt: true } });
-      case 'project': return this.prisma.client.project.findMany({ where, take, skip, orderBy, select: { id: true, name: true, status: true, deletedAt: true } });
-      case 'projectTask': return this.prisma.client.projectTask.findMany({ where, take, skip, orderBy, select: { id: true, title: true, status: true, deletedAt: true } });
-      case 'expense': return this.prisma.client.expense.findMany({ where, take, skip, orderBy, select: { id: true, description: true, amount: true, status: true, deletedAt: true } });
-      case 'automationFlow': return this.prisma.client.automationFlow.findMany({ where, take, skip, orderBy, select: { id: true, name: true, status: true, deletedAt: true } });
-      case 'account': return this.prisma.client.account.findMany({ where, take, skip, orderBy, select: { id: true, name: true, industry: true, deletedAt: true } });
-      case 'service': return this.prisma.client.service.findMany({ where, take, skip, orderBy, select: { id: true, name: true, price: true, deletedAt: true } });
-      case 'staffMember': return this.prisma.client.staffMember.findMany({ where, take, skip, orderBy, select: { id: true, name: true, email: true, deletedAt: true } });
-      case 'socialPost': return this.prisma.client.socialPost.findMany({ where, take, skip, orderBy, select: { id: true, content: true, platform: true, deletedAt: true } });
-      case 'site': return this.prisma.client.site.findMany({ where, take, skip, orderBy, select: { id: true, name: true, slug: true, deletedAt: true } });
-      case 'recurringInvoice': return this.prisma.client.recurringInvoice.findMany({ where, take, skip, orderBy, select: { id: true, name: true, frequency: true, amount: true, deletedAt: true } });
-      case 'emailCampaign': return this.prisma.client.emailCampaign.findMany({ where, take, skip, orderBy, select: { id: true, name: true, status: true, deletedAt: true } });
-      case 'leadForm': return this.prisma.client.leadForm.findMany({ where, take, skip, orderBy, select: { id: true, name: true, deletedAt: true } });
-      case 'landingPage': return this.prisma.client.landingPage.findMany({ where, take, skip, orderBy, select: { id: true, name: true, slug: true, deletedAt: true } });
-      case 'communityPost': return this.prisma.client.communityPost.findMany({ where, take, skip, orderBy, select: { id: true, title: true, deletedAt: true } });
-      case 'communityComment': return this.prisma.client.communityComment.findMany({ where, take, skip, orderBy, select: { id: true, body: true, deletedAt: true } });
-      case 'opportunity': return this.prisma.client.opportunity.findMany({ where, take, skip, orderBy, select: { id: true, title: true, status: true, deletedAt: true } });
+      case 'contact': return this.prisma.client.contact.findMany(args);
+      case 'deal': return this.prisma.client.deal.findMany(args);
+      case 'product': return this.prisma.client.product.findMany(args);
+      case 'quote': return this.prisma.client.quote.findMany(args);
+      case 'invoice': return this.prisma.client.invoice.findMany(args);
+      case 'booking': return this.prisma.client.booking.findMany(args);
+      case 'project': return this.prisma.client.project.findMany(args);
+      case 'projectTask': return this.prisma.client.projectTask.findMany(args);
+      case 'expense': return this.prisma.client.expense.findMany(args);
+      case 'automationFlow': return this.prisma.client.automationFlow.findMany(args);
+      case 'account': return this.prisma.client.account.findMany(args);
+      case 'service': return this.prisma.client.service.findMany(args);
+      case 'staffMember': return this.prisma.client.staffMember.findMany(args);
+      case 'socialPost': return this.prisma.client.socialPost.findMany(args);
+      case 'site': return this.prisma.client.site.findMany(args);
+      case 'recurringInvoice': return this.prisma.client.recurringInvoice.findMany(args);
+      case 'emailCampaign': return this.prisma.client.emailCampaign.findMany(args);
+      case 'leadForm': return this.prisma.client.leadForm.findMany(args);
+      case 'landingPage': return this.prisma.client.landingPage.findMany(args);
+      case 'communityPost': return this.prisma.client.communityPost.findMany(args);
+      case 'communityComment': return this.prisma.client.communityComment.findMany(args);
+      case 'opportunity': return this.prisma.client.opportunity.findMany(args);
       default: return [];
     }
   }
@@ -187,8 +187,7 @@ export class TrashController {
     }
   }
 
-  private async updateModel(model: TrashableModel, where: Record<string, unknown>, data: Record<string, unknown>) {
-    const id = (where as any).id;
+  private async updateModel(model: TrashableModel, id: string, data: any) {
     switch (model) {
       case 'contact': return this.prisma.client.contact.update({ where: { id }, data });
       case 'deal': return this.prisma.client.deal.update({ where: { id }, data });
@@ -216,8 +215,7 @@ export class TrashController {
     }
   }
 
-  private async deleteModel(model: TrashableModel, where: Record<string, unknown>) {
-    const id = (where as any).id;
+  private async deleteModel(model: TrashableModel, id: string) {
     switch (model) {
       case 'contact': return this.prisma.client.contact.delete({ where: { id } });
       case 'deal': return this.prisma.client.deal.delete({ where: { id } });

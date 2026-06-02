@@ -14888,3 +14888,40 @@ export async function fetchMaturityHistory(businessId: string): Promise<ApiResul
     [],
   );
 }
+
+
+// ── Trash & Restore ──
+
+export async function fetchTrashItems(
+  businessId: string,
+  params?: { model?: string; limit?: number; offset?: number },
+): Promise<ApiResult<{ items: Array<Record<string, unknown> & { _model?: string }>; total: number; model?: string }>> {
+  const query = new URLSearchParams();
+  if (params?.model) query.set("model", params.model);
+  if (params?.limit) query.set("limit", String(params.limit));
+  if (params?.offset) query.set("offset", String(params.offset));
+  return apiGet(
+    `/api/businesses/${encodeURIComponent(businessId)}/trash?${query.toString()}`,
+    z.object({ items: z.array(z.record(z.any())), total: z.number(), model: z.string().optional() }),
+    { items: [], total: 0 },
+  );
+}
+
+export async function restoreTrashItem(
+  businessId: string,
+  model: string,
+  id: string,
+): Promise<ApiResult<{ restored: boolean; model: string; id: string }>> {
+  return apiPost({
+    path: `/api/businesses/${encodeURIComponent(businessId)}/trash/${encodeURIComponent(model)}/${encodeURIComponent(id)}/restore`,
+    body: {},
+  });
+}
+
+export async function permanentDeleteTrashItem(
+  businessId: string,
+  model: string,
+  id: string,
+): Promise<ApiResult<{ deleted: boolean; model: string; id: string }>> {
+  return apiDelete(`/api/businesses/${encodeURIComponent(businessId)}/trash/${encodeURIComponent(model)}/${encodeURIComponent(id)}`);
+}
