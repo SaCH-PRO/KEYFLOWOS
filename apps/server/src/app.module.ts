@@ -95,6 +95,7 @@ import { DeviceModule } from './modules/device/device.module';
 import { AdminPlatformModule } from './modules/admin-platform/admin-platform.module';
 import { TrashModule } from './modules/trash/trash.module';
 import { PushNotificationModule } from './modules/push-notifications/push-notification.module';
+import { SecurityAuditModule } from './modules/security-audit/security-audit.module';
 
 @Module({
   imports: [
@@ -190,6 +191,7 @@ import { PushNotificationModule } from './modules/push-notifications/push-notifi
     TrashModule,
     PushNotificationModule,
     DeviceModule,
+    SecurityAuditModule,
   ],
   controllers: [AppController],
   providers: [

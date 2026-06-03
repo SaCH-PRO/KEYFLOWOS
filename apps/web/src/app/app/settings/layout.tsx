@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion } from "framer-motion";
-import { Users, Link2, Settings, Webhook, Bell, Code2, Palette, Sparkles, CreditCard, Brain, Crown, Shield, ContactRound, Layers, Zap, Gift } from "lucide-react";
+import { Users, Link2, Settings, Webhook, Bell, Code2, Palette, Sparkles, CreditCard, Brain, Crown, Shield, ShieldCheck, FileCheck, ContactRound, Layers, Zap, Gift } from "lucide-react";
 import { TaskContinuityHeader } from "@/components/ui/task-continuity-header";
 import { useNavigationContext } from "@/lib/navigation-context";
 
@@ -23,6 +23,8 @@ const navItems = [
   { href: "/app/settings/ai-control", label: "AI Control", icon: Brain, description: "AI governance" },
   { href: "/app/settings/ai", label: "L4 AI", icon: Zap, description: "Capacity & authority" },
   { href: "/app/settings/privacy", label: "Privacy", icon: Shield, description: "GDPR & forget" },
+  { href: "/app/settings/compliance", label: "Compliance", icon: FileCheck, description: "Consent & records" },
+  { href: "/app/settings/security", label: "Security", icon: ShieldCheck, description: "Audit & checks" },
 ];
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
