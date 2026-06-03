@@ -1,11 +1,14 @@
 import {
   Controller,
   Get,
+  Post,
+  Param,
   Query,
   UseGuards,
   Inject,
   ParseIntPipe,
   DefaultValuePipe,
+  BadRequestException,
 } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { AdminGuard } from '../../core/auth/admin.guard';
@@ -74,5 +77,25 @@ export class AdminBusinessController {
       })),
       total,
     };
+  }
+
+  @Post(':businessId/gdpr-delete')
+  async gdprDelete(@Param('businessId') businessId: string) {
+    if (!businessId) throw new BadRequestException('Business ID is required');
+    const business = await this.prisma.client.business.findUnique({ where: { id: businessId } });
+    if (!business) throw new BadRequestException('Business not found');
+
+    const now = new Date();
+    await this.prisma.client.contact.updateMany({ where: { businessId }, data: { deletedAt: now } });
+    await this.prisma.client.account.updateMany({ where: { businessId }, data: { deletedAt: now } });
+    await this.prisma.client.invoice.updateMany({ where: { businessId }, data: { deletedAt: now } });
+    await this.prisma.client.booking.updateMany({ where: { businessId }, data: { deletedAt: now } });
+
+    await this.prisma.client.expense.updateMany({ where: { businessId }, data: { deletedAt: now } });
+    await this.prisma.client.socialPost.updateMany({ where: { businessId }, data: { deletedAt: now } });
+    await this.prisma.client.automationFlow.updateMany({ where: { businessId }, data: { deletedAt: now } });
+    await this.prisma.client.business.update({ where: { id: businessId }, data: { name: '[DELETED]', slug: null, email: null, phone: null, website: null, address: null } });
+
+    return { success: true, message: 'Business data purged per GDPR request.' };
   }
 }

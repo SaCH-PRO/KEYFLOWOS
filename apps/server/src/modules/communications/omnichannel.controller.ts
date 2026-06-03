@@ -176,6 +176,21 @@ export class OmnichannelController {
     });
   }
 
+  @Get('consent')
+  async listConsent(
+    @Param('businessId') businessId: string,
+    @Query('contactId') contactId?: string,
+    @Query('channel') channel?: string,
+    @Query('consentType') consentType?: string,
+    @Query('status') status?: string,
+  ) {
+    return this.consent.listConsentRecords(businessId, contactId || undefined, {
+      channel: channel || undefined,
+      consentType: consentType || undefined,
+      status: status || undefined,
+    });
+  }
+
   // ─── Triggers ───
 
   @Get('triggers')
