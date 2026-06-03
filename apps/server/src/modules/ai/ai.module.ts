@@ -68,6 +68,7 @@ import { TaskRebalancerService } from './task-rebalancer.service';
 import { ChaserService } from './chaser.service';
 import { CrossBusinessIntelligenceService } from './cross-business-intelligence.service';
 import { AiIntelligenceController } from './ai-intelligence.controller';
+import { KeyAgentConfigService } from './key-agent-config.service';
 
 @Module({
   imports: [PrismaModule, RedisModule, SubscriptionsModule, BlueprintModule, TimelineModule, forwardRef(() => FinanceModule), CommandModule],
@@ -128,6 +129,7 @@ import { AiIntelligenceController } from './ai-intelligence.controller';
     AiSettingsService,
     ChaserService,
     CrossBusinessIntelligenceService,
+    KeyAgentConfigService,
   ],
   exports: [
     ModelGatewayService,
@@ -180,6 +182,7 @@ import { AiIntelligenceController } from './ai-intelligence.controller';
     CapacityInsightService,
     TaskRebalancerService,
     ChaserService,
+    KeyAgentConfigService,
   ],
 })
 export class AiModule {}

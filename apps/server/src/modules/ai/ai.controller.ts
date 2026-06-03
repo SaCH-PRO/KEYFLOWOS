@@ -36,6 +36,7 @@ import { TaskRebalancerService } from './task-rebalancer.service';
 import { UndoService } from './undo.service';
 import { ProactiveSuggestionService } from './proactive-suggestion.service';
 import { WorkflowTemplateService } from './workflow-template.service';
+import { KeyAgentConfigService } from './key-agent-config.service';
 
 
 const RESERVED_MEMORY_CATEGORIES = new Set(['settings']);
@@ -88,6 +89,7 @@ export class AiController {
     @Inject(TaskPrioritizerService) private readonly prioritizer: TaskPrioritizerService,
     @Inject(CapacityInsightService) private readonly capacityInsight: CapacityInsightService,
     @Inject(TaskRebalancerService) private readonly rebalancer: TaskRebalancerService,
+    @Inject(KeyAgentConfigService) private readonly keyAgentConfig: KeyAgentConfigService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Inject(UndoService) private readonly undoService: UndoService,
     @Inject(ProactiveSuggestionService) private readonly suggestions: ProactiveSuggestionService,
@@ -1470,5 +1472,17 @@ export class AiController {
   @CrmRateLimit(10, 60_000)
   async rebalance(@Param('businessId') businessId: string) {
     return this.rebalancer.rebalanceBusiness(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai/agent-config')
+  async getAgentConfig(@Param('businessId') businessId: string) {
+    return this.keyAgentConfig.getOrCreate(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Put('businesses/:businessId/ai/agent-config')
+  async updateAgentConfig(@Param('businessId') businessId: string, @Body() body: any) {
+    return this.keyAgentConfig.update(businessId, body);
   }
 }

@@ -34,6 +34,7 @@ export default function FinancialFlowPage() {
   const [loading, setLoading] = useState(true);
   const [overview, setOverview] = useState<FinancialOverview | null>(null);
   const [safe, setSafe] = useState<SafeToSpend | null>(null);
+  const [forecast, setForecast] = useState<{ days: number; expected: number; conservative: number; optimistic: number; dangerDate: string | null; recommendations: string[] } | null>(null);
   const [buckets, setBuckets] = useState<ReserveBucket[]>([]);
   const [showAdd, setShowAdd] = useState(false);
   const [newName, setNewName] = useState("");
@@ -46,13 +47,15 @@ export default function FinancialFlowPage() {
     if (!businessId) return;
     setLoading(true);
     try {
-      const [ovRes, safeRes, bucketRes] = await Promise.all([
+      const [ovRes, safeRes, fcRes, bucketRes] = await Promise.all([
         apiGet<FinancialOverview>(`/finance/businesses/${businessId}/overview`),
         apiGet<SafeToSpend>(`/finance/businesses/${businessId}/safe-to-spend`),
+        apiGet<any>(`/finance/businesses/${businessId}/cashflow-forecast?days=90`),
         fetchReserveBuckets(businessId),
       ]);
       if (ovRes.data) setOverview(ovRes.data);
       if (safeRes.data) setSafe(safeRes.data);
+      if (fcRes.data) setForecast(fcRes.data);
       if (bucketRes.data) setBuckets(bucketRes.data);
     } catch {
       // fail silently
@@ -124,6 +127,44 @@ export default function FinancialFlowPage() {
           </>
         )}
       </div>
+
+      {/* Cashflow Forecast */}
+      {forecast && (
+        <div className="kf-card p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">90-Day Cash Forecast</p>
+            {forecast.dangerDate && (
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 font-medium">
+                Danger: {new Date(forecast.dangerDate).toLocaleDateString()}
+              </span>
+            )}
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="text-center">
+              <p className="text-lg font-semibold">{currency} {(forecast.expected ?? 0).toLocaleString()}</p>
+              <p className="text-[10px] text-muted-foreground">Expected</p>
+            </div>
+            <div className="text-center">
+              <p className="text-lg font-semibold">{currency} {(forecast.conservative ?? 0).toLocaleString()}</p>
+              <p className="text-[10px] text-muted-foreground">Conservative</p>
+            </div>
+            <div className="text-center">
+              <p className="text-lg font-semibold">{currency} {(forecast.optimistic ?? 0).toLocaleString()}</p>
+              <p className="text-[10px] text-muted-foreground">Optimistic</p>
+            </div>
+          </div>
+          {forecast.recommendations && forecast.recommendations.length > 0 && (
+            <div className="space-y-1">
+              {forecast.recommendations.map((rec, i) => (
+                <p key={i} className="text-xs text-muted-foreground flex items-start gap-1.5">
+                  <TrendingUp className="w-3 h-3 mt-0.5 shrink-0 text-primary" />
+                  {rec}
+                </p>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Cash Reserve Buckets */}
       <div className="space-y-2">

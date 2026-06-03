@@ -1,10 +1,11 @@
-import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional, forwardRef } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ActivityService } from './activity.service';
 import { CrmService } from '../crm/crm.service';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
 import { AdapterRegistryService } from '../communications/adapters/adapter-registry.service';
+import { FlowRunnerService } from './flow-runner.service';
 import {
   BookingCreatedPayload,
   BookingConfirmedPayload,
@@ -25,6 +26,7 @@ export class AutomationExecutorService {
     @Inject(CrmService) private readonly crm: CrmService,
     @Inject(TransactionalEmailService) private readonly transactionalEmail: TransactionalEmailService,
     @Optional() @Inject(AdapterRegistryService) private readonly adapterRegistry: AdapterRegistryService | null,
+    @Optional() @Inject(forwardRef(() => FlowRunnerService)) private readonly flowRunner: FlowRunnerService | null,
   ) {}
 
   private async loadContactData(businessId: string, contactId: string): Promise<Record<string, any> | null> {
@@ -160,6 +162,48 @@ export class AutomationExecutorService {
           contactId: context.contactId,
         });
       }
+    }
+  }
+
+  private async executeFlows(businessId: string, triggerEvent: string, context: Record<string, any>) {
+    if (!this.flowRunner) return;
+    try {
+      const flows = await this.prisma.client.automationFlow.findMany({
+        where: { businessId, status: 'ACTIVE', deletedAt: null },
+        include: {
+          versions: {
+            where: { status: 'PUBLISHED' },
+            orderBy: { version: 'desc' },
+            take: 1,
+          },
+        },
+      });
+
+      for (const flow of flows) {
+        const version = flow.versions[0];
+        if (!version) continue;
+
+        const nodes = (version.nodes as unknown as Array<{ id: string; type: string; data: Record<string, unknown> }>) ?? [];
+        const triggerNode = nodes.find((n) => n.type === 'trigger');
+        if (!triggerNode) continue;
+
+        const nodeTriggerEvent = triggerNode.data?.triggerEvent as string | undefined;
+        if (nodeTriggerEvent !== triggerEvent) continue;
+
+        try {
+          await this.flowRunner.runFlow(businessId, flow.id, {
+            ...context,
+            sourceEventId: context.sourceEventId ?? null,
+            contactId: context.contactId ?? null,
+            idempotencyKey: `${triggerEvent}::${flow.id}::${Date.now()}`,
+          });
+          this.logger.log(`AutomationFlow "${flow.name}" executed for trigger "${triggerEvent}"`);
+        } catch (e) {
+          this.logger.error(`AutomationFlow "${flow.name}" failed: ${(e as Error).message}`);
+        }
+      }
+    } catch (e) {
+      this.logger.error(`executeFlows failed: ${(e as Error).message}`);
     }
   }
 
@@ -463,6 +507,10 @@ export class AutomationExecutorService {
       contactId: payload.contact.id,
       trigger: 'contact.created',
     });
+    await this.executeFlows(payload.businessId, 'contact.created', {
+      contactId: payload.contact.id,
+      trigger: 'contact.created',
+    });
   }
 
   @OnEvent('contact.updated')
@@ -484,10 +532,22 @@ export class AutomationExecutorService {
       toStatus: payload.toStatus,
       trigger: 'contact.updated',
     });
+    await this.executeFlows(payload.businessId, 'contact.updated', {
+      contactId: payload.contact.id,
+      fromStatus: payload.fromStatus,
+      toStatus: payload.toStatus,
+      trigger: 'contact.updated',
+    });
 
     if (payload.fromStatus && payload.toStatus && payload.fromStatus !== payload.toStatus) {
       await this.runBuiltInStageChanged(payload.businessId, payload.contact.id, payload.fromStatus, payload.toStatus);
       await this.executePlaybooks(payload.businessId, 'contact.stage_changed', {
+        contactId: payload.contact.id,
+        fromStatus: payload.fromStatus,
+        toStatus: payload.toStatus,
+        trigger: 'contact.stage_changed',
+      });
+    await this.executeFlows(payload.businessId, 'contact.stage_changed', {
         contactId: payload.contact.id,
         fromStatus: payload.fromStatus,
         toStatus: payload.toStatus,
@@ -538,6 +598,11 @@ export class AutomationExecutorService {
       bookingId: payload.booking.id,
       trigger: 'booking.created',
     });
+    await this.executeFlows(payload.businessId, 'booking.created', {
+      contactId: payload.contact?.id,
+      bookingId: payload.booking.id,
+      trigger: 'booking.created',
+    });
   }
 
   @OnEvent('booking.confirmed')
@@ -554,6 +619,11 @@ export class AutomationExecutorService {
       contactId: payload.contact?.id,
     });
     await this.executePlaybooks(payload.businessId, 'booking.confirmed', {
+      contactId: payload.contact?.id,
+      bookingId: payload.booking.id,
+      trigger: 'booking.confirmed',
+    });
+    await this.executeFlows(payload.businessId, 'booking.confirmed', {
       contactId: payload.contact?.id,
       bookingId: payload.booking.id,
       trigger: 'booking.confirmed',
@@ -592,6 +662,12 @@ export class AutomationExecutorService {
       data: { total: inv.total, currency: inv.currency },
     });
     await this.executePlaybooks(payload.businessId, 'invoice.paid', {
+      contactId: inv.contact?.id,
+      invoiceId: inv.id,
+      total: inv.total,
+      trigger: 'invoice.paid',
+    });
+    await this.executeFlows(payload.businessId, 'invoice.paid', {
       contactId: inv.contact?.id,
       invoiceId: inv.id,
       total: inv.total,
@@ -670,6 +746,11 @@ export class AutomationExecutorService {
       invoiceId: payload.invoice.id,
       trigger: 'invoice.sent',
     });
+    await this.executeFlows(payload.businessId, 'invoice.sent', {
+      contactId: payload.invoice.contact?.id,
+      invoiceId: payload.invoice.id,
+      trigger: 'invoice.sent',
+    });
   }
 
   @OnEvent('invoice.overdue')
@@ -687,6 +768,11 @@ export class AutomationExecutorService {
       contactId: payload.invoice.contact?.id,
     });
     await this.executePlaybooks(payload.businessId, 'invoice.overdue', {
+      contactId: payload.invoice.contact?.id,
+      invoiceId: payload.invoice.id,
+      trigger: 'invoice.overdue',
+    });
+    await this.executeFlows(payload.businessId, 'invoice.overdue', {
       contactId: payload.invoice.contact?.id,
       invoiceId: payload.invoice.id,
       trigger: 'invoice.overdue',

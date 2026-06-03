@@ -15,12 +15,15 @@ import {
   CheckCircle2,
   XCircle,
   Terminal,
+  Mic,
 } from "lucide-react";
+import dynamic from "next/dynamic";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { PageHeader } from "@/components/ui/page-header";
 import { SectionCard } from "@/components/ui/section-card";
 import { apiGet, apiPost } from "@/lib/api";
 import { fetchAiExecutionLogs, type AiExecutionLogEntry } from "@/lib/client";
+import { fetchAgentConfig, updateAgentConfig, type KeyAgentConfig } from "@/lib/api/key-agent";
 
 interface KeyCommand {
   id: string;
@@ -47,14 +50,19 @@ const MODES = [
   { key: "auto", label: "Auto", desc: "Monitor and act under governance rules" },
 ];
 
+const JarvisVoice = dynamic(() => import("../keyflow-command/components/jarvis-voice"), { ssr: false });
+
 export default function KeyWorkerPage() {
   const router = useRouter();
   const businessId = getStoredBusinessId() ?? "";
+  const [showVoice, setShowVoice] = useState(false);
   const [loading, setLoading] = useState(true);
   const [commands, setCommands] = useState<KeyCommand[]>([]);
   const [approvals, setApprovals] = useState<ApprovalItem[]>([]);
   const [governance, setGovernance] = useState<{ mode?: string; maxAutoTier?: number; blockedTools?: string[] } | null>(null);
   const [executionLogs, setExecutionLogs] = useState<AiExecutionLogEntry[]>([]);
+  const [agentConfig, setAgentConfig] = useState<KeyAgentConfig | null>(null);
+  const [configLoading, setConfigLoading] = useState(false);
   const [input, setInput] = useState("");
   const [selectedMode, setSelectedMode] = useState("do");
   const [submitting, setSubmitting] = useState(false);
@@ -63,16 +71,18 @@ export default function KeyWorkerPage() {
     if (!businessId) return;
     setLoading(true);
     try {
-      const [cmdRes, appRes, govRes, logRes] = await Promise.all([
+      const [cmdRes, appRes, govRes, logRes, cfgRes] = await Promise.all([
         apiGet<KeyCommand[]>(`/ai/businesses/${businessId}/key/commands`),
         apiGet<{ items: ApprovalItem[] }>(`/ai/businesses/${businessId}/ai/approvals`),
         apiGet<{ mode?: string; maxAutoTier?: number; blockedTools?: string[] }>(`/ai/businesses/${businessId}/ai/governance`),
         fetchAiExecutionLogs(businessId, { limit: 10 }),
+        fetchAgentConfig(businessId),
       ]);
       if (cmdRes.data) setCommands(cmdRes.data.slice(0, 20));
       if (appRes.data) setApprovals(appRes.data.items ?? []);
       if (govRes.data) setGovernance(govRes.data);
       if (logRes.data) setExecutionLogs(logRes.data ?? []);
+      if (cfgRes.data) setAgentConfig(cfgRes.data);
     } catch {
       // silently fail
     } finally {
@@ -150,6 +160,18 @@ export default function KeyWorkerPage() {
               <Bot className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: "hsl(var(--kf-accent1))" }} />
             </div>
             <button
+              type="button"
+              onClick={() => setShowVoice((v) => !v)}
+              className={`inline-flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${
+                showVoice
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-muted text-foreground hover:bg-muted/80"
+              }`}
+              title="Voice mode"
+            >
+              <Mic className="w-4 h-4" />
+            </button>
+            <button
               type="submit"
               disabled={!input.trim() || submitting}
               className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-sm font-medium bg-[hsl(var(--kf-accent1))] text-white hover:opacity-90 transition-opacity disabled:opacity-50"
@@ -158,6 +180,13 @@ export default function KeyWorkerPage() {
               Send
             </button>
           </form>
+
+          {/* Voice Panel */}
+          {showVoice && businessId && (
+            <div className="mt-4 rounded-xl border p-4" style={{ borderColor: "hsl(var(--kf-border))" }}>
+              <JarvisVoice businessId={businessId} />
+            </div>
+          )}
         </div>
       </SectionCard>
 
@@ -298,6 +327,61 @@ export default function KeyWorkerPage() {
                   Configure
                 </button>
               </div>
+            )}
+          </SectionCard>
+
+          <SectionCard icon={Brain} title="Memory" compact>
+            {agentConfig ? (
+              <div className="space-y-2">
+                <div>
+                  <label className="text-[10px] text-muted-foreground uppercase">Goals</label>
+                  <textarea
+                    value={Array.isArray(agentConfig.goals) ? agentConfig.goals.join("\n") : ""}
+                    onChange={async (e) => {
+                      const goals = e.target.value.split("\n").filter((g) => g.trim());
+                      setAgentConfig((prev) => prev ? { ...prev, goals } : prev);
+                      await updateAgentConfig(businessId, { goals });
+                    }}
+                    rows={2}
+                    className="w-full mt-0.5 px-2 py-1 rounded text-xs bg-background border focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+                    style={{ borderColor: "hsl(var(--kf-border))" }}
+                    placeholder="What should KEY focus on?"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-muted-foreground uppercase">Tone</label>
+                  <input
+                    value={typeof agentConfig.approvalPolicy?.tone === 'string' ? agentConfig.approvalPolicy.tone : ''}
+                    onChange={async (e) => {
+                      const tone = e.target.value;
+                      setAgentConfig((prev) => prev ? { ...prev, approvalPolicy: { ...prev.approvalPolicy, tone } } : prev);
+                      await updateAgentConfig(businessId, { approvalPolicy: { ...agentConfig.approvalPolicy, tone } });
+                    }}
+                    className="w-full mt-0.5 px-2 py-1 rounded text-xs bg-background border focus:outline-none focus:ring-1 focus:ring-primary"
+                    style={{ borderColor: "hsl(var(--kf-border))" }}
+                    placeholder="professional, friendly, formal..."
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-muted-foreground uppercase">Memory scope</label>
+                  <select
+                    value={agentConfig.memoryScope}
+                    onChange={async (e) => {
+                      const memoryScope = e.target.value;
+                      setAgentConfig((prev) => prev ? { ...prev, memoryScope } : prev);
+                      await updateAgentConfig(businessId, { memoryScope });
+                    }}
+                    className="w-full mt-0.5 px-2 py-1 rounded text-xs bg-background border focus:outline-none focus:ring-1 focus:ring-primary"
+                    style={{ borderColor: "hsl(var(--kf-border))" }}
+                  >
+                    <option value="business">Business-wide</option>
+                    <option value="user">User-only</option>
+                    <option value="session">Session-only</option>
+                  </select>
+                </div>
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">Loading memory...</p>
             )}
           </SectionCard>
 
