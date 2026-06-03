@@ -21,15 +21,15 @@ interface CommandCardProps {
 }
 
 const CATEGORY_COLORS: Record<string, string> = {
-  MONEY: "#10b981",
-  TIME: "#3b82f6",
-  PEOPLE: "#f59e0b",
-  WORK: "#8b5cf6",
-  SALES: "#ec4899",
-  MARKETING: "#f97316",
-  GOVERNANCE: "#ef4444",
-  STRATEGY: "#6366f1",
-  SYSTEM: "#64748b",
+  MONEY: "hsl(var(--kf-success))",
+  TIME: "hsl(var(--kf-accent2))",
+  PEOPLE: "hsl(var(--kf-warning))",
+  WORK: "hsl(var(--kf-violet-accent))",
+  SALES: "hsl(var(--kf-accent1))",
+  MARKETING: "hsl(var(--kf-accent1))",
+  GOVERNANCE: "hsl(var(--kf-destructive))",
+  STRATEGY: "hsl(var(--kf-accent2))",
+  SYSTEM: "hsl(var(--kf-muted-foreground))",
 };
 
 const STATUS_LABELS: Record<string, string> = {

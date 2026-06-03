@@ -217,7 +217,7 @@ export default function KeyWorkerPage() {
                           {cmd.status}
                         </span>
                         {cmd.riskLevel !== "LOW" && (
-                          <span className="text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded bg-red-500/10 text-red-500">
+                          <span className="text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded bg-destructive/10 text-destructive">
                             {cmd.riskLevel}
                           </span>
                         )}
@@ -243,7 +243,7 @@ export default function KeyWorkerPage() {
                       <p className="text-sm font-medium">{app.title}</p>
                       {app.description && <p className="text-xs text-muted-foreground">{app.description}</p>}
                       {app.riskTier >= 3 && (
-                        <span className="text-[10px] text-red-500 font-medium">High risk</span>
+                        <span className="text-[10px] text-destructive font-medium">High risk</span>
                       )}
                     </div>
                     <div className="flex items-center gap-1 flex-shrink-0">
@@ -255,7 +255,7 @@ export default function KeyWorkerPage() {
                       </button>
                       <button
                         onClick={() => handleApproval(app.id, "rejected")}
-                        className="p-1.5 rounded-md text-red-500 hover:bg-red-500/10 transition-colors"
+                        className="p-1.5 rounded-md text-destructive hover:bg-destructive/10 transition-colors"
                       >
                         <XCircle className="w-4 h-4" />
                       </button>
@@ -276,11 +276,11 @@ export default function KeyWorkerPage() {
                     <div className="min-w-0">
                       <p className="text-sm font-medium truncate">{log.toolName ?? log.action ?? 'Unknown action'}</p>
                       <div className="flex items-center gap-2 mt-1">
-                        <span className={`text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded ${log.success ? 'bg-emerald-500/10 text-emerald-600' : 'bg-red-500/10 text-red-600'}`}>
+                        <span className={`text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded ${log.success ? 'bg-emerald-500/10 text-emerald-600' : 'bg-destructive/10 text-destructive'}`}>
                           {log.success ? 'SUCCESS' : 'FAILED'}
                         </span>
                         {log.riskTier && log.riskTier >= 3 && (
-                          <span className="text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded bg-red-500/10 text-red-500">
+                          <span className="text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded bg-destructive/10 text-destructive">
                             Tier {log.riskTier}
                           </span>
                         )}
@@ -396,11 +396,11 @@ export default function KeyWorkerPage() {
                 <span className="kf-text-caption">Medium — approval gate</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-red-500" />
+                <div className="w-2 h-2 rounded-full bg-destructive" />
                 <span className="kf-text-caption">High — always requires approval</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-purple-500" />
+                <div className="w-2 h-2 rounded-full bg-[hsl(var(--kf-violet-accent))]" />
                 <span className="kf-text-caption">Critical — owner + confirmation</span>
               </div>
             </div>

@@ -31,19 +31,15 @@ export interface FlowDef {
   color: string;
 }
 
+const FLOW_ACCENT = "hsl(var(--kf-accent1))";
+
 const FLOWS: FlowDef[] = [
-  { id: "financial", label: "Money", href: "/app/financial-flow", icon: Banknote, category: "MONEY", color: "#10b981" },
-  { id: "temporal", label: "Time", href: "/app/temporal-flow", icon: Clock, category: "TIME", color: "#3b82f6" },
-  { id: "people", label: "People", href: "/app/people-flow", icon: Users, category: "PEOPLE", color: "#a855f7" },
-  { id: "sales", label: "Sales", href: "/app/sales-flow", icon: TrendingUp, category: "SALES", color: "#ec4899" },
-  { id: "marketing", label: "Marketing", href: "/app/marketing-flow", icon: Megaphone, category: "MARKETING", color: "#f97316" },
-  { id: "operations", label: "Ops", href: "/app/operations-flow", icon: BriefcaseBusiness, category: "WORK", color: "#6366f1" },
-  { id: "delivery", label: "Delivery", href: "/app/delivery-flow", icon: Truck, category: "WORK", color: "#14b8a6" },
-  { id: "team", label: "Team", href: "/app/team-flow", icon: UserCog, category: "PEOPLE", color: "#8b5cf6" },
-  { id: "asset", label: "Assets", href: "/app/asset-flow", icon: FolderArchive, category: "SYSTEM", color: "#64748b" },
-  { id: "intelligence", label: "Intel", href: "/app/intelligence-flow", icon: BrainCircuit, category: "SYSTEM", color: "#06b6d4" },
-  { id: "strategy", label: "Strategy", href: "/app/strategy-flow", icon: Target, category: "STRATEGY", color: "#d946ef" },
-  { id: "governance", label: "Gov", href: "/app/governance-flow", icon: ShieldCheck, category: "GOVERNANCE", color: "#ef4444" },
+  { id: "financial", label: "Money", href: "/app/financial-flow", icon: Banknote, category: "MONEY", color: FLOW_ACCENT },
+  { id: "temporal", label: "Time", href: "/app/temporal-flow", icon: Clock, category: "TIME", color: FLOW_ACCENT },
+  { id: "people", label: "People", href: "/app/people-flow", icon: Users, category: "PEOPLE", color: FLOW_ACCENT },
+  { id: "marketing", label: "Marketing", href: "/app/marketing-flow", icon: Megaphone, category: "MARKETING", color: FLOW_ACCENT },
+  { id: "operations", label: "Ops", href: "/app/operations-flow", icon: BriefcaseBusiness, category: "WORK", color: FLOW_ACCENT },
+  { id: "governance", label: "Gov", href: "/app/governance-flow", icon: ShieldCheck, category: "GOVERNANCE", color: FLOW_ACCENT },
 ];
 
 interface FlowShellProps {

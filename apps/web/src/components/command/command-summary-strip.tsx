@@ -22,19 +22,19 @@ export function CommandSummaryStrip({ summary, className = "" }: CommandSummaryS
         label="Needs Approval"
         value={summary.waitingApproval}
         icon={ShieldAlert}
-        iconColor="#ef4444"
+        iconColor="hsl(var(--kf-destructive))"
       />
       <MetricCard
         label="KEY Can Handle"
         value={summary.executableByKey}
         icon={Bot}
-        iconColor="#3b82f6"
+        iconColor="hsl(var(--kf-accent2))"
       />
       <MetricCard
         label="Total Categories"
         value={summary.byCategory.length}
         icon={Zap}
-        iconColor="#10b981"
+        iconColor="hsl(var(--kf-success))"
       />
     </div>
   );

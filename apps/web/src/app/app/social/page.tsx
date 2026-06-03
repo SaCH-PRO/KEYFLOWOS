@@ -189,7 +189,7 @@ export default function SocialComposerPage() {
         className="flex flex-col md:flex-row md:items-center md:justify-between gap-3"
       >
         <div className="flex items-center gap-3">
-          <div className="h-11 w-11 rounded-2xl bg-gradient-to-br from-pink-500 to-purple-500 flex items-center justify-center text-white shadow-lg">
+          <div className="h-11 w-11 rounded-2xl bg-gradient-to-br from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-violet-accent))] flex items-center justify-center text-white shadow-lg">
             <Share2 className="w-5 h-5" />
           </div>
           <div>
