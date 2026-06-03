@@ -66,6 +66,15 @@ export class DeviceController {
     return this.device.getCapture(businessId, id);
   }
 
+  @Post('captures/:id/process')
+  async processCapture(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Request() req: { user?: { sub?: string } },
+  ) {
+    return this.device.processCapture(businessId, id, req.user?.sub);
+  }
+
   // ─── Visual Intakes ───
 
   @Get('intakes')

@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { openKey } from "@/components/key";
+import { UnifiedPageShell } from "@/components/layout/unified-page-shell";
 import { CommandQueue } from "@/components/command/command-queue";
 import { CommandSummaryStrip } from "@/components/command/command-summary-strip";
 import { fetchCommandCenter, type CommandCenterDto } from "@/lib/api/os";
@@ -176,17 +177,12 @@ export default function CommandCenterPage() {
   const currency = d?.business.currency ?? "TTD";
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-6 space-y-5">
-      {/* Top greeting + quick stats */}
-      <div className="space-y-1">
-        <h1 className="text-xl font-semibold tracking-tight">
-          {greeting}{d?.business.name ? `, ${d.business.name}` : ""}
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          {loading ? "Loading your business overview..." : d?.key.briefing}
-        </p>
-      </div>
-
+    <UnifiedPageShell
+      title="Command Center"
+      subtitle="Your business cockpit. Health, actions, and quick navigation."
+      icon={Zap}
+      maxWidth="5xl"
+    >
       {/* Unified status strip */}
       {!loading && d && (
         <div className="flex flex-wrap items-center gap-2">
@@ -316,6 +312,6 @@ export default function CommandCenterPage() {
           </div>
         </div>
       )}
-    </div>
+    </UnifiedPageShell>
   );
 }

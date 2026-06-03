@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import { getStoredBusinessId } from "@/lib/workspace";
-import { PageHeader } from "@/components/ui/page-header";
+import { UnifiedPageShell } from "@/components/layout/unified-page-shell";
 import { SectionCard } from "@/components/ui/section-card";
 import { apiGet, apiPost } from "@/lib/api";
 import { fetchAiExecutionLogs, type AiExecutionLogEntry } from "@/lib/client";
@@ -122,13 +122,12 @@ export default function KeyWorkerPage() {
   const pendingApprovals = approvals.filter((a) => a.status === "pending");
 
   return (
-    <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
-      <PageHeader
-        icon={Bot}
-        title="KEY Worker"
-        subtitle="Your AI business employee — ask, plan, draft, do, or auto."
-      />
-
+    <UnifiedPageShell
+      title="KEY Worker"
+      subtitle="Ask, plan, draft, and execute with AI."
+      icon={Bot}
+      maxWidth="5xl"
+    >
       {/* Command Input */}
       <SectionCard icon={Brain} title="Command KEY" noPadding>
         <div className="p-4 space-y-3">
@@ -407,6 +406,6 @@ export default function KeyWorkerPage() {
           </SectionCard>
         </div>
       </div>
-    </div>
+    </UnifiedPageShell>
   );
 }

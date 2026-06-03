@@ -2,6 +2,7 @@ import { Injectable, Inject, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { VisualClassifierService, VisualClassification } from './visual-classifier.service';
 import { CommandService } from '../command/command.service';
+import { DocumentIntelligenceService } from '../ai/document-intelligence.service';
 
 export interface CreateCaptureInput {
   objectPath: string;
@@ -45,6 +46,7 @@ export class DeviceService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(VisualClassifierService) private readonly classifier: VisualClassifierService,
     @Inject(CommandService) private readonly commands: CommandService,
+    @Inject(DocumentIntelligenceService) private readonly docIntel: DocumentIntelligenceService,
   ) {}
 
   async createCapture(businessId: string, userId: string | null, input: CreateCaptureInput) {
@@ -403,5 +405,73 @@ export class DeviceService {
         isDefault: input.isDefault ?? false,
       },
     });
+  }
+
+  async processCapture(businessId: string, captureId: string, _userId?: string) {
+    const asset = await this.prisma.client.mediaAsset.findFirst({
+      where: { id: captureId, businessId },
+    });
+    if (!asset) throw new NotFoundException('Capture not found');
+    if (!asset.publicUrl) throw new NotFoundException('Capture has no accessible URL for processing');
+
+    // Find related visual intake
+    const intake = await this.prisma.client.visualIntake.findFirst({
+      where: { mediaAssetId: asset.id, businessId },
+    });
+
+    // Run AI document intelligence
+    const extraction = await this.docIntel.extractFromDocument({
+      businessId,
+      source: 'device_capture',
+      mimeType: asset.contentType,
+      url: asset.publicUrl,
+      filename: asset.fileName ?? 'capture',
+    });
+
+    // Update visual intake with AI results
+    if (intake) {
+      await this.prisma.client.visualIntake.update({
+        where: { id: intake.id },
+        data: {
+          extractedText: extraction.rawText ?? intake.extractedText ?? null,
+          extractedData: (extraction.invoiceData ?? extraction.contactData ?? {}) as Record<string, unknown>,
+          status: 'PROCESSED',
+          confidenceScore: extraction.confidence,
+        },
+      });
+
+      // Find existing extracted entity
+      const existingEntity = await this.prisma.client.extractedEntity.findFirst({
+        where: { visualIntakeId: intake.id, entityType: extraction.documentType },
+      });
+
+      const proposedData = (extraction.invoiceData ?? extraction.contactData ?? {}) as Record<string, unknown>;
+
+      if (existingEntity) {
+        await this.prisma.client.extractedEntity.update({
+          where: { id: existingEntity.id },
+          data: { proposedData, status: 'PROPOSED' },
+        });
+      } else {
+        await this.prisma.client.extractedEntity.create({
+          data: {
+            businessId,
+            visualIntakeId: intake.id,
+            mediaAssetId: asset.id,
+            entityType: extraction.documentType,
+            proposedData,
+            status: 'PROPOSED',
+          },
+        });
+      }
+    }
+
+    // Update media asset status
+    await this.prisma.client.mediaAsset.update({
+      where: { id: asset.id },
+      data: { status: 'PROCESSED' },
+    });
+
+    return { asset, extraction, intake };
   }
 }

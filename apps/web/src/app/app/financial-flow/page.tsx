@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { Banknote, Wallet, Receipt, FileText, Landmark, ShieldCheck, Zap, ArrowRight, TrendingUp, PiggyBank, Plus, Trash2, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { getStoredBusinessId } from "@/lib/workspace";
-import { FlowShell } from "@/components/layout/flow-shell";
+import { UnifiedPageShell } from "@/components/layout/unified-page-shell";
 import { MetricCard } from "@/components/ui/metric-card";
 import { apiGet } from "@/lib/api";
 import { fetchReserveBuckets, createReserveBucket, updateReserveBucket, deleteReserveBucket, type ReserveBucket } from "@/lib/api/finance";
@@ -109,11 +109,11 @@ export default function FinancialFlowPage() {
   ];
 
   return (
-    <FlowShell
+    <UnifiedPageShell
       title="Financial Flow"
-      subtitle="Control money. Know what you have, what you owe, and what is safe to spend."
+      subtitle="Cash, reserves, and forecasting."
       icon={Banknote}
-      activeFlowId="financial"
+      maxWidth="5xl"
     >
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {loading ? (
@@ -290,6 +290,6 @@ export default function FinancialFlowPage() {
           </button>
         ))}
       </div>
-    </FlowShell>
+    </UnifiedPageShell>
   );
 }

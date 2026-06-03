@@ -19,6 +19,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { Button } from "@keyflow/ui";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { UnifiedPageShell } from "@/components/layout/unified-page-shell";
 import { getStoredBusinessId } from "@/lib/workspace";
 import {
   fetchPosts,
@@ -182,23 +183,12 @@ export default function SocialComposerPage() {
   const connectedCount = connections.filter((c) => c.status === "CONNECTED").length;
 
   return (
-    <div className="space-y-6 max-w-6xl mx-auto p-4">
-      <motion.div
-        initial={{ opacity: 0, y: -8 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="flex flex-col md:flex-row md:items-center md:justify-between gap-3"
-      >
-        <div className="flex items-center gap-3">
-          <div className="h-11 w-11 rounded-2xl bg-gradient-to-br from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-violet-accent))] flex items-center justify-center text-white shadow-lg">
-            <Share2 className="w-5 h-5" />
-          </div>
-          <div>
-            <h1 className="text-xl font-semibold">Social Composer</h1>
-            <p className="text-sm text-muted-foreground">
-              Compose, schedule, and analyse posts across every connected channel.
-            </p>
-          </div>
-        </div>
+    <UnifiedPageShell
+      title="Social Composer"
+      subtitle="Compose, schedule, and analyze posts."
+      icon={Share2}
+      maxWidth="6xl"
+      headerActions={
         <div className="flex items-center gap-2">
           <Link
             href="/app/connect#social"
@@ -220,8 +210,8 @@ export default function SocialComposerPage() {
             <Plus className="h-3.5 w-3.5 mr-1" /> New post
           </Button>
         </div>
-      </motion.div>
-
+      }
+    >
       <div className="flex items-center gap-1 border-b border-border/40 overflow-x-auto">
         {VIEWS.map((v) => {
           const Icon = v.icon;
@@ -387,6 +377,6 @@ export default function SocialComposerPage() {
         }}
         onCancel={() => setConfirmState((p) => ({ ...p, open: false }))}
       />
-    </div>
+    </UnifiedPageShell>
   );
 }
