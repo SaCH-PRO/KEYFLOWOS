@@ -128,6 +128,56 @@ export class ProductAnalyticsService {
     });
   }
 
+  async listAiQualitySignals(filters: {
+    businessId?: string;
+    module?: string;
+    signalType?: string;
+    limit?: number;
+    offset?: number;
+  }) {
+    const where: Record<string, unknown> = {};
+    if (filters.businessId) where.businessId = filters.businessId;
+    if (filters.module) where.module = filters.module;
+    if (filters.signalType) where.signalType = filters.signalType;
+
+    const [items, total] = await Promise.all([
+      this.prisma.client.aiQualitySignal.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: filters.limit ?? 50,
+        skip: filters.offset ?? 0,
+      }),
+      this.prisma.client.aiQualitySignal.count({ where }),
+    ]);
+
+    return { items, total };
+  }
+
+  async listEvents(filters: {
+    businessId?: string;
+    module?: string;
+    eventName?: string;
+    limit?: number;
+    offset?: number;
+  }) {
+    const where: Record<string, unknown> = {};
+    if (filters.businessId) where.businessId = filters.businessId;
+    if (filters.module) where.module = filters.module;
+    if (filters.eventName) where.eventName = filters.eventName;
+
+    const [items, total] = await Promise.all([
+      this.prisma.client.productEvent.findMany({
+        where,
+        orderBy: { occurredAt: 'desc' },
+        take: filters.limit ?? 50,
+        skip: filters.offset ?? 0,
+      }),
+      this.prisma.client.productEvent.count({ where }),
+    ]);
+
+    return { items, total };
+  }
+
   async aggregateDailyUsage(day: Date) {
     const start = new Date(day);
     start.setHours(0, 0, 0, 0);

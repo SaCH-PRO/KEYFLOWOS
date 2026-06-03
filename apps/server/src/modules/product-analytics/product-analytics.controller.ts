@@ -98,6 +98,42 @@ export class ProductAnalyticsController {
     return this.analytics.createAiQualitySignal({ ...body, businessId });
   }
 
+  @Get('ai-quality')
+  @RequireModuleScope('settings', 'read')
+  async listAiQuality(
+    @Param('businessId') businessId: string,
+    @Query('module') module?: string,
+    @Query('signalType') signalType?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    return this.analytics.listAiQualitySignals({
+      businessId,
+      module,
+      signalType,
+      limit: limit ? parseInt(limit, 10) : undefined,
+      offset: offset ? parseInt(offset, 10) : undefined,
+    });
+  }
+
+  @Get('events')
+  @RequireModuleScope('settings', 'read')
+  async listEvents(
+    @Param('businessId') businessId: string,
+    @Query('module') module?: string,
+    @Query('eventName') eventName?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    return this.analytics.listEvents({
+      businessId,
+      module,
+      eventName,
+      limit: limit ? parseInt(limit, 10) : undefined,
+      offset: offset ? parseInt(offset, 10) : undefined,
+    });
+  }
+
   @Get('activation-funnel')
   @RequireModuleScope('settings', 'read')
   async getActivationFunnel(
