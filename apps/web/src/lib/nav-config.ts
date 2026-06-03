@@ -159,74 +159,57 @@ export const operateSections: NavSection[] = [
     ],
   },
   {
-    id: "sales-flow",
-    label: "Sales Flow",
+    id: "sales",
+    label: "Sales",
     icon: TrendingUp,
     items: [
-      { label: "Sales Flow", href: "/app/sales-flow", icon: TrendingUp },
       { label: "Commerce", href: "/app/commerce", icon: Receipt },
       { label: "Deals", href: "/app/network/contacts", icon: Contact },
     ],
   },
   {
-    id: "marketing-flow",
-    label: "Marketing Flow",
+    id: "marketing",
+    label: "Marketing",
     icon: Megaphone,
     items: [
-      { label: "Marketing Flow", href: "/app/marketing-flow", icon: Megaphone },
       { label: "Campaigns", href: "/app/marketing", icon: Mail },
       { label: "Content", href: "/app/content-ops", icon: PenTool },
       { label: "Social", href: "/app/social", icon: Share2 },
     ],
   },
   {
-    id: "operations-flow",
-    label: "Operations Flow",
+    id: "operations",
+    label: "Operations",
     icon: BriefcaseBusiness,
     items: [
-      { label: "Operations Flow", href: "/app/operations-flow", icon: BriefcaseBusiness },
       { label: "Projects", href: "/app/projects", icon: FolderKanban },
-      { label: "Workflows", href: "/app/workflows", icon: Layers },
       { label: "Tasks", href: "/app/approvals", icon: CheckSquare },
     ],
   },
   {
-    id: "delivery-flow",
-    label: "Delivery Flow",
-    icon: Truck,
-    items: [
-      { label: "Delivery Flow", href: "/app/delivery-flow", icon: Truck },
-      { label: "Bookings", href: "/app/bookings", icon: Calendar },
-      { label: "Projects", href: "/app/projects", icon: FolderKanban },
-    ],
-  },
-  {
-    id: "governance-flow",
-    label: "Governance Flow",
+    id: "governance",
+    label: "Governance",
     icon: ShieldCheck,
     items: [
-      { label: "Governance Flow", href: "/app/governance-flow", icon: ShieldCheck },
       { label: "Approvals", href: "/app/approvals", icon: CheckSquare },
       { label: "Compliance", href: "/app/evidence", icon: ShieldCheck },
     ],
   },
   {
-    id: "intelligence-flow",
-    label: "Intelligence Flow",
+    id: "intelligence",
+    label: "Intelligence",
     icon: Brain,
     items: [
-      { label: "Intelligence Flow", href: "/app/intelligence-flow", icon: Brain },
       { label: "Growth", href: "/app/growth", icon: TrendingUp },
       { label: "Storefront", href: "/app/storefront-intelligence", icon: Store },
       { label: "Documents", href: "/app/document-intelligence", icon: FileText },
     ],
   },
   {
-    id: "strategy-flow",
-    label: "Strategy Flow",
+    id: "strategy",
+    label: "Strategy",
     icon: Target,
     items: [
-      { label: "Strategy Flow", href: "/app/strategy-flow", icon: Target },
       { label: "Goals", href: "/app/goals", icon: Target },
       { label: "Blueprint", href: "/app/blueprint", icon: FileText },
     ],
@@ -248,7 +231,7 @@ export const buildSections: NavSection[] = [
     icon: Building,
     items: [
       { label: "Blueprint", href: "/app/blueprint", icon: BrainCircuit },
-      { label: "Storefront", href: "/app/store", icon: Store },
+      { label: "Storefront", href: "/app/commerce", icon: Store },
       { label: "Presence", href: "/app/presence", icon: Globe },
       { label: "Templates", href: "/app/templates", icon: GraduationCap },
     ],
@@ -303,7 +286,6 @@ export const buildNav: NavItem[] = buildSections.flatMap((s) => s.items);
 // ============================================================================
 
 export const moreNav: NavItem[] = [
-  { label: "Documents", href: "/app/documents", icon: FileText },
   { label: "Community", href: "/app/community", icon: MessageCircle, dormantFlag: "community" },
   { label: "Learn", href: "/app/learn", icon: BookOpen, dormantFlag: "learning" },
   { label: "Marketplace", href: "/app/marketplace", icon: Globe, dormantFlag: "marketplaceBrowsing" },
@@ -326,9 +308,9 @@ export const meNav: NavItem[] = [
 
 export const mobileBottomNav = [
   { label: "Home", href: "/app/command-center", icon: Zap },
-  { label: "Inbox", href: "/app/inbox", icon: Mail },
-  { label: "Capture", href: "/app/capture", icon: Camera },
+  { label: "Flows", href: "#flows", icon: Briefcase },
   { label: "AI", href: "#key", icon: Brain },
+  { label: "Inbox", href: "/app/inbox", icon: Mail },
   { label: "Me", href: "#me", icon: User },
 ];
 

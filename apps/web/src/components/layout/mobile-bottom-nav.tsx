@@ -66,10 +66,9 @@ export function MobileBottomNav({
             );
           }
 
-          // Drawer triggers: Operate, Build, Me
+          // Drawer triggers: Flows, Me
           if (
-            item.href === "#operate" ||
-            item.href === "#build" ||
+            item.href === "#flows" ||
             item.href === "#me"
           ) {
             return (
