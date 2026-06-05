@@ -12,6 +12,10 @@ import {
   CheckCircle2,
   Clock,
   TrendingUp,
+  History,
+  XCircle,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { getStoredBusinessId } from "@/lib/workspace";
 import {
@@ -20,8 +24,12 @@ import {
   publishFlow,
   deleteFlow,
   testFlow,
+  listFlowRuns,
+  getFlowRunSteps,
   type AutomationFlow,
   type FlowVersion,
+  type FlowRun,
+  type FlowRunStep,
 } from "@/lib/api/flow";
 import { SectionCard } from "@/components/ui/section-card";
 import { Button } from "@/components/ui/button";
@@ -41,6 +49,10 @@ export default function FlowDetailPage() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [goal, setGoal] = useState("");
+  const [runs, setRuns] = useState<FlowRun[]>([]);
+  const [runLoading, setRunLoading] = useState(false);
+  const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
+  const [runSteps, setRunSteps] = useState<Record<string, FlowRunStep[]>>({});
 
   useEffect(() => {
     if (!businessId || !flowId) return;
@@ -48,13 +60,19 @@ export default function FlowDetailPage() {
     const load = async () => {
       setLoading(true);
       try {
-        const res = await getFlow(businessId, flowId);
-        if (!cancelled && res.data) {
-          setFlow(res.data);
-          setVersions(res.data.versions ?? []);
-          setName(res.data.name);
-          setDescription(res.data.description ?? "");
-          setGoal(res.data.goal ?? "");
+        const [flowRes, runsRes] = await Promise.all([
+          getFlow(businessId, flowId),
+          listFlowRuns(businessId, flowId, { limit: 20 }),
+        ]);
+        if (!cancelled && flowRes.data) {
+          setFlow(flowRes.data);
+          setVersions(flowRes.data.versions ?? []);
+          setName(flowRes.data.name);
+          setDescription(flowRes.data.description ?? "");
+          setGoal(flowRes.data.goal ?? "");
+        }
+        if (!cancelled && runsRes.data) {
+          setRuns(runsRes.data.items);
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -100,9 +118,25 @@ export default function FlowDetailPage() {
     setTesting(true);
     try {
       await testFlow(businessId, flowId, { payload: {} });
-      alert("Test run started. Check the runs tab for results.");
+      // Refresh runs
+      const runsRes = await listFlowRuns(businessId, flowId, { limit: 20 });
+      if (runsRes.data) setRuns(runsRes.data.items);
     } finally {
       setTesting(false);
+    }
+  };
+
+  const toggleRun = async (runId: string) => {
+    if (expandedRunId === runId) {
+      setExpandedRunId(null);
+      return;
+    }
+    setExpandedRunId(runId);
+    if (!runSteps[runId] && businessId && flowId) {
+      const res = await getFlowRunSteps(businessId, flowId, runId);
+      if (res.data) {
+        setRunSteps((prev) => ({ ...prev, [runId]: res.data!.items }));
+      }
     }
   };
 
@@ -295,6 +329,96 @@ export default function FlowDetailPage() {
           </div>
         </SectionCard>
       )}
+
+      {/* Run History */}
+      <SectionCard>
+        <div className="p-4 border-b border-border/60 flex items-center justify-between">
+          <h2 className="text-sm font-semibold flex items-center gap-2">
+            <History className="w-4 h-4 text-muted-foreground" />
+            Run History
+          </h2>
+          <span className="text-xs text-muted-foreground">{runs.length} runs</span>
+        </div>
+        {runs.length === 0 ? (
+          <div className="p-6 text-center text-sm text-muted-foreground">
+            No runs yet. Click Test to run this flow manually.
+          </div>
+        ) : (
+          <div className="divide-y divide-border/60">
+            {runs.map((run) => (
+              <div key={run.id}>
+                <button
+                  onClick={() => toggleRun(run.id)}
+                  className="w-full p-4 flex items-center gap-3 hover:bg-muted/40 transition-colors text-left"
+                >
+                  {run.status === "COMPLETED" ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  ) : run.status === "FAILED" ? (
+                    <XCircle className="w-4 h-4 text-red-400 shrink-0" />
+                  ) : (
+                    <Loader2 className="w-4 h-4 text-amber-400 shrink-0 animate-spin" />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-medium">{run.status}</span>
+                      <span className="text-[10px] text-muted-foreground">
+                        {new Date(run.startedAt).toLocaleString()}
+                      </span>
+                    </div>
+                    {run.error && (
+                      <p className="text-[10px] text-red-400 truncate">{run.error}</p>
+                    )}
+                  </div>
+                  {expandedRunId === run.id ? (
+                    <ChevronUp className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                  ) : (
+                    <ChevronDown className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                  )}
+                </button>
+                {expandedRunId === run.id && (
+                  <div className="px-4 pb-4 pl-11">
+                    {runSteps[run.id] ? (
+                      <div className="space-y-2">
+                        {runSteps[run.id].map((step, idx) => (
+                          <div
+                            key={step.id}
+                            className={`flex items-center gap-2 text-xs p-2 rounded-md ${
+                              step.status === "COMPLETED"
+                                ? "bg-emerald-500/5"
+                                : step.status === "FAILED"
+                                ? "bg-red-500/5"
+                                : "bg-muted/30"
+                            }`}
+                          >
+                            <span className="text-muted-foreground w-4">{idx + 1}</span>
+                            <span className="font-medium capitalize">{step.nodeType.replace(/_/g, " ")}</span>
+                            <span
+                              className={`ml-auto text-[10px] ${
+                                step.status === "COMPLETED"
+                                  ? "text-emerald-400"
+                                  : step.status === "FAILED"
+                                  ? "text-red-400"
+                                  : "text-muted-foreground"
+                              }`}
+                            >
+                              {step.status}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                        Loading steps...
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </SectionCard>
     </div>
   );
 }

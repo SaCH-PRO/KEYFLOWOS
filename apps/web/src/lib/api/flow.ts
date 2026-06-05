@@ -152,3 +152,22 @@ export async function listFlowRuns(
     `/api/flows/businesses/${businessId}/flows/${flowId}/runs?${search.toString()}`,
   );
 }
+
+export interface FlowRunStep {
+  id: string;
+  runId: string;
+  nodeId: string;
+  nodeType: string;
+  status: string;
+  input: Record<string, unknown>;
+  output: Record<string, unknown>;
+  error: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+}
+
+export async function getFlowRunSteps(businessId: string, flowId: string, runId: string) {
+  return apiGet<{ items: FlowRunStep[]; total: number }>(
+    `/api/flows/businesses/${businessId}/flows/${flowId}/runs/${runId}/steps`,
+  );
+}
