@@ -32,6 +32,8 @@ import {
   dismissCommandItem,
   approveCommandItem,
   executeCommandItem,
+  completeCommandItem,
+  reopenCommandItem,
   autoScanCommandItems,
   type CommandItem,
   type CommandSummary,
@@ -156,6 +158,22 @@ export default function CommandCenterPage() {
     const res = await executeCommandItem(businessId, id);
     if (res.data) {
       setCommands((prev) => prev.map((c) => (c.id === id ? { ...c, status: "EXECUTED" } : c)));
+    }
+  };
+
+  const handleComplete = async (id: string) => {
+    if (!businessId) return;
+    const res = await completeCommandItem(businessId, id);
+    if (res.data) {
+      setCommands((prev) => prev.map((c) => (c.id === id ? { ...c, status: "COMPLETED" } : c)));
+    }
+  };
+
+  const handleReopen = async (id: string) => {
+    if (!businessId) return;
+    const res = await reopenCommandItem(businessId, id);
+    if (res.data) {
+      setCommands((prev) => prev.map((c) => (c.id === id ? { ...c, status: "OPEN" } : c)));
     }
   };
 
@@ -285,6 +303,8 @@ export default function CommandCenterPage() {
           onDismiss={handleDismiss}
           onApprove={handleApprove}
           onExecute={handleExecute}
+          onComplete={handleComplete}
+          onReopen={handleReopen}
         />
       </div>
 

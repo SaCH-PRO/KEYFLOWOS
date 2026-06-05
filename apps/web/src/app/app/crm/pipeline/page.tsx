@@ -10,7 +10,6 @@ import {
   Zap,
   TrendingUp,
   Lightbulb,
-  MessageSquare,
   ArrowRight,
   AlertTriangle,
   Flame,

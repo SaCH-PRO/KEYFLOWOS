@@ -144,7 +144,7 @@ export class VisualClassifierService {
 
     for (const line of lines) {
       const l = line.trim();
-      if (/^\+?[\d\s\-\(\)]{7,}$/.test(l) && !result.phone) {
+      if (/^\+?[\d\s\-()]{7,}$/.test(l) && !result.phone) {
         result.phone = l.replace(/\s/g, '');
       }
       if (l.includes('@') && l.includes('.') && !result.email) {
@@ -185,7 +185,7 @@ export class VisualClassifierService {
     if (taxMatch) result.tax = taxMatch[1];
 
     // Try to find date
-    const dateMatch = text.match(/(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/);
+    const dateMatch = text.match(/(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})/);
     if (dateMatch) result.date = dateMatch[1];
 
     // Try to find merchant name (first line that looks like a business name)

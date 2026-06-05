@@ -16,7 +16,6 @@ import {
   MessageCircle,
   Mail,
   Receipt,
-  Loader2,
   ArrowUpDown,
   ChevronLeft,
   ChevronRight,

@@ -7,21 +7,12 @@ import {
   Sparkles,
   Zap,
   Clock,
-  CheckCircle2,
   AlertTriangle,
-  Plus,
-  ArrowRight,
-  BarChart3,
-  Type,
-  PenTool,
   Shield,
-  CalendarDays,
-  ChevronRight,
   Bot,
   Lightbulb,
   Copy,
   Download,
-  Eye,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";

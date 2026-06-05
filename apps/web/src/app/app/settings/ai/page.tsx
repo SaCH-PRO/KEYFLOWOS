@@ -4,7 +4,6 @@ import { useEffect, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Brain,
-  Loader2,
   Users,
   Zap,
   Shield,
@@ -14,8 +13,6 @@ import {
   Check,
   Edit3,
   Tag,
-  Calendar,
-  Clock,
   DollarSign,
   Activity,
   Crown,
@@ -740,7 +737,7 @@ function AuthorityTab({
             <select
               className="w-full rounded-lg border border-border/60 bg-[#111113] px-3 py-2 text-sm"
               value={newGrant.scope}
-              onChange={(e) => setNewGrant((p) => ({ ...p, scope: e.target.value as any }))}
+              onChange={(e) => setNewGrant((p) => ({ ...p, scope: e.target.value as "tier4_operations" | "tier4_financial" | "tier4_publishing" }))}
             >
               <option value="tier4_operations">Operations</option>
               <option value="tier4_financial">Financial</option>

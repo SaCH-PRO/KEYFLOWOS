@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Target, Plus, TrendingUp, Calendar, Loader2, Zap, Trash2, RefreshCw, FolderKanban, ArrowRight } from "lucide-react";
+import { Target, Plus, Loader2, Trash2, RefreshCw, FolderKanban } from "lucide-react";
 import { toast } from "sonner";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { apiGet, apiPostSimple, apiDelete } from "@/lib/api";
@@ -35,6 +35,7 @@ interface LinkedProject {
   name: string;
   status: string;
   tasks: Array<{ isCompleted: boolean }>;
+  goalId?: string;
 }
 
 const ROLE_COLORS: Record<string, string> = {
@@ -299,7 +300,7 @@ export default function GoalsPage() {
 
                   {/* Linked Projects */}
                   {(() => {
-                    const linked = projects.filter((p) => (p as any).goalId === goal.id);
+                    const linked = projects.filter((p) => p.goalId === goal.id);
                     if (linked.length === 0) return null;
                     const totalTasks = linked.reduce((sum, p) => sum + p.tasks.length, 0);
                     const completedTasks = linked.reduce((sum, p) => sum + p.tasks.filter((t) => t.isCompleted).length, 0);

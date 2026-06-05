@@ -25,11 +25,6 @@ export default function ChangeOrdersPage() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ projectId: "", title: "", description: "", additionalAmount: "", additionalHours: "" });
 
-  useEffect(() => {
-    if (!businessId) return;
-    loadData();
-  }, [businessId]);
-
   async function loadData() {
     if (!businessId) return;
     setLoading(true);
@@ -37,6 +32,11 @@ export default function ChangeOrdersPage() {
     if (res.data) setItems(res.data);
     setLoading(false);
   }
+
+  useEffect(() => {
+    if (!businessId) return;
+    queueMicrotask(loadData);
+  }, [businessId]);
 
   async function handleCreate() {
     if (!businessId) return;

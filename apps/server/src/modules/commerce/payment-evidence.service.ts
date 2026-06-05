@@ -117,7 +117,7 @@ export class PaymentEvidenceService {
     let date: string | undefined;
     let payer: string | undefined;
     if (extraction.rawText) {
-      const dateMatch = extraction.rawText.match(/(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}|\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2})/);
+      const dateMatch = extraction.rawText.match(/(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2})/);
       if (dateMatch) date = dateMatch[1];
       const payerMatch = extraction.rawText.match(/(?:from|payer|sender|paid by)[\s:]*([A-Za-z][A-Za-z\s]+?)(?:\n|$|\d)/i);
       if (payerMatch) payer = payerMatch[1].trim();

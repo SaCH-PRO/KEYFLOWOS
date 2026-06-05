@@ -4,27 +4,20 @@ import { useEffect, useState, useMemo } from "react";
 import { motion } from "framer-motion";
 import {
   TrendingUp,
-  TrendingDown,
   Users,
   Target,
   Zap,
-  ArrowRight,
   BarChart3,
-  PieChart,
   Activity,
   Sparkles,
-  Globe,
   ShoppingCart,
   MessageSquare,
   CalendarDays,
-  Award,
   ChevronRight,
   Bot,
-  Lightbulb,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
-import { formatCurrency } from "@/lib/currency";
 
 /* ─────────── Types ─────────── */
 

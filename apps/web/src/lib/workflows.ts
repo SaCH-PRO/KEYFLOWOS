@@ -13,7 +13,7 @@ export interface WorkflowTemplate {
     description: string;
     riskTier: number;
     dependsOnOrders: number[];
-    inputPayload: Record<string, any> | null;
+    inputPayload: Record<string, unknown> | null;
     expectedBenefit: string;
   }>;
 }
@@ -27,7 +27,7 @@ export async function instantiateWorkflow(
   templateKey: string,
   body?: { contactId?: string; projectId?: string; amount?: number }
 ) {
-  return apiPost<{ planId: string; plan: any }>({
+  return apiPost<{ planId: string; plan: unknown }>({
     path: `/ai/businesses/${businessId}/ai/workflows/${templateKey}/instantiate`,
     body: body ?? {},
   });

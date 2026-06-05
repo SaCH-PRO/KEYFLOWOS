@@ -284,7 +284,7 @@ export class ProjectPlanExecutorService {
   private sanitizeProjectName(idea: string): string {
     // Take first 60 chars, strip special chars, title-case
     const cleaned = idea
-      .replace(/[^a-zA-Z0-9\s\-]/g, '')
+      .replace(/[^a-zA-Z0-9\s-]/g, '')
       .replace(/\s+/g, ' ')
       .trim();
     return cleaned.length > 60 ? cleaned.slice(0, 60) + '...' : cleaned;

@@ -20,7 +20,6 @@ import { ProjectExecutionStrip } from "./components/project-execution-strip";
 import { ProjectDetail } from "./components/project-detail";
 import { useProjectsAiHub } from "./hooks/use-projects-ai-hub";
 import { PlanGenerator } from "./components/plan-generator";
-import { useProjectPlans } from "./hooks/use-project-plans";
 import { ProjectIntelligencePanel } from "./components/project-intelligence-panel";
 import { ResumePrompt } from "@/components/ui/resume-task-system";
 import { useReturnNavigation } from "@/lib/use-return-navigation";

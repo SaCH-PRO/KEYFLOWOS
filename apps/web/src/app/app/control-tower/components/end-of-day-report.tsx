@@ -1,17 +1,14 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import {
   Moon,
   X,
-  ChevronDown,
-  ChevronUp,
   DollarSign,
   Calendar,
   Users,
   Activity,
   TrendingUp,
-  TrendingDown,
   Minus,
 } from "lucide-react";
 import { fetchEodReport } from "@/lib/client";

@@ -3,6 +3,7 @@
 import { HelpCircle } from "lucide-react";
 import { motion } from "framer-motion";
 import { openKey } from "@/components/key/key-agent";
+import type { CopilotModule } from "@/components/ai/copilot-panel";
 
 interface PageHelpButtonProps {
   /** Which module/workspace the user is in */
@@ -34,7 +35,7 @@ export function PageHelpButton({
     openKey({
       mode: "chat",
       prompt: ``,
-      module: module as any,
+      module: module as CopilotModule,
       context: {
         helpRequest: true,
         pageTitle,

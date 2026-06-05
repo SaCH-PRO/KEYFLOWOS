@@ -8,14 +8,6 @@ import {
   Receipt,
   Landmark,
   ArrowRight,
-  TrendingDown,
-  AlertTriangle,
-  CheckCircle2,
-  Wallet,
-  CreditCard,
-  FileText,
-  Calculator,
-  Clock,
   Target,
 } from "lucide-react";
 import { formatCurrency, formatCurrencyCompact } from "@/lib/currency";

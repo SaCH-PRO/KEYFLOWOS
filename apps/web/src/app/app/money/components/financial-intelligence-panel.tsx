@@ -5,14 +5,10 @@ import { motion } from "framer-motion";
 import {
   Brain,
   TrendingUp,
-  TrendingDown,
   AlertTriangle,
   Zap,
   Sparkles,
   Target,
-  Banknote,
-  CalendarDays,
-  ArrowRight,
   PieChart,
 } from "lucide-react";
 

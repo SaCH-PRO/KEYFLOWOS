@@ -7,7 +7,7 @@ import * as Sentry from "@sentry/nextjs";
  */
 export function logError(message: string, error?: unknown): void {
   if (process.env.NODE_ENV === "development") {
-    // eslint-disable-next-line no-console
+     
     console.error(message, error);
     return;
   }
@@ -23,7 +23,7 @@ export function logError(message: string, error?: unknown): void {
 
 export function logWarn(message: string): void {
   if (process.env.NODE_ENV === "development") {
-    // eslint-disable-next-line no-console
+     
     console.warn(message);
   }
 }

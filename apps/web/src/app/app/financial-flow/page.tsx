@@ -7,7 +7,7 @@ import { getStoredBusinessId } from "@/lib/workspace";
 import { UnifiedPageShell } from "@/components/layout/unified-page-shell";
 import { MetricCard } from "@/components/ui/metric-card";
 import { apiGet } from "@/lib/api";
-import { fetchReserveBuckets, createReserveBucket, updateReserveBucket, deleteReserveBucket, type ReserveBucket } from "@/lib/api/finance";
+import { fetchReserveBuckets, createReserveBucket, deleteReserveBucket, type ReserveBucket } from "@/lib/api/finance";
 
 interface FinancialOverview {
   cashBalance: number;
@@ -50,7 +50,7 @@ export default function FinancialFlowPage() {
       const [ovRes, safeRes, fcRes, bucketRes] = await Promise.all([
         apiGet<FinancialOverview>(`/finance/businesses/${businessId}/overview`),
         apiGet<SafeToSpend>(`/finance/businesses/${businessId}/safe-to-spend`),
-        apiGet<any>(`/finance/businesses/${businessId}/cashflow-forecast?days=90`),
+        apiGet<NonNullable<typeof forecast>>(`/finance/businesses/${businessId}/cashflow-forecast?days=90`),
         fetchReserveBuckets(businessId),
       ]);
       if (ovRes.data) setOverview(ovRes.data);

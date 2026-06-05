@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { apiGet } from "@/lib/api";
-import { Card, Badge, Button } from "@keyflow/ui";
+import { Card, Button } from "@keyflow/ui";
 import { FileText, Receipt } from "lucide-react";
 
 interface Invoice {

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState, useMemo } from "react";
 import {
   Calendar,
@@ -266,10 +267,10 @@ export function OverviewTab({ project, onStageChange: _onStageChange, milestones
           <div className="flex items-center gap-2 mt-2 text-[10px] text-muted-foreground">
             <span>{projectExpenses.length} expense{projectExpenses.length !== 1 ? "s" : ""} linked</span>
             <span>·</span>
-            <a href="/app/expenses" className="inline-flex items-center gap-0.5 transition-colors" style={{ color: "hsl(var(--kf-accent1))" }}>
+            <Link href="/app/expenses" className="inline-flex items-center gap-0.5 transition-colors" style={{ color: "hsl(var(--kf-accent1))" }}>
               <ExternalLink className="w-2.5 h-2.5" />
               View in Expenses
-            </a>
+            </Link>
           </div>
         </div>
       )}

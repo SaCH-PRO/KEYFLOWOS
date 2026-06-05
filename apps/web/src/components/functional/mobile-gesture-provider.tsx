@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, createContext, useContext, useCallback, useRef } from "react";
+import { useEffect, createContext, useContext, useRef } from "react";
 
 interface GestureContextType {
   onSwipeLeft?: () => void;

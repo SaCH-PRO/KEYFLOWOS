@@ -8,7 +8,6 @@ import {
   TrendingUp,
   AlertTriangle,
   Zap,
-  Sparkles,
   Heart,
   MessageSquare,
   Clock,

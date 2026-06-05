@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Clock, ChevronDown, ChevronUp, Tag } from "lucide-react";
+import { ChevronDown, ChevronUp, Tag } from "lucide-react";
 
 interface ChangelogEntry {
   id: string;

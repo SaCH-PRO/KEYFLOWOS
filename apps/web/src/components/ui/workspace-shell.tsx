@@ -76,7 +76,7 @@ export function WorkspaceShell({
   children,
 }: WorkspaceShellProps) {
   const { setCurrentMeta, current } = useNavigationContext();
-  const [queryTab, setQueryTab] = useState<string | null>(null);
+
   const tabRestored = useRef(false);
 
   useReturnNavigation({ restoreScrollOnMount: true });
@@ -93,11 +93,10 @@ export function WorkspaceShell({
     setCurrentMeta({ selectedEntityLabel: title });
   }, [setCurrentMeta, title]);
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const current = new URLSearchParams(window.location.search).get("tab");
-    setQueryTab(current);
-  }, []);
+  const [queryTab, setQueryTab] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    return new URLSearchParams(window.location.search).get("tab");
+  });
 
   useEffect(() => {
     if (tabRestored.current || !tabs || !onTabChange) return;

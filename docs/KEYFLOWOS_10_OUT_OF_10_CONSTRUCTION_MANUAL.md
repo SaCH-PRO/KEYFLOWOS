@@ -1930,6 +1930,3 @@ Before launch, update the scorecard. Do not launch unless every area is at least
 | QA/security/governance | 10 |
 
 If this table is not true, keep building.
-
-
-REPEAT THIS UNTIL 100%

@@ -30,6 +30,46 @@ function fmtMoney(n: number) {
   return `TTD ${n.toLocaleString("en-TT", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+function Field({
+  label,
+  value,
+  onChange,
+  min,
+  max,
+  step = 1,
+  prefix = "",
+  suffix = "",
+}: {
+  label: string;
+  value: number;
+  onChange: (v: number) => void;
+  min: number;
+  max: number;
+  step?: number;
+  prefix?: string;
+  suffix?: string;
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <label className="text-xs font-medium text-muted-foreground">{label}</label>
+        <span className="text-xs font-mono text-foreground">
+          {prefix}{value.toLocaleString()}{suffix}
+        </span>
+      </div>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="w-full h-1.5 rounded-full appearance-none bg-white/[0.06] accent-[hsl(var(--kf-accent1))]"
+      />
+    </div>
+  );
+}
+
 export function PricingTab() {
   const [inputs, setInputs] = useState<PricingInputs>(DEFAULTS);
 
@@ -66,44 +106,6 @@ export function PricingTab() {
   const update = <K extends keyof PricingInputs>(key: K, value: PricingInputs[K]) => {
     setInputs((prev) => ({ ...prev, [key]: value }));
   };
-
-  const Field = ({
-    label,
-    value,
-    onChange,
-    min,
-    max,
-    step = 1,
-    prefix = "",
-    suffix = "",
-  }: {
-    label: string;
-    value: number;
-    onChange: (v: number) => void;
-    min: number;
-    max: number;
-    step?: number;
-    prefix?: string;
-    suffix?: string;
-  }) => (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <label className="text-xs font-medium text-muted-foreground">{label}</label>
-        <span className="text-xs font-mono text-foreground">
-          {prefix}{value.toLocaleString()}{suffix}
-        </span>
-      </div>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="w-full h-1.5 rounded-full appearance-none bg-white/[0.06] accent-[hsl(var(--kf-accent1))]"
-      />
-    </div>
-  );
 
   return (
     <div className="space-y-6">
@@ -173,7 +175,7 @@ export function PricingTab() {
           <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4">
             <p className="text-sm text-emerald-300 leading-relaxed">
               <strong>Why this matters:</strong> Most Caribbean service providers undercharge by 30-50%. 
-              This calculator factors in your real costs, taxes, and profit goals — not just "what others charge."
+              This calculator factors in your real costs, taxes, and profit goals — not just &quot;what others charge.&quot;
             </p>
           </div>
         </motion.div>

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { fetchContactInsightSnapshot, fetchContactRevenueSummary, fetchContactMomentum } from "@/lib/client";
-import { Card, Button, Badge } from "@keyflow/ui";
+import { Card, Button } from "@keyflow/ui";
 import { Lightbulb, CheckCircle, Calendar, Mail, MessageSquare, Phone, FileText, Target, TrendingUp, AlertTriangle, Clock, Send } from "lucide-react";
 import { toast } from "sonner";
 

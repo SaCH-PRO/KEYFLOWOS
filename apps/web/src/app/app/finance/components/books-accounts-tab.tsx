@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ArrowRight, Plus, Wallet } from "lucide-react";
+import { Plus, Wallet } from "lucide-react";
 import { toast } from "sonner";
 import { EmptyState } from "@/components/ui/empty-state";
 import { getStoredBusinessId } from "@/lib/workspace";

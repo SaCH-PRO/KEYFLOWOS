@@ -117,6 +117,13 @@ export async function markDraftSent(businessId: string, draftId: string) {
   });
 }
 
+export async function sendDraft(businessId: string, draftId: string) {
+  return apiPost<DraftItem>({
+    path: `/api/communications/businesses/${businessId}/drafts/${draftId}/send`,
+    body: {},
+  });
+}
+
 // ─── Consent ───
 
 export async function checkConsent(

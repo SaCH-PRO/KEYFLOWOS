@@ -1,5 +1,6 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { AiMessageSenderService } from '../ai/ai-message-sender.service';
 
 export interface DraftOptions {
   channel: 'email' | 'sms' | 'whatsapp' | 'call' | 'form';
@@ -23,7 +24,10 @@ export interface DraftOptions {
 export class ResponseDraftService {
   private readonly logger = new Logger(ResponseDraftService.name);
 
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(AiMessageSenderService) private readonly sender: AiMessageSenderService,
+  ) {}
 
   async createDraft(
     businessId: string,
@@ -53,6 +57,7 @@ export class ResponseDraftService {
         evidence: options.evidence ?? {},
         createdBy,
         threadId: links?.threadId ?? null,
+        contactId: links?.intentId ? (await this.prisma.client.interactionIntent.findUnique({ where: { id: links.intentId }, select: { contactId: true } }))?.contactId ?? null : null,
       },
     });
 
@@ -90,6 +95,55 @@ export class ResponseDraftService {
 
     this.logger.log(`Draft ${draftId} rejected: ${reason}`);
     return draft;
+  }
+
+  async sendDraft(draftId: string, sentById?: string) {
+    const draft = await this.prisma.client.responseDraft.findUnique({
+      where: { id: draftId },
+    });
+
+    if (!draft) {
+      throw new Error('Draft not found');
+    }
+    if (draft.status !== 'APPROVED') {
+      throw new Error(`Cannot send draft with status ${draft.status}. Must be APPROVED.`);
+    }
+
+    let contactId = draft.contactId;
+    if (!contactId && draft.threadId) {
+      const thread = await this.prisma.client.conversationThread.findUnique({
+        where: { id: draft.threadId },
+        select: { contactId: true },
+      });
+      contactId = thread?.contactId ?? null;
+    }
+    if (!contactId) {
+      throw new Error('Draft has no associated contact');
+    }
+
+    const channel = draft.channel as 'email' | 'whatsapp' | 'sms';
+    if (!['email', 'whatsapp', 'sms'].includes(channel)) {
+      throw new Error(`Unsupported channel: ${channel}`);
+    }
+
+    const result = await this.sender.sendMessage({
+      businessId: draft.businessId,
+      contactId,
+      channel,
+      body: draft.body,
+    });
+
+    if (!result.success) {
+      throw new Error(result.error ?? 'Failed to send message');
+    }
+
+    const updated = await this.prisma.client.responseDraft.update({
+      where: { id: draftId },
+      data: { status: 'SENT', sentAt: new Date() },
+    });
+
+    this.logger.log(`Draft ${draftId} sent via ${channel} to contact ${contactId}`);
+    return updated;
   }
 
   async markSent(draftId: string) {

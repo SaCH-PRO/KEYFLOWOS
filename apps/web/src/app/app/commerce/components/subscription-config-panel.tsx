@@ -10,21 +10,30 @@ interface Props {
   productId: string;
 }
 
+type SubscriptionConfig = {
+  enabled: boolean;
+  billingInterval: "week" | "month" | "year";
+  intervalCount: number;
+  trialDays: number;
+  setupFee: number;
+  cancellationPolicy: "anytime" | "end_of_period" | "minimum_term";
+};
+
 export function SubscriptionConfigPanel({ businessId, productId }: Props) {
-  const [config, setConfig] = useState({
+  const [config, setConfig] = useState<SubscriptionConfig>({
     enabled: false,
-    billingInterval: "month" as "week" | "month" | "year",
+    billingInterval: "month",
     intervalCount: 1,
     trialDays: 0,
     setupFee: 0,
-    cancellationPolicy: "anytime" as "anytime" | "end_of_period" | "minimum_term",
+    cancellationPolicy: "anytime",
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!businessId || !productId) return;
-    apiGet<any>(`/conversion/businesses/${businessId}/products/${productId}/subscription-config`)
+    apiGet<SubscriptionConfig>(`/conversion/businesses/${businessId}/products/${productId}/subscription-config`)
       .then((res) => {
         if (res.data) setConfig(res.data);
       })
@@ -75,7 +84,7 @@ export function SubscriptionConfigPanel({ businessId, productId }: Props) {
               <label className="text-[10px] text-muted-foreground uppercase tracking-wider">Interval</label>
               <select
                 value={config.billingInterval}
-                onChange={(e) => setConfig({ ...config, billingInterval: e.target.value as any })}
+                onChange={(e) => setConfig({ ...config, billingInterval: e.target.value as "week" | "month" | "year" })}
                 className="kf-input w-full mt-1 text-sm"
               >
                 <option value="week">Weekly</option>
@@ -120,7 +129,7 @@ export function SubscriptionConfigPanel({ businessId, productId }: Props) {
             <label className="text-[10px] text-muted-foreground uppercase tracking-wider">Cancellation</label>
             <select
               value={config.cancellationPolicy}
-              onChange={(e) => setConfig({ ...config, cancellationPolicy: e.target.value as any })}
+              onChange={(e) => setConfig({ ...config, cancellationPolicy: e.target.value as "anytime" | "end_of_period" | "minimum_term" })}
               className="kf-input w-full mt-1 text-sm"
             >
               <option value="anytime">Anytime</option>

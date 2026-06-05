@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { fetchBookings } from "@/lib/client";
-import { Card, Badge } from "@keyflow/ui";
+import { Card } from "@keyflow/ui";
 import { Calendar, Clock, MapPin, User, CheckCircle, XCircle, AlertCircle } from "lucide-react";
 
 interface Booking {

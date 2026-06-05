@@ -24,7 +24,6 @@ import type { FlowIntelligenceData } from "@/components/contacts/flow-intelligen
 import type { RevenueData } from "@/components/contacts/predictive-revenue";
 import type { Contact } from "@/lib/client";
 import { exportInsightsReport, type InsightsExportFormat } from "@/lib/contacts-export";
-import { AskKeyButton } from "@/components/key";
 import { type Period, PERIOD_LABELS, PERIOD_MS, stagger, formatTTD } from "./components/insights/insights-shared";
 import { Users as UsersIcon } from "lucide-react";
 import { LazyWidget } from "./components/insights/lazy-widget";

@@ -3,7 +3,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import {
   HelpCircle,
@@ -14,12 +13,9 @@ import {
   TrendingUp,
   AlertCircle,
   CheckCircle,
-  ArrowUpRight,
-  ArrowDownRight,
   Target,
   AlertTriangle,
   Loader2,
-  ChevronRight,
 } from "lucide-react";
 import {
   fetchExpenseBudgets,
@@ -42,21 +38,16 @@ function formatK(amount: number): string {
 
 export default function BudgetingOverviewPage() {
   const router = useRouter();
-  const [businessId, setBusinessId] = useState<string | null>(null);
+  const [businessId, setBusinessId] = useState<string | null>(() => getStoredBusinessId() ?? null);
   const [budgets, setBudgets] = useState<ExpenseBudget[]>([]);
   const [summary, setSummary] = useState<ExpenseSummary | null>(null);
   const [vendors, setVendors] = useState<VendorAnalytics[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    const bid = getStoredBusinessId();
-    if (bid) setBusinessId(bid);
-  }, []);
-
-  useEffect(() => {
-    if (!businessId) { setLoading(false); return; }
+    if (!businessId) return;
     (async () => {
-      setLoading(true);
+      queueMicrotask(() => setLoading(true));
       try {
         const [budRes, sumRes, venRes] = await Promise.all([
           fetchExpenseBudgets(businessId),

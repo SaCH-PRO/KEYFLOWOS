@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { FileText, Clock, AlertCircle, CheckCircle, TrendingUp } from "lucide-react";
+import { FileText, Clock, AlertCircle, CheckCircle } from "lucide-react";
 import { Invoice } from "@/lib/client";
 import { formatAmount } from "../../utils/commerce-utils";
 

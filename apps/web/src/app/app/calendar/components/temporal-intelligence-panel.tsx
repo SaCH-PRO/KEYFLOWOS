@@ -4,14 +4,10 @@ import { useMemo } from "react";
 import { motion } from "framer-motion";
 import {
   Brain,
-  Clock,
   AlertTriangle,
   Zap,
-  CalendarDays,
   TrendingUp,
-  Users,
   Sparkles,
-  ChevronRight,
 } from "lucide-react";
 
 interface TimeInsight {

@@ -34,11 +34,6 @@ export default function RetainersPage() {
     rolloverHours: false,
   });
 
-  useEffect(() => {
-    if (!businessId) return;
-    loadData();
-  }, [businessId]);
-
   async function loadData() {
     if (!businessId) return;
     setLoading(true);
@@ -50,6 +45,11 @@ export default function RetainersPage() {
     if (sRes.data) setSummary(sRes.data);
     setLoading(false);
   }
+
+  useEffect(() => {
+    if (!businessId) return;
+    queueMicrotask(loadData);
+  }, [businessId]);
 
   async function handleCreate() {
     if (!businessId) return;

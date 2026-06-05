@@ -24,11 +24,6 @@ export default function PortalPage() {
   const [showForm, setShowForm] = useState(false);
   const [contactId, setContactId] = useState("");
 
-  useEffect(() => {
-    if (!businessId) return;
-    loadData();
-  }, [businessId]);
-
   async function loadData() {
     if (!businessId) return;
     setLoading(true);
@@ -36,6 +31,11 @@ export default function PortalPage() {
     if (res.data) setAccessList(res.data);
     setLoading(false);
   }
+
+  useEffect(() => {
+    if (!businessId) return;
+    queueMicrotask(loadData);
+  }, [businessId]);
 
   async function handleCreate() {
     if (!businessId || !contactId) return;

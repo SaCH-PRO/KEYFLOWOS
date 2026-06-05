@@ -18,7 +18,6 @@ import {
   Megaphone,
   BarChart3,
   Settings,
-  GraduationCap,
   Users,
   Store,
   ArrowUp,
@@ -30,7 +29,6 @@ import {
   BookOpen,
   MessageSquare,
   Moon,
-  Sun,
   Copy,
   RotateCcw,
 } from "lucide-react";

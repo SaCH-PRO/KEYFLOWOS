@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Plus, Calendar, FileText, Users, X } from "lucide-react";
+import { Plus, Calendar, FileText, Users } from "lucide-react";
 import { useRouter, usePathname } from "next/navigation";
 
 const FAB_ACTIONS = [

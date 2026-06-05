@@ -52,7 +52,7 @@ export default function PlanDetailPage() {
     completeEvent,
   } = useProjectPlan(businessId, planId);
 
-  const statusTone: Record<string, string> = {
+  const statusTone: Record<string, "default" | "warning" | "info" | "success" | "danger"> = {
     draft: "default",
     reviewing: "warning",
     approved: "info",
@@ -81,7 +81,7 @@ export default function PlanDetailPage() {
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {plan && (
-              <Badge tone={(statusTone[plan.status] as any) || "default"}>
+              <Badge tone={statusTone[plan.status] || "default"}>
                 {plan.status}
               </Badge>
             )}
@@ -247,7 +247,7 @@ export default function PlanDetailPage() {
                           <div key={idx} className="p-3 rounded-lg border border-border bg-background">
                             <div className="flex items-center gap-2 mb-1">
                               <span className="text-sm font-medium">{risk.description}</span>
-                              <Badge tone={(risk.impact === "high" ? "danger" : risk.impact === "medium" ? "warning" : "default") as any}>{risk.impact}</Badge>
+                              <Badge tone={risk.impact === "high" ? "danger" : risk.impact === "medium" ? "warning" : "default"}>{risk.impact}</Badge>
                               <Badge tone="default">{risk.likelihood}</Badge>
                             </div>
                             <p className="text-xs text-muted-foreground">Mitigation: {risk.mitigation}</p>
@@ -271,7 +271,7 @@ export default function PlanDetailPage() {
                         <div className="p-4">
                           <h3 className="text-sm font-semibold text-emerald-400 mb-2">Strengths</h3>
                           <ul className="list-disc list-inside text-xs text-muted-foreground space-y-1">
-                            {((plan.swotAnalysis as any).strengths as string[])?.map((s, i) => <li key={i}>{s}</li>) || <li>None listed</li>}
+                            {((plan.swotAnalysis as { strengths?: string[] }).strengths)?.map((s, i) => <li key={i}>{s}</li>) || <li>None listed</li>}
                           </ul>
                         </div>
                       </Card>
@@ -279,7 +279,7 @@ export default function PlanDetailPage() {
                         <div className="p-4">
                           <h3 className="text-sm font-semibold text-red-400 mb-2">Weaknesses</h3>
                           <ul className="list-disc list-inside text-xs text-muted-foreground space-y-1">
-                            {((plan.swotAnalysis as any).weaknesses as string[])?.map((s, i) => <li key={i}>{s}</li>) || <li>None listed</li>}
+                            {((plan.swotAnalysis as { weaknesses?: string[] }).weaknesses)?.map((s, i) => <li key={i}>{s}</li>) || <li>None listed</li>}
                           </ul>
                         </div>
                       </Card>
@@ -287,7 +287,7 @@ export default function PlanDetailPage() {
                         <div className="p-4">
                           <h3 className="text-sm font-semibold text-blue-400 mb-2">Opportunities</h3>
                           <ul className="list-disc list-inside text-xs text-muted-foreground space-y-1">
-                            {((plan.swotAnalysis as any).opportunities as string[])?.map((s, i) => <li key={i}>{s}</li>) || <li>None listed</li>}
+                            {((plan.swotAnalysis as { opportunities?: string[] }).opportunities)?.map((s, i) => <li key={i}>{s}</li>) || <li>None listed</li>}
                           </ul>
                         </div>
                       </Card>
@@ -295,7 +295,7 @@ export default function PlanDetailPage() {
                         <div className="p-4">
                           <h3 className="text-sm font-semibold text-amber-400 mb-2">Threats</h3>
                           <ul className="list-disc list-inside text-xs text-muted-foreground space-y-1">
-                            {((plan.swotAnalysis as any).threats as string[])?.map((s, i) => <li key={i}>{s}</li>) || <li>None listed</li>}
+                            {((plan.swotAnalysis as { threats?: string[] }).threats)?.map((s, i) => <li key={i}>{s}</li>) || <li>None listed</li>}
                           </ul>
                         </div>
                       </Card>

@@ -72,8 +72,8 @@ export function usePushNotifications(businessId?: string | null) {
 
       if (!res.ok) throw new Error('Failed to save subscription');
       setStatus('subscribed');
-    } catch (e: any) {
-      setError(e.message || 'Subscription failed');
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Subscription failed');
       setStatus('unsubscribed');
     }
   }, [businessId, vapidKey]);
@@ -93,8 +93,8 @@ export function usePushNotifications(businessId?: string | null) {
         });
       }
       setStatus('unsubscribed');
-    } catch (e: any) {
-      setError(e.message || 'Unsubscribe failed');
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Unsubscribe failed');
       setStatus('subscribed');
     }
   }, [businessId]);

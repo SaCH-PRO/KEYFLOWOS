@@ -44,7 +44,7 @@ export function PipelinePreview({ invoices, quotes, currency, limit = 5 }: Pipel
         return new Date(b.issueDate).getTime() - new Date(a.issueDate).getTime();
       })
       .slice(0, limit);
-  }, [invoices, quotes]);
+  }, [invoices, quotes, limit]);
 
   if (records.length === 0) return null;
 

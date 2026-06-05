@@ -3,7 +3,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import {
   ArrowLeft,
@@ -11,18 +10,15 @@ import {
   X,
   Receipt,
   Download,
-  AlertCircle,
   Loader2,
   FileText,
   ExternalLink,
   Pencil,
   Trash2,
-  Ban,
   Check,
   Clock,
   Upload,
   MessageSquare,
-  TrendingUp,
 } from "lucide-react";
 import {
   getExpense,
@@ -65,15 +61,10 @@ export default function ExpenseDetailPage() {
   const [categories, setCategories] = useState<ExpenseCategory[]>([]);
   const [budgets, setBudgets] = useState<ExpenseBudget[]>([]);
   const [loading, setLoading] = useState(true);
-  const [businessId, setBusinessId] = useState<string | null>(null);
+  const [businessId, setBusinessId] = useState<string | null>(() => getStoredBusinessId() ?? null);
   const [showEdit, setShowEdit] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
-
-  useEffect(() => {
-    const bid = getStoredBusinessId();
-    if (bid) setBusinessId(bid);
-  }, []);
 
   useEffect(() => {
     if (!businessId || !expenseId) return;

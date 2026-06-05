@@ -13,7 +13,6 @@ import { WorkspaceError } from "@/components/ui/workspace-error";
 import { NotesTrigger } from "@/components/keyflow/notes-trigger";
 import { PageNotesMount } from "@/components/keyflow/page-notes-mount";
 import { useStoreAiHub } from "./hooks/use-store-ai-hub";
-import { AiHubTrigger, AiCommandHub } from "@/components/ai/ai-command-hub";
 import { useStoreData } from "./hooks/use-store-data";
 import { StoreSkeleton } from "./components/store-skeleton";
 import { StoreHeaderActions } from "./components/store-header-actions";

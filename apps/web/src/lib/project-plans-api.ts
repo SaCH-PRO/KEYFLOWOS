@@ -1,4 +1,4 @@
-import { apiPost, apiGet, apiPatch, apiDelete } from "./api";
+import { apiPost, apiGet, apiDelete } from "./api";
 
 export interface ProjectPlan {
   id: string;

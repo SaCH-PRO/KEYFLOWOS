@@ -5,14 +5,8 @@ import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   RefreshCw,
-  Plus,
   Pencil,
-  Trash2,
   Play,
-  Calendar,
-  DollarSign,
-  CheckCircle2,
-  AlertTriangle,
   Ban,
   Repeat,
   FileText,
@@ -60,8 +54,15 @@ export default function RecurringExpensesPanel({ businessId, categories, trigger
     setLoading(false);
   }, [businessId]);
 
-  useEffect(() => { void load(); }, [load]);
-  useEffect(() => { if (triggerNew) { setEditing(null); setShowBuilder(true); } }, [triggerNew]);
+  useEffect(() => { queueMicrotask(load); }, [load]);
+  useEffect(() => {
+    if (triggerNew) {
+      queueMicrotask(() => {
+        setEditing(null);
+        setShowBuilder(true);
+      });
+    }
+  }, [triggerNew]);
 
   const handleSave = async (form: RecurringFormData) => {
     if (!businessId) return;

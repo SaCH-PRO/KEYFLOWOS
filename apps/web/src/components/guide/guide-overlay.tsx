@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useCallback } from "react";
+import { useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, ChevronRight, ChevronLeft, MousePointerClick, Footprints } from "lucide-react";
+import { X, ChevronRight, ChevronLeft, Footprints } from "lucide-react";
 import { useGuide } from "@/contexts/guide-context";
 
 function Spotlight({ rect }: { rect: DOMRect | null }) {

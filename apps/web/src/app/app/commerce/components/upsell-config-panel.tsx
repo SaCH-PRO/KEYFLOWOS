@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { apiGet, apiPatch } from "@/lib/api";
 import { toast } from "sonner";
-import { ArrowUpCircle, CheckCircle2, X, Loader2 } from "lucide-react";
+import { ArrowUpCircle, CheckCircle2, Loader2 } from "lucide-react";
 
 interface Product {
   id: string;
@@ -30,10 +30,10 @@ export function UpsellConfigPanel({ businessId, productId }: Props) {
       apiGet<{ upsells: Product[] }>(`/conversion/businesses/${businessId}/products/${productId}/upsells`),
     ]).then(([allRes, upsellRes]) => {
       if (allRes.data) {
-        setProducts((allRes.data as any).products ?? allRes.data ?? []);
+        setProducts(((allRes.data as unknown) as { products?: Product[] }).products ?? (Array.isArray(allRes.data) ? allRes.data : []));
       }
       if (upsellRes.data) {
-        setSelectedIds(((upsellRes.data as any).upsells ?? upsellRes.data ?? []).map((p: Product) => p.id));
+        setSelectedIds((((upsellRes.data as unknown) as { upsells?: Product[] }).upsells ?? (Array.isArray(upsellRes.data) ? upsellRes.data : [])).map((p: Product) => p.id));
       }
     }).catch(() => toast.error("Failed to load products"))
       .finally(() => setLoading(false));

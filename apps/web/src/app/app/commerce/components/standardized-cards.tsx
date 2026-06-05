@@ -200,6 +200,7 @@ export function RecordRowCard({
   linkedService,
   onViewContact,
 }: RecordRowCardProps) {
+  const [now] = useState(() => Date.now());
   const contactName = contact
     ? `${contact.firstName ?? ""} ${contact.lastName ?? ""}`.trim() || contact.email || "\u2014"
     : "\u2014";
@@ -216,20 +217,20 @@ export function RecordRowCard({
     if (status === "OVERDUE") {
       urgency = "overdue";
     } else if (status === "SENT" && dueDate) {
-      const daysLeft = Math.ceil((new Date(dueDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+      const daysLeft = Math.ceil((new Date(dueDate).getTime() - now) / (1000 * 60 * 60 * 24));
       if (daysLeft < 0) urgency = "overdue";
       else if (daysLeft <= 3) urgency = "due-soon";
     }
 
     if (dueDate) {
-      const daysLeft = Math.ceil((new Date(dueDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+      const daysLeft = Math.ceil((new Date(dueDate).getTime() - now) / (1000 * 60 * 60 * 24));
       if (daysLeft < 0) dueLabel = `${Math.abs(daysLeft)}d overdue`;
       else if (daysLeft === 0) dueLabel = "Due today";
       else if (daysLeft <= 7) dueLabel = `Due in ${daysLeft}d`;
     }
 
     return { urgency, dueLabel };
-  }, [status, dueDate, mounted]);
+  }, [status, dueDate, mounted, now]);
 
   return (
     <div

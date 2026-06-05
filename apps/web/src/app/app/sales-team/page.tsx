@@ -10,7 +10,6 @@ import {
   DollarSign,
   Target,
   Loader2,
-  ArrowRight,
 } from "lucide-react";
 
 interface SalesRep {
@@ -42,7 +41,7 @@ export default function SalesTeamPage() {
     if (!businessId) return;
     apiGet<{ reps: SalesRep[] }>(`/conversion/businesses/${businessId}/sales-reps`)
       .then((res) => {
-        if (res.data) setReps(res.data as any);
+        if (res.data) setReps((res.data as unknown) as SalesRep[]);
       })
       .catch(() => toast.error("Failed to load sales reps"))
       .finally(() => setLoading(false));
@@ -52,7 +51,7 @@ export default function SalesTeamPage() {
     if (!businessId || !selectedRep) return;
     apiGet<{ pipeline: PipelineContact[] }>(`/conversion/businesses/${businessId}/sales-reps/${selectedRep}/pipeline`)
       .then((res) => {
-        if (res.data) setPipeline(res.data as any);
+        if (res.data) setPipeline((res.data as unknown) as PipelineContact[]);
       })
       .catch(() => toast.error("Failed to load pipeline"));
   }, [businessId, selectedRep]);

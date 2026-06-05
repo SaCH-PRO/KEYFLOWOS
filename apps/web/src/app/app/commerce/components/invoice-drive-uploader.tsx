@@ -64,7 +64,7 @@ export function InvoiceDriveUploader({
 
       // Store the HTML on the ref for the upload effect
       if (hiddenRef.current) {
-        (hiddenRef.current as any).__capturedHtml = innerHtml;
+        ((hiddenRef.current as unknown) as { __capturedHtml?: string }).__capturedHtml = innerHtml;
         setHtmlReady(true);
       }
     }, 500);
@@ -85,7 +85,7 @@ export function InvoiceDriveUploader({
   // Upload to Drive once HTML is ready
   useEffect(() => {
     if (!htmlReady || uploadedRef.current) return;
-    const capturedHtml = (hiddenRef.current as any)?.__capturedHtml;
+    const capturedHtml = ((hiddenRef.current as unknown) as { __capturedHtml?: string })?.__capturedHtml;
     if (!capturedHtml) return;
 
     uploadedRef.current = true;

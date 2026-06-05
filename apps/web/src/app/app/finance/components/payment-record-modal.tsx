@@ -383,7 +383,12 @@ function DrivePickerLazy({
   onSelect: (file: { id: string; name: string; mimeType: string }) => void;
   allowedMimeTypes?: string[];
 }) {
-  const [Component, setComponent] = useState<React.ComponentType<any> | null>(null);
+  const [Component, setComponent] = useState<React.ComponentType<{
+    businessId: string;
+    onSelect: (file: { id: string; name: string; mimeType: string }) => void;
+    allowedMimeTypes?: string[];
+    pickerTitle?: string;
+  }> | null>(null);
 
   React.useEffect(() => {
     import("../../profile/components/google-drive-browser").then((mod) => {

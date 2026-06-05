@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useCallback, useEffect } from "react";
+import React, { useState, useMemo, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { ExpenseRecordCard } from "./expense-record-card";
@@ -81,16 +81,10 @@ export function ExpensePipeline({
   // Sync view with URL ?view= query param
   const paramView = searchParams.get("view") as ExpenseView | null;
   const validViews: ExpenseView[] = ["all", "expenses", "bills", "receipts"];
-  const [view, setViewState] = useState<ExpenseView>(
-    validViews.includes(paramView as ExpenseView) ? (paramView as ExpenseView) : "all"
-  );
-
-  useEffect(() => {
-    const param = searchParams.get("view") as ExpenseView | null;
-    if (param && validViews.includes(param)) {
-      setViewState(param);
-    }
-  }, [searchParams]);
+  const [view, setViewState] = useState<ExpenseView>(() => {
+    const param = new URLSearchParams(window.location.search).get("view") as ExpenseView | null;
+    return validViews.includes(param as ExpenseView) ? (param as ExpenseView) : "all";
+  });
 
   const setView = useCallback(
     (v: ExpenseView) => {

@@ -24,7 +24,7 @@ export function useLineItemHandlers(
     (itemId: string) => {
       updateItems((prev) => prev.filter((item) => item.id !== itemId));
     },
-    [updateItems, products],
+    [updateItems],
   );
 
   const updateItem = useCallback(
@@ -75,7 +75,7 @@ export function useLineItemHandlers(
         ),
       );
     },
-    [updateItems],
+    [updateItems, products],
   );
 
   return { addItem, removeItem, updateItem, selectProduct };

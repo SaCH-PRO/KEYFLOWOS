@@ -8,7 +8,6 @@ import {
   Pencil,
   Trash2,
   CheckCircle2,
-  Ban,
   Repeat,
   Paperclip,
   Clock,

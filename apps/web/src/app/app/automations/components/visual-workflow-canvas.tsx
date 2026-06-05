@@ -137,7 +137,7 @@ export function VisualWorkflowCanvas() {
       <div className="flex items-center gap-2 mt-3 pt-3 border-t border-border/20">
         <Sparkles className="w-3 h-3 text-[hsl(var(--kf-accent1))]" />
         <span className="text-[11px] text-muted-foreground">
-          AI Suggestion: Add a "Payment Reminder" step after "Follow-up SMS" to reduce overdue invoices by 34%.
+          AI Suggestion: Add a &quot;Payment Reminder&quot; step after &quot;Follow-up SMS&quot; to reduce overdue invoices by 34%.
         </span>
       </div>
     </div>

@@ -15,6 +15,7 @@ import {
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { CatalogService } from '../catalog/catalog.service';
 
 const TRASHABLE_MODELS = [
   'contact', 'deal', 'product', 'quote', 'invoice', 'booking',
@@ -35,6 +36,7 @@ function isTrashableModel(value: string): value is TrashableModel {
 export class TrashController {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(CatalogService) private readonly catalog: CatalogService,
   ) {}
 
   @Get()
@@ -82,7 +84,15 @@ export class TrashController {
     }
     const existing = await this.findUnique(model, { id, businessId, deletedAt: { not: null } });
     if (!existing) throw new NotFoundException(`Trashed ${model} not found`);
-    const restored = await this.updateModel(model, id, { deletedAt: null } as any);
+
+    let restored: any;
+    if (model === 'product') {
+      restored = await this.catalog.updateProduct({ businessId, productId: id, deletedAt: null } as any);
+    } else if (model === 'service') {
+      restored = await this.catalog.updateService({ businessId, serviceId: id, deletedAt: null } as any);
+    } else {
+      restored = await this.updateModel(model, id, { deletedAt: null } as any);
+    }
     return { restored: true, model, id, item: restored };
   }
 
@@ -98,7 +108,14 @@ export class TrashController {
     }
     const existing = await this.findUnique(model, { id, businessId, deletedAt: { not: null } });
     if (!existing) throw new NotFoundException(`Trashed ${model} not found`);
-    await this.deleteModel(model, id);
+
+    if (model === 'product') {
+      await this.catalog.deleteProduct(businessId, id);
+    } else if (model === 'service') {
+      await this.catalog.deleteService(businessId, id);
+    } else {
+      await this.deleteModel(model, id);
+    }
     return { deleted: true, model, id };
   }
 
@@ -191,7 +208,6 @@ export class TrashController {
     switch (model) {
       case 'contact': return this.prisma.client.contact.update({ where: { id }, data });
       case 'deal': return this.prisma.client.deal.update({ where: { id }, data });
-      case 'product': return this.prisma.client.product.update({ where: { id }, data });
       case 'quote': return this.prisma.client.quote.update({ where: { id }, data });
       case 'invoice': return this.prisma.client.invoice.update({ where: { id }, data });
       case 'booking': return this.prisma.client.booking.update({ where: { id }, data });
@@ -200,7 +216,6 @@ export class TrashController {
       case 'expense': return this.prisma.client.expense.update({ where: { id }, data });
       case 'automationFlow': return this.prisma.client.automationFlow.update({ where: { id }, data });
       case 'account': return this.prisma.client.account.update({ where: { id }, data });
-      case 'service': return this.prisma.client.service.update({ where: { id }, data });
       case 'staffMember': return this.prisma.client.staffMember.update({ where: { id }, data });
       case 'socialPost': return this.prisma.client.socialPost.update({ where: { id }, data });
       case 'site': return this.prisma.client.site.update({ where: { id }, data });
@@ -219,7 +234,6 @@ export class TrashController {
     switch (model) {
       case 'contact': return this.prisma.client.contact.delete({ where: { id } });
       case 'deal': return this.prisma.client.deal.delete({ where: { id } });
-      case 'product': return this.prisma.client.product.delete({ where: { id } });
       case 'quote': return this.prisma.client.quote.delete({ where: { id } });
       case 'invoice': return this.prisma.client.invoice.delete({ where: { id } });
       case 'booking': return this.prisma.client.booking.delete({ where: { id } });
@@ -228,7 +242,6 @@ export class TrashController {
       case 'expense': return this.prisma.client.expense.delete({ where: { id } });
       case 'automationFlow': return this.prisma.client.automationFlow.delete({ where: { id } });
       case 'account': return this.prisma.client.account.delete({ where: { id } });
-      case 'service': return this.prisma.client.service.delete({ where: { id } });
       case 'staffMember': return this.prisma.client.staffMember.delete({ where: { id } });
       case 'socialPost': return this.prisma.client.socialPost.delete({ where: { id } });
       case 'site': return this.prisma.client.site.delete({ where: { id } });

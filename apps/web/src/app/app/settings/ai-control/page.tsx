@@ -17,8 +17,6 @@ import { getStoredBusinessId } from "@/lib/workspace";
 import {
   fetchAiGovernance,
   updateAiGovernance,
-  fetchAutopilotRules,
-  updateAutopilotRule,
   fetchAgentHealth,
   type AiAutonomySettings,
 } from "@/lib/client";

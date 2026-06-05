@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import {
   DollarSign,
@@ -298,14 +299,14 @@ export function RevenueTab({ invoiceId, businessId, projectId }: RevenueTabProps
                 <p className="text-[10px] text-muted-foreground text-center">+{projectExpenses.length - 10} more</p>
               )}
             </div>
-            <a
+            <Link
               href="/app/expenses"
               className="text-xs inline-flex items-center gap-1 transition-colors"
               style={{ color: "hsl(var(--kf-accent1))" }}
             >
               <ExternalLink className="w-3 h-3" />
               View all in Expenses
-            </a>
+            </Link>
           </div>
         )}
       </div>

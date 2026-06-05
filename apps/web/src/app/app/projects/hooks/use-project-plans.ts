@@ -67,7 +67,7 @@ export function useProjectPlans(businessId: string | null) {
   }, [businessId]);
 
   useEffect(() => {
-    loadPlans();
+    queueMicrotask(loadPlans);
   }, [loadPlans]);
 
   return {
@@ -120,7 +120,7 @@ export function useProjectPlan(businessId: string | null, planId: string | null)
   }, [businessId, planId]);
 
   useEffect(() => {
-    loadPlan();
+    queueMicrotask(loadPlan);
   }, [loadPlan]);
 
   return {

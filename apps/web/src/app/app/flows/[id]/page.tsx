@@ -7,11 +7,9 @@ import {
   Loader2,
   ArrowLeft,
   Play,
-  Pause,
   Trash2,
   Save,
   CheckCircle2,
-  AlertCircle,
   Clock,
   TrendingUp,
 } from "lucide-react";

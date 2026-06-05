@@ -34,7 +34,7 @@ export class ProfitTrajectoryService {
     const currency = 'TTD';
 
     // Base revenue potential by intent
-    let revenuePotential = 0;
+    let revenuePotential!: number;
     switch (intentType) {
       case 'booking_request':
         revenuePotential = 500;

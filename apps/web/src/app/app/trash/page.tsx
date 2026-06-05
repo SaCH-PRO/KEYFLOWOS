@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { motion } from "framer-motion";
-import { Trash2, RotateCcw, AlertTriangle, Search, X } from "lucide-react";
+import { Trash2, RotateCcw, AlertTriangle, X } from "lucide-react";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 import { fetchTrashItems, restoreTrashItem, permanentDeleteTrashItem } from "@/lib/client";
 

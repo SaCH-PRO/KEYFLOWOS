@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChevronLeft } from "lucide-react";
 import { useNavigationContext } from "@/lib/navigation-context";
@@ -50,11 +50,11 @@ export function OriginAwareBreadcrumbs() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const { getOriginContext } = useNavigationContext();
-  const [isHydrated, setIsHydrated] = useState(false);
-
-  useEffect(() => {
-    setIsHydrated(true);
-  }, []);
+  const isHydrated = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false
+  );
 
   const segments = pathname.split("/").filter(Boolean);
   if (segments.length <= 1) return null;

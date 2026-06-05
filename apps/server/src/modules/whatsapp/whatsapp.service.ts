@@ -1,5 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { EntityResolutionService } from '../../core/connectors/entity-resolution.service';
 import { encryptToken, decryptToken } from '../../core/crypto/token-crypto';
 
 export interface WhatsAppMessage {
@@ -47,7 +49,42 @@ function decryptConfig(config: WhatsAppConfig): WhatsAppConfig {
 export class WhatsAppService {
   private readonly logger = new Logger(WhatsAppService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(EventEmitter2) private readonly events: EventEmitter2,
+    @Inject(EntityResolutionService) private readonly entityResolution: EntityResolutionService,
+  ) {}
+
+  async receiveInbound(businessId: string, payload: { from: string; body?: string; externalId?: string; senderName?: string }) {
+    const resolved = await this.entityResolution.resolveContact(businessId, {
+      source: 'whatsapp',
+      phone: payload.from,
+      firstName: payload.senderName?.split(' ')[0],
+      lastName: payload.senderName?.split(' ').slice(1).join(' ') || undefined,
+    });
+
+    this.events.emit('entity.resolved', {
+      businessId,
+      contactId: resolved.contactId,
+      source: 'whatsapp',
+      matchedOn: resolved.matchedOn,
+      isNew: resolved.isNew,
+      merged: resolved.merged,
+    });
+
+    this.events.emit('message.received', {
+      connectorType: 'whatsapp',
+      externalId: payload.externalId ?? null,
+      businessId,
+      timestamp: new Date(),
+      channel: 'whatsapp',
+      from: payload.from,
+      body: payload.body,
+      contactId: resolved.contactId,
+    });
+
+    return resolved;
+  }
 
   async getConfig(businessId: string): Promise<WhatsAppConfig | null> {
     const business = await this.prisma.client.business.findUnique({

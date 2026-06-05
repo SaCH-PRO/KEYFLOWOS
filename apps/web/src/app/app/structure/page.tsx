@@ -8,7 +8,6 @@ import {
   Briefcase,
   GitBranch,
   Network,
-  Plus,
   Loader2,
 } from "lucide-react";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";

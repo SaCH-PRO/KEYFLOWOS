@@ -6,7 +6,6 @@ import {
   TrendingUp,
   TrendingDown,
   Minus,
-  Receipt,
   FileText,
   AlertTriangle,
   CheckCircle2,

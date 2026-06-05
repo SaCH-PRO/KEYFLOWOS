@@ -13,7 +13,6 @@ import {
   Clock,
   User,
   Link as LinkIcon,
-  HardDrive,
 } from "lucide-react";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
 import {

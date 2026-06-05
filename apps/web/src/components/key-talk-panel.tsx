@@ -39,16 +39,123 @@ interface KeyTalkPanelProps {
   businessId?: string;
 }
 
+interface ProposedFlow {
+  name?: string;
+  triggerEvent?: string;
+  condition?: string;
+  actions?: Array<{ type?: string }>;
+}
+
+interface ProposedEvent {
+  title?: string;
+  type?: string;
+  startAt?: string;
+  endAt?: string;
+  priority?: string;
+  description?: string;
+}
+
+interface Alternative {
+  label?: string;
+  description?: string;
+  triggerEvent?: string;
+  proposedEvent?: Record<string, unknown>;
+  loopType?: string;
+}
+
+interface InterpretationData {
+  interpretation?: string;
+  recommendation?: string;
+  confidence?: number;
+  proposedFlow?: ProposedFlow;
+  proposedEvent?: ProposedEvent;
+  recommendedLoopType?: string;
+  proposedConfig?: Record<string, unknown>;
+  alternatives?: Alternative[];
+}
+
+interface BuiltEntityData {
+  name?: string;
+  flowId?: string;
+  loopId?: string;
+  eventId?: string;
+  flow?: { name?: string; triggerEvent?: string; loopType?: string; enabled?: boolean };
+  loop?: { loopType?: string; enabled?: boolean };
+  event?: { title?: string; type?: string; startAt?: string };
+  triggerEvent?: string;
+  loopType?: string;
+  enabled?: boolean;
+  title?: string;
+  type?: string;
+  startAt?: string;
+}
+
+interface ActivityLogEntry {
+  title?: string;
+  action?: string;
+}
+
+interface RecentTask {
+  title?: string;
+}
+
+interface ExecutionProofData {
+  proof?: {
+    activityLog?: ActivityLogEntry[];
+    recentTasks?: RecentTask[];
+    sourceType?: string;
+  };
+  executed?: boolean;
+  actionsRun?: unknown[];
+  result?: {
+    status?: string;
+    actionsCreated?: number;
+  };
+  event?: {
+    status?: string;
+    createdAt?: string;
+  };
+}
+
+interface TalkResponseData {
+  success: boolean;
+  error?: string;
+  interpretation?: string;
+  recommendation?: string;
+  confidence?: number;
+  flow?: Record<string, unknown> & { id?: string };
+  event?: Record<string, unknown> & { id?: string };
+  loop?: Record<string, unknown> & { id?: string; loopType?: string; config?: Record<string, unknown> };
+  executionProof?: Record<string, unknown>;
+}
+
+interface SpeechRecognitionInstance {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onstart: (() => void) | null;
+  onend: (() => void) | null;
+  onresult: ((event: { results: Array<Array<{ transcript: string }>> }) => void) | null;
+  onerror: (() => void) | null;
+  start(): void;
+  stop(): void;
+}
+
+interface WindowWithSpeech extends Window {
+  SpeechRecognition?: new () => SpeechRecognitionInstance;
+  webkitSpeechRecognition?: new () => SpeechRecognitionInstance;
+}
+
 export function KeyTalkPanel({ mode, businessId }: KeyTalkPanelProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [step, setStep] = useState<Step>("input");
   const [intent, setIntent] = useState("");
   const [isListening, setIsListening] = useState(false);
-  const [interpretation, setInterpretation] = useState<any>(null);
-  const [builtEntity, setBuiltEntity] = useState<any>(null);
-  const [executionProof, setExecutionProof] = useState<any>(null);
+  const [interpretation, setInterpretation] = useState<InterpretationData | null>(null);
+  const [builtEntity, setBuiltEntity] = useState<BuiltEntityData | null>(null);
+  const [executionProof, setExecutionProof] = useState<ExecutionProofData | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const recognitionRef = useRef<any>(null);
+  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
 
   const reset = useCallback(() => {
     setStep("input");
@@ -64,14 +171,14 @@ export function KeyTalkPanel({ mode, businessId }: KeyTalkPanelProps) {
       setError("Voice input not supported in this browser");
       return;
     }
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    const SpeechRecognition = ((window as WindowWithSpeech).SpeechRecognition || (window as WindowWithSpeech).webkitSpeechRecognition)!;
     const recognition = new SpeechRecognition();
     recognition.continuous = false;
     recognition.interimResults = false;
     recognition.lang = "en-US";
     recognition.onstart = () => setIsListening(true);
     recognition.onend = () => setIsListening(false);
-    recognition.onresult = (event: any) => {
+    recognition.onresult = (event: { results: Array<Array<{ transcript: string }>> }) => {
       const transcript = event.results[0][0].transcript;
       setIntent((prev) => (prev ? prev + " " + transcript : transcript));
     };
@@ -104,10 +211,10 @@ export function KeyTalkPanel({ mode, businessId }: KeyTalkPanelProps) {
         setStep("input");
         return;
       }
-      setInterpretation(data);
+      setInterpretation(data as InterpretationData);
       setStep("review");
-    } catch (e: any) {
-      setError(e.message || "Network error");
+    } catch (e: unknown) {
+      setError((e as { message?: string }).message || "Network error");
       setStep("input");
     }
   }, [intent, mode, businessId]);
@@ -120,6 +227,11 @@ export function KeyTalkPanel({ mode, businessId }: KeyTalkPanelProps) {
       if (mode === "flow") {
         res = await keyBuildFlow({ businessId, proposedFlow: interpretation.proposedFlow });
       } else if (mode === "autopilot") {
+        if (!interpretation.recommendedLoopType) {
+          setError("No loop type recommended");
+          setStep("review");
+          return;
+        }
         res = await keyBuildDelegation({
           businessId,
           recommendedLoopType: interpretation.recommendedLoopType,
@@ -135,10 +247,10 @@ export function KeyTalkPanel({ mode, businessId }: KeyTalkPanelProps) {
         setStep("review");
         return;
       }
-      setBuiltEntity(data);
+      setBuiltEntity(data as BuiltEntityData);
       setStep("proof");
-    } catch (e: any) {
-      setError(e.message || "Network error");
+    } catch (e: unknown) {
+      setError((e as { message?: string }).message || "Network error");
       setStep("review");
     }
   }, [interpretation, mode, businessId]);
@@ -149,10 +261,13 @@ export function KeyTalkPanel({ mode, businessId }: KeyTalkPanelProps) {
     try {
       let res;
       if (mode === "flow") {
+        if (!builtEntity.flowId) { setError("No flow ID"); setStep("proof"); return; }
         res = await keyExecuteFlow({ businessId, flowId: builtEntity.flowId });
       } else if (mode === "autopilot") {
+        if (!builtEntity.loopId) { setError("No loop ID"); setStep("proof"); return; }
         res = await keyExecuteDelegation({ businessId, loopId: builtEntity.loopId });
       } else {
+        if (!builtEntity.eventId) { setError("No event ID"); setStep("proof"); return; }
         res = await keyExecuteCalendar({ businessId, eventId: builtEntity.eventId });
       }
       const data = res.data;
@@ -161,10 +276,10 @@ export function KeyTalkPanel({ mode, businessId }: KeyTalkPanelProps) {
         setStep("proof");
         return;
       }
-      setExecutionProof(data);
+      setExecutionProof(data as ExecutionProofData);
       setStep("proof");
-    } catch (e: any) {
-      setError(e.message || "Network error");
+    } catch (e: unknown) {
+      setError((e as { message?: string }).message || "Network error");
       setStep("proof");
     }
   }, [builtEntity, mode, businessId]);
@@ -182,7 +297,7 @@ export function KeyTalkPanel({ mode, businessId }: KeyTalkPanelProps) {
       } else {
         res = await keyTalkCalendar({ businessId, intent, autoExecute: false });
       }
-      const data = res.data;
+      const data = res.data as TalkResponseData | undefined;
       if (!data?.success) {
         setError(data?.error || res.error || "Talk pipeline failed");
         setStep("input");
@@ -192,20 +307,20 @@ export function KeyTalkPanel({ mode, businessId }: KeyTalkPanelProps) {
         interpretation: data.interpretation,
         recommendation: data.recommendation,
         confidence: data.confidence,
-        proposedFlow: data.flow,
-        proposedEvent: data.event,
+        proposedFlow: data.flow as ProposedFlow | undefined,
+        proposedEvent: data.event as ProposedEvent | undefined,
         recommendedLoopType: data.loop?.loopType,
         proposedConfig: data.loop?.config,
       });
       if (mode === "calendar") {
-        setBuiltEntity(data.event ? { eventId: data.event.id, ...data.event } : null);
+        setBuiltEntity(data.event ? { eventId: data.event.id, ...data.event } as BuiltEntityData : null);
       } else {
-        setBuiltEntity(data.flow ? { flowId: data.flow.id, ...data.flow } : data.loop ? { loopId: data.loop.id, ...data.loop } : null);
+        setBuiltEntity(data.flow ? { flowId: data.flow.id, ...data.flow } as BuiltEntityData : data.loop ? { loopId: data.loop.id, ...data.loop } as BuiltEntityData : null);
       }
-      setExecutionProof(data.executionProof);
+      setExecutionProof((data.executionProof as ExecutionProofData | undefined) ?? null);
       setStep("proof");
-    } catch (e: any) {
-      setError(e.message || "Network error");
+    } catch (e: unknown) {
+      setError((e as { message?: string }).message || "Network error");
       setStep("input");
     }
   }, [intent, mode, businessId]);
@@ -370,7 +485,7 @@ export function KeyTalkPanel({ mode, businessId }: KeyTalkPanelProps) {
                     <div className="pt-1">
                       <span className="text-xs text-[hsl(30_10%_50%)]">Actions</span>
                       <div className="mt-1 space-y-1">
-                        {(interpretation.proposedFlow.actions || []).map((action: any, i: number) => (
+                        {(interpretation.proposedFlow.actions || []).map((action, i) => (
                           <div key={i} className="flex items-center gap-2 text-sm text-[hsl(30_20%_98%)]">
                             <ChevronRight className="w-3 h-3 text-[hsl(24_95%_53%)]" />
                             <span className="capitalize">{action.type?.replace(/_/g, " ")}</span>
@@ -437,11 +552,11 @@ export function KeyTalkPanel({ mode, businessId }: KeyTalkPanelProps) {
               </div>
             </div>
 
-            {interpretation.alternatives?.length > 0 && (
+            {(interpretation.alternatives?.length ?? 0) > 0 && (
               <div className="space-y-2">
                 <h4 className="text-xs font-semibold uppercase tracking-wider text-[hsl(30_10%_50%)]">Alternatives</h4>
                 <div className="space-y-1.5">
-                  {interpretation.alternatives.map((alt: any, i: number) => (
+                  {interpretation.alternatives!.map((alt, i) => (
                     <button
                       key={i}
                       onClick={() => {
@@ -559,9 +674,10 @@ export function KeyTalkPanel({ mode, businessId }: KeyTalkPanelProps) {
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-[hsl(30_10%_50%)]">Start</span>
                     <span className="text-sm text-[hsl(30_20%_98%)]">
-                      {builtEntity.startAt || builtEntity.event?.startAt
-                        ? new Date(builtEntity.startAt || builtEntity.event?.startAt).toLocaleString()
-                        : "—"}
+                      {(() => {
+                        const start = builtEntity.startAt || builtEntity.event?.startAt;
+                        return start ? new Date(start).toLocaleString() : "—";
+                      })()}
                     </span>
                   </div>
                 </>
@@ -582,11 +698,11 @@ export function KeyTalkPanel({ mode, businessId }: KeyTalkPanelProps) {
                         <span className="text-xs text-[hsl(30_10%_50%)]">Actions Run</span>
                         <span className="text-sm text-[hsl(30_20%_98%)]">{(executionProof.actionsRun || []).length}</span>
                       </div>
-                      {executionProof.proof?.activityLog?.length > 0 && (
+                      {(executionProof.proof?.activityLog?.length ?? 0) > 0 && (
                         <div className="pt-1">
                           <span className="text-xs text-[hsl(30_10%_50%)]">Recent Activity</span>
                           <div className="mt-1 space-y-1">
-                            {executionProof.proof.activityLog.slice(0, 5).map((log: any, i: number) => (
+                            {executionProof.proof.activityLog!.slice(0, 5).map((log, i) => (
                               <div key={i} className="text-xs text-[hsl(30_10%_55%)] truncate">
                                 {log.title || log.action}
                               </div>
@@ -606,11 +722,11 @@ export function KeyTalkPanel({ mode, businessId }: KeyTalkPanelProps) {
                         <span className="text-xs text-[hsl(30_10%_50%)]">Tasks Created</span>
                         <span className="text-sm text-[hsl(30_20%_98%)]">{executionProof.result?.actionsCreated || 0}</span>
                       </div>
-                      {executionProof.proof?.recentTasks?.length > 0 && (
+                      {(executionProof.proof?.recentTasks?.length ?? 0) > 0 && (
                         <div className="pt-1">
                           <span className="text-xs text-[hsl(30_10%_50%)]">Recent Tasks</span>
                           <div className="mt-1 space-y-1">
-                            {executionProof.proof.recentTasks.slice(0, 5).map((task: any, i: number) => (
+                            {executionProof.proof.recentTasks!.slice(0, 5).map((task, i) => (
                               <div key={i} className="text-xs text-[hsl(30_10%_55%)] truncate">
                                 {task.title}
                               </div>

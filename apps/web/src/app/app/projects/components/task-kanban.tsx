@@ -20,7 +20,6 @@ import {
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { motion } from "framer-motion";
 import { GripVertical, Clock, AlertCircle } from "lucide-react";
 
 interface Task {

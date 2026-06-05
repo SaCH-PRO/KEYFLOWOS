@@ -11,7 +11,6 @@ import {
   Trash2,
   AlertTriangle,
   Clock,
-  User,
   Calendar,
   Mic,
   FileText,

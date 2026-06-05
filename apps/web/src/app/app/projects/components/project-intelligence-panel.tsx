@@ -8,11 +8,8 @@ import {
   Zap,
   AlertTriangle,
   TrendingUp,
-  Clock,
   Users,
   CheckCircle2,
-  Sparkles,
-  BarChart3,
 } from "lucide-react";
 
 interface ProjectMetric {

@@ -1,11 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import { toast } from "sonner";
 import { CheckCircle2, XCircle, Send, AlertCircle, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
-import { approveDraft, rejectDraft, markDraftSent } from "@/lib/api/omnichannel";
+import { approveDraft, rejectDraft, sendDraft } from "@/lib/api/omnichannel";
 
 export interface DraftItem {
   id: string;
@@ -54,8 +55,10 @@ export function ResponseDraftPanel({ businessId, drafts, onMutate }: ResponseDra
   const handleSend = async (draftId: string) => {
     setLoadingId(draftId);
     try {
-      await markDraftSent(businessId, draftId);
+      await sendDraft(businessId, draftId);
       onMutate?.();
+    } catch (e) {
+      toast.error((e as Error)?.message ?? "Failed to send draft");
     } finally {
       setLoadingId(null);
     }

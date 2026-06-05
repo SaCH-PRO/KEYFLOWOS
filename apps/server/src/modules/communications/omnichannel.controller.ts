@@ -140,6 +140,16 @@ export class OmnichannelController {
     return this.drafts.markSent(id);
   }
 
+  @Post('drafts/:id/send')
+  async sendDraft(
+    @Param('businessId') _businessId: string,
+    @Param('id') id: string,
+    @Request() req: { user?: { sub?: string } },
+  ) {
+    const sentById = req.user?.sub ?? 'system';
+    return this.drafts.sendDraft(id, sentById);
+  }
+
   // ─── Consent ───
 
   @Get('consent/:contactId')

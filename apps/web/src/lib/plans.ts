@@ -11,8 +11,8 @@ export interface PlanStep {
   riskTier: number;
   requiresApproval: boolean;
   dependsOn: string[];
-  inputPayload: Record<string, any> | null;
-  outputResult: Record<string, any> | null;
+  inputPayload: Record<string, unknown> | null;
+  outputResult: Record<string, unknown> | null;
   errorMessage: string | null;
   expectedBenefit: string | null;
   startedAt: string | null;

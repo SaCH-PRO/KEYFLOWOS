@@ -13,11 +13,14 @@ interface CommandQueueProps {
   onDismiss?: (id: string) => Promise<void>;
   onApprove?: (id: string) => Promise<void>;
   onExecute?: (id: string) => Promise<void>;
+  onComplete?: (id: string) => Promise<void>;
+  onAssign?: (id: string) => Promise<void>;
+  onReopen?: (id: string) => Promise<void>;
 }
 
 const CATEGORIES = ["ALL", "MONEY", "TIME", "PEOPLE", "WORK", "SALES", "MARKETING", "GOVERNANCE", "STRATEGY", "SYSTEM"];
 
-export function CommandQueue({ items, total, loading, onRefresh, onDismiss, onApprove, onExecute }: CommandQueueProps) {
+export function CommandQueue({ items, total, loading, onRefresh, onDismiss, onApprove, onExecute, onComplete, onAssign, onReopen }: CommandQueueProps) {
   const [filter, setFilter] = useState("ALL");
 
   const filtered = filter === "ALL" ? items : items.filter((i) => i.category === filter);
@@ -70,6 +73,9 @@ export function CommandQueue({ items, total, loading, onRefresh, onDismiss, onAp
               onDismiss={onDismiss}
               onApprove={onApprove}
               onExecute={onExecute}
+              onComplete={onComplete}
+              onAssign={onAssign}
+              onReopen={onReopen}
             />
           ))}
         </div>

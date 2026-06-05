@@ -29,7 +29,7 @@ import {
 } from "@/lib/time-tracking";
 import { apiGet } from "@/lib/api";
 import { useControlTowerData } from "../control-tower/components/use-control-tower-data";
-import { format, startOfWeek, endOfWeek, addDays, subDays, isSameDay, parseISO } from "date-fns";
+import { format, startOfWeek, addDays, subDays, isSameDay, parseISO } from "date-fns";
 
 interface ProjectOption {
   id: string;
@@ -103,7 +103,7 @@ export default function TimeTrackingPage() {
   // Timer heartbeat
   useEffect(() => {
     if (!runningEntry) {
-      setElapsed(0);
+      queueMicrotask(() => setElapsed(0));
       return;
     }
     const interval = setInterval(() => {
@@ -112,14 +112,6 @@ export default function TimeTrackingPage() {
     }, 1000);
     return () => clearInterval(interval);
   }, [runningEntry]);
-
-  // Load data
-  useEffect(() => {
-    if (!businessId) return;
-    loadData();
-    loadProjects();
-    checkRunningTimer();
-  }, [businessId, selectedDate, selectedProject]);
 
   async function loadData() {
     if (!businessId) return;
@@ -147,6 +139,22 @@ export default function TimeTrackingPage() {
     if (res.data) setProjects(res.data);
   }
 
+  async function checkRunningTimer() {
+    if (!businessId) return;
+    const res = await getRunningTimer(businessId);
+    if (res.data) setRunningEntry(res.data);
+  }
+
+  // Load data
+  useEffect(() => {
+    if (!businessId) return;
+    queueMicrotask(() => {
+      loadData();
+      loadProjects();
+      checkRunningTimer();
+    });
+  }, [businessId, selectedDate, selectedProject]);
+
   async function loadTasks(projectId: string) {
     if (!businessId || !projectId) {
       setTasks([]);
@@ -154,12 +162,6 @@ export default function TimeTrackingPage() {
     }
     const res = await apiGet<{ tasks: TaskOption[] }>(`/projects/businesses/${businessId}/projects/${projectId}`);
     setTasks(res.data?.tasks ?? []);
-  }
-
-  async function checkRunningTimer() {
-    if (!businessId) return;
-    const res = await getRunningTimer(businessId);
-    if (res.data) setRunningEntry(res.data);
   }
 
   async function handleStartTimer() {

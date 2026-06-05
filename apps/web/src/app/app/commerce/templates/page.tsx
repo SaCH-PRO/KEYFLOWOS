@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
 import { fetchDocumentTemplates, setDocumentTemplate } from "@/lib/client";
 import { Card } from "@keyflow/ui";
 import { Button } from "@keyflow/ui";

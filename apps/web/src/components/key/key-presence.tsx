@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { Bot } from "lucide-react";
-import { X, MessageSquare } from "lucide-react";
 
 export type KeyPresenceState = "idle" | "active" | "processing" | "suggestion";
 
@@ -31,7 +30,7 @@ export function KeyPresence({ className }: KeyPresenceProps) {
   // Auto-show suggestions when KEY has something to say
   useEffect(() => {
     if (state === "suggestion" && !isExpanded) {
-      setShowSuggestions(true);
+      queueMicrotask(() => setShowSuggestions(true));
       const timer = setTimeout(() => setShowSuggestions(false), 8000);
       return () => clearTimeout(timer);
     }

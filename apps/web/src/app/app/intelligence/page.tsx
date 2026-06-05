@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Brain,
@@ -14,27 +14,18 @@ import {
   Workflow,
   FileText,
   AlertTriangle,
-  CheckCircle2,
   Sparkles,
   ArrowRight,
   Target,
   Lightbulb,
-  BarChart3,
-  PieChart,
-  Clock,
-  Shield,
-  Globe,
   MessageSquare,
   ShoppingCart,
-  RefreshCw,
   ChevronRight,
   Bot,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { apiGet } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
-import { formatCurrency } from "@/lib/currency";
 
 /* ─────────── Types ─────────── */
 
@@ -73,7 +64,7 @@ interface SystemSnapshot {
 
 /* ─────────── Mock data helpers ─────────── */
 
-const MODULE_CONFIG: Record<string, { label: string; icon: any; route: string }> = {
+const MODULE_CONFIG: Record<string, { label: string; icon: React.ElementType; route: string }> = {
   finance: { label: "Financial Flow", icon: Banknote, route: "/app/money" },
   network: { label: "Network", icon: Users, route: "/app/network/contacts" },
   calendar: { label: "Calendar", icon: CalendarDays, route: "/app/calendar" },
@@ -265,7 +256,7 @@ function ScoreRing({ score, label, size = 60, color }: { score: number; label: s
 
 export default function IntelligencePage() {
   const router = useRouter();
-  const [businessId, setBusinessId] = useState<string | null>(null);
+  const [businessId, setBusinessId] = useState<string | null>(() => getStoredBusinessId() ?? null);
   const [loading, setLoading] = useState(true);
   const [snapshot, setSnapshot] = useState<SystemSnapshot>({
     momentumScore: 72,
@@ -277,8 +268,6 @@ export default function IntelligencePage() {
   });
 
   useEffect(() => {
-    const bid = getStoredBusinessId();
-    if (bid) setBusinessId(bid);
     const timer = setTimeout(() => setLoading(false), 800);
     return () => clearTimeout(timer);
   }, []);

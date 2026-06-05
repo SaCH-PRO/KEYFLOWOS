@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { ShoppingCart, Send, Loader2, ArrowLeft, Sparkles, AlertTriangle } from "lucide-react";
+import { ShoppingCart, Send, Loader2, ArrowLeft, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { createProcurementRequest } from "@/lib/client";

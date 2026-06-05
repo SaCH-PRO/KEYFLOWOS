@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { useParams, useSearchParams } from 'next/navigation';
+import { useParams, useSearchParams, useRouter } from 'next/navigation';
 import { apiGet, apiPost } from '@/lib/api';
 
 interface Product {
@@ -22,6 +22,7 @@ interface CartItem {
 export default function CartWidgetPage() {
   const params = useParams();
   const searchParams = useSearchParams();
+  const router = useRouter();
   const slug = params.slug as string;
   const theme = searchParams.get('theme') || 'dark';
   const primary = searchParams.get('primary') || '#f97316';
@@ -35,6 +36,15 @@ export default function CartWidgetPage() {
   const [customerPhone, setCustomerPhone] = useState('');
   const [orderResult, setOrderResult] = useState<{ orderId?: string; payment?: { redirectUrl?: string } } | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
+  const addToCart = useCallback((product: Product) => {
+    setCart((prev) => {
+      const existing = prev.find((i) => i.productId === product.id);
+      if (existing) {
+        return prev.map((i) => (i.productId === product.id ? { ...i, quantity: i.quantity + 1 } : i));
+      }
+      return [...prev, { productId: product.id, name: product.name, price: product.price, quantity: 1 }];
+    });
+  }, []);
 
   useEffect(() => {
     apiGet<{ products?: Product[] }>(`/site/storefront/public/${encodeURIComponent(slug)}`)
@@ -51,7 +61,7 @@ export default function CartWidgetPage() {
         setStep('error');
         setErrorMsg('Unable to load products.');
       });
-  }, [slug, singleProductId]);
+  }, [slug, singleProductId, addToCart]);
 
   useEffect(() => {
     if (step !== 'loading') {
@@ -59,16 +69,6 @@ export default function CartWidgetPage() {
       window.parent.postMessage({ type: 'KEYFLOW_WIDGET_RESIZE', height: h }, '*');
     }
   }, [step, cart.length]);
-
-  const addToCart = useCallback((product: Product) => {
-    setCart((prev) => {
-      const existing = prev.find((i) => i.productId === product.id);
-      if (existing) {
-        return prev.map((i) => (i.productId === product.id ? { ...i, quantity: i.quantity + 1 } : i));
-      }
-      return [...prev, { productId: product.id, name: product.name, price: product.price, quantity: 1 }];
-    });
-  }, []);
 
   const removeFromCart = useCallback((productId: string) => {
     setCart((prev) => prev.filter((i) => i.productId !== productId));
@@ -100,7 +100,7 @@ export default function CartWidgetPage() {
       setStep('success');
       notifyParent('cart:purchase', { orderId: data.order.id, total: cartTotal });
       if (data.payment?.redirectUrl) {
-        window.location.href = data.payment.redirectUrl;
+        router.push(data.payment.redirectUrl);
       }
     }
   };

@@ -1,18 +1,17 @@
 "use client";
 
 import React, { useState, useMemo, useCallback, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { AnimatePresence } from "framer-motion";
 import {
   Search,
   TrendingUp,
-  Plus,
   X,
   CheckCircle2,
   Clock,
   AlertTriangle,
 } from "lucide-react";
 import { useSearchParams } from "next/navigation";
-import { formatCurrency, formatCurrencyCompact } from "@/lib/currency";
+import { formatCurrencyCompact } from "@/lib/currency";
 import { Skeleton } from "@/components/ui/skeleton";
 import { FINANCIAL_STAGES } from "@/lib/finance/constants";
 import { normalizeInvoice, normalizeQuote, computePipelineMetrics, getPipelineStage } from "@/lib/finance/utils";

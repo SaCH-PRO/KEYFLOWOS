@@ -5,13 +5,9 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import {
-  CreditCard,
   FileText,
   DollarSign,
   RefreshCw,
-  Plus,
-  Clock,
-  AlertTriangle,
   TrendingUp,
   Receipt,
   Send,
@@ -43,7 +39,6 @@ import { useActionQueue } from "./hooks/use-action-queue";
 import { FinancePipeline } from "../finance/components/finance-pipeline";
 import { RevenueComposer } from "../finance/components/revenue-composer";
 import RecurringPanel from "./recurring/recurring-panel";
-import PaymentsTab from "./payments/payments-tab";
 import { CommerceOverviewTab } from "./components/commerce-overview-tab";
 import { TabFrame } from "./components/tab-frame";
 import { RevenueRecordDrawer } from "./components/revenue-record-drawer";

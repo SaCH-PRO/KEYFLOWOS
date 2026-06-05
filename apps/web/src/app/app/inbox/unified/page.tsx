@@ -1,10 +1,12 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { MessageSquare, Mail, Phone, Instagram, Facebook, CheckCircle2, Loader2, Send, Filter, RefreshCw } from "lucide-react";
+import { MessageSquare, Mail, Phone, Instagram, Facebook, CheckCircle2, Loader2, Send, RefreshCw, FileText } from "lucide-react";
 import { toast } from "sonner";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { apiGet, apiPostSimple } from "@/lib/api";
+import { ResponseDraftPanel } from "@/components/communications/response-draft-panel";
+import { fetchUnifiedInbox, type DraftItem } from "@/lib/api/omnichannel";
 
 interface Thread {
   id: string;
@@ -57,6 +59,8 @@ export default function UnifiedInboxPage() {
   const [replyText, setReplyText] = useState("");
   const [filterStatus, setFilterStatus] = useState<string>("open");
   const [filterChannel, setFilterChannel] = useState<string>("");
+  const [drafts, setDrafts] = useState<DraftItem[]>([]);
+  const [showDrafts, setShowDrafts] = useState(false);
   // Role filter removed — Key auto-detects role intelligently
 
   const loadThreads = useCallback(async () => {
@@ -65,8 +69,12 @@ export default function UnifiedInboxPage() {
       const params = new URLSearchParams();
       if (filterStatus) params.set("status", filterStatus);
       if (filterChannel) params.set("channel", filterChannel);
-      const res = await apiGet<{ threads: Thread[] }>(`/ai/businesses/${businessId}/inbox?${params}`);
-      setThreads(res.data?.threads ?? []);
+      const [inboxRes, unifiedRes] = await Promise.all([
+        apiGet<{ threads: Thread[] }>(`/ai/businesses/${businessId}/inbox?${params}`),
+        fetchUnifiedInbox(businessId, { limit: 20 }),
+      ]);
+      setThreads(inboxRes.data?.threads ?? []);
+      setDrafts((unifiedRes.data?.drafts?.items ?? []) as DraftItem[]);
     } catch {
       toast.error("Failed to load inbox");
     } finally {
@@ -135,6 +143,17 @@ export default function UnifiedInboxPage() {
           <div className="flex items-center gap-2 mb-3">
             <MessageSquare className="w-5 h-5 text-[hsl(var(--kf-accent1))]" />
             <h1 className="text-sm font-bold text-foreground/90">Unified Inbox</h1>
+            <button
+              onClick={() => setShowDrafts((v) => !v)}
+              className={`ml-auto inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium transition-colors ${
+                showDrafts
+                  ? "bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))]"
+                  : "text-muted-foreground hover:bg-muted/30"
+              }`}
+            >
+              <FileText className="w-3 h-3" />
+              Drafts {drafts.length > 0 && `(${drafts.length})`}
+            </button>
           </div>
           <div className="flex items-center gap-2">
             <select
@@ -202,6 +221,30 @@ export default function UnifiedInboxPage() {
           )}
         </div>
       </div>
+
+      {/* Drafts Panel */}
+      {showDrafts && (
+        <div className="w-96 border-r border-border/20 flex flex-col overflow-hidden">
+          <div className="p-4 border-b border-border/20 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <FileText className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
+              <h2 className="text-sm font-semibold text-foreground/80">Response Drafts</h2>
+              {drafts.length > 0 && (
+                <span className="text-xs text-muted-foreground">{drafts.length}</span>
+              )}
+            </div>
+            <button
+              onClick={() => setShowDrafts(false)}
+              className="text-xs text-muted-foreground hover:text-foreground"
+            >
+              Hide
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-3">
+            <ResponseDraftPanel businessId={businessId ?? ""} drafts={drafts} onMutate={loadThreads} />
+          </div>
+        </div>
+      )}
 
       {/* Thread View */}
       <div className="flex-1 flex flex-col">

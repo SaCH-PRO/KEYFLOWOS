@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import type { TemplateId } from "../components/invoice-templates/template-types";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { SkeletonList } from "@/components/ui/skeleton";
@@ -1495,7 +1496,7 @@ export default function InvoicesPanel({
             businessId={businessId ?? ""}
             invoiceId={inv.id}
             docType="invoice"
-            templateId={pendingDriveUpload.templateId as any}
+            templateId={pendingDriveUpload.templateId as TemplateId}
             templateData={templateData}
             fileName={`Invoice-${inv.invoiceNumber ?? inv.id.slice(0, 8)}-${inv.contact?.lastName ?? "Client"}-${new Date().toISOString().split("T")[0]}`}
             onComplete={() => setPendingDriveUpload(null)}

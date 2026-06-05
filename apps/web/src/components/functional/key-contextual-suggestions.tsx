@@ -3,7 +3,6 @@
 import { useEffect, useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { usePathname } from "next/navigation";
-import { cn } from "@/lib/utils";
 import { Sparkles } from "lucide-react";
 import { ArrowRight, X } from "lucide-react";
 

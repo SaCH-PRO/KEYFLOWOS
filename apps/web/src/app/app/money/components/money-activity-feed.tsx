@@ -4,14 +4,11 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import {
-  Receipt,
   FileText,
   DollarSign,
   TrendingDown,
   CheckCircle2,
   Send,
-  Clock,
-  Repeat,
   AlertTriangle,
 } from "lucide-react";
 import { formatCurrency } from "@/lib/currency";

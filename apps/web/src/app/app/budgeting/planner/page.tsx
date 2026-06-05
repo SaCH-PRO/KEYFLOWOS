@@ -11,7 +11,6 @@ import {
   Copy,
   ArrowRightLeft,
   CheckCircle,
-  AlertCircle,
   Loader2,
   Lock,
   Unlock,

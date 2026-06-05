@@ -27,13 +27,6 @@ export default function PlanDetailPage() {
   const [loading, setLoading] = useState(false);
   const [undoingStepId, setUndoingStepId] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!businessId || !planId) return;
-    loadPlan();
-    const interval = setInterval(loadPlan, 3000); // Live refresh
-    return () => clearInterval(interval);
-  }, [businessId, planId]);
-
   async function loadPlan() {
     if (!businessId || !planId) return;
     setLoading(true);
@@ -41,6 +34,13 @@ export default function PlanDetailPage() {
     if (res.data) setPlan(res.data);
     setLoading(false);
   }
+
+  useEffect(() => {
+    if (!businessId || !planId) return;
+    queueMicrotask(loadPlan);
+    const interval = setInterval(loadPlan, 3000); // Live refresh
+    return () => clearInterval(interval);
+  }, [businessId, planId]);
 
   async function handleApprove() {
     if (!businessId || !plan) return;

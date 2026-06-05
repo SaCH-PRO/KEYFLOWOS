@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { LifeBuoy, Plus, X, Trash2, AlertCircle, Clock, CheckCircle2, PauseCircle, Loader2 } from "lucide-react";
+import { LifeBuoy, Plus, X, Trash2, AlertCircle, CheckCircle2, PauseCircle, Loader2 } from "lucide-react";
 import {
   SupportTicket,
   fetchSupportTickets,

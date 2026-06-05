@@ -88,6 +88,18 @@ export async function executeCommandItem(businessId: string, id: string, result?
   return apiPost<CommandItem>({ path: `/command/businesses/${businessId}/items/${id}/execute`, body: { result } });
 }
 
+export async function completeCommandItem(businessId: string, id: string) {
+  return apiPost<CommandItem>({ path: `/command/businesses/${businessId}/items/${id}/complete`, body: {} });
+}
+
+export async function assignCommandItem(businessId: string, id: string, ownerType: string, ownerId: string) {
+  return apiPost<CommandItem>({ path: `/command/businesses/${businessId}/items/${id}/assign`, body: { ownerType, ownerId } });
+}
+
+export async function reopenCommandItem(businessId: string, id: string) {
+  return apiPost<CommandItem>({ path: `/command/businesses/${businessId}/items/${id}/reopen`, body: {} });
+}
+
 export async function deleteCommandItem(businessId: string, id: string) {
   return apiDelete<CommandItem>(`/command/businesses/${businessId}/items/${id}`);
 }

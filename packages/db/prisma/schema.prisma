@@ -5548,7 +5548,7 @@ model CommandItem {
   /// MONEY | TIME | PEOPLE | WORK | SALES | MARKETING | GOVERNANCE | STRATEGY | SYSTEM
   category          String
   actionType        String   @map("action_type")
-  /// OPEN | IN_PROGRESS | WAITING_APPROVAL | EXECUTED | DISMISSED | FAILED | COMPLETED
+  /// OPEN | IN_PROGRESS | WAITING_APPROVAL | EXECUTED | DISMISSED | SNOOZED | FAILED | COMPLETED
   status            String   @default("OPEN")
   priority          Int      @default(50)
   urgency           Int      @default(50)

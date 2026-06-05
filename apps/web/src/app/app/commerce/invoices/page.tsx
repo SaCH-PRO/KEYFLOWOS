@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
@@ -22,7 +22,6 @@ import {
   CheckCircle2,
   Files,
   MessageCircle,
-  Mail,
   Receipt,
   ArrowUpDown,
   ChevronLeft,

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { apiGet } from "@/lib/api";
-import { Gift, Users, DollarSign, Copy, CheckCircle2 } from "lucide-react";
+import { Gift, Copy, CheckCircle2 } from "lucide-react";
 
 interface ReferralStats {
   referralCode?: string;

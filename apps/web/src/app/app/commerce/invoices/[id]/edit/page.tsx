@@ -15,7 +15,6 @@ import {
   MessageSquare,
   Trash2,
   Plus,
-  Tag,
 } from "lucide-react";
 import {
   fetchContacts,

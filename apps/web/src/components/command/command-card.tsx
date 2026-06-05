@@ -10,6 +10,8 @@ import {
   Bot,
   User,
   Loader2,
+  RotateCcw,
+  UserPlus,
 } from "lucide-react";
 import type { CommandItem } from "@/lib/api/command";
 
@@ -18,6 +20,9 @@ interface CommandCardProps {
   onDismiss?: (id: string) => void | Promise<void>;
   onApprove?: (id: string) => void | Promise<void>;
   onExecute?: (id: string) => void | Promise<void>;
+  onComplete?: (id: string) => void | Promise<void>;
+  onAssign?: (id: string) => void | Promise<void>;
+  onReopen?: (id: string) => void | Promise<void>;
 }
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -38,11 +43,12 @@ const STATUS_LABELS: Record<string, string> = {
   WAITING_APPROVAL: "Needs Approval",
   EXECUTED: "Executed",
   DISMISSED: "Dismissed",
+  SNOOZED: "Snoozed",
   FAILED: "Failed",
   COMPLETED: "Completed",
 };
 
-export function CommandCard({ item, onDismiss, onApprove, onExecute }: CommandCardProps) {
+export function CommandCard({ item, onDismiss, onApprove, onExecute, onComplete, onAssign, onReopen }: CommandCardProps) {
   const [loading, setLoading] = useState<string | null>(null);
   const color = CATEGORY_COLORS[item.category] ?? "hsl(var(--kf-accent1))";
 
@@ -56,7 +62,7 @@ export function CommandCard({ item, onDismiss, onApprove, onExecute }: CommandCa
     }
   };
 
-  const isDone = item.status === "COMPLETED" || item.status === "EXECUTED" || item.status === "DISMISSED";
+  const isDone = item.status === "COMPLETED" || item.status === "EXECUTED" || item.status === "DISMISSED" || item.status === "SNOOZED";
 
   return (
     <div
@@ -115,8 +121,18 @@ export function CommandCard({ item, onDismiss, onApprove, onExecute }: CommandCa
           </div>
         </div>
 
-        {!isDone && (
+        {!isDone ? (
           <div className="flex items-center gap-1 flex-shrink-0">
+            {onComplete && (
+              <button
+                onClick={() => handleAction("complete", onComplete)}
+                disabled={!!loading}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20 transition-colors disabled:opacity-50"
+              >
+                {loading === "complete" ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                Done
+              </button>
+            )}
             {item.requiresApproval && onApprove && (
               <button
                 onClick={() => handleAction("approve", onApprove)}
@@ -138,6 +154,16 @@ export function CommandCard({ item, onDismiss, onApprove, onExecute }: CommandCa
                 Execute
               </button>
             )}
+            {onAssign && (
+              <button
+                onClick={() => handleAction("assign", onAssign)}
+                disabled={!!loading}
+                className="inline-flex items-center gap-1 px-2 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
+                title="Assign"
+              >
+                {loading === "assign" ? <Loader2 className="w-3 h-3 animate-spin" /> : <UserPlus className="w-3.5 h-3.5" />}
+              </button>
+            )}
             <button
               onClick={() => handleAction("dismiss", onDismiss)}
               disabled={!!loading}
@@ -145,6 +171,19 @@ export function CommandCard({ item, onDismiss, onApprove, onExecute }: CommandCa
             >
               {loading === "dismiss" ? <Loader2 className="w-3 h-3 animate-spin" /> : <XCircle className="w-3.5 h-3.5" />}
             </button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-1 flex-shrink-0">
+            {onReopen && (
+              <button
+                onClick={() => handleAction("reopen", onReopen)}
+                disabled={!!loading}
+                className="inline-flex items-center gap-1 px-2 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
+                title="Reopen"
+              >
+                {loading === "reopen" ? <Loader2 className="w-3 h-3 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+              </button>
+            )}
           </div>
         )}
       </div>

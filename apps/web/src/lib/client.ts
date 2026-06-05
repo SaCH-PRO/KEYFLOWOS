@@ -3151,66 +3151,66 @@ export async function aiGenerateFlow(input: { businessId?: string; prompt: strin
 
 /* ---------- KEY Talk Pipeline — Flow Automations ---------- */
 
-export async function keyInterpretFlow(input: { businessId?: string; intent: string }): Promise<ApiResult<{ success: boolean; interpretation?: string; recommendation?: string; confidence?: number; proposedFlow?: any; alternatives?: any[]; error?: string }>> {
+export async function keyInterpretFlow(input: { businessId?: string; intent: string }): Promise<ApiResult<{ success: boolean; interpretation?: string; recommendation?: string; confidence?: number; proposedFlow?: unknown; alternatives?: unknown[]; error?: string }>> {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
   return apiPost({ path: `/automation/businesses/${encodeURIComponent(businessId)}/key/interpret`, body: { intent: input.intent } });
 }
 
-export async function keyBuildFlow(input: { businessId?: string; proposedFlow: any }): Promise<ApiResult<{ success: boolean; flowId?: string; flow?: any; error?: string }>> {
+export async function keyBuildFlow(input: { businessId?: string; proposedFlow: unknown }): Promise<ApiResult<{ success: boolean; flowId?: string; flow?: unknown; error?: string }>> {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
   return apiPost({ path: `/automation/businesses/${encodeURIComponent(businessId)}/key/build`, body: { proposedFlow: input.proposedFlow } });
 }
 
-export async function keyExecuteFlow(input: { businessId?: string; flowId: string; testContext?: Record<string, any> }): Promise<ApiResult<{ success: boolean; executed?: boolean; actionsRun?: string[]; error?: string; proof?: any }>> {
+export async function keyExecuteFlow(input: { businessId?: string; flowId: string; testContext?: Record<string, unknown> }): Promise<ApiResult<{ success: boolean; executed?: boolean; actionsRun?: string[]; error?: string; proof?: unknown }>> {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
   return apiPost({ path: `/automation/businesses/${encodeURIComponent(businessId)}/key/execute`, body: { flowId: input.flowId, testContext: input.testContext } });
 }
 
-export async function keyTalkFlow(input: { businessId?: string; intent: string; autoExecute?: boolean }): Promise<ApiResult<any>> {
+export async function keyTalkFlow(input: { businessId?: string; intent: string; autoExecute?: boolean }): Promise<ApiResult<unknown>> {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
   return apiPost({ path: `/automation/businesses/${encodeURIComponent(businessId)}/key/talk`, body: { intent: input.intent, autoExecute: input.autoExecute } });
 }
 
 /* ---------- KEY Talk Pipeline — Autopilot Delegations ---------- */
 
-export async function keyInterpretDelegation(input: { businessId?: string; intent: string }): Promise<ApiResult<{ success: boolean; interpretation?: string; recommendation?: string; confidence?: number; recommendedLoopType?: string; proposedConfig?: any; alternatives?: any[]; error?: string }>> {
+export async function keyInterpretDelegation(input: { businessId?: string; intent: string }): Promise<ApiResult<{ success: boolean; interpretation?: string; recommendation?: string; confidence?: number; recommendedLoopType?: string; proposedConfig?: unknown; alternatives?: unknown[]; error?: string }>> {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
   return apiPost({ path: `/autopilot/businesses/${encodeURIComponent(businessId)}/key/interpret`, body: { intent: input.intent } });
 }
 
-export async function keyBuildDelegation(input: { businessId?: string; recommendedLoopType: string; proposedConfig?: any; enabled?: boolean }): Promise<ApiResult<{ success: boolean; loopId?: string; loop?: any; error?: string }>> {
+export async function keyBuildDelegation(input: { businessId?: string; recommendedLoopType: string; proposedConfig?: unknown; enabled?: boolean }): Promise<ApiResult<{ success: boolean; loopId?: string; loop?: unknown; error?: string }>> {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
   return apiPost({ path: `/autopilot/businesses/${encodeURIComponent(businessId)}/key/build`, body: { recommendedLoopType: input.recommendedLoopType, proposedConfig: input.proposedConfig, enabled: input.enabled } });
 }
 
-export async function keyExecuteDelegation(input: { businessId?: string; loopId: string }): Promise<ApiResult<{ success: boolean; result?: any; proof?: any; error?: string }>> {
+export async function keyExecuteDelegation(input: { businessId?: string; loopId: string }): Promise<ApiResult<{ success: boolean; result?: unknown; proof?: unknown; error?: string }>> {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
   return apiPost({ path: `/autopilot/businesses/${encodeURIComponent(businessId)}/key/execute`, body: { loopId: input.loopId } });
 }
 
-export async function keyTalkDelegation(input: { businessId?: string; intent: string; autoExecute?: boolean }): Promise<ApiResult<any>> {
+export async function keyTalkDelegation(input: { businessId?: string; intent: string; autoExecute?: boolean }): Promise<ApiResult<unknown>> {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
   return apiPost({ path: `/autopilot/businesses/${encodeURIComponent(businessId)}/key/talk`, body: { intent: input.intent, autoExecute: input.autoExecute } });
 }
 
 /* ---------- KEY Talk — Calendar ---------- */
 
-export async function keyInterpretCalendar(input: { businessId?: string; intent: string }): Promise<ApiResult<{ success: boolean; interpretation?: string; actionType?: string; recommendation?: string; confidence?: number; proposedEvent?: any; alternatives?: any[]; error?: string }>> {
+export async function keyInterpretCalendar(input: { businessId?: string; intent: string }): Promise<ApiResult<{ success: boolean; interpretation?: string; actionType?: string; recommendation?: string; confidence?: number; proposedEvent?: unknown; alternatives?: unknown[]; error?: string }>> {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
   return apiPost({ path: `/calendar/businesses/${encodeURIComponent(businessId)}/key/interpret`, body: { intent: input.intent } });
 }
 
-export async function keyBuildCalendar(input: { businessId?: string; proposedEvent: any }): Promise<ApiResult<{ success: boolean; eventId?: string; event?: any; error?: string }>> {
+export async function keyBuildCalendar(input: { businessId?: string; proposedEvent: unknown }): Promise<ApiResult<{ success: boolean; eventId?: string; event?: unknown; error?: string }>> {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
   return apiPost({ path: `/calendar/businesses/${encodeURIComponent(businessId)}/key/build`, body: { proposedEvent: input.proposedEvent } });
 }
 
-export async function keyExecuteCalendar(input: { businessId?: string; eventId: string }): Promise<ApiResult<{ success: boolean; executed?: boolean; event?: any; error?: string; proof?: any }>> {
+export async function keyExecuteCalendar(input: { businessId?: string; eventId: string }): Promise<ApiResult<{ success: boolean; executed?: boolean; event?: unknown; error?: string; proof?: unknown }>> {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
   return apiPost({ path: `/calendar/businesses/${encodeURIComponent(businessId)}/key/execute`, body: { eventId: input.eventId } });
 }
 
-export async function keyTalkCalendar(input: { businessId?: string; intent: string; autoExecute?: boolean }): Promise<ApiResult<any>> {
+export async function keyTalkCalendar(input: { businessId?: string; intent: string; autoExecute?: boolean }): Promise<ApiResult<unknown>> {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
   return apiPost({ path: `/calendar/businesses/${encodeURIComponent(businessId)}/key/talk`, body: { intent: input.intent, autoExecute: input.autoExecute } });
 }
@@ -6063,7 +6063,7 @@ export interface ChatSuggestion {
   category: string;
   title: string;
   message: string;
-  actions: Array<{ label: string; value: string; toolName?: string; args?: Record<string, any> }>;
+  actions: Array<{ label: string; value: string; toolName?: string; args?: Record<string, unknown> }>;
   severity: 'critical' | 'warning' | 'opportunity' | 'info';
   metric?: string;
   createdAt: string;

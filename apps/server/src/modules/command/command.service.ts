@@ -153,11 +153,83 @@ export class CommandService {
   }
 
   async snooze(businessId: string, id: string, until: Date) {
-    await this.findOne(businessId, id);
-    return this.prisma.client.commandItem.update({
+    const existing = await this.findOne(businessId, id);
+    const item = await this.prisma.client.commandItem.update({
       where: { id },
-      data: { status: 'DISMISSED', snoozedUntil: until },
+      data: { status: 'SNOOZED', snoozedUntil: until },
     });
+    await this.timeline.recordEvent({
+      businessId,
+      module: 'command',
+      action: 'snooze',
+      entityType: 'command_item',
+      entityId: id,
+      title: `Snoozed: ${existing.title}`,
+      category: 'SYSTEM',
+      actorType: 'USER',
+      data: { until: until.toISOString(), previousStatus: existing.status },
+    });
+    return item;
+  }
+
+  async complete(businessId: string, id: string) {
+    const existing = await this.findOne(businessId, id);
+    const item = await this.prisma.client.commandItem.update({
+      where: { id },
+      data: { status: 'COMPLETED', completedAt: new Date() },
+    });
+    await this.timeline.recordEvent({
+      businessId,
+      module: 'command',
+      action: 'complete',
+      entityType: 'command_item',
+      entityId: id,
+      title: `Completed: ${existing.title}`,
+      category: 'SYSTEM',
+      actorType: 'USER',
+      data: { previousStatus: existing.status },
+    });
+    return item;
+  }
+
+  async assign(businessId: string, id: string, ownerType: string, ownerId: string) {
+    const existing = await this.findOne(businessId, id);
+    const item = await this.prisma.client.commandItem.update({
+      where: { id },
+      data: { ownerType, ownerId },
+    });
+    await this.timeline.recordEvent({
+      businessId,
+      module: 'command',
+      action: 'assign',
+      entityType: 'command_item',
+      entityId: id,
+      title: `Assigned: ${existing.title}`,
+      category: 'SYSTEM',
+      actorType: 'USER',
+      data: { ownerType, ownerId, previousOwnerType: existing.ownerType, previousOwnerId: existing.ownerId },
+    });
+    return item;
+  }
+
+  async reopen(businessId: string, id: string) {
+    const existing = await this.findOne(businessId, id);
+    const item = await this.prisma.client.commandItem.update({
+      where: { id },
+      data: { status: 'OPEN', completedAt: null, dismissedAt: null, snoozedUntil: null },
+    });
+    await this.timeline.recordEvent({
+      businessId,
+      module: 'command',
+      action: 'reopen',
+      entityType: 'command_item',
+      entityId: id,
+      title: `Reopened: ${existing.title}`,
+      category: 'SYSTEM',
+      actorType: 'USER',
+      data: { previousStatus: existing.status },
+    });
+    return item;
   }
 
   async approve(businessId: string, id: string) {

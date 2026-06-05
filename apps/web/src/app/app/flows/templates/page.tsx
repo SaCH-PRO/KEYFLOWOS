@@ -14,7 +14,6 @@ import {
   Star,
   Mail,
   AlertTriangle,
-  CheckCircle2,
 } from "lucide-react";
 import { getStoredBusinessId } from "@/lib/workspace";
 import {

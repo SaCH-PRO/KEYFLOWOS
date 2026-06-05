@@ -10,10 +10,7 @@ import {
   Search,
   Trash2,
   Eye,
-  CheckCircle2,
-  XCircle,
   Clock,
-  AlertTriangle,
   ArrowRight,
   X,
 } from "lucide-react";

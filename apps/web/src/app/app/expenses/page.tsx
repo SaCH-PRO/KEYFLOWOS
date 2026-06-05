@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import {
   Search,
@@ -21,22 +21,13 @@ import {
   FileText,
   TrendingUp,
   AlertTriangle,
-  ChevronRight,
   Loader2,
-  Inbox,
-  Eye,
-  Pencil,
-  Trash2,
-  Ban,
-  Check,
-  X,
 } from "lucide-react";
 import {
   deleteExpense,
   updateExpense,
   getExpenseExportUrl,
   Expense,
-  ExpenseCategory,
   ExpenseBudget,
 } from "@/lib/client";
 import { getAuthHeaders } from "@/lib/api";

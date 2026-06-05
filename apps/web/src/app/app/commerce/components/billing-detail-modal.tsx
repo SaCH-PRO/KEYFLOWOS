@@ -3,7 +3,6 @@
 import { type ReactNode, useEffect, useCallback, useRef, useState } from "react";
 import { useCompose } from "@/components/email/compose-context";
 import { motion } from "framer-motion";
-import { InfoBadge } from "@/components/ui/info-badge";
 import {
   FileText,
   X,

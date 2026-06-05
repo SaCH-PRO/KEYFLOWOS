@@ -3,7 +3,6 @@
 import React, { useMemo } from "react";
 import { motion } from "framer-motion";
 import {
-  Landmark,
   TrendingUp,
   TrendingDown,
   Wallet,
@@ -16,7 +15,6 @@ import {
   Zap,
   FileText,
   CreditCard,
-  Minus,
 } from "lucide-react";
 import { formatCurrency, formatCurrencyCompact } from "@/lib/currency";
 import type { FinanceOverview, FinanceOverviewActionItem } from "@/lib/client";

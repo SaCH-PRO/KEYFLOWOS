@@ -5,26 +5,18 @@ import { motion } from "framer-motion";
 import {
   Store,
   TrendingUp,
-  Users,
   Eye,
   ShoppingCart,
   MousePointerClick,
   Globe,
-  ArrowRight,
   Sparkles,
   AlertTriangle,
   Zap,
-  ChevronRight,
   BarChart3,
   Target,
-  Clock,
-  MapPin,
-  Monitor,
-  Smartphone,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
-import { formatCurrency } from "@/lib/currency";
 
 interface StorefrontMetric {
   label: string;

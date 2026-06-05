@@ -12,7 +12,6 @@ import {
   Trash2,
   Copy,
   TrendingUp,
-  AlertCircle,
   CheckCircle2,
   Clock,
 } from "lucide-react";

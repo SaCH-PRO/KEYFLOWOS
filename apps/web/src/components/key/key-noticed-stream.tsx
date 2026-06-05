@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Sparkles, RefreshCw, ChevronRight, AlertTriangle, AlertCircle, Zap, Info, ChevronDown, ChevronUp, Brain } from "lucide-react";
+import { Sparkles, RefreshCw, AlertTriangle, AlertCircle, Zap, Info, ChevronDown, ChevronUp, Brain } from "lucide-react";
 import { fetchProAutoInsights, type ProAutoInsight } from "@/lib/client";
 import { openKey } from "./key-agent";
 

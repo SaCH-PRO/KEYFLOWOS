@@ -10,7 +10,6 @@ import {
   Send,
   Save,
   Loader2,
-  Eye,
   User,
   Calendar,
   FileText,
@@ -18,8 +17,6 @@ import {
   Tag,
   MessageSquare,
   Trash2,
-  ChevronDown,
-  ChevronUp,
 } from "lucide-react";
 import {
   fetchContacts,

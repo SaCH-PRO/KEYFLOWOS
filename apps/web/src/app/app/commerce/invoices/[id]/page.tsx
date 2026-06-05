@@ -14,9 +14,7 @@ import {
   Ban,
   Trash2,
   Printer,
-  Eye,
   Loader2,
-  Mail,
   Link as LinkIcon,
   Receipt,
   FileText,
@@ -28,8 +26,6 @@ import {
   User,
   ChevronRight,
   Pencil,
-  CheckCircle2,
-  X,
 } from "lucide-react";
 import {
   getInvoice,
@@ -39,7 +35,6 @@ import {
   markInvoicePaid,
   resendInvoiceReceipt,
   sendInvoiceReminder,
-  sendInvoiceEmail,
   createInvoicePaymentLink,
   recordInvoicePayment,
   Invoice,

@@ -10,7 +10,6 @@ import {
   XCircle,
   User,
   MessageSquare,
-  DollarSign,
   ArrowRight,
   Sparkles,
   ChevronDown,

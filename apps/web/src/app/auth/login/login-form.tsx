@@ -300,7 +300,7 @@ export default function LoginForm() {
                             href="/auth/signup"
                             className="text-xs font-medium text-[hsl(24_95%_63%)] hover:text-[hsl(24_95%_73%)] transition-colors"
                           >
-                            Don't have an account? Create one →
+                            Don&apos;t have an account? Create one →
                           </Link>
                         </div>
                       )}

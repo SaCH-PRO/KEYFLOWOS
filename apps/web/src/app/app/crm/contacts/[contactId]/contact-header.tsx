@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { fetchContactDetail } from "@/lib/client";
 import { Badge } from "@keyflow/ui";
-import { User, Mail, Phone, MapPin, Calendar, Star } from "lucide-react";
+import { User, Mail, Phone, MapPin, Star } from "lucide-react";
 
 interface Contact {
   id: string;

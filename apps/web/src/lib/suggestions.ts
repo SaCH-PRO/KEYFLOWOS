@@ -9,7 +9,7 @@ export interface ChatSuggestion {
     label: string;
     value: string;
     toolName?: string;
-    args?: Record<string, any>;
+    args?: Record<string, unknown>;
   }>;
   severity: 'critical' | 'warning' | 'opportunity' | 'info';
   metric?: string;

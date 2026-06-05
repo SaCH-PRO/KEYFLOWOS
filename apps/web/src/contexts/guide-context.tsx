@@ -62,7 +62,7 @@ export function GuideProvider({ children }: { children: React.ReactNode }) {
   }, [currentStep]);
 
   useEffect(() => {
-    updateTargetRect();
+    queueMicrotask(updateTargetRect);
 
     if (!currentStep?.target || !isActive) {
       if (observerRef.current) {

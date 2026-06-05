@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Megaphone, Mail, PenTool, Share2, Target, ArrowRight, Plus, Loader2, Trash2, Play } from "lucide-react";
+import { Megaphone, Mail, PenTool, Share2, Target, ArrowRight, Plus, Loader2, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { FlowShell } from "@/components/layout/flow-shell";

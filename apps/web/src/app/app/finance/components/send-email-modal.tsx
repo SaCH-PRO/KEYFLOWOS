@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Mail, Send, Loader2 } from "lucide-react";
-import { sendInvoiceEmail, sendQuoteEmail, type Invoice, type Quote } from "@/lib/client";
+import { sendInvoiceEmail, sendQuoteEmail } from "@/lib/client";
 import { toast } from "sonner";
 
 interface SendEmailModalProps {

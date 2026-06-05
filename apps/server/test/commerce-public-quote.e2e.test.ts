@@ -14,6 +14,7 @@ import { CommerceVisionService } from '../src/modules/commerce/commerce-vision.s
 import { StoreReadinessService } from '../src/modules/commerce/store-readiness.service';
 import { CommerceStatsService } from '../src/modules/commerce/commerce-stats.service';
 import { InvoiceWorkflowService } from '../src/modules/commerce/invoice-workflow.service';
+import { PaymentEvidenceService } from '../src/modules/commerce/payment-evidence.service';
 import { CatalogService } from '../src/modules/catalog/catalog.service';
 import { PublicEventsService } from '../src/modules/public-events/public-events.service';
 import { RevenuePostingService } from '../src/modules/finance/revenue-posting.service';
@@ -146,6 +147,7 @@ describe('Commerce public quote e2e', () => {
         { provide: GmailService, useValue: {} },
         { provide: CommerceVisionService, useValue: {} },
         { provide: StoreReadinessService, useValue: {} },
+        { provide: PaymentEvidenceService, useValue: {} },
       ],
     })
       .overrideGuard(AuthGuard)

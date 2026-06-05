@@ -5,9 +5,10 @@ import { DeviceController } from './device.controller';
 import { DeviceService } from './device.service';
 import { VisualClassifierService } from './visual-classifier.service';
 import { CommandModule } from '../command/command.module';
+import { AiModule } from '../ai/ai.module';
 
 @Module({
-  imports: [PrismaModule, AuthModule, CommandModule],
+  imports: [PrismaModule, AuthModule, CommandModule, AiModule],
   controllers: [DeviceController],
   providers: [DeviceService, VisualClassifierService],
   exports: [DeviceService, VisualClassifierService],

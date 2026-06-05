@@ -92,6 +92,31 @@ export class CommandController {
     return this.commandService.execute(businessId, id, body.result);
   }
 
+  @Post('items/:id/complete')
+  async complete(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+  ) {
+    return this.commandService.complete(businessId, id);
+  }
+
+  @Post('items/:id/assign')
+  async assign(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Body() body: { ownerType: string; ownerId: string },
+  ) {
+    return this.commandService.assign(businessId, id, body.ownerType, body.ownerId);
+  }
+
+  @Post('items/:id/reopen')
+  async reopen(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+  ) {
+    return this.commandService.reopen(businessId, id);
+  }
+
   @Delete('items/:id')
   async delete(
     @Param('businessId') businessId: string,

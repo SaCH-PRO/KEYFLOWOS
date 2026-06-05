@@ -20,7 +20,6 @@ import {
   X,
 } from "lucide-react";
 import {
-  LineChart,
   Line,
   XAxis,
   YAxis,
@@ -36,7 +35,6 @@ import {
   Radar as RechartsRadar,
   BarChart,
   Bar,
-  Legend,
 } from "recharts";
 import {
   fetchAnalyticsOverview,
@@ -122,7 +120,7 @@ export function GrowthTrajectoryPanel({ businessId }: GrowthTrajectoryPanelProps
       setSnapshots(sn.data ?? []);
       setMaturity(mat.data);
       setProjections(proj.data ?? {});
-      setInsights(ins.data ?? { items: [], total: 0 } as any);
+      setInsights(ins.data ?? { items: [], total: 0 });
     } catch (e) {
       console.error("Failed to load analytics", e);
     } finally {

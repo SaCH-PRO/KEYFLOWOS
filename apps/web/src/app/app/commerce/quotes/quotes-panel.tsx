@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import type { TemplateId } from "../components/invoice-templates/template-types";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { SkeletonList } from "@/components/ui/skeleton";
@@ -1516,7 +1517,7 @@ export default function QuotesPanel({
             businessId={businessId ?? ""}
             invoiceId={q.id}
             docType="quote"
-            templateId={pendingDriveUpload.templateId as any}
+            templateId={pendingDriveUpload.templateId as TemplateId}
             templateData={templateData}
             fileName={`Quote-${q.quoteNumber ?? q.id.slice(0, 8)}-${q.contact?.lastName ?? "Client"}-${new Date().toISOString().split("T")[0]}`}
             onComplete={() => setPendingDriveUpload(null)}
