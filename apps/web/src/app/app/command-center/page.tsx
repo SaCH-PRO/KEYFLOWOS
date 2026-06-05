@@ -25,6 +25,7 @@ import { UnifiedPageShell } from "@/components/layout/unified-page-shell";
 import { CommandQueue } from "@/components/command/command-queue";
 import { CommandSummaryStrip } from "@/components/command/command-summary-strip";
 import { fetchCommandCenter, type CommandCenterDto } from "@/lib/api/os";
+import { BusinessPulseCard } from "@/components/business-pulse-card";
 import {
   fetchCommandItems,
   fetchCommandSummary,
@@ -201,22 +202,41 @@ export default function CommandCenterPage() {
       icon={Zap}
       maxWidth="5xl"
     >
-      {/* Unified status strip */}
+      {/* Business Pulse + Health Pills */}
       {!loading && d && (
-        <div className="flex flex-wrap items-center gap-2">
-          <HealthPill label="Money" score={d.health.money.score} trend={d.health.money.trend} />
-          <HealthPill label="Time" score={d.health.time.score} trend={d.health.time.trend} />
-          <HealthPill label="People" score={d.health.people.score} trend={d.health.people.trend} />
-          <HealthPill label="Sales" score={d.health.sales.score} trend={d.health.sales.trend} />
-          <HealthPill label="Ops" score={d.health.operations.score} trend={d.health.operations.trend} />
-          <button
-            onClick={handleGenerate}
-            disabled={generating}
-            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-[hsl(var(--kf-accent1))] text-white hover:opacity-90 transition-opacity disabled:opacity-50"
-          >
-            {generating ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
-            Scan
-          </button>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+          <BusinessPulseCard
+            overallScore={d.health.overallScore}
+            dimensions={[
+              { label: "Money", score: d.health.money.score, trend: d.health.money.trend, color: "hsl(var(--kf-success))" },
+              { label: "Time", score: d.health.time.score, trend: d.health.time.trend, color: "hsl(var(--kf-accent2))" },
+              { label: "People", score: d.health.people.score, trend: d.health.people.trend, color: "hsl(var(--kf-warning))" },
+              { label: "Sales", score: d.health.sales.score, trend: d.health.sales.trend, color: "hsl(var(--kf-accent1))" },
+              { label: "Ops", score: d.health.operations.score, trend: d.health.operations.trend, color: "hsl(var(--kf-violet-accent))" },
+            ]}
+            className="lg:col-span-2"
+          />
+          <div className="kf-card kf-radius-lg p-4 flex flex-col justify-center gap-2">
+            <div className="flex items-center gap-2 mb-1">
+              <Sparkles className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
+              <h3 className="text-sm font-semibold">Quick Actions</h3>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <HealthPill label="Money" score={d.health.money.score} trend={d.health.money.trend} />
+              <HealthPill label="Time" score={d.health.time.score} trend={d.health.time.trend} />
+              <HealthPill label="People" score={d.health.people.score} trend={d.health.people.trend} />
+              <HealthPill label="Sales" score={d.health.sales.score} trend={d.health.sales.trend} />
+              <HealthPill label="Ops" score={d.health.operations.score} trend={d.health.operations.trend} />
+            </div>
+            <button
+              onClick={handleGenerate}
+              disabled={generating}
+              className="mt-1 inline-flex items-center justify-center gap-1 px-3 py-1.5 rounded-md text-xs font-medium bg-[hsl(var(--kf-accent1))] text-white hover:opacity-90 transition-opacity disabled:opacity-50"
+            >
+              {generating ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+              Scan for Actions
+            </button>
+          </div>
         </div>
       )}
 
