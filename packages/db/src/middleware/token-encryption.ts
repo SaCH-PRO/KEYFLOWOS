@@ -1,13 +1,11 @@
 import { Prisma } from "@prisma/client";
+import * as crypto from 'crypto';
 
 const ALGORITHM = 'aes-256-gcm';
 const PREFIX = 'enc:v1:';
 
-// Lazy-load crypto to avoid issues in browser/edge environments where this file might be imported
-let _crypto: typeof import('crypto') | null = null;
-function getCrypto(): typeof import('crypto') {
-  if (!_crypto) _crypto = require('crypto');
-  return _crypto!;
+function getCrypto() {
+  return crypto;
 }
 
 function getDerivedKey(): Buffer {
