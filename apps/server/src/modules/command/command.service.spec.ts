@@ -22,15 +22,21 @@ function makeTimelineMock() {
   return { recordEvent: vi.fn().mockResolvedValue(undefined) };
 }
 
+function makeNotificationsMock() {
+  return { create: vi.fn().mockResolvedValue(undefined) };
+}
+
 describe('CommandService', () => {
   let prisma: ReturnType<typeof makePrismaMock>;
   let timeline: ReturnType<typeof makeTimelineMock>;
+  let notifications: ReturnType<typeof makeNotificationsMock>;
   let svc: CommandService;
 
   beforeEach(() => {
     prisma = makePrismaMock();
     timeline = makeTimelineMock();
-    svc = new CommandService(prisma as any, timeline as any);
+    notifications = makeNotificationsMock();
+    svc = new CommandService(prisma as any, timeline as any, notifications as any);
     vi.clearAllMocks();
   });
 

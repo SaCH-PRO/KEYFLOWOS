@@ -56,8 +56,12 @@ class TimelineServiceMock {
   async recordEvent(_input: any) { return { id: 'evt_1' }; }
 }
 
+class NotificationsServiceMock {
+  async create(_input: any) { return { id: 'notif_1' }; }
+}
+
 describe('OsController command-center', () => {
-  const commandService = new CommandService(new PrismaServiceMock() as any, new TimelineServiceMock() as any);
+  const commandService = new CommandService(new PrismaServiceMock() as any, new TimelineServiceMock() as any, new NotificationsServiceMock() as any);
   const osService = new OsService(new PrismaServiceMock() as any, commandService as any);
   const controller = new OsController(osService as any);
 

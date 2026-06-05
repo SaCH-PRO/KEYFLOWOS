@@ -1,6 +1,7 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { TimelineService } from '../timeline/timeline.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { CreateCommandItemDto } from './dto/create-command-item.dto';
 import { UpdateCommandItemDto } from './dto/update-command-item.dto';
 
@@ -9,6 +10,7 @@ export class CommandService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(TimelineService) private readonly timeline: TimelineService,
+    @Inject(NotificationsService) private readonly notifications: NotificationsService,
   ) {}
 
   async create(businessId: string, dto: CreateCommandItemDto) {
@@ -55,6 +57,16 @@ export class CommandService {
       actorType: 'SYSTEM',
       data: { category: dto.category, actionType: dto.actionType, priority: dto.priority },
     });
+    // Notify for high-priority or approval-required commands
+    if (item.requiresApproval || item.priority >= 80 || item.riskTier >= 3) {
+      await this.notifications.create({
+        businessId,
+        type: 'command',
+        title: item.requiresApproval ? `Approval required: ${item.title}` : `High priority: ${item.title}`,
+        body: item.description ?? undefined,
+        data: { commandId: item.id, category: item.category, priority: item.priority },
+      });
+    }
     return item;
   }
 

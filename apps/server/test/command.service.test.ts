@@ -23,8 +23,12 @@ class TimelineServiceMock {
   async recordEvent(_input: any) { return { id: 'evt_1' }; }
 }
 
+class NotificationsServiceMock {
+  async create(_input: any) { return { id: 'notif_1' }; }
+}
+
 describe('CommandService', () => {
-  const service = new CommandService(new PrismaServiceMock() as any, new TimelineServiceMock() as any);
+  const service = new CommandService(new PrismaServiceMock() as any, new TimelineServiceMock() as any, new NotificationsServiceMock() as any);
 
   it('creates a command item', async () => {
     const item = await service.create('biz_1', {

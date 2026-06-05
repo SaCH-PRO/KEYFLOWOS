@@ -51,6 +51,8 @@ export function getNotificationIcon(n: AppNotification): typeof Bell {
   if (type.includes("automation") || title.includes("automation") || title.includes("playbook")) return Zap;
   if (type.includes("endorsement") || title.includes("endorsed")) return Award;
   if (type.includes("connector") || title.includes("reconnect")) return Plug;
+  if (type.includes("command") || title.includes("command")) return Zap;
+  if (type.includes("inbox") || title.includes("message") || title.includes("whatsapp")) return Bell;
   return Bell;
 }
 
@@ -67,6 +69,8 @@ export function getNotificationLink(n: AppNotification): string | null {
   if (type.includes("automation") || title.includes("automation")) return "/app/automations";
   if (type.includes("endorsement") && n.data?.link) return n.data.link;
   if (type.includes("connector") || title.includes("reconnect")) return "/app/connect";
+  if (type.includes("command") || title.includes("command")) return "/app/command-center";
+  if (type.includes("inbox") || title.includes("message") || title.includes("whatsapp")) return "/app/inbox";
   if (n.data?.link) return n.data.link;
   return n.link || n.href || null;
 }
