@@ -14,6 +14,7 @@ import {
   Calendar,
   Users,
   ShieldAlert,
+  ShieldCheck,
   TrendingUp,
   ArrowRight,
   Sparkles,
@@ -291,6 +292,48 @@ export default function CommandCenterPage() {
               <span className="text-xs font-medium">{d.today.pendingApprovals} approvals</span>
             </button>
           )}
+        </div>
+      )}
+
+      {/* KEY Briefing + Alerts */}
+      {!loading && d && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {d.key.briefing && (
+            <div className="kf-card kf-radius-lg p-4 border-l-4" style={{ borderLeftColor: "hsl(var(--kf-accent1))" }}>
+              <div className="flex items-center gap-2 mb-1">
+                <Brain className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
+                <h3 className="text-sm font-semibold">KEY Briefing</h3>
+              </div>
+              <p className="text-xs text-muted-foreground leading-relaxed">{d.key.briefing}</p>
+            </div>
+          )}
+          <div className="kf-card kf-radius-lg p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <ShieldCheck className="w-4 h-4 text-[hsl(var(--kf-accent2))]" />
+              <h3 className="text-sm font-semibold">Governance</h3>
+            </div>
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="text-center">
+                <p className="text-lg font-bold" style={{ color: "hsl(var(--kf-accent1))" }}>{d.key.canAutoExecuteCount}</p>
+                <p className="text-[10px] text-muted-foreground">Auto-Ready</p>
+              </div>
+              <div className="w-px h-8 bg-border/60" />
+              <div className="text-center">
+                <p className="text-lg font-bold text-amber-500">{d.key.needsApprovalCount}</p>
+                <p className="text-[10px] text-muted-foreground">Needs Approval</p>
+              </div>
+              <div className="w-px h-8 bg-border/60" />
+              <div className="text-center">
+                <p className="text-lg font-bold text-emerald-500">{d.today.dueTasks}</p>
+                <p className="text-[10px] text-muted-foreground">Due Today</p>
+              </div>
+              <div className="w-px h-8 bg-border/60" />
+              <div className="text-center">
+                <p className="text-lg font-bold text-red-500">{d.today.urgentRisks}</p>
+                <p className="text-[10px] text-muted-foreground">Urgent Risks</p>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
