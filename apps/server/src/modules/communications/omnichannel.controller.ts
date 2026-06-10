@@ -8,9 +8,11 @@ import {
   Query,
   UseGuards,
   Request,
+  Inject,
 } from '@nestjs/common';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard } from '../../core/auth/module-scope.guard';
+import { PrismaService } from '../../core/prisma/prisma.service';
 import { InteractionClassifierService } from './interaction-classifier.service';
 import { ProfitTrajectoryService } from './profit-trajectory.service';
 import { ResponseDraftService } from './response-draft.service';
@@ -21,11 +23,12 @@ import { TriggerDefinitionService } from './trigger-definition.service';
 @UseGuards(BusinessGuard, ModuleScopeGuard)
 export class OmnichannelController {
   constructor(
-    private readonly classifier: InteractionClassifierService,
-    private readonly profit: ProfitTrajectoryService,
-    private readonly drafts: ResponseDraftService,
-    private readonly consent: ConsentService,
-    private readonly triggers: TriggerDefinitionService,
+    @Inject(InteractionClassifierService) private readonly classifier: InteractionClassifierService,
+    @Inject(ProfitTrajectoryService) private readonly profit: ProfitTrajectoryService,
+    @Inject(ResponseDraftService) private readonly drafts: ResponseDraftService,
+    @Inject(ConsentService) private readonly consent: ConsentService,
+    @Inject(TriggerDefinitionService) private readonly triggers: TriggerDefinitionService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
   // ─── Channel Accounts ───
@@ -148,6 +151,54 @@ export class OmnichannelController {
   ) {
     const sentById = req.user?.sub ?? 'system';
     return this.drafts.sendDraft(id, sentById);
+  }
+
+  @Post('threads/:threadId/generate-reply')
+  async generateReplyDraft(
+    @Param('businessId') businessId: string,
+    @Param('threadId') threadId: string,
+    @Request() req: { user?: { sub?: string } },
+  ) {
+    const thread = await this.prisma.client.conversationThread.findFirst({
+      where: { id: threadId, businessId },
+      include: {
+        messages: { orderBy: { createdAt: 'asc' } },
+        contact: { select: { firstName: true, lastName: true, displayName: true } },
+      },
+    });
+    if (!thread) return { error: 'Thread not found' };
+
+    const lastInbound = thread.messages.filter((m: { direction: string }) => m.direction === 'inbound').pop();
+    const body = lastInbound?.body ?? '';
+
+    const classification = this.classifier.classify(body, undefined, thread.channel);
+    const contactName = thread.contact?.displayName ?? thread.contact?.firstName ?? 'there';
+    const draftBody = this.drafts.generateBody(classification.intentType, {
+      contactName,
+      detectedDate: classification.extractedData?.detectedDate as string,
+    });
+
+    const draft = await this.drafts.createDraft(
+      businessId,
+      req.user?.sub ?? 'system',
+      {
+        channel: thread.channel as 'email' | 'sms' | 'whatsapp' | 'call' | 'form',
+        purpose: `Reply to ${classification.intentType}`,
+        body: draftBody,
+        tone: classification.intentType === 'complaint' ? 'empathetic' : 'friendly',
+        requiresApproval: classification.riskLevel === 'HIGH',
+        riskTier: classification.riskLevel === 'HIGH' ? 'HIGH' : 'LOW',
+        evidence: {
+          intentId: null,
+          intentType: classification.intentType,
+          confidence: classification.confidence,
+          threadId,
+        },
+      },
+      { threadId: thread.id },
+    );
+
+    return { draft, classification };
   }
 
   // ─── Consent ───

@@ -86,7 +86,7 @@ export default function ContactsPage() {
     if (googleSuccess) {
       googleHandled.current = true;
       toast.success(`Google Contacts imported successfully${imported ? ` (${imported} contacts)` : ""}`);
-      router.replace("/app/network/contacts");
+      router.replace("/app/crm/contacts");
       loadContacts();
       loadFlowData();
     } else if (googleError) {
@@ -96,13 +96,13 @@ export default function ContactsPage() {
         : googleError === "import_failed" ? "Google import failed — please try again"
         : "Something went wrong with Google import";
       toast.error(`Google import failed: ${msg}`);
-      router.replace("/app/network/contacts");
+      router.replace("/app/crm/contacts");
     } else if (action === "new") {
       googleHandled.current = true;
       if (typeof window !== "undefined") {
         setTimeout(() => window.dispatchEvent(new Event("kf:open-quick-add-contact")), 0);
       }
-      router.replace("/app/network/contacts");
+      router.replace("/app/crm/contacts");
     }
   }, [router, loadContacts, loadFlowData]);
 

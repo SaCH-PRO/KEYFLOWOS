@@ -125,7 +125,7 @@ export interface SemanticRoute {
 export const SEMANTIC_ROUTES: SemanticRoute[] = [
   /* ─── Core ─── */
   { segment: "app", label: "Home", workspace: "cockpit", icon: Zap },
-  { segment: "command-center", label: "Cockpit", workspace: "cockpit", icon: Zap },
+  { segment: "command-center", label: "Command Center", workspace: "cockpit", icon: Zap },
   { segment: "keyflow-command", label: "Command", workspace: "cockpit", icon: Zap },
   { segment: "control-tower", label: "KEYFLOW", workspace: "cockpit", icon: Zap },
   { segment: "key", label: "KEY", workspace: "key", icon: Bot },
@@ -133,7 +133,7 @@ export const SEMANTIC_ROUTES: SemanticRoute[] = [
   /* ─── Contacts ─── */
   { segment: "network", label: "Network", workspace: "contacts", icon: Users },
   { segment: "contacts", label: "Contacts", workspace: "contacts", icon: Users, isDetailSurface: true, entityType: "contact" },
-  { segment: "crm", label: "Network", workspace: "contacts", icon: Users, alias: "/app/network/contacts" },
+  { segment: "crm", label: "Network", workspace: "contacts", icon: Users, alias: "/app/crm/contacts" },
   { segment: "pipeline", label: "Contacts", workspace: "contacts", icon: Users },
   { segment: "deals", label: "Deals", workspace: "contacts", icon: Target, isDetailSurface: true, entityType: "deal" },
   { segment: "sequences", label: "Sequences", workspace: "contacts", icon: Mail, isDetailSurface: true, entityType: "sequence" },
@@ -149,7 +149,7 @@ export const SEMANTIC_ROUTES: SemanticRoute[] = [
 
   /* ─── Calendar ─── */
   { segment: "calendar", label: "Calendar", workspace: "calendar", icon: Calendar },
-  { segment: "bookings", label: "Calendar", workspace: "calendar", icon: Calendar, isDetailSurface: true, entityType: "booking" },
+  { segment: "bookings", label: "Bookings", workspace: "calendar", icon: Calendar, isDetailSurface: true, entityType: "booking" },
 
   /* ─── Storefront ─── */
   { segment: "store", label: "Presence", workspace: "storefront", icon: Store },
@@ -181,7 +181,7 @@ export const SEMANTIC_ROUTES: SemanticRoute[] = [
 
   /* ─── Inbox / Communications ─── */
   { segment: "inbox", label: "Inbox", workspace: "inbox", icon: Mail },
-  { segment: "call-tasks", label: "Calls", workspace: "inbox", icon: Phone, isDetailSurface: true, entityType: "task" },
+  { segment: "call-tasks", label: "Call Tasks", workspace: "inbox", icon: Phone, isDetailSurface: true, entityType: "task" },
   { segment: "content-ops", label: "Content", workspace: "inbox", icon: MessageSquare },
   { segment: "marketing", label: "Content", workspace: "inbox", icon: MessageSquare },
   { segment: "social", label: "Social", workspace: "inbox", icon: Globe },
@@ -208,12 +208,12 @@ export const SEMANTIC_ROUTES: SemanticRoute[] = [
   { segment: "compliance", label: "Compliance", workspace: "settings", icon: ShieldCheck },
   { segment: "developers", label: "Developers", workspace: "settings", icon: Code, isConfigSurface: true },
   { segment: "api-keys", label: "API Keys", workspace: "settings", icon: Code },
-  { segment: "helpdesk", label: "Service", workspace: "settings", icon: Phone },
-  { segment: "marketplace", label: "Marketplace", workspace: "connect", icon: ShoppingCart },
+  { segment: "helpdesk", label: "Helpdesk", workspace: "settings", icon: Phone },
+  { segment: "marketplace", label: "Commerce", workspace: "connect", icon: ShoppingCart },
   { segment: "suppliers", label: "Suppliers", workspace: "connect", icon: Truck },
   { segment: "procurement", label: "Procurement", workspace: "operations", icon: Truck },
   { segment: "community", label: "Community", workspace: "connect", icon: GraduationCap },
-  { segment: "learn", label: "Learn", workspace: "connect", icon: GraduationCap },
+  { segment: "learn", label: "MasterClass", workspace: "connect", icon: GraduationCap },
   { segment: "cohorts", label: "Cohorts", workspace: "connect", icon: GraduationCap },
   { segment: "onboarding", label: "Onboarding", workspace: "settings", icon: Target, isConfigSurface: true },
   { segment: "audiences", label: "Audiences", workspace: "inbox", icon: Users },
@@ -316,9 +316,9 @@ export const SEMANTIC_TAB_MAP: Record<string, Record<string, string>> = {
  * ──────────────────────────────────────────────────────────────── */
 
 export const SEMANTIC_ROUTE_ALIASES: Record<string, string> = {
-  "/app/network": "/app/network/contacts",
-  "/app/crm": "/app/network/contacts",
-  "/app/crm/contacts": "/app/network/contacts",
+  "/app/network": "/app/crm/contacts",
+  "/app/crm": "/app/crm/contacts",
+  "/app/crm/contacts": "/app/crm/contacts",
   "/app/money/books": "/app/finance",
   "/app/money/revenue": "/app/commerce",
   "/app/money/expenses": "/app/expenses",
@@ -455,9 +455,9 @@ export function getWorkspaceRelatedActions(workspace: WorkspaceId): Array<{ labe
   switch (workspace) {
     case "contacts":
       return [
-        { label: "Add contact", href: "/app/network/contacts?action=add" },
-        { label: "Import contacts", href: "/app/network/contacts?action=import" },
-        { label: "View follow-ups", href: "/app/network/contacts?tab=follow-ups" },
+        { label: "Add contact", href: "/app/crm/contacts?action=add" },
+        { label: "Import contacts", href: "/app/crm/contacts?action=import" },
+        { label: "View follow-ups", href: "/app/crm/contacts?tab=follow-ups" },
       ];
     case "commerce":
       return [

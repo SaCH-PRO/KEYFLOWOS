@@ -105,6 +105,18 @@ const contactSchema = z.object({
   createdAt: z.string().nullable().optional(),
   updatedAt: z.string().nullable().optional(),
   meta: contactMetaSchema.optional(),
+  leadScore: z.number().nullable().optional(),
+  lifetimeValue: z.number().nullable().optional(),
+  averageSpend: z.number().nullable().optional(),
+  paymentReliability: z.number().nullable().optional(),
+  bookingFrequency: z.number().nullable().optional(),
+  cancellationRate: z.number().nullable().optional(),
+  conversionProbability: z.number().nullable().optional(),
+  followUpPriority: z.string().nullable().optional(),
+  nextBestAction: z.string().nullable().optional(),
+  responsivenessScore: z.number().nullable().optional(),
+  sentimentScore: z.number().nullable().optional(),
+  referralLikelihood: z.number().nullable().optional(),
 });
 
 const eventSchema = z.object({
@@ -458,6 +470,25 @@ const contactDetailSchema = z.object({
   invoices: z.array(invoiceSummarySchema).optional(),
   bookings: z.array(bookingSchema).optional(),
   meta: contactMetaSchema.nullable().optional(),
+  customFieldValues: z.array(z.object({
+    id: z.string(),
+    contactId: z.string(),
+    definitionId: z.string(),
+    value: z.unknown(),
+    definition: z.object({
+      id: z.string(),
+      businessId: z.string(),
+      name: z.string(),
+      label: z.string(),
+      type: z.string(),
+      description: z.string().nullable(),
+      placeholder: z.string().nullable(),
+      options: z.record(z.unknown()).nullable(),
+      defaultValue: z.unknown().nullable(),
+      required: z.boolean(),
+      order: z.number(),
+    }),
+  })).optional(),
 });
 export type ContactDetail = z.infer<typeof contactDetailSchema>;
 
@@ -641,6 +672,7 @@ export async function createContact(input: {
   tags?: string[];
 
   custom?: Record<string, unknown>;
+  customFieldValues?: Record<string, unknown>;
   displayName?: string;
   companyName?: string;
   jobTitle?: string;
@@ -683,6 +715,7 @@ export async function createContact(input: {
     source: input.source ?? "",
     tags: input.tags ?? [],
     custom: input.custom ?? {},
+    customFieldValues: input.customFieldValues,
     displayName: input.displayName,
     companyName: input.companyName,
     jobTitle: input.jobTitle,
@@ -1775,6 +1808,7 @@ export async function updateContact(input: {
   tags?: string[];
 
   custom?: Record<string, unknown>;
+  customFieldValues?: Record<string, unknown>;
   displayName?: string;
   companyName?: string;
   jobTitle?: string;
@@ -1824,6 +1858,108 @@ export async function updateContact(input: {
 export async function deleteContact(contactId: string, businessId: string = DEFAULT_BUSINESS_ID) {
   return apiDelete<Contact>(
     `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Custom Field Definitions
+// ---------------------------------------------------------------------------
+
+export interface CustomFieldDefinition {
+  id: string;
+  businessId: string;
+  name: string;
+  label: string;
+  type: string;
+  description: string | null;
+  placeholder: string | null;
+  options: Record<string, unknown> | null;
+  defaultValue: unknown | null;
+  required: boolean;
+  order: number;
+  archivedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export async function fetchCustomFieldDefinitions(
+  businessId: string = DEFAULT_BUSINESS_ID,
+  opts?: { includeArchived?: boolean },
+): Promise<ApiResult<CustomFieldDefinition[]>> {
+  const qs = opts?.includeArchived ? "?includeArchived=true" : "";
+  return apiGet<CustomFieldDefinition[]>(
+    `/crm/businesses/${encodeURIComponent(businessId)}/custom-field-definitions${qs}`,
+  );
+}
+
+export async function createCustomFieldDefinition(
+  data: Omit<CustomFieldDefinition, "id" | "businessId" | "createdAt" | "updatedAt" | "archivedAt">,
+  businessId: string = DEFAULT_BUSINESS_ID,
+): Promise<ApiResult<CustomFieldDefinition>> {
+  return apiPost<CustomFieldDefinition>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/custom-field-definitions`,
+    body: data,
+  });
+}
+
+export async function updateCustomFieldDefinition(
+  definitionId: string,
+  data: Partial<Omit<CustomFieldDefinition, "id" | "businessId" | "createdAt" | "updatedAt">>,
+  businessId: string = DEFAULT_BUSINESS_ID,
+): Promise<ApiResult<CustomFieldDefinition>> {
+  return apiPatch<CustomFieldDefinition>(
+    `/crm/businesses/${encodeURIComponent(businessId)}/custom-field-definitions/${encodeURIComponent(definitionId)}`,
+    data,
+  );
+}
+
+export async function archiveCustomFieldDefinition(
+  definitionId: string,
+  businessId: string = DEFAULT_BUSINESS_ID,
+): Promise<ApiResult<CustomFieldDefinition>> {
+  return apiPost<CustomFieldDefinition>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/custom-field-definitions/${encodeURIComponent(definitionId)}/archive`,
+    body: {},
+  });
+}
+
+export async function restoreCustomFieldDefinition(
+  definitionId: string,
+  businessId: string = DEFAULT_BUSINESS_ID,
+): Promise<ApiResult<CustomFieldDefinition>> {
+  return apiPost<CustomFieldDefinition>({
+    path: `/crm/businesses/${encodeURIComponent(businessId)}/custom-field-definitions/${encodeURIComponent(definitionId)}/restore`,
+    body: {},
+  });
+}
+
+export async function deleteCustomFieldDefinition(
+  definitionId: string,
+  businessId: string = DEFAULT_BUSINESS_ID,
+): Promise<ApiResult<void>> {
+  return apiDelete(
+    `/crm/businesses/${encodeURIComponent(businessId)}/custom-field-definitions/${encodeURIComponent(definitionId)}`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Contact Custom Field Values
+// ---------------------------------------------------------------------------
+
+export interface ContactCustomFieldValue {
+  id: string;
+  contactId: string;
+  definitionId: string;
+  value: unknown;
+  definition: CustomFieldDefinition;
+}
+
+export async function fetchContactCustomFieldValues(
+  contactId: string,
+  businessId: string = DEFAULT_BUSINESS_ID,
+): Promise<ApiResult<ContactCustomFieldValue[]>> {
+  return apiGet<ContactCustomFieldValue[]>(
+    `/crm/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/custom-field-values`,
   );
 }
 
@@ -10460,6 +10596,107 @@ export async function transcribeKeyflowSpeech(
 }
 
 // ============================================
+// VOICE SESSIONS
+// ============================================
+
+export interface VoiceSession {
+  id: string;
+  businessId: string;
+  userId?: string | null;
+  mode: string;
+  status: string;
+  voiceKey?: string | null;
+  transcript?: string | null;
+  summary?: string | null;
+  startedAt: string;
+  endedAt?: string | null;
+  createdAt: string;
+}
+
+export async function fetchVoiceSessions(
+  businessId: string,
+  opts?: { limit?: number; offset?: number },
+): Promise<ApiResult<{ items: VoiceSession[]; total: number }>> {
+  const params = new URLSearchParams();
+  if (opts?.limit) params.set('limit', String(opts.limit));
+  if (opts?.offset) params.set('offset', String(opts.offset));
+  const qs = params.toString();
+  return apiGetSimple<{ items: VoiceSession[]; total: number }>(
+    `/device/businesses/${encodeURIComponent(businessId)}/voice-sessions${qs ? `?${qs}` : ''}`,
+  );
+}
+
+export async function createVoiceSession(
+  businessId: string,
+  mode?: string,
+): Promise<ApiResult<VoiceSession>> {
+  return apiPost<VoiceSession>({
+    path: `/device/businesses/${encodeURIComponent(businessId)}/voice-sessions`,
+    body: { mode: mode ?? 'push_to_talk' },
+  });
+}
+
+export async function endVoiceSession(
+  businessId: string,
+  sessionId: string,
+  transcript?: string,
+  summary?: string,
+): Promise<ApiResult<VoiceSession>> {
+  return apiPatch<VoiceSession>(
+    `/device/businesses/${encodeURIComponent(businessId)}/voice-sessions/${encodeURIComponent(sessionId)}/end`,
+    { transcript, summary },
+  );
+}
+
+export interface VoicePreference {
+  id: string;
+  businessId: string;
+  userId?: string | null;
+  voiceKey: string;
+  displayName: string;
+  provider: string;
+  language: string;
+  accent?: string | null;
+  speakingRate: number;
+  pitch?: number | null;
+  personality?: string | null;
+  isDefault: boolean;
+  settings?: Record<string, unknown>;
+}
+
+export async function fetchVoicePreferences(
+  businessId: string,
+  userId?: string,
+): Promise<ApiResult<VoicePreference[]>> {
+  const params = new URLSearchParams();
+  if (userId) params.set('userId', userId);
+  const qs = params.toString();
+  return apiGetSimple<VoicePreference[]>(
+    `/device/businesses/${encodeURIComponent(businessId)}/voice-preferences${qs ? `?${qs}` : ''}`,
+  );
+}
+
+export async function saveVoicePreference(
+  businessId: string,
+  body: {
+    voiceKey: string;
+    displayName: string;
+    provider: string;
+    language?: string;
+    accent?: string;
+    speakingRate?: number;
+    pitch?: number;
+    personality?: string;
+    isDefault?: boolean;
+  },
+): Promise<ApiResult<VoicePreference>> {
+  return apiPost<VoicePreference>({
+    path: `/device/businesses/${encodeURIComponent(businessId)}/voice-preferences`,
+    body,
+  });
+}
+
+// ============================================
 // COMMUNITY PHASE 5: NETWORK ACTIVITY & GROWTH
 // ============================================
 
@@ -11881,6 +12118,44 @@ export async function fetchPresenceCompleteness(businessId: string) {
     seoComplete: boolean;
     brandingComplete: boolean;
   }>(`/site/presence/businesses/${encodeURIComponent(businessId)}/completeness`);
+}
+
+export interface PresenceTodayStats {
+  visitors: number;
+  events: {
+    views: number;
+    cartAdds: number;
+    checkouts: number;
+    orders: number;
+    bookings: number;
+    revenue: number;
+    whatsappClicks: number;
+    shareClicks: number;
+  };
+  funnel: {
+    views: number;
+    cartAdds: number;
+    checkouts: number;
+    orders: number;
+    bookings: number;
+  };
+  topSources: { source: string; count: number }[];
+  recentEvents: { type: string; visitorId: string; source: string | null; medium: string | null; ts: string }[];
+  recentOrders: { id: string; total: number; currency: string; status: string; customerName: string | null; createdAt: string }[];
+  recentBookings: { id: string; status: string; contactName: string; startTime: string }[];
+}
+
+export async function fetchPresenceTodayStats(businessId: string) {
+  return apiGetSimple<PresenceTodayStats>(
+    `/site/presence/businesses/${encodeURIComponent(businessId)}/today-stats`,
+  );
+}
+
+export async function detectAbandonedCarts(businessId: string) {
+  return apiPostSimple<{ created: number; skipped: number; items: Array<{ eventId: string; visitorId: string; createdAt: string }> }>(
+    `/site/businesses/${encodeURIComponent(businessId)}/abandoned-carts/detect`,
+    {},
+  );
 }
 
 export type PresenceActionKey =

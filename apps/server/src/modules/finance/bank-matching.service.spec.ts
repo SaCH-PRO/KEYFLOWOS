@@ -63,7 +63,8 @@ describe('manualMatch — same-account integrity', () => {
       },
     };
     const audit = { log: vi.fn() };
-    const svc = new BankMatchingService(prisma as never, audit as never);
+    const bankRules = { applyRulesToAccount: vi.fn() };
+    const svc = new BankMatchingService(prisma as never, audit as never, bankRules as never);
     await expect(svc.manualMatch('biz1', 'b1', 't1', 'user1')).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.client.bankTransaction.update).not.toHaveBeenCalled();
     expect(audit.log).not.toHaveBeenCalled();

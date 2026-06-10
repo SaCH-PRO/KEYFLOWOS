@@ -93,7 +93,7 @@ function deriveGraphPriorities(snap: BusinessGraphSnapshot): ControlTowerPriorit
       module: "crm",
       urgency: Math.min(80, 40 + snap.contacts.staleLeadCount * 3),
       actionLabel: "View Contacts",
-      actionRoute: "/app/network/contacts",
+      actionRoute: "/app/crm/contacts",
     });
   }
 

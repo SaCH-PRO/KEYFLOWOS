@@ -36,6 +36,7 @@ import { SequenceAttributionListener } from './sequence-attribution.listener';
 import { CrmRelationshipHealthService } from './crm-relationship-health.service';
 import { CrmRelationshipHealthSchedulerService } from './crm-relationship-health-scheduler.service';
 import { CrmStatsService } from './crm-stats.service';
+import { CrmCacheService } from './crm-cache.service';
 import { CrmDuplicateDetectionService } from './crm-duplicate-detection.service';
 import { CrmDataQualityService } from './crm-data-quality.service';
 import { CrmDataQualityScheduler } from './crm-data-quality.scheduler';
@@ -43,6 +44,9 @@ import { CrmTimelineService } from './crm-timeline.service';
 import { CrmCommunicationService } from './crm-communication.service';
 import { ConversationAiService } from './conversation-ai.service';
 import { CrmService } from './crm.service';
+import { CustomFieldDefinitionService } from './custom-field-definition.service';
+import { ContactCustomFieldValueService } from './contact-custom-field-value.service';
+import { CrmCustomFieldsController } from './crm-custom-fields.controller';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
 import { BestChannelService } from './best-channel.service';
 import { BestChannelListener } from './best-channel.listener';
@@ -65,6 +69,7 @@ import { TaskAssignmentModule } from '../task-assignments/task-assignment.module
   imports: [SubscriptionsModule, AiModule, ConnectorModule, WhatsAppModule, CommunityModule, TimelineModule, EvidenceModule, TaskAssignmentModule, forwardRef(() => AutopilotModule)],
   controllers: [
     CrmController,
+    CrmCustomFieldsController,
     CrmAiController,
     CrmGoogleController,
     CrmSequenceController,
@@ -74,12 +79,15 @@ import { TaskAssignmentModule } from '../task-assignments/task-assignment.module
   ],
   providers: [
     CrmService,
+    CustomFieldDefinitionService,
+    ContactCustomFieldValueService,
     CrmTimelineService,
     CrmCommunicationService,
     ConversationAiService,
     CrmListsService,
     CrmSavedViewsService,
     CrmStatsService,
+    CrmCacheService,
     CrmDuplicateDetectionService,
     CrmDataQualityService,
     CrmDataQualityScheduler,
@@ -120,12 +128,15 @@ import { TaskAssignmentModule } from '../task-assignments/task-assignment.module
   ],
   exports: [
     CrmService,
+    CustomFieldDefinitionService,
+    ContactCustomFieldValueService,
     CrmTimelineService,
     CrmCommunicationService,
     ConversationAiService,
     CrmListsService,
     CrmSavedViewsService,
     CrmStatsService,
+    CrmCacheService,
     CrmDuplicateDetectionService,
     CrmDataQualityService,
     CrmImportService,

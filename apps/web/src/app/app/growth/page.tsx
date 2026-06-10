@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
+import { SectionCard } from "@/components/ui/section-card";
 
 /* ─────────── Types ─────────── */
 
@@ -265,66 +266,39 @@ export default function GrowthPage() {
         </div>
 
         {/* ─── Growth Drivers ─── */}
-        <div>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
-              <Zap className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
-              Growth Drivers
-            </h2>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <SectionCard title="Growth Drivers" icon={Zap} compact noPadding>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-3">
             {drivers.map((d, i) => (
               <DriverCard key={d.id} driver={d} index={i} />
             ))}
           </div>
-        </div>
+        </SectionCard>
 
         {/* ─── Goals & Predictions ─── */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                <Target className="w-4 h-4 text-[hsl(var(--kf-accent2))]" />
-                Active Goals
-              </h2>
-            </div>
-            <div className="space-y-3">
+          <SectionCard title="Active Goals" icon={Target} compact noPadding>
+            <div className="space-y-3 p-3">
               {goals.map((g, i) => (
                 <GoalCard key={g.id} goal={g} index={i} />
               ))}
             </div>
-          </div>
+          </SectionCard>
 
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                <Sparkles className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
-                AI Predictions
-              </h2>
-            </div>
-            <div className="space-y-3">
+          <SectionCard title="AI Predictions" icon={Sparkles} compact noPadding>
+            <div className="space-y-3 p-3">
               {predictions.map((p, i) => (
                 <PredictionCard key={p.id} prediction={p} index={i} />
               ))}
             </div>
-          </div>
+          </SectionCard>
         </div>
 
         {/* ─── Quick Navigation ─── */}
-        <motion.div
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.5 }}
-          className="rounded-2xl border border-border/40 bg-card/40 backdrop-blur-sm p-5"
-        >
-          <h2 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
-            <Activity className="w-4 h-4 text-[hsl(var(--kf-accent2))]" />
-            Explore Growth Levers
-          </h2>
+        <SectionCard title="Explore Growth Levers" icon={Activity}>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
             {[
               { label: "Revenue Analytics", icon: BarChart3, route: "/app/commerce", desc: "Deep dive into revenue patterns" },
-              { label: "Network Growth", icon: Users, route: "/app/network/contacts", desc: "Contact acquisition & retention" },
+              { label: "Network Growth", icon: Users, route: "/app/crm/contacts", desc: "Contact acquisition & retention" },
               { label: "Campaign Performance", icon: MessageSquare, route: "/app/marketing", desc: "Marketing ROI and attribution" },
               { label: "Calendar Optimization", icon: CalendarDays, route: "/app/calendar", desc: "Capacity and utilization" },
             ].map((action) => (
@@ -344,7 +318,7 @@ export default function GrowthPage() {
               </button>
             ))}
           </div>
-        </motion.div>
+        </SectionCard>
       </div>
     </WorkspaceShell>
   );

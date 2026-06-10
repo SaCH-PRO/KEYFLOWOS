@@ -15,7 +15,10 @@ import {
   Loader2,
   Lightbulb,
   X,
+  BarChart3,
+  Boxes,
 } from "lucide-react";
+import { MetricCard } from "@/components/ui/metric-card";
 import { apiGet, apiPost, apiPatch, apiDelete } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { DashboardSkeleton } from "@/components/ui/skeleton";
@@ -401,6 +404,16 @@ function MarketplacePageInner() {
         </div>
       }
     >
+      {/* Metrics */}
+      {!loading && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+          <MetricCard label="Products" value={products.length} icon={Package} />
+          <MetricCard label="Listings" value={listings.length} icon={Tag} />
+          <MetricCard label="Orders" value={orders.length} icon={ShoppingCart} />
+          <MetricCard label="Shipments" value={shipments.length} icon={Truck} />
+        </div>
+      )}
+
       {loading && (
         <div className="flex items-center justify-center py-12">
           <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />

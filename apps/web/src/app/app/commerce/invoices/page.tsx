@@ -35,7 +35,6 @@ import {
   updateInvoiceStatus,
   markInvoicePaid,
   resendInvoiceReceipt,
-  sendInvoiceReminder,
   createInvoicePaymentLink,
   Invoice,
   Contact,
@@ -43,6 +42,7 @@ import {
 } from "@/lib/client";
 import { apiDelete } from "@/lib/api";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
+import { useCompose } from "@/components/email/compose-context";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { formatAmount, getDaysUntilDue } from "../utils/commerce-utils";
 import { INVOICE_STATUS_FILTERS, BILLING_SORT_OPTIONS, BillingSortKey } from "../components/commerce-types";
@@ -54,6 +54,7 @@ const PAGE_SIZE = 10;
 
 export default function InvoicesHubPage() {
   const router = useRouter();
+  const { open: openComposer } = useCompose();
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [businessCurrency, setBusinessCurrency] = useState<string>("TTD");
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -347,7 +348,7 @@ export default function InvoicesHubPage() {
                               <div className="absolute right-0 top-full mt-1 z-50 min-w-[180px] rounded-xl border border-border bg-popover shadow-lg py-1" onClick={() => setMenuOpenId(null)}>
                                 <DropdownItem icon={Send} label="Send" onClick={() => handleSend(inv.id)} show={inv.status === "DRAFT"} loading={actionLoading[inv.id] === "send"} />
                                 <DropdownItem icon={DollarSign} label="Record payment" onClick={() => router.push(`/app/commerce/invoices/${inv.id}?action=record-payment`)} show={inv.status === "SENT" || inv.status === "OVERDUE" || inv.status === "PARTIALLY_PAID"} />
-                                <DropdownItem icon={Bell} label="Send reminder" onClick={() => sendInvoiceReminder(businessId!, inv.id, { recipientEmail: inv.contact?.email ?? "", message: "Friendly reminder", channel: "email" }).then(r => r.error ? toast.error(r.error) : toast.success("Sent"))} show={!!((inv.status === "SENT" || inv.status === "OVERDUE") && gmailStatus?.connected)} />
+                                <DropdownItem icon={Bell} label="Send reminder" onClick={() => openComposer({ to: inv.contact?.email ?? "", subject: `Friendly reminder: invoice ${inv.invoiceNumber ?? ""}`, body: "", context: { type: "follow_up", recordNumber: inv.invoiceNumber ?? inv.id, contactName: inv.contact?.firstName ? `${inv.contact.firstName} ${inv.contact.lastName ?? ""}`.trim() : undefined }, onSent: () => toast.success("Reminder sent") })} show={!!(inv.status === "SENT" || inv.status === "OVERDUE")} />
                                 <DropdownItem icon={CheckCircle2} label="Mark paid" onClick={() => handleMarkPaid(inv.id)} show={inv.status === "DRAFT" || inv.status === "SENT"} loading={actionLoading[inv.id] === "paid"} />
                                 <DropdownItem icon={Receipt} label="Resend receipt" onClick={() => resendInvoiceReceipt(businessId!, inv.id, {}).then(r => r.data?.success ? toast.success("Resent") : toast.error(r.error ?? "Failed"))} show={!!(inv.status === "PAID" && gmailStatus?.connected)} />
                                 <DropdownItem icon={Files} label="Duplicate" onClick={() => handleDuplicate(inv)} show />

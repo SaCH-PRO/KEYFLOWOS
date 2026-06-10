@@ -108,9 +108,24 @@ const customHtmlSection = z.object({
   }).default({}),
 });
 
+const reviewsSection = z.object({
+  ...baseSection,
+  type: z.literal('reviews'),
+  data: z.object({
+    heading: shortStr(120).optional().default('Testimonials'),
+    entries: z.array(z.object({
+      name: shortStr(200),
+      rating: z.number().int().min(1).max(5),
+      text: shortStr(2000),
+      imageUrl: urlSchema,
+    })).max(20).optional().default([]),
+  }).default({}),
+});
+
 const sectionSchema = z.discriminatedUnion('type', [
   heroSection, aboutSection, servicesSection, productsSection, trustSection,
   gallerySection, faqSection, contactSection, locationSection, customHtmlSection,
+  reviewsSection,
 ]);
 
 const presenceSchema = z.object({
@@ -150,6 +165,7 @@ const DEFAULT_PAYLOAD: PresencePayload = presenceSchema.parse({
     { id: 'sec_contact', type: 'contact', visible: true, data: { showWhatsApp: true, showEmail: true, showPhone: true } },
     { id: 'sec_location', type: 'location', visible: true, data: { showMap: true, showHours: true } },
     { id: 'sec_custom_html', type: 'custom_html', visible: false, data: { html: '' } },
+    { id: 'sec_reviews', type: 'reviews', visible: false, data: { heading: 'Testimonials', entries: [] } },
   ],
   seo: { robotsIndex: true },
 });
@@ -621,6 +637,7 @@ export class PresenceService {
         case 'faq': hasContent = (s.data.entries ?? []).length > 0; break;
         case 'gallery': hasContent = (s.data.images ?? []).length > 0; break;
         case 'trust': hasContent = (s.data.items ?? []).length > 0; break;
+        case 'reviews': hasContent = (s.data.entries ?? []).length > 0; break;
         case 'custom_html': hasContent = !!(s.data.html && s.data.html.trim()); break;
         default: hasContent = s.visible;
       }

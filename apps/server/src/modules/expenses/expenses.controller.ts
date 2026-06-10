@@ -162,6 +162,7 @@ export class ExpensesController {
       projectId?: string;
       contactId?: string;
       serviceId?: string;
+      items?: Array<{ amount: number; categoryId?: string | null; description?: string; taxRateId?: string | null }>;
     },
   ) {
     return this.expenses.createExpense({ businessId, ...body });
@@ -191,6 +192,7 @@ export class ExpensesController {
       projectId?: string | null;
       contactId?: string | null;
       serviceId?: string | null;
+      items?: Array<{ amount: number; categoryId?: string | null; description?: string; taxRateId?: string | null }> | null;
     },
   ) {
     return this.expenses.updateExpense({ businessId, expenseId, ...body });

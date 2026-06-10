@@ -1,43 +1,38 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { motion } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { ShoppingCart, Plus, Loader2, ArrowRight, Clock, CheckCircle2, AlertCircle, XCircle, TrendingUp, DollarSign, BarChart3, Truck, Package, FileText } from "lucide-react";
 import { toast } from "sonner";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { fetchProcurementRequests, fetchProcurementStats, type ProcurementRequest } from "@/lib/client";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
-import { Card } from "@keyflow/ui";
+import { MetricCard } from "@/components/ui/metric-card";
+import { SectionCard } from "@/components/ui/section-card";
+import { EmptyState } from "@/components/ui/empty-state";
 
-function statusIcon(status: string) {
-  switch (status) {
-    case "DRAFT": return <Clock className="w-3.5 h-3.5 text-muted-foreground" />;
-    case "SUBMITTED": return <AlertCircle className="w-3.5 h-3.5 text-amber-500" />;
-    case "APPROVED": return <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />;
-    case "COMPLETED": return <CheckCircle2 className="w-3.5 h-3.5 text-blue-500" />;
-    case "REJECTED": return <XCircle className="w-3.5 h-3.5 text-red-500" />;
-    case "PO_ISSUED": return <Truck className="w-3.5 h-3.5 text-blue-500" />;
-    case "VENDOR_ACKNOWLEDGED": return <CheckCircle2 className="w-3.5 h-3.5 text-indigo-500" />;
-    case "FULFILLED": return <Package className="w-3.5 h-3.5 text-teal-500" />;
-    case "INVOICED": return <FileText className="w-3.5 h-3.5 text-cyan-500" />;
-    default: return <Clock className="w-3.5 h-3.5 text-muted-foreground" />;
-  }
-}
+const STATUS_CONFIG: Record<string, { icon: React.ReactNode; label: string; bg: string; text: string }> = {
+  DRAFT: { icon: <Clock className="w-3.5 h-3.5" />, label: "Draft", bg: "bg-slate-500/10", text: "text-slate-500" },
+  SUBMITTED: { icon: <AlertCircle className="w-3.5 h-3.5" />, label: "Submitted", bg: "bg-amber-500/10", text: "text-amber-600" },
+  APPROVED: { icon: <CheckCircle2 className="w-3.5 h-3.5" />, label: "Approved", bg: "bg-emerald-500/10", text: "text-emerald-600" },
+  COMPLETED: { icon: <CheckCircle2 className="w-3.5 h-3.5" />, label: "Completed", bg: "bg-blue-500/10", text: "text-blue-600" },
+  REJECTED: { icon: <XCircle className="w-3.5 h-3.5" />, label: "Rejected", bg: "bg-red-500/10", text: "text-red-600" },
+  PO_ISSUED: { icon: <Truck className="w-3.5 h-3.5" />, label: "PO Issued", bg: "bg-indigo-500/10", text: "text-indigo-600" },
+  VENDOR_ACKNOWLEDGED: { icon: <CheckCircle2 className="w-3.5 h-3.5" />, label: "Acknowledged", bg: "bg-violet-500/10", text: "text-violet-600" },
+  FULFILLED: { icon: <Package className="w-3.5 h-3.5" />, label: "Fulfilled", bg: "bg-teal-500/10", text: "text-teal-600" },
+  INVOICED: { icon: <FileText className="w-3.5 h-3.5" />, label: "Invoiced", bg: "bg-cyan-500/10", text: "text-cyan-600" },
+};
 
-function statusLabel(status: string) {
-  switch (status) {
-    case "DRAFT": return "Draft";
-    case "SUBMITTED": return "Submitted";
-    case "APPROVED": return "Approved";
-    case "COMPLETED": return "Completed";
-    case "REJECTED": return "Rejected";
-    case "PO_ISSUED": return "PO Issued";
-    case "VENDOR_ACKNOWLEDGED": return "Acknowledged";
-    case "FULFILLED": return "Fulfilled";
-    case "INVOICED": return "Invoiced";
-    default: return status;
-  }
-}
+const fadeUp = {
+  hidden: { opacity: 0, y: 12 },
+  show: { opacity: 1, y: 0, transition: { type: "spring" as const, stiffness: 300, damping: 24 } },
+};
+
+const staggerContainer = {
+  hidden: { opacity: 0 },
+  show: { opacity: 1, transition: { staggerChildren: 0.05 } },
+};
 
 export default function ProcurementPage() {
   const router = useRouter();
@@ -97,87 +92,88 @@ export default function ProcurementPage() {
         </div>
       }
     >
+      {/* Metrics */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-2">
+        {loading ? (
+          Array.from({ length: 4 }).map((_, i) => <div key={i} className="kf-card-metric animate-pulse h-20" />)
+        ) : stats ? (
+          <>
+            <motion.div variants={fadeUp} initial="hidden" animate="show">
+              <MetricCard label="Total Requests" value={stats.total} icon={BarChart3} />
+            </motion.div>
+            <motion.div variants={fadeUp} initial="hidden" animate="show" transition={{ delay: 0.05 }}>
+              <MetricCard label="Pending Approval" value={stats.pendingApprovals} icon={AlertCircle} iconColor="#f59e0b" />
+            </motion.div>
+            <motion.div variants={fadeUp} initial="hidden" animate="show" transition={{ delay: 0.1 }}>
+              <MetricCard label="Avg Budget" value={`$${stats.averageBudget.toLocaleString()}`} icon={DollarSign} iconColor="#10b981" />
+            </motion.div>
+            <motion.div variants={fadeUp} initial="hidden" animate="show" transition={{ delay: 0.15 }}>
+              <MetricCard label="Approved" value={stats.byStatus.APPROVED ?? 0} icon={TrendingUp} iconColor="#3b82f6" />
+            </motion.div>
+          </>
+        ) : null}
+      </div>
+
+      {/* Status Distribution */}
+      {!loading && stats && (
+        <SectionCard title="Status Breakdown" icon={BarChart3} compact>
+          <div className="flex flex-wrap gap-2 p-3">
+            {Object.entries(stats.byStatus).map(([status, count]) => {
+              const config = STATUS_CONFIG[status];
+              if (!config) return null;
+              return (
+                <div key={status} className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg ${config.bg} ${config.text} text-xs font-medium`}>
+                  {config.icon}
+                  {config.label}: {count}
+                </div>
+              );
+            })}
+          </div>
+        </SectionCard>
+      )}
+
       {loading ? (
         <div className="flex items-center justify-center py-20">
           <Loader2 className="w-5 h-5 text-muted-foreground animate-spin" />
         </div>
+      ) : requests.length === 0 ? (
+        <EmptyState
+          icon={ShoppingCart}
+          title="No procurement requests yet"
+          description="Describe what you need and KEY will recommend the best packages for your business."
+          actionLabel="Create First Request"
+          actionIcon={Plus}
+          onAction={() => router.push("/app/procurement/new")}
+          variant="compact"
+        />
       ) : (
-        <div className="space-y-4">
-          {/* Stats */}
-          {stats && (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <Card>
-                <div className="p-3">
-                  <div className="flex items-center gap-2">
-                    <BarChart3 className="w-4 h-4 text-muted-foreground" />
-                    <span className="text-xs text-muted-foreground">Total requests</span>
-                  </div>
-                  <p className="text-xl font-bold mt-1">{stats.total}</p>
-                </div>
-              </Card>
-              <Card>
-                <div className="p-3">
-                  <div className="flex items-center gap-2">
-                    <AlertCircle className="w-4 h-4 text-amber-500" />
-                    <span className="text-xs text-muted-foreground">Pending approval</span>
-                  </div>
-                  <p className="text-xl font-bold mt-1">{stats.pendingApprovals}</p>
-                </div>
-              </Card>
-              <Card>
-                <div className="p-3">
-                  <div className="flex items-center gap-2">
-                    <DollarSign className="w-4 h-4 text-emerald-500" />
-                    <span className="text-xs text-muted-foreground">Avg budget</span>
-                  </div>
-                  <p className="text-xl font-bold mt-1">${stats.averageBudget.toLocaleString()}</p>
-                </div>
-              </Card>
-              <Card>
-                <div className="p-3">
-                  <div className="flex items-center gap-2">
-                    <TrendingUp className="w-4 h-4 text-blue-500" />
-                    <span className="text-xs text-muted-foreground">Approved</span>
-                  </div>
-                  <p className="text-xl font-bold mt-1">{stats.byStatus.APPROVED ?? 0}</p>
-                </div>
-              </Card>
-            </div>
-          )}
-
-          {requests.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-20 text-center">
-              <ShoppingCart className="w-10 h-10 text-muted-foreground/30 mb-3" />
-              <h3 className="text-sm font-medium text-foreground/80">No procurement requests yet</h3>
-              <p className="text-xs text-muted-foreground mt-1 max-w-xs">
-                Describe what you need and KEY will recommend the best packages for your business.
-              </p>
-              <button
-                onClick={() => router.push("/app/procurement/new")}
-                className="mt-4 flex items-center gap-1.5 h-9 px-4 kf-radius-md text-xs font-medium"
-                style={{ background: "hsl(var(--kf-accent1))", color: "hsl(var(--kf-primary-foreground))" }}
-              >
-                <Plus className="w-3.5 h-3.5" />
-                Create First Request
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {requests.map((req) => (
-                <button
+        <SectionCard title="All Requests" icon={FileText} compact>
+          <motion.div
+            variants={staggerContainer}
+            initial="hidden"
+            animate="show"
+            className="divide-y divide-border/30"
+          >
+            {requests.map((req) => {
+              const config = STATUS_CONFIG[req.status];
+              return (
+                <motion.button
                   key={req.id}
+                  variants={fadeUp}
                   onClick={() => router.push(`/app/procurement/${req.id}`)}
-                  className="w-full text-left rounded-xl border border-border/50 bg-card/50 p-4 hover:border-border/80 hover:bg-card transition-all group"
+                  className="w-full text-left p-4 hover:bg-muted/20 transition-all group"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        {statusIcon(req.status)}
-                        <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                          {statusLabel(req.status)}
-                        </span>
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
+                        {config && (
+                          <span className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-medium ${config.bg} ${config.text}`}>
+                            {config.icon}
+                            {config.label}
+                          </span>
+                        )}
                         {req.priority && (
-                          <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
                             req.priority === "HIGH" ? "bg-red-500/10 text-red-500" :
                             req.priority === "URGENT" ? "bg-amber-500/10 text-amber-500" :
                             "bg-muted text-muted-foreground"
@@ -197,11 +193,11 @@ export default function ProcurementPage() {
                     </div>
                     <ArrowRight className="w-4 h-4 text-muted-foreground/30 group-hover:text-foreground transition-colors shrink-0 mt-1" />
                   </div>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+                </motion.button>
+              );
+            })}
+          </motion.div>
+        </SectionCard>
       )}
     </WorkspaceShell>
   );

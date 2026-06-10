@@ -4,12 +4,13 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { X, List, Heart, ChevronDown, Zap, Bot } from "lucide-react";
 import { toast } from "sonner";
-import { createContact, fetchContactLists } from "@/lib/client";
+import { createContact, fetchContactLists, fetchContacts } from "@/lib/client";
 import { STATUS_COLORS } from "@/lib/crm-utils";
 import {
   ContactForm,
   ContactImport,
   type ContactCardData,
+  type ContactFormData,
 } from "@/components/contacts";
 import { NextActionQueue } from "@/components/contacts";
 import { AutopilotActions } from "@/components/contacts";
@@ -63,6 +64,7 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
     selectedContactId, selectMode, selectedIds, pinnedIds,
     showAddForm, setShowAddForm,
     editingContact, setEditingContact,
+    editingCustomFieldValues,
     isPending,
     activeListId, setActiveListId,  setActiveListContactIds,
     searchInput, setSearchInput,
@@ -150,6 +152,31 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
   }, [openComposer, contacts, selectedIds]);
   const handleScanSuccess = useCallback(() => { void loadContacts(); void loadFlowData(); }, [loadContacts, loadFlowData]);
   const handleCancelForm = useCallback(() => { setShowAddForm(false); setEditingContact(null); }, [setShowAddForm, setEditingContact]);
+  const handleCheckDuplicates = useCallback(async (formData: ContactFormData) => {
+    if (!businessId) return [];
+    const q = formData.email.trim() || formData.phone.trim();
+    if (!q) return [];
+    const { data } = await fetchContacts(businessId, {
+      search: q,
+      take: 10,
+    });
+    if (!data?.contacts) return [];
+    const emailNorm = formData.email.trim().toLowerCase();
+    const phoneNorm = formData.phone.trim().replace(/\D/g, "");
+    return data.contacts
+      .filter((c) => {
+        if (editingContact && (c.id === (editingContact as unknown as { id?: string }).id)) return false;
+        const cEmail = c.email?.toLowerCase();
+        const cPhone = c.phone?.replace(/\D/g, "");
+        return (emailNorm && cEmail === emailNorm) || (phoneNorm && cPhone === phoneNorm);
+      })
+      .map((c) => ({
+        id: c.id,
+        name: c.displayName || `${c.firstName ?? ""} ${c.lastName ?? ""}`.trim() || c.email || "Unnamed",
+        email: c.email,
+        phone: c.phone,
+      }));
+  }, [businessId, editingContact]);
   const handleClearListFilter = useCallback(() => { setActiveListId(null); setActiveListContactIds(null); }, [setActiveListId, setActiveListContactIds]);
 
   const handleDetailClose = useCallback(() => {
@@ -314,6 +341,8 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
             onCancel={handleCancelForm}
             loading={isPending}
             initialValues={editingContact || undefined}
+            initialCustomFieldValues={editingCustomFieldValues}
+            checkDuplicates={handleCheckDuplicates}
           />
         )}
       </AnimatePresence>

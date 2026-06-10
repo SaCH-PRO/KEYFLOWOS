@@ -1,3 +1,4 @@
+import 'reflect-metadata';
 import { config } from 'dotenv';
 import { resolve } from 'path';
 // In monorepo .env lives at repo root; cwd is apps/server when running directly

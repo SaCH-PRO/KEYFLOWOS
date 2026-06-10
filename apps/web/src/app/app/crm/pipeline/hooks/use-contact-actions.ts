@@ -65,6 +65,7 @@ export function useContactActions({
 
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingContact, setEditingContact] = useState<ContactFormData | null>(null);
+  const [editingCustomFieldValues, setEditingCustomFieldValues] = useState<Record<string, unknown>>({});
   const [showBroadcast, setShowBroadcast] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
   const [confirmState, setConfirmState] = useState<{ open: boolean; action: () => void }>({ open: false, action: () => {} });
@@ -73,7 +74,7 @@ export function useContactActions({
   const editingContactIdRef = useRef(editingContactId);
   editingContactIdRef.current = editingContactId;
 
-  const handleSubmitContact = useCallback(async (formData: ContactFormData) => {
+  const handleSubmitContact = useCallback(async (formData: ContactFormData, typedCustomFieldValues?: Record<string, unknown>) => {
     if (!businessId) return;
     const tagsArray = formData.tags.split(",").map((t) => t.trim()).filter(Boolean);
 
@@ -111,6 +112,7 @@ export function useContactActions({
       relationshipType: formData.relationshipType || null,
       priority: formData.priority || null,
       custom: Object.keys(customData).length > 0 ? customData : undefined,
+      customFieldValues: typedCustomFieldValues && Object.keys(typedCustomFieldValues).length > 0 ? typedCustomFieldValues : undefined,
     };
     try {
       const cid = editingContactIdRef.current;
@@ -280,6 +282,17 @@ export function useContactActions({
     const customFields = Object.entries(customObj)
       .filter(([k]) => !reservedKeys.has(k))
       .map(([key, value]) => ({ key, value: String(value ?? "") }));
+
+    const typedValues: Record<string, unknown> = {};
+    const cfv = (contactDetailRef.current as any)?.customFieldValues;
+    if (Array.isArray(cfv)) {
+      for (const v of cfv) {
+        if (v.definition?.name) {
+          typedValues[v.definition.name] = v.value;
+        }
+      }
+    }
+    setEditingCustomFieldValues(typedValues);
     setEditingContact({
       firstName: c.firstName || "", lastName: c.lastName || "",
       email: c.email || "", phone: c.phone || "",
@@ -553,8 +566,10 @@ export function useContactActions({
   return {
     showAddForm, setShowAddForm,
     editingContact,
+    editingCustomFieldValues,
     setEditingContact: useCallback((v: ContactFormData | null) => {
       setEditingContact(v);
+      setEditingCustomFieldValues({});
       if (!v) setEditingContactId(null);
     }, []),
     showBroadcast, setShowBroadcast,

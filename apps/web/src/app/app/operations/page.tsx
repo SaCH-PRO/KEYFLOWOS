@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { motion } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
@@ -23,6 +24,8 @@ import {
   Receipt,
 } from "lucide-react";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
+import { MetricCard } from "@/components/ui/metric-card";
+import { SectionCard } from "@/components/ui/section-card";
 import {
   ContentRequest,
   ApprovalRequest,
@@ -172,14 +175,15 @@ export default function OperationsPage() {
     return "bg-emerald-500";
   };
 
+  const fadeUp = {
+    hidden: { opacity: 0, y: 12 },
+    show: { opacity: 1, y: 0, transition: { type: "spring" as const, stiffness: 300, damping: 24 } },
+  };
+
   return (
-    <WorkspaceShell icon={Gauge} title="Operations">
-      <div className="flex flex-col gap-6 p-6 max-w-7xl mx-auto">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight">Operations Command Center</h1>
-            <p className="text-muted-foreground mt-1">Cross-module visibility and AI-powered workload management</p>
-          </div>
+    <WorkspaceShell icon={Gauge} title="Operations" subtitle="Cross-module visibility and AI-powered workload management">
+      <div className="flex flex-col gap-6 max-w-7xl mx-auto">
+        <div className="flex items-center justify-end">
           <button
             onClick={handleRebalance}
             disabled={rebalancing}
@@ -196,89 +200,36 @@ export default function OperationsPage() {
           </div>
         ) : (
           <>
-            {/* AI + Operations Stats */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="border rounded-xl p-4 bg-amber-50/50">
-                <div className="flex items-center gap-2 text-amber-700">
-                  <Megaphone className="w-4 h-4" />
-                  <span className="text-sm font-medium">Content In Production</span>
-                </div>
-                <div className="text-2xl font-bold mt-1">{stats.contentPending}</div>
-              </div>
-              <div className="border rounded-xl p-4 bg-purple-50/50">
-                <div className="flex items-center gap-2 text-purple-700">
-                  <Shield className="w-4 h-4" />
-                  <span className="text-sm font-medium">Pending Approvals</span>
-                </div>
-                <div className="text-2xl font-bold mt-1">{stats.approvalsPending}</div>
-              </div>
-              <div className="border rounded-xl p-4 bg-blue-50/50">
-                <div className="flex items-center gap-2 text-blue-700">
-                  <Phone className="w-4 h-4" />
-                  <span className="text-sm font-medium">Calls Today</span>
-                </div>
-                <div className="text-2xl font-bold mt-1">{stats.callsToday}</div>
-              </div>
-              <div className="border rounded-xl p-4 bg-green-50/50">
-                <div className="flex items-center gap-2 text-green-700">
-                  <ClipboardCheck className="w-4 h-4" />
-                  <span className="text-sm font-medium">Evidence Pending</span>
-                </div>
-                <div className="text-2xl font-bold mt-1">{stats.evidencePending}</div>
-              </div>
-              <div className="border rounded-xl p-4 bg-emerald-50/50">
-                <div className="flex items-center gap-2 text-emerald-700">
-                  <Receipt className="w-4 h-4" />
-                  <span className="text-sm font-medium">Content Invoiced</span>
-                </div>
-                <div className="text-2xl font-bold mt-1">{stats.contentInvoiced}</div>
-              </div>
+            {/* Operations Stats */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <motion.div variants={fadeUp} initial="hidden" animate="show">
+                <MetricCard label="Content In Production" value={stats.contentPending} icon={Megaphone} iconColor="#f59e0b" />
+              </motion.div>
+              <motion.div variants={fadeUp} initial="hidden" animate="show" transition={{ delay: 0.05 }}>
+                <MetricCard label="Pending Approvals" value={stats.approvalsPending} icon={Shield} iconColor="#8b5cf6" />
+              </motion.div>
+              <motion.div variants={fadeUp} initial="hidden" animate="show" transition={{ delay: 0.1 }}>
+                <MetricCard label="Calls Today" value={stats.callsToday} icon={Phone} iconColor="#3b82f6" />
+              </motion.div>
+              <motion.div variants={fadeUp} initial="hidden" animate="show" transition={{ delay: 0.15 }}>
+                <MetricCard label="Evidence Pending" value={stats.evidencePending} icon={ClipboardCheck} iconColor="#10b981" />
+              </motion.div>
             </div>
 
             {/* AI Activity Stats */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="border rounded-xl p-4">
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <Bot className="w-4 h-4" />
-                  <span className="text-sm font-medium">KEY Actions Today</span>
-                </div>
-                <div className="text-2xl font-bold mt-1">{executionStats?.totalActions ?? 0}</div>
-                <div className="text-xs text-muted-foreground mt-1">
-                  {executionStats ? `${Math.round(executionStats.successRate * 100)}% success` : "No data"}
-                </div>
-              </div>
-              <div className="border rounded-xl p-4">
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <Zap className="w-4 h-4" />
-                  <span className="text-sm font-medium">AI Approvals Pending</span>
-                </div>
-                <div className="text-2xl font-bold mt-1">{aiApprovalsPending}</div>
-                <div className="text-xs text-muted-foreground mt-1">
-                  {aiApprovalsPending > 0 ? "Needs your decision" : "All caught up"}
-                </div>
-              </div>
-              <div className="border rounded-xl p-4">
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <Users className="w-4 h-4" />
-                  <span className="text-sm font-medium">Team Utilization</span>
-                </div>
-                <div className="text-2xl font-bold mt-1">
-                  {workload ? `${Math.round((workload.totalAssignedHours / Math.max(workload.totalCapacityHours, 1)) * 100)}%` : "—"}
-                </div>
-                <div className="text-xs text-muted-foreground mt-1">
-                  {workload?.overloaded.length ?? 0} overloaded
-                </div>
-              </div>
-              <div className="border rounded-xl p-4">
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <Flag className="w-4 h-4" />
-                  <span className="text-sm font-medium">Capacity Alerts</span>
-                </div>
-                <div className="text-2xl font-bold mt-1">{alerts.length}</div>
-                <div className="text-xs text-muted-foreground mt-1">
-                  {alerts.filter((a) => a.severity === "high").length} high priority
-                </div>
-              </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <motion.div variants={fadeUp} initial="hidden" animate="show" transition={{ delay: 0.2 }}>
+                <MetricCard label="KEY Actions Today" value={executionStats?.totalActions ?? 0} sub={executionStats ? `${Math.round(executionStats.successRate * 100)}% success` : "No data"} icon={Bot} />
+              </motion.div>
+              <motion.div variants={fadeUp} initial="hidden" animate="show" transition={{ delay: 0.25 }}>
+                <MetricCard label="AI Approvals Pending" value={aiApprovalsPending} sub={aiApprovalsPending > 0 ? "Needs your decision" : "All caught up"} icon={Zap} iconColor={aiApprovalsPending > 0 ? "#f59e0b" : "#10b981"} />
+              </motion.div>
+              <motion.div variants={fadeUp} initial="hidden" animate="show" transition={{ delay: 0.3 }}>
+                <MetricCard label="Team Utilization" value={workload ? `${Math.round((workload.totalAssignedHours / Math.max(workload.totalCapacityHours, 1)) * 100)}%` : "—"} sub={`${workload?.overloaded.length ?? 0} overloaded`} icon={Users} />
+              </motion.div>
+              <motion.div variants={fadeUp} initial="hidden" animate="show" transition={{ delay: 0.35 }}>
+                <MetricCard label="Capacity Alerts" value={alerts.length} sub={`${alerts.filter((a) => a.severity === "high").length} high priority`} icon={Flag} iconColor={alerts.some((a) => a.severity === "high") ? "#ef4444" : "#10b981"} />
+              </motion.div>
             </div>
 
             {/* Main Content Grid */}
@@ -287,17 +238,8 @@ export default function OperationsPage() {
               <div className="flex flex-col gap-6">
                 {/* Team Workload */}
                 {workload && workload.entries.length > 0 && (
-                  <div className="border rounded-xl p-4">
-                    <div className="flex items-center justify-between mb-3">
-                      <h3 className="text-sm font-medium flex items-center gap-2">
-                        <BarChart3 className="w-4 h-4 text-primary" />
-                        Team Workload
-                      </h3>
-                      <span className="text-xs text-muted-foreground">
-                        {Math.round(workload.totalAssignedHours)}h / {Math.round(workload.totalCapacityHours)}h
-                      </span>
-                    </div>
-                    <div className="space-y-3">
+                  <SectionCard title="Team Workload" icon={BarChart3} compact headerRight={<span className="text-xs text-muted-foreground">{Math.round(workload.totalAssignedHours)}h / {Math.round(workload.totalCapacityHours)}h</span>}>
+                    <div className="space-y-3 p-3">
                       {workload.entries.map((entry) => (
                         <div key={entry.userId}>
                           <div className="flex items-center justify-between text-xs mb-1">
@@ -307,29 +249,31 @@ export default function OperationsPage() {
                             </span>
                           </div>
                           <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
-                            <div
+                            <motion.div
                               className={`h-full rounded-full transition-all ${getUtilizationColor(entry.utilizationPercent)}`}
-                              style={{ width: `${Math.min(entry.utilizationPercent, 100)}%` }}
+                              initial={{ width: 0 }}
+                              animate={{ width: `${Math.min(entry.utilizationPercent, 100)}%` }}
+                              transition={{ duration: 0.6, ease: "easeOut" }}
                             />
                           </div>
                         </div>
                       ))}
                     </div>
-                  </div>
+                  </SectionCard>
                 )}
 
                 {/* Capacity Alerts */}
                 {alerts.length > 0 && (
-                  <div className="border rounded-xl p-4">
-                    <div className="flex items-center justify-between mb-3">
-                      <h3 className="text-sm font-medium flex items-center gap-2">
-                        <AlertTriangle className="w-4 h-4 text-red-500" />
-                        Capacity Alerts
-                      </h3>
-                    </div>
-                    <div className="space-y-2">
+                  <SectionCard title="Capacity Alerts" icon={AlertTriangle} compact>
+                    <div className="space-y-2 p-3">
                       {alerts.map((alert, i) => (
-                        <div key={i} className={`p-3 rounded-lg border text-sm ${getAlertBorder(alert.severity)}`}>
+                        <motion.div
+                          key={i}
+                          initial={{ opacity: 0, x: -8 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: i * 0.05 }}
+                          className={`p-3 rounded-lg border text-sm ${getAlertBorder(alert.severity)}`}
+                        >
                           <div className="flex items-start gap-2">
                             {getAlertIcon(alert.severity)}
                             <div className="flex-1 min-w-0">
@@ -337,10 +281,10 @@ export default function OperationsPage() {
                               <div className="text-xs text-muted-foreground mt-1">{alert.recommendedAction}</div>
                             </div>
                           </div>
-                        </div>
+                        </motion.div>
                       ))}
                     </div>
-                  </div>
+                  </SectionCard>
                 )}
 
                 {/* My Approvals */}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { registerInterruptedTask, markTaskCompleted } from "@/lib/resume-task-registry";
 import { FolderKanban, Send, LayoutGrid, List, FileStack, Zap, Sparkles } from "lucide-react";
 import { getStoredBusinessId } from "@/lib/workspace";
@@ -261,40 +262,54 @@ export default function ProjectsPage() {
       />
 
       <div data-walkthrough="projects-board">
-        {activeTab === "board" && (
-          <ProjectBoard
-            businessId={businessId}
-            projects={projects}
-            loading={loading}
-            onProjectsChange={setProjects}
-            onOpenProject={setSelectedProjectId}
-            onReload={loadProjects}
-          />
-        )}
+        <AnimatePresence mode="wait">
+          {activeTab === "board" && (
+            <motion.div key="board" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
+              <ProjectBoard
+                businessId={businessId}
+                projects={projects}
+                loading={loading}
+                onProjectsChange={setProjects}
+                onOpenProject={setSelectedProjectId}
+                onReload={loadProjects}
+              />
+            </motion.div>
+          )}
 
-        {activeTab === "list" && (
-          <ProjectListView
-            projects={projects}
-            loading={loading}
-            onOpenProject={setSelectedProjectId}
-          />
-        )}
+          {activeTab === "list" && (
+            <motion.div key="list" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
+              <ProjectListView
+                projects={projects}
+                loading={loading}
+                onOpenProject={setSelectedProjectId}
+              />
+            </motion.div>
+          )}
 
-        {activeTab === "templates" && (
-          <TemplateManager businessId={businessId} onProjectCreated={loadProjects} />
-        )}
+          {activeTab === "templates" && (
+            <motion.div key="templates" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
+              <TemplateManager businessId={businessId} onProjectCreated={loadProjects} />
+            </motion.div>
+          )}
 
-        {activeTab === "plans" && (
-          <PlanGenerator businessId={businessId || ""} goals={[]} />
-        )}
+          {activeTab === "plans" && (
+            <motion.div key="plans" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
+              <PlanGenerator businessId={businessId || ""} goals={[]} />
+            </motion.div>
+          )}
 
-        {activeTab === "intelligence" && (
-          <ProjectIntelligencePanel />
-        )}
+          {activeTab === "intelligence" && (
+            <motion.div key="intelligence" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
+              <ProjectIntelligencePanel />
+            </motion.div>
+          )}
 
-        {activeTab === "playbooks" && (
-          <PlaybookPanel />
-        )}
+          {activeTab === "playbooks" && (
+            <motion.div key="playbooks" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
+              <PlaybookPanel />
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       <ContactPickerDrawer isOpen={showContactPicker} onClose={() => setShowContactPicker(false)} />

@@ -2,11 +2,15 @@
 "use client";
 
 import { useEffect, useState, useCallback, useMemo } from "react";
+import { motion } from "framer-motion";
 import { DormantRoute } from "@/components/dormant-route";
 import {
   GraduationCap,
   BookOpen,
   Play,
+  Trophy,
+  Clock,
+  Sparkles,
 } from "lucide-react";
 import {
   fetchCourses,
@@ -18,6 +22,8 @@ import {
 } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
+import { MetricCard } from "@/components/ui/metric-card";
+import { SectionCard } from "@/components/ui/section-card";
 import { NotesTrigger } from "@/components/keyflow/notes-trigger";
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
 import { LearnSkeleton } from "./components/learn-skeleton";
@@ -32,6 +38,11 @@ const LEARN_TABS = [
 ];
 
 const _LEARN_TAB_KEYS = LEARN_TABS.map((t) => t.key);
+
+const fadeUp = {
+  hidden: { opacity: 0, y: 12 },
+  show: { opacity: 1, y: 0, transition: { type: "spring" as const, stiffness: 300, damping: 24 } },
+};
 
 function LearnPageInner() {
   const [businessId, setBusinessId] = useState<string | null>(null);
@@ -119,6 +130,11 @@ function LearnPageInner() {
     [enrolledCourses]
   );
 
+  const totalHours = useMemo(() =>
+    enrolledCourses.reduce((sum, item) => sum + (item.course.duration ?? 0), 0),
+    [enrolledCourses]
+  );
+
   const learnShortcuts = useMemo<ShortcutGroup[]>(() => [
     {
       groupName: "Learn Navigation",
@@ -162,37 +178,58 @@ function LearnPageInner() {
       enableSwipe
       enableSlideAnimation
       headerRight={<NotesTrigger pageKey="learn" variant="header" />}
+      metricStrip={
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <motion.div variants={fadeUp} initial="hidden" animate="show">
+            <MetricCard label="Total Courses" value={courses.length} icon={BookOpen} />
+          </motion.div>
+          <motion.div variants={fadeUp} initial="hidden" animate="show" transition={{ delay: 0.05 }}>
+            <MetricCard label="Enrolled" value={enrolledCourses.length} icon={Play} iconColor="#3b82f6" />
+          </motion.div>
+          <motion.div variants={fadeUp} initial="hidden" animate="show" transition={{ delay: 0.1 }}>
+            <MetricCard label="Completed" value={completedCourses.length} icon={Trophy} iconColor="#f59e0b" />
+          </motion.div>
+          <motion.div variants={fadeUp} initial="hidden" animate="show" transition={{ delay: 0.15 }}>
+            <MetricCard label="Hours Learned" value={`${Math.round(totalHours / 60)}h`} icon={Clock} iconColor="#10b981" />
+          </motion.div>
+        </div>
+      }
     >
       {tab === "learning" && (
-        <div data-walkthrough="learn-progress">
-          <ProgressTracker
-            enrolledCourses={enrolledCourses}
-            onOpenCourse={openCourseViewer}
-          />
-        </div>
+        <SectionCard title="Continue Learning" icon={Sparkles} compact noPadding>
+          <div data-walkthrough="learn-progress" className="p-3">
+            <ProgressTracker
+              enrolledCourses={enrolledCourses}
+              onOpenCourse={openCourseViewer}
+            />
+          </div>
+        </SectionCard>
       )}
 
       {tab === "catalog" && (
-        <div data-walkthrough="learn-catalog">
-          <CourseCatalog
-            courses={courses}
-            enrolledCourseIds={enrolledCourseIds}
-            enrollingId={enrollingId}
-            onEnroll={handleEnroll}
-            onOpenCourse={(course) => openCourseViewer(course)}
-          />
-        </div>
+        <SectionCard title="Course Catalog" icon={BookOpen} compact noPadding>
+          <div data-walkthrough="learn-catalog" className="p-3">
+            <CourseCatalog
+              courses={courses}
+              enrolledCourseIds={enrolledCourseIds}
+              enrollingId={enrollingId}
+              onEnroll={handleEnroll}
+              onOpenCourse={(course) => openCourseViewer(course)}
+            />
+          </div>
+        </SectionCard>
       )}
 
       {tab === "certificates" && (
-        <div data-walkthrough="learn-certificates">
-          <ProgressTracker
-            enrolledCourses={completedCourses}
-            onOpenCourse={openCourseViewer}
-          />
-        </div>
+        <SectionCard title="Your Certificates" icon={Trophy} compact noPadding>
+          <div data-walkthrough="learn-certificates" className="p-3">
+            <ProgressTracker
+              enrolledCourses={completedCourses}
+              onOpenCourse={openCourseViewer}
+            />
+          </div>
+        </SectionCard>
       )}
-
     </WorkspaceShell>
   );
 }

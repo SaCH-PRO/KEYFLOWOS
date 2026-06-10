@@ -26,6 +26,7 @@ import {
 import { buildWhatsAppLink, getContactPhone } from "@/lib/whatsapp";
 import type { ContactDetailData, DetailQuickAction } from "./contact-detail";
 import { DataQualityBadge } from "./data-quality-badge";
+import { ContactAvatar } from "./contact-avatar";
 
 const STATUS_COLORS: Record<string, string> = {
   LEAD: "hsl(var(--kf-accent1))",
@@ -146,8 +147,6 @@ export function ContactDetailHeader({
   nextBookingDate,
 }: ContactDetailHeaderProps) {
   const fullName = `${contact.firstName ?? ""} ${contact.lastName ?? ""}`.trim() || "Unnamed";
-  const initials = `${contact.firstName?.[0] ?? ""}${contact.lastName?.[0] ?? ""}`.toUpperCase() || "?";
-  const statusColor = STATUS_COLORS[contact.status ?? ""] ?? STATUS_COLORS.LEAD;
   const waPhone = getContactPhone(contact);
   const sourceKey = (contact.source || "manual").toLowerCase().replace(/[_\s]/g, "-");
   const sourceInfo = SOURCE_CONFIG[sourceKey] || { label: contact.source || "Unknown", icon: Globe };
@@ -206,12 +205,7 @@ export function ContactDetailHeader({
     <>
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-3">
-          <div
-            className="h-14 w-14 rounded-full flex items-center justify-center text-white text-lg font-semibold flex-shrink-0"
-            style={{ background: statusColor }}
-          >
-            {initials}
-          </div>
+          <ContactAvatar contact={contact} size="lg" />
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-xl font-semibold">{fullName}</h2>

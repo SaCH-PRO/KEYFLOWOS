@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
+import { SectionCard } from "@/components/ui/section-card";
 
 interface StorefrontMetric {
   label: string;
@@ -196,49 +197,26 @@ export default function StorefrontIntelligencePage() {
 
         {/* Funnel & Traffic */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <motion.div
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="rounded-2xl border border-border/40 bg-card/40 backdrop-blur-sm p-5"
-          >
-            <h2 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
-              <BarChart3 className="w-4 h-4 text-[hsl(var(--kf-accent2))]" />
-              Conversion Funnel
-            </h2>
-            <div className="space-y-4">
+          <SectionCard title="Conversion Funnel" icon={BarChart3}>
+            <div className="p-4 space-y-4">
               {funnel.map((stage, i) => (
                 <FunnelStage key={stage.stage} stage={stage} index={i} maxCount={funnel[0].count} />
               ))}
             </div>
-          </motion.div>
+          </SectionCard>
 
-          <motion.div
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
-            className="rounded-2xl border border-border/40 bg-card/40 backdrop-blur-sm p-5"
-          >
-            <h2 className="text-sm font-semibold text-foreground mb-4 flex items-center gap-2">
-              <Globe className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
-              Traffic Sources
-            </h2>
-            <div>
+          <SectionCard title="Traffic Sources" icon={Globe}>
+            <div className="p-4">
               {trafficSources.map((source, i) => (
                 <TrafficSourceRow key={source.source} source={source} index={i} />
               ))}
             </div>
-          </motion.div>
+          </SectionCard>
         </div>
 
         {/* Insights */}
-        <div>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
-              AI Insights
-            </h2>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <SectionCard title="AI Insights" icon={Sparkles} compact noPadding>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-3">
             {insights.map((insight, i) => {
               const config = {
                 trend: { bg: "bg-[hsl(var(--kf-accent2))]/5", border: "border-[hsl(var(--kf-accent2))]/20", icon: TrendingUp },
@@ -274,7 +252,7 @@ export default function StorefrontIntelligencePage() {
               );
             })}
           </div>
-        </div>
+        </SectionCard>
       </div>
     </WorkspaceShell>
   );

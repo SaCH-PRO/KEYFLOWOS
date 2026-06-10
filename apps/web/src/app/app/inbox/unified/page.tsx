@@ -1,12 +1,12 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { MessageSquare, Mail, Phone, Instagram, Facebook, CheckCircle2, Loader2, Send, RefreshCw, FileText } from "lucide-react";
+import { MessageSquare, Mail, Phone, Instagram, Facebook, CheckCircle2, Loader2, Send, RefreshCw, FileText, Sparkles, ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { apiGet, apiPostSimple } from "@/lib/api";
 import { ResponseDraftPanel } from "@/components/communications/response-draft-panel";
-import { fetchUnifiedInbox, type DraftItem } from "@/lib/api/omnichannel";
+import { fetchUnifiedInbox, generateReplyDraft, type DraftItem } from "@/lib/api/omnichannel";
 
 interface Thread {
   id: string;
@@ -61,6 +61,7 @@ export default function UnifiedInboxPage() {
   const [filterChannel, setFilterChannel] = useState<string>("");
   const [drafts, setDrafts] = useState<DraftItem[]>([]);
   const [showDrafts, setShowDrafts] = useState(false);
+  const [generatingDraft, setGeneratingDraft] = useState(false);
   // Role filter removed — Key auto-detects role intelligently
 
   const loadThreads = useCallback(async () => {
@@ -113,6 +114,24 @@ export default function UnifiedInboxPage() {
     }
   };
 
+  const handleGenerateReply = async () => {
+    if (!businessId || !selectedThread) return;
+    setGeneratingDraft(true);
+    try {
+      const res = await generateReplyDraft(businessId, selectedThread.id);
+      if (res.data?.draft) {
+        toast.success("Draft generated! Check the drafts panel.");
+        await loadThreads();
+      } else {
+        toast.error("Failed to generate draft");
+      }
+    } catch {
+      toast.error("Failed to generate draft");
+    } finally {
+      setGeneratingDraft(false);
+    }
+  };
+
   const resolveThread = async () => {
     if (!businessId || !selectedThread) return;
     try {
@@ -135,11 +154,11 @@ export default function UnifiedInboxPage() {
   }
 
   return (
-    <div className="h-[calc(100vh-4rem)] flex">
+    <div className="h-full md:h-[calc(100vh-4rem)] flex -mx-3 -mt-3 sm:-mx-4 sm:-mt-4 md:-mx-6 md:-mt-6">
       {/* Sidebar */}
-      <div className="w-80 border-r border-border/20 flex flex-col">
+      <div className={`w-full md:w-80 border-r border-border/20 flex flex-col ${selectedThread ? "hidden md:flex" : "flex"}`}>
         {/* Header */}
-        <div className="p-4 border-b border-border/20">
+        <div className="p-2 md:p-4 border-b border-border/20">
           <div className="flex items-center gap-2 mb-3">
             <MessageSquare className="w-5 h-5 text-[hsl(var(--kf-accent1))]" />
             <h1 className="text-sm font-bold text-foreground/90">Unified Inbox</h1>
@@ -199,7 +218,7 @@ export default function UnifiedInboxPage() {
                 <button
                   key={thread.id}
                   onClick={() => selectThread(thread)}
-                  className={`w-full text-left p-3 border-b border-border/10 hover:bg-muted/20 transition-colors ${
+                  className={`w-full text-left p-2 md:p-3 border-b border-border/10 hover:bg-muted/20 transition-colors ${
                     selectedThread?.id === thread.id ? "bg-muted/30" : ""
                   }`}
                 >
@@ -247,20 +266,29 @@ export default function UnifiedInboxPage() {
       )}
 
       {/* Thread View */}
-      <div className="flex-1 flex flex-col">
+      <div className={`flex-1 flex flex-col ${selectedThread ? "flex" : "hidden md:flex"}`}>
         {selectedThread ? (
           <>
             {/* Thread Header */}
-            <div className="p-4 border-b border-border/20 flex items-center justify-between">
-              <div>
-                <h2 className="text-sm font-semibold text-foreground/80">
+            <div className="p-2 md:p-4 border-b border-border/20 flex items-center justify-between">
+              <div className="flex items-center min-w-0">
+                <button
+                  onClick={() => { setSelectedThread(null); setMessages([]); }}
+                  className="md:hidden mr-2 p-1 rounded-md hover:bg-muted/30 shrink-0"
+                  aria-label="Back to threads"
+                >
+                  <ArrowLeft className="w-4 h-4 text-muted-foreground" />
+                </button>
+                <div className="min-w-0">
+                  <h2 className="text-sm font-semibold text-foreground/80 truncate">
                   {selectedThread.contact ? `${selectedThread.contact.firstName ?? ""} ${selectedThread.contact.lastName ?? ""}`.trim() || selectedThread.contact.email || "Unknown" : "Unknown"}
                 </h2>
-                <p className="text-xs text-muted-foreground/40">
+                <p className="text-xs text-muted-foreground/40 truncate">
                   {selectedThread.channel} · {selectedThread.channelId}
                 </p>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 shrink-0">
                 {selectedThread.assignedRole && (
                   <span className={`px-2 py-1 rounded-md text-[10px] font-medium border ${ROLE_COLORS[selectedThread.assignedRole] ?? ROLE_COLORS.general}`}>
                     {selectedThread.assignedRole}
@@ -277,7 +305,7 @@ export default function UnifiedInboxPage() {
             </div>
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            <div className="flex-1 overflow-y-auto p-2 md:p-4 space-y-3">
               {messages.map((msg) => (
                 <div
                   key={msg.id}
@@ -310,7 +338,7 @@ export default function UnifiedInboxPage() {
             </div>
 
             {/* Reply Box */}
-            <div className="p-4 border-t border-border/20">
+            <div className="p-2 md:p-4 border-t border-border/20">
               <div className="flex items-center gap-2">
                 <input
                   type="text"
@@ -318,11 +346,19 @@ export default function UnifiedInboxPage() {
                   onChange={(e) => setReplyText(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && sendReply()}
                   placeholder="Type a reply..."
-                  className="flex-1 px-3 py-2 rounded-lg bg-muted/30 border border-border/20 text-sm text-foreground/80 placeholder:text-muted-foreground/40 focus:outline-none focus:border-[hsl(var(--kf-accent1))]/50"
+                  className="flex-1 px-2 md:px-3 py-1.5 md:py-2 rounded-lg bg-muted/30 border border-border/20 text-sm text-foreground/80 placeholder:text-muted-foreground/40 focus:outline-none focus:border-[hsl(var(--kf-accent1))]/50"
                 />
                 <button
+                  onClick={handleGenerateReply}
+                  disabled={generatingDraft}
+                  className="p-1.5 md:p-2 rounded-lg bg-muted/40 text-muted-foreground hover:text-[hsl(var(--kf-accent1))] hover:bg-[hsl(var(--kf-accent1))]/10 transition-colors disabled:opacity-50 shrink-0"
+                  title="Generate AI reply draft"
+                >
+                  {generatingDraft ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+                </button>
+                <button
                   onClick={sendReply}
-                  className="p-2 rounded-lg bg-[hsl(var(--kf-accent1))] text-white hover:opacity-90 transition-opacity"
+                  className="p-1.5 md:p-2 rounded-lg bg-[hsl(var(--kf-accent1))] text-white hover:opacity-90 transition-opacity shrink-0"
                 >
                   <Send className="w-4 h-4" />
                 </button>

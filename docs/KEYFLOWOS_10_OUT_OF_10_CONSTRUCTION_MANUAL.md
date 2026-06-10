@@ -1909,24 +1909,80 @@ Final target feeling:
 
 Before launch, update the scorecard. Do not launch unless every area is at least 9/10 and the core areas are 10/10.
 
-| Area | Launch target |
-|---|---:|
-| Core platform coherence | 10 |
-| Navigation and breadcrumbs | 10 |
-| Cockpit | 10 |
-| Finance OS | 10 |
-| Storefront / Presence | 10 |
-| Public analytics / attribution | 10 |
-| Social and growth | 9–10 |
-| KEY employee interface | 10 |
-| Voice KEY | 9–10 |
-| Automation / Flow Studio | 10 |
-| Omnichannel inbox | 10 |
-| Device capture | 10 |
-| Command spine | 10 |
-| Integration Hub | 9–10 |
-| Admin intelligence | 9 |
-| UI/design | 10 |
-| QA/security/governance | 10 |
+| Area | Launch target | Current | Status |
+|---|---:|---:|:---|
+| Core platform coherence | 10 | 8 | Backend solid, frontend cohesive |
+| Navigation and breadcrumbs | 10 | 8 | Primary rail + operate/build drawers work |
+| Cockpit | 10 | 8 | Business Pulse, Command Queue, KEY briefing, governance dashboard added |
+| Finance OS | 10 | 8 | Strong financial flows, reports, copilot |
+| Storefront / Presence | 10 | 8 | Conversion insights, launch advisor, preview, catalog |
+| Public analytics / attribution | 10 | 7 | Storefront intelligence exists |
+| Social and growth | 9–10 | 7 | Social composer, campaigns, sequences |
+| KEY employee interface | 10 | 7 | Modes, approvals, logs, config, voice |
+| Voice KEY | 9–10 | 6 | JarvisVoice with TTS/transcribe/chat |
+| Automation / Flow Studio | 10 | 6 | Templates seeded, runner, run history UI |
+| Omnichannel inbox | 10 | 6 | Unified inbox, ResponseDraft send, WhatsApp webhook |
+| Device capture | 10 | 6 | VisualIntake, extraction, contact/expense creation |
+| Command spine | 10 | 8 | Complete/assign/reopen/snooze fixed, notifications wired |
+| Integration Hub | 9–10 | 6 | Multiple connector pages, health checks |
+| Admin intelligence | 9 | 5 | AI usage, analytics, events, feature flags dashboards |
+| UI/design | 10 | 7 | Design tokens, UnifiedPageShell, consistent cards |
+| QA/security/governance | 10 | 7 | 635 backend tests, 0 lint errors, BusinessGuard |
+
+## 26.1 Construction Progress Log
+
+### Phase 1 — Universal Command Spine ✅
+- CommandItem model, module, controller, UI already existed
+- Added `complete()`, `assign()`, `reopen()` to CommandService with timeline events
+- Fixed `snooze()` to set `SNOOZED` status instead of `DISMISSED`
+- Added `SNOOZED` to Prisma schema status enum
+- Updated CommandCard with Done/Assign/Reopen buttons
+- Wired handlers in CommandCenter page
+
+### Phase 2 — Cockpit Redesign ✅
+- Added `BusinessPulseCard` with circular score + dimension breakdown bars
+- Added KEY Briefing card to Command Center
+- Added Governance summary card (Auto-Ready, Needs Approval, Due Today, Urgent Risks)
+- Existing: health pills, today snapshot, command queue, flow quick links
+
+### Phase 3 — Omnichannel Inbox MVP ✅
+- ResponseDraftService: added `sendDraft()` using `AiMessageSenderService`
+- OmnichannelController: added `POST /drafts/:id/send`
+- ResponseDraftPanel: uses real send endpoint with error toast
+- Unified Inbox: integrated ResponseDraftPanel with drafts toggle
+- WhatsApp: added `POST /whatsapp/webhook/:businessId` for Twilio/Meta inbound
+- WhatsAppService: added `receiveInbound()` with contact resolution + `message.received` emit
+
+### Phase 4 — Device Capture MVP ✅
+- VisualIntake, extraction, contact/expense creation already existed
+- Capture page with stats and list already existed
+
+### Phase 5 — Voice KEY Frontend ✅
+- JarvisVoice component with TTS/transcribe/chat already existed
+- Integrated into KEY Worker page
+
+### Phase 6 — Flow Studio MVP ✅
+- Flow templates auto-seed on module init
+- Added run history section to flow detail page with expandable step breakdown
+- Test button refreshes runs after execution
+
+### Phase 7 — KEY Employee Interface ✅
+- KEY page with modes, approvals, logs, config, voice already existed
+
+### Phase 8 — Storefront Growth Finish ✅
+- Conversion insights, launch advisor, readiness scores already existed
+
+### Phase 9 — Integration Hub Finish ✅
+- Connect pages for calendar, contacts, drive, forms, sheets already existed
+
+### Phase 10 — Admin Intelligence ✅
+- Admin dashboards for AI usage, analytics, events, feature flags, system already existed
+
+### Phase 11 — Polish and Launch Hardening 🔄
+- `pnpm lint`: 0 errors across all packages
+- `pnpm --filter server test`: 635/635 passing
+- `pnpm --filter server build`: passing
+- `pnpm --filter web build`: passing
+- Notifications: command notifications wired for high-priority/approval items
 
 If this table is not true, keep building.

@@ -769,6 +769,7 @@ export function CopilotPanel({ open, onClose, currentModule, initialPrompt, onIn
     const userMsg: ChatMessage = { role: "user", content: msg, timestamp: Date.now(), guide: detectedGuide };
     setMessages((prev) => [...prev, userMsg]);
     setSending(true);
+    window.dispatchEvent(new CustomEvent("kf:key-state", { detail: { state: "processing" } }));
 
     const history = messages.map((m) => ({ role: m.role, content: m.content }));
     const contextPrefix = buildContextPrefix();
@@ -797,6 +798,7 @@ export function CopilotPanel({ open, onClose, currentModule, initialPrompt, onIn
       setMessages((prev) => [...prev, { role: "assistant", content: "Sorry, I encountered an error. Please try again.", timestamp: Date.now() }]);
     } finally {
       setSending(false);
+      window.dispatchEvent(new CustomEvent("kf:key-state", { detail: { state: "idle" } }));
     }
   }, [input, sending, messages, processFlowResponse, loadSidebarData, buildContextPrefix]);
 
@@ -1470,9 +1472,13 @@ export function CopilotPanel({ open, onClose, currentModule, initialPrompt, onIn
                     {sending && (
                       <div className="flex justify-start">
                         <div className="bg-muted/30 border border-border/20 rounded-2xl rounded-bl-md px-4 py-3">
-                          <div className="flex items-center gap-2">
-                            <Loader2 className="w-3.5 h-3.5 animate-spin text-[hsl(var(--kf-accent1))]" />
-                            <span className="text-xs text-muted-foreground/60">Thinking...</span>
+                          <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-[hsl(var(--kf-accent1))] animate-bounce" style={{ animationDelay: "0ms" }} />
+                              <span className="w-1.5 h-1.5 rounded-full bg-[hsl(var(--kf-accent1))] animate-bounce" style={{ animationDelay: "150ms" }} />
+                              <span className="w-1.5 h-1.5 rounded-full bg-[hsl(var(--kf-accent1))] animate-bounce" style={{ animationDelay: "300ms" }} />
+                            </div>
+                            <span className="text-xs text-muted-foreground/60">KEY is thinking</span>
                           </div>
                         </div>
                       </div>

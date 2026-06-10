@@ -17,6 +17,7 @@ import {
   Activity,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ContactAvatar } from "@/components/contacts/contact-avatar";
 
 interface Contact {
   id: string;
@@ -72,9 +73,7 @@ function ContactRow({ contact, onClick }: { contact: Contact; onClick: () => voi
       onClick={onClick}
       className="w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-muted/50 transition-colors group"
     >
-      <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center text-[11px] font-semibold text-muted-foreground shrink-0">
-        {contact.firstName?.[0] || contact.email?.[0] || "?"}
-      </div>
+      <ContactAvatar contact={contact} size="sm" />
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium truncate">{contactName(contact)}</span>

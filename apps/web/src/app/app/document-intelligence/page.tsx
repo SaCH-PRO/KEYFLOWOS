@@ -16,6 +16,8 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
+import { MetricCard } from "@/components/ui/metric-card";
+import { SectionCard } from "@/components/ui/section-card";
 
 interface DocTemplate {
   id: string;
@@ -115,10 +117,10 @@ export default function DocumentIntelligencePage() {
   }, []);
 
   const stats = useMemo(() => [
-    { label: "Documents", value: "47", change: "+5 this week", icon: FileText },
-    { label: "AI Generated", value: "32", change: "68% of total", icon: Sparkles },
-    { label: "Avg. Time Saved", value: "18 min", change: "per document", icon: Clock },
-    { label: "Compliance Score", value: "94%", change: "+2% this month", icon: Shield },
+    { label: "Documents", value: "47", sub: "+5 this week", icon: FileText, color: "#3b82f6" },
+    { label: "AI Generated", value: "32", sub: "68% of total", icon: Sparkles, color: "#8b5cf6" },
+    { label: "Avg. Time Saved", value: "18 min", sub: "per document", icon: Clock, color: "#10b981" },
+    { label: "Compliance Score", value: "94%", sub: "+2% this month", icon: Shield, color: "#f59e0b" },
   ], []);
 
   const templates: DocTemplate[] = useMemo(() => [
@@ -173,32 +175,16 @@ export default function DocumentIntelligencePage() {
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: i * 0.06, duration: 0.3 }}
-              className="rounded-xl border border-border/40 bg-card/60 backdrop-blur-sm p-4"
             >
-              <div className="flex items-center gap-2 mb-2">
-                <div className="w-7 h-7 rounded-lg bg-[hsl(var(--kf-accent1))]/10 flex items-center justify-center">
-                  <s.icon className="w-3.5 h-3.5 text-[hsl(var(--kf-accent1))]" />
-                </div>
-                <span className="text-[11px] text-muted-foreground">{s.label}</span>
-              </div>
-              <div className="text-xl font-bold tabular-nums">{s.value}</div>
-              <div className="text-[11px] text-muted-foreground mt-1">{s.change}</div>
+              <MetricCard label={s.label} value={s.value} sub={s.sub} icon={s.icon} iconColor={s.color} />
             </motion.div>
           ))}
         </div>
 
         {/* Quick Create */}
-        <motion.div
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-          className="rounded-2xl border border-border/40 bg-card/40 backdrop-blur-sm p-5"
-        >
-          <h2 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
-            <Zap className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
-            Quick Create
-          </h2>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <SectionCard title="Quick Create" icon={Zap}>
+          <div className="p-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             {[
               { label: "AI Generate", icon: Bot, desc: "Describe what you need", color: "bg-[hsl(var(--kf-accent2))]/10 text-[hsl(var(--kf-accent2))]" },
               { label: "From Template", icon: Copy, desc: "Use existing template", color: "bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))]" },
@@ -218,52 +204,32 @@ export default function DocumentIntelligencePage() {
                 </div>
               </button>
             ))}
+            </div>
           </div>
-        </motion.div>
+        </SectionCard>
 
         {/* Templates & Recent Docs */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                <Copy className="w-4 h-4 text-[hsl(var(--kf-accent2))]" />
-                Templates
-              </h2>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <SectionCard title="Templates" icon={Copy} compact noPadding>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-3">
               {templates.map((t, i) => (
                 <TemplateCard key={t.id} template={t} index={i} />
               ))}
             </div>
-          </div>
+          </SectionCard>
 
-          <motion.div
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.15 }}
-            className="rounded-2xl border border-border/40 bg-card/40 backdrop-blur-sm p-5"
-          >
-            <h2 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
-              <Clock className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
-              Recent Documents
-            </h2>
-            <div>
+          <SectionCard title="Recent Documents" icon={Clock} compact noPadding>
+            <div className="p-3">
               {recentDocs.map((doc, i) => (
                 <DocRow key={doc.id} doc={doc} index={i} />
               ))}
             </div>
-          </motion.div>
+          </SectionCard>
         </div>
 
         {/* Insights */}
-        <div>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
-              AI Insights
-            </h2>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <SectionCard title="AI Insights" icon={Sparkles} compact noPadding>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-3">
             {insights.map((insight, i) => {
               const config = {
                 optimization: { bg: "bg-[hsl(var(--kf-accent2))]/5", border: "border-[hsl(var(--kf-accent2))]/20", icon: Lightbulb },
@@ -297,7 +263,7 @@ export default function DocumentIntelligencePage() {
               );
             })}
           </div>
-        </div>
+        </SectionCard>
       </div>
     </WorkspaceShell>
   );

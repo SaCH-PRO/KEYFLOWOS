@@ -48,6 +48,9 @@ export class CreateContactDto {
   @IsOptional()
   custom?: Record<string, any>;
 
+  @IsOptional()
+  customFieldValues?: Record<string, unknown>;
+
   @IsString()
   @IsOptional()
   @MaxLength(200)

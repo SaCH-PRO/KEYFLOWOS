@@ -93,7 +93,7 @@ export function RevenueView({ report, businessId }: { report: GeneratedReport; b
           <DataTable
             headers={["Client", "Revenue"]}
             rows={m.revenue.topClients.map(cl => [cl.name, formatCurrency(cl.total, m.currency)])}
-            onRowClick={(_idx) => { window.location.href = "/app/network/contacts"; }}
+            onRowClick={(_idx) => { window.location.href = "/app/crm/contacts"; }}
             emptyState={
               <EmptyState
                 icon={Users}

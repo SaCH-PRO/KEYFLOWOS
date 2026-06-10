@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import {
   Zap,
@@ -16,6 +16,9 @@ import {
   XCircle,
   ChevronDown,
   ChevronUp,
+  Activity,
+  Timer,
+  AlertTriangle,
 } from "lucide-react";
 import { getStoredBusinessId } from "@/lib/workspace";
 import {
@@ -50,9 +53,17 @@ export default function FlowDetailPage() {
   const [description, setDescription] = useState("");
   const [goal, setGoal] = useState("");
   const [runs, setRuns] = useState<FlowRun[]>([]);
-  const [runLoading, setRunLoading] = useState(false);
+  const [_runLoading, _setRunLoading] = useState(false);
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
   const [runSteps, setRunSteps] = useState<Record<string, FlowRunStep[]>>({});
+
+  const fetchRuns = useCallback(async () => {
+    if (!businessId || !flowId) return;
+    const runsRes = await listFlowRuns(businessId, flowId, { limit: 20 });
+    if (runsRes.data) {
+      setRuns(runsRes.data.items);
+    }
+  }, [businessId, flowId]);
 
   useEffect(() => {
     if (!businessId || !flowId) return;
@@ -81,6 +92,19 @@ export default function FlowDetailPage() {
     load();
     return () => { cancelled = true; };
   }, [businessId, flowId]);
+
+  // Live polling when any run is RUNNING
+  useEffect(() => {
+    if (!businessId || !flowId) return;
+    const hasRunning = runs.some((r) => r.status === "RUNNING");
+    if (!hasRunning) return;
+
+    const interval = setInterval(() => {
+      fetchRuns();
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [businessId, flowId, runs, fetchRuns]);
 
   const handleSave = async () => {
     if (!businessId || !flowId) return;
@@ -139,6 +163,29 @@ export default function FlowDetailPage() {
       }
     }
   };
+
+  const runMetrics = useMemo(() => {
+    const total = runs.length;
+    const completed = runs.filter((r) => r.status === "COMPLETED").length;
+    const failed = runs.filter((r) => r.status === "FAILED").length;
+    const successRate = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+    const completedDurations = runs
+      .filter((r) => r.status === "COMPLETED" && r.startedAt && r.completedAt)
+      .map((r) => new Date(r.completedAt!).getTime() - new Date(r.startedAt).getTime());
+
+    const avgDuration =
+      completedDurations.length > 0
+        ? completedDurations.reduce((a, b) => a + b, 0) / completedDurations.length
+        : 0;
+
+    return { total, successRate, avgDuration, failed };
+  }, [runs]);
+
+  function formatDuration(ms: number): string {
+    if (ms < 1000) return `${Math.round(ms)}ms`;
+    return `${(ms / 1000).toFixed(1)}s`;
+  }
 
   const handleDelete = async () => {
     if (!businessId || !flowId) return;
@@ -330,6 +377,45 @@ export default function FlowDetailPage() {
         </SectionCard>
       )}
 
+      {/* Run Metrics */}
+      {runs.length > 0 && (
+        <SectionCard>
+          <div className="p-4 border-b border-border/60">
+            <h2 className="text-sm font-semibold">Run Metrics</h2>
+          </div>
+          <div className="p-4 grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div>
+              <p className="text-xs text-muted-foreground">Total Runs</p>
+              <p className="text-lg font-semibold flex items-center gap-1.5">
+                <Activity className="w-4 h-4 text-primary" />
+                {runMetrics.total}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Success Rate</p>
+              <p className="text-lg font-semibold flex items-center gap-1.5">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                {runMetrics.successRate}%
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Avg Duration</p>
+              <p className="text-lg font-semibold flex items-center gap-1.5">
+                <Timer className="w-4 h-4 text-blue-400" />
+                {runMetrics.avgDuration > 0 ? formatDuration(runMetrics.avgDuration) : "—"}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Failed</p>
+              <p className="text-lg font-semibold flex items-center gap-1.5">
+                <AlertTriangle className="w-4 h-4 text-red-400" />
+                {runMetrics.failed}
+              </p>
+            </div>
+          </div>
+        </SectionCard>
+      )}
+
       {/* Run History */}
       <SectionCard>
         <div className="p-4 border-b border-border/60 flex items-center justify-between">
@@ -379,32 +465,53 @@ export default function FlowDetailPage() {
                   <div className="px-4 pb-4 pl-11">
                     {runSteps[run.id] ? (
                       <div className="space-y-2">
-                        {runSteps[run.id].map((step, idx) => (
-                          <div
-                            key={step.id}
-                            className={`flex items-center gap-2 text-xs p-2 rounded-md ${
-                              step.status === "COMPLETED"
-                                ? "bg-emerald-500/5"
-                                : step.status === "FAILED"
-                                ? "bg-red-500/5"
-                                : "bg-muted/30"
-                            }`}
-                          >
-                            <span className="text-muted-foreground w-4">{idx + 1}</span>
-                            <span className="font-medium capitalize">{step.nodeType.replace(/_/g, " ")}</span>
-                            <span
-                              className={`ml-auto text-[10px] ${
+                        {runSteps[run.id].map((step, idx) => {
+                          const isCurrent = run.currentNodeId === step.nodeId;
+                          const duration =
+                            step.startedAt && step.completedAt
+                              ? new Date(step.completedAt).getTime() - new Date(step.startedAt).getTime()
+                              : null;
+
+                          return (
+                            <div
+                              key={step.id}
+                              className={`flex items-center gap-2 text-xs p-2 rounded-md ${
                                 step.status === "COMPLETED"
-                                  ? "text-emerald-400"
+                                  ? "bg-emerald-500/5"
                                   : step.status === "FAILED"
-                                  ? "text-red-400"
-                                  : "text-muted-foreground"
+                                  ? "bg-red-500/5"
+                                  : "bg-muted/30"
                               }`}
                             >
-                              {step.status}
-                            </span>
-                          </div>
-                        ))}
+                              <span className="text-muted-foreground w-4">{idx + 1}</span>
+                              <span className="font-medium capitalize">{step.nodeType.replace(/_/g, " ")}</span>
+                              {isCurrent && (
+                                <span className="relative flex h-2 w-2">
+                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                                  <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                                </span>
+                              )}
+                              <span className="ml-auto flex items-center gap-2">
+                                {duration !== null && (
+                                  <span className="text-[10px] text-muted-foreground">
+                                    {formatDuration(duration)}
+                                  </span>
+                                )}
+                                <span
+                                  className={`text-[10px] ${
+                                    step.status === "COMPLETED"
+                                      ? "text-emerald-400"
+                                      : step.status === "FAILED"
+                                      ? "text-red-400"
+                                      : "text-muted-foreground"
+                                  }`}
+                                >
+                                  {step.status}
+                                </span>
+                              </span>
+                            </div>
+                          );
+                        })}
                       </div>
                     ) : (
                       <div className="flex items-center gap-2 text-xs text-muted-foreground">

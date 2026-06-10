@@ -145,7 +145,7 @@ export const operateSections: NavSection[] = [
     icon: Users,
     items: [
       { label: "People Flow", href: "/app/people-flow", icon: Users },
-      { label: "Contacts", href: "/app/network/contacts", icon: Contact },
+      { label: "Contacts", href: "/app/crm/contacts", icon: Contact },
       { label: "Sequences", href: "/app/crm/sequences", icon: Send },
       { label: "Intelligence", href: "/app/crm/intelligence", icon: Brain },
       { label: "Service", href: "/app/helpdesk", icon: Headset },
@@ -157,7 +157,7 @@ export const operateSections: NavSection[] = [
     icon: TrendingUp,
     items: [
       { label: "Commerce", href: "/app/commerce", icon: Receipt },
-      { label: "Deals", href: "/app/network/contacts", icon: Contact },
+      { label: "Deals", href: "/app/crm/contacts", icon: Contact },
     ],
   },
   {

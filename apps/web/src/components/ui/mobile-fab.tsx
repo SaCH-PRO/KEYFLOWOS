@@ -8,7 +8,7 @@ import { useRouter, usePathname } from "next/navigation";
 const FAB_ACTIONS = [
   { key: "booking", label: "New Booking", icon: Calendar, href: "/app/bookings?action=new" },
   { key: "invoice", label: "New Invoice", icon: FileText, href: "/app/commerce?tab=invoices&action=new" },
-  { key: "contact", label: "New Contact", icon: Users, href: "/app/network/contacts?action=new" },
+  { key: "contact", label: "New Contact", icon: Users, href: "/app/crm/contacts?action=new" },
 ];
 
 export function MobileFab() {

@@ -34,7 +34,6 @@ import {
   updateInvoiceStatus,
   markInvoicePaid,
   resendInvoiceReceipt,
-  sendInvoiceReminder,
   createInvoicePaymentLink,
   recordInvoicePayment,
   Invoice,
@@ -43,6 +42,7 @@ import {
 } from "@/lib/client";
 import { apiDelete } from "@/lib/api";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
+import { useCompose } from "@/components/email/compose-context";
 import { formatAmount, getDaysUntilDue } from "../../utils/commerce-utils";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
@@ -58,6 +58,7 @@ const STATUS_META: Record<string, { label: string; color: string; bg: string }> 
 
 export default function InvoiceDetailPage() {
   const router = useRouter();
+  const { open: openComposer } = useCompose();
   const params = useParams();
   const searchParams = useSearchParams();
   const invoiceId = params.id as string;
@@ -186,10 +187,21 @@ export default function InvoiceDetailPage() {
     } finally { setRecordingPayment(false); }
   };
 
-  const handleSendReminder = async () => {
-    if (!businessId || !invoice) return;
-    const { error } = await sendInvoiceReminder(businessId, invoice.id, { recipientEmail: invoice.contact?.email ?? "", message: `Reminder: invoice ${invoice.invoiceNumber ?? ""} is ${invoice.status === "OVERDUE" ? "overdue" : "awaiting payment"}.`, channel: "email" });
-    error ? toast.error(error) : toast.success("Reminder sent");
+  const handleSendReminder = () => {
+    if (!invoice) return;
+    openComposer({
+      to: invoice.contact?.email ?? "",
+      subject: `Friendly reminder: invoice ${invoice.invoiceNumber ?? ""}`,
+      body: "",
+      context: {
+        type: "follow_up",
+        recordNumber: invoice.invoiceNumber ?? invoice.id,
+        contactName: invoice.contact?.firstName ? `${invoice.contact.firstName} ${invoice.contact.lastName ?? ""}`.trim() : undefined,
+      },
+      onSent: () => {
+        toast.success("Reminder sent");
+      },
+    });
   };
 
   if (loading) return <div className="flex items-center justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-muted-foreground" /></div>;

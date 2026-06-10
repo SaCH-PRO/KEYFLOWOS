@@ -5,7 +5,8 @@ import React from "react";
 import { motion } from "framer-motion";
 import { Phone, Tag, Trash2, MessageCircle, MoreHorizontal, Receipt, Calendar, FileSignature, TrendingUp, Clock, AlertCircle, DollarSign, UserPlus } from "lucide-react";
 import { buildWhatsAppLink, getContactPhone } from "@/lib/whatsapp";
-import { relativeTime, getScoreStyle, STATUS_COLORS } from "@/lib/crm-utils";
+import { relativeTime, getScoreStyle } from "@/lib/crm-utils";
+import { ContactAvatar } from "./contact-avatar";
 
 export type ContactCardData = {
   id: string;
@@ -82,8 +83,6 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
   const [showActions, setShowActions] = useState(false);
   const actionsRef = useRef<HTMLDivElement>(null);
   const fullName = `${contact.firstName ?? ""} ${contact.lastName ?? ""}`.trim() || "Unnamed";
-  const initials = `${contact.firstName?.[0] ?? ""}${contact.lastName?.[0] ?? ""}`.toUpperCase() || "?";
-  const statusColor = STATUS_COLORS[contact.status ?? ""] ?? STATUS_COLORS.LEAD;
   const _statusDot = STATUS_DOT_COLORS[contact.status ?? ""] ?? "bg-blue-400";
 
   const leadScore = contact.meta?.leadScore;
@@ -148,12 +147,7 @@ function ContactCardInner({ contact, isSelected, selectable, selected, onToggleS
           />
         )}
 
-        <div
-          className="h-8 w-8 rounded-full flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0"
-          style={{ background: statusColor }}
-        >
-          {initials}
-        </div>
+        <ContactAvatar contact={contact} size="sm" />
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 min-w-0">

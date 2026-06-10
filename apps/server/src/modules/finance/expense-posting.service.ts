@@ -4,6 +4,8 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { PostingService } from './posting.service';
 import { ChartOfAccountsSeederService } from './chart-of-accounts-seeder.service';
 
+const D = Prisma.Decimal;
+
 /**
  * FIN3 — Posting recipes for expenses, bills, purchase orders, and the
  * cost-of-goods-sold leg that fires on product sales.
@@ -72,7 +74,8 @@ export class ExpensePostingService {
     categoryId: string | null | undefined,
     txClient?: Prisma.TransactionClient,
   ): Promise<string> {
-    const tx = (txClient ?? this.prisma.client) as Prisma.TransactionClient;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tx = (txClient ?? this.prisma.client) as any;
     if (categoryId) {
       const cat = await tx.expenseCategory.findUnique({
         where: { id: categoryId },
@@ -140,6 +143,7 @@ export class ExpensePostingService {
   /**
    * Paid expense — Dr Operating Expense / Cr Cash|Bank|Card.
    * Idempotent on `Expense:{id}:paid`.
+   * Supports multi-line split items for detailed categorization.
    */
   async onExpensePaid(
     expense: {
@@ -153,6 +157,12 @@ export class ExpensePostingService {
       description: string;
       contactId?: string | null;
       vendor?: string | null;
+      items?: Array<{
+        amount: number;
+        categoryId?: string | null;
+        description?: string;
+        taxRateId?: string | null;
+      }> | null;
     },
     txClient?: Prisma.TransactionClient,
   ) {
@@ -160,18 +170,50 @@ export class ExpensePostingService {
       // 0/-amount expenses are a no-op for the ledger.
       return null;
     }
-    const expenseCoaId = await this.resolveExpenseCoa(
-      expense.businessId,
-      expense.categoryId,
-      txClient,
-    );
+
     const cashCoaId = await this.resolvePaymentCoa(expense.businessId, expense.paymentMethod);
+
+    const entries: Array<{ accountId: string; debit: number; credit: number; memo?: string }> = [];
+    let debitTotal = new D(0);
+
+    const splitItems = Array.isArray(expense.items) && expense.items.length > 0 ? expense.items : null;
+
+    if (splitItems) {
+      for (const item of splitItems) {
+        const itemAmount = new D(String(item.amount ?? 0));
+        if (itemAmount.lte(0)) continue;
+        const itemCoaId = await this.resolveExpenseCoa(expense.businessId, item.categoryId ?? expense.categoryId, txClient);
+        entries.push({
+          accountId: itemCoaId,
+          debit: itemAmount.toNumber(),
+          credit: 0,
+          memo: item.description ?? expense.description,
+        });
+        debitTotal = debitTotal.add(itemAmount);
+      }
+    } else {
+      const expenseCoaId = await this.resolveExpenseCoa(expense.businessId, expense.categoryId, txClient);
+      entries.push({ accountId: expenseCoaId, debit: expense.amount, credit: 0, memo: expense.description });
+      debitTotal = new D(String(expense.amount));
+    }
+
+    if (entries.length === 0) return null;
+
+    // Credit the payment account for the total debit amount (may differ from
+    // expense.amount if individual item rounding is involved).
+    entries.push({
+      accountId: cashCoaId,
+      debit: 0,
+      credit: debitTotal.toNumber(),
+      memo: expense.vendor ?? expense.description,
+    });
+
     return this.posting.post(
       {
         businessId: expense.businessId,
         type: 'EXPENSE',
         date: expense.date,
-        amount: expense.amount,
+        amount: debitTotal.toNumber(),
         currency: expense.currency,
         description: expense.description,
         contactId: expense.contactId ?? null,
@@ -179,10 +221,7 @@ export class ExpensePostingService {
         sourceId: expense.id,
         kind: 'paid',
         reference: expense.vendor ?? null,
-        entries: [
-          { accountId: expenseCoaId, debit: expense.amount, memo: expense.description },
-          { accountId: cashCoaId, credit: expense.amount, memo: expense.vendor ?? expense.description },
-        ],
+        entries,
       },
       txClient,
     );
@@ -191,6 +230,7 @@ export class ExpensePostingService {
   /**
    * Bill (unpaid expense) — Dr Operating Expense / Cr Accounts Payable.
    * Idempotent on `Expense:{id}:bill_created`.
+   * Supports multi-line split items for detailed categorization.
    */
   async onBillCreated(
     expense: {
@@ -203,22 +243,58 @@ export class ExpensePostingService {
       description: string;
       contactId?: string | null;
       vendor?: string | null;
+      items?: Array<{
+        amount: number;
+        categoryId?: string | null;
+        description?: string;
+        taxRateId?: string | null;
+      }> | null;
     },
     txClient?: Prisma.TransactionClient,
   ) {
     if (expense.amount <= 0) return null;
-    const expenseCoaId = await this.resolveExpenseCoa(
-      expense.businessId,
-      expense.categoryId,
-      txClient,
-    );
+
     const apCoaId = await this.resolveSystemCoa(expense.businessId, 'ACCOUNTS_PAYABLE');
+
+    const entries: Array<{ accountId: string; debit: number; credit: number; memo?: string }> = [];
+    let debitTotal = new D(0);
+
+    const splitItems = Array.isArray(expense.items) && expense.items.length > 0 ? expense.items : null;
+
+    if (splitItems) {
+      for (const item of splitItems) {
+        const itemAmount = new D(String(item.amount ?? 0));
+        if (itemAmount.lte(0)) continue;
+        const itemCoaId = await this.resolveExpenseCoa(expense.businessId, item.categoryId ?? expense.categoryId, txClient);
+        entries.push({
+          accountId: itemCoaId,
+          debit: itemAmount.toNumber(),
+          credit: 0,
+          memo: item.description ?? expense.description,
+        });
+        debitTotal = debitTotal.add(itemAmount);
+      }
+    } else {
+      const expenseCoaId = await this.resolveExpenseCoa(expense.businessId, expense.categoryId, txClient);
+      entries.push({ accountId: expenseCoaId, debit: expense.amount, credit: 0, memo: expense.description });
+      debitTotal = new D(String(expense.amount));
+    }
+
+    if (entries.length === 0) return null;
+
+    entries.push({
+      accountId: apCoaId,
+      debit: 0,
+      credit: debitTotal.toNumber(),
+      memo: `Bill: ${expense.vendor ?? expense.description}`,
+    });
+
     return this.posting.post(
       {
         businessId: expense.businessId,
         type: 'EXPENSE',
         date: expense.date,
-        amount: expense.amount,
+        amount: debitTotal.toNumber(),
         currency: expense.currency,
         description: expense.description,
         contactId: expense.contactId ?? null,
@@ -226,10 +302,7 @@ export class ExpensePostingService {
         sourceId: expense.id,
         kind: 'bill_created',
         reference: expense.vendor ?? null,
-        entries: [
-          { accountId: expenseCoaId, debit: expense.amount, memo: expense.description },
-          { accountId: apCoaId, credit: expense.amount, memo: `Bill: ${expense.vendor ?? expense.description}` },
-        ],
+        entries,
       },
       txClient,
     );

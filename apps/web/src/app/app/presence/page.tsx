@@ -16,6 +16,7 @@ import {
   Share2,
   ShoppingCart,
   Sparkles,
+  Store,
   TrendingUp,
   Users,
   XCircle,
@@ -99,7 +100,14 @@ export default function PresenceOverviewPage() {
   }
 
   return (
-    <div className="p-4 space-y-4">
+    <div className="p-4 space-y-5">
+      <div>
+        <h1 className="text-xl font-semibold tracking-tight flex items-center gap-2">
+          <Store className="w-5 h-5 text-[hsl(var(--kf-accent1))]" />
+          Presence
+        </h1>
+        <p className="text-sm text-muted-foreground mt-0.5">Storefront performance, health, and growth actions.</p>
+      </div>
       <SiteStatusBanner data={data} />
       <div className="flex items-center justify-between gap-2">
         <div className="text-xs uppercase tracking-wide text-muted-foreground">

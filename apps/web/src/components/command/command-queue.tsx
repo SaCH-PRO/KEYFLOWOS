@@ -10,6 +10,8 @@ interface CommandQueueProps {
   total: number;
   loading?: boolean;
   onRefresh?: () => void;
+  selectedIds?: Set<string>;
+  onSelect?: (id: string, selected: boolean) => void;
   onDismiss?: (id: string) => Promise<void>;
   onApprove?: (id: string) => Promise<void>;
   onExecute?: (id: string) => Promise<void>;
@@ -20,7 +22,7 @@ interface CommandQueueProps {
 
 const CATEGORIES = ["ALL", "MONEY", "TIME", "PEOPLE", "WORK", "SALES", "MARKETING", "GOVERNANCE", "STRATEGY", "SYSTEM"];
 
-export function CommandQueue({ items, total, loading, onRefresh, onDismiss, onApprove, onExecute, onComplete, onAssign, onReopen }: CommandQueueProps) {
+export function CommandQueue({ items, total, loading, onRefresh, selectedIds, onSelect, onDismiss, onApprove, onExecute, onComplete, onAssign, onReopen }: CommandQueueProps) {
   const [filter, setFilter] = useState("ALL");
 
   const filtered = filter === "ALL" ? items : items.filter((i) => i.category === filter);
@@ -70,6 +72,8 @@ export function CommandQueue({ items, total, loading, onRefresh, onDismiss, onAp
             <CommandCard
               key={item.id}
               item={item}
+              selected={selectedIds?.has(item.id)}
+              onSelect={onSelect}
               onDismiss={onDismiss}
               onApprove={onApprove}
               onExecute={onExecute}

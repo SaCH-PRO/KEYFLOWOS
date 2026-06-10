@@ -120,7 +120,7 @@ export const NOTES_CATALOG: Record<string, PageNote> = {
     { pageKey: "commerce", label: "Revenue" },
     { pageKey: "crm", label: "Clients" },
   ]),
-  crm: fromOverview("crm", "/app/network/contacts", Users, "var(--kf-accent1)", CRM_WALKTHROUGH, [
+  crm: fromOverview("crm", "/app/crm/contacts", Users, "var(--kf-accent1)", CRM_WALKTHROUGH, [
     term("conversion_rate"),
     term("lead_score"),
     term("momentum_score"),

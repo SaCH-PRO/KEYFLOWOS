@@ -28,7 +28,7 @@ class NotificationsServiceMock {
 }
 
 describe('CommandService', () => {
-  const service = new CommandService(new PrismaServiceMock() as any, new TimelineServiceMock() as any, new NotificationsServiceMock() as any);
+  const service = new CommandService(new PrismaServiceMock() as any, new TimelineServiceMock() as any, new NotificationsServiceMock() as any, { emit: () => {} } as any);
 
   it('creates a command item', async () => {
     const item = await service.create('biz_1', {

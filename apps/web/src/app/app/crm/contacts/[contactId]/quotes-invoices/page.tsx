@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { apiGet } from "@/lib/api";
+import { getStoredBusinessId } from "@/lib/workspace";
 import { Card, Button } from "@keyflow/ui";
 import { FileText, Receipt } from "lucide-react";
 
@@ -48,8 +49,8 @@ export default function ContactQuotesInvoicesPage() {
     const load = async () => {
       setLoading(true);
       const [invRes, quoRes] = await Promise.all([
-        apiGet<{ data: Invoice[] }>(`/commerce/businesses/default/invoices?contactId=${contactId}`),
-        apiGet<{ data: Quote[] }>(`/commerce/businesses/default/quotes?contactId=${contactId}`),
+        apiGet<{ data: Invoice[] }>(`/commerce/businesses/${getStoredBusinessId() ?? "default"}/invoices?contactId=${contactId}`),
+        apiGet<{ data: Quote[] }>(`/commerce/businesses/${getStoredBusinessId() ?? "default"}/quotes?contactId=${contactId}`),
       ]);
       setInvoices(invRes.data?.data ?? []);
       setQuotes(quoRes.data?.data ?? []);

@@ -205,7 +205,7 @@ export default function ExpenseDetailPage() {
               </>
             )}
             <button
-              onClick={() => {}}
+              onClick={() => toast.info("Transaction matching coming soon.")}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-foreground border border-border hover:bg-muted transition-colors"
             >
               <Receipt className="w-4 h-4" />

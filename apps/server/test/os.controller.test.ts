@@ -61,7 +61,7 @@ class NotificationsServiceMock {
 }
 
 describe('OsController command-center', () => {
-  const commandService = new CommandService(new PrismaServiceMock() as any, new TimelineServiceMock() as any, new NotificationsServiceMock() as any);
+  const commandService = new CommandService(new PrismaServiceMock() as any, new TimelineServiceMock() as any, new NotificationsServiceMock() as any, { emit: () => {} } as any);
   const osService = new OsService(new PrismaServiceMock() as any, commandService as any);
   const controller = new OsController(osService as any);
 

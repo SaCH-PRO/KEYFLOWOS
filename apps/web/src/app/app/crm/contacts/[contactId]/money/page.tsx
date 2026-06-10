@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { fetchContactRevenueSummary } from "@/lib/client";
 import { apiGet } from "@/lib/api";
+import { getStoredBusinessId } from "@/lib/workspace";
 import { Card, Badge } from "@keyflow/ui";
 import { DollarSign, TrendingUp, AlertCircle, Receipt, FileText, Clock } from "lucide-react";
 
@@ -79,8 +80,8 @@ export default function ContactMoneyPage() {
       setLoading(true);
       const [sumRes, invRes, quoRes] = await Promise.all([
         fetchContactRevenueSummary(contactId as string),
-        apiGet<{ data: Invoice[] }>(`/commerce/businesses/default/invoices?contactId=${contactId}`),
-        apiGet<{ data: Quote[] }>(`/commerce/businesses/default/quotes?contactId=${contactId}`),
+        apiGet<{ data: Invoice[] }>(`/commerce/businesses/${getStoredBusinessId() ?? "default"}/invoices?contactId=${contactId}`),
+        apiGet<{ data: Quote[] }>(`/commerce/businesses/${getStoredBusinessId() ?? "default"}/quotes?contactId=${contactId}`),
       ]);
       setSummary(sumRes.data ?? null);
       setInvoices(invRes.data?.data ?? []);

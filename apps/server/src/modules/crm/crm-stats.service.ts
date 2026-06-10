@@ -1,7 +1,8 @@
 import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import type { Contact, Prisma } from '@prisma/client';
+import { Prisma, type Contact } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmTimelineService } from './crm-timeline.service';
+import { CrmCacheService } from './crm-cache.service';
 import { contactWhereBase, contactWhereWithId } from './crm.helpers';
 
 export type TopOpenDeal = {
@@ -115,50 +116,19 @@ type FlowHighlightsPayload = {
 @Injectable()
 export class CrmStatsService {
   private readonly logger = new Logger(CrmStatsService.name);
-  private cache: Map<string, { data: any; expires: number }> = new Map();
-  private cacheHits = 0;
-  private cacheMisses = 0;
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(CrmTimelineService) private readonly timeline: CrmTimelineService,
+    @Inject(CrmCacheService) private readonly cache: CrmCacheService,
   ) {}
 
-  private getCached<T>(key: string): T | null {
-    const entry = this.cache.get(key);
-    if (!entry) {
-      this.cacheMisses++;
-      return null;
-    }
-    if (Date.now() > entry.expires) {
-      this.cache.delete(key);
-      this.cacheMisses++;
-      return null;
-    }
-    this.cacheHits++;
-    return entry.data as T;
-  }
-
-  private setCache(key: string, data: any, ttlMs = 60000): void {
-    this.cache.set(key, { data, expires: Date.now() + ttlMs });
-  }
-
   invalidateCache(businessId: string): void {
-    for (const key of this.cache.keys()) {
-      if (key.startsWith(`${businessId}:`)) {
-        this.cache.delete(key);
-      }
-    }
+    void this.cache.invalidate(businessId);
   }
 
   getCacheMetrics() {
-    const total = this.cacheHits + this.cacheMisses;
-    return {
-      hits: this.cacheHits,
-      misses: this.cacheMisses,
-      hitRate: total > 0 ? Math.round((this.cacheHits / total) * 100) : 0,
-      size: this.cache.size,
-    };
+    return { hits: 0, misses: 0, hitRate: 0, size: 0 };
   }
 
   private formatContactName(contact: {
@@ -188,7 +158,7 @@ export class CrmStatsService {
 
   async getContactStats(businessId: string) {
     const cacheKey = `${businessId}:getContactStats`;
-    const cached = this.getCached(cacheKey);
+    const cached = await this.cache.get(cacheKey);
     if (cached) return cached;
 
     const totalCount = await this.prisma.client.contact.count({
@@ -251,43 +221,102 @@ export class CrmStatsService {
       .slice(0, 10);
 
     const result = { totalCount, countByStatus, countBySource, recentGrowth, topTags };
-    this.setCache(cacheKey, result);
+    await this.cache.set(cacheKey, result);
     return result;
   }
 
   async attachContactStats(businessId: string, contacts: Contact[]): Promise<ContactWithStats[]> {
     const ids = contacts.map((c) => c.id);
-    const [invoices, tasks, events, notes, bookings, openDeals] = await Promise.all([
-      this.prisma.client.invoice.findMany({
-        where: { businessId, contactId: { in: ids }, deletedAt: null },
-        select: {
-          id: true,
-          contactId: true,
-          status: true,
-          total: true,
-          currency: true,
-          dueDate: true,
-          issueDate: true,
-          createdAt: true,
-          paidAt: true,
-        },
-      }),
-      this.prisma.client.contactTask.findMany({
-        where: { businessId, contactId: { in: ids } },
-        select: { contactId: true, status: true, dueDate: true, createdAt: true },
-      }),
-      this.prisma.client.contactEvent.findMany({
-        where: { businessId, contactId: { in: ids } },
-        select: { contactId: true, createdAt: true },
-      }),
-      this.prisma.client.contactNote.findMany({
-        where: { businessId, contactId: { in: ids } },
-        select: { contactId: true, createdAt: true },
-      }),
-      this.prisma.client.booking.findMany({
-        where: { businessId, contactId: { in: ids }, deletedAt: null },
-        select: { contactId: true, status: true, startTime: true },
-      }),
+    if (ids.length === 0) return contacts;
+
+    const idList = Prisma.join(ids);
+
+    const [
+      invoiceRows,
+      taskRows,
+      eventRows,
+      noteRows,
+      bookingRows,
+      openDeals,
+    ] = await Promise.all([
+      this.prisma.client.$queryRaw<Array<{
+        contact_id: string;
+        invoice_count: number;
+        total_revenue: number;
+        outstanding_balance: number;
+        paid_invoices: number;
+        unpaid_invoices: number;
+        oldest_unpaid_due_at: Date | null;
+      }>>`
+        SELECT
+          contact_id,
+          COUNT(*)::int AS invoice_count,
+          COALESCE(SUM(total) FILTER (WHERE status = 'PAID'), 0)::float AS total_revenue,
+          COALESCE(SUM(total) FILTER (WHERE status IN ('SENT','OVERDUE')), 0)::float AS outstanding_balance,
+          COUNT(*) FILTER (WHERE status = 'PAID')::int AS paid_invoices,
+          COUNT(*) FILTER (WHERE status IN ('SENT','OVERDUE'))::int AS unpaid_invoices,
+          MIN(due_date) FILTER (WHERE status IN ('SENT','OVERDUE')) AS oldest_unpaid_due_at
+        FROM invoices
+        WHERE business_id = ${businessId}
+          AND contact_id IN (${idList})
+          AND deleted_at IS NULL
+        GROUP BY contact_id
+      `,
+      this.prisma.client.$queryRaw<Array<{
+        contact_id: string;
+        overdue_tasks: number;
+        next_due_task_at: Date | null;
+        max_created_at: Date | null;
+      }>>`
+        SELECT
+          contact_id,
+          COUNT(*) FILTER (WHERE status != 'DONE' AND due_date < NOW())::int AS overdue_tasks,
+          MIN(due_date) FILTER (WHERE status != 'DONE') AS next_due_task_at,
+          MAX(created_at) AS max_created_at
+        FROM contact_tasks
+        WHERE business_id = ${businessId}
+          AND contact_id IN (${idList})
+        GROUP BY contact_id
+      `,
+      this.prisma.client.$queryRaw<Array<{
+        contact_id: string;
+        max_created_at: Date | null;
+      }>>`
+        SELECT contact_id, MAX(created_at) AS max_created_at
+        FROM contact_events
+        WHERE business_id = ${businessId}
+          AND contact_id IN (${idList})
+        GROUP BY contact_id
+      `,
+      this.prisma.client.$queryRaw<Array<{
+        contact_id: string;
+        max_created_at: Date | null;
+      }>>`
+        SELECT contact_id, MAX(created_at) AS max_created_at
+        FROM contact_notes
+        WHERE business_id = ${businessId}
+          AND contact_id IN (${idList})
+        GROUP BY contact_id
+      `,
+      this.prisma.client.$queryRaw<Array<{
+        contact_id: string;
+        booking_count: number;
+        bookings_recent: number;
+        overdue_bookings: number;
+        max_start_time: Date | null;
+      }>>`
+        SELECT
+          contact_id,
+          COUNT(*)::int AS booking_count,
+          COUNT(*) FILTER (WHERE status = 'COMPLETED' AND start_time > NOW() - INTERVAL '14 days')::int AS bookings_recent,
+          COUNT(*) FILTER (WHERE status = 'PENDING' AND start_time < NOW())::int AS overdue_bookings,
+          MAX(start_time) AS max_start_time
+        FROM bookings
+        WHERE business_id = ${businessId}
+          AND contact_id IN (${idList})
+          AND deleted_at IS NULL
+        GROUP BY contact_id
+      `,
       this.prisma.client.deal.findMany({
         where: { businessId, contactId: { in: ids }, status: 'OPEN', deletedAt: null },
         orderBy: [{ value: 'desc' }],
@@ -324,6 +353,49 @@ export class CrmStatsService {
       });
     }
 
+    const mergeDate = (current: Date, candidate: Date | null): Date => {
+      if (!candidate) return current;
+      return candidate > current ? candidate : current;
+    };
+
+    for (const row of invoiceRows) {
+      const stats = statsMap.get(row.contact_id);
+      if (!stats) continue;
+      stats.invoiceCount = row.invoice_count;
+      stats.totalRevenue = row.total_revenue;
+      stats.outstandingBalance = row.outstanding_balance;
+      stats.paidInvoices = row.paid_invoices;
+      stats.unpaidInvoices = row.unpaid_invoices;
+      stats.oldestUnpaidInvoiceDueAt = row.oldest_unpaid_due_at;
+    }
+
+    for (const row of taskRows) {
+      const stats = statsMap.get(row.contact_id);
+      if (!stats) continue;
+      stats.overdueTasks = row.overdue_tasks;
+      stats.nextDueTaskAt = row.next_due_task_at;
+      stats.lastInteractionAt = mergeDate(stats.lastInteractionAt, row.max_created_at);
+    }
+
+    for (const row of eventRows) {
+      const stats = statsMap.get(row.contact_id);
+      if (stats) stats.lastInteractionAt = mergeDate(stats.lastInteractionAt, row.max_created_at);
+    }
+
+    for (const row of noteRows) {
+      const stats = statsMap.get(row.contact_id);
+      if (stats) stats.lastInteractionAt = mergeDate(stats.lastInteractionAt, row.max_created_at);
+    }
+
+    for (const row of bookingRows) {
+      const stats = statsMap.get(row.contact_id);
+      if (!stats) continue;
+      stats.bookingCount = row.booking_count;
+      stats.bookingsRecent = row.bookings_recent;
+      stats.overdueBookings = row.overdue_bookings;
+      stats.lastInteractionAt = mergeDate(stats.lastInteractionAt, row.max_start_time);
+    }
+
     for (const deal of openDeals) {
       const stats = statsMap.get(deal.contactId);
       if (!stats) continue;
@@ -340,57 +412,6 @@ export class CrmStatsService {
       }
     }
 
-    const now = new Date();
-    invoices.forEach((inv) => {
-      const stats = statsMap.get(inv.contactId);
-      if (!stats) return;
-      stats.invoiceCount += 1;
-      if (['SENT', 'OVERDUE'].includes(inv.status)) {
-        stats.outstandingBalance += Number(inv.total ?? 0);
-        stats.unpaidInvoices += 1;
-        const dueDate = inv.dueDate ?? inv.issueDate ?? inv.createdAt;
-        if (dueDate) {
-          if (!stats.oldestUnpaidInvoiceDueAt || dueDate < stats.oldestUnpaidInvoiceDueAt) {
-            stats.oldestUnpaidInvoiceDueAt = dueDate;
-          }
-        }
-      }
-      if (inv.status === 'PAID') {
-        stats.paidInvoices += 1;
-        stats.totalRevenue += Number(inv.total ?? 0);
-      }
-    });
-
-    tasks.forEach((task) => {
-      const stats = statsMap.get(task.contactId);
-      if (!stats) return;
-      if (task.status !== 'DONE' && task.dueDate) {
-        const due = new Date(task.dueDate);
-        if (!stats.nextDueTaskAt || due < stats.nextDueTaskAt) stats.nextDueTaskAt = due;
-        if (due < now) stats.overdueTasks += 1;
-      }
-      if (task.createdAt > stats.lastInteractionAt) stats.lastInteractionAt = task.createdAt;
-    });
-
-    events.forEach((event) => {
-      const stats = statsMap.get(event.contactId);
-      if (stats && event.createdAt > stats.lastInteractionAt) stats.lastInteractionAt = event.createdAt;
-    });
-    notes.forEach((note) => {
-      const stats = statsMap.get(note.contactId);
-      if (stats && note.createdAt > stats.lastInteractionAt) stats.lastInteractionAt = note.createdAt;
-    });
-    const recentCutoff = new Date();
-    recentCutoff.setDate(recentCutoff.getDate() - 14);
-    bookings.forEach((booking) => {
-      const stats = statsMap.get(booking.contactId);
-      if (!stats) return;
-      stats.bookingCount += 1;
-      if (booking.status === 'COMPLETED' && booking.startTime > recentCutoff) stats.bookingsRecent += 1;
-      if (booking.status === 'PENDING' && booking.startTime < now) stats.overdueBookings += 1;
-      if (booking.startTime > stats.lastInteractionAt) stats.lastInteractionAt = booking.startTime;
-    });
-
     // Latest AI rollup per contact (best-effort; failure is silent).
     const aiRollupMap = new Map<string, { sentiment: string | null; intent: string | null }>();
     try {
@@ -406,8 +427,8 @@ export class CrmStatsService {
         aiRollupMap.set(ins.contactId, { sentiment: p.sentiment ?? null, intent: p.intent ?? null });
       }
     } catch (err) {
-        this.logger.warn(`Silent catch: ${err instanceof Error ? err.message : err}`);
-      }
+      this.logger.warn(`Silent catch: ${err instanceof Error ? err.message : err}`);
+    }
 
     const updates: { id: string; leadScore: number; lastInteractionAt: Date }[] = [];
     const withStats = contacts.map((contact) => {
@@ -549,7 +570,7 @@ export class CrmStatsService {
 
   async contactDetail(params: { businessId: string; contactId: string }) {
     const contact = await this.assertContact(params.businessId, params.contactId);
-    const [events, notes, tasks, invoices, bookings] = await Promise.all([
+    const [events, notes, tasks, invoices, bookings, customFieldValues] = await Promise.all([
       this.prisma.client.contactEvent.findMany({
         where: { businessId: params.businessId, contactId: params.contactId },
         orderBy: { createdAt: 'desc' },
@@ -581,6 +602,10 @@ export class CrmStatsService {
       this.prisma.client.booking.findMany({
         where: { businessId: params.businessId, contactId: params.contactId, deletedAt: null },
         select: { id: true, status: true, startTime: true, endTime: true, serviceId: true, staffId: true },
+      }),
+      this.prisma.client.contactCustomFieldValue.findMany({
+        where: { contactId: params.contactId },
+        include: { definition: true },
       }),
     ]);
 
@@ -652,12 +677,12 @@ export class CrmStatsService {
       meta.overdueTasks * 5 +
       (contact.status === 'CLIENT' ? 5 : 0);
 
-    return { contact, events, notes, tasks, invoices, bookings, meta };
+    return { contact, events, notes, tasks, invoices, bookings, meta, customFieldValues };
   }
 
   async segmentSummary(input: { businessId: string }) {
     const cacheKey = `${input.businessId}:segmentSummary`;
-    const cached = this.getCached(cacheKey);
+    const cached = await this.cache.get(cacheKey);
     if (cached) return cached;
 
     const base = contactWhereBase(input.businessId);
@@ -690,13 +715,13 @@ export class CrmStatsService {
       this.prisma.client.contact.count({ where: { ...base, relationshipHealth: 'DORMANT' } }),
     ]);
     const segResult = { lead, prospect, client, lost, unpaid, stale, newThisWeek, atRisk, dormant };
-    this.setCache(cacheKey, segResult);
+    await this.cache.set(cacheKey, segResult);
     return segResult;
   }
 
   async flowHighlights(input: { businessId: string }): Promise<FlowHighlightsPayload> {
     const cacheKey = `${input.businessId}:flowHighlights`;
-    const cached = this.getCached<FlowHighlightsPayload>(cacheKey);
+    const cached = await this.cache.get<FlowHighlightsPayload>(cacheKey);
     if (cached) return cached;
 
     const rawContacts = await this.prisma.client.contact.findMany({
@@ -728,7 +753,7 @@ export class CrmStatsService {
       nextActions: this.buildNextActions(contacts),
       aiNextActions: [],
     };
-    this.setCache(cacheKey, flowResult);
+    await this.cache.set(cacheKey, flowResult);
     return flowResult;
   }
 

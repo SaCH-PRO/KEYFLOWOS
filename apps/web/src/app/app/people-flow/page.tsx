@@ -2,10 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { Users, Contact, UserCheck, UserX, Heart, TrendingUp, Send, ArrowRight, UsersRound, ShieldAlert, Flame, Snowflake } from "lucide-react";
+import { motion } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { FlowShell } from "@/components/layout/flow-shell";
 import { MetricCard } from "@/components/ui/metric-card";
+import { SectionCard } from "@/components/ui/section-card";
 import { apiGet } from "@/lib/api";
 import { fetchPeopleSegments, type PeopleSegment } from "@/lib/api/people-flow";
 
@@ -29,6 +31,16 @@ const SEGMENT_COLORS: Record<string, string> = {
   "high-value": "bg-emerald-500/10 border-emerald-500/20",
   "at-risk": "bg-red-500/10 border-red-500/20",
   "dormant": "bg-slate-500/10 border-slate-500/20",
+};
+
+const fadeUp = {
+  hidden: { opacity: 0, y: 12 },
+  show: { opacity: 1, y: 0, transition: { type: "spring" as const, stiffness: 300, damping: 24 } },
+};
+
+const staggerContainer = {
+  hidden: { opacity: 0 },
+  show: { opacity: 1, transition: { staggerChildren: 0.06 } },
 };
 
 export default function PeopleFlowPage() {
@@ -55,9 +67,9 @@ export default function PeopleFlowPage() {
   }, [businessId]);
 
   const sections = [
-    { label: "Contacts", href: "/app/network/contacts", icon: Contact, desc: "All people and relationships" },
-    { label: "Leads", href: "/app/network/contacts?status=LEAD", icon: UserCheck, desc: "Prospects to nurture" },
-    { label: "Customers", href: "/app/network/contacts?status=CLIENT", icon: Heart, desc: "Clients and loyalty" },
+    { label: "Contacts", href: "/app/crm/contacts", icon: Contact, desc: "All people and relationships" },
+    { label: "Leads", href: "/app/crm/contacts?status=LEAD", icon: UserCheck, desc: "Prospects to nurture" },
+    { label: "Customers", href: "/app/crm/contacts?status=CLIENT", icon: Heart, desc: "Clients and loyalty" },
     { label: "Follow-ups", href: "/app/crm/sequences", icon: Send, desc: "Sequences and outreach" },
   ];
 
@@ -68,24 +80,43 @@ export default function PeopleFlowPage() {
       icon={Users}
       activeFlowId="people"
     >
+      {/* Metrics */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {loading ? Array.from({ length: 4 }).map((_, i) => <div key={i} className="kf-card-metric animate-pulse h-20" />) : (
+        {loading ? (
+          Array.from({ length: 4 }).map((_, i) => <div key={i} className="kf-card-metric animate-pulse h-20" />)
+        ) : (
           <>
-            <MetricCard label="Total Contacts" value={data?.contacts.total ?? 0} icon={Contact} />
-            <MetricCard label="Pipeline Value" value={`$${(data?.pipeline.pipelineValue ?? 0).toLocaleString()}`} icon={TrendingUp} />
-            <MetricCard label="Stale Leads" value={data?.contacts.staleLeads ?? 0} icon={UserX} iconColor="#f59e0b" />
-            <MetricCard label="Overdue Follow-ups" value={data?.followUps.overdue ?? 0} icon={Send} iconColor="#ef4444" />
+            <motion.div variants={fadeUp} initial="hidden" animate="show">
+              <MetricCard label="Total Contacts" value={data?.contacts.total ?? 0} icon={Contact} />
+            </motion.div>
+            <motion.div variants={fadeUp} initial="hidden" animate="show" transition={{ delay: 0.05 }}>
+              <MetricCard label="Pipeline Value" value={`$${(data?.pipeline.pipelineValue ?? 0).toLocaleString()}`} icon={TrendingUp} />
+            </motion.div>
+            <motion.div variants={fadeUp} initial="hidden" animate="show" transition={{ delay: 0.1 }}>
+              <MetricCard label="Stale Leads" value={data?.contacts.staleLeads ?? 0} icon={UserX} iconColor="#f59e0b" />
+            </motion.div>
+            <motion.div variants={fadeUp} initial="hidden" animate="show" transition={{ delay: 0.15 }}>
+              <MetricCard label="Overdue Follow-ups" value={data?.followUps.overdue ?? 0} icon={Send} iconColor="#ef4444" />
+            </motion.div>
           </>
         )}
       </div>
 
       {/* Segments */}
       {!loading && segments.length > 0 && (
-        <div className="space-y-2">
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Segments</p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+        <SectionCard title="Smart Segments" icon={UsersRound} compact>
+          <motion.div
+            variants={staggerContainer}
+            initial="hidden"
+            animate="show"
+            className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 p-3"
+          >
             {segments.map((seg) => (
-              <div key={seg.id} className={`p-3 rounded-xl border ${SEGMENT_COLORS[seg.id] ?? "bg-muted/30 border-border/50"}`}>
+              <motion.div
+                key={seg.id}
+                variants={fadeUp}
+                className={`p-3 rounded-xl border ${SEGMENT_COLORS[seg.id] ?? "bg-muted/30 border-border/50"} hover:shadow-sm transition-shadow`}
+              >
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
                     {SEGMENT_ICONS[seg.id] ?? <UsersRound className="w-4 h-4 text-muted-foreground" />}
@@ -95,7 +126,7 @@ export default function PeopleFlowPage() {
                 </div>
                 <p className="text-[10px] text-muted-foreground mb-2">{seg.criteria}</p>
                 <div className="flex flex-wrap gap-1">
-                  {seg.contacts.map((c) => (
+                  {seg.contacts.slice(0, 5).map((c) => (
                     <button
                       key={c.id}
                       onClick={() => router.push(`/app/crm/contacts/${c.id}`)}
@@ -105,21 +136,32 @@ export default function PeopleFlowPage() {
                       {c.name}
                     </button>
                   ))}
-                  {seg.count > seg.contacts.length && (
+                  {seg.count > 5 && (
                     <span className="text-[10px] px-2 py-0.5 rounded-full bg-background text-muted-foreground">
-                      +{seg.count - seg.contacts.length} more
+                      +{seg.count - 5} more
                     </span>
                   )}
                 </div>
-              </div>
+              </motion.div>
             ))}
-          </div>
-        </div>
+          </motion.div>
+        </SectionCard>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      {/* Quick Links */}
+      <motion.div
+        variants={staggerContainer}
+        initial="hidden"
+        animate="show"
+        className="grid grid-cols-1 md:grid-cols-2 gap-3"
+      >
         {sections.map((s) => (
-          <button key={s.label} onClick={() => router.push(s.href)} className="kf-card kf-radius-lg p-4 text-left hover:shadow-md transition-all group">
+          <motion.button
+            key={s.label}
+            variants={fadeUp}
+            onClick={() => router.push(s.href)}
+            className="kf-card kf-radius-lg p-4 text-left hover:shadow-md transition-all group"
+          >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 kf-radius-lg flex items-center justify-center" style={{ background: "hsl(var(--kf-accent1) / 0.1)" }}>
@@ -132,9 +174,9 @@ export default function PeopleFlowPage() {
               </div>
               <ArrowRight className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors" />
             </div>
-          </button>
+          </motion.button>
         ))}
-      </div>
+      </motion.div>
     </FlowShell>
   );
 }

@@ -21,7 +21,10 @@ import {
   Activity,
   BarChart3,
   Link2,
+  TrendingUp,
+  Sparkles,
 } from "lucide-react";
+import { MetricCard } from "@/components/ui/metric-card";
 import {
   fetchCommunityPosts,
   createCommunityPost,
@@ -329,6 +332,22 @@ function CommunityPageInner() {
       tabLayoutId="community-tab"
       enableSwipe
       enableSlideAnimation
+      metricStrip={
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}>
+            <MetricCard label="Total Posts" value={posts.length} icon={MessageSquare} />
+          </motion.div>
+          <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}>
+            <MetricCard label="Unread Messages" value={unreadMessages} icon={Mail} iconColor={unreadMessages > 0 ? "#ef4444" : undefined} />
+          </motion.div>
+          <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
+            <MetricCard label="Cohorts Joined" value={myCohorts.length} icon={Users} iconColor="#3b82f6" />
+          </motion.div>
+          <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
+            <MetricCard label="Notifications" value={unreadNotifs} icon={Bell} iconColor={unreadNotifs > 0 ? "#f59e0b" : undefined} />
+          </motion.div>
+        </div>
+      }
       headerRight={
         <button
           onClick={() => setShowGuide(!showGuide)}

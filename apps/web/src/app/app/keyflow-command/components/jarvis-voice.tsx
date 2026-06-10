@@ -37,6 +37,10 @@ export default function JarvisVoice({ businessId, pageContext }: Props) {
   const chunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const animFrameRef = useRef<number>(0);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
 
   useEffect(() => {
     return () => {
@@ -92,16 +96,32 @@ export default function JarvisVoice({ businessId, pageContext }: Props) {
     void speak(reply);
   };
 
+
+
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
+
+      // Set up audio analyser for waveform
+      const audioCtx = new AudioContext();
+      audioCtxRef.current = audioCtx;
+      const source = audioCtx.createMediaStreamSource(stream);
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 256;
+      source.connect(analyser);
+      analyserRef.current = analyser;
+
       const mr = new MediaRecorder(stream, { mimeType: "audio/webm" });
       chunksRef.current = [];
       mr.ondataavailable = (e) => {
         if (e.data.size > 0) chunksRef.current.push(e.data);
       };
       mr.onstop = async () => {
+        cancelAnimationFrame(animFrameRef.current);
+        analyserRef.current = null;
+        await audioCtxRef.current?.close();
+        audioCtxRef.current = null;
         const audioBlob = new Blob(chunksRef.current, { type: "audio/webm" });
         streamRef.current?.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
@@ -123,12 +143,42 @@ export default function JarvisVoice({ businessId, pageContext }: Props) {
       mediaRecorderRef.current = mr;
       mr.start();
       setRecording(true);
+
+      // Start waveform animation
+      const draw = () => {
+        const canvas = canvasRef.current;
+        const a = analyserRef.current;
+        if (!canvas || !a) return;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        const bufferLength = a.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+        a.getByteTimeDomainData(dataArray);
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "hsl(var(--kf-accent1))";
+        ctx.beginPath();
+        const sliceWidth = canvas.width / bufferLength;
+        let x = 0;
+        for (let i = 0; i < bufferLength; i++) {
+          const v = dataArray[i] / 128.0;
+          const y = (v * canvas.height) / 2;
+          if (i === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+          x += sliceWidth;
+        }
+        ctx.lineTo(canvas.width, canvas.height / 2);
+        ctx.stroke();
+        animFrameRef.current = requestAnimationFrame(draw);
+      };
+      draw();
     } catch (_err) {
       toast.error("Microphone access denied");
     }
   };
 
   const stopRecording = () => {
+    cancelAnimationFrame(animFrameRef.current);
     mediaRecorderRef.current?.stop();
     mediaRecorderRef.current = null;
     setRecording(false);
@@ -255,7 +305,27 @@ export default function JarvisVoice({ businessId, pageContext }: Props) {
               </div>
 
               <div className="flex-1 overflow-y-auto p-4 space-y-2 min-h-[200px]">
-                {turns.length === 0 ? (
+                {/* Waveform canvas */}
+                <AnimatePresence>
+                  {recording && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: "auto" }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="flex justify-center"
+                    >
+                      <canvas
+                        ref={canvasRef}
+                        width={320}
+                        height={60}
+                        className="rounded-lg"
+                        style={{ background: "hsl(var(--muted) / 0.3)" }}
+                      />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {turns.length === 0 && !recording ? (
                   <div className="text-xs text-muted-foreground text-center py-8">
                     Tap the mic and ask anything — I see your bookings,
                     contacts, projects, expenses, store, marketplace, community,
@@ -263,8 +333,10 @@ export default function JarvisVoice({ businessId, pageContext }: Props) {
                   </div>
                 ) : (
                   turns.map((t) => (
-                    <div
+                    <motion.div
                       key={t.id}
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
                       className={`max-w-[85%] p-2.5 rounded-2xl text-xs ${
                         t.role === "user"
                           ? "ml-auto rounded-br-sm"
@@ -282,15 +354,24 @@ export default function JarvisVoice({ businessId, pageContext }: Props) {
                             }
                       }
                     >
+                      <span className="text-[10px] opacity-60 block mb-0.5">
+                        {t.role === "user" ? "You" : "Jarvis"}
+                      </span>
                       {t.text}
-                    </div>
+                    </motion.div>
                   ))
                 )}
                 {thinking && (
-                  <div className="text-[10px] text-muted-foreground flex items-center gap-1">
-                    <RefreshCw className="w-3 h-3 animate-spin" />
-                    Working…
-                  </div>
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="max-w-[85%] p-2.5 rounded-2xl rounded-bl-sm text-xs bg-muted/50"
+                  >
+                    <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                      <RefreshCw className="w-3 h-3 animate-spin" />
+                      <span>Thinking…</span>
+                    </div>
+                  </motion.div>
                 )}
               </div>
 

@@ -34,7 +34,7 @@ function buildCards(modules: ControlTowerModules, dashboard: StrategicDashboard)
       key: "clients",
       label: "Clients",
       icon: Users,
-      href: "/app/network/contacts",
+      href: "/app/crm/contacts",
       primary: `${fmt(modules.contacts.total)} contacts`,
       secondary: modules.contacts.staleLeadCount > 0 ? `${modules.contacts.staleLeadCount} stale leads` : `${modules.contacts.recentCount} new this week`,
       status: modules.contacts.staleLeadCount > 10 ? "critical" : modules.contacts.staleLeadCount > 0 ? "warn" : "good",

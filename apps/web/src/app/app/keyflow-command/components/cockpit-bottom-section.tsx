@@ -84,7 +84,7 @@ export function CockpitBottomSection({
       return {
         text: `${staleLeads} leads are cooling down. Thursday afternoon has historically high response rates for outreach.`,
         cta: "Reach out",
-        route: "/app/network/contacts",
+        route: "/app/crm/contacts",
       };
     }
     if (upcomingBookings < 3) {
@@ -99,7 +99,7 @@ export function CockpitBottomSection({
         ? "Your business momentum is strong. Keep nurturing your active leads to maintain the trajectory."
         : "Small consistent actions compound. Focus on one priority at a time to rebuild momentum.",
       cta: "View pipeline",
-      route: "/app/network/contacts",
+      route: "/app/crm/contacts",
     };
   })();
 

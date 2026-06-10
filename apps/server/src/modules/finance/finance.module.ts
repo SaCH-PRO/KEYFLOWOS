@@ -20,6 +20,10 @@ import { FinanceTaxRateService } from './finance-tax-rate.service';
 import { FinanceSettingsService } from './finance-settings.service';
 import { BankImportService } from './bank-import.service';
 import { BankMatchingService } from './bank-matching.service';
+import { BankRuleService } from './bank-rule.service';
+import { RecurringJournalEntryService } from './recurring-journal-entry.service';
+import { CreditNoteService } from './credit-note.service';
+import { AccountingPeriodService } from './accounting-period.service';
 import { ReconciliationService } from './reconciliation.service';
 import { ExpensePostingService } from './expense-posting.service';
 import { TaxLiabilityService } from './tax-liability.service';
@@ -62,6 +66,10 @@ import { CashReserveService } from './cash-reserve.service';
     FinanceSettingsService,
     BankImportService,
     BankMatchingService,
+    BankRuleService,
+    RecurringJournalEntryService,
+    CreditNoteService,
+    AccountingPeriodService,
     ReconciliationService,
     ExpensePostingService,
     TaxLiabilityService,
@@ -91,6 +99,10 @@ import { CashReserveService } from './cash-reserve.service';
     FinanceSettingsService,
     BankImportService,
     BankMatchingService,
+    BankRuleService,
+    RecurringJournalEntryService,
+    CreditNoteService,
+    AccountingPeriodService,
     ReconciliationService,
     ExpensePostingService,
     FinanceIntelligenceService,

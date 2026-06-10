@@ -10,6 +10,7 @@ import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ReceivablesService } from './receivables.service';
+import { LedgerBalanceService } from './ledger-balance.service';
 import { FinanceOverviewService } from './finance-overview.service';
 import { FinanceAccountsService, type CreateAccountInput, type UpdateAccountInput } from './finance-accounts.service';
 import { FinanceCoaService, type CreateCoaInput, type UpdateCoaInput } from './finance-coa.service';
@@ -28,6 +29,10 @@ import { SafeToSpendService } from './safe-to-spend.service';
 import { CashflowForecastService } from './cashflow-forecast.service';
 import { MoneyMovesService } from './money-moves.service';
 import { CashReserveService } from './cash-reserve.service';
+import { BankRuleService, type CreateBankRuleInput, type UpdateBankRuleInput } from './bank-rule.service';
+import { RecurringJournalEntryService, type CreateRecurringJournalEntryInput, type UpdateRecurringJournalEntryInput } from './recurring-journal-entry.service';
+import { CreditNoteService, type CreateCreditNoteInput, type UpdateCreditNoteInput } from './credit-note.service';
+import { AccountingPeriodService, type CreateAccountingPeriodInput, type CloseAccountingPeriodInput } from './accounting-period.service';
 
 /**
  * FIN2 — read-only receivables endpoints.
@@ -40,6 +45,7 @@ import { CashReserveService } from './cash-reserve.service';
 export class FinanceController {
   constructor(
     @Inject(ReceivablesService) private readonly receivables: ReceivablesService,
+    @Inject(LedgerBalanceService) private readonly ledgerBalance: LedgerBalanceService,
     @Inject(FinanceOverviewService) private readonly overview: FinanceOverviewService,
     @Inject(FinanceAccountsService) private readonly accounts: FinanceAccountsService,
     @Inject(FinanceCoaService) private readonly coa: FinanceCoaService,
@@ -47,6 +53,8 @@ export class FinanceController {
     @Inject(FinanceSettingsService) private readonly settings: FinanceSettingsService,
     @Inject(BankImportService) private readonly bankImport: BankImportService,
     @Inject(BankMatchingService) private readonly bankMatch: BankMatchingService,
+    @Inject(BankRuleService) private readonly bankRules: BankRuleService,
+    @Inject(RecurringJournalEntryService) private readonly recurringJournals: RecurringJournalEntryService,
     @Inject(ReconciliationService) private readonly reconciliation: ReconciliationService,
     @Inject(TaxLiabilityService) private readonly taxLiability: TaxLiabilityService,
     @Inject(AccountantExportService) private readonly accountantExport: AccountantExportService,
@@ -58,6 +66,8 @@ export class FinanceController {
     @Inject(CashflowForecastService) private readonly cashflowForecast: CashflowForecastService,
     @Inject(MoneyMovesService) private readonly moneyMoves: MoneyMovesService,
     @Inject(CashReserveService) private readonly cashReserve: CashReserveService,
+    @Inject(CreditNoteService) private readonly creditNotes: CreditNoteService,
+    @Inject(AccountingPeriodService) private readonly accountingPeriods: AccountingPeriodService,
   ) {}
 
   // ---------- Manual Journal Entries ----------
@@ -118,6 +128,60 @@ export class FinanceController {
       },
     });
     return { items: transactions };
+  }
+
+  // ---------- General Ledger & Trial Balance ----------
+  @Get('general-ledger')
+  async getGeneralLedger(
+    @Param('businessId') businessId: string,
+    @Req() req: Request,
+    @Query('accountId') accountId?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    await this.ensureAccess((req as any).user.id, businessId);
+    return this.ledgerBalance.getGeneralLedger(businessId, {
+      accountId,
+      from: from ? new Date(from) : undefined,
+      to: to ? new Date(to) : undefined,
+      page: page ? parseInt(page, 10) : undefined,
+      pageSize: pageSize ? parseInt(pageSize, 10) : undefined,
+    });
+  }
+
+  @Get('trial-balance')
+  async getTrialBalance(
+    @Param('businessId') businessId: string,
+    @Req() req: Request,
+    @Query('asOf') asOf?: string,
+  ) {
+    await this.ensureAccess((req as any).user.id, businessId);
+    const result = await this.ledgerBalance.getTrialBalance(businessId, asOf ? new Date(asOf) : undefined);
+    return {
+      items: result.map((r) => ({
+        accountId: r.accountId,
+        systemKey: r.systemKey,
+        name: r.name,
+        type: r.type,
+        debit: r.debit.toString(),
+        credit: r.credit.toString(),
+        net: r.net.toString(),
+      })),
+    };
+  }
+
+  @Get('trial-balance/account/:accountId')
+  async getAccountBalance(
+    @Param('businessId') businessId: string,
+    @Param('accountId') accountId: string,
+    @Req() req: Request,
+    @Query('asOf') asOf?: string,
+  ) {
+    await this.ensureAccess((req as any).user.id, businessId);
+    const balance = await this.ledgerBalance.getAccountBalance(accountId, asOf ? new Date(asOf) : undefined);
+    return { accountId, balance: balance.toString() };
   }
 
   private async ensureAccess(userId: string, businessId: string) {
@@ -324,6 +388,149 @@ export class FinanceController {
   ) {
     await this.ensureAccess(req.user.id, businessId);
     return this.settings.update(businessId, body);
+  }
+
+  // ---------- Bank Rules ----------
+  @Get('bank-rules')
+  async listBankRules(@Param('businessId') businessId: string, @Req() req: any) {
+    await this.ensureAccess(req.user.id, businessId);
+    const items = await this.bankRules.list(businessId);
+    return { items };
+  }
+
+  @Post('bank-rules')
+  async createBankRule(
+    @Param('businessId') businessId: string,
+    @Body() body: CreateBankRuleInput,
+    @Req() req: any,
+  ) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.bankRules.create(businessId, body);
+  }
+
+  @Get('bank-rules/:id')
+  async getBankRule(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Req() req: any,
+  ) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.bankRules.get(businessId, id);
+  }
+
+  @Patch('bank-rules/:id')
+  async updateBankRule(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Body() body: UpdateBankRuleInput,
+    @Req() req: any,
+  ) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.bankRules.update(businessId, id, body);
+  }
+
+  @Delete('bank-rules/:id')
+  async deleteBankRule(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Req() req: any,
+  ) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.bankRules.remove(businessId, id);
+  }
+
+  @Post('bank-rules/apply')
+  async applyBankRules(
+    @Param('businessId') businessId: string,
+    @Body() body: { bankTransactionIds: string[] },
+    @Req() req: any,
+  ) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.bankRules.applyRules(businessId, body.bankTransactionIds ?? [], { userId: req.user.id });
+  }
+
+  @Post('accounts/:accountId/bank-rules/apply')
+  async applyBankRulesToAccount(
+    @Param('businessId') businessId: string,
+    @Param('accountId') accountId: string,
+    @Body() body: { since?: string; until?: string },
+    @Req() req: any,
+  ) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.bankRules.applyRulesToAccount(businessId, accountId, {
+      sinceDate: body.since ? new Date(body.since) : null,
+      untilDate: body.until ? new Date(body.until) : null,
+      userId: req.user.id,
+    });
+  }
+
+  // ---------- Recurring Journal Entries ----------
+  @Get('recurring-journal-entries')
+  async listRecurringJournals(@Param('businessId') businessId: string, @Req() req: any) {
+    await this.ensureAccess(req.user.id, businessId);
+    const items = await this.recurringJournals.list(businessId);
+    return { items };
+  }
+
+  @Post('recurring-journal-entries')
+  async createRecurringJournal(
+    @Param('businessId') businessId: string,
+    @Body() body: CreateRecurringJournalEntryInput,
+    @Req() req: any,
+  ) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.recurringJournals.create(businessId, body);
+  }
+
+  @Get('recurring-journal-entries/:id')
+  async getRecurringJournal(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Req() req: any,
+  ) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.recurringJournals.get(businessId, id);
+  }
+
+  @Patch('recurring-journal-entries/:id')
+  async updateRecurringJournal(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Body() body: UpdateRecurringJournalEntryInput,
+    @Req() req: any,
+  ) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.recurringJournals.update(businessId, id, body);
+  }
+
+  @Post('recurring-journal-entries/:id/run')
+  async runRecurringJournal(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Req() req: any,
+  ) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.recurringJournals.runOnce(businessId, id);
+  }
+
+  @Post('recurring-journal-entries/:id/cancel')
+  async cancelRecurringJournal(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Req() req: any,
+  ) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.recurringJournals.cancel(businessId, id);
+  }
+
+  @Delete('recurring-journal-entries/:id')
+  async deleteRecurringJournal(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Req() req: any,
+  ) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.recurringJournals.remove(businessId, id);
   }
 
   // ---------- FIN6: Reconciliation ----------
@@ -788,5 +995,100 @@ export class FinanceController {
     @Param('id') id: string,
   ) {
     return this.cashReserve.delete(businessId, id);
+  }
+
+  // ---------- Credit Notes ----------
+  @Get('credit-notes')
+  async listCreditNotes(@Param('businessId') businessId: string) {
+    return this.creditNotes.list(businessId);
+  }
+
+  @Post('credit-notes')
+  async createCreditNote(
+    @Param('businessId') businessId: string,
+    @Body() body: CreateCreditNoteInput,
+  ) {
+    return this.creditNotes.create(businessId, body);
+  }
+
+  @Get('credit-notes/:id')
+  async getCreditNote(@Param('businessId') businessId: string, @Param('id') id: string) {
+    return this.creditNotes.get(businessId, id);
+  }
+
+  @Patch('credit-notes/:id')
+  async updateCreditNote(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Body() body: UpdateCreditNoteInput,
+  ) {
+    return this.creditNotes.update(businessId, id, body);
+  }
+
+  @Post('credit-notes/:id/apply')
+  async applyCreditNote(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Req() req: any,
+  ) {
+    return this.creditNotes.apply(businessId, id, { userId: req.user?.id });
+  }
+
+  @Post('credit-notes/:id/void')
+  async voidCreditNote(@Param('businessId') businessId: string, @Param('id') id: string) {
+    return this.creditNotes.void(businessId, id);
+  }
+
+  @Delete('credit-notes/:id')
+  async deleteCreditNote(@Param('businessId') businessId: string, @Param('id') id: string) {
+    return this.creditNotes.remove(businessId, id);
+  }
+
+  // ---------- Accounting Periods ----------
+  @Get('accounting-periods')
+  async listAccountingPeriods(@Param('businessId') businessId: string) {
+    return this.accountingPeriods.list(businessId);
+  }
+
+  @Post('accounting-periods')
+  async createAccountingPeriod(
+    @Param('businessId') businessId: string,
+    @Body() body: CreateAccountingPeriodInput,
+  ) {
+    return this.accountingPeriods.create(businessId, body);
+  }
+
+  @Get('accounting-periods/:id')
+  async getAccountingPeriod(@Param('businessId') businessId: string, @Param('id') id: string) {
+    return this.accountingPeriods.get(businessId, id);
+  }
+
+  @Patch('accounting-periods/:id')
+  async updateAccountingPeriod(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Body() body: Partial<CreateAccountingPeriodInput>,
+  ) {
+    return this.accountingPeriods.update(businessId, id, body);
+  }
+
+  @Post('accounting-periods/:id/close')
+  async closeAccountingPeriod(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Body() body: CloseAccountingPeriodInput,
+    @Req() req: any,
+  ) {
+    return this.accountingPeriods.close(businessId, id, { closedById: req.user?.id });
+  }
+
+  @Post('accounting-periods/:id/reopen')
+  async reopenAccountingPeriod(@Param('businessId') businessId: string, @Param('id') id: string) {
+    return this.accountingPeriods.reopen(businessId, id);
+  }
+
+  @Delete('accounting-periods/:id')
+  async deleteAccountingPeriod(@Param('businessId') businessId: string, @Param('id') id: string) {
+    return this.accountingPeriods.remove(businessId, id);
   }
 }

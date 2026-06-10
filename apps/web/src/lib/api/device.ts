@@ -21,6 +21,8 @@ export interface CaptureResult {
     objectPath: string;
     publicUrl: string | null;
     fileName: string | null;
+    contentType: string;
+    sizeBytes: number | null;
     mediaType: string;
     status: string;
     createdAt: string;
@@ -111,4 +113,11 @@ export async function rejectIntake(businessId: string, intakeId: string) {
     `/api/device/businesses/${businessId}/intakes/${intakeId}/reject`,
     {},
   );
+}
+
+export async function processCapture(businessId: string, captureId: string) {
+  return apiPost<CaptureResult>({
+    path: `/api/device/businesses/${businessId}/captures/${captureId}/process`,
+    body: {},
+  });
 }

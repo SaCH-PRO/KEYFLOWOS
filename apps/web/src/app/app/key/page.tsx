@@ -9,13 +9,20 @@ import {
   Zap,
   ShieldCheck,
   ClipboardList,
-  History,
   Settings,
   Loader2,
   CheckCircle2,
   XCircle,
   Terminal,
   Mic,
+  Search,
+  ChevronDown,
+  Inbox,
+  Activity,
+  Filter,
+  Clock,
+  Headphones,
+  Volume2,
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import { getStoredBusinessId } from "@/lib/workspace";
@@ -50,6 +57,9 @@ const MODES = [
   { key: "auto", label: "Auto", desc: "Monitor and act under governance rules" },
 ];
 
+const LOG_STATUS_OPTIONS = ["ALL", "SUCCESS", "FAILED"];
+const LOG_CATEGORY_OPTIONS = ["ALL", "MONEY", "TIME", "PEOPLE", "WORK", "SALES", "MARKETING", "GOVERNANCE", "STRATEGY", "SYSTEM"];
+
 const JarvisVoice = dynamic(() => import("../keyflow-command/components/jarvis-voice"), { ssr: false });
 
 export default function KeyWorkerPage() {
@@ -62,10 +72,17 @@ export default function KeyWorkerPage() {
   const [governance, setGovernance] = useState<{ mode?: string; maxAutoTier?: number; blockedTools?: string[] } | null>(null);
   const [executionLogs, setExecutionLogs] = useState<AiExecutionLogEntry[]>([]);
   const [agentConfig, setAgentConfig] = useState<KeyAgentConfig | null>(null);
-  const [configLoading, setConfigLoading] = useState(false);
   const [input, setInput] = useState("");
   const [selectedMode, setSelectedMode] = useState("do");
   const [submitting, setSubmitting] = useState(false);
+
+  // Execution log filters
+  const [logStatus, setLogStatus] = useState("ALL");
+  const [logCategory, setLogCategory] = useState("ALL");
+  const [logDateRange, setLogDateRange] = useState("ALL");
+  const [logSearch, setLogSearch] = useState("");
+  const [logLimit, setLogLimit] = useState(10);
+  const [logLoading, setLogLoading] = useState(false);
 
   const load = useCallback(async () => {
     if (!businessId) return;
@@ -75,7 +92,7 @@ export default function KeyWorkerPage() {
         apiGet<KeyCommand[]>(`/ai/businesses/${businessId}/key/commands`),
         apiGet<{ items: ApprovalItem[] }>(`/ai/businesses/${businessId}/ai/approvals`),
         apiGet<{ mode?: string; maxAutoTier?: number; blockedTools?: string[] }>(`/ai/businesses/${businessId}/ai/governance`),
-        fetchAiExecutionLogs(businessId, { limit: 10 }),
+        fetchAiExecutionLogs(businessId, { limit: logLimit }),
         fetchAgentConfig(businessId),
       ]);
       if (cmdRes.data) setCommands(cmdRes.data.slice(0, 20));
@@ -88,11 +105,28 @@ export default function KeyWorkerPage() {
     } finally {
       setLoading(false);
     }
-  }, [businessId]);
+  }, [businessId, logLimit]);
+
+  const loadLogs = useCallback(async () => {
+    if (!businessId) return;
+    setLogLoading(true);
+    try {
+      const res = await fetchAiExecutionLogs(businessId, { limit: logLimit });
+      if (res.data) setExecutionLogs(res.data ?? []);
+    } catch {
+      // silently fail
+    } finally {
+      setLogLoading(false);
+    }
+  }, [businessId, logLimit]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    loadLogs();
+  }, [loadLogs]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -121,12 +155,56 @@ export default function KeyWorkerPage() {
 
   const pendingApprovals = approvals.filter((a) => a.status === "pending");
 
+  const filteredLogs = executionLogs.filter((log) => {
+    if (logStatus === "SUCCESS" && !log.success) return false;
+    if (logStatus === "FAILED" && log.success) return false;
+    if (logCategory !== "ALL" && log.module !== logCategory) return false;
+    if (logDateRange !== "ALL") {
+      const logDate = new Date(log.createdAt);
+      const now = new Date();
+      const diffDays = (now.getTime() - logDate.getTime()) / (1000 * 60 * 60 * 24);
+      if (logDateRange === "24h" && diffDays > 1) return false;
+      if (logDateRange === "7d" && diffDays > 7) return false;
+      if (logDateRange === "30d" && diffDays > 30) return false;
+    }
+    if (logSearch.trim()) {
+      const term = logSearch.toLowerCase();
+      const text = `${log.toolName ?? ""} ${log.action ?? ""} ${log.module ?? ""} ${log.rationale ?? ""}`.toLowerCase();
+      if (!text.includes(term)) return false;
+    }
+    return true;
+  });
+
+  const handleTyping = () => {
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("kf:key-typing"));
+    }
+  };
+
   return (
     <UnifiedPageShell
       title="KEY Worker"
       subtitle="Ask, plan, draft, and execute with AI."
       icon={Bot}
       maxWidth="5xl"
+      headerActions={
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => router.push("/app/key/voice-sessions")}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-muted hover:bg-muted/80 transition-colors"
+          >
+            <Headphones className="w-3.5 h-3.5" />
+            Sessions
+          </button>
+          <button
+            onClick={() => router.push("/app/key/voice-settings")}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium bg-muted hover:bg-muted/80 transition-colors"
+          >
+            <Volume2 className="w-3.5 h-3.5" />
+            Voice
+          </button>
+        </div>
+      }
     >
       {/* Command Input */}
       <SectionCard icon={Brain} title="Command KEY" noPadding>
@@ -151,7 +229,7 @@ export default function KeyWorkerPage() {
               <input
                 type="text"
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
+                onChange={(e) => { setInput(e.target.value); handleTyping(); }}
                 placeholder={`Ask KEY to ${MODES.find((m) => m.key === selectedMode)?.desc.toLowerCase()}...`}
                 className="w-full pl-10 pr-4 py-2.5 rounded-xl border text-sm bg-background focus:outline-none focus:ring-2 focus:ring-[hsl(var(--kf-accent1))]/20"
                 style={{ borderColor: "hsl(var(--kf-border))" }}
@@ -199,8 +277,12 @@ export default function KeyWorkerPage() {
                 <div className="h-10 bg-muted rounded" />
               </div>
             ) : commands.length === 0 ? (
-              <div className="text-center py-6">
-                <p className="kf-text-caption">No commands yet. Ask KEY above to get started.</p>
+              <div className="flex flex-col items-center justify-center py-10 text-center">
+                <Inbox className="w-10 h-10 text-muted-foreground mb-3" />
+                <p className="text-sm font-medium">Your workbench is empty</p>
+                <p className="text-xs text-muted-foreground mt-1 max-w-xs">
+                  Ask KEY above to create your first command. Try &quot;What should I focus on today?&quot;
+                </p>
               </div>
             ) : (
               <div className="space-y-2">
@@ -231,7 +313,7 @@ export default function KeyWorkerPage() {
             )}
           </SectionCard>
 
-          <SectionCard icon={History} title="Pending Approvals" subtitle={`${pendingApprovals.length} items need your review`}>
+          <SectionCard icon={ShieldCheck} title="Pending Approvals" subtitle={`${pendingApprovals.length} items need your review`}>
             {pendingApprovals.length === 0 ? (
               <p className="kf-text-caption py-2">No pending approvals. KEY can act freely within governance rules.</p>
             ) : (
@@ -266,31 +348,120 @@ export default function KeyWorkerPage() {
           </SectionCard>
 
           <SectionCard icon={Terminal} title="Execution Log" subtitle="Recent KEY actions and outcomes">
-            {executionLogs.length === 0 ? (
-              <p className="kf-text-caption py-2">No execution history yet.</p>
-            ) : (
-              <div className="space-y-2">
-                {executionLogs.map((log) => (
-                  <div key={log.id} className="flex items-center justify-between p-3 rounded-lg border" style={{ borderColor: "hsl(var(--kf-border))" }}>
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium truncate">{log.toolName ?? log.action ?? 'Unknown action'}</p>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className={`text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded ${log.success ? 'bg-emerald-500/10 text-emerald-600' : 'bg-destructive/10 text-destructive'}`}>
-                          {log.success ? 'SUCCESS' : 'FAILED'}
-                        </span>
-                        {log.riskTier && log.riskTier >= 3 && (
-                          <span className="text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded bg-destructive/10 text-destructive">
-                            Tier {log.riskTier}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    <span className="text-xs text-muted-foreground flex-shrink-0">
-                      {new Date(log.createdAt).toLocaleDateString()}
-                    </span>
-                  </div>
-                ))}
+            {/* Filters */}
+            <div className="flex flex-col sm:flex-row gap-2 mb-3">
+              <div className="relative flex-1">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                <input
+                  type="text"
+                  value={logSearch}
+                  onChange={(e) => setLogSearch(e.target.value)}
+                  placeholder="Search logs..."
+                  className="w-full pl-8 pr-3 py-1.5 rounded-lg border text-xs bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+                  style={{ borderColor: "hsl(var(--kf-border))" }}
+                />
               </div>
+              <div className="flex gap-2">
+                <div className="relative">
+                  <Filter className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground" />
+                  <select
+                    value={logStatus}
+                    onChange={(e) => setLogStatus(e.target.value)}
+                    className="pl-7 pr-6 py-1.5 rounded-lg border text-xs bg-background focus:outline-none focus:ring-1 focus:ring-primary appearance-none"
+                    style={{ borderColor: "hsl(var(--kf-border))" }}
+                  >
+                    {LOG_STATUS_OPTIONS.map((s) => (
+                      <option key={s} value={s}>{s === "ALL" ? "All Status" : s}</option>
+                    ))}
+                  </select>
+                  <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+                </div>
+                <div className="relative">
+                  <Filter className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground" />
+                  <select
+                    value={logCategory}
+                    onChange={(e) => setLogCategory(e.target.value)}
+                    className="pl-7 pr-6 py-1.5 rounded-lg border text-xs bg-background focus:outline-none focus:ring-1 focus:ring-primary appearance-none"
+                    style={{ borderColor: "hsl(var(--kf-border))" }}
+                  >
+                    {LOG_CATEGORY_OPTIONS.map((c) => (
+                      <option key={c} value={c}>{c === "ALL" ? "All Categories" : c}</option>
+                    ))}
+                  </select>
+                  <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+                </div>
+                <div className="relative">
+                  <Clock className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground" />
+                  <select
+                    value={logDateRange}
+                    onChange={(e) => setLogDateRange(e.target.value)}
+                    className="pl-7 pr-6 py-1.5 rounded-lg border text-xs bg-background focus:outline-none focus:ring-1 focus:ring-primary appearance-none"
+                    style={{ borderColor: "hsl(var(--kf-border))" }}
+                  >
+                    <option value="ALL">All Time</option>
+                    <option value="24h">Last 24h</option>
+                    <option value="7d">Last 7 days</option>
+                    <option value="30d">Last 30 days</option>
+                  </select>
+                  <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+                </div>
+              </div>
+            </div>
+
+            {logLoading ? (
+              <div className="space-y-2 animate-pulse">
+                <div className="h-10 bg-muted rounded" />
+                <div className="h-10 bg-muted rounded" />
+              </div>
+            ) : filteredLogs.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-10 text-center">
+                <Activity className="w-10 h-10 text-muted-foreground mb-3" />
+                <p className="text-sm font-medium">No activity yet</p>
+                <p className="text-xs text-muted-foreground mt-1 max-w-xs">
+                  Once KEY starts working, you&apos;ll see a complete log of actions and outcomes here.
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="space-y-2">
+                  {filteredLogs.map((log) => (
+                    <div key={log.id} className="flex items-center justify-between p-3 rounded-lg border" style={{ borderColor: "hsl(var(--kf-border))" }}>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate">{log.toolName ?? log.action ?? "Unknown action"}</p>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className={`text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded ${log.success ? "bg-emerald-500/10 text-emerald-600" : "bg-destructive/10 text-destructive"}`}>
+                            {log.success ? "SUCCESS" : "FAILED"}
+                          </span>
+                          {log.module && (
+                            <span className="text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded bg-muted">
+                              {log.module}
+                            </span>
+                          )}
+                          {log.riskTier && log.riskTier >= 3 && (
+                            <span className="text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded bg-destructive/10 text-destructive">
+                              Tier {log.riskTier}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <span className="text-xs text-muted-foreground flex-shrink-0">
+                        {new Date(log.createdAt).toLocaleDateString()}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                {filteredLogs.length >= logLimit && (
+                  <div className="flex justify-center mt-3">
+                    <button
+                      onClick={() => setLogLimit((prev) => prev + 10)}
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border text-xs font-medium hover:bg-muted transition-colors"
+                      style={{ borderColor: "hsl(var(--kf-border))" }}
+                    >
+                      Load more
+                    </button>
+                  </div>
+                )}
+              </>
             )}
           </SectionCard>
         </div>
@@ -350,7 +521,7 @@ export default function KeyWorkerPage() {
                 <div>
                   <label className="text-[10px] text-muted-foreground uppercase">Tone</label>
                   <input
-                    value={typeof agentConfig.approvalPolicy?.tone === 'string' ? agentConfig.approvalPolicy.tone : ''}
+                    value={typeof agentConfig.approvalPolicy?.tone === "string" ? agentConfig.approvalPolicy.tone : ""}
                     onChange={async (e) => {
                       const tone = e.target.value;
                       setAgentConfig((prev) => prev ? { ...prev, approvalPolicy: { ...prev.approvalPolicy, tone } } : prev);

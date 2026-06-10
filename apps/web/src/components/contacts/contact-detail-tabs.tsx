@@ -1,6 +1,7 @@
 "use client";
 
 import React, { Suspense, useState } from "react";
+import { useRouter } from "next/navigation";
 import { MessageSquare, ListTodo, History, AlertCircle, Loader2, MessageCircle, Briefcase, Shield, Network } from "lucide-react";
 import type { ContactDetailData, ContactEvent, ContactNote, ContactTask } from "./contact-detail";
 import type { HealthMetricsData, JourneyMilestoneData, ConversationContextData, AiInsightData } from "./tab-constants";
@@ -110,6 +111,7 @@ export function ContactDetailTabs({
   invoices = [], bookings = [],
 }: ContactDetailTabsProps) {
   const normalized = normalizeTab(activeTab);
+  const router = useRouter();
   const [activatedTabs, setActivatedTabs] = useState<Set<string>>(() => new Set(["timeline", normalized]));
   if (!activatedTabs.has(normalized)) {
     setActivatedTabs((prev) => {
@@ -231,11 +233,7 @@ export function ContactDetailTabs({
                   contactId={contact.id}
                   contactName={`${contact.firstName ?? ""} ${contact.lastName ?? ""}`.trim() || undefined}
                   businessId={businessId}
-                  onNavigateToContact={(id) => {
-                    if (typeof window !== "undefined") {
-                      window.location.href = `/app/crm/contacts/${id}`;
-                    }
-                  }}
+                  onNavigateToContact={(id) => router.push(`/app/crm/contacts/${id}`)}
                 />
               </TabErrorBoundary>
             </div>

@@ -28,9 +28,11 @@ import {
 import { updateContact } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { buildWhatsAppLink } from "@/lib/whatsapp";
+import { useCompose } from "@/components/email/compose-context";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import type { ContactDetailData } from "./contact-detail";
 import { getContactAgeGroupLabel } from "@/lib/crm-constants";
+import { ContactCustomFields } from "./contact-custom-fields";
 
 function buildMapsUrl(parts: Array<string | null | undefined>): string {
   const query = parts.filter(Boolean).join(", ");
@@ -65,6 +67,7 @@ interface ContactDetailInfoProps {
   onSelectRelatedContact?: (contactId: string) => void;
   onAddTask?: (title: string, options?: { dueDate?: string; priority?: string; remindAt?: string }) => Promise<void>;
   onContactUpdated?: () => void;
+  customFieldValues?: Array<{ id: string; definitionId: string; value?: unknown; definition: { name: string; label: string; type: string; description: string | null; placeholder: string | null } }>;
 }
 
 export function ContactDetailInfo({
@@ -73,7 +76,9 @@ export function ContactDetailInfo({
   onSelectRelatedContact,
   onAddTask,
   onContactUpdated,
+  customFieldValues,
 }: ContactDetailInfoProps) {
+  const { open: openComposer } = useCompose();
   const router = useRouter();
   const [marketingOptIn, setMarketingOptIn] = useState<boolean | null | undefined>(contact.marketingOptIn);
   const [doNotContact, setDoNotContact] = useState<boolean | null | undefined>(contact.doNotContact);
@@ -151,11 +156,11 @@ export function ContactDetailInfo({
 
   const handleLifecycleClick = () => {
     if (!contact.lifecycleStage) return;
-    router.push(`/app/network/contacts?lifecycle=${encodeURIComponent(contact.lifecycleStage)}`);
+    router.push(`/app/crm/contacts?lifecycle=${encodeURIComponent(contact.lifecycleStage)}`);
   };
   const handleSegmentClick = () => {
     if (!contact.segment) return;
-    router.push(`/app/network/contacts?segment=${encodeURIComponent(contact.segment)}`);
+    router.push(`/app/crm/contacts?segment=${encodeURIComponent(contact.segment)}`);
   };
   const handleReferredByClick = () => {
     if (!referredBy && !referredById) return;
@@ -164,7 +169,7 @@ export function ContactDetailInfo({
       return;
     }
     if (referredById) {
-      router.push(`/app/network/contacts?contactId=${encodeURIComponent(referredById)}`);
+      router.push(`/app/crm/contacts?contactId=${encodeURIComponent(referredById)}`);
       return;
     }
     const match = relatedContacts?.find((rc) => {
@@ -174,7 +179,7 @@ export function ContactDetailInfo({
     if (match && onSelectRelatedContact) {
       onSelectRelatedContact(match.id);
     } else if (referredBy) {
-      router.push(`/app/network/contacts?search=${encodeURIComponent(referredBy)}`);
+      router.push(`/app/crm/contacts?search=${encodeURIComponent(referredBy)}`);
     }
   };
   const handleScheduleInteractionTask = async () => {
@@ -254,9 +259,23 @@ export function ContactDetailInfo({
   const otherChannels: Array<React.ReactNode> = [];
   if (contact.secondaryEmail) {
     otherChannels.push(
-      <a key="se" href={`mailto:${contact.secondaryEmail}`} className="inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-lg bg-muted/40 hover:bg-muted transition-colors text-blue-300" title={contact.secondaryEmail}>
+      <button
+        key="se"
+        type="button"
+        onClick={() =>
+          openComposer({
+            to: contact.secondaryEmail!,
+            context: {
+              type: "general",
+              contactName: `${contact.firstName ?? ""} ${contact.lastName ?? ""}`.trim(),
+            },
+          })
+        }
+        className="inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded-lg bg-muted/40 hover:bg-muted transition-colors text-blue-300"
+        title={contact.secondaryEmail}
+      >
         <Mail className="w-3 h-3" /> Alt email
-      </a>
+      </button>
     );
   }
   if (contact.secondaryPhone) {
@@ -279,6 +298,13 @@ export function ContactDetailInfo({
   if (instagramUrl) socialLinks.push(<a key="ig" href={instagramUrl} target="_blank" rel="noopener noreferrer" title="Instagram" className="p-1.5 rounded-lg bg-pink-500/10 text-pink-400 hover:bg-pink-500/20 transition-colors"><Instagram className="w-3.5 h-3.5" /></a>);
   if (twitterUrl) socialLinks.push(<a key="tw" href={twitterUrl} target="_blank" rel="noopener noreferrer" title="Twitter / X" className="p-1.5 rounded-lg bg-sky-500/10 text-sky-400 hover:bg-sky-500/20 transition-colors"><Twitter className="w-3.5 h-3.5" /></a>);
 
+  const typedValuesRecord: Record<string, unknown> = {};
+  if (customFieldValues) {
+    for (const v of customFieldValues) {
+      if (v.definition?.name) typedValuesRecord[v.definition.name] = v.value;
+    }
+  }
+
   const hasMoreDetails = !!(
     contact.department ||
     contact.industry ||
@@ -287,6 +313,7 @@ export function ContactDetailInfo({
     contact.postalCode ||
     contact.state ||
     arbitraryCustomFields.length > 0 ||
+    customFieldValues?.length ||
     (relatedContacts && relatedContacts.length > 0) ||
     (contact.tags && contact.tags.length > 0)
   );
@@ -467,6 +494,11 @@ export function ContactDetailInfo({
                   {[contact.addressLine1, contact.addressLine2, [contact.city, contact.state, contact.postalCode].filter(Boolean).join(" "), contact.country]
                     .filter(Boolean)
                     .map((line, i) => (<div key={i}>{line}</div>))}
+                </div>
+              )}
+              {customFieldValues && customFieldValues.length > 0 && (
+                <div className="space-y-2">
+                  <ContactCustomFields values={typedValuesRecord} readOnly />
                 </div>
               )}
               {arbitraryCustomFields.length > 0 && (

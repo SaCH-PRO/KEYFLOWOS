@@ -2,9 +2,17 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { fetchContactTasks, addContactTask, deleteContactTask } from "@/lib/client";
+import {
+  fetchContactTasks,
+  addContactTask,
+  deleteContactTask,
+  completeContactTask,
+  reopenContactTask,
+  updateContactTask,
+} from "@/lib/client";
+import { getStoredBusinessId } from "@/lib/workspace";
 import { Button, Card, Input } from "@keyflow/ui";
-import { CheckSquare, Plus, Trash2, Calendar, Flag } from "lucide-react";
+import { CheckSquare, Plus, Trash2, Calendar, Flag, Loader2, Pencil, X, Check } from "lucide-react";
 import { toast } from "sonner";
 
 interface Task {
@@ -26,6 +34,9 @@ export default function ContactTasksPage() {
   const [loading, setLoading] = useState(true);
   const [newTitle, setNewTitle] = useState("");
   const [saving, setSaving] = useState(false);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState("");
 
   const load = async () => {
     setLoading(true);
@@ -60,14 +71,28 @@ export default function ContactTasksPage() {
     }
   };
 
-  const handleToggle = (taskId: string) => {
-    setTasks((prev) =>
-      prev.map((t) => {
-        if (t.id !== taskId) return t;
-        const completed = t.status === "completed" || t.completedAt != null;
-        return { ...t, status: completed ? "pending" : "completed", completedAt: completed ? null : new Date().toISOString() };
-      })
-    );
+  const handleToggle = async (taskId: string) => {
+    const task = tasks.find((t) => t.id === taskId);
+    if (!task || togglingId) return;
+
+    const completed = task.status === "completed" || task.completedAt != null;
+    setTogglingId(taskId);
+    try {
+      const businessId = getStoredBusinessId() ?? undefined;
+      const res = completed
+        ? await reopenContactTask(taskId, businessId)
+        : await completeContactTask(taskId, businessId);
+      if (res.data) {
+        toast.success(completed ? "Task reopened" : "Task completed");
+        load();
+      } else {
+        toast.error(res.error ?? "Failed to update task");
+      }
+    } catch {
+      toast.error("Failed to update task");
+    } finally {
+      setTogglingId(null);
+    }
   };
 
   const handleDelete = async (taskId: string) => {
@@ -77,6 +102,29 @@ export default function ContactTasksPage() {
       load();
     } else {
       toast.error(res.error ?? "Failed to delete task");
+    }
+  };
+
+  const startEdit = (task: Task) => {
+    setEditingId(task.id);
+    setEditTitle(task.title);
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditTitle("");
+  };
+
+  const saveEdit = async (taskId: string) => {
+    if (!editTitle.trim()) return;
+    const businessId = getStoredBusinessId() ?? undefined;
+    const res = await updateContactTask(taskId, { title: editTitle.trim() }, businessId);
+    if (res.data) {
+      toast.success("Task updated");
+      setEditingId(null);
+      load();
+    } else {
+      toast.error(res.error ?? "Failed to update task");
     }
   };
 
@@ -121,14 +169,43 @@ export default function ContactTasksPage() {
               <div className="flex items-center gap-3 p-3">
                 <button
                   onClick={() => handleToggle(task.id)}
+                  disabled={togglingId === task.id}
                   className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border ${isCompleted(task) ? "bg-primary border-primary" : "border-muted-foreground/30"}`}
                 >
-                  {isCompleted(task) && <CheckSquare className="h-3.5 w-3.5 text-primary-foreground" />}
+                  {togglingId === task.id ? (
+                    <Loader2 className="h-3 w-3 animate-spin text-primary-foreground" />
+                  ) : isCompleted(task) ? (
+                    <CheckSquare className="h-3.5 w-3.5 text-primary-foreground" />
+                  ) : null}
                 </button>
                 <div className="min-w-0 flex-1">
-                  <p className={`text-sm ${isCompleted(task) ? "line-through text-muted-foreground" : ""}`}>
-                    {task.title}
-                  </p>
+                  {editingId === task.id ? (
+                    <div className="flex items-center gap-2">
+                      <Input
+                        value={editTitle}
+                        onChange={(e) => setEditTitle(e.target.value)}
+                        className="h-8 text-sm"
+                        autoFocus
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") saveEdit(task.id);
+                          if (e.key === "Escape") cancelEdit();
+                        }}
+                      />
+                      <button onClick={() => saveEdit(task.id)} className="text-primary hover:text-primary/80">
+                        <Check className="h-4 w-4" />
+                      </button>
+                      <button onClick={cancelEdit} className="text-muted-foreground hover:text-destructive">
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => startEdit(task)}
+                      className={`text-left text-sm w-full ${isCompleted(task) ? "line-through text-muted-foreground" : ""}`}
+                    >
+                      {task.title}
+                    </button>
+                  )}
                   <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
                     {task.dueDate && (
                       <span className="flex items-center gap-1">
@@ -144,12 +221,14 @@ export default function ContactTasksPage() {
                     )}
                   </div>
                 </div>
-                <button
-                  className="shrink-0 text-muted-foreground hover:text-destructive"
-                  onClick={() => handleDelete(task.id)}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
+                {editingId !== task.id && (
+                  <button
+                    className="shrink-0 text-muted-foreground hover:text-destructive"
+                    onClick={() => handleDelete(task.id)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                )}
               </div>
             </Card>
           ))}

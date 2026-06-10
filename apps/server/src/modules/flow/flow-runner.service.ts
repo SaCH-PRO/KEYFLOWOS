@@ -1,5 +1,6 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { RealtimeService } from '../realtime/realtime.service';
 import { FlowActionRegistry, ActionContext } from './flow-action.registry';
 
 interface FlowNode {
@@ -20,6 +21,7 @@ export class FlowRunnerService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(FlowActionRegistry) private readonly registry: FlowActionRegistry,
+    @Inject(RealtimeService) private readonly realtime: RealtimeService,
   ) {}
 
   async runFlow(
@@ -67,12 +69,22 @@ export class FlowRunnerService {
         idempotencyKey: idempotencyKey ?? null,
       },
     });
+    this.realtime.emit({
+      businessId,
+      type: 'flow.run_started',
+      payload: { runId: run.id, flowId, status: 'RUNNING' },
+    });
 
     try {
       await this.executeNodes(run.id, businessId, flowId, nodes, edges, triggerPayload);
       const updated = await this.prisma.client.flowRun.update({
         where: { id: run.id },
         data: { status: 'COMPLETED', completedAt: new Date() },
+      });
+      this.realtime.emit({
+        businessId,
+        type: 'flow.run_completed',
+        payload: { runId: run.id, flowId, status: 'COMPLETED' },
       });
       await this.writeTimeline(businessId, flowId, run.id, 'flow_completed', triggerPayload);
       return updated;
@@ -81,6 +93,11 @@ export class FlowRunnerService {
       const updated = await this.prisma.client.flowRun.update({
         where: { id: run.id },
         data: { status: 'FAILED', error, completedAt: new Date() },
+      });
+      this.realtime.emit({
+        businessId,
+        type: 'flow.run_failed',
+        payload: { runId: run.id, flowId, status: 'FAILED', error },
       });
       await this.writeTimeline(businessId, flowId, run.id, 'flow_failed', { ...triggerPayload, error });
       return updated;
@@ -130,6 +147,11 @@ export class FlowRunnerService {
         where: { id: runId },
         data: { currentNodeId: nodeId },
       });
+      this.realtime.emit({
+        businessId,
+        type: 'flow.node_changed',
+        payload: { runId, nodeId, nodeType: node.type },
+      });
 
       const shouldContinue = await this.executeNode(runId, businessId, flowId, node, triggerPayload);
       if (!shouldContinue) break;
@@ -158,6 +180,7 @@ export class FlowRunnerService {
         nodeType: node.type,
         status: 'RUNNING',
         input: node.data as any,
+        startedAt: new Date(),
       },
     });
 
@@ -280,11 +303,13 @@ export class FlowRunnerService {
         skip: filters.offset ?? 0,
         select: {
           id: true,
+          businessId: true,
           flowId: true,
           flowVersionId: true,
           status: true,
           startedAt: true,
           completedAt: true,
+          currentNodeId: true,
           error: true,
           input: true,
           output: true,

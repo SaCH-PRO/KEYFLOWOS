@@ -63,11 +63,11 @@ export async function GET(request: NextRequest) {
   }
 
   if (error) {
-    return publicRedirect("/app/network/contacts?google_error=" + error, request);
+    return publicRedirect("/app/crm/contacts?google_error=" + error, request);
   }
 
   if (!state || !code) {
-    return publicRedirect("/app/network/contacts?google_error=missing_params", request);
+    return publicRedirect("/app/crm/contacts?google_error=missing_params", request);
   }
 
   try {
@@ -82,12 +82,12 @@ export async function GET(request: NextRequest) {
     if (res.ok || res.status === 302 || res.status === 301) {
       const data = res.ok ? await res.json().catch(() => null) : null;
       const imported = data?.imported ?? "";
-      return publicRedirect(`/app/network/contacts?google_success=true${imported ? `&imported=${imported}` : ""}`, request);
+      return publicRedirect(`/app/crm/contacts?google_success=true${imported ? `&imported=${imported}` : ""}`, request);
     }
 
-    return publicRedirect("/app/network/contacts?google_error=import_failed", request);
+    return publicRedirect("/app/crm/contacts?google_error=import_failed", request);
   } catch (err) {
     console.error("Google Contacts callback proxy error:", err);
-    return publicRedirect("/app/network/contacts?google_error=proxy_error", request);
+    return publicRedirect("/app/crm/contacts?google_error=proxy_error", request);
   }
 }

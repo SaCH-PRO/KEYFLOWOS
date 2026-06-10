@@ -1,5 +1,6 @@
 import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ExpenseCreatedPayload } from '../../core/event-bus/events.types';
 import { ExpensePostingService } from '../finance/expense-posting.service';
@@ -108,9 +109,9 @@ export class ExpensesService {
     /** PAID (default) or BILL — BILL credits AP instead of cash. */
     status?: 'PAID' | 'BILL';
     dueDate?: string | Date;
-    /** When status=PAID and explicit, used as paidAt; otherwise = date. */
     paidAt?: string | Date;
     recurringExpenseId?: string;
+    items?: Array<{ amount: number; categoryId?: string | null; description?: string; taxRateId?: string | null }> | null;
   }) {
     let validProjectId: string | null = null;
     let validContactId: string | null = null;
@@ -170,6 +171,7 @@ export class ExpensesService {
           status,
           dueDate,
           paidAt,
+          items: input.items ? (input.items as Prisma.InputJsonValue) : undefined,
         },
         include: { category: true },
       });
@@ -185,6 +187,7 @@ export class ExpensesService {
         description: created.description,
         contactId: created.contactId,
         vendor: created.vendor,
+        items: input.items ?? null,
       };
       if (status === 'PAID') {
         await this.posting.onExpensePaid(postPayload, tx);
@@ -514,6 +517,7 @@ export class ExpensesService {
     projectId?: string | null;
     contactId?: string | null;
     serviceId?: string | null;
+    items?: Array<{ amount: number; categoryId?: string | null; description?: string; taxRateId?: string | null }> | null;
   }) {
     const updateData: Record<string, unknown> = {};
     if (input.description !== undefined) updateData.description = input.description;
@@ -528,6 +532,7 @@ export class ExpensesService {
     if (input.isRecurring !== undefined) updateData.isRecurring = input.isRecurring;
     if (input.recurringFrequency !== undefined) updateData.recurringFrequency = input.recurringFrequency;
     if (input.categoryId !== undefined) updateData.categoryId = input.categoryId;
+    if (input.items !== undefined) updateData.items = input.items as Prisma.InputJsonValue;
 
     if (input.projectId !== undefined) {
       if (input.projectId === null) {

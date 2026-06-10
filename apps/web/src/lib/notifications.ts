@@ -62,7 +62,7 @@ export function getNotificationLink(n: AppNotification): string | null {
   if (type.includes("invoice") || title.includes("invoice")) return "/app/commerce?tab=invoices";
   if (type.includes("payment") || title.includes("payment")) return "/app/commerce?tab=payments";
   if (type.includes("booking") || title.includes("booking") || title.includes("appointment")) return "/app/bookings";
-  if (type.includes("contact") || title.includes("contact") || title.includes("lead")) return "/app/network/contacts";
+  if (type.includes("contact") || title.includes("contact") || title.includes("lead")) return "/app/crm/contacts";
   if (type.includes("campaign") || title.includes("campaign")) return "/app/marketing";
   if (type.includes("project") || title.includes("project")) return "/app/projects";
   if (type.includes("expense") || title.includes("expense")) return "/app/expenses";

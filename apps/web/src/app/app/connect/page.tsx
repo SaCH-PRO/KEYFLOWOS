@@ -889,6 +889,13 @@ export default function KeyFlowConnectPage() {
             desc: "Reviews & posts",
             tone: "from-amber-500/15 to-orange-500/15 text-amber-200",
           },
+          {
+            href: "/app/connect/health",
+            icon: Activity,
+            title: "Health Dashboard",
+            desc: "Status & errors",
+            tone: "from-rose-500/15 to-red-500/15 text-rose-200",
+          },
         ].map((tile) => {
           const Icon = tile.icon;
           return (

@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
+import { useRouter, usePathname } from "next/navigation";
 import { MessageSquare, Sparkles, ChevronUp } from "lucide-react";
 import { toast } from "sonner";
 import type { CrossJourneyResponse } from "@/lib/client";
@@ -129,6 +130,7 @@ interface ContactDetailProps {
   onRefreshConversationContext?: () => Promise<void>;
   relatedContacts?: Array<{ id: string; firstName?: string | null; lastName?: string | null; email?: string | null; status?: string | null; jobTitle?: string | null }>;
   onSelectRelatedContact?: (contactId: string) => void;
+  customFieldValues?: Array<{ id: string; definitionId: string; value?: unknown; definition: { name: string; label: string; type: string; description: string | null; placeholder: string | null } }>;
   invoices?: Array<{ id: string; status: string; total?: number | null; currency?: string | null; dueDate?: string | null; issueDate?: string | null; createdAt?: string; paidAt?: string | null }>;
   bookings?: Array<{ id: string; startTime: string; endTime: string; status: string; service?: { name: string; price: number } | null; contact?: { firstName?: string | null } | null }>;
   businessId?: string | null;
@@ -171,9 +173,34 @@ export function ContactDetail({
   onSelectRelatedContact,
   invoices,
   bookings,
+  customFieldValues,
   businessId,
 }: ContactDetailProps) {
-  const [activeTab, setActiveTab] = useState<string>("timeline");
+  const router = useRouter();
+  const pathname = usePathname();
+  const getUrlTab = () => {
+    if (typeof window === "undefined") return null;
+    return new URLSearchParams(window.location.search).get("tab");
+  };
+  const [activeTab, setActiveTabState] = useState<string>(
+    getUrlTab() ?? "timeline"
+  );
+
+  useEffect(() => {
+    const urlTab = getUrlTab();
+    if (urlTab && urlTab !== activeTab) {
+      setActiveTabState(urlTab);
+    }
+  }, [activeTab]);
+
+  const setActiveTab = useCallback((tab: string) => {
+    setActiveTabState(tab);
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      params.set("tab", tab);
+      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+    }
+  }, [router, pathname]);
   const [confirmState, setConfirmState] = useState<{ open: boolean; action: () => void }>({
     open: false,
     action: () => {},
@@ -374,6 +401,7 @@ export function ContactDetail({
               relatedContacts={relatedContacts}
               onSelectRelatedContact={onSelectRelatedContact}
               onAddTask={onAddTask}
+              customFieldValues={customFieldValues}
             />
           </div>
 

@@ -35,6 +35,7 @@ import {
 import { cn } from "@/lib/utils";
 import { universalSearch, UniversalSearchResult } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
+import { useCompose } from "@/components/email/compose-context";
 
 type Action = {
   id: string;
@@ -163,6 +164,7 @@ function fuzzyMatch(text: string, query: string): boolean {
 
 export function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
   const router = useRouter();
+  const { open: openComposer } = useCompose();
   const [query, setQuery] = useState("");
   const [searchResults, setSearchResults] = useState<UniversalSearchResult>(EMPTY);
   const [searching, setSearching] = useState(false);
@@ -204,7 +206,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   }, [query]);
 
   const QUICK_ACTIONS: Action[] = useMemo(() => [
-    { id: "new-contact", label: "New Contact", hint: "Add a contact", shortcut: "⌘⇧C", icon: Users, onSelect: () => router.push("/app/network/contacts") },
+    { id: "new-contact", label: "New Contact", hint: "Add a contact", shortcut: "⌘⇧C", icon: Users, onSelect: () => router.push("/app/crm/contacts") },
     { id: "new-invoice", label: "New Invoice", hint: "Create an invoice", shortcut: "⌘⇧I", icon: Receipt, onSelect: () => router.push("/app/commerce") },
     { id: "new-booking", label: "New Booking", hint: "Schedule a booking", shortcut: "⌘⇧B", icon: Calendar, onSelect: () => router.push("/app/bookings") },
     { id: "new-expense", label: "New Expense", hint: "Log an expense", icon: Receipt, onSelect: () => router.push("/app/expenses") },
@@ -216,7 +218,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
 
   const NAV_ACTIONS: Action[] = useMemo(() => [
     { id: "nav-command-tower", label: "KEYFLOW", hint: "Operator headquarters · live brain", shortcut: "⌘1", icon: Zap, onSelect: () => router.push("/app/keyflow-command") },
-    { id: "nav-clients", label: "Contacts", hint: "Network contacts", shortcut: "⌘2", icon: Users, onSelect: () => router.push("/app/network/contacts") },
+    { id: "nav-clients", label: "Contacts", hint: "Network contacts", shortcut: "⌘2", icon: Users, onSelect: () => router.push("/app/crm/contacts") },
     { id: "nav-revenue", label: "Revenue", hint: "Quotes, invoices, payments, cashflow", shortcut: "⌘3", icon: Receipt, onSelect: () => router.push("/app/commerce") },
     { id: "nav-revenue-quotes", label: "Quotes", hint: "Revenue · Quotes tab", icon: FileText, onSelect: () => router.push("/app/commerce?tab=quotes") },
     { id: "nav-revenue-invoices", label: "Invoices", hint: "Revenue · Invoices tab", icon: Receipt, onSelect: () => router.push("/app/commerce?tab=invoices") },
@@ -272,9 +274,9 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   const HELP_ACTIONS: Action[] = useMemo(() => [
     { id: "help-center", label: "Help Center", hint: "Browse guides & documentation", icon: BookOpen, onSelect: () => router.push("/app/help") },
     { id: "keyboard-shortcuts", label: "Keyboard Shortcuts", hint: "View all available shortcuts", icon: MessageSquare, onSelect: () => router.push("/app/help/shortcuts") },
-    { id: "contact-support", label: "Contact Support", hint: "Get help from the Keyflow team", icon: LifeBuoy, onSelect: () => window.open("mailto:support@keyflowos.com", "_blank") },
+    { id: "contact-support", label: "Contact Support", hint: "Get help from the Keyflow team", icon: LifeBuoy, onSelect: () => openComposer({ to: "support@keyflowos.com", subject: "Support request", body: "<p>Hi Keyflow support team,</p><p>I need help with the following:</p><p><br></p><p>Thanks,</p>" }) },
     { id: "whats-new", label: "What’s New", hint: "Latest features & updates", icon: HelpCircle, onSelect: () => router.push("/app/help/whats-new") },
-  ], [router]);
+  ], [router, openComposer]);
 
   const filteredHelp = useMemo(() => {
     if (!query) return HELP_ACTIONS;

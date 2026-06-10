@@ -6,6 +6,7 @@ import { PresenceTracker } from "../../_lib/PresenceTracker";
 import { PoweredByKeyFlow } from "../_components/powered-by-keyflow";
 import { WhatsAppShare } from "../_components/whatsapp-share";
 import CaseStudiesSection, { type PublicCaseStudy } from "../_components/case-studies-section";
+import { CookieConsentBanner } from "../_components/cookie-consent";
 
 const API_BASE = getApiBase();
 const PUBLIC_BASE_URL = process.env.NEXT_PUBLIC_BASE_URL ?? "";
@@ -101,6 +102,7 @@ export default async function PublicSitePage({ params }: Props) {
         />
       </div>
       <PoweredByKeyFlow plan={plan} />
+      <CookieConsentBanner />
     </>
   );
 }

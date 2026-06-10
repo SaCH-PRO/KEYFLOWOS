@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion } from "framer-motion";
-import { Users, Link2, Settings, Webhook, Bell, Code2, Palette, Sparkles, CreditCard, Brain, Crown, Shield, ShieldCheck, FileCheck, ContactRound, Layers, Zap, Gift, BarChart3 } from "lucide-react";
+import { Users, Link2, Settings, Webhook, Bell, Code2, Palette, Sparkles, CreditCard, Brain, Crown, Shield, ShieldCheck, FileCheck, ContactRound, Layers, Zap, Gift, BarChart3, FormInput } from "lucide-react";
 import { TaskContinuityHeader } from "@/components/ui/task-continuity-header";
 import { useNavigationContext } from "@/lib/navigation-context";
 
@@ -15,6 +15,7 @@ const navItems = [
   { href: "/app/settings/team", label: "Team", icon: Users, description: "Staff & roles" },
   { href: "/app/connect", label: "Connect", icon: Link2, description: "Integrations hub" },
   { href: "/app/settings/contact-sources", label: "Contact Sources", icon: ContactRound, description: "Google, Outlook & signatures" },
+  { href: "/app/settings/custom-fields", label: "Custom Fields", icon: FormInput, description: "Structured contact attributes" },
   { href: "/app/settings/notifications", label: "Notifications", icon: Bell, description: "Customer emails" },
   { href: "/app/settings/webhooks", label: "Webhooks", icon: Webhook, description: "Event hooks" },
   { href: "/app/settings/templates", label: "Templates", icon: Palette, description: "Gallery" },

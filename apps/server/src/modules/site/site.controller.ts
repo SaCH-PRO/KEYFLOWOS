@@ -58,6 +58,12 @@ export class SiteController {
     return { ok: true, day: day.toISOString().slice(0, 10), upserts };
   }
 
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/abandoned-carts/detect')
+  async detectAbandonedCarts(@Param('businessId') businessId: string) {
+    return this.conversionService.detectAbandonedCarts(businessId);
+  }
+
   @Get('health')
   health() {
     return { status: 'ok', module: 'site' };

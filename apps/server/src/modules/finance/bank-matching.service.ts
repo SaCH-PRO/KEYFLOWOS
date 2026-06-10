@@ -2,6 +2,7 @@ import { Injectable, Inject, NotFoundException, BadRequestException, ConflictExc
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { FinanceAuditService } from './finance-audit.service';
+import { BankRuleService } from './bank-rule.service';
 
 const D = Prisma.Decimal;
 const AMOUNT_TOLERANCE = new D('0.01');
@@ -72,6 +73,7 @@ export class BankMatchingService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(FinanceAuditService) private readonly audit: FinanceAuditService,
+    @Inject(BankRuleService) private readonly bankRules: BankRuleService,
   ) {}
 
   /** Resolve the ChartOfAccount.id this FinancialAccount posts against. */
@@ -194,6 +196,14 @@ export class BankMatchingService {
       orderBy: [{ date: 'asc' }, { id: 'asc' }],
     });
     if (bankRows.length === 0) return { scanned: 0, matched: 0, ambiguous: 0 };
+
+    // Run user-defined bank rules first so rule-matched rows are removed
+    // from the UNMATCHED pool before heuristic matching runs.
+    await this.bankRules.applyRulesToAccount(businessId, accountId, {
+      sinceDate: opts.sinceDate ?? null,
+      untilDate: opts.untilDate ?? null,
+      userId: opts.userId ?? null,
+    });
 
     const candidates = await this.loadLedgerCandidates(
       businessId,

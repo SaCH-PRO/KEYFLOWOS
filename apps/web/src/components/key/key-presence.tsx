@@ -1,9 +1,12 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { Bot } from "lucide-react";
+import { apiGet } from "@/lib/api";
+import { fetchCommandItems } from "@/lib/api/command";
+import { getStoredBusinessId } from "@/lib/workspace";
 
 export type KeyPresenceState = "idle" | "active" | "processing" | "suggestion";
 
@@ -16,6 +19,7 @@ export function KeyPresence({ className }: KeyPresenceProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [tooltip, setTooltip] = useState<string | null>(null);
+  const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Listen for KEY state changes from other components
   useEffect(() => {
@@ -25,6 +29,60 @@ export function KeyPresence({ className }: KeyPresenceProps) {
     };
     window.addEventListener("kf:key-state", handleKeyState);
     return () => window.removeEventListener("kf:key-state", handleKeyState);
+  }, []);
+
+  // Poll for real API state every 5s
+  useEffect(() => {
+    const businessId = getStoredBusinessId();
+    if (!businessId) return;
+
+    const poll = async () => {
+      try {
+        const [cmdRes, flowRes] = await Promise.all([
+          fetchCommandItems(businessId, { status: "OPEN", limit: 1 }),
+          apiGet<Array<{ status: string }>>(`/ai/businesses/${businessId}/flow/sessions`),
+        ]);
+
+        const pendingCount = cmdRes.data?.total ?? 0;
+        const sessions = Array.isArray(flowRes.data) ? flowRes.data : [];
+        const runningFlows = sessions.filter((s) => s.status === "RUNNING").length;
+
+        setState((prev) => {
+          // Don't override active (typing) state via polling
+          if (prev === "active") return prev;
+          if (runningFlows > 0) return "processing";
+          if (pendingCount > 0) return "suggestion";
+          return "idle";
+        });
+      } catch {
+        // silently fail
+      }
+    };
+
+    poll();
+    const interval = setInterval(poll, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Listen for typing in KEY inputs across the app
+  useEffect(() => {
+    const handleTyping = () => {
+      setState("active");
+      if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+      typingTimerRef.current = setTimeout(() => {
+        setState((prev) => {
+          // After typing stops, fallback to idle; next poll will correct if needed
+          if (prev === "active") return "idle";
+          return prev;
+        });
+      }, 1500);
+    };
+
+    window.addEventListener("kf:key-typing", handleTyping);
+    return () => {
+      window.removeEventListener("kf:key-typing", handleTyping);
+      if (typingTimerRef.current) clearTimeout(typingTimerRef.current);
+    };
   }, []);
 
   // Auto-show suggestions when KEY has something to say
@@ -42,7 +100,7 @@ export function KeyPresence({ className }: KeyPresenceProps) {
     window.dispatchEvent(new CustomEvent("kf:open-key", { detail: { mode: "chat" } }));
   }, []);
 
-  const handleClose = useCallback(() => {
+  const _handleClose = useCallback(() => {
     setIsExpanded(false);
   }, []);
 

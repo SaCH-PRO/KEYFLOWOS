@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Banknote, Wallet, Receipt, FileText, Landmark, ShieldCheck, Zap, ArrowRight, TrendingUp, PiggyBank, Plus, Trash2, Loader2 } from "lucide-react";
+import { motion } from "framer-motion";
+import { Banknote, Wallet, Receipt, FileText, Landmark, ShieldCheck, ArrowRight, TrendingUp, PiggyBank, Plus, Trash2, Loader2, BookOpen, Scale, ListFilter, Repeat } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { UnifiedPageShell } from "@/components/layout/unified-page-shell";
 import { MetricCard } from "@/components/ui/metric-card";
+import { SectionCard } from "@/components/ui/section-card";
 import { apiGet } from "@/lib/api";
 import { fetchReserveBuckets, createReserveBucket, deleteReserveBucket, type ReserveBucket } from "@/lib/api/finance";
 
@@ -104,8 +106,10 @@ export default function FinancialFlowPage() {
     { label: "Money Out", href: "/app/expenses", icon: Wallet, desc: "Expenses, bills, vendors" },
     { label: "Accounts", href: "/app/finance/accounts", icon: Landmark, desc: "Bank, cash, reconciliation" },
     { label: "Reports", href: "/app/finance", icon: FileText, desc: "P&L, balance sheet, tax" },
-    { label: "Safe to Spend", href: "#", icon: ShieldCheck, desc: "Know what cash is truly available" },
-    { label: "Money Moves", href: "#", icon: Zap, desc: "Actions to improve cashflow" },
+    { label: "General Ledger", href: "/app/finance/ledger", icon: BookOpen, desc: "Detailed transaction history" },
+    { label: "Trial Balance", href: "/app/finance/trial-balance", icon: Scale, desc: "Account balances summary" },
+    { label: "Bank Rules", href: "/app/finance/bank-rules", icon: ListFilter, desc: "Auto-categorize transactions" },
+    { label: "Recurring Journals", href: "/app/finance/recurring-journals", icon: Repeat, desc: "Scheduled journal entries" },
   ];
 
   return (
@@ -120,56 +124,78 @@ export default function FinancialFlowPage() {
           Array.from({ length: 4 }).map((_, i) => <div key={i} className="kf-card-metric animate-pulse h-20" />)
         ) : (
           <>
-            <MetricCard label="Cash Balance" value={`${currency} ${(overview?.cashBalance ?? 0).toLocaleString()}`} icon={Wallet} />
-            <MetricCard label="Safe to Spend" value={`${currency} ${(safe?.safeToSpend ?? 0).toLocaleString()}`} icon={ShieldCheck} iconColor="#10b981" />
-            <MetricCard label="Overdue" value={`${currency} ${(overview?.overdueInvoices ?? 0).toLocaleString()}`} icon={Receipt} iconColor="#ef4444" />
-            <MetricCard label="Net Profit (MTD)" value={`${currency} ${(overview?.netProfitThisMonth ?? 0).toLocaleString()}`} icon={TrendingUp} />
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ type: "spring", stiffness: 300, damping: 24 }}>
+              <MetricCard label="Cash Balance" value={`${currency} ${(overview?.cashBalance ?? 0).toLocaleString()}`} icon={Wallet} />
+            </motion.div>
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05, type: "spring", stiffness: 300, damping: 24 }}>
+              <MetricCard label="Safe to Spend" value={`${currency} ${(safe?.safeToSpend ?? 0).toLocaleString()}`} icon={ShieldCheck} iconColor="#10b981" />
+            </motion.div>
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1, type: "spring", stiffness: 300, damping: 24 }}>
+              <MetricCard label="Overdue" value={`${currency} ${(overview?.overdueInvoices ?? 0).toLocaleString()}`} icon={Receipt} iconColor="#ef4444" />
+            </motion.div>
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15, type: "spring", stiffness: 300, damping: 24 }}>
+              <MetricCard label="Net Profit (MTD)" value={`${currency} ${(overview?.netProfitThisMonth ?? 0).toLocaleString()}`} icon={TrendingUp} />
+            </motion.div>
           </>
         )}
       </div>
 
       {/* Cashflow Forecast */}
       {forecast && (
-        <div className="kf-card p-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">90-Day Cash Forecast</p>
-            {forecast.dangerDate && (
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 font-medium">
-                Danger: {new Date(forecast.dangerDate).toLocaleDateString()}
-              </span>
+        <SectionCard title="90-Day Cash Forecast" icon={TrendingUp} compact>
+          <div className="p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              {forecast.dangerDate && (
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 font-medium">
+                  Danger: {new Date(forecast.dangerDate).toLocaleDateString()}
+                </span>
+              )}
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="text-center">
+                <p className="text-lg font-semibold">{currency} {(forecast.expected ?? 0).toLocaleString()}</p>
+                <p className="text-[10px] text-muted-foreground">Expected</p>
+              </div>
+              <div className="text-center">
+                <p className="text-lg font-semibold">{currency} {(forecast.conservative ?? 0).toLocaleString()}</p>
+                <p className="text-[10px] text-muted-foreground">Conservative</p>
+              </div>
+              <div className="text-center">
+                <p className="text-lg font-semibold">{currency} {(forecast.optimistic ?? 0).toLocaleString()}</p>
+                <p className="text-[10px] text-muted-foreground">Optimistic</p>
+              </div>
+            </div>
+            {forecast.recommendations && forecast.recommendations.length > 0 && (
+              <div className="space-y-1">
+                {forecast.recommendations.map((rec, i) => (
+                  <p key={i} className="text-xs text-muted-foreground flex items-start gap-1.5">
+                    <TrendingUp className="w-3 h-3 mt-0.5 shrink-0 text-primary" />
+                    {rec}
+                  </p>
+                ))}
+              </div>
             )}
           </div>
-          <div className="grid grid-cols-3 gap-3">
-            <div className="text-center">
-              <p className="text-lg font-semibold">{currency} {(forecast.expected ?? 0).toLocaleString()}</p>
-              <p className="text-[10px] text-muted-foreground">Expected</p>
-            </div>
-            <div className="text-center">
-              <p className="text-lg font-semibold">{currency} {(forecast.conservative ?? 0).toLocaleString()}</p>
-              <p className="text-[10px] text-muted-foreground">Conservative</p>
-            </div>
-            <div className="text-center">
-              <p className="text-lg font-semibold">{currency} {(forecast.optimistic ?? 0).toLocaleString()}</p>
-              <p className="text-[10px] text-muted-foreground">Optimistic</p>
-            </div>
-          </div>
-          {forecast.recommendations && forecast.recommendations.length > 0 && (
-            <div className="space-y-1">
-              {forecast.recommendations.map((rec, i) => (
-                <p key={i} className="text-xs text-muted-foreground flex items-start gap-1.5">
-                  <TrendingUp className="w-3 h-3 mt-0.5 shrink-0 text-primary" />
-                  {rec}
-                </p>
-              ))}
-            </div>
-          )}
-        </div>
+        </SectionCard>
       )}
 
       {/* Cash Reserve Buckets */}
-      <div className="space-y-2">
-        <div className="flex items-center justify-between">
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Cash Reserve Buckets</p>
+      <SectionCard
+        title="Cash Reserve Buckets"
+        icon={PiggyBank}
+        compact
+        headerRight={
+          <button
+            onClick={() => setShowAdd(!showAdd)}
+            className="inline-flex items-center gap-1 text-xs font-medium transition-colors hover:opacity-80"
+            style={{ color: "hsl(var(--kf-accent1))" }}
+          >
+            <Plus className="w-3 h-3" />
+            {showAdd ? "Cancel" : "Add bucket"}
+          </button>
+        }
+      >
+        <div className="p-3 space-y-2">
           <button
             onClick={() => setShowAdd(!showAdd)}
             className="inline-flex items-center gap-1 text-xs font-medium transition-colors hover:opacity-80"
@@ -231,8 +257,14 @@ export default function FinancialFlowPage() {
           <p className="text-xs text-muted-foreground py-2">No reserve buckets yet. Add one to track tax, payroll, or other cash allocations.</p>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-            {buckets.map((bucket) => (
-              <div key={bucket.id} className="kf-card p-3 space-y-1.5">
+            {buckets.map((bucket, i) => (
+              <motion.div
+                key={bucket.id}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: i * 0.05 }}
+                className="kf-card p-3 space-y-1.5"
+              >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <PiggyBank className="w-3.5 h-3.5 text-emerald-500" />
@@ -256,19 +288,21 @@ export default function FinancialFlowPage() {
                 </div>
                 {bucket.targetAmount && bucket.targetAmount > 0 && (
                   <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-                    <div
-                      className="h-full rounded-full bg-emerald-500 transition-all"
-                      style={{ width: `${Math.min(100, (bucket.currentAmount / bucket.targetAmount) * 100)}%` }}
+                    <motion.div
+                      className="h-full rounded-full bg-emerald-500"
+                      initial={{ width: 0 }}
+                      animate={{ width: `${Math.min(100, (bucket.currentAmount / bucket.targetAmount) * 100)}%` }}
+                      transition={{ duration: 0.6, ease: "easeOut" }}
                     />
                   </div>
                 )}
-              </div>
+              </motion.div>
             ))}
           </div>
         )}
-      </div>
+      </SectionCard>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {sections.map((s) => (
           <button
             key={s.label}

@@ -14,6 +14,7 @@ import {
   keyBuildCalendar,
   keyExecuteCalendar,
   keyTalkCalendar,
+  synthesizeKeyflowSpeech,
 } from "@/lib/client";
 import {
   Mic,
@@ -28,6 +29,8 @@ import {
   ChevronRight,
   RotateCcw,
   AlertCircle,
+  Volume2,
+  VolumeX,
 } from "lucide-react";
 
 type PanelMode = "flow" | "autopilot" | "calendar";
@@ -155,6 +158,14 @@ export function KeyTalkPanel({ mode, businessId }: KeyTalkPanelProps) {
   const [builtEntity, setBuiltEntity] = useState<BuiltEntityData | null>(null);
   const [executionProof, setExecutionProof] = useState<ExecutionProofData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [ttsMuted, setTtsMuted] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem("kf_voice_settings") || "{}").muted ?? false;
+    } catch {
+      return false;
+    }
+  });
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
 
   const reset = useCallback(() => {
@@ -284,6 +295,26 @@ export function KeyTalkPanel({ mode, businessId }: KeyTalkPanelProps) {
     }
   }, [builtEntity, mode, businessId]);
 
+  const speak = useCallback(async (text: string) => {
+    if (ttsMuted || !businessId) return;
+    const settings = JSON.parse(localStorage.getItem("kf_voice_settings") || "{}");
+    const voice = settings.voice || "alloy";
+    const { blob, error } = await synthesizeKeyflowSpeech(businessId, text, voice);
+    if (error || !blob) {
+      if (error) console.error("TTS failed:", error);
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    if (audioRef.current) audioRef.current.pause();
+    const audio = new Audio(url);
+    audioRef.current = audio;
+    audio.playbackRate = settings.speed || 1;
+    audio.onended = () => URL.revokeObjectURL(url);
+    void audio.play().catch(() => {
+      // Browser blocked autoplay
+    });
+  }, [ttsMuted, businessId]);
+
   const handleTalk = useCallback(async () => {
     if (!intent.trim()) return;
     setStep("interpreting");
@@ -319,11 +350,14 @@ export function KeyTalkPanel({ mode, businessId }: KeyTalkPanelProps) {
       }
       setExecutionProof((data.executionProof as ExecutionProofData | undefined) ?? null);
       setStep("proof");
+      // Speak the recommendation if available
+      const textToSpeak = data.recommendation || data.interpretation;
+      if (textToSpeak) void speak(textToSpeak);
     } catch (e: unknown) {
       setError((e as { message?: string }).message || "Network error");
       setStep("input");
     }
-  }, [intent, mode, businessId]);
+  }, [intent, mode, businessId, speak]);
 
   if (!isOpen) {
     return (
@@ -357,6 +391,13 @@ export function KeyTalkPanel({ mode, businessId }: KeyTalkPanelProps) {
           </div>
         </div>
         <div className="flex items-center gap-1">
+          <button
+            onClick={() => setTtsMuted((m: boolean) => !m)}
+            className="p-1.5 rounded-lg hover:bg-white/[0.05] text-[hsl(30_10%_50%)] transition-colors"
+            title={ttsMuted ? "Unmute voice" : "Mute voice"}
+          >
+            {ttsMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+          </button>
           <button onClick={reset} className="p-1.5 rounded-lg hover:bg-white/[0.05] text-[hsl(30_10%_50%)] transition-colors" title="Reset">
             <RotateCcw className="w-4 h-4" />
           </button>

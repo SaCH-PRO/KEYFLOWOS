@@ -12,7 +12,6 @@ import {
   Download,
   Upload,
   Plus,
-  HelpCircle,
   ArrowUpDown,
   AlertCircle,
   CheckCircle,
@@ -347,13 +346,6 @@ export default function ExpensesInboxPage() {
             <p className="text-sm text-muted-foreground mt-0.5">Capture, review, approve, and control company spend.</p>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => {}}
-              className="hidden sm:flex items-center justify-center w-9 h-9 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
-              title="Help"
-            >
-              <HelpCircle className="w-4 h-4" />
-            </button>
             <button
               onClick={openAdd}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white transition-all hover:opacity-90 active:scale-95"

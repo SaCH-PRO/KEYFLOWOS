@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import type { ContactInsightSnapshot, ContactRevenueSummary } from "@/lib/client";
 import { buildWhatsAppLink } from "@/lib/whatsapp";
+import { useCompose } from "@/components/email/compose-context";
 
 interface ContactInsightCardProps {
   snapshot: ContactInsightSnapshot | null;
@@ -132,6 +133,7 @@ export function ContactInsightCard({
   revenueSummary,
   businessId,
 }: ContactInsightCardProps) {
+  const { open: openComposer } = useCompose();
   const [acting, setActing] = useState(false);
   const [timeRollup, setTimeRollup] = useState<ContactTimeRollup | null>(null);
 
@@ -176,9 +178,15 @@ export function ContactInsightCard({
         }
         case "send_email": {
           if (contact.email) {
-            const subject = encodeURIComponent(action.prefill?.subject ?? "");
-            const body = encodeURIComponent(action.prefill?.message ?? "");
-            window.location.href = `mailto:${contact.email}?subject=${subject}&body=${body}`;
+            openComposer({
+              to: contact.email,
+              subject: action.prefill?.subject ?? "",
+              body: action.prefill?.message ? `<p>${action.prefill.message.replace(/\n/g, "</p><p>")}</p>` : "",
+              context: {
+                type: "general",
+                contactName: `${contact.firstName ?? ""} ${contact.lastName ?? ""}`.trim(),
+              },
+            });
           } else {
             await onAddTask?.(action.prefill?.taskTitle ?? action.label, {
               priority: action.prefill?.priority ?? "NORMAL",

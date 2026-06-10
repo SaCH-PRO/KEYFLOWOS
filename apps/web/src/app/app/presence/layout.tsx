@@ -12,6 +12,7 @@ import {
   Search,
   BarChart3,
   Settings,
+  Activity,
 } from "lucide-react";
 
 const TABS: {
@@ -28,6 +29,13 @@ const TABS: {
     href: "/app/presence",
     Icon: Gauge,
     match: (p) => p === "/app/presence" || p === "/app/presence/",
+  },
+  {
+    key: "dashboard",
+    label: "Live Dashboard",
+    href: "/app/presence/dashboard",
+    Icon: Activity,
+    match: (p) => p.startsWith("/app/presence/dashboard"),
   },
   {
     key: "pages",

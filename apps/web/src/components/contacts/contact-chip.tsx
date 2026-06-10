@@ -1,6 +1,7 @@
 "use client";
 
 import { X } from "lucide-react";
+import { ContactAvatar } from "./contact-avatar";
 
 const STATUS_COLORS: Record<string, string> = {
   CLIENT: "bg-emerald-500",
@@ -40,13 +41,8 @@ export function ContactChip({
     [contact.firstName, contact.lastName].filter(Boolean).join(" ") ||
     contact.email ||
     "Unknown";
-  const initials = (
-    (contact.firstName?.[0] ?? "") + (contact.lastName?.[0] ?? "")
-  ).toUpperCase() || (contact.email?.[0]?.toUpperCase() ?? "?");
 
-  const avatarSize = size === "sm" ? "w-6 h-6" : "w-8 h-8";
   const textSize = size === "sm" ? "text-xs" : "text-sm";
-  const initialsSize = size === "sm" ? "text-[10px]" : "text-[11px]";
 
   const Wrapper = onClick ? "button" : "div";
 
@@ -57,15 +53,7 @@ export function ContactChip({
         onClick ? "cursor-pointer hover:bg-muted" : ""
       } ${className}`}
     >
-      <div
-        className={`${avatarSize} rounded-full flex items-center justify-center flex-shrink-0 ${initialsSize} font-bold`}
-        style={{
-          background: "hsl(var(--kf-accent1) / 0.15)",
-          color: "hsl(var(--kf-accent1))",
-        }}
-      >
-        {initials}
-      </div>
+      <ContactAvatar contact={contact} size={size === "sm" ? "xs" : "sm"} />
       <span className={`${textSize} font-medium truncate max-w-[120px]`}>{name}</span>
       {showEmail && contact.email && (
         <span className="text-[10px] text-muted-foreground truncate max-w-[100px]">

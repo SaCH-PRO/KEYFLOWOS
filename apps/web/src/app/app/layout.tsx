@@ -25,6 +25,7 @@ import { PageTransition } from "@/components/transitions/page-transition";
 import { KeyContextualSuggestions } from "@/components/functional/key-contextual-suggestions";
 import { KeyboardShortcutsHelp } from "@/components/functional/keyboard-shortcuts-help";
 import { MobileGestureProvider } from "@/components/functional/mobile-gesture-provider";
+import { ComposeFab } from "@/components/email/compose-fab";
 
 function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const layout = useAppLayout();
@@ -127,6 +128,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
       <KeyContextualSuggestions />
       <KeyboardShortcutsHelp />
       <CelebrationListener />
+      <ComposeFab />
 
     </div>
     </MobileGestureProvider>

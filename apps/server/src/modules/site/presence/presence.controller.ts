@@ -120,6 +120,12 @@ export class PresenceController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/today-stats')
+  getTodayStats(@Param('businessId') businessId: string) {
+    return this.overview.getTodayStats(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/insights/regenerate')
   regenerateInsights(
     @Param('businessId') businessId: string,

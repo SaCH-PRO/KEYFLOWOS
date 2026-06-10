@@ -2,6 +2,7 @@ import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { TimelineService } from '../timeline/timeline.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { RealtimeService } from '../realtime/realtime.service';
 import { CreateCommandItemDto } from './dto/create-command-item.dto';
 import { UpdateCommandItemDto } from './dto/update-command-item.dto';
 
@@ -11,6 +12,7 @@ export class CommandService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(TimelineService) private readonly timeline: TimelineService,
     @Inject(NotificationsService) private readonly notifications: NotificationsService,
+    @Inject(RealtimeService) private readonly realtime: RealtimeService,
   ) {}
 
   async create(businessId: string, dto: CreateCommandItemDto) {
@@ -56,6 +58,11 @@ export class CommandService {
       category: 'SYSTEM',
       actorType: 'SYSTEM',
       data: { category: dto.category, actionType: dto.actionType, priority: dto.priority },
+    });
+    this.realtime.emit({
+      businessId,
+      type: 'command.created',
+      payload: { id: item.id, title: item.title, status: item.status, category: item.category },
     });
     // Notify for high-priority or approval-required commands
     if (item.requiresApproval || item.priority >= 80 || item.riskTier >= 3) {
@@ -201,6 +208,11 @@ export class CommandService {
       actorType: 'USER',
       data: { previousStatus: existing.status },
     });
+    this.realtime.emit({
+      businessId,
+      type: 'command.completed',
+      payload: { id: item.id, title: existing.title },
+    });
     return item;
   }
 
@@ -220,6 +232,11 @@ export class CommandService {
       category: 'SYSTEM',
       actorType: 'USER',
       data: { ownerType, ownerId, previousOwnerType: existing.ownerType, previousOwnerId: existing.ownerId },
+    });
+    this.realtime.emit({
+      businessId,
+      type: 'command.assigned',
+      payload: { id: item.id, title: existing.title, ownerType, ownerId },
     });
     return item;
   }
@@ -302,6 +319,104 @@ export class CommandService {
       actorType: 'USER',
     });
     return existing;
+  }
+
+  async bulkComplete(businessId: string, ids: string[]) {
+    if (!ids.length) return { count: 0 };
+    const existing = await this.prisma.client.commandItem.findMany({
+      where: { id: { in: ids }, businessId },
+    });
+    if (existing.length !== ids.length) {
+      throw new NotFoundException('One or more command items not found');
+    }
+    const { count } = await this.prisma.client.commandItem.updateMany({
+      where: { id: { in: ids }, businessId },
+      data: { status: 'COMPLETED', completedAt: new Date() },
+    });
+    await Promise.all(
+      existing.map((item) =>
+        this.timeline.recordEvent({
+          businessId,
+          module: 'command',
+          action: 'complete',
+          entityType: 'command_item',
+          entityId: item.id,
+          title: `Completed: ${item.title}`,
+          category: 'SYSTEM',
+          actorType: 'USER',
+          data: { previousStatus: item.status },
+        }),
+      ),
+    );
+    this.realtime.emit({
+      businessId,
+      type: 'command.bulk_completed',
+      payload: { count, ids },
+    });
+    return { count };
+  }
+
+  async bulkDismiss(businessId: string, ids: string[]) {
+    if (!ids.length) return { count: 0 };
+    const existing = await this.prisma.client.commandItem.findMany({
+      where: { id: { in: ids }, businessId },
+    });
+    if (existing.length !== ids.length) {
+      throw new NotFoundException('One or more command items not found');
+    }
+    const { count } = await this.prisma.client.commandItem.updateMany({
+      where: { id: { in: ids }, businessId },
+      data: { status: 'DISMISSED', dismissedAt: new Date() },
+    });
+    await Promise.all(
+      existing.map((item) =>
+        this.timeline.recordEvent({
+          businessId,
+          module: 'command',
+          action: 'dismiss',
+          entityType: 'command_item',
+          entityId: item.id,
+          title: `Dismissed: ${item.title}`,
+          category: 'SYSTEM',
+          actorType: 'USER',
+          data: { previousStatus: item.status },
+        }),
+      ),
+    );
+    this.realtime.emit({
+      businessId,
+      type: 'command.bulk_dismissed',
+      payload: { count, ids },
+    });
+    return { count };
+  }
+
+  async bulkDelete(businessId: string, ids: string[]) {
+    if (!ids.length) return { count: 0 };
+    const existing = await this.prisma.client.commandItem.findMany({
+      where: { id: { in: ids }, businessId },
+    });
+    if (existing.length !== ids.length) {
+      throw new NotFoundException('One or more command items not found');
+    }
+    const { count } = await this.prisma.client.commandItem.deleteMany({
+      where: { id: { in: ids }, businessId },
+    });
+    await Promise.all(
+      existing.map((item) =>
+        this.timeline.recordEvent({
+          businessId,
+          module: 'command',
+          action: 'delete',
+          entityType: 'command_item',
+          entityId: item.id,
+          title: `Deleted: ${item.title}`,
+          category: 'SYSTEM',
+          actorType: 'USER',
+        }),
+      ),
+    );
+    return { count };
   }
 
   async summary(businessId: string) {

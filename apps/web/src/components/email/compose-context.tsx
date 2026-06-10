@@ -14,7 +14,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { ComposeModal, type ComposePrefill } from "./compose-modal";
 
 interface ComposeContextValue {
-  open: (prefill?: ComposePrefill) => void;
+  open: (prefill?: ComposePrefill & { onSent?: () => void }) => void;
   close: () => void;
   isOpen: boolean;
 }
@@ -29,9 +29,9 @@ export function useCompose(): ComposeContextValue {
 
 interface InternalState {
   isOpen: boolean;
-  prefill: ComposePrefill | undefined;
+  prefill: (ComposePrefill & { onSent?: () => void }) | undefined;
   setIsOpen: (v: boolean) => void;
-  setPrefill: (p: ComposePrefill | undefined) => void;
+  setPrefill: (p: (ComposePrefill & { onSent?: () => void }) | undefined) => void;
 }
 
 function DeepLinkBridge({ state }: { state: InternalState }) {
@@ -69,9 +69,9 @@ function DeepLinkBridge({ state }: { state: InternalState }) {
 
 export function ComposeProvider({ children }: { children: ReactNode }) {
   const [isOpen, setIsOpen] = useState(false);
-  const [prefill, setPrefill] = useState<ComposePrefill | undefined>(undefined);
+  const [prefill, setPrefill] = useState<(ComposePrefill & { onSent?: () => void }) | undefined>(undefined);
 
-  const open = useCallback((p?: ComposePrefill) => {
+  const open = useCallback((p?: ComposePrefill & { onSent?: () => void }) => {
     setPrefill(p);
     setIsOpen(true);
   }, []);
@@ -96,13 +96,17 @@ export function ComposeProvider({ children }: { children: ReactNode }) {
   const value = useMemo(() => ({ open, close, isOpen }), [open, close, isOpen]);
   const bridgeState: InternalState = { isOpen, prefill, setIsOpen, setPrefill };
 
+  const handleSent = useCallback(() => {
+    prefill?.onSent?.();
+  }, [prefill]);
+
   return (
     <ComposeContext.Provider value={value}>
       <Suspense fallback={null}>
         <DeepLinkBridge state={bridgeState} />
       </Suspense>
       {children}
-      <ComposeModal open={isOpen} onClose={close} prefill={prefill} />
+      <ComposeModal open={isOpen} onClose={close} prefill={prefill} onSent={handleSent} />
     </ComposeContext.Provider>
   );
 }

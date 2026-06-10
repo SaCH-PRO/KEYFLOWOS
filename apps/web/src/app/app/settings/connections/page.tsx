@@ -14,7 +14,14 @@ import {
   Plug,
   Unlink,
   ExternalLink,
+  TrendingUp,
+  Clock,
+  ShieldAlert,
+  Cloud,
+  Eye,
 } from "lucide-react";
+import { MetricCard } from "@/components/ui/metric-card";
+import { SectionCard } from "@/components/ui/section-card";
 import { toast } from "sonner";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
 import { apiGet, apiPostSimple, apiPatch } from "@/lib/api";
@@ -227,6 +234,42 @@ export default function SettingsConnectionsPage() {
           <span className="text-foreground">Google Calendar</span>
         </div>
 
+        {/* Sync Stats */}
+        {!loading && status && (
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0 }}>
+              <MetricCard
+                label="Status"
+                value={status.connected ? "Connected" : "Disconnected"}
+                icon={Cloud}
+                iconColor={status.connected ? "#10b981" : "#ef4444"}
+              />
+            </motion.div>
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}>
+              <MetricCard
+                label="Last Sync"
+                value={formatTimeAgo(status.lastSyncedAt)}
+                icon={Clock}
+              />
+            </motion.div>
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
+              <MetricCard
+                label="Conflicts"
+                value={status.openConflicts}
+                icon={ShieldAlert}
+                iconColor={status.openConflicts > 0 ? "#ef4444" : "#10b981"}
+              />
+            </motion.div>
+            <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
+              <MetricCard
+                label="Sync Direction"
+                value={status.syncDirection === "two_way" ? "Two-way" : status.syncDirection === "push" ? "Push" : status.syncDirection === "pull" ? "Pull" : "Paused"}
+                icon={TrendingUp}
+              />
+            </motion.div>
+          </div>
+        )}
+
         {!businessId ? (
           <div className="rounded-2xl border border-border/40 p-8 text-sm text-muted-foreground">
             Select a workspace to manage its connections.
@@ -343,9 +386,9 @@ export default function SettingsConnectionsPage() {
 
             {status?.connected && (
               <div className="mt-6 space-y-6">
-                <div>
-                  <h3 className="text-sm font-medium mb-2">Target calendar</h3>
-                  <div className="flex flex-wrap gap-2">
+                <SectionCard title="Target Calendar" icon={Calendar} compact noPadding>
+                  <div className="p-3">
+                    <div className="flex flex-wrap gap-2">
                     {calendars.length === 0 && (
                       <span className="text-xs text-muted-foreground">No writable calendars</span>
                     )}
@@ -370,12 +413,13 @@ export default function SettingsConnectionsPage() {
                         </button>
                       );
                     })}
+                    </div>
                   </div>
-                </div>
+                </SectionCard>
 
-                <div>
-                  <h3 className="text-sm font-medium mb-2">Sync direction</h3>
-                  <div className="flex flex-wrap gap-2">
+                <SectionCard title="Sync Direction" icon={TrendingUp} compact noPadding>
+                  <div className="p-3">
+                    <div className="flex flex-wrap gap-2">
                     {(
                       [
                         ["two_way", "Two-way"],
@@ -396,12 +440,12 @@ export default function SettingsConnectionsPage() {
                         {label}
                       </button>
                     ))}
+                    </div>
                   </div>
-                </div>
+                </SectionCard>
 
-                <div>
-                  <h3 className="text-sm font-medium mb-2">What to sync</h3>
-                  <div className="space-y-2">
+                <SectionCard title="What to Sync" icon={Plug} compact noPadding>
+                  <div className="p-3 space-y-2">
                     {EVENT_TYPE_TOGGLES.map((t) => (
                       <label
                         key={t.key}
@@ -439,11 +483,11 @@ export default function SettingsConnectionsPage() {
                       </div>
                     </label>
                   </div>
-                </div>
+                </SectionCard>
 
-                <div>
-                  <h3 className="text-sm font-medium mb-2">Default visibility for synced events</h3>
-                  <div className="flex flex-wrap gap-2">
+                <SectionCard title="Default Visibility" icon={Eye} compact noPadding>
+                  <div className="p-3">
+                    <div className="flex flex-wrap gap-2">
                     {(["PRIVATE", "TEAM", "PUBLIC"] as const).map((v) => (
                       <button
                         key={v}
@@ -457,8 +501,9 @@ export default function SettingsConnectionsPage() {
                         {v.charAt(0) + v.slice(1).toLowerCase()}
                       </button>
                     ))}
+                    </div>
                   </div>
-                </div>
+                </SectionCard>
 
                 <div className="pt-4 border-t border-border/30 flex items-center justify-between text-xs text-muted-foreground">
                   <span>Hourly resync runs in the background.</span>

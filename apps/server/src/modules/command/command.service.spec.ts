@@ -36,7 +36,7 @@ describe('CommandService', () => {
     prisma = makePrismaMock();
     timeline = makeTimelineMock();
     notifications = makeNotificationsMock();
-    svc = new CommandService(prisma as any, timeline as any, notifications as any);
+    svc = new CommandService(prisma as any, timeline as any, notifications as any, { emit: () => {} } as any);
     vi.clearAllMocks();
   });
 

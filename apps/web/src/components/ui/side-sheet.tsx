@@ -1,23 +1,24 @@
 "use client";
 
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, type ReactNode } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X } from "lucide-react";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 
-type SheetWidth = "sm" | "md" | "lg";
+type SheetWidth = "sm" | "md" | "lg" | "2xl";
 
 const WIDTH_MAP: Record<SheetWidth, string> = {
   sm: "320px",
   md: "480px",
   lg: "640px",
+  "2xl": "768px",
 };
 
 interface SideSheetProps {
   open: boolean;
   onClose: () => void;
-  title: string;
-  subtitle?: string;
+  title: ReactNode;
+  subtitle?: ReactNode;
   width?: SheetWidth;
   children: React.ReactNode;
   footer?: React.ReactNode;

@@ -37,7 +37,7 @@ export function ClientsView({ report }: { report: GeneratedReport }) {
   return (
     <div className="space-y-6">
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Link href="/app/network/contacts">
+        <Link href="/app/crm/contacts">
           <MetricCard
             label={c ? "New Contacts" : "Total Contacts"}
             value={c ? (c.clients.newContacts ?? 0).toString() : m.clients.totalContacts.toString()}
@@ -155,7 +155,7 @@ export function ClientsView({ report }: { report: GeneratedReport }) {
             title="No client revenue data"
             description="No paid invoices found for this period."
             actionLabel="Go to CRM"
-            onAction={() => { window.location.href = "/app/network/contacts"; }}
+            onAction={() => { window.location.href = "/app/crm/contacts"; }}
             tip="Revenue per client is calculated from paid invoices linked to contacts."
           />
         )}

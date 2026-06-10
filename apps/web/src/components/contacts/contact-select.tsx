@@ -14,6 +14,7 @@ import { createContact } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { moduleEvents } from "@/lib/module-events";
 import { ContactChip } from "./contact-chip";
+import { ContactAvatar } from "./contact-avatar";
 
 const STATUS_DOT: Record<string, string> = {
   CLIENT: "bg-emerald-500",
@@ -271,9 +272,6 @@ export function ContactSelect({
                   [contact.firstName, contact.lastName].filter(Boolean).join(" ") ||
                   contact.email ||
                   "Unknown";
-                const initials =
-                  ((contact.firstName?.[0] ?? "") + (contact.lastName?.[0] ?? "")).toUpperCase() ||
-                  (contact.email?.[0]?.toUpperCase() ?? "?");
                 const isActive = idx === activeIndex;
                 const isSelected = contact.id === value;
                 return (
@@ -288,15 +286,7 @@ export function ContactSelect({
                       isActive ? "bg-muted" : "hover:bg-muted/50"
                     } ${isSelected ? "bg-muted/70" : ""}`}
                   >
-                    <div
-                      className="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold flex-shrink-0"
-                      style={{
-                        background: "hsl(var(--kf-accent1) / 0.15)",
-                        color: "hsl(var(--kf-accent1))",
-                      }}
-                    >
-                      {initials}
-                    </div>
+                    <ContactAvatar contact={contact} size="sm" />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{name}</p>
                       <div className="flex items-center gap-2 text-[11px] text-muted-foreground">

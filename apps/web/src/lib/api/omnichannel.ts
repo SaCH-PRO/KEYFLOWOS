@@ -208,3 +208,10 @@ export async function fetchUnifiedInbox(
     `/api/communications/businesses/${businessId}/unified-inbox?${search.toString()}`,
   );
 }
+
+export async function generateReplyDraft(businessId: string, threadId: string) {
+  return apiPost<{ draft: DraftItem; classification: unknown }>({
+    path: `/api/communications/businesses/${businessId}/threads/${threadId}/generate-reply`,
+    body: {},
+  });
+}

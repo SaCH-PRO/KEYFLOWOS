@@ -26,6 +26,7 @@ import {
 import { useRouter } from "next/navigation";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
+import { SectionCard } from "@/components/ui/section-card";
 
 /* ─────────── Types ─────────── */
 
@@ -66,7 +67,7 @@ interface SystemSnapshot {
 
 const MODULE_CONFIG: Record<string, { label: string; icon: React.ElementType; route: string }> = {
   finance: { label: "Financial Flow", icon: Banknote, route: "/app/money" },
-  network: { label: "Network", icon: Users, route: "/app/network/contacts" },
+  network: { label: "Network", icon: Users, route: "/app/crm/contacts" },
   calendar: { label: "Calendar", icon: CalendarDays, route: "/app/calendar" },
   automations: { label: "Automations", icon: Workflow, route: "/app/automations" },
   projects: { label: "Projects", icon: Target, route: "/app/projects" },
@@ -286,10 +287,10 @@ export default function IntelligencePage() {
   const insights: CrossModuleInsight[] = useMemo(() => [
     { id: "1", type: "opportunity", title: "Revenue Leak Detected", description: "3 invoices are 15+ days overdue totaling $4,200. Automating follow-ups could recover 80% within 48 hours.", modules: ["finance", "automations", "network"], impact: "high", actionable: true, actionRoute: "/app/money", actionLabel: "Review Invoices" },
     { id: "2", type: "pattern", title: "Booking Gap Pattern", description: "Tuesdays show 40% lower booking volume. A targeted email campaign could fill 3-4 slots weekly.", modules: ["calendar", "communications", "commerce"], impact: "medium", actionable: true, actionRoute: "/app/calendar", actionLabel: "View Calendar" },
-    { id: "3", type: "risk", title: "Contact Stagnation", description: "47 high-value contacts have had no interaction in 60+ days. 12 are at risk of churning.", modules: ["network", "automations"], impact: "high", actionable: true, actionRoute: "/app/network/contacts", actionLabel: "View Contacts" },
+    { id: "3", type: "risk", title: "Contact Stagnation", description: "47 high-value contacts have had no interaction in 60+ days. 12 are at risk of churning.", modules: ["network", "automations"], impact: "high", actionable: true, actionRoute: "/app/crm/contacts", actionLabel: "View Contacts" },
     { id: "4", type: "suggestion", title: "Automation Opportunity", description: "You manually process 12 similar tasks daily. A 3-step flow could save 2.5 hours per week.", modules: ["automations", "projects"], impact: "medium", actionable: true, actionRoute: "/app/automations", actionLabel: "Build Flow" },
     { id: "5", type: "pattern", title: "Peak Revenue Window", description: "Historical data shows Friday 2-4pm has 3x conversion rate. Consider running promotions then.", modules: ["commerce", "finance"], impact: "medium", actionable: false },
-    { id: "6", type: "opportunity", title: "Cross-sell Ready", description: "8 clients who purchased Service A haven't been offered Service B. Expected uplift: $1,600.", modules: ["network", "commerce"], impact: "high", actionable: true, actionRoute: "/app/network/contacts", actionLabel: "View Opportunities" },
+    { id: "6", type: "opportunity", title: "Cross-sell Ready", description: "8 clients who purchased Service A haven't been offered Service B. Expected uplift: $1,600.", modules: ["network", "commerce"], impact: "high", actionable: true, actionRoute: "/app/crm/contacts", actionLabel: "View Opportunities" },
   ], []);
 
   const filteredInsights = insights;
@@ -411,7 +412,7 @@ export default function IntelligencePage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
             {[
               { label: "Run Revenue Recovery", icon: Banknote, route: "/app/money", desc: "Auto-follow up on overdue invoices" },
-              { label: "Re-engage Contacts", icon: Users, route: "/app/network/contacts", desc: "Launch sequence to idle contacts" },
+              { label: "Re-engage Contacts", icon: Users, route: "/app/crm/contacts", desc: "Launch sequence to idle contacts" },
               { label: "Build Flow", icon: Workflow, route: "/app/automations", desc: "Automate your top manual task" },
               { label: "Optimize Calendar", icon: CalendarDays, route: "/app/calendar", desc: "Fill gaps with AI suggestions" },
             ].map((action) => (

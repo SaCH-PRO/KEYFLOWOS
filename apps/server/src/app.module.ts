@@ -41,6 +41,7 @@ import { ProjectsModule } from './modules/projects/projects.module';
 import { HelpdeskModule } from './modules/helpdesk/helpdesk.module';
 import { ExpensesModule } from './modules/expenses/expenses.module';
 import { FinanceModule } from './modules/finance/finance.module';
+import { ContinentalOpsModule } from './modules/continental-ops/continental-ops.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { EmailMarketingModule } from './modules/email-marketing/email-marketing.module';
 import { LeadFormsModule } from './modules/lead-forms/lead-forms.module';
@@ -92,6 +93,7 @@ import { ProductAnalyticsModule } from './modules/product-analytics/product-anal
 import { AdminAnalyticsModule } from './modules/admin-analytics/admin-analytics.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { DeviceModule } from './modules/device/device.module';
+import { RealtimeModule } from './modules/realtime/realtime.module';
 import { AdminPlatformModule } from './modules/admin-platform/admin-platform.module';
 import { TrashModule } from './modules/trash/trash.module';
 import { PushNotificationModule } from './modules/push-notifications/push-notification.module';
@@ -158,6 +160,7 @@ import { SecurityAuditModule } from './modules/security-audit/security-audit.mod
     WhatsAppModule,
     SlackModule,
     ShopifyModule,
+    ContinentalOpsModule,
     SentryModule,
     KeyflowCommandModule,
     ConnectModule,
@@ -191,6 +194,7 @@ import { SecurityAuditModule } from './modules/security-audit/security-audit.mod
     TrashModule,
     PushNotificationModule,
     DeviceModule,
+    RealtimeModule,
     SecurityAuditModule,
   ],
   controllers: [AppController],

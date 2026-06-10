@@ -214,6 +214,7 @@ export function useContactDetail(businessId: string | null, contacts: Contact[])
   })), [contactDetail]);
   const detailInvoices = useMemo(() => contactDetail?.invoices ?? [], [contactDetail]);
   const detailBookings = useMemo(() => contactDetail?.bookings ?? [], [contactDetail]);
+  const detailCustomFieldValues = useMemo(() => contactDetail?.customFieldValues ?? [], [contactDetail]);
 
   const contactName = selectedContact
     ? `${selectedContact.firstName ?? ""} ${selectedContact.lastName ?? ""}`.trim() || "Contact"
@@ -228,7 +229,7 @@ export function useContactDetail(businessId: string | null, contacts: Contact[])
     aiInsight, aiInsightLoading,
     insightSnapshot, insightLoading, handleRecomputeInsight,
     revenueSummary,
-    selectedContact, detailEvents, detailNotes, detailTasks, detailInvoices, detailBookings, contactName,
+    selectedContact, detailEvents, detailNotes, detailTasks, detailInvoices, detailBookings, detailCustomFieldValues, contactName,
     loadDetail, selectContact,
     handleGenerateAiInsight, handleRefreshConversationContext,
   };

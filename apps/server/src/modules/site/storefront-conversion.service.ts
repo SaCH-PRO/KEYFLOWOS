@@ -2,6 +2,12 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
+export interface AbandonedCartResult {
+  created: number;
+  skipped: number;
+  items: Array<{ eventId: string; visitorId: string; createdAt: Date }>;
+}
+
 type ConversionKind = 'product' | 'service' | 'overall';
 
 const VIEW_TYPES = new Set(['product.viewed', 'service.viewed', 'storefront.viewed']);
@@ -183,5 +189,101 @@ export class StorefrontConversionService {
       orderBy: { day: 'asc' },
     });
     return rows;
+  }
+
+  /**
+   * Detect abandoned carts: checkout_start events from the last 24h with no
+   * matching checkout_complete. Creates a CommandItem per abandoned session
+   * so the recovery flow can pick it up.
+   */
+  async detectAbandonedCarts(businessId: string): Promise<AbandonedCartResult> {
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+    const starts = await this.prisma.client.publicEvent.findMany({
+      where: {
+        businessId,
+        type: 'checkout_start',
+        ts: { gte: since },
+      },
+      select: { id: true, visitorId: true, sessionId: true, ts: true, payload: true },
+      orderBy: { ts: 'desc' },
+    });
+
+    const completions = await this.prisma.client.publicEvent.findMany({
+      where: {
+        businessId,
+        type: 'checkout_complete',
+        ts: { gte: since },
+      },
+      select: { visitorId: true, sessionId: true },
+    });
+
+    const completedKeys = new Set(
+      completions.map((c) => `${c.visitorId}::${c.sessionId ?? ''}`),
+    );
+
+    const createdItems: AbandonedCartResult['items'] = [];
+    let skipped = 0;
+
+    for (const start of starts) {
+      const key = `${start.visitorId}::${start.sessionId ?? ''}`;
+      if (completedKeys.has(key)) {
+        skipped++;
+        continue;
+      }
+
+      // Deduplicate: only one command item per visitor per day
+      const existing = await this.prisma.client.commandItem.findFirst({
+        where: {
+          businessId,
+          category: 'SALES',
+          actionType: 'recover_abandoned_cart',
+          sourceId: start.visitorId,
+          createdAt: { gte: since },
+        },
+      });
+      if (existing) {
+        skipped++;
+        continue;
+      }
+
+      const payload = (start.payload && typeof start.payload === 'object' && !Array.isArray(start.payload))
+        ? (start.payload as Record<string, unknown>)
+        : {};
+      const amount = Number(payload.amount ?? 0) || 0;
+      const currency = typeof payload.currency === 'string' ? payload.currency : 'TTD';
+
+      await this.prisma.client.commandItem.create({
+        data: {
+          businessId,
+          sourceModule: 'storefront',
+          sourceType: 'public_event',
+          sourceId: start.visitorId,
+          title: 'Recover abandoned cart',
+          description: `Visitor started checkout but did not complete. Event ${start.id.slice(0, 8)}…`,
+          category: 'SALES',
+          actionType: 'recover_abandoned_cart',
+          status: 'OPEN',
+          priority: 70,
+          urgency: 60,
+          impactScore: amount > 0 ? Math.min(100, Math.round(amount / 10)) : 30,
+          expectedValue: amount > 0 ? amount : null,
+          currency: amount > 0 ? currency : null,
+          riskTier: 1,
+        },
+      });
+
+      createdItems.push({
+        eventId: start.id,
+        visitorId: start.visitorId,
+        createdAt: start.ts,
+      });
+    }
+
+    return {
+      created: createdItems.length,
+      skipped,
+      items: createdItems,
+    };
   }
 }

@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { CrmCacheService } from './crm-cache.service';
 import { contactWhereBase } from './crm.helpers';
 
 type FlowIntelligenceData = {
@@ -18,42 +19,23 @@ type FlowIntelligenceData = {
 @Injectable()
 export class CrmFlowService {
   private readonly logger = new Logger(CrmFlowService.name);
-  private cache: Map<string, { data: any; expires: number }> = new Map();
-  private readonly ttlMs = 60000;
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(CrmCacheService) private readonly cache: CrmCacheService,
   ) {}
 
   private get db() {
     return this.prisma.client;
   }
 
-  private getCached<T>(key: string): T | null {
-    const entry = this.cache.get(key);
-    if (!entry) return null;
-    if (Date.now() > entry.expires) {
-      this.cache.delete(key);
-      return null;
-    }
-    return entry.data as T;
-  }
-
-  private setCache(key: string, data: any): void {
-    this.cache.set(key, { data, expires: Date.now() + this.ttlMs });
-  }
-
   invalidateCache(businessId: string): void {
-    for (const key of this.cache.keys()) {
-      if (key.startsWith(`${businessId}:`)) {
-        this.cache.delete(key);
-      }
-    }
+    void this.cache.invalidate(businessId);
   }
 
   async getFlowIntelligence(businessId: string): Promise<FlowIntelligenceData> {
     const cacheKey = `${businessId}:flowIntelligence`;
-    const cached = this.getCached<FlowIntelligenceData>(cacheKey);
+    const cached = await this.cache.get<FlowIntelligenceData>(cacheKey);
     if (cached) return cached;
     const now = new Date();
     const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
@@ -103,7 +85,7 @@ export class CrmFlowService {
       return acc;
     }, {} as Record<string, number>);
 
-    const weeklyChange = newLastWeek > 0 
+    const weeklyChange = newLastWeek > 0
       ? Math.round(((newThisWeek - newLastWeek) / newLastWeek) * 100)
       : newThisWeek > 0 ? 100 : 0;
 
@@ -119,7 +101,7 @@ export class CrmFlowService {
       contactsReadyToAdvance: readyContacts,
       weeklyChange,
     };
-    this.setCache(cacheKey, result);
+    await this.cache.set(cacheKey, result);
     return result;
   }
 }

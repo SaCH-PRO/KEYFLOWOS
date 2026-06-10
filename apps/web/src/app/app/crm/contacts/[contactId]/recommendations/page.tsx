@@ -1,10 +1,32 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
-import { fetchContactInsightSnapshot, fetchContactRevenueSummary, fetchContactMomentum } from "@/lib/client";
+import { useParams, useRouter } from "next/navigation";
+import {
+  fetchContactInsightSnapshot,
+  fetchContactRevenueSummary,
+  fetchContactMomentum,
+  fetchContactDetail,
+  addContactTask,
+} from "@/lib/client";
+import { getStoredBusinessId } from "@/lib/workspace";
+import { useCompose } from "@/components/email/compose-context";
+import { buildWhatsAppLink, getContactPhone } from "@/lib/whatsapp";
 import { Card, Button } from "@keyflow/ui";
-import { Lightbulb, CheckCircle, Calendar, Mail, MessageSquare, Phone, FileText, Target, TrendingUp, AlertTriangle, Clock, Send } from "lucide-react";
+import {
+  Lightbulb,
+  CheckCircle,
+  Calendar,
+  Mail,
+  MessageSquare,
+  Phone,
+  FileText,
+  Target,
+  TrendingUp,
+  AlertTriangle,
+  Clock,
+  Send,
+} from "lucide-react";
 import { toast } from "sonner";
 
 interface Recommendation {
@@ -14,26 +36,57 @@ interface Recommendation {
   description: string;
   priority: "high" | "medium" | "low";
   actionLabel?: string;
+  action?: () => void | Promise<void>;
 }
 
 export default function ContactRecommendationsPage() {
   const { contactId } = useParams();
+  const router = useRouter();
+  const { open: openComposer } = useCompose();
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
   const [loading, setLoading] = useState(true);
+  const [actingId, setActingId] = useState<string | null>(null);
 
   useEffect(() => {
     const load = async () => {
       setLoading(true);
-      const [insRes, revRes, momRes] = await Promise.all([
-        fetchContactInsightSnapshot(contactId as string),
-        fetchContactRevenueSummary(contactId as string),
-        fetchContactMomentum(contactId as string),
+      const businessId = getStoredBusinessId() ?? undefined;
+      const [insRes, revRes, momRes, contactRes] = await Promise.all([
+        fetchContactInsightSnapshot(contactId as string, businessId),
+        fetchContactRevenueSummary(contactId as string, businessId),
+        fetchContactMomentum(contactId as string, businessId),
+        fetchContactDetail(contactId as string, businessId),
       ]);
 
       const recs: Recommendation[] = [];
       const insight = insRes.data?.payload;
       const revenue = revRes.data;
       const momentum = momRes.data;
+      const contact = contactRes.data?.contact;
+      const contactName = `${contact?.firstName ?? ""} ${contact?.lastName ?? ""}`.trim() || contact?.displayName || "there";
+      const phone = getContactPhone({ phone: contact?.phone ?? null, whatsappNumber: contact?.whatsappNumber ?? null });
+
+      const addTask = async (title: string, priority: "NORMAL" | "HIGH" | "LOW" = "NORMAL") => {
+        const res = await addContactTask(contactId as string, title, { priority });
+        if (res.data) {
+          toast.success("Task created");
+        } else {
+          toast.error(res.error ?? "Failed to create task");
+          throw new Error(res.error ?? "Failed");
+        }
+      };
+
+      const openEmail = (subject: string, _contextType: Recommendation["id"]) => {
+        openComposer({
+          to: contact?.email ?? "",
+          subject,
+          body: "",
+          context: {
+            type: "general",
+            contactName,
+          },
+        });
+      };
 
       // AI-suggested action from insight snapshot
       if (insight?.suggestedAction) {
@@ -48,6 +101,35 @@ export default function ContactRecommendationsPage() {
           book_appointment: Calendar,
           review_dormant: Clock,
         };
+
+        let action: (() => void | Promise<void>) | undefined;
+        switch (sa.kind) {
+          case "send_email":
+            action = () => openEmail(sa.prefill?.subject || "Quick follow-up", "ai-suggested");
+            break;
+          case "send_whatsapp":
+            action = () => {
+              if (!phone) { toast.error("No phone number available"); return; }
+              window.open(buildWhatsAppLink(phone, sa.prefill?.message ?? ""), "_blank", "noopener,noreferrer");
+            };
+            break;
+          case "schedule_call":
+          case "book_appointment":
+          case "create_task":
+            action = () => addTask(sa.prefill?.taskTitle ?? sa.label, (sa.prefill?.priority as "NORMAL" | "HIGH" | "LOW") ?? "NORMAL");
+            break;
+          case "create_invoice":
+            action = () => router.push("/app/commerce?tab=invoices");
+            break;
+          case "enroll_in_sequence":
+            action = () => { toast.info("Sequences coming soon"); };
+            break;
+          case "review_dormant":
+          default:
+            action = () => openEmail("Checking in", "ai-suggested");
+            break;
+        }
+
         recs.push({
           id: "ai-suggested",
           icon: iconMap[sa.kind] || Lightbulb,
@@ -55,6 +137,7 @@ export default function ContactRecommendationsPage() {
           description: sa.description,
           priority: "high",
           actionLabel: "Act now",
+          action,
         });
       }
 
@@ -67,6 +150,7 @@ export default function ContactRecommendationsPage() {
           description: insight.churnRiskReason || `Churn risk is at ${insight.churnRisk}%. Re-engage this contact promptly.`,
           priority: "high",
           actionLabel: "Reach out",
+          action: () => openEmail("Checking in", "churn-risk"),
         });
       }
 
@@ -79,6 +163,7 @@ export default function ContactRecommendationsPage() {
           description: `This contact has ${new Intl.NumberFormat("en-US", { style: "currency", currency: revenue.currency || "USD" }).format(revenue.outstandingBalance)} in unpaid invoices.`,
           priority: revenue.outstandingBalance > 1000 ? "high" : "medium",
           actionLabel: "Send reminder",
+          action: () => openEmail("Friendly reminder: outstanding invoice", "outstanding"),
         });
       }
 
@@ -91,6 +176,7 @@ export default function ContactRecommendationsPage() {
           description: `Momentum score is ${momentum.score}/100. Consider a re-engagement campaign.`,
           priority: "medium",
           actionLabel: "Plan outreach",
+          action: () => addTask("Plan re-engagement outreach", "HIGH"),
         });
       }
 
@@ -103,6 +189,7 @@ export default function ContactRecommendationsPage() {
           description: `${revenue.openQuotes} open quote${revenue.openQuotes > 1 ? "s" : ""} waiting for response. Follow up to close the deal.`,
           priority: "medium",
           actionLabel: "Follow up",
+          action: () => openEmail("Following up on your quote", "open-quotes"),
         });
       }
 
@@ -115,6 +202,7 @@ export default function ContactRecommendationsPage() {
           description: "This contact hasn't made a payment recently despite previous purchases.",
           priority: "low",
           actionLabel: "Check in",
+          action: () => openEmail("Checking in", "no-recent-payment"),
         });
       }
 
@@ -122,10 +210,16 @@ export default function ContactRecommendationsPage() {
       setLoading(false);
     };
     load();
-  }, [contactId]);
+  }, [contactId, openComposer, router]);
 
-  const handleAction = (rec: Recommendation) => {
-    toast.info(`${rec.actionLabel || "Action"} for: ${rec.title}`);
+  const handleAction = async (rec: Recommendation) => {
+    if (!rec.action || actingId) return;
+    setActingId(rec.id);
+    try {
+      await rec.action();
+    } finally {
+      setActingId(null);
+    }
   };
 
   const handleDismiss = (id: string) => {
@@ -176,8 +270,8 @@ export default function ContactRecommendationsPage() {
                       <p className="mt-1 text-sm text-muted-foreground">{rec.description}</p>
                       <div className="mt-3 flex items-center gap-2">
                         {rec.actionLabel && (
-                          <Button size="sm" onClick={() => handleAction(rec)}>
-                            {rec.actionLabel}
+                          <Button size="sm" onClick={() => handleAction(rec)} disabled={actingId === rec.id}>
+                            {actingId === rec.id ? "Working…" : rec.actionLabel}
                           </Button>
                         )}
                         <Button size="sm" variant="ghost" onClick={() => handleDismiss(rec.id)}>

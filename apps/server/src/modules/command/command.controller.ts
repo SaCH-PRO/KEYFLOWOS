@@ -7,6 +7,7 @@ import { CommandSchedulerService } from './command-scheduler.service';
 import { CreateCommandItemDto } from './dto/create-command-item.dto';
 import { UpdateCommandItemDto } from './dto/update-command-item.dto';
 import { ListCommandItemsDto } from './dto/list-command-items.dto';
+import { BulkCommandItemsDto } from './dto/bulk-command-items.dto';
 
 @Controller('command/businesses/:businessId')
 @UseGuards(AuthGuard, BusinessGuard)
@@ -123,6 +124,30 @@ export class CommandController {
     @Param('id') id: string,
   ) {
     return this.commandService.delete(businessId, id);
+  }
+
+  @Post('items/bulk/complete')
+  async bulkComplete(
+    @Param('businessId') businessId: string,
+    @Body() dto: BulkCommandItemsDto,
+  ) {
+    return this.commandService.bulkComplete(businessId, dto.ids);
+  }
+
+  @Post('items/bulk/dismiss')
+  async bulkDismiss(
+    @Param('businessId') businessId: string,
+    @Body() dto: BulkCommandItemsDto,
+  ) {
+    return this.commandService.bulkDismiss(businessId, dto.ids);
+  }
+
+  @Post('items/bulk/delete')
+  async bulkDelete(
+    @Param('businessId') businessId: string,
+    @Body() dto: BulkCommandItemsDto,
+  ) {
+    return this.commandService.bulkDelete(businessId, dto.ids);
   }
 
   @Post('generate')

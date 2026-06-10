@@ -192,6 +192,7 @@ model Business {
   customsDeclarations CustomsDeclaration[]
   preOrders        PreOrder[]
   purchaseOrders   PurchaseOrder[]
+  goodsReceipts    GoodsReceipt[]
   marketplaceOrders MarketplaceOrder[]
   fulfillmentRoutes FulfillmentRoute[]
   promoCodes       PromoCode[]
@@ -222,6 +223,16 @@ model Business {
   reconciliations       Reconciliation[]
   taxLiabilities        TaxLiability[]
   taxRates              TaxRate[]
+  bankRules             BankRule[]
+  recurringJournalEntries RecurringJournalEntry[]
+  creditNotes           CreditNote[]
+  accountingPeriods     AccountingPeriod[]
+  bankConnections       BankConnection[]
+  exchangeRates         ExchangeRate[]
+  fixedAssets           FixedAsset[]
+  deliveryNotes         DeliveryNote[]
+  stockCounts           StockCount[]
+  receipts              Receipt[]
 
   // Finance OS (FIN5) — settings stored on the business row.
   // (accountingBasis declared above as part of FIN2; FIN5 settings UI flips it.)
@@ -812,6 +823,9 @@ model Contact {
   updatedAt DateTime  @updatedAt      @map("updated_at")
   deletedAt DateTime? @map("deleted_at") // Soft delete
 
+  // Full-text search (PostgreSQL tsvector) — managed by trigger, not Prisma
+  searchVector Unsupported("tsvector")? @map("search_vector")
+
   @@index([businessId])
   @@index([businessId, createdAt])
   @@index([businessId, status])
@@ -829,9 +843,80 @@ model Contact {
   @@index([businessId, ownerId])
   @@index([businessId, visibility])
   @@index([businessId, accountId])
+  contactTags       ContactTag[]
+  customFieldValues ContactCustomFieldValue[]
+
   @@unique([businessId, emailNormalized])
   @@unique([businessId, phoneNormalized])
   @@map("contacts")
+}
+
+model CustomFieldDefinition {
+  id           String   @id @default(cuid())
+  businessId   String   @map("business_id")
+  name         String
+  label        String
+  type         String
+  description  String?
+  placeholder  String?
+  options      Json?    // { options: [{ label, value }] } for SELECT / MULTI_SELECT
+  defaultValue Json?    @map("default_value")
+  required     Boolean  @default(false)
+  order        Int      @default(0)
+  archivedAt   DateTime? @map("archived_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  values       ContactCustomFieldValue[]
+
+  @@unique([businessId, name])
+  @@index([businessId])
+  @@index([businessId, archivedAt])
+  @@map("custom_field_definitions")
+}
+
+model ContactCustomFieldValue {
+  id           String   @id @default(cuid())
+  contactId    String   @map("contact_id")
+  definitionId String   @map("definition_id")
+  value        Json?
+
+  contact      Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  definition   CustomFieldDefinition @relation(fields: [definitionId], references: [id], onDelete: Cascade)
+
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@unique([contactId, definitionId])
+  @@index([contactId])
+  @@index([definitionId])
+  @@map("contact_custom_field_values")
+}
+
+model Tag {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  name        String
+  color       String?
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  contacts    ContactTag[]
+
+  @@unique([businessId, name])
+  @@index([businessId])
+  @@map("tags")
+}
+
+model ContactTag {
+  contactId String  @map("contact_id")
+  tagId     String  @map("tag_id")
+  contact   Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  tag       Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([contactId, tagId])
+  @@index([contactId])
+  @@index([tagId])
+  @@map("contact_tags")
 }
 
 /// Account / Company rollup. Multiple contacts and deals can belong to a single
@@ -1695,6 +1780,9 @@ model Invoice {
   receiptSentAt      DateTime?         @map("receipt_sent_at")
 
   timeEntries TimeEntry[]
+  creditNotes CreditNote[]
+  deliveryNotes DeliveryNote[]
+  receipts    Receipt[]
 
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt      @map("updated_at")
@@ -2885,6 +2973,7 @@ model ExpenseCategory {
   expenses   Expense[]
   budgets    ExpenseBudget[]
   recurringExpenses RecurringExpense[]
+  bankRules  BankRule[]
 
   // FIN1: link expense categories to a Chart of Account row so reports can
   // group spend by COA bucket. Nullable until FIN3 backfills the mapping.
@@ -2926,6 +3015,10 @@ model Expense {
   status      String    @default("PAID") // PAID, BILL, VOID
   dueDate     DateTime? @map("due_date")
   paidAt      DateTime? @map("paid_at")
+
+  /// Multi-line split items: [{ amount, categoryId, description?, taxRateId? }].
+  /// When absent, the expense posts as a single-line against categoryId.
+  items       Json?     @map("items")
 
   categoryId String?          @map("category_id")
   category   ExpenseCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
@@ -3001,6 +3094,117 @@ model RecurringExpense {
   @@index([businessId, isActive])
   @@index([businessId, nextRunDate])
   @@map("recurring_expenses")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Continental Operations — Delivery Notes, Goods Receipts, Stock Counts, Receipts
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Delivery Note authorizes release of goods from inventory. Cross-referenced
+/// with Invoice. Signed by deliverer and receiver. Status: DRAFT → ISSUED → DELIVERED.
+model DeliveryNote {
+  id                String   @id @default(cuid())
+  businessId        String   @map("business_id")
+  business          Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  dnNumber          String   @map("dn_number")
+  invoiceId         String   @map("invoice_id")
+  invoice           Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  status            String   @default("DRAFT") // DRAFT | ISSUED | DELIVERED | CANCELLED
+  deliveredAt       DateTime? @map("delivered_at")
+  delivererName     String?  @map("deliverer_name")
+  delivererSignature String? @map("deliverer_signature")
+  receiverName      String? @map("receiver_name")
+  receiverSignature String?  @map("receiver_signature")
+  notes             String?
+  items             Json     // [{ productId, description, quantity, unitPrice }]
+
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt      @map("updated_at")
+
+  @@unique([businessId, dnNumber])
+  @@index([businessId])
+  @@index([businessId, invoiceId])
+  @@index([businessId, status])
+  @@map("delivery_notes")
+}
+
+/// Goods Receipt records physical receipt of inventory against a PO or transfer.
+/// Qty received is checked against qty ordered. Discrepancies logged.
+model GoodsReceipt {
+  id                String   @id @default(cuid())
+  businessId        String   @map("business_id")
+  business          Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  grNumber          String   @map("gr_number")
+  purchaseOrderId   String?  @map("purchase_order_id")
+  purchaseOrder     PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id], onDelete: SetNull)
+
+  supplierName      String?  @map("supplier_name")
+  receivedAt        DateTime @default(now()) @map("received_at")
+  receivedBy        String?  @map("received_by")
+  status            String   @default("PENDING") // PENDING | CHECKED | POSTED | DISCREPANCY
+  notes             String?
+  items             Json     // [{ productId, description, qtyOrdered, qtyReceived, qtyAccepted, qtyRejected, reason }]
+
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt      @map("updated_at")
+
+  @@unique([businessId, grNumber])
+  @@index([businessId])
+  @@index([businessId, purchaseOrderId])
+  @@index([businessId, status])
+  @@map("goods_receipts")
+}
+
+/// Physical stock count with discrepancy audit.
+model StockCount {
+  id                String   @id @default(cuid())
+  businessId        String   @map("business_id")
+  business          Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  countNumber       String   @map("count_number")
+  countDate         DateTime @default(now()) @map("count_date")
+  countedBy         String?  @map("counted_by")
+  status            String   @default("IN_PROGRESS") // IN_PROGRESS | COMPLETED | ADJUSTED
+  notes             String?
+  items             Json     // [{ productId, description, systemQty, countedQty, variance, varianceValue }]
+
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt      @map("updated_at")
+
+  @@unique([businessId, countNumber])
+  @@index([businessId])
+  @@index([businessId, status])
+  @@map("stock_counts")
+}
+
+/// Formal payment receipt document. Linked to invoice and customer.
+model Receipt {
+  id                String   @id @default(cuid())
+  businessId        String   @map("business_id")
+  business          Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  receiptNumber     String   @map("receipt_number")
+  invoiceId         String   @map("invoice_id")
+  invoice           Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  amount            Decimal  @db.Decimal(18, 4)
+  currency          String   @default("TTD")
+  paymentMethod     String   @map("payment_method") // cash | bank_transfer | card | cheque | other
+  receivedFrom      String?  @map("received_from")
+  receivedBy        String?  @map("received_by")
+  receivedAt        DateTime @default(now()) @map("received_at")
+  notes             String?
+
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt      @map("updated_at")
+
+  @@unique([businessId, receiptNumber])
+  @@index([businessId])
+  @@index([businessId, invoiceId])
+  @@map("receipts")
 }
 
 model ExpenseBudget {
@@ -3939,6 +4143,7 @@ model PurchaseOrder {
   notes       String?
 
   fulfillmentRoutes FulfillmentRoute[]
+  goodsReceipts     GoodsReceipt[]
 
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
@@ -7189,6 +7394,7 @@ model FinancialAccount {
 
   bankTransactions BankTransaction[]
   reconciliations  Reconciliation[]
+  bankConnections  BankConnection[]
 
   @@unique([businessId, name])
   @@index([businessId])
@@ -7229,6 +7435,7 @@ model ChartOfAccount {
   ledgerEntries     LedgerEntry[]
   expenseCategories ExpenseCategory[]
   financialAccounts FinancialAccount[] @relation("FinancialAccountChartLink")
+  bankRules         BankRule[]
 
   @@unique([businessId, systemKey])
   @@index([businessId])
@@ -7445,6 +7652,205 @@ model TaxRate {
   @@unique([businessId, name])
   @@index([businessId, isActive])
   @@map("tax_rates")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Finance OS: Control Layer — Bank rules, recurring journals, credit notes,
+// period close, bank feeds, FX, and fixed assets.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// User-defined pattern rules for auto-categorizing imported bank transactions.
+/// When a bank row description/reference matches the pattern, the system can
+/// auto-create a categorized ledger transaction or at least pre-fill the match.
+model BankRule {
+  id                String   @id @default(cuid())
+  businessId        String   @map("business_id")
+  business          Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  name              String
+  priority          Int      @default(0)
+  pattern           String
+  matchType         String   @default("contains") @map("match_type") // contains | starts_with | equals | regex
+  accountId         String   @map("account_id")
+  account           ChartOfAccount @relation(fields: [accountId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  expenseCategoryId String?  @map("expense_category_id")
+  expenseCategory   ExpenseCategory? @relation(fields: [expenseCategoryId], references: [id], onDelete: SetNull)
+
+  isActive          Boolean  @default(true) @map("is_active")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt      @map("updated_at")
+
+  @@index([businessId])
+  @@index([businessId, isActive])
+  @@index([businessId, priority])
+  @@map("bank_rules")
+}
+
+/// Scheduled double-entry journal entries that emit on a recurring cadence.
+/// Mirrors the RecurringExpense scheduler pattern but posts directly via
+/// PostingService with type = ADJUSTMENT.
+model RecurringJournalEntry {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  name        String
+  description String?
+  frequency   String   // WEEKLY | BIWEEKLY | MONTHLY | QUARTERLY | YEARLY
+  nextRunDate DateTime @map("next_run_date")
+  endDate     DateTime? @map("end_date")
+  isActive    Boolean  @default(true) @map("is_active")
+
+  /// Array of { accountId, debit?, credit?, memo? } — validated by service layer.
+  entries     Json
+
+  runCount        Int      @default(0) @map("run_count")
+  failureCount    Int      @default(0) @map("failure_count")
+  lastError       String?  @map("last_error")
+  lastRunDate     DateTime? @map("last_run_date")
+  cancelledAt     DateTime? @map("cancelled_at")
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt      @map("updated_at")
+
+  @@index([businessId])
+  @@index([businessId, isActive])
+  @@index([businessId, nextRunDate])
+  @@map("recurring_journal_entries")
+}
+
+/// Formal credit memo against an invoice. Issuing a credit note reduces the
+/// invoice balance and posts a reversal journal via PostingService.
+model CreditNote {
+  id                String   @id @default(cuid())
+  businessId        String   @map("business_id")
+  business          Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  invoiceId         String   @map("invoice_id")
+  invoice           Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  creditNoteNumber  String   @map("credit_note_number")
+  status            String   @default("DRAFT") // DRAFT | ISSUED | APPLIED | VOID
+  amount            Decimal  @db.Decimal(18, 4)
+  reason            String?
+  items             Json?
+  appliedAt         DateTime? @map("applied_at")
+  voidedAt          DateTime? @map("voided_at")
+
+  /// Link to the reversal journal transaction created on issue.
+  reversalTransactionId String? @map("reversal_transaction_id")
+
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt      @map("updated_at")
+
+  @@unique([businessId, creditNoteNumber])
+  @@index([businessId])
+  @@index([businessId, invoiceId])
+  @@index([businessId, status])
+  @@map("credit_notes")
+}
+
+/// Formal accounting period (month/year bucket). Closing a period stamps all
+/// in-period FinancialTransaction rows and prevents back-dated edits unless
+/// an admin reopens it.
+model AccountingPeriod {
+  id            String   @id @default(cuid())
+  businessId    String   @map("business_id")
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  year          Int
+  month         Int      // 1-12
+  startDate     DateTime @map("start_date")
+  endDate       DateTime @map("end_date")
+  status        String   @default("OPEN") // OPEN | CLOSED
+  closedAt      DateTime? @map("closed_at")
+  closedById    String?  @map("closed_by_id")
+
+  /// Set on all FinancialTransaction rows whose date falls inside the period
+  /// when the period is closed. Used to enforce the lock.
+  lockedTransactionStamp String? @map("locked_transaction_stamp")
+
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt      @map("updated_at")
+
+  @@unique([businessId, year, month])
+  @@index([businessId, status])
+  @@map("accounting_periods")
+}
+
+/// Live bank feed connection metadata (Plaid, Yodlee, etc.).
+model BankConnection {
+  id                  String   @id @default(cuid())
+  businessId          String   @map("business_id")
+  business            Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  financialAccountId  String   @map("financial_account_id")
+  financialAccount    FinancialAccount @relation(fields: [financialAccountId], references: [id], onDelete: Cascade)
+
+  provider            String   // plaid | yodlee | salt_edge | open_banking
+  providerItemId      String?  @map("provider_item_id")
+  accessToken         String?  @map("access_token")
+  status              String   @default("ACTIVE") // ACTIVE | ERROR | EXPIRED | DISCONNECTED
+  lastSyncAt          DateTime? @map("last_sync_at")
+  lastSyncCursor      String?  @map("last_sync_cursor")
+  errorMessage        String?  @map("error_message")
+
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt      @map("updated_at")
+
+  @@index([businessId])
+  @@index([businessId, status])
+  @@index([businessId, financialAccountId])
+  @@map("bank_connections")
+}
+
+/// Daily exchange rate snapshot for multi-currency revaluation.
+model ExchangeRate {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  fromCurrency String  @map("from_currency")
+  toCurrency   String  @map("to_currency")
+  rate         Decimal @db.Decimal(18, 8)
+  date         DateTime @db.Date
+  source       String? // ecb | xe | manual
+
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@unique([businessId, fromCurrency, toCurrency, date])
+  @@index([businessId, fromCurrency, toCurrency])
+  @@map("exchange_rates")
+}
+
+/// Fixed asset register with depreciation tracking.
+model FixedAsset {
+  id                     String   @id @default(cuid())
+  businessId             String   @map("business_id")
+  business               Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  name                   String
+  category               String   // equipment | vehicle | property | furniture | technology
+  purchaseDate           DateTime @map("purchase_date")
+  purchaseCost           Decimal  @db.Decimal(18, 4) @map("purchase_cost")
+  salvageValue           Decimal? @db.Decimal(18, 4) @map("salvage_value")
+  usefulLifeMonths       Int      @map("useful_life_months")
+  depreciationMethod     String   @default("straight_line") @map("depreciation_method") // straight_line | reducing_balance
+
+  accumulatedDepreciation Decimal @default(0) @db.Decimal(18, 4) @map("accumulated_depreciation")
+  netBookValue           Decimal  @db.Decimal(18, 4) @map("net_book_value")
+
+  disposalDate           DateTime? @map("disposal_date")
+  disposalProceeds       Decimal?  @db.Decimal(18, 4) @map("disposal_proceeds")
+  status                 String   @default("ACTIVE") // ACTIVE | FULLY_DEPRECIATED | DISPOSED
+
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt      @map("updated_at")
+
+  @@index([businessId])
+  @@index([businessId, status])
+  @@map("fixed_assets")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

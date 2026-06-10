@@ -704,6 +704,127 @@ export class PresenceOverviewService {
     return { items };
   }
 
+  async getTodayStats(businessId: string) {
+    const todayStart = new Date();
+    todayStart.setUTCHours(0, 0, 0, 0);
+
+    const [todayEvents, uniqueVisitors, sources, recentOrders, recentBookings] = await Promise.all([
+      this.prisma.client.publicEvent.findMany({
+        where: { businessId, ts: { gte: todayStart } },
+        select: { type: true, visitorId: true, source: true, medium: true, payload: true, ts: true },
+      }),
+      this.prisma.client.publicEvent.findMany({
+        where: { businessId, ts: { gte: todayStart }, type: { in: ['page_view', 'view'] } },
+        select: { visitorId: true },
+        distinct: ['visitorId'],
+      }),
+      this.prisma.client.publicEvent.groupBy({
+        by: ['source'],
+        where: { businessId, ts: { gte: todayStart } },
+        _count: { _all: true },
+      }),
+      this.prisma.client.marketplaceOrder.findMany({
+        where: { businessId, createdAt: { gte: todayStart } },
+        select: { id: true, total: true, currency: true, status: true, customerName: true, createdAt: true },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+      }),
+      this.prisma.client.booking.findMany({
+        where: { businessId, deletedAt: null, createdAt: { gte: todayStart } },
+        select: { id: true, status: true, startTime: true, contact: { select: { firstName: true, lastName: true, displayName: true } } },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+      }),
+    ]);
+
+    let views = 0;
+    let cartAdds = 0;
+    let checkouts = 0;
+    let orders = 0;
+    let bookings = 0;
+    let revenue = 0;
+    let whatsappClicks = 0;
+    let shareClicks = 0;
+
+    for (const ev of todayEvents) {
+      switch (ev.type) {
+        case 'page_view':
+        case 'view':
+        case 'product_view':
+        case 'service_view':
+          views++;
+          break;
+        case 'cart.added':
+        case 'cart.updated':
+          cartAdds++;
+          break;
+        case 'checkout_start':
+          checkouts++;
+          break;
+        case 'store_order.created':
+          orders++;
+          break;
+        case 'booking.created':
+          bookings++;
+          break;
+        case 'whatsapp_click':
+          whatsappClicks++;
+          break;
+        case 'share_click':
+        case 'share':
+          shareClicks++;
+          break;
+      }
+      if (ev.type === 'payment.completed' && ev.payload && typeof ev.payload === 'object' && !Array.isArray(ev.payload)) {
+        const p = ev.payload as Record<string, unknown>;
+        revenue += Number(p.amount ?? 0) || 0;
+      }
+    }
+
+    for (const o of recentOrders) {
+      revenue += Number(o.total ?? 0);
+    }
+
+    const topSources = sources
+      .filter((s) => s.source && s.source.length > 0)
+      .map((s) => ({ source: s.source!, count: s._count._all }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 6);
+
+    const recentEvents = todayEvents
+      .sort((a, b) => b.ts.getTime() - a.ts.getTime())
+      .slice(0, 20)
+      .map((ev) => ({
+        type: ev.type,
+        visitorId: ev.visitorId,
+        source: ev.source,
+        medium: ev.medium,
+        ts: ev.ts.toISOString(),
+      }));
+
+    return {
+      visitors: uniqueVisitors.length,
+      events: { views, cartAdds, checkouts, orders, bookings, revenue, whatsappClicks, shareClicks },
+      funnel: { views, cartAdds, checkouts, orders, bookings },
+      topSources,
+      recentEvents,
+      recentOrders: recentOrders.map((o) => ({
+        id: o.id,
+        total: Number(o.total ?? 0),
+        currency: o.currency,
+        status: o.status,
+        customerName: o.customerName,
+        createdAt: o.createdAt.toISOString(),
+      })),
+      recentBookings: recentBookings.map((b) => ({
+        id: b.id,
+        status: b.status,
+        contactName: b.contact?.displayName ?? (`${b.contact?.firstName ?? ''} ${b.contact?.lastName ?? ''}`.trim() || 'Guest'),
+        startTime: b.startTime.toISOString(),
+      })),
+    };
+  }
+
   async listStorefrontBookings(businessId: string, opts: { limit?: number } = {}) {
     const limit = Math.min(Math.max(opts.limit ?? 25, 1), 100);
     // Strict: bookings whose contact has source='storefront'. If there are no

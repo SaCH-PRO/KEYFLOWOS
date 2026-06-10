@@ -38,10 +38,10 @@ export function RelationshipIntelligencePanel() {
   const router = useRouter();
 
   const insights: RelationshipInsight[] = useMemo(() => [
-    { id: "1", type: "risk", title: "Churn Risk Detected", description: "12 high-value contacts haven't engaged in 60+ days. 3 show strong churn signals.", contactCount: 12, impact: "-$4,200 MRR", actionRoute: "/app/network/contacts" },
-    { id: "2", type: "opportunity", title: "Upsell Window", description: "8 clients are ready for Service B based on usage patterns. Expected value: $1,600.", contactCount: 8, impact: "+$1,600", actionRoute: "/app/network/contacts" },
-    { id: "3", type: "pattern", title: "Referral Source", description: "Your top 5 clients referred 18 new contacts. Consider a formal referral program.", contactCount: 18, impact: "+18 leads", actionRoute: "/app/network/contacts" },
-    { id: "4", type: "action", title: "Follow-up Queue", description: "7 contacts need follow-up today. 2 are high-priority based on deal stage.", contactCount: 7, impact: "Today", actionRoute: "/app/network/contacts" },
+    { id: "1", type: "risk", title: "Churn Risk Detected", description: "12 high-value contacts haven't engaged in 60+ days. 3 show strong churn signals.", contactCount: 12, impact: "-$4,200 MRR", actionRoute: "/app/crm/contacts" },
+    { id: "2", type: "opportunity", title: "Upsell Window", description: "8 clients are ready for Service B based on usage patterns. Expected value: $1,600.", contactCount: 8, impact: "+$1,600", actionRoute: "/app/crm/contacts" },
+    { id: "3", type: "pattern", title: "Referral Source", description: "Your top 5 clients referred 18 new contacts. Consider a formal referral program.", contactCount: 18, impact: "+18 leads", actionRoute: "/app/crm/contacts" },
+    { id: "4", type: "action", title: "Follow-up Queue", description: "7 contacts need follow-up today. 2 are high-priority based on deal stage.", contactCount: 7, impact: "Today", actionRoute: "/app/crm/contacts" },
   ], []);
 
   const segments: SegmentHealth[] = useMemo(() => [

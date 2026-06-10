@@ -9,18 +9,34 @@ interface CaptureButtonProps {
   businessId: string;
   variant?: "fab" | "inline" | "icon";
   className?: string;
+  onCaptureCreated?: () => void;
 }
 
-export function CaptureButton({ businessId, variant = "fab", className }: CaptureButtonProps) {
+export function CaptureButton({
+  businessId,
+  variant = "fab",
+  className,
+  onCaptureCreated,
+}: CaptureButtonProps) {
   const [open, setOpen] = useState(false);
 
   if (variant === "icon") {
     return (
       <>
-        <Button size="icon" variant="ghost" onClick={() => setOpen(true)} className={className}>
+        <Button
+          size="icon"
+          variant="ghost"
+          onClick={() => setOpen(true)}
+          className={className}
+        >
           <Camera className="h-5 w-5" />
         </Button>
-        <CaptureSheet businessId={businessId} open={open} onClose={() => setOpen(false)} />
+        <CaptureSheet
+          businessId={businessId}
+          open={open}
+          onClose={() => setOpen(false)}
+          onCaptureCreated={onCaptureCreated}
+        />
       </>
     );
   }
@@ -32,7 +48,12 @@ export function CaptureButton({ businessId, variant = "fab", className }: Captur
           <Camera className="h-4 w-4 mr-2" />
           Capture
         </Button>
-        <CaptureSheet businessId={businessId} open={open} onClose={() => setOpen(false)} />
+        <CaptureSheet
+          businessId={businessId}
+          open={open}
+          onClose={() => setOpen(false)}
+          onCaptureCreated={onCaptureCreated}
+        />
       </>
     );
   }
@@ -54,7 +75,12 @@ export function CaptureButton({ businessId, variant = "fab", className }: Captur
       >
         <Plus className="h-6 w-6" />
       </button>
-      <CaptureSheet businessId={businessId} open={open} onClose={() => setOpen(false)} />
+      <CaptureSheet
+        businessId={businessId}
+        open={open}
+        onClose={() => setOpen(false)}
+        onCaptureCreated={onCaptureCreated}
+      />
     </>
   );
 }

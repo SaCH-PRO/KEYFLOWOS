@@ -115,6 +115,13 @@ export class DeviceService {
       });
     }
 
+    // 4b. Auto-run AI vision extraction for images with public URL
+    if (input.mediaType === 'image' && input.publicUrl) {
+      this.runAutoExtraction(businessId, asset.id, intake.id, input).catch((err: unknown) => {
+        this.logger.warn(`Auto-extraction failed for asset ${asset.id}: ${err instanceof Error ? err.message : String(err)}`);
+      });
+    }
+
     // 5. Create command item for high-value captures
     if (classification && classification.detectedType !== 'unknown') {
       const categoryMap: Record<string, string> = {
@@ -256,7 +263,7 @@ export class DeviceService {
     if (filters?.status) where.status = filters.status;
     if (filters?.contactId) where.contactId = filters.contactId;
 
-    const [items, total] = await Promise.all([
+    const [assets, total] = await Promise.all([
       this.prisma.client.mediaAsset.findMany({
         where,
         orderBy: { createdAt: 'desc' },
@@ -265,6 +272,19 @@ export class DeviceService {
       }),
       this.prisma.client.mediaAsset.count({ where }),
     ]);
+
+    const assetIds = assets.map((a) => a.id);
+    const intakes = assetIds.length > 0
+      ? await this.prisma.client.visualIntake.findMany({
+          where: { mediaAssetId: { in: assetIds }, businessId },
+        })
+      : [];
+    const intakeMap = new Map(intakes.map((i) => [i.mediaAssetId, i]));
+
+    const items = assets.map((asset) => ({
+      asset,
+      intake: intakeMap.get(asset.id) ?? null,
+    }));
 
     return { items, total };
   }
@@ -301,11 +321,19 @@ export class DeviceService {
       where: { mediaAssetId: assetId, businessId },
     });
 
-    const entities = await this.prisma.client.extractedEntity.findMany({
-      where: { mediaAssetId: assetId, businessId },
-    });
-
-    return { asset, intake, entities };
+    return {
+      asset,
+      intake,
+      classification: intake
+        ? {
+            detectedType: intake.detectedType ?? 'unknown',
+            confidenceScore: intake.confidenceScore ?? 0,
+            summary: intake.summary ?? '',
+            extractedData: (intake.extractedData ?? {}) as Record<string, unknown>,
+            recommendedActions: (intake.recommendedActions ?? []) as Record<string, unknown>[],
+          }
+        : null,
+    };
   }
 
   async approveIntake(businessId: string, intakeId: string, userId: string) {
@@ -405,6 +433,66 @@ export class DeviceService {
         isDefault: input.isDefault ?? false,
       },
     });
+  }
+
+  private async runAutoExtraction(
+    businessId: string,
+    assetId: string,
+    intakeId: string,
+    input: CreateCaptureInput,
+  ) {
+    try {
+      const extraction = await this.docIntel.extractFromDocument({
+        businessId,
+        source: 'device_capture_auto',
+        mimeType: input.contentType,
+        url: input.publicUrl!,
+        filename: input.fileName ?? 'capture',
+      });
+
+      await this.prisma.client.visualIntake.update({
+        where: { id: intakeId },
+        data: {
+          extractedText: extraction.rawText ?? null,
+          extractedData: (extraction.invoiceData ?? extraction.contactData ?? {}) as Record<string, unknown>,
+          status: 'PROCESSED',
+          confidenceScore: extraction.confidence,
+        },
+      });
+
+      const proposedData = (extraction.invoiceData ?? extraction.contactData ?? {}) as Record<string, unknown>;
+      const existingEntity = await this.prisma.client.extractedEntity.findFirst({
+        where: { visualIntakeId: intakeId, entityType: extraction.documentType },
+      });
+      if (existingEntity) {
+        await this.prisma.client.extractedEntity.update({
+          where: { id: existingEntity.id },
+          data: { proposedData, status: 'PROPOSED' },
+        });
+      } else {
+        await this.prisma.client.extractedEntity.create({
+          data: {
+            businessId,
+            visualIntakeId: intakeId,
+            mediaAssetId: assetId,
+            entityType: extraction.documentType,
+            proposedData,
+            status: 'PROPOSED',
+          },
+        });
+      }
+
+      await this.prisma.client.mediaAsset.update({
+        where: { id: assetId },
+        data: { status: 'PROCESSED' },
+      });
+    } catch (err: unknown) {
+      this.logger.warn(`Auto-extraction failed: ${err instanceof Error ? err.message : String(err)}`);
+      await this.prisma.client.visualIntake.update({
+        where: { id: intakeId },
+        data: { status: 'FAILED' },
+      });
+    }
   }
 
   async processCapture(businessId: string, captureId: string, _userId?: string) {

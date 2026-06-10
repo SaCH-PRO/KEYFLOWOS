@@ -2,6 +2,7 @@
 
 import { AddonPackGate } from "@/components/addon-pack-gate";
 import { useState, useMemo, useCallback, useEffect } from "react";
+import { motion } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
@@ -17,8 +18,13 @@ import {
   Eye,
   Copy,
   Sparkles,
+  BarChart3,
+  Calendar,
 } from "lucide-react";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
+import { MetricCard } from "@/components/ui/metric-card";
+import { SectionCard } from "@/components/ui/section-card";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
   CallLog,
   fetchCallLogs,
@@ -185,14 +191,46 @@ function CallTasksPage() {
     toast.success("Copied to clipboard");
   };
 
+  const reachedCount = calls.filter((c) => c.outcome === "reached").length;
+  const noAnswerCount = calls.filter((c) => c.outcome === "no_answer").length;
+  const completionRate = calls.length > 0 ? Math.round((reachedCount / calls.length) * 100) : 0;
+
+  const fadeUp = {
+    hidden: { opacity: 0, y: 12 },
+    show: { opacity: 1, y: 0, transition: { type: "spring" as const, stiffness: 300, damping: 24 } },
+  };
+
+  const staggerContainer = {
+    hidden: { opacity: 0 },
+    show: { opacity: 1, transition: { staggerChildren: 0.04 } },
+  };
+
   return (
-    <WorkspaceShell icon={Phone} title="Call Tasks">
-      <div className="flex flex-col gap-6 p-6 max-w-7xl mx-auto">
+    <WorkspaceShell icon={Phone} title="Call Tasks" subtitle="Schedule and log phone calls">
+      <div className="flex flex-col gap-6 max-w-7xl mx-auto">
+        {/* Metrics */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {loading ? (
+            Array.from({ length: 4 }).map((_, i) => <div key={i} className="kf-card-metric animate-pulse h-20" />)
+          ) : (
+            <>
+              <motion.div variants={fadeUp} initial="hidden" animate="show">
+                <MetricCard label="Total Calls" value={calls.length} icon={Phone} />
+              </motion.div>
+              <motion.div variants={fadeUp} initial="hidden" animate="show" transition={{ delay: 0.05 }}>
+                <MetricCard label="Scheduled Today" value={scheduled.length} icon={Calendar} iconColor="#3b82f6" />
+              </motion.div>
+              <motion.div variants={fadeUp} initial="hidden" animate="show" transition={{ delay: 0.1 }}>
+                <MetricCard label="Reached" value={reachedCount} icon={CheckCircle2} iconColor="#10b981" />
+              </motion.div>
+              <motion.div variants={fadeUp} initial="hidden" animate="show" transition={{ delay: 0.15 }}>
+                <MetricCard label="Completion Rate" value={`${completionRate}%`} icon={BarChart3} iconColor="#8b5cf6" />
+              </motion.div>
+            </>
+          )}
+        </div>
+
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight">Call Tasks</h1>
-            <p className="text-muted-foreground mt-1">Schedule and log phone calls</p>
-          </div>
           <button
             onClick={() => setShowCreate(true)}
             className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors"
@@ -204,16 +242,20 @@ function CallTasksPage() {
 
         {/* Today's scheduled */}
         {scheduled.length > 0 && (
-          <div className="border rounded-xl p-4 bg-blue-50/50">
-            <h3 className="text-sm font-medium mb-3 flex items-center gap-2">
-              <Clock className="w-4 h-4 text-blue-600" />
-              Scheduled Today ({scheduled.length})
-            </h3>
-            <div className="space-y-2">
-              {scheduled.slice(0, 3).map((c) => (
-                <div key={c.id} className="flex items-center justify-between p-3 rounded-lg bg-white border">
+          <SectionCard title={`Scheduled Today (${scheduled.length})`} icon={Clock} compact>
+            <div className="space-y-2 p-3">
+              {scheduled.slice(0, 5).map((c, i) => (
+                <motion.div
+                  key={c.id}
+                  initial={{ opacity: 0, x: -8 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: i * 0.05 }}
+                  className="flex items-center justify-between p-3 rounded-xl bg-muted/20 border border-border/30 hover:bg-muted/30 transition-colors"
+                >
                   <div className="flex items-center gap-3">
-                    <Phone className="w-4 h-4 text-blue-500" />
+                    <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center">
+                      <Phone className="w-4 h-4 text-blue-500" />
+                    </div>
                     <div>
                       <span className="font-medium text-sm">Contact {c.contactId.slice(0, 8)}</span>
                       <span className="text-muted-foreground text-xs ml-2">
@@ -223,14 +265,14 @@ function CallTasksPage() {
                   </div>
                   <button
                     onClick={() => setShowComplete(c.id)}
-                    className="px-3 py-1 bg-primary text-primary-foreground rounded-lg text-xs font-medium hover:bg-primary/90"
+                    className="px-3 py-1.5 bg-primary text-primary-foreground rounded-lg text-xs font-medium hover:bg-primary/90 transition-colors"
                   >
                     Log
                   </button>
-                </div>
+                </motion.div>
               ))}
             </div>
-          </div>
+          </SectionCard>
         )}
 
         <div className="relative">
@@ -249,12 +291,17 @@ function CallTasksPage() {
             <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
           </div>
         ) : filtered.length === 0 ? (
-          <div className="text-center py-20 border rounded-xl bg-muted/20">
-            <Phone className="w-12 h-12 mx-auto text-muted-foreground mb-3" />
-            <h3 className="text-lg font-medium">No call tasks</h3>
-          </div>
+          <EmptyState
+            icon={Phone}
+            title="No call tasks"
+            description="Schedule your first call to start tracking outreach."
+            actionLabel="New Call"
+            actionIcon={Plus}
+            onAction={() => setShowCreate(true)}
+            variant="compact"
+          />
         ) : (
-          <div className="border rounded-xl overflow-hidden">
+          <SectionCard title="Call History" icon={BarChart3} compact noPadding>
             <table className="w-full text-sm">
               <thead className="bg-muted/50">
                 <tr>
@@ -335,7 +382,7 @@ function CallTasksPage() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </SectionCard>
         )}
       </div>
 

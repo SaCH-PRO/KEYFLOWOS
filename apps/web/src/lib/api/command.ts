@@ -125,3 +125,24 @@ export async function autoScanCommandItems(businessId: string) {
     body: {},
   });
 }
+
+export async function bulkCompleteCommands(businessId: string, ids: string[]) {
+  return apiPost<{ count: number }>({
+    path: `/command/businesses/${businessId}/items/bulk/complete`,
+    body: { ids },
+  });
+}
+
+export async function bulkDismissCommands(businessId: string, ids: string[]) {
+  return apiPost<{ count: number }>({
+    path: `/command/businesses/${businessId}/items/bulk/dismiss`,
+    body: { ids },
+  });
+}
+
+export async function bulkDeleteCommands(businessId: string, ids: string[]) {
+  return apiPost<{ count: number }>({
+    path: `/command/businesses/${businessId}/items/bulk/delete`,
+    body: { ids },
+  });
+}

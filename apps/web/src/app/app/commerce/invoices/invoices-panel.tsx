@@ -45,8 +45,6 @@ import {
   updateInvoice,
   markInvoicePaid,
   updateInvoiceStatus,
-  sendInvoiceEmail,
-  sendInvoiceReminder,
   resendInvoiceReceipt,
   createInvoicePaymentLink,
   recordInvoicePayment,
@@ -61,6 +59,7 @@ import { apiDelete } from "@/lib/api";
 import { useModuleEmit } from "@/hooks/use-module-events";
 import { registerInterruptedTask, markTaskCompleted } from "@/lib/resume-task-registry";
 import { useNavigationContext } from "@/lib/navigation-context";
+import { useCompose } from "@/components/email/compose-context";
 import {
   INVOICE_STATUS_FILTERS,
   InvoiceLineItem,
@@ -146,6 +145,7 @@ export default function InvoicesPanel({
   const emitEvent = useModuleEmit();
   const { businessData, saveBranding, savingBranding } = useBusinessPreview();
   const { getOriginContext } = useNavigationContext();
+  const { open: openComposer } = useCompose();
   const invoiceTaskIdRef = useRef<string | null>(null);
   const invoiceSessionIdRef = useRef<string | null>(null);
 
@@ -225,10 +225,6 @@ export default function InvoicesPanel({
   const [copiedLink, setCopiedLink] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [invoiceError, setInvoiceError] = useState<string | null>(null);
-  const [showEmailModal, setShowEmailModal] = useState(false);
-  const [emailMode, setEmailMode] = useState<"send" | "reminder">("send");
-  const [emailForm, setEmailForm] = useState({ email: "", message: "" });
-  const [sendingEmail, setSendingEmail] = useState(false);
   const [confirmState, setConfirmState] = useState<{open: boolean; action: () => void}>({open: false, action: () => {}});
   const [actionLoading, setActionLoading] = useState<Record<string, string>>({});
   const [paymentModal, setPaymentModal] = useState<{ invoice: Invoice } | null>(null);
@@ -667,57 +663,7 @@ export default function InvoicesPanel({
     }
   }
 
-  function openReminderEmail(inv: Invoice) {
-    setSelectedInvoice(inv);
-    const contactName = inv.contact
-      ? `${inv.contact.firstName ?? ""} ${inv.contact.lastName ?? ""}`.trim()
-      : "there";
-    setEmailForm({
-      email: inv.contact?.email ?? "",
-      message: `Hi ${contactName}, this is a friendly reminder that invoice ${inv.invoiceNumber ?? ""} for ${formatAmount(inv.total, inv.currency)} is ${inv.status === "OVERDUE" ? "overdue" : "awaiting payment"}. Please let us know if you have any questions.`,
-    });
-    setEmailMode("reminder");
-    setShowEmailModal(true);
-  }
 
-  async function handleSendInvoiceEmail() {
-    if (!selectedInvoice || !businessId) return;
-    const targetEmail = emailForm.email || selectedInvoice.contact?.email;
-    if (!targetEmail) {
-      setInvoiceError("Please enter an email address");
-      return;
-    }
-    setSendingEmail(true);
-    try {
-      const res = emailMode === "reminder"
-        ? await sendInvoiceReminder(businessId, selectedInvoice.id, {
-            recipientEmail: targetEmail,
-            message: emailForm.message,
-            channel: "email",
-          })
-        : await sendInvoiceEmail(businessId, selectedInvoice.id, {
-            recipientEmail: targetEmail,
-            message: emailForm.message,
-          });
-      if (res.error) {
-        toast.error(res.error);
-      } else {
-        if (emailMode === "send") {
-          setInvoices((prev) =>
-            prev.map((i) => (i.id === selectedInvoice.id && i.status === "DRAFT" ? { ...i, status: "SENT" } : i))
-          );
-        }
-        setShowEmailModal(false);
-        setEmailForm({ email: "", message: "" });
-        setInvoiceError(null);
-        toast.success(emailMode === "reminder" ? "Reminder sent" : "Invoice sent via email");
-      }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to send email");
-    } finally {
-      setSendingEmail(false);
-    }
-  }
 
   return (
     <motion.div
@@ -944,7 +890,12 @@ export default function InvoicesPanel({
                   setShowInvoiceBuilder(true);
                   break;
                 case "remind":
-                  openReminderEmail(inv);
+                  openComposer({
+                    to: inv.contact?.email || "",
+                    subject: `Friendly reminder: Invoice ${inv.invoiceNumber || inv.id}`,
+                    context: { type: "follow_up", recordNumber: inv.invoiceNumber || inv.id },
+                    onSent: () => toast.success("Reminder sent"),
+                  });
                   break;
                 case "collect":
                   openPaymentModal(inv);
@@ -1046,11 +997,33 @@ export default function InvoicesPanel({
                       />
                       <OverflowMenuItem icon={Files} label="Duplicate" onClick={() => duplicateInvoice(inv)} />
                       <OverflowMenuItem icon={MessageCircle} label="Share via WhatsApp" onClick={() => shareViaWhatsApp(inv)} />
-                      {gmailStatus?.connected && (
-                        <OverflowMenuItem icon={Mail} label="Send via email" onClick={() => { setSelectedInvoice(inv); setEmailMode("send"); setShowEmailModal(true); }} />
-                      )}
-                      {(inv.status === "SENT" || inv.status === "OVERDUE" || inv.status === "PARTIALLY_PAID") && gmailStatus?.connected && (
-                        <OverflowMenuItem icon={Bell} label="Send reminder" onClick={() => openReminderEmail(inv)} />
+                      <OverflowMenuItem
+                        icon={Mail}
+                        label="Send via email"
+                        onClick={() => {
+                          setSelectedInvoice(inv);
+                          openComposer({
+                            to: inv.contact?.email || "",
+                            subject: `Invoice ${inv.invoiceNumber || inv.id}`,
+                            context: { type: "invoice", recordNumber: inv.invoiceNumber || inv.id },
+                            onSent: () => {
+                              setInvoices((prev) => prev.map((i) => (i.id === inv.id && i.status === "DRAFT" ? { ...i, status: "SENT" } : i)));
+                              toast.success("Invoice sent via email");
+                            },
+                          });
+                        }}
+                      />
+                      {(inv.status === "SENT" || inv.status === "OVERDUE" || inv.status === "PARTIALLY_PAID") && (
+                        <OverflowMenuItem
+                          icon={Bell}
+                          label="Send reminder"
+                          onClick={() => openComposer({
+                            to: inv.contact?.email || "",
+                            subject: `Friendly reminder: Invoice ${inv.invoiceNumber || inv.id}`,
+                            context: { type: "follow_up", recordNumber: inv.invoiceNumber || inv.id },
+                            onSent: () => toast.success("Reminder sent"),
+                          })}
+                        />
                       )}
                       {inv.status === "PAID" && gmailStatus?.connected && inv.contact?.email && (
                         <OverflowMenuItem icon={Receipt} label="Resend receipt" onClick={() => handleResendReceipt(inv)} />
@@ -1112,21 +1085,32 @@ export default function InvoicesPanel({
         onClose={() => setMobileSheetFor(null)}
         invoiceNumber={mobileSheetFor?.invoiceNumber ?? mobileSheetFor?.id?.slice(0, 8) ?? ""}
         status={mobileSheetFor?.status ?? "DRAFT"}
-        hasGmail={!!gmailStatus?.connected}
+        hasGmail={true}
         onSend={
-          mobileSheetFor && gmailStatus?.connected
-            ? () => {
-                setSelectedInvoice(mobileSheetFor);
-                setEmailMode("send");
-                setShowEmailModal(true);
-              }
+          mobileSheetFor
+            ? () => openComposer({
+                to: mobileSheetFor.contact?.email || "",
+                subject: `Invoice ${mobileSheetFor.invoiceNumber || mobileSheetFor.id}`,
+                context: { type: "invoice", recordNumber: mobileSheetFor.invoiceNumber || mobileSheetFor.id },
+                onSent: () => {
+                  setInvoices((prev) => prev.map((i) => (i.id === mobileSheetFor.id && i.status === "DRAFT" ? { ...i, status: "SENT" } : i)));
+                  toast.success("Invoice sent via email");
+                },
+              })
             : undefined
         }
         onCopyPaymentLink={() => mobileSheetFor && copyPaymentLink(mobileSheetFor.id)}
         onShareWhatsApp={mobileSheetFor ? () => shareViaWhatsApp(mobileSheetFor) : undefined}
         onRecordPayment={mobileSheetFor ? () => openPaymentModal(mobileSheetFor) : undefined}
         onSendReminder={
-          mobileSheetFor && gmailStatus?.connected ? () => openReminderEmail(mobileSheetFor) : undefined
+          mobileSheetFor
+            ? () => openComposer({
+                to: mobileSheetFor.contact?.email || "",
+                subject: `Friendly reminder: Invoice ${mobileSheetFor.invoiceNumber || mobileSheetFor.id}`,
+                context: { type: "follow_up", recordNumber: mobileSheetFor.invoiceNumber || mobileSheetFor.id },
+                onSent: () => toast.success("Reminder sent"),
+              })
+            : undefined
         }
         onResendReceipt={
           mobileSheetFor && gmailStatus?.connected ? () => handleResendReceipt(mobileSheetFor) : undefined
@@ -1134,7 +1118,7 @@ export default function InvoicesPanel({
       />
 
       <AnimatePresence>
-        {selectedInvoice && !showEmailModal && (
+        {selectedInvoice && (
           <BillingDetailModal
             type="invoice"
             number={selectedInvoice.invoiceNumber ?? selectedInvoice.id.slice(0, 8)}
@@ -1178,13 +1162,32 @@ export default function InvoicesPanel({
                     <button onClick={() => shareViaWhatsApp(selectedInvoice)} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-emerald-500/10 transition-colors" title="Share via WhatsApp">
                       <MessageCircle className="w-4 h-4 text-emerald-400" />
                     </button>
-                    {gmailStatus?.connected && (
-                      <button onClick={() => { setEmailMode("send"); setShowEmailModal(true); }} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-blue-500/10 transition-colors" title="Send via email">
-                        <Mail className="w-4 h-4 text-blue-400" />
-                      </button>
-                    )}
-                    {(selectedInvoice.status === "SENT" || selectedInvoice.status === "OVERDUE" || selectedInvoice.status === "PARTIALLY_PAID") && gmailStatus?.connected && (
-                      <button onClick={() => openReminderEmail(selectedInvoice)} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-amber-500/10 transition-colors" title="Send payment reminder">
+                    <button
+                      onClick={() => openComposer({
+                        to: selectedInvoice.contact?.email || "",
+                        subject: `Invoice ${selectedInvoice.invoiceNumber || selectedInvoice.id}`,
+                        context: { type: "invoice", recordNumber: selectedInvoice.invoiceNumber || selectedInvoice.id },
+                        onSent: () => {
+                          setInvoices((prev) => prev.map((i) => (i.id === selectedInvoice.id && i.status === "DRAFT" ? { ...i, status: "SENT" } : i)));
+                          toast.success("Invoice sent via email");
+                        },
+                      })}
+                      className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-blue-500/10 transition-colors"
+                      title="Send via email"
+                    >
+                      <Mail className="w-4 h-4 text-blue-400" />
+                    </button>
+                    {(selectedInvoice.status === "SENT" || selectedInvoice.status === "OVERDUE" || selectedInvoice.status === "PARTIALLY_PAID") && (
+                      <button
+                        onClick={() => openComposer({
+                          to: selectedInvoice.contact?.email || "",
+                          subject: `Friendly reminder: Invoice ${selectedInvoice.invoiceNumber || selectedInvoice.id}`,
+                          context: { type: "follow_up", recordNumber: selectedInvoice.invoiceNumber || selectedInvoice.id },
+                          onSent: () => toast.success("Reminder sent"),
+                        })}
+                        className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-amber-500/10 transition-colors"
+                        title="Send payment reminder"
+                      >
                         <Bell className="w-4 h-4 text-amber-400" />
                       </button>
                     )}
@@ -1225,60 +1228,7 @@ export default function InvoicesPanel({
           />
         )}
 
-        {showEmailModal && selectedInvoice && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-            onClick={(e) => e.target === e.currentTarget && setShowEmailModal(false)}
-          >
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="w-full max-w-md bg-card rounded-2xl border border-border shadow-2xl p-6 space-y-4"
-            >
-              <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold flex items-center gap-2">
-                  <Mail className="w-5 h-5 text-blue-400" /> Send Invoice via Email
-                </h3>
-                <button onClick={() => setShowEmailModal(false)} className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg hover:bg-muted">
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-              <p className="text-sm text-muted-foreground">
-                Sending invoice <span className="font-mono text-foreground">{selectedInvoice.invoiceNumber}</span> for{" "}
-                {formatAmount(selectedInvoice.total, selectedInvoice.currency)}
-              </p>
-              <div>
-                <label className="text-xs text-muted-foreground mb-1.5 block">Recipient Email</label>
-                <input
-                  type="email"
-                  className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                  placeholder={selectedInvoice.contact?.email || "Enter email address"}
-                  value={emailForm.email}
-                  onChange={(e) => setEmailForm((f) => ({ ...f, email: e.target.value }))}
-                />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground mb-1.5 block">Message (optional)</label>
-                <textarea
-                  className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 min-h-[80px] resize-none"
-                  placeholder="Add a personal message..."
-                  value={emailForm.message}
-                  onChange={(e) => setEmailForm((f) => ({ ...f, message: e.target.value }))}
-                />
-              </div>
-              <div className="flex justify-end gap-2">
-                <Button variant="outline" onClick={() => setShowEmailModal(false)}>Cancel</Button>
-                <Button onClick={handleSendInvoiceEmail} disabled={sendingEmail} className="gap-2">
-                  <Send className="w-4 h-4" /> {sendingEmail ? "Sending..." : "Send Email"}
-                </Button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
+
       </AnimatePresence>
       {paymentModal && (
         <motion.div

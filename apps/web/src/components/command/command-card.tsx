@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   CheckCircle2,
   XCircle,
@@ -12,11 +13,14 @@ import {
   Loader2,
   RotateCcw,
   UserPlus,
+  ArrowRight,
 } from "lucide-react";
 import type { CommandItem } from "@/lib/api/command";
 
 interface CommandCardProps {
   item: CommandItem;
+  selected?: boolean;
+  onSelect?: (id: string, selected: boolean) => void;
   onDismiss?: (id: string) => void | Promise<void>;
   onApprove?: (id: string) => void | Promise<void>;
   onExecute?: (id: string) => void | Promise<void>;
@@ -48,7 +52,8 @@ const STATUS_LABELS: Record<string, string> = {
   COMPLETED: "Completed",
 };
 
-export function CommandCard({ item, onDismiss, onApprove, onExecute, onComplete, onAssign, onReopen }: CommandCardProps) {
+export function CommandCard({ item, selected, onSelect, onDismiss, onApprove, onExecute, onComplete, onAssign, onReopen }: CommandCardProps) {
+  const router = useRouter();
   const [loading, setLoading] = useState<string | null>(null);
   const color = CATEGORY_COLORS[item.category] ?? "hsl(var(--kf-accent1))";
 
@@ -66,10 +71,20 @@ export function CommandCard({ item, onDismiss, onApprove, onExecute, onComplete,
 
   return (
     <div
-      className="kf-card kf-radius-lg p-4 transition-all hover:shadow-md"
+      className="kf-card kf-radius-lg p-3 md:p-4 transition-all hover:shadow-md"
       style={{ borderLeft: `3px solid ${color}` }}
     >
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex flex-col md:flex-row md:items-start justify-between gap-3">
+        {onSelect && (
+          <div className="pt-1 pr-1 flex-shrink-0">
+            <input
+              type="checkbox"
+              checked={selected}
+              onChange={(e) => onSelect(item.id, e.target.checked)}
+              className="w-4 h-4 cursor-pointer rounded border-gray-300"
+            />
+          </div>
+        )}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span
@@ -88,41 +103,56 @@ export function CommandCard({ item, onDismiss, onApprove, onExecute, onComplete,
               </span>
             )}
           </div>
-          <h4 className="font-semibold mt-1 truncate">{item.title}</h4>
+          <button
+            onClick={() => router.push(`/app/command-center/${item.id}`)}
+            className="text-left w-full group"
+          >
+            <h4 className="font-semibold mt-1 truncate text-sm md:text-base group-hover:underline decoration-[hsl(var(--kf-accent1))]">
+              {item.title}
+            </h4>
+          </button>
           {item.description && (
-            <p className="kf-text-caption mt-0.5" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+            <p className="kf-text-caption mt-0.5 truncate" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
               {item.description}
             </p>
           )}
           <div className="flex items-center gap-3 mt-2 flex-wrap">
             {item.expectedValue != null && (
-              <span className="kf-text-micro font-medium" style={{ color: "hsl(var(--kf-success))" }}>
+              <span className="hidden md:inline-flex kf-text-micro font-medium" style={{ color: "hsl(var(--kf-success))" }}>
                 {item.currency} {item.expectedValue}
               </span>
             )}
             {item.dueAt && (
-              <span className="flex items-center gap-1 kf-text-micro" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+              <span className="inline-flex items-center gap-1 kf-text-micro" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
                 <Clock className="w-3 h-3" />
                 Due {new Date(item.dueAt).toLocaleDateString()}
               </span>
             )}
             {item.executableByKey && (
-              <span className="flex items-center gap-1 kf-text-micro" style={{ color: "hsl(var(--kf-accent1))" }}>
+              <span className="hidden md:inline-flex items-center gap-1 kf-text-micro" style={{ color: "hsl(var(--kf-accent1))" }}>
                 <Bot className="w-3 h-3" />
                 KEY can handle
               </span>
             )}
             {item.ownerType === "USER" && item.ownerId && (
-              <span className="flex items-center gap-1 kf-text-micro" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+              <span className="hidden md:inline-flex items-center gap-1 kf-text-micro" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
                 <User className="w-3 h-3" />
                 Assigned
               </span>
             )}
+            <button
+              onClick={() => router.push(`/app/command-center/${item.id}`)}
+              className="inline-flex items-center gap-1 kf-text-micro font-medium hover:underline"
+              style={{ color: "hsl(var(--kf-accent1))" }}
+            >
+              Details
+              <ArrowRight className="w-3 h-3" />
+            </button>
           </div>
         </div>
 
         {!isDone ? (
-          <div className="flex items-center gap-1 flex-shrink-0">
+          <div className="flex flex-wrap gap-1 md:flex-nowrap md:items-center flex-shrink-0">
             {onComplete && (
               <button
                 onClick={() => handleAction("complete", onComplete)}
@@ -173,7 +203,7 @@ export function CommandCard({ item, onDismiss, onApprove, onExecute, onComplete,
             </button>
           </div>
         ) : (
-          <div className="flex items-center gap-1 flex-shrink-0">
+          <div className="flex flex-wrap gap-1 md:flex-nowrap md:items-center flex-shrink-0">
             {onReopen && (
               <button
                 onClick={() => handleAction("reopen", onReopen)}

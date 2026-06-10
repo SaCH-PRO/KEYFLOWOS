@@ -28,8 +28,7 @@ export default function GovernanceFlowPage() {
 
   const sections = [
     { label: "Approvals", href: "/app/approvals", icon: CheckCircle2, desc: "Pending and resolved approvals" },
-    { label: "Risks", href: "#", icon: AlertTriangle, desc: "Risk register and mitigation" },
-    { label: "Audit Logs", href: "#", icon: FileText, desc: "Business event history" },
+    { label: "Audit Logs", href: "/app/evidence", icon: FileText, desc: "Business event history" },
     { label: "AI Autonomy", href: "/app/settings/ai", icon: Settings, desc: "KEY governance settings" },
   ];
 

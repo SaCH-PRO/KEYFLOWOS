@@ -12,6 +12,7 @@ import { sanitize } from '../../core/utils/sanitize';
 import { BULK_LIMIT, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from './crm.constants';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { CrmTimelineService } from './crm-timeline.service';
+import { ContactCustomFieldValueService } from './contact-custom-field-value.service';
 import { CrmStatsService } from './crm-stats.service';
 import { CrmListsService } from './crm-lists.service';
 import { CrmFlowService } from './crm-flow.service';
@@ -138,6 +139,7 @@ export class CrmService {
     @Inject(CrmFlowService) private readonly flow: CrmFlowService,
     @Inject(EntityResolutionService) private readonly entityResolution: EntityResolutionService,
     @Inject(ContactAuditService) private readonly contactAudit: ContactAuditService,
+    @Inject(ContactCustomFieldValueService) private readonly customFieldValues: ContactCustomFieldValueService,
   ) {}
 
   /**
@@ -237,9 +239,17 @@ export class CrmService {
       }
     }
 
+    let searchContactIds: string[] | undefined;
+    if (input.search?.trim()) {
+      const tsIds = await this.searchContactIdsByTsvector(input.businessId, input.search.trim());
+      if (tsIds.length > 0) {
+        searchContactIds = tsIds;
+      }
+    }
+
     const where: any = buildContactWhere(input.businessId, {
       status: input.status,
-      search: input.search,
+      search: searchContactIds ? undefined : input.search,
       hasUnpaidInvoices: input.hasUnpaidInvoices,
       hasUpcomingBookings: input.hasUpcomingBookings,
       hasOpenDeals: input.hasOpenDeals,
@@ -263,6 +273,10 @@ export class CrmService {
       favorite: input.favorite,
       includeArchived: input.includeArchived,
     });
+
+    if (searchContactIds) {
+      where.id = { in: searchContactIds };
+    }
 
     if (revenueContactIds) {
       where.id = { in: revenueContactIds };
@@ -367,6 +381,24 @@ export class CrmService {
     return { contacts: withStats, nextCursor, hasMore };
   }
 
+  private async searchContactIdsByTsvector(businessId: string, searchValue: string): Promise<string[]> {
+    try {
+      const rows = await this.prisma.client.$queryRaw<Array<{ id: string }>>`
+        SELECT id
+        FROM contacts
+        WHERE business_id = ${businessId}
+          AND deleted_at IS NULL
+          AND search_vector @@ plainto_tsquery('english', ${searchValue})
+        ORDER BY ts_rank(search_vector, plainto_tsquery('english', ${searchValue})) DESC
+        LIMIT 1000
+      `;
+      return rows.map((r) => r.id);
+    } catch (err) {
+      this.logger.warn(`TSVector search failed: ${(err as Error).message}`);
+      return [];
+    }
+  }
+
   async createContact(input: {
     businessId: string;
     firstName?: string | null;
@@ -378,6 +410,7 @@ export class CrmService {
     sourceDetail?: string | null;
     tags?: string[];
     custom?: any;
+    customFieldValues?: Record<string, unknown>;
   } & ContactExtraAttributes, _audit?: AuditContext) {
     const start = Date.now();
     const normalizeString = (value?: string | null) => {
@@ -463,6 +496,11 @@ export class CrmService {
         action: 'created',
         after: contact,
         ctx: _audit,
+      });
+    }
+    if (contact && input.customFieldValues && Object.keys(input.customFieldValues).length > 0) {
+      await this.customFieldValues.setValuesForContact(contact.id, input.customFieldValues).catch((err) => {
+        this.logger.warn(`[CRM] Failed to save custom field values for contact ${contact.id}: ${(err as Error).message}`);
       });
     }
     this.stats.invalidateCache(input.businessId);
@@ -609,6 +647,7 @@ export class CrmService {
     sourceDetail?: string | null;
     tags?: string[];
     custom?: any;
+    customFieldValues?: Record<string, unknown>;
     actorUserId?: string;
   } & ContactExtraAttributes, _audit?: AuditContext) {
     const start = Date.now();
@@ -783,6 +822,11 @@ export class CrmService {
         : undefined,
     });
 
+    if (input.customFieldValues && Object.keys(input.customFieldValues).length > 0) {
+      await this.customFieldValues.setValuesForContact(input.contactId, input.customFieldValues).catch((err) => {
+        this.logger.warn(`[CRM] Failed to save custom field values for contact ${input.contactId}: ${(err as Error).message}`);
+      });
+    }
     this.stats.invalidateCache(input.businessId);
     this.flow.invalidateCache(input.businessId);
     const duration = Date.now() - start;
@@ -1218,6 +1262,30 @@ export class CrmService {
       await repointByIds('journeyTouchpoints',
         () => tx.journeyTouchpoint.findMany({ where: { businessId: input.businessId, contactId: input.duplicateId }, select: { id: true } }),
         (ids) => tx.journeyTouchpoint.updateMany({ where: { id: { in: ids } }, data: { contactId: input.primaryId } }));
+
+      // Custom field values: unique on (contactId, definitionId). Repoint only when
+      // primary doesn't already have a value for that definition.
+      const dupCustomValues = await tx.contactCustomFieldValue.findMany({
+        where: { contactId: input.duplicateId },
+      });
+      const primaryCustomValues = await tx.contactCustomFieldValue.findMany({
+        where: { contactId: input.primaryId },
+      });
+      const primaryDefinitionIds = new Set(primaryCustomValues.map((v) => v.definitionId));
+      const repointableCustomValues = dupCustomValues.filter((v) => !primaryDefinitionIds.has(v.definitionId));
+      for (const v of repointableCustomValues) {
+        await tx.contactCustomFieldValue.update({
+          where: { id: v.id },
+          data: { contactId: input.primaryId },
+        });
+      }
+      await tx.contactCustomFieldValue.deleteMany({
+        where: { contactId: input.duplicateId },
+      });
+      repointedRows['customFieldValues'] = {
+        ids: repointableCustomValues.map((v) => v.id),
+        count: repointableCustomValues.length,
+      };
 
       // 2. Capture full snapshots of unique-per-contact rows owned by the duplicate so
       //    they can be re-created on revert. They are deleted (not repointed) here to

@@ -42,8 +42,6 @@ import {
   updateQuoteStatus,
   deleteQuote,
   convertQuoteToInvoice,
-  sendQuoteEmail,
-  disconnectGmail,
   bulkUpdateQuotes,
   Product,
   Quote,
@@ -76,6 +74,7 @@ import { useLineItemHandlers } from "../hooks/use-line-item-handlers";
 import { useModuleEmit } from "@/hooks/use-module-events";
 import { registerInterruptedTask, markTaskCompleted } from "@/lib/resume-task-registry";
 import { useNavigationContext } from "@/lib/navigation-context";
+import { useCompose } from "@/components/email/compose-context";
 import { ArrowRightLeft, Eye } from "lucide-react";
 
 interface QuotesPanelProps {
@@ -139,6 +138,7 @@ export default function QuotesPanel({
   const emitEvent = useModuleEmit();
   const { businessData, saveBranding, savingBranding } = useBusinessPreview();
   const { getOriginContext } = useNavigationContext();
+  const { open: openComposer } = useCompose();
   const quoteTaskIdRef = useRef<string | null>(null);
   const quoteSessionIdRef = useRef<string | null>(null);
 
@@ -222,9 +222,6 @@ export default function QuotesPanel({
   const [extendDate, setExtendDate] = useState("");
   const [showConvertModal, setShowConvertModal] = useState(false);
   const [showAcceptPrompt, setShowAcceptPrompt] = useState(false);
-  const [showEmailModal, setShowEmailModal] = useState(false);
-  const [emailForm, setEmailForm] = useState({ email: "", message: "" });
-  const [sendingEmail, setSendingEmail] = useState(false);
   const [convertForm, setConvertForm] = useState({
     taxRate: "12.5",
     discountType: "PERCENT" as "PERCENT" | "FIXED",
@@ -638,37 +635,7 @@ export default function QuotesPanel({
     }
   }
 
-  async function handleSendEmail() {
-    if (!selectedQuote) return;
-    const targetEmail = emailForm.email || selectedQuote.contact?.email;
-    if (!targetEmail) {
-      toast.error("Please enter an email address");
-      return;
-    }
-    setSendingEmail(true);
-    try {
-      const res = await sendQuoteEmail({
-        businessId: businessId ?? undefined,
-        quoteId: selectedQuote.id,
-        recipientEmail: targetEmail,
-        message: emailForm.message || undefined,
-      });
-      if (res.data?.success) {
-        setQuotes((q) =>
-          q.map((qItem) => (qItem.id === selectedQuote.id ? { ...qItem, status: "SENT" } : qItem))
-        );
-        setShowEmailModal(false);
-        setEmailForm({ email: "", message: "" });
-        toast.success(`Quote sent to ${targetEmail}`);
-      } else {
-        toast.error(res.error || "Failed to send email");
-      }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to send email");
-    } finally {
-      setSendingEmail(false);
-    }
-  }
+
 
   return (
     <motion.div
@@ -883,7 +850,15 @@ export default function QuotesPanel({
                   break;
                 case "follow_up":
                   setSelectedQuote(quote);
-                  setShowEmailModal(true);
+                  openComposer({
+                    to: quote.contact?.email || "",
+                    subject: `Quote ${quote.quoteNumber || quote.id}`,
+                    context: { type: "quote", recordNumber: quote.quoteNumber || quote.id },
+                    onSent: () => {
+                      setQuotes((q) => q.map((qItem) => (qItem.id === quote.id ? { ...qItem, status: "SENT" } : qItem)));
+                      toast.success(`Quote sent to ${quote.contact?.email}`);
+                    },
+                  });
                   break;
                 case "convert":
                   setSelectedQuote(quote);
@@ -997,7 +972,22 @@ export default function QuotesPanel({
                     <OverflowMenuItem icon={Sparkles} label="AI Follow-up" onClick={() => setFollowUpFor(quote)} />
                     <OverflowMenuItem icon={MessageCircle} label="Share via WhatsApp" onClick={() => shareQuoteViaWhatsApp(quote)} />
                     {(quote.status === "DRAFT" || quote.status === "SENT") && (
-                      <OverflowMenuItem icon={Mail} label="Send via email" onClick={() => { setSelectedQuote(quote); setShowEmailModal(true); }} />
+                      <OverflowMenuItem
+                        icon={Mail}
+                        label="Send via email"
+                        onClick={() => {
+                          setSelectedQuote(quote);
+                          openComposer({
+                            to: quote.contact?.email || "",
+                            subject: `Quote ${quote.quoteNumber || quote.id}`,
+                            context: { type: "quote", recordNumber: quote.quoteNumber || quote.id },
+                            onSent: () => {
+                              setQuotes((q) => q.map((qItem) => (qItem.id === quote.id ? { ...qItem, status: "SENT" } : qItem)));
+                              toast.success(`Quote sent to ${quote.contact?.email}`);
+                            },
+                          });
+                        }}
+                      />
                     )}
                     {quote.status === "DRAFT" && (
                       <OverflowMenuItem icon={Send} label="Mark as sent" onClick={() => handleMarkSent(quote)} disabled={!!actionLoading[quote.id]} />
@@ -1208,7 +1198,7 @@ export default function QuotesPanel({
           </div>
         )}
 
-        {selectedQuote && !showConvertModal && !showEmailModal && !showAcceptPrompt && (
+        {selectedQuote && !showConvertModal && !showAcceptPrompt && (
           <BillingDetailModal
             type="quote"
             number={selectedQuote.quoteNumber}
@@ -1278,7 +1268,19 @@ export default function QuotesPanel({
                     <button onClick={() => shareQuoteViaWhatsApp(selectedQuote)} className="p-2 rounded-lg hover:bg-emerald-500/10 transition-colors" title="Share via WhatsApp">
                       <MessageCircle className="w-4 h-4 text-emerald-400" />
                     </button>
-                    <button onClick={() => setShowEmailModal(true)} className="p-2 rounded-lg hover:bg-blue-500/10 transition-colors" title="Send via email">
+                    <button
+                      onClick={() => openComposer({
+                        to: selectedQuote.contact?.email || "",
+                        subject: `Quote ${selectedQuote.quoteNumber || selectedQuote.id}`,
+                        context: { type: "quote", recordNumber: selectedQuote.quoteNumber || selectedQuote.id },
+                        onSent: () => {
+                          setQuotes((q) => q.map((qItem) => (qItem.id === selectedQuote.id ? { ...qItem, status: "SENT" } : qItem)));
+                          toast.success(`Quote sent to ${selectedQuote.contact?.email}`);
+                        },
+                      })}
+                      className="p-2 rounded-lg hover:bg-blue-500/10 transition-colors"
+                      title="Send via email"
+                    >
                       <Mail className="w-4 h-4 text-blue-400" />
                     </button>
                   </div>
@@ -1319,139 +1321,7 @@ export default function QuotesPanel({
           />
         )}
 
-        {showEmailModal && selectedQuote && (
-          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-card rounded-2xl border border-border shadow-2xl p-6 max-w-md w-full space-y-4"
-            >
-              <div className="flex items-center justify-between">
-                <h3 className="text-lg font-semibold flex items-center gap-2">
-                  <Mail className="w-5 h-5 text-primary" /> Send Quote to Client
-                </h3>
-                <button
-                  onClick={() => {
-                    setShowEmailModal(false);
-                    setEmailForm({ email: "", message: "" });
-                  }}
-                  className="p-1 rounded hover:bg-muted"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
 
-              {!gmailStatus?.connected ? (
-                <div className="space-y-4">
-                  <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4">
-                    <p className="text-sm text-amber-200">
-                      Connect your Gmail account to send quotes directly from your email address.
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => window.location.href = "/app/settings/connections"}
-                    className="w-full rounded-xl bg-primary text-primary-foreground py-3 text-sm font-medium hover:bg-primary/90 flex items-center justify-center gap-2"
-                  >
-                    <Mail className="w-4 h-4" />
-                    Connect Gmail
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowEmailModal(false);
-                      setEmailForm({ email: "", message: "" });
-                    }}
-                    className="w-full rounded-xl border border-border py-2.5 text-sm hover:bg-muted"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              ) : (
-                <>
-                  <div className="bg-green-500/10 border border-green-500/30 rounded-xl p-3 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <CheckCircle className="w-4 h-4 text-green-500" />
-                      <span className="text-sm text-green-200">Sending from: {gmailStatus.email}</span>
-                    </div>
-                    <button
-                      onClick={() => {
-                        setConfirmState({
-                          open: true,
-                          action: async () => {
-                            await disconnectGmail(businessId ?? undefined);
-                            toast.success("Gmail disconnected");
-                          },
-                        });
-                      }}
-                      className="text-xs text-muted-foreground hover:text-foreground"
-                    >
-                      Disconnect
-                    </button>
-                  </div>
-                  <div className="space-y-3">
-                    <div>
-                      <label className="text-xs text-muted-foreground mb-1.5 block">Recipient Email</label>
-                      <input
-                        type="email"
-                        className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
-                        placeholder={selectedQuote.contact?.email || "client@example.com"}
-                        value={emailForm.email || selectedQuote.contact?.email || ""}
-                        onChange={(e) => setEmailForm((f) => ({ ...f, email: e.target.value }))}
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs text-muted-foreground mb-1.5 block">Message (optional)</label>
-                      <textarea
-                        className="w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 min-h-[80px]"
-                        placeholder="Please find attached your quotation..."
-                        value={emailForm.message}
-                        onChange={(e) => setEmailForm((f) => ({ ...f, message: e.target.value }))}
-                      />
-                    </div>
-                  </div>
-                  <div className="bg-muted/30 rounded-lg p-3 text-sm space-y-1">
-                    <div>
-                      <span className="text-muted-foreground">Quote:</span> {selectedQuote.quoteNumber}
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground">Amount:</span> {formatAmount(selectedQuote.total, selectedQuote.currency)}
-                    </div>
-                    <div>
-                      <span className="text-muted-foreground">Expires:</span>{" "}
-                      {selectedQuote.expiryDate
-                        ? new Date(selectedQuote.expiryDate).toLocaleDateString()
-                        : "N/A"}
-                    </div>
-                  </div>
-                  <div className="flex gap-2 pt-2">
-                    <button
-                      onClick={() => {
-                        setShowEmailModal(false);
-                        setEmailForm({ email: "", message: "" });
-                      }}
-                      className="flex-1 rounded-xl border border-border py-2.5 text-sm hover:bg-muted"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={handleSendEmail}
-                      disabled={sendingEmail}
-                      className="flex-1 rounded-xl bg-primary text-primary-foreground py-2.5 text-sm font-medium hover:bg-primary/90 disabled:opacity-50 flex items-center justify-center gap-2"
-                    >
-                      {sendingEmail ? (
-                        "Sending..."
-                      ) : (
-                        <>
-                          <Send className="w-4 h-4" /> Send Quote
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </>
-              )}
-            </motion.div>
-          </div>
-        )}
       </AnimatePresence>
       <ConfirmDialog
         open={confirmState.open}

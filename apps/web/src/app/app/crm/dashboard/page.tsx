@@ -124,7 +124,7 @@ export default function CrmDashboardPage() {
             <Button variant="outline" size="sm" onClick={() => setInsightsOpen(true)}>
               Insights
             </Button>
-            <Link href="/app/network/contacts">
+            <Link href="/app/crm/contacts">
               <Button variant="outline" size="sm">
                 Go to pipeline
               </Button>

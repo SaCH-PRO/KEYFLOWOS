@@ -18,6 +18,7 @@ import { getStoredBusinessId } from "@/lib/workspace";
 import { getContactPhone } from "@/lib/whatsapp";
 import type { ContactCardData } from "./contact-card";
 import { BroadcastDrawer } from "./broadcast-drawer";
+import { ContactAvatar } from "./contact-avatar";
 
 const STATUSES = ["ALL", "LEAD", "PROSPECT", "CLIENT", "LOST"] as const;
 
@@ -321,15 +322,7 @@ export function ContactPickerDrawer({ isOpen, onClose }: ContactPickerDrawerProp
                         )}
                       </div>
 
-                      <div
-                        className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
-                        style={{
-                          background: `hsl(var(--kf-accent${(contact.id.charCodeAt(0) % 2) + 1}) / 0.15)`,
-                          color: `hsl(var(--kf-accent${(contact.id.charCodeAt(0) % 2) + 1}))`,
-                        }}
-                      >
-                        {(contact.firstName?.[0] || contact.email?.[0] || "?").toUpperCase()}
-                      </div>
+                      <ContactAvatar contact={contact} size="sm" />
 
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium truncate">{name}</p>

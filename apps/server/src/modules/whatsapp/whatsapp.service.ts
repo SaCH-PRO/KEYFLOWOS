@@ -50,7 +50,7 @@ export class WhatsAppService {
   private readonly logger = new Logger(WhatsAppService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Inject(EntityResolutionService) private readonly entityResolution: EntityResolutionService,
   ) {}

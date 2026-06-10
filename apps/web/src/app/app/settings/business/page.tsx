@@ -38,6 +38,10 @@ export default function BusinessSettingsPage() {
       animate={{ opacity: 1, y: 0 }}
       className="space-y-6 max-w-3xl"
     >
+      <div>
+        <h1 className="text-xl font-semibold tracking-tight">Business Settings</h1>
+        <p className="text-sm text-muted-foreground mt-0.5">Payments, branding, and workspace configuration.</p>
+      </div>
       {status && (
         <motion.div
           initial={{ opacity: 0, y: -8 }}

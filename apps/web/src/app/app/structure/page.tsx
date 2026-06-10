@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { motion } from "framer-motion";
 import {
   Building2,
   Users,
@@ -9,8 +10,11 @@ import {
   GitBranch,
   Network,
   Loader2,
+  LayoutGrid,
 } from "lucide-react";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
+import { MetricCard } from "@/components/ui/metric-card";
+import { SectionCard } from "@/components/ui/section-card";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { fetchStructureStats, type StructureStats } from "@/lib/client";
 import { OrgUnitsPanel } from "./components/org-units-panel";
@@ -24,6 +28,18 @@ const TABS = [
   { key: "assignments", label: "Assignments", icon: Users },
   { key: "delegation", label: "Delegation", icon: GitBranch },
 ];
+
+const TAB_COLORS: Record<string, string> = {
+  units: "#F97316",
+  roles: "#3b82f6",
+  assignments: "#10b981",
+  delegation: "#8b5cf6",
+};
+
+const fadeUp = {
+  hidden: { opacity: 0, y: 12 },
+  show: { opacity: 1, y: 0, transition: { type: "spring" as const, stiffness: 300, damping: 24 } },
+};
 
 export default function StructurePage() {
   const router = useRouter();
@@ -46,12 +62,12 @@ export default function StructurePage() {
     router.replace(`/app/structure?tab=${key}`);
   };
 
-  const statCards = useMemo(
+  const statItems = useMemo(
     () => [
-      { label: "Org Units", value: stats?.unitCount ?? 0, icon: Network },
-      { label: "Job Roles", value: stats?.roleCount ?? 0, icon: Briefcase },
-      { label: "Active Assignments", value: stats?.assignmentCount ?? 0, icon: Users },
-      { label: "Delegation Rules", value: stats?.delegationCount ?? 0, icon: GitBranch },
+      { label: "Org Units", value: stats?.unitCount ?? 0, icon: Network, color: "#F97316" },
+      { label: "Job Roles", value: stats?.roleCount ?? 0, icon: Briefcase, color: "#3b82f6" },
+      { label: "Active Assignments", value: stats?.assignmentCount ?? 0, icon: Users, color: "#10b981" },
+      { label: "Delegation Rules", value: stats?.delegationCount ?? 0, icon: GitBranch, color: "#8b5cf6" },
     ],
     [stats],
   );
@@ -65,29 +81,48 @@ export default function StructurePage() {
     >
       {/* Stats Row */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-        {statCards.map((s) => (
-          <div
-            key={s.label}
-            className="rounded-xl border border-border/60 bg-card/60 backdrop-blur-sm p-3 flex items-center gap-3"
-          >
-            <div className="h-9 w-9 rounded-lg bg-muted/60 flex items-center justify-center">
-              <s.icon className="w-4 h-4 text-muted-foreground" />
-            </div>
-            <div>
-              <div className="text-lg font-semibold leading-tight">
-                {loadingStats ? <Loader2 className="w-4 h-4 animate-spin" /> : s.value}
+        {loadingStats ? (
+          Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="kf-card-metric animate-pulse h-20" />
+          ))
+        ) : (
+          statItems.map((s, i) => (
+            <motion.div
+              key={s.label}
+              variants={fadeUp}
+              initial="hidden"
+              animate="show"
+              transition={{ delay: i * 0.05 }}
+            >
+              <MetricCard label={s.label} value={s.value} icon={s.icon} iconColor={s.color} />
+            </motion.div>
+          ))
+        )}
+      </div>
+
+      {/* Org Visual Placeholder */}
+      {!loadingStats && stats && (
+        <SectionCard title="Organization Overview" icon={LayoutGrid} compact className="mb-6">
+          <div className="p-4 flex items-center justify-center">
+            <div className="flex flex-col items-center gap-3">
+              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[hsl(var(--kf-accent1))]/20 to-[hsl(var(--kf-accent2))]/20 flex items-center justify-center">
+                <Network className="w-6 h-6 text-[hsl(var(--kf-accent1))]" />
               </div>
-              <div className="text-[11px] text-muted-foreground">{s.label}</div>
+              <div className="text-center">
+                <p className="text-sm font-medium text-foreground">{stats.unitCount} units · {stats.roleCount} roles · {stats.assignmentCount} assignments</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">Org chart visualization coming soon</p>
+              </div>
             </div>
           </div>
-        ))}
-      </div>
+        </SectionCard>
+      )}
 
       {/* Tabs */}
       <div className="flex items-center gap-1 border-b border-border/60 mb-4">
         {TABS.map((t) => {
           const Icon = t.icon;
           const active = tab === t.key;
+          const color = TAB_COLORS[t.key];
           return (
             <button
               key={t.key}
@@ -98,7 +133,7 @@ export default function StructurePage() {
                   : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
-              <Icon className="w-3.5 h-3.5" />
+              <Icon className="w-3.5 h-3.5" style={active ? { color } : undefined} />
               {t.label}
             </button>
           );
