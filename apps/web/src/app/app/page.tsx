@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
 
-export default function CommandPage() {
-  redirect("/app/keyflow-command");
+export default function AppLandingPage() {
+  redirect("/app/command-center");
 }

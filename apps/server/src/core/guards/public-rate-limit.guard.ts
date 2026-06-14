@@ -1,7 +1,7 @@
 import { CanActivate, ExecutionContext, HttpException, HttpStatus, Inject, Injectable, SetMetadata } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { Redis } from 'ioredis';
-import { REDIS_CLIENT } from '../redis/redis.module';
+import { REDIS_CLIENT } from '../redis/redis.constants';
 
 export const PUBLIC_RATE_LIMIT_KEY = 'PUBLIC_RATE_LIMIT';
 

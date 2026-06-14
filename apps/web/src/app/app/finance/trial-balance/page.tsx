@@ -11,14 +11,18 @@ export default function TrialBalancePage() {
   const businessId = getStoredBusinessId() ?? "";
   const [rows, setRows] = useState<TrialBalanceRow[]>([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [asOf, setAsOf] = useState("");
 
   const load = useCallback(async () => {
     if (!businessId) return;
     setLoading(true);
+    setError(null);
     try {
       const res = await fetchTrialBalance(businessId, asOf || undefined);
-      if (res.data) setRows(res.data);
+      setRows(res.data?.items ?? []);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load trial balance");
     } finally {
       setLoading(false);
     }
@@ -28,8 +32,8 @@ export default function TrialBalancePage() {
     load();
   }, [load]);
 
-  const totalDebit = rows.reduce((s, r) => s + (r.debit || 0), 0);
-  const totalCredit = rows.reduce((s, r) => s + (r.credit || 0), 0);
+  const totalDebit = rows.reduce((s, r) => s + Number(r.debit || 0), 0);
+  const totalCredit = rows.reduce((s, r) => s + Number(r.credit || 0), 0);
 
   return (
     <UnifiedPageShell
@@ -39,6 +43,12 @@ export default function TrialBalancePage() {
       maxWidth="5xl"
     >
       <div className="space-y-4">
+        {error && (
+          <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            {error}
+            <button onClick={load} className="ml-2 underline">Retry</button>
+          </div>
+        )}
         <div className="flex flex-wrap gap-2 items-center">
           <input
             type="date"
@@ -78,19 +88,19 @@ export default function TrialBalancePage() {
           keyField="accountId"
           pageSize={50}
           columns={[
-            { key: "accountCode", header: "Code", sortable: true, getValue: (r) => (r as unknown as TrialBalanceRow).accountCode ?? "—" },
-            { key: "accountName", header: "Account", sortable: true, getValue: (r) => (r as unknown as TrialBalanceRow).accountName },
-            { key: "accountType", header: "Type", sortable: true, getValue: (r) => (r as unknown as TrialBalanceRow).accountType },
+            { key: "systemKey", header: "Code", sortable: true, getValue: (r) => (r as unknown as TrialBalanceRow).systemKey ?? "—" },
+            { key: "name", header: "Account", sortable: true, getValue: (r) => (r as unknown as TrialBalanceRow).name },
+            { key: "type", header: "Type", sortable: true, getValue: (r) => (r as unknown as TrialBalanceRow).type },
             { key: "debit", header: "Debit", sortable: true, render: (r) => {
-              const v = (r as unknown as TrialBalanceRow).debit;
+              const v = Number((r as unknown as TrialBalanceRow).debit);
               return v > 0 ? <span className="text-xs font-medium">{v.toLocaleString()}</span> : <span className="text-xs">—</span>;
             }},
             { key: "credit", header: "Credit", sortable: true, render: (r) => {
-              const v = (r as unknown as TrialBalanceRow).credit;
+              const v = Number((r as unknown as TrialBalanceRow).credit);
               return v > 0 ? <span className="text-xs font-medium">{v.toLocaleString()}</span> : <span className="text-xs">—</span>;
             }},
-            { key: "netBalance", header: "Net", sortable: true, render: (r) => {
-              const v = (r as unknown as TrialBalanceRow).netBalance;
+            { key: "net", header: "Net", sortable: true, render: (r) => {
+              const v = Number((r as unknown as TrialBalanceRow).net);
               return <span className={`text-xs font-semibold ${v >= 0 ? "text-emerald-600" : "text-red-500"}`}>{v.toLocaleString()}</span>;
             }},
           ]}

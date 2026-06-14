@@ -14,15 +14,22 @@ import { ConsentService } from './consent.service';
 import { TriggerDefinitionService } from './trigger-definition.service';
 import { OmnichannelController } from './omnichannel.controller';
 import { OmnichannelProcessorService } from './omnichannel-processor.service';
+import { MessageIntakeController } from './message-intake.controller';
+import { MessageIntakeOrchestrator } from './message-intake-orchestrator.service';
+import { MessageIntakeListener } from './message-intake.listener';
 import { AiModule } from '../ai/ai.module';
 import { CommandModule } from '../command/command.module';
+import { CrmModule } from '../crm/crm.module';
+import { TaskAssignmentModule } from '../task-assignments/task-assignment.module';
+import { TimelineModule } from '../timeline/timeline.module';
 
 @Module({
-  imports: [AiModule, CommandModule],
+  imports: [AiModule, CommandModule, CrmModule, TaskAssignmentModule, TimelineModule],
   controllers: [
     CommunicationsController,
     InboundCommunicationsController,
     OmnichannelController,
+    MessageIntakeController,
   ],
   providers: [
     ChannelConnectionService,
@@ -37,6 +44,8 @@ import { CommandModule } from '../command/command.module';
     ConsentService,
     TriggerDefinitionService,
     OmnichannelProcessorService,
+    MessageIntakeOrchestrator,
+    MessageIntakeListener,
   ],
   exports: [
     ChannelConnectionService,
@@ -51,6 +60,7 @@ import { CommandModule } from '../command/command.module';
     ConsentService,
     TriggerDefinitionService,
     OmnichannelProcessorService,
+    MessageIntakeOrchestrator,
   ],
 })
 export class CommunicationsModule {}

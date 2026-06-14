@@ -4,7 +4,7 @@ import { scrypt, timingSafeEqual } from 'crypto';
 import { buildAdminToken, verifyAdminToken } from '../../core/auth/admin-token.util';
 import type { Redis } from 'ioredis';
 import { Inject } from '@nestjs/common';
-import { REDIS_CLIENT } from '../../core/redis/redis.module';
+import { REDIS_CLIENT } from '../../core/redis/redis.constants';
 
 function getAdminJwtSecret(): string {
   return process.env.ADMIN_JWT_SECRET || '';

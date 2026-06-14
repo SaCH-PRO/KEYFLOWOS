@@ -1,5 +1,6 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { RedisService } from '../../core/redis/redis.service';
 import { FinancialAccountSeederService } from './financial-account-seeder.service';
 import { ReceivablesService } from './receivables.service';
 
@@ -72,9 +73,26 @@ export class FinanceOverviewService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Optional() @Inject(FinancialAccountSeederService) private readonly accountSeeder: FinancialAccountSeederService | null,
     @Optional() @Inject(ReceivablesService) private readonly receivables: ReceivablesService | null,
+    @Optional() @Inject(RedisService) private readonly redis: RedisService | null,
   ) {}
 
+  private cacheKey(businessId: string) {
+    return `finance:overview:${businessId}`;
+  }
+
+  async invalidateCache(businessId: string) {
+    if (this.redis) {
+      await this.redis.del(this.cacheKey(businessId)).catch(() => {});
+    }
+  }
+
   async getOverview(businessId: string): Promise<FinanceOverview> {
+    const cacheKey = this.cacheKey(businessId);
+    if (this.redis) {
+      const cached = await this.redis.getJson<FinanceOverview>(cacheKey).catch(() => null);
+      if (cached) return cached;
+    }
+
     // First read of the surface seeds the default Cash + Bank accounts +
     // system COA so the numbers below are never zero on a clean install.
     if (this.accountSeeder) {
@@ -322,7 +340,7 @@ export class FinanceOverviewService {
     }));
     void pendingActionItems; // initial sample superseded by post-upsert read
 
-    return {
+    const result: FinanceOverview = {
       cashBalance,
       cashAccountCount: cashAccounts.length,
       revenueThisMonth,
@@ -340,5 +358,11 @@ export class FinanceOverviewService {
       actions,
       currency,
     };
+
+    if (this.redis) {
+      await this.redis.setJson(cacheKey, result, 60).catch(() => {});
+    }
+
+    return result;
   }
 }

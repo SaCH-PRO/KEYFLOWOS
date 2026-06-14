@@ -23,14 +23,17 @@ const DEFAULT_SCOPES: Record<string, Record<string, string>> = {
   OWNER: Object.fromEntries([
     'crm', 'revenue', 'bookings', 'projects', 'content', 'expenses',
     'automations', 'storefront', 'settings', 'ai', 'team', 'analytics',
+    'operations',
   ].map((m) => [m, 'admin'])),
   ADMIN: Object.fromEntries([
     'crm', 'revenue', 'bookings', 'projects', 'content', 'expenses',
     'automations', 'storefront', 'settings', 'ai', 'team', 'analytics',
+    'operations',
   ].map((m) => [m, m === 'team' ? 'write' : 'admin'])),
   STAFF: Object.fromEntries([
     'crm', 'revenue', 'bookings', 'projects', 'content', 'expenses',
     'automations', 'storefront', 'settings', 'ai', 'team', 'analytics',
+    'operations',
   ].map((m) => [m, ['settings', 'team', 'ai'].includes(m) ? 'none' : 'read'])),
 };
 

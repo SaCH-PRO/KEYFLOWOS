@@ -3,7 +3,8 @@
 import { useRouter } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { bootstrapIdentity } from "@/lib/client";
-import { setStoredToken, setStoredBusinessId } from "@/lib/workspace";
+import { setStoredToken, setStoredBusinessId, getStoredBusinessId } from "@/lib/workspace";
+import { apiPatch } from "@/lib/api";
 
 /**
  * Derive (firstName, lastName) from a Supabase OAuth user_metadata payload.
@@ -100,12 +101,23 @@ function AuthCallbackInner() {
           window.localStorage.setItem("kf_email", email);
         }
 
-        window.localStorage.setItem("kf_profile_draft", JSON.stringify({ firstName, lastName, username: "", company: "", phone: "" }));
+        const existingDraft = JSON.parse(window.localStorage.getItem("kf_profile_draft") || "{}") as Record<string, string>;
+        const profileDraft = {
+          firstName: existingDraft.firstName || firstName,
+          lastName: existingDraft.lastName || lastName,
+          username: existingDraft.username || "",
+          company: existingDraft.company || "",
+          phone: existingDraft.phone || "",
+        };
+        window.localStorage.setItem("kf_profile_draft", JSON.stringify(profileDraft));
         const bootstrap = await bootstrapIdentity({
           email,
-          name: fullName,
-          firstName,
-          lastName,
+          name: fullName || `${profileDraft.firstName} ${profileDraft.lastName}`.trim(),
+          firstName: profileDraft.firstName || firstName,
+          lastName: profileDraft.lastName || lastName,
+          phone: profileDraft.phone,
+          company: profileDraft.company,
+          username: profileDraft.username,
           avatarUrl,
         });
         
@@ -115,6 +127,16 @@ function AuthCallbackInner() {
             window.localStorage.setItem("kf_user_cache", JSON.stringify(bootstrap.data.user));
           }
           window.localStorage.setItem("kf_business_cache", JSON.stringify(bootstrap.data.business));
+
+          // If bootstrap did not consume the profile draft (e.g. business already existed),
+          // apply the draft directly to the business profile so signup intent is not lost.
+          const bid = getStoredBusinessId();
+          if (bid && (profileDraft.company || profileDraft.phone)) {
+            void apiPatch(`/identity/businesses/${bid}`, {
+              name: profileDraft.company || undefined,
+              phone: profileDraft.phone || undefined,
+            });
+          }
         } else if (bootstrap.errorCode === "account_email_conflict") {
           setConflictEmail(email ?? null);
           setErrorKind("account_email_conflict");

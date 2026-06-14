@@ -2493,6 +2493,26 @@ export const FLOW_TOOLS: FlowTool[] = [
     },
     outputSchema: { type: 'object', description: 'Updated post', fields: { id: { type: 'string', description: 'Post ID' }, status: { type: 'string', description: 'Post status' } } },
   },
+  {
+    name: 'update_business_blueprint',
+    description: 'ALWAYS use this tool first when the user shares any business fact while the Business Genome is incomplete. Update the Business Blueprint (Business Genome) with structured facts learned during conversation. Wrap all section updates under a single "patch" key. Supported sections: identity (name, industry, archetype), operatingModel (revenueModel, deliveryMode), goals (northStar, ninetyDayGoals), constraints (budgetRange, timeCommitment), brand (voice, tone), customerModel (idealCustomer), financials (avgTicket), workflowModel, aiPreferences. Example call arguments: {"patch": {"identity": {"industry": "software"}, "operatingModel": {"revenueModel": "subscription"}}}.',
+    family: 'crud',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/blueprint',
+    changedEntities: ['businessBlueprint'],
+    parameters: {
+      type: 'object',
+      properties: {
+        patch: {
+          type: 'object',
+          description: 'Blueprint patch. Top-level keys are section names: identity, operatingModel, goals, constraints, brand, customerModel, financials, workflowModel, aiPreferences. Values are objects containing the fields to update.',
+        },
+      },
+      required: ['patch'],
+    },
+    outputSchema: { type: 'object', description: 'Updated blueprint summary', fields: { completeness: { type: 'number', description: 'New completeness percentage 0-100' }, confidenceScores: { type: 'object', description: 'Per-section confidence scores' } } },
+  },
 
 ];
 

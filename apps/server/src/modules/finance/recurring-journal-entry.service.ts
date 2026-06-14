@@ -145,12 +145,16 @@ export class RecurringJournalEntryService implements OnModuleInit, OnModuleDestr
       try {
         await this.emitEntry(entry, now);
       } catch (err) {
+        const nextRunDate = this.computeNext(entry.frequency, entry.nextRunDate);
+        const failureCount = entry.failureCount + 1;
         await this.prisma.client.recurringJournalEntry.update({
           where: { id: entry.id },
           data: {
-            failureCount: { increment: 1 },
+            failureCount,
             lastError: err instanceof Error ? err.message : String(err),
             lastRunDate: now,
+            nextRunDate,
+            ...(failureCount >= 5 ? { isActive: false } : {}),
           },
         });
       }
@@ -171,12 +175,13 @@ export class RecurringJournalEntryService implements OnModuleInit, OnModuleDestr
     await this.posting.post({
       businessId: entry.businessId,
       type: 'ADJUSTMENT',
-      date: now,
+      date: entry.nextRunDate,
       amount: totalDebit,
       description: entry.name,
       notes: entry.description,
       sourceType: 'RecurringJournalEntry',
       sourceId: entry.id,
+      kind: 'recurring_run',
       entries: items.map((e) => ({
         accountId: e.accountId,
         debit: e.debit ?? 0,
@@ -206,17 +211,26 @@ export class RecurringJournalEntryService implements OnModuleInit, OnModuleDestr
       case 'BIWEEKLY':
         d.setDate(d.getDate() + 14);
         break;
-      case 'MONTHLY':
+      case 'MONTHLY': {
+        const day = d.getDate();
         d.setMonth(d.getMonth() + 1);
+        if (d.getDate() !== day) d.setDate(0);
         break;
-      case 'QUARTERLY':
+      }
+      case 'QUARTERLY': {
+        const day = d.getDate();
         d.setMonth(d.getMonth() + 3);
+        if (d.getDate() !== day) d.setDate(0);
         break;
+      }
       case 'YEARLY':
         d.setFullYear(d.getFullYear() + 1);
         break;
-      default:
+      default: {
+        const day = d.getDate();
         d.setMonth(d.getMonth() + 1);
+        if (d.getDate() !== day) d.setDate(0);
+      }
     }
     return d;
   }

@@ -98,6 +98,7 @@ import { AdminPlatformModule } from './modules/admin-platform/admin-platform.mod
 import { TrashModule } from './modules/trash/trash.module';
 import { PushNotificationModule } from './modules/push-notifications/push-notification.module';
 import { SecurityAuditModule } from './modules/security-audit/security-audit.module';
+import { IngestionModule } from './modules/ingestion/ingestion.module';
 
 @Module({
   imports: [
@@ -181,6 +182,7 @@ import { SecurityAuditModule } from './modules/security-audit/security-audit.mod
     CommandModule,
     OsModule,
     GovernanceModule,
+    IngestionModule,
     TemporalModule,
     PeopleFlowModule,
     SopModule,

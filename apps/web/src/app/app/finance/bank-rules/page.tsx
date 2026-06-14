@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { ListFilter, Plus, Loader2, Trash2, Play, Power } from "lucide-react";
+import { toast } from "sonner";
 import { UnifiedPageShell } from "@/components/layout/unified-page-shell";
 import { DataTable } from "@/components/ui/data-table";
 import { getStoredBusinessId } from "@/lib/workspace";
@@ -11,6 +12,7 @@ export default function BankRulesPage() {
   const businessId = getStoredBusinessId() ?? "";
   const [rules, setRules] = useState<BankRule[]>([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);
   const [applying, setApplying] = useState(false);
@@ -25,9 +27,12 @@ export default function BankRulesPage() {
   const load = useCallback(async () => {
     if (!businessId) return;
     setLoading(true);
+    setError(null);
     try {
       const res = await fetchBankRules(businessId);
-      if (res.data) setRules(res.data);
+      setRules(res.data?.items ?? []);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load bank rules");
     } finally {
       setLoading(false);
     }
@@ -49,15 +54,19 @@ export default function BankRulesPage() {
         expenseCategoryId: expenseCategoryId || null,
         priority: Number(priority) || 0,
       });
-      if (res.data) {
-        setRules((prev) => [...prev, res.data!]);
+      const created = res.data;
+      if (created) {
+        setRules((prev) => [...prev, created]);
         setShowAdd(false);
         setName("");
         setPattern("");
         setAccountId("");
         setExpenseCategoryId("");
         setPriority("0");
+        toast.success("Bank rule created");
       }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to create bank rule");
     } finally {
       setSaving(false);
     }
@@ -65,16 +74,28 @@ export default function BankRulesPage() {
 
   const handleToggle = async (rule: BankRule) => {
     if (!businessId) return;
-    const res = await updateBankRule(businessId, rule.id, { isActive: !rule.isActive });
-    if (res.data) {
-      setRules((prev) => prev.map((r) => (r.id === rule.id ? res.data! : r)));
+    try {
+      const res = await updateBankRule(businessId, rule.id, { isActive: !rule.isActive });
+      const updated = res.data;
+      if (updated) {
+        setRules((prev) => prev.map((r) => (r.id === rule.id ? updated : r)));
+        toast.success(updated.isActive ? "Rule activated" : "Rule deactivated");
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to update rule");
     }
   };
 
   const handleDelete = async (id: string) => {
     if (!businessId) return;
-    await deleteBankRule(businessId, id);
-    setRules((prev) => prev.filter((r) => r.id !== id));
+    if (!window.confirm("Are you sure? This cannot be undone.")) return;
+    try {
+      await deleteBankRule(businessId, id);
+      setRules((prev) => prev.filter((r) => r.id !== id));
+      toast.success("Bank rule deleted");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to delete rule");
+    }
   };
 
   const handleApply = async () => {
@@ -82,7 +103,9 @@ export default function BankRulesPage() {
     setApplying(true);
     try {
       await applyBankRules(businessId);
-      alert("Bank rules applied successfully");
+      toast.success("Bank rules applied");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to apply rules");
     } finally {
       setApplying(false);
     }
@@ -115,6 +138,12 @@ export default function BankRulesPage() {
       }
     >
       <div className="space-y-4">
+        {error && (
+          <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            {error}
+            <button onClick={load} className="ml-2 underline">Retry</button>
+          </div>
+        )}
         {showAdd && (
           <div className="kf-card p-4 space-y-3">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -123,6 +152,7 @@ export default function BankRulesPage() {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Rule name"
+                aria-label="Rule name"
                 className="px-3 py-2 rounded-lg border text-sm bg-background focus:outline-none focus:ring-2 focus:ring-[hsl(var(--kf-accent1))]/20"
                 style={{ borderColor: "hsl(var(--kf-border))" }}
               />
@@ -131,6 +161,7 @@ export default function BankRulesPage() {
                 value={pattern}
                 onChange={(e) => setPattern(e.target.value)}
                 placeholder="Pattern (e.g. 'AMAZON')"
+                aria-label="Pattern"
                 className="px-3 py-2 rounded-lg border text-sm bg-background focus:outline-none focus:ring-2 focus:ring-[hsl(var(--kf-accent1))]/20"
                 style={{ borderColor: "hsl(var(--kf-border))" }}
               />
@@ -150,6 +181,7 @@ export default function BankRulesPage() {
                 value={accountId}
                 onChange={(e) => setAccountId(e.target.value)}
                 placeholder="Chart of Account ID"
+                aria-label="Chart of account ID"
                 className="px-3 py-2 rounded-lg border text-sm bg-background focus:outline-none focus:ring-2 focus:ring-[hsl(var(--kf-accent1))]/20"
                 style={{ borderColor: "hsl(var(--kf-border))" }}
               />
@@ -158,6 +190,7 @@ export default function BankRulesPage() {
                 value={expenseCategoryId}
                 onChange={(e) => setExpenseCategoryId(e.target.value)}
                 placeholder="Expense Category ID (optional)"
+                aria-label="Expense category ID"
                 className="px-3 py-2 rounded-lg border text-sm bg-background focus:outline-none focus:ring-2 focus:ring-[hsl(var(--kf-accent1))]/20"
                 style={{ borderColor: "hsl(var(--kf-border))" }}
               />
@@ -166,6 +199,7 @@ export default function BankRulesPage() {
                 value={priority}
                 onChange={(e) => setPriority(e.target.value)}
                 placeholder="Priority"
+                aria-label="Priority"
                 className="px-3 py-2 rounded-lg border text-sm bg-background focus:outline-none focus:ring-2 focus:ring-[hsl(var(--kf-accent1))]/20"
                 style={{ borderColor: "hsl(var(--kf-border))" }}
               />

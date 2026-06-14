@@ -159,6 +159,7 @@ model Business {
   sites            Site[]
   autopilotTasks   AutopilotTask[]
   delegationLoops  DelegationLoop[]
+  ingestionItems   IngestionItem[]
   delegationLoopRuns DelegationLoopRun[]
   notifications    Notification[]
   subscriptions    Subscription[]
@@ -394,6 +395,13 @@ model Business {
   driveRefreshToken String?   @map("drive_refresh_token")
   driveTokenExpiry  DateTime? @map("drive_token_expiry")
 
+  driveSyncCursor   DriveSyncCursor?
+  driveIntakeFiles  DriveIntakeFile[]
+
+  // Connector Message Intake Gate
+  messageIntakeEnabled Boolean @default(false) @map("message_intake_enabled")
+  messageIntakes      MessageIntake[]
+
   // Google Forms Integration
   formsEmail        String?   @map("forms_email")
   formsAccessToken  String?   @map("forms_access_token")
@@ -518,6 +526,120 @@ model Business {
   deletedAt DateTime? @map("deleted_at")
 
   @@map("businesses")
+}
+
+model DriveSyncCursor {
+  id           String   @id @default(cuid())
+  businessId   String   @unique @map("business_id")
+  business     Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  lastSyncAt   DateTime @default("1970-01-01T00:00:00.000Z") @map("last_sync_at")
+  pageToken    String?  @map("page_token")
+  status       String   @default("idle") // idle | running | error
+  errorMessage String?  @map("error_message")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@map("drive_sync_cursors")
+}
+
+model DriveIntakeFile {
+  id              String   @id @default(cuid())
+  businessId      String   @map("business_id")
+  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  driveFileId     String   @map("drive_file_id")
+  name            String
+  mimeType        String   @map("mime_type")
+  webViewLink     String?  @map("web_view_link")
+  size            Int?
+  modifiedTime    DateTime @map("modified_time")
+  status          String   @default("pending") // pending | extracted | reviewing | approved | rejected | error
+  confidence      Float?
+  documentType    String?  @map("document_type")
+  extractedData   Json?    @map("extracted_data")
+  proposedActions Json?    @map("proposed_actions")
+  errorMessage    String?  @map("error_message")
+  detectedAt      DateTime @default(now()) @map("detected_at")
+  processedAt     DateTime? @map("processed_at")
+
+  @@unique([businessId, driveFileId])
+  @@index([businessId, status])
+  @@index([businessId, modifiedTime])
+  @@map("drive_intake_files")
+}
+
+model MessageIntake {
+  id              String   @id @default(cuid())
+  businessId      String   @map("business_id")
+  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  connectorType   String   @map("connector_type") // whatsapp | gmail | meta_social | sms
+  sourceChannel   String   @map("source_channel") // whatsapp | email | sms | instagram | messenger
+  externalId      String?  @map("external_id")
+  from            String
+  fromName        String?  @map("from_name")
+  to              String?
+  subject         String?
+  body            String
+  rawPayload      Json?    @map("raw_payload")
+  contactId       String?  @map("contact_id")
+  contact         Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  threadId        String?  @map("thread_id")
+  thread          ConversationThread? @relation(fields: [threadId], references: [id], onDelete: SetNull)
+  status          String   @default("pending") // pending | extracted | reviewing | approved | rejected | error
+  confidence      Float?
+  intentType      String?  @map("intent_type")
+  riskTier        Int      @default(1)
+  extractedData   Json?    @map("extracted_data")
+  proposedActions Json?    @map("proposed_actions")
+  errorMessage    String?  @map("error_message")
+  detectedAt      DateTime @default(now()) @map("detected_at")
+  processedAt     DateTime? @map("processed_at")
+
+  @@unique([businessId, sourceChannel, externalId])
+  @@index([businessId, status])
+  @@index([businessId, contactId])
+  @@map("message_intakes")
+}
+
+model IngestionItem {
+  id                    String    @id @default(cuid())
+  businessId            String    @map("business_id")
+  business              Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  sourceType            String    @map("source_type")
+  sourceConnectorType   String    @map("source_connector_type")
+  externalId            String?   @map("external_id")
+  contactId             String?   @map("contact_id")
+  contact               Contact?  @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  status                String    @default("pending")
+
+  rawPayload            Json      @map("raw_payload")
+  summary               String?
+  subject               String?
+  body                  String?
+  toDestination         String?   @map("to_destination")
+  receivedAt            DateTime? @map("received_at")
+  attachments           Json?     @map("attachments")
+  fromName              String?   @map("from_name")
+  fromEmail             String?   @map("from_email")
+  fromPhone             String?   @map("from_phone")
+  fromExternalId        String?   @map("from_external_id")
+  dedupeHash            String?   @map("dedupe_hash")
+  intentType            String?   @map("intent_type")
+  confidence            Float?
+  extractedData         Json?     @map("extracted_data")
+  proposedActions       Json?     @map("proposed_actions")
+  userFeedback          Json?     @map("user_feedback")
+  executedResults       Json?     @map("executed_results")
+  errorMessage          String?   @map("error_message")
+
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  @@unique([businessId, sourceType, externalId])
+  @@unique([businessId, dedupeHash])
+  @@index([businessId, status])
+  @@index([businessId, sourceType])
+  @@index([businessId, createdAt])
+  @@index([businessId, contactId])
+  @@map("ingestion_items")
 }
 
 model Membership {
@@ -776,6 +898,7 @@ model Contact {
     shares              ContactShare[]
   listMembers         ContactListMember[]
   momentum            ContactMomentum[]
+  ingestionItems      IngestionItem[]
   channelStats        ContactChannelStat[]
   momentumSnapshots   ContactMomentumSnapshot[]
   momentumRecommendations MomentumRecommendation[]
@@ -787,6 +910,7 @@ model Contact {
   journeyTouchpoints  JourneyTouchpoint[]
   whatsappContacts    WhatsAppContact[]
   conversationInsights ConversationAIInsight[]
+  messageIntakes      MessageIntake[]
   relationshipsFrom   ContactRelationship[] @relation("ContactRelationshipFrom")
   relationshipsTo     ContactRelationship[] @relation("ContactRelationshipTo")
   financialTransactions FinancialTransaction[]
@@ -1253,18 +1377,21 @@ model CalendarEvent {
 }
 
 model ConnectorStatus {
-  id              String   @id @default(cuid())
-  businessId      String   @map("business_id")
-  connectorType   String   @map("connector_type")
-  status          String   @default("disconnected")
-  connectedAt     DateTime? @map("connected_at")
-  connectedAccount String? @map("connected_account")
-  lastSyncAt      DateTime? @map("last_sync_at")
-  lastErrorAt     DateTime? @map("last_error_at")
-  lastError       String?   @map("last_error")
-  errorCount      Int       @default(0) @map("error_count")
-  syncCount       Int       @default(0) @map("sync_count")
-  metadata        Json?
+  id                            String   @id @default(cuid())
+  businessId                    String   @map("business_id")
+  connectorType                 String   @map("connector_type")
+  status                        String   @default("disconnected")
+  connectedAt                   DateTime? @map("connected_at")
+  connectedAccount              String?   @map("connected_account")
+  lastSyncAt                    DateTime? @map("last_sync_at")
+  lastErrorAt                   DateTime? @map("last_error_at")
+  lastError                     String?   @map("last_error")
+  errorCount                    Int       @default(0) @map("error_count")
+  syncCount                     Int       @default(0) @map("sync_count")
+  intakeEnabled                 Boolean   @default(false) @map("intake_enabled")
+  autoApproveThreshold          Float?    @map("auto_approve_threshold")
+  createContactsAutomatically   Boolean   @default(true) @map("create_contacts_automatically")
+  metadata                      Json?
 
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
@@ -1272,6 +1399,22 @@ model ConnectorStatus {
   @@unique([businessId, connectorType])
   @@index([businessId])
   @@map("connector_statuses")
+}
+
+model WebhookDeliveryLog {
+  id              String   @id @default(cuid())
+  businessId      String   @map("business_id")
+  connectorType   String   @map("connector_type")
+  payload         Json
+  headers         Json
+  statusCode      Int?     @map("status_code")
+  responseBody    String?  @map("response_body")
+  errorMessage    String?  @map("error_message")
+  retryCount      Int      @default(0) @map("retry_count")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@index([businessId, connectorType, createdAt])
+  @@map("webhook_delivery_logs")
 }
 
 model ConnectorActivityLog {
@@ -6034,6 +6177,7 @@ model ConversationThread {
   createdAt    DateTime @default(now()) @map("created_at")
 
   messages ConversationMessage[]
+  messageIntakes MessageIntake[]
 
   @@index([businessId, contactId])
   @@index([businessId, channel, status])

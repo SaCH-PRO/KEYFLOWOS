@@ -52,37 +52,38 @@ export class LedgerBalanceService {
   }
 
   /**
-   * Trial balance — every active account with non-zero net activity.
-   * Sums debit/credit per account in one grouped query.
+   * Trial balance — every active account, including those with zero activity.
+   * Sums debit/credit per account in one grouped query, then LEFT JOINs with
+   * all active ChartOfAccount rows so zero-balance accounts are still shown.
    */
   async getTrialBalance(businessId: string, asOf?: Date): Promise<AccountBalance[]> {
     const where: Prisma.LedgerEntryWhereInput = { businessId };
     if (asOf) where.date = { lte: asOf };
 
-    const grouped = await this.prisma.client.ledgerEntry.groupBy({
-      by: ['accountId'],
-      where,
-      _sum: { debit: true, credit: true },
-    });
+    const [grouped, allAccounts] = await Promise.all([
+      this.prisma.client.ledgerEntry.groupBy({
+        by: ['accountId'],
+        where,
+        _sum: { debit: true, credit: true },
+      }),
+      this.prisma.client.chartOfAccount.findMany({
+        where: { businessId, isActive: true },
+        select: { id: true, name: true, type: true, systemKey: true },
+      }),
+    ]);
 
-    if (grouped.length === 0) return [];
+    const byId = new Map(grouped.map((g) => [g.accountId, g]));
 
-    const accounts = await this.prisma.client.chartOfAccount.findMany({
-      where: { id: { in: grouped.map((g) => g.accountId) } },
-      select: { id: true, name: true, type: true, systemKey: true },
-    });
-    const byId = new Map(accounts.map((a) => [a.id, a]));
-
-    return grouped
-      .map((g): AccountBalance => {
-        const meta = byId.get(g.accountId);
-        const debit = new D(((g._sum.debit as Prisma.Decimal | null) ?? ZERO).toString());
-        const credit = new D(((g._sum.credit as Prisma.Decimal | null) ?? ZERO).toString());
+    return allAccounts
+      .map((account): AccountBalance => {
+        const g = byId.get(account.id);
+        const debit = new D(((g?._sum.debit as Prisma.Decimal | null) ?? ZERO).toString());
+        const credit = new D(((g?._sum.credit as Prisma.Decimal | null) ?? ZERO).toString());
         return {
-          accountId: g.accountId,
-          systemKey: meta?.systemKey ?? null,
-          name: meta?.name ?? '(unknown)',
-          type: meta?.type ?? 'ASSET',
+          accountId: account.id,
+          systemKey: account.systemKey ?? null,
+          name: account.name,
+          type: account.type,
           debit,
           credit,
           net: debit.sub(credit),
@@ -131,6 +132,23 @@ export class LedgerBalanceService {
 
     // Running balance is scoped per account if accountId is provided; otherwise global net.
     const running = new Map<string, Prisma.Decimal>();
+
+    // For page > 1, pre-compute opening balances from prior entries
+    if (page > 1) {
+      const priorWhere: Prisma.LedgerEntryWhereInput = { businessId };
+      if (opts.accountId) priorWhere.accountId = opts.accountId;
+      const cutoff = opts.from ?? new Date(0);
+      priorWhere.date = { lt: cutoff };
+      const priorEntries = await this.prisma.client.ledgerEntry.findMany({
+        where: priorWhere,
+        select: { accountId: true, debit: true, credit: true },
+      });
+      for (const e of priorEntries) {
+        const net = new D(e.debit.toString()).sub(new D(e.credit.toString()));
+        running.set(e.accountId, (running.get(e.accountId) ?? ZERO).add(net));
+      }
+    }
+
     const rows: GeneralLedgerRow[] = entries.map((e): GeneralLedgerRow => {
       const accountRunning = running.get(e.accountId) ?? ZERO;
       const nextBalance = accountRunning.add(new D(e.debit.toString())).sub(new D(e.credit.toString()));

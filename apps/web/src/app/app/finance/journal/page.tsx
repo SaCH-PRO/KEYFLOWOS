@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
 
 export default function JournalRedirectPage() {
-  redirect("/app/finance?tab=journal");
+  redirect("/app/finance/ledger");
 }

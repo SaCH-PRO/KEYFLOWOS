@@ -9,8 +9,9 @@ export class StockCountController {
   constructor(@Inject(StockCountService) private readonly svc: StockCountService) {}
 
   @Get()
-  list(@Param('businessId') businessId: string) {
-    return this.svc.list(businessId);
+  async list(@Param('businessId') businessId: string) {
+    const items = await this.svc.list(businessId);
+    return { items };
   }
 
   @Post()

@@ -12,7 +12,7 @@ import { AuthSecurityService } from '../src/modules/identity/auth-security.servi
 import { PrismaService } from '../src/core/prisma/prisma.service';
 import { AuthMiddleware } from '../src/core/auth/auth.middleware';
 import { SupabaseAuthService } from '../src/core/auth/supabase-auth.service';
-import { REDIS_CLIENT } from '../src/core/redis/redis.module';
+import { REDIS_CLIENT } from '../src/core/redis/redis.constants';
 
 // Server-side leg of the Google sign-in callback flow (task #310).
 // Exercises the real AuthMiddleware -> AuthGuard -> POST /identity/bootstrap

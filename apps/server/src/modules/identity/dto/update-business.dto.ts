@@ -159,6 +159,10 @@ export class UpdateBusinessDto {
   @IsOptional()
   onboardingComplete?: boolean;
 
+  @IsBoolean()
+  @IsOptional()
+  messageIntakeEnabled?: boolean;
+
   @IsString()
   @IsOptional()
   @MaxLength(200)

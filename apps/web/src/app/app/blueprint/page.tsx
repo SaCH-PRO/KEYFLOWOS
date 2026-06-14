@@ -1,7 +1,7 @@
 "use client";
 
-import { AddonPackGate } from "@/components/addon-pack-gate";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   Brain,
   Building2,
@@ -13,6 +13,7 @@ import {
   ShieldCheck,
   Sparkles,
   Users,
+  MessageSquarePlus,
 } from "lucide-react";
 import { apiGet, apiPatch } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
@@ -25,6 +26,7 @@ import type {
   BlueprintSectionDataMap,
   BlueprintSectionKey,
 } from "@/lib/blueprint-types";
+import { BlueprintOnboardingChat } from "../profile/components/blueprint-onboarding-chat";
 
 interface RecommendedStep {
   id: string;
@@ -204,29 +206,11 @@ function CompletenessBar({ value }: { value: number }) {
   );
 }
 
-export default function Page() {
-  return (
-    <AddonPackGate
-      pack="blueprintPostOnboard"
-      title="Blueprint"
-      description="Your business operating model is set. Blueprint is tucked away to keep your workspace focused. You can re-enable it anytime from Settings."
-      features={[
-        "Business identity, brand, and customer model",
-        "Financial constraints and operating model",
-        "Goals, workflow model, and AI preferences",
-        "Exportable business plan document",
-        "Intelligence dashboard for strategic insights",
-      ]}
-    >
-      <BlueprintPage />
-    </AddonPackGate>
-  );
-}
-
-function BlueprintPage() {
+export default function BlueprintPage() {
   // Lazy initializer hydrates the businessId synchronously from localStorage on
   // first client render so we no longer need a follow-up effect to set it
   // (which previously required a `react-hooks/set-state-in-effect` disable).
+  const searchParams = useSearchParams();
   const [businessId] = useState<string | null>(() =>
     typeof window === "undefined" ? null : getStoredBusinessId(),
   );
@@ -235,6 +219,7 @@ function BlueprintPage() {
   const [recs, setRecs] = useState<RecommendedStep[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(() => searchParams.get("onboarding") === "1");
 
   const load = useCallback(async () => {
     if (!businessId) {
@@ -396,6 +381,51 @@ function BlueprintPage() {
         </SectionCard>
       </div>
 
+      {!showOnboarding && (
+        <div className="mb-6">
+          <button
+            type="button"
+            onClick={() => setShowOnboarding(true)}
+            className="w-full rounded-xl p-4 flex items-center justify-between gap-4 border transition-colors hover:border-orange-500/40"
+            style={{
+              background: "linear-gradient(135deg, hsl(var(--kf-accent1) / 0.08), hsl(var(--kf-accent2) / 0.04))",
+              borderColor: "hsl(var(--kf-accent1) / 0.2)",
+            }}
+          >
+            <div className="flex items-center gap-3">
+              <div
+                className="w-10 h-10 rounded-xl flex items-center justify-center"
+                style={{ background: "hsl(var(--kf-accent1) / 0.1)" }}
+              >
+                <MessageSquarePlus className="w-5 h-5" style={{ color: "hsl(var(--kf-accent1))" }} />
+              </div>
+              <div className="text-left">
+                <h3 className="text-sm font-semibold">Build your Business Genome with KEY</h3>
+                <p className="text-xs text-muted-foreground">
+                  Answer a few questions and KEY will fill this blueprint for you.
+                </p>
+              </div>
+            </div>
+            <span className="text-sm font-medium" style={{ color: "hsl(var(--kf-accent1))" }}>
+              Start interview
+            </span>
+          </button>
+        </div>
+      )}
+
+      {showOnboarding && businessId && (
+        <div className="mb-6">
+          <BlueprintOnboardingChat
+            businessId={businessId}
+            fullPage={false}
+            onComplete={() => {
+              setShowOnboarding(false);
+              void load();
+            }}
+          />
+        </div>
+      )}
+
       <div className="grid gap-4 md:grid-cols-2">
         <section id="identity">
           <SectionCard title={SECTION_LABELS.identity} icon={Building2}>
@@ -521,6 +551,12 @@ function BlueprintPage() {
                 <TextArea
                   value={arrToCsv(goals.twelveMonthGoals)}
                   onChange={(v) => updateSection("goals", { twelveMonthGoals: csvToArr(v) })}
+                />
+              </FieldRow>
+              <FieldRow label="Current priorities" hint="What you are focused on right now, comma-separated.">
+                <TextArea
+                  value={arrToCsv(goals.priorities)}
+                  onChange={(v) => updateSection("goals", { priorities: csvToArr(v) })}
                 />
               </FieldRow>
             </div>
@@ -785,6 +821,32 @@ function BlueprintPage() {
                   value={ai?.tone}
                   onChange={(v) => updateSection("aiPreferences", { tone: v })}
                   placeholder="e.g. professional, warm, direct"
+                />
+              </FieldRow>
+              <FieldRow label="Outreach style" hint="How KEY should communicate on your behalf.">
+                <SelectField
+                  value={ai?.outreachStyle}
+                  onChange={(v) => updateSection("aiPreferences", { outreachStyle: v })}
+                  options={[
+                    { value: "FORMAL", label: "Formal" },
+                    { value: "FRIENDLY", label: "Friendly" },
+                    { value: "DIRECT", label: "Direct" },
+                    { value: "PERSUASIVE", label: "Persuasive" },
+                    { value: "CONSULTATIVE", label: "Consultative" },
+                  ]}
+                />
+              </FieldRow>
+              <FieldRow label="Reporting cadence" hint="How often KEY should brief you.">
+                <SelectField
+                  value={ai?.reportingCadence}
+                  onChange={(v) => updateSection("aiPreferences", { reportingCadence: v })}
+                  options={[
+                    { value: "DAILY", label: "Daily" },
+                    { value: "WEEKLY", label: "Weekly" },
+                    { value: "BIWEEKLY", label: "Bi-weekly" },
+                    { value: "MONTHLY", label: "Monthly" },
+                    { value: "ON_DEMAND", label: "On demand" },
+                  ]}
                 />
               </FieldRow>
               <div className="grid grid-cols-2 gap-2">

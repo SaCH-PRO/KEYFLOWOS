@@ -41,6 +41,7 @@ export interface BlueprintGoals {
   northStar?: string;
   ninetyDayGoals?: string[];
   twelveMonthGoals?: string[];
+  priorities?: string[];
 }
 
 export interface BlueprintConstraints {
@@ -78,6 +79,12 @@ export interface BlueprintIntelligence {
   topProductCategories?: string[];
   topChannels?: string[];
   recentMomentumScore?: number;
+  quoteConversionRate?: number;
+  noShowRate?: number;
+  expenseRatio?: number;
+  seasonalPattern?: string;
+  campaignOpenRate?: number;
+  campaignClickRate?: number;
   inferredAt?: string;
 }
 
@@ -89,15 +96,33 @@ export interface BlueprintWorkflowModel {
   walkInQueue?: boolean;
   ecommerceFulfillment?: boolean;
   customInquiryFlow?: boolean;
+  quoteDrivenSales?: boolean;
+  highNoShowRate?: boolean;
+  seasonalBusiness?: boolean;
 }
 
 export interface BlueprintAiPreferences {
   autonomyLevel?: number;
   tone?: string;
+  outreachStyle?: string;
+  reportingCadence?: string;
   notifyOnRecommendations?: boolean;
   notifyOnAlerts?: boolean;
   approvedActions?: string[];
   voiceEnabled?: boolean;
+}
+
+export interface BlueprintConfidenceScores {
+  identity?: number;
+  operatingModel?: number;
+  goals?: number;
+  constraints?: number;
+  brand?: number;
+  customerModel?: number;
+  financials?: number;
+  intelligence?: number;
+  workflowModel?: number;
+  aiPreferences?: number;
 }
 
 export interface BlueprintData {
@@ -112,7 +137,9 @@ export interface BlueprintData {
   intelligence: BlueprintIntelligence;
   workflowModel: BlueprintWorkflowModel;
   aiPreferences: BlueprintAiPreferences;
+  confidenceScores: BlueprintConfidenceScores;
   completeness: number;
+  lastAnalyzedAt?: string;
   updatedAt: string;
 }
 

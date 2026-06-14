@@ -40,8 +40,8 @@ export class AccountingPeriodService {
     });
     if (existing) throw new BadRequestException('Accounting period already exists');
 
-    const startDate = new Date(input.year, input.month - 1, 1);
-    const endDate = new Date(input.year, input.month, 0, 23, 59, 59, 999);
+    const startDate = new Date(Date.UTC(input.year, input.month - 1, 1));
+    const endDate = new Date(Date.UTC(input.year, input.month, 0, 23, 59, 59, 999));
 
     return this.prisma.client.accountingPeriod.create({
       data: {
@@ -65,8 +65,8 @@ export class AccountingPeriodService {
       throw new BadRequestException('Month must be 1-12');
     }
 
-    const startDate = new Date(year, month - 1, 1);
-    const endDate = new Date(year, month, 0, 23, 59, 59, 999);
+    const startDate = new Date(Date.UTC(year, month - 1, 1));
+    const endDate = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
 
     return this.prisma.client.accountingPeriod.update({
       where: { id },
@@ -81,14 +81,21 @@ export class AccountingPeriodService {
     const stamp = `lock:${businessId}:${period.year}-${String(period.month).padStart(2, '0')}`;
 
     await this.prisma.client.$transaction(async (tx) => {
-      // Stamp all transactions in the period
-      await tx.financialTransaction.updateMany({
+      // Stamp all transactions in the period — preserve existing metadata
+      const txs = await tx.financialTransaction.findMany({
         where: {
           businessId,
           date: { gte: period.startDate, lte: period.endDate },
         },
-        data: { metadata: { lockedByPeriod: stamp } },
+        select: { id: true, metadata: true },
       });
+      for (const t of txs) {
+        const existing = (t.metadata as Record<string, unknown> | null) ?? {};
+        await tx.financialTransaction.update({
+          where: { id: t.id },
+          data: { metadata: { ...existing, lockedByPeriod: stamp } },
+        });
+      }
 
       await tx.accountingPeriod.update({
         where: { id },
@@ -109,15 +116,23 @@ export class AccountingPeriodService {
     if (period.status !== 'CLOSED') throw new BadRequestException('Period is not closed');
 
     await this.prisma.client.$transaction(async (tx) => {
-      // Clear stamp from transactions
+      // Clear stamp from transactions — preserve other metadata
       if (period.lockedTransactionStamp) {
-        await tx.financialTransaction.updateMany({
+        const txs = await tx.financialTransaction.findMany({
           where: {
             businessId,
             date: { gte: period.startDate, lte: period.endDate },
           },
-          data: { metadata: Prisma.JsonNull },
+          select: { id: true, metadata: true },
         });
+        for (const t of txs) {
+          const existing = { ...((t.metadata as Record<string, unknown> | null) ?? {}) };
+          delete existing.lockedByPeriod;
+          await tx.financialTransaction.update({
+            where: { id: t.id },
+            data: { metadata: Object.keys(existing).length > 0 ? existing : Prisma.JsonNull },
+          });
+        }
       }
 
       await tx.accountingPeriod.update({

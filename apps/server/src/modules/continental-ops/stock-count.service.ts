@@ -102,17 +102,19 @@ export class StockCountService {
 
     const items = sc.items as unknown as Array<{ productId?: string; countedQty: number; systemQty: number; variance: number }>;
 
-    for (const item of items) {
-      if (!item.productId || item.variance === 0) continue;
-      await this.prisma.client.inventoryStock.updateMany({
-        where: { productId: item.productId, businessId },
-        data: { quantity: item.countedQty },
-      });
-    }
+    return this.prisma.client.$transaction(async (tx) => {
+      for (const item of items) {
+        if (!item.productId || item.variance === 0) continue;
+        await tx.inventoryStock.updateMany({
+          where: { productId: item.productId, businessId },
+          data: { quantity: item.countedQty },
+        });
+      }
 
-    return this.prisma.client.stockCount.update({
-      where: { id },
-      data: { status: 'ADJUSTED' },
+      return tx.stockCount.update({
+        where: { id },
+        data: { status: 'ADJUSTED' },
+      });
     });
   }
 

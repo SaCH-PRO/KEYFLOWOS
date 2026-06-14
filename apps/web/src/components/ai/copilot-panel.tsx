@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Brain,
@@ -32,9 +33,12 @@ import {
   Target,
   Layers,
   Footprints,
+  Dna,
 } from "lucide-react";
 import { toast } from "sonner";
+import { apiGet } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
+import type { BlueprintData } from "@/lib/blueprint-types";
 import {
   sendFlowChat,
   confirmFlowAction,
@@ -48,16 +52,11 @@ import {
   dismissSuggestion,
   blockSuggestionCategory,
   type ChatSuggestion,
-  fetchProfileStatus,
-  sendProfileChat,
-  confirmProfileExtractions,
   type AiApprovalItem,
   type AiExecutionStats,
   type AiExecutionLogEntry,
   type ActionQueueItem,
   type ProAutoInsight,
-  type ProfileStatus,
-  type ProfileExtraction,
   type FlowChatResponse,
   type FlowToolResult,
   type FlowPendingConfirmation,
@@ -462,15 +461,11 @@ export function CopilotPanel({ open, onClose, currentModule, initialPrompt, onIn
   const [suggestions, setSuggestions] = useState<ChatSuggestion[]>([]);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
-  const [profileStatus, setProfileStatus] = useState<ProfileStatus | null>(null);
-  const [profileMode, setProfileMode] = useState(false);
-  const [profileSending, setProfileSending] = useState(false);
-  const [profileMessages, setProfileMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([]);
-  const [pendingExtractions, setPendingExtractions] = useState<ProfileExtraction[]>([]);
-  const [confirmingExtractions, setConfirmingExtractions] = useState(false);
   const [executionLogs, setExecutionLogs] = useState<AiExecutionLogEntry[]>([]);
   const [actionQueue, setActionQueue] = useState<ActionQueueItem[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
+  const [blueprintCompleteness, setBlueprintCompleteness] = useState<number | null>(null);
+  const router = useRouter();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -597,15 +592,6 @@ export function CopilotPanel({ open, onClose, currentModule, initialPrompt, onIn
     }
   }, []);
 
-  const loadProfileStatus = useCallback(async () => {
-    const biz = getStoredBusinessId();
-    if (!biz) return;
-    try {
-      const res = await fetchProfileStatus(biz);
-      if (res.data) setProfileStatus(res.data);
-    } catch {}
-  }, []);
-
   const loadExecutionLogs = useCallback(async () => {
     const biz = getStoredBusinessId();
     if (!biz) return;
@@ -619,53 +605,19 @@ export function CopilotPanel({ open, onClose, currentModule, initialPrompt, onIn
     }
   }, []);
 
-  const handleProfileSend = useCallback(async (msg: string) => {
-    const biz = getStoredBusinessId();
-    if (!biz || !msg.trim()) return;
-    setProfileMessages((prev) => [...prev, { role: "user", content: msg }]);
-    setProfileSending(true);
-    try {
-      const res = await sendProfileChat(biz, msg);
-      if (res.data) {
-        setProfileMessages((prev) => [...prev, { role: "assistant", content: res.data!.reply }]);
-        if (res.data.pendingExtractions?.length > 0) {
-          setPendingExtractions(res.data.pendingExtractions);
-        }
-        loadProfileStatus();
-      }
-    } catch {
-      toast.error("Failed to process response");
-    } finally {
-      setProfileSending(false);
-    }
-  }, [loadProfileStatus]);
-
-  const handleConfirmExtractions = useCallback(async (keys?: string[]) => {
-    const biz = getStoredBusinessId();
-    if (!biz) return;
-    setConfirmingExtractions(true);
-    try {
-      const res = await confirmProfileExtractions(biz, keys);
-      if (res.data) {
-        setPendingExtractions([]);
-        loadProfileStatus();
-        toast.success(`Saved ${res.data.saved} insight${res.data.saved !== 1 ? "s" : ""} to your profile`);
-      }
-    } catch {
-      toast.error("Failed to save profile data");
-    } finally {
-      setConfirmingExtractions(false);
-    }
-  }, [loadProfileStatus]);
-
   useEffect(() => {
     if (open) {
       setTimeout(() => inputRef.current?.focus(), 300);
       loadSidebarData();
       loadInsights();
-      loadProfileStatus();
+      const biz = getStoredBusinessId();
+      if (biz) {
+        apiGet<BlueprintData>(`/blueprint/businesses/${biz}`)
+          .then(({ data }) => { if (data) setBlueprintCompleteness(data.completeness); })
+          .catch(() => { setBlueprintCompleteness(null); });
+      }
     }
-  }, [open, loadSidebarData, loadInsights, loadProfileStatus]);
+  }, [open, loadSidebarData, loadInsights]);
 
   useEffect(() => {
     if (open && tab === "activity") {
@@ -1092,111 +1044,7 @@ export function CopilotPanel({ open, onClose, currentModule, initialPrompt, onIn
             </div>
 
             <div className="flex-1 overflow-y-auto">
-              {tab === "chat" && profileMode && (
-                <div id="copilot-panel-profile" role="tabpanel" className="flex flex-col h-full">
-                  <div className="flex items-center gap-2 px-4 py-2 border-b border-border/20">
-                    <button
-                      onClick={() => setProfileMode(false)}
-                      className="text-xs text-muted-foreground/60 hover:text-foreground/70 transition-colors"
-                    >
-                      &larr; Back
-                    </button>
-                    <Brain className="w-3.5 h-3.5 text-[hsl(var(--kf-accent2))]" />
-                    <span className="text-xs font-semibold text-foreground/80">Business Profile Interview</span>
-                    {profileStatus && (
-                      <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-[hsl(var(--kf-accent2)_/_0.15)] text-[hsl(var(--kf-accent2))] font-medium ml-auto">
-                        {profileStatus.completionPercent}%
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
-                    {profileMessages.map((msg, i) => (
-                      <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                        <div
-                          className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-[13px] leading-relaxed ${
-                            msg.role === "user"
-                              ? "bg-[hsl(var(--kf-accent2))] text-white rounded-br-md"
-                              : "bg-muted/30 text-foreground/85 border border-border/20 rounded-bl-md"
-                          }`}
-                        >
-                          {msg.content}
-                        </div>
-                      </div>
-                    ))}
-                    {profileSending && (
-                      <div className="flex justify-start">
-                        <div className="bg-muted/30 border border-border/20 rounded-2xl rounded-bl-md px-4 py-3">
-                          <div className="flex items-center gap-2">
-                            <Loader2 className="w-3.5 h-3.5 animate-spin text-[hsl(var(--kf-accent2))]" />
-                            <span className="text-xs text-muted-foreground/60">Learning...</span>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                    {pendingExtractions.length > 0 && !profileSending && (
-                      <div className="mx-1 p-3 rounded-xl border border-[hsl(var(--kf-accent2)_/_0.3)] bg-[hsl(var(--kf-accent2)_/_0.08)]">
-                        <div className="flex items-center gap-1.5 mb-2">
-                          <CheckCircle2 className="w-3.5 h-3.5 text-[hsl(var(--kf-accent2))]" />
-                          <span className="text-[11px] font-semibold text-[hsl(var(--kf-accent2))]">Confirm what I learned</span>
-                        </div>
-                        <div className="space-y-1.5 mb-2.5">
-                          {pendingExtractions.map((ext, i) => (
-                            <div key={i} className="flex items-start gap-2 text-[12px] text-foreground/75">
-                              <span className="shrink-0 mt-0.5 w-1.5 h-1.5 rounded-full bg-[hsl(var(--kf-accent2))]" />
-                              <div>
-                                <span className="font-medium text-foreground/85">{ext.key.replace(/_/g, " ")}:</span>{" "}
-                                <span>{ext.value}</span>
-                                <span className="ml-1 text-[10px] text-muted-foreground/50">({Math.round(ext.confidence * 100)}%)</span>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => handleConfirmExtractions()}
-                            disabled={confirmingExtractions}
-                            className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-[hsl(var(--kf-accent2))] text-white text-[11px] font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
-                          >
-                            {confirmingExtractions ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
-                            Save All
-                          </button>
-                          <button
-                            onClick={() => setPendingExtractions([])}
-                            disabled={confirmingExtractions}
-                            className="px-3 py-1.5 rounded-lg border border-border/30 text-[11px] text-muted-foreground/60 hover:text-foreground/70 transition-colors disabled:opacity-50"
-                          >
-                            Skip
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                    <div ref={messagesEndRef} />
-                  </div>
-                  <form
-                    onSubmit={(e) => { e.preventDefault(); if (input.trim() && !profileSending) { handleProfileSend(input.trim()); setInput(""); } }}
-                    className="p-3 border-t border-border/20"
-                  >
-                    <div className="flex items-center gap-2 bg-gradient-to-r from-muted/30 to-muted/10 border border-border/40 rounded-xl px-3 py-2 focus-within:border-[hsl(var(--kf-accent1))]/30 focus-within:shadow-[0_0_12px_hsl(var(--kf-accent1)/0.06)] transition-all">
-                      <input
-                        value={input}
-                        onChange={(e) => setInput(e.target.value)}
-                        placeholder="Tell me about your business..."
-                        className="flex-1 bg-transparent text-sm text-foreground/85 placeholder:text-muted-foreground/35 outline-none"
-                        disabled={profileSending}
-                      />
-                      <button
-                        type="submit"
-                        disabled={!input.trim() || profileSending}
-                        className="w-7 h-7 rounded-lg flex items-center justify-center bg-[hsl(var(--kf-accent2))] text-white disabled:opacity-30 transition-opacity"
-                      >
-                        <Send className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </form>
-                </div>
-              )}
-
-              {tab === "chat" && !profileMode && (
+              {tab === "chat" && (
                 <div id="copilot-panel-chat" role="tabpanel" aria-labelledby="copilot-tab-chat" className="flex flex-col h-full">
                   <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
                     {messages.length === 0 && (
@@ -1343,41 +1191,40 @@ export function CopilotPanel({ open, onClose, currentModule, initialPrompt, onIn
                           </div>
                         )}
 
-                        {profileStatus && profileStatus.completionPercent < 100 && (
-                          <div className="p-3 rounded-xl border border-[hsl(var(--kf-accent2)_/_0.3)] bg-[hsl(var(--kf-accent2)_/_0.05)]">
+                        {blueprintCompleteness !== null && blueprintCompleteness < 100 && (
+                          <div className="p-3 rounded-xl border border-[hsl(var(--kf-accent1)_/_0.3)] bg-[hsl(var(--kf-accent1)_/_0.05)]">
                             <div className="flex items-center gap-2 mb-2">
-                              <Brain className="w-4 h-4 text-[hsl(var(--kf-accent2))]" />
-                              <span className="text-xs font-semibold text-foreground/80">Teach Me Your Business</span>
-                              <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-[hsl(var(--kf-accent2)_/_0.15)] text-[hsl(var(--kf-accent2))] font-medium ml-auto">
-                                {profileStatus.completionPercent}%
+                              <Dna className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
+                              <span className="text-xs font-semibold text-foreground/80">Business Genome</span>
+                              <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-[hsl(var(--kf-accent1)_/_0.15)] text-[hsl(var(--kf-accent1))] font-medium ml-auto">
+                                {blueprintCompleteness}%
                               </span>
                             </div>
                             <div className="w-full h-1.5 rounded-full bg-muted/30 mb-2">
                               <div
-                                className="h-full rounded-full bg-[hsl(var(--kf-accent2))] transition-all"
-                                style={{ width: `${profileStatus.completionPercent}%` }}
+                                className="h-full rounded-full bg-[hsl(var(--kf-accent1))] transition-all"
+                                style={{ width: `${blueprintCompleteness}%` }}
                               />
                             </div>
                             <p className="text-[10px] text-muted-foreground/60 mb-2">
-                              Help me understand your business better so I can give smarter suggestions and automate more for you.
+                              Your Business Genome is {blueprintCompleteness}% complete. The more KEY knows, the better it can run as your digital co-founder.
                             </p>
-                            {profileStatus.remainingTopics.length > 0 && (
-                              <p className="text-[10px] text-muted-foreground/40 mb-2">
-                                Next: {profileStatus.remainingTopics[0]}
-                              </p>
-                            )}
-                            <button
-                              onClick={() => {
-                                setProfileMode(true);
-                                if (profileMessages.length === 0) {
-                                  handleProfileSend("Hi, I'd like to tell you about my business");
-                                }
-                              }}
-                              className="w-full flex items-center justify-center gap-1.5 p-2 rounded-lg bg-[hsl(var(--kf-accent2)_/_0.15)] text-xs text-[hsl(var(--kf-accent2))] font-medium hover:bg-[hsl(var(--kf-accent2)_/_0.25)] transition-all"
-                            >
-                              <span>Start Conversation</span>
-                              <ArrowRight className="w-3 h-3" />
-                            </button>
+                            <div className="flex flex-col gap-2">
+                              <button
+                                onClick={() => { router.push("/app/blueprint?onboarding=1"); onClose(); }}
+                                className="w-full flex items-center justify-center gap-1.5 p-2 rounded-lg bg-[hsl(var(--kf-accent1)_/_0.15)] text-xs text-[hsl(var(--kf-accent1))] font-medium hover:bg-[hsl(var(--kf-accent1)_/_0.25)] transition-all"
+                              >
+                                <span>Continue in Blueprint</span>
+                                <ArrowRight className="w-3 h-3" />
+                              </button>
+                              <button
+                                onClick={() => { handleSend("Hi KEY, can you help me complete my Business Genome?"); }}
+                                className="w-full flex items-center justify-center gap-1.5 p-2 rounded-lg border border-[hsl(var(--kf-accent1)_/_0.2)] text-xs text-foreground/70 hover:bg-[hsl(var(--kf-accent1)_/_0.08)] transition-all"
+                              >
+                                <Brain className="w-3 h-3" />
+                                <span>Chat with KEY</span>
+                              </button>
+                            </div>
                           </div>
                         )}
 
@@ -1638,7 +1485,7 @@ export function CopilotPanel({ open, onClose, currentModule, initialPrompt, onIn
               )}
             </div>
 
-            {tab === "chat" && !profileMode && (
+            {tab === "chat" && (
               <div className="px-4 py-3 border-t border-border/30">
                 <div className="flex items-center gap-2 bg-muted/20 border border-border/30 rounded-xl px-3 py-1">
                   <input

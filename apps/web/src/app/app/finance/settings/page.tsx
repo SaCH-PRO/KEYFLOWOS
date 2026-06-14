@@ -43,8 +43,8 @@ export default function FinanceSettingsPage() {
       icon={SettingsIcon}
       title="Finance settings"
       subtitle={
-        <Link href="/app/finance/cashflow" className="inline-flex items-center gap-1 hover:text-foreground">
-          <ArrowLeft className="w-3 h-3" /> Back to Books
+        <Link href="/app/financial-flow" className="inline-flex items-center gap-1 hover:text-foreground">
+          <ArrowLeft className="w-3 h-3" /> Back to Financial Flow
         </Link>
       }
       tabs={SECTIONS.map((s) => ({ key: s.key, label: s.label, icon: s.icon }))}

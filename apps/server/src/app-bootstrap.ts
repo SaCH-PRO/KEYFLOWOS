@@ -52,11 +52,12 @@ export function configureNestApp(app: INestApplication): void {
 
   // Rate limit everything EXCEPT the top-level health/readiness endpoints
   // — load balancers and the workflow waitForPort probe must always be
-  // able to hit them.
+  // able to hit them. Dev environments can raise the ceiling via env.
+  const rateLimitMax = parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '200', 10);
   app.use(
     rateLimit({
-      windowMs: 60 * 1000,
-      max: 200,
+      windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '60000', 10),
+      max: Number.isFinite(rateLimitMax) && rateLimitMax > 0 ? rateLimitMax : 200,
       standardHeaders: true,
       legacyHeaders: false,
       message: {

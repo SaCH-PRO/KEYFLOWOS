@@ -24,6 +24,9 @@ import { BankRuleService } from './bank-rule.service';
 import { RecurringJournalEntryService } from './recurring-journal-entry.service';
 import { CreditNoteService } from './credit-note.service';
 import { AccountingPeriodService } from './accounting-period.service';
+import { BankConnectionService } from './bank-connection.service';
+import { ExchangeRateService } from './exchange-rate.service';
+import { FixedAssetService } from './fixed-asset.service';
 import { ReconciliationService } from './reconciliation.service';
 import { ExpensePostingService } from './expense-posting.service';
 import { TaxLiabilityService } from './tax-liability.service';
@@ -70,6 +73,9 @@ import { CashReserveService } from './cash-reserve.service';
     RecurringJournalEntryService,
     CreditNoteService,
     AccountingPeriodService,
+    BankConnectionService,
+    ExchangeRateService,
+    FixedAssetService,
     ReconciliationService,
     ExpensePostingService,
     TaxLiabilityService,
@@ -103,6 +109,9 @@ import { CashReserveService } from './cash-reserve.service';
     RecurringJournalEntryService,
     CreditNoteService,
     AccountingPeriodService,
+    BankConnectionService,
+    ExchangeRateService,
+    FixedAssetService,
     ReconciliationService,
     ExpensePostingService,
     FinanceIntelligenceService,

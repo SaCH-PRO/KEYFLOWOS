@@ -7,6 +7,7 @@ import { ReceivablesService } from '../finance/receivables.service';
 import { FinanceOverviewService } from '../finance/finance-overview.service';
 import { CommandService } from '../command/command.service';
 import { TimelineService } from '../timeline/timeline.service';
+import { ConnectorIntelligenceService } from './connector-intelligence.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
 
 export interface ToolResult<T = unknown> {
@@ -48,6 +49,7 @@ export interface ToolDependencies {
   financeOverview: FinanceOverviewService;
   commandService: CommandService;
   timeline: TimelineService;
+  connectorIntelligence: ConnectorIntelligenceService;
 }
 
 function str(input: Record<string, unknown>, key: string, fallback?: string): string | undefined {
@@ -337,6 +339,100 @@ const timelineCreateReminder: KeyToolDefinition<
   },
 };
 
+const connectScanDrive: KeyToolDefinition<
+  Record<string, never>,
+  { scanned: number; newFiles: number }
+> = {
+  name: 'scanDrive',
+  module: 'connect',
+  description: 'Scan connected Google Drive for new business documents',
+  riskTier: 1,
+  requiresApproval: false,
+  validateInput: () => ({ valid: true, parsed: {} as Record<string, never> }),
+  execute: async (ctx, _input, deps) => {
+    const result = await deps.connectorIntelligence.syncGoogleDrive(ctx.businessId);
+    return { success: true, data: result };
+  },
+};
+
+const connectListDriveIntake: KeyToolDefinition<
+  { status?: string; limit?: number },
+  { items: Array<Record<string, unknown>>; count: number }
+> = {
+  name: 'listDriveIntake',
+  module: 'connect',
+  description: 'List detected Drive intake items waiting for review',
+  riskTier: 1,
+  requiresApproval: false,
+  validateInput: (input) => {
+    const status = str(input, 'status');
+    const limit = num(input, 'limit', 20) ?? 20;
+    return { valid: true, parsed: { status, limit } };
+  },
+  execute: async (ctx, input, deps) => {
+    const where: Record<string, unknown> = { businessId: ctx.businessId };
+    if (input.status) where.status = input.status;
+    const items = await (deps.prisma.client as any).driveIntakeFile.findMany({
+      where,
+      orderBy: { modifiedTime: 'desc' },
+      take: input.limit,
+    });
+    return { success: true, data: { items, count: items.length } };
+  },
+};
+
+const messagesListMessageIntake: KeyToolDefinition<
+  { status?: string; sourceChannel?: string; limit?: number },
+  { items: Array<Record<string, unknown>>; count: number }
+> = {
+  name: 'listMessageIntake',
+  module: 'messages',
+  description: 'List message intake items waiting for approval across WhatsApp, email, SMS, Facebook and Instagram',
+  riskTier: 1,
+  requiresApproval: false,
+  validateInput: (input) => {
+    const status = str(input, 'status');
+    const sourceChannel = str(input, 'sourceChannel');
+    const limit = num(input, 'limit', 20) ?? 20;
+    return { valid: true, parsed: { status, sourceChannel, limit } };
+  },
+  execute: async (ctx, input, deps) => {
+    const where: Record<string, unknown> = { businessId: ctx.businessId };
+    if (input.status) where.status = input.status;
+    if (input.sourceChannel) where.sourceChannel = input.sourceChannel;
+    const items = await (deps.prisma.client as any).messageIntake.findMany({
+      where,
+      orderBy: { detectedAt: 'desc' },
+      take: input.limit,
+      include: { contact: { select: { firstName: true, lastName: true, email: true, phone: true } } },
+    });
+    return { success: true, data: { items, count: items.length } };
+  },
+};
+
+const socialListRecentEngagement: KeyToolDefinition<
+  { limit?: number },
+  { engagements: Array<Record<string, unknown>>; count: number }
+> = {
+  name: 'listRecentEngagement',
+  module: 'social',
+  description: 'List recent social engagements (comments, DMs, mentions) from Facebook and Instagram',
+  riskTier: 1,
+  requiresApproval: false,
+  validateInput: (input) => {
+    const limit = num(input, 'limit', 20) ?? 20;
+    return { valid: true, parsed: { limit } };
+  },
+  execute: async (ctx, input, deps) => {
+    const items = await (deps.prisma.client as any).socialEngagement.findMany({
+      where: { businessId: ctx.businessId },
+      orderBy: { createdAt: 'desc' },
+      take: input.limit,
+    });
+    return { success: true, data: { engagements: items, count: items.length } };
+  },
+};
+
 // ── Registry ────────────────────────────────────────────────────────────────
 
 @Injectable()
@@ -353,6 +449,7 @@ export class KeyToolRegistryService {
     @Inject(forwardRef(() => FinanceOverviewService)) private readonly financeOverview: FinanceOverviewService,
     @Inject(forwardRef(() => CommandService)) private readonly commandService: CommandService,
     @Inject(TimelineService) private readonly timeline: TimelineService,
+    @Inject(ConnectorIntelligenceService) private readonly connectorIntelligence: ConnectorIntelligenceService,
     @Inject(AiExecutionLogService) private readonly auditLog: AiExecutionLogService,
   ) {
     this.register(financeSummarizeCashPosition);
@@ -365,6 +462,10 @@ export class KeyToolRegistryService {
     this.register(contactsCreateCommandItem);
     this.register(commerceSummarizeRevenue);
     this.register(timelineCreateReminder);
+    this.register(connectScanDrive);
+    this.register(connectListDriveIntake);
+    this.register(messagesListMessageIntake);
+    this.register(socialListRecentEngagement);
   }
 
   private register(tool: AnyTool) {
@@ -439,6 +540,7 @@ export class KeyToolRegistryService {
       financeOverview: this.financeOverview,
       commandService: this.commandService,
       timeline: this.timeline,
+      connectorIntelligence: this.connectorIntelligence,
     };
 
     const startMs = Date.now();

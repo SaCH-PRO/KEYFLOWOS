@@ -11,7 +11,11 @@ CREATE TABLE "business_blueprints" (
     "customer_model" JSONB NOT NULL DEFAULT '{}',
     "financials" JSONB NOT NULL DEFAULT '{}',
     "intelligence" JSONB NOT NULL DEFAULT '{}',
+    "workflow_model" JSONB,
+    "ai_preferences" JSONB,
+    "confidence_scores" JSONB NOT NULL DEFAULT '{}',
     "completeness" INTEGER NOT NULL DEFAULT 0,
+    "last_analyzed_at" TIMESTAMP(3),
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMP(3) NOT NULL,
 

@@ -8,6 +8,8 @@ import { CopilotPanel, type CopilotModule } from "@/components/ai/copilot-panel"
 import { CommandPalette } from "@/components/command-palette";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { transcribeKeyflowSpeech } from "@/lib/client";
+import { apiGet } from "@/lib/api";
+import type { BlueprintData } from "@/lib/blueprint-types";
 
 export type KeyMode = "chat" | "voice" | "palette";
 
@@ -103,6 +105,36 @@ export function KeyAgent({ currentModule }: KeyAgentProps) {
   }, []);
 
   const onPromptConsumed = useCallback(() => setInitialPrompt(undefined), []);
+
+  // Auto-open KEY once per session when the Business Genome is incomplete
+  useEffect(() => {
+    if (!businessId) return;
+    const alreadyPrompted = sessionStorage.getItem("kf:genome-auto-prompt");
+    if (alreadyPrompted === "1") return;
+
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      apiGet<BlueprintData>(`/blueprint/businesses/${businessId}`)
+        .then(({ data }) => {
+          if (cancelled || !data) return;
+          if (data.completeness < 100) {
+            sessionStorage.setItem("kf:genome-auto-prompt", "1");
+            setMode("chat");
+            setInitialPrompt(
+              "Hi KEY! Can you help me complete my Business Genome? Tell me what's missing and ask me one question at a time.",
+            );
+          }
+        })
+        .catch(() => {
+          // ignore — don't block the app if blueprint check fails
+        });
+    }, 2500);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [businessId]);
 
   const effectiveModule = useMemo<CopilotModule | undefined>(
     () => scopedModule ?? currentModule,

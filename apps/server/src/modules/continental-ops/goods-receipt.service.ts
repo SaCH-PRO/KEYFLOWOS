@@ -121,17 +121,20 @@ export class GoodsReceiptService {
 
     // Update inventory stock levels for accepted quantities
     const items = gr.items as unknown as Array<{ productId?: string; qtyAccepted: number }>;
-    for (const item of items) {
-      if (!item.productId || item.qtyAccepted <= 0) continue;
-      await this.prisma.client.inventoryStock.updateMany({
-        where: { productId: item.productId, businessId },
-        data: { quantity: { increment: item.qtyAccepted } },
-      });
-    }
 
-    return this.prisma.client.goodsReceipt.update({
-      where: { id },
-      data: { status: 'POSTED' },
+    return this.prisma.client.$transaction(async (tx) => {
+      for (const item of items) {
+        if (!item.productId || item.qtyAccepted <= 0) continue;
+        await tx.inventoryStock.updateMany({
+          where: { productId: item.productId, businessId },
+          data: { quantity: { increment: item.qtyAccepted } },
+        });
+      }
+
+      return tx.goodsReceipt.update({
+        where: { id },
+        data: { status: 'POSTED' },
+      });
     });
   }
 

@@ -1,6 +1,6 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy, Inject } from '@nestjs/common';
 import { Queue, Worker, Job, QueueEvents } from 'bullmq';
-import { REDIS_CLIENT } from '../../core/redis/redis.module';
+import { REDIS_CLIENT } from '../../core/redis/redis.constants';
 import type { Redis } from 'ioredis';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';

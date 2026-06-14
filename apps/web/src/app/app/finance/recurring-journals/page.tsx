@@ -2,15 +2,18 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { Repeat, Plus, Loader2, Trash2, Play, Power, Calendar } from "lucide-react";
+import { toast } from "sonner";
 import { UnifiedPageShell } from "@/components/layout/unified-page-shell";
 import { DataTable } from "@/components/ui/data-table";
+import { InlineLineItemBuilder, type LineItem } from "@/components/finance/inline-line-item-builder";
 import { getStoredBusinessId } from "@/lib/workspace";
-import { fetchRecurringJournals, createRecurringJournal, updateRecurringJournal, deleteRecurringJournal, runRecurringJournal, type RecurringJournalEntry } from "@/lib/api/finance";
+import { fetchRecurringJournals, createRecurringJournal, updateRecurringJournal, deleteRecurringJournal, runRecurringJournal, fetchChartOfAccounts, type RecurringJournalEntry, type ChartOfAccount } from "@/lib/api/finance";
 
 export default function RecurringJournalsPage() {
   const businessId = getStoredBusinessId() ?? "";
   const [entries, setEntries] = useState<RecurringJournalEntry[]>([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState<string | null>(null);
@@ -20,14 +23,23 @@ export default function RecurringJournalsPage() {
   const [frequency, setFrequency] = useState("MONTHLY");
   const [nextRunDate, setNextRunDate] = useState("");
   const [endDate, setEndDate] = useState("");
-  const [journalEntries, setJournalEntries] = useState("");
+  const [lineItems, setLineItems] = useState<LineItem[]>([]);
+  const [accounts, setAccounts] = useState<ChartOfAccount[]>([]);
+  const [lineItemErrors, setLineItemErrors] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
     if (!businessId) return;
     setLoading(true);
+    setError(null);
     try {
-      const res = await fetchRecurringJournals(businessId);
-      if (res.data) setEntries(res.data);
+      const [entriesRes, accountsRes] = await Promise.all([
+        fetchRecurringJournals(businessId),
+        fetchChartOfAccounts(businessId),
+      ]);
+      setEntries(entriesRes.data?.items ?? []);
+      setAccounts(accountsRes.data?.items ?? []);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load recurring journals");
     } finally {
       setLoading(false);
     }
@@ -38,15 +50,31 @@ export default function RecurringJournalsPage() {
   }, [load]);
 
   const handleCreate = async () => {
-    if (!businessId || !name.trim() || !nextRunDate || !journalEntries.trim()) return;
-    let parsedEntries: Array<{ accountId: string; debit?: number; credit?: number; memo?: string }>;
-    try {
-      parsedEntries = JSON.parse(journalEntries);
-      if (!Array.isArray(parsedEntries)) throw new Error("Must be an array");
-    } catch {
-      alert("Entries must be valid JSON array: [{accountId, debit?, credit?, memo?}]");
+    if (!businessId || !name.trim() || !nextRunDate) return;
+
+    const errors: Record<string, string> = {};
+    const validItems = lineItems.filter((item) => item.accountId && (item.debit || item.credit));
+    if (validItems.length < 2) {
+      errors.items = "Add at least two line items with an account and a debit or credit amount.";
+    }
+    const totalDebit = validItems.reduce((sum, item) => sum + (Number(item.debit) || 0), 0);
+    const totalCredit = validItems.reduce((sum, item) => sum + (Number(item.credit) || 0), 0);
+    if (Math.abs(totalDebit - totalCredit) > 0.001) {
+      errors.balance = `Journal is out of balance by ${Math.abs(totalDebit - totalCredit).toFixed(2)}.`;
+    }
+    if (Object.keys(errors).length > 0) {
+      setLineItemErrors(errors);
       return;
     }
+    setLineItemErrors({});
+
+    const entries = validItems.map((item) => ({
+      accountId: item.accountId!,
+      debit: Number(item.debit) || undefined,
+      credit: Number(item.credit) || undefined,
+      memo: item.memo || undefined,
+    }));
+
     setSaving(true);
     try {
       const res = await createRecurringJournal(businessId, {
@@ -55,17 +83,21 @@ export default function RecurringJournalsPage() {
         frequency,
         nextRunDate,
         endDate: endDate || null,
-        entries: parsedEntries,
+        entries,
       });
-      if (res.data) {
-        setEntries((prev) => [...prev, res.data!]);
+      const created = res.data;
+      if (created) {
+        setEntries((prev) => [...prev, created]);
         setShowAdd(false);
         setName("");
         setDescription("");
         setNextRunDate("");
         setEndDate("");
-        setJournalEntries("");
+        setLineItems([]);
+        toast.success("Recurring journal created");
       }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to create recurring journal");
     } finally {
       setSaving(false);
     }
@@ -73,16 +105,28 @@ export default function RecurringJournalsPage() {
 
   const handleToggle = async (entry: RecurringJournalEntry) => {
     if (!businessId) return;
-    const res = await updateRecurringJournal(businessId, entry.id, { isActive: !entry.isActive });
-    if (res.data) {
-      setEntries((prev) => prev.map((e) => (e.id === entry.id ? res.data! : e)));
+    try {
+      const res = await updateRecurringJournal(businessId, entry.id, { isActive: !entry.isActive });
+      const updated = res.data;
+      if (updated) {
+        setEntries((prev) => prev.map((e) => (e.id === entry.id ? updated : e)));
+        toast.success(updated.isActive ? "Entry activated" : "Entry deactivated");
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to update entry");
     }
   };
 
   const handleDelete = async (id: string) => {
     if (!businessId) return;
-    await deleteRecurringJournal(businessId, id);
-    setEntries((prev) => prev.filter((e) => e.id !== id));
+    if (!window.confirm("Are you sure? This cannot be undone.")) return;
+    try {
+      await deleteRecurringJournal(businessId, id);
+      setEntries((prev) => prev.filter((e) => e.id !== id));
+      toast.success("Entry deleted");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to delete entry");
+    }
   };
 
   const handleRun = async (id: string) => {
@@ -90,8 +134,10 @@ export default function RecurringJournalsPage() {
     setRunning(id);
     try {
       await runRecurringJournal(businessId, id);
-      alert("Journal entry executed successfully");
+      toast.success("Journal entry executed");
       load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to run entry");
     } finally {
       setRunning(null);
     }
@@ -114,6 +160,12 @@ export default function RecurringJournalsPage() {
       }
     >
       <div className="space-y-4">
+        {error && (
+          <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            {error}
+            <button onClick={load} className="ml-2 underline">Retry</button>
+          </div>
+        )}
         {showAdd && (
           <div className="kf-card p-4 space-y-3">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -122,6 +174,7 @@ export default function RecurringJournalsPage() {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Entry name (e.g. Monthly Depreciation)"
+                aria-label="Entry name"
                 className="px-3 py-2 rounded-lg border text-sm bg-background focus:outline-none focus:ring-2 focus:ring-[hsl(var(--kf-accent1))]/20"
                 style={{ borderColor: "hsl(var(--kf-border))" }}
               />
@@ -130,6 +183,7 @@ export default function RecurringJournalsPage() {
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder="Description"
+                aria-label="Description"
                 className="px-3 py-2 rounded-lg border text-sm bg-background focus:outline-none focus:ring-2 focus:ring-[hsl(var(--kf-accent1))]/20"
                 style={{ borderColor: "hsl(var(--kf-border))" }}
               />
@@ -162,17 +216,21 @@ export default function RecurringJournalsPage() {
                 style={{ borderColor: "hsl(var(--kf-border))" }}
               />
             </div>
-            <textarea
-              value={journalEntries}
-              onChange={(e) => setJournalEntries(e.target.value)}
-              placeholder={`Journal entries JSON: [{"accountId":"...","debit":100,"memo":"..."},{"accountId":"...","credit":100}]`}
-              rows={4}
-              className="w-full px-3 py-2 rounded-lg border text-sm bg-background focus:outline-none focus:ring-2 focus:ring-[hsl(var(--kf-accent1))]/20 font-mono"
-              style={{ borderColor: "hsl(var(--kf-border))" }}
-            />
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1.5">Journal lines</label>
+              <InlineLineItemBuilder
+                mode="journal"
+                items={lineItems}
+                onChange={setLineItems}
+                accounts={accounts}
+                currency="TTD"
+                errors={lineItemErrors}
+                disabled={saving}
+              />
+            </div>
             <button
               onClick={handleCreate}
-              disabled={saving || !name.trim() || !nextRunDate || !journalEntries.trim()}
+              disabled={saving || !name.trim() || !nextRunDate}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-[hsl(var(--kf-accent1))] text-white hover:opacity-90 transition-opacity disabled:opacity-50"
             >
               {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}

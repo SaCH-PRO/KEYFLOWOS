@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy, Inject } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AgentTriggerService } from './agent-trigger.service';
@@ -7,6 +8,7 @@ import { AgentBusService } from './agent-bus.service';
 import { PlanExecutorService } from './plan-executor.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
 import { ConversationalAIService } from './conversational-ai.service';
+import { GoogleDriveService } from '../google-drive/google-drive.service';
 
 interface ScannedFile {
   id: string;
@@ -43,6 +45,7 @@ export class ConnectorIntelligenceService implements OnModuleInit, OnModuleDestr
     @Inject(PlanExecutorService) private readonly planExecutor: PlanExecutorService,
     @Inject(AiExecutionLogService) private readonly executionLog: AiExecutionLogService,
     @Inject(ConversationalAIService) private readonly conversationalAI: ConversationalAIService,
+    @Inject(GoogleDriveService) private readonly googleDrive: GoogleDriveService,
   ) {}
 
   onModuleInit() {
@@ -101,65 +104,175 @@ export class ConnectorIntelligenceService implements OnModuleInit, OnModuleDestr
     }
   }
 
-  private async scanGoogleDrive(businessId: string): Promise<void> {
-    const business = await this.prisma.client.business.findUnique({
-      where: { id: businessId },
-      select: { driveAccessToken: true },
+  async syncGoogleDrive(businessId: string): Promise<{ scanned: number; newFiles: number }> {
+    const status = await this.prisma.client.driveSyncCursor.upsert({
+      where: { businessId },
+      create: { businessId, status: 'running' },
+      update: { status: 'running', errorMessage: null },
     });
-    if (!business?.driveAccessToken) return;
 
-    // Search for recent files in KeyFlow folder or recent uploads
+    let scanned = 0;
+    let newFiles = 0;
+    let pageToken: string | undefined;
+
     try {
-      const searchRes = await fetch(
-        `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(
-          "mimeType contains 'image/' or mimeType contains 'application/pdf' or mimeType contains 'text/'"
-        )}&orderBy=modifiedTime desc&pageSize=20&fields=files(id,name,mimeType,webViewLink,modifiedTime,size)`,
-        { headers: { Authorization: `Bearer ${business.driveAccessToken}` } },
-      );
+      // Ensure token is valid before scanning
+      await this.googleDrive.getValidAccessToken(businessId);
 
-      if (!searchRes.ok) return;
-      const data = await searchRes.json() as { files?: ScannedFile[] };
-      const files = data.files ?? [];
+      const lastSync = status.lastSyncAt.toISOString();
+      const query = `modifiedTime > '${lastSync}' and (mimeType contains 'image/' or mimeType contains 'application/pdf' or mimeType contains 'text/') and trashed = false`;
 
-      for (const file of files) {
-        if (this.processedFileIds.has(file.id)) continue;
-        this.processedFileIds.add(file.id);
-
-        // Only process files modified in last hour
-        const modifiedTime = new Date(file.modifiedTime);
-        if (Date.now() - modifiedTime.getTime() > 60 * 60 * 1000) continue;
-
-        // Emit file event for AI processing
-        this.events.emit('file.uploaded', {
-          businessId,
-          connectorType: 'google_drive',
-          externalId: file.id,
-          fileName: file.name,
-          mimeType: file.mimeType,
-          url: file.webViewLink,
-          size: file.size,
+      do {
+        const list = await this.googleDrive.listFiles(businessId, {
+          query,
+          pageSize: 50,
+          pageToken,
+          orderBy: 'modifiedTime desc',
         });
 
-        // Trigger document intelligence
-        this.docIntel.extractFromDocument({
-          businessId,
-          source: 'google_drive',
-          mimeType: file.mimeType,
-          url: file.webViewLink,
-          filename: file.name,
-          externalId: file.id,
-          sourceConnector: 'google_drive',
-        }).then((result) => {
-          if (result.confidence > 0.6) {
-            return this.docIntel.processExtractedDocument(businessId, result, { autoCreate: true });
-          }
-        }).catch(() => {});
+        pageToken = list.nextPageToken;
+        const files = list.files ?? [];
+        scanned += files.length;
 
-        this.logger.log(`Processed Drive file: ${file.name} for ${businessId}`);
-      }
+        for (const file of files) {
+          const modifiedTime = file.modifiedTime ? new Date(file.modifiedTime) : new Date();
+
+          // Idempotency: same Drive file id + modifiedTime is one intake record
+          const existing = await this.prisma.client.driveIntakeFile.findUnique({
+            where: { businessId_driveFileId: { businessId, driveFileId: file.id } },
+          });
+
+          if (existing && existing.modifiedTime.getTime() >= modifiedTime.getTime()) {
+            continue;
+          }
+
+          newFiles += 1;
+
+          const intake = await this.prisma.client.driveIntakeFile.upsert({
+            where: { businessId_driveFileId: { businessId, driveFileId: file.id } },
+            create: {
+              businessId,
+              driveFileId: file.id,
+              name: file.name,
+              mimeType: file.mimeType,
+              webViewLink: file.webViewLink,
+              size: file.size ? Number(file.size) : null,
+              modifiedTime,
+              status: 'pending',
+            },
+            update: {
+              name: file.name,
+              mimeType: file.mimeType,
+              webViewLink: file.webViewLink,
+              size: file.size ? Number(file.size) : null,
+              modifiedTime,
+              status: 'pending',
+              confidence: null,
+              documentType: null,
+              extractedData: Prisma.JsonNull,
+              proposedActions: Prisma.JsonNull,
+              errorMessage: null,
+              processedAt: null,
+            },
+          });
+
+          // Process asynchronously so one bad file does not block the scan
+          this.processDriveIntakeFile(businessId, intake.id, file.id).catch((err) => {
+            this.logger.warn(`Drive intake processing failed for ${file.id}: ${(err as Error).message}`);
+          });
+        }
+      } while (pageToken);
+
+      await this.prisma.client.driveSyncCursor.update({
+        where: { businessId },
+        data: { status: 'idle', lastSyncAt: new Date(), pageToken: null },
+      });
+
+      return { scanned, newFiles };
     } catch (err) {
-      this.logger.warn(`Drive scan error: ${(err as Error).message}`);
+      const message = err instanceof Error ? err.message : String(err);
+      await this.prisma.client.driveSyncCursor.update({
+        where: { businessId },
+        data: { status: 'error', errorMessage: message },
+      });
+      throw err;
     }
+  }
+
+  private async processDriveIntakeFile(businessId: string, intakeId: string, driveFileId: string): Promise<void> {
+    const intake = await this.prisma.client.driveIntakeFile.findUnique({ where: { id: intakeId } });
+    if (!intake || intake.status !== 'pending') return;
+
+    try {
+      const { base64, mimeType, name } = await this.googleDrive.downloadBinary(businessId, driveFileId);
+
+      const result = await this.docIntel.extractFromDocument({
+        businessId,
+        source: 'google_drive',
+        mimeType,
+        base64Content: base64,
+        filename: name,
+        externalId: driveFileId,
+        sourceConnector: 'google_drive',
+      });
+
+      await this.prisma.client.driveIntakeFile.update({
+        where: { id: intakeId },
+        data: {
+          status: result.confidence > 0.6 ? 'reviewing' : 'extracted',
+          confidence: result.confidence,
+          documentType: result.documentType,
+          extractedData: result as unknown as Record<string, unknown>,
+        },
+      });
+
+      this.events.emit('file.uploaded', {
+        businessId,
+        connectorType: 'google_drive',
+        externalId: driveFileId,
+        fileName: name,
+        mimeType,
+        intakeId,
+        result,
+      });
+
+      this.events.emit('ingestion.item.received', {
+        businessId,
+        inputs: [
+          {
+            sourceType: 'google_drive',
+            sourceConnectorType: 'google_drive',
+            externalId: driveFileId,
+            receivedAt: new Date(),
+            from: { name: 'Google Drive' },
+            subject: name,
+            rawPayload: {
+              driveFileId,
+              name,
+              mimeType,
+              extractedData: result,
+              documentType: result.documentType,
+              confidence: result.confidence,
+            },
+          },
+        ],
+      });
+
+      this.logger.log(`Extracted Drive file: ${name} (${result.documentType}, ${Math.round(result.confidence * 100)}%) for ${businessId}`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await this.prisma.client.driveIntakeFile.update({
+        where: { id: intakeId },
+        data: { status: 'error', errorMessage: message },
+      });
+    }
+  }
+
+  private async scanGoogleDrive(businessId: string): Promise<void> {
+    // Kept for backward compatibility with the 5-minute background interval.
+    await this.syncGoogleDrive(businessId).catch((err) => {
+      this.logger.warn(`Background Drive sync failed for ${businessId}: ${(err as Error).message}`);
+    });
   }
 
   private async scanWhatsApp(businessId: string): Promise<void> {
@@ -167,6 +280,12 @@ export class ConnectorIntelligenceService implements OnModuleInit, OnModuleDestr
     // But we can check for unread messages or message status updates
     // For now, this is a placeholder for future WhatsApp Business API polling
     // The actual message ingestion happens via webhooks
+
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { messageIntakeEnabled: true },
+    });
+    const intakeEnabled = business?.messageIntakeEnabled ?? false;
 
     // Check for pending message responses that AI should handle
     const pendingResponses = await this.prisma.client.whatsAppMessage.findMany({
@@ -186,6 +305,18 @@ export class ConnectorIntelligenceService implements OnModuleInit, OnModuleDestr
         select: { phoneNumber: true },
       });
       const fromPhone = contact?.phoneNumber ?? 'unknown';
+
+      if (intakeEnabled) {
+        this.events.emit('message.intake.received', {
+          businessId,
+          connectorType: 'whatsapp',
+          sourceChannel: 'whatsapp',
+          externalId: msg.wamid ?? msg.id,
+          from: fromPhone,
+          body: msg.body,
+        });
+        continue;
+      }
 
       this.events.emit('message.received', {
         businessId,
@@ -236,7 +367,25 @@ export class ConnectorIntelligenceService implements OnModuleInit, OnModuleDestr
       take: 20,
     });
 
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { messageIntakeEnabled: true },
+    });
+    const intakeEnabled = business?.messageIntakeEnabled ?? false;
+
     for (const engagement of recentEngagements) {
+      if (intakeEnabled && engagement.type === 'DM' && engagement.content) {
+        this.events.emit('message.intake.received', {
+          businessId,
+          connectorType: 'meta_social',
+          sourceChannel: engagement.platform.toLowerCase() === 'instagram' ? 'instagram' : 'messenger',
+          externalId: engagement.externalId ?? engagement.id,
+          from: engagement.fromUserId ?? engagement.fromUserName ?? 'unknown',
+          fromName: engagement.fromUserName ?? undefined,
+          body: engagement.content,
+        });
+      }
+
       this.events.emit('social.engagement_received', {
         businessId,
         platform: engagement.platform,

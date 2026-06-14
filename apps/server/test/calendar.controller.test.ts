@@ -13,7 +13,7 @@ import { AuthGuard } from '../src/core/auth/auth.guard';
 import { BusinessGuard } from '../src/core/auth/business.guard';
 import { KeyflowCommandService } from '../src/modules/keyflow-command/keyflow-command.service';
 import { CatalogService } from '../src/modules/catalog/catalog.service';
-import { REDIS_CLIENT } from '../src/core/redis/redis.module';
+import { REDIS_CLIENT } from '../src/core/redis/redis.constants';
 
 class CalendarPrismaMock {
   client: any;

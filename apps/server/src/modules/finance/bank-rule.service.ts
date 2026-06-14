@@ -148,8 +148,13 @@ export class BankRuleService {
       // debit the expense account and credit the bank account. For deposits
       // (positive amount) we debit the bank account and credit the income account.
       const amount = new D(String(bank.amount)).abs();
+      if (amount.eq(0)) continue;
       const isDeposit = new D(String(bank.amount)).gte(0);
       const bankCoaId = bank.account.chartOfAccountId;
+      if (!bankCoaId) {
+        console.warn(`[BankRule] Skipping bank transaction ${bank.id}: account has no chartOfAccountId`);
+        continue;
+      }
 
       const entries = isDeposit
         ? [

@@ -9,8 +9,9 @@ export class DeliveryNoteController {
   constructor(@Inject(DeliveryNoteService) private readonly svc: DeliveryNoteService) {}
 
   @Get()
-  list(@Param('businessId') businessId: string) {
-    return this.svc.list(businessId);
+  async list(@Param('businessId') businessId: string) {
+    const items = await this.svc.list(businessId);
+    return { items };
   }
 
   @Post()
@@ -26,6 +27,15 @@ export class DeliveryNoteController {
   @Patch(':id')
   update(@Param('businessId') businessId: string, @Param('id') id: string, @Body() body: UpdateDeliveryNoteInput) {
     return this.svc.update(businessId, id, body);
+  }
+
+  @Post(':id/fulfill')
+  fulfill(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Body() body: { delivererName?: string; delivererSignature?: string; receiverName?: string; receiverSignature?: string },
+  ) {
+    return this.svc.fulfill(businessId, id, body);
   }
 
   @Post(':id/cancel')

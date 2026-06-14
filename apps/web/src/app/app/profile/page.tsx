@@ -19,6 +19,7 @@ import {
   Target,
   Calculator,
   TrendingUp,
+  Dna,
 } from "lucide-react";
 import { apiGet } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
@@ -31,12 +32,13 @@ import { ReadinessTab } from "./components/readiness-tab";
 import { IntelligenceTab } from "./components/intelligence-tab";
 import { OutputsTab } from "./components/outputs-tab";
 import { PricingTab } from "./components/pricing-tab";
+import { BlueprintTab } from "./components/blueprint-tab";
 import SecuritySection from "./components/security-section";
 import { GrowthTrajectoryPanel } from "./components/growth-trajectory-panel";
 import { ProfileSectionErrorBoundary } from "./components/profile-section-error-boundary";
 import type { ProfileBusinessData, ProfileCompletenessField, StatusMessage, TabId } from "./components/profile-types";
 
-type ActiveTab = "overview" | "identity" | "readiness" | "intelligence" | "outputs" | "growth" | "security" | "pricing";
+type ActiveTab = "overview" | "identity" | "readiness" | "intelligence" | "outputs" | "growth" | "security" | "pricing" | "blueprint";
 
 function checkFieldCompletion(key: string, bd: ProfileBusinessData | null): boolean {
   if (!bd) return false;
@@ -72,6 +74,7 @@ const TAB_CONFIG: { id: ActiveTab; label: string; icon: React.ElementType; short
   { id: "outputs", label: "Outputs", shortLabel: "Docs", icon: FileText, description: "Documents and exports" },
   { id: "growth", label: "Growth", shortLabel: "Growth", icon: TrendingUp, description: "Trajectory and milestones" },
   { id: "pricing", label: "Pricing", shortLabel: "Price", icon: Calculator, description: "Rate calculator" },
+  { id: "blueprint", label: "Blueprint", shortLabel: "Genome", icon: Dna, description: "Business Genome" },
   { id: "security", label: "Security", shortLabel: "Security", icon: Shield, description: "Preferences" },
 ];
 
@@ -83,6 +86,7 @@ function mapLegacyTab(tab: string): ActiveTab {
   if (tab === "brand" || tab === "business" || tab === "professional") return "identity";
   if (tab === "documents") return "outputs";
   if (tab === "trajectory") return "growth";
+  if (tab === "blueprint") return "blueprint";
   if (VALID_TABS.has(tab)) return tab as ActiveTab;
   return "overview";
 }
@@ -121,6 +125,7 @@ export default function ProfileSettingsPage() {
   const [completenessFields, setCompletenessFields] = useState<ProfileCompletenessField[]>([]);
   const [intelligenceTiers, setIntelligenceTiers] = useState<IntelligenceTier[]>([]);
   const [overallIntelligenceScore, setOverallIntelligenceScore] = useState(0);
+  const [blueprintCompleteness, setBlueprintCompleteness] = useState(0);
 
   const [activeTab, setActiveTab] = useState<ActiveTab>(initialTab);
 
@@ -250,6 +255,14 @@ export default function ProfileSettingsPage() {
         .catch((err) => {
           console.error("Failed to load intelligence tiers:", err);
         });
+
+      apiGet<{ completeness: number }>(`/blueprint/businesses/${bid}`)
+        .then(({ data }) => {
+          if (data) setBlueprintCompleteness(data.completeness || 0);
+        })
+        .catch((err) => {
+          console.error("Failed to load blueprint completeness:", err);
+        });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot mount-time bootstrap: business id is read from storage and used to fetch initial profile data. `setStatus` is a stable useCallback wrapper but excluded to keep this from re-firing on status changes.
   }, []);
@@ -304,6 +317,16 @@ export default function ProfileSettingsPage() {
           color: overallIntelligenceScore >= 80 ? "hsl(var(--kf-success))" : "hsl(var(--kf-warning))",
         }}>
           {overallIntelligenceScore}%
+        </span>
+      );
+    }
+    if (tabId === "blueprint" && blueprintCompleteness > 0 && blueprintCompleteness < 80) {
+      return (
+        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full flex-shrink-0" style={{
+          background: blueprintCompleteness >= 40 ? "hsl(var(--kf-warning) / 0.15)" : "hsl(var(--kf-error) / 0.15)",
+          color: blueprintCompleteness >= 40 ? "hsl(var(--kf-warning))" : "hsl(var(--kf-error))",
+        }}>
+          {blueprintCompleteness}%
         </span>
       );
     }
@@ -467,6 +490,14 @@ export default function ProfileSettingsPage() {
                 <PricingTab />
               </ProfileSectionErrorBoundary>
             </div>
+          </motion.div>
+        )}
+
+        {activeTab === "blueprint" && (
+          <motion.div key="blueprint" id="tabpanel-blueprint" role="tabpanel" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
+            <ProfileSectionErrorBoundary sectionName="Business Genome">
+              <BlueprintTab />
+            </ProfileSectionErrorBoundary>
           </motion.div>
         )}
 

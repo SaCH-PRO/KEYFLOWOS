@@ -48,6 +48,7 @@ export interface BlueprintGoals {
   northStar?: string;
   ninetyDayGoals?: string[];
   twelveMonthGoals?: string[];
+  priorities?: string[];
 }
 
 export interface BlueprintConstraints {
@@ -110,6 +111,8 @@ export interface BlueprintWorkflowModel {
 export interface BlueprintAiPreferences {
   autonomyLevel?: number;
   tone?: string;
+  outreachStyle?: string;
+  reportingCadence?: string;
   notifyOnRecommendations?: boolean;
   notifyOnAlerts?: boolean;
   approvedActions?: string[];
@@ -172,4 +175,10 @@ export interface RecommendedSetupStep {
   title: string;
   reason: string;
   href?: string;
+}
+
+export interface SetupStep {
+  id: BlueprintSectionKey;
+  label: string;
+  done: boolean;
 }

@@ -22,6 +22,8 @@ export const SYSTEM_COA: CoaSeed[] = [
   { systemKey: 'PAYMENT_PROCESSOR', name: 'Payment Processor Clearing', type: 'ASSET', code: '1020' },
   { systemKey: 'ACCOUNTS_RECEIVABLE', name: 'Accounts Receivable', type: 'ASSET', code: '1100' },
   { systemKey: 'INVENTORY_ASSET', name: 'Inventory', type: 'ASSET', code: '1200' },
+  { systemKey: 'FIXED_ASSET_EQUIPMENT', name: 'Fixed Assets — Equipment', type: 'ASSET', code: '1300' },
+  { systemKey: 'ACCUMULATED_DEPRECIATION', name: 'Accumulated Depreciation', type: 'ASSET', code: '1310' },
 
   // LIABILITIES
   { systemKey: 'ACCOUNTS_PAYABLE', name: 'Accounts Payable', type: 'LIABILITY', code: '2000' },
@@ -56,6 +58,8 @@ export const SYSTEM_COA: CoaSeed[] = [
   { systemKey: 'EXPENSE_PROFESSIONAL', name: 'Professional Services', type: 'EXPENSE', code: '6700', parentSystemKey: 'EXPENSE_GENERAL' },
   { systemKey: 'EXPENSE_BANK_FEES', name: 'Bank & Processor Fees', type: 'EXPENSE', code: '6800', parentSystemKey: 'EXPENSE_GENERAL' },
   { systemKey: 'EXPENSE_OTHER', name: 'Other Expenses', type: 'EXPENSE', code: '6900', parentSystemKey: 'EXPENSE_GENERAL' },
+  { systemKey: 'DEPRECIATION_EXPENSE', name: 'Depreciation Expense', type: 'EXPENSE', code: '6950', parentSystemKey: 'EXPENSE_GENERAL' },
+  { systemKey: 'GAIN_LOSS_ON_DISPOSAL', name: 'Gain/Loss on Asset Disposal', type: 'EXPENSE', code: '6960', parentSystemKey: 'EXPENSE_GENERAL' },
 ];
 
 /**

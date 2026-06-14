@@ -46,10 +46,25 @@ export class CreditNoteService {
   async create(businessId: string, input: CreateCreditNoteInput) {
     const invoice = await this.prisma.client.invoice.findFirst({
       where: { id: input.invoiceId, businessId },
-      select: { id: true, status: true },
+      select: { id: true, status: true, total: true },
     });
     if (!invoice) throw new BadRequestException('Invoice not found');
     if (invoice.status === 'DRAFT') throw new BadRequestException('Cannot credit a draft invoice');
+
+    const amount = new D(String(input.amount));
+    const invoiceTotal = new D(String(invoice.total));
+    if (amount.greaterThan(invoiceTotal)) {
+      throw new BadRequestException(`Credit note amount (${amount.toString()}) exceeds invoice total (${invoiceTotal.toString()})`);
+    }
+
+    const existingCns = await this.prisma.client.creditNote.aggregate({
+      where: { businessId, invoiceId: input.invoiceId, status: { not: 'VOID' } },
+      _sum: { amount: true },
+    });
+    const alreadyCredited = new D(String(existingCns._sum.amount ?? 0));
+    if (alreadyCredited.add(amount).greaterThan(invoiceTotal)) {
+      throw new BadRequestException(`Total credits (${alreadyCredited.add(amount).toString()}) would exceed invoice total (${invoiceTotal.toString()})`);
+    }
 
     const existing = await this.prisma.client.creditNote.findFirst({
       where: { businessId, creditNoteNumber: input.creditNoteNumber },
@@ -61,7 +76,7 @@ export class CreditNoteService {
         businessId,
         invoiceId: input.invoiceId,
         creditNoteNumber: input.creditNoteNumber,
-        amount: new D(String(input.amount)),
+        amount,
         reason: input.reason ?? null,
         items: (input.items as unknown as Prisma.InputJsonValue) ?? Prisma.JsonNull,
       },
@@ -88,8 +103,8 @@ export class CreditNoteService {
     const cn = await this.get(businessId, id);
     if (cn.status !== 'DRAFT') throw new BadRequestException('Credit note already applied or voided');
 
-    // Find the revenue account from the invoice's ledger entries
-    const revEntry = await this.prisma.client.ledgerEntry.findFirst({
+    // Find ALL revenue ledger entries for the invoice (multi-line support)
+    const revEntries = await this.prisma.client.ledgerEntry.findMany({
       where: {
         businessId,
         transaction: {
@@ -115,14 +130,34 @@ export class CreditNoteService {
       orderBy: { debit: 'desc' },
     });
 
-    const revenueAccountId = revEntry?.accountId;
-    const arAccountId = arEntry?.accountId;
-
-    if (!revenueAccountId || !arAccountId) {
+    if (revEntries.length === 0 || !arEntry) {
       throw new BadRequestException('Could not find original invoice ledger entries to reverse');
     }
 
     const amount = new D(String(cn.amount));
+    const totalRevenue = revEntries.reduce((sum, e) => sum.add(new D(String(e.credit))), new D(0));
+
+    // Pro-rate credit note amount across revenue accounts
+    const postingEntries: PostingInput['entries'] = [];
+    let allocated = new D(0);
+    for (let i = 0; i < revEntries.length; i++) {
+      const entry = revEntries[i];
+      const share = i === revEntries.length - 1
+        ? amount.sub(allocated) // last entry gets remainder to avoid rounding drift
+        : amount.mul(new D(String(entry.credit))).div(totalRevenue);
+      allocated = allocated.add(share);
+      postingEntries.push({
+        accountId: entry.accountId,
+        debit: share,
+        memo: `Reversal for CN ${cn.creditNoteNumber}`,
+      });
+    }
+
+    postingEntries.push({
+      accountId: arEntry.accountId,
+      credit: amount,
+      memo: `AR reduction for CN ${cn.creditNoteNumber}`,
+    });
 
     const posting: PostingInput = {
       businessId,
@@ -135,21 +170,42 @@ export class CreditNoteService {
       kind: 'credit_note_applied',
       reference: cn.creditNoteNumber,
       createdById: opts.userId ?? null,
-      entries: [
-        { accountId: revenueAccountId, debit: amount, memo: `Reversal for CN ${cn.creditNoteNumber}` },
-        { accountId: arAccountId, credit: amount, memo: `AR reduction for CN ${cn.creditNoteNumber}` },
-      ],
+      entries: postingEntries,
     };
 
-    const result = await this.posting.post(posting);
+    const result = await this.prisma.client.$transaction(async (tx) => {
+      const postingResult = await this.posting.post(posting, tx as unknown as Prisma.TransactionClient);
 
-    await this.prisma.client.creditNote.update({
-      where: { id: cn.id },
-      data: {
-        status: 'APPLIED',
-        appliedAt: new Date(),
-        reversalTransactionId: result.transactionId,
-      },
+      await tx.creditNote.update({
+        where: { id: cn.id },
+        data: {
+          status: 'APPLIED',
+          appliedAt: new Date(),
+          reversalTransactionId: postingResult.transactionId,
+        },
+      });
+
+      // Update invoice status based on total credits
+      const invoice = await tx.invoice.findFirst({
+        where: { id: cn.invoiceId, businessId },
+        select: { total: true },
+      });
+      if (invoice) {
+        const creditedAgg = await tx.creditNote.aggregate({
+          where: { businessId, invoiceId: cn.invoiceId, status: 'APPLIED' },
+          _sum: { amount: true },
+        });
+        const totalCredited = new D(String(creditedAgg._sum.amount ?? 0));
+        const invoiceTotal = new D(String(invoice.total));
+        await tx.invoice.update({
+          where: { id: cn.invoiceId },
+          data: {
+            status: totalCredited.greaterThanOrEqualTo(invoiceTotal) ? 'FULLY_CREDITED' : 'PARTIALLY_CREDITED',
+          },
+        });
+      }
+
+      return postingResult;
     });
 
     return { creditNote: cn, transactionId: result.transactionId };

@@ -14,6 +14,7 @@ import {
   BlueprintPatch,
   BlueprintSectionKey,
   RecommendedSetupStep,
+  SetupStep,
 } from './blueprint.types';
 
 const SCHEMA_VERSION = 1;
@@ -40,14 +41,14 @@ const SECTION_KEYS: BlueprintSectionKey[] = [
 const COMPLETENESS_FIELDS: Record<BlueprintSectionKey, string[]> = {
   identity: ['name', 'archetype', 'industry', 'tagline', 'oneLiner', 'mission'],
   operatingModel: ['revenueModel', 'deliveryMode', 'serviceArea', 'channels', 'teamSize'],
-  goals: ['northStar', 'ninetyDayGoals', 'twelveMonthGoals'],
+  goals: ['northStar', 'ninetyDayGoals', 'twelveMonthGoals', 'priorities'],
   constraints: ['budgetRange', 'timeCommitment', 'riskTolerance'],
   brand: ['voice', 'tone', 'primaryColor', 'valueProps'],
   customerModel: ['idealCustomer', 'segments', 'painPoints'],
   financials: ['currency', 'pricingModel', 'avgTicket', 'monthlyTarget'],
   intelligence: ['topChannels', 'recentMomentumScore'],
   workflowModel: ['primaryWorkflow'],
-  aiPreferences: ['autonomyLevel', 'tone'],
+  aiPreferences: ['autonomyLevel', 'tone', 'outreachStyle', 'reportingCadence'],
 };
 
 function isPopulated(value: unknown): boolean {
@@ -456,6 +457,38 @@ export class BlueprintService {
     }
 
     return steps;
+  }
+
+  /**
+   * Return a flat checklist of all blueprint sections with done status.
+   * Used by the Cockpit widget to show progress at a glance.
+   */
+  async getSetupSteps(businessId: string): Promise<SetupStep[]> {
+    const bp = await this.getBlueprint(businessId);
+
+    const SECTION_LABELS: Record<BlueprintSectionKey, string> = {
+      identity: 'Identity',
+      operatingModel: 'Operating Model',
+      goals: 'Goals',
+      constraints: 'Constraints',
+      brand: 'Brand',
+      customerModel: 'Customer Model',
+      financials: 'Financials',
+      intelligence: 'Intelligence',
+      workflowModel: 'Workflow Model',
+      aiPreferences: 'AI Preferences',
+    };
+
+    return SECTION_KEYS.map((key) => {
+      const fields = COMPLETENESS_FIELDS[key];
+      const section = (bp[key] as unknown as Record<string, unknown>) || {};
+      const filled = fields.filter((f) => isPopulated(section[f])).length;
+      return {
+        id: key,
+        label: SECTION_LABELS[key],
+        done: filled >= Math.ceil(fields.length / 2),
+      };
+    });
   }
 
   // -- internals -----------------------------------------------------------

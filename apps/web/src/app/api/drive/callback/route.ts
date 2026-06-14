@@ -11,15 +11,18 @@ export async function GET(request: NextRequest) {
   const error = searchParams.get("error");
 
   if (error) {
-    return NextResponse.redirect(new URL("/app/profile?tab=documents&drive=error&reason=" + error, request.url));
+    return NextResponse.redirect(new URL("/app/key-connect?drive=error&reason=" + error, request.url));
   }
 
   if (!state || !code) {
-    return NextResponse.redirect(new URL("/app/profile?tab=documents&drive=error&reason=missing_params", request.url));
+    return NextResponse.redirect(new URL("/app/key-connect?drive=error&reason=missing_params", request.url));
   }
 
   try {
-    const backendUrl = `${API_BASE}/drive/callback?state=${encodeURIComponent(state)}&code=${encodeURIComponent(code)}${scope ? `&scope=${encodeURIComponent(scope)}` : ""}`;
+    const apiBase = API_BASE.startsWith("/")
+      ? new URL(API_BASE, request.url).toString()
+      : API_BASE;
+    const backendUrl = `${apiBase}/drive/callback?state=${encodeURIComponent(state)}&code=${encodeURIComponent(code)}${scope ? `&scope=${encodeURIComponent(scope)}` : ""}`;
     const res = await fetch(backendUrl, { redirect: "manual" });
 
     const location = res.headers.get("location");
@@ -33,15 +36,15 @@ export async function GET(request: NextRequest) {
         : new URL(location);
       if (redirectUrl.origin !== appOrigin) {
         return NextResponse.redirect(
-          new URL("/app/profile?tab=documents&drive=error&reason=invalid_redirect", request.url),
+          new URL("/app/key-connect?drive=error&reason=invalid_redirect", request.url),
         );
       }
       return NextResponse.redirect(redirectUrl);
     }
 
-    return NextResponse.redirect(new URL("/app/profile?tab=documents&drive=success", request.url));
+    return NextResponse.redirect(new URL("/app/key-connect?drive=success", request.url));
   } catch (err) {
     console.error("Drive callback proxy error:", err);
-    return NextResponse.redirect(new URL("/app/profile?tab=documents&drive=error&reason=proxy_error", request.url));
+    return NextResponse.redirect(new URL("/app/key-connect?drive=error&reason=proxy_error", request.url));
   }
 }

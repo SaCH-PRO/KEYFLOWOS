@@ -9,8 +9,9 @@ export class ReceiptController {
   constructor(@Inject(ReceiptService) private readonly svc: ReceiptService) {}
 
   @Get()
-  list(@Param('businessId') businessId: string) {
-    return this.svc.list(businessId);
+  async list(@Param('businessId') businessId: string) {
+    const items = await this.svc.list(businessId);
+    return { items };
   }
 
   @Post()

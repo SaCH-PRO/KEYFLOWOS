@@ -65,8 +65,26 @@ export class GoogleDriveService {
   private readonly logger = new Logger(GoogleDriveService.name);
   private readonly clientId = process.env.GOOGLE_CLIENT_ID;
   private readonly clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-  private readonly redirectUri = process.env.DRIVE_REDIRECT_URI || process.env.GOOGLE_REDIRECT_URI;
   private readonly stateSecret = process.env.GOOGLE_STATE_SECRET;
+
+  private getRedirectUri(): string {
+    const explicit = process.env.DRIVE_REDIRECT_URI || process.env.GOOGLE_REDIRECT_URI;
+    if (explicit) return explicit;
+
+    const base = process.env.OAUTH_REDIRECT_BASE || process.env.APP_URL || process.env.PUBLIC_BASE_URL;
+    if (base) {
+      const clean = base.replace(/\/$/, '');
+      return `${clean}/api/drive/callback`;
+    }
+
+    if (process.env.NODE_ENV === 'development') {
+      return 'http://localhost:5000/api/drive/callback';
+    }
+
+    throw new BadRequestException(
+      'Drive redirect URI is not configured. Set DRIVE_REDIRECT_URI, GOOGLE_REDIRECT_URI, OAUTH_REDIRECT_BASE, or APP_URL.',
+    );
+  }
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -139,14 +157,14 @@ export class GoogleDriveService {
     const signedState = this.signState(state);
 
     const scopes = [
-      'https://www.googleapis.com/auth/drive.file',
+      'https://www.googleapis.com/auth/drive',
       'https://www.googleapis.com/auth/spreadsheets',
       'https://www.googleapis.com/auth/userinfo.email',
     ];
 
     const params = new URLSearchParams({
       client_id: this.clientId,
-      redirect_uri: this.redirectUri || '',
+      redirect_uri: this.getRedirectUri(),
       response_type: 'code',
       scope: scopes.join(' '),
       access_type: 'offline',
@@ -158,7 +176,9 @@ export class GoogleDriveService {
   }
 
   async saveDriveCredentials(businessId: string, code: string): Promise<void> {
-    if (!this.clientId || !this.clientSecret || !this.redirectUri) {
+    const redirectUri = this.getRedirectUri();
+
+    if (!this.clientId || !this.clientSecret) {
       throw new BadRequestException('Google OAuth not configured');
     }
 
@@ -168,7 +188,7 @@ export class GoogleDriveService {
       body: new URLSearchParams({
         client_id: this.clientId,
         client_secret: this.clientSecret,
-        redirect_uri: this.redirectUri,
+        redirect_uri: redirectUri,
         grant_type: 'authorization_code',
         code,
       }),
@@ -203,7 +223,7 @@ export class GoogleDriveService {
     this.logger.log(`Google Drive connected for business ${businessId} (${userInfo.email})`);
   }
 
-  private async getValidAccessToken(businessId: string): Promise<string> {
+  async getValidAccessToken(businessId: string): Promise<string> {
     const business = await this.prisma.client.business.findUnique({
       where: { id: businessId },
       select: {

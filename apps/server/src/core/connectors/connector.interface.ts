@@ -148,6 +148,32 @@ export interface ConnectorSyncResult {
   duration: number;
 }
 
+export interface IngestionItemInput {
+  sourceType: 'email' | 'whatsapp' | 'sms' | 'instagram' | 'messenger' | 'google_drive' | 'manual';
+  sourceConnectorType?: string;
+  externalId?: string;
+  receivedAt?: Date;
+  from: {
+    id?: string;
+    name?: string;
+    email?: string;
+    phone?: string;
+  };
+  to?: string;
+  subject?: string;
+  body?: string;
+  rawPayload: Record<string, unknown>;
+  attachments?: IngestionAttachment[];
+}
+
+export interface IngestionAttachment {
+  externalId?: string;
+  name: string;
+  mimeType: string;
+  url?: string;
+  sizeBytes?: number;
+}
+
 export interface IConnector {
   readonly meta: ConnectorMeta;
 
@@ -177,6 +203,31 @@ export interface IConnector {
   smokeTest?(businessId: string): Promise<ConnectorSmokeResult>;
 
   getAuthUrl?(businessId: string): Promise<string>;
+
+  /**
+   * Poll the provider for new items and return normalized inputs.
+   * Invoked by ConnectorIntelligenceService (5-minute poll) for polling connectors.
+   */
+  syncToIngestion?(businessId: string): Promise<IngestionItemInput[]>;
+
+  /**
+   * Parse a provider webhook payload into normalized inputs.
+   * Invoked by webhook controllers after signature verification.
+   */
+  parseInbound?(
+    payload: unknown,
+    businessId: string,
+  ): IngestionItemInput[] | Promise<IngestionItemInput[]>;
+
+  /**
+   * Verify a provider webhook signature. Return true if valid.
+   * Called by webhook controllers before parseInbound.
+   */
+  verifyWebhook?(
+    payload: unknown,
+    signature: string | undefined,
+    secret: string,
+  ): boolean | Promise<boolean>;
 }
 
 export interface ConnectorSmokeResult {

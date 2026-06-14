@@ -167,6 +167,7 @@ export class IdentityService {
     storeEnabled?: boolean;
     businessHours?: Record<string, { open: string; close: string; closed: boolean }>;
     onboardingComplete?: boolean;
+    messageIntakeEnabled?: boolean;
     tagline?: string;
     description?: string;
     city?: string;
@@ -226,7 +227,7 @@ export class IdentityService {
     if (positioningStatement !== undefined) data.positioningStatement = positioningStatement?.trim();
 
     const nonStringFields: (keyof typeof rest)[] = [
-      'defaultTaxRate', 'complianceData', 'storeEnabled', 'businessHours', 'onboardingComplete',
+      'defaultTaxRate', 'complianceData', 'storeEnabled', 'businessHours', 'onboardingComplete', 'messageIntakeEnabled',
     ];
     for (const key of nonStringFields) {
       if (rest[key] !== undefined) {

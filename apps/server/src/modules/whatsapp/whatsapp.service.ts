@@ -72,16 +72,34 @@ export class WhatsAppService {
       merged: resolved.merged,
     });
 
-    this.events.emit('message.received', {
-      connectorType: 'whatsapp',
-      externalId: payload.externalId ?? null,
-      businessId,
-      timestamp: new Date(),
-      channel: 'whatsapp',
-      from: payload.from,
-      body: payload.body,
-      contactId: resolved.contactId,
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { messageIntakeEnabled: true },
     });
+    const intakeEnabled = business?.messageIntakeEnabled ?? false;
+
+    if (intakeEnabled) {
+      this.events.emit('message.intake.received', {
+        businessId,
+        connectorType: 'whatsapp',
+        sourceChannel: 'whatsapp',
+        externalId: payload.externalId ?? null,
+        from: payload.from,
+        fromName: payload.senderName,
+        body: payload.body,
+      });
+    } else {
+      this.events.emit('message.received', {
+        connectorType: 'whatsapp',
+        externalId: payload.externalId ?? null,
+        businessId,
+        timestamp: new Date(),
+        channel: 'whatsapp',
+        from: payload.from,
+        body: payload.body,
+        contactId: resolved.contactId,
+      });
+    }
 
     return resolved;
   }

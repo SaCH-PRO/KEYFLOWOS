@@ -88,6 +88,53 @@ export class DeliveryNoteService {
     });
   }
 
+  async fulfill(businessId: string, id: string, input: {
+    delivererName?: string;
+    delivererSignature?: string;
+    receiverName?: string;
+    receiverSignature?: string;
+  }) {
+    const dn = await this.get(businessId, id);
+    if (dn.status === 'DELIVERED') throw new BadRequestException('Already delivered');
+    if (dn.status === 'CANCELLED') throw new BadRequestException('Cannot fulfill a cancelled delivery note');
+
+    const items = dn.items as unknown as Array<{ productId?: string; quantity: number }>;
+
+    return this.prisma.client.$transaction(async (tx) => {
+      // Decrement inventory stock for each item and record stock movement
+      for (const item of items) {
+        if (!item.productId || item.quantity <= 0) continue;
+        await tx.inventoryStock.updateMany({
+          where: { productId: item.productId, businessId },
+          data: { quantity: { decrement: item.quantity } },
+        });
+        await tx.stockMovement.create({
+          data: {
+            businessId,
+            productId: item.productId,
+            quantityChange: -item.quantity,
+            reasonCode: 'SALE',
+            referenceId: dn.id,
+            note: `Delivery note ${dn.dnNumber} fulfilled`,
+          },
+        });
+      }
+
+      return tx.deliveryNote.update({
+        where: { id },
+        data: {
+          status: 'DELIVERED',
+          deliveredAt: new Date(),
+          delivererName: input.delivererName ?? null,
+          delivererSignature: input.delivererSignature ?? null,
+          receiverName: input.receiverName ?? null,
+          receiverSignature: input.receiverSignature ?? null,
+        },
+        include: { invoice: { select: { invoiceNumber: true } } },
+      });
+    });
+  }
+
   async cancel(businessId: string, id: string) {
     await this.get(businessId, id);
     return this.prisma.client.deliveryNote.update({

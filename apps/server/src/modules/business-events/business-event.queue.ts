@@ -1,6 +1,6 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy, Inject } from '@nestjs/common';
 import { Queue, Worker, Job } from 'bullmq';
-import { REDIS_CLIENT } from '../../core/redis/redis.module';
+import { REDIS_CLIENT } from '../../core/redis/redis.constants';
 import type { Redis } from 'ioredis';
 import { BusinessEventService } from './business-event.service';
 import { BusinessEventAnomalyService } from './business-event-anomaly.service';

@@ -27,7 +27,7 @@ import { ModuleScopeGuard } from '../src/core/auth/module-scope.guard';
 import { PlanLimitGuard } from '../src/modules/subscriptions/plan-limit.guard';
 import { TeamAuditInterceptor } from '../src/core/interceptors/team-audit.interceptor';
 import { PublicRateLimitGuard } from '../src/core/guards/public-rate-limit.guard';
-import { REDIS_CLIENT } from '../src/core/redis/redis.module';
+import { REDIS_CLIENT } from '../src/core/redis/redis.constants';
 
 interface QuoteRow {
   id: string;

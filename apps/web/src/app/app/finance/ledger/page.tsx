@@ -14,6 +14,7 @@ export default function GeneralLedgerPage() {
   const [page, setPage] = useState(1);
   const [limit] = useState(25);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [accountId, setAccountId] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -21,6 +22,7 @@ export default function GeneralLedgerPage() {
   const load = useCallback(async () => {
     if (!businessId) return;
     setLoading(true);
+    setError(null);
     try {
       const res = await fetchGeneralLedger(businessId, {
         accountId: accountId || undefined,
@@ -33,6 +35,8 @@ export default function GeneralLedgerPage() {
         setRows(res.data.rows);
         setTotal(res.data.total);
       }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load ledger");
     } finally {
       setLoading(false);
     }
@@ -52,6 +56,12 @@ export default function GeneralLedgerPage() {
       maxWidth="6xl"
     >
       <div className="space-y-4">
+        {error && (
+          <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            {error}
+            <button onClick={load} className="ml-2 underline">Retry</button>
+          </div>
+        )}
         {/* Filters */}
         <div className="flex flex-wrap gap-2 items-center">
           <input
@@ -87,29 +97,26 @@ export default function GeneralLedgerPage() {
 
         <DataTable
           data={rows as unknown as Record<string, unknown>[]}
-          keyField="id"
+          keyField="entryId"
           pageSize={limit}
           columns={[
             { key: "date", header: "Date", sortable: true, getValue: (r) => new Date((r as unknown as GeneralLedgerRow).date).toLocaleDateString() },
             { key: "account", header: "Account", render: (r) => {
               const row = r as unknown as GeneralLedgerRow;
-              return <span className="text-xs">{row.account.code ? `${row.account.code} — ` : ""}{row.account.name}</span>;
+              return <span className="text-xs">{row.accountCode ? `${row.accountCode} — ` : ""}{row.accountName}</span>;
             }},
-            { key: "transaction", header: "Ref", render: (r) => {
-              const row = r as unknown as GeneralLedgerRow;
-              return <span className="text-xs text-muted-foreground">{row.transaction.reference ?? row.transaction.type}</span>;
-            }},
-            { key: "memo", header: "Memo", getValue: (r) => (r as unknown as GeneralLedgerRow).memo ?? "" },
+            { key: "reference", header: "Ref", getValue: (r) => (r as unknown as GeneralLedgerRow).reference ?? (r as unknown as GeneralLedgerRow).sourceType ?? "" },
+            { key: "memo", header: "Memo", getValue: (r) => (r as unknown as GeneralLedgerRow).memo ?? (r as unknown as GeneralLedgerRow).description ?? "" },
             { key: "debit", header: "Debit", render: (r) => {
-              const v = (r as unknown as GeneralLedgerRow).debit;
+              const v = Number((r as unknown as GeneralLedgerRow).debit);
               return v > 0 ? <span className="text-xs font-medium text-emerald-600">{v.toLocaleString()}</span> : <span className="text-xs">—</span>;
             }},
             { key: "credit", header: "Credit", render: (r) => {
-              const v = (r as unknown as GeneralLedgerRow).credit;
+              const v = Number((r as unknown as GeneralLedgerRow).credit);
               return v > 0 ? <span className="text-xs font-medium text-red-500">{v.toLocaleString()}</span> : <span className="text-xs">—</span>;
             }},
             { key: "runningBalance", header: "Balance", render: (r) => {
-              const v = (r as unknown as GeneralLedgerRow).runningBalance;
+              const v = Number((r as unknown as GeneralLedgerRow).runningBalance);
               return <span className="text-xs font-semibold">{v.toLocaleString()}</span>;
             }},
           ]}

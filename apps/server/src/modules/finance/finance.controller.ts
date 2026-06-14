@@ -33,6 +33,9 @@ import { BankRuleService, type CreateBankRuleInput, type UpdateBankRuleInput } f
 import { RecurringJournalEntryService, type CreateRecurringJournalEntryInput, type UpdateRecurringJournalEntryInput } from './recurring-journal-entry.service';
 import { CreditNoteService, type CreateCreditNoteInput, type UpdateCreditNoteInput } from './credit-note.service';
 import { AccountingPeriodService, type CreateAccountingPeriodInput, type CloseAccountingPeriodInput } from './accounting-period.service';
+import { BankConnectionService, type CreateBankConnectionInput, type UpdateBankConnectionInput } from './bank-connection.service';
+import { ExchangeRateService, type CreateExchangeRateInput } from './exchange-rate.service';
+import { FixedAssetService, type CreateFixedAssetInput, type UpdateFixedAssetInput } from './fixed-asset.service';
 
 /**
  * FIN2 — read-only receivables endpoints.
@@ -68,6 +71,9 @@ export class FinanceController {
     @Inject(CashReserveService) private readonly cashReserve: CashReserveService,
     @Inject(CreditNoteService) private readonly creditNotes: CreditNoteService,
     @Inject(AccountingPeriodService) private readonly accountingPeriods: AccountingPeriodService,
+    @Inject(BankConnectionService) private readonly bankConnections: BankConnectionService,
+    @Inject(ExchangeRateService) private readonly exchangeRates: ExchangeRateService,
+    @Inject(FixedAssetService) private readonly fixedAssets: FixedAssetService,
   ) {}
 
   // ---------- Manual Journal Entries ----------
@@ -88,7 +94,7 @@ export class FinanceController {
     const input: PostingInput = {
       businessId,
       type: 'ADJUSTMENT',
-      date: new Date(body.date),
+      date: (() => { const d = new Date(body.date); if (Number.isNaN(d.getTime())) throw new BadRequestException('Invalid date'); return d; })(),
       amount: totalDebit,
       description: body.description,
       reference: body.reference ?? null,
@@ -114,8 +120,8 @@ export class FinanceController {
     const where: any = { businessId, type: 'ADJUSTMENT' };
     if (from || to) {
       where.date = {};
-      if (from) where.date.gte = new Date(from);
-      if (to) where.date.lte = new Date(to);
+      if (from) { const d = new Date(from); if (Number.isNaN(d.getTime())) throw new BadRequestException('Invalid from date'); where.date.gte = d; }
+      if (to) { const d = new Date(to); if (Number.isNaN(d.getTime())) throw new BadRequestException('Invalid to date'); where.date.lte = d; }
     }
     const transactions = await this.prisma.client.financialTransaction.findMany({
       where,
@@ -144,10 +150,10 @@ export class FinanceController {
     await this.ensureAccess((req as any).user.id, businessId);
     return this.ledgerBalance.getGeneralLedger(businessId, {
       accountId,
-      from: from ? new Date(from) : undefined,
-      to: to ? new Date(to) : undefined,
-      page: page ? parseInt(page, 10) : undefined,
-      pageSize: pageSize ? parseInt(pageSize, 10) : undefined,
+      from: from ? (() => { const d = new Date(from); if (Number.isNaN(d.getTime())) throw new BadRequestException('Invalid from date'); return d; })() : undefined,
+      to: to ? (() => { const d = new Date(to); if (Number.isNaN(d.getTime())) throw new BadRequestException('Invalid to date'); return d; })() : undefined,
+      page: page ? (() => { const n = parseInt(page, 10); if (Number.isNaN(n)) throw new BadRequestException('Invalid page'); return n; })() : undefined,
+      pageSize: pageSize ? (() => { const n = parseInt(pageSize, 10); if (Number.isNaN(n)) throw new BadRequestException('Invalid pageSize'); return n; })() : undefined,
     });
   }
 
@@ -158,7 +164,7 @@ export class FinanceController {
     @Query('asOf') asOf?: string,
   ) {
     await this.ensureAccess((req as any).user.id, businessId);
-    const result = await this.ledgerBalance.getTrialBalance(businessId, asOf ? new Date(asOf) : undefined);
+    const result = await this.ledgerBalance.getTrialBalance(businessId, asOf ? (() => { const d = new Date(asOf); if (Number.isNaN(d.getTime())) throw new BadRequestException('Invalid asOf date'); return d; })() : undefined);
     return {
       items: result.map((r) => ({
         accountId: r.accountId,
@@ -195,7 +201,7 @@ export class FinanceController {
   // ---------- Receivables (FIN2) ----------
   @Get('receivables/aging')
   async aging(@Param('businessId') businessId: string, @Query('asOf') asOf?: string) {
-    const date = asOf ? new Date(asOf) : new Date();
+    const date = asOf ? (() => { const d = new Date(asOf); if (Number.isNaN(d.getTime())) throw new BadRequestException('Invalid asOf date'); return d; })() : new Date();
     const [report, ledgerAr] = await Promise.all([
       this.receivables.getAging(businessId, date),
       this.receivables.getLedgerArBalance(businessId, date),
@@ -218,6 +224,51 @@ export class FinanceController {
   async getOverview(@Param('businessId') businessId: string, @Req() req: any) {
     await this.ensureAccess(req.user.id, businessId);
     return this.overview.getOverview(businessId);
+  }
+
+  @Get('expense-breakdown')
+  async getExpenseBreakdown(@Param('businessId') businessId: string, @Req() req: any) {
+    await this.ensureAccess(req.user.id, businessId);
+
+    const monthStart = new Date();
+    monthStart.setDate(1);
+    monthStart.setHours(0, 0, 0, 0);
+
+    const expenses = await this.prisma.client.expense.findMany({
+      where: { businessId, date: { gte: monthStart }, deletedAt: null, status: { not: 'VOID' } },
+      select: { amount: true, categoryId: true, category: { select: { name: true } } },
+    });
+
+    const totals = new Map<string, { category: string; amount: number; budget: number }>();
+    for (const e of expenses) {
+      const key = e.categoryId ?? 'uncategorised';
+      const existing = totals.get(key);
+      if (existing) {
+        existing.amount += e.amount;
+      } else {
+        totals.set(key, {
+          category: e.category?.name ?? 'Uncategorised',
+          amount: e.amount,
+          budget: 0,
+        });
+      }
+    }
+
+    const budgets = await this.prisma.client.expenseBudget.findMany({
+      where: { businessId },
+      select: { categoryId: true, amount: true },
+    });
+    for (const b of budgets) {
+      if (!b.categoryId) continue;
+      const entry = totals.get(b.categoryId);
+      if (entry) entry.budget = b.amount;
+    }
+
+    const items = Array.from(totals.values())
+      .sort((a, b) => b.amount - a.amount)
+      .slice(0, 8);
+
+    return { items };
   }
 
   // ---------- FIN8: Finance intelligence / action queue ----------
@@ -458,8 +509,8 @@ export class FinanceController {
   ) {
     await this.ensureAccess(req.user.id, businessId);
     return this.bankRules.applyRulesToAccount(businessId, accountId, {
-      sinceDate: body.since ? new Date(body.since) : null,
-      untilDate: body.until ? new Date(body.until) : null,
+      sinceDate: body.since ? (() => { const d = new Date(body.since); if (Number.isNaN(d.getTime())) throw new BadRequestException('Invalid since date'); return d; })() : null,
+      untilDate: body.until ? (() => { const d = new Date(body.until); if (Number.isNaN(d.getTime())) throw new BadRequestException('Invalid until date'); return d; })() : null,
       userId: req.user.id,
     });
   }
@@ -570,8 +621,8 @@ export class FinanceController {
   ) {
     await this.ensureAccess(req.user.id, businessId);
     return this.bankMatch.getSplitView(businessId, accountId, {
-      sinceDate: since ? new Date(since) : null,
-      untilDate: until ? new Date(until) : null,
+      sinceDate: since ? (() => { const d = new Date(since); if (Number.isNaN(d.getTime())) throw new BadRequestException('Invalid since date'); return d; })() : null,
+      untilDate: until ? (() => { const d = new Date(until); if (Number.isNaN(d.getTime())) throw new BadRequestException('Invalid until date'); return d; })() : null,
     });
   }
 
@@ -644,8 +695,8 @@ export class FinanceController {
     if (!body?.periodStart || !body?.periodEnd) throw new BadRequestException('periodStart and periodEnd are required');
     return this.reconciliation.create(businessId, {
       accountId: body.accountId,
-      periodStart: new Date(body.periodStart),
-      periodEnd: new Date(body.periodEnd),
+      periodStart: (() => { const d = new Date(body.periodStart); if (Number.isNaN(d.getTime())) throw new BadRequestException('Invalid periodStart'); return d; })(),
+      periodEnd: (() => { const d = new Date(body.periodEnd); if (Number.isNaN(d.getTime())) throw new BadRequestException('Invalid periodEnd'); return d; })(),
       statementBalance: body.statementBalance ?? 0,
       notes: body.notes ?? null,
     }, req.user.id);
@@ -914,7 +965,9 @@ export class FinanceController {
     @Param('businessId') businessId: string,
     @Query('days') days?: string,
   ) {
-    return this.cashflowForecast.forecast(businessId, days ? parseInt(days, 10) : 90);
+    const daysNum = days ? parseInt(days, 10) : 90;
+    if (days && Number.isNaN(daysNum)) throw new BadRequestException('Invalid days');
+    return this.cashflowForecast.forecast(businessId, daysNum);
   }
 
   // ---------- Money Moves ----------
@@ -968,15 +1021,19 @@ export class FinanceController {
 
   // ---------- Cash Reserve Buckets ----------
   @Get('reserves')
-  async listReserves(@Param('businessId') businessId: string) {
-    return this.cashReserve.list(businessId);
+  async listReserves(@Param('businessId') businessId: string, @Req() req: any) {
+    await this.ensureAccess(req.user.id, businessId);
+    const items = await this.cashReserve.list(businessId);
+    return { items };
   }
 
   @Post('reserves')
   async createReserve(
     @Param('businessId') businessId: string,
     @Body() body: { name: string; purpose: string; targetAmount?: number; currentAmount?: number; currency?: string },
+    @Req() req: any,
   ) {
+    await this.ensureAccess(req.user.id, businessId);
     return this.cashReserve.create(businessId, body);
   }
 
@@ -985,7 +1042,9 @@ export class FinanceController {
     @Param('businessId') businessId: string,
     @Param('id') id: string,
     @Body() body: Partial<{ name: string; purpose: string; targetAmount: number; currentAmount: number; status: string }>,
+    @Req() req: any,
   ) {
+    await this.ensureAccess(req.user.id, businessId);
     return this.cashReserve.update(businessId, id, body);
   }
 
@@ -993,26 +1052,33 @@ export class FinanceController {
   async deleteReserve(
     @Param('businessId') businessId: string,
     @Param('id') id: string,
+    @Req() req: any,
   ) {
+    await this.ensureAccess(req.user.id, businessId);
     return this.cashReserve.delete(businessId, id);
   }
 
   // ---------- Credit Notes ----------
   @Get('credit-notes')
-  async listCreditNotes(@Param('businessId') businessId: string) {
-    return this.creditNotes.list(businessId);
+  async listCreditNotes(@Param('businessId') businessId: string, @Req() req: any) {
+    await this.ensureAccess(req.user.id, businessId);
+    const items = await this.creditNotes.list(businessId);
+    return { items };
   }
 
   @Post('credit-notes')
   async createCreditNote(
     @Param('businessId') businessId: string,
     @Body() body: CreateCreditNoteInput,
+    @Req() req: any,
   ) {
+    await this.ensureAccess(req.user.id, businessId);
     return this.creditNotes.create(businessId, body);
   }
 
   @Get('credit-notes/:id')
-  async getCreditNote(@Param('businessId') businessId: string, @Param('id') id: string) {
+  async getCreditNote(@Param('businessId') businessId: string, @Param('id') id: string, @Req() req: any) {
+    await this.ensureAccess(req.user.id, businessId);
     return this.creditNotes.get(businessId, id);
   }
 
@@ -1021,7 +1087,9 @@ export class FinanceController {
     @Param('businessId') businessId: string,
     @Param('id') id: string,
     @Body() body: UpdateCreditNoteInput,
+    @Req() req: any,
   ) {
+    await this.ensureAccess(req.user.id, businessId);
     return this.creditNotes.update(businessId, id, body);
   }
 
@@ -1031,35 +1099,43 @@ export class FinanceController {
     @Param('id') id: string,
     @Req() req: any,
   ) {
+    await this.ensureAccess(req.user.id, businessId);
     return this.creditNotes.apply(businessId, id, { userId: req.user?.id });
   }
 
   @Post('credit-notes/:id/void')
-  async voidCreditNote(@Param('businessId') businessId: string, @Param('id') id: string) {
+  async voidCreditNote(@Param('businessId') businessId: string, @Param('id') id: string, @Req() req: any) {
+    await this.ensureAccess(req.user.id, businessId);
     return this.creditNotes.void(businessId, id);
   }
 
   @Delete('credit-notes/:id')
-  async deleteCreditNote(@Param('businessId') businessId: string, @Param('id') id: string) {
+  async deleteCreditNote(@Param('businessId') businessId: string, @Param('id') id: string, @Req() req: any) {
+    await this.ensureAccess(req.user.id, businessId);
     return this.creditNotes.remove(businessId, id);
   }
 
   // ---------- Accounting Periods ----------
   @Get('accounting-periods')
-  async listAccountingPeriods(@Param('businessId') businessId: string) {
-    return this.accountingPeriods.list(businessId);
+  async listAccountingPeriods(@Param('businessId') businessId: string, @Req() req: any) {
+    await this.ensureAccess(req.user.id, businessId);
+    const items = await this.accountingPeriods.list(businessId);
+    return { items };
   }
 
   @Post('accounting-periods')
   async createAccountingPeriod(
     @Param('businessId') businessId: string,
     @Body() body: CreateAccountingPeriodInput,
+    @Req() req: any,
   ) {
+    await this.ensureAccess(req.user.id, businessId);
     return this.accountingPeriods.create(businessId, body);
   }
 
   @Get('accounting-periods/:id')
-  async getAccountingPeriod(@Param('businessId') businessId: string, @Param('id') id: string) {
+  async getAccountingPeriod(@Param('businessId') businessId: string, @Param('id') id: string, @Req() req: any) {
+    await this.ensureAccess(req.user.id, businessId);
     return this.accountingPeriods.get(businessId, id);
   }
 
@@ -1068,7 +1144,9 @@ export class FinanceController {
     @Param('businessId') businessId: string,
     @Param('id') id: string,
     @Body() body: Partial<CreateAccountingPeriodInput>,
+    @Req() req: any,
   ) {
+    await this.ensureAccess(req.user.id, businessId);
     return this.accountingPeriods.update(businessId, id, body);
   }
 
@@ -1079,16 +1157,163 @@ export class FinanceController {
     @Body() body: CloseAccountingPeriodInput,
     @Req() req: any,
   ) {
+    await this.ensureAccess(req.user.id, businessId);
     return this.accountingPeriods.close(businessId, id, { closedById: req.user?.id });
   }
 
   @Post('accounting-periods/:id/reopen')
-  async reopenAccountingPeriod(@Param('businessId') businessId: string, @Param('id') id: string) {
+  async reopenAccountingPeriod(@Param('businessId') businessId: string, @Param('id') id: string, @Req() req: any) {
+    await this.ensureAccess(req.user.id, businessId);
     return this.accountingPeriods.reopen(businessId, id);
   }
 
   @Delete('accounting-periods/:id')
-  async deleteAccountingPeriod(@Param('businessId') businessId: string, @Param('id') id: string) {
+  async deleteAccountingPeriod(@Param('businessId') businessId: string, @Param('id') id: string, @Req() req: any) {
+    await this.ensureAccess(req.user.id, businessId);
     return this.accountingPeriods.remove(businessId, id);
+  }
+
+  // ---------- Bank Connections ----------
+  @Get('bank-connections')
+  async listBankConnections(@Param('businessId') businessId: string, @Req() req: any) {
+    await this.ensureAccess(req.user.id, businessId);
+    const items = await this.bankConnections.list(businessId);
+    return { items };
+  }
+
+  @Post('bank-connections')
+  async createBankConnection(@Param('businessId') businessId: string, @Body() body: CreateBankConnectionInput, @Req() req: any) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.bankConnections.create(businessId, body);
+  }
+
+  @Get('bank-connections/:id')
+  async getBankConnection(@Param('businessId') businessId: string, @Param('id') id: string, @Req() req: any) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.bankConnections.get(businessId, id);
+  }
+
+  @Patch('bank-connections/:id')
+  async updateBankConnection(@Param('businessId') businessId: string, @Param('id') id: string, @Body() body: UpdateBankConnectionInput, @Req() req: any) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.bankConnections.update(businessId, id, body);
+  }
+
+  @Post('bank-connections/:id/sync')
+  async syncBankConnection(@Param('businessId') businessId: string, @Param('id') id: string, @Body() body: { cursor?: string }, @Req() req: any) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.bankConnections.recordSync(businessId, id, body.cursor);
+  }
+
+  @Delete('bank-connections/:id')
+  async deleteBankConnection(@Param('businessId') businessId: string, @Param('id') id: string, @Req() req: any) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.bankConnections.remove(businessId, id);
+  }
+
+  // ---------- Exchange Rates ----------
+  @Get('exchange-rates')
+  async listExchangeRates(
+    @Param('businessId') businessId: string,
+    @Req() req: any,
+    @Query('from') fromCurrency?: string,
+    @Query('to') toCurrency?: string,
+  ) {
+    await this.ensureAccess(req.user.id, businessId);
+    const items = await this.exchangeRates.list(businessId, fromCurrency && toCurrency ? { from: fromCurrency, to: toCurrency } : undefined);
+    return { items };
+  }
+
+  @Post('exchange-rates')
+  async createExchangeRate(@Param('businessId') businessId: string, @Body() body: CreateExchangeRateInput, @Req() req: any) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.exchangeRates.create(businessId, body);
+  }
+
+  @Post('exchange-rates/bulk')
+  async bulkCreateExchangeRates(@Param('businessId') businessId: string, @Body() body: { rates: CreateExchangeRateInput[] }, @Req() req: any) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.exchangeRates.bulkCreate(businessId, body.rates);
+  }
+
+  @Get('exchange-rates/latest')
+  async getLatestExchangeRate(
+    @Param('businessId') businessId: string,
+    @Req() req: any,
+    @Query('from') fromCurrency: string,
+    @Query('to') toCurrency: string,
+  ) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.exchangeRates.getLatest(businessId, fromCurrency, toCurrency);
+  }
+
+  @Delete('exchange-rates/:id')
+  async deleteExchangeRate(@Param('businessId') businessId: string, @Param('id') id: string, @Req() req: any) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.exchangeRates.remove(businessId, id);
+  }
+
+  // ---------- Fixed Assets ----------
+  @Get('fixed-assets')
+  async listFixedAssets(@Param('businessId') businessId: string, @Req() req: any) {
+    await this.ensureAccess(req.user.id, businessId);
+    const items = await this.fixedAssets.list(businessId);
+    return { items };
+  }
+
+  @Post('fixed-assets')
+  async createFixedAsset(@Param('businessId') businessId: string, @Body() body: CreateFixedAssetInput, @Req() req: any) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.fixedAssets.create(businessId, body);
+  }
+
+  @Get('fixed-assets/:id')
+  async getFixedAsset(@Param('businessId') businessId: string, @Param('id') id: string, @Req() req: any) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.fixedAssets.get(businessId, id);
+  }
+
+  @Patch('fixed-assets/:id')
+  async updateFixedAsset(@Param('businessId') businessId: string, @Param('id') id: string, @Body() body: UpdateFixedAssetInput, @Req() req: any) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.fixedAssets.update(businessId, id, body);
+  }
+
+  @Post('fixed-assets/:id/depreciate')
+  async depreciateFixedAsset(@Param('businessId') businessId: string, @Param('id') id: string, @Body() body: { asOf?: string }, @Req() req: any) {
+    await this.ensureAccess(req.user.id, businessId);
+    if (body.asOf) {
+      const asOfDate = new Date(body.asOf);
+      if (Number.isNaN(asOfDate.getTime())) throw new BadRequestException('Invalid asOf date');
+    }
+    return this.fixedAssets.runDepreciation(businessId, id, body.asOf ? new Date(body.asOf) : undefined);
+  }
+
+  @Get('fixed-assets/:id/depreciation')
+  async calculateDepreciation(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Req() req: any,
+    @Query('asOf') asOf?: string,
+  ) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.fixedAssets.calculateDepreciation(businessId, id, asOf ? new Date(asOf) : undefined);
+  }
+
+  @Post('fixed-assets/:id/dispose')
+  async disposeFixedAsset(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Body() body: { proceeds: number; disposalDate?: string },
+    @Req() req: any,
+  ) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.fixedAssets.dispose(businessId, id, body.proceeds, body.disposalDate);
+  }
+
+  @Delete('fixed-assets/:id')
+  async deleteFixedAsset(@Param('businessId') businessId: string, @Param('id') id: string, @Req() req: any) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.fixedAssets.remove(businessId, id);
   }
 }

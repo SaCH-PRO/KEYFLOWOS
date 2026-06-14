@@ -66,6 +66,28 @@ export class InboundCommunicationsService {
       return { ok: false, businessId: null, contactId: null, matchedOn: null, reason: 'unrouted' };
     }
 
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { messageIntakeEnabled: true },
+    });
+    const intakeEnabled = business?.messageIntakeEnabled ?? false;
+
+    if (intakeEnabled) {
+      this.events.emit('message.intake.received', {
+        businessId,
+        connectorType: 'email',
+        sourceChannel: 'email',
+        externalId: payload.externalId ?? null,
+        from,
+        fromName: payload.senderName,
+        to: payload.to,
+        subject: payload.subject,
+        body: payload.body,
+        receivedAt: payload.receivedAt,
+      });
+      return { ok: true, businessId, contactId: null, matchedOn: null, reason: 'intake_queued' };
+    }
+
     const match = await this.entityResolution.findContactIdByMatch(businessId, {
       email: from,
       externalId: payload.externalId ?? null,
@@ -103,6 +125,27 @@ export class InboundCommunicationsService {
     if (!businessId) {
       this.logger.warn(`Inbound SMS from ${from} could not be routed to a business`);
       return { ok: false, businessId: null, contactId: null, matchedOn: null, reason: 'unrouted' };
+    }
+
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { messageIntakeEnabled: true },
+    });
+    const intakeEnabled = business?.messageIntakeEnabled ?? false;
+
+    if (intakeEnabled) {
+      this.events.emit('message.intake.received', {
+        businessId,
+        connectorType: 'sms',
+        sourceChannel: 'sms',
+        externalId: payload.externalId ?? null,
+        from,
+        fromName: payload.senderName,
+        to: payload.to,
+        body: payload.body,
+        receivedAt: payload.receivedAt,
+      });
+      return { ok: true, businessId, contactId: null, matchedOn: null, reason: 'intake_queued' };
     }
 
     const match = await this.entityResolution.findContactIdByMatch(businessId, {

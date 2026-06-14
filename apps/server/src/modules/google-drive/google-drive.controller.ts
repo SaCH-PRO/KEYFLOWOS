@@ -30,24 +30,26 @@ export class GoogleDriveController {
     @Query('error') error: string,
     @Res() res: Response,
   ) {
+    const returnPath = '/app/key-connect';
+
     if (error) {
-      return res.redirect(`/app/profile?tab=documents&drive=error&reason=${error}`);
+      return res.redirect(`${returnPath}?drive=error&reason=${error}`);
     }
 
     if (!state || !code) {
-      return res.redirect('/app/profile?tab=documents&drive=error&reason=missing_params');
+      return res.redirect(`${returnPath}?drive=error&reason=missing_params`);
     }
 
     const oauthState = this.driveService.verifyState(state);
     if (!oauthState) {
-      return res.redirect('/app/profile?tab=documents&drive=error&reason=invalid_state');
+      return res.redirect(`${returnPath}?drive=error&reason=invalid_state`);
     }
 
     try {
       await this.driveService.saveDriveCredentials(oauthState.businessId, code);
-      return res.redirect('/app/profile?tab=documents&drive=success');
+      return res.redirect(`${returnPath}?drive=success`);
     } catch (err) {
-      return res.redirect('/app/profile?tab=documents&drive=error&reason=token_exchange');
+      return res.redirect(`${returnPath}?drive=error&reason=token_exchange`);
     }
   }
 

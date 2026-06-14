@@ -12,6 +12,7 @@ import { PlanLimitDialog } from "@/components/ui/upgrade-prompt";
 import { KeyflowOSStoreDrawer } from "@/components/keyflowos-store-drawer";
 
 import { CelebrationListener } from "@/components/ui/celebration-listener";
+import { BlueprintCompletionBanner } from "@/components/blueprint/blueprint-completion-banner";
 import { RequireAuth } from "@/components/require-auth";
 import { KeyAgent } from "@/components/key";
 import { KeyPresence } from "@/components/key/key-presence";
@@ -20,6 +21,7 @@ import { AppHeader } from "@/components/layout/app-header";
 import { MobileDrawer } from "@/components/layout/mobile-drawer";
 import { MobileBottomNav } from "@/components/layout/mobile-bottom-nav";
 import { useAppLayout } from "@/hooks/use-app-layout";
+import { useOnboardingGuard } from "@/hooks/use-onboarding-guard";
 import { useKeyboardShortcuts, useRouteKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 import { PageTransition } from "@/components/transitions/page-transition";
 import { KeyContextualSuggestions } from "@/components/functional/key-contextual-suggestions";
@@ -29,8 +31,20 @@ import { ComposeFab } from "@/components/email/compose-fab";
 
 function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const layout = useAppLayout();
+  const onboardingGuard = useOnboardingGuard();
   useKeyboardShortcuts();
   useRouteKeyboardShortcuts();
+
+  if (onboardingGuard.checking) {
+    return (
+      <div className="h-dvh flex items-center justify-center bg-background text-foreground">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 border-2 border-[hsl(var(--kf-accent1))] border-t-transparent rounded-full animate-spin" />
+          <p className="text-sm text-muted-foreground">Checking your Business Genome...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <MobileGestureProvider>
@@ -84,6 +98,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
             userMenuRef={layout.userMenuRef}
             handleLogout={layout.handleLogout}
           />
+          <BlueprintCompletionBanner />
           <div className="px-3 md:px-6 pt-1">
             <OriginAwareBreadcrumbs />
           </div>

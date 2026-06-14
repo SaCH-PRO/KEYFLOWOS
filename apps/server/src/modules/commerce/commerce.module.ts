@@ -55,6 +55,10 @@ import { DocumentTemplateModule } from './document-template/document-template.mo
 import { DocumentTemplateController } from './document-template/document-template.controller';
 import { DocumentTemplateService } from './document-template/document-template.service';
 import { GoogleDriveModule } from '../google-drive/google-drive.module';
+import { TaskAssignmentModule } from '../task-assignments/task-assignment.module';
+import { DriveIntakeController } from './drive-intake.controller';
+import { DriveIntakeOrchestrator } from './drive-intake-orchestrator.service';
+import { DriveIntakeListener } from './drive-intake.listener';
 import type { NotificationsModule as NotificationsModuleType } from '../notifications/notifications.module';
 
 @Module({
@@ -68,6 +72,7 @@ import type { NotificationsModule as NotificationsModuleType } from '../notifica
     FinanceModule,
     DocumentTemplateModule,
     GoogleDriveModule,
+    TaskAssignmentModule,
     // notifications -> commerce -> notifications is a circular cycle, so we
     // Dynamic import avoids a TDZ "Cannot access ... before initialization" error.
     forwardRef(
@@ -75,7 +80,7 @@ import type { NotificationsModule as NotificationsModuleType } from '../notifica
         (await import('../notifications/notifications.module')).NotificationsModule,
     ),
   ],
-  controllers: [CommerceController, AccountingController, CommerceAiController, CommerceInsightsController, FinancialCopilotController, RecurringInvoiceController, RevenueActionController, RevenueReportingController, RevenueIntelligenceController, LeverageController, DocumentTemplateController],
+  controllers: [CommerceController, AccountingController, CommerceAiController, CommerceInsightsController, FinancialCopilotController, RecurringInvoiceController, RevenueActionController, RevenueReportingController, RevenueIntelligenceController, LeverageController, DocumentTemplateController, DriveIntakeController],
   providers: [
     CommerceService,
     CommerceStatsService,
@@ -114,6 +119,8 @@ import type { NotificationsModule as NotificationsModuleType } from '../notifica
     MarginOnPaymentListener,
     PlanLimitGuard,
     DocumentTemplateService,
+    DriveIntakeOrchestrator,
+    DriveIntakeListener,
   ],
   exports: [
     CommerceService,
@@ -135,6 +142,7 @@ import type { NotificationsModule as NotificationsModuleType } from '../notifica
     RevenueBriefingService,
     TimeCostService,
     DocumentTemplateService,
+    DriveIntakeOrchestrator,
   ],
 })
 export class CommerceModule {}

@@ -3,8 +3,10 @@
 import { useEffect, useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { usePathname } from "next/navigation";
-import { Sparkles } from "lucide-react";
-import { ArrowRight, X } from "lucide-react";
+import { Sparkles, ArrowRight, X, Dna } from "lucide-react";
+import { apiGet } from "@/lib/api";
+import { getStoredBusinessId } from "@/lib/workspace";
+import type { BlueprintData } from "@/lib/blueprint-types";
 
 interface Suggestion {
   prompt: string;
@@ -59,8 +61,24 @@ export function KeyContextualSuggestions() {
   const pathname = usePathname();
   const [visible, setVisible] = useState(false);
   const [dismissedAt, setDismissedAt] = useState<number>(0);
+  const [blueprintCompleteness, setBlueprintCompleteness] = useState<number | null>(null);
 
   const suggestions = useMemo(() => getSuggestionsForPath(pathname), [pathname]);
+  const blueprintIncomplete = blueprintCompleteness !== null && blueprintCompleteness < 100;
+
+  useEffect(() => {
+    const businessId = getStoredBusinessId();
+    if (!businessId) return;
+    let cancelled = false;
+    apiGet<BlueprintData>(`/blueprint/businesses/${businessId}`)
+      .then(({ data }) => {
+        if (cancelled) return;
+        if (data) setBlueprintCompleteness(data.completeness);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pathname]);
 
   // Show suggestions when entering a new route (after a delay)
   useEffect(() => {
@@ -84,6 +102,10 @@ export function KeyContextualSuggestions() {
     setVisible(false);
   };
 
+  const handleOpenBlueprintOnboarding = () => {
+    window.location.href = "/app/blueprint?onboarding=1";
+  };
+
   if (!visible) return null;
 
   return (
@@ -100,7 +122,7 @@ export function KeyContextualSuggestions() {
             <div className="flex items-center gap-1.5">
               <Sparkles className="w-3.5 h-3.5 text-[hsl(var(--kf-accent1))]" />
               <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
-                KEY Suggests
+                {blueprintIncomplete ? "Finish setup" : "KEY Suggests"}
               </span>
             </div>
             <button
@@ -110,20 +132,59 @@ export function KeyContextualSuggestions() {
               <X className="w-3 h-3" />
             </button>
           </div>
-          <div className="flex flex-wrap gap-1.5">
-            {suggestions.map((s) => (
-              <motion.button
-                key={s.label}
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={() => handleSuggest(s.prompt)}
-                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] bg-gradient-to-r from-orange-500/8 to-teal-500/5 border border-orange-500/10 text-foreground/80 hover:border-orange-500/25 hover:from-orange-500/12 hover:to-teal-500/8 transition-all"
-              >
-                {s.label}
-                <ArrowRight className="w-2.5 h-2.5 text-muted-foreground/50" />
-              </motion.button>
-            ))}
-          </div>
+
+          {blueprintIncomplete ? (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <div
+                  className="h-8 w-8 rounded-lg flex items-center justify-center"
+                  style={{ background: "hsl(var(--kf-accent1) / 0.12)" }}
+                >
+                  <Dna className="h-4 w-4" style={{ color: "hsl(var(--kf-accent1))" }} />
+                </div>
+                <div>
+                  <p className="text-xs font-medium">Business Genome {blueprintCompleteness}% complete</p>
+                  <p className="text-[10px] text-muted-foreground">
+                    KEY can finish it with a few questions.
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => handleSuggest("Hi KEY, can you help me complete my Business Genome?")}
+                  className="flex-1 flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium bg-gradient-to-r from-orange-500/12 to-teal-500/8 border border-orange-500/15 text-foreground/90 hover:border-orange-500/30 transition-all"
+                >
+                  Chat with KEY
+                  <ArrowRight className="w-2.5 h-2.5 text-muted-foreground/50" />
+                </motion.button>
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={handleOpenBlueprintOnboarding}
+                  className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium border border-border hover:bg-muted/30 transition-all"
+                >
+                  Open
+                </motion.button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {suggestions.map((s) => (
+                <motion.button
+                  key={s.label}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => handleSuggest(s.prompt)}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] bg-gradient-to-r from-orange-500/8 to-teal-500/5 border border-orange-500/10 text-foreground/80 hover:border-orange-500/25 hover:from-orange-500/12 hover:to-teal-500/8 transition-all"
+                >
+                  {s.label}
+                  <ArrowRight className="w-2.5 h-2.5 text-muted-foreground/50" />
+                </motion.button>
+              ))}
+            </div>
+          )}
         </div>
       </motion.div>
     </AnimatePresence>

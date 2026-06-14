@@ -47,10 +47,10 @@ import {
   BookOpen,
   Truck,
   Bell,
-  Settings,
   LayoutDashboard,
   TrendingUp,
   Camera,
+  Inbox,
 } from "lucide-react";
 import type { DormantFeatureFlagKey } from "./feature-flags";
 
@@ -112,6 +112,7 @@ export const operateSections: NavSection[] = [
     items: [
       { label: "Command Center", href: "/app/command-center", icon: LayoutDashboard },
       { label: "KEY Worker", href: "/app/key", icon: Bot },
+      { label: "Key Inbox", href: "/app/key-inbox", icon: Inbox },
       { label: "Capture", href: "/app/capture", icon: Camera },
     ],
   },
@@ -249,15 +250,8 @@ export const buildSections: NavSection[] = [
     label: "Connect",
     icon: Plug,
     items: [
-      { label: "Overview", href: "/app/connect", icon: Activity },
-      { label: "Google", href: "/app/connect", icon: Search },
-      { label: "Microsoft", href: "/app/connect", icon: Mail },
-      { label: "Payments", href: "/app/connect", icon: CreditCard },
-      { label: "Accounting", href: "/app/connect", icon: Calculator },
-      { label: "Marketing", href: "/app/connect", icon: Megaphone },
-      { label: "Social", href: "/app/connect", icon: Share2 },
-      { label: "Forms", href: "/app/connect", icon: FileText },
-      { label: "WhatsApp", href: "/app/connect", icon: MessageCircle },
+      { label: "Key Connect", href: "/app/key-connect", icon: Activity },
+      { label: "Legacy Connect", href: "/app/connect", icon: Plug },
     ],
   },
   {
@@ -292,7 +286,6 @@ export const moreNav: NavItem[] = [
 export const meNav: NavItem[] = [
   { label: "Profile", href: "/app/profile", icon: User },
   { label: "Notifications", href: "/app/notifications", icon: Bell },
-  { label: "Preferences", href: "/app/settings/profile", icon: Settings },
 ];
 
 // ============================================================================
@@ -303,7 +296,7 @@ export const mobileBottomNav = [
   { label: "Home", href: "/app/command-center", icon: Zap },
   { label: "Flows", href: "#flows", icon: Briefcase },
   { label: "AI", href: "#key", icon: Brain },
-  { label: "Inbox", href: "/app/inbox", icon: Mail },
+  { label: "Inbox", href: "/app/key-inbox", icon: Inbox },
   { label: "Me", href: "#me", icon: User },
 ];
 

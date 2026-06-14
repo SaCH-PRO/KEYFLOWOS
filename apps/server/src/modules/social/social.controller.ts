@@ -1,5 +1,6 @@
 import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, UseGuards, BadRequestException } from '@nestjs/common';
 import { randomBytes, createHash } from 'crypto';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { SocialService } from './social.service';
@@ -15,11 +16,61 @@ export class SocialController {
     @Inject(SocialConnectionsService) private readonly connections: SocialConnectionsService,
     @Inject(SocialAnalyticsService) private readonly analytics: SocialAnalyticsService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(EventEmitter2) private readonly events: EventEmitter2,
   ) {}
 
   @Get('health')
   health() {
     return { status: 'ok', module: 'social' };
+  }
+
+  /**
+   * Public webhook for Facebook / Instagram DMs and comments.
+   * When message intake is enabled, DMs are held for approval just like Drive files.
+   */
+  @Post('webhook/:businessId')
+  async socialWebhook(
+    @Param('businessId') businessId: string,
+    @Body() body: { type?: string; platform?: string; from?: { id?: string; name?: string }; message?: string; externalId?: string; postId?: string },
+  ) {
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { messageIntakeEnabled: true },
+    });
+    if (!business?.messageIntakeEnabled) {
+      return { ignored: true, reason: 'message_intake_disabled' };
+    }
+
+    const platform = (body.platform ?? '').toLowerCase();
+    const sourceChannel = platform === 'instagram' ? 'instagram' : 'messenger';
+
+    if (body.type?.toUpperCase() === 'DM' && body.message) {
+      await this.prisma.client.socialEngagement.create({
+        data: {
+          businessId,
+          platform: platform === 'instagram' ? 'INSTAGRAM' : 'FACEBOOK',
+          type: 'DM',
+          postId: body.postId ?? null,
+          externalId: body.externalId ?? null,
+          fromUserId: body.from?.id ?? null,
+          fromUserName: body.from?.name ?? null,
+          content: body.message,
+          aiHandled: false,
+        },
+      });
+
+      this.events.emit('message.intake.received', {
+        businessId,
+        connectorType: 'meta_social',
+        sourceChannel,
+        externalId: body.externalId ?? null,
+        from: body.from?.id ?? 'unknown',
+        fromName: body.from?.name,
+        body: body.message,
+      });
+    }
+
+    return { queued: true };
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

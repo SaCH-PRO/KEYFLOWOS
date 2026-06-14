@@ -1,13 +1,15 @@
-import { Body, Controller, Delete, Get, Post, Param, Query, UseGuards, BadRequestException, NotFoundException, Inject } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Patch, Post, Param, Query, UseGuards, BadRequestException, NotFoundException, Inject } from '@nestjs/common';
 import { ConnectorRegistryService } from './connector-registry.service';
 import { ConnectorActivityService } from './connector-activity.service';
 import { ConnectorHealthMonitorService } from './connector-health-monitor.service';
 import { ConnectorCredentialsService } from './connector-credentials.service';
+import { PrismaService } from '../prisma/prisma.service';
 import { AuthGuard } from '../auth/auth.guard';
 import { BusinessGuard } from '../auth/business.guard';
 import { apiLink } from '../config/runtime-urls';
 import { randomBytes } from 'crypto';
 import type { ConnectorType, ConnectorCredentialField } from './connector.interface';
+import { UpdateInboxConfigDto } from '../../modules/ingestion/dto/ingestion-item.dto';
 
 @Controller('connectors')
 @UseGuards(AuthGuard, BusinessGuard)
@@ -17,6 +19,7 @@ export class ConnectorController {
     @Inject(ConnectorActivityService) private readonly activity: ConnectorActivityService,
     @Inject(ConnectorHealthMonitorService) private readonly healthMonitor: ConnectorHealthMonitorService,
     @Inject(ConnectorCredentialsService) private readonly credentials: ConnectorCredentialsService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
   @Get('businesses/:businessId/dashboard')
@@ -131,6 +134,66 @@ export class ConnectorController {
   @Post('businesses/:businessId/health-check/run')
   async runHealthCheck(@Param('businessId') businessId: string) {
     return this.healthMonitor.tickBusiness(businessId);
+  }
+
+  /**
+   * Get the current ingestion configuration for a connector.
+   */
+  @Get('businesses/:businessId/inbox-config/:type')
+  async getInboxConfig(
+    @Param('businessId') businessId: string,
+    @Param('type') type: string,
+  ) {
+    const connector = this.registry.get(type as ConnectorType);
+    if (!connector) throw new NotFoundException(`Connector ${type} not found`);
+
+    const status = await this.prisma.client.connectorStatus.findUnique({
+      where: { businessId_connectorType: { businessId, connectorType: type as ConnectorType } },
+    });
+
+    return {
+      type,
+      intakeEnabled: status?.intakeEnabled ?? false,
+      autoApproveThreshold: status?.autoApproveThreshold ?? null,
+      createContactsAutomatically: status?.createContactsAutomatically ?? true,
+    };
+  }
+
+  /**
+   * Update ingestion configuration for a connector (intake toggle, auto-approve
+   * threshold, contact creation). Upserts the ConnectorStatus row if needed.
+   */
+  @Patch('businesses/:businessId/inbox-config/:type')
+  async updateInboxConfig(
+    @Param('businessId') businessId: string,
+    @Param('type') type: string,
+    @Body() body: UpdateInboxConfigDto,
+  ) {
+    const connector = this.registry.get(type as ConnectorType);
+    if (!connector) throw new NotFoundException(`Connector ${type} not found`);
+
+    const data: Record<string, boolean | number | null> = {};
+    if (body.intakeEnabled !== undefined) data.intakeEnabled = body.intakeEnabled;
+    if (body.autoApproveThreshold !== undefined) data.autoApproveThreshold = body.autoApproveThreshold;
+    if (body.createContactsAutomatically !== undefined) data.createContactsAutomatically = body.createContactsAutomatically;
+
+    const status = await this.prisma.client.connectorStatus.upsert({
+      where: { businessId_connectorType: { businessId, connectorType: type as ConnectorType } },
+      create: {
+        businessId,
+        connectorType: type as ConnectorType,
+        status: 'disconnected',
+        ...data,
+      },
+      update: data,
+    });
+
+    return {
+      type,
+      intakeEnabled: status.intakeEnabled,
+      autoApproveThreshold: status.autoApproveThreshold,
+      createContactsAutomatically: status.createContactsAutomatically,
+    };
   }
 
   /**

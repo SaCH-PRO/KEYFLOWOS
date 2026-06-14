@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { MessageSquare, Mail, Phone, Instagram, Facebook, CheckCircle2, Loader2, Send, RefreshCw, FileText, Sparkles, ArrowLeft } from "lucide-react";
+import { MessageSquare, Mail, Phone, Instagram, Facebook, CheckCircle2, Loader2, Send, RefreshCw, FileText, Sparkles, ArrowLeft, ShieldCheck } from "lucide-react";
+import Link from "next/link";
 import { toast } from "sonner";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { apiGet, apiPostSimple } from "@/lib/api";
@@ -162,9 +163,16 @@ export default function UnifiedInboxPage() {
           <div className="flex items-center gap-2 mb-3">
             <MessageSquare className="w-5 h-5 text-[hsl(var(--kf-accent1))]" />
             <h1 className="text-sm font-bold text-foreground/90">Unified Inbox</h1>
+            <Link
+              href="/app/inbox/intake"
+              className="ml-auto inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium text-muted-foreground hover:bg-muted/30 transition-colors"
+            >
+              <ShieldCheck className="w-3 h-3" />
+              Intake
+            </Link>
             <button
               onClick={() => setShowDrafts((v) => !v)}
-              className={`ml-auto inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium transition-colors ${
+              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium transition-colors ${
                 showDrafts
                   ? "bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))]"
                   : "text-muted-foreground hover:bg-muted/30"

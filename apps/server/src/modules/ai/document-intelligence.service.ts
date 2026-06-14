@@ -47,9 +47,25 @@ export interface ExtractedContactData {
   confidence: number;
 }
 
+export interface ExtractedCreditNoteData {
+  originalInvoiceNumber?: string;
+  contactName?: string;
+  contactEmail?: string;
+  contactPhone?: string;
+  amountPaid?: number;
+  amountCredited?: number;
+  totalOriginalAmount?: number;
+  currency?: string;
+  issueDate?: string;
+  reason?: string;
+  lineItems?: Array<{ description: string; quantity: number; unitPrice: number; total: number }>;
+  confidence: number;
+}
+
 export interface DocumentExtractionResult {
-  documentType: 'invoice' | 'receipt' | 'contact_card' | 'contract' | 'unknown';
+  documentType: 'invoice' | 'receipt' | 'credit_note' | 'contact_card' | 'contract' | 'unknown';
   invoiceData?: ExtractedInvoiceData;
+  creditNoteData?: ExtractedCreditNoteData;
   contactData?: ExtractedContactData;
   rawText?: string;
   confidence: number;
@@ -90,6 +106,15 @@ For INVOICES/RECEIPTS, extract:
 - dates (issueDate, dueDate)
 - invoiceNumber
 
+For CREDIT NOTES / PARTIAL-PAYMENT NOTES, extract:
+- originalInvoiceNumber (the invoice this credit relates to)
+- contact info (name, email, phone)
+- totalOriginalAmount (full invoice amount before credit)
+- amountPaid (amount the customer actually paid)
+- amountCredited (amount being written off as credit)
+- currency, issueDate, reason
+- lineItems if listed
+
 For CONTACT CARDS/BUSINESS CARDS, extract:
 - firstName, lastName, email, phone, companyName, address
 
@@ -98,9 +123,10 @@ For CONTRACTS, extract:
 
 Respond ONLY with valid JSON in this exact shape:
 {
-  "documentType": "invoice" | "receipt" | "contact_card" | "contract" | "unknown",
+  "documentType": "invoice" | "receipt" | "credit_note" | "contact_card" | "contract" | "unknown",
   "confidence": 0.0-1.0,
   "invoiceData": { ... } | null,
+  "creditNoteData": { ... } | null,
   "contactData": { ... } | null,
   "rawText": "extracted text summary",
   "suggestedActions": [
@@ -190,6 +216,12 @@ Respond ONLY with valid JSON in this exact shape:
   ): Promise<Array<{ action: string; success: boolean; entityId?: string; error?: string }>> {
     const outcomes: Array<{ action: string; success: boolean; entityId?: string; error?: string }> = [];
 
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { currency: true },
+    });
+    const businessCurrency = business?.currency ?? 'TTD';
+
     if (result.documentType === 'invoice' || result.documentType === 'receipt') {
       if (result.invoiceData && result.invoiceData.confidence > 0.7) {
         // Check governance
@@ -254,7 +286,7 @@ Respond ONLY with valid JSON in this exact shape:
                 contactId,
                 invoiceNumber: result.invoiceData.invoiceNumber ?? `AI-${Date.now()}`,
                 status: 'DRAFT',
-                currency: result.invoiceData.currency ?? 'USD',
+                currency: result.invoiceData.currency ?? businessCurrency,
                 subtotal: result.invoiceData.subtotal ?? result.invoiceData.total ?? 0,
                 taxRate: result.invoiceData.taxRate ?? 0,
                 taxAmount: result.invoiceData.taxAmount ?? 0,
@@ -283,6 +315,41 @@ Respond ONLY with valid JSON in this exact shape:
           }
         } else {
           outcomes.push({ action: 'create_invoice', success: false, error: 'Requires approval - not auto-approved' });
+        }
+      }
+    }
+
+    if (result.documentType === 'credit_note') {
+      if (result.creditNoteData && result.creditNoteData.confidence > 0.6) {
+        try {
+          const existing = await this.prisma.client.contact.findFirst({
+            where: {
+              businessId,
+              OR: [
+                ...(result.creditNoteData.contactEmail ? [{ email: result.creditNoteData.contactEmail }] : []),
+                ...(result.creditNoteData.contactPhone ? [{ phone: result.creditNoteData.contactPhone }] : []),
+              ],
+              deletedAt: null,
+            },
+            select: { id: true },
+          });
+          if (!existing && result.creditNoteData.contactName) {
+            const names = result.creditNoteData.contactName.split(' ');
+            await this.prisma.client.contact.create({
+              data: {
+                businessId,
+                firstName: names[0] || null,
+                lastName: names.slice(1).join(' ') || null,
+                email: result.creditNoteData.contactEmail ?? null,
+                phone: result.creditNoteData.contactPhone ?? null,
+                status: 'LEAD',
+                source: 'document_extraction',
+              },
+            });
+          }
+          outcomes.push({ action: 'resolve_credit_note_contact', success: true });
+        } catch (err) {
+          outcomes.push({ action: 'resolve_credit_note_contact', success: false, error: (err as Error).message });
         }
       }
     }

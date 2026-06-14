@@ -2,6 +2,7 @@ import { Body, Controller, Get, Inject, Param, Patch, Post, UseGuards } from '@n
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { BlueprintService } from './blueprint.service';
+
 import { BlueprintPatch } from './blueprint.types';
 
 @Controller('blueprint/businesses/:businessId')
@@ -38,6 +39,12 @@ export class BlueprintController {
   @Get('recommendations')
   async recommendations(@Param('businessId') businessId: string) {
     const steps = await this.blueprint.getRecommendedSetupSteps(businessId);
+    return { steps };
+  }
+
+  @Get('setup-steps')
+  async setupSteps(@Param('businessId') businessId: string) {
+    const steps = await this.blueprint.getSetupSteps(businessId);
     return { steps };
   }
 }

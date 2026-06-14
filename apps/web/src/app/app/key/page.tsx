@@ -7,7 +7,10 @@ import {
   Brain,
   Send,
   Zap,
+  HardDrive,
+  Share2,
   ShieldCheck,
+  MessageSquare,
   ClipboardList,
   Settings,
   Loader2,
@@ -264,6 +267,26 @@ export default function KeyWorkerPage() {
               <JarvisVoice businessId={businessId} />
             </div>
           )}
+
+          {/* Quick prompts */}
+          <div className="mt-3 flex flex-wrap gap-2">
+            {[
+              { label: "Scan Drive", icon: HardDrive, text: "Scan Drive" },
+              { label: "What did KEY find?", icon: Search, text: "What did KEY find?" },
+              { label: "Check messages", icon: MessageSquare, text: "Check messages" },
+              { label: "Recent social", icon: Share2, text: "Show recent social engagement" },
+            ].map((prompt) => (
+              <button
+                key={prompt.label}
+                type="button"
+                onClick={() => { setInput(prompt.text); handleTyping(); }}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-medium bg-muted hover:bg-muted/80 transition-colors"
+              >
+                <prompt.icon className="w-3 h-3" />
+                {prompt.label}
+              </button>
+            ))}
+          </div>
         </div>
       </SectionCard>
 

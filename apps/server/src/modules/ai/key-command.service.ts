@@ -103,6 +103,14 @@ export class KeyCommandService {
       intent = { domain: 'multi', action: 'cleanup_tasks', mode: cmd.mode || KeyMode.DO };
     } else if (raw.includes('execute all') || raw.includes('approve all')) {
       intent = { domain: 'multi', action: 'execute_all', mode: KeyMode.AUTO };
+    } else if (raw.includes('scan drive') || raw.includes('sync drive') || raw.includes('check drive')) {
+      intent = { domain: 'connect', action: 'scan_drive', mode: KeyMode.DO };
+    } else if (raw.includes('what did key find') || raw.includes('what did you find') || raw.includes('drive findings') || raw.includes('drive intake')) {
+      intent = { domain: 'connect', action: 'drive_findings', mode: KeyMode.ASK };
+    } else if (raw.includes('check messages') || raw.includes('message intake') || raw.includes('unread messages') || raw.includes('my inbox')) {
+      intent = { domain: 'messages', action: 'message_intake', mode: KeyMode.ASK };
+    } else if (raw.includes('social') || raw.includes('facebook') || raw.includes('instagram') || raw.includes('recent engagement')) {
+      intent = { domain: 'social', action: 'recent_engagement', mode: KeyMode.ASK };
     }
 
     await (this.prisma.client as any).keyCommand.update({
@@ -154,6 +162,14 @@ export class KeyCommandService {
       plan.steps.push({ tool: 'recommendFollowUps', module: 'contacts', input: {}, riskTier: 'LOW', requiresApproval: false });
     } else if (domain === 'storefront' && action === 'storefront_audit') {
       plan.steps.push({ tool: 'auditStorefront', module: 'storefront', input: {}, riskTier: 'LOW', requiresApproval: false });
+    } else if (domain === 'connect' && action === 'scan_drive') {
+      plan.steps.push({ tool: 'scanDrive', module: 'connect', input: {}, riskTier: 'LOW', requiresApproval: false });
+    } else if (domain === 'connect' && action === 'drive_findings') {
+      plan.steps.push({ tool: 'listDriveIntake', module: 'connect', input: { status: 'reviewing', limit: 20 }, riskTier: 'LOW', requiresApproval: false });
+    } else if (domain === 'messages' && action === 'message_intake') {
+      plan.steps.push({ tool: 'listMessageIntake', module: 'messages', input: { status: 'reviewing', limit: 20 }, riskTier: 'LOW', requiresApproval: false });
+    } else if (domain === 'social' && action === 'recent_engagement') {
+      plan.steps.push({ tool: 'listRecentEngagement', module: 'social', input: { limit: 20 }, riskTier: 'LOW', requiresApproval: false });
     } else {
       plan.steps.push({ tool: 'searchContacts', module: 'contacts', input: { query: action }, riskTier: 'LOW', requiresApproval: false });
     }

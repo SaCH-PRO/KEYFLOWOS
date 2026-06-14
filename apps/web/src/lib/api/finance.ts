@@ -13,7 +13,7 @@ export interface ReserveBucket {
 }
 
 export async function fetchReserveBuckets(businessId: string) {
-  return apiGet<ReserveBucket[]>(`/finance/businesses/${businessId}/reserves`);
+  return apiGet<{ items: ReserveBucket[] }>(`/finance/businesses/${businessId}/reserves`);
 }
 
 export async function createReserveBucket(businessId: string, body: { name: string; purpose: string; targetAmount?: number; currentAmount?: number; currency?: string }) {
@@ -28,16 +28,38 @@ export async function deleteReserveBucket(businessId: string, id: string) {
   return apiDelete<void>(`/finance/businesses/${businessId}/reserves/${id}`);
 }
 
+// ---------- Chart of Accounts ----------
+export interface ChartOfAccount {
+  id: string;
+  name: string;
+  code: string | null;
+  type: string;
+  subtype: string | null;
+  systemKey: string | null;
+  isActive: boolean;
+}
+
+export async function fetchChartOfAccounts(businessId: string) {
+  return apiGet<{ items: ChartOfAccount[] }>(`/finance/businesses/${businessId}/chart-of-accounts`);
+}
+
 // ---------- General Ledger ----------
 export interface GeneralLedgerRow {
-  id: string;
+  entryId: string;
+  transactionId: string;
   date: string;
+  accountId: string;
+  accountName: string;
+  accountCode: string | null;
+  accountType: string;
+  debit: string;
+  credit: string;
+  runningBalance: string;
   memo: string | null;
-  debit: number;
-  credit: number;
-  runningBalance: number;
-  transaction: { id: string; type: string; description: string | null; reference: string | null };
-  account: { id: string; name: string; type: string; code: string | null };
+  description: string | null;
+  reference: string | null;
+  sourceType: string | null;
+  sourceId: string | null;
 }
 
 export async function fetchGeneralLedger(businessId: string, params?: { accountId?: string; from?: string; to?: string; page?: number; limit?: number }) {
@@ -48,17 +70,17 @@ export async function fetchGeneralLedger(businessId: string, params?: { accountI
 // ---------- Trial Balance ----------
 export interface TrialBalanceRow {
   accountId: string;
-  accountName: string;
-  accountType: string;
-  accountCode: string | null;
-  debit: number;
-  credit: number;
-  netBalance: number;
+  systemKey: string | null;
+  name: string;
+  type: string;
+  debit: string;
+  credit: string;
+  net: string;
 }
 
 export async function fetchTrialBalance(businessId: string, asOf?: string) {
   const qs = asOf ? `?asOf=${encodeURIComponent(asOf)}` : "";
-  return apiGet<TrialBalanceRow[]>(`/finance/businesses/${businessId}/trial-balance${qs}`);
+  return apiGet<{ items: TrialBalanceRow[] }>(`/finance/businesses/${businessId}/trial-balance${qs}`);
 }
 
 export async function fetchAccountBalance(businessId: string, accountId: string, asOf?: string) {
@@ -81,7 +103,7 @@ export interface BankRule {
 }
 
 export async function fetchBankRules(businessId: string) {
-  return apiGet<BankRule[]>(`/finance/businesses/${businessId}/bank-rules`);
+  return apiGet<{ items: BankRule[] }>(`/finance/businesses/${businessId}/bank-rules`);
 }
 
 export async function createBankRule(businessId: string, body: { name: string; pattern: string; matchType?: string; accountId: string; expenseCategoryId?: string | null; priority?: number }) {
@@ -120,7 +142,7 @@ export interface RecurringJournalEntry {
 }
 
 export async function fetchRecurringJournals(businessId: string) {
-  return apiGet<RecurringJournalEntry[]>(`/finance/businesses/${businessId}/recurring-journal-entries`);
+  return apiGet<{ items: RecurringJournalEntry[] }>(`/finance/businesses/${businessId}/recurring-journal-entries`);
 }
 
 export async function createRecurringJournal(businessId: string, body: { name: string; description?: string; frequency: string; nextRunDate: string; endDate?: string | null; entries: Array<{ accountId: string; debit?: number; credit?: number; memo?: string }> }) {
@@ -154,7 +176,7 @@ export interface CreditNote {
 }
 
 export async function fetchCreditNotes(businessId: string) {
-  return apiGet<CreditNote[]>(`/finance/businesses/${businessId}/credit-notes`);
+  return apiGet<{ items: CreditNote[] }>(`/finance/businesses/${businessId}/credit-notes`);
 }
 
 export async function createCreditNote(businessId: string, body: { invoiceId: string; creditNoteNumber: string; amount: number; reason?: string; items?: Array<{ description: string; quantity?: number; unitPrice?: number; amount: number }> }) {
@@ -184,7 +206,7 @@ export interface AccountingPeriod {
 }
 
 export async function fetchAccountingPeriods(businessId: string) {
-  return apiGet<AccountingPeriod[]>(`/finance/businesses/${businessId}/accounting-periods`);
+  return apiGet<{ items: AccountingPeriod[] }>(`/finance/businesses/${businessId}/accounting-periods`);
 }
 
 export async function createAccountingPeriod(businessId: string, body: { year: number; month: number }) {
@@ -197,4 +219,85 @@ export async function closeAccountingPeriod(businessId: string, id: string) {
 
 export async function reopenAccountingPeriod(businessId: string, id: string) {
   return apiPost<AccountingPeriod>({ path: `/finance/businesses/${businessId}/accounting-periods/${id}/reopen`, body: {} });
+}
+
+// ---------- Bank Connections ----------
+export interface BankConnection {
+  id: string;
+  financialAccountId: string;
+  provider: string;
+  providerItemId: string | null;
+  status: string;
+  lastSyncAt: string | null;
+  errorMessage: string | null;
+  createdAt: string;
+}
+
+export async function fetchBankConnections(businessId: string) {
+  return apiGet<{ items: BankConnection[] }>(`/finance/businesses/${businessId}/bank-connections`);
+}
+
+export async function createBankConnection(businessId: string, body: { financialAccountId: string; provider: string; providerItemId?: string; accessToken?: string }) {
+  return apiPost<BankConnection>({ path: `/finance/businesses/${businessId}/bank-connections`, body });
+}
+
+export async function deleteBankConnection(businessId: string, id: string) {
+  return apiDelete<void>(`/finance/businesses/${businessId}/bank-connections/${id}`);
+}
+
+// ---------- Exchange Rates ----------
+export interface ExchangeRate {
+  id: string;
+  fromCurrency: string;
+  toCurrency: string;
+  rate: number;
+  date: string;
+  source: string | null;
+  createdAt: string;
+}
+
+export async function fetchExchangeRates(businessId: string, fromCurrency?: string, toCurrency?: string) {
+  const qs = fromCurrency && toCurrency ? `?from=${fromCurrency}&to=${toCurrency}` : "";
+  return apiGet<{ items: ExchangeRate[] }>(`/finance/businesses/${businessId}/exchange-rates${qs}`);
+}
+
+export async function createExchangeRate(businessId: string, body: { fromCurrency: string; toCurrency: string; rate: number; date: string; source?: string }) {
+  return apiPost<ExchangeRate>({ path: `/finance/businesses/${businessId}/exchange-rates`, body });
+}
+
+export async function deleteExchangeRate(businessId: string, id: string) {
+  return apiDelete<void>(`/finance/businesses/${businessId}/exchange-rates/${id}`);
+}
+
+// ---------- Fixed Assets ----------
+export interface FixedAsset {
+  id: string;
+  name: string;
+  category: string;
+  purchaseDate: string;
+  purchaseCost: number;
+  salvageValue: number | null;
+  usefulLifeMonths: number;
+  depreciationMethod: string;
+  accumulatedDepreciation: number;
+  netBookValue: number;
+  status: string;
+  disposalDate: string | null;
+  createdAt: string;
+}
+
+export async function fetchFixedAssets(businessId: string) {
+  return apiGet<{ items: FixedAsset[] }>(`/finance/businesses/${businessId}/fixed-assets`);
+}
+
+export async function createFixedAsset(businessId: string, body: { name: string; category: string; purchaseDate: string; purchaseCost: number; salvageValue?: number; usefulLifeMonths: number; depreciationMethod?: string }) {
+  return apiPost<FixedAsset>({ path: `/finance/businesses/${businessId}/fixed-assets`, body });
+}
+
+export async function depreciateFixedAsset(businessId: string, id: string) {
+  return apiPost<FixedAsset>({ path: `/finance/businesses/${businessId}/fixed-assets/${id}/depreciate`, body: {} });
+}
+
+export async function deleteFixedAsset(businessId: string, id: string) {
+  return apiDelete<void>(`/finance/businesses/${businessId}/fixed-assets/${id}`);
 }

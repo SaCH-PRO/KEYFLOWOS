@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { motion } from "framer-motion";
-import { Banknote, Wallet, Receipt, FileText, Landmark, ShieldCheck, ArrowRight, TrendingUp, PiggyBank, Plus, Trash2, Loader2, BookOpen, Scale, ListFilter, Repeat } from "lucide-react";
+import { Banknote, Wallet, Receipt, FileText, Landmark, ShieldCheck, ArrowRight, TrendingUp, PiggyBank, Plus, Trash2, Loader2, BookOpen, Scale, ListFilter, Repeat, FileMinus, CalendarDays, Package, Globe, Cable, PackageCheck, Truck, ClipboardList } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { UnifiedPageShell } from "@/components/layout/unified-page-shell";
@@ -53,7 +53,7 @@ export default function FinancialFlowPage() {
         apiGet<FinancialOverview>(`/finance/businesses/${businessId}/overview`),
         apiGet<SafeToSpend>(`/finance/businesses/${businessId}/safe-to-spend`),
         apiGet<NonNullable<typeof forecast>>(`/finance/businesses/${businessId}/cashflow-forecast?days=90`),
-        fetchReserveBuckets(businessId),
+        fetchReserveBuckets(businessId).then(r => ({ error: r.error, data: r.data?.items ?? [] }) as { error: string | null; data: ReserveBucket[] }),
       ]);
       if (ovRes.data) setOverview(ovRes.data);
       if (safeRes.data) setSafe(safeRes.data);
@@ -104,12 +104,21 @@ export default function FinancialFlowPage() {
   const sections = [
     { label: "Money In", href: "/app/commerce", icon: Receipt, desc: "Invoices, quotes, payments" },
     { label: "Money Out", href: "/app/expenses", icon: Wallet, desc: "Expenses, bills, vendors" },
-    { label: "Accounts", href: "/app/finance/accounts", icon: Landmark, desc: "Bank, cash, reconciliation" },
-    { label: "Reports", href: "/app/finance", icon: FileText, desc: "P&L, balance sheet, tax" },
+    { label: "Accounts", href: "/app/finance/settings#accounts", icon: Landmark, desc: "Bank, cash, reconciliation" },
+    { label: "Reports", href: "/app/finance/reports", icon: FileText, desc: "P&L, balance sheet, tax" },
     { label: "General Ledger", href: "/app/finance/ledger", icon: BookOpen, desc: "Detailed transaction history" },
     { label: "Trial Balance", href: "/app/finance/trial-balance", icon: Scale, desc: "Account balances summary" },
     { label: "Bank Rules", href: "/app/finance/bank-rules", icon: ListFilter, desc: "Auto-categorize transactions" },
     { label: "Recurring Journals", href: "/app/finance/recurring-journals", icon: Repeat, desc: "Scheduled journal entries" },
+    { label: "Credit Notes", href: "/app/finance/credit-notes", icon: FileMinus, desc: "Issue credit memos" },
+    { label: "Accounting Periods", href: "/app/finance/accounting-periods", icon: CalendarDays, desc: "Close monthly books" },
+    { label: "Fixed Assets", href: "/app/finance/fixed-assets", icon: Package, desc: "Asset register & depreciation" },
+    { label: "Exchange Rates", href: "/app/finance/exchange-rates", icon: Globe, desc: "Multi-currency rates" },
+    { label: "Bank Connections", href: "/app/finance/bank-connections", icon: Cable, desc: "Link bank feeds" },
+    { label: "Goods Receipts", href: "/app/continental-ops/goods-receipts", icon: PackageCheck, desc: "Receive inventory" },
+    { label: "Delivery Notes", href: "/app/continental-ops/delivery-notes", icon: Truck, desc: "Authorize goods release" },
+    { label: "Receipts", href: "/app/continental-ops/receipts", icon: Receipt, desc: "Payment receipts" },
+    { label: "Stock Counts", href: "/app/continental-ops/stock-counts", icon: ClipboardList, desc: "Physical inventory audit" },
   ];
 
   return (

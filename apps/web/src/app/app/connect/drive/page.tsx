@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { ArrowLeft, HardDrive } from "lucide-react";
 import GoogleDriveBrowser from "../../profile/components/google-drive-browser";
+import { DriveIntakeQueue } from "./components/drive-intake-queue";
 import { getStoredBusinessId } from "@/lib/workspace";
 
 export default function ConnectDrivePage() {
@@ -30,7 +31,10 @@ export default function ConnectDrivePage() {
         </div>
       </div>
       {businessId ? (
-        <GoogleDriveBrowser businessId={businessId} />
+        <>
+          <GoogleDriveBrowser businessId={businessId} />
+          <DriveIntakeQueue businessId={businessId} />
+        </>
       ) : (
         <div className="text-sm text-muted-foreground">No active business — pick a workspace first.</div>
       )}

@@ -22,6 +22,8 @@ import { AiMemoryService } from './ai-memory.service';
 import { StrategicIntelligenceService } from './strategic-intelligence.service';
 import { ProAutoMonitorService } from './pro-auto-monitor.service';
 import { ProfileIntelligenceService } from './profile-intelligence.service';
+import { BlueprintOnboardingService } from './blueprint-onboarding.service';
+import { BlueprintOnboardingController } from './blueprint-onboarding.controller';
 import { WorkspaceRecommendationsService } from './workspace-recommendations.service';
 import { ModelGatewayService } from './model-gateway.service';
 import { BusinessMatchingService } from './business-matching.service';
@@ -33,6 +35,7 @@ import { BlueprintModule } from '../blueprint/blueprint.module';
 import { TimelineModule } from '../timeline/timeline.module';
 import { FinanceModule } from '../finance/finance.module';
 import { CommandModule } from '../command/command.module';
+import { GoogleDriveModule } from '../google-drive/google-drive.module';
 import { KeyCommandService } from './key-command.service';
 import { KeyToolRegistryService } from './key-tool-registry.service';
 import { AutopilotRulesService } from './autopilot-rules.service';
@@ -71,8 +74,8 @@ import { AiIntelligenceController } from './ai-intelligence.controller';
 import { KeyAgentConfigService } from './key-agent-config.service';
 
 @Module({
-  imports: [PrismaModule, RedisModule, SubscriptionsModule, BlueprintModule, TimelineModule, forwardRef(() => FinanceModule), CommandModule],
-  controllers: [AiController, AiSettingsController, OutputTemplateController, FlowController, GraphActionsController, AiUsageAdminController, AiIntelligenceController],
+  imports: [PrismaModule, RedisModule, SubscriptionsModule, BlueprintModule, TimelineModule, forwardRef(() => FinanceModule), CommandModule, GoogleDriveModule],
+  controllers: [AiController, AiSettingsController, OutputTemplateController, FlowController, GraphActionsController, AiUsageAdminController, AiIntelligenceController, BlueprintOnboardingController],
   providers: [
     AiListener,
     ModelGatewayService,
@@ -90,6 +93,7 @@ import { KeyAgentConfigService } from './key-agent-config.service';
     StrategicIntelligenceService,
     ProAutoMonitorService,
     ProfileIntelligenceService,
+    BlueprintOnboardingService,
     WorkspaceRecommendationsService,
     BusinessMatchingService,
     MatchRefreshSchedulerService,
@@ -183,6 +187,8 @@ import { KeyAgentConfigService } from './key-agent-config.service';
     TaskRebalancerService,
     ChaserService,
     KeyAgentConfigService,
+    ConnectorIntelligenceService,
+    DocumentIntelligenceService,
   ],
 })
 export class AiModule {}

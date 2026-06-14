@@ -1,6 +1,7 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
+import { BlueprintService } from '../blueprint/blueprint.service';
 
 export type MemoryCategory =
   | 'goals'
@@ -59,6 +60,7 @@ export class AiMemoryService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AiExecutionLogService) private readonly executionLog: AiExecutionLogService,
+    @Inject(BlueprintService) private readonly blueprint: BlueprintService,
   ) {}
 
   async getAll(businessId: string): Promise<MemoryEntry[]> {
@@ -151,7 +153,13 @@ export class AiMemoryService {
   }
 
   async buildContextBlock(businessId: string): Promise<MemoryContextBlock> {
-    const memories = await this.getAll(businessId);
+    const [memories, blueprint] = await Promise.all([
+      this.getAll(businessId),
+      this.blueprint.getBlueprint(businessId).catch((err) => {
+        this.logger.warn(`Failed to load blueprint for memory context: ${(err as Error).message}`);
+        return null;
+      }),
+    ]);
 
     const block: MemoryContextBlock = {
       goals: [],
@@ -165,16 +173,28 @@ export class AiMemoryService {
       patterns: [],
     };
 
+    // Prefer canonical Business Blueprint for structured DNA, fall back to legacy AiMemory.
+    if (blueprint) {
+      if (blueprint.goals.northStar) block.goals.push(blueprint.goals.northStar);
+      if (blueprint.goals.ninetyDayGoals?.length) block.goals.push(...blueprint.goals.ninetyDayGoals);
+      if (blueprint.goals.twelveMonthGoals?.length) block.goals.push(...blueprint.goals.twelveMonthGoals);
+      if (blueprint.goals.priorities?.length) block.priorities.push(...blueprint.goals.priorities);
+      block.tone = blueprint.brand.tone || blueprint.aiPreferences.tone || null;
+      block.riskTolerance = blueprint.constraints.riskTolerance || null;
+      block.outreachStyle = blueprint.aiPreferences.outreachStyle || null;
+      block.reportingCadence = blueprint.aiPreferences.reportingCadence || null;
+    }
+
     for (const mem of memories) {
       switch (mem.category) {
         case 'goals':
-          block.goals.push(mem.value);
+          if (!block.goals.includes(mem.value)) block.goals.push(mem.value);
           break;
         case 'tone':
-          if (mem.key === 'preferred') block.tone = mem.value;
+          if (mem.key === 'preferred' && !block.tone) block.tone = mem.value;
           break;
         case 'riskTolerance':
-          if (mem.key === 'level') block.riskTolerance = mem.value;
+          if (mem.key === 'level' && !block.riskTolerance) block.riskTolerance = mem.value;
           break;
         case 'outreachStyle':
           if (mem.key === 'preferred') block.outreachStyle = mem.value;
@@ -183,16 +203,16 @@ export class AiMemoryService {
           if (mem.key === 'preferred') block.reportingCadence = mem.value;
           break;
         case 'priorities':
-          block.priorities.push(mem.value);
+          if (!block.priorities.includes(mem.value)) block.priorities.push(mem.value);
           break;
         case 'bottlenecks':
-          block.bottlenecks.push(mem.value);
+          if (!block.bottlenecks.includes(mem.value)) block.bottlenecks.push(mem.value);
           break;
         case 'corrections':
-          block.corrections.push(mem.value);
+          if (!block.corrections.includes(mem.value)) block.corrections.push(mem.value);
           break;
         case 'patterns':
-          block.patterns.push(mem.value);
+          if (!block.patterns.includes(mem.value)) block.patterns.push(mem.value);
           break;
       }
     }

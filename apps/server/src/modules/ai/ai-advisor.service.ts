@@ -2,6 +2,7 @@ import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from './ai-usage.service';
 import { StrategicIntelligenceService } from './strategic-intelligence.service';
+import { BlueprintService } from '../blueprint/blueprint.service';
 
 @Injectable()
 export class AiAdvisorService {
@@ -11,6 +12,7 @@ export class AiAdvisorService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
     @Inject(forwardRef(() => StrategicIntelligenceService)) private readonly strategic: StrategicIntelligenceService,
+    @Inject(BlueprintService) private readonly blueprint: BlueprintService,
   ) {}
 
   async getBusinessContext(businessId: string) {
@@ -184,6 +186,25 @@ export class AiAdvisorService {
     const context = await this.getBusinessContext(businessId);
     const businessName = context.business?.name ?? 'your business';
 
+    const blueprintContext = await this.blueprint.getBlueprintContext(businessId).catch((err) => {
+      this.logger.warn(`Failed to load blueprint context for advisor chat: ${(err as Error).message}`);
+      return null;
+    });
+
+    const blueprintSnapshot = blueprintContext
+      ? [
+          `Business Genome completeness: ${blueprintContext.completeness}%`,
+          blueprintContext.summary ? `Summary: ${blueprintContext.summary}` : null,
+          blueprintContext.identity.mission ? `Mission: ${blueprintContext.identity.mission}` : null,
+          blueprintContext.goals.northStar ? `North star: ${blueprintContext.goals.northStar}` : null,
+          blueprintContext.customerModel.idealCustomer ? `Ideal customer: ${blueprintContext.customerModel.idealCustomer}` : null,
+          blueprintContext.brand.voice ? `Brand voice: ${blueprintContext.brand.voice}` : null,
+          blueprintContext.brand.tone ? `Brand tone: ${blueprintContext.brand.tone}` : null,
+          blueprintContext.constraints.riskTolerance ? `Risk tolerance: ${blueprintContext.constraints.riskTolerance}` : null,
+          blueprintContext.financials.monthlyTarget ? `Monthly revenue target: $${blueprintContext.financials.monthlyTarget.toLocaleString()}` : null,
+        ].filter(Boolean)
+      : [];
+
     const contextSnapshot = [
       `Business: ${businessName}`,
       context.business?.industry ? `Industry: ${context.business.industry}` : null,
@@ -196,11 +217,16 @@ export class AiAdvisorService {
       `Expenses this month: $${context.expenses.totalThisMonth.toLocaleString()} TTD`,
       `Momentum Score: ${context.momentumScore}/100`,
       `Recent Activity: ${context.recentActivities.map((a) => a.title).join('; ')}`,
+      ...(blueprintSnapshot.length > 0 ? ['', 'BUSINESS GENOME:', ...blueprintSnapshot] : []),
     ]
       .filter(Boolean)
       .join('\n');
 
-    const systemPrompt = `You are KeyFlow, a friendly AI business partner for ${businessName}. You know their business inside and out, and you're genuinely invested in helping them grow.\n\n${contextSnapshot}\n\nHelp them make better decisions, analyze their data, suggest strategies, and answer any questions. Be warm, encouraging, and actionable. Celebrate their wins. Use TTD currency where relevant. Keep responses under 300 words but never at the expense of sounding human.`;
+    const onboardingDirective = blueprintContext && blueprintContext.completeness < 100
+      ? `\n\nONBOARDING DIRECTIVE: The Business Genome is only ${blueprintContext.completeness}% complete. Until it reaches 100%, one of your priorities is to help the user fill missing sections. When the user is open to it, asks a general question, or shares a relevant fact, ask ONE concise follow-up question at a time to fill the next missing section. Work in this order: identity, operatingModel, constraints, goals, brand, customerModel, financials, workflowModel, aiPreferences. When the user shares a blueprint fact, tell them you've noted it. Never ask for passwords, API keys, or bank details.`
+      : '';
+
+    const systemPrompt = `You are KeyFlow, a friendly AI business partner for ${businessName}. You know their business inside and out, and you're genuinely invested in helping them grow.\n\n${contextSnapshot}${onboardingDirective}\n\nHelp them make better decisions, analyze their data, suggest strategies, and answer any questions. Be warm, encouraging, and actionable. Celebrate their wins. Use TTD currency where relevant. Keep responses under 300 words but never at the expense of sounding human. When you write content, match the brand voice and tone described in the Business Genome.`;
 
     const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
       { role: 'system', content: systemPrompt },

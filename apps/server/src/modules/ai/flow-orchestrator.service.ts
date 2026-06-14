@@ -138,7 +138,7 @@ function formatPageContextSection(ctx?: FlowPageContext): string {
   return '\n' + lines.join('\n');
 }
 
-const FLOW_SYSTEM_PROMPT = `You are Flow, an AI assistant built into KeyFlowOS — a business operating system for Caribbean entrepreneurs. You have full access to the user's business data and can take real actions on their behalf.
+const FLOW_SYSTEM_PROMPT = `{{ONBOARDING_DIRECTIVE}}You are Flow, an AI assistant built into KeyFlowOS — a business operating system for Caribbean entrepreneurs. You have full access to the user's business data and can take real actions on their behalf.
 
 You have 4 tool families at your disposal:
 
@@ -247,6 +247,19 @@ export class FlowOrchestratorService {
    * BusinessBlueprint so KEY's recommendations are grounded in the operator's
    * actual identity, goals, constraints, and brand voice.
    */
+  private async buildOnboardingDirective(businessId: string): Promise<string> {
+    const ctx = await this.blueprint.getBlueprintContext(businessId);
+    if (!ctx || ctx.completeness >= 100) return '';
+    return (
+      '\n[PRIORITY DIRECTIVE — BUSINESS GENOME ONBOARDING]\n' +
+      `The Business Genome is only ${ctx.completeness}% complete. Until it reaches 100%, your FIRST priority in every turn is to collect missing business facts. ` +
+      'When the user shares ANY concrete business fact (industry, revenue model, ideal customer, goals, constraints, brand voice, budget, time commitment, etc.), ' +
+      'STOP and call the update_business_blueprint tool with a patch containing that fact BEFORE doing anything else. Do NOT use commerce, CRM, marketing, or finance tools when a blueprint fact is present. ' +
+      'If they have not shared a fact, ask ONE concise follow-up question to fill the next missing section in this order: identity, operatingModel, constraints, goals, brand, customerModel, financials, workflowModel, aiPreferences. ' +
+      'Never ask for passwords, API keys, or bank details.\n'
+    );
+  }
+
   private async buildBlueprintSection(businessId: string): Promise<string> {
     const ctx = await this.blueprint.getBlueprintContext(businessId);
     if (!ctx) return '';
@@ -356,15 +369,17 @@ export class FlowOrchestratorService {
 
     const pageContextSection = formatPageContextSection(pageContext);
     const blueprintSection = await this.buildBlueprintSection(businessId);
+    const onboardingDirective = await this.buildOnboardingDirective(businessId);
 
     let systemPrompt: string;
     if (detectedRole && detectedRole !== 'general') {
-      const businessContext = contextSnapshot + memorySection + semanticMemorySection + pageContextSection + blueprintSection;
-      systemPrompt = this.roleEngine.getSystemPromptForRole(detectedRole, businessContext)
+      const businessContext = onboardingDirective + contextSnapshot + memorySection + semanticMemorySection + pageContextSection + blueprintSection;
+      systemPrompt = this.roleEngine.getSystemPromptForRole(detectedRole, businessContext, onboardingDirective)
         .replace('{{CURRENT_DATE}}', new Date().toISOString());
     } else {
       systemPrompt = FLOW_SYSTEM_PROMPT
         .replace('{{CURRENT_DATE}}', new Date().toISOString())
+        .replace('{{ONBOARDING_DIRECTIVE}}', onboardingDirective)
         .replace('{{BUSINESS_CONTEXT}}', contextSnapshot + memorySection + semanticMemorySection + pageContextSection + blueprintSection);
     }
 
@@ -647,15 +662,17 @@ export class FlowOrchestratorService {
 
     const pageContextSection = formatPageContextSection(pageContext);
     const blueprintSection = await this.buildBlueprintSection(businessId);
+    const onboardingDirective = await this.buildOnboardingDirective(businessId);
 
     let systemPrompt: string;
     if (detectedRole && detectedRole !== 'general') {
-      const businessContext = contextSnapshot + memorySection + semanticMemorySection + pageContextSection + blueprintSection;
-      systemPrompt = this.roleEngine.getSystemPromptForRole(detectedRole, businessContext)
+      const businessContext = onboardingDirective + contextSnapshot + memorySection + semanticMemorySection + pageContextSection + blueprintSection;
+      systemPrompt = this.roleEngine.getSystemPromptForRole(detectedRole, businessContext, onboardingDirective)
         .replace('{{CURRENT_DATE}}', new Date().toISOString());
     } else {
       systemPrompt = FLOW_SYSTEM_PROMPT
         .replace('{{CURRENT_DATE}}', new Date().toISOString())
+        .replace('{{ONBOARDING_DIRECTIVE}}', onboardingDirective)
         .replace('{{BUSINESS_CONTEXT}}', contextSnapshot + memorySection + semanticMemorySection + pageContextSection + blueprintSection);
     }
 
@@ -1003,6 +1020,16 @@ export class FlowOrchestratorService {
 
   private async executeToolAction(businessId: string, toolName: string, args: Record<string, any>): Promise<any> {
     switch (toolName) {
+      case 'update_business_blueprint': {
+        const patch = args.patch as Record<string, Record<string, unknown>>;
+        const blueprint = await this.blueprint.updateBlueprint(businessId, patch);
+        return {
+          completeness: blueprint.completeness,
+          confidenceScores: blueprint.confidenceScores,
+          updatedSections: Object.keys(patch),
+        };
+      }
+
       case 'crm_search_contacts': {
         const q = args.query?.trim();
         if (!q) return { contacts: [] };

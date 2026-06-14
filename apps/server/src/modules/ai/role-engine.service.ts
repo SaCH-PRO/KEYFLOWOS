@@ -133,7 +133,7 @@ const ROLE_DEFINITIONS: Record<BusinessRole, RoleDefinition> = {
     description: 'Qualifies leads, manages pipeline, creates quotes, follows up on proposals, converts opportunities',
     tone: 'warm, persuasive, confident, relationship-focused',
     priorities: ['Convert leads to customers', 'Follow up on stale quotes', 'Upsell existing customers', 'Fill calendar with bookings'],
-    approvedTools: ['crm_*', 'commerce_create_quote', 'commerce_create_invoice', 'commerce_update_invoice', 'commerce_send_invoice', 'bookings_*', 'draft_followup_message', 'create_followup_queue', 'tag_contact', 'segment_contacts', 'send_message_with_approval', 'calendar_*', 'finance_customer_balance'],
+    approvedTools: ['update_business_blueprint', 'crm_*', 'commerce_create_quote', 'commerce_create_invoice', 'commerce_update_invoice', 'commerce_send_invoice', 'bookings_*', 'draft_followup_message', 'create_followup_queue', 'tag_contact', 'segment_contacts', 'send_message_with_approval', 'calendar_*', 'finance_customer_balance'],
     blockedTools: ['commerce_delete_invoice', 'bookings_cancel_booking', 'crm_delete_contact', 'projects_delete_task'],
     maxRiskTier: 2,
     autonomyLevel: 3,
@@ -154,7 +154,7 @@ const ROLE_DEFINITIONS: Record<BusinessRole, RoleDefinition> = {
     description: 'Manages invoices, tracks payments, monitors cash flow, sends reminders, handles collections',
     tone: 'friendly but precise, clear about numbers, and always respectful',
     priorities: ['Collect overdue invoices', 'Monitor cash flow', 'Reconcile accounts', 'Track expenses', 'Send payment reminders'],
-    approvedTools: ['commerce_*', 'expenses_*', 'draft_payment_reminder', 'send_message_with_approval', 'fetch_revenue_risk', 'fetch_expense_pressure', 'create_task', 'finance_view_receivables', 'finance_customer_balance', 'finance_list_action_items', 'calendar_*'],
+    approvedTools: ['update_business_blueprint', 'commerce_*', 'expenses_*', 'draft_payment_reminder', 'send_message_with_approval', 'fetch_revenue_risk', 'fetch_expense_pressure', 'create_task', 'finance_view_receivables', 'finance_customer_balance', 'finance_list_action_items', 'calendar_*'],
     blockedTools: ['commerce_delete_invoice', 'crm_delete_contact', 'projects_delete_task'],
     maxRiskTier: 2,
     autonomyLevel: 3,
@@ -175,7 +175,7 @@ const ROLE_DEFINITIONS: Record<BusinessRole, RoleDefinition> = {
     description: 'Handles inquiries, resolves complaints, manages tickets, ensures customer satisfaction',
     tone: 'empathetic, patient, solution-oriented, reassuring',
     priorities: ['Respond to all inquiries within 4 hours', 'Resolve complaints with empathy', 'Escalate urgent issues', 'Follow up on resolved tickets'],
-    approvedTools: ['crm_*', 'bookings_*', 'draft_followup_message', 'send_message_with_approval', 'create_task', 'tag_contact', 'helpdesk_*', 'calendar_*', 'finance_customer_balance'],
+    approvedTools: ['update_business_blueprint', 'crm_*', 'bookings_*', 'draft_followup_message', 'send_message_with_approval', 'create_task', 'tag_contact', 'helpdesk_*', 'calendar_*', 'finance_customer_balance'],
     blockedTools: ['commerce_delete_invoice', 'crm_delete_contact', 'bookings_cancel_booking', 'projects_delete_task'],
     maxRiskTier: 2,
     autonomyLevel: 2,
@@ -195,7 +195,7 @@ const ROLE_DEFINITIONS: Record<BusinessRole, RoleDefinition> = {
     description: 'Manages scheduling, inventory, staff, tasks, ensures business runs smoothly day-to-day',
     tone: 'efficient, organized, direct, action-oriented',
     priorities: ['Fill calendar gaps', 'Manage staff schedules', 'Track inventory levels', 'Complete tasks on time', 'Optimize workflows'],
-    approvedTools: ['bookings_*', 'projects_*', 'create_task', 'schedule_action', 'tag_contact', 'fetch_schedule_health', 'fetch_project_status', 'content_*', 'call_*', 'evidence_*', 'approval_*', 'drive_*', 'calendar_*', 'time_*', 'helpdesk_*', 'finance_list_action_items'],
+    approvedTools: ['update_business_blueprint', 'bookings_*', 'projects_*', 'create_task', 'schedule_action', 'tag_contact', 'fetch_schedule_health', 'fetch_project_status', 'content_*', 'call_*', 'evidence_*', 'approval_*', 'drive_*', 'calendar_*', 'time_*', 'helpdesk_*', 'finance_list_action_items'],
     blockedTools: ['commerce_delete_invoice', 'crm_delete_contact', 'content_upload_deliverables', 'content_deliver_request', 'approval_decide_step'],
     maxRiskTier: 2,
     autonomyLevel: 3,
@@ -216,7 +216,7 @@ const ROLE_DEFINITIONS: Record<BusinessRole, RoleDefinition> = {
     description: 'Manages campaigns, social media, content, SEO, lead generation, brand presence',
     tone: 'creative, engaging, brand-conscious, data-driven',
     priorities: ['Grow email list', 'Increase social engagement', 'Improve SEO rankings', 'Generate leads', 'Nurture existing contacts'],
-    approvedTools: ['marketing_*', 'social_*', 'seo_*', 'draft_campaign_bundle', 'draft_storefront_copy', 'generate_content_brief', 'segment_contacts', 'tag_contact', 'queue_campaign', 'content_*', 'drive_*', 'calendar_*'],
+    approvedTools: ['update_business_blueprint', 'marketing_*', 'social_*', 'seo_*', 'draft_campaign_bundle', 'draft_storefront_copy', 'generate_content_brief', 'segment_contacts', 'tag_contact', 'queue_campaign', 'content_*', 'drive_*', 'calendar_*'],
     blockedTools: ['marketing_send_campaign', 'social_publish_post', 'content_upload_deliverables', 'content_deliver_request'],
     maxRiskTier: 2,
     autonomyLevel: 2,
@@ -237,7 +237,7 @@ const ROLE_DEFINITIONS: Record<BusinessRole, RoleDefinition> = {
     description: 'General-purpose assistant for queries, summaries, and cross-role coordination',
     tone: 'warm, helpful, and conversational — like a knowledgeable friend who is always happy to help',
     priorities: ['Answer questions accurately', 'Summarize business health', 'Coordinate between roles', 'Execute user requests'],
-    approvedTools: ['fetch_*', 'crm_search_contacts', 'crm_list_contacts', 'projects_list', 'expenses_list', 'documents_list', 'keyflow_create_note', 'content_list_requests', 'content_get_request', 'call_list_tasks', 'evidence_list', 'approval_list', 'calendar_list_events', 'calendar_check_conflicts', 'helpdesk_list_tickets', 'finance_view_receivables', 'finance_customer_balance', 'finance_list_action_items'],
+    approvedTools: ['update_business_blueprint', 'fetch_*', 'crm_search_contacts', 'crm_list_contacts', 'projects_list', 'expenses_list', 'documents_list', 'keyflow_create_note', 'content_list_requests', 'content_get_request', 'call_list_tasks', 'evidence_list', 'approval_list', 'calendar_list_events', 'calendar_check_conflicts', 'helpdesk_list_tickets', 'finance_view_receivables', 'finance_customer_balance', 'finance_list_action_items'],
     blockedTools: ['commerce_delete_invoice', 'crm_delete_contact', 'bookings_cancel_booking', 'marketing_send_campaign', 'social_publish_post', 'content_create_request', 'content_assign_request', 'content_transition_status', 'call_create_task', 'approval_create_request', 'projects_delete_task', 'commerce_send_invoice'],
     maxRiskTier: 1,
     autonomyLevel: 1,
@@ -258,7 +258,7 @@ const ROLE_DEFINITIONS: Record<BusinessRole, RoleDefinition> = {
     description: 'AI worker that executes tasks across all modules — creates content, logs calls, submits evidence, manages approvals, and drives workflows end-to-end',
     tone: 'efficient and reliable, but warm and clear when confirming what you have done',
     priorities: ['Execute assigned tasks autonomously', 'Move content through production pipeline', 'Log call outcomes and schedule follow-ups', 'Submit and verify evidence', 'Create and manage approval requests', 'Create Drive folders and documents'],
-    approvedTools: ['content_*', 'call_*', 'evidence_*', 'approval_*', 'drive_*', 'crm_*', 'bookings_*', 'projects_*', 'create_task', 'tag_contact', 'fetch_*', 'expenses_list', 'documents_list', 'keyflow_create_note', 'calendar_*', 'time_*', 'helpdesk_*', 'finance_view_receivables', 'finance_customer_balance', 'finance_list_action_items', 'commerce_update_invoice', 'commerce_update_product', 'commerce_send_invoice', 'marketing_update_campaign', 'social_update_post'],
+    approvedTools: ['update_business_blueprint', 'content_*', 'call_*', 'evidence_*', 'approval_*', 'drive_*', 'crm_*', 'bookings_*', 'projects_*', 'create_task', 'tag_contact', 'fetch_*', 'expenses_list', 'documents_list', 'keyflow_create_note', 'calendar_*', 'time_*', 'helpdesk_*', 'finance_view_receivables', 'finance_customer_balance', 'finance_list_action_items', 'commerce_update_invoice', 'commerce_update_product', 'commerce_send_invoice', 'marketing_update_campaign', 'social_update_post'],
     blockedTools: ['commerce_delete_invoice', 'crm_delete_contact', 'bookings_cancel_booking', 'marketing_send_campaign', 'social_publish_post', 'enable_flow_with_approval', 'content_upload_deliverables', 'content_deliver_request', 'approval_decide_step'],
     maxRiskTier: 3,
     autonomyLevel: 3,
@@ -488,9 +488,9 @@ export class RoleEngineService {
     return false;
   }
 
-  getSystemPromptForRole(role: BusinessRole, businessContext: string): string {
+  getSystemPromptForRole(role: BusinessRole, businessContext: string, onboardingDirective = ''): string {
     const def = ROLE_DEFINITIONS[role];
-    return `You are ${def.name}. ${def.description}
+    return `${onboardingDirective}You are ${def.name}. ${def.description}
 
 TONE: ${def.tone}
 

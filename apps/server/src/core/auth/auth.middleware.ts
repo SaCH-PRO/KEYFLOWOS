@@ -4,7 +4,7 @@ import { SupabaseAuthService } from './supabase-auth.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { verifyAdminToken } from './admin-token.util';
 import { Redis } from 'ioredis';
-import { REDIS_CLIENT } from '../redis/redis.module';
+import { REDIS_CLIENT } from '../redis/redis.constants';
 
 /**
  * Server-side authentication gate for every inbound request.

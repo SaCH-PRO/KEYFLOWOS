@@ -9,7 +9,7 @@ import {
 import { Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
 import type { Request, Response } from 'express';
-import { REDIS_CLIENT } from '../redis/redis.module';
+import { REDIS_CLIENT } from '../redis/redis.constants';
 import type { Redis } from 'ioredis';
 
 const IDEMPOTENCY_KEY_HEADER = 'idempotency-key';
