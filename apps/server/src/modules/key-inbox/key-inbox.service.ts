@@ -1,0 +1,390 @@
+import { Inject, Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import type { KeyInboxInsight, KeyInboxMessage, KeyInboxThread } from '@prisma/client';
+import { PrismaService } from '../../core/prisma/prisma.service';
+import { AiUsageService } from '../ai/ai-usage.service';
+import { KeyInboxActionService } from './key-inbox-action.service';
+import { KeyInboxAnalysisService } from './key-inbox-analysis.service';
+import { KeyInboxTemporalEmitterService } from './key-inbox-temporal-emitter.service';
+import type { CreateInboxMessageInput, CreateInboxThreadInput, InboxAnalysis } from './key-inbox.types';
+
+@Injectable()
+export class KeyInboxService {
+  private readonly logger = new Logger(KeyInboxService.name);
+
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(KeyInboxAnalysisService) private readonly analysisService: KeyInboxAnalysisService,
+    @Inject(KeyInboxActionService) private readonly actionService: KeyInboxActionService,
+    @Inject(KeyInboxTemporalEmitterService) private readonly temporalEmitter: KeyInboxTemporalEmitterService,
+    @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
+  ) {}
+
+  async upsertThread(input: CreateInboxThreadInput): Promise<KeyInboxThread> {
+    const existing = input.externalThreadId
+      ? await this.prisma.client.keyInboxThread.findFirst({
+          where: {
+            businessId: input.businessId,
+            channel: input.channel,
+            externalThreadId: input.externalThreadId,
+          },
+        })
+      : null;
+
+    if (existing) return existing;
+
+    return this.prisma.client.keyInboxThread.create({
+      data: {
+        businessId: input.businessId,
+        channel: input.channel,
+        externalThreadId: input.externalThreadId ?? null,
+        contactId: input.contactId ?? null,
+        subject: input.subject ?? null,
+        status: input.status ?? 'OPEN',
+        priority: input.priority ?? 'NORMAL',
+        metadata: input.metadata ?? {},
+      },
+    });
+  }
+
+  async addMessage(
+    input: CreateInboxMessageInput & { threadId?: string },
+  ): Promise<{ thread: KeyInboxThread; message: KeyInboxMessage }> {
+    let thread: KeyInboxThread | null;
+
+    if (input.threadId) {
+      thread = await this.prisma.client.keyInboxThread.findFirst({
+        where: { id: input.threadId, businessId: input.businessId },
+      });
+    } else {
+      const subject = this.truncate(input.contentText ?? 'New message', 100);
+      thread = await this.upsertThread({
+        businessId: input.businessId,
+        channel: input.channel,
+        externalThreadId: input.externalMessageId ?? null,
+        contactId: null,
+        subject,
+        status: 'OPEN',
+        priority: 'NORMAL',
+        metadata: input.metadata ?? {},
+      });
+    }
+
+    if (!thread) throw new NotFoundException('Thread not found');
+
+    const receivedAt = input.receivedAt ?? new Date();
+
+    const [message, updatedThread] = await this.prisma.client.$transaction([
+      this.prisma.client.keyInboxMessage.create({
+        data: {
+          businessId: input.businessId,
+          threadId: thread.id,
+          channel: input.channel,
+          direction: input.direction,
+          senderName: input.senderName ?? null,
+          senderHandle: input.senderHandle ?? null,
+          senderEmail: input.senderEmail ?? null,
+          senderPhone: input.senderPhone ?? null,
+          contentText: input.contentText ?? null,
+          contentHtml: input.contentHtml ?? null,
+          attachments: input.attachments ?? [],
+          externalMessageId: input.externalMessageId ?? null,
+          receivedAt: input.direction === 'INBOUND' ? receivedAt : input.receivedAt ?? null,
+          sentAt: input.direction === 'OUTBOUND' ? (input.sentAt ?? new Date()) : input.sentAt ?? null,
+        },
+      }),
+      this.prisma.client.keyInboxThread.update({
+        where: { id: thread.id },
+        data: {
+          lastMessageAt: receivedAt,
+          lastInboundAt: input.direction === 'INBOUND' ? receivedAt : undefined,
+          lastOutboundAt: input.direction === 'OUTBOUND' ? (input.sentAt ?? new Date()) : undefined,
+        },
+      }),
+    ]);
+
+    await this.temporalEmitter.emitMessageReceived(input.businessId, message);
+
+    try {
+      await this.analyzeMessage(input.businessId, message.id);
+      await this.analyzeThread(input.businessId, thread.id);
+    } catch (err) {
+      this.logger.warn(`Background analysis failed for message ${message.id}: ${(err as Error).message}`);
+    }
+
+    return { thread: updatedThread, message };
+  }
+
+  async analyzeMessage(businessId: string, messageId: string): Promise<KeyInboxMessage> {
+    const message = await this.prisma.client.keyInboxMessage.findFirst({
+      where: { id: messageId, businessId },
+    });
+    if (!message) throw new NotFoundException('Message not found');
+
+    const content = message.contentText ?? '';
+    const thread = await this.prisma.client.keyInboxThread.findFirst({
+      where: { id: message.threadId, businessId },
+    });
+
+    const analysis = await this.analysisService.analyzeMessage(businessId, content, {
+      subject: thread?.subject ?? undefined,
+      channel: message.channel,
+    });
+
+    const actions = await this.actionService.buildActions(analysis);
+
+    const updated = await this.prisma.client.keyInboxMessage.update({
+      where: { id: messageId },
+      data: {
+        aiAnalysis: analysis as unknown as Record<string, unknown>,
+        extractedEntities: analysis.entities as Record<string, unknown>,
+        suggestedActions: actions as unknown as Record<string, unknown>[],
+        aiConfidence: analysis.confidence,
+      },
+    });
+
+    if (thread) {
+      await this.temporalEmitter.emitMessageAnalyzed(businessId, thread, analysis);
+      await this.temporalEmitter.emitActionSuggested(businessId, thread, actions);
+    }
+
+    return updated;
+  }
+
+  async analyzeThread(businessId: string, threadId: string): Promise<KeyInboxThread> {
+    const thread = await this.prisma.client.keyInboxThread.findFirst({
+      where: { id: threadId, businessId },
+      include: { messages: { orderBy: { receivedAt: 'asc' } } },
+    });
+    if (!thread) throw new NotFoundException('Thread not found');
+
+    const analysis = await this.analysisService.analyzeThread(
+      businessId,
+      thread.messages,
+      { subject: thread.subject ?? undefined, channel: thread.channel },
+    );
+
+    const tags = this.buildTags(analysis);
+
+    const updated = await this.prisma.client.keyInboxThread.update({
+      where: { id: threadId },
+      data: {
+        aiSummary: analysis.summary,
+        aiIntent: analysis.intent,
+        aiSentiment: analysis.sentiment,
+        aiUrgency: analysis.urgency,
+        aiTags: tags,
+        priority: this.urgencyToPriority(analysis.urgency),
+      },
+    });
+
+    const actions = await this.actionService.buildActions(analysis);
+    await this.temporalEmitter.emitMessageAnalyzed(businessId, updated, analysis);
+    await this.temporalEmitter.emitActionSuggested(businessId, updated, actions);
+
+    return updated;
+  }
+
+  async listThreads(
+    businessId: string,
+    filters?: { channel?: string; status?: string; priority?: string; limit?: number; offset?: number },
+  ): Promise<KeyInboxThread[]> {
+    return this.prisma.client.keyInboxThread.findMany({
+      where: {
+        businessId,
+        channel: filters?.channel,
+        status: filters?.status,
+        priority: filters?.priority,
+      },
+      orderBy: { lastMessageAt: 'desc' },
+      take: filters?.limit ?? 50,
+      skip: filters?.offset ?? 0,
+    });
+  }
+
+  async getThread(
+    businessId: string,
+    threadId: string,
+  ): Promise<(KeyInboxThread & { messages: KeyInboxMessage[] }) | null> {
+    return this.prisma.client.keyInboxThread.findFirst({
+      where: { id: threadId, businessId },
+      include: {
+        messages: {
+          orderBy: { receivedAt: 'desc' },
+        },
+      },
+    });
+  }
+
+  async generateBrief(
+    businessId: string,
+    scope: 'DAILY' | 'WEEKLY' | 'CUSTOM',
+    periodStart?: Date,
+    periodEnd?: Date,
+  ): Promise<KeyInboxInsight> {
+    const { start, end } = this.resolvePeriod(scope, periodStart, periodEnd);
+
+    const [threads, messages] = await Promise.all([
+      this.prisma.client.keyInboxThread.findMany({
+        where: { businessId, lastMessageAt: { gte: start, lte: end } },
+      }),
+      this.prisma.client.keyInboxMessage.findMany({
+        where: { businessId, receivedAt: { gte: start, lte: end } },
+      }),
+    ]);
+
+    const inboundMessages = messages.filter((m) => m.direction === 'INBOUND');
+    const outboundMessages = messages.filter((m) => m.direction === 'OUTBOUND');
+    const intents = new Map<string, number>();
+    const urgencies = new Map<string, number>();
+
+    for (const message of messages) {
+      const analysis = message.aiAnalysis as Record<string, unknown> | null;
+      if (analysis?.intent) {
+        intents.set(String(analysis.intent), (intents.get(String(analysis.intent)) ?? 0) + 1);
+      }
+      if (analysis?.urgency) {
+        urgencies.set(String(analysis.urgency), (urgencies.get(String(analysis.urgency)) ?? 0) + 1);
+      }
+    }
+
+    const prompt = `Summarize the following inbox activity for a business.
+Period: ${start.toISOString()} to ${end.toISOString()}
+Threads: ${threads.length}
+Inbound messages: ${inboundMessages.length}
+Outbound messages: ${outboundMessages.length}
+Intents: ${JSON.stringify(Object.fromEntries(intents))}
+Urgencies: ${JSON.stringify(Object.fromEntries(urgencies))}
+
+Return ONLY valid JSON:
+{
+  "summary": "1-2 sentence overview",
+  "keyFindings": ["finding 1", ...],
+  "recommendations": ["recommendation 1", ...],
+  "taskSuggestions": ["task 1", ...],
+  "metrics": { "threads": 0, "inbound": 0, "outbound": 0, "highUrgency": 0 }
+}`;
+
+    let brief: { summary: string; keyFindings: string[]; recommendations: string[]; taskSuggestions: string[]; metrics: Record<string, number> };
+
+    try {
+      const response = await this.aiUsage.trackAndComplete(
+        businessId,
+        undefined,
+        'key_inbox_brief',
+        {
+          messages: [{ role: 'system', content: prompt }],
+          taskCategory: 'summarization',
+          temperature: 0.3,
+          maxTokens: 1200,
+        },
+      );
+
+      const raw = (response.content ?? '').trim();
+      const jsonMatch = raw.match(/\{[\s\S]*\}/);
+      const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : raw) as Partial<typeof brief>;
+
+      brief = {
+        summary: typeof parsed.summary === 'string' ? parsed.summary : `Inbox brief for ${scope.toLowerCase()} period.`,
+        keyFindings: Array.isArray(parsed.keyFindings) ? parsed.keyFindings.map(String) : [],
+        recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations.map(String) : [],
+        taskSuggestions: Array.isArray(parsed.taskSuggestions) ? parsed.taskSuggestions.map(String) : [],
+        metrics: parsed.metrics && typeof parsed.metrics === 'object' ? (parsed.metrics as Record<string, number>) : {},
+      };
+    } catch (err) {
+      this.logger.warn(`Brief generation failed: ${(err as Error).message}`);
+      brief = {
+        summary: `Inbox brief for ${scope.toLowerCase()} period.`,
+        keyFindings: [`${threads.length} threads`, `${inboundMessages.length} inbound messages`],
+        recommendations: [],
+        taskSuggestions: [],
+        metrics: {
+          threads: threads.length,
+          inbound: inboundMessages.length,
+          outbound: outboundMessages.length,
+          highUrgency: urgencies.get('high') ?? 0 + (urgencies.get('urgent') ?? 0),
+        },
+      };
+    }
+
+    const insight = await this.prisma.client.keyInboxInsight.create({
+      data: {
+        businessId,
+        periodStart: start,
+        periodEnd: end,
+        scope,
+        summary: brief.summary,
+        keyFindings: brief.keyFindings,
+        recommendations: brief.recommendations,
+        taskSuggestions: brief.taskSuggestions,
+        metrics: brief.metrics,
+      },
+    });
+
+    await this.temporalEmitter.emitBriefGenerated(businessId, insight.id, scope, start, end);
+
+    return insight;
+  }
+
+  async listInsights(businessId: string, scope?: string, limit?: number): Promise<KeyInboxInsight[]> {
+    return this.prisma.client.keyInboxInsight.findMany({
+      where: { businessId, scope },
+      orderBy: { createdAt: 'desc' },
+      take: limit ?? 20,
+    });
+  }
+
+  private buildTags(analysis: InboxAnalysis): string[] {
+    const tags = new Set<string>();
+    tags.add(analysis.intent);
+    tags.add(analysis.sentiment);
+    tags.add(analysis.urgency);
+    for (const [key, values] of Object.entries(analysis.entities)) {
+      if (Array.isArray(values) && values.length > 0) {
+        tags.add(`entity:${key}`);
+      }
+    }
+    return Array.from(tags);
+  }
+
+  private urgencyToPriority(urgency: string): 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT' {
+    switch (urgency) {
+      case 'urgent':
+        return 'URGENT';
+      case 'high':
+        return 'HIGH';
+      case 'low':
+        return 'LOW';
+      case 'normal':
+      default:
+        return 'NORMAL';
+    }
+  }
+
+  private resolvePeriod(
+    scope: 'DAILY' | 'WEEKLY' | 'CUSTOM',
+    periodStart?: Date,
+    periodEnd?: Date,
+  ): { start: Date; end: Date } {
+    const now = new Date();
+
+    if (scope === 'CUSTOM') {
+      if (!periodStart || !periodEnd) {
+        throw new BadRequestException('Custom scope requires periodStart and periodEnd');
+      }
+      return { start: periodStart, end: periodEnd };
+    }
+
+    if (scope === 'DAILY') {
+      const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+      return { start, end: now };
+    }
+
+    const start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    return { start, end: now };
+  }
+
+  private truncate(text: string, maxLength: number): string {
+    if (!text) return '';
+    return text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text;
+  }
+}

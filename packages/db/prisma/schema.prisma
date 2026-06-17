@@ -9697,6 +9697,7 @@ model KeyInboxMessage {
   aiAnalysis          Json?    @default("{}")
   extractedEntities   Json?    @default("{}")
   suggestedActions    Json?    @default("[]")
+  aiConfidence        Float?   @map("ai_confidence")
 
   createdAt           DateTime @default(now()) @map("created_at")
 

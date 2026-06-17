@@ -32,13 +32,13 @@ import { ReadinessTab } from "./components/readiness-tab";
 import { IntelligenceTab } from "./components/intelligence-tab";
 import { OutputsTab } from "./components/outputs-tab";
 import { PricingTab } from "./components/pricing-tab";
-import { BlueprintTab } from "./components/blueprint-tab";
+import { BusinessGenomeTab } from "./components/business-genome-tab";
 import SecuritySection from "./components/security-section";
 import { GrowthTrajectoryPanel } from "./components/growth-trajectory-panel";
 import { ProfileSectionErrorBoundary } from "./components/profile-section-error-boundary";
 import type { ProfileBusinessData, ProfileCompletenessField, StatusMessage, TabId } from "./components/profile-types";
 
-type ActiveTab = "overview" | "identity" | "readiness" | "intelligence" | "outputs" | "growth" | "security" | "pricing" | "blueprint";
+type ActiveTab = "overview" | "identity" | "readiness" | "intelligence" | "outputs" | "growth" | "security" | "pricing" | "business-genome";
 
 function checkFieldCompletion(key: string, bd: ProfileBusinessData | null): boolean {
   if (!bd) return false;
@@ -74,7 +74,7 @@ const TAB_CONFIG: { id: ActiveTab; label: string; icon: React.ElementType; short
   { id: "outputs", label: "Outputs", shortLabel: "Docs", icon: FileText, description: "Documents and exports" },
   { id: "growth", label: "Growth", shortLabel: "Growth", icon: TrendingUp, description: "Trajectory and milestones" },
   { id: "pricing", label: "Pricing", shortLabel: "Price", icon: Calculator, description: "Rate calculator" },
-  { id: "blueprint", label: "Blueprint", shortLabel: "Genome", icon: Dna, description: "Business Genome" },
+  { id: "business-genome", label: "Business Genome", shortLabel: "Genome", icon: Dna, description: "Business Genome" },
   { id: "security", label: "Security", shortLabel: "Security", icon: Shield, description: "Preferences" },
 ];
 
@@ -86,7 +86,7 @@ function mapLegacyTab(tab: string): ActiveTab {
   if (tab === "brand" || tab === "business" || tab === "professional") return "identity";
   if (tab === "documents") return "outputs";
   if (tab === "trajectory") return "growth";
-  if (tab === "blueprint") return "blueprint";
+  if (tab === "blueprint" || tab === "business-genome") return "business-genome";
   if (VALID_TABS.has(tab)) return tab as ActiveTab;
   return "overview";
 }
@@ -320,7 +320,7 @@ export default function ProfileSettingsPage() {
         </span>
       );
     }
-    if (tabId === "blueprint" && blueprintCompleteness > 0 && blueprintCompleteness < 80) {
+    if ((tabId as string) === "business-genome" && blueprintCompleteness > 0 && blueprintCompleteness < 80) {
       return (
         <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full flex-shrink-0" style={{
           background: blueprintCompleteness >= 40 ? "hsl(var(--kf-warning) / 0.15)" : "hsl(var(--kf-error) / 0.15)",
@@ -493,10 +493,10 @@ export default function ProfileSettingsPage() {
           </motion.div>
         )}
 
-        {activeTab === "blueprint" && (
-          <motion.div key="blueprint" id="tabpanel-blueprint" role="tabpanel" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
+        {activeTab === "business-genome" && (
+          <motion.div key="business-genome" id="tabpanel-business-genome" role="tabpanel" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
             <ProfileSectionErrorBoundary sectionName="Business Genome">
-              <BlueprintTab />
+              <BusinessGenomeTab />
             </ProfileSectionErrorBoundary>
           </motion.div>
         )}

@@ -100,6 +100,7 @@ import { TrashModule } from './modules/trash/trash.module';
 import { PushNotificationModule } from './modules/push-notifications/push-notification.module';
 import { SecurityAuditModule } from './modules/security-audit/security-audit.module';
 import { IngestionModule } from './modules/ingestion/ingestion.module';
+import { KeyInboxModule } from './modules/key-inbox/key-inbox.module';
 
 @Module({
   imports: [
@@ -186,6 +187,7 @@ import { IngestionModule } from './modules/ingestion/ingestion.module';
     GovernanceModule,
     IngestionModule,
     TemporalModule,
+    KeyInboxModule,
     PeopleFlowModule,
     SopModule,
     MarketingModule,
