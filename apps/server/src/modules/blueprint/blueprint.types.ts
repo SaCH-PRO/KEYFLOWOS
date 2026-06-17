@@ -407,6 +407,57 @@ export interface BlueprintConfidenceScores {
   executionRoadmap?: number;
 }
 
+export type DnaSectionKey =
+  | 'founder'
+  | 'vision'
+  | 'business'
+  | 'market'
+  | 'financial'
+  | 'legal'
+  | 'operations'
+  | 'sales'
+  | 'marketing'
+  | 'growth'
+  | 'technology';
+
+export type GenomeStage =
+  | 'CONCEPT'
+  | 'VALIDATED_CONCEPT'
+  | 'REGISTERED_ENTITY'
+  | 'REVENUE_ENGINE'
+  | 'OPERATING_BUSINESS'
+  | 'GROWTH_BUSINESS'
+  | 'ENTERPRISE_READY';
+
+export interface DnaSectionScore {
+  key: DnaSectionKey;
+  label: string;
+  integrity: number;
+  confidence: number;
+  summary: string;
+  fieldsCaptured: number;
+  fieldsTotal: number;
+  missingFields: string[];
+  recommendation: string;
+}
+
+export interface GenomeIntegrityResult {
+  genomeIntegrity: number;
+  genomeDnaScores: Record<DnaSectionKey, number>;
+  genomeDnaConfidence: Record<DnaSectionKey, number>;
+  genomeStage: GenomeStage;
+  threePillarMinimumMet: boolean;
+  dnaSections: DnaSectionScore[];
+}
+
+export interface GenomeRecommendation {
+  id: string;
+  section: DnaSectionKey;
+  title: string;
+  reason: string;
+  href?: string;
+}
+
 export interface BlueprintData {
   schemaVersion: number;
   identity: BlueprintIdentity;
@@ -439,6 +490,21 @@ export interface BlueprintData {
   completeness: number;
   readinessScore?: number;
   lastAnalyzedAt?: string;
+
+  // Business Genome Phase 1 cache/state fields
+  genomeIntegrity?: number;
+  genomeDnaScores?: Record<DnaSectionKey, number>;
+  genomeDnaConfidence?: Record<DnaSectionKey, number>;
+  genomeStage?: GenomeStage;
+  genesisCompleted?: boolean;
+  constitutionVersion?: number;
+  constitutionGeneratedAt?: string;
+
+  // Phase 2+ architecture hooks
+  lastGenomeSyncAt?: string;
+  businessAssets?: Record<string, unknown>;
+  executiveReadinessScore?: number;
+
   updatedAt: string;
 }
 

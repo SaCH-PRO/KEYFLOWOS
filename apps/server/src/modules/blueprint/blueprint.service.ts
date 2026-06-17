@@ -40,6 +40,11 @@ import {
   BlueprintTaxProfile,
   BlueprintWorkflowStep,
   ComplianceItem,
+  DnaSectionKey,
+  DnaSectionScore,
+  GenomeIntegrityResult,
+  GenomeRecommendation,
+  GenomeStage,
   RecommendedSetupStep,
   SetupStep,
 } from './blueprint.types';
@@ -125,8 +130,120 @@ const COMPLETENESS_FIELDS: Record<BlueprintSectionKey, string[]> = {
   documentProfile: ['generatedDocuments'],
 };
 
+// --- Business Genome DNA mapping ------------------------------------------------
+
+const DNA_SECTION_WEIGHTS: Record<DnaSectionKey, number> = {
+  founder: 10,
+  vision: 5,
+  business: 15,
+  market: 15,
+  financial: 15,
+  legal: 10,
+  operations: 10,
+  sales: 5,
+  marketing: 5,
+  growth: 5,
+  technology: 5,
+};
+
+const DNA_SECTION_CONFIG: Record<
+  DnaSectionKey,
+  { sources: BlueprintSectionKey[]; fields: string[]; label: string }
+> = {
+  founder: {
+    sources: ['founderProfile'],
+    fields: ['founderName', 'background', 'skills', 'weeklyAvailabilityHours'],
+    label: 'Founder DNA',
+  },
+  vision: {
+    sources: ['identity', 'brand'],
+    fields: ['mission', 'vision', 'values', 'voice', 'tone', 'valueProps'],
+    label: 'Vision DNA',
+  },
+  business: {
+    sources: ['identity', 'operatingModel', 'brand', 'goals', 'constraints', 'workflowModel', 'aiPreferences'],
+    fields: [
+      'name',
+      'archetype',
+      'industry',
+      'revenueModel',
+      'deliveryMode',
+      'serviceArea',
+      'teamSize',
+      'northStar',
+      'budgetRange',
+      'timeCommitment',
+      'riskTolerance',
+      'primaryWorkflow',
+      'autonomyLevel',
+      'reportingCadence',
+    ],
+    label: 'Business DNA',
+  },
+  market: {
+    sources: ['customerModel', 'marketProfile'],
+    fields: ['idealCustomer', 'segments', 'painPoints', 'targetGeography', 'marketCategory', 'demandSignals'],
+    label: 'Market DNA',
+  },
+  financial: {
+    sources: ['financials', 'projectionProfile'],
+    fields: [
+      'currency',
+      'pricingModel',
+      'avgTicket',
+      'monthlyTarget',
+      'startupCapital',
+      'monthlyFixedCosts',
+      'variableCostPercent',
+    ],
+    label: 'Financial DNA',
+  },
+  legal: {
+    sources: ['legalProfile', 'registrationProfile', 'taxProfile', 'ownershipProfile', 'complianceProfile'],
+    fields: [
+      'country',
+      'recommendedEntityType',
+      'regulatedIndustry',
+      'businessNameStatus',
+      'companiesRegistryStatus',
+      'vatStatus',
+      'taxIdStatus',
+      'hasPartners',
+      'owners',
+      'complianceItems',
+    ],
+    label: 'Legal DNA',
+  },
+  operations: {
+    sources: ['operationsSystem'],
+    fields: ['coreWorkflows', 'fulfillmentProcess'],
+    label: 'Operations DNA',
+  },
+  sales: {
+    sources: ['salesSystem'],
+    fields: ['salesChannels', 'pipelineStages'],
+    label: 'Sales DNA',
+  },
+  marketing: {
+    sources: ['marketingSystem'],
+    fields: ['channels', 'launchPlan'],
+    label: 'Marketing DNA',
+  },
+  growth: {
+    sources: ['executionRoadmap'],
+    fields: ['today', 'sevenDayPlan', 'thirtyDayPlan'],
+    label: 'Growth DNA',
+  },
+  technology: {
+    sources: ['workflowModel', 'aiPreferences'],
+    fields: ['primaryWorkflow', 'autonomyLevel', 'outreachStyle', 'reportingCadence'],
+    label: 'Technology DNA',
+  },
+};
+
 function isPopulated(value: unknown): boolean {
   if (value === null || value === undefined) return false;
+  if (typeof value === 'boolean') return true;
   if (typeof value === 'string') return value.trim().length > 0;
   if (Array.isArray(value)) return value.length > 0;
   if (typeof value === 'number') return !Number.isNaN(value);
@@ -208,6 +325,34 @@ export class BlueprintService {
 
     const confidenceScores = this.calculateConfidenceScores(next);
 
+    const genomeResult = this.buildGenomeIntegrityResult({
+      identity: next.identity as Prisma.JsonValue,
+      operatingModel: next.operatingModel as Prisma.JsonValue,
+      goals: next.goals as Prisma.JsonValue,
+      constraints: next.constraints as Prisma.JsonValue,
+      brand: next.brand as Prisma.JsonValue,
+      customerModel: next.customerModel as Prisma.JsonValue,
+      financials: next.financials as Prisma.JsonValue,
+      intelligence: next.intelligence as Prisma.JsonValue,
+      workflowModel: next.workflowModel as Prisma.JsonValue,
+      aiPreferences: next.aiPreferences as Prisma.JsonValue,
+      founderProfile: next.founderProfile as Prisma.JsonValue,
+      legalProfile: next.legalProfile as Prisma.JsonValue,
+      registrationProfile: next.registrationProfile as Prisma.JsonValue,
+      taxProfile: next.taxProfile as Prisma.JsonValue,
+      ownershipProfile: next.ownershipProfile as Prisma.JsonValue,
+      marketProfile: next.marketProfile as Prisma.JsonValue,
+      offerArchitecture: next.offerArchitecture as Prisma.JsonValue,
+      salesSystem: next.salesSystem as Prisma.JsonValue,
+      marketingSystem: next.marketingSystem as Prisma.JsonValue,
+      operationsSystem: next.operationsSystem as Prisma.JsonValue,
+      projectionProfile: next.projectionProfile as Prisma.JsonValue,
+      riskProfile: next.riskProfile as Prisma.JsonValue,
+      complianceProfile: next.complianceProfile as Prisma.JsonValue,
+      executionRoadmap: next.executionRoadmap as Prisma.JsonValue,
+      documentProfile: next.documentProfile as Prisma.JsonValue,
+    });
+
     const updateData: Prisma.BusinessBlueprintUpdateInput = {
       identity: next.identity as Prisma.InputJsonValue,
       operatingModel: next.operatingModel as Prisma.InputJsonValue,
@@ -237,6 +382,12 @@ export class BlueprintService {
       confidenceScores: confidenceScores as unknown as Prisma.InputJsonValue,
       completeness,
       lastAnalyzedAt: new Date(),
+      genomeIntegrity: genomeResult.genomeIntegrity,
+      genomeDnaScores: genomeResult.genomeDnaScores as unknown as Prisma.InputJsonValue,
+      genomeDnaConfidence: genomeResult.genomeDnaConfidence as unknown as Prisma.InputJsonValue,
+      genomeStage: genomeResult.genomeStage,
+      genesisCompleted:
+        current.genesisCompleted != null ? current.genesisCompleted : genomeResult.threePillarMinimumMet,
     };
 
     if (typeof patch.readinessScore === 'number') {
@@ -249,6 +400,87 @@ export class BlueprintService {
     });
 
     return this.serialize(updated);
+  }
+
+  /**
+   * Compute the full Business Genome integrity result for a business.
+   */
+  async calculateGenomeIntegrity(businessId: string): Promise<GenomeIntegrityResult> {
+    const row = await this.getBlueprintRecord(businessId);
+    return this.buildGenomeIntegrityResult(row);
+  }
+
+  /**
+   * Check whether the Three-Pillar Minimum is satisfied.
+   */
+  checkThreePillarMinimum(scores: Record<DnaSectionKey, number>): boolean {
+    return scores.founder >= 50 && scores.business >= 50 && scores.market >= 50;
+  }
+
+  /**
+   * Determine the business lifecycle stage from integrity and DNA scores.
+   */
+  determineGenomeStage(
+    integrity: number,
+    scores: Record<DnaSectionKey, number>,
+  ): GenomeStage {
+    if (integrity >= 95) return 'ENTERPRISE_READY';
+    if (integrity >= 85 && scores.growth >= 60) return 'GROWTH_BUSINESS';
+    if (integrity >= 75 && scores.operations >= 60) return 'OPERATING_BUSINESS';
+    if (integrity >= 60 && scores.sales >= 50 && scores.marketing >= 50) return 'REVENUE_ENGINE';
+    if (
+      scores.founder >= 50 &&
+      scores.business >= 50 &&
+      scores.market >= 50 &&
+      scores.legal >= 60 &&
+      scores.financial >= 40
+    ) {
+      return 'REGISTERED_ENTITY';
+    }
+    if (this.checkThreePillarMinimum(scores)) return 'VALIDATED_CONCEPT';
+    return 'CONCEPT';
+  }
+
+  /**
+   * Return rule-based DNA recommendations for the next highest-value action.
+   */
+  async getRecommendations(businessId: string): Promise<GenomeRecommendation[]> {
+    const { dnaSections, threePillarMinimumMet } = await this.calculateGenomeIntegrity(businessId);
+
+    const recommendations: GenomeRecommendation[] = [];
+
+    if (!threePillarMinimumMet) {
+      const pillars: DnaSectionKey[] = ['founder', 'business', 'market'];
+      for (const key of pillars) {
+        const section = dnaSections.find((s) => s.key === key);
+        if (section && section.integrity < 50) {
+          recommendations.push({
+            id: `complete-${key}`,
+            section: key,
+            title: `Complete ${section.label}`,
+            reason: `The Three-Pillar Minimum requires ${section.label} to be at least 50%. It is currently ${section.integrity}%.`,
+            href: `/app/profile?tab=business-genome&section=dna-sections`,
+          });
+        }
+      }
+      return recommendations;
+    }
+
+    const weakest = [...dnaSections]
+      .filter((s) => s.integrity < 100)
+      .sort((a, b) => a.integrity - b.integrity)[0];
+
+    if (weakest) {
+      recommendations.push({
+        id: `improve-${weakest.key}`,
+        section: weakest.key,
+        title: `Improve ${weakest.label}`,
+        reason: `Your ${weakest.label} is the lowest-scoring section at ${weakest.integrity}%. ${weakest.recommendation}`,
+        href: `/app/profile?tab=business-genome&section=dna-sections`,
+      });
+    }
+
+    return recommendations;
   }
 
   /**
@@ -1163,6 +1395,162 @@ export class BlueprintService {
     return scores;
   }
 
+  private buildGenomeIntegrityResult(
+    row: {
+      identity: Prisma.JsonValue;
+      operatingModel: Prisma.JsonValue;
+      goals: Prisma.JsonValue;
+      constraints: Prisma.JsonValue;
+      brand: Prisma.JsonValue;
+      customerModel: Prisma.JsonValue;
+      financials: Prisma.JsonValue;
+      intelligence: Prisma.JsonValue;
+      workflowModel: Prisma.JsonValue;
+      aiPreferences: Prisma.JsonValue;
+      founderProfile: Prisma.JsonValue;
+      legalProfile: Prisma.JsonValue;
+      registrationProfile: Prisma.JsonValue;
+      taxProfile: Prisma.JsonValue;
+      ownershipProfile: Prisma.JsonValue;
+      marketProfile: Prisma.JsonValue;
+      offerArchitecture: Prisma.JsonValue;
+      salesSystem: Prisma.JsonValue;
+      marketingSystem: Prisma.JsonValue;
+      operationsSystem: Prisma.JsonValue;
+      projectionProfile: Prisma.JsonValue;
+      riskProfile: Prisma.JsonValue;
+      complianceProfile: Prisma.JsonValue;
+      executionRoadmap: Prisma.JsonValue;
+      documentProfile: Prisma.JsonValue;
+    },
+  ): GenomeIntegrityResult {
+    const sections: Record<BlueprintSectionKey, Record<string, unknown>> = {
+      identity: readObject(row.identity),
+      operatingModel: readObject(row.operatingModel),
+      goals: readObject(row.goals),
+      constraints: readObject(row.constraints),
+      brand: readObject(row.brand),
+      customerModel: readObject(row.customerModel),
+      financials: readObject(row.financials),
+      intelligence: readObject(row.intelligence),
+      workflowModel: readObject(row.workflowModel),
+      aiPreferences: readObject(row.aiPreferences),
+      founderProfile: readObject(row.founderProfile),
+      legalProfile: readObject(row.legalProfile),
+      registrationProfile: readObject(row.registrationProfile),
+      taxProfile: readObject(row.taxProfile),
+      ownershipProfile: readObject(row.ownershipProfile),
+      marketProfile: readObject(row.marketProfile),
+      offerArchitecture: readObject(row.offerArchitecture),
+      salesSystem: readObject(row.salesSystem),
+      marketingSystem: readObject(row.marketingSystem),
+      operationsSystem: readObject(row.operationsSystem),
+      projectionProfile: readObject(row.projectionProfile),
+      riskProfile: readObject(row.riskProfile),
+      complianceProfile: readObject(row.complianceProfile),
+      executionRoadmap: readObject(row.executionRoadmap),
+      documentProfile: readObject(row.documentProfile),
+    };
+
+    const dnaSections = (Object.keys(DNA_SECTION_CONFIG) as DnaSectionKey[]).map((key) =>
+      this.buildDnaSectionScore(key, sections),
+    );
+
+    const genomeDnaScores: Record<DnaSectionKey, number> = {
+      founder: 0,
+      vision: 0,
+      business: 0,
+      market: 0,
+      financial: 0,
+      legal: 0,
+      operations: 0,
+      sales: 0,
+      marketing: 0,
+      growth: 0,
+      technology: 0,
+    };
+    for (const section of dnaSections) {
+      genomeDnaScores[section.key] = section.integrity;
+    }
+
+    const totalWeight = Object.values(DNA_SECTION_WEIGHTS).reduce((a, b) => a + b, 0);
+    const weightedSum = dnaSections.reduce(
+      (sum, section) => sum + section.integrity * DNA_SECTION_WEIGHTS[section.key],
+      0,
+    );
+    const genomeIntegrity = totalWeight ? Math.round(weightedSum / totalWeight) : 0;
+
+    const threePillarMinimumMet = this.checkThreePillarMinimum(genomeDnaScores);
+    const genomeStage = this.determineGenomeStage(genomeIntegrity, genomeDnaScores);
+
+    return {
+      genomeIntegrity,
+      genomeDnaScores,
+      genomeDnaConfidence: { ...genomeDnaScores },
+      genomeStage,
+      threePillarMinimumMet,
+      dnaSections,
+    };
+  }
+
+  private buildDnaSectionScore(
+    key: DnaSectionKey,
+    sections: Record<BlueprintSectionKey, Record<string, unknown>>,
+  ): DnaSectionScore {
+    const config = DNA_SECTION_CONFIG[key];
+    const populatedFields: string[] = [];
+    const missingFields: string[] = [];
+
+    for (const field of config.fields) {
+      let value: unknown;
+      for (const source of config.sources) {
+        const section = sections[source] || {};
+        if (field in section) {
+          value = section[field];
+          break;
+        }
+      }
+      if (isPopulated(value)) {
+        populatedFields.push(field);
+      } else {
+        missingFields.push(field);
+      }
+    }
+
+    const fieldsTotal = config.fields.length;
+    const integrity = fieldsTotal ? Math.round((populatedFields.length / fieldsTotal) * 100) : 0;
+
+    return {
+      key,
+      label: config.label,
+      integrity,
+      confidence: integrity,
+      summary: this.buildSectionSummary(key, integrity, missingFields),
+      fieldsCaptured: populatedFields.length,
+      fieldsTotal,
+      missingFields,
+      recommendation: this.buildSectionRecommendation(key, missingFields),
+    };
+  }
+
+  private buildSectionSummary(
+    key: DnaSectionKey,
+    integrity: number,
+    missingFields: string[],
+  ): string {
+    if (integrity === 100) return `${DNA_SECTION_CONFIG[key].label} is complete.`;
+    if (integrity === 0) return `${DNA_SECTION_CONFIG[key].label} has not been started.`;
+    const firstMissing = missingFields.slice(0, 3).join(', ');
+    return `${DNA_SECTION_CONFIG[key].label} is partially complete. Missing: ${firstMissing}${missingFields.length > 3 ? '...' : ''}`;
+  }
+
+  private buildSectionRecommendation(key: DnaSectionKey, missingFields: string[]): string {
+    if (!missingFields.length) return 'No further fields required.';
+    const next = missingFields[0];
+    const readable = next.replace(/([A-Z])/g, ' $1').toLowerCase();
+    return `Add ${readable} to strengthen ${DNA_SECTION_CONFIG[key].label}.`;
+  }
+
   private serialize(row: {
     schemaVersion: number;
     identity: Prisma.JsonValue;
@@ -1195,8 +1583,18 @@ export class BlueprintService {
     completeness: number;
     lastAnalyzedAt: Date | null;
     updatedAt: Date;
+    genomeIntegrity?: number | null;
+    genomeDnaScores?: Prisma.JsonValue;
+    genomeDnaConfidence?: Prisma.JsonValue;
+    genomeStage?: string | null;
+    genesisCompleted?: boolean | null;
+    constitutionVersion?: number | null;
+    constitutionGeneratedAt?: Date | null;
+    lastGenomeSyncAt?: Date | null;
+    businessAssets?: Prisma.JsonValue;
+    executiveReadinessScore?: number | null;
   }): BlueprintData {
-    return {
+    const result: BlueprintData = {
       schemaVersion: row.schemaVersion,
       identity: readObject(row.identity) as BlueprintIdentity,
       operatingModel: readObject(row.operatingModel) as BlueprintOperatingModel,
@@ -1229,5 +1627,22 @@ export class BlueprintService {
       lastAnalyzedAt: row.lastAnalyzedAt?.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
     };
+
+    if (row.genomeIntegrity != null) result.genomeIntegrity = row.genomeIntegrity;
+    if (row.genomeDnaScores) result.genomeDnaScores = readObject(row.genomeDnaScores) as Record<DnaSectionKey, number>;
+    if (row.genomeDnaConfidence) {
+      result.genomeDnaConfidence = readObject(row.genomeDnaConfidence) as Record<DnaSectionKey, number>;
+    }
+    if (row.genomeStage) result.genomeStage = row.genomeStage as GenomeStage;
+    if (row.genesisCompleted != null) result.genesisCompleted = row.genesisCompleted;
+    if (row.constitutionVersion != null) result.constitutionVersion = row.constitutionVersion;
+    if (row.constitutionGeneratedAt) {
+      result.constitutionGeneratedAt = row.constitutionGeneratedAt.toISOString();
+    }
+    if (row.lastGenomeSyncAt) result.lastGenomeSyncAt = row.lastGenomeSyncAt.toISOString();
+    if (row.businessAssets) result.businessAssets = readObject(row.businessAssets) as Record<string, unknown>;
+    if (row.executiveReadinessScore != null) result.executiveReadinessScore = row.executiveReadinessScore;
+
+    return result;
   }
 }

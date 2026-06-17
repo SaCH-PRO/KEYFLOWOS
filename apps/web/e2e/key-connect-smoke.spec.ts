@@ -66,7 +66,7 @@ test.describe("Key Connect hub smoke", () => {
     await page.goto(`${WEB_BASE}/app/key-connect?tab=banking`);
     await expect(page.getByRole("heading", { name: "Key Connect" })).toBeVisible({ timeout: 15_000 });
     await expect(page.getByText("Banking", { exact: true })).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByText("Social", { exact: true })).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText("Social Channels", { exact: true })).toBeVisible({ timeout: 10_000 });
     await expect(page.getByText("Add connection").first()).toBeVisible();
   });
 });

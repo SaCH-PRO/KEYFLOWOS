@@ -38,8 +38,6 @@ import { getStoredBusinessId } from "@/lib/workspace";
 import { Switch } from "@/components/ui/switch";
 import { ConnectorCredentialDialog } from "./components/connector-credential-dialog";
 import { BankingSection } from "./components/banking-section";
-import { SocialSection } from "./components/social-section";
-import { MetaBusinessSuiteSection } from "./components/meta-business-suite-section";
 import { ConnectorHealthSection } from "./components/connector-health-section";
 import { ManageDrawer } from "./components/manage-drawer";
 import { DriveIntakeQueue } from "./components/drive/drive-intake-queue";
@@ -970,8 +968,6 @@ export default function KeyConnectPage() {
         return renderGroupSection(group, items);
       })}
 
-      <MetaBusinessSuiteSection businessId={businessId} />
-      <SocialSection businessId={businessId} />
       <BankingSection businessId={businessId} />
       <ConnectorHealthSection businessId={businessId} />
 
