@@ -21,7 +21,7 @@ import { AppHeader } from "@/components/layout/app-header";
 import { MobileDrawer } from "@/components/layout/mobile-drawer";
 import { MobileBottomNav } from "@/components/layout/mobile-bottom-nav";
 import { useAppLayout } from "@/hooks/use-app-layout";
-import { useOnboardingGuard } from "@/hooks/use-onboarding-guard";
+import { useGenomeGate } from "@/hooks/use-genome-gate";
 import { useKeyboardShortcuts, useRouteKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 import { PageTransition } from "@/components/transitions/page-transition";
 import { KeyContextualSuggestions } from "@/components/functional/key-contextual-suggestions";
@@ -31,11 +31,11 @@ import { ComposeFab } from "@/components/email/compose-fab";
 
 function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const layout = useAppLayout();
-  const onboardingGuard = useOnboardingGuard();
+  const genomeGate = useGenomeGate();
   useKeyboardShortcuts();
   useRouteKeyboardShortcuts();
 
-  if (onboardingGuard.checking) {
+  if (genomeGate.checking) {
     return (
       <div className="h-dvh flex items-center justify-center bg-background text-foreground">
         <div className="flex flex-col items-center gap-3">

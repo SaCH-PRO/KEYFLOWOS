@@ -484,6 +484,126 @@ export class BlueprintService {
   }
 
   /**
+   * Update a single DNA section by distributing fields to their underlying
+   * `BusinessBlueprint` JSONB source columns and recomputing scores.
+   */
+  async updateDnaSection(
+    businessId: string,
+    sectionKey: DnaSectionKey,
+    data: Record<string, unknown>,
+  ): Promise<BlueprintData> {
+    const config = DNA_SECTION_CONFIG[sectionKey];
+    if (!config) {
+      throw new Error(`Unknown DNA section: ${sectionKey}`);
+    }
+
+    // Build a reverse lookup: field -> first source section that contains it.
+    const fieldToSource: Record<string, BlueprintSectionKey> = {};
+    for (const source of config.sources) {
+      const sourceFields = COMPLETENESS_FIELDS[source] || [];
+      for (const field of sourceFields) {
+        if (fieldToSource[field] === undefined) {
+          fieldToSource[field] = source;
+        }
+      }
+    }
+
+    const patch: BlueprintPatch = {};
+    for (const [field, value] of Object.entries(data)) {
+      const source = fieldToSource[field];
+      if (!source) continue;
+      (patch as Record<string, Record<string, unknown>>)[source] =
+        (patch as Record<string, Record<string, unknown>>)[source] || {};
+      (patch as Record<string, Record<string, unknown>>)[source][field] = value;
+    }
+
+    return this.updateBlueprint(businessId, patch);
+  }
+
+  /**
+   * Generate a read-only Business Constitution assembled from the Genome.
+   */
+  async generateConstitution(businessId: string): Promise<Record<string, unknown>> {
+    const genome = await this.calculateGenomeIntegrity(businessId);
+    const sections = genome.dnaSections;
+    const sectionMap = new Map(sections.map((s) => [s.key, s] as const));
+
+    const byKey = (key: string) => sectionMap.get(key as DnaSectionKey);
+
+    return {
+      businessId,
+      generatedAt: new Date().toISOString(),
+      version: 1,
+      genomeIntegrity: genome.genomeIntegrity,
+      genomeStage: genome.genomeStage,
+      sections: {
+        executiveSummary: {
+          title: 'Executive Summary',
+          sourceDna: ['business', 'vision'],
+          strength: Math.round(((byKey('business')?.integrity ?? 0) + (byKey('vision')?.integrity ?? 0)) / 2),
+          content: 'Generated from Business DNA and Vision DNA.',
+        },
+        businessModel: {
+          title: 'Business Model',
+          sourceDna: ['business'],
+          strength: byKey('business')?.integrity ?? 0,
+          content: 'Generated from Business DNA.',
+        },
+        governanceFramework: {
+          title: 'Governance Framework',
+          sourceDna: ['legal'],
+          strength: byKey('legal')?.integrity ?? 0,
+          content: 'Generated from Legal DNA.',
+        },
+        legalFramework: {
+          title: 'Legal Framework',
+          sourceDna: ['legal'],
+          strength: byKey('legal')?.integrity ?? 0,
+          content: 'Generated from Legal DNA.',
+        },
+        financialStrategy: {
+          title: 'Financial Strategy',
+          sourceDna: ['financial'],
+          strength: byKey('financial')?.integrity ?? 0,
+          content: 'Generated from Financial DNA.',
+        },
+        marketingStrategy: {
+          title: 'Marketing Strategy',
+          sourceDna: ['marketing', 'market'],
+          strength: Math.round(((byKey('marketing')?.integrity ?? 0) + (byKey('market')?.integrity ?? 0)) / 2),
+          content: 'Generated from Marketing DNA and Market DNA.',
+        },
+        salesStrategy: {
+          title: 'Sales Strategy',
+          sourceDna: ['sales'],
+          strength: byKey('sales')?.integrity ?? 0,
+          content: 'Generated from Sales DNA.',
+        },
+        operationsStrategy: {
+          title: 'Operations Strategy',
+          sourceDna: ['operations', 'technology'],
+          strength: Math.round(((byKey('operations')?.integrity ?? 0) + (byKey('technology')?.integrity ?? 0)) / 2),
+          content: 'Generated from Operations DNA and Technology DNA.',
+        },
+        growthRoadmap: {
+          title: 'Growth Roadmap',
+          sourceDna: ['growth'],
+          strength: byKey('growth')?.integrity ?? 0,
+          content: 'Generated from Growth DNA.',
+        },
+        riskRegister: {
+          title: 'Risk Register',
+          sourceDna: ['legal', 'financial', 'operations'],
+          strength: Math.round(
+            ((byKey('legal')?.integrity ?? 0) + (byKey('financial')?.integrity ?? 0) + (byKey('operations')?.integrity ?? 0)) / 3,
+          ),
+          content: 'Generated from Legal, Financial, and Operations DNA.',
+        },
+      },
+    };
+  }
+
+  /**
    * Map onboarding-concierge answers into the relevant blueprint sections.
    * Called from the onboarding flow whenever a step is submitted.
    */
