@@ -14,6 +14,7 @@ import {
   Calendar,
   HardDrive,
   FileText,
+  FileSpreadsheet,
   Users,
   Building2,
   Map as MapIcon,
@@ -40,6 +41,10 @@ import { ManageDrawer } from "./components/manage-drawer";
 import { DriveIntakeQueue } from "./components/drive/drive-intake-queue";
 import { ContactSyncSettings } from "./components/contact-sync-settings";
 import { CalendarSyncSettings } from "./components/calendar-sync-settings";
+import { FormsManageDrawer } from "./components/forms/forms-manage-drawer";
+import { SheetsManageDrawer } from "./components/sheets/sheets-manage-drawer";
+import { BusinessProfileManageDrawer } from "./components/business-profile/business-profile-manage-drawer";
+import { WhatsAppManageDrawer } from "./components/whatsapp/whatsapp-manage-drawer";
 import GoogleDriveBrowser from "../profile/components/google-drive-browser";
 import {
   authenticateConnector,
@@ -443,6 +448,34 @@ export default function KeyConnectPage() {
       title: "Google Calendar",
       component: <CalendarSyncSettings businessId={businessId} />,
     },
+    google_forms: {
+      title: "Google Forms",
+      component: <FormsManageDrawer businessId={businessId} type="google_forms" />,
+    },
+    typeform: {
+      title: "Typeform",
+      component: <FormsManageDrawer businessId={businessId} type="typeform" />,
+    },
+    jotform: {
+      title: "Jotform",
+      component: <FormsManageDrawer businessId={businessId} type="jotform" />,
+    },
+    webhook_form: {
+      title: "Webhook Forms",
+      component: <FormsManageDrawer businessId={businessId} type="webhook_form" />,
+    },
+    google_sheets: {
+      title: "Google Sheets",
+      component: <SheetsManageDrawer businessId={businessId} />,
+    },
+    google_business_profile: {
+      title: "Google Business Profile",
+      component: <BusinessProfileManageDrawer businessId={businessId} />,
+    },
+    whatsapp: {
+      title: "WhatsApp Business",
+      component: <WhatsAppManageDrawer businessId={businessId} />,
+    },
   };
 
   const pageHeader = (
@@ -665,6 +698,18 @@ export default function KeyConnectPage() {
                         )}
                         Test
                       </Button>
+
+                      {meta.type === "google_drive" && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setManageType("google_sheets")}
+                          className="h-7 text-xs"
+                        >
+                          <FileSpreadsheet className="h-3 w-3 mr-1" />
+                          Sheets
+                        </Button>
+                      )}
 
                       {MANAGE_CONFIG[meta.type] && (
                         <Button
