@@ -150,11 +150,11 @@ export function ChannelSelector({ businessId, selectedDestinations, onSelectionC
       return;
     }
     if (upper === "GOOGLE" || upper === "EMAIL") {
-      window.location.href = "/app/connect";
+      window.location.href = "/app/key-connect";
       return;
     }
     if (!OAUTH_PLATFORMS.has(upper)) {
-      window.location.href = "/app/connect";
+      window.location.href = "/app/key-connect";
       return;
     }
     setConnectingPlatform(upper);

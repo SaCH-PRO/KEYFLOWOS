@@ -13,8 +13,8 @@ const navItems = [
   { href: "/app/settings/business", label: "Payment Gateways", icon: CreditCard, description: "Customer payment methods" },
   { href: "/app/settings/catalog", label: "Catalog", icon: Layers, description: "Products & services" },
   { href: "/app/settings/team", label: "Team", icon: Users, description: "Staff & roles" },
-  { href: "/app/connect", label: "Connect", icon: Link2, description: "Integrations hub" },
-  { href: "/app/settings/contact-sources", label: "Contact Sources", icon: ContactRound, description: "Google, Outlook & signatures" },
+  { href: "/app/key-connect", label: "Connect", icon: Link2, description: "Integrations hub" },
+
   { href: "/app/settings/custom-fields", label: "Custom Fields", icon: FormInput, description: "Structured contact attributes" },
   { href: "/app/settings/notifications", label: "Notifications", icon: Bell, description: "Customer emails" },
   { href: "/app/settings/webhooks", label: "Webhooks", icon: Webhook, description: "Event hooks" },

@@ -37,14 +37,14 @@ function notifyOpener(data: OAuthMessage) {
     } else {
       if (data.type === "social-oauth-success") {
         setTimeout(() => {
-          window.location.assign("/app/settings/connections");
+          window.location.assign("/app/key-connect?tab=social");
         }, 2000);
       }
     }
   } catch {
     if (data.type === "social-oauth-success") {
       setTimeout(() => {
-        window.location.assign("/app/settings/connections");
+        window.location.assign("/app/key-connect?tab=social");
       }, 2000);
     }
   }

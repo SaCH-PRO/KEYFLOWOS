@@ -114,7 +114,7 @@ export default function FinancialFlowPage() {
     { label: "Accounting Periods", href: "/app/finance/accounting-periods", icon: CalendarDays, desc: "Close monthly books" },
     { label: "Fixed Assets", href: "/app/finance/fixed-assets", icon: Package, desc: "Asset register & depreciation" },
     { label: "Exchange Rates", href: "/app/finance/exchange-rates", icon: Globe, desc: "Multi-currency rates" },
-    { label: "Bank Connections", href: "/app/finance/bank-connections", icon: Cable, desc: "Link bank feeds" },
+    { label: "Bank Connections", href: "/app/key-connect?tab=banking", icon: Cable, desc: "Link bank feeds" },
     { label: "Goods Receipts", href: "/app/continental-ops/goods-receipts", icon: PackageCheck, desc: "Receive inventory" },
     { label: "Delivery Notes", href: "/app/continental-ops/delivery-notes", icon: Truck, desc: "Authorize goods release" },
     { label: "Receipts", href: "/app/continental-ops/receipts", icon: Receipt, desc: "Payment receipts" },

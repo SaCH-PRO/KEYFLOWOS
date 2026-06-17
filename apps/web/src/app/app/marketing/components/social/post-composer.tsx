@@ -519,7 +519,7 @@ export function PostComposer({ onSubmit, onClose, submitting, initial, mode = "c
                 return (
                   <a
                     key={plt.key}
-                    href={`/app/connect#social-${plt.key.toLowerCase()}`}
+                    href={`/app/key-connect?tab=social`}
                     className="px-3 py-1.5 rounded-xl text-xs font-medium border border-dashed inline-flex items-center gap-1.5 text-muted-foreground/70 hover:text-foreground hover:border-[hsl(var(--kf-accent1)/0.5)] transition-all"
                     style={{ borderColor: "hsl(var(--kf-border))" }}
                     title={`${plt.label} not connected — click to connect`}

@@ -360,7 +360,7 @@ export default function UnifiedCalendar({ businessId, onOpenNotes }: Props) {
             </span>
           </div>
           <Link
-            href="/app/connect/calendar"
+            href="/app/key-connect?tab=calendar"
             className="flex-shrink-0 inline-flex items-center px-2 py-1 rounded-md text-[11px] font-medium kf-btn-secondary"
           >
             Connect Google Calendar…

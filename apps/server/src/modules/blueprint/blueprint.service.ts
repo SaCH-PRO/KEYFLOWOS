@@ -3,23 +3,54 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import {
   BlueprintBrand,
+  BlueprintComplianceProfile,
   BlueprintConstraints,
+  BlueprintConversionAssumptions,
   BlueprintCustomerModel,
   BlueprintData,
+  BlueprintDocumentProfile,
+  BlueprintExecutionRoadmap,
   BlueprintFinancials,
+  BlueprintFollowUpStep,
+  BlueprintFounderProfile,
+  BlueprintGeneratedDocument,
   BlueprintGoals,
   BlueprintIdentity,
   BlueprintIntelligence,
+  BlueprintLegalProfile,
+  BlueprintMarketProfile,
+  BlueprintMarketingChannel,
+  BlueprintMarketingSystem,
+  BlueprintOffer,
+  BlueprintOfferArchitecture,
+  BlueprintOwner,
   BlueprintOperatingModel,
+  BlueprintOperationsSystem,
+  BlueprintOwnershipProfile,
   BlueprintPatch,
+  BlueprintPipelineStage,
+  BlueprintProjectionProfile,
+  BlueprintRecommendedEntityType,
+  BlueprintRegistrationProfile,
+  BlueprintRiskItem,
+  BlueprintRiskProfile,
+  BlueprintSalesChannel,
+  BlueprintSalesSystem,
   BlueprintSectionKey,
+  BlueprintTaxProfile,
+  BlueprintWorkflowStep,
+  ComplianceItem,
   RecommendedSetupStep,
   SetupStep,
 } from './blueprint.types';
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
-const SECTION_KEYS: BlueprintSectionKey[] = [
+/**
+ * Original 10 blueprint sections that drive the onboarding completeness
+ * guard. Do not change this set without reviewing onboarding gating logic.
+ */
+const CORE_SECTION_KEYS: BlueprintSectionKey[] = [
   'identity',
   'operatingModel',
   'goals',
@@ -33,10 +64,37 @@ const SECTION_KEYS: BlueprintSectionKey[] = [
 ];
 
 /**
+ * Genesis sections added by Business Genesis Patch 1. They extend the
+ * blueprint but do not affect the legacy onboarding completeness score.
+ */
+const GENESIS_SECTION_KEYS: BlueprintSectionKey[] = [
+  'founderProfile',
+  'legalProfile',
+  'registrationProfile',
+  'taxProfile',
+  'ownershipProfile',
+  'marketProfile',
+  'offerArchitecture',
+  'salesSystem',
+  'marketingSystem',
+  'operationsSystem',
+  'projectionProfile',
+  'riskProfile',
+  'complianceProfile',
+  'executionRoadmap',
+  'documentProfile',
+];
+
+const SECTION_KEYS: BlueprintSectionKey[] = [...CORE_SECTION_KEYS, ...GENESIS_SECTION_KEYS];
+
+/**
  * Per-section weighted fields used to compute the 0-100 completeness score.
  * Each field carries equal weight inside its section, every section carries
  * equal weight in the overall total. Adjust here in one place when the
  * blueprint shape evolves.
+ *
+ * NOTE: completeness is computed from CORE_SECTION_KEYS only so the existing
+ * onboarding guard is not affected by the Genesis expansion.
  */
 const COMPLETENESS_FIELDS: Record<BlueprintSectionKey, string[]> = {
   identity: ['name', 'archetype', 'industry', 'tagline', 'oneLiner', 'mission'],
@@ -49,6 +107,22 @@ const COMPLETENESS_FIELDS: Record<BlueprintSectionKey, string[]> = {
   intelligence: ['topChannels', 'recentMomentumScore'],
   workflowModel: ['primaryWorkflow'],
   aiPreferences: ['autonomyLevel', 'tone', 'outreachStyle', 'reportingCadence'],
+  // Genesis completeness fields (not used by core onboarding score yet)
+  founderProfile: ['founderName', 'background', 'skills', 'weeklyAvailabilityHours'],
+  legalProfile: ['country', 'recommendedEntityType', 'regulatedIndustry'],
+  registrationProfile: ['businessNameStatus', 'companiesRegistryStatus', 'vatStatus'],
+  taxProfile: ['country', 'taxIdStatus', 'taxReadinessScore'],
+  ownershipProfile: ['hasPartners', 'owners'],
+  marketProfile: ['targetGeography', 'marketCategory', 'demandSignals'],
+  offerArchitecture: ['coreOffer', 'offerLadder'],
+  salesSystem: ['salesChannels', 'pipelineStages'],
+  marketingSystem: ['channels', 'launchPlan'],
+  operationsSystem: ['coreWorkflows', 'fulfillmentProcess'],
+  projectionProfile: ['startupCapital', 'monthlyFixedCosts', 'avgTicket'],
+  riskProfile: ['financialRisks', 'legalRisks', 'riskScore'],
+  complianceProfile: ['complianceItems', 'complianceScore'],
+  executionRoadmap: ['today', 'sevenDayPlan', 'thirtyDayPlan'],
+  documentProfile: ['generatedDocuments'],
 };
 
 function isPopulated(value: unknown): boolean {
@@ -106,6 +180,21 @@ export class BlueprintService {
       intelligence: readObject(current.intelligence),
       workflowModel: readObject(current.workflowModel),
       aiPreferences: readObject(current.aiPreferences),
+      founderProfile: readObject(current.founderProfile),
+      legalProfile: readObject(current.legalProfile),
+      registrationProfile: readObject(current.registrationProfile),
+      taxProfile: readObject(current.taxProfile),
+      ownershipProfile: readObject(current.ownershipProfile),
+      marketProfile: readObject(current.marketProfile),
+      offerArchitecture: readObject(current.offerArchitecture),
+      salesSystem: readObject(current.salesSystem),
+      marketingSystem: readObject(current.marketingSystem),
+      operationsSystem: readObject(current.operationsSystem),
+      projectionProfile: readObject(current.projectionProfile),
+      riskProfile: readObject(current.riskProfile),
+      complianceProfile: readObject(current.complianceProfile),
+      executionRoadmap: readObject(current.executionRoadmap),
+      documentProfile: readObject(current.documentProfile),
     };
 
     for (const key of SECTION_KEYS) {
@@ -119,23 +208,44 @@ export class BlueprintService {
 
     const confidenceScores = this.calculateConfidenceScores(next);
 
+    const updateData: Prisma.BusinessBlueprintUpdateInput = {
+      identity: next.identity as Prisma.InputJsonValue,
+      operatingModel: next.operatingModel as Prisma.InputJsonValue,
+      goals: next.goals as Prisma.InputJsonValue,
+      constraints: next.constraints as Prisma.InputJsonValue,
+      brand: next.brand as Prisma.InputJsonValue,
+      customerModel: next.customerModel as Prisma.InputJsonValue,
+      financials: next.financials as Prisma.InputJsonValue,
+      intelligence: next.intelligence as Prisma.InputJsonValue,
+      workflowModel: next.workflowModel as Prisma.InputJsonValue,
+      aiPreferences: next.aiPreferences as Prisma.InputJsonValue,
+      founderProfile: next.founderProfile as Prisma.InputJsonValue,
+      legalProfile: next.legalProfile as Prisma.InputJsonValue,
+      registrationProfile: next.registrationProfile as Prisma.InputJsonValue,
+      taxProfile: next.taxProfile as Prisma.InputJsonValue,
+      ownershipProfile: next.ownershipProfile as Prisma.InputJsonValue,
+      marketProfile: next.marketProfile as Prisma.InputJsonValue,
+      offerArchitecture: next.offerArchitecture as Prisma.InputJsonValue,
+      salesSystem: next.salesSystem as Prisma.InputJsonValue,
+      marketingSystem: next.marketingSystem as Prisma.InputJsonValue,
+      operationsSystem: next.operationsSystem as Prisma.InputJsonValue,
+      projectionProfile: next.projectionProfile as Prisma.InputJsonValue,
+      riskProfile: next.riskProfile as Prisma.InputJsonValue,
+      complianceProfile: next.complianceProfile as Prisma.InputJsonValue,
+      executionRoadmap: next.executionRoadmap as Prisma.InputJsonValue,
+      documentProfile: next.documentProfile as Prisma.InputJsonValue,
+      confidenceScores: confidenceScores as unknown as Prisma.InputJsonValue,
+      completeness,
+      lastAnalyzedAt: new Date(),
+    };
+
+    if (typeof patch.readinessScore === 'number') {
+      updateData.readinessScore = Math.max(0, Math.min(100, patch.readinessScore));
+    }
+
     const updated = await this.prisma.client.businessBlueprint.update({
       where: { businessId },
-      data: {
-        identity: next.identity as Prisma.InputJsonValue,
-        operatingModel: next.operatingModel as Prisma.InputJsonValue,
-        goals: next.goals as Prisma.InputJsonValue,
-        constraints: next.constraints as Prisma.InputJsonValue,
-        brand: next.brand as Prisma.InputJsonValue,
-        customerModel: next.customerModel as Prisma.InputJsonValue,
-        financials: next.financials as Prisma.InputJsonValue,
-        intelligence: next.intelligence as Prisma.InputJsonValue,
-        workflowModel: next.workflowModel as Prisma.InputJsonValue,
-        aiPreferences: next.aiPreferences as Prisma.InputJsonValue,
-        confidenceScores: confidenceScores as unknown as Prisma.InputJsonValue,
-        completeness,
-        lastAnalyzedAt: new Date(),
-      },
+      data: updateData,
     });
 
     return this.serialize(updated);
@@ -151,7 +261,19 @@ export class BlueprintService {
   ): Promise<BlueprintData> {
     const patch: BlueprintPatch = {};
 
-    const identity: Partial<BlueprintIdentity> = {};
+    // Support nested keys like legalProfile.hasPhysicalLocation by splitting on '.'
+    for (const [key, value] of Object.entries(answers)) {
+      if (!key.includes('.') || value === undefined || value === null) continue;
+      const [section, ...rest] = key.split('.');
+      if (!SECTION_KEYS.includes(section as BlueprintSectionKey)) continue;
+      const field = rest.join('.');
+      if (!field) continue;
+      (patch as Record<string, Record<string, unknown>>)[section] =
+        (patch as Record<string, Record<string, unknown>>)[section] || {};
+      (patch as Record<string, Record<string, unknown>>)[section][field] = value;
+    }
+
+    const identity: Partial<BlueprintIdentity> = (patch.identity as any) || {};
     if (typeof answers.businessName === 'string') identity.name = answers.businessName;
     if (typeof answers.businessIntent === 'string') identity.oneLiner = answers.businessIntent;
     if (typeof answers.archetype === 'string') identity.archetype = answers.archetype;
@@ -160,7 +282,7 @@ export class BlueprintService {
     if (typeof answers.country === 'string') identity.country = answers.country;
     if (Object.keys(identity).length) patch.identity = identity;
 
-    const operating: Partial<BlueprintOperatingModel> = {};
+    const operating: Partial<BlueprintOperatingModel> = (patch.operatingModel as any) || {};
     if (typeof answers.revenueModel === 'string') operating.revenueModel = answers.revenueModel;
     if (typeof answers.deliveryMode === 'string') operating.deliveryMode = answers.deliveryMode;
     if (typeof answers.serviceArea === 'string') operating.serviceArea = answers.serviceArea;
@@ -170,13 +292,13 @@ export class BlueprintService {
     }
     if (Object.keys(operating).length) patch.operatingModel = operating;
 
-    const constraints: Partial<BlueprintConstraints> = {};
+    const constraints: Partial<BlueprintConstraints> = (patch.constraints as any) || {};
     if (typeof answers.budgetRange === 'string') constraints.budgetRange = answers.budgetRange;
     if (typeof answers.timeCommitment === 'string') constraints.timeCommitment = answers.timeCommitment;
     if (typeof answers.riskTolerance === 'string') constraints.riskTolerance = answers.riskTolerance;
     if (Object.keys(constraints).length) patch.constraints = constraints;
 
-    const goals: Partial<BlueprintGoals> = {};
+    const goals: Partial<BlueprintGoals> = (patch.goals as any) || {};
     if (typeof answers.northStar === 'string') goals.northStar = answers.northStar;
     if (Array.isArray(answers.ninetyDayGoals)) {
       goals.ninetyDayGoals = answers.ninetyDayGoals.filter((g): g is string => typeof g === 'string');
@@ -186,7 +308,7 @@ export class BlueprintService {
     }
     if (Object.keys(goals).length) patch.goals = goals;
 
-    const brand: Partial<BlueprintBrand> = {};
+    const brand: Partial<BlueprintBrand> = (patch.brand as any) || {};
     if (typeof answers.brandVoice === 'string') brand.voice = answers.brandVoice;
     if (typeof answers.brandTone === 'string') brand.tone = answers.brandTone;
     if (typeof answers.primaryColor === 'string') brand.primaryColor = answers.primaryColor;
@@ -197,22 +319,287 @@ export class BlueprintService {
     }
     if (Object.keys(brand).length) patch.brand = brand;
 
-    const customer: Partial<BlueprintCustomerModel> = {};
+    const customer: Partial<BlueprintCustomerModel> = (patch.customerModel as any) || {};
     if (typeof answers.idealCustomer === 'string') customer.idealCustomer = answers.idealCustomer;
+    if (typeof answers.targetCustomer === 'string') customer.idealCustomer = answers.targetCustomer;
     if (Array.isArray(answers.segments)) {
       customer.segments = answers.segments.filter((s): s is string => typeof s === 'string');
     }
     if (Array.isArray(answers.painPoints)) {
       customer.painPoints = answers.painPoints.filter((s): s is string => typeof s === 'string');
     }
+    if (Array.isArray(answers.jobsToBeDone)) {
+      customer.jobsToBeDone = answers.jobsToBeDone.filter((s): s is string => typeof s === 'string');
+    }
     if (Object.keys(customer).length) patch.customerModel = customer;
 
-    const financials: Partial<BlueprintFinancials> = {};
+    const financials: Partial<BlueprintFinancials> = (patch.financials as any) || {};
     if (typeof answers.currency === 'string') financials.currency = answers.currency;
     if (typeof answers.pricingModel === 'string') financials.pricingModel = answers.pricingModel;
     if (typeof answers.avgTicket === 'number') financials.avgTicket = answers.avgTicket;
     if (typeof answers.monthlyTarget === 'number') financials.monthlyTarget = answers.monthlyTarget;
     if (Object.keys(financials).length) patch.financials = financials;
+
+    // Genesis section mappings
+    const founderProfile: Partial<BlueprintFounderProfile> = (patch.founderProfile as any) || {};
+    if (typeof answers.founderName === 'string') founderProfile.founderName = answers.founderName;
+    if (typeof answers.background === 'string') founderProfile.background = answers.background;
+    if (Array.isArray(answers.skills)) {
+      founderProfile.skills = answers.skills.filter((s): s is string => typeof s === 'string');
+    }
+    if (Array.isArray(answers.weaknesses)) {
+      founderProfile.weaknesses = answers.weaknesses.filter((s): s is string => typeof s === 'string');
+    }
+    if (typeof answers.riskTolerance === 'string') founderProfile.riskTolerance = answers.riskTolerance;
+    if (typeof answers.weeklyAvailabilityHours === 'number') {
+      founderProfile.weeklyAvailabilityHours = answers.weeklyAvailabilityHours;
+    }
+    if (typeof answers.visionStatement === 'string') founderProfile.visionStatement = answers.visionStatement;
+    if (Object.keys(founderProfile).length) patch.founderProfile = founderProfile;
+
+    const legalProfile: Partial<BlueprintLegalProfile> = (patch.legalProfile as any) || {};
+    if (typeof answers.hasPhysicalLocation === 'boolean') {
+      legalProfile.hasPhysicalLocation = answers.hasPhysicalLocation;
+    }
+    if (typeof answers.hasRegulatedActivity === 'boolean') {
+      legalProfile.regulatedIndustry = answers.hasRegulatedActivity;
+    }
+    if (typeof answers.regulatedIndustry === 'boolean') {
+      legalProfile.regulatedIndustry = answers.regulatedIndustry;
+    }
+    if (typeof answers.legalStructurePreference === 'string') {
+      const allowed: BlueprintRecommendedEntityType[] = [
+        'SOLE_TRADER',
+        'PARTNERSHIP',
+        'LIMITED_COMPANY',
+        'NONPROFIT',
+        'UNKNOWN',
+      ];
+      legalProfile.recommendedEntityType = allowed.includes(
+        answers.legalStructurePreference as BlueprintRecommendedEntityType,
+      )
+        ? (answers.legalStructurePreference as BlueprintRecommendedEntityType)
+        : 'UNKNOWN';
+    }
+    if (typeof answers.entityTypeReason === 'string') {
+      legalProfile.entityTypeReason = answers.entityTypeReason;
+    }
+    if (Array.isArray(answers.regulatedIndustryNotes)) {
+      legalProfile.regulatedIndustryNotes = answers.regulatedIndustryNotes.filter(
+        (n): n is string => typeof n === 'string',
+      );
+    }
+    if (Object.keys(legalProfile).length) patch.legalProfile = legalProfile;
+
+    const registrationProfile: Partial<BlueprintRegistrationProfile> =
+      (patch.registrationProfile as any) || {};
+    if (typeof answers.registrationStatus === 'string') {
+      registrationProfile.businessNameStatus = answers.registrationStatus;
+    }
+    if (typeof answers.hasEmployees === 'boolean') {
+      registrationProfile.nisEmployerStatus = answers.hasEmployees ? 'NOT_STARTED' : 'NOT_NEEDED';
+    }
+    if (typeof answers.estimatedAnnualRevenue === 'number') {
+      registrationProfile.vatStatus = answers.estimatedAnnualRevenue > 500000 ? 'REQUIRED' : 'NOT_REQUIRED';
+    }
+    if (Object.keys(registrationProfile).length) patch.registrationProfile = registrationProfile;
+
+    const taxProfile: Partial<BlueprintTaxProfile> = (patch.taxProfile as any) || {};
+    if (typeof answers.country === 'string') taxProfile.country = answers.country;
+    if (typeof answers.estimatedAnnualRevenue === 'number') {
+      taxProfile.estimatedAnnualRevenue = answers.estimatedAnnualRevenue;
+    }
+    if (typeof answers.payrollExpected === 'boolean') taxProfile.payrollExpected = answers.payrollExpected;
+    if (typeof answers.contractorPaymentsExpected === 'boolean') {
+      taxProfile.contractorPaymentsExpected = answers.contractorPaymentsExpected;
+    }
+    if (Object.keys(taxProfile).length) patch.taxProfile = taxProfile;
+
+    const ownershipProfile: Partial<BlueprintOwnershipProfile> = (patch.ownershipProfile as any) || {};
+    if (typeof answers.hasPartners === 'boolean') ownershipProfile.hasPartners = answers.hasPartners;
+    if (Array.isArray(answers.owners)) ownershipProfile.owners = answers.owners as BlueprintOwner[];
+    if (Object.keys(ownershipProfile).length) patch.ownershipProfile = ownershipProfile;
+
+    const marketProfile: Partial<BlueprintMarketProfile> = (patch.marketProfile as any) || {};
+    if (typeof answers.targetGeography === 'string') marketProfile.targetGeography = answers.targetGeography;
+    if (typeof answers.marketCategory === 'string') marketProfile.marketCategory = answers.marketCategory;
+    if (typeof answers.marketStage === 'string') marketProfile.marketStage = answers.marketStage;
+    if (Array.isArray(answers.trends)) {
+      marketProfile.trends = answers.trends.filter((s): s is string => typeof s === 'string');
+    }
+    if (Array.isArray(answers.barriersToEntry)) {
+      marketProfile.barriersToEntry = answers.barriersToEntry.filter(
+        (s): s is string => typeof s === 'string',
+      );
+    }
+    if (Array.isArray(answers.demandSignals)) {
+      marketProfile.demandSignals = answers.demandSignals.filter(
+        (s): s is string => typeof s === 'string',
+      );
+    }
+    if (Object.keys(marketProfile).length) patch.marketProfile = marketProfile;
+
+    const offerArchitecture: Partial<BlueprintOfferArchitecture> = (patch.offerArchitecture as any) || {};
+    if (answers.coreOffer && typeof answers.coreOffer === 'object') {
+      offerArchitecture.coreOffer = answers.coreOffer as BlueprintOffer;
+    }
+    if (Array.isArray(answers.offerLadder)) {
+      offerArchitecture.offerLadder = answers.offerLadder as BlueprintOffer[];
+    }
+    if (Array.isArray(answers.pricingTiers)) {
+      offerArchitecture.pricingTiers = answers.pricingTiers as BlueprintOffer[];
+    }
+    if (Array.isArray(answers.upsells)) {
+      offerArchitecture.upsells = answers.upsells as BlueprintOffer[];
+    }
+    if (Array.isArray(answers.recurringRevenueOpportunities)) {
+      offerArchitecture.recurringRevenueOpportunities =
+        answers.recurringRevenueOpportunities.filter((s): s is string => typeof s === 'string');
+    }
+    if (Object.keys(offerArchitecture).length) patch.offerArchitecture = offerArchitecture;
+
+    const salesSystem: Partial<BlueprintSalesSystem> = (patch.salesSystem as any) || {};
+    if (Array.isArray(answers.salesChannels)) {
+      salesSystem.salesChannels = answers.salesChannels.map((c) => {
+        if (typeof c === 'string') return { channel: c, priority: 'MEDIUM' as const };
+        return c as BlueprintSalesChannel;
+      });
+    }
+    if (Array.isArray(answers.pipelineStages)) {
+      salesSystem.pipelineStages = answers.pipelineStages as BlueprintPipelineStage[];
+    }
+    if (Array.isArray(answers.leadSources)) {
+      salesSystem.leadSources = answers.leadSources.filter((s): s is string => typeof s === 'string');
+    }
+    if (answers.conversionAssumptions && typeof answers.conversionAssumptions === 'object') {
+      salesSystem.conversionAssumptions = answers.conversionAssumptions as BlueprintConversionAssumptions;
+    }
+    if (Array.isArray(answers.followUpCadence)) {
+      salesSystem.followUpCadence = answers.followUpCadence as BlueprintFollowUpStep[];
+    }
+    if (Object.keys(salesSystem).length) patch.salesSystem = salesSystem;
+
+    const marketingSystem: Partial<BlueprintMarketingSystem> = (patch.marketingSystem as any) || {};
+    if (Array.isArray(answers.channels)) {
+      marketingSystem.channels = answers.channels.map((c) => {
+        if (typeof c === 'string') return { channel: c, priority: 'MEDIUM' as const };
+        return c as BlueprintMarketingChannel;
+      });
+    }
+    if (Array.isArray(answers.contentPillars)) {
+      marketingSystem.contentPillars = answers.contentPillars.filter(
+        (s): s is string => typeof s === 'string',
+      );
+    }
+    if (Array.isArray(answers.campaignIdeas)) {
+      marketingSystem.campaignIdeas = answers.campaignIdeas.filter(
+        (s): s is string => typeof s === 'string',
+      );
+    }
+    if (typeof answers.brandNarrative === 'string') {
+      marketingSystem.brandNarrative = answers.brandNarrative;
+    }
+    if (Array.isArray(answers.launchPlan)) {
+      marketingSystem.launchPlan = answers.launchPlan.filter((s): s is string => typeof s === 'string');
+    }
+    if (Object.keys(marketingSystem).length) patch.marketingSystem = marketingSystem;
+
+    const operationsSystem: Partial<BlueprintOperationsSystem> = (patch.operationsSystem as any) || {};
+    if (Array.isArray(answers.coreWorkflows)) {
+      operationsSystem.coreWorkflows = answers.coreWorkflows as BlueprintWorkflowStep[];
+    }
+    if (Array.isArray(answers.dailyChecklist)) {
+      operationsSystem.dailyChecklist = answers.dailyChecklist.filter(
+        (s): s is string => typeof s === 'string',
+      );
+    }
+    if (Array.isArray(answers.weeklyChecklist)) {
+      operationsSystem.weeklyChecklist = answers.weeklyChecklist.filter(
+        (s): s is string => typeof s === 'string',
+      );
+    }
+    if (Array.isArray(answers.fulfillmentProcess)) {
+      operationsSystem.fulfillmentProcess = answers.fulfillmentProcess as BlueprintWorkflowStep[];
+    }
+    if (Array.isArray(answers.customerSupportProcess)) {
+      operationsSystem.customerSupportProcess = answers.customerSupportProcess as BlueprintWorkflowStep[];
+    }
+    if (Array.isArray(answers.vendorProcess)) {
+      operationsSystem.vendorProcess = answers.vendorProcess as BlueprintWorkflowStep[];
+    }
+    if (Object.keys(operationsSystem).length) patch.operationsSystem = operationsSystem;
+
+    const projectionProfile: Partial<BlueprintProjectionProfile> = (patch.projectionProfile as any) || {};
+    if (typeof answers.startupCapital === 'number') projectionProfile.startupCapital = answers.startupCapital;
+    if (typeof answers.startupCosts === 'number') projectionProfile.startupCosts = answers.startupCosts;
+    if (typeof answers.monthlyFixedCosts === 'number') {
+      projectionProfile.monthlyFixedCosts = answers.monthlyFixedCosts;
+    }
+    if (typeof answers.variableCostPercent === 'number') {
+      projectionProfile.variableCostPercent = answers.variableCostPercent;
+    }
+    if (typeof answers.expectedMonthlyUnits === 'number') {
+      projectionProfile.expectedMonthlyUnits = answers.expectedMonthlyUnits;
+    }
+    if (typeof answers.conservativeMonthlyUnits === 'number') {
+      projectionProfile.conservativeMonthlyUnits = answers.conservativeMonthlyUnits;
+    }
+    if (typeof answers.aggressiveMonthlyUnits === 'number') {
+      projectionProfile.aggressiveMonthlyUnits = answers.aggressiveMonthlyUnits;
+    }
+    if (Object.keys(projectionProfile).length) patch.projectionProfile = projectionProfile;
+
+    const riskProfile: Partial<BlueprintRiskProfile> = (patch.riskProfile as any) || {};
+    if (Array.isArray(answers.financialRisks)) {
+      riskProfile.financialRisks = answers.financialRisks as BlueprintRiskItem[];
+    }
+    if (Array.isArray(answers.legalRisks)) {
+      riskProfile.legalRisks = answers.legalRisks as BlueprintRiskItem[];
+    }
+    if (Array.isArray(answers.marketRisks)) {
+      riskProfile.marketRisks = answers.marketRisks as BlueprintRiskItem[];
+    }
+    if (Array.isArray(answers.operationalRisks)) {
+      riskProfile.operationalRisks = answers.operationalRisks as BlueprintRiskItem[];
+    }
+    if (Array.isArray(answers.founderRisks)) {
+      riskProfile.founderRisks = answers.founderRisks as BlueprintRiskItem[];
+    }
+    if (Array.isArray(answers.mitigationPlan)) {
+      riskProfile.mitigationPlan = answers.mitigationPlan.filter((s): s is string => typeof s === 'string');
+    }
+    if (Object.keys(riskProfile).length) patch.riskProfile = riskProfile;
+
+    const complianceProfile: Partial<BlueprintComplianceProfile> = (patch.complianceProfile as any) || {};
+    if (Array.isArray(answers.complianceItems)) {
+      complianceProfile.complianceItems = answers.complianceItems as ComplianceItem[];
+    }
+    if (typeof answers.complianceScore === 'number') {
+      complianceProfile.complianceScore = answers.complianceScore;
+    }
+    if (Object.keys(complianceProfile).length) patch.complianceProfile = complianceProfile;
+
+    const executionRoadmap: Partial<BlueprintExecutionRoadmap> = (patch.executionRoadmap as any) || {};
+    if (Array.isArray(answers.today)) {
+      executionRoadmap.today = answers.today.filter((s): s is string => typeof s === 'string');
+    }
+    if (Array.isArray(answers.sevenDayPlan)) {
+      executionRoadmap.sevenDayPlan = answers.sevenDayPlan.filter((s): s is string => typeof s === 'string');
+    }
+    if (Array.isArray(answers.thirtyDayPlan)) {
+      executionRoadmap.thirtyDayPlan = answers.thirtyDayPlan.filter((s): s is string => typeof s === 'string');
+    }
+    if (Array.isArray(answers.ninetyDayPlan)) {
+      executionRoadmap.ninetyDayPlan = answers.ninetyDayPlan.filter(
+        (s): s is string => typeof s === 'string',
+      );
+    }
+    if (Array.isArray(answers.twelveMonthMilestones)) {
+      executionRoadmap.twelveMonthMilestones = answers.twelveMonthMilestones.filter(
+        (s): s is string => typeof s === 'string',
+      );
+    }
+    if (Object.keys(executionRoadmap).length) patch.executionRoadmap = executionRoadmap;
 
     return this.updateBlueprint(businessId, patch);
   }
@@ -355,6 +742,7 @@ export class BlueprintService {
    */
   async getBlueprintContext(businessId: string): Promise<{
     completeness: number;
+    readinessScore?: number;
     summary: string;
     identity: BlueprintIdentity;
     operatingModel: BlueprintOperatingModel;
@@ -363,6 +751,20 @@ export class BlueprintService {
     brand: BlueprintBrand;
     customerModel: BlueprintCustomerModel;
     financials: BlueprintFinancials;
+    founderProfile?: BlueprintFounderProfile;
+    legalProfile?: BlueprintLegalProfile;
+    registrationProfile?: BlueprintRegistrationProfile;
+    taxProfile?: BlueprintTaxProfile;
+    marketProfile?: BlueprintMarketProfile;
+    offerArchitecture?: BlueprintOfferArchitecture;
+    salesSystem?: BlueprintSalesSystem;
+    marketingSystem?: BlueprintMarketingSystem;
+    operationsSystem?: BlueprintOperationsSystem;
+    projectionProfile?: BlueprintProjectionProfile;
+    riskProfile?: BlueprintRiskProfile;
+    complianceProfile?: BlueprintComplianceProfile;
+    executionRoadmap?: BlueprintExecutionRoadmap;
+    documentProfile?: BlueprintDocumentProfile;
   } | null> {
     try {
       const bp = await this.getBlueprint(businessId);
@@ -375,6 +777,7 @@ export class BlueprintService {
 
       return {
         completeness: bp.completeness,
+        readinessScore: bp.readinessScore,
         summary: summaryParts.join(' ').trim() || 'Blueprint is empty — recommendations will be generic.',
         identity: bp.identity,
         operatingModel: bp.operatingModel,
@@ -383,6 +786,20 @@ export class BlueprintService {
         brand: bp.brand,
         customerModel: bp.customerModel,
         financials: bp.financials,
+        founderProfile: bp.founderProfile,
+        legalProfile: bp.legalProfile,
+        registrationProfile: bp.registrationProfile,
+        taxProfile: bp.taxProfile,
+        marketProfile: bp.marketProfile,
+        offerArchitecture: bp.offerArchitecture,
+        salesSystem: bp.salesSystem,
+        marketingSystem: bp.marketingSystem,
+        operationsSystem: bp.operationsSystem,
+        projectionProfile: bp.projectionProfile,
+        riskProfile: bp.riskProfile,
+        complianceProfile: bp.complianceProfile,
+        executionRoadmap: bp.executionRoadmap,
+        documentProfile: bp.documentProfile,
       };
     } catch (err) {
       this.logger.debug(`getBlueprintContext failed for ${businessId}: ${(err as Error).message}`);
@@ -439,6 +856,66 @@ export class BlueprintService {
         title: 'Set your AI preferences',
         reason: 'Autonomy level, tone, and notifications let KEY work the way you want.',
       },
+      founderProfile: {
+        title: 'Document the founder profile',
+        reason: 'Background, availability, and skills determine what KEY can safely automate.',
+      },
+      legalProfile: {
+        title: 'Clarify legal structure',
+        reason: 'Entity type and jurisdiction shape compliance and contract recommendations.',
+      },
+      registrationProfile: {
+        title: 'Track business registrations',
+        reason: 'Licences, tax IDs, and bank accounts must be in place before trading.',
+      },
+      taxProfile: {
+        title: 'Set up the tax profile',
+        reason: 'Payroll, VAT, and contractor expectations drive finance workflows.',
+      },
+      ownershipProfile: {
+        title: 'Confirm ownership structure',
+        reason: 'Partners and shareholder agreements affect authority and risk routing.',
+      },
+      marketProfile: {
+        title: 'Map the market opportunity',
+        reason: 'Trends, barriers, and demand signals focus go-to-market planning.',
+      },
+      offerArchitecture: {
+        title: 'Design your offer architecture',
+        reason: 'Core offer, tiers, and upsells determine pricing and revenue playbooks.',
+      },
+      salesSystem: {
+        title: 'Build the sales system',
+        reason: 'Channels, pipeline stages, and cadence turn leads into customers.',
+      },
+      marketingSystem: {
+        title: 'Build the marketing system',
+        reason: 'Channels, content pillars, and launch plan generate repeatable reach.',
+      },
+      operationsSystem: {
+        title: 'Document operating workflows',
+        reason: 'Daily, weekly, and fulfilment processes keep delivery predictable.',
+      },
+      projectionProfile: {
+        title: 'Create financial projections',
+        reason: 'Runway, break-even, and month-by-month forecasts guide capital decisions.',
+      },
+      riskProfile: {
+        title: 'Review business risks',
+        reason: 'Financial, legal, market, and operational risks need mitigation plans.',
+      },
+      complianceProfile: {
+        title: 'Track compliance obligations',
+        reason: 'Licences, filings, and regulator deadlines keep the business legal.',
+      },
+      executionRoadmap: {
+        title: 'Plan the execution roadmap',
+        reason: '7-day, 30-day, 90-day, and 12-month milestones turn strategy into action.',
+      },
+      documentProfile: {
+        title: 'Generate your legal document pack',
+        reason: 'The document pack creates the core legal, privacy, and HR documents for your business.',
+      },
     };
 
     for (const key of SECTION_KEYS) {
@@ -477,6 +954,21 @@ export class BlueprintService {
       intelligence: 'Intelligence',
       workflowModel: 'Workflow Model',
       aiPreferences: 'AI Preferences',
+      founderProfile: 'Founder Profile',
+      legalProfile: 'Legal Profile',
+      registrationProfile: 'Registration Profile',
+      taxProfile: 'Tax Profile',
+      ownershipProfile: 'Ownership Profile',
+      marketProfile: 'Market Profile',
+      offerArchitecture: 'Offer Architecture',
+      salesSystem: 'Sales System',
+      marketingSystem: 'Marketing System',
+      operationsSystem: 'Operations System',
+      projectionProfile: 'Projection Profile',
+      riskProfile: 'Risk Profile',
+      complianceProfile: 'Compliance Profile',
+      executionRoadmap: 'Execution Roadmap',
+      documentProfile: 'Legal Document Pack',
     };
 
     return SECTION_KEYS.map((key) => {
@@ -556,6 +1048,24 @@ export class BlueprintService {
     const workflowModel: any = {};
     const aiPreferences: any = {};
 
+    // Genesis sections are seeded as empty objects until the operator or an
+    // inference engine fills them in.
+    const founderProfile: BlueprintFounderProfile = {};
+    const legalProfile: BlueprintLegalProfile = {};
+    const registrationProfile: BlueprintRegistrationProfile = {};
+    const taxProfile: BlueprintTaxProfile = {};
+    const ownershipProfile: BlueprintOwnershipProfile = {};
+    const marketProfile: BlueprintMarketProfile = {};
+    const offerArchitecture: BlueprintOfferArchitecture = {};
+    const salesSystem: BlueprintSalesSystem = {};
+    const marketingSystem: BlueprintMarketingSystem = {};
+    const operationsSystem: BlueprintOperationsSystem = {};
+    const projectionProfile: BlueprintProjectionProfile = {};
+    const riskProfile: BlueprintRiskProfile = {};
+    const complianceProfile: BlueprintComplianceProfile = {};
+    const executionRoadmap: BlueprintExecutionRoadmap = {};
+    const documentProfile: BlueprintDocumentProfile = {};
+
     const seed = {
       identity,
       operatingModel,
@@ -567,6 +1077,21 @@ export class BlueprintService {
       intelligence,
       workflowModel,
       aiPreferences,
+      founderProfile,
+      legalProfile,
+      registrationProfile,
+      taxProfile,
+      ownershipProfile,
+      marketProfile,
+      offerArchitecture,
+      salesSystem,
+      marketingSystem,
+      operationsSystem,
+      projectionProfile,
+      riskProfile,
+      complianceProfile,
+      executionRoadmap,
+      documentProfile,
     };
 
     const completeness = this.calculateCompleteness(seed as any);
@@ -587,16 +1112,34 @@ export class BlueprintService {
         intelligence: intelligence as unknown as Prisma.InputJsonValue,
         workflowModel: workflowModel as unknown as Prisma.InputJsonValue,
         aiPreferences: aiPreferences as unknown as Prisma.InputJsonValue,
+        founderProfile: founderProfile as unknown as Prisma.InputJsonValue,
+        legalProfile: legalProfile as unknown as Prisma.InputJsonValue,
+        registrationProfile: registrationProfile as unknown as Prisma.InputJsonValue,
+        taxProfile: taxProfile as unknown as Prisma.InputJsonValue,
+        ownershipProfile: ownershipProfile as unknown as Prisma.InputJsonValue,
+        marketProfile: marketProfile as unknown as Prisma.InputJsonValue,
+        offerArchitecture: offerArchitecture as unknown as Prisma.InputJsonValue,
+        salesSystem: salesSystem as unknown as Prisma.InputJsonValue,
+        marketingSystem: marketingSystem as unknown as Prisma.InputJsonValue,
+        operationsSystem: operationsSystem as unknown as Prisma.InputJsonValue,
+        projectionProfile: projectionProfile as unknown as Prisma.InputJsonValue,
+        riskProfile: riskProfile as unknown as Prisma.InputJsonValue,
+        complianceProfile: complianceProfile as unknown as Prisma.InputJsonValue,
+        executionRoadmap: executionRoadmap as unknown as Prisma.InputJsonValue,
+        documentProfile: documentProfile as unknown as Prisma.InputJsonValue,
+        readinessScore: 0,
         confidenceScores: confidenceScores as unknown as Prisma.InputJsonValue,
         completeness,
       },
       update: {},
+      // documentProfile is intentionally left empty on seed; it is populated
+      // by GenesisDocumentPackService once the legal disclaimer is accepted.
     });
   }
 
   private calculateCompleteness(sections: Record<BlueprintSectionKey, Record<string, unknown>>): number {
     const sectionScores: number[] = [];
-    for (const key of SECTION_KEYS) {
+    for (const key of CORE_SECTION_KEYS) {
       const fields = COMPLETENESS_FIELDS[key];
       if (!fields.length) continue;
       const section = sections[key] || {};
@@ -632,6 +1175,22 @@ export class BlueprintService {
     intelligence: Prisma.JsonValue;
     workflowModel: Prisma.JsonValue;
     aiPreferences: Prisma.JsonValue;
+    founderProfile: Prisma.JsonValue;
+    legalProfile: Prisma.JsonValue;
+    registrationProfile: Prisma.JsonValue;
+    taxProfile: Prisma.JsonValue;
+    ownershipProfile: Prisma.JsonValue;
+    marketProfile: Prisma.JsonValue;
+    offerArchitecture: Prisma.JsonValue;
+    salesSystem: Prisma.JsonValue;
+    marketingSystem: Prisma.JsonValue;
+    operationsSystem: Prisma.JsonValue;
+    projectionProfile: Prisma.JsonValue;
+    riskProfile: Prisma.JsonValue;
+    complianceProfile: Prisma.JsonValue;
+    executionRoadmap: Prisma.JsonValue;
+    documentProfile: Prisma.JsonValue;
+    readinessScore: number;
     confidenceScores: Prisma.JsonValue;
     completeness: number;
     lastAnalyzedAt: Date | null;
@@ -649,6 +1208,22 @@ export class BlueprintService {
       intelligence: readObject(row.intelligence) as BlueprintIntelligence,
       workflowModel: readObject(row.workflowModel) as any,
       aiPreferences: readObject(row.aiPreferences) as any,
+      founderProfile: readObject(row.founderProfile) as BlueprintFounderProfile,
+      legalProfile: readObject(row.legalProfile) as BlueprintLegalProfile,
+      registrationProfile: readObject(row.registrationProfile) as BlueprintRegistrationProfile,
+      taxProfile: readObject(row.taxProfile) as BlueprintTaxProfile,
+      ownershipProfile: readObject(row.ownershipProfile) as BlueprintOwnershipProfile,
+      marketProfile: readObject(row.marketProfile) as BlueprintMarketProfile,
+      offerArchitecture: readObject(row.offerArchitecture) as BlueprintOfferArchitecture,
+      salesSystem: readObject(row.salesSystem) as BlueprintSalesSystem,
+      marketingSystem: readObject(row.marketingSystem) as BlueprintMarketingSystem,
+      operationsSystem: readObject(row.operationsSystem) as BlueprintOperationsSystem,
+      projectionProfile: readObject(row.projectionProfile) as BlueprintProjectionProfile,
+      riskProfile: readObject(row.riskProfile) as BlueprintRiskProfile,
+      complianceProfile: readObject(row.complianceProfile) as BlueprintComplianceProfile,
+      executionRoadmap: readObject(row.executionRoadmap) as BlueprintExecutionRoadmap,
+      documentProfile: readObject(row.documentProfile) as BlueprintDocumentProfile,
+      readinessScore: row.readinessScore,
       confidenceScores: readObject(row.confidenceScores) as any,
       completeness: row.completeness,
       lastAnalyzedAt: row.lastAnalyzedAt?.toISOString(),

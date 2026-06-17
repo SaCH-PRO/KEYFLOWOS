@@ -9572,6 +9572,12 @@ export interface ConciergeSetupStatus {
   storefront: boolean;
   contacts: boolean;
   profile: boolean;
+  legalProfile: boolean;
+  registrationPlan: boolean;
+  financeModel: boolean;
+  marketStrategy: boolean;
+  operationsPlan: boolean;
+  complianceChecklist: boolean;
   completedCount: number;
   totalSteps: number;
   percentage: number;

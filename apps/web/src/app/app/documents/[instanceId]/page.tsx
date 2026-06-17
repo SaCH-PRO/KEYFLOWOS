@@ -966,7 +966,7 @@ export default function DocumentDetailPage() {
             </div>
           </div>
           <a
-            href="/app/connect"
+            href="/app/key-connect"
             className="flex-shrink-0 px-3 py-2 text-xs font-medium rounded-lg bg-[hsl(var(--kf-warning))]/20 text-[hsl(var(--kf-warning))] hover:bg-[hsl(var(--kf-warning))]/30 transition-colors min-h-[36px] inline-flex items-center"
           >
             Connect Google Drive

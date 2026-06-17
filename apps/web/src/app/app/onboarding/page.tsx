@@ -1,18 +1,15 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { Sparkles, ArrowRight, Loader2, Settings } from "lucide-react";
+import { Sparkles, Loader2 } from "lucide-react";
 import { apiGet } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
-import { BlueprintOnboardingChat } from "../profile/components/blueprint-onboarding-chat";
+import { GenesisConversation } from "./components/GenesisConversation";
 
 export default function OnboardingPage() {
-  const router = useRouter();
-  const [businessId, setBusinessId] = useState<string | null>(null);
   const [checking, setChecking] = useState(true);
-  const [completeness, setCompleteness] = useState(0);
+  const [readiness, setReadiness] = useState<{ overall: number } | null>(null);
 
   useEffect(() => {
     const bid = getStoredBusinessId();
@@ -20,10 +17,9 @@ export default function OnboardingPage() {
       setChecking(false);
       return;
     }
-    setBusinessId(bid);
-    apiGet<{ completeness: number }>(`/blueprint/businesses/${bid}`)
+    apiGet<{ overall: number }>(`/business-genesis/businesses/${bid}/readiness`)
       .then(({ data }) => {
-        if (data) setCompleteness(data.completeness || 0);
+        if (data) setReadiness(data);
       })
       .finally(() => setChecking(false));
   }, []);
@@ -37,7 +33,7 @@ export default function OnboardingPage() {
   }
 
   return (
-    <div className="max-w-3xl mx-auto py-6 sm:py-8 space-y-6">
+    <div className="max-w-3xl mx-auto py-6 sm:py-8 px-4 sm:px-6 space-y-6">
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
@@ -50,12 +46,30 @@ export default function OnboardingPage() {
           <Sparkles className="w-8 h-8" style={{ color: "hsl(var(--kf-accent1))" }} />
         </div>
         <h1 className="text-2xl sm:text-3xl font-bold">
-          {completeness >= 80 ? "Your Business Genome is shaping up" : "Let's build your Business Genome"}
+          {readiness && readiness.overall >= 80
+            ? "Your Business Genome is shaping up"
+            : "Let's build your Business Genome"}
         </h1>
         <p className="text-sm text-muted-foreground max-w-md mx-auto">
-          Spend a few minutes talking with KEY. The more it knows about your business, the better it can
-          run as your digital co-founder.
+          Spend a few minutes with KEY. The more it knows about your business, the better it can run
+          as your digital co-founder.
         </p>
+        {readiness && (
+          <div className="flex items-center justify-center gap-3 pt-1">
+            <span className="text-xs font-medium text-muted-foreground">
+              Readiness {readiness.overall}%
+            </span>
+            <div className="w-24 h-1.5 rounded-full bg-muted overflow-hidden">
+              <motion.div
+                className="h-full rounded-full"
+                style={{ background: "hsl(var(--kf-accent1))" }}
+                initial={{ width: 0 }}
+                animate={{ width: `${readiness.overall}%` }}
+                transition={{ duration: 0.4 }}
+              />
+            </div>
+          </div>
+        )}
       </motion.div>
 
       <motion.div
@@ -68,37 +82,7 @@ export default function OnboardingPage() {
           border: "1px solid hsl(var(--kf-border) / 0.3)",
         }}
       >
-        <BlueprintOnboardingChat
-          businessId={businessId ?? undefined}
-          fullPage={false}
-          onComplete={() => {
-            router.push("/app/command-center");
-          }}
-        />
-      </motion.div>
-
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: 0.2 }}
-        className="flex flex-col sm:flex-row items-center justify-center gap-4 text-xs text-muted-foreground"
-      >
-        <a
-          href="/app/blueprint"
-          className="flex items-center gap-1.5 hover:text-foreground transition-colors"
-        >
-          <Settings className="w-3.5 h-3.5" />
-          Prefer manual setup?
-        </a>
-        {completeness >= 40 && (
-          <button
-            onClick={() => router.push("/app/command-center")}
-            className="flex items-center gap-1.5 hover:text-foreground transition-colors"
-          >
-            Skip for now
-            <ArrowRight className="w-3.5 h-3.5" />
-          </button>
-        )}
+        <GenesisConversation />
       </motion.div>
     </div>
   );

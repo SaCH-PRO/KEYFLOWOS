@@ -44,6 +44,9 @@
   },
   "packageManager": "pnpm@9.15.0",
   "pnpm": {
+    "patchedDependencies": {
+      "next@16.2.4": "patches/next@16.2.4.patch"
+    },
     "overrides": {
       "baseline-browser-mapping": "^2.8.32",
       "axios": "^1.13.5",

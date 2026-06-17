@@ -47,6 +47,23 @@ const SECTION_LABELS: Record<BlueprintSectionKey, string> = {
   intelligence: "Intelligence",
   workflowModel: "Workflow Model",
   aiPreferences: "AI Preferences",
+  // Genesis sections
+  founderProfile: "Founder Profile",
+  legalProfile: "Legal Profile",
+  registrationProfile: "Registration Profile",
+  taxProfile: "Tax Profile",
+  ownershipProfile: "Ownership Profile",
+  marketProfile: "Market Profile",
+  offerArchitecture: "Offer Architecture",
+  salesSystem: "Sales System",
+  marketingSystem: "Marketing System",
+  operationsSystem: "Operations System",
+  projectionProfile: "Projection Profile",
+  riskProfile: "Risk Profile",
+  complianceProfile: "Compliance Profile",
+  executionRoadmap: "Execution Roadmap",
+  // Patch 2: Legal & Document Pack
+  documentProfile: "Document Pack",
 };
 
 function arrToCsv(value: string[] | undefined): string {

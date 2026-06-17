@@ -277,6 +277,24 @@ export class FlowOrchestratorService {
     if (ctx.brand.voice) lines.push(`- Brand voice: ${ctx.brand.voice}`);
     if (ctx.customerModel.idealCustomer) lines.push(`- Ideal customer: ${ctx.customerModel.idealCustomer}`);
     if (ctx.financials.avgTicket) lines.push(`- Avg ticket: ${ctx.financials.avgTicket}`);
+    if (ctx.legalProfile?.recommendedEntityType) {
+      lines.push(`- Recommended entity type: ${ctx.legalProfile.recommendedEntityType}`);
+    }
+    if (ctx.registrationProfile?.missingRegistrationSteps?.length) {
+      lines.push(`- Missing registration steps: ${ctx.registrationProfile.missingRegistrationSteps.join('; ')}`);
+    }
+    if (ctx.projectionProfile?.runwayMonths) {
+      lines.push(`- Cash runway: ${ctx.projectionProfile.runwayMonths} months`);
+    }
+    if (ctx.riskProfile?.riskScore) {
+      lines.push(`- Business risk score: ${ctx.riskProfile.riskScore}/100`);
+    }
+    if (ctx.executionRoadmap?.today?.length) {
+      lines.push(`- Today's priorities: ${ctx.executionRoadmap.today.join('; ')}`);
+    }
+    if (ctx.complianceProfile?.complianceScore !== undefined) {
+      lines.push(`- Compliance score: ${ctx.complianceProfile.complianceScore}%`);
+    }
     return '\n' + lines.join('\n');
   }
 

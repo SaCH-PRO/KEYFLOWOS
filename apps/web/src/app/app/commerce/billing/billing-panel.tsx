@@ -310,7 +310,7 @@ export function BillingPanel({
             if (gmailStatus?.connected) return;
             if (current) setTaskOrigin(current);
             pushContext({ taskIntent: "connect-email", workspace: "Revenue" });
-            router.push("/app/settings/connections");
+            router.push("/app/key-connect");
           }}
           className={`ml-auto inline-flex items-center gap-1.5 px-2 py-1 rounded-lg border text-sm transition-all duration-200 shrink-0 ${
             gmailStatus?.connected

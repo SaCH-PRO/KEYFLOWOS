@@ -78,6 +78,47 @@ export interface BusinessModelContract {
   recommendations: string[];
 }
 
+export interface GenesisIdeaExtractionContract {
+  summary: string;
+  identity: {
+    name?: string;
+    archetype?: string;
+    industry?: string;
+    oneLiner?: string;
+    country?: string;
+  };
+  operatingModel?: {
+    revenueModel?: string;
+    deliveryMode?: string;
+  };
+  legalProfile?: {
+    recommendedEntityType?: string;
+    entityTypeReason?: string;
+    regulatedIndustry?: boolean;
+    regulatedIndustryNotes?: string[];
+  };
+  customerModel?: {
+    idealCustomer?: string;
+  };
+  financials?: {
+    pricingModel?: string;
+    avgTicket?: number;
+    currency?: string;
+  };
+  projectionProfile?: {
+    startupCapital?: number;
+    startupCosts?: number;
+    monthlyFixedCosts?: number;
+    expectedMonthlyUnits?: number;
+    variableCostPercent?: number;
+  };
+  riskProfile?: {
+    legalRiskFlags?: string[];
+    marketRiskFlags?: string[];
+    operationalRiskFlags?: string[];
+  };
+}
+
 export interface ChatResponseContract {
   reply: string;
   suggestedActions?: string[];
@@ -129,6 +170,53 @@ export interface PresenceInsightsContract {
   };
 }
 
+export interface GenesisSwotPestlePositioningResult {
+  swot: {
+    strengths: string[];
+    weaknesses: string[];
+    opportunities: string[];
+    threats: string[];
+  };
+  pestle: {
+    political: string;
+    economic: string;
+    social: string;
+    technological: string;
+    legal: string;
+    environmental: string;
+  };
+  positioning: {
+    tagline: string;
+    valueProposition: string;
+    keyMessages: string[];
+    differentiators: string[];
+    targetSegments: string[];
+  };
+  analysisSummary: {
+    marketOpportunityScore: number;
+    keyInsight: string;
+  };
+}
+
+export interface GenesisCompetitorResult {
+  name: string;
+  threatLevel?: 'LOW' | 'MEDIUM' | 'HIGH' | null;
+  strengths: string[];
+  weaknesses: string[];
+  positioning?: string | null;
+}
+
+export interface GenesisLaunchPlanResult {
+  launchPlan: {
+    summary: string;
+    phases: Array<{
+      name: string;
+      duration: string;
+      actions: string[];
+    }>;
+  };
+}
+
 export type ContractType =
   | 'intent_parse'
   | 'workflow_plan'
@@ -137,10 +225,14 @@ export type ContractType =
   | 'lead_score'
   | 'quote_recommendation'
   | 'business_model'
+  | 'genesis_idea_extraction'
   | 'chat_response'
   | 'daily_plan'
   | 'weekly_capacity'
-  | 'presence_insights';
+  | 'presence_insights'
+  | 'genesis_swot_pestle_positioning'
+  | 'genesis_competitors'
+  | 'genesis_launch_plan';
 
 interface ValidationResult {
   valid: boolean;
@@ -160,6 +252,20 @@ function validateRequiredFields(data: Record<string, unknown>, fields: string[])
 function validateArrayField(data: Record<string, unknown>, field: string): string[] {
   if (data[field] !== undefined && !Array.isArray(data[field])) {
     return [`Field "${field}" must be an array`];
+  }
+  return [];
+}
+
+function validateStringField(data: Record<string, unknown>, field: string): string[] {
+  if (data[field] !== undefined && typeof data[field] !== 'string') {
+    return [`Field "${field}" must be a string`];
+  }
+  return [];
+}
+
+function validateObjectField(data: Record<string, unknown>, field: string): string[] {
+  if (data[field] !== undefined && (typeof data[field] !== 'object' || data[field] === null || Array.isArray(data[field]))) {
+    return [`Field "${field}" must be an object`];
   }
   return [];
 }
@@ -226,6 +332,13 @@ export function validateOutputContract(
       errors.push(...validateRequiredFields(obj, ['overview', 'valueProposition']));
       break;
 
+    case 'genesis_idea_extraction':
+      errors.push(...validateRequiredFields(obj, ['summary', 'identity']));
+      if (obj.identity && typeof obj.identity !== 'object') {
+        errors.push('identity must be an object');
+      }
+      break;
+
     case 'chat_response':
       errors.push(...validateRequiredFields(obj, ['reply']));
       break;
@@ -283,6 +396,72 @@ export function validateOutputContract(
       errors.push(...validateArrayField(obj, 'overloadedDays'));
       errors.push(...validateArrayField(obj, 'underutilizedDays'));
       errors.push(...validateArrayField(obj, 'recommendations'));
+      break;
+
+    case 'genesis_swot_pestle_positioning':
+      errors.push(...validateRequiredFields(obj, ['swot', 'pestle', 'positioning', 'analysisSummary']));
+      errors.push(...validateObjectField(obj, 'swot'));
+      errors.push(...validateObjectField(obj, 'pestle'));
+      errors.push(...validateObjectField(obj, 'positioning'));
+      errors.push(...validateObjectField(obj, 'analysisSummary'));
+      if (typeof obj.swot === 'object' && obj.swot !== null && !Array.isArray(obj.swot)) {
+        const swot = obj.swot as Record<string, unknown>;
+        errors.push(...validateArrayField(swot, 'strengths'));
+        errors.push(...validateArrayField(swot, 'weaknesses'));
+        errors.push(...validateArrayField(swot, 'opportunities'));
+        errors.push(...validateArrayField(swot, 'threats'));
+      }
+      if (typeof obj.pestle === 'object' && obj.pestle !== null && !Array.isArray(obj.pestle)) {
+        const pestle = obj.pestle as Record<string, unknown>;
+        for (const k of ['political', 'economic', 'social', 'technological', 'legal', 'environmental']) {
+          errors.push(...validateStringField(pestle, k));
+        }
+      }
+      if (typeof obj.positioning === 'object' && obj.positioning !== null && !Array.isArray(obj.positioning)) {
+        const pos = obj.positioning as Record<string, unknown>;
+        errors.push(...validateStringField(pos, 'tagline'));
+        errors.push(...validateStringField(pos, 'valueProposition'));
+        errors.push(...validateArrayField(pos, 'keyMessages'));
+        errors.push(...validateArrayField(pos, 'differentiators'));
+        errors.push(...validateArrayField(pos, 'targetSegments'));
+      }
+      if (typeof obj.analysisSummary === 'object' && obj.analysisSummary !== null && !Array.isArray(obj.analysisSummary)) {
+        const summary = obj.analysisSummary as Record<string, unknown>;
+        if (typeof summary.marketOpportunityScore !== 'number') {
+          errors.push('analysisSummary.marketOpportunityScore must be a number');
+        }
+      }
+      break;
+
+    case 'genesis_competitors':
+      errors.push(...validateRequiredFields(obj, ['competitors']));
+      errors.push(...validateArrayField(obj, 'competitors'));
+      if (Array.isArray(obj.competitors)) {
+        for (const c of obj.competitors as Record<string, unknown>[]) {
+          if (typeof c.name !== 'string') {
+            errors.push('Each competitor must have a name string');
+          }
+          errors.push(...validateArrayField(c, 'strengths'));
+          errors.push(...validateArrayField(c, 'weaknesses'));
+        }
+      }
+      break;
+
+    case 'genesis_launch_plan':
+      errors.push(...validateRequiredFields(obj, ['launchPlan']));
+      errors.push(...validateObjectField(obj, 'launchPlan'));
+      if (typeof obj.launchPlan === 'object' && obj.launchPlan !== null && !Array.isArray(obj.launchPlan)) {
+        const lp = obj.launchPlan as Record<string, unknown>;
+        errors.push(...validateStringField(lp, 'summary'));
+        errors.push(...validateArrayField(lp, 'phases'));
+        if (Array.isArray(lp.phases)) {
+          for (const phase of lp.phases as Record<string, unknown>[]) {
+            errors.push(...validateStringField(phase, 'name'));
+            errors.push(...validateStringField(phase, 'duration'));
+            errors.push(...validateArrayField(phase, 'actions'));
+          }
+        }
+      }
       break;
   }
 

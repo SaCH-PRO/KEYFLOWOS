@@ -16,6 +16,7 @@ const PUBLIC_APP_PATHS = [
   "/app/settings",
   "/app/billing",
   "/app/help",
+  "/app/key-connect",
 ];
 
 function isOnboardingOrPublic(path: string): boolean {

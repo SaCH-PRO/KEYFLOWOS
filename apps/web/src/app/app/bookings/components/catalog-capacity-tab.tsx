@@ -995,7 +995,7 @@ export default function CatalogCapacityTab({
             </div>
 
             <NextLink
-              href="/app/settings/connections"
+              href="/app/key-connect"
               className="kf-card p-3 flex items-center justify-between group hover:border-[hsl(var(--kf-accent1))]/40 transition-colors w-full text-left"
             >
               <div className="flex items-center gap-2.5">

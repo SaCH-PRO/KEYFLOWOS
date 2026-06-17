@@ -232,7 +232,7 @@ export default function WhatsAppInboxPage() {
           <p className="text-sm text-neutral-600 mb-6">
             Link your WhatsApp Business number to send and receive messages directly from Keyflow.
           </p>
-          <Link href="/app/connect">
+          <Link href="/app/key-connect">
             <Button>Connect WhatsApp</Button>
           </Link>
         </div>

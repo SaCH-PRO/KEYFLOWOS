@@ -49,7 +49,7 @@ const SECTION_ORDER: BlueprintSectionKey[] = [
 ];
 // Note: 'intelligence' is intentionally excluded from onboarding; it is inferred from events.
 
-const SECTION_FOCUS: Record<BlueprintSectionKey, { label: string; goal: string; fields: string[] }> = {
+const SECTION_FOCUS: Partial<Record<BlueprintSectionKey, { label: string; goal: string; fields: string[] }>> = {
   identity: {
     label: 'Business Identity',
     goal: 'what the business is, who it serves, and what it stands for',
@@ -221,13 +221,13 @@ export class BlueprintOnboardingService {
 CURRENT BUSINESS CONTEXT:
 ${blueprintSummary}
 
-SECTIONS ALREADY COVERED: ${completed.length > 0 ? completed.map(s => SECTION_FOCUS[s].label).join(', ') : 'None yet'}
+SECTIONS ALREADY COVERED: ${completed.length > 0 ? completed.map(s => SECTION_FOCUS[s]?.label ?? s).join(', ') : 'None yet'}
 
-SECTIONS STILL TO COVER: ${remaining.length > 0 ? remaining.map(s => SECTION_FOCUS[s].label).join(', ') : 'All core sections covered'}
+SECTIONS STILL TO COVER: ${remaining.length > 0 ? remaining.map(s => SECTION_FOCUS[s]?.label ?? s).join(', ') : 'All core sections covered'}
 
-CURRENT FOCUS SECTION: ${current ? SECTION_FOCUS[current].label : 'None — summarizing'}
+CURRENT FOCUS SECTION: ${current ? SECTION_FOCUS[current]?.label ?? current : 'None — summarizing'}
 
-GOAL OF CURRENT SECTION: ${current ? SECTION_FOCUS[current].goal : 'N/A'}
+GOAL OF CURRENT SECTION: ${current ? SECTION_FOCUS[current]?.goal ?? 'N/A' : 'N/A'}
 
 IMPORTANT INSTRUCTIONS:
 1. Be warm, concise, and conversational. Ask ONE clear question at a time.
@@ -309,6 +309,7 @@ Confidence: 0.6 for inferred, 0.85 for stated clearly, 1.0 for explicitly confir
   private getCompletedSections(blueprint: BlueprintData): BlueprintSectionKey[] {
     return SECTION_ORDER.filter(section => {
       const focus = SECTION_FOCUS[section];
+      if (!focus) return false;
       const data = blueprint[section] as Record<string, unknown>;
       const filled = focus.fields.filter(f => this.isPopulated(data?.[f])).length;
       return filled >= Math.ceil(focus.fields.length * 0.6);
@@ -339,13 +340,14 @@ Confidence: 0.6 for inferred, 0.85 for stated clearly, 1.0 for explicitly confir
 
   private sectionFillScore(blueprint: BlueprintData, section: BlueprintSectionKey): number {
     const focus = SECTION_FOCUS[section];
+    if (!focus) return 0;
     const data = blueprint[section] as Record<string, unknown>;
     const filled = focus.fields.filter(f => this.isPopulated(data?.[f])).length;
     return filled / focus.fields.length;
   }
 
   private firstQuestionForSection(section: BlueprintSectionKey): string {
-    const questions: Record<BlueprintSectionKey, string | undefined> = {
+    const questions: Partial<Record<BlueprintSectionKey, string | undefined>> = {
       identity: "To get started, what's your business name and what do you do in one sentence?",
       operatingModel: 'How does your business make money today?',
       constraints: "What's your approximate monthly budget for growth tools and marketing?",

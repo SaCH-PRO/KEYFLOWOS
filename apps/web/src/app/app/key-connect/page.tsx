@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import {
   Plug,
@@ -25,13 +25,22 @@ import {
   Inbox,
   ShieldCheck,
   ExternalLink,
+  Settings2,
 } from "lucide-react";
 import { toast } from "sonner";
-import { Button, Badge } from "@keyflow/ui";
+import { Button } from "@keyflow/ui";
 import { apiGet } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { Switch } from "@/components/ui/switch";
-import { ConnectorCredentialDialog } from "../connect/ConnectorCredentialDialog";
+import { ConnectorCredentialDialog } from "./components/connector-credential-dialog";
+import { BankingSection } from "./components/banking-section";
+import { SocialSection } from "./components/social-section";
+import { ConnectorHealthSection } from "./components/connector-health-section";
+import { ManageDrawer } from "./components/manage-drawer";
+import { DriveIntakeQueue } from "./components/drive/drive-intake-queue";
+import { ContactSyncSettings } from "./components/contact-sync-settings";
+import { CalendarSyncSettings } from "./components/calendar-sync-settings";
+import GoogleDriveBrowser from "../profile/components/google-drive-browser";
 import {
   authenticateConnector,
   disconnectConnector,
@@ -52,7 +61,8 @@ type ConnectorGroup =
   | "accounting"
   | "marketing"
   | "forms"
-  | "other";
+  | "other"
+  | "banking";
 
 interface ConnectorMeta {
   type: string;
@@ -110,6 +120,7 @@ const GROUP_LABELS: Record<ConnectorGroup, { label: string; emoji: string }> = {
   marketing: { label: "Marketing", emoji: "E" },
   forms: { label: "Forms & Webhooks", emoji: "F" },
   other: { label: "Other", emoji: "•" },
+  banking: { label: "Banking", emoji: "$" },
 };
 
 const GROUP_ORDER: ConnectorGroup[] = [
@@ -121,7 +132,11 @@ const GROUP_ORDER: ConnectorGroup[] = [
   "marketing",
   "forms",
   "other",
+  "banking",
 ];
+
+// These are handled by the dedicated Social section using the Social module OAuth flow.
+const SOCIAL_CONNECTOR_TYPES = new Set(["meta_social", "linkedin", "tiktok", "twitter"]);
 
 const STATUS_STYLES: Record<string, { bg: string; text: string; border: string; label: string }> = {
   connected: { bg: "bg-emerald-500/10", text: "text-emerald-400", border: "border-emerald-500/30", label: "Connected" },
@@ -146,11 +161,13 @@ function formatTimeAgo(dateStr: string | null): string {
 export default function KeyConnectPage() {
   const businessId = getStoredBusinessId();
   const searchParams = useSearchParams();
+  const router = useRouter();
   const [entries, setEntries] = useState<DashboardEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState<Record<string, Record<string, boolean>>>({});
   const [configs, setConfigs] = useState<Record<string, ConnectorInboxConfig>>({});
   const [credentialDialog, setCredentialDialog] = useState<string | null>(null);
+  const [manageType, setManageType] = useState<string | null>(null);
 
   const setBusyFor = (type: string, action: string, value: boolean) => {
     setBusy((prev) => ({ ...prev, [type]: { ...prev[type], [action]: value } }));
@@ -183,18 +200,76 @@ export default function KeyConnectPage() {
 
   useEffect(() => {
     if (!searchParams) return;
+    const tab = searchParams.get("tab");
+    if (!tab) return;
+    const el = document.getElementById(tab);
+    if (!el) return;
+    const timeout = setTimeout(() => {
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+      el.classList.add("ring-2", "ring-[hsl(var(--kf-accent1))]/30", "rounded-2xl");
+      setTimeout(() => {
+        el.classList.remove("ring-2", "ring-[hsl(var(--kf-accent1))]/30", "rounded-2xl");
+      }, 2000);
+    }, 200);
+    return () => clearTimeout(timeout);
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (!searchParams) return;
     const drive = searchParams.get("drive");
+    const calendar = searchParams.get("calendar");
+    const google = searchParams.get("google");
+    const social = searchParams.get("social");
     const reason = searchParams.get("reason");
+    let messageShown = false;
+
     if (drive === "success") {
       toast.success("Google Drive connected");
       fetchDashboard();
+      messageShown = true;
     } else if (drive === "error") {
       toast.error(`Google Drive connection failed: ${reason || "unknown"}`);
+      messageShown = true;
     }
-    if (drive) {
-      window.history.replaceState({}, "", window.location.pathname);
+
+    if (calendar === "success") {
+      toast.success("Google Calendar connected");
+      fetchDashboard();
+      messageShown = true;
+    } else if (calendar === "error") {
+      toast.error(`Google Calendar connection failed: ${reason || "unknown"}`);
+      messageShown = true;
     }
-  }, [searchParams, fetchDashboard]);
+
+    if (google === "connected") {
+      toast.success("Google account connected");
+      fetchDashboard();
+      messageShown = true;
+    } else if (google === "error") {
+      toast.error(`Google connection failed: ${reason || "unknown"}`);
+      messageShown = true;
+    }
+
+    if (social === "success") {
+      toast.success("Social account connected");
+      fetchDashboard();
+      messageShown = true;
+    } else if (social === "error") {
+      toast.error(`Social connection failed: ${reason || "unknown"}`);
+      messageShown = true;
+    }
+
+    if (messageShown) {
+      const next = new URLSearchParams(searchParams.toString());
+      next.delete("drive");
+      next.delete("calendar");
+      next.delete("google");
+      next.delete("social");
+      next.delete("reason");
+      const qs = next.toString();
+      router.replace(`/app/key-connect${qs ? `?${qs}` : ""}`, { scroll: false });
+    }
+  }, [searchParams, fetchDashboard, router]);
 
   const handleConnect = async (entry: DashboardEntry) => {
     if (!businessId) return;
@@ -227,6 +302,7 @@ export default function KeyConnectPage() {
     }
 
     if (/^https?:\/\//i.test(authUrl)) {
+      // eslint-disable-next-line react-hooks/immutability -- navigate away to external OAuth provider
       window.location.href = authUrl;
       return;
     }
@@ -234,6 +310,7 @@ export default function KeyConnectPage() {
     if (authUrl.endsWith("/oauth/start")) {
       const start = await apiGet<{ authUrl?: string }>(authUrl);
       if (start.data?.authUrl) {
+        // eslint-disable-next-line react-hooks/immutability -- continue external OAuth redirect
         window.location.href = start.data.authUrl;
       } else {
         toast.error(start.error || "Could not start OAuth flow");
@@ -244,6 +321,7 @@ export default function KeyConnectPage() {
     if (authUrl.includes("/drive/businesses/") && authUrl.endsWith("/auth-url")) {
       const driveRes = await fetchDriveAuthUrl(businessId);
       if (driveRes.data?.url) {
+        // eslint-disable-next-line react-hooks/immutability -- continue external OAuth redirect
         window.location.href = driveRes.data.url;
       } else {
         toast.error(driveRes.error || "Could not get Google Drive auth URL");
@@ -326,12 +404,14 @@ export default function KeyConnectPage() {
     }
   };
 
-  const grouped = entries.reduce<Record<ConnectorGroup, DashboardEntry[]>>((acc, e) => {
-    const group = (e.meta.group ?? "other") as ConnectorGroup;
-    if (!acc[group]) acc[group] = [];
-    acc[group].push(e);
-    return acc;
-  }, { google: [], social: [], payments: [], messaging: [], accounting: [], marketing: [], forms: [], other: [] });
+  const grouped = entries
+    .filter((e) => !SOCIAL_CONNECTOR_TYPES.has(e.meta.type))
+    .reduce<Record<ConnectorGroup, DashboardEntry[]>>((acc, e) => {
+      const group = (e.meta.group ?? "other") as ConnectorGroup;
+      if (!acc[group]) acc[group] = [];
+      acc[group].push(e);
+      return acc;
+    }, { google: [], social: [], payments: [], messaging: [], accounting: [], marketing: [], forms: [], other: [], banking: [] });
 
   if (!businessId) {
     return (
@@ -341,14 +421,66 @@ export default function KeyConnectPage() {
     );
   }
 
+  const MANAGE_CONFIG: Record<string, { title: string; component: React.ReactNode }> = {
+    google_drive: {
+      title: "Google Drive",
+      component: (
+        <div className="space-y-6">
+          <GoogleDriveBrowser businessId={businessId} />
+          <DriveIntakeQueue businessId={businessId} />
+        </div>
+      ),
+    },
+    google_contacts: {
+      title: "Google Contacts",
+      component: <ContactSyncSettings businessId={businessId} type="google_contacts" />,
+    },
+    outlook_contacts: {
+      title: "Outlook Contacts",
+      component: <ContactSyncSettings businessId={businessId} type="outlook_contacts" />,
+    },
+    google_calendar: {
+      title: "Google Calendar",
+      component: <CalendarSyncSettings businessId={businessId} />,
+    },
+  };
+
+  const pageHeader = (
+    <motion.div
+      initial={{ opacity: 0, y: -10 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="flex items-center gap-3"
+    >
+      <div className="h-11 w-11 rounded-2xl bg-gradient-to-br from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent2))] flex items-center justify-center text-white shadow-lg">
+        <Plug className="w-5 h-5" />
+      </div>
+      <div>
+        <h1 className="text-xl font-semibold">Key Connect</h1>
+        <p className="text-sm text-muted-foreground">
+          Connect the services that feed into Key Inbox.
+        </p>
+      </div>
+      <div className="flex-1" />
+      <Link
+        href="/app/key-inbox"
+        className="inline-flex items-center gap-1.5 text-xs font-medium text-[hsl(var(--kf-accent1))] hover:underline"
+      >
+        <Inbox className="w-3.5 h-3.5" /> Open Key Inbox
+      </Link>
+    </motion.div>
+  );
+
   if (loading && entries.length === 0) {
     return (
-      <div className="space-y-6 max-w-5xl mx-auto p-4 animate-pulse">
-        <div className="h-24 rounded-2xl bg-muted/10 border border-border/20" />
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="h-40 rounded-2xl bg-muted/10 border border-border/20" />
-          ))}
+      <div className="space-y-6 max-w-5xl mx-auto p-4">
+        {pageHeader}
+        <div className="animate-pulse space-y-3">
+          <div className="h-24 rounded-2xl bg-muted/10 border border-border/20" />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="h-40 rounded-2xl bg-muted/10 border border-border/20" />
+            ))}
+          </div>
         </div>
       </div>
     );
@@ -356,35 +488,14 @@ export default function KeyConnectPage() {
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto p-4">
-      <motion.div
-        initial={{ opacity: 0, y: -10 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="flex items-center gap-3"
-      >
-        <div className="h-11 w-11 rounded-2xl bg-gradient-to-br from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent2))] flex items-center justify-center text-white shadow-lg">
-          <Plug className="w-5 h-5" />
-        </div>
-        <div>
-          <h1 className="text-xl font-semibold">Key Connect</h1>
-          <p className="text-sm text-muted-foreground">
-            Connect the services that feed into Key Inbox.
-          </p>
-        </div>
-        <div className="flex-1" />
-        <Link
-          href="/app/key-inbox"
-          className="inline-flex items-center gap-1.5 text-xs font-medium text-[hsl(var(--kf-accent1))] hover:underline"
-        >
-          <Inbox className="w-3.5 h-3.5" /> Open Key Inbox
-        </Link>
-      </motion.div>
+      {pageHeader}
 
       {GROUP_ORDER.map((group) => {
         const items = grouped[group] ?? [];
-        if (!items.length) return null;
+        if (!items.length || group === "banking") return null;
         const meta = GROUP_LABELS[group];
         return (
-          <section key={group} className="space-y-3">
+          <section key={group} id={group} className="space-y-3">
             <div className="flex items-center gap-2">
               <div className="h-7 w-7 rounded-lg bg-gradient-to-br from-[hsl(var(--kf-accent1))]/20 to-[hsl(var(--kf-accent2))]/20 border border-border/40 flex items-center justify-center text-[11px] font-bold">
                 {meta.emoji}
@@ -554,6 +665,18 @@ export default function KeyConnectPage() {
                         )}
                         Test
                       </Button>
+
+                      {MANAGE_CONFIG[meta.type] && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setManageType(meta.type)}
+                          className="h-7 text-xs"
+                        >
+                          <Settings2 className="h-3 w-3 mr-1" />
+                          Manage
+                        </Button>
+                      )}
                     </div>
                   </motion.div>
                 );
@@ -562,6 +685,20 @@ export default function KeyConnectPage() {
           </section>
         );
       })}
+
+      <SocialSection businessId={businessId} />
+      <BankingSection businessId={businessId} />
+      <ConnectorHealthSection businessId={businessId} />
+
+      {manageType && (
+        <ManageDrawer
+          open={!!manageType}
+          onClose={() => setManageType(null)}
+          title={MANAGE_CONFIG[manageType]?.title ?? "Manage"}
+        >
+          {MANAGE_CONFIG[manageType]?.component}
+        </ManageDrawer>
+      )}
 
       {credentialDialog && (
         <ConnectorCredentialDialog

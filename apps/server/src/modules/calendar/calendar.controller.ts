@@ -154,14 +154,14 @@ export class CalendarController {
     const parsed = this.sync.verifyState(state);
     if (!parsed) {
       return res.redirect(
-        `${frontendUrl}/app/settings/connections?calendar=error&reason=invalid_state`,
+        `${frontendUrl}/app/key-connect?calendar=error&reason=invalid_state`,
       );
     }
     try {
       await this.sync.completeOAuth(parsed.businessId, code);
-      return res.redirect(`${frontendUrl}/app/settings/connections?calendar=success`);
+      return res.redirect(`${frontendUrl}/app/key-connect?calendar=success`);
     } catch {
-      return res.redirect(`${frontendUrl}/app/settings/connections?calendar=error`);
+      return res.redirect(`${frontendUrl}/app/key-connect?calendar=error`);
     }
   }
 

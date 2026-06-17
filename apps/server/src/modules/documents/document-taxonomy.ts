@@ -161,6 +161,15 @@ export const DOCUMENT_CATEGORIES = [
     tier: 'ADVANCED',
     trigger: 'MULTI_JURISDICTION',
   },
+  {
+    name: 'Strategy & Planning',
+    slug: 'strategy-planning',
+    description: 'Strategic planning documents including market analysis and launch plans',
+    icon: 'Target',
+    sortOrder: 19,
+    tier: 'UNIVERSAL_CORE',
+    trigger: null,
+  },
 ];
 
 export interface DocTypeDef {
@@ -309,4 +318,7 @@ export const DOCUMENT_TYPES: DocTypeDef[] = [
   { name: 'International Tax Compliance Guide', slug: 'intl-tax-guide', description: 'Tax obligations, withholding requirements, and treaties for cross-border operations', categorySlug: 'international', riskTier: 'RED', requiredProfileFields: ['name', 'country', 'industry'], brandSensitive: false, financialSensitive: true, legalSensitive: true, jurisdictionSensitive: true, sortOrder: 3 },
   { name: 'Export/Import Compliance Policy', slug: 'export-import-policy', description: 'Policies for complying with customs, trade sanctions, and import/export regulations', categorySlug: 'international', riskTier: 'RED', requiredProfileFields: ['name', 'country', 'industry'], brandSensitive: false, financialSensitive: true, legalSensitive: true, jurisdictionSensitive: true, sortOrder: 4 },
   { name: 'Multi-Currency Payment Policy', slug: 'multi-currency-policy', description: 'Procedures for invoicing, receiving, and managing payments in multiple currencies', categorySlug: 'international', riskTier: 'YELLOW', requiredProfileFields: ['name', 'country'], brandSensitive: false, financialSensitive: true, legalSensitive: false, jurisdictionSensitive: true, sortOrder: 5 },
+
+  // Strategy & Planning
+  { name: 'Market Strategy', slug: 'market-strategy', description: 'Combined SWOT, PESTLE, competitor analysis, positioning, and launch plan', categorySlug: 'strategy-planning', riskTier: 'GREEN', requiredProfileFields: ['name', 'industry'], brandSensitive: true, financialSensitive: false, legalSensitive: false, jurisdictionSensitive: false, sortOrder: 1 },
 ];

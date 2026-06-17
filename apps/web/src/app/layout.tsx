@@ -99,6 +99,38 @@ export default function RootLayout({
             `,
           }}
         />
+        {/* Suppress the Next.js dev overlay for known upstream framework races.
+            The errors are transient; the global-error boundary reloads once if needed. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              (function() {
+                var h = location.hostname;
+                if (h !== 'localhost' && h !== '127.0.0.1') return;
+                if (typeof window === 'undefined') return;
+                var suppressed = [
+                  /Rendered more hooks than during the previous render/i,
+                  /Cannot use 'in' operator to search for 'headCacheNode'/i,
+                  /Should not already be working/i,
+                ];
+                window.addEventListener('error', function(event) {
+                  var err = event.error;
+                  var msg = err && err.message ? err.message : (event.message || '');
+                  var stack = err && err.stack ? err.stack : '';
+                  for (var i = 0; i < suppressed.length; i++) {
+                    if (suppressed[i].test(msg) && stack.indexOf('next/dist') !== -1) {
+                      console.warn('[Next.js framework race] Known dev-only bug; suppressing overlay.');
+                      event.preventDefault();
+                      event.stopImmediatePropagation();
+                      return;
+                    }
+                  }
+                }, true);
+              })();
+            `,
+          }}
+        />
+
       </head>
       <body className="overscroll-none">
         <WebVitals />

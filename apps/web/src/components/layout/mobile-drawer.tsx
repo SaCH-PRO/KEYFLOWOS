@@ -66,7 +66,7 @@ function MobileSection({
           const Icon = item.icon;
           const active = isSecondaryActive(item);
           const showConnectorBadge =
-            item.href === "/app/build/connect" && connectorAlertCount > 0;
+            item.href === "/app/key-connect" && connectorAlertCount > 0;
           const isLocked = isFeatureLocked(item);
           if (isLocked) {
             return (

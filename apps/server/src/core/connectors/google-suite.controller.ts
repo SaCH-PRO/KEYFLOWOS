@@ -40,8 +40,8 @@ export class GoogleSuiteController {
     @Res() res: Response,
   ) {
     const appUrl = process.env.APP_URL || process.env.NEXT_PUBLIC_APP_URL || '';
-    const success = `${appUrl}/app/connect?google=connected`;
-    const failure = `${appUrl}/app/connect?google=error`;
+    const success = `${appUrl}/app/key-connect?google=connected`;
+    const failure = `${appUrl}/app/key-connect?google=error`;
 
     if (error) {
       return res.redirect(`${failure}&reason=${encodeURIComponent(error)}`);
@@ -56,7 +56,7 @@ export class GoogleSuiteController {
         services: result.enabledServices.join(','),
         email: result.email,
       });
-      return res.redirect(`${appUrl}/app/connect?${params.toString()}`);
+      return res.redirect(`${appUrl}/app/key-connect?${params.toString()}`);
     } catch (err) {
       const reason = err instanceof Error ? err.message : 'Unknown error';
       return res.redirect(`${failure}&reason=${encodeURIComponent(reason)}`);

@@ -245,6 +245,10 @@ export async function deleteBankConnection(businessId: string, id: string) {
   return apiDelete<void>(`/finance/businesses/${businessId}/bank-connections/${id}`);
 }
 
+export async function syncBankConnection(businessId: string, id: string) {
+  return apiPost<{ lastSyncAt?: string; cursor?: string | null }>({ path: `/finance/businesses/${businessId}/bank-connections/${id}/sync`, body: {} });
+}
+
 // ---------- Exchange Rates ----------
 export interface ExchangeRate {
   id: string;

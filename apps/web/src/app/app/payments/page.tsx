@@ -147,7 +147,7 @@ export default function PaymentsPage() {
             ) : (
               <Link
                 key={g.id}
-                href="/app/connect"
+                href="/app/key-connect"
                 className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-amber-800 hover:bg-amber-100"
                 title={`Connect ${g.name}`}
               >
@@ -164,7 +164,7 @@ export default function PaymentsPage() {
           <span>
             {disconnectedGateways.map((g) => g.name).join(", ")} not connected — activity from {disconnectedGateways.length === 1 ? "this provider" : "these providers"} won&apos;t appear.
           </span>
-          <Link href="/app/connect" className="ml-auto inline-flex items-center gap-1 rounded-md border border-amber-300 bg-white px-2 py-1 text-amber-800 hover:bg-amber-100">
+          <Link href="/app/key-connect" className="ml-auto inline-flex items-center gap-1 rounded-md border border-amber-300 bg-white px-2 py-1 text-amber-800 hover:bg-amber-100">
             <Plug className="h-3 w-3" /> Open Connect
           </Link>
         </div>
@@ -397,7 +397,7 @@ function LinksTab({
             <AlertCircle className="h-4 w-4 mt-0.5" />
             <div>No connected gateway supports payment links. Connect Stripe or PayPal to enable this feature.</div>
           </div>
-          <Link href="/app/connect" className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-white px-2 py-1 text-xs text-amber-800 hover:bg-amber-100">
+          <Link href="/app/key-connect" className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-white px-2 py-1 text-xs text-amber-800 hover:bg-amber-100">
             <Plug className="h-3 w-3" /> Open Connect
           </Link>
         </div>

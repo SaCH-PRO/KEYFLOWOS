@@ -75,7 +75,7 @@ export class ExpensePostingService {
     txClient?: Prisma.TransactionClient,
   ): Promise<string> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const tx = (txClient ?? this.prisma.client) as any;
+    const tx = txClient ? (txClient as any) : (this.prisma.client as any);
     if (categoryId) {
       const cat = await tx.expenseCategory.findUnique({
         where: { id: categoryId },

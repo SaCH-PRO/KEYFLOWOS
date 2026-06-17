@@ -68,7 +68,7 @@ export function getNotificationLink(n: AppNotification): string | null {
   if (type.includes("expense") || title.includes("expense")) return "/app/expenses";
   if (type.includes("automation") || title.includes("automation")) return "/app/automations";
   if (type.includes("endorsement") && n.data?.link) return n.data.link;
-  if (type.includes("connector") || title.includes("reconnect")) return "/app/connect";
+  if (type.includes("connector") || title.includes("reconnect")) return "/app/key-connect";
   if (type.includes("command") || title.includes("command")) return "/app/command-center";
   if (type.includes("inbox") || title.includes("message") || title.includes("whatsapp")) return "/app/inbox";
   if (n.data?.link) return n.data.link;

@@ -1,0 +1,111 @@
+<h2>Proposed <code>/app/market</code> hub layout</h2>
+<p class="subtitle">A single-page hub that generates all strategy artifacts together. Scrollable cards keep each analysis scannable.</p>
+
+<div class="mockup">
+  <div class="mockup-header">Market Strategy & Intelligence</div>
+  <div class="mockup-body" style="padding: 1rem; background: #0b0d10; color: #e6e6e6;">
+    <!-- top bar -->
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem;">
+      <div>
+        <div style="font-size:1.25rem; font-weight:600;">Market readiness</div>
+        <div style="font-size:0.875rem; color:#9ca3af;">SWOT · PESTLE · Competitors · Positioning · Launch plan</div>
+      </div>
+      <button class="mock-button" style="background:#f97316; color:#fff; border:none; padding:0.5rem 1rem; border-radius:0.375rem;">Generate market strategy</button>
+    </div>
+
+    <!-- score row -->
+    <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:1rem; margin-bottom:1.5rem;">
+      <div style="background:#11131a; border:1px solid #1f2937; border-radius:0.5rem; padding:1rem; text-align:center;">
+        <div style="font-size:1.5rem; font-weight:700; color:#f97316;">72</div>
+        <div style="font-size:0.7rem; text-transform:uppercase; color:#9ca3af;">Market readiness</div>
+      </div>
+      <div style="background:#11131a; border:1px solid #1f2937; border-radius:0.5rem; padding:1rem; text-align:center;">
+        <div style="font-size:1.5rem; font-weight:700; color:#22c55e;">4</div>
+        <div style="font-size:0.7rem; text-transform:uppercase; color:#9ca3af;">Competitors tracked</div>
+      </div>
+      <div style="background:#11131a; border:1px solid #1f2937; border-radius:0.5rem; padding:1rem; text-align:center;">
+        <div style="font-size:1.5rem; font-weight:700; color:#3b82f6;">12</div>
+        <div style="font-size:0.7rem; text-transform:uppercase; color:#9ca3af;">Launch actions</div>
+      </div>
+    </div>
+
+    <!-- SWOT -->
+    <div style="background:#11131a; border:1px solid #1f2937; border-radius:0.5rem; padding:1rem; margin-bottom:1rem;">
+      <div style="font-weight:600; margin-bottom:0.75rem;">SWOT analysis</div>
+      <div style="display:grid; grid-template-columns: repeat(2, 1fr); gap:0.75rem;">
+        <div style="background:#0f172a; border-radius:0.375rem; padding:0.75rem;">
+          <div style="font-size:0.7rem; color:#22c55e; text-transform:uppercase; margin-bottom:0.25rem;">Strengths</div>
+          <div style="font-size:0.8rem;">• Local T&T focus<br>• Founder health-tech background</div>
+        </div>
+        <div style="background:#0f172a; border-radius:0.375rem; padding:0.75rem;">
+          <div style="font-size:0.7rem; color:#ef4444; text-transform:uppercase; margin-bottom:0.25rem;">Weaknesses</div>
+          <div style="font-size:0.8rem;">• Limited startup capital<br>• No brand awareness yet</div>
+        </div>
+        <div style="background:#0f172a; border-radius:0.375rem; padding:0.75rem;">
+          <div style="font-size:0.7rem; color:#3b82f6; text-transform:uppercase; margin-bottom:0.25rem;">Opportunities</div>
+          <div style="font-size:0.8rem;">• Underserved private clinics<br>• Digital-payments growth</div>
+        </div>
+        <div style="background:#0f172a; border-radius:0.375rem; padding:0.75rem;">
+          <div style="font-size:0.7rem; color:#f59e0b; text-transform:uppercase; margin-bottom:0.25rem;">Threats</div>
+          <div style="font-size:0.8rem;">• Established international EMRs<br>• Regulatory changes</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PESTLE -->
+    <div style="background:#11131a; border:1px solid #1f2937; border-radius:0.5rem; padding:1rem; margin-bottom:1rem;">
+      <div style="font-weight:600; margin-bottom:0.75rem;">PESTLE analysis</div>
+      <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:0.75rem;">
+        <div style="background:#0f172a; border-radius:0.375rem; padding:0.75rem; font-size:0.8rem;"><strong>Political:</strong> Healthcare budget and procurement policy.</div>
+        <div style="background:#0f172a; border-radius:0.375rem; padding:0.75rem; font-size:0.8rem;"><strong>Economic:</strong> TTD revenue, forex risk for SaaS imports.</div>
+        <div style="background:#0f172a; border-radius:0.375rem; padding:0.75rem; font-size:0.8rem;"><strong>Social:</strong> Aging population, doctor tech adoption.</div>
+        <div style="background:#0f172a; border-radius:0.375rem; padding:0.75rem; font-size:0.8rem;"><strong>Technological:</strong> Cloud EMR, telehealth expectations.</div>
+        <div style="background:#0f172a; border-radius:0.375rem; padding:0.75rem; font-size:0.8rem;"><strong>Legal:</strong> Health data privacy, BIR e-filing.</div>
+        <div style="background:#0f172a; border-radius:0.375rem; padding:0.75rem; font-size:0.8rem;"><strong>Environmental:</strong> Minimal direct impact; paperless angle.</div>
+      </div>
+    </div>
+
+    <!-- Competitors -->
+    <div style="background:#11131a; border:1px solid #1f2937; border-radius:0.5rem; padding:1rem; margin-bottom:1rem;">
+      <div style="font-weight:600; margin-bottom:0.75rem;">Competitor profile</div>
+      <div style="display:grid; grid-template-columns: repeat(2, 1fr); gap:0.75rem;">
+        <div style="background:#0f172a; border-radius:0.375rem; padding:0.75rem;">
+          <div style="display:flex; justify-content:space-between;">
+            <span style="font-weight:600;">International EMR A</span>
+            <span style="font-size:0.7rem; color:#9ca3af;">High threat</span>
+          </div>
+          <div style="font-size:0.8rem; color:#9ca3af; margin-top:0.25rem;">Strengths: feature-rich, global support. Weaknesses: expensive, not T&T-localized.</div>
+        </div>
+        <div style="background:#0f172a; border-radius:0.375rem; padding:0.75rem;">
+          <div style="display:flex; justify-content:space-between;">
+            <span style="font-weight:600;">Local scheduling app B</span>
+            <span style="font-size:0.7rem; color:#9ca3af;">Medium threat</span>
+          </div>
+          <div style="font-size:0.8rem; color:#9ca3af; margin-top:0.25rem;">Strengths: cheap, known locally. Weaknesses: no EMR, no billing.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Positioning + Launch -->
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:1rem;">
+      <div style="background:#11131a; border:1px solid #1f2937; border-radius:0.5rem; padding:1rem;">
+        <div style="font-weight:600; margin-bottom:0.5rem;">Offer positioning</div>
+        <div style="font-size:0.8rem; color:#9ca3af;">"The only clinic management platform built for Trinidad & Tobago private practices — local payments, local compliance, and support that understands your workflow."</div>
+      </div>
+      <div style="background:#11131a; border:1px solid #1f2937; border-radius:0.5rem; padding:1rem;">
+        <div style="font-weight:600; margin-bottom:0.5rem;">90-day launch plan</div>
+        <div style="font-size:0.8rem; color:#9ca3af;">Week 1-2: validate positioning with 3 clinics.<br>Week 3-6: content + demo bookings.<br>Week 7-12: paid pilots + referrals.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>What this wireframe shows</h3>
+  <ul>
+    <li>One primary <strong>Generate market strategy</strong> CTA at the top.</li>
+    <li>Summary score cards (market readiness, competitors, launch actions).</li>
+    <li>Scrollable analysis cards: SWOT, PESTLE, Competitors, Positioning, Launch plan.</li>
+    <li>Each card is collapsible/expandable in the real implementation.</li>
+  </ul>
+</div>

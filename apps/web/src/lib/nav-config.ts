@@ -27,13 +27,13 @@ import {
   Target,
   Activity,
   ShieldCheck,
+  Scale,
   Building,
   BrainCircuit,
   Store,
   Globe,
   GraduationCap,
   Cog,
-  Link,
   Bot,
   Code,
   Plug,
@@ -187,6 +187,7 @@ export const operateSections: NavSection[] = [
     items: [
       { label: "Approvals", href: "/app/approvals", icon: CheckSquare },
       { label: "Compliance", href: "/app/evidence", icon: ShieldCheck },
+      { label: "Legal", href: "/app/legal", icon: Scale },
     ],
   },
   {
@@ -204,6 +205,7 @@ export const operateSections: NavSection[] = [
     label: "Strategy",
     icon: Target,
     items: [
+      { label: "Market Strategy", href: "/app/market", icon: Target },
       { label: "Goals", href: "/app/goals", icon: Target },
       { label: "Blueprint", href: "/app/blueprint", icon: FileText },
     ],
@@ -239,7 +241,6 @@ export const buildSections: NavSection[] = [
       { label: "Workspace", href: "/app/settings", icon: Building },
       { label: "Team", href: "/app/settings/team", icon: Users },
       { label: "Structure", href: "/app/structure", icon: Layers },
-      { label: "Connections", href: "/app/settings/connections", icon: Link },
       { label: "AI", href: "/app/settings/ai", icon: Bot },
       { label: "Compliance", href: "/app/settings/compliance", icon: ShieldCheck },
       { label: "Developers", href: "/app/settings/developers", icon: Code },
@@ -251,7 +252,6 @@ export const buildSections: NavSection[] = [
     icon: Plug,
     items: [
       { label: "Key Connect", href: "/app/key-connect", icon: Activity },
-      { label: "Legacy Connect", href: "/app/connect", icon: Plug },
     ],
   },
   {

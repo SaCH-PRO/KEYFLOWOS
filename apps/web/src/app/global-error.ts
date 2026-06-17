@@ -27,6 +27,23 @@
 
 import { createElement as h, useEffect } from "react";
 
+const KNOWN_NEXTJS_FRAMEWORK_ERRORS = [
+  "Rendered more hooks than during the previous render",
+  "Cannot use 'in' operator to search for 'headCacheNode' in null",
+  "Should not already be working",
+];
+
+function isKnownFrameworkError(error: Error & { digest?: string }) {
+  const msg = error?.message || "";
+  const stack = error?.stack || "";
+  return (
+    typeof msg === "string" &&
+    KNOWN_NEXTJS_FRAMEWORK_ERRORS.some((known) => msg.includes(known)) &&
+    typeof stack === "string" &&
+    (stack.includes("app-router.js") || stack.includes("next/dist"))
+  );
+}
+
 export default function GlobalError({
   error,
   reset,
@@ -36,6 +53,17 @@ export default function GlobalError({
 }) {
   useEffect(() => {
     console.error("Global error:", error);
+
+    // Dev-only auto-recovery for known Next.js 16 + React 19 App Router bugs.
+    // These are transient framework races; one reload usually clears them.
+    // See vercel/next.js#78396 and facebook/react#33556.
+    if (process.env.NODE_ENV !== "production" && isKnownFrameworkError(error)) {
+      if (!sessionStorage.getItem("__kfFrameworkErrorReloaded")) {
+        console.warn("[GlobalError] Known Next.js framework race; reloading once...");
+        sessionStorage.setItem("__kfFrameworkErrorReloaded", "1");
+        window.location.reload();
+      }
+    }
   }, [error]);
 
   return h(

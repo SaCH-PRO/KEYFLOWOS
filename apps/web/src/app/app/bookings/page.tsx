@@ -553,7 +553,7 @@ export default function BookingsPage() {
             side="bottom"
           >
             <Link
-              href="/app/settings/connections"
+              href="/app/key-connect"
               className="inline-flex items-center justify-center gap-1.5 min-w-[44px] min-h-[44px] px-2 rounded-lg text-[11px] transition-colors"
               style={{
                 background: calendarConnected ? "hsl(var(--kf-success) / 0.08)" : "hsl(var(--muted) / 0.3)",

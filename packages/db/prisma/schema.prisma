@@ -521,11 +521,47 @@ model Business {
   maturityScores       MaturityScore[]
   projections          Projection[]
 
+  // Patch 3: Market Strategy & Intelligence
+  marketStrategy       MarketStrategy?
+  competitors          Competitor[]
+
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt      @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
 
   @@map("businesses")
+}
+
+model MarketStrategy {
+  id              String   @id @default(cuid())
+  businessId      String   @unique @map("business_id")
+  business        Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  swot            Json?    @map("swot")
+  pestle          Json?    @map("pestle")
+  positioning     Json?    @map("positioning")
+  launchPlan      Json?    @map("launch_plan")
+  analysisSummary Json?    @map("analysis_summary")
+  generatedAt     DateTime? @map("generated_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@map("market_strategies")
+}
+
+model Competitor {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name        String
+  threatLevel String?  @map("threat_level")
+  strengths   String[]
+  weaknesses  String[]
+  positioning String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId])
+  @@map("competitors")
 }
 
 model DriveSyncCursor {
@@ -7030,6 +7066,74 @@ model BusinessBlueprint {
   /// { autonomyLevel, tone, notifyOnRecommendations, notifyOnAlerts,
   ///   approvedActions[], voiceEnabled }
   aiPreferences  Json?    @map("ai_preferences")
+
+  // --- Business Genesis sections (Patch 1) --------------------------------
+
+  /// { founderName, background, skills[], weaknesses[], riskTolerance,
+  ///   weeklyAvailabilityHours, visionStatement }
+  founderProfile Json? @map("founder_profile")
+
+  /// { country, jurisdiction, hasPhysicalLocation, recommendedEntityType,
+  ///   entityTypeReason, regulatedIndustry, regulatedIndustryNotes[],
+  ///   legalRiskFlags[], disclaimerAcceptedAt }
+  legalProfile Json? @map("legal_profile")
+
+  /// { businessNameStatus, companiesRegistryStatus, birStatus,
+  ///   nisEmployerStatus, vatStatus, businessBankStatus,
+  ///   requiredLicenses[], missingRegistrationSteps[] }
+  registrationProfile Json? @map("registration_profile")
+
+  /// { country, taxIdStatus, vatThresholdWatch, estimatedAnnualRevenue,
+  ///   payrollExpected, contractorPaymentsExpected, taxReadinessScore }
+  taxProfile Json? @map("tax_profile")
+
+  /// { hasPartners, owners[], needsShareholderAgreement,
+  ///   unresolvedOwnershipRisks[] }
+  ownershipProfile Json? @map("ownership_profile")
+
+  /// { targetGeography, marketCategory, marketStage, trends[],
+  ///   barriersToEntry[], demandSignals[], marketOpportunityScore }
+  marketProfile Json? @map("market_profile")
+
+  /// { coreOffer, offerLadder[], pricingTiers[], upsells[],
+  ///   recurringRevenueOpportunities[] }
+  offerArchitecture Json? @map("offer_architecture")
+
+  /// { salesChannels[], pipelineStages[], leadSources[],
+  ///   conversionAssumptions, followUpCadence }
+  salesSystem Json? @map("sales_system")
+
+  /// { channels[], contentPillars[], campaignIdeas[], brandNarrative,
+  ///   launchPlan[] }
+  marketingSystem Json? @map("marketing_system")
+
+  /// { coreWorkflows[], dailyChecklist[], weeklyChecklist[],
+  ///   fulfillmentProcess[], customerSupportProcess[], vendorProcess[] }
+  operationsSystem Json? @map("operations_system")
+
+  /// { startupCapital, startupCosts, monthlyFixedCosts,
+  ///   variableCostPercent, avgTicket, expectedMonthlyUnits,
+  ///   conservativeMonthlyUnits, aggressiveMonthlyUnits, breakEvenUnits,
+  ///   breakEvenRevenue, runwayMonths, monthByMonth[] }
+  projectionProfile Json? @map("projection_profile")
+
+  /// { financialRisks[], legalRisks[], marketRisks[], operationalRisks[],
+  ///   founderRisks[], riskScore, mitigationPlan[] }
+  riskProfile Json? @map("risk_profile")
+
+  /// { complianceItems[], complianceScore }
+  complianceProfile Json? @map("compliance_profile")
+
+  /// { today[], sevenDayPlan[], thirtyDayPlan[], ninetyDayPlan[],
+  ///   twelveMonthMilestones[] }
+  executionRoadmap Json? @map("execution_roadmap")
+
+  /// { generatedDocuments[], missingDocuments[] }
+  documentProfile Json? @map("document_profile")
+
+  /// 0–100 Genesis readiness score. Separate from core completeness so the
+  /// existing onboarding guard remains stable while Genesis modules mature.
+  readinessScore Int @default(0) @map("readiness_score")
 
   /// Per-section confidence scores { identity, operatingModel, goals,
   ///   customerModel, brand, financials, constraints, workflowModel }

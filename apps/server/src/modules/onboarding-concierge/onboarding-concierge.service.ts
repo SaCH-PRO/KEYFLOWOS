@@ -4,7 +4,33 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
+import type {
+  BlueprintData,
+  BlueprintRegistrationProfile,
+} from '../blueprint/blueprint.types';
 import { matchIndustryTemplate, getTemplateById, IndustryTemplate, INDUSTRY_TEMPLATES } from './industry-templates';
+
+function isPopulated(value: unknown): boolean {
+  if (value === null || value === undefined) return false;
+  if (typeof value === 'string') return value.trim().length > 0;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === 'number') return !Number.isNaN(value);
+  if (typeof value === 'object') return Object.keys(value as object).length > 0;
+  return Boolean(value);
+}
+
+function isRegistrationStepActive(status: unknown): boolean {
+  if (typeof status !== 'string') return false;
+  const value = status.trim().toUpperCase();
+  return value !== 'NOT_STARTED' && value !== 'UNKNOWN' && value !== 'IDEA_ONLY' && value !== '';
+}
+
+function isRegistrationStepCompleteForReadiness(status: unknown): boolean {
+  if (typeof status !== 'string') return false;
+  const value = status.trim().toUpperCase();
+  const incomplete = ['NOT_STARTED', 'UNKNOWN', 'IDEA_ONLY', 'PENDING', 'IN_PROGRESS', ''];
+  return !incomplete.includes(value);
+}
 
 export interface SetupStatus {
   products: boolean;
@@ -13,6 +39,12 @@ export interface SetupStatus {
   storefront: boolean;
   contacts: boolean;
   profile: boolean;
+  legalProfile: boolean;
+  registrationPlan: boolean;
+  financeModel: boolean;
+  marketStrategy: boolean;
+  operationsPlan: boolean;
+  complianceChecklist: boolean;
   completedCount: number;
   totalSteps: number;
   percentage: number;
@@ -84,7 +116,7 @@ export class OnboardingConciergeService {
   ) {}
 
   async getSetupStatus(businessId: string): Promise<SetupStatus> {
-    const [business, productCount, contactCount] = await Promise.all([
+    const [business, productCount, contactCount, blueprint] = await Promise.all([
       this.prisma.client.business.findUnique({
         where: { id: businessId },
         select: {
@@ -101,6 +133,10 @@ export class OnboardingConciergeService {
       }),
       this.prisma.client.product.count({ where: { businessId, deletedAt: null } }),
       this.prisma.client.contact.count({ where: { businessId, deletedAt: null } }),
+      this.blueprint.getBlueprint(businessId).catch((err: unknown) => {
+        this.logger.debug(`Failed to load blueprint for setup status: ${(err as Error).message}`);
+        return null;
+      }),
     ]);
 
     const meta = parseMetaData(business?.metaData);
@@ -112,7 +148,31 @@ export class OnboardingConciergeService {
     const storefront = !!(business?.slug && business?.storeEnabled);
     const contacts = contactCount > 0;
 
-    const steps = [profile, products, businessHours, payments, storefront, contacts];
+    const genesisStatus = blueprint
+      ? this.deriveGenesisSetupStatus(blueprint)
+      : {
+          legalProfile: false,
+          registrationPlan: false,
+          financeModel: false,
+          marketStrategy: false,
+          operationsPlan: false,
+          complianceChecklist: false,
+        };
+
+    const steps = [
+      profile,
+      products,
+      businessHours,
+      payments,
+      storefront,
+      contacts,
+      genesisStatus.legalProfile,
+      genesisStatus.registrationPlan,
+      genesisStatus.financeModel,
+      genesisStatus.marketStrategy,
+      genesisStatus.operationsPlan,
+      genesisStatus.complianceChecklist,
+    ];
     const completedCount = steps.filter(Boolean).length;
 
     return {
@@ -122,9 +182,156 @@ export class OnboardingConciergeService {
       storefront,
       contacts,
       profile,
+      legalProfile: genesisStatus.legalProfile,
+      registrationPlan: genesisStatus.registrationPlan,
+      financeModel: genesisStatus.financeModel,
+      marketStrategy: genesisStatus.marketStrategy,
+      operationsPlan: genesisStatus.operationsPlan,
+      complianceChecklist: genesisStatus.complianceChecklist,
       completedCount,
       totalSteps: steps.length,
       percentage: Math.round((completedCount / steps.length) * 100),
+    };
+  }
+
+  private deriveGenesisSetupStatus(blueprint: BlueprintData) {
+    const legalProfile = blueprint.legalProfile || {};
+    const registrationProfile = blueprint.registrationProfile || {};
+    const projectionProfile = blueprint.projectionProfile || {};
+    const customerModel = blueprint.customerModel || {};
+    const offerArchitecture = blueprint.offerArchitecture || {};
+    const marketingSystem = blueprint.marketingSystem || {};
+    const operationsSystem = blueprint.operationsSystem || {};
+    const workflowModel = blueprint.workflowModel || {};
+    const complianceProfile = blueprint.complianceProfile || {};
+
+    const legalProfileDone = !!(
+      legalProfile.recommendedEntityType &&
+      legalProfile.recommendedEntityType !== 'UNKNOWN' &&
+      legalProfile.disclaimerAcceptedAt
+    );
+
+    const registrationStatusFields: (keyof BlueprintRegistrationProfile)[] = [
+      'companiesRegistryStatus',
+      'birStatus',
+      'nisEmployerStatus',
+      'vatStatus',
+      'businessBankStatus',
+    ];
+    const registrationPlanDone = registrationStatusFields.some((field) =>
+      isRegistrationStepActive(registrationProfile[field]),
+    );
+
+    const financeModelDone = !!(
+      typeof projectionProfile.monthlyFixedCosts === 'number' &&
+      typeof projectionProfile.breakEvenRevenue === 'number'
+    );
+
+    const marketStrategyDone = !!(
+      customerModel.idealCustomer &&
+      customerModel.idealCustomer.trim().length > 0 &&
+      (isPopulated(offerArchitecture.coreOffer) || (marketingSystem.channels && marketingSystem.channels.length > 0))
+    );
+
+    const operationsPlanDone = !!(
+      (operationsSystem.coreWorkflows && operationsSystem.coreWorkflows.length > 0) ||
+      workflowModel.primaryWorkflow
+    );
+
+    const items = complianceProfile.complianceItems || [];
+    const complianceChecklistDone = !!(
+      items.length > 0 &&
+      items.some((item) => item.status === 'DONE' || item.status === 'NOT_APPLICABLE')
+    );
+
+    return {
+      legalProfile: legalProfileDone,
+      registrationPlan: registrationPlanDone,
+      financeModel: financeModelDone,
+      marketStrategy: marketStrategyDone,
+      operationsPlan: operationsPlanDone,
+      complianceChecklist: complianceChecklistDone,
+    };
+  }
+
+  private calculateDomainReadiness(blueprint: BlueprintData) {
+    const legal = blueprint.legalProfile || {};
+    const registration = blueprint.registrationProfile || {};
+    const projection = blueprint.projectionProfile || {};
+    const customer = blueprint.customerModel || {};
+    const offer = blueprint.offerArchitecture || {};
+    const marketing = blueprint.marketingSystem || {};
+    const ops = blueprint.operationsSystem || {};
+    const workflow = blueprint.workflowModel || {};
+    const compliance = blueprint.complianceProfile || {};
+
+    let legalScore = 0;
+    if (legal.recommendedEntityType && legal.recommendedEntityType !== 'UNKNOWN') {
+      legalScore += 40;
+    }
+    if (legal.disclaimerAcceptedAt) {
+      legalScore += 30;
+    }
+    const registrationFields: (keyof BlueprintRegistrationProfile)[] = [
+      'businessNameStatus',
+      'companiesRegistryStatus',
+      'birStatus',
+      'nisEmployerStatus',
+      'vatStatus',
+      'businessBankStatus',
+    ];
+    const completedRegistration = registrationFields.filter((field) =>
+      isRegistrationStepCompleteForReadiness(registration[field]),
+    ).length;
+    legalScore += Math.round((completedRegistration / 6) * 30);
+
+    let financeScore = 0;
+    if (typeof projection.startupCapital === 'number' && typeof projection.monthlyFixedCosts === 'number') {
+      financeScore += 40;
+    }
+    if (typeof projection.breakEvenRevenue === 'number') {
+      financeScore += 30;
+    }
+    if (typeof projection.runwayMonths === 'number') {
+      financeScore += 30;
+    }
+
+    let marketScore = 0;
+    if (customer.idealCustomer && customer.idealCustomer.trim().length > 0) {
+      marketScore += 40;
+    }
+    if (offer.coreOffer && Object.keys(offer.coreOffer).length > 0) {
+      marketScore += 30;
+    }
+    if (marketing.channels && marketing.channels.length > 0) {
+      marketScore += 30;
+    }
+
+    let operationsScore = 0;
+    if (ops.coreWorkflows && ops.coreWorkflows.length > 0) {
+      operationsScore += 50;
+    }
+    if (workflow.primaryWorkflow && workflow.primaryWorkflow.trim().length > 0) {
+      operationsScore += 30;
+    }
+    if (typeof blueprint.aiPreferences?.autonomyLevel === 'number') {
+      operationsScore += 20;
+    }
+
+    const items = compliance.complianceItems || [];
+    const complianceScore = items.length > 0
+      ? Math.round(
+          (items.filter((item) => item.status === 'DONE' || item.status === 'NOT_APPLICABLE').length / items.length) *
+            100,
+        )
+      : 0;
+
+    return {
+      legal: Math.min(100, legalScore),
+      finance: Math.min(100, financeScore),
+      market: Math.min(100, marketScore),
+      operations: Math.min(100, operationsScore),
+      compliance: Math.min(100, complianceScore),
     };
   }
 
@@ -364,6 +571,12 @@ export class OnboardingConciergeService {
     if (!setupStatus.payments) incompleteSteps.push('payment methods');
     if (!setupStatus.storefront) incompleteSteps.push('online storefront');
     if (!setupStatus.contacts) incompleteSteps.push('customer contacts');
+    if (!setupStatus.legalProfile) incompleteSteps.push('legal profile and entity type');
+    if (!setupStatus.registrationPlan) incompleteSteps.push('business registration plan');
+    if (!setupStatus.financeModel) incompleteSteps.push('financial projections');
+    if (!setupStatus.marketStrategy) incompleteSteps.push('market strategy');
+    if (!setupStatus.operationsPlan) incompleteSteps.push('operations plan');
+    if (!setupStatus.complianceChecklist) incompleteSteps.push('compliance checklist');
 
     return `You are the KeyFlowOS Onboarding Concierge — a friendly, knowledgeable business setup assistant for Caribbean entrepreneurs.
 
@@ -383,6 +596,12 @@ COMPLETED STEPS:
 - Payments: ${setupStatus.payments ? 'Done' : 'Not done'}
 - Storefront: ${setupStatus.storefront ? 'Done' : 'Not done'}
 - Contacts: ${setupStatus.contacts ? 'Done' : 'Not done'}
+- Legal Profile: ${setupStatus.legalProfile ? 'Done' : 'Not done'}
+- Registration Plan: ${setupStatus.registrationPlan ? 'Done' : 'Not done'}
+- Finance Model: ${setupStatus.financeModel ? 'Done' : 'Not done'}
+- Market Strategy: ${setupStatus.marketStrategy ? 'Done' : 'Not done'}
+- Operations Plan: ${setupStatus.operationsPlan ? 'Done' : 'Not done'}
+- Compliance Checklist: ${setupStatus.complianceChecklist ? 'Done' : 'Not done'}
 
 GUIDELINES:
 1. Be warm, encouraging, and conversational — like a helpful friend who knows Caribbean business.
@@ -443,6 +662,10 @@ ACTION:confirm|Set Up Salon Defaults`;
         quickReplies.push('Enable storefront', 'Skip for now');
       } else if (!setupStatus.payments) {
         quickReplies.push('Configure payments', 'Skip for now');
+      } else if (!setupStatus.legalProfile || !setupStatus.registrationPlan) {
+        quickReplies.push('Set up legal profile', 'Skip for now');
+      } else if (!setupStatus.financeModel) {
+        quickReplies.push('Build financial model', 'Skip for now');
       }
     }
 
@@ -463,6 +686,12 @@ ACTION:confirm|Set Up Salon Defaults`;
     if (!setupStatus.payments) incompleteSteps.push('payment methods');
     if (!setupStatus.storefront) incompleteSteps.push('storefront');
     if (!setupStatus.contacts) incompleteSteps.push('contacts');
+    if (!setupStatus.legalProfile) incompleteSteps.push('legal profile');
+    if (!setupStatus.registrationPlan) incompleteSteps.push('registration plan');
+    if (!setupStatus.financeModel) incompleteSteps.push('finance model');
+    if (!setupStatus.marketStrategy) incompleteSteps.push('market strategy');
+    if (!setupStatus.operationsPlan) incompleteSteps.push('operations plan');
+    if (!setupStatus.complianceChecklist) incompleteSteps.push('compliance checklist');
 
     if (incompleteSteps.length === 0) {
       return {
@@ -523,11 +752,15 @@ ACTION:confirm|Set Up Salon Defaults`;
   }
 
   async checkAndGenerateNudges(businessId: string): Promise<NudgeItem[]> {
-    const [setupStatus, business] = await Promise.all([
+    const [setupStatus, business, blueprint] = await Promise.all([
       this.getSetupStatus(businessId),
       this.prisma.client.business.findUnique({
         where: { id: businessId },
         select: { metaData: true, onboardingComplete: true, createdAt: true },
+      }),
+      this.blueprint.getBlueprint(businessId).catch((err: unknown) => {
+        this.logger.debug(`Failed to load blueprint for nudges: ${(err as Error).message}`);
+        return null;
       }),
     ]);
 
@@ -542,6 +775,7 @@ ACTION:confirm|Set Up Salon Defaults`;
     const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
 
     const nudges: NudgeItem[] = [];
+    const domainReadiness = blueprint ? this.calculateDomainReadiness(blueprint) : null;
 
     const nudgeDefinitions: Array<{
       key: string;
@@ -590,6 +824,38 @@ ACTION:confirm|Set Up Salon Defaults`;
         body: 'Set up how you accept payments — WiPay for local, PayPal for international clients.',
         ctaLabel: 'Set up payments',
         ctaHref: '/app/settings/business?tab=payments',
+      },
+      {
+        key: 'genesis-legal',
+        condition: !setupStatus.legalProfile && (!domainReadiness || domainReadiness.legal < 60),
+        title: 'Complete your legal setup',
+        body: 'KEY can generate your Trinidad & Tobago registration checklist once you confirm your entity type.',
+        ctaLabel: 'Set up legal profile',
+        ctaHref: '/app/onboarding',
+      },
+      {
+        key: 'genesis-finance',
+        condition: !setupStatus.financeModel && (!domainReadiness || domainReadiness.finance < 60),
+        title: 'Build your financial model',
+        body: 'Add your startup costs, monthly fixed costs, and pricing so KEY can forecast break-even and runway.',
+        ctaLabel: 'Build finance model',
+        ctaHref: '/app/onboarding',
+      },
+      {
+        key: 'genesis-market',
+        condition: !setupStatus.marketStrategy && (!domainReadiness || domainReadiness.market < 60),
+        title: 'Define your market strategy',
+        body: 'Tell KEY who your ideal customer is, what your core offer is, and how you plan to reach them.',
+        ctaLabel: 'Define market strategy',
+        ctaHref: '/app/onboarding',
+      },
+      {
+        key: 'genesis-compliance',
+        condition: !setupStatus.complianceChecklist && (!domainReadiness || domainReadiness.compliance < 60),
+        title: 'Complete your compliance checklist',
+        body: 'Run the Trinidad & Tobago compliance check so you know which registrations and licences you need.',
+        ctaLabel: 'Run compliance check',
+        ctaHref: '/app/onboarding',
       },
     ];
 

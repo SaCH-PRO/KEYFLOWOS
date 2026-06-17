@@ -92,17 +92,17 @@ export const MODE_OPERATE_ITEMS: Record<DisclosureMode, string[]> = {
  *  These labels must match the `label` field in buildNav exactly.
  */
 export const MODE_BUILD_ITEMS: Record<DisclosureMode, string[]> = {
-  startup: ["Blueprint", "Storefront", "Presence", "Account", "Workspace"],
+  startup: ["Blueprint", "Storefront", "Presence", "Account", "Workspace", "Key Connect"],
   growth: [
     "Blueprint", "Storefront", "Presence", "Templates",
-    "Account", "Workspace", "Connections", "AI",
-    "Overview", "Flows",
+    "Account", "Workspace", "AI",
+    "Overview", "Flows", "Key Connect",
   ],
   enterprise: [
     "Blueprint", "Storefront", "Presence", "Templates",
-    "Account", "Workspace", "Connections", "AI", "Compliance", "Developers",
+    "Account", "Workspace", "AI", "Compliance", "Developers",
     "Overview", "Google", "Microsoft", "Payments", "Accounting", "Marketing", "Social", "Forms", "WhatsApp",
-    "Flows", "Workflows",
+    "Flows", "Workflows", "Key Connect",
   ],
 };
 

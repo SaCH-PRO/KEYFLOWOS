@@ -191,7 +191,7 @@ export default function SocialComposerPage() {
       headerActions={
         <div className="flex items-center gap-2">
           <Link
-            href="/app/connect#social"
+            href="/app/key-connect?tab=social"
             className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-border/40 hover:bg-muted/30 transition-colors"
           >
             <Plug className="h-3.5 w-3.5" />
@@ -263,7 +263,7 @@ export default function SocialComposerPage() {
             to publish from this composer.
           </p>
           <Link
-            href="/app/connect#social"
+            href="/app/key-connect?tab=social"
             className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-[hsl(var(--kf-accent1))] text-white"
           >
             <Plug className="h-3.5 w-3.5" /> Open KeyFlow Connect

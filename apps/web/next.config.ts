@@ -56,6 +56,17 @@ const isProd = process.env.NODE_ENV === "production";
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  // Disable Strict Mode in development to avoid a known Next.js 16 + React 19
+  // race where the double-render/re-mount cycle triggers
+  // "Rendered more hooks than during the previous render". Production keeps
+  // Strict Mode enabled for safety. See vercel/next.js#78396.
+  reactStrictMode: isProd,
+  // Disable the App Router dev rendering indicator to avoid a known
+  // Next.js 16 + React 19 bug where the indicator's internal hook state
+  // can trigger "Rendered more hooks than during the previous render"
+  // during hydration in development. This is dev-only UI; production is
+  // unaffected. See vercel/next.js#78396 and facebook/react#33556.
+  devIndicators: false,
   // `@keyflow/ui` is a workspace package whose package.json `exports` already
   // points at its TypeScript source. `transpilePackages` is sufficient on its
   // own to consume it. Do NOT add a `turbopack.resolveAlias` entry for it —
@@ -163,6 +174,49 @@ const nextConfig: NextConfig = {
         source: "/app/finance/actions/:path*",
         destination: "/app/money",
         permanent: true,
+      },
+      // Key Connect unification: every legacy connect surface now lives at
+      // /app/key-connect. Permanent 308s for the old routes, 307s for pages
+      // that carried a contextual tab so bookmarks keep working.
+      {
+        source: "/app/connect",
+        destination: "/app/key-connect",
+        permanent: true,
+      },
+      {
+        source: "/app/connect/:path*",
+        destination: "/app/key-connect",
+        permanent: true,
+      },
+      {
+        source: "/app/build/connect",
+        destination: "/app/key-connect",
+        permanent: true,
+      },
+      {
+        source: "/app/build/connect/:path*",
+        destination: "/app/key-connect",
+        permanent: true,
+      },
+      {
+        source: "/app/build/system/connections",
+        destination: "/app/key-connect",
+        permanent: true,
+      },
+      {
+        source: "/app/settings/connections",
+        destination: "/app/key-connect?tab=calendar",
+        permanent: false,
+      },
+      {
+        source: "/app/settings/contact-sources",
+        destination: "/app/key-connect?tab=contacts",
+        permanent: false,
+      },
+      {
+        source: "/app/finance/bank-connections",
+        destination: "/app/key-connect?tab=banking",
+        permanent: false,
       },
     ];
   },
