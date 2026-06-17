@@ -4,6 +4,7 @@ import { AiModule } from '../ai/ai.module';
 import { DocumentsModule } from '../documents/documents.module';
 import { GovernanceModule } from '../governance/governance.module';
 import { BusinessGenesisController } from './business-genesis.controller';
+import { GenomeChatController } from './genome-chat.controller';
 import { BusinessGenesisService } from './business-genesis.service';
 import { GenesisProjectionService } from './projection-engine.service';
 import { GenesisReadinessScorer } from './readiness-scorer.service';
@@ -16,10 +17,11 @@ import { MarketStrategyRepository } from './market-strategy.repository';
 import { MarketStrategyDocumentBuilder } from './market-strategy-document-builder.service';
 import { MarketStrategyMapper } from './market-strategy.mapper';
 import { GenesisMarketStrategyService } from './genesis-market-strategy.service';
+import { GenomeChatService } from './genome-chat.service';
 
 @Module({
   imports: [BlueprintModule, AiModule, DocumentsModule, GovernanceModule],
-  controllers: [BusinessGenesisController],
+  controllers: [BusinessGenesisController, GenomeChatController],
   providers: [
     BusinessGenesisService,
     GenesisProjectionService,
@@ -33,7 +35,8 @@ import { GenesisMarketStrategyService } from './genesis-market-strategy.service'
     MarketStrategyDocumentBuilder,
     MarketStrategyMapper,
     GenesisMarketStrategyService,
+    GenomeChatService,
   ],
-  exports: [BusinessGenesisService, GenesisMarketStrategyService],
+  exports: [BusinessGenesisService, GenesisMarketStrategyService, GenomeChatService],
 })
 export class BusinessGenesisModule {}
