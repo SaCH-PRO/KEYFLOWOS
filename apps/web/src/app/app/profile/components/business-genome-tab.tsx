@@ -3,19 +3,24 @@
 import { useEffect, useState, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { Dna, Grid3X3, MessageSquare, FileText, Settings, Loader2 } from "lucide-react";
+import { Dna, Grid3X3, MessageSquare, FileText, Settings, Loader2, ScrollText } from "lucide-react";
 import { getStoredBusinessId } from "@/lib/workspace";
-import { getGenome, type GenomeIntegrityResult, type DnaSectionKey } from "@/lib/api/business-genome";
+import { getGenome, type GenomeIntegrityResult } from "@/lib/api/business-genome";
 import { GenomeOverview } from "./business-genome/genome-overview";
 import { DnaSectionsList } from "./business-genome/dna-sections-list";
+import { GenomeChatPanel } from "./business-genome/genome-chat-panel";
+import { GenomeReportsPanel } from "./business-genome/genome-reports-panel";
+import { ConstitutionPanel } from "./business-genome/constitution-panel";
+import { AdvancedEditorPanel } from "./business-genome/advanced-editor-panel";
 
-type GenomeSubTab = "overview" | "dna-sections" | "genome-chat" | "reports" | "advanced-editor";
+type GenomeSubTab = "overview" | "dna-sections" | "genome-chat" | "reports" | "constitution" | "advanced-editor";
 
 const SUB_TABS: { id: GenomeSubTab; label: string; icon: React.ElementType }[] = [
   { id: "overview", label: "Overview", icon: Dna },
   { id: "dna-sections", label: "DNA Sections", icon: Grid3X3 },
   { id: "genome-chat", label: "Genome Chat", icon: MessageSquare },
   { id: "reports", label: "Reports", icon: FileText },
+  { id: "constitution", label: "Constitution", icon: ScrollText },
   { id: "advanced-editor", label: "Advanced Editor", icon: Settings },
 ];
 
@@ -56,7 +61,19 @@ export function BusinessGenomeTab() {
     setLoading(false);
   }, [businessId]);
 
+  const handleGenomeUpdate = useCallback(
+    (result?: GenomeIntegrityResult) => {
+      if (result) {
+        setGenome(result);
+      } else {
+        void refresh();
+      }
+    },
+    [refresh],
+  );
+
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- initial async load of Business Genome data
     refresh();
   }, [refresh]);
 
@@ -135,37 +152,31 @@ export function BusinessGenomeTab() {
 
         {activeSubTab === "genome-chat" && (
           <motion.div key="genome-chat" {...fade}>
-            <div className="kf-card p-12 text-center">
-              <MessageSquare className="w-10 h-10 mx-auto mb-3 text-muted-foreground" />
-              <h3 className="text-lg font-semibold">Genome Chat</h3>
-              <p className="text-sm text-muted-foreground mt-1 max-w-md mx-auto">
-                Talk with KEY to build your Business Genome. This sub-tab is coming in the next phase.
-              </p>
+            <div className="kf-card p-4 sm:p-6">
+              <GenomeChatPanel genome={genome} onGenomeUpdate={handleGenomeUpdate} />
             </div>
           </motion.div>
         )}
 
         {activeSubTab === "reports" && (
           <motion.div key="reports" {...fade}>
-            <div className="kf-card p-12 text-center">
-              <FileText className="w-10 h-10 mx-auto mb-3 text-muted-foreground" />
-              <h3 className="text-lg font-semibold">Reports</h3>
-              <p className="text-sm text-muted-foreground mt-1 max-w-md mx-auto">
-                Blueprint, Constitution, SWOT, financial projections, and more. Coming in the next phase.
-              </p>
-            </div>
+            <GenomeReportsPanel
+              genome={genome}
+              onOpenConstitution={() => handleSubTabChange("constitution")}
+              onOpenDnaSections={() => handleSubTabChange("dna-sections")}
+            />
+          </motion.div>
+        )}
+
+        {activeSubTab === "constitution" && (
+          <motion.div key="constitution" {...fade}>
+            <ConstitutionPanel genome={genome} />
           </motion.div>
         )}
 
         {activeSubTab === "advanced-editor" && (
           <motion.div key="advanced-editor" {...fade}>
-            <div className="kf-card p-12 text-center">
-              <Settings className="w-10 h-10 mx-auto mb-3 text-muted-foreground" />
-              <h3 className="text-lg font-semibold">Advanced Editor</h3>
-              <p className="text-sm text-muted-foreground mt-1 max-w-md mx-auto">
-                Power-user structured editing of the raw Blueprint JSON. Coming in the next phase.
-              </p>
-            </div>
+            <AdvancedEditorPanel onGenomeUpdate={handleGenomeUpdate} />
           </motion.div>
         )}
       </AnimatePresence>

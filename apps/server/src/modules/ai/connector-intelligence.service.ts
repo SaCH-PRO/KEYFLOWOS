@@ -9,6 +9,7 @@ import { PlanExecutorService } from './plan-executor.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
 import { ConversationalAIService } from './conversational-ai.service';
 import { GoogleDriveService } from '../google-drive/google-drive.service';
+import { ConnectorRegistryService } from '../../core/connectors/connector-registry.service';
 
 interface ScannedFile {
   id: string;
@@ -46,6 +47,7 @@ export class ConnectorIntelligenceService implements OnModuleInit, OnModuleDestr
     @Inject(AiExecutionLogService) private readonly executionLog: AiExecutionLogService,
     @Inject(ConversationalAIService) private readonly conversationalAI: ConversationalAIService,
     @Inject(GoogleDriveService) private readonly googleDrive: GoogleDriveService,
+    @Inject(ConnectorRegistryService) private readonly connectorRegistry: ConnectorRegistryService,
   ) {}
 
   onModuleInit() {
@@ -96,6 +98,9 @@ export class ConnectorIntelligenceService implements OnModuleInit, OnModuleDestr
             break;
           case 'google_forms':
             await this.scanGoogleForms(businessId);
+            break;
+          case 'gmail':
+            await this.connectorRegistry.syncConnector('gmail', businessId);
             break;
         }
       } catch (err) {

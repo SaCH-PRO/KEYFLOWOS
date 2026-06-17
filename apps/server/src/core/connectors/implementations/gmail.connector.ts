@@ -3,6 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EntityResolutionService } from '../entity-resolution.service';
 import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary } from '../connector.interface';
+import { GmailIngestionService } from './gmail-ingestion.service';
 
 @Injectable()
 export class GmailConnector implements IConnector {
@@ -31,6 +32,7 @@ export class GmailConnector implements IConnector {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Inject(EntityResolutionService) private readonly entityResolution: EntityResolutionService,
+    @Inject(GmailIngestionService) private readonly ingestion: GmailIngestionService,
   ) {}
 
   async authenticate(businessId: string): Promise<{ connected: boolean; authUrl?: string }> {
@@ -84,19 +86,12 @@ export class GmailConnector implements IConnector {
   }
 
   async sync(businessId: string): Promise<ConnectorSyncResult> {
-    const start = Date.now();
     const connected = await this.isConnected(businessId);
     if (!connected) {
-      return { success: false, itemsSynced: 0, errors: ['Gmail not connected'], duration: Date.now() - start };
+      return { success: false, itemsSynced: 0, errors: ['Gmail not connected'], duration: 0 };
     }
 
-    await this.prisma.client.connectorStatus.upsert({
-      where: { businessId_connectorType: { businessId, connectorType: 'gmail' } },
-      create: { businessId, connectorType: 'gmail', status: 'connected', lastSyncAt: new Date(), syncCount: 1, connectedAccount: (await this.getGmailEmail(businessId)) },
-      update: { lastSyncAt: new Date(), syncCount: { increment: 1 }, status: 'connected' },
-    });
-
-    return { success: true, itemsSynced: 0, errors: [], duration: Date.now() - start };
+    return this.ingestion.syncInbox(businessId);
   }
 
   async testConnection(businessId: string): Promise<{ success: boolean; error?: string; account?: string }> {

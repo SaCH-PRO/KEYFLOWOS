@@ -1,4 +1,4 @@
-import { apiGet, apiPatch } from "@/lib/api";
+import { apiGet, apiPatch, apiPost } from "@/lib/api";
 
 export type DnaSectionKey =
   | "founder"
@@ -70,6 +70,25 @@ export interface GenomeRecommendationsResponse {
   recommendations: GenomeRecommendation[];
 }
 
+export interface GenomeChatMessage {
+  id: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface ProposedGenomeUpdate {
+  section: DnaSectionKey;
+  data: Record<string, unknown>;
+  summary: string;
+}
+
+export interface SendGenomeMessageResult {
+  message: GenomeChatMessage;
+  proposedUpdates: ProposedGenomeUpdate | null;
+}
+
 export async function getGenome(businessId: string) {
   return apiGet<GenomeIntegrityResult>(`/blueprint/businesses/${businessId}/genome`);
 }
@@ -92,4 +111,26 @@ export async function getConstitution(businessId: string) {
 
 export async function updateDnaSection(businessId: string, section: DnaSectionKey, data: Record<string, unknown>) {
   return apiPatch<GenomeIntegrityResult>(`/blueprint/businesses/${businessId}/genome/dna/${section}`, { data });
+}
+
+export async function getGenomeMessages(businessId: string) {
+  return apiGet<GenomeChatMessage[]>(`/genome-chat/businesses/${businessId}/messages`);
+}
+
+export async function sendGenomeMessage(businessId: string, message: string) {
+  return apiPost<SendGenomeMessageResult>({
+    path: `/genome-chat/businesses/${businessId}/messages`,
+    body: { message },
+  });
+}
+
+export async function applyGenomeUpdates(
+  businessId: string,
+  section: DnaSectionKey,
+  data: Record<string, unknown>,
+) {
+  return apiPost<GenomeIntegrityResult>({
+    path: `/genome-chat/businesses/${businessId}/apply-updates`,
+    body: { section, data },
+  });
 }

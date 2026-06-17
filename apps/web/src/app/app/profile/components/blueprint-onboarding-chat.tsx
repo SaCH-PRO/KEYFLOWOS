@@ -304,7 +304,7 @@ export function BlueprintOnboardingChat({
               Your Business Genome is strong enough for KEY to start helping.
             </p>
             <p className="text-xs text-muted-foreground">
-              You can keep chatting to refine it, or dive into the app. You can always return via Profile → Blueprint.
+              You can keep chatting to refine it, or dive into the app. You can always return via Profile → Business Genome.
             </p>
           </motion.div>
         )}
@@ -358,7 +358,7 @@ export function BlueprintOnboardingChat({
 export function BlueprintOnboardingCTA({ className = "" }: { className?: string }) {
   return (
     <a
-      href="/app/profile?tab=blueprint"
+      href="/app/profile?tab=business-genome"
       className={`flex items-center gap-3 rounded-xl p-4 transition-colors hover:opacity-90 ${className}`}
       style={{
         background: "linear-gradient(135deg, hsl(var(--kf-accent1) / 0.1), hsl(var(--kf-accent2) / 0.05))",

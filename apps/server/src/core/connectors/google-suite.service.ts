@@ -211,6 +211,9 @@ export class GoogleSuiteService {
     for (const { svc, ok, account, error } of verified) {
       const ct = SERVICE_TO_CONNECTOR[svc];
       const displayAccount = account || email || null;
+      const meta = this.registry.get(ct);
+      const keyInboxCategories = new Set(['communication', 'messaging', 'forms', 'email_marketing']);
+      const intakeEnabled = meta ? keyInboxCategories.has(meta.meta.category) : false;
       await this.prisma.client.connectorStatus.upsert({
         where: { businessId_connectorType: { businessId: state.businessId, connectorType: ct } },
         create: {
@@ -219,6 +222,7 @@ export class GoogleSuiteService {
           status: ok ? 'connected' : 'error',
           connectedAt: new Date(),
           connectedAccount: displayAccount,
+          intakeEnabled,
           lastError: ok ? null : error,
           lastErrorAt: ok ? null : new Date(),
           errorCount: ok ? 0 : 1,

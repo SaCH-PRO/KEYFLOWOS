@@ -1,4 +1,5 @@
 export { GmailConnector } from './gmail.connector';
+export { GmailIngestionService } from './gmail-ingestion.service';
 export { GoogleCalendarConnector } from './google-calendar.connector';
 export { GoogleDriveConnector } from './google-drive.connector';
 export { GoogleFormsConnector } from './google-forms.connector';

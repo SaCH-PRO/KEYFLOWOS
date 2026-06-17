@@ -284,3 +284,35 @@ describe('BlueprintService stage determination', () => {
     },
   );
 });
+
+
+describe('BlueprintService constitution generation', () => {
+  it('generates a constitution with all expected sections', async () => {
+    const service = makeService(fullBlueprintRow());
+    const constitution = await service.generateConstitution('biz_1');
+
+    expect(constitution.businessId).toBe('biz_1');
+    expect(constitution.version).toBe(1);
+    expect(constitution.genomeIntegrity).toBe(100);
+
+    const sections = constitution.sections as Record<string, { title: string; sourceDna: unknown[]; strength: number; content: string }>;
+    const sectionKeys = ['executiveSummary', 'businessModel', 'governanceFramework', 'legalFramework', 'financialStrategy', 'marketingStrategy', 'salesStrategy', 'operationsStrategy', 'growthRoadmap', 'riskRegister'];
+    for (const key of sectionKeys) {
+      expect(sections[key]).toBeDefined();
+      expect(sections[key].title).toBeTruthy();
+      expect(Array.isArray(sections[key].sourceDna)).toBe(true);
+      expect(typeof sections[key].strength).toBe('number');
+      expect(typeof sections[key].content).toBe('string');
+    }
+  });
+
+  it('remains sparse-data tolerant for an empty blueprint', async () => {
+    const service = makeService(emptyBlueprintRow());
+    const constitution = await service.generateConstitution('biz_1');
+
+    const sections = constitution.sections as Record<string, { strength: number }>;
+    expect(constitution.genomeIntegrity).toBe(0);
+    expect(sections.businessModel.strength).toBe(0);
+    expect(sections.riskRegister.strength).toBe(0);
+  });
+});

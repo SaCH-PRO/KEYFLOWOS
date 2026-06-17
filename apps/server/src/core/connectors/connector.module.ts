@@ -11,8 +11,10 @@ import { GoogleSuiteService } from './google-suite.service';
 import { GoogleSuiteController } from './google-suite.controller';
 import { FormWebhookController } from './form-webhook.controller';
 import { NotificationsModule } from '../../modules/notifications/notifications.module';
+import { KeyInboxModule } from '../../modules/key-inbox/key-inbox.module';
 import {
   GmailConnector,
+  GmailIngestionService,
   GoogleCalendarConnector,
   GoogleDriveConnector,
   GoogleFormsConnector,
@@ -38,7 +40,7 @@ import {
 
 @Global()
 @Module({
-  imports: [NotificationsModule],
+  imports: [NotificationsModule, KeyInboxModule],
   controllers: [ConnectorController, GoogleSuiteController, FormWebhookController],
   providers: [
     ConnectorRegistryService,
@@ -50,6 +52,7 @@ import {
     ConnectorInitializerService,
     GoogleSuiteService,
     GmailConnector,
+    GmailIngestionService,
     GoogleCalendarConnector,
     GoogleDriveConnector,
     GoogleFormsConnector,
@@ -80,6 +83,7 @@ import {
     ConnectorCredentialsService,
     EntityResolutionService,
     GoogleSuiteService,
+    GmailIngestionService,
     StripeConnector,
     PayPalConnector,
     WiPayConnector,
