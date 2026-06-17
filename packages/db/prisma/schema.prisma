@@ -7145,6 +7145,21 @@ model BusinessBlueprint {
 
   lastAnalyzedAt DateTime? @map("last_analyzed_at")
 
+  // Business Genome Phase 1 cache/state fields
+  genomeIntegrity     Int?     @map("genome_integrity")
+  genomeDnaScores     Json?    @default("{}") @map("genome_dna_scores")
+  genomeDnaConfidence Json?    @default("{}") @map("genome_dna_confidence")
+  genomeStage         String?  @map("genome_stage")
+  genesisCompleted    Boolean? @default(false) @map("genesis_completed")
+
+  constitutionVersion     Int?      @default(1) @map("constitution_version")
+  constitutionGeneratedAt DateTime? @map("constitution_generated_at")
+
+  // Architecture hooks for Phase 2+
+  lastGenomeSyncAt        DateTime? @map("last_genome_sync_at")
+  businessAssets          Json?     @default("{}") @map("business_assets")
+  executiveReadinessScore Int?      @map("executive_readiness_score")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt      @map("updated_at")
 
@@ -7152,6 +7167,18 @@ model BusinessBlueprint {
 
   @@index([completeness])
   @@map("business_blueprints")
+}
+
+model GenomeChatMessage {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  role       String
+  content    String
+  metadata   Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([businessId, createdAt])
+  @@map("genome_chat_messages")
 }
 
 model FeatureFlag {
@@ -9577,4 +9604,127 @@ model Projection {
 
   @@index([businessId, projectionType, period, startDate])
   @@map("projections")
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// KEYCONNECT + KEYINBOX FOUNDATION MODELS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model ConnectorAccount {
+  id                    String    @id @default(cuid())
+  businessId            String    @map("business_id")
+
+  provider              String    // GOOGLE, META, TIKTOK, MICROSOFT
+  service               String    // GMAIL, CALENDAR, DRIVE, FORMS, FACEBOOK, INSTAGRAM, WHATSAPP
+  accountName           String?   @map("account_name")
+  accountEmail          String?   @map("account_email")
+  externalId            String?   @map("external_id")
+
+  accessTokenEncrypted  String?   @map("access_token_encrypted")
+  refreshTokenEncrypted String?   @map("refresh_token_encrypted")
+  tokenExpiresAt        DateTime? @map("token_expires_at")
+
+  scopes                String[]  @default([])
+  status                String    @default("DISCONNECTED")
+  syncEnabled           Boolean   @default(true) @map("sync_enabled")
+  lastSyncAt            DateTime? @map("last_sync_at")
+  lastError             String?   @map("last_error")
+  settings              Json?     @default("{}")
+
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  @@index([businessId, provider])
+  @@index([businessId, service])
+  @@map("connector_accounts")
+}
+
+model KeyInboxThread {
+  id                String   @id @default(cuid())
+  businessId        String   @map("business_id")
+
+  channel           String   // GMAIL, WHATSAPP, INSTAGRAM, FACEBOOK, TIKTOK, FORMS
+  externalThreadId  String?  @map("external_thread_id")
+
+  contactId         String?  @map("contact_id")
+  subject           String?
+  status            String   @default("OPEN") // OPEN, WAITING, DONE, ARCHIVED
+  priority          String   @default("NORMAL") // LOW, NORMAL, HIGH, URGENT
+
+  lastMessageAt     DateTime? @map("last_message_at")
+  lastInboundAt     DateTime? @map("last_inbound_at")
+  lastOutboundAt    DateTime? @map("last_outbound_at")
+
+  aiSummary         String?
+  aiIntent          String?
+  aiSentiment       String?
+  aiUrgency         String?
+  aiTags            String[] @default([])
+
+  metadata          Json?    @default("{}")
+
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  messages          KeyInboxMessage[]
+
+  @@index([businessId, lastMessageAt])
+  @@index([businessId, channel])
+  @@map("key_inbox_threads")
+}
+
+model KeyInboxMessage {
+  id                  String   @id @default(cuid())
+  businessId          String   @map("business_id")
+  threadId            String   @map("thread_id")
+
+  channel             String
+  direction           String   // INBOUND, OUTBOUND
+  senderName          String?  @map("sender_name")
+  senderHandle        String?  @map("sender_handle")
+  senderEmail         String?  @map("sender_email")
+  senderPhone         String?  @map("sender_phone")
+
+  contentText         String?  @map("content_text")
+  contentHtml         String?  @map("content_html")
+  attachments         Json?    @default("[]")
+
+  externalMessageId   String?  @map("external_message_id")
+  receivedAt          DateTime? @map("received_at")
+  sentAt              DateTime? @map("sent_at")
+
+  aiAnalysis          Json?    @default("{}")
+  extractedEntities   Json?    @default("{}")
+  suggestedActions    Json?    @default("[]")
+
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  thread              KeyInboxThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, receivedAt])
+  @@index([businessId, channel])
+  @@index([threadId])
+  @@map("key_inbox_messages")
+}
+
+model KeyInboxInsight {
+  id                String   @id @default(cuid())
+  businessId        String   @map("business_id")
+
+  periodStart       DateTime @map("period_start")
+  periodEnd         DateTime @map("period_end")
+  scope             String   // DAILY, WEEKLY, MONTHLY, CUSTOM
+  channel           String?
+
+  summary           String
+  keyFindings       Json?    @default("[]")
+  recommendations   Json?    @default("[]")
+  taskSuggestions   Json?    @default("[]")
+  metrics           Json?    @default("{}")
+
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  @@index([businessId, periodStart, periodEnd])
+  @@map("key_inbox_insights")
 }

@@ -63,6 +63,13 @@ export interface ConnectorHealth {
    * (e.g. open calendar conflicts, oauth scope warnings).
    */
   metadata?: Record<string, unknown>;
+  /**
+   * Which KEY product layers this connector currently feeds.
+   */
+  flows?: {
+    keyInbox: boolean;
+    temporal: boolean;
+  };
 }
 
 export interface ConnectorStatusSummary {

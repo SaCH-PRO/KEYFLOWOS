@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { motion } from "framer-motion";
@@ -27,6 +27,9 @@ import {
   ShieldCheck,
   ExternalLink,
   Settings2,
+  Facebook,
+  Instagram,
+  Music,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@keyflow/ui";
@@ -36,6 +39,7 @@ import { Switch } from "@/components/ui/switch";
 import { ConnectorCredentialDialog } from "./components/connector-credential-dialog";
 import { BankingSection } from "./components/banking-section";
 import { SocialSection } from "./components/social-section";
+import { MetaBusinessSuiteSection } from "./components/meta-business-suite-section";
 import { ConnectorHealthSection } from "./components/connector-health-section";
 import { ManageDrawer } from "./components/manage-drawer";
 import { DriveIntakeQueue } from "./components/drive/drive-intake-queue";
@@ -59,15 +63,19 @@ import {
 } from "@/lib/api/key-connect";
 
 type ConnectorGroup =
+  | "priority"
+  | "meta"
   | "google"
   | "social"
-  | "payments"
   | "messaging"
+  | "storage"
+  | "payments"
   | "accounting"
   | "marketing"
   | "forms"
-  | "other"
-  | "banking";
+  | "productivity"
+  | "developer"
+  | "other";
 
 interface ConnectorMeta {
   type: string;
@@ -82,6 +90,7 @@ interface ConnectorMeta {
   externalUrl?: string;
   connectMode?: "dialog" | "oauth" | "webhook" | "external";
   oauthStartPath?: string;
+  isPlaceholder?: boolean;
 }
 
 interface ConnectorHealth {
@@ -94,6 +103,7 @@ interface ConnectorHealth {
   syncCount: number;
   connectedAt: string | null;
   connectedAccount: string | null;
+  flows?: { keyInbox: boolean; temporal: boolean };
 }
 
 interface DashboardEntry {
@@ -114,34 +124,169 @@ const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   "credit-card": CreditCard,
   wallet: Wallet,
   plug: Plug2,
+  facebook: Facebook,
+  instagram: Instagram,
+  music: Music,
 };
 
 const GROUP_LABELS: Record<ConnectorGroup, { label: string; emoji: string }> = {
-  google: { label: "Google Workspace", emoji: "G" },
-  social: { label: "Social", emoji: "S" },
-  payments: { label: "Payments", emoji: "P" },
-  messaging: { label: "Messaging", emoji: "M" },
+  priority: { label: "Priority Connections", emoji: "★" },
+  meta: { label: "Meta Business Suite", emoji: "M" },
+  google: { label: "Google Suite", emoji: "G" },
+  social: { label: "Social Channels", emoji: "S" },
+  messaging: { label: "Messaging & Email", emoji: "@" },
+  storage: { label: "Storage & Documents", emoji: "D" },
+  payments: { label: "Payments & Finance", emoji: "$" },
   accounting: { label: "Accounting", emoji: "A" },
   marketing: { label: "Marketing", emoji: "E" },
   forms: { label: "Forms & Webhooks", emoji: "F" },
+  productivity: { label: "Productivity", emoji: "P" },
+  developer: { label: "Developer / Webhooks", emoji: "</>" },
   other: { label: "Other", emoji: "•" },
-  banking: { label: "Banking", emoji: "$" },
 };
 
 const GROUP_ORDER: ConnectorGroup[] = [
+  "priority",
+  "meta",
   "google",
   "social",
   "messaging",
+  "storage",
   "payments",
   "accounting",
   "marketing",
   "forms",
+  "productivity",
+  "developer",
   "other",
-  "banking",
 ];
 
-// These are handled by the dedicated Social section using the Social module OAuth flow.
-const SOCIAL_CONNECTOR_TYPES = new Set(["meta_social", "linkedin", "tiktok", "twitter"]);
+const CONNECTOR_GROUP_MAP: Record<string, ConnectorGroup> = {
+  google_forms: "google",
+  google_contacts: "google",
+  google_business_profile: "google",
+  google_calendar: "google",
+  google_drive: "google",
+  gmail: "google",
+  outlook_contacts: "google",
+  outlook_calendar: "google",
+  whatsapp: "messaging",
+  meta_social: "meta",
+  paypal: "payments",
+  wipay: "payments",
+  stripe: "payments",
+  quickbooks: "accounting",
+  xero: "accounting",
+  mailchimp: "marketing",
+  klaviyo: "marketing",
+  linkedin: "social",
+  tiktok: "social",
+  twitter: "social",
+  typeform: "forms",
+  jotform: "forms",
+  webhook_form: "developer",
+  shopify: "productivity",
+  slack: "productivity",
+  zapier: "productivity",
+};
+
+const PRIORITY_TYPES = new Set([
+  "whatsapp",
+  "instagram",
+  "facebook_page",
+  "meta_messenger",
+  "gmail",
+  "google_calendar",
+  "google_drive",
+  "google_forms",
+  "google_contacts",
+  "google_business_profile",
+  "tiktok",
+]);
+
+const PLACEHOLDER_TYPES = new Set(["facebook_page", "instagram", "meta_messenger"]);
+
+const PLACEHOLDER_ENTRIES: DashboardEntry[] = [
+  {
+    meta: {
+      type: "facebook_page",
+      name: "Facebook Page",
+      description:
+        "Connect your Facebook business page to capture reviews, messages, and leads in Key Inbox.",
+      category: "social",
+      group: "meta",
+      icon: "facebook",
+      supportsSync: false,
+      supportsWebhook: true,
+      authType: "oauth2",
+      connectMode: "oauth",
+      isPlaceholder: true,
+    },
+    health: {
+      status: "disconnected",
+      lastSyncAt: null,
+      lastErrorAt: null,
+      lastError: null,
+      errorCount: 0,
+      syncCount: 0,
+      connectedAt: null,
+      connectedAccount: null,
+      flows: { keyInbox: false, temporal: false },
+    },
+  },
+  {
+    meta: {
+      type: "instagram",
+      name: "Instagram Business",
+      description: "Sync Instagram Business messages, comments, and mentions with Key Inbox.",
+      category: "social",
+      group: "meta",
+      icon: "instagram",
+      supportsSync: false,
+      supportsWebhook: true,
+      authType: "oauth2",
+      connectMode: "oauth",
+      isPlaceholder: true,
+    },
+    health: {
+      status: "disconnected",
+      lastSyncAt: null,
+      lastErrorAt: null,
+      lastError: null,
+      errorCount: 0,
+      syncCount: 0,
+      connectedAt: null,
+      connectedAccount: null,
+      flows: { keyInbox: false, temporal: false },
+    },
+  },
+  {
+    meta: {
+      type: "meta_messenger",
+      name: "Messenger",
+      description: "Receive and respond to Facebook Messenger conversations from Key Inbox.",
+      category: "social",
+      group: "meta",
+      icon: "message-circle",
+      supportsSync: false,
+      supportsWebhook: true,
+      authType: "oauth2",
+      connectMode: "oauth",
+      isPlaceholder: true,
+    },
+    health: {
+      status: "disconnected",
+      lastSyncAt: null,
+      lastErrorAt: null,
+      lastError: null,
+      errorCount: 0,
+      syncCount: 0,
+      connectedAt: null,
+      connectedAccount: null,
+      flows: { keyInbox: false, temporal: false },
+    },
+  },
+];
 
 const STATUS_STYLES: Record<string, { bg: string; text: string; border: string; label: string }> = {
   connected: { bg: "bg-emerald-500/10", text: "text-emerald-400", border: "border-emerald-500/30", label: "Connected" },
@@ -409,14 +554,74 @@ export default function KeyConnectPage() {
     }
   };
 
-  const grouped = entries
-    .filter((e) => !SOCIAL_CONNECTOR_TYPES.has(e.meta.type))
-    .reduce<Record<ConnectorGroup, DashboardEntry[]>>((acc, e) => {
-      const group = (e.meta.group ?? "other") as ConnectorGroup;
-      if (!acc[group]) acc[group] = [];
-      acc[group].push(e);
-      return acc;
-    }, { google: [], social: [], payments: [], messaging: [], accounting: [], marketing: [], forms: [], other: [], banking: [] });
+  const mergedEntries = useMemo(() => {
+    const seen = new Set(entries.map((e) => e.meta.type));
+    const merged = [...entries];
+    for (const placeholder of PLACEHOLDER_ENTRIES) {
+      if (!seen.has(placeholder.meta.type)) {
+        merged.push(placeholder);
+      }
+    }
+    if (!seen.has("tiktok")) {
+      merged.push({
+        meta: {
+          type: "tiktok",
+          name: "TikTok",
+          description: "Sync TikTok comments, mentions, and messages with Key Inbox.",
+          category: "social",
+          group: "social",
+          icon: "music",
+          supportsSync: false,
+          supportsWebhook: true,
+          authType: "oauth2",
+          connectMode: "oauth",
+          isPlaceholder: true,
+        },
+        health: {
+          status: "disconnected",
+          lastSyncAt: null,
+          lastErrorAt: null,
+          lastError: null,
+          errorCount: 0,
+          syncCount: 0,
+          connectedAt: null,
+          connectedAccount: null,
+          flows: { keyInbox: false, temporal: false },
+        },
+      });
+    }
+    return merged;
+  }, [entries]);
+
+  const grouped = useMemo(() => {
+    const groups: Record<ConnectorGroup, DashboardEntry[]> = {
+      priority: [],
+      meta: [],
+      google: [],
+      social: [],
+      messaging: [],
+      storage: [],
+      payments: [],
+      accounting: [],
+      marketing: [],
+      forms: [],
+      productivity: [],
+      developer: [],
+      other: [],
+    };
+    for (const entry of mergedEntries) {
+      if (PRIORITY_TYPES.has(entry.meta.type)) continue;
+      const group = CONNECTOR_GROUP_MAP[entry.meta.type] ?? entry.meta.group ?? "other";
+      if (!groups[group]) groups[group] = [];
+      groups[group].push(entry);
+    }
+    return groups;
+  }, [mergedEntries]);
+
+  const priorityEntries = useMemo(
+    () => mergedEntries.filter((e) => PRIORITY_TYPES.has(e.meta.type)),
+    [mergedEntries],
+  );
 
   if (!businessId) {
     return (
@@ -503,6 +708,239 @@ export default function KeyConnectPage() {
     </motion.div>
   );
 
+  const renderConnectorCard = (entry: DashboardEntry) => {
+    const { meta, health } = entry;
+    const status = STATUS_STYLES[health.status] ?? STATUS_STYLES.disconnected;
+    const Icon = ICONS[meta.icon] ?? Plug2;
+    const isConnected = health.status === "connected" || health.status === "syncing";
+    const config = configs[meta.type];
+    const supportsIngestion = meta.type === "google_drive";
+    const isPlaceholder = meta.isPlaceholder ?? false;
+    const flows = health.flows ?? { keyInbox: false, temporal: false };
+
+    if (supportsIngestion && isConnected && config === undefined) {
+      loadInboxConfig(meta.type);
+    }
+
+    return (
+      <motion.div
+        key={meta.type}
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="rounded-2xl border border-border/40 bg-card p-4 space-y-3"
+      >
+        <div className="flex items-start gap-3">
+          <div className="h-10 w-10 rounded-xl bg-muted/50 border border-border/30 flex items-center justify-center shrink-0">
+            <Icon className="h-5 w-5 text-muted-foreground" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <h4 className="text-sm font-semibold truncate">{meta.name}</h4>
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-full border ${status.bg} ${status.text} ${status.border}`}>
+                {isPlaceholder ? "Coming soon" : status.label}
+              </span>
+            </div>
+            <p className="text-xs text-muted-foreground line-clamp-2">{meta.description}</p>
+            <p className="text-[11px] text-muted-foreground/70 truncate">
+              Connected account: {health.connectedAccount || "—"}
+            </p>
+            <p className="text-[10px] text-muted-foreground/50">
+              Last sync {formatTimeAgo(health.lastSyncAt)}
+            </p>
+            <div className="flex items-center gap-1.5 pt-0.5">
+              <span
+                className={`text-[10px] px-1.5 py-0.5 rounded-full border ${
+                  flows.keyInbox
+                    ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                    : "bg-zinc-500/10 text-zinc-400 border-zinc-500/30"
+                }`}
+              >
+                KEYInbox
+              </span>
+              <span
+                className={`text-[10px] px-1.5 py-0.5 rounded-full border ${
+                  flows.temporal
+                    ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                    : "bg-zinc-500/10 text-zinc-400 border-zinc-500/30"
+                }`}
+              >
+                Temporal Flow
+              </span>
+            </div>
+            {health.errorMessage && (
+              <p className="text-[11px] text-red-400 truncate">{health.errorMessage}</p>
+            )}
+          </div>
+          {meta.externalUrl && (
+            <a
+              href={meta.externalUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="text-muted-foreground hover:text-foreground"
+              title="Open service"
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+            </a>
+          )}
+        </div>
+
+        {supportsIngestion && isConnected && (
+          <div className="rounded-xl border border-border/30 bg-muted/20 p-3 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="h-3.5 w-3.5 text-[hsl(var(--kf-accent1))]" />
+                <span className="text-xs font-medium">Send items to Key Inbox</span>
+              </div>
+              <Switch
+                checked={config?.intakeEnabled ?? false}
+                onCheckedChange={(checked) => toggleIngestion(meta.type, checked)}
+              />
+            </div>
+            {config?.intakeEnabled && (
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                  <span>Auto-approve threshold</span>
+                  <span>{config.autoApproveThreshold ?? "Off"}</span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={config.autoApproveThreshold ?? 0}
+                  onChange={(e) => updateThreshold(meta.type, parseFloat(e.target.value) || null)}
+                  className="w-full accent-[hsl(var(--kf-accent1))]"
+                />
+                <p className="text-[10px] text-muted-foreground/60">
+                  Confidence above this value will auto-execute. Set to 0 to disable.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center gap-2">
+          {isPlaceholder ? (
+            <Button size="sm" variant="default" disabled className="h-7 text-xs">
+              Coming soon
+            </Button>
+          ) : isConnected ? (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => handleDisconnect(meta.type, meta.name)}
+              disabled={busy[meta.type]?.disconnect}
+              className="h-7 text-xs"
+            >
+              {busy[meta.type]?.disconnect ? (
+                <Loader2 className="h-3 w-3 animate-spin mr-1" />
+              ) : (
+                <Unlink className="h-3 w-3 mr-1" />
+              )}
+              Disconnect
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              variant="default"
+              onClick={() => handleConnect(entry)}
+              disabled={busy[meta.type]?.connect}
+              className="h-7 text-xs"
+            >
+              {busy[meta.type]?.connect ? (
+                <Loader2 className="h-3 w-3 animate-spin mr-1" />
+              ) : (
+                <Plug className="h-3 w-3 mr-1" />
+              )}
+              Connect
+            </Button>
+          )}
+
+          {!isPlaceholder && meta.supportsSync && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => handleSync(meta.type, meta.name)}
+              disabled={busy[meta.type]?.sync}
+              className="h-7 text-xs"
+            >
+              {busy[meta.type]?.sync ? (
+                <Loader2 className="h-3 w-3 animate-spin mr-1" />
+              ) : (
+                <RefreshCw className="h-3 w-3 mr-1" />
+              )}
+              Sync now
+            </Button>
+          )}
+
+          {!isPlaceholder && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => handleTest(meta.type, meta.name)}
+              disabled={busy[meta.type]?.test}
+              className="h-7 text-xs"
+            >
+              {busy[meta.type]?.test ? (
+                <Loader2 className="h-3 w-3 animate-spin mr-1" />
+              ) : (
+                <Activity className="h-3 w-3 mr-1" />
+              )}
+              Test
+            </Button>
+          )}
+
+          {!isPlaceholder && meta.type === "google_drive" && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setManageType("google_sheets")}
+              className="h-7 text-xs"
+            >
+              <FileSpreadsheet className="h-3 w-3 mr-1" />
+              Sheets
+            </Button>
+          )}
+
+          {!isPlaceholder && MANAGE_CONFIG[meta.type] && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setManageType(meta.type)}
+              className="h-7 text-xs"
+            >
+              <Settings2 className="h-3 w-3 mr-1" />
+              Manage
+            </Button>
+          )}
+        </div>
+      </motion.div>
+    );
+  };
+
+  const renderGroupSection = (group: ConnectorGroup, items: DashboardEntry[]) => {
+    if (!items.length) return null;
+    const meta = GROUP_LABELS[group];
+    return (
+      <section key={group} id={group} className="space-y-3">
+        <div className="flex items-center gap-2">
+          <div className="h-7 w-7 rounded-lg bg-gradient-to-br from-[hsl(var(--kf-accent1))]/20 to-[hsl(var(--kf-accent2))]/20 border border-border/40 flex items-center justify-center text-[11px] font-bold">
+            {meta.emoji}
+          </div>
+          <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+            {meta.label}
+          </h3>
+          <span className="text-[10px] text-muted-foreground/60">
+            {items.filter((i) => i.health.status === "connected").length}/{items.length} connected
+          </span>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {items.map((entry) => renderConnectorCard(entry))}
+        </div>
+      </section>
+    );
+  };
+
   if (loading && entries.length === 0) {
     return (
       <div className="space-y-6 max-w-5xl mx-auto p-4">
@@ -523,214 +961,16 @@ export default function KeyConnectPage() {
     <div className="space-y-6 max-w-5xl mx-auto p-4">
       {pageHeader}
 
+      {priorityEntries.length > 0 && renderGroupSection("priority", priorityEntries)}
+
       {GROUP_ORDER.map((group) => {
+        if (group === "priority") return null;
         const items = grouped[group] ?? [];
-        if (!items.length || group === "banking") return null;
-        const meta = GROUP_LABELS[group];
-        return (
-          <section key={group} id={group} className="space-y-3">
-            <div className="flex items-center gap-2">
-              <div className="h-7 w-7 rounded-lg bg-gradient-to-br from-[hsl(var(--kf-accent1))]/20 to-[hsl(var(--kf-accent2))]/20 border border-border/40 flex items-center justify-center text-[11px] font-bold">
-                {meta.emoji}
-              </div>
-              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                {meta.label}
-              </h3>
-              <span className="text-[10px] text-muted-foreground/60">
-                {items.filter((i) => i.health.status === "connected").length}/{items.length} connected
-              </span>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {items.map((entry) => {
-                const { meta, health } = entry;
-                const status = STATUS_STYLES[health.status] ?? STATUS_STYLES.disconnected;
-                const Icon = ICONS[meta.icon] ?? Plug2;
-                const isConnected = health.status === "connected" || health.status === "syncing";
-                const config = configs[meta.type];
-                const supportsIngestion = meta.type === "google_drive";
-
-                if (supportsIngestion && isConnected && config === undefined) {
-                  loadInboxConfig(meta.type);
-                }
-
-                return (
-                  <motion.div
-                    key={meta.type}
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="rounded-2xl border border-border/40 bg-card p-4 space-y-3"
-                  >
-                    <div className="flex items-start gap-3">
-                      <div className="h-10 w-10 rounded-xl bg-muted/50 border border-border/30 flex items-center justify-center shrink-0">
-                        <Icon className="h-5 w-5 text-muted-foreground" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <h4 className="text-sm font-semibold truncate">{meta.name}</h4>
-                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full border ${status.bg} ${status.text} ${status.border}`}>
-                            {status.label}
-                          </span>
-                        </div>
-                        <p className="text-xs text-muted-foreground line-clamp-2">{meta.description}</p>
-                        {health.connectedAccount && (
-                          <p className="text-[11px] text-muted-foreground/70 truncate">
-                            {health.connectedAccount}
-                          </p>
-                        )}
-                        {health.lastSyncAt && (
-                          <p className="text-[10px] text-muted-foreground/50">
-                            Last sync {formatTimeAgo(health.lastSyncAt)}
-                          </p>
-                        )}
-                        {health.errorMessage && (
-                          <p className="text-[11px] text-red-400 truncate">{health.errorMessage}</p>
-                        )}
-                      </div>
-                      {meta.externalUrl && (
-                        <a
-                          href={meta.externalUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-muted-foreground hover:text-foreground"
-                          title="Open service"
-                        >
-                          <ExternalLink className="h-3.5 w-3.5" />
-                        </a>
-                      )}
-                    </div>
-
-                    {supportsIngestion && isConnected && (
-                      <div className="rounded-xl border border-border/30 bg-muted/20 p-3 space-y-3">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <ShieldCheck className="h-3.5 w-3.5 text-[hsl(var(--kf-accent1))]" />
-                            <span className="text-xs font-medium">Send items to Key Inbox</span>
-                          </div>
-                          <Switch
-                            checked={config?.intakeEnabled ?? false}
-                            onCheckedChange={(checked) => toggleIngestion(meta.type, checked)}
-                          />
-                        </div>
-                        {config?.intakeEnabled && (
-                          <div className="space-y-1">
-                            <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                              <span>Auto-approve threshold</span>
-                              <span>{config.autoApproveThreshold ?? "Off"}</span>
-                            </div>
-                            <input
-                              type="range"
-                              min={0}
-                              max={1}
-                              step={0.05}
-                              value={config.autoApproveThreshold ?? 0}
-                              onChange={(e) => updateThreshold(meta.type, parseFloat(e.target.value) || null)}
-                              className="w-full accent-[hsl(var(--kf-accent1))]"
-                            />
-                            <p className="text-[10px] text-muted-foreground/60">
-                              Confidence above this value will auto-execute. Set to 0 to disable.
-                            </p>
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    <div className="flex flex-wrap items-center gap-2">
-                      {isConnected ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleDisconnect(meta.type, meta.name)}
-                          disabled={busy[meta.type]?.disconnect}
-                          className="h-7 text-xs"
-                        >
-                          {busy[meta.type]?.disconnect ? (
-                            <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                          ) : (
-                            <Unlink className="h-3 w-3 mr-1" />
-                          )}
-                          Disconnect
-                        </Button>
-                      ) : (
-                        <Button
-                          size="sm"
-                          variant="default"
-                          onClick={() => handleConnect(entry)}
-                          disabled={busy[meta.type]?.connect}
-                          className="h-7 text-xs"
-                        >
-                          {busy[meta.type]?.connect ? (
-                            <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                          ) : (
-                            <Plug className="h-3 w-3 mr-1" />
-                          )}
-                          Connect
-                        </Button>
-                      )}
-
-                      {meta.supportsSync && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleSync(meta.type, meta.name)}
-                          disabled={busy[meta.type]?.sync}
-                          className="h-7 text-xs"
-                        >
-                          {busy[meta.type]?.sync ? (
-                            <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                          ) : (
-                            <RefreshCw className="h-3 w-3 mr-1" />
-                          )}
-                          Sync now
-                        </Button>
-                      )}
-
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => handleTest(meta.type, meta.name)}
-                        disabled={busy[meta.type]?.test}
-                        className="h-7 text-xs"
-                      >
-                        {busy[meta.type]?.test ? (
-                          <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                        ) : (
-                          <Activity className="h-3 w-3 mr-1" />
-                        )}
-                        Test
-                      </Button>
-
-                      {meta.type === "google_drive" && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => setManageType("google_sheets")}
-                          className="h-7 text-xs"
-                        >
-                          <FileSpreadsheet className="h-3 w-3 mr-1" />
-                          Sheets
-                        </Button>
-                      )}
-
-                      {MANAGE_CONFIG[meta.type] && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => setManageType(meta.type)}
-                          className="h-7 text-xs"
-                        >
-                          <Settings2 className="h-3 w-3 mr-1" />
-                          Manage
-                        </Button>
-                      )}
-                    </div>
-                  </motion.div>
-                );
-              })}
-            </div>
-          </section>
-        );
+        if (!items.length) return null;
+        return renderGroupSection(group, items);
       })}
 
+      <MetaBusinessSuiteSection businessId={businessId} />
       <SocialSection businessId={businessId} />
       <BankingSection businessId={businessId} />
       <ConnectorHealthSection businessId={businessId} />

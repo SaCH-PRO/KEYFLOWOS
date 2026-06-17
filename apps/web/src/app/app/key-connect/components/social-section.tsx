@@ -138,7 +138,7 @@ export function SocialSection({ businessId }: SocialSectionProps) {
         <div className="h-7 w-7 rounded-lg bg-gradient-to-br from-[hsl(var(--kf-accent1))]/20 to-[hsl(var(--kf-accent2))]/20 border border-border/40 flex items-center justify-center text-[11px] font-bold">
           S
         </div>
-        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Social</h3>
+        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Social Channels</h3>
         <span className="text-[10px] text-muted-foreground/60">
           {connections.filter((c) => c.status === "CONNECTED").length}/{PLATFORMS.length} connected
         </span>

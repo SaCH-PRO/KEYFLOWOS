@@ -86,10 +86,19 @@ export class ConnectorRegistryService {
 
   async getDashboard(businessId: string): Promise<ConnectorDashboardEntry[]> {
     const entries: ConnectorDashboardEntry[] = [];
+    const statuses = await this.prisma.client.connectorStatus.findMany({ where: { businessId } });
+    const statusMap = new Map(statuses.map((s) => [s.connectorType, s]));
+    const keyInboxDefaultCategories = new Set(['communication', 'messaging', 'forms', 'email_marketing']);
+
     for (const connector of this.connectors.values()) {
       const health = await this.getHealth(connector.meta.type, businessId);
       if (health) {
-        entries.push({ meta: connector.meta, health });
+        const status = statusMap.get(connector.meta.type);
+        const flows = {
+          keyInbox: status ? status.intakeEnabled : keyInboxDefaultCategories.has(connector.meta.category),
+          temporal: health.status === 'connected',
+        };
+        entries.push({ meta: connector.meta, health: { ...health, flows } });
       }
     }
     return entries;
