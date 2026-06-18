@@ -3,12 +3,24 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { EntityResolutionService } from '../../core/connectors/entity-resolution.service';
 import { encryptToken, decryptToken } from '../../core/crypto/token-crypto';
+import { KeyInboxService } from '../key-inbox/key-inbox.service';
+import type { ResolvedEntity } from '../../core/connectors/entity-resolution.service';
 
 export interface WhatsAppMessage {
   to: string;
   body: string;
   templateName?: string;
   templateData?: Record<string, string>;
+}
+
+export interface WhatsAppInboundPayload {
+  from: string;
+  body?: string;
+  externalId?: string;
+  senderName?: string;
+  provider?: 'twilio' | 'meta';
+  rawPayload?: Record<string, unknown>;
+  receivedAt?: Date;
 }
 
 export interface WhatsAppConfig {
@@ -53,9 +65,10 @@ export class WhatsAppService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Inject(EntityResolutionService) private readonly entityResolution: EntityResolutionService,
+    @Inject(KeyInboxService) private readonly keyInbox: KeyInboxService,
   ) {}
 
-  async receiveInbound(businessId: string, payload: { from: string; body?: string; externalId?: string; senderName?: string }) {
+  async receiveInbound(businessId: string, payload: WhatsAppInboundPayload) {
     const resolved = await this.entityResolution.resolveContact(businessId, {
       source: 'whatsapp',
       phone: payload.from,
@@ -101,7 +114,79 @@ export class WhatsAppService {
       });
     }
 
+    await this.ingestToKeyInbox(businessId, payload, resolved);
+
     return resolved;
+  }
+
+  private async ingestToKeyInbox(
+    businessId: string,
+    payload: WhatsAppInboundPayload,
+    resolved: ResolvedEntity,
+  ): Promise<void> {
+    const externalMessageId = payload.externalId;
+    if (!externalMessageId) {
+      this.logger.warn(`Skipping KEYInbox ingest for WhatsApp message without externalId (business ${businessId})`);
+      return;
+    }
+
+    try {
+      const existing = await this.prisma.client.keyInboxMessage.findFirst({
+        where: {
+          businessId,
+          channel: 'whatsapp',
+          externalMessageId,
+        },
+      });
+      if (existing) {
+        this.logger.debug(`WhatsApp message ${externalMessageId} already in KEYInbox`);
+        return;
+      }
+
+      const normalizedFrom = this.normalizePhone(payload.from) ?? payload.from;
+      const body = payload.body ?? '';
+      const receivedAt = payload.receivedAt ?? new Date();
+
+      const thread = await this.keyInbox.upsertThread({
+        businessId,
+        channel: 'whatsapp',
+        externalThreadId: normalizedFrom,
+        contactId: resolved.contactId || null,
+        subject: this.truncate(body, 100),
+        status: 'OPEN',
+        priority: 'NORMAL',
+        metadata: {
+          provider: payload.provider ?? 'unknown',
+          rawPayload: payload.rawPayload ?? {},
+        },
+      });
+
+      await this.keyInbox.addMessage({
+        businessId,
+        threadId: thread.id,
+        channel: 'whatsapp',
+        direction: 'INBOUND',
+        senderName: payload.senderName ?? null,
+        senderPhone: normalizedFrom,
+        senderHandle: normalizedFrom,
+        contentText: body,
+        externalMessageId,
+        receivedAt,
+        metadata: {
+          provider: payload.provider ?? 'unknown',
+          rawPayload: payload.rawPayload ?? {},
+        },
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Failed to ingest WhatsApp message to KEYInbox for ${businessId}: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  private truncate(text: string, maxLength: number): string {
+    if (!text) return 'New message';
+    return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
   }
 
   async getConfig(businessId: string): Promise<WhatsAppConfig | null> {

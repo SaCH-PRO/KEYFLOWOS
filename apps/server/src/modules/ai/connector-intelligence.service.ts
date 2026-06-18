@@ -281,83 +281,12 @@ export class ConnectorIntelligenceService implements OnModuleInit, OnModuleDestr
     });
   }
 
-  private async scanWhatsApp(businessId: string): Promise<void> {
-    // WhatsApp messages are received via webhooks, not polling
-    // But we can check for unread messages or message status updates
-    // For now, this is a placeholder for future WhatsApp Business API polling
-    // The actual message ingestion happens via webhooks
-
-    const business = await this.prisma.client.business.findUnique({
-      where: { id: businessId },
-      select: { messageIntakeEnabled: true },
-    });
-    const intakeEnabled = business?.messageIntakeEnabled ?? false;
-
-    // Check for pending message responses that AI should handle
-    const pendingResponses = await this.prisma.client.whatsAppMessage.findMany({
-      where: {
-        businessId,
-        direction: 'INBOUND',
-        status: 'RECEIVED',
-        createdAt: { gte: new Date(Date.now() - 5 * 60 * 1000) },
-      },
-      take: 10,
-    });
-
-    for (const msg of pendingResponses) {
-      // Get contact phone from related WhatsAppContact
-      const contact = await this.prisma.client.whatsAppContact.findUnique({
-        where: { id: msg.whatsappContactId },
-        select: { phoneNumber: true },
-      });
-      const fromPhone = contact?.phoneNumber ?? 'unknown';
-
-      if (intakeEnabled) {
-        this.events.emit('message.intake.received', {
-          businessId,
-          connectorType: 'whatsapp',
-          sourceChannel: 'whatsapp',
-          externalId: msg.wamid ?? msg.id,
-          from: fromPhone,
-          body: msg.body,
-        });
-        continue;
-      }
-
-      this.events.emit('message.received', {
-        businessId,
-        channel: 'whatsapp',
-        from: fromPhone,
-        body: msg.body,
-        messageId: msg.id,
-      });
-
-      // Publish to agent bus for AI response routing
-      this.agentBus.publish(businessId, {
-        topic: 'whatsapp.inbound',
-        payload: {
-          messageId: msg.id,
-          from: fromPhone,
-          body: msg.body,
-          timestamp: msg.createdAt,
-        },
-        senderAgentId: 'whatsapp_connector',
-        priority: msg.body?.includes('urgent') || msg.body?.includes('emergency') ? 2 : 0,
-      }).catch(() => {});
-
-      // Process via conversational AI
-      this.conversationalAI.handleInboundMessage({
-        businessId,
-        channel: 'whatsapp',
-        from: fromPhone,
-        messageBody: msg.body ?? '',
-        messageId: msg.id,
-      }).then((response) => {
-        this.logger.log(`WhatsApp AI response for ${fromPhone}: ${response.reply.slice(0, 80)}...`);
-      }).catch((err) => {
-        this.logger.error(`Conversational AI failed for WhatsApp: ${(err as Error).message}`);
-      });
-    }
+  private async scanWhatsApp(_businessId: string): Promise<void> {
+    // WhatsApp inbound messages are ingested via webhooks (WhatsAppController.webhook)
+    // and written directly to KEYInbox by WhatsAppService. Polling the WhatsApp Business
+    // API is not required for message ingestion, so this scheduled scan is intentionally
+    // a no-op to avoid duplicate events.
+    return;
   }
 
   private async scanMetaMessages(businessId: string): Promise<void> {
