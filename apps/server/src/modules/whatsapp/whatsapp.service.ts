@@ -316,7 +316,10 @@ export class WhatsAppService {
   }
 
   private normalizePhone(phone: string): string | null {
-    const cleaned = phone.replace(/\s/g, '').replace(/[-()]/g, '');
+    const cleaned = phone
+      .replace(/^whatsapp:/i, '')
+      .replace(/\s/g, '')
+      .replace(/[-()]/g, '');
     if (cleaned.startsWith('+')) return cleaned;
     if (cleaned.startsWith('1') && cleaned.length === 11) return `+${cleaned}`;
     if (cleaned.length === 10) return `+1${cleaned}`;
