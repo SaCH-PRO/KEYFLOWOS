@@ -103,7 +103,7 @@ export function KeyContextualSuggestions() {
   };
 
   const handleOpenBlueprintOnboarding = () => {
-    window.location.href = "/app/blueprint?onboarding=1";
+    window.location.href = "/app/profile?tab=business-genome";
   };
 
   if (!visible) return null;

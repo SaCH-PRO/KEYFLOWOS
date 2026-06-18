@@ -1,12 +1,5 @@
-"use client";
+import { redirect } from "next/navigation";
 
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
-
-export default function BusinessBlueprintPage() {
-  const router = useRouter();
-  useEffect(() => {
-    router.replace("/app/blueprint");
-  }, [router]);
-  return null;
+export default function BusinessBlueprintRedirectPage() {
+  redirect("/app/profile?tab=business-genome&section=advanced-editor");
 }

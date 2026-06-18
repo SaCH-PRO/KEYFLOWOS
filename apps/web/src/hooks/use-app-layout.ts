@@ -222,7 +222,7 @@ export function useAppLayout(): AppLayoutState {
 
   useEffect(() => {
     setMobileDrawerOpen(false);
-    if (pathname && pathname !== "/app/onboarding") {
+    if (pathname) {
       try {
         const segments = pathname.split("/").filter(Boolean);
         const last = segments[segments.length - 1];

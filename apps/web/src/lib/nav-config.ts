@@ -207,7 +207,7 @@ export const operateSections: NavSection[] = [
     items: [
       { label: "Market Strategy", href: "/app/market", icon: Target },
       { label: "Goals", href: "/app/goals", icon: Target },
-      { label: "Blueprint", href: "/app/blueprint", icon: FileText },
+      { label: "Business Genome", href: "/app/profile?tab=business-genome", icon: FileText },
     ],
   },
 ];
@@ -226,7 +226,7 @@ export const buildSections: NavSection[] = [
     label: "Business",
     icon: Building,
     items: [
-      { label: "Blueprint", href: "/app/blueprint", icon: BrainCircuit },
+      { label: "Business Genome", href: "/app/profile?tab=business-genome", icon: BrainCircuit },
       { label: "Storefront", href: "/app/commerce", icon: Store },
       { label: "Presence", href: "/app/presence", icon: Globe },
       { label: "Templates", href: "/app/templates", icon: GraduationCap },

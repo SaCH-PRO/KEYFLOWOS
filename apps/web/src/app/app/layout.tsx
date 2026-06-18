@@ -12,7 +12,7 @@ import { PlanLimitDialog } from "@/components/ui/upgrade-prompt";
 import { KeyflowOSStoreDrawer } from "@/components/keyflowos-store-drawer";
 
 import { CelebrationListener } from "@/components/ui/celebration-listener";
-import { BlueprintCompletionBanner } from "@/components/blueprint/blueprint-completion-banner";
+import { GenomeIntegrityBanner } from "@/components/genome-integrity-banner";
 import { RequireAuth } from "@/components/require-auth";
 import { KeyAgent } from "@/components/key";
 import { KeyPresence } from "@/components/key/key-presence";
@@ -98,7 +98,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
             userMenuRef={layout.userMenuRef}
             handleLogout={layout.handleLogout}
           />
-          <BlueprintCompletionBanner />
+          <GenomeIntegrityBanner />
           <div className="px-3 md:px-6 pt-1">
             <OriginAwareBreadcrumbs />
           </div>

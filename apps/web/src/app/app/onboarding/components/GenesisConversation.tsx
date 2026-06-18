@@ -44,6 +44,7 @@ export function GenesisConversation() {
   useEffect(() => {
     const bid = getStoredBusinessId();
     if (!bid) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- initial async load of Genesis readiness
       setInitializing(false);
       setError("No business selected. Please sign in or create a workspace.");
       return;
@@ -318,7 +319,7 @@ export function GenesisConversation() {
           className="flex flex-col sm:flex-row items-center justify-center gap-4 text-xs text-muted-foreground"
         >
           <button
-            onClick={() => (window.location.href = "/app/blueprint")}
+            onClick={() => (window.location.href = "/app/profile?tab=business-genome")}
             className="flex items-center gap-1.5 hover:text-foreground transition-colors"
           >
             Prefer manual setup?

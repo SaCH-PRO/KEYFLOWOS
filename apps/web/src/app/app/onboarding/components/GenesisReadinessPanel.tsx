@@ -295,7 +295,7 @@ export function GenesisReadinessPanel({
           <ArrowRight className="w-4 h-4" />
         </button>
         <button
-          onClick={() => router.push("/app/blueprint")}
+          onClick={() => router.push("/app/profile?tab=business-genome")}
           className="kf-btn-secondary flex items-center gap-2 px-5 py-2.5"
         >
           <FileText className="w-4 h-4" />

@@ -1211,7 +1211,7 @@ export function CopilotPanel({ open, onClose, currentModule, initialPrompt, onIn
                             </p>
                             <div className="flex flex-col gap-2">
                               <button
-                                onClick={() => { router.push("/app/blueprint?onboarding=1"); onClose(); }}
+                                onClick={() => { router.push("/app/profile?tab=business-genome"); onClose(); }}
                                 className="w-full flex items-center justify-center gap-1.5 p-2 rounded-lg bg-[hsl(var(--kf-accent1)_/_0.15)] text-xs text-[hsl(var(--kf-accent1))] font-medium hover:bg-[hsl(var(--kf-accent1)_/_0.25)] transition-all"
                               >
                                 <span>Continue in Blueprint</span>
