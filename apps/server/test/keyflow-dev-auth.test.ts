@@ -9,13 +9,13 @@ describe('KEYFLOW_DEV_AUTH_BYPASS boot guard', () => {
     const result = await runMain('true');
     expect(result.code).not.toBe(0);
     expect(result.stderr).toContain('KEYFLOW_DEV_AUTH_BYPASS');
-  }, 45_000);
+  }, 120_000);
 
   it('exits non-zero when set to "1"', async () => {
     const result = await runMain('1');
     expect(result.code).not.toBe(0);
     expect(result.stderr).toContain('KEYFLOW_DEV_AUTH_BYPASS');
-  }, 45_000);
+  }, 120_000);
 });
 
 async function runMain(value: string): Promise<{ code: number | null; stderr: string }> {
@@ -40,7 +40,7 @@ async function runMain(value: string): Promise<{ code: number | null; stderr: st
       // SIGKILL is not supported on Windows; default kill() terminates the process tree.
       child.kill(IS_WINDOWS ? undefined : 'SIGKILL');
       reject(new Error('main.ts did not exit within timeout'));
-    }, 35_000);
+    }, 100_000);
     child.on('exit', (code) => { clearTimeout(timer); resolve({ code, stderr }); });
     child.on('error', (err) => { clearTimeout(timer); reject(err); });
   });

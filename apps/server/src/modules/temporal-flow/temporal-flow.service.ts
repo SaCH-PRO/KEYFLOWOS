@@ -216,52 +216,57 @@ export class TemporalFlowService {
     const events = recent ?? (await this.list(businessId, { limit: 500 }));
     const candidates: TemporalFlowGenomeCandidate[] = [];
 
-    const whatsappLeadCount = events.filter(
+    const whatsappLeads = events.filter(
       (e) => e.source === 'WHATSAPP' && e.type.includes('lead'),
-    ).length;
-    if (whatsappLeadCount >= 3) {
+    );
+    if (whatsappLeads.length >= 3) {
       candidates.push({
         section: 'marketing',
         reason: 'WhatsApp appears to be a meaningful acquisition source.',
-        evidence: [`${whatsappLeadCount} WhatsApp lead events detected.`],
+        evidence: [`${whatsappLeads.length} WhatsApp lead events detected.`],
+        eventIds: whatsappLeads.map((e) => e.id),
       });
     }
 
-    const instagramDmCount = events.filter(
+    const instagramDms = events.filter(
       (e) => e.source === 'INSTAGRAM' && e.type === 'instagram.dm.received',
-    ).length;
-    if (instagramDmCount >= 5) {
+    );
+    if (instagramDms.length >= 5) {
       candidates.push({
         section: 'marketing',
         reason: 'Instagram DM volume indicates active audience engagement.',
-        evidence: [`${instagramDmCount} Instagram DM events detected.`],
+        evidence: [`${instagramDms.length} Instagram DM events detected.`],
+        eventIds: instagramDms.map((e) => e.id),
       });
     }
 
-    const bookingCount = events.filter((e) => e.type === 'booking.created').length;
-    if (bookingCount >= 5) {
+    const bookings = events.filter((e) => e.type === 'booking.created');
+    if (bookings.length >= 5) {
       candidates.push({
         section: 'operations',
         reason: 'Rising booking volume suggests operations workflows are material.',
-        evidence: [`${bookingCount} booking events detected.`],
+        evidence: [`${bookings.length} booking events detected.`],
+        eventIds: bookings.map((e) => e.id),
       });
     }
 
-    const invoiceCount = events.filter((e) => e.type === 'invoice.paid').length;
-    if (invoiceCount >= 3) {
+    const invoices = events.filter((e) => e.type === 'invoice.paid');
+    if (invoices.length >= 3) {
       candidates.push({
         section: 'sales',
         reason: 'Paid invoice activity confirms a working sales channel.',
-        evidence: [`${invoiceCount} paid invoice events detected.`],
+        evidence: [`${invoices.length} paid invoice events detected.`],
+        eventIds: invoices.map((e) => e.id),
       });
     }
 
-    const assetExpiryCount = events.filter((e) => e.type === 'asset.expiring_soon').length;
-    if (assetExpiryCount >= 1) {
+    const assetExpiries = events.filter((e) => e.type === 'asset.expiring_soon');
+    if (assetExpiries.length >= 1) {
       candidates.push({
         section: 'risk',
         reason: 'Expiring assets indicate active risk management needs.',
-        evidence: [`${assetExpiryCount} asset expiry reminder(s) detected.`],
+        evidence: [`${assetExpiries.length} asset expiry reminder(s) detected.`],
+        eventIds: assetExpiries.map((e) => e.id),
       });
     }
 

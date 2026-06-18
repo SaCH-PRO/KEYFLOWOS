@@ -91,8 +91,8 @@ describe('GenomeEvolutionService', () => {
   it('generates proposals from temporal flow signals', async () => {
     const { service, temporal } = makeService();
     temporal.findGenomeSignals = vi.fn().mockResolvedValue([
-      { section: 'marketing', reason: 'WhatsApp leads', evidence: ['3 leads'] },
-      { section: 'operations', reason: 'Bookings rising', evidence: ['5 bookings'] },
+      { section: 'marketing', reason: 'WhatsApp leads', evidence: ['3 leads'], eventIds: ['evt_1', 'evt_2'] },
+      { section: 'operations', reason: 'Bookings rising', evidence: ['5 bookings'], eventIds: ['evt_3'] },
     ]);
 
     const created = await service.generateFromTemporalFlow('biz_1', 'KEY');
@@ -100,6 +100,7 @@ describe('GenomeEvolutionService', () => {
     expect(created).toHaveLength(2);
     expect(created[0].section).toBe('marketing');
     expect(created[0].status).toBe('PENDING');
+    expect(created[0].sourceEventIds).toEqual(['evt_1', 'evt_2']);
   });
 
   it('skips duplicate pending sections during generation', async () => {
