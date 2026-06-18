@@ -3,6 +3,7 @@ export { GmailIngestionService } from './gmail-ingestion.service';
 export { GoogleCalendarConnector } from './google-calendar.connector';
 export { GoogleDriveConnector } from './google-drive.connector';
 export { GoogleFormsConnector } from './google-forms.connector';
+export { GoogleFormsIngestionService } from './google-forms-ingestion.service';
 export { GoogleContactsConnector } from './google-contacts.connector';
 export { OutlookContactsConnector } from './outlook-contacts.connector';
 export { GoogleBusinessProfileConnector } from './google-business-profile.connector';

@@ -9,6 +9,7 @@ import {
   ConnectorStatusSummary,
   ConnectorSmokeResult,
 } from '../connector.interface';
+import { GoogleFormsIngestionService } from './google-forms-ingestion.service';
 
 @Injectable()
 export class GoogleFormsConnector implements IConnector {
@@ -35,6 +36,7 @@ export class GoogleFormsConnector implements IConnector {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
+    @Inject(GoogleFormsIngestionService) private readonly ingestion: GoogleFormsIngestionService,
   ) {}
 
   async authenticate(businessId: string): Promise<{ connected: boolean; authUrl?: string }> {
@@ -85,17 +87,11 @@ export class GoogleFormsConnector implements IConnector {
   }
 
   async sync(businessId: string): Promise<ConnectorSyncResult> {
-    const start = Date.now();
     const connected = await this.isConnected(businessId);
     if (!connected) {
-      return { success: false, itemsSynced: 0, errors: ['Google Forms not connected'], duration: Date.now() - start };
+      return { success: false, itemsSynced: 0, errors: ['Google Forms not connected'], duration: 0 };
     }
-    await this.prisma.client.connectorStatus.upsert({
-      where: { businessId_connectorType: { businessId, connectorType: 'google_forms' } },
-      create: { businessId, connectorType: 'google_forms', status: 'connected', lastSyncAt: new Date(), syncCount: 1 },
-      update: { lastSyncAt: new Date(), syncCount: { increment: 1 }, status: 'connected' },
-    });
-    return { success: true, itemsSynced: 0, errors: [], duration: Date.now() - start };
+    return this.ingestion.syncForms(businessId);
   }
 
   async testConnection(businessId: string): Promise<{ success: boolean; error?: string; account?: string }> {

@@ -513,6 +513,7 @@ model Business {
   callLogs             CallLog[]
   approvalRequests     ApprovalRequest[]
   assets               Asset[]
+  businessAssets       BusinessAsset[]
   authorityGrants      AuthorityGrant[]
   timeEntries          TimeEntry[]
 
@@ -530,6 +531,32 @@ model Business {
   deletedAt DateTime? @map("deleted_at")
 
   @@map("businesses")
+}
+
+// Phase 7: Business Genome — Business Asset Registry
+model BusinessAsset {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  type        String   // DOMAIN, WEBSITE, SOCIAL, BANK, PAYMENT_PROCESSOR, LICENSE, EQUIPMENT, CONTRACT, BRAND_ASSET, SOFTWARE
+  name        String
+  status      String   @default("ACTIVE") // ACTIVE, PENDING, EXPIRED, ARCHIVED
+  provider    String?
+  url         String?
+  identifier  String?
+  owner       String?
+  metadata    Json?    @default("{}")
+
+  verifiedAt  DateTime? @map("verified_at")
+  expiresAt   DateTime? @map("expires_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@index([businessId])
+  @@index([businessId, type])
+  @@index([businessId, status])
+  @@map("business_assets")
 }
 
 model MarketStrategy {

@@ -250,7 +250,9 @@ export class GmailIngestionService {
     }
 
     if (!lastHistoryId) {
-      const refs = await this.listInboxMessages(accessToken);
+      const refs = await this.listInboxMessages(accessToken, {
+        backfillDays: this.getFirstSyncBackfillDays(),
+      });
       return { refs, historyId: currentHistoryId };
     }
 
@@ -266,6 +268,12 @@ export class GmailIngestionService {
     }
   }
 
+  private getFirstSyncBackfillDays(): number {
+    const env = process.env.GMAIL_INGESTION_BACKFILL_DAYS;
+    const parsed = env ? Number(env) : NaN;
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 30;
+  }
+
   private async fetchProfile(accessToken: string): Promise<GmailProfile> {
     const res = await fetch(`${GMAIL_API_BASE}/profile?fields=emailAddress,historyId`, {
       headers: { Authorization: `Bearer ${accessToken}` },
@@ -277,11 +285,15 @@ export class GmailIngestionService {
     return (await res.json()) as GmailProfile;
   }
 
-  private async listInboxMessages(accessToken: string): Promise<MessageRef[]> {
+  private async listInboxMessages(
+    accessToken: string,
+    opts?: { backfillDays?: number },
+  ): Promise<MessageRef[]> {
     const refs: MessageRef[] = [];
     let pageToken: string | undefined;
     const maxResults = 50;
-    const query = 'newer_than:1d';
+    const backfillDays = opts?.backfillDays ?? 1;
+    const query = `newer_than:${backfillDays}d`;
 
     do {
       const params = new URLSearchParams({

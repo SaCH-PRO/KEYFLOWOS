@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { Dna, Grid3X3, MessageSquare, FileText, Settings, Loader2, ScrollText } from "lucide-react";
+import { Dna, Grid3X3, MessageSquare, FileText, Settings, Loader2, ScrollText, Briefcase } from "lucide-react";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { getGenome, type GenomeIntegrityResult } from "@/lib/api/business-genome";
 import { GenomeOverview } from "./business-genome/genome-overview";
@@ -12,8 +12,9 @@ import { GenomeChatPanel } from "./business-genome/genome-chat-panel";
 import { GenomeReportsPanel } from "./business-genome/genome-reports-panel";
 import { ConstitutionPanel } from "./business-genome/constitution-panel";
 import { AdvancedEditorPanel } from "./business-genome/advanced-editor-panel";
+import { AssetRegistryPanel } from "./business-genome/asset-registry-panel";
 
-type GenomeSubTab = "overview" | "dna-sections" | "genome-chat" | "reports" | "constitution" | "advanced-editor";
+type GenomeSubTab = "overview" | "dna-sections" | "genome-chat" | "reports" | "constitution" | "assets" | "advanced-editor";
 
 const SUB_TABS: { id: GenomeSubTab; label: string; icon: React.ElementType }[] = [
   { id: "overview", label: "Overview", icon: Dna },
@@ -21,6 +22,7 @@ const SUB_TABS: { id: GenomeSubTab; label: string; icon: React.ElementType }[] =
   { id: "genome-chat", label: "Genome Chat", icon: MessageSquare },
   { id: "reports", label: "Reports", icon: FileText },
   { id: "constitution", label: "Constitution", icon: ScrollText },
+  { id: "assets", label: "Asset Registry", icon: Briefcase },
   { id: "advanced-editor", label: "Advanced Editor", icon: Settings },
 ];
 
@@ -171,6 +173,12 @@ export function BusinessGenomeTab() {
         {activeSubTab === "constitution" && (
           <motion.div key="constitution" {...fade}>
             <ConstitutionPanel genome={genome} />
+          </motion.div>
+        )}
+
+        {activeSubTab === "assets" && (
+          <motion.div key="assets" {...fade}>
+            <AssetRegistryPanel />
           </motion.div>
         )}
 

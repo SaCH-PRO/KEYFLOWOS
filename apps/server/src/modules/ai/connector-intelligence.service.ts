@@ -97,6 +97,7 @@ export class ConnectorIntelligenceService implements OnModuleInit, OnModuleDestr
             await this.scanMetaMessages(businessId);
             break;
           case 'google_forms':
+            await this.connectorRegistry.syncConnector('google_forms', businessId);
             await this.scanGoogleForms(businessId);
             break;
           case 'gmail':

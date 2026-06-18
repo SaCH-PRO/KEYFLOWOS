@@ -301,7 +301,7 @@ Return ONLY valid JSON:
           threads: threads.length,
           inbound: inboundMessages.length,
           outbound: outboundMessages.length,
-          highUrgency: urgencies.get('high') ?? 0 + (urgencies.get('urgent') ?? 0),
+          highUrgency: (urgencies.get('high') ?? 0) + (urgencies.get('urgent') ?? 0),
         },
       };
     }
