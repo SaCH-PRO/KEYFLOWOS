@@ -71,6 +71,7 @@ import { GrowthIntelligenceModule } from './modules/growth-intelligence/growth-i
 import { FeatureFlagsModule } from './modules/feature-flags/feature-flags.module';
 import { BlueprintModule } from './modules/blueprint/blueprint.module';
 import { BusinessGenesisModule } from './modules/business-genesis/business-genesis.module';
+import { BusinessAssetsModule } from './modules/business-assets/business-assets.module';
 import { CalendarModule } from './modules/calendar/calendar.module';
 import { PublicEventsModule } from './modules/public-events/public-events.module';
 import { DirectoryModule } from './modules/directory/directory.module';
@@ -172,6 +173,7 @@ import { KeyInboxModule } from './modules/key-inbox/key-inbox.module';
     FeatureFlagsModule,
     BlueprintModule,
     BusinessGenesisModule,
+    BusinessAssetsModule,
     CalendarModule,
     PublicEventsModule,
     DirectoryModule,
