@@ -22,6 +22,7 @@ const DNA_COLORS: Record<DnaSectionKey, string> = {
   marketing: "hsl(320 80% 60%)",
   growth: "hsl(170 80% 40%)",
   technology: "hsl(190 90% 55%)",
+  risk: "hsl(0 75% 55%)",
 };
 
 interface ConstitutionSection {

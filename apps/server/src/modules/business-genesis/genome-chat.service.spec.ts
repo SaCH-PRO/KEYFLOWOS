@@ -47,6 +47,7 @@ function makeService(responseContent: string) {
         marketing: 0,
         growth: 0,
         technology: 15,
+        risk: 0,
       },
       genomeDnaConfidence: {
         founder: 60,
@@ -60,9 +61,12 @@ function makeService(responseContent: string) {
         marketing: 0,
         growth: 0,
         technology: 15,
+        risk: 0,
       },
       genomeStage: 'CONCEPT',
       threePillarMinimumMet: false,
+      executiveReadinessScore: 0,
+      readinessBreakdown: { legal: 10, financial: 20, market: 40, operations: 5, sales: 0, marketing: 0, risk: 0 },
       dnaSections: [
         { key: 'market', label: 'Market DNA', integrity: 40, confidence: 40, summary: '', fieldsCaptured: 0, fieldsTotal: 1, missingFields: [], recommendation: '' },
       ],

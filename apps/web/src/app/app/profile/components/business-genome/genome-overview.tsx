@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { Dna, ArrowRight, Sparkles, TrendingUp } from "lucide-react";
+import { Dna, ArrowRight, Sparkles, TrendingUp, Shield } from "lucide-react";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { getGenomeRecommendations, type GenomeIntegrityResult, type DnaSectionKey } from "@/lib/api/business-genome";
 
@@ -23,6 +23,7 @@ const DNA_COLORS: Record<DnaSectionKey, string> = {
   marketing: "hsl(320 80% 60%)",
   growth: "hsl(170 80% 40%)",
   technology: "hsl(190 90% 55%)",
+  risk: "hsl(0 75% 55%)",
 };
 
 function scoreColor(score: number): string {
@@ -74,27 +75,52 @@ export function GenomeOverview({ genome, onSectionClick }: GenomeOverviewProps) 
         }}
       >
         <div className="flex flex-col md:flex-row md:items-center gap-6">
-          <div className="relative flex-shrink-0 mx-auto md:mx-0">
-            <svg width="120" height="120" viewBox="0 0 120 120" className="-rotate-90">
-              <circle cx="60" cy="60" r="52" fill="none" stroke="hsl(var(--kf-muted) / 0.2)" strokeWidth="10" />
-              <motion.circle
-                cx="60"
-                cy="60"
-                r="52"
-                fill="none"
-                stroke={scoreColor(genome.genomeIntegrity)}
-                strokeWidth="10"
-                strokeLinecap="round"
-                strokeDasharray={circumference}
-                initial={{ strokeDashoffset: circumference }}
-                animate={{ strokeDashoffset }}
-                transition={{ duration: 0.8, ease: "easeOut" }}
-              />
-            </svg>
-            <div className="absolute inset-0 flex flex-col items-center justify-center">
-              <Dna className="w-5 h-5 mb-0.5" style={{ color: scoreColor(genome.genomeIntegrity) }} />
-              <span className="text-2xl font-bold">{genome.genomeIntegrity}%</span>
-              <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Integrity</span>
+          <div className="flex items-center justify-center md:justify-start gap-6">
+            <div className="relative flex-shrink-0">
+              <svg width="120" height="120" viewBox="0 0 120 120" className="-rotate-90">
+                <circle cx="60" cy="60" r="52" fill="none" stroke="hsl(var(--kf-muted) / 0.2)" strokeWidth="10" />
+                <motion.circle
+                  cx="60"
+                  cy="60"
+                  r="52"
+                  fill="none"
+                  stroke={scoreColor(genome.genomeIntegrity)}
+                  strokeWidth="10"
+                  strokeLinecap="round"
+                  strokeDasharray={circumference}
+                  initial={{ strokeDashoffset: circumference }}
+                  animate={{ strokeDashoffset }}
+                  transition={{ duration: 0.8, ease: "easeOut" }}
+                />
+              </svg>
+              <div className="absolute inset-0 flex flex-col items-center justify-center">
+                <Dna className="w-5 h-5 mb-0.5" style={{ color: scoreColor(genome.genomeIntegrity) }} />
+                <span className="text-2xl font-bold">{genome.genomeIntegrity}%</span>
+                <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Integrity</span>
+              </div>
+            </div>
+
+            <div className="relative flex-shrink-0">
+              <svg width="96" height="96" viewBox="0 0 120 120" className="-rotate-90">
+                <circle cx="60" cy="60" r="52" fill="none" stroke="hsl(var(--kf-muted) / 0.2)" strokeWidth="10" />
+                <motion.circle
+                  cx="60"
+                  cy="60"
+                  r="52"
+                  fill="none"
+                  stroke={scoreColor(genome.executiveReadinessScore)}
+                  strokeWidth="10"
+                  strokeLinecap="round"
+                  strokeDasharray={circumference}
+                  initial={{ strokeDashoffset: circumference }}
+                  animate={{ strokeDashoffset: circumference * (1 - genome.executiveReadinessScore / 100) }}
+                  transition={{ duration: 0.8, ease: "easeOut" }}
+                />
+              </svg>
+              <div className="absolute inset-0 flex flex-col items-center justify-center">
+                <span className="text-xl font-bold">{genome.executiveReadinessScore}%</span>
+                <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Readiness</span>
+              </div>
             </div>
           </div>
 
@@ -192,6 +218,46 @@ export function GenomeOverview({ genome, onSectionClick }: GenomeOverviewProps) 
               </div>
             </button>
           ))}
+        </div>
+      </div>
+
+      {/* Executive readiness breakdown */}
+      <div>
+        <div className="flex items-center gap-2 mb-3">
+          <Shield className="w-4 h-4 text-muted-foreground" />
+          <h3 className="text-sm font-semibold">Executive Readiness</h3>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {Object.entries(genome.readinessBreakdown).map(([key, score]) => {
+            const section = genome.dnaSections.find((s) => s.key === key);
+            const label = section?.label || key;
+            return (
+              <div
+                key={key}
+                className="rounded-xl p-3"
+                style={{
+                  background: scoreBg(score),
+                  border: `1px solid ${scoreColor(score).replace(")", " / 0.25)")}`,
+                }}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full" style={{ background: DNA_COLORS[key as DnaSectionKey] }} />
+                    <span className="text-xs font-medium truncate">{label}</span>
+                  </div>
+                  <span className="text-xs font-semibold" style={{ color: scoreColor(score) }}>
+                    {score}%
+                  </span>
+                </div>
+                <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                  <div
+                    className="h-full rounded-full transition-all duration-500"
+                    style={{ width: `${score}%`, background: scoreColor(score) }}
+                  />
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
 

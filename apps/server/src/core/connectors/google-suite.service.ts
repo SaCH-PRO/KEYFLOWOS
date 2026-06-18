@@ -43,6 +43,7 @@ const SERVICE_SCOPES: Record<GoogleService, string[]> = {
   forms: [
     'https://www.googleapis.com/auth/forms.body',
     'https://www.googleapis.com/auth/forms.responses.readonly',
+    'https://www.googleapis.com/auth/drive.metadata.readonly',
   ],
   contacts: ['https://www.googleapis.com/auth/contacts'],
   business_profile: ['https://www.googleapis.com/auth/business.manage'],

@@ -124,7 +124,7 @@ const COMPLETENESS_FIELDS: Record<BlueprintSectionKey, string[]> = {
   marketingSystem: ['channels', 'launchPlan'],
   operationsSystem: ['coreWorkflows', 'fulfillmentProcess'],
   projectionProfile: ['startupCapital', 'monthlyFixedCosts', 'avgTicket'],
-  riskProfile: ['financialRisks', 'legalRisks', 'riskScore'],
+  riskProfile: ['financialRisks', 'legalRisks', 'marketRisks', 'operationalRisks', 'founderRisks', 'mitigationPlan'],
   complianceProfile: ['complianceItems', 'complianceScore'],
   executionRoadmap: ['today', 'sevenDayPlan', 'thirtyDayPlan'],
   documentProfile: ['generatedDocuments'],
@@ -144,6 +144,7 @@ const DNA_SECTION_WEIGHTS: Record<DnaSectionKey, number> = {
   marketing: 5,
   growth: 5,
   technology: 5,
+  risk: 0,
 };
 
 const DNA_SECTION_CONFIG: Record<
@@ -239,6 +240,21 @@ const DNA_SECTION_CONFIG: Record<
     fields: ['primaryWorkflow', 'autonomyLevel', 'outreachStyle', 'reportingCadence'],
     label: 'Technology DNA',
   },
+  risk: {
+    sources: ['riskProfile'],
+    fields: ['financialRisks', 'legalRisks', 'marketRisks', 'operationalRisks', 'founderRisks', 'mitigationPlan'],
+    label: 'Risk DNA',
+  },
+};
+
+const EXECUTIVE_READINESS_WEIGHTS: Record<string, number> = {
+  legal: 15,
+  financial: 20,
+  market: 15,
+  operations: 15,
+  sales: 10,
+  marketing: 10,
+  risk: 15,
 };
 
 function isPopulated(value: unknown): boolean {
@@ -386,6 +402,7 @@ export class BlueprintService {
       genomeDnaScores: genomeResult.genomeDnaScores as unknown as Prisma.InputJsonValue,
       genomeDnaConfidence: genomeResult.genomeDnaConfidence as unknown as Prisma.InputJsonValue,
       genomeStage: genomeResult.genomeStage,
+      executiveReadinessScore: genomeResult.executiveReadinessScore,
       genesisCompleted:
         current.genesisCompleted != null ? current.genesisCompleted : genomeResult.threePillarMinimumMet,
     };
@@ -1480,6 +1497,7 @@ export class BlueprintService {
         executionRoadmap: executionRoadmap as unknown as Prisma.InputJsonValue,
         documentProfile: documentProfile as unknown as Prisma.InputJsonValue,
         readinessScore: 0,
+        executiveReadinessScore: 0,
         confidenceScores: confidenceScores as unknown as Prisma.InputJsonValue,
         completeness,
       },
@@ -1588,6 +1606,7 @@ export class BlueprintService {
       marketing: 0,
       growth: 0,
       technology: 0,
+      risk: 0,
     };
     for (const section of dnaSections) {
       genomeDnaScores[section.key] = section.integrity;
@@ -1595,10 +1614,23 @@ export class BlueprintService {
 
     const totalWeight = Object.values(DNA_SECTION_WEIGHTS).reduce((a, b) => a + b, 0);
     const weightedSum = dnaSections.reduce(
-      (sum, section) => sum + section.integrity * DNA_SECTION_WEIGHTS[section.key],
+      (sum, section) => sum + section.integrity * (DNA_SECTION_WEIGHTS[section.key] ?? 0),
       0,
     );
     const genomeIntegrity = totalWeight ? Math.round(weightedSum / totalWeight) : 0;
+
+    const readinessBreakdown: Record<string, number> = {};
+    let readinessWeightedSum = 0;
+    let readinessTotalWeight = 0;
+    for (const [key, weight] of Object.entries(EXECUTIVE_READINESS_WEIGHTS)) {
+      const score = genomeDnaScores[key as DnaSectionKey] ?? 0;
+      readinessBreakdown[key] = score;
+      readinessWeightedSum += score * weight;
+      readinessTotalWeight += weight;
+    }
+    const executiveReadinessScore = readinessTotalWeight
+      ? Math.round(readinessWeightedSum / readinessTotalWeight)
+      : 0;
 
     const threePillarMinimumMet = this.checkThreePillarMinimum(genomeDnaScores);
     const genomeStage = this.determineGenomeStage(genomeIntegrity, genomeDnaScores);
@@ -1610,6 +1642,8 @@ export class BlueprintService {
       genomeStage,
       threePillarMinimumMet,
       dnaSections,
+      executiveReadinessScore,
+      readinessBreakdown,
     };
   }
 

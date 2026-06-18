@@ -18,6 +18,8 @@ import { CalendarCrmListener } from './listeners/crm.listener';
 import { CalendarCommerceListener } from './listeners/commerce.listener';
 import { CalendarProjectsListener } from './listeners/projects.listener';
 import { CalendarOrdersListener } from './listeners/orders.listener';
+import { CalendarConnectorListener } from './listeners/connector.listener';
+import { CalendarActionIntelligenceService } from './calendar-action-intelligence.service';
 
 @Module({
   imports: [PrismaModule, AiModule, forwardRef(() => BookingsModule)],
@@ -38,6 +40,8 @@ import { CalendarOrdersListener } from './listeners/orders.listener';
     CalendarCommerceListener,
     CalendarProjectsListener,
     CalendarOrdersListener,
+    CalendarConnectorListener,
+    CalendarActionIntelligenceService,
   ],
   exports: [
     CalendarProjectionService,

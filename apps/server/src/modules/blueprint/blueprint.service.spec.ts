@@ -171,6 +171,14 @@ function fullBlueprintRow(): Record<string, unknown> {
       sevenDayPlan: ['validate'],
       thirtyDayPlan: ['launch'],
     },
+    riskProfile: {
+      financialRisks: [{ label: 'Cash flow' }],
+      legalRisks: [{ label: 'Contract risk' }],
+      marketRisks: [{ label: 'Competition' }],
+      operationalRisks: [{ label: 'Downtime' }],
+      founderRisks: [{ label: 'Burnout' }],
+      mitigationPlan: ['Hire lawyer'],
+    },
   };
 }
 
@@ -213,6 +221,29 @@ describe('BlueprintService genome integrity', () => {
     for (const section of result.dnaSections) {
       expect(section.integrity).toBe(100);
     }
+  });
+
+  it('computes executive readiness from weighted DNA sections', () => {
+    const service = makeService(fullBlueprintRow());
+    const result = (service as any).buildGenomeIntegrityResult(fullBlueprintRow());
+
+    expect(result.executiveReadinessScore).toBe(100);
+    expect(result.readinessBreakdown).toEqual({
+      legal: 100,
+      financial: 100,
+      market: 100,
+      operations: 100,
+      sales: 100,
+      marketing: 100,
+      risk: 100,
+    });
+  });
+
+  it('returns 0 executive readiness for an empty blueprint', () => {
+    const service = makeService(emptyBlueprintRow());
+    const result = (service as any).buildGenomeIntegrityResult(emptyBlueprintRow());
+
+    expect(result.executiveReadinessScore).toBe(0);
   });
 
   it('detects Three-Pillar Minimum met at exactly 50% per pillar', () => {
@@ -263,6 +294,7 @@ describe('BlueprintService stage determination', () => {
       marketing: 0,
       growth: 0,
       technology: 0,
+      risk: 0,
       ...overrides,
     };
   }

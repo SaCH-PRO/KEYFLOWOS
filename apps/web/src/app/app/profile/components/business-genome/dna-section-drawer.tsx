@@ -59,6 +59,7 @@ const SECTION_FIELDS: Record<DnaSectionKey, string[]> = {
   marketing: ["channels", "launchPlan"],
   growth: ["today", "sevenDayPlan", "thirtyDayPlan"],
   technology: ["primaryWorkflow", "autonomyLevel", "outreachStyle", "reportingCadence"],
+  risk: ["financialRisks", "legalRisks", "marketRisks", "operationalRisks", "founderRisks", "mitigationPlan"],
 };
 
 const FIELD_SOURCES: Record<string, BlueprintSectionKey[]> = {
@@ -118,6 +119,12 @@ const FIELD_SOURCES: Record<string, BlueprintSectionKey[]> = {
   today: ["executionRoadmap"],
   sevenDayPlan: ["executionRoadmap"],
   thirtyDayPlan: ["executionRoadmap"],
+  financialRisks: ["riskProfile"],
+  legalRisks: ["riskProfile"],
+  marketRisks: ["riskProfile"],
+  operationalRisks: ["riskProfile"],
+  founderRisks: ["riskProfile"],
+  mitigationPlan: ["riskProfile"],
 };
 
 const KNOWN_NUMBER_FIELDS = new Set([
@@ -145,6 +152,12 @@ const KNOWN_ARRAY_FIELDS = new Set([
   "today",
   "sevenDayPlan",
   "thirtyDayPlan",
+  "financialRisks",
+  "legalRisks",
+  "marketRisks",
+  "operationalRisks",
+  "founderRisks",
+  "mitigationPlan",
 ]);
 
 function getFieldValue(blueprint: BlueprintData | null, field: string): unknown {

@@ -65,6 +65,8 @@ export class BlueprintController {
       genomeDnaConfidence: result.genomeDnaConfidence,
       genomeStage: result.genomeStage,
       threePillarMinimumMet: result.threePillarMinimumMet,
+      executiveReadinessScore: result.executiveReadinessScore,
+      readinessBreakdown: result.readinessBreakdown,
     };
   }
 

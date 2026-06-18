@@ -28,6 +28,7 @@ export class GoogleFormsConnector implements IConnector {
     scopes: [
       'https://www.googleapis.com/auth/forms.body',
       'https://www.googleapis.com/auth/forms.responses.readonly',
+      'https://www.googleapis.com/auth/drive.metadata.readonly',
       'https://www.googleapis.com/auth/userinfo.email',
     ],
     externalUrl: 'https://docs.google.com/forms',

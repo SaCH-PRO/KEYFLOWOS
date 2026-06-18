@@ -11,7 +11,8 @@ export type DnaSectionKey =
   | "sales"
   | "marketing"
   | "growth"
-  | "technology";
+  | "technology"
+  | "risk";
 
 export type GenomeStage =
   | "CONCEPT"
@@ -41,6 +42,8 @@ export interface GenomeIntegrityResult {
   genomeStage: GenomeStage;
   threePillarMinimumMet: boolean;
   dnaSections: DnaSectionScore[];
+  executiveReadinessScore: number;
+  readinessBreakdown: Record<string, number>;
 }
 
 export interface GenomeRecommendation {
@@ -57,6 +60,8 @@ export interface GenomeIntegritySummary {
   genomeDnaConfidence: Record<DnaSectionKey, number>;
   genomeStage: GenomeStage;
   threePillarMinimumMet: boolean;
+  executiveReadinessScore: number;
+  readinessBreakdown: Record<string, number>;
 }
 
 export interface ThreePillarStatus {

@@ -19,11 +19,13 @@ function makeController() {
       },
       genomeDnaConfidence: {
         founder: 60, vision: 50, business: 70, market: 55, financial: 40,
-        legal: 30, operations: 20, sales: 10, marketing: 10, growth: 0, technology: 15,
+        legal: 30, operations: 20, sales: 10, marketing: 10, growth: 0, technology: 15, risk: 0,
       },
       genomeStage: 'VALIDATED_CONCEPT',
       threePillarMinimumMet: true,
       dnaSections: [],
+      executiveReadinessScore: 35,
+      readinessBreakdown: { legal: 30, financial: 40, market: 55, operations: 20, sales: 10, marketing: 10, risk: 0 },
     } as unknown as GenomeIntegrityResult),
     getRecommendations: vi.fn().mockResolvedValue([{ id: 'r1', section: 'financial', title: 'Add costs', reason: '...' }]),
     generateConstitution: vi.fn().mockResolvedValue({ version: 1, sections: {} }),
@@ -48,6 +50,8 @@ describe('BlueprintController genome endpoints', () => {
     expect(blueprint.calculateGenomeIntegrity).toHaveBeenCalledWith('biz_1');
     expect(result.threePillarMinimumMet).toBe(true);
     expect(result.genomeDnaScores.founder).toBe(60);
+    expect(result.executiveReadinessScore).toBe(35);
+    expect(result.readinessBreakdown).toEqual({ legal: 30, financial: 40, market: 55, operations: 20, sales: 10, marketing: 10, risk: 0 });
   });
 
   it('GET /genome/three-pillar-status returns pillar scores', async () => {
