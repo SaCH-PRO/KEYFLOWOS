@@ -2,9 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { Dna, ArrowRight, Sparkles, TrendingUp, Shield } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Dna, ArrowRight, Sparkles, TrendingUp, Shield, Brain, AlertTriangle } from "lucide-react";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { getGenomeRecommendations, type GenomeIntegrityResult, type DnaSectionKey } from "@/lib/api/business-genome";
+import { getExecutiveBrief, type BusinessExecutiveBrief } from "@/lib/api/intelligence";
 
 interface GenomeOverviewProps {
   genome: GenomeIntegrityResult;
@@ -39,8 +41,10 @@ function scoreBg(score: number): string {
 }
 
 export function GenomeOverview({ genome, onSectionClick }: GenomeOverviewProps) {
+  const router = useRouter();
   const businessId = getStoredBusinessId();
   const [recommendation, setRecommendation] = useState<string | null>(null);
+  const [brief, setBrief] = useState<BusinessExecutiveBrief | null>(null);
 
   useEffect(() => {
     if (!businessId) return;
@@ -48,6 +52,9 @@ export function GenomeOverview({ genome, onSectionClick }: GenomeOverviewProps) 
       if (data?.recommendations?.length) {
         setRecommendation(data.recommendations[0].title + ". " + data.recommendations[0].reason);
       }
+    });
+    getExecutiveBrief(businessId).then(({ data }) => {
+      if (data) setBrief(data);
     });
   }, [businessId, genome.genomeIntegrity]);
 
@@ -185,6 +192,57 @@ export function GenomeOverview({ genome, onSectionClick }: GenomeOverviewProps) 
           <ArrowRight className="w-3.5 h-3.5" />
         </button>
       </div>
+
+      {/* Executive Brief mini-card */}
+      {brief && (
+        <div
+          className="rounded-xl p-4 flex flex-col sm:flex-row sm:items-center gap-4 cursor-pointer group transition-colors hover:bg-card/80"
+          style={{
+            background: "linear-gradient(90deg, hsl(var(--kf-accent2) / 0.08), hsl(var(--kf-accent1) / 0.04))",
+            border: "1px solid hsl(var(--kf-accent2) / 0.15)",
+          }}
+          onClick={() => router.push("/app/intelligence")}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") router.push("/app/intelligence");
+          }}
+        >
+          <div className="flex-shrink-0">
+            <div
+              className="w-10 h-10 rounded-lg flex items-center justify-center"
+              style={{ background: "hsl(var(--kf-accent2) / 0.12)" }}
+            >
+              <Brain className="w-5 h-5" style={{ color: "hsl(var(--kf-accent2))" }} />
+            </div>
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-0.5">
+              <h3 className="text-sm font-semibold">KEY Executive Brief</h3>
+              {brief.topPriorities.some((p) => p.priority === "CRITICAL" || p.priority === "HIGH") && (
+                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-destructive/10 text-destructive flex items-center gap-1">
+                  <AlertTriangle className="w-3 h-3" />
+                  {brief.topPriorities.filter((p) => p.priority === "CRITICAL" || p.priority === "HIGH").length} urgent
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground line-clamp-2">
+              Executive Readiness: {brief.executiveReadinessScore}% · {brief.topPriorities.length} high-priority
+              insight{brief.topPriorities.length === 1 ? "" : "s"}
+              {brief.topPriorities.find((i) => i.id === "pending-evolution-proposals")
+                ? ` · ${brief.topPriorities.find((i) => i.id === "pending-evolution-proposals")?.title}`
+                : ""}
+            </p>
+          </div>
+          <button
+            className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold transition-colors shrink-0"
+            style={{ background: "hsl(var(--kf-accent2))", color: "hsl(var(--kf-accent2-foreground, 0 0% 100%))" }}
+          >
+            Open Intelligence
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Strength grid */}
       <div>
