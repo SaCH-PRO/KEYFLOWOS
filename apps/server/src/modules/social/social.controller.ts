@@ -6,6 +6,7 @@ import { BusinessGuard } from '../../core/auth/business.guard';
 import { SocialService } from './social.service';
 import { SocialConnectionsService } from './social-connections.service';
 import { SocialAnalyticsService } from './social-analytics.service';
+import { MetaSocialIngestionService } from './meta-social-ingestion.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { oauthRedirect } from '../../core/config/runtime-urls';
 
@@ -15,6 +16,7 @@ export class SocialController {
     @Inject(SocialService) private readonly social: SocialService,
     @Inject(SocialConnectionsService) private readonly connections: SocialConnectionsService,
     @Inject(SocialAnalyticsService) private readonly analytics: SocialAnalyticsService,
+    @Inject(MetaSocialIngestionService) private readonly ingestion: MetaSocialIngestionService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
   ) {}
@@ -25,52 +27,62 @@ export class SocialController {
   }
 
   /**
-   * Public webhook for Facebook / Instagram DMs and comments.
-   * When message intake is enabled, DMs are held for approval just like Drive files.
+   * Public webhook verification for Facebook / Instagram.
+   * Meta sends a GET with hub.mode=subscribe, hub.verify_token, hub.challenge.
+   */
+  @Get('webhook/:businessId')
+  async verifyWebhook(
+    @Param('businessId') businessId: string,
+    @Query('hub.mode') hubMode?: string,
+    @Query('hub.verify_token') hubVerifyToken?: string,
+    @Query('hub.challenge') hubChallenge?: string,
+  ) {
+    if (hubMode === 'subscribe' && hubVerifyToken) {
+      const expectedToken = process.env.META_SOCIAL_VERIFY_TOKEN;
+      if (expectedToken && hubVerifyToken === expectedToken) {
+        return hubChallenge;
+      }
+      return { error: 'Invalid verify token' };
+    }
+    return { success: false, error: 'Unsupported webhook request' };
+  }
+
+  /**
+   * Public webhook for Facebook / Instagram DMs.
+   * Inbound DMs are written directly to KEYInbox (like WhatsApp).
    */
   @Post('webhook/:businessId')
   async socialWebhook(
     @Param('businessId') businessId: string,
-    @Body() body: { type?: string; platform?: string; from?: { id?: string; name?: string }; message?: string; externalId?: string; postId?: string },
+    @Body() body: unknown,
+    @Query('hub.mode') hubMode?: string,
+    @Query('hub.verify_token') hubVerifyToken?: string,
+    @Query('hub.challenge') hubChallenge?: string,
   ) {
+    // Meta sometimes verifies with a POST-shaped request.
+    if (hubMode === 'subscribe' && hubVerifyToken) {
+      const expectedToken = process.env.META_SOCIAL_VERIFY_TOKEN;
+      if (expectedToken && hubVerifyToken === expectedToken) {
+        return hubChallenge;
+      }
+      return { error: 'Invalid verify token' };
+    }
+
     const business = await this.prisma.client.business.findUnique({
       where: { id: businessId },
-      select: { messageIntakeEnabled: true },
+      select: { id: true },
     });
-    if (!business?.messageIntakeEnabled) {
-      return { ignored: true, reason: 'message_intake_disabled' };
+    if (!business) {
+      return { success: false, error: 'Business not found' };
     }
 
-    const platform = (body.platform ?? '').toLowerCase();
-    const sourceChannel = platform === 'instagram' ? 'instagram' : 'messenger';
-
-    if (body.type?.toUpperCase() === 'DM' && body.message) {
-      await this.prisma.client.socialEngagement.create({
-        data: {
-          businessId,
-          platform: platform === 'instagram' ? 'INSTAGRAM' : 'FACEBOOK',
-          type: 'DM',
-          postId: body.postId ?? null,
-          externalId: body.externalId ?? null,
-          fromUserId: body.from?.id ?? null,
-          fromUserName: body.from?.name ?? null,
-          content: body.message,
-          aiHandled: false,
-        },
-      });
-
-      this.events.emit('message.intake.received', {
-        businessId,
-        connectorType: 'meta_social',
-        sourceChannel,
-        externalId: body.externalId ?? null,
-        from: body.from?.id ?? 'unknown',
-        fromName: body.from?.name,
-        body: body.message,
-      });
+    try {
+      const result = await this.ingestion.receiveInbound(businessId, body);
+      return { success: true, ...result };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { success: false, error: message };
     }
-
-    return { queued: true };
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

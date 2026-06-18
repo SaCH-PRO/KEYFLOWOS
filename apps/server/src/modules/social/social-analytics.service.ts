@@ -412,6 +412,20 @@ export class SocialAnalyticsService {
     }
   }
 
+  async getPlatformAnalytics(
+    _businessId: string,
+    platform: string,
+  ): Promise<PlatformMetrics> {
+    return {
+      platform,
+      likes: 0,
+      comments: 0,
+      shares: 0,
+      reach: 0,
+      impressions: 0,
+    };
+  }
+
   private daysAgo(days: number): string {
     const d = new Date();
     d.setDate(d.getDate() - days);

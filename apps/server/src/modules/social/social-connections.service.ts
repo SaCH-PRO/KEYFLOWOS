@@ -159,4 +159,13 @@ export class SocialConnectionsService implements OnModuleDestroy {
     if (!envMap) return false;
     return !!(process.env[envMap.idKey] && process.env[envMap.secretKey]);
   }
+
+  async exchangeOAuthCode(
+    _businessId: string,
+    _platform: string,
+    _code: string,
+    _stateHash: string,
+  ): Promise<Record<string, unknown>> {
+    throw new Error('OAuth code exchange not implemented');
+  }
 }
