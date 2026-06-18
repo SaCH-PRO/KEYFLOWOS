@@ -515,6 +515,7 @@ model Business {
   assets               Asset[]
   businessAssets       BusinessAsset[]
   temporalFlowEvents   TemporalFlowEvent[]
+  genomeEvolutionProposals GenomeEvolutionProposal[]
   authorityGrants      AuthorityGrant[]
   timeEntries          TimeEntry[]
 
@@ -612,6 +613,34 @@ model TemporalFlowEvent {
   @@index([businessId, genomeImpactPotential])
   @@unique([businessId, source, externalId])
   @@map("temporal_flow_events")
+}
+
+model GenomeEvolutionProposal {
+  id            String   @id @default(cuid())
+  businessId    String   @map("business_id")
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  section       String
+  proposedPatch Json     @map("proposed_patch")
+  reason        String
+  evidence      Json?    @default("[]")
+  confidence    Float?   @default(0.5)
+
+  status        String   @default("PENDING") @map("status")
+  createdBy     String?  @map("created_by")
+  approvedBy    String?  @map("approved_by")
+  approvedAt    DateTime? @map("approved_at")
+  rejectedAt    DateTime? @map("rejected_at")
+
+  sourceEventIds String[] @default([]) @map("source_event_ids")
+
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId, status])
+  @@index([businessId, section])
+  @@index([businessId, createdAt])
+  @@map("genome_evolution_proposals")
 }
 
 model MarketStrategy {

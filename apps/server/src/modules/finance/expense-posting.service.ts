@@ -421,7 +421,7 @@ export class ExpensePostingService {
     },
     txClient?: Prisma.TransactionClient,
   ) {
-    const tx = (txClient ?? this.prisma.client) as Prisma.TransactionClient;
+    const tx = txClient ?? (this.prisma.client as unknown as Prisma.TransactionClient);
     if (!sale.items || sale.items.length === 0) return null;
 
     const productIds = Array.from(new Set(sale.items.map((i) => i.productId).filter(Boolean)));

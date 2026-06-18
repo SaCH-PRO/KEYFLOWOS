@@ -89,6 +89,26 @@ export interface ProposedGenomeUpdate {
   summary: string;
 }
 
+export type GenomeEvolutionProposalStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'EDITED';
+
+export interface GenomeEvolutionProposal {
+  id: string;
+  businessId: string;
+  section: DnaSectionKey;
+  proposedPatch: Record<string, unknown>;
+  reason: string;
+  evidence: string[];
+  confidence: number;
+  status: GenomeEvolutionProposalStatus;
+  createdBy: string | null;
+  approvedBy: string | null;
+  approvedAt: string | null;
+  rejectedAt: string | null;
+  sourceEventIds: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface SendGenomeMessageResult {
   message: GenomeChatMessage;
   proposedUpdates: ProposedGenomeUpdate | null;
@@ -138,4 +158,49 @@ export async function applyGenomeUpdates(
     path: `/genome-chat/businesses/${businessId}/apply-updates`,
     body: { section, data },
   });
+}
+
+export async function getGenomeEvolutionProposals(
+  businessId: string,
+  filters?: { status?: string; section?: string },
+) {
+  const params = new URLSearchParams();
+  if (filters?.status) params.set('status', filters.status);
+  if (filters?.section) params.set('section', filters.section);
+  const query = params.toString();
+  return apiGet<GenomeEvolutionProposal[]>(
+    `/business-genome/businesses/${businessId}/evolution-proposals${query ? `?${query}` : ''}`,
+  );
+}
+
+export async function generateGenomeEvolutionProposals(businessId: string) {
+  return apiPost<GenomeEvolutionProposal[]>({
+    path: `/business-genome/businesses/${businessId}/evolution-proposals/generate-from-temporal-flow`,
+    body: {},
+  });
+}
+
+export async function approveGenomeEvolutionProposal(businessId: string, proposalId: string) {
+  return apiPost<{ proposal: GenomeEvolutionProposal; genome: GenomeIntegrityResult }>({
+    path: `/business-genome/businesses/${businessId}/evolution-proposals/${proposalId}/approve`,
+    body: {},
+  });
+}
+
+export async function rejectGenomeEvolutionProposal(businessId: string, proposalId: string) {
+  return apiPost<GenomeEvolutionProposal>({
+    path: `/business-genome/businesses/${businessId}/evolution-proposals/${proposalId}/reject`,
+    body: {},
+  });
+}
+
+export async function editGenomeEvolutionProposal(
+  businessId: string,
+  proposalId: string,
+  patch: Partial<Omit<GenomeEvolutionProposal, 'id' | 'businessId' | 'status' | 'createdAt' | 'updatedAt'>>,
+) {
+  return apiPatch<GenomeEvolutionProposal>(
+    `/business-genome/businesses/${businessId}/evolution-proposals/${proposalId}`,
+    patch,
+  );
 }

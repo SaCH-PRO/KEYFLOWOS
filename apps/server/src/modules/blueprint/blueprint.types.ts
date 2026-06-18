@@ -421,6 +421,21 @@ export type DnaSectionKey =
   | 'technology'
   | 'risk';
 
+export const DNA_SECTION_KEYS: DnaSectionKey[] = [
+  'founder',
+  'vision',
+  'business',
+  'market',
+  'financial',
+  'legal',
+  'operations',
+  'sales',
+  'marketing',
+  'growth',
+  'technology',
+  'risk',
+];
+
 export type GenomeStage =
   | 'CONCEPT'
   | 'VALIDATED_CONCEPT'
