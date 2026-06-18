@@ -86,6 +86,7 @@ export interface TemporalFlowGenomeCandidate {
   section: string;
   reason: string;
   evidence: string[];
+  eventIds?: string[];
 }
 
 export interface TemporalFlowAnalysis {

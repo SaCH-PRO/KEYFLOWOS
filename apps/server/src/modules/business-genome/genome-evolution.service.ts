@@ -107,6 +107,7 @@ export class GenomeEvolutionService {
         evidence: candidate.evidence,
         confidence: 0.6,
         createdBy: createdBy ?? 'KEY',
+        sourceEventIds: candidate.eventIds ?? [],
       });
       created.push(proposal);
       pendingSections.add(candidate.section);
