@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { TemporalFlowService } from '../temporal-flow/temporal-flow.service';
 import {
   BlueprintBrand,
   BlueprintComplianceProfile,
@@ -278,7 +279,34 @@ function readObject(raw: Prisma.JsonValue | null | undefined): Record<string, un
 export class BlueprintService {
   private readonly logger = new Logger(BlueprintService.name);
 
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(TemporalFlowService) private readonly temporal: TemporalFlowService,
+  ) {}
+
+  private emitGenomeUpdated(
+    businessId: string,
+    type: string,
+    title: string,
+    payload?: Record<string, unknown>,
+    section?: string,
+  ) {
+    this.temporal
+      .emit({
+        businessId,
+        source: 'KEY',
+        type,
+        module: 'business-genome',
+        entityType: section ? 'dna_section' : 'business_blueprint',
+        entityId: section,
+        title,
+        summary: section ? `${section} DNA was updated` : 'The Business Genome was updated',
+        importance: 'NORMAL',
+        genomeImpactPotential: true,
+        payload: payload ?? {},
+      })
+      .catch((err) => this.logger.warn(`Temporal emit failed: ${(err as Error).message}`));
+  }
 
   /**
    * Read the blueprint for a business, lazily creating one (seeded from the
@@ -416,6 +444,11 @@ export class BlueprintService {
       data: updateData,
     });
 
+    this.emitGenomeUpdated(businessId, 'genome.updated', 'Business Genome updated', {
+      executiveReadinessScore: genomeResult.executiveReadinessScore,
+      genomeIntegrity: genomeResult.genomeIntegrity,
+    });
+
     return this.serialize(updated);
   }
 
@@ -534,7 +567,9 @@ export class BlueprintService {
       (patch as Record<string, Record<string, unknown>>)[source][field] = value;
     }
 
-    return this.updateBlueprint(businessId, patch);
+    const result = await this.updateBlueprint(businessId, patch);
+    this.emitGenomeUpdated(businessId, 'genome.section_updated', `${sectionKey} DNA updated`, { section: sectionKey, data }, sectionKey);
+    return result;
   }
 
   /**

@@ -1,6 +1,7 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { PrismaModule } from '../../core/prisma/prisma.module';
 import { BookingsModule } from '../bookings/bookings.module';
+import { TemporalFlowModule } from '../temporal-flow/temporal-flow.module';
 import { AiModule } from '../ai/ai.module';
 import { CalendarController } from './calendar.controller';
 import { CalendarPermissionService } from './calendar-permission.service';
@@ -20,9 +21,10 @@ import { CalendarProjectsListener } from './listeners/projects.listener';
 import { CalendarOrdersListener } from './listeners/orders.listener';
 import { CalendarConnectorListener } from './listeners/connector.listener';
 import { CalendarActionIntelligenceService } from './calendar-action-intelligence.service';
+import { GoogleCalendarTemporalSyncService } from './connectors/google-calendar-temporal-sync.service';
 
 @Module({
-  imports: [PrismaModule, AiModule, forwardRef(() => BookingsModule)],
+  imports: [PrismaModule, AiModule, forwardRef(() => BookingsModule), forwardRef(() => TemporalFlowModule)],
   controllers: [CalendarController],
   providers: [
     CalendarProjectionService,
@@ -42,6 +44,7 @@ import { CalendarActionIntelligenceService } from './calendar-action-intelligenc
     CalendarOrdersListener,
     CalendarConnectorListener,
     CalendarActionIntelligenceService,
+    GoogleCalendarTemporalSyncService,
   ],
   exports: [
     CalendarProjectionService,
@@ -51,6 +54,7 @@ import { CalendarActionIntelligenceService } from './calendar-action-intelligenc
     CalendarSyncService,
     CalendarConflictService,
     CalendarInsightService,
+    GoogleCalendarTemporalSyncService,
   ],
 })
 export class CalendarModule {}

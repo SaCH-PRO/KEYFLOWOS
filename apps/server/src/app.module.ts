@@ -86,6 +86,7 @@ import { CommandModule } from './modules/command/command.module';
 import { OsModule } from './modules/os/os.module';
 import { GovernanceModule } from './modules/governance/governance.module';
 import { TemporalModule } from './modules/temporal/temporal.module';
+import { TemporalFlowModule } from './modules/temporal-flow/temporal-flow.module';
 import { PeopleFlowModule } from './modules/people-flow/people-flow.module';
 import { SopModule } from './modules/sop/sop.module';
 import { MarketingModule } from './modules/marketing/marketing.module';
@@ -189,6 +190,7 @@ import { KeyInboxModule } from './modules/key-inbox/key-inbox.module';
     GovernanceModule,
     IngestionModule,
     TemporalModule,
+    TemporalFlowModule,
     KeyInboxModule,
     PeopleFlowModule,
     SopModule,

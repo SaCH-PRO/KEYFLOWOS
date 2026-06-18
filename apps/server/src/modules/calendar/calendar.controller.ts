@@ -45,6 +45,7 @@ import {
 import { CalendarConflictService } from './calendar-conflict.service';
 import { CalendarInsightService } from './calendar-insight.service';
 import { AiUsageService } from '../ai/ai-usage.service';
+import { GoogleCalendarTemporalSyncService } from './connectors/google-calendar-temporal-sync.service';
 
 interface AuthedRequest {
   user?: { id?: string; role?: string };
@@ -65,6 +66,8 @@ export class CalendarController {
     private readonly insightService: CalendarInsightService,
     @Inject(AiUsageService)
     private readonly aiUsage: AiUsageService,
+    @Inject(GoogleCalendarTemporalSyncService)
+    private readonly temporalSync: GoogleCalendarTemporalSyncService,
   ) {}
 
   // ----- Google Calendar sync (platform connection) ---------------------
@@ -137,6 +140,12 @@ export class CalendarController {
   @Post('businesses/:businessId/sync/google/resync')
   async syncResync(@Param('businessId') businessId: string) {
     return this.sync.manualResync(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/sync/google/temporal-flow')
+  async syncGoogleCalendarToTemporalFlow(@Param('businessId') businessId: string) {
+    return this.temporalSync.syncBusiness(businessId);
   }
 
   /**

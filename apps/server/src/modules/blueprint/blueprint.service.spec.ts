@@ -17,7 +17,11 @@ function makeService(row?: Record<string, unknown>) {
     },
   } as unknown as PrismaService;
 
-  return new BlueprintService(prisma);
+  const temporal = {
+    emit: vi.fn().mockResolvedValue({ id: 'tf_1' }),
+  };
+
+  return new BlueprintService(prisma, temporal as any);
 }
 
 function emptyBlueprintRow(): Record<string, unknown> {

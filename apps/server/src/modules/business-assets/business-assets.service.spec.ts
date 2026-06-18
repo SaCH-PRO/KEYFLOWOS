@@ -2,6 +2,12 @@ import { describe, expect, it, vi } from 'vitest';
 import { BusinessAssetsService } from './business-assets.service';
 import { NotFoundException } from '@nestjs/common';
 
+function createMockTemporalFlow() {
+  return {
+    emit: vi.fn().mockResolvedValue({ id: 'tf_1' }),
+  };
+}
+
 function createMockPrisma() {
   const store = {
     businessAssets: new Map<string, any>(),
@@ -64,7 +70,8 @@ function createMockPrisma() {
 describe('BusinessAssetsService', () => {
   it('creates an asset', async () => {
     const prisma = createMockPrisma();
-    const svc = new BusinessAssetsService(prisma as any);
+    const temporal = createMockTemporalFlow();
+    const svc = new BusinessAssetsService(prisma as any, temporal as any);
 
     const result = await svc.create('biz_1', {
       type: 'DOMAIN',
@@ -82,7 +89,8 @@ describe('BusinessAssetsService', () => {
 
   it('lists active assets excluding archived', async () => {
     const prisma = createMockPrisma();
-    const svc = new BusinessAssetsService(prisma as any);
+    const temporal = createMockTemporalFlow();
+    const svc = new BusinessAssetsService(prisma as any, temporal as any);
 
     await svc.create('biz_1', { type: 'SOFTWARE', name: 'Notion' });
     await svc.create('biz_1', { type: 'SOFTWARE', name: 'Old tool', status: 'ARCHIVED' });
@@ -94,7 +102,8 @@ describe('BusinessAssetsService', () => {
 
   it('updates an asset', async () => {
     const prisma = createMockPrisma();
-    const svc = new BusinessAssetsService(prisma as any);
+    const temporal = createMockTemporalFlow();
+    const svc = new BusinessAssetsService(prisma as any, temporal as any);
 
     const created = await svc.create('biz_1', { type: 'BANK', name: 'First Bank' });
     const updated = await svc.update('biz_1', created.id, { name: 'First Citizens Bank' });
@@ -104,14 +113,16 @@ describe('BusinessAssetsService', () => {
 
   it('throws when updating a missing asset', async () => {
     const prisma = createMockPrisma();
-    const svc = new BusinessAssetsService(prisma as any);
+    const temporal = createMockTemporalFlow();
+    const svc = new BusinessAssetsService(prisma as any, temporal as any);
 
     await expect(svc.update('biz_1', 'missing', { name: 'x' })).rejects.toThrow(NotFoundException);
   });
 
   it('removes an asset', async () => {
     const prisma = createMockPrisma();
-    const svc = new BusinessAssetsService(prisma as any);
+    const temporal = createMockTemporalFlow();
+    const svc = new BusinessAssetsService(prisma as any, temporal as any);
 
     const created = await svc.create('biz_1', { type: 'LICENSE', name: 'Trade License' });
     await svc.remove('biz_1', created.id);
@@ -122,14 +133,16 @@ describe('BusinessAssetsService', () => {
 
   it('throws when removing a missing asset', async () => {
     const prisma = createMockPrisma();
-    const svc = new BusinessAssetsService(prisma as any);
+    const temporal = createMockTemporalFlow();
+    const svc = new BusinessAssetsService(prisma as any, temporal as any);
 
     await expect(svc.remove('biz_1', 'missing')).rejects.toThrow(NotFoundException);
   });
 
   it('summarizes assets and flags expiring items', async () => {
     const prisma = createMockPrisma();
-    const svc = new BusinessAssetsService(prisma as any);
+    const temporal = createMockTemporalFlow();
+    const svc = new BusinessAssetsService(prisma as any, temporal as any);
 
     const soon = new Date(Date.now() + 1000 * 60 * 60 * 24 * 5).toISOString();
     await svc.create('biz_1', { type: 'DOMAIN', name: 'keyflowos.com' });

@@ -514,6 +514,7 @@ model Business {
   approvalRequests     ApprovalRequest[]
   assets               Asset[]
   businessAssets       BusinessAsset[]
+  temporalFlowEvents   TemporalFlowEvent[]
   authorityGrants      AuthorityGrant[]
   timeEntries          TimeEntry[]
 
@@ -557,6 +558,60 @@ model BusinessAsset {
   @@index([businessId, type])
   @@index([businessId, status])
   @@map("business_assets")
+}
+
+// Phase 9: Temporal Flow OS — universal business timeline
+model TemporalFlowEvent {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  userId      String?  @map("user_id")
+
+  source      String
+  type        String
+  module      String?
+  entityType  String?  @map("entity_type")
+  entityId    String?  @map("entity_id")
+
+  title       String
+  summary     String?
+  description String?
+
+  startsAt    DateTime? @map("starts_at")
+  endsAt      DateTime? @map("ends_at")
+  occurredAt  DateTime  @default(now()) @map("occurred_at")
+
+  status      String    @default("RECORDED")
+  importance  String    @default("NORMAL")
+  visibility  String    @default("USER")
+
+  payload     Json?     @default("{}")
+  signals     Json?     @default("{}")
+  tags        String[]  @default([])
+
+  reminderAt  DateTime? @map("reminder_at")
+  completedAt DateTime? @map("completed_at")
+
+  genomeImpactPotential Boolean @default(false) @map("genome_impact_potential")
+  keyAnalysisStatus      String? @map("key_analysis_status")
+
+  externalId  String?   @map("external_id")
+  externalUrl String?   @map("external_url")
+
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId, occurredAt])
+  @@index([businessId, startsAt])
+  @@index([businessId, source])
+  @@index([businessId, type])
+  @@index([businessId, module])
+  @@index([businessId, status])
+  @@index([businessId, reminderAt])
+  @@index([businessId, genomeImpactPotential])
+  @@unique([businessId, source, externalId])
+  @@map("temporal_flow_events")
 }
 
 model MarketStrategy {

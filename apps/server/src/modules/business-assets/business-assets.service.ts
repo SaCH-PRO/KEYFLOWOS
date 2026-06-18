@@ -1,5 +1,6 @@
-import { Injectable, Inject, NotFoundException } from '@nestjs/common';
+import { Injectable, Inject, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { TemporalFlowService } from '../temporal-flow/temporal-flow.service';
 import type { BusinessAssetType } from './dto/create-business-asset.dto';
 
 export interface CreateBusinessAssetInput {
@@ -34,7 +35,12 @@ export interface BusinessAssetSummary {
 
 @Injectable()
 export class BusinessAssetsService {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(BusinessAssetsService.name);
+
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(TemporalFlowService) private readonly temporal: TemporalFlowService,
+  ) {}
 
   list(businessId: string) {
     return this.prisma.client.businessAsset.findMany({
@@ -44,7 +50,7 @@ export class BusinessAssetsService {
   }
 
   async create(businessId: string, input: CreateBusinessAssetInput) {
-    return this.prisma.client.businessAsset.create({
+    const asset = await this.prisma.client.businessAsset.create({
       data: {
         businessId,
         type: input.type,
@@ -58,6 +64,22 @@ export class BusinessAssetsService {
         metadata: input.metadata ?? {},
       },
     });
+
+    this.emitAssetEvent(businessId, 'asset.created', asset, 'Business asset added', asset.expiresAt ? 'NORMAL' : 'LOW');
+
+    if (asset.expiresAt) {
+      const reminderAt = new Date(asset.expiresAt.getTime() - 30 * 24 * 60 * 60 * 1000);
+      this.emitAssetEvent(
+        businessId,
+        'asset.expiring_soon',
+        asset,
+        `Asset expiring soon: ${asset.name}`,
+        'HIGH',
+        reminderAt,
+      );
+    }
+
+    return asset;
   }
 
   async update(businessId: string, assetId: string, input: UpdateBusinessAssetInput) {
@@ -68,7 +90,7 @@ export class BusinessAssetsService {
       throw new NotFoundException('Asset not found');
     }
 
-    return this.prisma.client.businessAsset.update({
+    const asset = await this.prisma.client.businessAsset.update({
       where: { id: assetId },
       data: {
         ...(input.type !== undefined && { type: input.type }),
@@ -84,6 +106,9 @@ export class BusinessAssetsService {
         ...(input.metadata !== undefined && { metadata: input.metadata }),
       },
     });
+
+    this.emitAssetEvent(businessId, 'asset.updated', asset, 'Business asset updated', 'LOW');
+    return asset;
   }
 
   async remove(businessId: string, assetId: string) {
@@ -95,6 +120,33 @@ export class BusinessAssetsService {
     }
 
     await this.prisma.client.businessAsset.delete({ where: { id: assetId } });
+    this.emitAssetEvent(businessId, 'asset.deleted', existing, 'Business asset removed', 'LOW');
+  }
+
+  private emitAssetEvent(
+    businessId: string,
+    type: string,
+    asset: { id: string; type: string; name: string; expiresAt: Date | null },
+    title: string,
+    importance: 'LOW' | 'NORMAL' | 'HIGH',
+    reminderAt?: Date,
+  ) {
+    this.temporal
+      .emit({
+        businessId,
+        source: 'APP',
+        type,
+        module: 'business-assets',
+        entityType: 'business_asset',
+        entityId: asset.id,
+        title,
+        summary: `${asset.type} — ${asset.name}`,
+        importance,
+        reminderAt,
+        genomeImpactPotential: true,
+        payload: { assetId: asset.id, type: asset.type, name: asset.name },
+      })
+      .catch((err) => this.logger.warn(`Temporal emit failed: ${(err as Error).message}`));
   }
 
   async summarizeForGenome(businessId: string): Promise<BusinessAssetSummary> {

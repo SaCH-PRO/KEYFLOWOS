@@ -9,6 +9,7 @@ import { CalendarPermissionService } from '../src/modules/calendar/calendar-perm
 import { CalendarProjectionService } from '../src/modules/calendar/calendar-projection.service';
 import { CalendarConflictService } from '../src/modules/calendar/calendar-conflict.service';
 import { CalendarInsightService } from '../src/modules/calendar/calendar-insight.service';
+import { GoogleCalendarTemporalSyncService } from '../src/modules/calendar/connectors/google-calendar-temporal-sync.service';
 import { ModelGatewayService } from '../src/modules/ai/model-gateway.service';
 import { PrismaService } from '../src/core/prisma/prisma.service';
 import { AuthGuard } from '../src/core/auth/auth.guard';
@@ -241,6 +242,12 @@ describe('CalendarController (C2)', () => {
         CalendarProjectionService,
         CalendarConflictService,
         CalendarInsightService,
+        {
+          provide: GoogleCalendarTemporalSyncService,
+          useValue: {
+            syncBusiness: vi.fn().mockResolvedValue({ synced: 0, skipped: 0 }),
+          },
+        },
         {
           provide: (await import('../src/modules/calendar/calendar-sync.service')).CalendarSyncService,
           useValue: {
