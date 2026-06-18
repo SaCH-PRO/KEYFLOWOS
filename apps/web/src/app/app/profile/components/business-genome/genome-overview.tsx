@@ -227,7 +227,7 @@ export function GenomeOverview({ genome, onSectionClick }: GenomeOverviewProps) 
               )}
             </div>
             <p className="text-xs text-muted-foreground line-clamp-2">
-              Executive Readiness: {brief.executiveReadinessScore}% · {brief.topPriorities.length} high-priority
+              Executive Readiness: {brief.executiveReadinessScore}% · {brief.topPriorities.length} top-priority
               insight{brief.topPriorities.length === 1 ? "" : "s"}
               {brief.topPriorities.find((i) => i.id === "pending-evolution-proposals")
                 ? ` · ${brief.topPriorities.find((i) => i.id === "pending-evolution-proposals")?.title}`
