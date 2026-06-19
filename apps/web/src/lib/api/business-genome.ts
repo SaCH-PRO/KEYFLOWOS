@@ -114,6 +114,38 @@ export interface SendGenomeMessageResult {
   proposedUpdates: ProposedGenomeUpdate | null;
 }
 
+export type ConstitutionVersionStatus = 'DRAFT' | 'ACTIVE' | 'ARCHIVED';
+
+export interface ConstitutionVersion {
+  id: string;
+  businessId: string;
+  version: number;
+  title: string;
+  status: ConstitutionVersionStatus;
+  content: Record<string, unknown>;
+  summary?: string | null;
+  changeNotes?: string | null;
+  sourceGenomeIntegrity?: number | null;
+  sourceExecutiveReadiness?: number | null;
+  sourceGenomeStage?: string | null;
+  sourceDnaScores?: Record<string, number> | null;
+  sourceDnaConfidence?: Record<string, number> | null;
+  generatedBy?: string | null;
+  generatedAt: string;
+  createdAt: string;
+}
+
+export interface ConstitutionStaleness {
+  stale: boolean;
+  reason: string;
+  currentGenomeIntegrity: number;
+  constitutionGenomeIntegrity: number | null;
+  currentExecutiveReadiness?: number;
+  constitutionExecutiveReadiness?: number | null;
+  currentGenomeStage?: string;
+  constitutionGenomeStage?: string | null;
+}
+
 export async function getGenome(businessId: string) {
   return apiGet<GenomeIntegrityResult>(`/blueprint/businesses/${businessId}/genome`);
 }
@@ -203,4 +235,30 @@ export async function editGenomeEvolutionProposal(
     `/business-genome/businesses/${businessId}/evolution-proposals/${proposalId}`,
     patch,
   );
+}
+
+export async function getLatestConstitutionVersion(businessId: string) {
+  return apiGet<ConstitutionVersion | null>(`/business-genome/businesses/${businessId}/constitution/latest`);
+}
+
+export async function getConstitutionVersions(businessId: string) {
+  return apiGet<ConstitutionVersion[]>(`/business-genome/businesses/${businessId}/constitution/versions`);
+}
+
+export async function generateConstitutionVersion(businessId: string, input: { changeNotes?: string } = {}) {
+  return apiPost<ConstitutionVersion>({
+    path: `/business-genome/businesses/${businessId}/constitution/generate`,
+    body: input,
+  });
+}
+
+export async function getConstitutionStaleness(businessId: string) {
+  return apiGet<ConstitutionStaleness>(`/business-genome/businesses/${businessId}/constitution/staleness`);
+}
+
+export async function archiveConstitutionVersion(businessId: string, version: number) {
+  return apiPost<ConstitutionVersion>({
+    path: `/business-genome/businesses/${businessId}/constitution/versions/${version}/archive`,
+    body: {},
+  });
 }

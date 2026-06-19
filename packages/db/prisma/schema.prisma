@@ -516,6 +516,7 @@ model Business {
   businessAssets       BusinessAsset[]
   temporalFlowEvents   TemporalFlowEvent[]
   genomeEvolutionProposals GenomeEvolutionProposal[]
+  constitutionVersions BusinessConstitutionVersion[]
   authorityGrants      AuthorityGrant[]
   timeEntries          TimeEntry[]
 
@@ -641,6 +642,37 @@ model GenomeEvolutionProposal {
   @@index([businessId, section])
   @@index([businessId, createdAt])
   @@map("genome_evolution_proposals")
+}
+
+// Phase 12: Living Constitution v2 — versioned, immutable operating document
+model BusinessConstitutionVersion {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  version     Int
+  title       String   @default("Business Constitution")
+  status      String   @default("ACTIVE") // DRAFT, ACTIVE, ARCHIVED
+
+  content     Json
+  summary     String?
+  changeNotes String?  @map("change_notes")
+
+  sourceGenomeIntegrity      Int?  @map("source_genome_integrity")
+  sourceExecutiveReadiness   Int?  @map("source_executive_readiness")
+  sourceGenomeStage          String? @map("source_genome_stage")
+  sourceDnaScores            Json? @map("source_dna_scores")
+  sourceDnaConfidence        Json? @map("source_dna_confidence")
+
+  generatedBy String?  @map("generated_by")
+  generatedAt DateTime @default(now()) @map("generated_at")
+
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@unique([businessId, version])
+  @@index([businessId])
+  @@index([businessId, status])
+  @@map("business_constitution_versions")
 }
 
 model MarketStrategy {

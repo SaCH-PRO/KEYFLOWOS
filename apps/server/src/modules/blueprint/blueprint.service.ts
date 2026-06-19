@@ -576,10 +576,12 @@ export class BlueprintService {
    * Generate a read-only Business Constitution assembled from the Genome.
    */
   async generateConstitution(businessId: string): Promise<Record<string, unknown>> {
-    const genome = await this.calculateGenomeIntegrity(businessId);
+    const [genome, blueprint] = await Promise.all([
+      this.calculateGenomeIntegrity(businessId),
+      this.getBlueprint(businessId),
+    ]);
     const sections = genome.dnaSections;
     const sectionMap = new Map(sections.map((s) => [s.key, s] as const));
-
     const byKey = (key: string) => sectionMap.get(key as DnaSectionKey);
 
     return {
@@ -587,72 +589,238 @@ export class BlueprintService {
       generatedAt: new Date().toISOString(),
       version: 1,
       genomeIntegrity: genome.genomeIntegrity,
+      executiveReadinessScore: genome.executiveReadinessScore,
       genomeStage: genome.genomeStage,
       sections: {
-        executiveSummary: {
-          title: 'Executive Summary',
-          sourceDna: ['business', 'vision'],
-          strength: Math.round(((byKey('business')?.integrity ?? 0) + (byKey('vision')?.integrity ?? 0)) / 2),
-          content: 'Generated from Business DNA and Vision DNA.',
-        },
-        businessModel: {
-          title: 'Business Model',
-          sourceDna: ['business'],
-          strength: byKey('business')?.integrity ?? 0,
-          content: 'Generated from Business DNA.',
-        },
-        governanceFramework: {
-          title: 'Governance Framework',
-          sourceDna: ['legal'],
-          strength: byKey('legal')?.integrity ?? 0,
-          content: 'Generated from Legal DNA.',
-        },
-        legalFramework: {
-          title: 'Legal Framework',
-          sourceDna: ['legal'],
-          strength: byKey('legal')?.integrity ?? 0,
-          content: 'Generated from Legal DNA.',
-        },
-        financialStrategy: {
-          title: 'Financial Strategy',
-          sourceDna: ['financial'],
-          strength: byKey('financial')?.integrity ?? 0,
-          content: 'Generated from Financial DNA.',
-        },
-        marketingStrategy: {
-          title: 'Marketing Strategy',
-          sourceDna: ['marketing', 'market'],
-          strength: Math.round(((byKey('marketing')?.integrity ?? 0) + (byKey('market')?.integrity ?? 0)) / 2),
-          content: 'Generated from Marketing DNA and Market DNA.',
-        },
-        salesStrategy: {
-          title: 'Sales Strategy',
-          sourceDna: ['sales'],
-          strength: byKey('sales')?.integrity ?? 0,
-          content: 'Generated from Sales DNA.',
-        },
-        operationsStrategy: {
-          title: 'Operations Strategy',
-          sourceDna: ['operations', 'technology'],
-          strength: Math.round(((byKey('operations')?.integrity ?? 0) + (byKey('technology')?.integrity ?? 0)) / 2),
-          content: 'Generated from Operations DNA and Technology DNA.',
-        },
-        growthRoadmap: {
-          title: 'Growth Roadmap',
-          sourceDna: ['growth'],
-          strength: byKey('growth')?.integrity ?? 0,
-          content: 'Generated from Growth DNA.',
-        },
-        riskRegister: {
-          title: 'Risk Register',
-          sourceDna: ['legal', 'financial', 'operations'],
-          strength: Math.round(
-            ((byKey('legal')?.integrity ?? 0) + (byKey('financial')?.integrity ?? 0) + (byKey('operations')?.integrity ?? 0)) / 3,
-          ),
-          content: 'Generated from Legal, Financial, and Operations DNA.',
-        },
+        executiveSummary: this.buildExecutiveSummary(blueprint, genome),
+        businessModel: this.buildBusinessModelSection(blueprint, genome),
+        governanceFramework: this.buildGovernanceSection(blueprint, genome),
+        legalFramework: this.buildLegalSection(blueprint, genome),
+        financialStrategy: this.buildFinancialSection(blueprint, genome),
+        marketingStrategy: this.buildMarketingSection(blueprint, genome),
+        salesStrategy: this.buildSalesSection(blueprint, genome),
+        operationsStrategy: this.buildOperationsSection(blueprint, genome),
+        growthRoadmap: this.buildGrowthSection(blueprint, genome),
+        riskRegister: this.buildRiskSection(blueprint, genome),
       },
     };
+  }
+
+  private buildExecutiveSummary(blueprint: BlueprintData, genome: GenomeIntegrityResult) {
+    const sourceDna = ['business', 'vision'];
+    const strength = Math.round(
+      ((this.sectionIntegrity(genome, 'business') + this.sectionIntegrity(genome, 'vision')) / 2),
+    );
+    const identity = blueprint.identity ?? {};
+    const brand = blueprint.brand ?? {};
+    const goals = blueprint.goals ?? {};
+    const lines: string[] = [];
+    if (identity.name) lines.push(`Business: ${identity.name}.`);
+    if (identity.industry) lines.push(`Industry: ${identity.industry}.`);
+    if (identity.oneLiner || identity.mission) lines.push(`Mission: ${identity.oneLiner || identity.mission}.`);
+    if (brand.valueProps?.length) lines.push(`Value Proposition: ${brand.valueProps.join('; ')}.`);
+    if (goals.northStar) lines.push(`North Star: ${goals.northStar}.`);
+    if (lines.length === 0) lines.push('Generated from Business DNA and Vision DNA.');
+
+    return {
+      title: 'Executive Summary',
+      sourceDna,
+      strength,
+      content: lines.join(' '),
+    };
+  }
+
+  private buildBusinessModelSection(blueprint: BlueprintData, genome: GenomeIntegrityResult) {
+    const sourceDna = ['business'];
+    const strength = this.sectionIntegrity(genome, 'business');
+    const operating = blueprint.operatingModel ?? {};
+    const customer = blueprint.customerModel ?? {};
+    const offers = blueprint.offerArchitecture ?? {};
+    const financials = blueprint.financials ?? {};
+    const lines: string[] = [];
+    if (operating.revenueModel) lines.push(`Revenue model: ${operating.revenueModel}.`);
+    if (operating.deliveryMode) lines.push(`Delivery mode: ${operating.deliveryMode}.`);
+    if (operating.serviceArea) lines.push(`Service area: ${operating.serviceArea}.`);
+    if (customer.idealCustomer) lines.push(`Ideal customer: ${customer.idealCustomer}.`);
+    if (offers.coreOffer?.name) lines.push(`Core offer: ${offers.coreOffer.name}.`);
+    if (financials.pricingModel) lines.push(`Pricing model: ${financials.pricingModel}.`);
+    if (lines.length === 0) lines.push('Generated from Business DNA.');
+
+    return { title: 'Business Model', sourceDna, strength, content: lines.join(' ') };
+  }
+
+  private buildGovernanceSection(blueprint: BlueprintData, genome: GenomeIntegrityResult) {
+    const sourceDna = ['legal'];
+    const strength = this.sectionIntegrity(genome, 'legal');
+    const founder = blueprint.founderProfile ?? {};
+    const ownership = blueprint.ownershipProfile ?? {};
+    const ai = blueprint.aiPreferences ?? {};
+    const lines: string[] = [];
+    if (founder.founderName) lines.push(`Founder: ${founder.founderName}.`);
+    if (founder.background) lines.push(`Background: ${founder.background}.`);
+    if (ownership.hasPartners != null) lines.push(`Has partners: ${ownership.hasPartners ? 'Yes' : 'No'}.`);
+    if (ownership.owners?.length) {
+      lines.push(`Ownership: ${ownership.owners.map((o) => `${o.name ?? 'Unnamed'} (${o.sharePct ?? 0}%)`).join(', ')}.`);
+    }
+    if (ai.autonomyLevel != null) lines.push(`AI autonomy level: ${ai.autonomyLevel}/10.`);
+    if (lines.length === 0) lines.push('Generated from Legal DNA.');
+
+    return { title: 'Governance Framework', sourceDna, strength, content: lines.join(' ') };
+  }
+
+  private buildLegalSection(blueprint: BlueprintData, genome: GenomeIntegrityResult) {
+    const sourceDna = ['legal'];
+    const strength = this.sectionIntegrity(genome, 'legal');
+    const legal = blueprint.legalProfile ?? {};
+    const registration = blueprint.registrationProfile ?? {};
+    const tax = blueprint.taxProfile ?? {};
+    const compliance = blueprint.complianceProfile ?? {};
+    const lines: string[] = [];
+    if (legal.jurisdiction) lines.push(`Jurisdiction: ${legal.jurisdiction}.`);
+    if (legal.recommendedEntityType) lines.push(`Recommended entity type: ${legal.recommendedEntityType}.`);
+    if (legal.regulatedIndustry != null) {
+      lines.push(`Regulated industry: ${legal.regulatedIndustry ? 'Yes' : 'No'}.`);
+    }
+    if (registration.requiredLicenses?.length) {
+      lines.push(`Required licenses: ${registration.requiredLicenses.join(', ')}.`);
+    }
+    if (tax.taxIdStatus) lines.push(`Tax ID status: ${tax.taxIdStatus}.`);
+    if (compliance.complianceItems?.length) lines.push(`Compliance items: ${compliance.complianceItems.length} tracked.`);
+    if (legal.legalRiskFlags?.length) lines.push(`Legal risk flags: ${legal.legalRiskFlags.join('; ')}.`);
+    if (lines.length === 0) lines.push('Generated from Legal DNA.');
+
+    return { title: 'Legal Framework', sourceDna, strength, content: lines.join(' ') };
+  }
+
+  private buildFinancialSection(blueprint: BlueprintData, genome: GenomeIntegrityResult) {
+    const sourceDna = ['financial'];
+    const strength = this.sectionIntegrity(genome, 'financial');
+    const financials = blueprint.financials ?? {};
+    const projections = blueprint.projectionProfile ?? {};
+    const risk = blueprint.riskProfile ?? {};
+    const lines: string[] = [];
+    if (financials.currency) lines.push(`Currency: ${financials.currency}.`);
+    if (financials.pricingModel) lines.push(`Pricing model: ${financials.pricingModel}.`);
+    if (financials.avgTicket) lines.push(`Average ticket: ${financials.avgTicket}.`);
+    if (financials.monthlyTarget) lines.push(`Monthly revenue target: ${financials.monthlyTarget}.`);
+    if (projections.breakEvenRevenue) lines.push(`Break-even revenue: ${projections.breakEvenRevenue}.`);
+    if (projections.runwayMonths) lines.push(`Runway: ${projections.runwayMonths} months.`);
+    if (risk.financialRisks?.length) lines.push(`Financial risks: ${risk.financialRisks.length} tracked.`);
+    if (lines.length === 0) lines.push('Generated from Financial DNA.');
+
+    return { title: 'Financial Strategy', sourceDna, strength, content: lines.join(' ') };
+  }
+
+  private buildMarketingSection(blueprint: BlueprintData, genome: GenomeIntegrityResult) {
+    const sourceDna = ['marketing', 'market'];
+    const strength = Math.round(
+      (this.sectionIntegrity(genome, 'marketing') + this.sectionIntegrity(genome, 'market')) / 2,
+    );
+    const market = blueprint.marketProfile ?? {};
+    const customer = blueprint.customerModel ?? {};
+    const marketing = blueprint.marketingSystem ?? {};
+    const brand = blueprint.brand ?? {};
+    const lines: string[] = [];
+    if (market.marketCategory) lines.push(`Market category: ${market.marketCategory}.`);
+    if (market.targetGeography) lines.push(`Target geography: ${market.targetGeography}.`);
+    if (customer.idealCustomer) lines.push(`Ideal customer: ${customer.idealCustomer}.`);
+    if (customer.painPoints?.length) lines.push(`Key pain points: ${customer.painPoints.join('; ')}.`);
+    if (marketing.channels?.length) {
+      lines.push(`Marketing channels: ${marketing.channels.map((c) => c.channel).join(', ')}.`);
+    }
+    if (brand.valueProps?.length) lines.push(`Value propositions: ${brand.valueProps.join('; ')}.`);
+    if (lines.length === 0) lines.push('Generated from Marketing DNA and Market DNA.');
+
+    return { title: 'Marketing Strategy', sourceDna, strength, content: lines.join(' ') };
+  }
+
+  private buildSalesSection(blueprint: BlueprintData, genome: GenomeIntegrityResult) {
+    const sourceDna = ['sales'];
+    const strength = this.sectionIntegrity(genome, 'sales');
+    const sales = blueprint.salesSystem ?? {};
+    const offers = blueprint.offerArchitecture ?? {};
+    const lines: string[] = [];
+    if (sales.salesChannels?.length) {
+      lines.push(`Sales channels: ${sales.salesChannels.map((c) => c.channel).join(', ')}.`);
+    }
+    if (sales.leadSources?.length) lines.push(`Lead sources: ${sales.leadSources.join(', ')}.`);
+    if (sales.conversionAssumptions?.quoteToCloseRate) {
+      lines.push(`Quote-to-close rate: ${sales.conversionAssumptions.quoteToCloseRate}%.`);
+    }
+    if (offers.coreOffer?.name) lines.push(`Core offer: ${offers.coreOffer.name}.`);
+    if (lines.length === 0) lines.push('Generated from Sales DNA.');
+
+    return { title: 'Sales Strategy', sourceDna, strength, content: lines.join(' ') };
+  }
+
+  private buildOperationsSection(blueprint: BlueprintData, genome: GenomeIntegrityResult) {
+    const sourceDna = ['operations', 'technology'];
+    const strength = Math.round(
+      (this.sectionIntegrity(genome, 'operations') + this.sectionIntegrity(genome, 'technology')) / 2,
+    );
+    const operations = blueprint.operationsSystem ?? {};
+    const workflow = blueprint.workflowModel ?? {};
+    const lines: string[] = [];
+    if (operations.coreWorkflows?.length) {
+      lines.push(`Core workflows: ${operations.coreWorkflows.map((w) => w.name).join(', ')}.`);
+    }
+    if (workflow.primaryWorkflow) lines.push(`Primary workflow: ${workflow.primaryWorkflow}.`);
+    if (operations.dailyChecklist?.length) lines.push(`Daily checklist: ${operations.dailyChecklist.join('; ')}.`);
+    if (operations.weeklyChecklist?.length) lines.push(`Weekly checklist: ${operations.weeklyChecklist.join('; ')}.`);
+    if (blueprint.businessAssets) lines.push(`Business assets tracked in Genome.`);
+    if (lines.length === 0) lines.push('Generated from Operations DNA and Technology DNA.');
+
+    return { title: 'Operations Strategy', sourceDna, strength, content: lines.join(' ') };
+  }
+
+  private buildGrowthSection(blueprint: BlueprintData, genome: GenomeIntegrityResult) {
+    const sourceDna = ['growth'];
+    const strength = this.sectionIntegrity(genome, 'growth');
+    const roadmap = blueprint.executionRoadmap ?? {};
+    const goals = blueprint.goals ?? {};
+    const lines: string[] = [];
+    if (goals.northStar) lines.push(`North Star: ${goals.northStar}.`);
+    if (goals.twelveMonthGoals?.length) lines.push(`12-month goals: ${goals.twelveMonthGoals.join('; ')}.`);
+    if (roadmap.today?.length) lines.push(`Today: ${roadmap.today.join('; ')}.`);
+    if (roadmap.sevenDayPlan?.length) lines.push(`7-day plan: ${roadmap.sevenDayPlan.join('; ')}.`);
+    if (roadmap.thirtyDayPlan?.length) lines.push(`30-day plan: ${roadmap.thirtyDayPlan.join('; ')}.`);
+    if (roadmap.ninetyDayPlan?.length) lines.push(`90-day plan: ${roadmap.ninetyDayPlan.join('; ')}.`);
+    if (roadmap.twelveMonthMilestones?.length) lines.push(`12-month milestones: ${roadmap.twelveMonthMilestones.join('; ')}.`);
+    if (lines.length === 0) lines.push('Generated from Growth DNA.');
+
+    return { title: 'Growth Roadmap', sourceDna, strength, content: lines.join(' ') };
+  }
+
+  private buildRiskSection(blueprint: BlueprintData, genome: GenomeIntegrityResult) {
+    const sourceDna = ['legal', 'financial', 'operations'];
+    const strength = Math.round(
+      (this.sectionIntegrity(genome, 'legal') +
+        this.sectionIntegrity(genome, 'financial') +
+        this.sectionIntegrity(genome, 'operations')) /
+        3,
+    );
+    const risk = blueprint.riskProfile ?? {};
+    const legal = blueprint.legalProfile ?? {};
+    const lines: string[] = [];
+    const totalRisks =
+      (risk.financialRisks?.length ?? 0) +
+      (risk.legalRisks?.length ?? 0) +
+      (risk.marketRisks?.length ?? 0) +
+      (risk.operationalRisks?.length ?? 0) +
+      (risk.founderRisks?.length ?? 0);
+    if (totalRisks > 0) lines.push(`Tracked risks: ${totalRisks}.`);
+    if (risk.financialRisks?.length) lines.push(`Financial: ${risk.financialRisks.map((r) => r.description).join('; ')}.`);
+    if (risk.legalRisks?.length) lines.push(`Legal: ${risk.legalRisks.map((r) => r.description).join('; ')}.`);
+    if (risk.operationalRisks?.length) lines.push(`Operational: ${risk.operationalRisks.map((r) => r.description).join('; ')}.`);
+    if (legal.legalRiskFlags?.length) lines.push(`Legal flags: ${legal.legalRiskFlags.join('; ')}.`);
+    if (risk.mitigationPlan?.length) lines.push(`Mitigation plan: ${risk.mitigationPlan.join('; ')}.`);
+    if (lines.length === 0) lines.push('Generated from Legal, Financial, and Operations DNA.');
+
+    return { title: 'Risk Register', sourceDna, strength, content: lines.join(' ') };
+  }
+
+  private sectionIntegrity(genome: GenomeIntegrityResult, key: string): number {
+    return genome.dnaSections.find((s) => s.key === key)?.integrity ?? 0;
   }
 
   /**

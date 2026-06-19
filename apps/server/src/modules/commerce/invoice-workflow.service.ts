@@ -141,16 +141,18 @@ export class InvoiceWorkflowService {
     businessId: string,
     paidAt: Date | null,
     currency: string,
-    txClient?: Prisma.TransactionClient,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    txClient?: any,
   ): Promise<void> {
-    const db = (txClient ?? this.prisma.client) as Prisma.TransactionClient;
-    const items = await db.invoiceItem.findMany({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const db = (txClient ?? this.prisma.client) as any;
+    const items: Array<{ productId: string | null; quantity: number }> = await db.invoiceItem.findMany({
       where: { invoiceId },
       select: { productId: true, quantity: true },
     });
     const productItems = items
-      .filter((i) => i.productId && i.quantity > 0)
-      .map((i) => ({ productId: i.productId as string, quantity: i.quantity }));
+      .filter((i: { productId: string | null; quantity: number }) => i.productId && i.quantity > 0)
+      .map((i: { productId: string | null; quantity: number }) => ({ productId: i.productId as string, quantity: i.quantity }));
     if (productItems.length === 0) return;
     await this.expensePosting.onProductSold(
       {
