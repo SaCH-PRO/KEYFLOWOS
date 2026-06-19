@@ -92,6 +92,7 @@ import { PeopleFlowModule } from './modules/people-flow/people-flow.module';
 import { SopModule } from './modules/sop/sop.module';
 import { MarketingModule } from './modules/marketing/marketing.module';
 import { IntelligenceModule } from './modules/intelligence/intelligence.module';
+import { KeyAutonomyModule } from './modules/key-autonomy/key-autonomy.module';
 import { GenomeDocumentPackModule } from './modules/business-genome/document-pack/genome-document-pack.module';
 import { IntegrationHubModule } from './modules/integration-hub/integration-hub.module';
 import { ProductAnalyticsModule } from './modules/product-analytics/product-analytics.module';
@@ -200,6 +201,7 @@ import { KeyInboxModule } from './modules/key-inbox/key-inbox.module';
     MarketingModule,
     IntelligenceModule,
     GenomeDocumentPackModule,
+    KeyAutonomyModule,
     IntegrationHubModule,
     ProductAnalyticsModule,
     AdminAnalyticsModule,

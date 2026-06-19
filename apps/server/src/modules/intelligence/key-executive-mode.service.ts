@@ -466,16 +466,36 @@ export class KeyExecutiveModeService {
       'CREATE_DOCUMENT',
       'OPEN_KEY_INBOX',
       'REQUEST_APPROVAL',
+      'GENERATE_CONSTITUTION_VERSION',
+      'GENERATE_DOCUMENT_EXPORT',
+      'CREATE_GENOME_EVOLUTION_PROPOSAL',
+      'SCHEDULE_FOLLOWUP',
+      'ESCALATE_THREAD',
     ];
-    const actionType = validActionTypes.includes(action.actionType as KeyModeActionType)
+    let actionType = validActionTypes.includes(action.actionType as KeyModeActionType)
       ? (action.actionType as KeyModeActionType)
       : 'OPEN_INTELLIGENCE';
+    if (actionType === 'GENERATE_DOCUMENT') {
+      actionType = 'CREATE_DOCUMENT';
+    }
+
+    const executableActionTypes: KeyModeActionType[] = [
+      'CREATE_TASK',
+      'CREATE_DOCUMENT',
+      'GENERATE_CONSTITUTION_VERSION',
+      'GENERATE_DOCUMENT_EXPORT',
+      'CREATE_GENOME_EVOLUTION_PROPOSAL',
+      'SCHEDULE_FOLLOWUP',
+      'ESCALATE_THREAD',
+      'REQUEST_APPROVAL',
+    ];
 
     return {
       label: action.label,
       actionType,
       href: action.href,
       payload: action.payload,
+      requiresApproval: executableActionTypes.includes(actionType),
     };
   }
 

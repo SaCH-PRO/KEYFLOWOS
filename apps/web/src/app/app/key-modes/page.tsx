@@ -134,7 +134,7 @@ export default function KeyModesPage() {
           </div>
         )}
 
-        {selected && !loadingBrief && brief && <KeyModeBriefPanel brief={brief} />}
+        {selected && !loadingBrief && brief && <KeyModeBriefPanel brief={brief} mode={selected} businessId={businessId} />}
 
         {!selected && (
           <div className="rounded-xl border border-dashed p-8 text-center" style={{ borderColor: "hsl(var(--kf-border) / 0.4)" }}>

@@ -675,6 +675,47 @@ model BusinessConstitutionVersion {
   @@map("business_constitution_versions")
 }
 
+model KeyActionProposal {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  userId      String?  @map("user_id")
+
+  sourceType  String   @map("source_type")
+  sourceId    String?  @map("source_id")
+  sourceMode  String?  @map("source_mode")
+
+  title       String
+  summary     String?
+  rationale   String?
+  evidence    Json     @default("[]")
+  actionType  String   @map("action_type")
+  payload     Json     @default("{}")
+
+  riskLevel   String   @default("LOW") @map("risk_level")
+  status      String   @default("PENDING")
+
+  requiresApproval Boolean @default(true) @map("requires_approval")
+  approvedBy       String? @map("approved_by")
+  approvedAt       DateTime? @map("approved_at")
+  rejectedBy       String? @map("rejected_by")
+  rejectedAt       DateTime? @map("rejected_at")
+  rejectionReason  String? @map("rejection_reason")
+
+  executedBy       String? @map("executed_by")
+  executedAt       DateTime? @map("executed_at")
+  executionResult  Json?   @map("execution_result")
+  failureReason    String? @map("failure_reason")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId])
+  @@index([businessId, status])
+  @@index([businessId, sourceType])
+  @@index([businessId, actionType])
+  @@map("key_action_proposals")
+}
+
 model MarketStrategy {
   id              String   @id @default(cuid())
   businessId      String   @unique @map("business_id")

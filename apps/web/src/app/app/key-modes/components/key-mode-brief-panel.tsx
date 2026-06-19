@@ -1,17 +1,71 @@
 "use client";
 
+import { useState } from "react";
 import { motion } from "framer-motion";
-import { AlertTriangle, ArrowRight, Lightbulb, Target, Zap } from "lucide-react";
+import { AlertTriangle, ArrowRight, Lightbulb, Target, Zap, ShieldCheck, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { SectionCard } from "@/components/ui/section-card";
-import type { KeyExecutiveModeBrief, KeyModeFinding, KeyModePriority } from "@/lib/api/intelligence";
+import type { KeyExecutiveModeBrief, KeyExecutiveMode, KeyModeFinding, KeyModePriority } from "@/lib/api/intelligence";
+import { createKeyActionProposal, type KeyExecutableActionType } from "@/lib/api/key-autonomy";
 
 interface KeyModeBriefPanelProps {
   brief: KeyExecutiveModeBrief;
+  mode: KeyExecutiveMode;
+  businessId: string;
 }
 
-export function KeyModeBriefPanel({ brief }: KeyModeBriefPanelProps) {
+const EXECUTABLE_ACTION_TYPES: KeyExecutableActionType[] = [
+  "CREATE_TASK",
+  "CREATE_DOCUMENT",
+  "GENERATE_CONSTITUTION_VERSION",
+  "GENERATE_DOCUMENT_EXPORT",
+  "CREATE_GENOME_EVOLUTION_PROPOSAL",
+  "SCHEDULE_FOLLOWUP",
+  "ESCALATE_THREAD",
+];
+
+function isExecutableAction(actionType: string): actionType is KeyExecutableActionType {
+  return EXECUTABLE_ACTION_TYPES.includes(actionType as KeyExecutableActionType);
+}
+
+export function KeyModeBriefPanel({ brief, mode, businessId }: KeyModeBriefPanelProps) {
   const router = useRouter();
+  const [requesting, setRequesting] = useState<string | null>(null);
+
+  const handleAction = async (action: KeyModeBriefPanelProps["brief"]["recommendedActions"][number], index: number) => {
+    const key = `${action.actionType}-${index}`;
+    if (action.href && !action.requiresApproval && !isExecutableAction(action.actionType)) {
+      router.push(action.href);
+      return;
+    }
+
+    if (!isExecutableAction(action.actionType)) {
+      if (action.href) router.push(action.href);
+      return;
+    }
+
+    setRequesting(key);
+    const { data, error } = await createKeyActionProposal(businessId, {
+      sourceType: "EXECUTIVE_MODE",
+      sourceMode: mode,
+      title: action.label,
+      summary: brief.summary,
+      rationale: brief.diagnosis,
+      evidence: brief.findings.map((f) => f.title),
+      actionType: action.actionType,
+      payload: action.payload ?? {},
+    });
+    setRequesting(null);
+
+    if (error || !data) {
+      toast.error(error || "Failed to request approval");
+      return;
+    }
+
+    toast.success("Approval requested. KEY will execute once approved.");
+    router.push("/app/key-autonomy");
+  };
 
   return (
     <div className="space-y-4">
@@ -38,27 +92,38 @@ export function KeyModeBriefPanel({ brief }: KeyModeBriefPanelProps) {
       {brief.recommendedActions.length > 0 && (
         <SectionCard title="Recommended Actions" icon={Zap} noPadding compact>
           <div className="p-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-            {brief.recommendedActions.map((action, index) => (
-              <motion.button
-                key={`${action.actionType}-${action.label}-${index}`}
-                initial={{ opacity: 0, y: 4 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: index * 0.05 }}
-                onClick={() => action.href && router.push(action.href)}
-                disabled={!action.href}
-                className="flex items-center gap-3 p-3 rounded-xl border border-border/30 bg-card/30 hover:bg-card/60 hover:border-[hsl(var(--kf-accent1))]/20 transition-all text-left group disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <div className="w-8 h-8 rounded-lg bg-[hsl(var(--kf-accent1))]/10 flex items-center justify-center shrink-0 group-hover:bg-[hsl(var(--kf-accent1))]/15 transition-colors">
-                  <ArrowRight className="w-3.5 h-3.5 text-[hsl(var(--kf-accent1))]" />
-                </div>
-                <div className="min-w-0">
-                  <div className="text-xs font-medium text-foreground truncate">{action.label}</div>
-                  {action.requiresApproval && (
-                    <div className="text-[10px] text-muted-foreground">Requires approval</div>
-                  )}
-                </div>
-              </motion.button>
-            ))}
+            {brief.recommendedActions.map((action, index) => {
+              const key = `${action.actionType}-${index}`;
+              const isRequesting = requesting === key;
+              const executable = isExecutableAction(action.actionType);
+              return (
+                <motion.button
+                  key={key}
+                  initial={{ opacity: 0, y: 4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: index * 0.05 }}
+                  onClick={() => handleAction(action, index)}
+                  disabled={isRequesting}
+                  className="flex items-center gap-3 p-3 rounded-xl border border-border/30 bg-card/30 hover:bg-card/60 hover:border-[hsl(var(--kf-accent1))]/20 transition-all text-left group disabled:opacity-70"
+                >
+                  <div className="w-8 h-8 rounded-lg bg-[hsl(var(--kf-accent1))]/10 flex items-center justify-center shrink-0 group-hover:bg-[hsl(var(--kf-accent1))]/15 transition-colors">
+                    {isRequesting ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-[hsl(var(--kf-accent1))]" />
+                    ) : executable || action.requiresApproval ? (
+                      <ShieldCheck className="w-3.5 h-3.5 text-[hsl(var(--kf-accent1))]" />
+                    ) : (
+                      <ArrowRight className="w-3.5 h-3.5 text-[hsl(var(--kf-accent1))]" />
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-xs font-medium text-foreground truncate">{action.label}</div>
+                    {(executable || action.requiresApproval) && (
+                      <div className="text-[10px] text-muted-foreground">Request approval</div>
+                    )}
+                  </div>
+                </motion.button>
+              );
+            })}
           </div>
         </SectionCard>
       )}

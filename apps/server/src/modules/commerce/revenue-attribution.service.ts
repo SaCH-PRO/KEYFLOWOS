@@ -66,7 +66,7 @@ export class RevenueAttributionService {
     input: RecordRevenueInput,
     tx?: Prisma.TransactionClient,
   ): Promise<void> {
-    const db = (tx ?? this.prisma.client) as Prisma.TransactionClient;
+    const db = (tx ?? this.prisma.client) as any;
     if (!Number.isFinite(input.amount) || input.amount <= 0) {
       return;
     }
