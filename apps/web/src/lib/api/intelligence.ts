@@ -136,3 +136,72 @@ export async function runScan(businessId: string) {
 export async function getExecutiveBrief(businessId: string) {
   return apiGet<BusinessExecutiveBrief>(`/intelligence/businesses/${businessId}/executive-brief`);
 }
+
+export type KeyExecutiveMode =
+  | "STRATEGIST"
+  | "CFO"
+  | "CMO"
+  | "COO"
+  | "LEGAL_GUIDE"
+  | "GROWTH_ADVISOR"
+  | "RISK_OFFICER"
+  | "EXECUTIVE_ASSISTANT";
+
+export type KeyModePriority = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+
+export type KeyModeActionType =
+  | "OPEN_GENOME"
+  | "OPEN_TEMPORAL_FLOW"
+  | "OPEN_INTELLIGENCE"
+  | "REVIEW_EVOLUTION_PROPOSALS"
+  | "REVIEW_ASSETS"
+  | "OPEN_CONSTITUTION"
+  | "CREATE_TASK"
+  | "CREATE_DOCUMENT"
+  | "OPEN_KEY_INBOX"
+  | "REQUEST_APPROVAL";
+
+export interface KeyModeAction {
+  label: string;
+  actionType: KeyModeActionType;
+  href?: string;
+  payload?: Record<string, unknown>;
+  requiresApproval?: boolean;
+}
+
+export interface KeyModeFinding {
+  id: string;
+  priority: KeyModePriority;
+  title: string;
+  finding: string;
+  evidence: string[];
+  confidence: number;
+  actions: KeyModeAction[];
+}
+
+export interface KeyExecutiveModeBrief {
+  businessId: string;
+  mode: KeyExecutiveMode;
+  generatedAt: string;
+  title: string;
+  summary: string;
+  diagnosis: string;
+  findings: KeyModeFinding[];
+  recommendedActions: KeyModeAction[];
+  risks: KeyModeFinding[];
+  opportunities: KeyModeFinding[];
+}
+
+export interface KeyModeListItem {
+  mode: KeyExecutiveMode;
+  label: string;
+  description: string;
+}
+
+export function getKeyExecutiveModes(businessId: string) {
+  return apiGet<KeyModeListItem[]>(`/intelligence/businesses/${businessId}/key-modes`);
+}
+
+export function getKeyExecutiveModeBrief(businessId: string, mode: KeyExecutiveMode) {
+  return apiGet<KeyExecutiveModeBrief>(`/intelligence/businesses/${businessId}/key-modes/${mode}`);
+}

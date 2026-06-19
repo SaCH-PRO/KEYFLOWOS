@@ -8,6 +8,8 @@ import { HealthScoreService } from './health-score.service';
 import { ScheduledScansService } from './scheduled-scans.service';
 import { EntityResolverService } from './entity-resolver.service';
 import { BusinessIntelligenceService } from './business-intelligence.service';
+import { KeyExecutiveModeController } from './key-executive-mode.controller';
+import { KeyExecutiveModeService } from './key-executive-mode.service';
 import { BlueprintModule } from '../blueprint/blueprint.module';
 import { TemporalFlowModule } from '../temporal-flow/temporal-flow.module';
 import { BusinessGenomeModule } from '../business-genome/business-genome.module';
@@ -15,7 +17,7 @@ import { BusinessAssetsModule } from '../business-assets/business-assets.module'
 
 @Module({
   imports: [BlueprintModule, TemporalFlowModule, BusinessGenomeModule, BusinessAssetsModule],
-  controllers: [IntelligenceController, BusinessIntelligenceController],
+  controllers: [IntelligenceController, BusinessIntelligenceController, KeyExecutiveModeController],
   providers: [
     RulesService,
     SignalsService,
@@ -24,6 +26,7 @@ import { BusinessAssetsModule } from '../business-assets/business-assets.module'
     ScheduledScansService,
     EntityResolverService,
     BusinessIntelligenceService,
+    KeyExecutiveModeService,
   ],
   exports: [
     RulesService,
@@ -33,6 +36,7 @@ import { BusinessAssetsModule } from '../business-assets/business-assets.module'
     ScheduledScansService,
     EntityResolverService,
     BusinessIntelligenceService,
+    KeyExecutiveModeService,
   ],
 })
 export class IntelligenceModule {}

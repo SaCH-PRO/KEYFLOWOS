@@ -2,13 +2,14 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Brain, RefreshCw, Loader2, AlertTriangle, Lightbulb, Sparkles, ArrowRight } from "lucide-react";
+import { Brain, RefreshCw, Loader2, AlertTriangle, Lightbulb, Sparkles, ArrowRight, Users, TrendingUp, Megaphone, Settings2, Scale, Rocket, ShieldAlert, ClipboardList } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
 import { SectionCard } from "@/components/ui/section-card";
 import { getExecutiveBrief, type BusinessExecutiveBrief, type BusinessIntelligenceInsight } from "@/lib/api/intelligence";
 import { ExecutiveBriefPanel } from "./components/executive-brief-panel";
+import type { KeyExecutiveMode } from "@/lib/api/intelligence";
 import { IntelligenceInsightCard } from "./components/intelligence-insight-card";
 import { IntelligenceDomainFilter } from "./components/intelligence-domain-filter";
 
@@ -110,6 +111,8 @@ export default function IntelligencePage() {
       <div className="space-y-5">
         <ExecutiveBriefPanel brief={brief} />
 
+        <AskKeyAsPanel businessId={businessId} />
+
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <Sparkles className="w-4 h-4 text-[hsl(var(--kf-accent1))]" />
@@ -165,5 +168,41 @@ export default function IntelligencePage() {
         )}
       </div>
     </WorkspaceShell>
+  );
+}
+
+const MODE_BUTTONS: { mode: KeyExecutiveMode; label: string; icon: React.ElementType }[] = [
+  { mode: "STRATEGIST", label: "Strategist", icon: Users },
+  { mode: "CFO", label: "CFO", icon: TrendingUp },
+  { mode: "CMO", label: "CMO", icon: Megaphone },
+  { mode: "COO", label: "COO", icon: Settings2 },
+  { mode: "LEGAL_GUIDE", label: "Legal Guide", icon: Scale },
+  { mode: "GROWTH_ADVISOR", label: "Growth", icon: Rocket },
+  { mode: "RISK_OFFICER", label: "Risk Officer", icon: ShieldAlert },
+  { mode: "EXECUTIVE_ASSISTANT", label: "Assistant", icon: ClipboardList },
+];
+
+function AskKeyAsPanel({ businessId }: { businessId: string | null }) {
+  const router = useRouter();
+  const handleClick = (mode: KeyExecutiveMode) => {
+    router.push(`/app/key-modes?mode=${mode}`);
+  };
+
+  return (
+    <SectionCard title="Ask KEY as..." subtitle="Get a role-specific executive briefing" icon={Brain} compact>
+      <div className="p-3 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
+        {MODE_BUTTONS.map(({ mode, label, icon: Icon }) => (
+          <button
+            key={mode}
+            disabled={!businessId}
+            onClick={() => handleClick(mode)}
+            className="flex flex-col items-center gap-1.5 p-2.5 rounded-xl border border-border/30 bg-card/30 hover:bg-card/60 hover:border-[hsl(var(--kf-accent1))]/20 transition-all text-left disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Icon className="w-4 h-4 text-[hsl(var(--kf-accent2))]" />
+            <span className="text-[10px] font-medium text-foreground">{label}</span>
+          </button>
+        ))}
+      </div>
+    </SectionCard>
   );
 }
