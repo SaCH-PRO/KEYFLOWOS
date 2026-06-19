@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import type { KeyInboxMessage, KeyInboxThread } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -21,9 +21,9 @@ export class KeyInboxReplySenderService {
   private gmailServiceCache: any = null;
 
   constructor(
-    private readonly moduleRef: ModuleRef,
-    private readonly prisma: PrismaService,
-    private readonly businessEvents: BusinessEventService,
+    @Inject(ModuleRef) private readonly moduleRef: ModuleRef,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(BusinessEventService) private readonly businessEvents: BusinessEventService,
   ) {}
 
   async sendReply(
