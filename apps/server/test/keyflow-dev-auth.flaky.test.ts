@@ -1,3 +1,5 @@
+// TODO: Quarantined flaky test — full app boot via tsx times out on Windows before guard exits.
+// Remediation: split into fast guard-logic unit test + one slower integration boot test.
 import { describe, expect, it } from 'vitest';
 import { spawn } from 'node:child_process';
 import * as path from 'node:path';

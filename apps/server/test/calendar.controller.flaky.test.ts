@@ -1,3 +1,5 @@
+// TODO: Quarantined flaky test — timeout/ECONNRESET in calendar controller integration setup.
+// Remediation: reduce module bootstrap scope and mock Prisma/Redis where appropriate.
 import { Test } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';

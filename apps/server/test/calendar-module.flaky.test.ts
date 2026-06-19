@@ -1,3 +1,5 @@
+// TODO: Quarantined flaky test — timeout/ECONNRESET when exercising Google Calendar connector paths.
+// Remediation: mock connector boundaries, freeze time, and move to integration suite.
 import { Test } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
