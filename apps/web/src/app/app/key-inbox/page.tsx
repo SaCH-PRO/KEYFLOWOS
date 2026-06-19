@@ -17,6 +17,7 @@ import {
   Bot,
   Tag,
   AlertTriangle,
+  Save,
 } from "lucide-react";
 import { toast } from "sonner";
 import { getStoredBusinessId } from "@/lib/workspace";
@@ -38,6 +39,7 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SkeletonList } from "@/components/ui/skeleton";
+import { ConfirmDialog } from "@/app/app/finance/components/confirm-dialog";
 
 const STATUS_OPTIONS = [
   { value: "", label: "All statuses" },
@@ -124,6 +126,13 @@ export default function KeyInboxPage() {
   const [sendingReply, setSendingReply] = useState(false);
   const [executingAction, setExecutingAction] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<{
+    action: KeyInboxSuggestedAction;
+    index: number;
+    messageId?: string;
+  } | null>(null);
+  const [confirmLoading, setConfirmLoading] = useState(false);
+  const [confirmForm, setConfirmForm] = useState({ title: "", dueDate: "", content: "" });
 
   const [filters, setFilters] = useState({
     channel: "",
@@ -201,17 +210,21 @@ export default function KeyInboxPage() {
     await loadThreads();
   };
 
-  const handleReply = async () => {
+  const handleReply = async (mode: "draft" | "send") => {
     if (!businessId || !selectedThread || !replyText.trim()) return;
     setSendingReply(true);
-    const { data, error } = await replyToThread(businessId, selectedThread.id, replyText.trim());
+    const { data, error } = await replyToThread(businessId, selectedThread.id, replyText.trim(), mode);
     if (error || !data) {
-      toast.error(error ?? "Failed to send reply");
+      toast.error(error ?? "Failed to save reply");
     } else {
       setReplyText("");
       setSelectedThread({ ...selectedThread, messages: [data.message, ...(selectedThread.messages ?? [])] });
       await loadThreads();
-      toast.success("Reply saved");
+      if (mode === "send" && data.sendResult && !data.sendResult.success) {
+        toast.error(data.sendResult.error ?? "Reply could not be sent");
+      } else {
+        toast.success(mode === "send" ? "Reply sent" : "Draft saved");
+      }
     }
     setSendingReply(false);
   };
@@ -229,14 +242,45 @@ export default function KeyInboxPage() {
     setAnalyzing(false);
   };
 
-  const handleExecuteAction = async (action: KeyInboxSuggestedAction, index: number, messageId?: string) => {
-    if (!businessId || !selectedThread) return;
+  const openConfirmAction = (action: KeyInboxSuggestedAction, index: number, messageId?: string) => {
+    setConfirmAction({ action, index, messageId });
+    setConfirmForm({
+      title: typeof action.payload?.title === "string" ? action.payload.title : "",
+      dueDate:
+        typeof action.payload?.dueDate === "string"
+          ? action.payload.dueDate.slice(0, 16)
+          : "",
+      content:
+        typeof action.payload?.draft === "string"
+          ? action.payload.draft
+          : typeof action.payload?.content === "string"
+            ? action.payload.content
+            : "",
+    });
+  };
+
+  const handleConfirmAction = async () => {
+    if (!businessId || !selectedThread || !confirmAction) return;
+    const { action, index, messageId } = confirmAction;
     const actionKey = `${messageId ?? "thread"}-${index}`;
+    setConfirmLoading(true);
     setExecutingAction(actionKey);
-    const { data, error } = await executeThreadAction(businessId, selectedThread.id, index, messageId);
+
+    const payloadOverride: Record<string, unknown> = {};
+    if (action.type === "create_task" || action.type === "schedule_followup") {
+      if (confirmForm.title.trim()) payloadOverride.title = confirmForm.title.trim();
+      if (confirmForm.dueDate) payloadOverride.dueDate = new Date(confirmForm.dueDate).toISOString();
+    }
+    if (action.type === "draft_reply" && confirmForm.content.trim()) {
+      payloadOverride.draft = confirmForm.content.trim();
+      payloadOverride.content = confirmForm.content.trim();
+    }
+
+    const { data, error } = await executeThreadAction(businessId, selectedThread.id, index, messageId, payloadOverride);
     if (error || !data) {
       toast.error(error ?? "Action failed");
     } else {
+      setConfirmAction(null);
       if (data.redirectUrl) {
         router.push(data.redirectUrl);
       } else {
@@ -245,7 +289,12 @@ export default function KeyInboxPage() {
         await loadThreads();
       }
     }
+    setConfirmLoading(false);
     setExecutingAction(null);
+  };
+
+  const handleExecuteAction = (action: KeyInboxSuggestedAction, index: number, messageId?: string) => {
+    openConfirmAction(action, index, messageId);
   };
 
   const metrics = useMemo(() => {
@@ -344,6 +393,14 @@ export default function KeyInboxPage() {
           )}
           <div className={`mt-1 kf-text-micro text-muted-foreground ${isOutbound ? "text-right" : ""}`}>
             {formatDateTime(message.receivedAt ?? message.sentAt ?? message.createdAt)}
+            {isOutbound && message.sendStatus && (
+              <span className="ml-2">
+                {message.sendStatus === "SENT" && "✓ Sent"}
+                {message.sendStatus === "DRAFT" && "Draft"}
+                {message.sendStatus === "FAILED" && `Failed${message.sendError ? `: ${message.sendError}` : ""}`}
+                {message.sendStatus === "QUEUED" && "Sending..."}
+              </span>
+            )}
           </div>
         </div>
       </div>
@@ -547,12 +604,20 @@ export default function KeyInboxPage() {
             onKeyDown={(e) => {
               if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                 e.preventDefault();
-                handleReply();
+                handleReply("send");
               }
             }}
           />
           <button
-            onClick={handleReply}
+            onClick={() => handleReply("draft")}
+            disabled={!replyText.trim() || sendingReply}
+            className="px-3 py-2 kf-radius-md kf-text-caption font-medium bg-muted/50 hover:bg-muted/70 text-foreground disabled:opacity-50 inline-flex items-center gap-1"
+          >
+            {sendingReply ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            Save Draft
+          </button>
+          <button
+            onClick={() => handleReply("send")}
             disabled={!replyText.trim() || sendingReply}
             className="px-3 py-2 kf-radius-md kf-text-caption font-medium bg-[hsl(var(--kf-accent1))] text-white disabled:opacity-50 inline-flex items-center gap-1"
           >
@@ -626,6 +691,77 @@ export default function KeyInboxPage() {
           </div>
         </div>
       </div>
+      {confirmAction && (
+        <ConfirmDialog
+          open={!!confirmAction}
+          title={confirmAction.action.label}
+          description={
+            confirmAction.action.type === "create_task"
+              ? "Review the task details before creating it."
+              : confirmAction.action.type === "schedule_followup"
+                ? "Review the follow-up details before scheduling."
+                : confirmAction.action.type === "draft_reply"
+                  ? "Review and edit the AI draft before saving."
+                  : confirmAction.action.type === "create_contact"
+                    ? selectedThread?.contactId
+                      ? "A contact is already linked to this thread. No new contact will be created."
+                      : "Create a new contact from this conversation."
+                    : confirmAction.action.type === "create_invoice"
+                      ? "You will be redirected to create an invoice."
+                      : confirmAction.action.type === "create_booking"
+                        ? "You will be redirected to create a booking."
+                        : `Run the suggested action: ${confirmAction.action.type.replace(/_/g, " ")}.`
+          }
+          confirmLabel={
+            confirmAction.action.type === "create_invoice"
+              ? "Create Invoice"
+              : confirmAction.action.type === "create_booking"
+                ? "Create Booking"
+                : confirmAction.action.type === "create_contact"
+                  ? "Create Contact"
+                  : "Confirm"
+          }
+          cancelLabel="Cancel"
+          variant="primary"
+          onConfirm={handleConfirmAction}
+          onCancel={() => setConfirmAction(null)}
+          loading={confirmLoading}
+        >
+          {(confirmAction.action.type === "create_task" || confirmAction.action.type === "schedule_followup") && (
+            <div className="space-y-2">
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">Title</label>
+                <input
+                  type="text"
+                  value={confirmForm.title}
+                  onChange={(e) => setConfirmForm((f) => ({ ...f, title: e.target.value }))}
+                  className="w-full px-3 py-2 rounded-lg bg-muted/30 border border-border/20 text-xs"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-muted-foreground mb-1">Due date</label>
+                <input
+                  type="datetime-local"
+                  value={confirmForm.dueDate}
+                  onChange={(e) => setConfirmForm((f) => ({ ...f, dueDate: e.target.value }))}
+                  className="w-full px-3 py-2 rounded-lg bg-muted/30 border border-border/20 text-xs"
+                />
+              </div>
+            </div>
+          )}
+          {confirmAction.action.type === "draft_reply" && (
+            <div>
+              <label className="block text-xs font-medium text-muted-foreground mb-1">Draft content</label>
+              <textarea
+                value={confirmForm.content}
+                onChange={(e) => setConfirmForm((f) => ({ ...f, content: e.target.value }))}
+                rows={4}
+                className="w-full px-3 py-2 rounded-lg bg-muted/30 border border-border/20 text-xs resize-none"
+              />
+            </div>
+          )}
+        </ConfirmDialog>
+      )}
     </StandardModuleLayout>
   );
 }

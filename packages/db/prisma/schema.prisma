@@ -9878,6 +9878,12 @@ model KeyInboxMessage {
   receivedAt          DateTime? @map("received_at")
   sentAt              DateTime? @map("sent_at")
 
+  sendStatus          String?  @map("send_status") // DRAFT, QUEUED, SENT, FAILED, NOT_SUPPORTED
+  providerMessageId   String?  @map("provider_message_id")
+  sendError           String?  @map("send_error")
+  sentByUserId        String?  @map("sent_by_user_id")
+  sentVia             String?  @map("sent_via")
+
   aiAnalysis          Json?    @default("{}")
   extractedEntities   Json?    @default("{}")
   suggestedActions    Json?    @default("[]")

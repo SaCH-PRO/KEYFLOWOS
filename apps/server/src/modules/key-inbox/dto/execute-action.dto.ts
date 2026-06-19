@@ -1,10 +1,14 @@
-import { IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsObject, IsOptional, IsString } from 'class-validator';
 
 export class ExecuteActionDto {
-  @IsString()
-  actionIndex!: string;
-
   @IsOptional()
   @IsString()
   messageId?: string;
+
+  @IsBoolean()
+  confirmed!: boolean;
+
+  @IsOptional()
+  @IsObject()
+  payloadOverride?: Record<string, unknown>;
 }

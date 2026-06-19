@@ -38,6 +38,11 @@ export interface CreateInboxMessageInput {
   externalMessageId?: string | null;
   receivedAt?: Date | null;
   sentAt?: Date | null;
+  sendStatus?: string | null;
+  providerMessageId?: string | null;
+  sendError?: string | null;
+  sentByUserId?: string | null;
+  sentVia?: string | null;
   metadata?: Record<string, unknown>;
 }
 

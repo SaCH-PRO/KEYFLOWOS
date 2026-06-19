@@ -5,6 +5,7 @@ import { AiUsageService } from '../ai/ai-usage.service';
 import { KeyInboxActionService } from './key-inbox-action.service';
 import { KeyInboxAnalysisService } from './key-inbox-analysis.service';
 import { KeyInboxTemporalEmitterService } from './key-inbox-temporal-emitter.service';
+import { KeyInboxReplySenderService } from './key-inbox-reply-sender.service';
 import type { CreateInboxMessageInput, CreateInboxThreadInput, InboxAnalysis } from './key-inbox.types';
 
 @Injectable()
@@ -17,6 +18,7 @@ export class KeyInboxService {
     @Inject(KeyInboxActionService) private readonly actionService: KeyInboxActionService,
     @Inject(KeyInboxTemporalEmitterService) private readonly temporalEmitter: KeyInboxTemporalEmitterService,
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
+    @Inject(KeyInboxReplySenderService) private readonly replySender: KeyInboxReplySenderService,
   ) {}
 
   async upsertThread(input: CreateInboxThreadInput): Promise<KeyInboxThread> {
@@ -90,6 +92,11 @@ export class KeyInboxService {
           externalMessageId: input.externalMessageId ?? null,
           receivedAt: input.direction === 'INBOUND' ? receivedAt : input.receivedAt ?? null,
           sentAt: input.direction === 'OUTBOUND' ? (input.sentAt ?? new Date()) : input.sentAt ?? null,
+          sendStatus: input.sendStatus ?? null,
+          providerMessageId: input.providerMessageId ?? null,
+          sendError: input.sendError ?? null,
+          sentByUserId: input.sentByUserId ?? null,
+          sentVia: input.sentVia ?? null,
         },
       }),
       this.prisma.client.keyInboxThread.update({
@@ -247,21 +254,43 @@ export class KeyInboxService {
     threadId: string,
     contentText: string,
     attachments?: Record<string, unknown>[],
-  ): Promise<{ thread: KeyInboxThread; message: KeyInboxMessage }> {
+    opts?: { mode?: 'draft' | 'send'; userId?: string },
+  ): Promise<{ thread: KeyInboxThread; message: KeyInboxMessage; sendResult?: { success: boolean; status: string; error?: string } }> {
     const thread = await this.prisma.client.keyInboxThread.findFirst({
       where: { id: threadId, businessId },
     });
     if (!thread) throw new NotFoundException('Thread not found');
 
-    return this.addMessage({
+    const mode = opts?.mode ?? 'draft';
+    const userId = opts?.userId;
+
+    const result = await this.addMessage({
       businessId,
       threadId,
       channel: thread.channel,
       direction: 'OUTBOUND',
       contentText,
       attachments,
+      sendStatus: mode === 'draft' ? 'DRAFT' : 'QUEUED',
+      sentByUserId: userId,
+      sentVia: 'key_inbox',
       metadata: { source: 'key_inbox_reply' },
     });
+
+    if (mode === 'draft') {
+      this.replySender.emitDraftEvent(businessId, thread.id, result.message.id, userId);
+      return result;
+    }
+
+    const sendResult = await this.replySender.sendReply(businessId, thread, result.message, userId);
+    return {
+      ...result,
+      sendResult: {
+        success: sendResult.success,
+        status: sendResult.status,
+        error: sendResult.error,
+      },
+    };
   }
 
   async getThread(

@@ -14,6 +14,7 @@ interface ConfirmDialogProps {
   onConfirm: () => void;
   onCancel: () => void;
   loading?: boolean;
+  children?: React.ReactNode;
 }
 
 const variantStyles = {
@@ -32,6 +33,7 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
   loading,
+  children,
 }: ConfirmDialogProps) {
   const style = variantStyles[variant];
 
@@ -60,6 +62,7 @@ export function ConfirmDialog({
                 <div className="flex-1 min-w-0">
                   <h3 className="text-sm font-semibold text-foreground">{title}</h3>
                   <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{description}</p>
+                  {children && <div className="mt-3 space-y-2">{children}</div>}
                 </div>
               </div>
             </div>

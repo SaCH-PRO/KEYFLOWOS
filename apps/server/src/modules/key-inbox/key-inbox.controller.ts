@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   ForbiddenException,
@@ -9,6 +10,7 @@ import {
   Patch,
   Post,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
@@ -120,12 +122,14 @@ export class KeyInboxController {
     @Param('businessId') businessId: string,
     @Param('threadId') threadId: string,
     @Body() body: ReplyDto,
+    @Req() req: Request & { user?: { id?: string } },
   ) {
     return this.keyInbox.addReply(
       businessId,
       threadId,
       body.contentText,
       body.attachments?.map((a) => ({ type: a.type, url: a.url })) ?? [],
+      { mode: body.mode ?? 'draft', userId: req.user?.id },
     );
   }
 
@@ -135,7 +139,12 @@ export class KeyInboxController {
     @Param('threadId') threadId: string,
     @Param('actionIndex') actionIndex: string,
     @Body() body: ExecuteActionDto,
+    @Req() req: Request & { user?: { id?: string } },
   ) {
+    if (body.confirmed !== true) {
+      throw new BadRequestException('Action must be confirmed before execution');
+    }
+
     const thread = await this.keyInbox.getThread(businessId, threadId);
     if (!thread) throw new NotFoundException('Thread not found');
 
@@ -155,17 +164,38 @@ export class KeyInboxController {
       throw new NotFoundException('Suggested action not found');
     }
 
-    const result = await this.actionExecutor.execute(businessId, threadId, action, {
-      messageId: message?.id,
-    });
+    const userId = req.user?.id ?? 'user';
 
     await this.businessEvents.emit({
       businessId,
-      eventType: 'key_inbox.action_executed',
+      eventType: 'key_inbox.action_confirmed',
       subjectType: 'KeyInboxThread',
       subjectId: threadId,
       actorType: 'human',
-      actorId: 'user',
+      actorId: userId,
+      action: 'confirm_action',
+      source: 'web',
+      metadata: { actionType: action.type, messageId: message?.id },
+    });
+
+    const result = await this.actionExecutor.execute(
+      businessId,
+      threadId,
+      { ...action, payload: action.payload ?? {} },
+      {
+        messageId: message?.id,
+        userId,
+        ...(body.payloadOverride ? { payloadOverride: body.payloadOverride } : {}),
+      },
+    );
+
+    await this.businessEvents.emit({
+      businessId,
+      eventType: result.success ? 'key_inbox.action_executed' : 'key_inbox.action_failed',
+      subjectType: 'KeyInboxThread',
+      subjectId: threadId,
+      actorType: 'human',
+      actorId: userId,
       action: 'execute_action',
       source: 'web',
       metadata: { actionType: action.type, result },

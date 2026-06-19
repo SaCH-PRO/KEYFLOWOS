@@ -27,6 +27,11 @@ export interface KeyInboxMessage {
   extractedEntities?: Record<string, unknown> | null;
   suggestedActions: KeyInboxSuggestedAction[];
   aiConfidence?: number | null;
+  sendStatus?: "DRAFT" | "QUEUED" | "SENT" | "FAILED" | null;
+  providerMessageId?: string | null;
+  sendError?: string | null;
+  sentByUserId?: string | null;
+  sentVia?: string | null;
   createdAt: string;
 }
 
@@ -132,10 +137,11 @@ export async function replyToThread(
   businessId: string,
   threadId: string,
   contentText: string,
-): Promise<{ data: { thread: KeyInboxThread; message: KeyInboxMessage } | null; error: string | null }> {
-  return apiPost<{ thread: KeyInboxThread; message: KeyInboxMessage }>({
+  mode: "draft" | "send" = "draft",
+): Promise<{ data: { thread: KeyInboxThread; message: KeyInboxMessage; sendResult?: { success: boolean; status: string; error?: string } } | null; error: string | null }> {
+  return apiPost<{ thread: KeyInboxThread; message: KeyInboxMessage; sendResult?: { success: boolean; status: string; error?: string } }>({
     path: `/key-inbox/businesses/${encodeURIComponent(businessId)}/threads/${encodeURIComponent(threadId)}/reply`,
-    body: { contentText },
+    body: { contentText, mode },
   });
 }
 
@@ -154,10 +160,11 @@ export async function executeThreadAction(
   threadId: string,
   actionIndex: number,
   messageId?: string,
+  payloadOverride?: Record<string, unknown>,
 ): Promise<{ data: ActionExecutionResult | null; error: string | null }> {
   return apiPost<ActionExecutionResult>({
     path: `/key-inbox/businesses/${encodeURIComponent(businessId)}/threads/${encodeURIComponent(threadId)}/actions/${actionIndex}/execute`,
-    body: { messageId },
+    body: { messageId, confirmed: true, payloadOverride },
   });
 }
 

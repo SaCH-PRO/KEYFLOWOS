@@ -60,22 +60,22 @@ describe('KeyInboxController', () => {
 
   it('adds a reply', async () => {
     const { controller, keyInbox } = makeController();
-    const result = await controller.reply('biz_1', 'thread_1', { contentText: 'Reply text' });
+    const result = await controller.reply('biz_1', 'thread_1', { contentText: 'Reply text' }, { user: { id: 'user_1' } } as any);
 
     expect(result.message.id).toBe('msg_reply');
-    expect(keyInbox.addReply).toHaveBeenCalledWith('biz_1', 'thread_1', 'Reply text', []);
+    expect(keyInbox.addReply).toHaveBeenCalledWith('biz_1', 'thread_1', 'Reply text', [], { mode: 'draft', userId: 'user_1' });
   });
 
   it('executes a suggested action', async () => {
     const { controller, executor, businessEvents } = makeController();
-    const result = await controller.executeAction('biz_1', 'thread_1', '0', { actionIndex: '0' });
+    const result = await controller.executeAction('biz_1', 'thread_1', '0', { confirmed: true }, { user: { id: 'user_1' } } as any);
 
     expect(result.success).toBe(true);
     expect(executor.execute).toHaveBeenCalledWith(
       'biz_1',
       'thread_1',
-      { type: 'create_task', label: 'Task', confidence: 0.9 },
-      { messageId: 'msg_1' },
+      { type: 'create_task', label: 'Task', confidence: 0.9, payload: {} },
+      { messageId: 'msg_1', userId: 'user_1' },
     );
     expect(businessEvents.emit).toHaveBeenCalled();
   });

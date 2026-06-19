@@ -24,9 +24,16 @@ export class KeyInboxActionExecutorService {
   async execute(
     businessId: string,
     threadId: string,
-    action: InboxSuggestedAction,
-    opts?: { messageId?: string; userId?: string },
+    rawAction: InboxSuggestedAction,
+    opts?: { messageId?: string; userId?: string; payloadOverride?: Record<string, unknown> },
   ): Promise<ActionExecutionResult> {
+    const action: InboxSuggestedAction = {
+      ...rawAction,
+      payload: {
+        ...(rawAction.payload ?? {}),
+        ...(opts?.payloadOverride ?? {}),
+      },
+    };
     const thread = await this.prisma.client.keyInboxThread.findFirst({
       where: { id: threadId, businessId },
       include: { messages: { orderBy: { receivedAt: 'desc' }, take: 1 } },

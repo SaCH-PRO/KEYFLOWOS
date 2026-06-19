@@ -1,4 +1,4 @@
-import { IsOptional, IsString, MaxLength, ValidateNested } from 'class-validator';
+import { IsIn, IsOptional, IsString, MaxLength, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class ReplyAttachmentDto {
@@ -18,4 +18,9 @@ export class ReplyDto {
   @ValidateNested({ each: true })
   @Type(() => ReplyAttachmentDto)
   attachments?: ReplyAttachmentDto[];
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['draft', 'send'])
+  mode?: 'draft' | 'send';
 }
