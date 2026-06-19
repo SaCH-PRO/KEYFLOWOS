@@ -262,3 +262,16 @@ export async function archiveConstitutionVersion(businessId: string, version: nu
     body: {},
   });
 }
+
+export type DocumentPackArtifact = 'executive-brief' | 'constitution' | 'dna-report';
+
+export function getDocumentPackExportUrl(
+  businessId: string,
+  artifact: DocumentPackArtifact,
+  format: 'pdf' | 'docx',
+  version?: number,
+): string {
+  const params = new URLSearchParams({ format });
+  if (version !== undefined) params.set('version', String(version));
+  return `/business-genome/businesses/${businessId}/document-pack/${artifact}/export?${params.toString()}`;
+}

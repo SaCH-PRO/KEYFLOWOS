@@ -32,6 +32,7 @@
     "class-validator": "^0.14.3",
     "compression": "^1.8.1",
     "csv-parse": "^5.4.0",
+    "docx": "^9.7.1",
     "exceljs": "^4.4.0",
     "express": "^4.19.2",
     "express-rate-limit": "^8.4.1",

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ScrollText, Loader2, AlertCircle, RefreshCw, History, ChevronDown, ChevronUp, Archive, AlertTriangle } from "lucide-react";
+import { ScrollText, Loader2, AlertCircle, RefreshCw, History, ChevronDown, ChevronUp, Archive, AlertTriangle, FileText } from "lucide-react";
 import { getStoredBusinessId } from "@/lib/workspace";
 import {
   getLatestConstitutionVersion,
@@ -14,6 +14,7 @@ import {
   type DnaSectionKey,
   type ConstitutionVersion,
   type ConstitutionStaleness,
+  getDocumentPackExportUrl,
 } from "@/lib/api/business-genome";
 
 interface ConstitutionPanelProps {
@@ -116,6 +117,11 @@ export function ConstitutionPanel({ genome }: ConstitutionPanelProps) {
     await load();
   };
 
+  const openExport = (format: "pdf" | "docx", v?: number) => {
+    if (!businessId) return;
+    window.open(getDocumentPackExportUrl(businessId, "constitution", format, v), "_blank");
+  };
+
   const sections = Object.entries((version?.content?.sections ?? {}) as Record<string, ConstitutionSection>);
   const generatedAtText = version?.generatedAt ? new Date(version.generatedAt).toLocaleString() : "Unknown";
 
@@ -185,6 +191,27 @@ export function ConstitutionPanel({ genome }: ConstitutionPanelProps) {
                     {(version.sourceGenomeStage ?? genome.genomeStage).replace(/_/g, " ")}
                   </span>
                 </div>
+              </div>
+            )}
+            {version && (
+              <div className="flex flex-wrap items-center gap-2 mt-3">
+                <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Export</span>
+                <button
+                  onClick={() => openExport("pdf")}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-colors hover:bg-[hsl(var(--kf-accent1))]/10 hover:text-[hsl(var(--kf-accent1))]"
+                  style={{ background: "hsl(var(--kf-muted) / 0.12)" }}
+                >
+                  <FileText className="w-3 h-3" />
+                  PDF
+                </button>
+                <button
+                  onClick={() => openExport("docx")}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-colors hover:bg-[hsl(var(--kf-accent1))]/10 hover:text-[hsl(var(--kf-accent1))]"
+                  style={{ background: "hsl(var(--kf-muted) / 0.12)" }}
+                >
+                  <FileText className="w-3 h-3" />
+                  DOCX
+                </button>
               </div>
             )}
           </div>

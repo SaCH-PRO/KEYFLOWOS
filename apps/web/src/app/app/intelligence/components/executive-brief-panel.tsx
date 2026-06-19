@@ -1,10 +1,12 @@
 "use client";
 
-import { Brain, Dna, Shield, TrendingUp, Calendar } from "lucide-react";
+import { Brain, Dna, Shield, TrendingUp, Calendar, Download, FileText } from "lucide-react";
 import { motion } from "framer-motion";
 import { SectionCard } from "@/components/ui/section-card";
 import { IntelligencePriorityList } from "./intelligence-priority-list";
 import type { BusinessExecutiveBrief } from "@/lib/api/intelligence";
+import { getDocumentPackExportUrl } from "@/lib/api/business-genome";
+import { getStoredBusinessId } from "@/lib/workspace";
 
 interface ExecutiveBriefPanelProps {
   brief: BusinessExecutiveBrief;
@@ -23,7 +25,13 @@ function scoreBg(score: number): string {
 }
 
 export function ExecutiveBriefPanel({ brief }: ExecutiveBriefPanelProps) {
+  const businessId = getStoredBusinessId();
   const generatedAt = new Date(brief.generatedAt).toLocaleString();
+
+  const openExport = (format: "pdf" | "docx") => {
+    if (!businessId) return;
+    window.open(getDocumentPackExportUrl(businessId, "executive-brief", format), "_blank");
+  };
 
   return (
     <div className="space-y-4">
@@ -36,9 +44,15 @@ export function ExecutiveBriefPanel({ brief }: ExecutiveBriefPanelProps) {
           border: "1px solid hsl(var(--kf-border) / 0.2)",
         }}
       >
-        <div className="flex items-center gap-2 mb-3">
-          <Brain className="w-4 h-4 text-[hsl(var(--kf-accent2))]" />
-          <h2 className="text-sm font-semibold text-foreground">Executive Brief</h2>
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <div className="flex items-center gap-2">
+            <Brain className="w-4 h-4 text-[hsl(var(--kf-accent2))]" />
+            <h2 className="text-sm font-semibold text-foreground">Executive Brief</h2>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <ExportButton label="PDF" onClick={() => openExport("pdf")} />
+            <ExportButton label="DOCX" onClick={() => openExport("docx")} />
+          </div>
         </div>
         <p className="text-sm text-muted-foreground leading-relaxed">{brief.summary}</p>
         <div className="flex items-center gap-1.5 mt-3 text-[10px] text-muted-foreground">
@@ -120,5 +134,20 @@ function StageCard({ stage }: { stage: string }) {
         <div className="text-[10px] text-muted-foreground font-medium">Genome Stage</div>
       </div>
     </motion.div>
+  );
+}
+
+function ExportButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-medium transition-colors hover:bg-[hsl(var(--kf-accent1))]/10 hover:text-[hsl(var(--kf-accent1))]"
+      style={{ background: "hsl(var(--kf-muted) / 0.12)" }}
+      title={`Export ${label}`}
+    >
+      <FileText className="w-3 h-3" />
+      <span>{label}</span>
+      <Download className="w-3 h-3" />
+    </button>
   );
 }
