@@ -61,6 +61,9 @@ const RecommendedSchema = z.object({
   APP_URL: optionalNonEmpty.refine((v) => v === undefined || /^https?:\/\//i.test(v), 'must start with http:// or https://'),
   API_URL: optionalNonEmpty.refine((v) => v === undefined || /^https?:\/\//i.test(v), 'must start with http:// or https://'),
   PUBLIC_BASE_URL: optionalNonEmpty.refine((v) => v === undefined || /^https?:\/\//i.test(v), 'must start with http:// or https://'),
+
+  // Queues / cache
+  REDIS_URL: optionalNonEmpty,
 });
 
 /**
@@ -145,6 +148,7 @@ export function validateServerEnv(env: NodeJS.ProcessEnv = process.env): EnvVali
     APP_URL: env.APP_URL,
     API_URL: env.API_URL,
     PUBLIC_BASE_URL: env.PUBLIC_BASE_URL,
+    REDIS_URL: env.REDIS_URL,
   });
   if (!recommendedResult.success) {
     for (const issue of recommendedResult.error.issues) {
@@ -160,6 +164,12 @@ export function validateServerEnv(env: NodeJS.ProcessEnv = process.env): EnvVali
     }
     if (!r.AI_INTEGRATIONS_OPENAI_API_KEY && !r.ANTHROPIC_API_KEY && !r.XAI_API_KEY) {
       warnings.push('AI provider keys: none of AI_INTEGRATIONS_OPENAI_API_KEY/ANTHROPIC_API_KEY/XAI_API_KEY set — AI features will return errors');
+    }
+    if (!r.REDIS_URL) {
+      warnings.push('REDIS_URL: not set — BullMQ background jobs will fail to start');
+    }
+    if (env.KEYFLOW_DEV_AUTH_BYPASS === 'true' || env.KEYFLOW_DEV_AUTH_BYPASS === '1') {
+      warnings.push('KEYFLOW_DEV_AUTH_BYPASS is enabled — the server will exit immediately to prevent insecure boot');
     }
   }
 
