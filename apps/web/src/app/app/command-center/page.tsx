@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { motion } from "framer-motion";
-import { LayoutDashboard, Loader2, AlertTriangle, RefreshCw } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import { LayoutDashboard, Loader2, AlertTriangle, RefreshCw, Bot, BrainCircuit, Clock, Inbox, Target } from "lucide-react";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
 import { SectionCard } from "@/components/ui/section-card";
 import { getStoredBusinessId } from "@/lib/workspace";
@@ -79,9 +81,18 @@ export default function CommandCenterPage() {
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
         <CommandHealthStrip health={snapshot.health} />
 
-        <div className="rounded-2xl p-4 border border-border/30 bg-card/40">
-          <h2 className="text-sm font-semibold text-foreground">Today&apos;s KEY Summary</h2>
-          <p className="text-xs text-muted-foreground leading-relaxed mt-1">{snapshot.summary}</p>
+        <div className="rounded-2xl p-4 border border-border/30 bg-card/40 space-y-3">
+          <div>
+            <h2 className="text-sm font-semibold text-foreground">Today&apos;s KEY Summary</h2>
+            <p className="text-xs text-muted-foreground leading-relaxed mt-1">{snapshot.summary}</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <QuickLink href="/app/key-autonomy" icon={Bot} label="KEY Autonomy" />
+            <QuickLink href="/app/key-modes" icon={BrainCircuit} label="KEY Modes" />
+            <QuickLink href="/app/temporal-flow" icon={Clock} label="Temporal Flow" />
+            <QuickLink href="/app/key-inbox" icon={Inbox} label="Key Inbox" />
+            <QuickLink href="/app/profile?tab=business-genome" icon={Target} label="Business Genome" />
+          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
@@ -153,5 +164,17 @@ export default function CommandCenterPage() {
         </div>
       </motion.div>
     </WorkspaceShell>
+  );
+}
+
+function QuickLink({ href, icon: Icon, label }: { href: string; icon: LucideIcon; label: string }) {
+  return (
+    <Link
+      href={href}
+      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-muted/50 hover:bg-muted/80 text-xs font-medium text-foreground transition-colors"
+    >
+      <Icon className="w-3.5 h-3.5 text-muted-foreground" />
+      {label}
+    </Link>
   );
 }

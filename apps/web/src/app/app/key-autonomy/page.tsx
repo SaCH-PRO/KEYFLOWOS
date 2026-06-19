@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { ShieldCheck, Loader2, AlertTriangle, Plus } from "lucide-react";
+import Link from "next/link";
+import { ShieldCheck, Loader2, AlertTriangle, Plus, LayoutDashboard } from "lucide-react";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
 import { getStoredBusinessId } from "@/lib/workspace";
 import {
@@ -113,6 +114,13 @@ export default function KeyAutonomyPage() {
       actionIcon={Plus}
       onAction={() => router.push("/app/key-modes")}
     >
+      <Link
+        href="/app/command-center"
+        className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+      >
+        <LayoutDashboard className="w-3.5 h-3.5" />
+        Back to Command Center
+      </Link>
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-3">
         {proposals.length === 0 && !loading && (
           <div className="rounded-2xl border border-dashed border-border/40 p-8 text-center">

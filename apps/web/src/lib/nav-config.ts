@@ -112,6 +112,8 @@ export const operateSections: NavSection[] = [
     items: [
       { label: "Command Center", href: "/app/command-center", icon: LayoutDashboard },
       { label: "KEY Worker", href: "/app/key", icon: Bot },
+      { label: "KEY Autonomy", href: "/app/key-autonomy", icon: CheckSquare },
+      { label: "KEY Modes", href: "/app/key-modes", icon: BrainCircuit },
       { label: "Key Inbox", href: "/app/key-inbox", icon: Inbox },
       { label: "Capture", href: "/app/capture", icon: Camera },
     ],
@@ -195,6 +197,7 @@ export const operateSections: NavSection[] = [
     label: "Intelligence",
     icon: Brain,
     items: [
+      { label: "Executive Intelligence", href: "/app/intelligence", icon: LayoutDashboard },
       { label: "Growth", href: "/app/growth", icon: TrendingUp },
       { label: "Storefront", href: "/app/storefront-intelligence", icon: Store },
       { label: "Documents", href: "/app/document-intelligence", icon: FileText },

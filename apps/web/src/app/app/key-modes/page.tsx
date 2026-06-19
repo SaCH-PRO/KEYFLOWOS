@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
-import { Brain, Loader2, AlertTriangle } from "lucide-react";
+import Link from "next/link";
+import { Brain, Loader2, AlertTriangle, LayoutDashboard } from "lucide-react";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
 import { getStoredBusinessId } from "@/lib/workspace";
 import {
@@ -109,6 +110,13 @@ export default function KeyModesPage() {
 
   return (
     <WorkspaceShell icon={Brain} title="KEY Executive Modes" subtitle="Ask KEY to think like a specialist executive">
+      <Link
+        href="/app/command-center"
+        className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+      >
+        <LayoutDashboard className="w-3.5 h-3.5" />
+        Back to Command Center
+      </Link>
       <div className="space-y-5">
         <motion.div
           initial={{ opacity: 0, y: 8 }}
