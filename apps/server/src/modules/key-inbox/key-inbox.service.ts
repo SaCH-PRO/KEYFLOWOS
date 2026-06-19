@@ -186,18 +186,81 @@ export class KeyInboxService {
 
   async listThreads(
     businessId: string,
-    filters?: { channel?: string; status?: string; priority?: string; limit?: number; offset?: number },
+    filters?: {
+      channel?: string;
+      status?: string;
+      priority?: string;
+      intent?: string;
+      urgency?: string;
+      sentiment?: string;
+      search?: string;
+      limit?: number;
+      offset?: number;
+    },
   ): Promise<KeyInboxThread[]> {
+    const where: Record<string, unknown> = { businessId };
+    if (filters?.channel) where.channel = filters.channel;
+    if (filters?.status) where.status = filters.status;
+    if (filters?.priority) where.priority = filters.priority;
+    if (filters?.intent) where.aiIntent = filters.intent;
+    if (filters?.urgency) where.aiUrgency = filters.urgency;
+    if (filters?.sentiment) where.aiSentiment = filters.sentiment;
+
+    if (filters?.search?.trim()) {
+      const term = filters.search.trim();
+      where.OR = [
+        { subject: { contains: term, mode: 'insensitive' } },
+        { messages: { some: { contentText: { contains: term, mode: 'insensitive' } } } },
+      ];
+    }
+
     return this.prisma.client.keyInboxThread.findMany({
-      where: {
-        businessId,
-        channel: filters?.channel,
-        status: filters?.status,
-        priority: filters?.priority,
-      },
+      where,
       orderBy: { lastMessageAt: 'desc' },
       take: filters?.limit ?? 50,
       skip: filters?.offset ?? 0,
+    });
+  }
+
+  async updateThread(
+    businessId: string,
+    threadId: string,
+    patch: { subject?: string; status?: 'OPEN' | 'WAITING' | 'DONE' | 'ARCHIVED'; priority?: 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT' },
+  ): Promise<KeyInboxThread> {
+    const thread = await this.prisma.client.keyInboxThread.findFirst({
+      where: { id: threadId, businessId },
+    });
+    if (!thread) throw new NotFoundException('Thread not found');
+
+    return this.prisma.client.keyInboxThread.update({
+      where: { id: threadId },
+      data: {
+        subject: patch.subject,
+        status: patch.status,
+        priority: patch.priority,
+      },
+    });
+  }
+
+  async addReply(
+    businessId: string,
+    threadId: string,
+    contentText: string,
+    attachments?: Record<string, unknown>[],
+  ): Promise<{ thread: KeyInboxThread; message: KeyInboxMessage }> {
+    const thread = await this.prisma.client.keyInboxThread.findFirst({
+      where: { id: threadId, businessId },
+    });
+    if (!thread) throw new NotFoundException('Thread not found');
+
+    return this.addMessage({
+      businessId,
+      threadId,
+      channel: thread.channel,
+      direction: 'OUTBOUND',
+      contentText,
+      attachments,
+      metadata: { source: 'key_inbox_reply' },
     });
   }
 

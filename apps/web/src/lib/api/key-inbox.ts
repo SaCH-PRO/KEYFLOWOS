@@ -1,110 +1,200 @@
-import { apiGet, apiPost } from "@/lib/api";
+import { apiGet, apiPost, apiPatch } from "@/lib/api";
 
-export interface ProposedAction {
-  id: string;
+export interface KeyInboxSuggestedAction {
   type: string;
-  title: string;
-  description?: string;
-  payload: Record<string, unknown>;
+  label: string;
+  confidence: number;
+  payload?: Record<string, unknown>;
 }
 
-export interface IngestionItem {
+export interface KeyInboxMessage {
   id: string;
-  sourceType: string;
-  sourceConnectorType: string;
-  status: string;
-  summary?: string | null;
-  intentType?: string | null;
-  confidence?: number | null;
-  fromName?: string | null;
-  fromEmail?: string | null;
-  fromPhone?: string | null;
-  subject?: string | null;
+  businessId: string;
+  threadId: string;
+  channel: string;
+  direction: "INBOUND" | "OUTBOUND";
+  senderName?: string | null;
+  senderHandle?: string | null;
+  senderEmail?: string | null;
+  senderPhone?: string | null;
+  contentText?: string | null;
+  contentHtml?: string | null;
+  attachments: Array<{ type: string; url: string }>;
+  externalMessageId?: string | null;
+  receivedAt?: string | null;
+  sentAt?: string | null;
+  aiAnalysis?: Record<string, unknown> | null;
+  extractedEntities?: Record<string, unknown> | null;
+  suggestedActions: KeyInboxSuggestedAction[];
+  aiConfidence?: number | null;
   createdAt: string;
-  proposedActionsCount: number;
 }
 
-export interface IngestionItemDetail extends IngestionItem {
-  body?: string | null;
-  rawPayload: Record<string, unknown>;
-  extractedData?: Record<string, unknown> | null;
-  proposedActions?: ProposedAction[];
-  executedResults?: Record<string, unknown> | null;
-  userFeedback?: Record<string, unknown> | null;
-  errorMessage?: string | null;
-  riskTier?: number | null;
-  contact?: {
-    id: string;
-    firstName?: string | null;
-    lastName?: string | null;
-    email?: string | null;
-    phone?: string | null;
-  } | null;
+export interface KeyInboxThread {
+  id: string;
+  businessId: string;
+  channel: string;
+  externalThreadId?: string | null;
+  contactId?: string | null;
+  subject?: string | null;
+  status: "OPEN" | "WAITING" | "DONE" | "ARCHIVED";
+  priority: "LOW" | "NORMAL" | "HIGH" | "URGENT";
+  lastMessageAt?: string | null;
+  lastInboundAt?: string | null;
+  lastOutboundAt?: string | null;
+  aiSummary?: string | null;
+  aiIntent?: string | null;
+  aiSentiment?: string | null;
+  aiUrgency?: string | null;
+  aiTags: string[];
+  metadata?: Record<string, unknown> | null;
+  createdAt: string;
+  updatedAt: string;
+  messages?: KeyInboxMessage[];
 }
 
-export interface IngestionItemListResponse {
-  items: IngestionItem[];
-  nextCursor: string | null;
-  hasMore: boolean;
+export interface KeyInboxInsight {
+  id: string;
+  businessId: string;
+  scope: "DAILY" | "WEEKLY" | "MONTHLY" | "CUSTOM";
+  periodStart: string;
+  periodEnd: string;
+  summary: string;
+  keyFindings: string[];
+  recommendations: string[];
+  taskSuggestions: string[];
+  metrics: Record<string, number>;
+  createdAt: string;
 }
 
-export async function fetchIngestionItems(
-  businessId: string,
-  opts?: {
-    status?: string;
-    sourceType?: string;
-    search?: string;
-    intentType?: string;
-    sortBy?: string;
-    sortOrder?: string;
-    cursor?: string;
-    limit?: number;
-  },
-): Promise<{ data: IngestionItemListResponse | null; error: string | null }> {
+export interface ThreadFilters {
+  channel?: string;
+  status?: string;
+  priority?: string;
+  intent?: string;
+  urgency?: string;
+  sentiment?: string;
+  search?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface ActionExecutionResult {
+  type: string;
+  success: boolean;
+  message: string;
+  redirectUrl?: string;
+  entityId?: string;
+  entityType?: string;
+}
+
+function buildQueryString(filters?: ThreadFilters): string {
   const params = new URLSearchParams();
-  if (opts?.status) params.set("status", opts.status);
-  if (opts?.sourceType) params.set("sourceType", opts.sourceType);
-  if (opts?.search) params.set("search", opts.search);
-  if (opts?.intentType) params.set("intentType", opts.intentType);
-  if (opts?.sortBy) params.set("sortBy", opts.sortBy);
-  if (opts?.sortOrder) params.set("sortOrder", opts.sortOrder);
-  if (opts?.cursor) params.set("cursor", opts.cursor);
-  if (opts?.limit) params.set("limit", String(opts.limit));
-  const qs = params.toString() ? `?${params.toString()}` : "";
-  return apiGet<IngestionItemListResponse>(`/key-inbox/businesses/${encodeURIComponent(businessId)}/items${qs}`);
+  if (!filters) return "";
+  for (const [key, value] of Object.entries(filters)) {
+    if (value !== undefined && value !== null && value !== "") {
+      params.set(key, String(value));
+    }
+  }
+  return params.toString() ? `?${params.toString()}` : "";
 }
 
-export async function fetchIngestionItem(
+export async function fetchThreads(
   businessId: string,
-  itemId: string,
-): Promise<{ data: IngestionItemDetail | null; error: string | null }> {
-  return apiGet<IngestionItemDetail>(
-    `/key-inbox/businesses/${encodeURIComponent(businessId)}/items/${encodeURIComponent(itemId)}`,
+  filters?: ThreadFilters,
+): Promise<{ data: KeyInboxThread[] | null; error: string | null }> {
+  return apiGet<KeyInboxThread[]>(
+    `/key-inbox/businesses/${encodeURIComponent(businessId)}/threads${buildQueryString(filters)}`,
   );
 }
 
-export async function approveIngestionItem(businessId: string, itemId: string) {
-  return apiPost<{ id: string; status: string }>({
-    path: `/key-inbox/businesses/${encodeURIComponent(businessId)}/items/${encodeURIComponent(itemId)}/approve`,
+export async function fetchThread(
+  businessId: string,
+  threadId: string,
+): Promise<{ data: KeyInboxThread | null; error: string | null }> {
+  return apiGet<KeyInboxThread>(
+    `/key-inbox/businesses/${encodeURIComponent(businessId)}/threads/${encodeURIComponent(threadId)}`,
+  );
+}
+
+export async function updateThread(
+  businessId: string,
+  threadId: string,
+  patch: { subject?: string; status?: string; priority?: string },
+): Promise<{ data: KeyInboxThread | null; error: string | null }> {
+  return apiPatch<KeyInboxThread>(
+    `/key-inbox/businesses/${encodeURIComponent(businessId)}/threads/${encodeURIComponent(threadId)}`,
+    patch,
+  );
+}
+
+export async function replyToThread(
+  businessId: string,
+  threadId: string,
+  contentText: string,
+): Promise<{ data: { thread: KeyInboxThread; message: KeyInboxMessage } | null; error: string | null }> {
+  return apiPost<{ thread: KeyInboxThread; message: KeyInboxMessage }>({
+    path: `/key-inbox/businesses/${encodeURIComponent(businessId)}/threads/${encodeURIComponent(threadId)}/reply`,
+    body: { contentText },
+  });
+}
+
+export async function analyzeThread(
+  businessId: string,
+  threadId: string,
+): Promise<{ data: KeyInboxThread | null; error: string | null }> {
+  return apiPost<KeyInboxThread>({
+    path: `/key-inbox/businesses/${encodeURIComponent(businessId)}/threads/${encodeURIComponent(threadId)}/analyze`,
     body: {},
   });
 }
 
-export async function rejectIngestionItem(businessId: string, itemId: string, reason?: string) {
-  return apiPost<{ id: string; status: string }>({
-    path: `/key-inbox/businesses/${encodeURIComponent(businessId)}/items/${encodeURIComponent(itemId)}/reject`,
-    body: { reason },
+export async function executeThreadAction(
+  businessId: string,
+  threadId: string,
+  actionIndex: number,
+  messageId?: string,
+): Promise<{ data: ActionExecutionResult | null; error: string | null }> {
+  return apiPost<ActionExecutionResult>({
+    path: `/key-inbox/businesses/${encodeURIComponent(businessId)}/threads/${encodeURIComponent(threadId)}/actions/${actionIndex}/execute`,
+    body: { messageId },
   });
 }
 
-export async function correctIngestionItem(
+export async function fetchThreadTimeline(
   businessId: string,
-  itemId: string,
-  correctedActions: ProposedAction[],
-  note?: string,
-) {
-  return apiPost<{ id: string; status: string }>({
-    path: `/key-inbox/businesses/${encodeURIComponent(businessId)}/items/${encodeURIComponent(itemId)}/correct`,
-    body: { correctedActions, note },
+  threadId: string,
+): Promise<{ data: Array<Record<string, unknown>> | null; error: string | null }> {
+  return apiGet<Array<Record<string, unknown>>>(
+    `/key-inbox/businesses/${encodeURIComponent(businessId)}/threads/${encodeURIComponent(threadId)}/timeline`,
+  );
+}
+
+export async function fetchBrief(
+  businessId: string,
+  scope: "DAILY" | "WEEKLY" | "CUSTOM" = "DAILY",
+  start?: string,
+  end?: string,
+): Promise<{ data: KeyInboxInsight | null; error: string | null }> {
+  const params = new URLSearchParams();
+  params.set("scope", scope);
+  if (start) params.set("start", start);
+  if (end) params.set("end", end);
+  return apiGet<KeyInboxInsight>(
+    `/key-inbox/businesses/${encodeURIComponent(businessId)}/brief?${params.toString()}`,
+  );
+}
+
+export async function generateBrief(
+  businessId: string,
+  scope: "DAILY" | "WEEKLY" | "CUSTOM" = "DAILY",
+  start?: string,
+  end?: string,
+): Promise<{ data: KeyInboxInsight | null; error: string | null }> {
+  return apiPost<KeyInboxInsight>({
+    path: `/key-inbox/businesses/${encodeURIComponent(businessId)}/brief/generate`,
+    body: { scope, start, end },
   });
 }
+
+// Legacy ingestion-item exports removed; they are no longer used by the KEYInbox backend.

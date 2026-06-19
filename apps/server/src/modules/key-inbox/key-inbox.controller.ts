@@ -6,19 +6,29 @@ import {
   Inject,
   NotFoundException,
   Param,
+  Patch,
   Post,
   Query,
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { BusinessEventService } from '../business-events/business-event.service';
 import { KeyInboxService } from './key-inbox.service';
+import { KeyInboxActionExecutorService } from './key-inbox-action-executor.service';
+import { ExecuteActionDto } from './dto/execute-action.dto';
+import { ReplyDto } from './dto/reply.dto';
+import { UpdateThreadDto } from './dto/update-thread.dto';
 import type { CreateInboxMessageInput, CreateInboxThreadInput } from './key-inbox.types';
 
 @Controller('key-inbox/businesses/:businessId')
 @UseGuards(AuthGuard, BusinessGuard)
 export class KeyInboxController {
-  constructor(@Inject(KeyInboxService) private readonly keyInbox: KeyInboxService) {}
+  constructor(
+    @Inject(KeyInboxService) private readonly keyInbox: KeyInboxService,
+    @Inject(KeyInboxActionExecutorService) private readonly actionExecutor: KeyInboxActionExecutorService,
+    @Inject(BusinessEventService) private readonly businessEvents: BusinessEventService,
+  ) {}
 
   @Get('threads')
   async listThreads(
@@ -26,6 +36,10 @@ export class KeyInboxController {
     @Query('channel') channel?: string,
     @Query('status') status?: string,
     @Query('priority') priority?: string,
+    @Query('intent') intent?: string,
+    @Query('urgency') urgency?: string,
+    @Query('sentiment') sentiment?: string,
+    @Query('search') search?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
   ) {
@@ -33,6 +47,10 @@ export class KeyInboxController {
       channel,
       status,
       priority,
+      intent,
+      urgency,
+      sentiment,
+      search,
       limit: limit ? Number(limit) : undefined,
       offset: offset ? Number(offset) : undefined,
     });
@@ -86,6 +104,85 @@ export class KeyInboxController {
       body.start ? new Date(String(body.start)) : undefined,
       body.end ? new Date(String(body.end)) : undefined,
     );
+  }
+
+  @Patch('threads/:threadId')
+  async updateThread(
+    @Param('businessId') businessId: string,
+    @Param('threadId') threadId: string,
+    @Body() body: UpdateThreadDto,
+  ) {
+    return this.keyInbox.updateThread(businessId, threadId, body);
+  }
+
+  @Post('threads/:threadId/reply')
+  async reply(
+    @Param('businessId') businessId: string,
+    @Param('threadId') threadId: string,
+    @Body() body: ReplyDto,
+  ) {
+    return this.keyInbox.addReply(
+      businessId,
+      threadId,
+      body.contentText,
+      body.attachments?.map((a) => ({ type: a.type, url: a.url })) ?? [],
+    );
+  }
+
+  @Post('threads/:threadId/actions/:actionIndex/execute')
+  async executeAction(
+    @Param('businessId') businessId: string,
+    @Param('threadId') threadId: string,
+    @Param('actionIndex') actionIndex: string,
+    @Body() body: ExecuteActionDto,
+  ) {
+    const thread = await this.keyInbox.getThread(businessId, threadId);
+    if (!thread) throw new NotFoundException('Thread not found');
+
+    const sourceMessageId = body.messageId;
+    const message = sourceMessageId
+      ? thread.messages.find((m) => m.id === sourceMessageId)
+      : thread.messages[0];
+    const actions = (message?.suggestedActions ?? []) as unknown as Array<{
+      type: string;
+      label: string;
+      confidence: number;
+      payload?: Record<string, unknown>;
+    }>;
+    const action = actions[Number(actionIndex)];
+
+    if (!action) {
+      throw new NotFoundException('Suggested action not found');
+    }
+
+    const result = await this.actionExecutor.execute(businessId, threadId, action, {
+      messageId: message?.id,
+    });
+
+    await this.businessEvents.emit({
+      businessId,
+      eventType: 'key_inbox.action_executed',
+      subjectType: 'KeyInboxThread',
+      subjectId: threadId,
+      actorType: 'human',
+      actorId: 'user',
+      action: 'execute_action',
+      source: 'web',
+      metadata: { actionType: action.type, result },
+    });
+
+    return result;
+  }
+
+  @Get('threads/:threadId/timeline')
+  async getTimeline(
+    @Param('businessId') businessId: string,
+    @Param('threadId') threadId: string,
+  ) {
+    const thread = await this.keyInbox.getThread(businessId, threadId);
+    if (!thread) throw new NotFoundException('Thread not found');
+
+    return this.businessEvents.getTimeline('KeyInboxThread', threadId);
   }
 
   @Post('ingest')
