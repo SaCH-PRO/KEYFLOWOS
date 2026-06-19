@@ -119,7 +119,7 @@ export class SecurityAuditService {
   private checkEnvSecrets(): SecurityCheck {
     const env = process.env;
     const exposed = [
-      env.OPENAI_API_KEY && env.OPENAI_API_KEY.length < 20 ? 'OPENAI_API_KEY appears short/weak' : null,
+      env.AI_INTEGRATIONS_OPENAI_API_KEY && env.AI_INTEGRATIONS_OPENAI_API_KEY.length < 20 ? 'AI_INTEGRATIONS_OPENAI_API_KEY appears short/weak' : null,
       env.SUPABASE_SERVICE_ROLE_KEY && !env.NODE_ENV?.includes('prod') ? null : null,
       env.DATABASE_URL?.includes('@localhost') ? 'DATABASE_URL points to localhost' : null,
     ].filter(Boolean) as string[];

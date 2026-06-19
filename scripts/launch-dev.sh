@@ -13,7 +13,7 @@ if [ "${KEYFLOW_DEV_AUTH_BYPASS:-}" = "true" ] || [ "${KEYFLOW_DEV_AUTH_BYPASS:-
   unset KEYFLOW_DEV_AUTH_BYPASS
 fi
 
-# Clear any inherited OpenAI key so the app always loads the value from .env.
+# Clear any inherited OpenAI keys so the values in .env always take precedence.
 unset AI_INTEGRATIONS_OPENAI_API_KEY OPENAI_API_KEY 2>/dev/null || true
 
 # ── port cleanup ───────────────────────────────────────────────────────────────

@@ -23,7 +23,6 @@ export interface StoreMemoryInput {
 @Injectable()
 export class SemanticMemoryService {
   private readonly logger = new Logger(SemanticMemoryService.name);
-  private readonly OPENAI_API_KEY = process.env.OPENAI_API_KEY;
   private readonly EMBEDDING_MODEL = 'text-embedding-3-small';
   private readonly EMBEDDING_DIM = 1536;
 

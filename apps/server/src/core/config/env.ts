@@ -159,7 +159,7 @@ export function validateServerEnv(env: NodeJS.ProcessEnv = process.env): EnvVali
       warnings.push('SUPABASE_JWT_SECRET: not set — local JWT verification unavailable; backend will rely on Supabase getUser() round-trip only');
     }
     if (!r.AI_INTEGRATIONS_OPENAI_API_KEY && !r.ANTHROPIC_API_KEY && !r.XAI_API_KEY) {
-      warnings.push('AI provider keys: none of OPENAI/ANTHROPIC/XAI set — AI features will return errors');
+      warnings.push('AI provider keys: none of AI_INTEGRATIONS_OPENAI_API_KEY/ANTHROPIC_API_KEY/XAI_API_KEY set — AI features will return errors');
     }
   }
 
