@@ -91,6 +91,19 @@ const mockBrief: BusinessExecutiveBrief = {
         href: '/app/profile?tab=business-genome&section=evolution-proposals',
       },
     },
+    {
+      id: 'generate-document-export',
+      domain: 'EXECUTIVE',
+      priority: 'MEDIUM',
+      title: 'Generate document export',
+      finding: 'A document export is recommended.',
+      evidence: ['Document pack request'],
+      confidence: 0.7,
+      recommendedAction: {
+        label: 'Generate export',
+        actionType: 'GENERATE_DOCUMENT' as any,
+      },
+    },
   ],
   topPriorities: [],
 };
@@ -300,5 +313,19 @@ describe('KeyExecutiveModeService', () => {
     const brief = await service.generateModeBrief('biz_1', 'CFO');
     expect(brief.recommendedActions.length).toBeGreaterThan(0);
     expect(brief.recommendedActions[0].actionType).toBeDefined();
+  });
+
+  it('maps GENERATE_DOCUMENT to GENERATE_DOCUMENT_EXPORT and marks it as requiring approval', async () => {
+    const brief = await service.generateModeBrief('biz_1', 'STRATEGIST');
+    const action = brief.recommendedActions.find((a) => a.actionType === 'GENERATE_DOCUMENT_EXPORT');
+    expect(action).toBeDefined();
+    expect(action?.requiresApproval).toBe(true);
+  });
+
+  it('does not mark navigation actions as requiring approval', async () => {
+    const brief = await service.generateModeBrief('biz_1', 'STRATEGIST');
+    const openGenome = brief.recommendedActions.find((a) => a.actionType === 'OPEN_GENOME');
+    expect(openGenome).toBeDefined();
+    expect(openGenome?.requiresApproval).toBeFalsy();
   });
 });

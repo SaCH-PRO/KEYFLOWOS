@@ -468,6 +468,7 @@ export class KeyExecutiveModeService {
       'REQUEST_APPROVAL',
       'GENERATE_CONSTITUTION_VERSION',
       'GENERATE_DOCUMENT_EXPORT',
+      'GENERATE_DOCUMENT',
       'CREATE_GENOME_EVOLUTION_PROPOSAL',
       'SCHEDULE_FOLLOWUP',
       'ESCALATE_THREAD',
@@ -476,17 +477,14 @@ export class KeyExecutiveModeService {
       ? (action.actionType as KeyModeActionType)
       : 'OPEN_INTELLIGENCE';
     if (actionType === 'GENERATE_DOCUMENT') {
-      actionType = 'CREATE_DOCUMENT';
+      actionType = 'GENERATE_DOCUMENT_EXPORT';
     }
 
     const executableActionTypes: KeyModeActionType[] = [
       'CREATE_TASK',
-      'CREATE_DOCUMENT',
       'GENERATE_CONSTITUTION_VERSION',
       'GENERATE_DOCUMENT_EXPORT',
       'CREATE_GENOME_EVOLUTION_PROPOSAL',
-      'SCHEDULE_FOLLOWUP',
-      'ESCALATE_THREAD',
       'REQUEST_APPROVAL',
     ];
 

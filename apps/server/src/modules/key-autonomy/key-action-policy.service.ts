@@ -26,8 +26,8 @@ const ACTION_POLICY: Record<KeyExecutableActionType, ActionPolicy> = {
   CREATE_GENOME_EVOLUTION_PROPOSAL: { executable: true, requiresApproval: true, riskLevel: 'MEDIUM' },
   GENERATE_CONSTITUTION_VERSION: { executable: true, requiresApproval: true, riskLevel: 'MEDIUM' },
 
-  SCHEDULE_FOLLOWUP: { executable: true, requiresApproval: true, riskLevel: 'MEDIUM' },
-  ESCALATE_THREAD: { executable: true, requiresApproval: true, riskLevel: 'MEDIUM' },
+  SCHEDULE_FOLLOWUP: { executable: false, requiresApproval: true, riskLevel: 'MEDIUM' },
+  ESCALATE_THREAD: { executable: false, requiresApproval: true, riskLevel: 'MEDIUM' },
 };
 
 @Injectable()
