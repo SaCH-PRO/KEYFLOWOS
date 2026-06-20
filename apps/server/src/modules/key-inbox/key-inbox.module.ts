@@ -9,6 +9,7 @@ import { KeyInboxService } from './key-inbox.service';
 import { KeyInboxTemporalEmitterService } from './key-inbox-temporal-emitter.service';
 import { KeyInboxActionExecutorService } from './key-inbox-action-executor.service';
 import { KeyInboxReplySenderService } from './key-inbox-reply-sender.service';
+import { KeyInboxIntelligenceService } from './key-inbox-intelligence.service';
 
 @Module({
   imports: [PrismaModule, AiModule, BusinessEventModule],
@@ -20,6 +21,7 @@ import { KeyInboxReplySenderService } from './key-inbox-reply-sender.service';
     KeyInboxTemporalEmitterService,
     KeyInboxActionExecutorService,
     KeyInboxReplySenderService,
+    KeyInboxIntelligenceService,
   ],
   exports: [
     KeyInboxService,
@@ -28,6 +30,7 @@ import { KeyInboxReplySenderService } from './key-inbox-reply-sender.service';
     KeyInboxTemporalEmitterService,
     KeyInboxActionExecutorService,
     KeyInboxReplySenderService,
+    KeyInboxIntelligenceService,
   ],
 })
 export class KeyInboxModule {}

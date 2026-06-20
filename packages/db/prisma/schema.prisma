@@ -10094,6 +10094,13 @@ model KeyInboxInsight {
   taskSuggestions   Json?    @default("[]")
   metrics           Json?    @default("{}")
 
+  trends            Json?    @default("{}")
+  insights          Json?    @default("[]")
+  channelBreakdown  Json?    @default("{}") @map("channel_breakdown")
+  genomeSignals     Json?    @default("[]") @map("genome_signals")
+  reportVersion     Int      @default(1) @map("report_version")
+  generatedBy       String?  @map("generated_by") // ai | fallback
+
   createdAt         DateTime @default(now()) @map("created_at")
 
   @@index([businessId, periodStart, periodEnd])

@@ -3,6 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { KeyInboxMessage, KeyInboxThread } from '@prisma/client';
 import { BusinessEventService } from '../business-events/business-event.service';
 import type { EventSource } from '../business-events/dto/create-business-event.dto';
+import type { GenomeSignalPreview, KeyInboxIntelligenceInsight, MetricTrend } from './key-inbox-intelligence.types';
 import type { InboxAnalysis, InboxSuggestedAction } from './key-inbox.types';
 
 @Injectable()
@@ -139,6 +140,137 @@ export class KeyInboxTemporalEmitterService {
     });
 
     this.events.emit('key_inbox.brief_generated', payload);
+  }
+
+  async emitIntelligenceGenerated(
+    businessId: string,
+    insightId: string,
+    scope: string,
+    periodStart: Date,
+    periodEnd: Date,
+    generatedBy: string,
+  ): Promise<void> {
+    const payload = { businessId, insightId, scope, periodStart, periodEnd, generatedBy };
+
+    await this.businessEventService.emit({
+      businessId,
+      eventType: 'key_inbox.intelligence_generated',
+      subjectType: 'KeyInboxInsight',
+      subjectId: insightId,
+      actorType: 'ai',
+      actorId: 'key_inbox_ai',
+      action: 'generate_intelligence',
+      source: 'ai',
+      after: payload,
+      metadata: { feature: 'key_inbox', scope, generatedBy },
+    });
+
+    this.events.emit('key_inbox.intelligence_generated', payload);
+  }
+
+  async emitTrendDetected(
+    businessId: string,
+    insightId: string,
+    scope: string,
+    periodStart: Date,
+    periodEnd: Date,
+    metricKey: string,
+    trend: MetricTrend,
+  ): Promise<void> {
+    const payload = { businessId, insightId, scope, periodStart, periodEnd, metricKey, trend };
+
+    await this.businessEventService.emit({
+      businessId,
+      eventType: 'key_inbox.trend_detected',
+      subjectType: 'KeyInboxInsight',
+      subjectId: insightId,
+      actorType: 'ai',
+      actorId: 'key_inbox_ai',
+      action: 'detect_trend',
+      source: 'ai',
+      after: payload,
+      metadata: { feature: 'key_inbox', metricKey, direction: trend.direction },
+    });
+
+    this.events.emit('key_inbox.trend_detected', payload);
+  }
+
+  async emitOpportunityDetected(
+    businessId: string,
+    insightId: string,
+    scope: string,
+    periodStart: Date,
+    periodEnd: Date,
+    insight: KeyInboxIntelligenceInsight,
+  ): Promise<void> {
+    const payload = { businessId, insightId, scope, periodStart, periodEnd, insight };
+
+    await this.businessEventService.emit({
+      businessId,
+      eventType: 'key_inbox.opportunity_detected',
+      subjectType: 'KeyInboxInsight',
+      subjectId: insightId,
+      actorType: 'ai',
+      actorId: 'key_inbox_ai',
+      action: 'detect_opportunity',
+      source: 'ai',
+      after: payload,
+      metadata: { feature: 'key_inbox', severity: insight.severity, type: insight.type },
+    });
+
+    this.events.emit('key_inbox.opportunity_detected', payload);
+  }
+
+  async emitRiskDetected(
+    businessId: string,
+    insightId: string,
+    scope: string,
+    periodStart: Date,
+    periodEnd: Date,
+    insight: KeyInboxIntelligenceInsight,
+  ): Promise<void> {
+    const payload = { businessId, insightId, scope, periodStart, periodEnd, insight };
+
+    await this.businessEventService.emit({
+      businessId,
+      eventType: 'key_inbox.risk_detected',
+      subjectType: 'KeyInboxInsight',
+      subjectId: insightId,
+      actorType: 'ai',
+      actorId: 'key_inbox_ai',
+      action: 'detect_risk',
+      source: 'ai',
+      after: payload,
+      metadata: { feature: 'key_inbox', severity: insight.severity, type: insight.type },
+    });
+
+    this.events.emit('key_inbox.risk_detected', payload);
+  }
+
+  async emitGenomeSignalDetected(
+    businessId: string,
+    insightId: string,
+    scope: string,
+    periodStart: Date,
+    periodEnd: Date,
+    signal: GenomeSignalPreview,
+  ): Promise<void> {
+    const payload = { businessId, insightId, scope, periodStart, periodEnd, signal };
+
+    await this.businessEventService.emit({
+      businessId,
+      eventType: 'key_inbox.genome_signal_detected',
+      subjectType: 'KeyInboxInsight',
+      subjectId: insightId,
+      actorType: 'ai',
+      actorId: 'key_inbox_ai',
+      action: 'detect_genome_signal',
+      source: 'ai',
+      after: payload,
+      metadata: { feature: 'key_inbox', signalType: signal.signalType, confidence: signal.confidence },
+    });
+
+    this.events.emit('key_inbox.genome_signal_detected', payload);
   }
 
   private normalizeSource(channel?: string | null): EventSource {

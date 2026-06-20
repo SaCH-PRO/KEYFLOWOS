@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { KeyInboxController } from './key-inbox.controller';
 import { KeyInboxService } from './key-inbox.service';
 import { KeyInboxActionExecutorService } from './key-inbox-action-executor.service';
+import { KeyInboxIntelligenceService } from './key-inbox-intelligence.service';
 import { BusinessEventService } from '../business-events/business-event.service';
 
 describe('KeyInboxController', () => {
@@ -28,8 +29,15 @@ describe('KeyInboxController', () => {
       getTimeline: vi.fn().mockResolvedValue([{ id: 'evt_1' }]),
     } as unknown as BusinessEventService;
 
-    const controller = new KeyInboxController(keyInbox, executor, businessEvents);
-    return { controller, keyInbox, executor, businessEvents };
+    const intelligence = {
+      generateReport: vi.fn().mockResolvedValue({ id: 'intel_1', scope: 'WEEKLY' }),
+      getLatestReport: vi.fn().mockResolvedValue({ id: 'intel_1', scope: 'WEEKLY' }),
+      listReports: vi.fn().mockResolvedValue([{ id: 'intel_1', scope: 'WEEKLY' }]),
+      getReport: vi.fn().mockResolvedValue({ id: 'intel_1', scope: 'WEEKLY' }),
+    } as unknown as KeyInboxIntelligenceService;
+
+    const controller = new KeyInboxController(keyInbox, executor, intelligence, businessEvents);
+    return { controller, keyInbox, executor, intelligence, businessEvents };
   }
 
   it('lists threads with filters', async () => {
@@ -87,5 +95,37 @@ describe('KeyInboxController', () => {
 
     expect(result).toEqual([{ id: 'evt_1' }]);
     expect(businessEvents.getTimeline).toHaveBeenCalledWith('KeyInboxThread', 'thread_1');
+  });
+
+  it('generates intelligence report', async () => {
+    const { controller, intelligence } = makeController();
+    const result = await controller.generateIntelligence('biz_1', { scope: 'WEEKLY' }, { user: { id: 'user_1' } } as any);
+
+    expect(result.id).toBe('intel_1');
+    expect(intelligence.generateReport).toHaveBeenCalledWith('biz_1', { scope: 'WEEKLY' }, 'user_1');
+  });
+
+  it('gets latest intelligence report', async () => {
+    const { controller, intelligence } = makeController();
+    const result = await controller.getLatestIntelligence('biz_1', 'DAILY');
+
+    expect(result.id).toBe('intel_1');
+    expect(intelligence.getLatestReport).toHaveBeenCalledWith('biz_1', 'DAILY');
+  });
+
+  it('lists intelligence reports', async () => {
+    const { controller, intelligence } = makeController();
+    const result = await controller.listIntelligence('biz_1', 'MONTHLY', '10');
+
+    expect(result).toEqual([{ id: 'intel_1', scope: 'WEEKLY' }]);
+    expect(intelligence.listReports).toHaveBeenCalledWith('biz_1', 'MONTHLY', 10);
+  });
+
+  it('gets intelligence report by id', async () => {
+    const { controller, intelligence } = makeController();
+    const result = await controller.getIntelligence('biz_1', 'intel_1');
+
+    expect(result.id).toBe('intel_1');
+    expect(intelligence.getReport).toHaveBeenCalledWith('biz_1', 'intel_1');
   });
 });

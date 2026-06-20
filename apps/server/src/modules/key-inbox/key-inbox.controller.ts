@@ -18,9 +18,12 @@ import { BusinessGuard } from '../../core/auth/business.guard';
 import { BusinessEventService } from '../business-events/business-event.service';
 import { KeyInboxService } from './key-inbox.service';
 import { KeyInboxActionExecutorService } from './key-inbox-action-executor.service';
+import { KeyInboxIntelligenceService } from './key-inbox-intelligence.service';
 import { ExecuteActionDto } from './dto/execute-action.dto';
 import { ReplyDto } from './dto/reply.dto';
 import { UpdateThreadDto } from './dto/update-thread.dto';
+import { GenerateKeyInboxIntelligenceDto } from './dto/generate-intelligence.dto';
+import type { IntelligenceScope } from './key-inbox-intelligence.types';
 import type { CreateInboxMessageInput, CreateInboxThreadInput } from './key-inbox.types';
 
 @Controller('key-inbox/businesses/:businessId')
@@ -29,6 +32,7 @@ export class KeyInboxController {
   constructor(
     @Inject(KeyInboxService) private readonly keyInbox: KeyInboxService,
     @Inject(KeyInboxActionExecutorService) private readonly actionExecutor: KeyInboxActionExecutorService,
+    @Inject(KeyInboxIntelligenceService) private readonly intelligence: KeyInboxIntelligenceService,
     @Inject(BusinessEventService) private readonly businessEvents: BusinessEventService,
   ) {}
 
@@ -108,6 +112,44 @@ export class KeyInboxController {
       body.start ? new Date(String(body.start)) : undefined,
       body.end ? new Date(String(body.end)) : undefined,
     );
+  }
+
+  @Post('intelligence/generate')
+  async generateIntelligence(
+    @Param('businessId') businessId: string,
+    @Body() body: GenerateKeyInboxIntelligenceDto,
+    @Req() req: Request & { user?: { id?: string } },
+  ) {
+    return this.intelligence.generateReport(businessId, body, req.user?.id);
+  }
+
+  @Get('intelligence/latest')
+  async getLatestIntelligence(
+    @Param('businessId') businessId: string,
+    @Query('scope') scope: IntelligenceScope = 'WEEKLY',
+  ) {
+    const report = await this.intelligence.getLatestReport(businessId, scope);
+    if (!report) throw new NotFoundException('No intelligence report found for this scope');
+    return report;
+  }
+
+  @Get('intelligence')
+  async listIntelligence(
+    @Param('businessId') businessId: string,
+    @Query('scope') scope?: IntelligenceScope,
+    @Query('limit') limit?: string,
+  ) {
+    return this.intelligence.listReports(businessId, scope, limit ? Number(limit) : undefined);
+  }
+
+  @Get('intelligence/:insightId')
+  async getIntelligence(
+    @Param('businessId') businessId: string,
+    @Param('insightId') insightId: string,
+  ) {
+    const report = await this.intelligence.getReport(businessId, insightId);
+    if (!report) throw new NotFoundException('Intelligence report not found');
+    return report;
   }
 
   @Patch('threads/:threadId')

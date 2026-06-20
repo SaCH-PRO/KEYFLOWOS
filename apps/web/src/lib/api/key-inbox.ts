@@ -72,6 +72,54 @@ export interface KeyInboxInsight {
   createdAt: string;
 }
 
+export interface MetricTrend {
+  current: number;
+  previous: number;
+  delta: number;
+  deltaPercent: number | null;
+  direction: "up" | "down" | "flat";
+}
+
+export interface KeyInboxIntelligenceInsight {
+  type: string;
+  severity: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  title: string;
+  description: string;
+  evidence: string[];
+  relatedThreadIds?: string[];
+  relatedMessageIds?: string[];
+  suggestedAction?: {
+    type: string;
+    label: string;
+    payload?: Record<string, unknown>;
+  };
+}
+
+export interface GenomeSignalPreview {
+  signalType: string;
+  section: string;
+  domain: string;
+  title: string;
+  reason: string;
+  confidence: number;
+  evidence: Array<{
+    threadId?: string;
+    messageId?: string;
+    channel?: string;
+    excerpt?: string;
+  }>;
+}
+
+export interface KeyInboxIntelligenceReport extends KeyInboxInsight {
+  executiveSummary: string;
+  trends: Record<string, MetricTrend>;
+  insights: KeyInboxIntelligenceInsight[];
+  genomeSignals: GenomeSignalPreview[];
+  channelBreakdown: Record<string, number>;
+  generatedBy?: string;
+  reportVersion: number;
+}
+
 export interface ThreadFilters {
   channel?: string;
   status?: string;
@@ -203,6 +251,51 @@ export async function generateBrief(
     path: `/key-inbox/businesses/${encodeURIComponent(businessId)}/brief/generate`,
     body: { scope, start, end },
   });
+}
+
+export type IntelligenceScope = "DAILY" | "WEEKLY" | "MONTHLY" | "CUSTOM";
+
+export async function generateInboxIntelligence(
+  businessId: string,
+  scope: IntelligenceScope,
+  start?: string,
+  end?: string,
+): Promise<{ data: KeyInboxIntelligenceReport | null; error: string | null }> {
+  return apiPost<KeyInboxIntelligenceReport>({
+    path: `/key-inbox/businesses/${encodeURIComponent(businessId)}/intelligence/generate`,
+    body: { scope, start, end },
+  });
+}
+
+export async function fetchLatestInboxIntelligence(
+  businessId: string,
+  scope: IntelligenceScope = "WEEKLY",
+): Promise<{ data: KeyInboxIntelligenceReport | null; error: string | null }> {
+  return apiGet<KeyInboxIntelligenceReport>(
+    `/key-inbox/businesses/${encodeURIComponent(businessId)}/intelligence/latest?scope=${encodeURIComponent(scope)}`,
+  );
+}
+
+export async function fetchInboxIntelligenceReports(
+  businessId: string,
+  scope?: IntelligenceScope,
+  limit?: number,
+): Promise<{ data: KeyInboxIntelligenceReport[] | null; error: string | null }> {
+  const params = new URLSearchParams();
+  if (scope) params.set("scope", scope);
+  if (limit !== undefined) params.set("limit", String(limit));
+  return apiGet<KeyInboxIntelligenceReport[]>(
+    `/key-inbox/businesses/${encodeURIComponent(businessId)}/intelligence?${params.toString()}`,
+  );
+}
+
+export async function fetchInboxIntelligenceReport(
+  businessId: string,
+  insightId: string,
+): Promise<{ data: KeyInboxIntelligenceReport | null; error: string | null }> {
+  return apiGet<KeyInboxIntelligenceReport>(
+    `/key-inbox/businesses/${encodeURIComponent(businessId)}/intelligence/${encodeURIComponent(insightId)}`,
+  );
 }
 
 // Legacy ingestion-item exports removed; they are no longer used by the KEYInbox backend.

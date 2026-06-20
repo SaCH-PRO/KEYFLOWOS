@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Inbox,
   ArrowLeft,
@@ -143,16 +143,21 @@ export default function KeyInboxPage() {
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [confirmForm, setConfirmForm] = useState({ title: "", dueDate: "", content: "" });
 
-  const [filters, setFilters] = useState({
-    channel: "",
-    status: "OPEN",
-    priority: "",
-    intent: "",
-    urgency: "",
-    sentiment: "",
-    sendStatus: "",
-    search: "",
-  });
+  const searchParams = useSearchParams();
+  const initialFilters = useMemo(
+    () => ({
+      channel: searchParams.get("channel") ?? "",
+      status: searchParams.get("status") ?? "OPEN",
+      priority: searchParams.get("priority") ?? "",
+      intent: searchParams.get("intent") ?? "",
+      urgency: searchParams.get("urgency") ?? "",
+      sentiment: searchParams.get("sentiment") ?? "",
+      sendStatus: searchParams.get("sendStatus") ?? "",
+      search: searchParams.get("search") ?? "",
+    }),
+    [searchParams],
+  );
+  const [filters, setFilters] = useState(initialFilters);
 
   const loadThreads = async () => {
     if (!businessId) return;
