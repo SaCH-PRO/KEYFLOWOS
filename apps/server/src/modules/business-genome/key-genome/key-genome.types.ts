@@ -29,7 +29,7 @@ export interface GenomeFactScore {
   overall: number;
 }
 
-export interface GenomeFact {
+export interface GenomeFactData {
   id: string;
   businessId: string;
   section: string;
@@ -49,7 +49,7 @@ export interface GenomeFact {
   updatedAt: string;
 }
 
-export interface GenomeEvidence {
+export interface GenomeEvidenceData {
   id: string;
   businessId: string;
   factId?: string | null;
@@ -62,7 +62,7 @@ export interface GenomeEvidence {
   createdAt: string;
 }
 
-export interface GenomeSignal {
+export interface GenomeSignalData {
   id: string;
   businessId: string;
   sourceModule: string;
@@ -74,7 +74,7 @@ export interface GenomeSignal {
   field?: string | null;
   proposedValue?: unknown;
   reason: string;
-  evidence: GenomeEvidence[];
+  evidence: GenomeEvidenceData[];
   confidence: number;
   status: SignalStatus;
   createdAt: string;
@@ -89,7 +89,7 @@ export interface MissingGenomeFact {
   impact: 'BLOCKING' | 'DEGRADED' | 'OPTIONAL';
 }
 
-export interface ModuleReadiness {
+export interface ModuleReadinessData {
   businessId: string;
   module: string;
   readinessScore: number;
@@ -103,7 +103,7 @@ export interface ModuleReadiness {
   lastComputedAt: string;
 }
 
-export interface GenomeRecommendation {
+export interface GenomeRecommendationData {
   id: string;
   businessId: string;
   domain: string;
@@ -124,7 +124,7 @@ export interface GenomeRecommendation {
   outcomeTrackedAt?: string | null;
 }
 
-export interface GenomeExperiment {
+export interface GenomeExperimentData {
   id: string;
   businessId: string;
   hypothesis: string;
@@ -157,13 +157,6 @@ export interface KeyGenomeScore {
   computedAt: string;
 }
 
-export interface FactRequirement {
-  section: string;
-  domain: string;
-  field: string;
-  impact: 'BLOCKING' | 'DEGRADED' | 'OPTIONAL';
-}
-
 export interface UpsertGenomeFactInput {
   businessId: string;
   section: string;
@@ -174,7 +167,6 @@ export interface UpsertGenomeFactInput {
   sourceType: string;
   sourceEntityType?: string;
   sourceEntityId?: string;
-  evidence?: Omit<GenomeEvidence, 'id' | 'factId' | 'createdAt'>[];
 }
 
 export interface AttachGenomeEvidenceInput {
@@ -199,7 +191,7 @@ export interface EmitGenomeSignalInput {
   field?: string;
   proposedValue?: unknown;
   reason: string;
-  evidence?: Omit<GenomeEvidence, 'id' | 'factId' | 'createdAt'>[];
+  evidence?: Omit<GenomeEvidenceData, 'id' | 'factId' | 'createdAt'>[];
   confidence?: number;
 }
 
