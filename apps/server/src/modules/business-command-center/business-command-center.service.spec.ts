@@ -11,6 +11,7 @@ import { BusinessAssetsService } from '../business-assets/business-assets.servic
 import { ConstitutionVersionService } from '../business-genome/constitution-version.service';
 import { GenomeScoringService } from '../business-genome/key-genome/genome-scoring.service';
 import { GenomeModuleReadinessService } from '../business-genome/key-genome/genome-module-readiness.service';
+import { GenomeSignalService } from '../business-genome/key-genome/genome-signal.service';
 import type { BusinessExecutiveBrief } from '../intelligence/business-intelligence.types';
 import type { KeyExecutiveModeBrief } from '../intelligence/key-executive-mode.types';
 import type { TemporalFlowAnalysis } from '../temporal-flow/temporal-flow.types';
@@ -226,8 +227,10 @@ const mockKeyProposal: KeyActionProposalData = {
 
 describe('BusinessCommandCenterService', () => {
   let service: BusinessCommandCenterService;
+  const mockSignalList = vi.fn().mockResolvedValue([]);
 
   beforeEach(async () => {
+    mockSignalList.mockReset().mockResolvedValue([]);
     const moduleRef = await Test.createTestingModule({
       providers: [
         BusinessCommandCenterService,
@@ -241,6 +244,7 @@ describe('BusinessCommandCenterService', () => {
         { provide: ConstitutionVersionService, useValue: { latest: async () => mockConstitution, staleness: async () => mockStaleness } },
         { provide: GenomeScoringService, useValue: { computeFactScores: vi.fn().mockResolvedValue([]), computeBusinessScore: vi.fn().mockReturnValue(mockKeyGenomeScore) } },
         { provide: GenomeModuleReadinessService, useValue: { computeReadiness: vi.fn().mockResolvedValue(mockModuleReadiness) } },
+        { provide: GenomeSignalService, useValue: { listSignals: mockSignalList } },
       ],
     }).compile();
 
@@ -365,5 +369,79 @@ describe('BusinessCommandCenterService', () => {
   it('mentions KEY Genome in summary when facts exist', async () => {
     const snapshot = await service.snapshot('biz_1');
     expect(snapshot.summary).toContain('KEY Genome');
+  });
+
+  it('creates a GENOME_SIGNAL priority item for high-confidence NEW signals', async () => {
+    mockSignalList.mockResolvedValueOnce([
+      {
+        id: 'sig_1',
+        businessId: 'biz_1',
+        sourceModule: 'key_inbox',
+        sourceEntityType: 'KeyInboxThread',
+        sourceEntityId: 'thread_1',
+        signalType: 'FACT_CONFLICT',
+        section: 'CUSTOMER_MARKET',
+        domain: 'customer',
+        field: 'pain_points',
+        proposedValue: ['weekend delivery'],
+        reason: 'Customers keep asking about weekend delivery.',
+        evidence: [{ summary: 'Three customers asked about weekend delivery.', sourceModule: 'key_inbox', sourceEntityType: 'KeyInboxThread' }],
+        confidence: 0.85,
+        status: 'NEW',
+        createdAt: new Date().toISOString(),
+      },
+    ]);
+    const snapshot = await service.snapshot('biz_1');
+    expect(snapshot.topPriorities.some((i) => i.type === 'GENOME_SIGNAL')).toBe(true);
+  });
+
+  it('does not surface low-confidence NEW signals in Command Center', async () => {
+    mockSignalList.mockResolvedValueOnce([
+      {
+        id: 'sig_low',
+        businessId: 'biz_1',
+        sourceModule: 'temporal_flow',
+        sourceEntityType: 'TemporalEvent',
+        sourceEntityId: 'ev_low',
+        signalType: 'OPERATIONS_PATTERN',
+        section: 'OPERATIONS_DELIVERY',
+        domain: 'operations',
+        field: 'capacity',
+        proposedValue: null,
+        reason: 'Maybe a capacity issue.',
+        evidence: [{ summary: 'One ambiguous event.', sourceModule: 'temporal_flow', sourceEntityType: 'TemporalEvent' }],
+        confidence: 0.4,
+        status: 'NEW',
+        createdAt: new Date().toISOString(),
+      },
+    ]);
+    const snapshot = await service.snapshot('biz_1');
+    expect(snapshot.topPriorities.some((i) => i.type === 'GENOME_SIGNAL')).toBe(false);
+  });
+
+  it('ranks FACT_CONFLICT signals as CRITICAL', async () => {
+    mockSignalList.mockResolvedValueOnce([
+      {
+        id: 'sig_conflict',
+        businessId: 'biz_1',
+        sourceModule: 'executive_mode',
+        sourceEntityType: 'CFO',
+        sourceEntityId: 'finding_1',
+        signalType: 'FACT_CONFLICT',
+        section: 'FINANCIAL',
+        domain: 'finance',
+        field: 'pricing_model',
+        proposedValue: 'subscription',
+        reason: 'Pricing model conflicts between sources.',
+        evidence: [{ summary: 'CFO review found conflicting pricing data.', sourceModule: 'executive_mode', sourceEntityType: 'CFO' }],
+        confidence: 0.9,
+        status: 'NEW',
+        createdAt: new Date().toISOString(),
+      },
+    ]);
+    const snapshot = await service.snapshot('biz_1');
+    const signalItem = snapshot.topPriorities.find((i) => i.type === 'GENOME_SIGNAL');
+    expect(signalItem).toBeDefined();
+    expect(signalItem!.priority).toBe('CRITICAL');
   });
 });

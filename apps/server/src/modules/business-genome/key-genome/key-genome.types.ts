@@ -14,6 +14,34 @@ export type RecommendationStatus = 'ACTIVE' | 'ACCEPTED' | 'DISMISSED' | 'APPLIE
 export type ExperimentStatus = 'PROPOSED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
 export type FactValueType = 'STRING' | 'NUMBER' | 'BOOLEAN' | 'DATE' | 'JSON' | 'LIST';
 
+export type GenomeSignalType =
+  | 'NEW_FACT'
+  | 'FACT_UPDATE'
+  | 'FACT_CONFLICT'
+  | 'MISSING_FACT'
+  | 'STALE_FACT'
+  | 'LOW_CONFIDENCE_FACT'
+  | 'READINESS_BLOCKER'
+  | 'CUSTOMER_PATTERN'
+  | 'REVENUE_PATTERN'
+  | 'OPERATIONS_PATTERN'
+  | 'RISK_PATTERN'
+  | 'MARKET_PATTERN';
+
+export type GenomeSignalSourceModule =
+  | 'temporal_flow'
+  | 'key_inbox'
+  | 'executive_mode'
+  | 'command_center'
+  | 'key_autonomy'
+  | 'blueprint'
+  | 'commerce'
+  | 'crm'
+  | 'finance'
+  | 'marketing'
+  | 'operations'
+  | 'manual';
+
 export interface GenomeFactValue {
   raw: unknown;
   type: FactValueType;
@@ -180,19 +208,40 @@ export interface AttachGenomeEvidenceInput {
   occurredAt?: string;
 }
 
-export interface EmitGenomeSignalInput {
-  businessId: string;
+export interface GenomeSignalEvidenceInput {
   sourceModule: string;
-  sourceEntityType?: string;
-  sourceEntityId?: string;
-  signalType: string;
+  sourceEntityType: string;
+  sourceEntityId?: string | null;
+  summary: string;
+  evidenceStrength?: number;
+  occurredAt?: string | null;
+}
+
+export interface CreateGenomeSignalInput {
+  businessId: string;
+  sourceModule: GenomeSignalSourceModule | string;
+  sourceEntityType?: string | null;
+  sourceEntityId?: string | null;
+  signalType: GenomeSignalType | string;
   section: string;
   domain: string;
-  field?: string;
+  field?: string | null;
   proposedValue?: unknown;
   reason: string;
-  evidence?: Omit<GenomeEvidenceData, 'id' | 'factId' | 'createdAt'>[];
+  evidence?: GenomeSignalEvidenceInput[];
   confidence?: number;
+}
+
+/** @deprecated use CreateGenomeSignalInput */
+export type EmitGenomeSignalInput = CreateGenomeSignalInput;
+
+export interface ListGenomeSignalsQuery {
+  status?: SignalStatus | string;
+  sourceModule?: string;
+  section?: string;
+  signalType?: string;
+  minConfidence?: number;
+  limit?: number;
 }
 
 export interface GenomeSignalCluster {

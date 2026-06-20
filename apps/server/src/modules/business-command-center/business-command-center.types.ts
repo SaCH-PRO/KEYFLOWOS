@@ -13,7 +13,8 @@ export type CommandCenterItemType =
   | 'DOCUMENT'
   | 'KEY_GENOME_GAP'
   | 'MODULE_READINESS'
-  | 'MISSING_FACT';
+  | 'MISSING_FACT'
+  | 'GENOME_SIGNAL';
 
 export type CommandCenterActionType =
   | 'OPEN'

@@ -5,6 +5,7 @@ import { GenomeEvidenceService } from './genome-evidence.service';
 import { GenomeScoringService } from './genome-scoring.service';
 import { GenomeModuleReadinessService } from './genome-module-readiness.service';
 import { KeyGenomeBackfillService } from './key-genome-backfill.service';
+import { GenomeSignalService } from './genome-signal.service';
 
 @Module({
   imports: [PrismaModule],
@@ -14,6 +15,7 @@ import { KeyGenomeBackfillService } from './key-genome-backfill.service';
     GenomeScoringService,
     GenomeModuleReadinessService,
     KeyGenomeBackfillService,
+    GenomeSignalService,
   ],
   exports: [
     GenomeFactService,
@@ -21,6 +23,7 @@ import { KeyGenomeBackfillService } from './key-genome-backfill.service';
     GenomeScoringService,
     GenomeModuleReadinessService,
     KeyGenomeBackfillService,
+    GenomeSignalService,
   ],
 })
 export class KeyGenomeModule {}

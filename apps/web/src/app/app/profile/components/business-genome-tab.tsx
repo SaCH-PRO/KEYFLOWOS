@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { Dna, Grid3X3, MessageSquare, FileText, Settings, Loader2, ScrollText, Briefcase, Sparkles } from "lucide-react";
+import { Dna, Grid3X3, MessageSquare, FileText, Settings, Loader2, ScrollText, Briefcase, Sparkles, Radio } from "lucide-react";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { getGenome, type GenomeIntegrityResult } from "@/lib/api/business-genome";
 import { GenomeOverview } from "./business-genome/genome-overview";
@@ -14,8 +14,9 @@ import { ConstitutionPanel } from "./business-genome/constitution-panel";
 import { AdvancedEditorPanel } from "./business-genome/advanced-editor-panel";
 import { AssetRegistryPanel } from "./business-genome/asset-registry-panel";
 import { EvolutionProposalsPanel } from "./business-genome/evolution-proposals-panel";
+import { KeyGenomeSignalsPanel } from "./business-genome/key-genome-signals-panel";
 
-type GenomeSubTab = "overview" | "dna-sections" | "genome-chat" | "reports" | "constitution" | "assets" | "evolution-proposals" | "advanced-editor";
+type GenomeSubTab = "overview" | "dna-sections" | "genome-chat" | "reports" | "constitution" | "assets" | "evolution-proposals" | "signals" | "advanced-editor";
 
 const SUB_TABS: { id: GenomeSubTab; label: string; icon: React.ElementType }[] = [
   { id: "overview", label: "Overview", icon: Dna },
@@ -25,6 +26,7 @@ const SUB_TABS: { id: GenomeSubTab; label: string; icon: React.ElementType }[] =
   { id: "constitution", label: "Constitution", icon: ScrollText },
   { id: "assets", label: "Asset Registry", icon: Briefcase },
   { id: "evolution-proposals", label: "Evolution Proposals", icon: Sparkles },
+  { id: "signals", label: "Signals", icon: Radio },
   { id: "advanced-editor", label: "Advanced Editor", icon: Settings },
 ];
 
@@ -187,6 +189,12 @@ export function BusinessGenomeTab() {
         {activeSubTab === "evolution-proposals" && (
           <motion.div key="evolution-proposals" {...fade}>
             <EvolutionProposalsPanel onGenomeUpdate={handleGenomeUpdate} />
+          </motion.div>
+        )}
+
+        {activeSubTab === "signals" && (
+          <motion.div key="signals" {...fade}>
+            <KeyGenomeSignalsPanel onGenomeUpdate={handleGenomeUpdate} />
           </motion.div>
         )}
 

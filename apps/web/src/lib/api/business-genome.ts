@@ -116,6 +116,63 @@ export interface SendGenomeMessageResult {
 
 export type ConstitutionVersionStatus = 'DRAFT' | 'ACTIVE' | 'ARCHIVED';
 
+export type GenomeSignalStatus = 'NEW' | 'REVIEWED' | 'ACCEPTED' | 'REJECTED' | 'MERGED';
+
+export type GenomeSignalType =
+  | 'NEW_FACT'
+  | 'FACT_UPDATE'
+  | 'FACT_CONFLICT'
+  | 'MISSING_FACT'
+  | 'STALE_FACT'
+  | 'LOW_CONFIDENCE_FACT'
+  | 'READINESS_BLOCKER'
+  | 'CUSTOMER_PATTERN'
+  | 'REVENUE_PATTERN'
+  | 'OPERATIONS_PATTERN'
+  | 'RISK_PATTERN'
+  | 'MARKET_PATTERN';
+
+export interface GenomeSignalEvidence {
+  id?: string;
+  businessId?: string;
+  factId?: string | null;
+  sourceModule: string;
+  sourceEntityType: string;
+  sourceEntityId?: string | null;
+  summary: string;
+  evidenceStrength?: number;
+  occurredAt?: string | null;
+  createdAt?: string;
+}
+
+export interface GenomeSignal {
+  id: string;
+  businessId: string;
+  sourceModule: string;
+  sourceEntityType?: string | null;
+  sourceEntityId?: string | null;
+  signalType: GenomeSignalType | string;
+  section: string;
+  domain: string;
+  field?: string | null;
+  proposedValue?: unknown;
+  reason: string;
+  evidence: GenomeSignalEvidence[];
+  confidence: number;
+  status: GenomeSignalStatus;
+  createdAt: string;
+  reviewedAt?: string | null;
+}
+
+export interface GenomeSignalListFilters {
+  status?: string;
+  sourceModule?: string;
+  section?: string;
+  signalType?: string;
+  minConfidence?: number;
+  limit?: number;
+}
+
 export interface ConstitutionVersion {
   id: string;
   businessId: string;
@@ -274,4 +331,46 @@ export function getDocumentPackExportUrl(
   const params = new URLSearchParams({ format });
   if (version !== undefined) params.set('version', String(version));
   return `/business-genome/businesses/${businessId}/document-pack/${artifact}/export?${params.toString()}`;
+}
+
+export async function getGenomeSignals(businessId: string, filters: GenomeSignalListFilters = {}) {
+  const params = new URLSearchParams();
+  if (filters.status) params.set('status', filters.status);
+  if (filters.sourceModule) params.set('sourceModule', filters.sourceModule);
+  if (filters.section) params.set('section', filters.section);
+  if (filters.signalType) params.set('signalType', filters.signalType);
+  if (filters.minConfidence !== undefined) params.set('minConfidence', String(filters.minConfidence));
+  if (filters.limit !== undefined) params.set('limit', String(filters.limit));
+  const query = params.toString();
+  return apiGet<GenomeSignal[]>(
+    `/business-genome/businesses/${businessId}/key-genome/signals${query ? `?${query}` : ''}`,
+  );
+}
+
+export async function reviewGenomeSignal(businessId: string, signalId: string) {
+  return apiPost<GenomeSignal>({
+    path: `/business-genome/businesses/${businessId}/key-genome/signals/${signalId}/review`,
+    body: {},
+  });
+}
+
+export async function acceptGenomeSignal(businessId: string, signalId: string) {
+  return apiPost<GenomeSignal>({
+    path: `/business-genome/businesses/${businessId}/key-genome/signals/${signalId}/accept`,
+    body: {},
+  });
+}
+
+export async function rejectGenomeSignal(businessId: string, signalId: string) {
+  return apiPost<GenomeSignal>({
+    path: `/business-genome/businesses/${businessId}/key-genome/signals/${signalId}/reject`,
+    body: {},
+  });
+}
+
+export async function mergeGenomeSignal(businessId: string, signalId: string) {
+  return apiPost<{ signal: GenomeSignal }>({
+    path: `/business-genome/businesses/${businessId}/key-genome/signals/${signalId}/merge`,
+    body: {},
+  });
 }

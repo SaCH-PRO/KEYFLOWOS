@@ -9,6 +9,7 @@ import { BusinessAssetsService } from '../business-assets/business-assets.servic
 import { ConstitutionVersionService } from '../business-genome/constitution-version.service';
 import { GenomeScoringService } from '../business-genome/key-genome/genome-scoring.service';
 import { GenomeModuleReadinessService } from '../business-genome/key-genome/genome-module-readiness.service';
+import { GenomeSignalService } from '../business-genome/key-genome/genome-signal.service';
 import type { BusinessAsset } from '@prisma/client';
 import type { KeyGenomeScore, ModuleReadinessData } from '../business-genome/key-genome/key-genome.types';
 import type { KeyExecutiveMode } from '../intelligence/key-executive-mode.types';
@@ -57,6 +58,7 @@ const TYPE_WEIGHT: Record<CommandCenterItem['type'], number> = {
   RISK: 80,
   ASSET_RISK: 75,
   GENOME_PROPOSAL: 65,
+  GENOME_SIGNAL: 60,
   CONSTITUTION: 60,
   EXECUTIVE_MODE: 45,
   OPPORTUNITY: 40,
@@ -86,6 +88,8 @@ export class BusinessCommandCenterService {
     private readonly genomeScoring: GenomeScoringService,
     @Inject(GenomeModuleReadinessService)
     private readonly genomeReadiness: GenomeModuleReadinessService,
+    @Inject(GenomeSignalService)
+    private readonly genomeSignal: GenomeSignalService,
   ) {}
 
   async snapshot(businessId: string): Promise<BusinessCommandCenterSnapshot> {
@@ -133,6 +137,7 @@ export class BusinessCommandCenterService {
     const moduleReadinessItems = this.mapModuleReadinessItems(moduleReadiness);
     const missingFactItems = this.mapMissingFactItems(moduleReadiness);
     const weakSectionItems = this.mapWeakSectionItems(keyGenomeScore);
+    const genomeSignalItems = await this.mapGenomeSignalItems(businessId);
 
     const allItems: CommandCenterItem[] = [
       ...approvalItems,
@@ -141,6 +146,7 @@ export class BusinessCommandCenterService {
       ...moduleReadinessItems,
       ...missingFactItems,
       ...weakSectionItems,
+      ...genomeSignalItems,
       ...riskItems,
       ...opportunityItems,
       ...genomeProposalItems,
@@ -764,5 +770,43 @@ export class BusinessCommandCenterService {
           },
         ],
       }));
+  }
+
+  private async mapGenomeSignalItems(businessId: string): Promise<CommandCenterItem[]> {
+    const signals = await this.genomeSignal.listSignals(businessId, {
+      status: 'NEW',
+      minConfidence: 0.7,
+      limit: 5,
+    });
+
+    return signals.map((signal) => {
+      const criticalTypes = new Set(['FACT_CONFLICT', 'READINESS_BLOCKER']);
+      const highTypes = new Set(['MISSING_FACT', 'STALE_FACT', 'LOW_CONFIDENCE_FACT']);
+      const priority: CommandCenterPriority = criticalTypes.has(signal.signalType)
+        ? 'CRITICAL'
+        : highTypes.has(signal.signalType)
+          ? 'HIGH'
+          : 'MEDIUM';
+
+      return {
+        id: `genome-signal-${signal.id}`,
+        type: 'GENOME_SIGNAL' as const,
+        priority,
+        title: `Genome signal: ${this.titleCase(signal.signalType)}`,
+        summary: signal.reason,
+        evidence: signal.evidence.map((e) => e.summary),
+        source: 'KEY Genome',
+        sourceId: signal.id,
+        href: '/app/profile?tab=business-genome&section=signals',
+        actions: [
+          {
+            label: 'Review signal',
+            actionType: 'REVIEW' as const,
+            href: '/app/profile?tab=business-genome&section=signals',
+          },
+        ],
+        createdAt: signal.createdAt,
+      };
+    });
   }
 }

@@ -69,6 +69,9 @@ describe('KEYFlowOS operating system smoke', () => {
       {
         computeReadiness: vi.fn().mockResolvedValue([]),
       } as any,
+      {
+        listSignals: vi.fn().mockResolvedValue([]),
+      } as any,
     );
 
     const snapshot = await service.snapshot('biz_smoke');
