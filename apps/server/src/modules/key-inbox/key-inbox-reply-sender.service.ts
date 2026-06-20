@@ -3,6 +3,7 @@ import { ModuleRef } from '@nestjs/core';
 import type { KeyInboxMessage, KeyInboxThread } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { BusinessEventService } from '../business-events/business-event.service';
+import { KEY_INBOX_CHANNELS, KEY_INBOX_SEND_STATUSES } from './key-inbox.constants';
 
 export type SendReplyStatus = 'DRAFT' | 'QUEUED' | 'SENT' | 'FAILED' | 'NOT_SUPPORTED';
 
@@ -35,22 +36,22 @@ export class KeyInboxReplySenderService {
     const channel = thread.channel?.toLowerCase() ?? '';
     const referenceMessage = await this.getLatestInboundMessage(thread.id);
 
-    if (['whatsapp', 'sms'].includes(channel)) {
+    if (channel === KEY_INBOX_CHANNELS.WHATSAPP || channel === KEY_INBOX_CHANNELS.SMS) {
       return this.sendViaWhatsApp(businessId, thread, message, referenceMessage, userId);
     }
 
-    if (['gmail', 'email'].includes(channel)) {
+    if (channel === KEY_INBOX_CHANNELS.EMAIL) {
       return this.sendViaGmail(businessId, thread, message, referenceMessage, userId);
     }
 
-    if (['messenger', 'instagram', 'facebook', 'meta', 'tiktok'].includes(channel)) {
+    if (channel === KEY_INBOX_CHANNELS.FACEBOOK_MESSENGER || channel === KEY_INBOX_CHANNELS.INSTAGRAM_DM) {
       return this.sendViaMetaStub(businessId, thread, message, userId);
     }
 
     const result: SendReplyResult = {
       success: false,
-      status: 'FAILED',
-      error: `Outbound send not implemented for channel: ${thread.channel}`,
+      status: KEY_INBOX_SEND_STATUSES.NOT_SUPPORTED,
+      error: `Outbound replies are not supported for channel: ${thread.channel}`,
       sentVia: undefined,
     };
     await this.persistSendResult(message.id, result, userId);
@@ -61,7 +62,7 @@ export class KeyInboxReplySenderService {
   emitDraftEvent(businessId: string, threadId: string, messageId: string, userId?: string): void {
     this.emitReplyEvent(businessId, threadId, messageId, 'key_inbox.reply_drafted', userId, {
       success: true,
-      status: 'DRAFT' as const,
+      status: KEY_INBOX_SEND_STATUSES.DRAFT,
     });
   }
 
@@ -76,7 +77,7 @@ export class KeyInboxReplySenderService {
     if (!to || typeof to !== 'string') {
       const result: SendReplyResult = {
         success: false,
-        status: 'FAILED',
+        status: KEY_INBOX_SEND_STATUSES.FAILED,
         error: 'No recipient phone number found for WhatsApp reply',
         sentVia: 'whatsapp',
       };
@@ -89,7 +90,7 @@ export class KeyInboxReplySenderService {
     if (!whatsappService) {
       const result: SendReplyResult = {
         success: false,
-        status: 'FAILED',
+        status: KEY_INBOX_SEND_STATUSES.FAILED,
         error: 'WhatsApp service is not available',
         sentVia: 'whatsapp',
       };
@@ -139,7 +140,7 @@ export class KeyInboxReplySenderService {
     if (!to || typeof to !== 'string') {
       const result: SendReplyResult = {
         success: false,
-        status: 'FAILED',
+        status: KEY_INBOX_SEND_STATUSES.FAILED,
         error: 'No recipient email found for Gmail reply',
         sentVia: 'gmail',
       };
@@ -152,7 +153,7 @@ export class KeyInboxReplySenderService {
     if (!gmailService) {
       const result: SendReplyResult = {
         success: false,
-        status: 'FAILED',
+        status: KEY_INBOX_SEND_STATUSES.FAILED,
         error: 'Gmail service is not available',
         sentVia: 'gmail',
       };
@@ -187,7 +188,7 @@ export class KeyInboxReplySenderService {
 
       const result: SendReplyResult = {
         success: true,
-        status: 'SENT',
+        status: KEY_INBOX_SEND_STATUSES.SENT,
         providerMessageId: providerResult?.messageId,
         sentVia: 'gmail',
       };
@@ -212,7 +213,7 @@ export class KeyInboxReplySenderService {
   ): Promise<SendReplyResult> {
     const result: SendReplyResult = {
       success: false,
-      status: 'NOT_SUPPORTED',
+      status: KEY_INBOX_SEND_STATUSES.NOT_SUPPORTED,
       error: 'Meta outbound DMs are not enabled for this channel. Configure app review and permissions to enable sending.',
       sentVia: thread.channel ?? 'meta',
     };

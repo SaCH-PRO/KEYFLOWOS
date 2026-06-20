@@ -10008,7 +10008,7 @@ model KeyInboxThread {
   id                String   @id @default(cuid())
   businessId        String   @map("business_id")
 
-  channel           String   // GMAIL, WHATSAPP, INSTAGRAM, FACEBOOK, TIKTOK, FORMS
+  channel           String   // email, whatsapp, google_forms, instagram_dm, facebook_messenger, ...
   externalThreadId  String?  @map("external_thread_id")
 
   contactId         String?  @map("contact_id")
@@ -10035,6 +10035,7 @@ model KeyInboxThread {
 
   @@index([businessId, lastMessageAt])
   @@index([businessId, channel])
+  @@unique([businessId, channel, externalThreadId])
   @@map("key_inbox_threads")
 }
 
@@ -10076,6 +10077,7 @@ model KeyInboxMessage {
   @@index([businessId, receivedAt])
   @@index([businessId, channel])
   @@index([threadId])
+  @@unique([businessId, channel, externalMessageId])
   @@map("key_inbox_messages")
 }
 

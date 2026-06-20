@@ -4,6 +4,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { EntityResolutionService } from '../../core/connectors/entity-resolution.service';
 import { encryptToken, decryptToken } from '../../core/crypto/token-crypto';
 import { KeyInboxService } from '../key-inbox/key-inbox.service';
+import { KEY_INBOX_CHANNELS } from '../key-inbox/key-inbox.constants';
 import type { ResolvedEntity } from '../../core/connectors/entity-resolution.service';
 
 export interface WhatsAppMessage {
@@ -107,7 +108,7 @@ export class WhatsAppService {
         externalId: payload.externalId ?? null,
         businessId,
         timestamp: new Date(),
-        channel: 'whatsapp',
+        channel: KEY_INBOX_CHANNELS.WHATSAPP,
         from: payload.from,
         body: payload.body,
         contactId: resolved.contactId,
@@ -134,7 +135,7 @@ export class WhatsAppService {
       const existing = await this.prisma.client.keyInboxMessage.findFirst({
         where: {
           businessId,
-          channel: 'whatsapp',
+          channel: KEY_INBOX_CHANNELS.WHATSAPP,
           externalMessageId,
         },
       });
@@ -149,7 +150,7 @@ export class WhatsAppService {
 
       const thread = await this.keyInbox.upsertThread({
         businessId,
-        channel: 'whatsapp',
+        channel: KEY_INBOX_CHANNELS.WHATSAPP,
         externalThreadId: normalizedFrom,
         contactId: resolved.contactId || null,
         subject: this.truncate(body, 100),
@@ -164,7 +165,7 @@ export class WhatsAppService {
       await this.keyInbox.addMessage({
         businessId,
         threadId: thread.id,
-        channel: 'whatsapp',
+        channel: KEY_INBOX_CHANNELS.WHATSAPP,
         direction: 'INBOUND',
         senderName: payload.senderName ?? null,
         senderPhone: normalizedFrom,

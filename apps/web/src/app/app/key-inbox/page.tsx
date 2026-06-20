@@ -22,6 +22,7 @@ import {
 import { toast } from "sonner";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { getChannelIcon } from "@/lib/channel-icons";
+import { KEY_INBOX_CHANNEL_OPTIONS, normalizeFrontendChannel } from "@/lib/key-inbox/channels";
 import {
   fetchThreads,
   fetchThread,
@@ -57,15 +58,7 @@ const PRIORITY_OPTIONS = [
   { value: "URGENT", label: "Urgent" },
 ];
 
-const CHANNEL_OPTIONS = [
-  { value: "", label: "All channels" },
-  { value: "gmail", label: "Email" },
-  { value: "whatsapp", label: "WhatsApp" },
-  { value: "instagram", label: "Instagram" },
-  { value: "messenger", label: "Messenger" },
-  { value: "forms", label: "Forms" },
-  { value: "calendar", label: "Calendar" },
-];
+const CHANNEL_OPTIONS = KEY_INBOX_CHANNEL_OPTIONS;
 
 const INTENT_OPTIONS = [
   { value: "", label: "All intents" },
@@ -146,7 +139,7 @@ export default function KeyInboxPage() {
   const searchParams = useSearchParams();
   const initialFilters = useMemo(
     () => ({
-      channel: searchParams.get("channel") ?? "",
+      channel: normalizeFrontendChannel(searchParams.get("channel")),
       status: searchParams.get("status") ?? "OPEN",
       priority: searchParams.get("priority") ?? "",
       intent: searchParams.get("intent") ?? "",

@@ -25,6 +25,7 @@ import { UpdateThreadDto } from './dto/update-thread.dto';
 import { GenerateKeyInboxIntelligenceDto } from './dto/generate-intelligence.dto';
 import type { IntelligenceScope } from './key-inbox-intelligence.types';
 import type { CreateInboxMessageInput, CreateInboxThreadInput } from './key-inbox.types';
+import { normalizeKeyInboxChannel } from './key-inbox.constants';
 
 @Controller('key-inbox/businesses/:businessId')
 @UseGuards(AuthGuard, BusinessGuard)
@@ -281,10 +282,19 @@ export class KeyInboxController {
     let threadId: string | undefined;
 
     if (threadInput) {
-      const thread = await this.keyInbox.upsertThread({ ...threadInput, businessId });
+      const thread = await this.keyInbox.upsertThread({
+        ...threadInput,
+        businessId,
+        channel: normalizeKeyInboxChannel(threadInput.channel),
+      });
       threadId = thread.id;
     }
 
-    return this.keyInbox.addMessage({ ...messageInput, businessId, threadId });
+    return this.keyInbox.addMessage({
+      ...messageInput,
+      businessId,
+      threadId,
+      channel: normalizeKeyInboxChannel(messageInput.channel),
+    });
   }
 }

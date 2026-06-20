@@ -5,6 +5,7 @@ import { GoogleTokenHelper } from '../../../modules/connect/google-token.helper'
 import { KeyInboxService } from '../../../modules/key-inbox/key-inbox.service';
 import type { ConnectorSyncResult } from '../connector.interface';
 import type { CreateInboxMessageInput } from '../../../modules/key-inbox/key-inbox.types';
+import { KEY_INBOX_CHANNELS } from '../../../modules/key-inbox/key-inbox.constants';
 
 const GMAIL_API_BASE = 'https://gmail.googleapis.com/gmail/v1/users/me';
 const INBOX_LABEL = 'INBOX';
@@ -106,7 +107,7 @@ export class GmailIngestionService {
           const alreadyExists = await this.prisma.client.keyInboxMessage.findFirst({
             where: {
               businessId,
-              channel: 'email',
+              channel: KEY_INBOX_CHANNELS.EMAIL,
               externalMessageId: ref.id,
             },
           });
@@ -131,7 +132,7 @@ export class GmailIngestionService {
 
           const thread = await this.keyInbox.upsertThread({
             businessId,
-            channel: 'email',
+            channel: KEY_INBOX_CHANNELS.EMAIL,
             externalThreadId: message.threadId,
             contactId: resolved.contactId || null,
             subject: parsed.subject || null,
@@ -147,7 +148,7 @@ export class GmailIngestionService {
           const messageInput: CreateInboxMessageInput = {
             businessId,
             threadId: thread.id,
-            channel: 'email',
+            channel: KEY_INBOX_CHANNELS.EMAIL,
             direction: 'INBOUND',
             senderName: parsed.fromName || null,
             senderHandle: parsed.fromEmail || null,

@@ -74,7 +74,7 @@ describe('MetaSocialIngestionService', () => {
     expect(keyInbox.upsertThread).toHaveBeenCalledWith(
       expect.objectContaining({
         businessId: 'biz_1',
-        channel: 'messenger',
+        channel: 'facebook_messenger',
         externalThreadId: 'user_123',
         contactId: 'contact_1',
         subject: 'Hello from Messenger',
@@ -83,7 +83,7 @@ describe('MetaSocialIngestionService', () => {
     expect(keyInbox.addMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         businessId: 'biz_1',
-        channel: 'messenger',
+        channel: 'facebook_messenger',
         direction: 'INBOUND',
         senderHandle: 'user_123',
         contentText: 'Hello from Messenger',
@@ -120,13 +120,13 @@ describe('MetaSocialIngestionService', () => {
     expect(keyInbox.upsertThread).toHaveBeenCalledWith(
       expect.objectContaining({
         businessId: 'biz_1',
-        channel: 'instagram',
+        channel: 'instagram_dm',
         externalThreadId: 'ig_user_456',
       }),
     );
     expect(keyInbox.addMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        channel: 'instagram',
+        channel: 'instagram_dm',
         externalMessageId: 'mid.ig.123',
         contentText: 'Hi on Instagram',
       }),
@@ -151,7 +151,7 @@ describe('MetaSocialIngestionService', () => {
     expect(entityResolution.resolveContact).toHaveBeenCalledWith(
       'biz_1',
       expect.objectContaining({
-        source: 'meta_instagram',
+        source: 'meta_instagram_dm',
         externalId: 'legacy_user',
         firstName: 'Jane',
         lastName: 'Doe',

@@ -117,7 +117,7 @@ describe('KEYFlowOS operating system smoke', () => {
     );
 
     expect(result.success).toBe(false);
-    expect(result.status).toBe('FAILED');
-    expect(result.error).toContain('Outbound send not implemented');
+    expect(result.status).toBe('NOT_SUPPORTED');
+    expect(result.error).toContain('not supported');
   });
 });

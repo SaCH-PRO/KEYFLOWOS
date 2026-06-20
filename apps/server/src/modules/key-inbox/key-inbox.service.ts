@@ -6,6 +6,7 @@ import { KeyInboxActionService } from './key-inbox-action.service';
 import { KeyInboxAnalysisService } from './key-inbox-analysis.service';
 import { KeyInboxTemporalEmitterService } from './key-inbox-temporal-emitter.service';
 import { KeyInboxReplySenderService } from './key-inbox-reply-sender.service';
+import { KEY_INBOX_CHANNELS, normalizeKeyInboxChannel } from './key-inbox.constants';
 import type { CreateInboxMessageInput, CreateInboxThreadInput, InboxAnalysis } from './key-inbox.types';
 
 @Injectable()
@@ -22,11 +23,12 @@ export class KeyInboxService {
   ) {}
 
   async upsertThread(input: CreateInboxThreadInput): Promise<KeyInboxThread> {
+    const channel = normalizeKeyInboxChannel(input.channel);
     const existing = input.externalThreadId
       ? await this.prisma.client.keyInboxThread.findFirst({
           where: {
             businessId: input.businessId,
-            channel: input.channel,
+            channel,
             externalThreadId: input.externalThreadId,
           },
         })
@@ -34,23 +36,47 @@ export class KeyInboxService {
 
     if (existing) return existing;
 
-    return this.prisma.client.keyInboxThread.create({
-      data: {
-        businessId: input.businessId,
-        channel: input.channel,
-        externalThreadId: input.externalThreadId ?? null,
-        contactId: input.contactId ?? null,
-        subject: input.subject ?? null,
-        status: input.status ?? 'OPEN',
-        priority: input.priority ?? 'NORMAL',
-        metadata: input.metadata ?? {},
-      },
-    });
+    try {
+      return await this.prisma.client.keyInboxThread.create({
+        data: {
+          businessId: input.businessId,
+          channel,
+          externalThreadId: input.externalThreadId ?? null,
+          contactId: input.contactId ?? null,
+          subject: input.subject ?? null,
+          status: input.status ?? 'OPEN',
+          priority: input.priority ?? 'NORMAL',
+          metadata: input.metadata ?? {},
+        },
+      });
+    } catch (err) {
+      if (input.externalThreadId && this.isUniqueConstraintError(err)) {
+        const thread = await this.prisma.client.keyInboxThread.findFirst({
+          where: { businessId: input.businessId, channel, externalThreadId: input.externalThreadId },
+        });
+        if (thread) return thread;
+      }
+      throw err;
+    }
   }
 
   async addMessage(
     input: CreateInboxMessageInput & { threadId?: string },
   ): Promise<{ thread: KeyInboxThread; message: KeyInboxMessage }> {
+    const channel = normalizeKeyInboxChannel(input.channel);
+
+    if (input.externalMessageId) {
+      const existingMessage = await this.prisma.client.keyInboxMessage.findFirst({
+        where: { businessId: input.businessId, channel, externalMessageId: input.externalMessageId },
+      });
+      if (existingMessage) {
+        const existingThread = await this.prisma.client.keyInboxThread.findFirst({
+          where: { id: existingMessage.threadId, businessId: input.businessId },
+        });
+        if (existingThread) return { thread: existingThread, message: existingMessage };
+      }
+    }
+
     let thread: KeyInboxThread | null;
 
     if (input.threadId) {
@@ -61,7 +87,7 @@ export class KeyInboxService {
       const subject = this.truncate(input.contentText ?? 'New message', 100);
       thread = await this.upsertThread({
         businessId: input.businessId,
-        channel: input.channel,
+        channel,
         externalThreadId: input.externalMessageId ?? null,
         contactId: null,
         subject,
@@ -75,12 +101,13 @@ export class KeyInboxService {
 
     const receivedAt = input.receivedAt ?? new Date();
 
-    const [message, updatedThread] = await this.prisma.client.$transaction([
+    try {
+      const [message, updatedThread] = await this.prisma.client.$transaction([
       this.prisma.client.keyInboxMessage.create({
         data: {
           businessId: input.businessId,
           threadId: thread.id,
-          channel: input.channel,
+          channel,
           direction: input.direction,
           senderName: input.senderName ?? null,
           senderHandle: input.senderHandle ?? null,
@@ -118,7 +145,25 @@ export class KeyInboxService {
       this.logger.warn(`Background analysis failed for message ${message.id}: ${(err as Error).message}`);
     }
 
-    return { thread: updatedThread, message };
+      return { thread: updatedThread, message };
+    } catch (err) {
+      if (input.externalMessageId && this.isUniqueConstraintError(err)) {
+        const existingMessage = await this.prisma.client.keyInboxMessage.findFirst({
+          where: { businessId: input.businessId, channel, externalMessageId: input.externalMessageId },
+        });
+        if (existingMessage) {
+          const existingThread = await this.prisma.client.keyInboxThread.findFirst({
+            where: { id: existingMessage.threadId, businessId: input.businessId },
+          });
+          if (existingThread) return { thread: existingThread, message: existingMessage };
+        }
+      }
+      throw err;
+    }
+  }
+
+  private isUniqueConstraintError(err: unknown): boolean {
+    return err instanceof Error && /unique constraint/i.test(err.message);
   }
 
   async analyzeMessage(businessId: string, messageId: string): Promise<KeyInboxMessage> {

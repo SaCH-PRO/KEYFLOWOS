@@ -5,6 +5,7 @@ import { GoogleTokenHelper } from '../../../modules/connect/google-token.helper'
 import { KeyInboxService } from '../../../modules/key-inbox/key-inbox.service';
 import type { ConnectorSyncResult } from '../connector.interface';
 import type { CreateInboxMessageInput } from '../../../modules/key-inbox/key-inbox.types';
+import { KEY_INBOX_CHANNELS } from '../../../modules/key-inbox/key-inbox.constants';
 
 const FORMS_API_BASE = 'https://forms.googleapis.com/v1/forms';
 const DRIVE_API_BASE = 'https://www.googleapis.com/drive/v3/files';
@@ -94,7 +95,7 @@ export class GoogleFormsIngestionService {
               const alreadyExists = await this.prisma.client.keyInboxMessage.findFirst({
                 where: {
                   businessId,
-                  channel: 'google_forms',
+                  channel: KEY_INBOX_CHANNELS.GOOGLE_FORMS,
                   externalMessageId: response.responseId,
                 },
               });
@@ -117,7 +118,7 @@ export class GoogleFormsIngestionService {
 
               const thread = await this.keyInbox.upsertThread({
                 businessId,
-                channel: 'google_forms',
+                channel: KEY_INBOX_CHANNELS.GOOGLE_FORMS,
                 externalThreadId: form.id,
                 contactId,
                 subject: form.name,
@@ -134,7 +135,7 @@ export class GoogleFormsIngestionService {
               const messageInput: CreateInboxMessageInput = {
                 businessId,
                 threadId: thread.id,
-                channel: 'google_forms',
+                channel: KEY_INBOX_CHANNELS.GOOGLE_FORMS,
                 direction: 'INBOUND',
                 senderName: contact.fullName || contact.email || response.respondentEmail || null,
                 senderHandle: response.respondentEmail || contact.email || null,

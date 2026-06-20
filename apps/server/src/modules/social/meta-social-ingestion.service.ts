@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { KeyInboxService } from '../key-inbox/key-inbox.service';
 import { EntityResolutionService } from '../../core/connectors/entity-resolution.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { KEY_INBOX_CHANNELS, normalizeKeyInboxChannel, type KeyInboxChannel } from '../key-inbox/key-inbox.constants';
 
 export interface MetaSocialInboundResult {
   contactId: string;
@@ -138,7 +139,7 @@ export class MetaSocialIngestionService {
   private parseInbound(
     rawPayload: unknown,
   ): {
-    channel: 'instagram' | 'messenger';
+    channel: KeyInboxChannel;
     senderId: string;
     senderName?: string;
     text?: string;
@@ -157,7 +158,7 @@ export class MetaSocialIngestionService {
       typeof payload.from?.id === 'string'
     ) {
       const platform = (payload.platform ?? '').toLowerCase();
-      const channel = platform === 'instagram' ? 'instagram' : 'messenger';
+      const channel = normalizeKeyInboxChannel(platform);
       return {
         channel,
         senderId: payload.from.id,
@@ -173,7 +174,7 @@ export class MetaSocialIngestionService {
     // Real Meta Graph webhook shape (page / instagram).
     if (Array.isArray(payload.entry) && payload.entry.length > 0) {
       const object = (payload.object ?? '').toLowerCase();
-      const channel: 'instagram' | 'messenger' = object === 'instagram' ? 'instagram' : 'messenger';
+      const channel = object === 'instagram' ? KEY_INBOX_CHANNELS.INSTAGRAM_DM : KEY_INBOX_CHANNELS.FACEBOOK_MESSENGER;
       const event = payload.entry[0]?.messaging?.[0];
       const message = event?.message;
 
@@ -197,7 +198,7 @@ export class MetaSocialIngestionService {
 
   private async recordLegacyEngagement(
     businessId: string,
-    channel: 'instagram' | 'messenger',
+    channel: KeyInboxChannel,
     senderId: string,
     senderName: string | undefined,
     text: string | undefined,
@@ -207,7 +208,7 @@ export class MetaSocialIngestionService {
       await this.prisma.client.socialEngagement.create({
         data: {
           businessId,
-          platform: channel === 'instagram' ? 'INSTAGRAM' : 'FACEBOOK',
+          platform: channel === KEY_INBOX_CHANNELS.INSTAGRAM_DM ? 'INSTAGRAM' : 'FACEBOOK',
           type: 'DM',
           externalId: externalId ?? null,
           fromUserId: senderId,

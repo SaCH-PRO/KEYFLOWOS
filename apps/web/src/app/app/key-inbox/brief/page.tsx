@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { getStoredBusinessId } from "@/lib/workspace";
+import { normalizeFrontendChannel, getChannelLabel } from "@/lib/key-inbox/channels";
 import { Button, Card, Badge } from "@keyflow/ui";
 import {
   type IntelligenceScope,
@@ -506,16 +507,19 @@ export default function KeyInboxBriefPage() {
               </h3>
               <Card variant="glass" padding="md">
                 <div className="flex flex-wrap gap-2">
-                  {Object.entries(report.channelBreakdown).map(([channel, count]) => (
-                    <Link
-                      key={channel}
-                      href={`/app/key-inbox?channel=${encodeURIComponent(channel)}`}
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-muted/40 text-xs hover:bg-muted/60 transition-colors"
-                    >
-                      <span className="font-medium">{channel}</span>
-                      <span className="text-muted-foreground">{count}</span>
-                    </Link>
-                  ))}
+                  {Object.entries(report.channelBreakdown).map(([channel, count]) => {
+                    const canonical = normalizeFrontendChannel(channel);
+                    return (
+                      <Link
+                        key={channel}
+                        href={`/app/key-inbox?channel=${encodeURIComponent(canonical)}`}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-muted/40 text-xs hover:bg-muted/60 transition-colors"
+                      >
+                        <span className="font-medium">{getChannelLabel(canonical)}</span>
+                        <span className="text-muted-foreground">{count}</span>
+                      </Link>
+                    );
+                  })}
                 </div>
               </Card>
             </div>
