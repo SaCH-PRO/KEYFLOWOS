@@ -93,6 +93,15 @@ const SENTIMENT_OPTIONS = [
   { value: "negative", label: "Negative" },
 ];
 
+const SEND_STATUS_OPTIONS = [
+  { value: "", label: "All send statuses" },
+  { value: "DRAFT", label: "Draft" },
+  { value: "QUEUED", label: "Sending" },
+  { value: "SENT", label: "Sent" },
+  { value: "FAILED", label: "Failed" },
+  { value: "NOT_SUPPORTED", label: "Not supported" },
+];
+
 function relativeTime(dateStr?: string | null) {
   if (!dateStr) return "";
   const date = new Date(dateStr);
@@ -141,6 +150,7 @@ export default function KeyInboxPage() {
     intent: "",
     urgency: "",
     sentiment: "",
+    sendStatus: "",
     search: "",
   });
 
@@ -154,6 +164,7 @@ export default function KeyInboxPage() {
       intent: filters.intent || undefined,
       urgency: filters.urgency || undefined,
       sentiment: filters.sentiment || undefined,
+      sendStatus: filters.sendStatus || undefined,
       search: filters.search || undefined,
       limit: 50,
     });
@@ -168,7 +179,7 @@ export default function KeyInboxPage() {
   useEffect(() => {
     loadThreads();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [businessId, filters.channel, filters.status, filters.priority, filters.intent, filters.urgency, filters.sentiment]);
+  }, [businessId, filters.channel, filters.status, filters.priority, filters.intent, filters.urgency, filters.sentiment, filters.sendStatus]);
 
   // Debounce search
   useEffect(() => {
@@ -224,6 +235,24 @@ export default function KeyInboxPage() {
         toast.error(data.sendResult.error ?? "Reply could not be sent");
       } else {
         toast.success(mode === "send" ? "Reply sent" : "Draft saved");
+      }
+    }
+    setSendingReply(false);
+  };
+
+  const handleRetry = async (message: KeyInboxMessage) => {
+    if (!businessId || !selectedThread || !message.contentText?.trim()) return;
+    setSendingReply(true);
+    const { data, error } = await replyToThread(businessId, selectedThread.id, message.contentText.trim(), "send");
+    if (error || !data) {
+      toast.error(error ?? "Retry failed");
+    } else {
+      setSelectedThread({ ...selectedThread, messages: [data.message, ...(selectedThread.messages ?? [])] });
+      await loadThreads();
+      if (data.sendResult && !data.sendResult.success) {
+        toast.error(data.sendResult.error ?? "Retry could not be sent");
+      } else {
+        toast.success("Retry sent");
       }
     }
     setSendingReply(false);
@@ -394,11 +423,27 @@ export default function KeyInboxPage() {
           <div className={`mt-1 kf-text-micro text-muted-foreground ${isOutbound ? "text-right" : ""}`}>
             {formatDateTime(message.receivedAt ?? message.sentAt ?? message.createdAt)}
             {isOutbound && message.sendStatus && (
-              <span className="ml-2">
-                {message.sendStatus === "SENT" && "✓ Sent"}
-                {message.sendStatus === "DRAFT" && "Draft"}
-                {message.sendStatus === "FAILED" && `Failed${message.sendError ? `: ${message.sendError}` : ""}`}
-                {message.sendStatus === "QUEUED" && "Sending..."}
+              <span className="ml-2 inline-flex items-center gap-1.5">
+                {message.sendStatus === "SENT" && <span className="text-emerald-400">✓ Sent</span>}
+                {message.sendStatus === "DRAFT" && <span>Draft</span>}
+                {message.sendStatus === "QUEUED" && <span>Sending...</span>}
+                {message.sendStatus === "FAILED" && (
+                  <>
+                    <span className="text-destructive">Failed: {message.sendError ?? "send error"}</span>
+                    <button
+                      onClick={() => handleRetry(message)}
+                      disabled={sendingReply}
+                      className="inline-flex items-center gap-1 px-1.5 py-0.5 kf-radius-md bg-muted/50 hover:bg-muted/70 text-foreground disabled:opacity-50"
+                      title="Retry sending this reply"
+                    >
+                      {sendingReply ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                      Retry
+                    </button>
+                  </>
+                )}
+                {message.sendStatus === "NOT_SUPPORTED" && (
+                  <span className="text-amber-400">Sending not enabled for this channel</span>
+                )}
               </span>
             )}
           </div>
@@ -452,6 +497,7 @@ export default function KeyInboxPage() {
           <FilterSelect value={filters.intent} onChange={(v) => setFilters((f) => ({ ...f, intent: v }))} options={INTENT_OPTIONS} placeholder="Intent" />
           <FilterSelect value={filters.urgency} onChange={(v) => setFilters((f) => ({ ...f, urgency: v }))} options={URGENCY_OPTIONS} placeholder="Urgency" />
           <FilterSelect value={filters.sentiment} onChange={(v) => setFilters((f) => ({ ...f, sentiment: v }))} options={SENTIMENT_OPTIONS} placeholder="Sentiment" />
+          <FilterSelect value={filters.sendStatus} onChange={(v) => setFilters((f) => ({ ...f, sendStatus: v }))} options={SEND_STATUS_OPTIONS} placeholder="Send status" />
         </div>
         <input
           value={filters.search}

@@ -200,6 +200,7 @@ export class KeyInboxService {
       intent?: string;
       urgency?: string;
       sentiment?: string;
+      sendStatus?: string;
       search?: string;
       limit?: number;
       offset?: number;
@@ -212,6 +213,15 @@ export class KeyInboxService {
     if (filters?.intent) where.aiIntent = filters.intent;
     if (filters?.urgency) where.aiUrgency = filters.urgency;
     if (filters?.sentiment) where.aiSentiment = filters.sentiment;
+
+    if (filters?.sendStatus) {
+      where.messages = {
+        some: {
+          direction: 'OUTBOUND',
+          sendStatus: filters.sendStatus,
+        },
+      };
+    }
 
     if (filters?.search?.trim()) {
       const term = filters.search.trim();

@@ -216,7 +216,7 @@ export class KeyInboxReplySenderService {
       error: 'Meta outbound DMs are not enabled for this channel. Configure app review and permissions to enable sending.',
       sentVia: thread.channel ?? 'meta',
     };
-    await this.persistSendResult(message.id, { ...result, status: 'FAILED' }, userId);
+    await this.persistSendResult(message.id, result, userId);
     this.emitReplyEvent(businessId, thread.id, message.id, 'key_inbox.reply_failed', userId, result);
     return result;
   }
@@ -260,7 +260,7 @@ export class KeyInboxReplySenderService {
     await this.prisma.client.keyInboxMessage.update({
       where: { id: messageId },
       data: {
-        sendStatus: result.status === 'NOT_SUPPORTED' ? 'FAILED' : result.status,
+        sendStatus: result.status,
         providerMessageId: result.providerMessageId ?? null,
         sendError: result.error ?? null,
         sentByUserId: userId ?? null,

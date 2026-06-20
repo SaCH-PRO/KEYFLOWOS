@@ -34,7 +34,7 @@ describe('KeyInboxController', () => {
 
   it('lists threads with filters', async () => {
     const { controller, keyInbox } = makeController();
-    const result = await controller.listThreads('biz_1', 'whatsapp', 'OPEN', 'HIGH', 'lead_inquiry', 'urgent', 'positive', 'hello');
+    const result = await controller.listThreads('biz_1', 'whatsapp', 'OPEN', 'HIGH', 'lead_inquiry', 'urgent', 'positive', undefined, 'hello');
 
     expect(result).toEqual([{ id: 'thread_1' }]);
     expect(keyInbox.listThreads).toHaveBeenCalledWith('biz_1', {
@@ -44,6 +44,7 @@ describe('KeyInboxController', () => {
       intent: 'lead_inquiry',
       urgency: 'urgent',
       sentiment: 'positive',
+      sendStatus: undefined,
       search: 'hello',
       limit: undefined,
       offset: undefined,

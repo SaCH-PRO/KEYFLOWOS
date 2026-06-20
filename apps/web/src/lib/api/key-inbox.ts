@@ -27,7 +27,7 @@ export interface KeyInboxMessage {
   extractedEntities?: Record<string, unknown> | null;
   suggestedActions: KeyInboxSuggestedAction[];
   aiConfidence?: number | null;
-  sendStatus?: "DRAFT" | "QUEUED" | "SENT" | "FAILED" | null;
+  sendStatus?: "DRAFT" | "QUEUED" | "SENT" | "FAILED" | "NOT_SUPPORTED" | null;
   providerMessageId?: string | null;
   sendError?: string | null;
   sentByUserId?: string | null;
@@ -79,6 +79,7 @@ export interface ThreadFilters {
   intent?: string;
   urgency?: string;
   sentiment?: string;
+  sendStatus?: string;
   search?: string;
   limit?: number;
   offset?: number;
