@@ -10,6 +10,7 @@ import { ConstitutionVersionService } from '../business-genome/constitution-vers
 import { GenomeScoringService } from '../business-genome/key-genome/genome-scoring.service';
 import { GenomeModuleReadinessService } from '../business-genome/key-genome/genome-module-readiness.service';
 import { GenomeSignalService } from '../business-genome/key-genome/genome-signal.service';
+import { GenomeRecommendationService } from '../business-genome/key-genome/genome-recommendation.service';
 import type { BusinessAsset } from '@prisma/client';
 import type { KeyGenomeScore, ModuleReadinessData } from '../business-genome/key-genome/key-genome.types';
 import type { KeyExecutiveMode } from '../intelligence/key-executive-mode.types';
@@ -59,6 +60,7 @@ const TYPE_WEIGHT: Record<CommandCenterItem['type'], number> = {
   ASSET_RISK: 75,
   GENOME_PROPOSAL: 65,
   GENOME_SIGNAL: 60,
+  GENOME_RECOMMENDATION: 78,
   CONSTITUTION: 60,
   EXECUTIVE_MODE: 45,
   OPPORTUNITY: 40,
@@ -90,6 +92,8 @@ export class BusinessCommandCenterService {
     private readonly genomeReadiness: GenomeModuleReadinessService,
     @Inject(GenomeSignalService)
     private readonly genomeSignal: GenomeSignalService,
+    @Inject(GenomeRecommendationService)
+    private readonly genomeRecommendation: GenomeRecommendationService,
   ) {}
 
   async snapshot(businessId: string): Promise<BusinessCommandCenterSnapshot> {
@@ -138,6 +142,7 @@ export class BusinessCommandCenterService {
     const missingFactItems = this.mapMissingFactItems(moduleReadiness);
     const weakSectionItems = this.mapWeakSectionItems(keyGenomeScore);
     const genomeSignalItems = await this.mapGenomeSignalItems(businessId);
+    const genomeRecommendationItems = await this.mapGenomeRecommendationItems(businessId);
 
     const allItems: CommandCenterItem[] = [
       ...approvalItems,
@@ -146,6 +151,7 @@ export class BusinessCommandCenterService {
       ...moduleReadinessItems,
       ...missingFactItems,
       ...weakSectionItems,
+      ...genomeRecommendationItems,
       ...genomeSignalItems,
       ...riskItems,
       ...opportunityItems,
@@ -806,6 +812,42 @@ export class BusinessCommandCenterService {
           },
         ],
         createdAt: signal.createdAt,
+      };
+    });
+  }
+
+  private async mapGenomeRecommendationItems(businessId: string): Promise<CommandCenterItem[]> {
+    const recommendations = await this.genomeRecommendation.listRecommendations(businessId, {
+      status: 'ACTIVE',
+      limit: 5,
+    });
+
+    return recommendations.map((rec) => {
+      const priority: CommandCenterPriority =
+        rec.riskLevel === 'CRITICAL' || rec.riskLevel === 'HIGH'
+          ? 'HIGH'
+          : rec.riskLevel === 'MEDIUM'
+            ? 'MEDIUM'
+            : 'LOW';
+
+      return {
+        id: `genome-recommendation-${rec.id}`,
+        type: 'GENOME_RECOMMENDATION' as const,
+        priority,
+        title: rec.title,
+        summary: rec.insight,
+        evidence: [rec.diagnosis, rec.recommendation].filter(Boolean),
+        source: 'KEY Genome',
+        sourceId: rec.id,
+        href: '/app/profile?tab=business-genome&section=recommendations',
+        actions: [
+          {
+            label: 'Review recommendation',
+            actionType: 'REVIEW' as const,
+            href: '/app/profile?tab=business-genome&section=recommendations',
+          },
+        ],
+        createdAt: rec.createdAt,
       };
     });
   }

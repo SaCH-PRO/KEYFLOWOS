@@ -12,6 +12,7 @@ import { ConstitutionVersionService } from '../business-genome/constitution-vers
 import { GenomeScoringService } from '../business-genome/key-genome/genome-scoring.service';
 import { GenomeModuleReadinessService } from '../business-genome/key-genome/genome-module-readiness.service';
 import { GenomeSignalService } from '../business-genome/key-genome/genome-signal.service';
+import { GenomeRecommendationService } from '../business-genome/key-genome/genome-recommendation.service';
 import type { BusinessExecutiveBrief } from '../intelligence/business-intelligence.types';
 import type { KeyExecutiveModeBrief } from '../intelligence/key-executive-mode.types';
 import type { TemporalFlowAnalysis } from '../temporal-flow/temporal-flow.types';
@@ -228,9 +229,11 @@ const mockKeyProposal: KeyActionProposalData = {
 describe('BusinessCommandCenterService', () => {
   let service: BusinessCommandCenterService;
   const mockSignalList = vi.fn().mockResolvedValue([]);
+  const mockRecommendationList = vi.fn().mockResolvedValue([]);
 
   beforeEach(async () => {
     mockSignalList.mockReset().mockResolvedValue([]);
+    mockRecommendationList.mockReset().mockResolvedValue([]);
     const moduleRef = await Test.createTestingModule({
       providers: [
         BusinessCommandCenterService,
@@ -245,6 +248,7 @@ describe('BusinessCommandCenterService', () => {
         { provide: GenomeScoringService, useValue: { computeFactScores: vi.fn().mockResolvedValue([]), computeBusinessScore: vi.fn().mockReturnValue(mockKeyGenomeScore) } },
         { provide: GenomeModuleReadinessService, useValue: { computeReadiness: vi.fn().mockResolvedValue(mockModuleReadiness) } },
         { provide: GenomeSignalService, useValue: { listSignals: mockSignalList } },
+        { provide: GenomeRecommendationService, useValue: { listRecommendations: mockRecommendationList } },
       ],
     }).compile();
 
@@ -443,5 +447,35 @@ describe('BusinessCommandCenterService', () => {
     const signalItem = snapshot.topPriorities.find((i) => i.type === 'GENOME_SIGNAL');
     expect(signalItem).toBeDefined();
     expect(signalItem!.priority).toBe('CRITICAL');
+  });
+
+  it('creates a GENOME_RECOMMENDATION priority item for active recommendations', async () => {
+    mockRecommendationList.mockResolvedValueOnce([
+      {
+        id: 'rec_1',
+        businessId: 'biz_1',
+        domain: 'VISION_IDENTITY',
+        title: 'Provide blocking fact: identity.business_name',
+        insight: 'key_inbox readiness is 25% because identity.business_name is missing.',
+        diagnosis: 'Missing blocking fact: Business name',
+        recommendation: 'Capture the identity.business_name fact in the Business Genome to unlock key_inbox operations.',
+        expectedGain: 'Improves key_inbox readiness and enables automation.',
+        expectedGainScore: 85,
+        riskLevel: 'HIGH',
+        effortLevel: 'LOW',
+        confidence: 0.75,
+        evidenceIds: [],
+        suggestedExperimentId: null,
+        status: 'ACTIVE',
+        createdAt: new Date().toISOString(),
+        reviewedAt: null,
+        outcomeTrackedAt: null,
+      },
+    ]);
+    const snapshot = await service.snapshot('biz_1');
+    const item = snapshot.topPriorities.find((i) => i.type === 'GENOME_RECOMMENDATION');
+    expect(item).toBeDefined();
+    expect(item!.title).toContain('business_name');
+    expect(item!.priority).toBe('HIGH');
   });
 });

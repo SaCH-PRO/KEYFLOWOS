@@ -75,6 +75,53 @@ export interface GenomeRecommendationsResponse {
   recommendations: GenomeRecommendation[];
 }
 
+export type GenomeRecommendationStatus = 'ACTIVE' | 'ACCEPTED' | 'DISMISSED' | 'APPLIED' | 'EXPIRED';
+export type GenomeExperimentStatus = 'PROPOSED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
+
+export interface GenomeRecommendationData {
+  id: string;
+  businessId: string;
+  domain: string;
+  title: string;
+  insight: string;
+  diagnosis: string;
+  recommendation: string;
+  expectedGain?: string | null;
+  expectedGainScore: number;
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  effortLevel: 'LOW' | 'MEDIUM' | 'HIGH';
+  confidence: number;
+  evidenceIds: string[];
+  suggestedExperimentId?: string | null;
+  status: GenomeRecommendationStatus;
+  createdAt: string;
+  reviewedAt?: string | null;
+  outcomeTrackedAt?: string | null;
+}
+
+export interface GenomeExperimentData {
+  id: string;
+  businessId: string;
+  hypothesis: string;
+  action: string;
+  successMetric: string;
+  baselineValue?: number | null;
+  targetValue?: number | null;
+  durationDays: number;
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  status: GenomeExperimentStatus;
+  result?: Record<string, unknown> | null;
+  createdAt: string;
+  startedAt?: string | null;
+  endedAt?: string | null;
+}
+
+export interface RecommendationOutcome {
+  success: boolean;
+  notes?: string;
+  measuredValue?: number;
+}
+
 export interface GenomeChatMessage {
   id: string;
   role: "user" | "assistant" | "system";
@@ -215,8 +262,107 @@ export async function getThreePillarStatus(businessId: string) {
   return apiGet<ThreePillarStatus>(`/blueprint/businesses/${businessId}/genome/three-pillar-status`);
 }
 
-export async function getGenomeRecommendations(businessId: string) {
-  return apiGet<GenomeRecommendationsResponse>(`/blueprint/businesses/${businessId}/genome/recommendations`);
+export async function getGenomeRecommendations(
+  businessId: string,
+  filters: { status?: string; domain?: string; minExpectedGainScore?: number; limit?: number } = {},
+) {
+  const params = new URLSearchParams();
+  if (filters.status) params.set('status', filters.status);
+  if (filters.domain) params.set('domain', filters.domain);
+  if (filters.minExpectedGainScore !== undefined)
+    params.set('minExpectedGainScore', String(filters.minExpectedGainScore));
+  if (filters.limit !== undefined) params.set('limit', String(filters.limit));
+  const query = params.toString();
+  return apiGet<GenomeRecommendationData[]>(
+    `/business-genome/businesses/${businessId}/key-genome/recommendations${query ? `?${query}` : ''}`,
+  );
+}
+
+export async function generateGenomeRecommendations(businessId: string) {
+  return apiPost<GenomeRecommendationData[]>({
+    path: `/business-genome/businesses/${businessId}/key-genome/recommendations/generate`,
+    body: {},
+  });
+}
+
+export async function acceptGenomeRecommendation(businessId: string, recommendationId: string) {
+  return apiPost<GenomeRecommendationData>({
+    path: `/business-genome/businesses/${businessId}/key-genome/recommendations/${recommendationId}/accept`,
+    body: {},
+  });
+}
+
+export async function dismissGenomeRecommendation(businessId: string, recommendationId: string) {
+  return apiPost<GenomeRecommendationData>({
+    path: `/business-genome/businesses/${businessId}/key-genome/recommendations/${recommendationId}/dismiss`,
+    body: {},
+  });
+}
+
+export async function applyGenomeRecommendation(businessId: string, recommendationId: string) {
+  return apiPost<GenomeRecommendationData>({
+    path: `/business-genome/businesses/${businessId}/key-genome/recommendations/${recommendationId}/apply`,
+    body: {},
+  });
+}
+
+export async function trackGenomeRecommendationOutcome(
+  businessId: string,
+  recommendationId: string,
+  outcome: RecommendationOutcome,
+) {
+  return apiPost<GenomeRecommendationData>({
+    path: `/business-genome/businesses/${businessId}/key-genome/recommendations/${recommendationId}/track-outcome`,
+    body: outcome,
+  });
+}
+
+export async function getGenomeExperiments(
+  businessId: string,
+  filters: { status?: string; limit?: number } = {},
+) {
+  const params = new URLSearchParams();
+  if (filters.status) params.set('status', filters.status);
+  if (filters.limit !== undefined) params.set('limit', String(filters.limit));
+  const query = params.toString();
+  return apiGet<GenomeExperimentData[]>(
+    `/business-genome/businesses/${businessId}/key-genome/experiments${query ? `?${query}` : ''}`,
+  );
+}
+
+export async function createGenomeExperiment(
+  businessId: string,
+  input: Omit<GenomeExperimentData, 'id' | 'businessId' | 'status' | 'createdAt' | 'startedAt' | 'endedAt'>,
+) {
+  return apiPost<GenomeExperimentData>({
+    path: `/business-genome/businesses/${businessId}/key-genome/experiments`,
+    body: input,
+  });
+}
+
+export async function startGenomeExperiment(businessId: string, experimentId: string) {
+  return apiPost<GenomeExperimentData>({
+    path: `/business-genome/businesses/${businessId}/key-genome/experiments/${experimentId}/start`,
+    body: {},
+  });
+}
+
+export async function completeGenomeExperiment(
+  businessId: string,
+  experimentId: string,
+  outcome?: RecommendationOutcome,
+) {
+  return apiPost<GenomeExperimentData>({
+    path: `/business-genome/businesses/${businessId}/key-genome/experiments/${experimentId}/complete`,
+    body: outcome ?? {},
+  });
+}
+
+export async function cancelGenomeExperiment(businessId: string, experimentId: string) {
+  return apiPost<GenomeExperimentData>({
+    path: `/business-genome/businesses/${businessId}/key-genome/experiments/${experimentId}/cancel`,
+    body: {},
+  });
 }
 
 export async function getConstitution(businessId: string) {

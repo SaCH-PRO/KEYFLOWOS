@@ -49,8 +49,8 @@ export function GenomeOverview({ genome, onSectionClick }: GenomeOverviewProps) 
   useEffect(() => {
     if (!businessId) return;
     getGenomeRecommendations(businessId).then(({ data }) => {
-      if (data?.recommendations?.length) {
-        setRecommendation(data.recommendations[0].title + ". " + data.recommendations[0].reason);
+      if (data?.length) {
+        setRecommendation(data[0].title + ". " + data[0].insight);
       }
     });
     getExecutiveBrief(businessId).then(({ data }) => {

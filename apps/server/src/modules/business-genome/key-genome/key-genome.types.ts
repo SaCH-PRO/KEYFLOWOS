@@ -267,3 +267,59 @@ export interface GenomePolicyBlock {
   missingFacts: MissingGenomeFact[];
   riskLevel: RiskLevel;
 }
+
+export type GenomeRecommendationSource =
+  | 'READINESS_GAP'
+  | 'SIGNAL'
+  | 'WEAK_SECTION'
+  | 'MANUAL';
+
+export interface CreateGenomeRecommendationInput {
+  businessId: string;
+  domain: string;
+  title: string;
+  insight: string;
+  diagnosis: string;
+  recommendation: string;
+  expectedGain?: string | null;
+  expectedGainScore?: number;
+  riskLevel?: RiskLevel;
+  effortLevel?: 'LOW' | 'MEDIUM' | 'HIGH';
+  confidence?: number;
+  evidenceIds?: string[];
+  suggestedExperimentId?: string | null;
+  source?: GenomeRecommendationSource;
+}
+
+export interface ListGenomeRecommendationsQuery {
+  status?: RecommendationStatus | string;
+  domain?: string;
+  source?: GenomeRecommendationSource | string;
+  minExpectedGainScore?: number;
+  limit?: number;
+}
+
+export interface GenerateGenomeRecommendationsInput {
+  businessId: string;
+  sources?: GenomeRecommendationSource[];
+  maxRecommendations?: number;
+}
+
+export interface CreateGenomeExperimentInput {
+  businessId: string;
+  recommendationId?: string | null;
+  hypothesis: string;
+  action: string;
+  successMetric: string;
+  baselineValue?: number | null;
+  targetValue?: number | null;
+  durationDays?: number;
+  riskLevel?: RiskLevel;
+}
+
+export interface ListGenomeExperimentsQuery {
+  status?: ExperimentStatus | string;
+  recommendationId?: string;
+  limit?: number;
+}
+

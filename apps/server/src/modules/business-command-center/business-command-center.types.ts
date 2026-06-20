@@ -14,7 +14,8 @@ export type CommandCenterItemType =
   | 'KEY_GENOME_GAP'
   | 'MODULE_READINESS'
   | 'MISSING_FACT'
-  | 'GENOME_SIGNAL';
+  | 'GENOME_SIGNAL'
+  | 'GENOME_RECOMMENDATION';
 
 export type CommandCenterActionType =
   | 'OPEN'
