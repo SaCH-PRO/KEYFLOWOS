@@ -516,6 +516,12 @@ model Business {
   businessAssets       BusinessAsset[]
   temporalFlowEvents   TemporalFlowEvent[]
   genomeEvolutionProposals GenomeEvolutionProposal[]
+  genomeFacts          GenomeFact[]
+  genomeEvidence       GenomeEvidence[]
+  genomeSignals        GenomeSignal[]
+  genomeModuleReadiness GenomeModuleReadiness[]
+  genomeRecommendations GenomeRecommendation[]
+  genomeExperiments    GenomeExperiment[]
   constitutionVersions BusinessConstitutionVersion[]
   authorityGrants      AuthorityGrant[]
   timeEntries          TimeEntry[]
@@ -642,6 +648,180 @@ model GenomeEvolutionProposal {
   @@index([businessId, section])
   @@index([businessId, createdAt])
   @@map("genome_evolution_proposals")
+}
+
+// KEY Genome kernel — evidence-backed operating intelligence
+model GenomeFact {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  section     String
+  domain      String
+  field       String
+  value       Json
+  valueType   String   @map("value_type")
+
+  sourceModule     String? @map("source_module")
+  sourceType       String  @map("source_type")
+  sourceEntityType String? @map("source_entity_type")
+  sourceEntityId   String? @map("source_entity_id")
+
+  completenessScore         Float @default(0) @map("completeness_score")
+  qualityScore              Float @default(0) @map("quality_score")
+  confidenceScore           Float @default(0) @map("confidence_score")
+  freshnessScore            Float @default(0) @map("freshness_score")
+  operationalReadinessScore Float @default(0) @map("operational_readiness_score")
+
+  verificationStatus String @default("INFERRED") @map("verification_status")
+  riskIfWrong        String @default("MEDIUM") @map("risk_if_wrong")
+
+  lastVerifiedAt DateTime? @map("last_verified_at")
+  expiresAt       DateTime? @map("expires_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  evidence GenomeEvidence[]
+
+  @@unique([businessId, section, domain, field])
+  @@index([businessId, section])
+  @@index([businessId, domain])
+  @@index([businessId, verificationStatus])
+  @@map("genome_facts")
+}
+
+model GenomeEvidence {
+  id         String @id @default(cuid())
+  businessId String @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  factId     String? @map("fact_id")
+  fact       GenomeFact? @relation(fields: [factId], references: [id], onDelete: SetNull)
+
+  sourceModule     String @map("source_module")
+  sourceEntityType String @map("source_entity_type")
+  sourceEntityId   String? @map("source_entity_id")
+
+  summary          String
+  evidenceStrength Float @default(0.5) @map("evidence_strength")
+  occurredAt       DateTime? @map("occurred_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([businessId, factId])
+  @@index([businessId, sourceModule])
+  @@index([businessId, occurredAt])
+  @@map("genome_evidence")
+}
+
+model GenomeSignal {
+  id         String @id @default(cuid())
+  businessId String @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  sourceModule     String @map("source_module")
+  sourceEntityType String? @map("source_entity_type")
+  sourceEntityId   String? @map("source_entity_id")
+
+  signalType String @map("signal_type")
+  section    String
+  domain     String
+  field      String?
+  proposedValue Json? @map("proposed_value")
+
+  reason     String
+  evidence   Json @default("[]")
+  confidence Float @default(0.5)
+  status     String @default("NEW") // NEW | REVIEWED | ACCEPTED | REJECTED | MERGED
+
+  createdAt DateTime @default(now()) @map("created_at")
+  reviewedAt DateTime? @map("reviewed_at")
+
+  @@index([businessId, sourceModule])
+  @@index([businessId, status])
+  @@index([businessId, section])
+  @@map("genome_signals")
+}
+
+model GenomeModuleReadiness {
+  id         String @id @default(cuid())
+  businessId String @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  module     String
+  readinessScore Int @map("readiness_score")
+
+  requiredFacts Json @default("[]") @map("required_facts")
+  missingFacts  Json @default("[]") @map("missing_facts")
+  optionalFacts Json @default("[]") @map("optional_facts")
+
+  blockedReasons Json @default("[]") @map("blocked_reasons")
+  recommendedSetupActions Json @default("[]") @map("recommended_setup_actions")
+
+  automationAllowed Boolean @default(false) @map("automation_allowed")
+  riskLevel String @default("MEDIUM") @map("risk_level")
+
+  lastComputedAt DateTime @default(now()) @map("last_computed_at")
+
+  @@unique([businessId, module])
+  @@index([businessId, readinessScore])
+  @@map("genome_module_readiness")
+}
+
+model GenomeRecommendation {
+  id         String @id @default(cuid())
+  businessId String @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  domain     String
+  title      String
+  insight    String
+  diagnosis  String
+  recommendation String
+
+  expectedGain String? @map("expected_gain")
+  expectedGainScore Float @default(0) @map("expected_gain_score")
+  riskLevel String @default("MEDIUM") @map("risk_level")
+  effortLevel String @default("MEDIUM") @map("effort_level")
+  confidence Float @default(0.5)
+
+  evidenceIds String[] @default([]) @map("evidence_ids")
+  suggestedExperimentId String? @map("suggested_experiment_id")
+
+  status String @default("ACTIVE") // ACTIVE | ACCEPTED | DISMISSED | APPLIED | EXPIRED
+  createdAt DateTime @default(now()) @map("created_at")
+  reviewedAt DateTime? @map("reviewed_at")
+  outcomeTrackedAt DateTime? @map("outcome_tracked_at")
+
+  @@index([businessId, status])
+  @@index([businessId, domain])
+  @@index([businessId, riskLevel])
+  @@map("genome_recommendations")
+}
+
+model GenomeExperiment {
+  id         String @id @default(cuid())
+  businessId String @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  hypothesis String
+  action     String
+  successMetric String @map("success_metric")
+  baselineValue Float? @map("baseline_value")
+  targetValue   Float? @map("target_value")
+  durationDays  Int    @default(14) @map("duration_days")
+
+  riskLevel String @default("LOW") @map("risk_level")
+  status    String @default("PROPOSED") // PROPOSED | RUNNING | COMPLETED | FAILED | CANCELLED
+  result    Json?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  startedAt DateTime? @map("started_at")
+  endedAt   DateTime? @map("ended_at")
+
+  @@index([businessId, status])
+  @@map("genome_experiments")
 }
 
 // Phase 12: Living Constitution v2 — versioned, immutable operating document
