@@ -323,3 +323,74 @@ export interface ListGenomeExperimentsQuery {
   limit?: number;
 }
 
+export type KeyGenomeGovernanceItemType =
+  | 'SIGNAL'
+  | 'RECOMMENDATION'
+  | 'EXPERIMENT'
+  | 'READINESS_BLOCKER'
+  | 'AUTONOMY_BLOCK'
+  | 'WEAK_SECTION';
+
+export type KeyGenomeGovernanceActionType =
+  | 'REVIEW'
+  | 'ACCEPT'
+  | 'REJECT'
+  | 'MERGE'
+  | 'DISMISS'
+  | 'APPLY'
+  | 'START'
+  | 'COMPLETE'
+  | 'CANCEL'
+  | 'OPEN';
+
+export interface KeyGenomeGovernanceItemAction {
+  label: string;
+  actionType: KeyGenomeGovernanceActionType;
+  href?: string;
+}
+
+export interface KeyGenomeGovernanceItem {
+  id: string;
+  type: KeyGenomeGovernanceItemType;
+  priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  title: string;
+  summary: string;
+  source: string;
+  sourceId?: string | null;
+  createdAt?: string | null;
+  actions: KeyGenomeGovernanceItemAction[];
+}
+
+export interface KeyGenomeGovernanceSummary {
+  businessId: string;
+  generatedAt: string;
+  counts: {
+    newSignals: number;
+    acceptedSignals: number;
+    activeRecommendations: number;
+    acceptedRecommendations: number;
+    runningExperiments: number;
+    proposedExperiments: number;
+    blockedModules: number;
+    lowReadinessModules: number;
+    autonomyBlockedActions: number;
+  };
+  urgentReviewItems: KeyGenomeGovernanceItem[];
+  signalReviewQueue: KeyGenomeGovernanceItem[];
+  recommendationQueue: KeyGenomeGovernanceItem[];
+  experimentQueue: KeyGenomeGovernanceItem[];
+  readinessBlockers: KeyGenomeGovernanceItem[];
+  autonomyBlocks: KeyGenomeGovernanceItem[];
+  genomeHealth: {
+    overall: number;
+    confidence: number;
+    readiness: number;
+    weakestSections: Array<{
+      section: string;
+      overall: number;
+      confidence: number;
+      freshness: number;
+    }>;
+  };
+}
+

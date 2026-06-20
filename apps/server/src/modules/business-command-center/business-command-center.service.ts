@@ -810,6 +810,11 @@ export class BusinessCommandCenterService {
             actionType: 'REVIEW' as const,
             href: '/app/profile?tab=business-genome&section=signals',
           },
+          {
+            label: 'Open Governance Console',
+            actionType: 'OPEN' as const,
+            href: '/app/profile?tab=business-genome&section=governance',
+          },
         ],
         createdAt: signal.createdAt,
       };
@@ -845,6 +850,11 @@ export class BusinessCommandCenterService {
             label: 'Review recommendation',
             actionType: 'REVIEW' as const,
             href: '/app/profile?tab=business-genome&section=recommendations',
+          },
+          {
+            label: 'Open Governance Console',
+            actionType: 'OPEN' as const,
+            href: '/app/profile?tab=business-genome&section=governance',
           },
         ],
         createdAt: rec.createdAt,

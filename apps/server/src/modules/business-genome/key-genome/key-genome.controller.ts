@@ -13,6 +13,7 @@ import { BusinessGuard } from '../../../core/auth/business.guard';
 import { GenomeSignalService } from './genome-signal.service';
 import { GenomeRecommendationService } from './genome-recommendation.service';
 import { GenomeExperimentService } from './genome-experiment.service';
+import { KeyGenomeGovernanceService } from './key-genome-governance.service';
 import type {
   CreateGenomeExperimentInput,
   GenerateGenomeRecommendationsInput,
@@ -27,6 +28,7 @@ export class KeyGenomeController {
     @Inject(GenomeRecommendationService)
     private readonly recommendationService: GenomeRecommendationService,
     @Inject(GenomeExperimentService) private readonly experimentService: GenomeExperimentService,
+    @Inject(KeyGenomeGovernanceService) private readonly governanceService: KeyGenomeGovernanceService,
   ) {}
 
   @Get('signals')
@@ -209,5 +211,15 @@ export class KeyGenomeController {
     @Param('experimentId') experimentId: string,
   ) {
     return this.experimentService.cancelExperiment(businessId, experimentId);
+  }
+
+  @Get('governance')
+  async governance(@Param('businessId') businessId: string) {
+    return this.governanceService.summary(businessId);
+  }
+
+  @Get('governance/queue')
+  async governanceQueue(@Param('businessId') businessId: string) {
+    return this.governanceService.queue(businessId);
   }
 }
