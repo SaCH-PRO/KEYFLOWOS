@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../core/prisma/prisma.service';
-import type { GenomeFactData, GenomeFactValue, UpsertGenomeFactInput } from './key-genome.types';
+import { KEY_GENOME_RISK_PENALTIES, KEY_GENOME_SCORING_WEIGHTS } from './key-genome.ontology';
+import type { GenomeFactData, GenomeFactScore, GenomeFactValue, UpsertGenomeFactInput } from './key-genome.types';
 
 function inferValueType(raw: unknown): GenomeFactValue['type'] {
   if (raw === null || raw === undefined) return 'JSON';
@@ -22,6 +23,18 @@ function normalizeValue(raw: unknown): GenomeFactValue {
     return { raw: raw.toISOString(), type };
   }
   return { raw: raw ?? null, type };
+}
+
+function computeOverallScore(scores: Omit<GenomeFactScore, 'overall' | 'riskPenalty'>, riskIfWrong: string): number {
+  const weights = KEY_GENOME_SCORING_WEIGHTS;
+  const base =
+    scores.completeness * weights.completeness +
+    scores.quality * weights.quality +
+    scores.confidence * weights.confidence +
+    scores.freshness * weights.freshness +
+    scores.operationalReadiness * weights.operationalReadiness;
+  const penalty = KEY_GENOME_RISK_PENALTIES[riskIfWrong as keyof typeof KEY_GENOME_RISK_PENALTIES] ?? 0;
+  return Math.max(0, Math.min(1, base - penalty));
 }
 
 function toDomain(row: {
@@ -49,6 +62,25 @@ function toDomain(row: {
   updatedAt: Date;
 }): GenomeFactData {
   const normalized = normalizeValue(row.value);
+  const riskPenalty = KEY_GENOME_RISK_PENALTIES[row.riskIfWrong as keyof typeof KEY_GENOME_RISK_PENALTIES] ?? 0;
+  const score = {
+    completeness: row.completenessScore,
+    quality: row.qualityScore,
+    confidence: row.confidenceScore,
+    freshness: row.freshnessScore,
+    operationalReadiness: row.operationalReadinessScore,
+    riskPenalty,
+    overall: computeOverallScore(
+      {
+        completeness: row.completenessScore,
+        quality: row.qualityScore,
+        confidence: row.confidenceScore,
+        freshness: row.freshnessScore,
+        operationalReadiness: row.operationalReadinessScore,
+      },
+      row.riskIfWrong,
+    ),
+  };
   return {
     id: row.id,
     businessId: row.businessId,
@@ -60,15 +92,7 @@ function toDomain(row: {
     sourceType: row.sourceType,
     sourceEntityType: row.sourceEntityType,
     sourceEntityId: row.sourceEntityId,
-    score: {
-      completeness: row.completenessScore,
-      quality: row.qualityScore,
-      confidence: row.confidenceScore,
-      freshness: row.freshnessScore,
-      operationalReadiness: row.operationalReadinessScore,
-      riskPenalty: 0,
-      overall: 0,
-    },
+    score,
     verificationStatus: row.verificationStatus as GenomeFactData['verificationStatus'],
     riskIfWrong: row.riskIfWrong as GenomeFactData['riskIfWrong'],
     lastVerifiedAt: row.lastVerifiedAt?.toISOString() ?? null,

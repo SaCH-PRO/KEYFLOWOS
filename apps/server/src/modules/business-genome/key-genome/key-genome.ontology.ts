@@ -289,3 +289,20 @@ export type KeyGenomeModuleName =
   | 'documents'
   | 'key_autonomy'
   | 'command_center';
+
+export const KEY_GENOME_MODULE_NAMES: KeyGenomeModuleName[] = [
+  'key_inbox',
+  'finance',
+  'commerce',
+  'calendar',
+  'bookings',
+  'people_flow',
+  'sop',
+  'projects',
+  'marketing',
+  'crm',
+  'business_assets',
+  'documents',
+  'key_autonomy',
+  'command_center',
+];
