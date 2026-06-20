@@ -9,6 +9,7 @@ const statusStyles: Record<KeyActionProposalStatus, { label: string; color: stri
   EXECUTING: { label: "Executing", color: "hsl(var(--kf-accent2))", bg: "hsl(var(--kf-accent2) / 0.1)" },
   EXECUTED: { label: "Executed", color: "hsl(var(--kf-success))", bg: "hsl(var(--kf-success) / 0.1)" },
   FAILED: { label: "Failed", color: "hsl(var(--kf-danger))", bg: "hsl(var(--kf-danger) / 0.1)" },
+  BLOCKED: { label: "Blocked by Genome", color: "hsl(var(--kf-danger))", bg: "hsl(var(--kf-danger) / 0.1)" },
   CANCELLED: { label: "Cancelled", color: "hsl(var(--kf-muted-foreground))", bg: "hsl(var(--kf-muted) / 0.15)" },
 };
 

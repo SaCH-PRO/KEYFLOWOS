@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { Test } from '@nestjs/testing';
+import { Test, type TestingModule } from '@nestjs/testing';
 import { KeyActionProposalService } from './key-action-proposal.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { TemporalFlowService } from '../temporal-flow/temporal-flow.service';
 import { KeyActionPolicyService } from './key-action-policy.service';
 import { KeyActionExecutorService } from './key-action-executor.service';
+import { KeyActionGenomePolicyService } from './key-action-genome-policy.service';
 
 function createMockClient() {
   const rows: any[] = [];
@@ -32,11 +33,12 @@ describe('KeyActionProposalService', () => {
   let service: KeyActionProposalService;
   let mockClient: ReturnType<typeof createMockClient>;
   let executor: KeyActionExecutorService;
+  let moduleRef: TestingModule;
 
   beforeEach(async () => {
     mockClient = createMockClient();
 
-    const moduleRef = await Test.createTestingModule({
+    moduleRef = await Test.createTestingModule({
       providers: [
         KeyActionProposalService,
         KeyActionPolicyService,
@@ -52,6 +54,16 @@ describe('KeyActionProposalService', () => {
           provide: KeyActionExecutorService,
           useValue: {
             execute: vi.fn(async () => ({ success: true, result: { entityType: 'Test' } })),
+          },
+        },
+        {
+          provide: KeyActionGenomePolicyService,
+          useValue: {
+            evaluateExecution: vi.fn().mockResolvedValue({
+              allowed: true,
+              requiresExtraConfirmation: false,
+              message: 'KEY Genome readiness permits this action.',
+            }),
           },
         },
       ],
@@ -172,6 +184,65 @@ describe('KeyActionProposalService', () => {
     await service.approve('biz_1', created.id, 'user_1');
     // MEDIUM does not require confirm; only HIGH/CRITICAL do in our implementation.
     const executed = await service.execute('biz_1', created.id, 'user_1');
+    expect(executed.status).toBe('EXECUTED');
+  });
+
+  it('blocks execution when Genome policy disallows it', async () => {
+    const genomePolicy = moduleRef.get(KeyActionGenomePolicyService);
+    vi.spyOn(genomePolicy, 'evaluateExecution').mockResolvedValue({
+      allowed: false,
+      requiresExtraConfirmation: false,
+      module: 'sop',
+      readinessScore: 25,
+      riskLevel: 'HIGH',
+      automationAllowed: false,
+      blockedReasons: ['Missing blocking fact: identity.business_name'],
+      missingFacts: [],
+      recommendedSetupActions: [],
+      message: 'KEY cannot execute this action because sop automation is blocked by missing Genome facts.',
+    });
+
+    const created = await service.create('biz_1', {
+      sourceType: 'EXECUTIVE_MODE',
+      sourceMode: 'COO',
+      title: 'Create task',
+      actionType: 'CREATE_TASK',
+    });
+    await service.approve('biz_1', created.id, 'user_1');
+
+    await expect(service.execute('biz_1', created.id, 'user_1')).rejects.toThrow('blocked by missing Genome facts');
+
+    const after = await service.get('biz_1', created.id);
+    expect(after.status).toBe('BLOCKED');
+    expect(after.failureReason).toContain('blocked by missing Genome facts');
+  });
+
+  it('requires confirmGenomeRisk when Genome policy warns', async () => {
+    const genomePolicy = moduleRef.get(KeyActionGenomePolicyService);
+    vi.spyOn(genomePolicy, 'evaluateExecution').mockResolvedValue({
+      allowed: true,
+      requiresExtraConfirmation: true,
+      module: 'sop',
+      readinessScore: 60,
+      riskLevel: 'MEDIUM',
+      automationAllowed: true,
+      blockedReasons: [],
+      missingFacts: [],
+      recommendedSetupActions: [],
+      message: 'KEY can execute this action, but sop readiness is only 60% and requires confirmation.',
+    });
+
+    const created = await service.create('biz_1', {
+      sourceType: 'EXECUTIVE_MODE',
+      sourceMode: 'COO',
+      title: 'Create task',
+      actionType: 'CREATE_TASK',
+    });
+    await service.approve('biz_1', created.id, 'user_1');
+
+    await expect(service.execute('biz_1', created.id, 'user_1')).rejects.toThrow('requires confirmation');
+
+    const executed = await service.execute('biz_1', created.id, 'user_1', false, true);
     expect(executed.status).toBe('EXECUTED');
   });
 });

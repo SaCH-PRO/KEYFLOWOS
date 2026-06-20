@@ -1,9 +1,10 @@
-import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { TemporalFlowService } from '../temporal-flow/temporal-flow.service';
 import { KeyActionExecutorService } from './key-action-executor.service';
 import { KeyActionPolicyService } from './key-action-policy.service';
+import { KeyActionGenomePolicyService } from './key-action-genome-policy.service';
 import type {
   CreateKeyActionProposalInput,
   KeyActionProposalData,
@@ -22,6 +23,7 @@ export class KeyActionProposalService {
     @Inject(TemporalFlowService) private readonly temporal: TemporalFlowService,
     @Inject(KeyActionPolicyService) private readonly policy: KeyActionPolicyService,
     @Inject(KeyActionExecutorService) private readonly executor: KeyActionExecutorService,
+    @Inject(KeyActionGenomePolicyService) private readonly genomePolicy: KeyActionGenomePolicyService,
   ) {}
 
   async create(
@@ -178,6 +180,7 @@ export class KeyActionProposalService {
     proposalId: string,
     executedBy?: string,
     confirm = false,
+    confirmGenomeRisk = false,
   ): Promise<KeyActionProposalData> {
     const proposal = await this.get(businessId, proposalId);
 
@@ -193,10 +196,62 @@ export class KeyActionProposalService {
       throw new NotFoundException('High-risk action requires explicit confirmation');
     }
 
+    const genomeDecision = await this.genomePolicy.evaluateExecution(businessId, proposal);
+
+    if (!genomeDecision.allowed) {
+      const row = await this.prisma.client.keyActionProposal.update({
+        where: { id: proposalId },
+        data: {
+          status: 'BLOCKED',
+          executedBy: executedBy ?? null,
+          executedAt: new Date(),
+          failureReason: genomeDecision.message,
+        },
+      });
+
+      await this.emitLifecycleEvent(
+        businessId,
+        proposalId,
+        proposal.actionType,
+        'key.action.blocked_by_genome',
+        'HIGH',
+        {
+          executedBy,
+          module: genomeDecision.module,
+          readinessScore: genomeDecision.readinessScore,
+          riskLevel: genomeDecision.riskLevel,
+          blockedReasons: genomeDecision.blockedReasons,
+          missingFacts: genomeDecision.missingFacts,
+        },
+      );
+
+      throw new BadRequestException(genomeDecision.message);
+    }
+
+    if (genomeDecision.requiresExtraConfirmation && !confirmGenomeRisk) {
+      throw new BadRequestException(genomeDecision.message);
+    }
+
     await this.prisma.client.keyActionProposal.update({
       where: { id: proposalId },
       data: { status: 'EXECUTING' },
     });
+
+    if (genomeDecision.requiresExtraConfirmation) {
+      await this.emitLifecycleEvent(
+        businessId,
+        proposalId,
+        proposal.actionType,
+        'key.action.genome_risk_confirmed',
+        'NORMAL',
+        {
+          executedBy,
+          module: genomeDecision.module,
+          readinessScore: genomeDecision.readinessScore,
+          riskLevel: genomeDecision.riskLevel,
+        },
+      );
+    }
 
     await this.emitLifecycleEvent(
       businessId,

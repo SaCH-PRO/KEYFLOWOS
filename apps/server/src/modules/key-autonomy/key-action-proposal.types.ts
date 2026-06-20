@@ -5,6 +5,7 @@ export const KEY_ACTION_PROPOSAL_STATUSES: KeyActionProposalStatus[] = [
   'EXECUTING',
   'EXECUTED',
   'FAILED',
+  'BLOCKED',
   'CANCELLED',
 ];
 
@@ -15,6 +16,7 @@ export type KeyActionProposalStatus =
   | 'EXECUTING'
   | 'EXECUTED'
   | 'FAILED'
+  | 'BLOCKED'
   | 'CANCELLED';
 
 export const KEY_ACTION_RISK_LEVELS: KeyActionRiskLevel[] = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];

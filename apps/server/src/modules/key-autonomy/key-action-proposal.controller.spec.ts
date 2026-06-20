@@ -72,7 +72,7 @@ describe('KeyActionProposalController', () => {
 
   it('executes a proposal with confirmation', async () => {
     const result = await controller.execute('biz_1', 'prop_1', { confirm: true }, { user: { id: 'user_1' } });
-    expect(service.execute).toHaveBeenCalledWith('biz_1', 'prop_1', 'user_1', true);
+    expect(service.execute).toHaveBeenCalledWith('biz_1', 'prop_1', 'user_1', true, undefined);
     expect(result.status).toBe('EXECUTED');
   });
 });

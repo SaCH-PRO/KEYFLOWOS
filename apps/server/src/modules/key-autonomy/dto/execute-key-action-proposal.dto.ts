@@ -4,4 +4,8 @@ export class ExecuteKeyActionProposalDto {
   @IsOptional()
   @IsBoolean()
   confirm?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  confirmGenomeRisk?: boolean;
 }

@@ -7,6 +7,7 @@ export type KeyActionProposalStatus =
   | "EXECUTING"
   | "EXECUTED"
   | "FAILED"
+  | "BLOCKED"
   | "CANCELLED";
 
 export type KeyActionRiskLevel = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
@@ -62,6 +63,24 @@ export interface KeyActionProposal {
   failureReason?: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface GenomeActionPolicyDecision {
+  allowed: boolean;
+  requiresExtraConfirmation: boolean;
+  module: string | null;
+  readinessScore: number | null;
+  riskLevel: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL" | null;
+  blockedReasons: string[];
+  missingFacts: {
+    section: string;
+    domain: string;
+    field: string;
+    reason: string;
+    impact: "BLOCKING" | "DEGRADED" | "OPTIONAL";
+  }[];
+  recommendedSetupActions: string[];
+  message: string;
 }
 
 export interface CreateKeyActionProposalInput {
@@ -150,9 +169,10 @@ export async function executeKeyActionProposal(
   businessId: string,
   proposalId: string,
   confirm?: boolean,
+  confirmGenomeRisk?: boolean,
 ) {
   return apiPost<KeyActionProposal>({
     path: `/key-autonomy/businesses/${businessId}/actions/proposals/${proposalId}/execute`,
-    body: { confirm },
+    body: { confirm, confirmGenomeRisk },
   });
 }

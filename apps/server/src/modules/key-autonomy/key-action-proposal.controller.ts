@@ -89,6 +89,12 @@ export class KeyActionProposalController {
     @Body() body: ExecuteKeyActionProposalDto,
     @Req() req: { user?: { id?: string } },
   ) {
-    return this.proposals.execute(businessId, proposalId, this.userId(req), body.confirm);
+    return this.proposals.execute(
+      businessId,
+      proposalId,
+      this.userId(req),
+      body.confirm,
+      body.confirmGenomeRisk,
+    );
   }
 }

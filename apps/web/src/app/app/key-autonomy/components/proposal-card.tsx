@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Check, Play, X, Loader2, AlertCircle, ChevronDown, ChevronUp } from "lucide-react";
+import { Check, Play, X, Loader2, AlertCircle, ChevronDown, ChevronUp, ShieldAlert, Target } from "lucide-react";
+import Link from "next/link";
 import { SectionCard } from "@/components/ui/section-card";
 import {
   approveKeyActionProposal,
@@ -23,6 +24,7 @@ export function ProposalCard({ businessId, proposal, onUpdated }: ProposalCardPr
   const [loading, setLoading] = useState<"approve" | "reject" | "execute" | "cancel" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const [needsGenomeConfirm, setNeedsGenomeConfirm] = useState(false);
 
   const handleAction = async (
     action: "approve" | "reject" | "execute" | "cancel",
@@ -42,6 +44,7 @@ export function ProposalCard({ businessId, proposal, onUpdated }: ProposalCardPr
           businessId,
           proposal.id,
           proposal.riskLevel === "HIGH" || proposal.riskLevel === "CRITICAL",
+          needsGenomeConfirm,
         );
         break;
       case "cancel":
@@ -50,9 +53,14 @@ export function ProposalCard({ businessId, proposal, onUpdated }: ProposalCardPr
     }
     setLoading(null);
     if (res.error || !res.data) {
-      setError(res.error || "Action failed");
+      const msg = res.error || "Action failed";
+      setError(msg);
+      if (typeof msg === "string" && msg.toLowerCase().includes("requires confirmation")) {
+        setNeedsGenomeConfirm(true);
+      }
       return;
     }
+    setNeedsGenomeConfirm(false);
     onUpdated();
   };
 
@@ -78,11 +86,17 @@ export function ProposalCard({ businessId, proposal, onUpdated }: ProposalCardPr
       )}
       {proposal.status === "APPROVED" && (
         <ActionButton
-          label={proposal.riskLevel === "HIGH" || proposal.riskLevel === "CRITICAL" ? "Confirm & Execute" : "Execute"}
-          icon={Play}
+          label={
+            needsGenomeConfirm
+              ? "Confirm Genome risk & Execute"
+              : proposal.riskLevel === "HIGH" || proposal.riskLevel === "CRITICAL"
+                ? "Confirm & Execute"
+                : "Execute"
+          }
+          icon={needsGenomeConfirm ? ShieldAlert : Play}
           onClick={() => handleAction("execute")}
           loading={loading === "execute"}
-          variant="accent"
+          variant={needsGenomeConfirm ? "danger" : "accent"}
         />
       )}
       {(proposal.status === "PENDING" || proposal.status === "APPROVED") && (
@@ -174,6 +188,28 @@ export function ProposalCard({ businessId, proposal, onUpdated }: ProposalCardPr
           )}
           {proposal.failureReason && (
             <div className="text-xs text-destructive">{proposal.failureReason}</div>
+          )}
+          {proposal.status === "BLOCKED" && (
+            <div className="rounded-lg bg-destructive/5 p-2.5 space-y-2">
+              <div className="flex items-start gap-2 text-xs text-destructive">
+                <ShieldAlert className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                <span>Execution was blocked by KEY Genome readiness.</span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Link
+                  href="/app/command-center"
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-muted/50 text-[10px] font-medium text-foreground hover:bg-muted/80 transition-colors"
+                >
+                  <Target className="w-3 h-3" /> Open Command Center
+                </Link>
+                <Link
+                  href="/app/profile?tab=business-genome"
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-muted/50 text-[10px] font-medium text-foreground hover:bg-muted/80 transition-colors"
+                >
+                  Update Business Genome
+                </Link>
+              </div>
+            </div>
           )}
           <div className="text-[10px] text-muted-foreground">
             Created {new Date(proposal.createdAt).toLocaleString()}
