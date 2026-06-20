@@ -13,6 +13,8 @@ import { CommandHealthStrip } from "./components/command-health-strip";
 import { CommandItemCard } from "./components/command-item-card";
 import { CommandExecutiveModeGrid } from "./components/command-executive-mode-grid";
 import { CommandGenomeCard } from "./components/command-genome-card";
+import { CommandKeyGenomeCard } from "./components/command-key-genome-card";
+import { CommandModuleReadinessPanel } from "./components/command-module-readiness-panel";
 import { CommandConstitutionCard } from "./components/command-constitution-card";
 
 export default function CommandCenterPage() {
@@ -152,6 +154,8 @@ export default function CommandCenterPage() {
               </div>
             </SectionCard>
 
+            <CommandKeyGenomeCard keyGenome={snapshot.keyGenome} />
+            <CommandModuleReadinessPanel modules={snapshot.moduleReadiness} />
             <CommandGenomeCard genome={snapshot.genome} />
             <CommandConstitutionCard constitution={snapshot.constitution} />
 

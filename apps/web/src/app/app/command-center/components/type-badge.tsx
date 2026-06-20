@@ -13,6 +13,9 @@ const labels: Record<CommandCenterItemType, string> = {
   CONSTITUTION: "Constitution",
   EXECUTIVE_MODE: "Mode",
   DOCUMENT: "Document",
+  KEY_GENOME_GAP: "Genome Gap",
+  MODULE_READINESS: "Readiness",
+  MISSING_FACT: "Missing Fact",
 };
 
 interface TypeBadgeProps {

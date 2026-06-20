@@ -5,6 +5,7 @@ import { TemporalFlowModule } from '../temporal-flow/temporal-flow.module';
 import { BusinessGenomeModule } from '../business-genome/business-genome.module';
 import { BusinessAssetsModule } from '../business-assets/business-assets.module';
 import { BlueprintModule } from '../blueprint/blueprint.module';
+import { KeyGenomeModule } from '../business-genome/key-genome/key-genome.module';
 import { BusinessCommandCenterController } from './business-command-center.controller';
 import { BusinessCommandCenterService } from './business-command-center.service';
 
@@ -16,6 +17,7 @@ import { BusinessCommandCenterService } from './business-command-center.service'
     BusinessGenomeModule,
     BusinessAssetsModule,
     BlueprintModule,
+    KeyGenomeModule,
   ],
   controllers: [BusinessCommandCenterController],
   providers: [BusinessCommandCenterService],

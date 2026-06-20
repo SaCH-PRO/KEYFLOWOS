@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { Test } from '@nestjs/testing';
 import { BusinessCommandCenterService } from './business-command-center.service';
 import { BusinessIntelligenceService } from '../intelligence/business-intelligence.service';
@@ -9,6 +9,8 @@ import { GenomeEvolutionService } from '../business-genome/genome-evolution.serv
 import { BlueprintService } from '../blueprint/blueprint.service';
 import { BusinessAssetsService } from '../business-assets/business-assets.service';
 import { ConstitutionVersionService } from '../business-genome/constitution-version.service';
+import { GenomeScoringService } from '../business-genome/key-genome/genome-scoring.service';
+import { GenomeModuleReadinessService } from '../business-genome/key-genome/genome-module-readiness.service';
 import type { BusinessExecutiveBrief } from '../intelligence/business-intelligence.types';
 import type { KeyExecutiveModeBrief } from '../intelligence/key-executive-mode.types';
 import type { TemporalFlowAnalysis } from '../temporal-flow/temporal-flow.types';
@@ -130,6 +132,80 @@ const mockStaleness: ConstitutionStaleness = {
   constitutionGenomeStage: 'OPERATING_BUSINESS',
 };
 
+const mockKeyGenomeScore = {
+  businessId: 'biz_1',
+  overall: 0.45,
+  integrity: 0.6,
+  readiness: 0.5,
+  confidence: 0.55,
+  sections: [
+    {
+      section: 'VISION_IDENTITY',
+      weight: 6,
+      score: {
+        completeness: 0.5,
+        quality: 0.7,
+        confidence: 0.6,
+        freshness: 0.9,
+        operationalReadiness: 0.5,
+        riskPenalty: 0.03,
+        overall: 0.35,
+      },
+    },
+    {
+      section: 'FINANCIAL',
+      weight: 12,
+      score: {
+        completeness: 0.8,
+        quality: 0.7,
+        confidence: 0.5,
+        freshness: 0.8,
+        operationalReadiness: 0.6,
+        riskPenalty: 0.03,
+        overall: 0.55,
+      },
+    },
+  ],
+  computedAt: new Date().toISOString(),
+};
+
+const mockModuleReadiness = [
+  {
+    businessId: 'biz_1',
+    module: 'key_inbox',
+    readinessScore: 25,
+    requiredFacts: [],
+    missingFacts: [
+      {
+        section: 'VISION_IDENTITY',
+        domain: 'identity',
+        field: 'business_name',
+        reason: 'Missing blocking fact: Business name',
+        impact: 'BLOCKING' as const,
+      },
+    ],
+    optionalFacts: [],
+    blockedReasons: ['Missing blocking fact: identity.business_name'],
+    recommendedSetupActions: ['Provide blocking fact: identity.business_name'],
+    automationAllowed: false,
+    riskLevel: 'HIGH' as const,
+    lastComputedAt: new Date().toISOString(),
+  },
+  {
+    businessId: 'biz_1',
+    module: 'finance',
+    readinessScore: 80,
+    requiredFacts: [],
+    missingFacts: [],
+    optionalFacts: [],
+    blockedReasons: [],
+    recommendedSetupActions: [],
+    automationAllowed: true,
+    riskLevel: 'LOW' as const,
+    lastComputedAt: new Date().toISOString(),
+  },
+];
+
 const mockKeyProposal: KeyActionProposalData = {
   id: 'kap_1',
   businessId: 'biz_1',
@@ -163,6 +239,8 @@ describe('BusinessCommandCenterService', () => {
         { provide: BlueprintService, useValue: { calculateGenomeIntegrity: async () => mockGenome } },
         { provide: BusinessAssetsService, useValue: { list: async () => mockAssets } },
         { provide: ConstitutionVersionService, useValue: { latest: async () => mockConstitution, staleness: async () => mockStaleness } },
+        { provide: GenomeScoringService, useValue: { computeFactScores: vi.fn().mockResolvedValue([]), computeBusinessScore: vi.fn().mockReturnValue(mockKeyGenomeScore) } },
+        { provide: GenomeModuleReadinessService, useValue: { computeReadiness: vi.fn().mockResolvedValue(mockModuleReadiness) } },
       ],
     }).compile();
 
@@ -247,5 +325,45 @@ describe('BusinessCommandCenterService', () => {
   it('provides recommended actions from top priorities', async () => {
     const snapshot = await service.snapshot('biz_1');
     expect(snapshot.recommendedActions.length).toBeGreaterThan(0);
+  });
+
+  it('includes KEY Genome score in snapshot', async () => {
+    const snapshot = await service.snapshot('biz_1');
+    expect(snapshot.keyGenome.overall).toBe(45);
+    expect(snapshot.keyGenome.confidence).toBe(55);
+    expect(snapshot.keyGenome.weakestSections.length).toBeGreaterThan(0);
+  });
+
+  it('includes module readiness in snapshot', async () => {
+    const snapshot = await service.snapshot('biz_1');
+    expect(snapshot.moduleReadiness.length).toBe(2);
+    expect(snapshot.moduleReadiness.some((m) => m.module === 'key_inbox')).toBe(true);
+  });
+
+  it('creates a MODULE_READINESS priority item for blocked modules', async () => {
+    const snapshot = await service.snapshot('biz_1');
+    expect(snapshot.topPriorities.some((i) => i.type === 'MODULE_READINESS')).toBe(true);
+  });
+
+  it('creates a MISSING_FACT priority item for blocking missing facts', async () => {
+    const snapshot = await service.snapshot('biz_1');
+    expect(snapshot.topPriorities.some((i) => i.type === 'MISSING_FACT' && i.priority === 'HIGH')).toBe(true);
+  });
+
+  it('creates a KEY_GENOME_GAP item for weak sections', async () => {
+    const snapshot = await service.snapshot('biz_1');
+    expect(snapshot.topPriorities.some((i) => i.type === 'KEY_GENOME_GAP')).toBe(true);
+  });
+
+  it('includes KEY Genome metrics in health', async () => {
+    const snapshot = await service.snapshot('biz_1');
+    expect(snapshot.health.keyGenomeOverall).toBe(45);
+    expect(snapshot.health.blockedModuleCount).toBe(1);
+    expect(snapshot.health.missingBlockingFactCount).toBe(1);
+  });
+
+  it('mentions KEY Genome in summary when facts exist', async () => {
+    const snapshot = await service.snapshot('biz_1');
+    expect(snapshot.summary).toContain('KEY Genome');
   });
 });

@@ -54,6 +54,21 @@ describe('KEYFlowOS operating system smoke', () => {
         latest: vi.fn().mockResolvedValue({ id: 'const_1', version: 1 }),
         staleness: vi.fn().mockResolvedValue({ stale: false }),
       } as any,
+      {
+        computeFactScores: vi.fn().mockResolvedValue([]),
+        computeBusinessScore: vi.fn().mockReturnValue({
+          businessId: 'biz_smoke',
+          overall: 0,
+          integrity: 0,
+          readiness: 0,
+          confidence: 0,
+          sections: [],
+          computedAt: new Date().toISOString(),
+        }),
+      } as any,
+      {
+        computeReadiness: vi.fn().mockResolvedValue([]),
+      } as any,
     );
 
     const snapshot = await service.snapshot('biz_smoke');
@@ -67,6 +82,8 @@ describe('KEYFlowOS operating system smoke', () => {
     expect(Array.isArray(snapshot.risks)).toBe(true);
     expect(Array.isArray(snapshot.opportunities)).toBe(true);
     expect(snapshot.genome).toBeDefined();
+    expect(snapshot.keyGenome).toBeDefined();
+    expect(Array.isArray(snapshot.moduleReadiness)).toBe(true);
     expect(snapshot.constitution).toBeDefined();
     expect(Array.isArray(snapshot.executiveModes)).toBe(true);
     expect(Array.isArray(snapshot.recommendedActions)).toBe(true);

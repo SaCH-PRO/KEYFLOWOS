@@ -7,7 +7,10 @@ import { GenomeEvolutionService } from '../business-genome/genome-evolution.serv
 import { BlueprintService } from '../blueprint/blueprint.service';
 import { BusinessAssetsService } from '../business-assets/business-assets.service';
 import { ConstitutionVersionService } from '../business-genome/constitution-version.service';
+import { GenomeScoringService } from '../business-genome/key-genome/genome-scoring.service';
+import { GenomeModuleReadinessService } from '../business-genome/key-genome/genome-module-readiness.service';
 import type { BusinessAsset } from '@prisma/client';
+import type { KeyGenomeScore, ModuleReadinessData } from '../business-genome/key-genome/key-genome.types';
 import type { KeyExecutiveMode } from '../intelligence/key-executive-mode.types';
 import type {
   BusinessCommandCenterSnapshot,
@@ -17,6 +20,8 @@ import type {
   CommandCenterGenome,
   CommandCenterHealth,
   CommandCenterItem,
+  CommandCenterKeyGenome,
+  CommandCenterModuleReadiness,
   CommandCenterPriority,
 } from './business-command-center.types';
 
@@ -46,6 +51,9 @@ const TYPE_WEIGHT: Record<CommandCenterItem['type'], number> = {
   KEY_APPROVAL: 100,
   KEY_APPROVED: 95,
   TEMPORAL_URGENT: 90,
+  MODULE_READINESS: 85,
+  MISSING_FACT: 83,
+  KEY_GENOME_GAP: 82,
   RISK: 80,
   ASSET_RISK: 75,
   GENOME_PROPOSAL: 65,
@@ -74,6 +82,10 @@ export class BusinessCommandCenterService {
     private readonly assets: BusinessAssetsService,
     @Inject(ConstitutionVersionService)
     private readonly constitution: ConstitutionVersionService,
+    @Inject(GenomeScoringService)
+    private readonly genomeScoring: GenomeScoringService,
+    @Inject(GenomeModuleReadinessService)
+    private readonly genomeReadiness: GenomeModuleReadinessService,
   ) {}
 
   async snapshot(businessId: string): Promise<BusinessCommandCenterSnapshot> {
@@ -103,6 +115,13 @@ export class BusinessCommandCenterService {
 
     const modeMap = new Map(modeBriefs.map((brief) => [brief.mode, brief]));
 
+    // Compute KEY Genome scores and module readiness after the parallel block
+    // so readiness uses freshly-scored facts rather than stale DB values.
+    const keyGenomeFacts = await this.genomeScoring.computeFactScores(businessId);
+    const keyGenomeScore = this.genomeScoring.computeBusinessScore(businessId, keyGenomeFacts);
+    const moduleReadiness = await this.genomeReadiness.computeReadiness(businessId, keyGenomeFacts);
+    const keyGenome = this.buildKeyGenome(keyGenomeScore);
+
     const approvalItems = this.mapPendingApprovals(pendingApprovals);
     const approvedItems = this.mapApprovedAwaitingExecution(approvedAwaitingExecution);
     const temporalUrgentItems = this.mapTemporalUrgent(temporalAnalysis.urgentItems);
@@ -111,11 +130,17 @@ export class BusinessCommandCenterService {
     const genomeProposalItems = this.mapGenomeProposals(genomeProposals);
     const assetRiskItems = this.mapAssetRisks(rawAssets);
     const constitutionItems = this.mapConstitutionItem(latestConstitution, constitutionStaleness);
+    const moduleReadinessItems = this.mapModuleReadinessItems(moduleReadiness);
+    const missingFactItems = this.mapMissingFactItems(moduleReadiness);
+    const weakSectionItems = this.mapWeakSectionItems(keyGenomeScore);
 
     const allItems: CommandCenterItem[] = [
       ...approvalItems,
       ...approvedItems,
       ...temporalUrgentItems,
+      ...moduleReadinessItems,
+      ...missingFactItems,
+      ...weakSectionItems,
       ...riskItems,
       ...opportunityItems,
       ...genomeProposalItems,
@@ -133,13 +158,15 @@ export class BusinessCommandCenterService {
       genomeProposals.length,
       assetRiskItems.length,
       constitutionStaleness.stale,
+      keyGenome,
+      moduleReadiness,
     );
 
     return {
       businessId,
       generatedAt: new Date().toISOString(),
       health,
-      summary: this.buildSummary(health, executiveBrief.summary),
+      summary: this.buildSummary(health, executiveBrief.summary, keyGenome, moduleReadiness),
       topPriorities: ranked.slice(0, 7),
       pendingApprovals: approvalItems,
       approvedAwaitingExecution: approvedItems,
@@ -147,6 +174,8 @@ export class BusinessCommandCenterService {
       risks: this.deduplicateItems([...riskItems, ...assetRiskItems]),
       opportunities: opportunityItems,
       genome: this.buildGenome(genome, genomeProposalItems),
+      keyGenome,
+      moduleReadiness: moduleReadiness.map((r) => this.mapModuleReadiness(r)),
       constitution: this.buildConstitution(latestConstitution, constitutionStaleness),
       executiveModes: this.mapExecutiveModes(modeBriefs),
       recommendedActions: this.buildRecommendedActions(ranked),
@@ -452,6 +481,8 @@ export class BusinessCommandCenterService {
     pendingGenomeProposalCount: number,
     assetRiskCount: number,
     constitutionStale: boolean,
+    keyGenome: CommandCenterKeyGenome,
+    moduleReadiness: ModuleReadinessData[],
   ): CommandCenterHealth {
     return {
       genomeIntegrity: brief.genomeIntegrity,
@@ -465,11 +496,37 @@ export class BusinessCommandCenterService {
       pendingGenomeProposalCount,
       assetRiskCount,
       constitutionStale,
+      keyGenomeOverall: keyGenome.overall,
+      keyGenomeReadiness: keyGenome.readiness,
+      keyGenomeConfidence: keyGenome.confidence,
+      blockedModuleCount: moduleReadiness.filter((m) => !m.automationAllowed).length,
+      lowReadinessModuleCount: moduleReadiness.filter((m) => m.readinessScore < 70).length,
+      missingBlockingFactCount: moduleReadiness
+        .flatMap((m) => m.missingFacts)
+        .filter((f) => f.impact === 'BLOCKING').length,
     };
   }
 
-  private buildSummary(health: CommandCenterHealth, briefSummary: string): string {
+  private buildSummary(
+    health: CommandCenterHealth,
+    briefSummary: string,
+    keyGenome: CommandCenterKeyGenome,
+    moduleReadiness: ModuleReadinessData[],
+  ): string {
     const parts: string[] = [briefSummary];
+
+    const hasFacts = keyGenome.sections.length > 0;
+    if (hasFacts) {
+      parts.push(
+        `KEY Genome is ${keyGenome.overall}% ready with ${keyGenome.confidence}% confidence.`,
+      );
+      if (health.blockedModuleCount > 0) {
+        parts.push(`${health.blockedModuleCount} module(s) are blocked by missing facts.`);
+      }
+    } else {
+      parts.push('KEY Genome has not been populated yet. Run Blueprint backfill to unlock readiness intelligence.');
+    }
+
     if (health.criticalCount > 0) {
       parts.push(`${health.criticalCount} critical item(s) need immediate attention.`);
     }
@@ -574,5 +631,138 @@ export class BusinessCommandCenterService {
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-|-$/g, '')
       .slice(0, 40);
+  }
+
+  private titleCase(value: string): string {
+    return value
+      .replace(/_/g, ' ')
+      .replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+
+  private mapModuleReadiness(readiness: ModuleReadinessData): CommandCenterModuleReadiness {
+    return {
+      module: readiness.module,
+      readinessScore: readiness.readinessScore,
+      automationAllowed: readiness.automationAllowed,
+      riskLevel: readiness.riskLevel,
+      missingFacts: readiness.missingFacts,
+      blockedReasons: readiness.blockedReasons,
+      recommendedSetupActions: readiness.recommendedSetupActions,
+      lastComputedAt: readiness.lastComputedAt,
+    };
+  }
+
+  private buildKeyGenome(score: KeyGenomeScore): CommandCenterKeyGenome {
+    const weakest = [...score.sections]
+      .sort((a, b) => a.score.overall - b.score.overall)
+      .slice(0, 5)
+      .map((s) => ({
+        section: s.section,
+        overall: Math.round(s.score.overall * 100),
+        confidence: Math.round(s.score.confidence * 100),
+        freshness: Math.round(s.score.freshness * 100),
+        readiness: Math.round(s.score.operationalReadiness * 100),
+      }));
+
+    return {
+      overall: Math.round(score.overall * 100),
+      integrity: Math.round(score.integrity * 100),
+      readiness: Math.round(score.readiness * 100),
+      confidence: Math.round(score.confidence * 100),
+      computedAt: score.computedAt,
+      sections: score.sections,
+      weakestSections: weakest,
+    };
+  }
+
+  private mapModuleReadinessItems(readiness: ModuleReadinessData[]): CommandCenterItem[] {
+    return readiness
+      .filter((r) => r.readinessScore < 90 || !r.automationAllowed)
+      .map((r) => ({
+        id: `module-readiness-${r.module}`,
+        type: 'MODULE_READINESS' as const,
+        priority:
+          r.readinessScore < 40 || !r.automationAllowed
+            ? 'HIGH'
+            : r.readinessScore < 70
+              ? 'MEDIUM'
+              : 'LOW',
+        title: `${this.titleCase(r.module)} readiness is ${r.readinessScore}%`,
+        summary:
+          r.blockedReasons[0] ??
+          `${this.titleCase(r.module)} needs more Genome context before KEY can operate confidently.`,
+        evidence: r.blockedReasons,
+        source: 'KEY Genome',
+        href: '/app/profile?tab=business-genome',
+        actions: [
+          {
+            label: 'Review missing facts',
+            actionType: 'REVIEW' as const,
+            href: '/app/profile?tab=business-genome',
+          },
+        ],
+      }));
+  }
+
+  private mapMissingFactItems(readiness: ModuleReadinessData[]): CommandCenterItem[] {
+    const seen = new Set<string>();
+    const items: CommandCenterItem[] = [];
+
+    for (const module of readiness) {
+      for (const missing of module.missingFacts) {
+        if (missing.impact === 'OPTIONAL') continue;
+
+        const key = `${missing.section}:${missing.domain}:${missing.field}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+
+        items.push({
+          id: `missing-fact-${this.slug(key)}`,
+          type: 'MISSING_FACT' as const,
+          priority: missing.impact === 'BLOCKING' ? 'HIGH' : 'MEDIUM',
+          title: `Missing ${missing.domain}.${missing.field}`,
+          summary: missing.reason,
+          evidence: [`Blocks or degrades module readiness for ${module.module}.`],
+          source: 'KEY Genome',
+          href: '/app/profile?tab=business-genome',
+          actions: [
+            {
+              label: 'Update Business Genome',
+              actionType: 'REVIEW' as const,
+              href: '/app/profile?tab=business-genome',
+            },
+          ],
+        });
+      }
+    }
+
+    return items.slice(0, 7);
+  }
+
+  private mapWeakSectionItems(score: KeyGenomeScore): CommandCenterItem[] {
+    return score.sections
+      .filter((s) => s.score.overall < 0.7 || s.score.confidence < 0.4 || s.score.freshness < 0.3)
+      .map((s) => ({
+        id: `key-genome-section-${this.slug(s.section)}`,
+        type: 'KEY_GENOME_GAP' as const,
+        priority: s.score.overall < 0.4 ? 'HIGH' : 'MEDIUM',
+        title: `${this.titleCase(s.section)} Genome section needs strengthening`,
+        summary: `Overall ${Math.round(s.score.overall * 100)}%, confidence ${Math.round(
+          s.score.confidence * 100,
+        )}%, freshness ${Math.round(s.score.freshness * 100)}%.`,
+        evidence: [
+          `Completeness: ${Math.round(s.score.completeness * 100)}%`,
+          `Operational readiness: ${Math.round(s.score.operationalReadiness * 100)}%`,
+        ],
+        source: 'KEY Genome',
+        href: '/app/profile?tab=business-genome',
+        actions: [
+          {
+            label: 'Improve Genome section',
+            actionType: 'REVIEW' as const,
+            href: '/app/profile?tab=business-genome',
+          },
+        ],
+      }));
   }
 }

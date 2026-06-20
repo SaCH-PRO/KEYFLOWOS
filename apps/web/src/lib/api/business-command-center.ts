@@ -12,7 +12,10 @@ export type CommandCenterItemType =
   | "ASSET_RISK"
   | "CONSTITUTION"
   | "EXECUTIVE_MODE"
-  | "DOCUMENT";
+  | "DOCUMENT"
+  | "KEY_GENOME_GAP"
+  | "MODULE_READINESS"
+  | "MISSING_FACT";
 
 export type CommandCenterActionType =
   | "OPEN"
@@ -58,6 +61,12 @@ export interface CommandCenterHealth {
   pendingGenomeProposalCount: number;
   assetRiskCount: number;
   constitutionStale: boolean;
+  keyGenomeOverall: number;
+  keyGenomeReadiness: number;
+  keyGenomeConfidence: number;
+  blockedModuleCount: number;
+  lowReadinessModuleCount: number;
+  missingBlockingFactCount: number;
 }
 
 export interface CommandCenterExecutiveMode {
@@ -84,6 +93,51 @@ export interface CommandCenterGenome {
   weakestSections: CommandCenterItem[];
 }
 
+export interface CommandCenterKeyGenome {
+  overall: number;
+  integrity: number;
+  readiness: number;
+  confidence: number;
+  computedAt: string;
+  sections: {
+    section: string;
+    weight: number;
+    score: {
+      completeness: number;
+      quality: number;
+      confidence: number;
+      freshness: number;
+      operationalReadiness: number;
+      riskPenalty: number;
+      overall: number;
+    };
+  }[];
+  weakestSections: {
+    section: string;
+    overall: number;
+    confidence: number;
+    freshness: number;
+    readiness: number;
+  }[];
+}
+
+export interface CommandCenterModuleReadiness {
+  module: string;
+  readinessScore: number;
+  automationAllowed: boolean;
+  riskLevel: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  missingFacts: {
+    section: string;
+    domain: string;
+    field: string;
+    reason: string;
+    impact: "BLOCKING" | "DEGRADED" | "OPTIONAL";
+  }[];
+  blockedReasons: string[];
+  recommendedSetupActions: string[];
+  lastComputedAt: string;
+}
+
 export interface BusinessCommandCenterSnapshot {
   businessId: string;
   generatedAt: string;
@@ -96,6 +150,8 @@ export interface BusinessCommandCenterSnapshot {
   risks: CommandCenterItem[];
   opportunities: CommandCenterItem[];
   genome: CommandCenterGenome;
+  keyGenome: CommandCenterKeyGenome;
+  moduleReadiness: CommandCenterModuleReadiness[];
   constitution: CommandCenterConstitution;
   executiveModes: CommandCenterExecutiveMode[];
   recommendedActions: CommandCenterAction[];
