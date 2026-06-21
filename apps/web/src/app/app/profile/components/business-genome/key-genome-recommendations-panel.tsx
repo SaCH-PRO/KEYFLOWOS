@@ -27,6 +27,7 @@ import {
   type GenomeExperimentData,
   type GenomeRecommendationData,
 } from "@/lib/api/business-genome";
+import { RecommendationBridgeModal } from "./recommendation-bridge-modal";
 
 const fade = {
   initial: { opacity: 0, y: 8 },
@@ -59,6 +60,7 @@ export function KeyGenomeRecommendationsPanel({
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [actionId, setActionId] = useState<string | null>(null);
+  const [bridgeRecommendation, setBridgeRecommendation] = useState<GenomeRecommendationData | null>(null);
 
   const businessId = getStoredBusinessId();
 
@@ -290,16 +292,12 @@ export function KeyGenomeRecommendationsPanel({
                   )}
                   {rec.status === "ACCEPTED" && (
                     <button
-                      onClick={() => handleRecommendationAction(rec.id, "apply")}
+                      onClick={() => setBridgeRecommendation(rec)}
                       disabled={isBusy}
                       className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
                     >
-                      {isBusy && actionId === `apply-${rec.id}` ? (
-                        <Loader2 className="w-3 h-3 animate-spin" />
-                      ) : (
-                        <Check className="w-3 h-3" />
-                      )}
-                      Apply
+                      <Check className="w-3 h-3" />
+                      Create action plan
                     </button>
                   )}
                   {rec.suggestedExperimentId && (
@@ -358,6 +356,17 @@ export function KeyGenomeRecommendationsPanel({
           })}
         </div>
       )}
+
+      <RecommendationBridgeModal
+        businessId={businessId ?? ""}
+        recommendation={bridgeRecommendation}
+        open={!!bridgeRecommendation}
+        onClose={() => setBridgeRecommendation(null)}
+        onBridged={() => {
+          void refresh();
+          onGenomeUpdate?.();
+        }}
+      />
     </div>
   );
 }

@@ -250,6 +250,41 @@ describe('KeyGenomeGovernanceService', () => {
     expect(weakItem!.priority).toBe('HIGH');
   });
 
+  it('exposes Create action plan action for ACCEPTED recommendations', async () => {
+    const { service, recommendations } = makeService();
+    recommendations.listRecommendations.mockImplementation((businessId: string, query: any) => {
+      if (query.status === 'ACCEPTED') {
+        return Promise.resolve([
+          {
+            id: 'rec_accepted',
+            businessId,
+            domain: 'VISION_IDENTITY',
+            title: 'Strengthen Vision Genome section',
+            insight: 'Weak vision section.',
+            diagnosis: 'Low score.',
+            recommendation: 'Capture more facts.',
+            expectedGainScore: 70,
+            riskLevel: 'MEDIUM',
+            effortLevel: 'MEDIUM',
+            confidence: 0.7,
+            evidenceIds: [],
+            suggestedExperimentId: null,
+            status: 'ACCEPTED',
+            createdAt: new Date().toISOString(),
+            reviewedAt: new Date().toISOString(),
+            outcomeTrackedAt: null,
+          },
+        ] as GenomeRecommendationData[]);
+      }
+      return Promise.resolve([]);
+    });
+
+    const summary = await service.summary('biz_1');
+    const item = summary.recommendationQueue.find((i) => i.id === 'recommendation-rec_accepted');
+    expect(item).toBeDefined();
+    expect(item!.actions.some((a) => a.actionType === 'BRIDGE' && a.label === 'Create action plan')).toBe(true);
+  });
+
   it('sorts urgent review items by priority then createdAt', async () => {
     const { service, signals } = makeService();
     signals.listSignals.mockImplementation((businessId: string, query: any) => {

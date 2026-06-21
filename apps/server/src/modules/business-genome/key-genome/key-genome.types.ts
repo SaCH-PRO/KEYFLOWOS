@@ -323,6 +323,45 @@ export interface ListGenomeExperimentsQuery {
   limit?: number;
 }
 
+export type GenomeRecommendationActionKind =
+  | 'KEY_ACTION_PROPOSAL'
+  | 'EXPERIMENT'
+  | 'GENOME_REVIEW'
+  | 'DOCUMENT_REQUEST'
+  | 'CONSTITUTION_UPDATE'
+  | 'MANUAL_TASK';
+
+export interface GenomeRecommendationActionPreview {
+  recommendationId: string;
+  actionKind: GenomeRecommendationActionKind;
+  title: string;
+  summary: string;
+  rationale: string;
+  proposedActionType?: string;
+  targetModule?: string | null;
+  riskLevel: RiskLevel;
+  requiresApproval: boolean;
+  readinessWarning?: string | null;
+  evidenceIds: string[];
+  payload: Record<string, unknown>;
+}
+
+export interface BridgeGenomeRecommendationInput {
+  businessId: string;
+  recommendationId: string;
+  actionKind?: GenomeRecommendationActionKind;
+  confirmBridge?: boolean;
+}
+
+export interface BridgeGenomeRecommendationResult {
+  recommendationId: string;
+  actionKind: GenomeRecommendationActionKind;
+  createdEntityType: string;
+  createdEntityId: string;
+  status: 'CREATED' | 'ALREADY_EXISTS' | 'BLOCKED';
+  message: string;
+}
+
 export type KeyGenomeGovernanceItemType =
   | 'SIGNAL'
   | 'RECOMMENDATION'
@@ -341,7 +380,8 @@ export type KeyGenomeGovernanceActionType =
   | 'START'
   | 'COMPLETE'
   | 'CANCEL'
-  | 'OPEN';
+  | 'OPEN'
+  | 'BRIDGE';
 
 export interface KeyGenomeGovernanceItemAction {
   label: string;

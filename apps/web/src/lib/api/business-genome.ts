@@ -539,7 +539,40 @@ export type KeyGenomeGovernanceActionType =
   | 'START'
   | 'COMPLETE'
   | 'CANCEL'
-  | 'OPEN';
+  | 'OPEN'
+  | 'BRIDGE';
+
+export type GenomeRecommendationActionKind =
+  | 'KEY_ACTION_PROPOSAL'
+  | 'EXPERIMENT'
+  | 'GENOME_REVIEW'
+  | 'DOCUMENT_REQUEST'
+  | 'CONSTITUTION_UPDATE'
+  | 'MANUAL_TASK';
+
+export interface GenomeRecommendationActionPreview {
+  recommendationId: string;
+  actionKind: GenomeRecommendationActionKind;
+  title: string;
+  summary: string;
+  rationale: string;
+  proposedActionType?: string;
+  targetModule?: string | null;
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  requiresApproval: boolean;
+  readinessWarning?: string | null;
+  evidenceIds: string[];
+  payload: Record<string, unknown>;
+}
+
+export interface BridgeGenomeRecommendationResult {
+  recommendationId: string;
+  actionKind: GenomeRecommendationActionKind;
+  createdEntityType: string;
+  createdEntityId: string;
+  status: 'CREATED' | 'ALREADY_EXISTS' | 'BLOCKED';
+  message: string;
+}
 
 export interface KeyGenomeGovernanceItemAction {
   label: string;
@@ -602,4 +635,21 @@ export async function getKeyGenomeGovernanceQueue(businessId: string) {
   return apiGet<KeyGenomeGovernanceItem[]>(
     `/business-genome/businesses/${businessId}/key-genome/governance/queue`,
   );
+}
+
+export async function previewRecommendationAction(businessId: string, recommendationId: string) {
+  return apiGet<GenomeRecommendationActionPreview>(
+    `/business-genome/businesses/${businessId}/key-genome/recommendations/${recommendationId}/action-preview`,
+  );
+}
+
+export async function bridgeRecommendationAction(
+  businessId: string,
+  recommendationId: string,
+  input: { actionKind?: GenomeRecommendationActionKind; confirmBridge: boolean },
+) {
+  return apiPost<BridgeGenomeRecommendationResult>({
+    path: `/business-genome/businesses/${businessId}/key-genome/recommendations/${recommendationId}/bridge-action`,
+    body: input,
+  });
 }

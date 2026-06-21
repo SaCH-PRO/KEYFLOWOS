@@ -9,11 +9,13 @@ import { KeyActionProposalService } from './key-action-proposal.service';
 import { KeyActionExecutorService } from './key-action-executor.service';
 import { KeyActionPolicyService } from './key-action-policy.service';
 import { KeyActionGenomePolicyService } from './key-action-genome-policy.service';
+import { KeyGenomeBridgeController } from './key-genome-bridge.controller';
+import { GenomeRecommendationActionBridgeService } from './genome-recommendation-action-bridge.service';
 
 @Module({
   imports: [PrismaModule, TemporalFlowModule, BusinessGenomeModule, GenomeDocumentPackModule, KeyGenomeModule],
-  controllers: [KeyActionProposalController],
-  providers: [KeyActionProposalService, KeyActionExecutorService, KeyActionPolicyService, KeyActionGenomePolicyService],
-  exports: [KeyActionProposalService, KeyActionExecutorService, KeyActionPolicyService, KeyActionGenomePolicyService],
+  controllers: [KeyActionProposalController, KeyGenomeBridgeController],
+  providers: [KeyActionProposalService, KeyActionExecutorService, KeyActionPolicyService, KeyActionGenomePolicyService, GenomeRecommendationActionBridgeService],
+  exports: [KeyActionProposalService, KeyActionExecutorService, KeyActionPolicyService, KeyActionGenomePolicyService, GenomeRecommendationActionBridgeService],
 })
 export class KeyAutonomyModule {}

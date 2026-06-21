@@ -31,10 +31,12 @@ import {
   rejectGenomeSignal,
   reviewGenomeSignal,
   startGenomeExperiment,
+  type GenomeRecommendationData,
   type KeyGenomeGovernanceItem,
   type KeyGenomeGovernanceItemAction,
   type KeyGenomeGovernanceSummary,
 } from "@/lib/api/business-genome";
+import { RecommendationBridgeModal } from "./recommendation-bridge-modal";
 
 const fade = {
   initial: { opacity: 0, y: 8 },
@@ -92,6 +94,7 @@ export function KeyGenomeGovernanceConsole({ onGenomeUpdate }: KeyGenomeGovernan
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [bridgeRecommendation, setBridgeRecommendation] = useState<GenomeRecommendationData | null>(null);
 
   const businessId = getStoredBusinessId();
 
@@ -124,6 +127,27 @@ export function KeyGenomeGovernanceConsole({ onGenomeUpdate }: KeyGenomeGovernan
       } else {
         router.push(`/app/profile?tab=business-genome&section=governance`);
       }
+      return;
+    }
+
+    if (action.actionType === "BRIDGE") {
+      if (!item.sourceId) return;
+      setBridgeRecommendation({
+        id: item.sourceId,
+        businessId: businessId ?? "",
+        domain: item.source,
+        title: item.title,
+        insight: item.summary,
+        diagnosis: "",
+        recommendation: item.summary,
+        expectedGainScore: 0,
+        riskLevel: "MEDIUM",
+        effortLevel: "MEDIUM",
+        confidence: 0.5,
+        evidenceIds: [],
+        status: "ACCEPTED",
+        createdAt: item.createdAt ?? new Date().toISOString(),
+      });
       return;
     }
 
@@ -310,6 +334,17 @@ export function KeyGenomeGovernanceConsole({ onGenomeUpdate }: KeyGenomeGovernan
           onAction={handleAction}
         />
       )}
+
+      <RecommendationBridgeModal
+        businessId={businessId ?? ""}
+        recommendation={bridgeRecommendation}
+        open={!!bridgeRecommendation}
+        onClose={() => setBridgeRecommendation(null)}
+        onBridged={() => {
+          void refresh();
+          onGenomeUpdate?.();
+        }}
+      />
 
       {summary.genomeHealth.weakestSections.length > 0 && (
         <div className="kf-card p-4 space-y-3">

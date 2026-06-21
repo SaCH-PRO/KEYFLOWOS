@@ -244,7 +244,7 @@ export class KeyGenomeGovernanceService {
       );
     } else if (recommendation.status === 'ACCEPTED') {
       actions.push(
-        { label: 'Apply', actionType: 'APPLY' },
+        { label: 'Create action plan', actionType: 'BRIDGE' },
         { label: 'Dismiss', actionType: 'DISMISS' },
       );
     } else {
