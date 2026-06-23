@@ -37,10 +37,17 @@ function makeService() {
     }),
   } as any;
 
+  const departments = {
+    listDepartments: vi.fn().mockResolvedValue([]),
+  } as any;
+
   const prisma = {
     client: {
       keyActionProposal: {
         findMany: vi.fn().mockResolvedValue([]),
+      },
+      genomeMemoryEvent: {
+        count: vi.fn().mockResolvedValue(0),
       },
     },
   } as any;
@@ -52,6 +59,7 @@ function makeService() {
     experiments,
     readiness,
     scoring,
+    departments,
   );
 
   return {
@@ -61,6 +69,7 @@ function makeService() {
     experiments,
     readiness,
     scoring,
+    departments,
     prisma,
   };
 }

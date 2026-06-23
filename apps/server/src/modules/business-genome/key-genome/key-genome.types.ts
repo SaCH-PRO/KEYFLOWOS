@@ -14,6 +14,39 @@ export type RecommendationStatus = 'ACTIVE' | 'ACCEPTED' | 'DISMISSED' | 'APPLIE
 export type ExperimentStatus = 'PROPOSED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
 export type FactValueType = 'STRING' | 'NUMBER' | 'BOOLEAN' | 'DATE' | 'JSON' | 'LIST';
 
+export type GenomeOutcome = 'SUCCESS' | 'FAILURE' | 'MIXED' | 'UNKNOWN';
+
+export type GenomeMemorySourceType =
+  | 'GENOME_RECOMMENDATION'
+  | 'GENOME_EXPERIMENT'
+  | 'GENOME_SIGNAL'
+  | 'KEY_ACTION_PROPOSAL'
+  | 'GENOME_FACT'
+  | 'MODULE_READINESS'
+  | 'GOVERNANCE_DECISION'
+  | 'MANUAL';
+
+export type GenomeMemoryEventType =
+  | 'RECOMMENDATION_ACCEPTED'
+  | 'RECOMMENDATION_DISMISSED'
+  | 'RECOMMENDATION_APPLIED'
+  | 'RECOMMENDATION_OUTCOME_TRACKED'
+  | 'EXPERIMENT_STARTED'
+  | 'EXPERIMENT_COMPLETED'
+  | 'EXPERIMENT_FAILED'
+  | 'EXPERIMENT_CANCELLED'
+  | 'SIGNAL_REVIEWED'
+  | 'SIGNAL_ACCEPTED'
+  | 'SIGNAL_REJECTED'
+  | 'SIGNAL_MERGED'
+  | 'ACTION_PROPOSED'
+  | 'ACTION_EXECUTED'
+  | 'ACTION_BLOCKED'
+  | 'READINESS_IMPROVED'
+  | 'READINESS_DEGRADED'
+  | 'FACT_CONFIDENCE_CHANGED'
+  | 'MANUAL_LESSON';
+
 export type GenomeSignalType =
   | 'NEW_FACT'
   | 'FACT_UPDATE'
@@ -362,6 +395,88 @@ export interface BridgeGenomeRecommendationResult {
   message: string;
 }
 
+export interface GenomeMemoryLesson {
+  lesson: string;
+  confidence?: number;
+  appliesTo?: string[];
+}
+
+export interface GenomeMemoryEventData {
+  id: string;
+  businessId: string;
+  sourceType: GenomeMemorySourceType | string;
+  sourceEntityId?: string | null;
+  eventType: GenomeMemoryEventType | string;
+  domain?: string | null;
+  section?: string | null;
+  title: string;
+  summary: string;
+  outcome?: GenomeOutcome | null;
+  impactScore: number;
+  confidenceDelta: number;
+  evidence: Array<Record<string, unknown>>;
+  lessons: GenomeMemoryLesson[];
+  metadata: Record<string, unknown>;
+  occurredAt?: string | null;
+  createdAt: string;
+}
+
+export interface CreateGenomeMemoryEventInput {
+  businessId: string;
+  sourceType: GenomeMemorySourceType | string;
+  sourceEntityId?: string | null;
+  eventType: GenomeMemoryEventType | string;
+  domain?: string | null;
+  section?: string | null;
+  title: string;
+  summary: string;
+  outcome?: GenomeOutcome | null;
+  impactScore?: number;
+  confidenceDelta?: number;
+  evidence?: Array<Record<string, unknown>>;
+  lessons?: GenomeMemoryLesson[];
+  metadata?: Record<string, unknown>;
+  occurredAt?: string | null;
+}
+
+export interface ListGenomeMemoryEventsQuery {
+  sourceType?: string;
+  eventType?: string;
+  domain?: string;
+  section?: string;
+  outcome?: string;
+  minImpactScore?: number;
+  limit?: number;
+}
+
+export interface GenomeLearningSummary {
+  businessId: string;
+  generatedAt: string;
+  totalMemoryEvents: number;
+  successCount: number;
+  failureCount: number;
+  mixedCount: number;
+  unknownCount: number;
+  averageImpactScore: number;
+  averageConfidenceDelta: number;
+  topLessons: Array<{
+    lesson: string;
+    count: number;
+    averageImpactScore: number;
+  }>;
+  strongestDomains: Array<{
+    domain: string;
+    successCount: number;
+    averageImpactScore: number;
+  }>;
+  weakestDomains: Array<{
+    domain: string;
+    failureCount: number;
+    averageImpactScore: number;
+  }>;
+  recentMemory: GenomeMemoryEventData[];
+}
+
 export type KeyGenomeGovernanceItemType =
   | 'SIGNAL'
   | 'RECOMMENDATION'
@@ -414,6 +529,10 @@ export interface KeyGenomeGovernanceSummary {
     blockedModules: number;
     lowReadinessModules: number;
     autonomyBlockedActions: number;
+    memoryEventsLast7Days: number;
+    failedOutcomesLast30Days: number;
+    blockedDepartments: number;
+    weakDepartments: number;
   };
   urgentReviewItems: KeyGenomeGovernanceItem[];
   signalReviewQueue: KeyGenomeGovernanceItem[];
@@ -421,6 +540,7 @@ export interface KeyGenomeGovernanceSummary {
   experimentQueue: KeyGenomeGovernanceItem[];
   readinessBlockers: KeyGenomeGovernanceItem[];
   autonomyBlocks: KeyGenomeGovernanceItem[];
+  departmentBlockers: KeyGenomeGovernanceItem[];
   genomeHealth: {
     overall: number;
     confidence: number;
@@ -432,5 +552,84 @@ export interface KeyGenomeGovernanceSummary {
       freshness: number;
     }>;
   };
+}
+
+export type GenomeDepartmentCode =
+  | 'CEO_STRATEGY'
+  | 'COO_OPERATIONS'
+  | 'CFO_FINANCE'
+  | 'CMO_MARKETING'
+  | 'SALES'
+  | 'CUSTOMER_SUCCESS'
+  | 'PRODUCT_SERVICE'
+  | 'LEGAL_COMPLIANCE'
+  | 'RISK'
+  | 'TECH_DATA'
+  | 'HR_STAFFING'
+  | 'VENDOR_PROCUREMENT'
+  | 'EXECUTIVE_ASSISTANT';
+
+export type GenomeDepartmentGapType =
+  | 'MISSING_FACT'
+  | 'LOW_CONFIDENCE'
+  | 'READINESS_BLOCKER'
+  | 'WEAK_SECTION'
+  | 'RISK';
+
+export interface GenomeDepartmentGap {
+  type: GenomeDepartmentGapType;
+  section?: string;
+  domain?: string;
+  field?: string;
+  reason: string;
+  impact: 'BLOCKING' | 'DEGRADED' | 'OPTIONAL';
+}
+
+export interface GenomeDepartmentRecommendedAction {
+  label: string;
+  reason: string;
+  priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+}
+
+export interface GenomeDepartmentData {
+  id: string;
+  businessId: string;
+  code: GenomeDepartmentCode | string;
+  name: string;
+  description?: string | null;
+  primarySections: string[];
+  supportingSections: string[];
+  impactedModules: string[];
+  coreCapabilities: string[];
+  maturityScore: number;
+  readinessScore: number;
+  confidenceScore: number;
+  riskLevel: RiskLevel;
+  autonomySensitive: boolean;
+  automationAllowed: boolean;
+  gapSummary: GenomeDepartmentGap[];
+  recommendedActions: GenomeDepartmentRecommendedAction[];
+  lastComputedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DepartmentGenomeSummary {
+  businessId: string;
+  generatedAt: string;
+  departments: GenomeDepartmentData[];
+  strongestDepartments: GenomeDepartmentData[];
+  weakestDepartments: GenomeDepartmentData[];
+  blockedDepartments: GenomeDepartmentData[];
+  automationReadyDepartments: GenomeDepartmentData[];
+  overallDepartmentMaturity: number;
+  overallDepartmentReadiness: number;
+}
+
+export interface ListGenomeDepartmentsQuery {
+  riskLevel?: RiskLevel;
+  automationAllowed?: boolean;
+  minReadinessScore?: number;
+  limit?: number;
 }
 

@@ -214,6 +214,7 @@ model Business {
   businessRules        BusinessRule[]
   businessSignals      BusinessSignal[]
   healthSnapshots      BusinessHealthSnapshot[]
+  genomeMemoryEvents   GenomeMemoryEvent[]
 
   // Finance OS (FIN1)
   financialAccounts     FinancialAccount[]
@@ -523,6 +524,7 @@ model Business {
   genomeModuleReadiness GenomeModuleReadiness[]
   genomeRecommendations GenomeRecommendation[]
   genomeExperiments    GenomeExperiment[]
+  genomeDepartments    GenomeDepartment[]
   constitutionVersions BusinessConstitutionVersion[]
   authorityGrants      AuthorityGrant[]
   timeEntries          TimeEntry[]
@@ -856,6 +858,75 @@ model GenomeExperiment {
 
   @@index([businessId, status])
   @@map("genome_experiments")
+}
+
+model GenomeDepartment {
+  id         String @id @default(cuid())
+  businessId String @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  code        String
+  name        String
+  description String?
+
+  primarySections    Json @default("[]") @map("primary_sections")
+  supportingSections Json @default("[]") @map("supporting_sections")
+  impactedModules    Json @default("[]") @map("impacted_modules")
+  coreCapabilities   Json @default("[]") @map("core_capabilities")
+
+  maturityScore   Float  @default(0) @map("maturity_score")
+  readinessScore  Float  @default(0) @map("readiness_score")
+  confidenceScore Float  @default(0) @map("confidence_score")
+  riskLevel       String @default("MEDIUM") @map("risk_level")
+
+  autonomySensitive Boolean @default(false) @map("autonomy_sensitive")
+  automationAllowed Boolean @default(false) @map("automation_allowed")
+
+  gapSummary         Json @default("[]") @map("gap_summary")
+  recommendedActions Json @default("[]") @map("recommended_actions")
+
+  lastComputedAt DateTime? @map("last_computed_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([businessId, code])
+  @@index([businessId, riskLevel])
+  @@index([businessId, readinessScore])
+  @@map("genome_departments")
+}
+
+model GenomeMemoryEvent {
+  id         String @id @default(cuid())
+  businessId String @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  sourceType     String  @map("source_type")
+  sourceEntityId String? @map("source_entity_id")
+
+  eventType String @map("event_type")
+  domain    String?
+  section   String?
+
+  title   String
+  summary String
+
+  outcome         String? @map("outcome") // SUCCESS | FAILURE | MIXED | UNKNOWN
+  impactScore     Float   @default(0.5) @map("impact_score")
+  confidenceDelta Float   @default(0) @map("confidence_delta")
+
+  evidence Json @default("[]")
+  lessons  Json @default("[]")
+  metadata Json @default("{}")
+
+  occurredAt DateTime? @map("occurred_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  @@index([businessId, sourceType])
+  @@index([businessId, eventType])
+  @@index([businessId, domain])
+  @@index([businessId, occurredAt])
+  @@map("genome_memory_events")
 }
 
 // Phase 12: Living Constitution v2 — versioned, immutable operating document

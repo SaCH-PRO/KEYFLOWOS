@@ -137,8 +137,15 @@ function makeService() {
     emit: vi.fn(),
   } as any;
 
-  const service = new GenomeSignalService(prisma, factService, evidenceService, scoring, readiness, events);
-  return { service, prisma, factService, evidenceService, scoring, readiness, events, storedSignals };
+  const outcomeLearning = {
+    recordSignalReviewed: vi.fn().mockResolvedValue({ id: 'mem_1' }),
+    recordSignalAccepted: vi.fn().mockResolvedValue({ id: 'mem_2' }),
+    recordSignalRejected: vi.fn().mockResolvedValue({ id: 'mem_3' }),
+    recordSignalMerged: vi.fn().mockResolvedValue({ id: 'mem_4' }),
+  } as any;
+
+  const service = new GenomeSignalService(prisma, factService, evidenceService, scoring, readiness, events, outcomeLearning);
+  return { service, prisma, factService, evidenceService, scoring, readiness, events, outcomeLearning, storedSignals };
 }
 
 describe('GenomeSignalService', () => {

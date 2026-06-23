@@ -6,6 +6,7 @@ import { GenomeFactService } from './genome-fact.service';
 import { GenomeEvidenceService } from './genome-evidence.service';
 import { GenomeScoringService } from './genome-scoring.service';
 import { GenomeModuleReadinessService } from './genome-module-readiness.service';
+import { OutcomeLearningService } from './outcome-learning.service';
 import type {
   CreateGenomeSignalInput,
   GenomeEvidenceData,
@@ -81,6 +82,7 @@ export class GenomeSignalService {
     private readonly scoring: GenomeScoringService,
     private readonly readiness: GenomeModuleReadinessService,
     private readonly events: EventEmitter2,
+    private readonly outcomeLearning: OutcomeLearningService,
   ) {}
 
   async createSignal(input: CreateGenomeSignalInput): Promise<GenomeSignalData> {
@@ -188,6 +190,8 @@ export class GenomeSignalService {
       data: { status: 'REVIEWED', reviewedAt: new Date() },
     });
 
+    await this.outcomeLearning.recordSignalReviewed(businessId, toDomain(updated));
+
     return toDomain(updated);
   }
 
@@ -201,6 +205,8 @@ export class GenomeSignalService {
       where: { id: signalId },
       data: { status: 'ACCEPTED', reviewedAt: new Date() },
     });
+
+    await this.outcomeLearning.recordSignalAccepted(businessId, toDomain(updated));
 
     return toDomain(updated);
   }
@@ -216,6 +222,8 @@ export class GenomeSignalService {
       where: { id: signalId },
       data: { status: 'REJECTED', reviewedAt: new Date(), reason: updatedReason },
     });
+
+    await this.outcomeLearning.recordSignalRejected(businessId, toDomain(updated));
 
     return toDomain(updated);
   }
@@ -271,6 +279,8 @@ export class GenomeSignalService {
       domain: signal.domain,
       field,
     });
+
+    await this.outcomeLearning.recordSignalMerged(businessId, toDomain(updated));
 
     return { signal: toDomain(updated), fact };
   }

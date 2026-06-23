@@ -5,6 +5,8 @@ import { GenomeSignalService } from './genome-signal.service';
 import { GenomeModuleReadinessService } from './genome-module-readiness.service';
 import { GenomeScoringService } from './genome-scoring.service';
 import { GenomeExperimentService } from './genome-experiment.service';
+import { GenomeMemoryService } from './genome-memory.service';
+import { OutcomeLearningService } from './outcome-learning.service';
 import {
   KEY_GENOME_SECTION_CONFIG,
   type KeyGenomeSection,
@@ -137,6 +139,8 @@ export class GenomeRecommendationService {
     private readonly readiness: GenomeModuleReadinessService,
     private readonly scoring: GenomeScoringService,
     private readonly experimentService: GenomeExperimentService,
+    private readonly memory: GenomeMemoryService,
+    private readonly outcomeLearning: OutcomeLearningService,
   ) {}
 
   async createRecommendation(
@@ -223,6 +227,8 @@ export class GenomeRecommendationService {
       data: { status: 'ACCEPTED' as RecommendationStatus, reviewedAt: new Date() },
     });
 
+    await this.outcomeLearning.recordRecommendationAccepted(businessId, toDomain(updated));
+
     return toDomain(updated);
   }
 
@@ -236,6 +242,8 @@ export class GenomeRecommendationService {
       where: { id: recommendationId },
       data: { status: 'DISMISSED' as RecommendationStatus, reviewedAt: new Date() },
     });
+
+    await this.outcomeLearning.recordRecommendationDismissed(businessId, toDomain(updated));
 
     return toDomain(updated);
   }
@@ -255,6 +263,8 @@ export class GenomeRecommendationService {
       },
     });
 
+    await this.outcomeLearning.recordRecommendationApplied(businessId, toDomain(updated));
+
     return toDomain(updated);
   }
 
@@ -272,6 +282,8 @@ export class GenomeRecommendationService {
         expectedGainScore: outcome.measuredValue ?? undefined,
       },
     });
+
+    await this.outcomeLearning.recordRecommendationOutcome(businessId, toDomain(updated), outcome);
 
     return toDomain(updated);
   }
@@ -317,7 +329,8 @@ export class GenomeRecommendationService {
       candidates.push(...this.buildWeakSectionCandidates(score));
     }
 
-    const ranked = this.rankCandidates(candidates).slice(0, maxRecommendations);
+    const adjusted = await this.applyMemoryConfidenceAdjustment(input.businessId, candidates);
+    const ranked = this.rankCandidates(adjusted).slice(0, maxRecommendations);
     const created: GenomeRecommendationData[] = [];
 
     for (const candidate of ranked) {
@@ -504,6 +517,31 @@ export class GenomeRecommendationService {
 
   private rankCandidates(candidates: CandidateRecommendation[]): CandidateRecommendation[] {
     return [...candidates].sort((a, b) => this.candidateScore(b) - this.candidateScore(a));
+  }
+
+  private async applyMemoryConfidenceAdjustment(
+    businessId: string,
+    candidates: CandidateRecommendation[],
+  ): Promise<CandidateRecommendation[]> {
+    const memoryEvents = await this.memory.listMemoryEvents(businessId, { limit: 1000 });
+    const domainAdjustments = new Map<string, number>();
+
+    for (const event of memoryEvents) {
+      if (!event.domain) continue;
+      const current = domainAdjustments.get(event.domain) ?? 0;
+      if (event.outcome === 'SUCCESS') domainAdjustments.set(event.domain, current + 0.05);
+      if (event.outcome === 'FAILURE') domainAdjustments.set(event.domain, current - 0.05);
+      if (event.outcome === 'MIXED') domainAdjustments.set(event.domain, current + 0.02);
+    }
+
+    return candidates.map((candidate) => {
+      const adjustment = domainAdjustments.get(candidate.domain) ?? 0;
+      if (adjustment === 0) return candidate;
+      return {
+        ...candidate,
+        confidence: Math.max(0, Math.min(1, candidate.confidence + adjustment)),
+      };
+    });
   }
 
   private candidateScore(candidate: CandidateRecommendation): number {

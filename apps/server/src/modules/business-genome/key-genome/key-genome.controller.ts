@@ -14,9 +14,13 @@ import { GenomeSignalService } from './genome-signal.service';
 import { GenomeRecommendationService } from './genome-recommendation.service';
 import { GenomeExperimentService } from './genome-experiment.service';
 import { KeyGenomeGovernanceService } from './key-genome-governance.service';
+import { GenomeMemoryService } from './genome-memory.service';
+import { GenomeDepartmentService } from './genome-department.service';
+import { DepartmentReadinessService } from './department-readiness.service';
 import type {
   CreateGenomeExperimentInput,
   GenerateGenomeRecommendationsInput,
+  GenomeOutcome,
   RecommendationOutcome,
 } from './key-genome.types';
 
@@ -29,6 +33,9 @@ export class KeyGenomeController {
     private readonly recommendationService: GenomeRecommendationService,
     @Inject(GenomeExperimentService) private readonly experimentService: GenomeExperimentService,
     @Inject(KeyGenomeGovernanceService) private readonly governanceService: KeyGenomeGovernanceService,
+    @Inject(GenomeMemoryService) private readonly memoryService: GenomeMemoryService,
+    @Inject(GenomeDepartmentService) private readonly departments: GenomeDepartmentService,
+    @Inject(DepartmentReadinessService) private readonly departmentReadiness: DepartmentReadinessService,
   ) {}
 
   @Get('signals')
@@ -213,6 +220,57 @@ export class KeyGenomeController {
     return this.experimentService.cancelExperiment(businessId, experimentId);
   }
 
+  @Get('memory')
+  async listMemoryEvents(
+    @Param('businessId') businessId: string,
+    @Query('sourceType') sourceType?: string,
+    @Query('eventType') eventType?: string,
+    @Query('domain') domain?: string,
+    @Query('section') section?: string,
+    @Query('outcome') outcome?: string,
+    @Query('minImpactScore') minImpactScore?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.memoryService.listMemoryEvents(businessId, {
+      sourceType,
+      eventType,
+      domain,
+      section,
+      outcome: outcome as GenomeOutcome | undefined,
+      minImpactScore: minImpactScore !== undefined ? Number(minImpactScore) : undefined,
+      limit: limit !== undefined ? Number(limit) : undefined,
+    });
+  }
+
+  @Get('memory/summary')
+  async memorySummary(@Param('businessId') businessId: string) {
+    return this.memoryService.summarizeMemory(businessId);
+  }
+
+  @Get('memory/similar')
+  async findSimilarMemory(
+    @Param('businessId') businessId: string,
+    @Query('domain') domain?: string,
+    @Query('eventType') eventType?: string,
+    @Query('outcome') outcome?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.memoryService.findSimilarMemory(businessId, {
+      domain,
+      eventType,
+      outcome,
+      limit: limit !== undefined ? Number(limit) : undefined,
+    });
+  }
+
+  @Get('memory/:memoryEventId')
+  async getMemoryEvent(
+    @Param('businessId') businessId: string,
+    @Param('memoryEventId') memoryEventId: string,
+  ) {
+    return this.memoryService.getMemoryEvent(businessId, memoryEventId);
+  }
+
   @Get('governance')
   async governance(@Param('businessId') businessId: string) {
     return this.governanceService.summary(businessId);
@@ -221,5 +279,52 @@ export class KeyGenomeController {
   @Get('governance/queue')
   async governanceQueue(@Param('businessId') businessId: string) {
     return this.governanceService.queue(businessId);
+  }
+
+  @Get('departments')
+  async listDepartments(
+    @Param('businessId') businessId: string,
+    @Query('riskLevel') riskLevel?: string,
+    @Query('automationAllowed') automationAllowed?: string,
+    @Query('minReadinessScore') minReadinessScore?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.departments.listDepartments(businessId, {
+      riskLevel: riskLevel as 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' | undefined,
+      automationAllowed: automationAllowed !== undefined ? automationAllowed === 'true' : undefined,
+      minReadinessScore: minReadinessScore !== undefined ? Number(minReadinessScore) : undefined,
+      limit: limit !== undefined ? Number(limit) : undefined,
+    });
+  }
+
+  @Get('departments/summary')
+  async departmentsSummary(@Param('businessId') businessId: string) {
+    return this.departments.summary(businessId);
+  }
+
+  @Post('departments/seed')
+  async seedDepartments(@Param('businessId') businessId: string) {
+    return this.departments.seedDepartments(businessId);
+  }
+
+  @Post('departments/compute')
+  async computeDepartments(@Param('businessId') businessId: string) {
+    return this.departmentReadiness.computeDepartmentReadiness(businessId);
+  }
+
+  @Get('departments/:code')
+  async getDepartment(
+    @Param('businessId') businessId: string,
+    @Param('code') code: string,
+  ) {
+    return this.departments.getDepartment(businessId, code);
+  }
+
+  @Post('departments/:code/compute')
+  async computeDepartment(
+    @Param('businessId') businessId: string,
+    @Param('code') code: string,
+  ) {
+    return this.departmentReadiness.computeOneDepartment(businessId, code);
   }
 }

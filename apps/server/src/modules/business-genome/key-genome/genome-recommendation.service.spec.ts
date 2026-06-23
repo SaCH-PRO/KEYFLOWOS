@@ -119,12 +119,26 @@ function makeService() {
     }),
   } as any;
 
+  const memoryService = {
+    createMemoryEvent: vi.fn().mockResolvedValue({ id: 'mem_1' }),
+    listMemoryEvents: vi.fn().mockResolvedValue([]),
+  } as any;
+
+  const outcomeLearning = {
+    recordRecommendationAccepted: vi.fn().mockResolvedValue({ id: 'mem_1' }),
+    recordRecommendationDismissed: vi.fn().mockResolvedValue({ id: 'mem_2' }),
+    recordRecommendationApplied: vi.fn().mockResolvedValue({ id: 'mem_3' }),
+    recordRecommendationOutcome: vi.fn().mockResolvedValue({ id: 'mem_4' }),
+  } as any;
+
   const service = new GenomeRecommendationService(
     prisma,
     signalService,
     readiness,
     scoring,
     experimentService,
+    memoryService,
+    outcomeLearning,
   );
 
   return {
@@ -134,6 +148,8 @@ function makeService() {
     readiness,
     scoring,
     experimentService,
+    memoryService,
+    outcomeLearning,
     storedRecs,
     storedExperiments,
   };

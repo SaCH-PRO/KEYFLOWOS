@@ -9,6 +9,10 @@ import { GenomeSignalService } from './genome-signal.service';
 import { GenomeRecommendationService } from './genome-recommendation.service';
 import { GenomeExperimentService } from './genome-experiment.service';
 import { KeyGenomeGovernanceService } from './key-genome-governance.service';
+import { GenomeMemoryService } from './genome-memory.service';
+import { OutcomeLearningService } from './outcome-learning.service';
+import { GenomeDepartmentService } from './genome-department.service';
+import { DepartmentReadinessService } from './department-readiness.service';
 
 @Module({
   imports: [PrismaModule],
@@ -22,6 +26,10 @@ import { KeyGenomeGovernanceService } from './key-genome-governance.service';
     GenomeRecommendationService,
     GenomeExperimentService,
     KeyGenomeGovernanceService,
+    GenomeMemoryService,
+    OutcomeLearningService,
+    GenomeDepartmentService,
+    DepartmentReadinessService,
   ],
   exports: [
     GenomeFactService,
@@ -33,6 +41,10 @@ import { KeyGenomeGovernanceService } from './key-genome-governance.service';
     GenomeRecommendationService,
     GenomeExperimentService,
     KeyGenomeGovernanceService,
+    GenomeMemoryService,
+    OutcomeLearningService,
+    GenomeDepartmentService,
+    DepartmentReadinessService,
   ],
 })
 export class KeyGenomeModule {}

@@ -220,6 +220,91 @@ export interface GenomeSignalListFilters {
   limit?: number;
 }
 
+export type GenomeMemorySourceType =
+  | 'GENOME_RECOMMENDATION'
+  | 'GENOME_EXPERIMENT'
+  | 'GENOME_SIGNAL'
+  | 'KEY_ACTION_PROPOSAL'
+  | 'GENOME_FACT'
+  | 'MODULE_READINESS'
+  | 'GOVERNANCE_DECISION'
+  | 'MANUAL';
+
+export type GenomeMemoryEventType =
+  | 'RECOMMENDATION_ACCEPTED'
+  | 'RECOMMENDATION_DISMISSED'
+  | 'RECOMMENDATION_APPLIED'
+  | 'RECOMMENDATION_OUTCOME_TRACKED'
+  | 'EXPERIMENT_STARTED'
+  | 'EXPERIMENT_COMPLETED'
+  | 'EXPERIMENT_FAILED'
+  | 'EXPERIMENT_CANCELLED'
+  | 'SIGNAL_REVIEWED'
+  | 'SIGNAL_ACCEPTED'
+  | 'SIGNAL_REJECTED'
+  | 'SIGNAL_MERGED'
+  | 'ACTION_PROPOSED'
+  | 'ACTION_EXECUTED'
+  | 'ACTION_BLOCKED'
+  | 'READINESS_IMPROVED'
+  | 'READINESS_DEGRADED'
+  | 'FACT_CONFIDENCE_CHANGED'
+  | 'MANUAL_LESSON';
+
+export type GenomeOutcome = 'SUCCESS' | 'FAILURE' | 'MIXED' | 'UNKNOWN';
+
+export interface GenomeMemoryLesson {
+  lesson: string;
+  confidence?: number;
+  appliesTo?: string[];
+}
+
+export interface GenomeMemoryEventData {
+  id: string;
+  businessId: string;
+  sourceType: GenomeMemorySourceType;
+  sourceEntityId?: string | null;
+  eventType: GenomeMemoryEventType;
+  domain?: string | null;
+  section?: string | null;
+  title: string;
+  summary: string;
+  outcome: GenomeOutcome;
+  impactScore: number;
+  confidenceDelta: number;
+  evidence?: unknown[];
+  lessons?: GenomeMemoryLesson[];
+  metadata?: Record<string, unknown>;
+  occurredAt?: string | null;
+  createdAt: string;
+}
+
+export interface GenomeMemoryEventListFilters {
+  sourceType?: string;
+  eventType?: string;
+  domain?: string;
+  section?: string;
+  outcome?: string;
+  minImpactScore?: number;
+  limit?: number;
+}
+
+export interface GenomeLearningSummary {
+  businessId: string;
+  generatedAt: string;
+  totalMemoryEvents: number;
+  successCount: number;
+  failureCount: number;
+  mixedCount: number;
+  unknownCount: number;
+  averageImpactScore: number;
+  averageConfidenceDelta: number;
+  topLessons: GenomeMemoryLesson[];
+  strongestDomains: Array<{ domain: string; successCount: number; averageImpactScore: number }>;
+  weakestDomains: Array<{ domain: string; failureCount: number; averageImpactScore: number }>;
+  recentMemory: GenomeMemoryEventData[];
+}
+
 export interface ConstitutionVersion {
   id: string;
   businessId: string;
@@ -605,6 +690,8 @@ export interface KeyGenomeGovernanceSummary {
     blockedModules: number;
     lowReadinessModules: number;
     autonomyBlockedActions: number;
+    memoryEventsLast7Days: number;
+    failedOutcomesLast30Days: number;
   };
   urgentReviewItems: KeyGenomeGovernanceItem[];
   signalReviewQueue: KeyGenomeGovernanceItem[];
@@ -652,4 +739,50 @@ export async function bridgeRecommendationAction(
     path: `/business-genome/businesses/${businessId}/key-genome/recommendations/${recommendationId}/bridge-action`,
     body: input,
   });
+}
+
+
+export async function listGenomeMemoryEvents(
+  businessId: string,
+  filters: GenomeMemoryEventListFilters = {},
+) {
+  const params = new URLSearchParams();
+  if (filters.sourceType) params.set('sourceType', filters.sourceType);
+  if (filters.eventType) params.set('eventType', filters.eventType);
+  if (filters.domain) params.set('domain', filters.domain);
+  if (filters.section) params.set('section', filters.section);
+  if (filters.outcome) params.set('outcome', filters.outcome);
+  if (filters.minImpactScore !== undefined) params.set('minImpactScore', String(filters.minImpactScore));
+  if (filters.limit !== undefined) params.set('limit', String(filters.limit));
+  const query = params.toString();
+  return apiGet<GenomeMemoryEventData[]>(
+    `/business-genome/businesses/${businessId}/key-genome/memory${query ? `?${query}` : ''}`,
+  );
+}
+
+export async function getGenomeMemoryEvent(businessId: string, memoryEventId: string) {
+  return apiGet<GenomeMemoryEventData>(
+    `/business-genome/businesses/${businessId}/key-genome/memory/${memoryEventId}`,
+  );
+}
+
+export async function getGenomeLearningSummary(businessId: string) {
+  return apiGet<GenomeLearningSummary>(
+    `/business-genome/businesses/${businessId}/key-genome/memory/summary`,
+  );
+}
+
+export async function findSimilarGenomeMemory(
+  businessId: string,
+  filters: { domain?: string; eventType?: string; outcome?: string; limit?: number } = {},
+) {
+  const params = new URLSearchParams();
+  if (filters.domain) params.set('domain', filters.domain);
+  if (filters.eventType) params.set('eventType', filters.eventType);
+  if (filters.outcome) params.set('outcome', filters.outcome);
+  if (filters.limit !== undefined) params.set('limit', String(filters.limit));
+  const query = params.toString();
+  return apiGet<GenomeMemoryEventData[]>(
+    `/business-genome/businesses/${businessId}/key-genome/memory/similar${query ? `?${query}` : ''}`,
+  );
 }

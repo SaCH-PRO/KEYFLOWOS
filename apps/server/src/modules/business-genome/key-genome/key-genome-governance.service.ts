@@ -5,6 +5,7 @@ import { GenomeRecommendationService } from './genome-recommendation.service';
 import { GenomeExperimentService } from './genome-experiment.service';
 import { GenomeModuleReadinessService } from './genome-module-readiness.service';
 import { GenomeScoringService } from './genome-scoring.service';
+import { GenomeDepartmentService } from './genome-department.service';
 import type {
   GenomeExperimentData,
   GenomeRecommendationData,
@@ -55,6 +56,7 @@ export class KeyGenomeGovernanceService {
     private readonly experiments: GenomeExperimentService,
     private readonly readiness: GenomeModuleReadinessService,
     private readonly scoring: GenomeScoringService,
+    private readonly departments: GenomeDepartmentService,
   ) {}
 
   async summary(businessId: string): Promise<KeyGenomeGovernanceSummary> {
@@ -65,6 +67,7 @@ export class KeyGenomeGovernanceService {
       acceptedRecommendations,
       experiments,
       readinessList,
+      departments,
     ] = await Promise.all([
       this.signals.listSignals(businessId, { status: 'NEW', limit: 25 }),
       this.signals.listSignals(businessId, { status: 'ACCEPTED', limit: 25 }),
@@ -72,6 +75,18 @@ export class KeyGenomeGovernanceService {
       this.recommendations.listRecommendations(businessId, { status: 'ACCEPTED', limit: 25 }),
       this.experiments.listExperiments(businessId, { limit: 25 }),
       this.readiness.getReadiness(businessId) as Promise<ModuleReadinessData[]>,
+      this.departments.listDepartments(businessId),
+    ]);
+
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const [memoryEventsLast7Days, failedOutcomesLast30Days] = await Promise.all([
+      this.prisma.client.genomeMemoryEvent.count({
+        where: { businessId, createdAt: { gte: sevenDaysAgo } },
+      }),
+      this.prisma.client.genomeMemoryEvent.count({
+        where: { businessId, outcome: 'FAILURE', createdAt: { gte: thirtyDaysAgo } },
+      }),
     ]);
 
     const [autonomyBlocks, facts] = await Promise.all([
@@ -129,6 +144,10 @@ export class KeyGenomeGovernanceService {
         blockedModules: readinessList.filter((r) => !r.automationAllowed).length,
         lowReadinessModules: readinessList.filter((r) => r.readinessScore < 70).length,
         autonomyBlockedActions: autonomyBlocks.length,
+        memoryEventsLast7Days,
+        failedOutcomesLast30Days,
+        blockedDepartments: departments.filter((d) => !d.automationAllowed).length,
+        weakDepartments: departments.filter((d) => d.maturityScore < 70).length,
       },
       urgentReviewItems,
       signalReviewQueue: signalItems.sort(sortByPriorityAndDate),
@@ -136,6 +155,10 @@ export class KeyGenomeGovernanceService {
       experimentQueue: experimentItems.sort(sortByPriorityAndDate),
       readinessBlockers: readinessItems.sort(sortByPriorityAndDate),
       autonomyBlocks: autonomyItems.sort(sortByPriorityAndDate),
+      departmentBlockers: departments
+        .filter((d) => !d.automationAllowed || d.riskLevel === 'HIGH' || d.riskLevel === 'CRITICAL')
+        .map((d) => this.departmentToGovernanceItem(d))
+        .sort(sortByPriorityAndDate),
       genomeHealth: {
         overall: Math.round(score.overall * 100),
         confidence: Math.round(score.confidence * 100),
@@ -353,6 +376,40 @@ export class KeyGenomeGovernanceService {
       sourceId: block.id,
       createdAt: block.createdAt.toISOString(),
       actions: [{ label: 'Open', actionType: 'OPEN', href: '/app/key-autonomy' }],
+    };
+  }
+
+  private departmentToGovernanceItem(department: {
+    code: string;
+    name: string;
+    maturityScore: number;
+    readinessScore: number;
+    riskLevel: string;
+    automationAllowed: boolean;
+    gapSummary: Array<{ reason: string; impact: string }>;
+    lastComputedAt?: string | null;
+  }): KeyGenomeGovernanceItem {
+    const priority: KeyGenomeGovernanceItem['priority'] =
+      department.riskLevel === 'CRITICAL' || department.readinessScore < 40
+        ? 'CRITICAL'
+        : department.riskLevel === 'HIGH' || department.readinessScore < 60
+          ? 'HIGH'
+          : 'MEDIUM';
+
+    const topGap = department.gapSummary[0];
+
+    return {
+      id: `department-${department.code}`,
+      type: 'READINESS_BLOCKER',
+      priority,
+      title: `${department.name} department is not ready`,
+      summary:
+        topGap?.reason ??
+        `${department.name} readiness is ${Math.round(department.readinessScore)}%. Automation is ${department.automationAllowed ? 'allowed' : 'blocked'}.`,
+      source: 'KEY Genome',
+      sourceId: department.code,
+      createdAt: department.lastComputedAt ?? null,
+      actions: [{ label: 'Open', actionType: 'OPEN', href: '/app/profile?tab=business-genome&section=departments' }],
     };
   }
 

@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../core/prisma/prisma.service';
+import { OutcomeLearningService } from './outcome-learning.service';
 import type {
   CreateGenomeExperimentInput,
   ExperimentStatus,
@@ -45,7 +46,10 @@ function toDomain(row: {
 
 @Injectable()
 export class GenomeExperimentService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly outcomeLearning: OutcomeLearningService,
+  ) {}
 
   async createExperiment(input: CreateGenomeExperimentInput): Promise<GenomeExperimentData> {
     const created = await this.prisma.client.genomeExperiment.create({
@@ -102,6 +106,8 @@ export class GenomeExperimentService {
       data: { status: 'RUNNING' as ExperimentStatus, startedAt: new Date() },
     });
 
+    await this.outcomeLearning.recordExperimentStarted(businessId, toDomain(updated));
+
     return toDomain(updated);
   }
 
@@ -128,6 +134,8 @@ export class GenomeExperimentService {
         result: result ?? undefined,
       },
     });
+
+    await this.outcomeLearning.recordExperimentCompleted(businessId, toDomain(updated), outcome);
 
     return toDomain(updated);
   }
@@ -156,6 +164,8 @@ export class GenomeExperimentService {
       },
     });
 
+    await this.outcomeLearning.recordExperimentFailed(businessId, toDomain(updated), outcome);
+
     return toDomain(updated);
   }
 
@@ -167,6 +177,9 @@ export class GenomeExperimentService {
       data: { status: 'CANCELLED' as ExperimentStatus, endedAt: new Date() },
     });
 
+    await this.outcomeLearning.recordExperimentCancelled(businessId, toDomain(updated));
+
     return toDomain(updated);
   }
+
 }
