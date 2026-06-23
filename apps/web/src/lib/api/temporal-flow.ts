@@ -52,12 +52,35 @@ export interface TemporalFlowGenomeCandidate {
   evidence: string[];
 }
 
+export interface TemporalFlowMemoryInsight {
+  title: string;
+  reason: string;
+  evidence?: string[];
+  memoryId?: string;
+}
+
 export interface TemporalFlowAnalysis {
   summary: string;
   urgentItems: TemporalFlowAnalysisItem[];
   opportunities: TemporalFlowOpportunity[];
   risks: TemporalFlowRisk[];
   genomeProposalCandidates: TemporalFlowGenomeCandidate[];
+  memoryInsights?: TemporalFlowMemoryInsight[];
+}
+
+export interface TemporalFlowMemory {
+  id: string;
+  businessId: string;
+  entityType: string;
+  entityId: string | null;
+  type: string;
+  content: string;
+  sourceEventIds: string[];
+  sourceModule: string;
+  metadata: Record<string, unknown> | null;
+  confidence: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface TemporalFlowListParams {
@@ -127,6 +150,48 @@ export function analyzeTemporalFlow(businessId: string) {
 export function syncGoogleCalendarToTemporalFlow(businessId: string) {
   return apiPost<{ synced: number; skipped: number }>({
     path: `/calendar/businesses/${businessId}/sync/google/temporal-flow`,
+    body: {},
+  });
+}
+
+export function getTemporalFlowMemory(
+  businessId: string,
+  params: {
+    entityType?: string;
+    entityId?: string;
+    type?: string;
+    limit?: number;
+  } = {},
+) {
+  const qs = new URLSearchParams();
+  if (params.entityType) qs.set("entityType", params.entityType);
+  if (params.entityId) qs.set("entityId", params.entityId);
+  if (params.type) qs.set("type", params.type);
+  if (params.limit) qs.set("limit", String(params.limit));
+  const query = qs.toString();
+  return apiGet<TemporalFlowMemory[]>(
+    `/temporal-flow/businesses/${businessId}/memory${query ? `?${query}` : ""}`,
+  );
+}
+
+export function searchTemporalFlowMemory(businessId: string, query: string, limit = 10) {
+  return apiGet<
+    Array<{ id: string; content: string; sourceType: string; sourceId: string; similarity: number }>
+  >(
+    `/temporal-flow/businesses/${businessId}/memory/search?q=${encodeURIComponent(query)}&limit=${limit}`,
+  );
+}
+
+export function compactTemporalFlowMemory(businessId: string) {
+  return apiPost<{ id: string }>({
+    path: `/temporal-flow/businesses/${businessId}/memory/compact`,
+    body: {},
+  });
+}
+
+export function detectTemporalFlowPatterns(businessId: string) {
+  return apiPost<{ id: string }>({
+    path: `/temporal-flow/businesses/${businessId}/memory/detect-patterns`,
     body: {},
   });
 }

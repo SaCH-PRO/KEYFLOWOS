@@ -15,7 +15,7 @@ export interface SemanticMemory {
 export interface StoreMemoryInput {
   businessId: string;
   content: string;
-  sourceType: 'memory' | 'event' | 'conversation' | 'document' | 'action';
+  sourceType: 'memory' | 'event' | 'conversation' | 'document' | 'action' | 'temporal_memory';
   sourceId: string;
   metadata?: Record<string, any>;
 }

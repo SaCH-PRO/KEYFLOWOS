@@ -515,6 +515,7 @@ model Business {
   assets               Asset[]
   businessAssets       BusinessAsset[]
   temporalFlowEvents   TemporalFlowEvent[]
+  temporalFlowMemories TemporalFlowMemory[]
   genomeEvolutionProposals GenomeEvolutionProposal[]
   genomeFacts          GenomeFact[]
   genomeEvidence       GenomeEvidence[]
@@ -617,9 +618,42 @@ model TemporalFlowEvent {
   @@index([businessId, module])
   @@index([businessId, status])
   @@index([businessId, reminderAt])
+  threadId          String?  @map("thread_id")
+  messageId         String?  @map("message_id")
+  contactId         String?  @map("contact_id")
+  memoryEmbeddingId String?  @map("memory_embedding_id")
+
   @@index([businessId, genomeImpactPotential])
+  @@index([businessId, threadId])
+  @@index([businessId, contactId])
+  @@index([businessId, messageId])
   @@unique([businessId, source, externalId])
   @@map("temporal_flow_events")
+}
+
+model TemporalFlowMemory {
+  id             String   @id @default(cuid())
+  businessId     String   @map("business_id")
+  business       Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  entityType     String   @map("entity_type") // contact | thread | channel | business
+  entityId       String?  @map("entity_id")
+  type           String   // summary | pattern | insight | recommendation
+
+  content        String
+  sourceEventIds String[] @default([]) @map("source_event_ids")
+  sourceModule   String   @map("source_module")
+
+  metadata       Json?    @default("{}")
+  confidence     Float    @default(0.5)
+
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId, entityType, entityId])
+  @@index([businessId, type])
+  @@index([businessId, updatedAt])
+  @@map("temporal_flow_memories")
 }
 
 model GenomeEvolutionProposal {

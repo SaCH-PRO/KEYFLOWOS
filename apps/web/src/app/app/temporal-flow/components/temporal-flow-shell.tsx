@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Clock, CalendarDays, Bell, Sparkles, List, Plus } from "lucide-react";
+import { Clock, CalendarDays, Bell, Sparkles, List, Plus, Brain } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   TemporalFlowEvent,
@@ -16,14 +16,16 @@ import { TemporalFlowTimeline } from "./temporal-flow-timeline";
 import { TemporalFlowCalendar } from "./temporal-flow-calendar";
 import { TemporalFlowReminders } from "./temporal-flow-reminders";
 import { TemporalFlowKeyAnalysis } from "./temporal-flow-key-analysis";
+import { TemporalFlowMemoryTab } from "./temporal-flow-memory-tab";
 
-type TabId = "timeline" | "calendar" | "reminders" | "analysis";
+type TabId = "timeline" | "calendar" | "reminders" | "analysis" | "memory";
 
 const TABS: { id: TabId; label: string; icon: React.ElementType }[] = [
   { id: "timeline", label: "Timeline", icon: List },
   { id: "calendar", label: "Calendar", icon: CalendarDays },
   { id: "reminders", label: "Reminders", icon: Bell },
   { id: "analysis", label: "KEY Analysis", icon: Sparkles },
+  { id: "memory", label: "Memory", icon: Brain },
 ];
 
 export function TemporalFlowShell() {
@@ -126,6 +128,8 @@ export function TemporalFlowShell() {
           <TemporalFlowKeyAnalysis />
         </>
       )}
+
+      {activeTab === "memory" && <TemporalFlowMemoryTab />}
 
       {showCreate && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">

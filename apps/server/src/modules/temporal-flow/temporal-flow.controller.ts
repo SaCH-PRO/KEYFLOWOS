@@ -13,13 +13,20 @@ import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { CreateTemporalFlowEventDto } from './dto/create-temporal-flow-event.dto';
 import { TemporalFlowQueryDto } from './dto/temporal-flow-query.dto';
+import { TemporalFlowMemoryQueryDto } from './dto/temporal-flow-memory-query.dto';
 import { TemporalFlowService } from './temporal-flow.service';
+import { TemporalFlowMemoryService } from './temporal-flow-memory.service';
+import { TemporalFlowMemoryQueueService } from './temporal-flow-memory.queue.service';
+import { TemporalFlowGenomeBridgeService } from './temporal-flow-genome-bridge.service';
 
 @Controller('temporal-flow/businesses/:businessId')
 @UseGuards(AuthGuard, BusinessGuard)
 export class TemporalFlowController {
   constructor(
     @Inject(TemporalFlowService) private readonly temporal: TemporalFlowService,
+    @Inject(TemporalFlowMemoryService) private readonly memory: TemporalFlowMemoryService,
+    @Inject(TemporalFlowMemoryQueueService) private readonly memoryQueue: TemporalFlowMemoryQueueService,
+    @Inject(TemporalFlowGenomeBridgeService) private readonly genomeBridge: TemporalFlowGenomeBridgeService,
   ) {}
 
   @Get()
@@ -73,5 +80,46 @@ export class TemporalFlowController {
   @Post('analyze')
   analyze(@Param('businessId') businessId: string) {
     return this.temporal.analyze(businessId);
+  }
+
+  @Get('memory')
+  listMemory(
+    @Param('businessId') businessId: string,
+    @Query() query: TemporalFlowMemoryQueryDto,
+  ) {
+    return this.memory.findMany(businessId, {
+      entityType: query.entityType,
+      entityId: query.entityId,
+      type: query.type,
+      limit: query.limit,
+    });
+  }
+
+  @Get('memory/search')
+  searchMemory(
+    @Param('businessId') businessId: string,
+    @Query('q') q: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.memory.searchMemory(businessId, q, limit ? Number(limit) : 10);
+  }
+
+  @Get('memory/by-entity/:entityType/:entityId')
+  memoryByEntity(
+    @Param('businessId') businessId: string,
+    @Param('entityType') entityType: string,
+    @Param('entityId') entityId: string,
+  ) {
+    return this.memory.findByEntity(businessId, entityType, entityId);
+  }
+
+  @Post('memory/compact')
+  compactMemory(@Param('businessId') businessId: string) {
+    return this.memoryQueue.enqueue({ businessId, operation: 'compact' });
+  }
+
+  @Post('memory/detect-patterns')
+  detectPatterns(@Param('businessId') businessId: string) {
+    return this.memoryQueue.enqueue({ businessId, operation: 'detect_patterns' });
   }
 }

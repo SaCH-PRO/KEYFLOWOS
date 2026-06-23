@@ -1,11 +1,13 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { Inject } from '@nestjs/common';
+import { Injectable, Logger, Inject } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { SemanticMemoryService } from '../ai/semantic-memory.service';
+import { TemporalFlowMemoryService } from './temporal-flow-memory.service';
 import type {
   TemporalFlowAnalysis,
   TemporalFlowEventInput,
   TemporalFlowGenomeCandidate,
+  TemporalFlowMemoryInsight,
 } from './temporal-flow.types';
 
 export interface TemporalFlowListQuery {
@@ -24,7 +26,11 @@ export interface TemporalFlowListQuery {
 export class TemporalFlowService {
   private readonly logger = new Logger(TemporalFlowService.name);
 
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(TemporalFlowMemoryService) private readonly memoryService?: TemporalFlowMemoryService,
+    @Inject(SemanticMemoryService) private readonly semanticMemory?: SemanticMemoryService,
+  ) {}
 
   async emit(input: TemporalFlowEventInput) {
     const data = this.buildCreateData(input);
@@ -190,6 +196,8 @@ export class TemporalFlowService {
 
     const genomeProposalCandidates = await this.findGenomeSignals(businessId, recent);
 
+    const memoryInsights = await this.buildMemoryInsights(businessId);
+
     const summaryParts = [
       `${recent.length} events analyzed.`,
       urgentItems.length ? `${urgentItems.length} urgent item(s).` : 'No urgent items.',
@@ -198,7 +206,8 @@ export class TemporalFlowService {
       genomeProposalCandidates.length
         ? `${genomeProposalCandidates.length} Genome evolution candidate(s).`
         : 'No Genome candidates yet.',
-    ];
+      memoryInsights.length ? `${memoryInsights.length} memory-backed insight(s).` : '',
+    ].filter(Boolean);
 
     return {
       summary: summaryParts.join(' '),
@@ -206,7 +215,48 @@ export class TemporalFlowService {
       opportunities,
       risks,
       genomeProposalCandidates,
+      memoryInsights: memoryInsights.length ? memoryInsights : undefined,
     };
+  }
+
+  private async buildMemoryInsights(businessId: string): Promise<TemporalFlowMemoryInsight[]> {
+    const insights: NonNullable<TemporalFlowAnalysis['memoryInsights']> = [];
+    if (!this.memoryService) return insights;
+
+    const recentMemory = await this.memoryService.findMany(businessId, { limit: 20 });
+    for (const memory of recentMemory) {
+      if (memory.confidence < 0.6) continue;
+      if (memory.type === 'summary') {
+        insights.push({
+          title: `Memory: ${memory.entityType} ${memory.entityId ?? ''}`,
+          reason: memory.content,
+          memoryId: memory.id,
+        });
+      }
+    }
+
+    if (this.semanticMemory) {
+      try {
+        const recall = await this.semanticMemory.search({
+          businessId,
+          query: 'overdue invoice complaint urgent follow-up',
+          limit: 3,
+          sourceTypes: ['temporal_memory'],
+          minSimilarity: 0.72,
+        });
+        for (const hit of recall) {
+          insights.push({
+            title: 'Memory recall: follow-up context',
+            reason: hit.content,
+            evidence: [`similarity ${hit.similarity.toFixed(2)}`],
+          });
+        }
+      } catch {
+        // semantic search is optional; ignore failures
+      }
+    }
+
+    return insights;
   }
 
   async findGenomeSignals(
@@ -297,6 +347,10 @@ export class TemporalFlowService {
       reminderAt: input.reminderAt,
       genomeImpactPotential: input.genomeImpactPotential ?? false,
       keyAnalysisStatus: input.keyAnalysisStatus ?? 'PENDING',
+      threadId: input.threadId,
+      messageId: input.messageId,
+      contactId: input.contactId,
+      memoryEmbeddingId: input.memoryEmbeddingId,
       externalId: input.externalId,
       externalUrl: input.externalUrl,
     };
@@ -324,6 +378,10 @@ export class TemporalFlowService {
       reminderAt: input.reminderAt,
       genomeImpactPotential: input.genomeImpactPotential ?? false,
       keyAnalysisStatus: input.keyAnalysisStatus ?? 'PENDING',
+      threadId: input.threadId,
+      messageId: input.messageId,
+      contactId: input.contactId,
+      memoryEmbeddingId: input.memoryEmbeddingId,
       externalUrl: input.externalUrl,
     };
   }

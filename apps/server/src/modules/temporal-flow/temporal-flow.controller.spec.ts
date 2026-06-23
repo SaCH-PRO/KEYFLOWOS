@@ -18,7 +18,10 @@ function makeController() {
     }),
   } as unknown as TemporalFlowService;
 
-  const controller = new TemporalFlowController(temporal);
+  const memory = { findMany: vi.fn(), searchMemory: vi.fn() } as any;
+  const memoryQueue = { enqueue: vi.fn() } as any;
+  const genomeBridge = {} as any;
+  const controller = new TemporalFlowController(temporal, memory, memoryQueue, genomeBridge);
   return { controller, temporal };
 }
 

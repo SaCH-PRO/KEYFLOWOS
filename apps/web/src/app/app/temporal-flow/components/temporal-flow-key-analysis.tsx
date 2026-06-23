@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Loader2, Sparkles, AlertTriangle, TrendingUp, ShieldAlert, Dna } from "lucide-react";
+import { Loader2, Sparkles, AlertTriangle, TrendingUp, ShieldAlert, Dna, Brain } from "lucide-react";
 import {
   TemporalFlowAnalysis,
   analyzeTemporalFlow,
@@ -120,6 +120,23 @@ export function TemporalFlowKeyAnalysis() {
                 {analysis.genomeProposalCandidates.map((item, i) => (
                   <li key={i} className="text-sm">
                     <span className="font-medium capitalize">{item.section} DNA</span>
+                    <span className="text-muted-foreground"> — {item.reason}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {analysis.memoryInsights && analysis.memoryInsights.length > 0 && (
+            <div className="rounded-xl border border-border bg-card p-4">
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
+                <Brain className="w-3.5 h-3.5 text-indigo-500" />
+                Memory-Backed Insights
+              </h4>
+              <ul className="space-y-2">
+                {analysis.memoryInsights.map((item, i) => (
+                  <li key={i} className="text-sm">
+                    <span className="font-medium">{item.title}</span>
                     <span className="text-muted-foreground"> — {item.reason}</span>
                   </li>
                 ))}

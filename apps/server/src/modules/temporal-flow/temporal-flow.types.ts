@@ -61,6 +61,11 @@ export interface TemporalFlowEventInput {
   genomeImpactPotential?: boolean;
   keyAnalysisStatus?: 'PENDING' | 'ANALYZED' | 'IGNORED';
 
+  threadId?: string;
+  messageId?: string;
+  contactId?: string;
+  memoryEmbeddingId?: string;
+
   externalId?: string;
   externalUrl?: string;
 }
@@ -89,12 +94,20 @@ export interface TemporalFlowGenomeCandidate {
   eventIds?: string[];
 }
 
+export interface TemporalFlowMemoryInsight {
+  title: string;
+  reason: string;
+  evidence?: string[];
+  memoryId?: string;
+}
+
 export interface TemporalFlowAnalysis {
   summary: string;
   urgentItems: TemporalFlowAnalysisItem[];
   opportunities: TemporalFlowOpportunity[];
   risks: TemporalFlowRisk[];
   genomeProposalCandidates: TemporalFlowGenomeCandidate[];
+  memoryInsights?: TemporalFlowMemoryInsight[];
 }
 
 export interface TemporalConnectorNormalizer<TPayload = unknown> {
