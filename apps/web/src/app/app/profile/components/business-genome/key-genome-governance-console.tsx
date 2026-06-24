@@ -389,10 +389,12 @@ function GovernanceHealthStrip({
     { label: "Autonomy blocks", value: counts.autonomyBlockedActions },
     { label: "Memory (7d)", value: counts.memoryEventsLast7Days },
     { label: "Failed outcomes (30d)", value: counts.failedOutcomesLast30Days },
+    { label: "Blocked departments", value: counts.blockedDepartments },
+    { label: "Weak departments", value: counts.weakDepartments },
   ];
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-8 gap-3">
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-10 gap-3">
       {cards.map((card) => (
         <div
           key={card.label}

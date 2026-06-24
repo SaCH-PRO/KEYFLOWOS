@@ -692,6 +692,8 @@ export interface KeyGenomeGovernanceSummary {
     autonomyBlockedActions: number;
     memoryEventsLast7Days: number;
     failedOutcomesLast30Days: number;
+    blockedDepartments: number;
+    weakDepartments: number;
   };
   urgentReviewItems: KeyGenomeGovernanceItem[];
   signalReviewQueue: KeyGenomeGovernanceItem[];
@@ -785,4 +787,131 @@ export async function findSimilarGenomeMemory(
   return apiGet<GenomeMemoryEventData[]>(
     `/business-genome/businesses/${businessId}/key-genome/memory/similar${query ? `?${query}` : ''}`,
   );
+}
+
+export type GenomeDepartmentCode =
+  | 'CEO_STRATEGY'
+  | 'COO_OPERATIONS'
+  | 'CFO_FINANCE'
+  | 'CMO_MARKETING'
+  | 'SALES'
+  | 'CUSTOMER_SUCCESS'
+  | 'PRODUCT_SERVICE'
+  | 'LEGAL_COMPLIANCE'
+  | 'RISK'
+  | 'TECH_DATA'
+  | 'HR_STAFFING'
+  | 'VENDOR_PROCUREMENT'
+  | 'EXECUTIVE_ASSISTANT';
+
+export type GenomeDepartmentGapType =
+  | 'MISSING_FACT'
+  | 'LOW_CONFIDENCE'
+  | 'READINESS_BLOCKER'
+  | 'WEAK_SECTION'
+  | 'RISK';
+
+export interface GenomeDepartmentGap {
+  type: GenomeDepartmentGapType;
+  section?: string;
+  domain?: string;
+  field?: string;
+  reason: string;
+  impact: 'BLOCKING' | 'DEGRADED' | 'OPTIONAL';
+}
+
+export interface GenomeDepartmentRecommendedAction {
+  label: string;
+  reason: string;
+  priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+}
+
+export interface GenomeDepartmentData {
+  id: string;
+  businessId: string;
+  code: GenomeDepartmentCode | string;
+  name: string;
+  description?: string | null;
+  primarySections: string[];
+  supportingSections: string[];
+  impactedModules: string[];
+  coreCapabilities: string[];
+  maturityScore: number;
+  readinessScore: number;
+  confidenceScore: number;
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  autonomySensitive: boolean;
+  automationAllowed: boolean;
+  gapSummary: GenomeDepartmentGap[];
+  recommendedActions: GenomeDepartmentRecommendedAction[];
+  lastComputedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DepartmentGenomeSummary {
+  businessId: string;
+  generatedAt: string;
+  departments: GenomeDepartmentData[];
+  strongestDepartments: GenomeDepartmentData[];
+  weakestDepartments: GenomeDepartmentData[];
+  blockedDepartments: GenomeDepartmentData[];
+  automationReadyDepartments: GenomeDepartmentData[];
+  overallDepartmentMaturity: number;
+  overallDepartmentReadiness: number;
+}
+
+export interface ListGenomeDepartmentsQuery {
+  riskLevel?: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  automationAllowed?: boolean;
+  minReadinessScore?: number;
+  limit?: number;
+}
+
+export async function listGenomeDepartments(
+  businessId: string,
+  filters: ListGenomeDepartmentsQuery = {},
+) {
+  const params = new URLSearchParams();
+  if (filters.riskLevel) params.set('riskLevel', filters.riskLevel);
+  if (filters.automationAllowed !== undefined) params.set('automationAllowed', String(filters.automationAllowed));
+  if (filters.minReadinessScore !== undefined) params.set('minReadinessScore', String(filters.minReadinessScore));
+  if (filters.limit !== undefined) params.set('limit', String(filters.limit));
+  const query = params.toString();
+  return apiGet<GenomeDepartmentData[]>(
+    `/business-genome/businesses/${businessId}/key-genome/departments${query ? `?${query}` : ''}`,
+  );
+}
+
+export async function getGenomeDepartmentSummary(businessId: string) {
+  return apiGet<DepartmentGenomeSummary>(
+    `/business-genome/businesses/${businessId}/key-genome/departments/summary`,
+  );
+}
+
+export async function getGenomeDepartment(businessId: string, code: string) {
+  return apiGet<GenomeDepartmentData>(
+    `/business-genome/businesses/${businessId}/key-genome/departments/${code}`,
+  );
+}
+
+export async function seedGenomeDepartments(businessId: string) {
+  return apiPost<GenomeDepartmentData[]>({
+    path: `/business-genome/businesses/${businessId}/key-genome/departments/seed`,
+    body: {},
+  });
+}
+
+export async function computeGenomeDepartments(businessId: string) {
+  return apiPost<GenomeDepartmentData[]>({
+    path: `/business-genome/businesses/${businessId}/key-genome/departments/compute`,
+    body: {},
+  });
+}
+
+export async function computeGenomeDepartment(businessId: string, code: string) {
+  return apiPost<GenomeDepartmentData>({
+    path: `/business-genome/businesses/${businessId}/key-genome/departments/${code}/compute`,
+    body: {},
+  });
 }
