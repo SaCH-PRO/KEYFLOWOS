@@ -91,7 +91,7 @@ interface KeyGenomeGovernanceConsoleProps {
 export function KeyGenomeGovernanceConsole({ onGenomeUpdate }: KeyGenomeGovernanceConsoleProps) {
   const router = useRouter();
   const [summary, setSummary] = useState<KeyGenomeGovernanceSummary | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !!getStoredBusinessId());
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [bridgeRecommendation, setBridgeRecommendation] = useState<GenomeRecommendationData | null>(null);
@@ -99,11 +99,7 @@ export function KeyGenomeGovernanceConsole({ onGenomeUpdate }: KeyGenomeGovernan
   const businessId = getStoredBusinessId();
 
   const refresh = useCallback(async () => {
-    if (!businessId) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
+    if (!businessId) return;
     const { data, error: apiError } = await getKeyGenomeGovernanceSummary(businessId);
     if (apiError || !data) {
       setError(apiError || "Failed to load Genome governance summary");
@@ -115,7 +111,7 @@ export function KeyGenomeGovernanceConsole({ onGenomeUpdate }: KeyGenomeGovernan
   }, [businessId]);
 
   useEffect(() => {
-    void refresh();
+    Promise.resolve().then(() => refresh());
   }, [refresh]);
 
   const handleAction = async (item: KeyGenomeGovernanceItem, action: KeyGenomeGovernanceItemAction) => {
@@ -336,6 +332,7 @@ export function KeyGenomeGovernanceConsole({ onGenomeUpdate }: KeyGenomeGovernan
       )}
 
       <RecommendationBridgeModal
+        key={bridgeRecommendation?.id ?? "none"}
         businessId={businessId ?? ""}
         recommendation={bridgeRecommendation}
         open={!!bridgeRecommendation}

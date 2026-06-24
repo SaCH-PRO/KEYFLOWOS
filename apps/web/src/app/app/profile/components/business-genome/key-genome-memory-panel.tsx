@@ -52,17 +52,13 @@ interface KeyGenomeMemoryPanelProps {
 export function KeyGenomeMemoryPanel({ onGenomeUpdate }: KeyGenomeMemoryPanelProps) {
   const [summary, setSummary] = useState<GenomeLearningSummary | null>(null);
   const [events, setEvents] = useState<GenomeMemoryEventData[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !!getStoredBusinessId());
   const [error, setError] = useState<string | null>(null);
 
   const businessId = getStoredBusinessId();
 
   const refresh = useCallback(async () => {
-    if (!businessId) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
+    if (!businessId) return;
     const [summaryResult, eventsResult] = await Promise.all([
       getGenomeLearningSummary(businessId),
       listGenomeMemoryEvents(businessId, { limit: 50 }),
@@ -80,7 +76,7 @@ export function KeyGenomeMemoryPanel({ onGenomeUpdate }: KeyGenomeMemoryPanelPro
   }, [businessId]);
 
   useEffect(() => {
-    void refresh();
+    Promise.resolve().then(() => refresh());
   }, [refresh]);
 
   if (loading) {

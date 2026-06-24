@@ -39,18 +39,14 @@ interface KeyGenomeSignalsPanelProps {
 
 export function KeyGenomeSignalsPanel({ onGenomeUpdate }: KeyGenomeSignalsPanelProps) {
   const [signals, setSignals] = useState<GenomeSignal[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !!getStoredBusinessId());
   const [error, setError] = useState<string | null>(null);
   const [actionId, setActionId] = useState<string | null>(null);
 
   const businessId = getStoredBusinessId();
 
   const refresh = useCallback(async () => {
-    if (!businessId) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
+    if (!businessId) return;
     const { data, error: apiError } = await getGenomeSignals(businessId, { limit: 50 });
     if (apiError || !data) {
       setError(apiError || "Failed to load Genome signals");
@@ -62,7 +58,7 @@ export function KeyGenomeSignalsPanel({ onGenomeUpdate }: KeyGenomeSignalsPanelP
   }, [businessId]);
 
   useEffect(() => {
-    void refresh();
+    Promise.resolve().then(() => refresh());
   }, [refresh]);
 
   const handleAction = async (

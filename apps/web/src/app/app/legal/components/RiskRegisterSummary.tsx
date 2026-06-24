@@ -31,26 +31,21 @@ const SEVERITY_BG: Record<string, string> = {
 };
 
 export function RiskRegisterSummary() {
-  const [businessId, setBusinessId] = useState<string | null>(null);
+  const [businessId] = useState<string | null>(() => getStoredBusinessId());
   const [risks, setRisks] = useState<Risk[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !businessId);
   const [generating, setGenerating] = useState(false);
-
-  useEffect(() => {
-    setBusinessId(getStoredBusinessId());
-  }, []);
 
   const loadRisks = useCallback(async () => {
     const bid = businessId;
     if (!bid) return;
-    setLoading(true);
     const { data } = await apiGet<Risk[]>(`/governance/businesses/${bid}/risks?status=OPEN`);
     if (data) setRisks(data);
     setLoading(false);
   }, [businessId]);
 
   useEffect(() => {
-    void loadRisks();
+    Promise.resolve().then(() => loadRisks());
   }, [loadRisks]);
 
   const handleGenerate = async () => {

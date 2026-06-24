@@ -38,21 +38,18 @@ export function useGenomeGate(): GenomeGateState {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
-  const [state, setState] = useState<GenomeGateState>({
-    checking: true,
+  const [state, setState] = useState<GenomeGateState>(() => ({
+    checking: !!getStoredBusinessId(),
     gateActive: false,
     threePillarMet: false,
     genomeIntegrity: null,
     genesisCompleted: null,
-  });
+  }));
 
   useEffect(() => {
     let cancelled = false;
     const businessId = getStoredBusinessId();
-    if (!businessId) {
-      setState((s) => ({ ...s, checking: false }));
-      return;
-    }
+    if (!businessId) return;
 
     const pathWithQuery = searchParams?.toString()
       ? `${pathname}?${searchParams.toString()}`

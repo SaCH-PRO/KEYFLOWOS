@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Search, RefreshCw, Brain, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -19,16 +19,15 @@ export function TemporalFlowMemoryTab() {
     Array<{ id: string; content: string; similarity: number }>
   >([]);
   const [query, setQuery] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(() => !!businessId);
   const [actioning, setActioning] = useState<string | null>(null);
 
-  const fetchMemory = async () => {
+  const fetchMemory = useCallback(async () => {
     if (!businessId) return;
-    setLoading(true);
     const { data } = await getTemporalFlowMemory(businessId, { limit: 50 });
     setMemory(data ?? []);
     setLoading(false);
-  };
+  }, [businessId]);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -61,8 +60,8 @@ export function TemporalFlowMemoryTab() {
   };
 
   useEffect(() => {
-    fetchMemory();
-  }, [businessId]);
+    Promise.resolve().then(() => fetchMemory());
+  }, [businessId, fetchMemory]);
 
   return (
     <div className="space-y-4">

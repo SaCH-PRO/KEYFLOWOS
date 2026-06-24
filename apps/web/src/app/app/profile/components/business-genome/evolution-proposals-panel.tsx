@@ -43,7 +43,7 @@ interface EvolutionProposalsPanelProps {
 export function EvolutionProposalsPanel({ onGenomeUpdate }: EvolutionProposalsPanelProps) {
   const businessId = getStoredBusinessId();
   const [proposals, setProposals] = useState<GenomeEvolutionProposal[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !!businessId);
   const [generating, setGenerating] = useState(false);
   const [actionId, setActionId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -53,7 +53,6 @@ export function EvolutionProposalsPanel({ onGenomeUpdate }: EvolutionProposalsPa
 
   const load = useCallback(async () => {
     if (!businessId) return;
-    setLoading(true);
     setError(null);
     const { data, error: apiError } = await getGenomeEvolutionProposals(businessId);
     if (apiError || !data) {
@@ -65,7 +64,7 @@ export function EvolutionProposalsPanel({ onGenomeUpdate }: EvolutionProposalsPa
   }, [businessId]);
 
   useEffect(() => {
-    void load();
+    Promise.resolve().then(() => load());
   }, [load]);
 
   const handleGenerate = async () => {

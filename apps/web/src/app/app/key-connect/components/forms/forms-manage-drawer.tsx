@@ -1569,11 +1569,6 @@ export function FormsManageDrawer({
   );
 
   useEffect(() => {
-    setTab(TYPE_TO_PROVIDER[type]);
-    setSelectedGoogleFormId(null);
-  }, [type]);
-
-  useEffect(() => {
     apiGet<DashboardConnectionEntry[]>(
       `/connectors/businesses/${businessId}/dashboard`,
     ).then((res) => {

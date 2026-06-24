@@ -20,31 +20,20 @@ import { KeyModeBriefPanel } from "./components/key-mode-brief-panel";
 export default function KeyModesPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [businessId, setBusinessId] = useState<string | null>(null);
+  const [businessId] = useState<string | null>(() => getStoredBusinessId() ?? null);
   const [modes, setModes] = useState<KeyModeListItem[]>([]);
-  const [selected, setSelected] = useState<KeyExecutiveMode | null>(null);
+  const [selected, setSelected] = useState<KeyExecutiveMode | null>(() =>
+    searchParams.get("mode") as KeyExecutiveMode | null,
+  );
   const [brief, setBrief] = useState<KeyExecutiveModeBrief | null>(null);
-  const [loadingModes, setLoadingModes] = useState(true);
+  const [loadingModes, setLoadingModes] = useState(() => !!businessId);
   const [loadingBrief, setLoadingBrief] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    setBusinessId(getStoredBusinessId() ?? null);
-  }, []);
-
-  useEffect(() => {
-    const mode = searchParams.get("mode") as KeyExecutiveMode | null;
-    if (mode) setSelected(mode);
-  }, [searchParams]);
-
-  useEffect(() => {
-    if (!businessId) {
-      setLoadingModes(false);
-      return;
-    }
+    if (!businessId) return;
 
     const loadModes = async () => {
-      setLoadingModes(true);
       setError(null);
       const { data, error: apiError } = await getKeyExecutiveModes(businessId);
       if (apiError || !data) {
@@ -60,10 +49,7 @@ export default function KeyModesPage() {
   }, [businessId]);
 
   useEffect(() => {
-    if (!businessId || !selected) {
-      setBrief(null);
-      return;
-    }
+    if (!businessId || !selected) return;
 
     const loadBrief = async () => {
       setLoadingBrief(true);

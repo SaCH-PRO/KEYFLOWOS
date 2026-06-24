@@ -182,12 +182,11 @@ export default function KeyInboxBriefPage() {
   const [customStart, setCustomStart] = useState<string>("");
   const [customEnd, setCustomEnd] = useState<string>("");
   const [report, setReport] = useState<KeyInboxIntelligenceReport | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(() => !!businessId);
   const [generating, setGenerating] = useState(false);
 
   const fetchReport = async (signal?: AbortSignal) => {
     if (!businessId) return;
-    setLoading(true);
     const res = await fetchLatestInboxIntelligence(businessId, scope);
     if (signal?.aborted) return;
     if (res.error) {
@@ -205,9 +204,9 @@ export default function KeyInboxBriefPage() {
 
   useEffect(() => {
     const controller = new AbortController();
-    fetchReport(controller.signal);
+    Promise.resolve().then(() => fetchReport(controller.signal));
     return () => controller.abort();
-  }, [businessId, scope]);
+  }, [fetchReport]);
 
   const handleGenerate = async () => {
     if (!businessId) return;

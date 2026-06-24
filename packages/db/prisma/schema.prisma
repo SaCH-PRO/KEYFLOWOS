@@ -527,6 +527,9 @@ model Business {
   genomeDepartments    GenomeDepartment[]
   genomeFinancialMetrics GenomeFinancialMetric[]
   genomeFinanceSnapshots GenomeFinanceSnapshot[]
+  genomeCustomerSegments GenomeCustomerSegment[]
+  genomeSalesMotions GenomeSalesMotion[]
+  genomeCustomerSalesSnapshots GenomeCustomerSalesSnapshot[]
   constitutionVersions BusinessConstitutionVersion[]
   authorityGrants      AuthorityGrant[]
   timeEntries          TimeEntry[]
@@ -999,6 +1002,112 @@ model GenomeFinanceSnapshot {
   @@index([businessId, period])
   @@index([businessId, overallRisk])
   @@map("genome_finance_snapshots")
+}
+
+// Phase 14: Customer / Sales / Revenue Genome
+model GenomeCustomerSegment {
+  id         String @id @default(cuid())
+  businessId String @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  name        String
+  description String?
+  segmentType String @map("segment_type")
+
+  estimatedSize    Float? @map("estimated_size")
+  averageRevenue   Float? @map("average_revenue")
+  averageCost      Float? @map("average_cost")
+  lifetimeValue    Float? @map("lifetime_value")
+  acquisitionCost  Float? @map("acquisition_cost")
+  churnRate        Float? @map("churn_rate")
+  conversionRate   Float? @map("conversion_rate")
+  channel          String?
+  tags             String[] @default([])
+
+  confidence Float @default(0.5)
+
+  sourceModule     String? @map("source_module")
+  sourceEntityType String? @map("source_entity_type")
+  sourceEntityId   String? @map("source_entity_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId, segmentType])
+  @@index([businessId, channel])
+  @@map("genome_customer_segments")
+}
+
+model GenomeSalesMotion {
+  id         String @id @default(cuid())
+  businessId String @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  name        String
+  description String?
+  motionType  String @map("motion_type")
+  stage       String?
+
+  conversionRate      Float? @map("conversion_rate")
+  averageDealSize     Float? @map("average_deal_size")
+  cycleDays           Float? @map("cycle_days")
+  volume              Float? @map("volume")
+  channel             String?
+  revenueContribution Float? @map("revenue_contribution")
+  costPerLead         Float? @map("cost_per_lead")
+  isActive            Boolean @default(true)
+
+  confidence Float @default(0.5)
+
+  sourceModule     String? @map("source_module")
+  sourceEntityType String? @map("source_entity_type")
+  sourceEntityId   String? @map("source_entity_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId, motionType])
+  @@index([businessId, stage])
+  @@index([businessId, isActive])
+  @@map("genome_sales_motions")
+}
+
+model GenomeCustomerSalesSnapshot {
+  id         String @id @default(cuid())
+  businessId String @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  period String?
+  currency String @default("TTD")
+
+  totalCustomers            Float? @map("total_customers")
+  activeCustomers           Float? @map("active_customers")
+  newCustomers              Float? @map("new_customers")
+  churnedCustomers          Float? @map("churned_customers")
+  retentionRate             Float? @map("retention_rate")
+  conversionRate            Float? @map("conversion_rate")
+  averageRevenuePerCustomer Float? @map("average_revenue_per_customer")
+  lifetimeValue             Float? @map("lifetime_value")
+  customerAcquisitionCost   Float? @map("customer_acquisition_cost")
+  ltvCacRatio               Float? @map("ltv_cac_ratio")
+
+  revenueQualityScore      Float @default(0) @map("revenue_quality_score")
+  revenueConcentrationRisk String @default("UNKNOWN") @map("revenue_concentration_risk")
+  cacRisk                  String @default("UNKNOWN") @map("cac_risk")
+  ltvRisk                  String @default("UNKNOWN") @map("ltv_risk")
+  churnRisk                String @default("UNKNOWN") @map("churn_risk")
+  conversionRisk           String @default("UNKNOWN") @map("conversion_risk")
+  overallRisk              String @default("MEDIUM") @map("overall_risk")
+
+  missingInputs   Json @default("[]") @map("missing_inputs")
+  warnings        Json @default("[]")
+  recommendations Json @default("[]")
+
+  computedAt DateTime @default(now()) @map("computed_at")
+
+  @@index([businessId, period])
+  @@index([businessId, overallRisk])
+  @@map("genome_customer_sales_snapshots")
 }
 
 // Phase 12: Living Constitution v2 — versioned, immutable operating document

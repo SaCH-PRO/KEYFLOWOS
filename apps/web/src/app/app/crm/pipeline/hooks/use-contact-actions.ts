@@ -284,7 +284,7 @@ export function useContactActions({
       .map(([key, value]) => ({ key, value: String(value ?? "") }));
 
     const typedValues: Record<string, unknown> = {};
-    const cfv = (contactDetailRef.current as any)?.customFieldValues;
+    const cfv = contactDetailRef.current?.customFieldValues;
     if (Array.isArray(cfv)) {
       for (const v of cfv) {
         if (v.definition?.name) {

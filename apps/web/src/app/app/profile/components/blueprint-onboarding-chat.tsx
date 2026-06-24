@@ -65,13 +65,7 @@ const SECTION_LABELS: Record<BlueprintSectionKey, string> = {
 };
 
 function useBusinessId(propId?: string) {
-  const [id, setId] = useState<string | null>(propId ?? null);
-  useEffect(() => {
-    if (!id && typeof window !== "undefined") {
-      setId(getStoredBusinessId());
-    }
-  }, [id]);
-  return id;
+  return propId ?? getStoredBusinessId() ?? null;
 }
 
 export function BlueprintOnboardingChat({
@@ -83,7 +77,7 @@ export function BlueprintOnboardingChat({
   const businessId = useBusinessId(propBusinessId);
   const [messages, setMessages] = useState<OnboardingMessage[]>([]);
   const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(() => !!businessId);
   const [blueprint, setBlueprint] = useState<BlueprintData | null>(null);
   const [completeness, setCompleteness] = useState(0);
   const [currentSection, setCurrentSection] = useState<BlueprintSectionKey | null>("identity");
@@ -97,7 +91,6 @@ export function BlueprintOnboardingChat({
   useEffect(() => {
     if (!businessId) return;
     // Seed the conversation with a welcome message from KEY.
-    setLoading(true);
     apiPost<OnboardingChatResult>(`/blueprint/businesses/${businessId}/onboarding-chat`, {
       message: "Hi KEY, I'm ready to build my Business Genome.",
       history: [],

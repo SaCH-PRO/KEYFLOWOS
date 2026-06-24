@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { FileText, Plus, AlertCircle, CheckCircle2, Loader2, ExternalLink } from "lucide-react";
 import Link from "next/link";
@@ -33,9 +33,9 @@ function labelForMissing(slug: string): string {
 }
 
 export function GenesisDocumentPackCard({ blueprint }: GenesisDocumentPackCardProps) {
-  const [businessId, setBusinessId] = useState<string | null>(null);
+  const [businessId] = useState<string | null>(() => getStoredBusinessId());
   const [pack, setPack] = useState<GenesisDocumentPackResult | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !businessId);
   const [generating, setGenerating] = useState(false);
   const [showDisclaimer, setShowDisclaimer] = useState(false);
 
@@ -43,21 +43,13 @@ export function GenesisDocumentPackCard({ blueprint }: GenesisDocumentPackCardPr
   const disclaimerAccepted = !!blueprint?.legalProfile?.disclaimerAcceptedAt || localDisclaimerAccepted;
 
   useEffect(() => {
-    setBusinessId(getStoredBusinessId());
-  }, []);
-
-  const loadPack = useCallback(async () => {
     const bid = businessId;
     if (!bid) return;
-    setLoading(true);
-    const { data } = await getDocumentPack(bid);
-    if (data) setPack(data);
-    setLoading(false);
+    getDocumentPack(bid).then(({ data }) => {
+      if (data) setPack(data);
+      setLoading(false);
+    });
   }, [businessId]);
-
-  useEffect(() => {
-    void loadPack();
-  }, [loadPack]);
 
   const handleGenerate = async () => {
     if (!businessId) return;

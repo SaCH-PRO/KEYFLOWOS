@@ -50,19 +50,15 @@ function getScoreColor(score: number): string {
 }
 
 export default function LegalHubPage() {
-  const [businessId, setBusinessId] = useState<string | null>(null);
+  const [businessId] = useState<string | null>(() => getStoredBusinessId());
   const [readiness, setReadiness] = useState<GenesisReadinessScore | null>(null);
   const [blueprint, setBlueprint] = useState<BlueprintData | null>(null);
   const [complianceItems, setComplianceItems] = useState<ComplianceItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !businessId);
 
   useEffect(() => {
-    const bid = getStoredBusinessId();
-    if (!bid) {
-      setLoading(false);
-      return;
-    }
-    setBusinessId(bid);
+    const bid = businessId;
+    if (!bid) return;
 
     const load = async () => {
       const [readinessRes, blueprintRes] = await Promise.all([
@@ -78,7 +74,7 @@ export default function LegalHubPage() {
     };
 
     void load();
-  }, []);
+  }, [businessId]);
 
   const disclaimerAccepted = !!blueprint?.legalProfile?.disclaimerAcceptedAt;
   const legalScore = readiness?.legal ?? 0;

@@ -80,7 +80,6 @@ export default function CustomFieldsSettingsPage() {
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    setLoading(true);
     const res = await fetchCustomFieldDefinitions(undefined, { includeArchived: showArchived });
     if (res.data) {
       setDefinitions(res.data);
@@ -91,7 +90,7 @@ export default function CustomFieldsSettingsPage() {
   }, [showArchived]);
 
   useEffect(() => {
-    load();
+    Promise.resolve().then(() => load());
   }, [load]);
 
   const resetForm = () => {
@@ -100,6 +99,10 @@ export default function CustomFieldsSettingsPage() {
   };
 
   const startEdit = (def: CustomFieldDefinition) => {
+    const optionItems =
+      def.options && typeof def.options === "object"
+        ? (def.options as Record<string, unknown>).options
+        : undefined;
     setEditingId(def.id);
     setForm({
       name: def.name,
@@ -107,8 +110,10 @@ export default function CustomFieldsSettingsPage() {
       type: def.type as FieldType,
       description: def.description ?? "",
       placeholder: def.placeholder ?? "",
-      options: def.options && Array.isArray((def.options as any)?.options)
-        ? (def.options as any).options.map((o: { label: string; value: string }) => `${o.label}:${o.value}`).join("\n")
+      options: Array.isArray(optionItems)
+        ? optionItems
+            .map((o) => `${(o as { label: string; value: string }).label}:${(o as { label: string; value: string }).value}`)
+            .join("\n")
         : "",
       required: def.required,
       order: def.order,
@@ -154,7 +159,7 @@ export default function CustomFieldsSettingsPage() {
         toast.error(res.error ?? "Failed to update");
       }
     } else {
-      const res = await createCustomFieldDefinition(payload as any);
+      const res = await createCustomFieldDefinition(payload as Omit<CustomFieldDefinition, "id" | "businessId" | "createdAt" | "updatedAt" | "archivedAt">);
       if (res.data) {
         toast.success("Custom field created");
         resetForm();

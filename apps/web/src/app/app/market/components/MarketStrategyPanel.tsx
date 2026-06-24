@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { Target, Users, Zap, Loader2, FileText, ArrowRight } from "lucide-react";
 import Link from "next/link";
@@ -37,34 +37,23 @@ function SummaryCard({ label, value, color, icon: Icon }: { label: string; value
 }
 
 export function MarketStrategyPanel() {
-  const [businessId, setBusinessId] = useState<string | null>(null);
+  const [businessId] = useState<string | null>(() => getStoredBusinessId());
   const [response, setResponse] = useState<MarketStrategyResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !businessId);
   const [generating, setGenerating] = useState(false);
 
   useEffect(() => {
-    setBusinessId(getStoredBusinessId());
-  }, []);
-
-  const load = useCallback(async () => {
     const bid = businessId;
-    if (!bid) {
+    if (!bid) return;
+    getMarketStrategy(bid).then(({ data, error }) => {
+      if (error) {
+        toast.error(error || "Could not load market strategy.");
+      } else if (data) {
+        setResponse(data);
+      }
       setLoading(false);
-      return;
-    }
-    setLoading(true);
-    const { data, error } = await getMarketStrategy(bid);
-    if (error) {
-      toast.error(error || "Could not load market strategy.");
-    } else if (data) {
-      setResponse(data);
-    }
-    setLoading(false);
+    });
   }, [businessId]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
 
   const handleGenerate = async () => {
     if (!businessId) return;

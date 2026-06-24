@@ -56,7 +56,7 @@ export function KeyGenomeRecommendationsPanel({
 }: KeyGenomeRecommendationsPanelProps) {
   const [recommendations, setRecommendations] = useState<GenomeRecommendationData[]>([]);
   const [experiments, setExperiments] = useState<GenomeExperimentData[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !!getStoredBusinessId());
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [actionId, setActionId] = useState<string | null>(null);
@@ -65,11 +65,7 @@ export function KeyGenomeRecommendationsPanel({
   const businessId = getStoredBusinessId();
 
   const refresh = useCallback(async () => {
-    if (!businessId) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
+    if (!businessId) return;
     const [recs, exps] = await Promise.all([
       getGenomeRecommendations(businessId, { limit: 50 }),
       getGenomeExperiments(businessId, { limit: 50 }),
@@ -85,7 +81,7 @@ export function KeyGenomeRecommendationsPanel({
   }, [businessId]);
 
   useEffect(() => {
-    void refresh();
+    Promise.resolve().then(() => refresh());
   }, [refresh]);
 
   const handleGenerate = async () => {
@@ -358,6 +354,7 @@ export function KeyGenomeRecommendationsPanel({
       )}
 
       <RecommendationBridgeModal
+        key={bridgeRecommendation?.id ?? "none"}
         businessId={businessId ?? ""}
         recommendation={bridgeRecommendation}
         open={!!bridgeRecommendation}

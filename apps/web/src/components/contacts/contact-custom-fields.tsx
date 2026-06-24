@@ -39,7 +39,6 @@ export function useCustomFieldDefinitions(businessId?: string) {
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
     fetchCustomFieldDefinitions(businessId)
       .then((res) => {
         if (!cancelled && res.data) {
@@ -163,8 +162,11 @@ function CustomFieldInput({
   onChange: (value: unknown) => void;
 }) {
   const placeholder = definition.placeholder || undefined;
-  const opts = definition.options && typeof definition.options === "object"
-    ? (definition.options as any).options as Array<{ label: string; value: string }>
+  const rawOptions = definition.options && typeof definition.options === "object"
+    ? (definition.options as Record<string, unknown>).options
+    : undefined;
+  const opts = Array.isArray(rawOptions)
+    ? (rawOptions as Array<{ label: string; value: string }>)
     : [];
 
   switch (definition.type) {

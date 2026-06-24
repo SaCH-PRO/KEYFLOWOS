@@ -40,11 +40,10 @@ export function TemporalFlowCalendar() {
   const businessId = getStoredBusinessId() ?? "";
   const [month, setMonth] = useState(new Date());
   const [events, setEvents] = useState<TemporalFlowEvent[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(() => !!businessId);
 
   useEffect(() => {
     if (!businessId) return;
-    setLoading(true);
     const from = startOfMonth(month).toISOString();
     const to = endOfMonth(month).toISOString();
     getTemporalFlowCalendar(businessId, from, to).then(({ data }) => {

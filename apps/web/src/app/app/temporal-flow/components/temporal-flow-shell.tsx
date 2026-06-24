@@ -33,13 +33,12 @@ export function TemporalFlowShell() {
   const [activeTab, setActiveTab] = useState<TabId>("timeline");
   const [events, setEvents] = useState<TemporalFlowEvent[]>([]);
   const [reminders, setReminders] = useState<TemporalFlowEvent[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(() => !!businessId);
   const [filters, setFilters] = useState<TemporalFlowListParams>({ limit: 100 });
   const [showCreate, setShowCreate] = useState(false);
 
   const fetchEvents = async () => {
     if (!businessId) return;
-    setLoading(true);
     const { data } = await getTemporalFlowEvents(businessId, filters);
     setEvents(data ?? []);
     setLoading(false);
@@ -53,12 +52,12 @@ export function TemporalFlowShell() {
 
   useEffect(() => {
     if (activeTab === "timeline" || activeTab === "analysis") {
-      fetchEvents();
+      Promise.resolve().then(() => fetchEvents());
     }
     if (activeTab === "reminders") {
-      fetchReminders();
+      Promise.resolve().then(() => fetchReminders());
     }
-  }, [activeTab, filters, businessId]);
+  }, [activeTab, filters, businessId, fetchEvents, fetchReminders]);
 
   const handleCreate = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();

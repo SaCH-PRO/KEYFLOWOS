@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { AlertTriangle, Beaker, Check, FileText, FlaskConical, Gavel, Loader2, Shield, Target, X } from "lucide-react";
 import { Button } from "@keyflow/ui";
@@ -64,35 +64,23 @@ export function RecommendationBridgeModal({
   onBridged,
 }: RecommendationBridgeModalProps) {
   const [preview, setPreview] = useState<GenomeRecommendationActionPreview | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(open);
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<{ status: string; message: string; entityId?: string; entityType?: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const loadPreview = useCallback(async () => {
-    if (!recommendation) return;
-    setLoading(true);
-    setError(null);
-    setResult(null);
-    const { data, error: apiError } = await previewRecommendationAction(businessId, recommendation.id);
-    if (apiError || !data) {
-      setError(apiError || "Failed to load action preview");
-      setPreview(null);
-    } else {
-      setPreview(data);
-    }
-    setLoading(false);
-  }, [businessId, recommendation]);
-
   useEffect(() => {
-    if (open) {
-      void loadPreview();
-    } else {
-      setPreview(null);
-      setResult(null);
-      setError(null);
-    }
-  }, [open, loadPreview]);
+    if (!open || !recommendation) return;
+    previewRecommendationAction(businessId, recommendation.id).then(({ data, error: apiError }) => {
+      if (apiError || !data) {
+        setError(apiError || "Failed to load action preview");
+        setPreview(null);
+      } else {
+        setPreview(data);
+      }
+      setLoading(false);
+    });
+  }, [open, businessId, recommendation]);
 
   const handleConfirm = async () => {
     if (!recommendation || !preview) return;
