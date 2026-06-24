@@ -26,6 +26,7 @@ export type GenomeMemorySourceType =
   | 'GOVERNANCE_DECISION'
   | 'FINANCE_GENOME'
   | 'CUSTOMER_SALES_GENOME'
+  | 'OPERATIONS_GENOME'
   | 'MANUAL';
 
 export type GenomeMemoryEventType =
@@ -59,6 +60,13 @@ export type GenomeMemoryEventType =
   | 'CUSTOMER_SALES_RISK_DETECTED'
   | 'CUSTOMER_SALES_SEGMENT_RECORDED'
   | 'CUSTOMER_SALES_MOTION_RECORDED'
+  | 'OPERATIONS_PROCESS_RECORDED'
+  | 'OPERATIONS_CAPABILITY_RECORDED'
+  | 'OPERATIONS_SNAPSHOT_COMPUTED'
+  | 'OPERATIONS_RISK_DETECTED'
+  | 'OPERATIONS_RECOMMENDATION_GENERATED'
+  | 'OPERATIONS_READINESS_IMPROVED'
+  | 'OPERATIONS_READINESS_DEGRADED'
   | 'MANUAL_LESSON';
 
 export type GenomeSignalType =
@@ -950,6 +958,219 @@ export interface ListGenomeSalesMotionsQuery {
 }
 
 export interface ListGenomeCustomerSalesSnapshotsQuery {
+  period?: string;
+  riskLevel?: string;
+  limit?: number;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 15 — Operations / Delivery Genome
+// ---------------------------------------------------------------------------
+
+export type GenomeOperationsRiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' | 'UNKNOWN';
+
+export type GenomeOperationalProcessType =
+  | 'DELIVERY'
+  | 'SUPPORT'
+  | 'FULFILLMENT'
+  | 'ADMIN'
+  | 'QUALITY'
+  | 'ONBOARDING'
+  | 'CUSTOM';
+
+export type GenomeDeliveryCapabilityType =
+  | 'SERVICE'
+  | 'PRODUCT'
+  | 'SUPPORT'
+  | 'FULFILLMENT'
+  | 'CONSULTING'
+  | 'CUSTOM';
+
+export interface GenomeOperationalProcessBottleneck {
+  label: string;
+  reason?: string;
+  severity?: GenomeOperationsRiskLevel;
+}
+
+export interface GenomeOperationalProcessRecommendation {
+  title: string;
+  reason: string;
+  priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  suggestedAction?: string;
+}
+
+export interface GenomeOperationalProcessData {
+  id: string;
+  businessId: string;
+  name: string;
+  description?: string | null;
+  processType: GenomeOperationalProcessType | string;
+  ownerRole?: string | null;
+  frequency?: string | null;
+  documented: boolean;
+  hasSop: boolean;
+  averageCycleTimeHours?: number | null;
+  failureRate?: number | null;
+  reworkRate?: number | null;
+  handoffCount?: number | null;
+  automationCandidate: boolean;
+  autonomySensitive: boolean;
+  maturityScore: number;
+  riskLevel: GenomeOperationsRiskLevel;
+  confidence: number;
+  bottlenecks: GenomeOperationalProcessBottleneck[];
+  missingInputs: string[];
+  recommendations: GenomeOperationalProcessRecommendation[];
+  sourceModule?: string | null;
+  sourceEntityType?: string | null;
+  sourceEntityId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GenomeDeliveryCapabilityConstraint {
+  label: string;
+  reason?: string;
+  severity?: GenomeOperationsRiskLevel;
+}
+
+export interface GenomeDeliveryCapabilityDependency {
+  label: string;
+  type?: string;
+  risk?: GenomeOperationsRiskLevel;
+}
+
+export interface GenomeDeliveryCapabilityRecommendation {
+  title: string;
+  reason: string;
+  priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  suggestedAction?: string;
+}
+
+export interface GenomeDeliveryCapabilityData {
+  id: string;
+  businessId: string;
+  name: string;
+  description?: string | null;
+  capabilityType: GenomeDeliveryCapabilityType | string;
+  currentCapacity?: number | null;
+  maxCapacity?: number | null;
+  capacityUnit?: string | null;
+  utilizationRate?: number | null;
+  backlogVolume?: number | null;
+  averageLeadTimeDays?: number | null;
+  qualityScore?: number | null;
+  reliabilityScore?: number | null;
+  riskLevel: GenomeOperationsRiskLevel;
+  confidence: number;
+  constraints: GenomeDeliveryCapabilityConstraint[];
+  dependencies: GenomeDeliveryCapabilityDependency[];
+  recommendations: GenomeDeliveryCapabilityRecommendation[];
+  sourceModule?: string | null;
+  sourceEntityType?: string | null;
+  sourceEntityId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GenomeOperationsWarning {
+  code: string;
+  message: string;
+  severity: GenomeOperationsRiskLevel;
+}
+
+export interface GenomeOperationsRecommendation {
+  title: string;
+  reason: string;
+  priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  suggestedAction?: string;
+}
+
+export interface GenomeOperationsSnapshotData {
+  id: string;
+  businessId: string;
+  period?: string | null;
+
+  processCount: number;
+  documentedCount: number;
+  sopCoverageRate?: number | null;
+
+  averageProcessMaturity?: number | null;
+  averageUtilizationRate?: number | null;
+  averageLeadTimeDays?: number | null;
+
+  bottleneckCount: number;
+  highRiskProcessCount: number;
+  overloadedCapabilityCount: number;
+
+  deliveryReadinessScore: number;
+  qualityRisk: GenomeOperationsRiskLevel;
+  capacityRisk: GenomeOperationsRiskLevel;
+  sopRisk: GenomeOperationsRiskLevel;
+  overallRisk: GenomeOperationsRiskLevel;
+
+  missingInputs: string[];
+  warnings: GenomeOperationsWarning[];
+  recommendations: GenomeOperationsRecommendation[];
+
+  computedAt: string;
+}
+
+export interface UpsertGenomeOperationalProcessInput {
+  businessId: string;
+  name: string;
+  description?: string | null;
+  processType: GenomeOperationalProcessType | string;
+  ownerRole?: string | null;
+  frequency?: string | null;
+  documented?: boolean;
+  hasSop?: boolean;
+  averageCycleTimeHours?: number | null;
+  failureRate?: number | null;
+  reworkRate?: number | null;
+  handoffCount?: number | null;
+  automationCandidate?: boolean;
+  autonomySensitive?: boolean;
+  confidence?: number;
+  sourceModule?: string | null;
+  sourceEntityType?: string | null;
+  sourceEntityId?: string | null;
+}
+
+export interface UpsertGenomeDeliveryCapabilityInput {
+  businessId: string;
+  name: string;
+  description?: string | null;
+  capabilityType: GenomeDeliveryCapabilityType | string;
+  currentCapacity?: number | null;
+  maxCapacity?: number | null;
+  capacityUnit?: string | null;
+  utilizationRate?: number | null;
+  backlogVolume?: number | null;
+  averageLeadTimeDays?: number | null;
+  qualityScore?: number | null;
+  reliabilityScore?: number | null;
+  confidence?: number;
+  sourceModule?: string | null;
+  sourceEntityType?: string | null;
+  sourceEntityId?: string | null;
+}
+
+export interface ListGenomeOperationalProcessesQuery {
+  processType?: string;
+  ownerRole?: string;
+  hasSop?: boolean;
+  minConfidence?: number;
+  limit?: number;
+}
+
+export interface ListGenomeDeliveryCapabilitiesQuery {
+  capabilityType?: string;
+  minConfidence?: number;
+  limit?: number;
+}
+
+export interface ListGenomeOperationsSnapshotsQuery {
   period?: string;
   riskLevel?: string;
   limit?: number;
