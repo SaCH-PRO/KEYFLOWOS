@@ -294,6 +294,18 @@ describe('KeyGenomeGovernanceService', () => {
     expect(item!.actions.some((a) => a.actionType === 'BRIDGE' && a.label === 'Create action plan')).toBe(true);
   });
 
+  it('includes memory event counts in summary', async () => {
+    const { service, prisma } = makeService();
+    prisma.client.genomeMemoryEvent.count.mockImplementation(({ where }: any) => {
+      if (where?.outcome === 'FAILURE') return Promise.resolve(2);
+      return Promise.resolve(7);
+    });
+
+    const summary = await service.summary('biz_1');
+    expect(summary.counts.memoryEventsLast7Days).toBe(7);
+    expect(summary.counts.failedOutcomesLast30Days).toBe(2);
+  });
+
   it('sorts urgent review items by priority then createdAt', async () => {
     const { service, signals } = makeService();
     signals.listSignals.mockImplementation((businessId: string, query: any) => {
