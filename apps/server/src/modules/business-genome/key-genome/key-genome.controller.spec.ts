@@ -15,6 +15,9 @@ import { FinanceGenomeService } from './finance-genome.service';
 import { GenomeCustomerSegmentService } from './genome-customer-segment.service';
 import { GenomeSalesMotionService } from './genome-sales-motion.service';
 import { CustomerSalesGenomeService } from './customer-sales-genome.service';
+import { GenomeOperationalProcessService } from './genome-operational-process.service';
+import { GenomeDeliveryCapabilityService } from './genome-delivery-capability.service';
+import { OperationsGenomeService } from './operations-genome.service';
 
 function mockProvider(
   token: string | symbol | (new (...args: any[]) => any),
@@ -142,6 +145,23 @@ async function makeController() {
         listCustomerSalesSnapshots: vi.fn().mockResolvedValue([]),
         generateCustomerSalesSignals: vi.fn().mockResolvedValue([]),
         generateCustomerSalesRecommendations: vi.fn().mockResolvedValue([]),
+      }),
+      mockProvider(GenomeOperationalProcessService, {
+        listProcesses: vi.fn().mockResolvedValue([]),
+        upsertProcess: vi.fn().mockResolvedValue({ id: 'proc_1' }),
+        deleteProcess: vi.fn().mockResolvedValue({ deleted: true }),
+      }),
+      mockProvider(GenomeDeliveryCapabilityService, {
+        listCapabilities: vi.fn().mockResolvedValue([]),
+        upsertCapability: vi.fn().mockResolvedValue({ id: 'cap_1' }),
+        deleteCapability: vi.fn().mockResolvedValue({ deleted: true }),
+      }),
+      mockProvider(OperationsGenomeService, {
+        computeOperationsSnapshot: vi.fn().mockResolvedValue({ id: 'opsnap_1' }),
+        getLatestOperationsSnapshot: vi.fn().mockResolvedValue({ id: 'opsnap_1' }),
+        listOperationsSnapshots: vi.fn().mockResolvedValue([]),
+        generateOperationsSignals: vi.fn().mockResolvedValue([]),
+        generateOperationsRecommendations: vi.fn().mockResolvedValue([]),
       }),
     ],
   })
@@ -326,6 +346,70 @@ describe('KeyGenomeController', () => {
   it('generates customer/sales recommendations', async () => {
     const { controller } = await makeController();
     const result = await controller.generateCustomerSalesRecommendations('biz_1');
+
+    expect(result).toEqual([]);
+  });
+
+  it('lists operational processes', async () => {
+    const { controller } = await makeController();
+    const result = await controller.listOperationalProcesses('biz_1', 'FULFILLMENT', undefined, 'true', '0.8', '10');
+
+    expect(result).toEqual([]);
+  });
+
+  it('upserts an operational process', async () => {
+    const { controller } = await makeController();
+    const result = await controller.upsertOperationalProcess('biz_1', {
+      businessId: 'biz_1',
+      name: 'Order Fulfillment',
+      processType: 'FULFILLMENT',
+    } as any);
+
+    expect(result.id).toBe('proc_1');
+  });
+
+  it('lists delivery capabilities', async () => {
+    const { controller } = await makeController();
+    const result = await controller.listDeliveryCapabilities('biz_1', 'SERVICE', '0.8', '10');
+
+    expect(result).toEqual([]);
+  });
+
+  it('upserts a delivery capability', async () => {
+    const { controller } = await makeController();
+    const result = await controller.upsertDeliveryCapability('biz_1', {
+      businessId: 'biz_1',
+      name: 'Implementation',
+      capabilityType: 'SERVICE',
+    } as any);
+
+    expect(result.id).toBe('cap_1');
+  });
+
+  it('gets latest operations snapshot', async () => {
+    const { controller } = await makeController();
+    const result = await controller.getOperationsSnapshot('biz_1');
+
+    expect(result?.id).toBe('opsnap_1');
+  });
+
+  it('computes operations snapshot', async () => {
+    const { controller } = await makeController();
+    const result = await controller.computeOperationsSnapshot('biz_1', '2026-06');
+
+    expect(result.id).toBe('opsnap_1');
+  });
+
+  it('generates operations signals', async () => {
+    const { controller } = await makeController();
+    const result = await controller.generateOperationsSignals('biz_1');
+
+    expect(result).toEqual([]);
+  });
+
+  it('generates operations recommendations', async () => {
+    const { controller } = await makeController();
+    const result = await controller.generateOperationsRecommendations('biz_1');
 
     expect(result).toEqual([]);
   });

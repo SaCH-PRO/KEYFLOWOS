@@ -1399,3 +1399,284 @@ export async function generateGenomeCustomerSalesRecommendations(businessId: str
     body: {},
   });
 }
+
+export type GenomeOperationsRiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' | 'UNKNOWN';
+
+export type GenomeOperationalProcessType =
+  | 'DELIVERY'
+  | 'SUPPORT'
+  | 'FULFILLMENT'
+  | 'ADMIN'
+  | 'QUALITY'
+  | 'ONBOARDING'
+  | 'CUSTOM';
+
+export type GenomeDeliveryCapabilityType =
+  | 'SERVICE'
+  | 'PRODUCT'
+  | 'SUPPORT'
+  | 'FULFILLMENT'
+  | 'CONSULTING'
+  | 'CUSTOM';
+
+export interface GenomeOperationalProcessData {
+  id: string;
+  businessId: string;
+  name: string;
+  description?: string | null;
+  processType: GenomeOperationalProcessType | string;
+  ownerRole?: string | null;
+  frequency?: string | null;
+  documented: boolean;
+  hasSop: boolean;
+  averageCycleTimeHours?: number | null;
+  failureRate?: number | null;
+  reworkRate?: number | null;
+  handoffCount?: number | null;
+  automationCandidate: boolean;
+  autonomySensitive: boolean;
+  maturityScore: number;
+  riskLevel: GenomeOperationsRiskLevel;
+  confidence: number;
+  bottlenecks: string[];
+  missingInputs: string[];
+  recommendations: string[];
+  sourceModule?: string | null;
+  sourceEntityType?: string | null;
+  sourceEntityId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GenomeDeliveryCapabilityData {
+  id: string;
+  businessId: string;
+  name: string;
+  description?: string | null;
+  capabilityType: GenomeDeliveryCapabilityType | string;
+  currentCapacity?: number | null;
+  maxCapacity?: number | null;
+  capacityUnit?: string | null;
+  utilizationRate?: number | null;
+  backlogVolume?: number | null;
+  averageLeadTimeDays?: number | null;
+  qualityScore?: number | null;
+  reliabilityScore?: number | null;
+  riskLevel: GenomeOperationsRiskLevel;
+  confidence: number;
+  constraints: string[];
+  dependencies: string[];
+  recommendations: string[];
+  sourceModule?: string | null;
+  sourceEntityType?: string | null;
+  sourceEntityId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GenomeOperationsWarning {
+  code: string;
+  message: string;
+  severity: GenomeOperationsRiskLevel;
+}
+
+export interface GenomeOperationsRecommendation {
+  title: string;
+  reason: string;
+  priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  suggestedAction?: string;
+}
+
+export interface GenomeOperationsSnapshotData {
+  id: string;
+  businessId: string;
+  period?: string | null;
+
+  processCount: number;
+  documentedCount: number;
+  sopCoverageRate?: number | null;
+
+  averageProcessMaturity?: number | null;
+  averageUtilizationRate?: number | null;
+  averageLeadTimeDays?: number | null;
+
+  bottleneckCount: number;
+  highRiskProcessCount: number;
+  overloadedCapabilityCount: number;
+
+  deliveryReadinessScore: number;
+  qualityRisk: GenomeOperationsRiskLevel;
+  capacityRisk: GenomeOperationsRiskLevel;
+  sopRisk: GenomeOperationsRiskLevel;
+  overallRisk: GenomeOperationsRiskLevel;
+
+  missingInputs: string[];
+  warnings: GenomeOperationsWarning[];
+  recommendations: GenomeOperationsRecommendation[];
+
+  computedAt: string;
+}
+
+export interface UpsertGenomeOperationalProcessInput {
+  name: string;
+  description?: string | null;
+  processType: GenomeOperationalProcessType | string;
+  ownerRole?: string | null;
+  frequency?: string | null;
+  documented?: boolean;
+  hasSop?: boolean;
+  averageCycleTimeHours?: number | null;
+  failureRate?: number | null;
+  reworkRate?: number | null;
+  handoffCount?: number | null;
+  automationCandidate?: boolean;
+  autonomySensitive?: boolean;
+  confidence?: number;
+  sourceModule?: string | null;
+  sourceEntityType?: string | null;
+  sourceEntityId?: string | null;
+}
+
+export interface UpsertGenomeDeliveryCapabilityInput {
+  name: string;
+  description?: string | null;
+  capabilityType: GenomeDeliveryCapabilityType | string;
+  currentCapacity?: number | null;
+  maxCapacity?: number | null;
+  capacityUnit?: string | null;
+  utilizationRate?: number | null;
+  backlogVolume?: number | null;
+  averageLeadTimeDays?: number | null;
+  qualityScore?: number | null;
+  reliabilityScore?: number | null;
+  confidence?: number;
+  sourceModule?: string | null;
+  sourceEntityType?: string | null;
+  sourceEntityId?: string | null;
+}
+
+export interface ListGenomeOperationalProcessesQuery {
+  processType?: string;
+  ownerRole?: string;
+  hasSop?: boolean;
+  minConfidence?: number;
+  limit?: number;
+}
+
+export interface ListGenomeDeliveryCapabilitiesQuery {
+  capabilityType?: string;
+  minConfidence?: number;
+  limit?: number;
+}
+
+export interface ListGenomeOperationsSnapshotsQuery {
+  period?: string;
+  riskLevel?: string;
+  limit?: number;
+}
+
+export async function listGenomeOperationalProcesses(
+  businessId: string,
+  filters: ListGenomeOperationalProcessesQuery = {},
+) {
+  const params = new URLSearchParams();
+  if (filters.processType) params.set('processType', filters.processType);
+  if (filters.ownerRole) params.set('ownerRole', filters.ownerRole);
+  if (filters.hasSop !== undefined) params.set('hasSop', String(filters.hasSop));
+  if (filters.minConfidence !== undefined) params.set('minConfidence', String(filters.minConfidence));
+  if (filters.limit !== undefined) params.set('limit', String(filters.limit));
+  const query = params.toString();
+  return apiGet<GenomeOperationalProcessData[]>(
+    `/business-genome/businesses/${businessId}/key-genome/operations/processes${query ? `?${query}` : ''}`,
+  );
+}
+
+export async function upsertGenomeOperationalProcess(
+  businessId: string,
+  input: UpsertGenomeOperationalProcessInput,
+) {
+  return apiPost<GenomeOperationalProcessData>({
+    path: `/business-genome/businesses/${businessId}/key-genome/operations/processes`,
+    body: input,
+  });
+}
+
+export async function deleteGenomeOperationalProcess(businessId: string, processId: string) {
+  return apiDelete<{ deleted: true }>(
+    `/business-genome/businesses/${businessId}/key-genome/operations/processes/${processId}`,
+  );
+}
+
+export async function listGenomeDeliveryCapabilities(
+  businessId: string,
+  filters: ListGenomeDeliveryCapabilitiesQuery = {},
+) {
+  const params = new URLSearchParams();
+  if (filters.capabilityType) params.set('capabilityType', filters.capabilityType);
+  if (filters.minConfidence !== undefined) params.set('minConfidence', String(filters.minConfidence));
+  if (filters.limit !== undefined) params.set('limit', String(filters.limit));
+  const query = params.toString();
+  return apiGet<GenomeDeliveryCapabilityData[]>(
+    `/business-genome/businesses/${businessId}/key-genome/operations/capabilities${query ? `?${query}` : ''}`,
+  );
+}
+
+export async function upsertGenomeDeliveryCapability(
+  businessId: string,
+  input: UpsertGenomeDeliveryCapabilityInput,
+) {
+  return apiPost<GenomeDeliveryCapabilityData>({
+    path: `/business-genome/businesses/${businessId}/key-genome/operations/capabilities`,
+    body: input,
+  });
+}
+
+export async function deleteGenomeDeliveryCapability(businessId: string, capabilityId: string) {
+  return apiDelete<{ deleted: true }>(
+    `/business-genome/businesses/${businessId}/key-genome/operations/capabilities/${capabilityId}`,
+  );
+}
+
+export async function getGenomeOperationsSnapshot(businessId: string) {
+  return apiGet<GenomeOperationsSnapshotData | null>(
+    `/business-genome/businesses/${businessId}/key-genome/operations/snapshot`,
+  );
+}
+
+export async function computeGenomeOperationsSnapshot(businessId: string, period?: string) {
+  const params = new URLSearchParams();
+  if (period) params.set('period', period);
+  const query = params.toString();
+  return apiPost<GenomeOperationsSnapshotData>({
+    path: `/business-genome/businesses/${businessId}/key-genome/operations/snapshot/compute${query ? `?${query}` : ''}`,
+    body: {},
+  });
+}
+
+export async function listGenomeOperationsSnapshots(
+  businessId: string,
+  filters: ListGenomeOperationsSnapshotsQuery = {},
+) {
+  const params = new URLSearchParams();
+  if (filters.period) params.set('period', filters.period);
+  if (filters.riskLevel) params.set('riskLevel', filters.riskLevel);
+  if (filters.limit !== undefined) params.set('limit', String(filters.limit));
+  const query = params.toString();
+  return apiGet<GenomeOperationsSnapshotData[]>(
+    `/business-genome/businesses/${businessId}/key-genome/operations/snapshots${query ? `?${query}` : ''}`,
+  );
+}
+
+export async function generateGenomeOperationsSignals(businessId: string) {
+  return apiPost<GenomeSignal[]>({
+    path: `/business-genome/businesses/${businessId}/key-genome/operations/signals/generate`,
+    body: {},
+  });
+}
+
+export async function generateGenomeOperationsRecommendations(businessId: string) {
+  return apiPost<GenomeRecommendationData[]>({
+    path: `/business-genome/businesses/${businessId}/key-genome/operations/recommendations/generate`,
+    body: {},
+  });
+}

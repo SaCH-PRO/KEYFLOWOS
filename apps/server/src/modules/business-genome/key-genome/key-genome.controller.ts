@@ -23,13 +23,18 @@ import { FinanceGenomeService } from './finance-genome.service';
 import { GenomeCustomerSegmentService } from './genome-customer-segment.service';
 import { GenomeSalesMotionService } from './genome-sales-motion.service';
 import { CustomerSalesGenomeService } from './customer-sales-genome.service';
+import { GenomeOperationalProcessService } from './genome-operational-process.service';
+import { GenomeDeliveryCapabilityService } from './genome-delivery-capability.service';
+import { OperationsGenomeService } from './operations-genome.service';
 import type {
   CreateGenomeExperimentInput,
   GenerateGenomeRecommendationsInput,
   GenomeOutcome,
   RecommendationOutcome,
   UpsertGenomeCustomerSegmentInput,
+  UpsertGenomeDeliveryCapabilityInput,
   UpsertGenomeFinancialMetricInput,
+  UpsertGenomeOperationalProcessInput,
   UpsertGenomeSalesMotionInput,
 } from './key-genome.types';
 
@@ -50,6 +55,9 @@ export class KeyGenomeController {
     @Inject(GenomeCustomerSegmentService) private readonly customerSegments: GenomeCustomerSegmentService,
     @Inject(GenomeSalesMotionService) private readonly salesMotions: GenomeSalesMotionService,
     @Inject(CustomerSalesGenomeService) private readonly customerSalesGenome: CustomerSalesGenomeService,
+    @Inject(GenomeOperationalProcessService) private readonly operationalProcesses: GenomeOperationalProcessService,
+    @Inject(GenomeDeliveryCapabilityService) private readonly deliveryCapabilities: GenomeDeliveryCapabilityService,
+    @Inject(OperationsGenomeService) private readonly operationsGenome: OperationsGenomeService,
   ) {}
 
   @Get('signals')
@@ -516,5 +524,110 @@ export class KeyGenomeController {
   @Post('customer-sales/recommendations/generate')
   async generateCustomerSalesRecommendations(@Param('businessId') businessId: string) {
     return this.customerSalesGenome.generateCustomerSalesRecommendations(businessId);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Phase 15: Operations / Delivery Genome
+  // ---------------------------------------------------------------------------
+
+  @Get('operations/processes')
+  async listOperationalProcesses(
+    @Param('businessId') businessId: string,
+    @Query('processType') processType?: string,
+    @Query('ownerRole') ownerRole?: string,
+    @Query('hasSop') hasSop?: string,
+    @Query('minConfidence') minConfidence?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.operationalProcesses.listProcesses(businessId, {
+      processType,
+      ownerRole,
+      hasSop: hasSop !== undefined ? hasSop === 'true' : undefined,
+      minConfidence: minConfidence !== undefined ? Number(minConfidence) : undefined,
+      limit: limit !== undefined ? Number(limit) : undefined,
+    });
+  }
+
+  @Post('operations/processes')
+  async upsertOperationalProcess(
+    @Param('businessId') businessId: string,
+    @Body() body: UpsertGenomeOperationalProcessInput,
+  ) {
+    return this.operationalProcesses.upsertProcess({ ...body, businessId });
+  }
+
+  @Delete('operations/processes/:processId')
+  async deleteOperationalProcess(
+    @Param('businessId') businessId: string,
+    @Param('processId') processId: string,
+  ) {
+    return this.operationalProcesses.deleteProcess(businessId, processId);
+  }
+
+  @Get('operations/capabilities')
+  async listDeliveryCapabilities(
+    @Param('businessId') businessId: string,
+    @Query('capabilityType') capabilityType?: string,
+    @Query('minConfidence') minConfidence?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.deliveryCapabilities.listCapabilities(businessId, {
+      capabilityType,
+      minConfidence: minConfidence !== undefined ? Number(minConfidence) : undefined,
+      limit: limit !== undefined ? Number(limit) : undefined,
+    });
+  }
+
+  @Post('operations/capabilities')
+  async upsertDeliveryCapability(
+    @Param('businessId') businessId: string,
+    @Body() body: UpsertGenomeDeliveryCapabilityInput,
+  ) {
+    return this.deliveryCapabilities.upsertCapability({ ...body, businessId });
+  }
+
+  @Delete('operations/capabilities/:capabilityId')
+  async deleteDeliveryCapability(
+    @Param('businessId') businessId: string,
+    @Param('capabilityId') capabilityId: string,
+  ) {
+    return this.deliveryCapabilities.deleteCapability(businessId, capabilityId);
+  }
+
+  @Get('operations/snapshot')
+  async getOperationsSnapshot(@Param('businessId') businessId: string) {
+    return this.operationsGenome.getLatestOperationsSnapshot(businessId);
+  }
+
+  @Post('operations/snapshot/compute')
+  async computeOperationsSnapshot(
+    @Param('businessId') businessId: string,
+    @Query('period') period?: string,
+  ) {
+    return this.operationsGenome.computeOperationsSnapshot(businessId, period);
+  }
+
+  @Get('operations/snapshots')
+  async listOperationsSnapshots(
+    @Param('businessId') businessId: string,
+    @Query('period') period?: string,
+    @Query('riskLevel') riskLevel?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.operationsGenome.listOperationsSnapshots(businessId, {
+      period,
+      riskLevel,
+      limit: limit !== undefined ? Number(limit) : undefined,
+    });
+  }
+
+  @Post('operations/signals/generate')
+  async generateOperationsSignals(@Param('businessId') businessId: string) {
+    return this.operationsGenome.generateOperationsSignals(businessId);
+  }
+
+  @Post('operations/recommendations/generate')
+  async generateOperationsRecommendations(@Param('businessId') businessId: string) {
+    return this.operationsGenome.generateOperationsRecommendations(businessId);
   }
 }
