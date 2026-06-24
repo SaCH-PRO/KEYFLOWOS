@@ -4,7 +4,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiAdvisorService } from './ai-advisor.service';
 import { AiUsageService } from './ai-usage.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
-import { GovernanceService } from './governance.service';
+import { AiOversightService } from './ai-oversight.service';
 import { BusinessGraphService } from './business-graph.service';
 import { PlannerService } from './planner.service';
 import { getOpenAiToolDefinitions, getToolByName, RiskLevel, ToolFamily, wrapToolResult, FlowTool } from './flow-tool-registry';
@@ -206,7 +206,7 @@ export class FlowOrchestratorService {
     @Inject(AiAdvisorService) private readonly advisor: AiAdvisorService,
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
     @Inject(AiExecutionLogService) private readonly executionLog: AiExecutionLogService,
-    @Inject(GovernanceService) private readonly governance: GovernanceService,
+    @Inject(AiOversightService) private readonly governance: AiOversightService,
     @Inject(BusinessGraphService) private readonly businessGraph: BusinessGraphService,
     @Inject(forwardRef(() => PlannerService)) private readonly planner: PlannerService,
     @Inject(AiMemoryService) private readonly memory: AiMemoryService,

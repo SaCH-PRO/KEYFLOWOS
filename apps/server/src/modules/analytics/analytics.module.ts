@@ -2,7 +2,7 @@ import { Module } from '@nestjs/common';
 import { AnalyticsController } from './analytics.controller';
 import { AnalyticsEngineService } from './analytics-engine.service';
 import { ProjectionService } from './projection.service';
-import { GrowthIntelligenceService } from './growth-intelligence.service';
+import { GrowthInsightGeneratorService } from './growth-insight-generator.service';
 import { MaturityAssessmentService } from './maturity-assessment.service';
 import { AnalyticsSchedulerService } from './analytics-scheduler.service';
 import { PrismaModule } from '../../core/prisma/prisma.module';
@@ -13,14 +13,14 @@ import { PrismaModule } from '../../core/prisma/prisma.module';
   providers: [
     AnalyticsEngineService,
     ProjectionService,
-    GrowthIntelligenceService,
+    GrowthInsightGeneratorService,
     MaturityAssessmentService,
     AnalyticsSchedulerService,
   ],
   exports: [
     AnalyticsEngineService,
     ProjectionService,
-    GrowthIntelligenceService,
+    GrowthInsightGeneratorService,
     MaturityAssessmentService,
   ],
 })

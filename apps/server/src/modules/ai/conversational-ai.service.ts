@@ -3,7 +3,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ModelGatewayService } from './model-gateway.service';
 import { FlowOrchestratorService } from './flow-orchestrator.service';
-import { GovernanceService } from './governance.service';
+import { AiOversightService } from './ai-oversight.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
 import { PlanExecutorService } from './plan-executor.service';
 import { AgentBusService } from './agent-bus.service';
@@ -50,7 +50,7 @@ export class ConversationalAIService {
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Inject(ModelGatewayService) private readonly gateway: ModelGatewayService,
     @Inject(FlowOrchestratorService) private readonly flowOrchestrator: FlowOrchestratorService,
-    @Inject(GovernanceService) private readonly governance: GovernanceService,
+    @Inject(AiOversightService) private readonly governance: AiOversightService,
     @Inject(AiExecutionLogService) private readonly executionLog: AiExecutionLogService,
     @Inject(PlanExecutorService) private readonly planExecutor: PlanExecutorService,
     @Inject(AgentBusService) private readonly agentBus: AgentBusService,

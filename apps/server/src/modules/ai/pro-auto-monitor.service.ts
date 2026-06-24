@@ -1,7 +1,7 @@
 import { Injectable, Logger, Inject, OnModuleInit, OnModuleDestroy, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { BusinessGraphService, BusinessGraphSnapshot } from './business-graph.service';
-import { GovernanceService, type AutonomySettings } from './governance.service';
+import { AiOversightService, type AutonomySettings } from './ai-oversight.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
 import { FlowOrchestratorService } from './flow-orchestrator.service';
 
@@ -67,7 +67,7 @@ export class ProAutoMonitorService implements OnModuleInit, OnModuleDestroy {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(BusinessGraphService) private readonly businessGraph: BusinessGraphService,
-    @Inject(GovernanceService) private readonly governance: GovernanceService,
+    @Inject(AiOversightService) private readonly governance: AiOversightService,
     @Inject(AiExecutionLogService) private readonly executionLog: AiExecutionLogService,
     @Inject(forwardRef(() => FlowOrchestratorService)) private readonly orchestrator: FlowOrchestratorService,
   ) {}

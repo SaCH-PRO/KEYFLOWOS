@@ -28,7 +28,7 @@ export interface UpdateReceiptInput {
  * Cross-referenced: receipt number recorded on invoice, invoice number on receipt.
  */
 @Injectable()
-export class ReceiptService {
+export class PaymentReceiptService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   async list(businessId: string) {

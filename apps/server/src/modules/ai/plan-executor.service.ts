@@ -2,7 +2,7 @@ import { Injectable, Logger, OnModuleInit, OnModuleDestroy, Inject, forwardRef }
 import { OnEvent } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { GovernanceService } from './governance.service';
+import { AiOversightService } from './ai-oversight.service';
 import { FlowOrchestratorService } from './flow-orchestrator.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
 import { TimelineService } from '../timeline/timeline.service';
@@ -42,7 +42,7 @@ export class PlanExecutorService implements OnModuleInit, OnModuleDestroy {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
-    @Inject(forwardRef(() => GovernanceService)) private readonly governance: GovernanceService,
+    @Inject(forwardRef(() => AiOversightService)) private readonly governance: AiOversightService,
     @Inject(forwardRef(() => FlowOrchestratorService)) private readonly flowOrchestrator: FlowOrchestratorService,
     @Inject(AiExecutionLogService) private readonly executionLog: AiExecutionLogService,
     @Inject(TimelineService) private readonly timeline: TimelineService,

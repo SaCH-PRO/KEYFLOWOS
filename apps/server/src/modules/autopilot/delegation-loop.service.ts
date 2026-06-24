@@ -1,6 +1,6 @@
 import { Injectable, Logger, Inject, Optional, OnModuleInit, OnModuleDestroy, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { GovernanceService } from '../ai/governance.service';
+import { AiOversightService } from '../ai/ai-oversight.service';
 import { AiMemoryService } from '../ai/ai-memory.service';
 import { AiExecutionLogService } from '../ai/ai-execution-log.service';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
@@ -97,7 +97,7 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(GovernanceService) private readonly governance: GovernanceService,
+    @Inject(AiOversightService) private readonly governance: AiOversightService,
     @Inject(AiMemoryService) private readonly memory: AiMemoryService,
     @Inject(AiExecutionLogService) private readonly executionLog: AiExecutionLogService,
     @Inject(TransactionalEmailService) private readonly emailService: TransactionalEmailService,

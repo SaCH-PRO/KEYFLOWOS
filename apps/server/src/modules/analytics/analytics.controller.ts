@@ -10,7 +10,7 @@ import {
 } from '@nestjs/common';
 import { AnalyticsEngineService } from './analytics-engine.service';
 import { ProjectionService } from './projection.service';
-import { GrowthIntelligenceService } from './growth-intelligence.service';
+import { GrowthInsightGeneratorService } from './growth-insight-generator.service';
 import { MaturityAssessmentService } from './maturity-assessment.service';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { RequireModuleScope } from '../../core/auth/module-scope.guard';
@@ -21,7 +21,7 @@ export class AnalyticsController {
   constructor(
     private readonly engine: AnalyticsEngineService,
     private readonly projection: ProjectionService,
-    private readonly intelligence: GrowthIntelligenceService,
+    private readonly intelligence: GrowthInsightGeneratorService,
     private readonly maturity: MaturityAssessmentService,
   ) {}
 

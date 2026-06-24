@@ -5,7 +5,7 @@ import { ModelGatewayService } from './model-gateway.service';
 import { AiMemoryService } from './ai-memory.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
 import { PlannerService } from './planner.service';
-import { GovernanceService } from './governance.service';
+import { AiOversightService } from './ai-oversight.service';
 import { AiUsageService } from './ai-usage.service';
 
 export interface FeedbackContext {
@@ -47,7 +47,7 @@ export class FeedbackLoopService {
     @Inject(AiMemoryService) private readonly memory: AiMemoryService,
     @Inject(AiExecutionLogService) private readonly executionLog: AiExecutionLogService,
     @Inject(forwardRef(() => PlannerService)) private readonly planner: PlannerService,
-    @Inject(forwardRef(() => GovernanceService)) private readonly governance: GovernanceService,
+    @Inject(forwardRef(() => AiOversightService)) private readonly governance: AiOversightService,
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
   ) {}
 

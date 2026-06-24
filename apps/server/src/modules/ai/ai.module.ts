@@ -14,7 +14,7 @@ import { FlowOrchestratorService } from './flow-orchestrator.service';
 import { FlowController } from './flow.controller';
 import { GraphActionsController } from './graph-actions.controller';
 import { BusinessGraphService } from './business-graph.service';
-import { GovernanceService } from './governance.service';
+import { AiOversightService } from './ai-oversight.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
 import { IntentParserService } from './intent-parser.service';
 import { PlannerService } from './planner.service';
@@ -85,7 +85,7 @@ import { KeyAgentConfigService } from './key-agent-config.service';
     OutputTemplateService,
     FlowOrchestratorService,
     BusinessGraphService,
-    GovernanceService,
+    AiOversightService,
     AiExecutionLogService,
     IntentParserService,
     PlannerService,
@@ -143,7 +143,7 @@ import { KeyAgentConfigService } from './key-agent-config.service';
     OutputTemplateService,
     FlowOrchestratorService,
     BusinessGraphService,
-    GovernanceService,
+    AiOversightService,
     AiExecutionLogService,
     IntentParserService,
     PlannerService,

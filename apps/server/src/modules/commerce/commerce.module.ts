@@ -14,7 +14,7 @@ import { QuoteStaleListener } from './quote-stale.listener';
 import { CommerceAiService } from './commerce-ai.service';
 import { CommerceVisionService } from './commerce-vision.service';
 import { RecurringInvoiceService } from './recurring-invoice.service';
-import { ReceiptService } from './receipt.service';
+import { InvoiceReceiptBuilderService } from './invoice-receipt-builder.service';
 import { GmailService } from './gmail.service';
 import { FinancialCopilotService } from './financial-copilot.service';
 import { FinancialBriefingSchedulerService } from './financial-briefing-scheduler.service';
@@ -91,7 +91,7 @@ import type { NotificationsModule as NotificationsModuleType } from '../notifica
     CommerceAiService,
     CommerceVisionService,
     RecurringInvoiceService,
-    ReceiptService,
+    InvoiceReceiptBuilderService,
     GmailService,
     FinancialCopilotService,
     FinancialBriefingSchedulerService,

@@ -2,7 +2,7 @@ import { Injectable, Inject, Logger, NotFoundException, BadRequestException } fr
 import { createHash } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { EntityResolutionService } from '../../core/connectors/entity-resolution.service';
-import { GovernanceService } from '../ai/governance.service';
+import { AiOversightService } from '../ai/ai-oversight.service';
 import { MessageIntakeOrchestrator } from '../communications/message-intake-orchestrator.service';
 import { DriveIntakeOrchestrator } from '../commerce/drive-intake-orchestrator.service';
 import { IngestionItemInput } from '../../core/connectors/connector.interface';
@@ -22,7 +22,7 @@ export class IngestionOrchestrator {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EntityResolutionService) private readonly entityResolution: EntityResolutionService,
-    @Inject(GovernanceService) private readonly governance: GovernanceService,
+    @Inject(AiOversightService) private readonly governance: AiOversightService,
     @Inject(MessageIntakeOrchestrator) private readonly messageOrchestrator: MessageIntakeOrchestrator,
     @Inject(DriveIntakeOrchestrator) private readonly driveOrchestrator: DriveIntakeOrchestrator,
   ) {}

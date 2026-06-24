@@ -2,8 +2,8 @@ import { Injectable, Inject, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 @Injectable()
-export class GrowthIntelligenceService {
-  private readonly logger = new Logger(GrowthIntelligenceService.name);
+export class GrowthInsightGeneratorService {
+  private readonly logger = new Logger(GrowthInsightGeneratorService.name);
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,

@@ -8,7 +8,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi, type MockIns
 import { CommerceController } from '../src/modules/commerce/commerce.controller';
 import { CommerceService } from '../src/modules/commerce/commerce.service';
 import { RecurringInvoiceService } from '../src/modules/commerce/recurring-invoice.service';
-import { ReceiptService } from '../src/modules/commerce/receipt.service';
+import { InvoiceReceiptBuilderService } from '../src/modules/commerce/invoice-receipt-builder.service';
 import { GmailService } from '../src/modules/commerce/gmail.service';
 import { CommerceVisionService } from '../src/modules/commerce/commerce-vision.service';
 import { StoreReadinessService } from '../src/modules/commerce/store-readiness.service';
@@ -143,7 +143,7 @@ describe('Commerce public quote e2e', () => {
         { provide: REDIS_CLIENT, useValue: { get: vi.fn(), set: vi.fn(), del: vi.fn() } },
         CommerceService,
         { provide: RecurringInvoiceService, useValue: {} },
-        { provide: ReceiptService, useValue: {} },
+        { provide: InvoiceReceiptBuilderService, useValue: {} },
         { provide: GmailService, useValue: {} },
         { provide: CommerceVisionService, useValue: {} },
         { provide: StoreReadinessService, useValue: {} },

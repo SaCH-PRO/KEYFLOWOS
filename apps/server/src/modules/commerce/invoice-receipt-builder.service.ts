@@ -2,7 +2,7 @@ import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 @Injectable()
-export class ReceiptService {
+export class InvoiceReceiptBuilderService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   async buildReceipt(invoiceId: string) {

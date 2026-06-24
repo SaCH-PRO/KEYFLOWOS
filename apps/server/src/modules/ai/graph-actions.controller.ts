@@ -4,7 +4,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { BusinessGraphService } from './business-graph.service';
 import { IntentParserService } from './intent-parser.service';
 import { PlannerService } from './planner.service';
-import { GovernanceService } from './governance.service';
+import { AiOversightService } from './ai-oversight.service';
 import { FlowOrchestratorService } from './flow-orchestrator.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
 import { WorkspaceRecommendationsService } from './workspace-recommendations.service';
@@ -31,7 +31,7 @@ export class GraphActionsController {
     @Inject(BusinessGraphService) private readonly businessGraph: BusinessGraphService,
     @Inject(IntentParserService) private readonly intentParser: IntentParserService,
     @Inject(PlannerService) private readonly planner: PlannerService,
-    @Inject(GovernanceService) private readonly governance: GovernanceService,
+    @Inject(AiOversightService) private readonly governance: AiOversightService,
     @Inject(FlowOrchestratorService) private readonly orchestrator: FlowOrchestratorService,
     @Inject(AiExecutionLogService) private readonly executionLog: AiExecutionLogService,
     @Inject(WorkspaceRecommendationsService) private readonly workspaceRecs: WorkspaceRecommendationsService,

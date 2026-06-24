@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiExecutionLogService } from '../ai/ai-execution-log.service';
-import { GovernanceService } from '../ai/governance.service';
+import { AiOversightService } from '../ai/ai-oversight.service';
 import { FlowOrchestratorService } from '../ai/flow-orchestrator.service';
 import { UndoService } from './undo.service';
 
@@ -46,7 +46,7 @@ export class ActionDispatcherService {
     private readonly prisma: PrismaService,
     private readonly events: EventEmitter2,
     private readonly executionLog: AiExecutionLogService,
-    private readonly governance: GovernanceService,
+    private readonly governance: AiOversightService,
     private readonly flowOrchestrator: FlowOrchestratorService,
     private readonly undoService: UndoService,
   ) {}

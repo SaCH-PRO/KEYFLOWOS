@@ -1,12 +1,12 @@
 import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
-import { ReceiptService, type CreateReceiptInput, type UpdateReceiptInput } from './receipt.service';
+import { PaymentReceiptService, type CreateReceiptInput, type UpdateReceiptInput } from './payment-receipt.service';
 
 @Controller('continental-ops/businesses/:businessId/receipts')
 @UseGuards(AuthGuard, BusinessGuard)
 export class ReceiptController {
-  constructor(@Inject(ReceiptService) private readonly svc: ReceiptService) {}
+  constructor(@Inject(PaymentReceiptService) private readonly svc: PaymentReceiptService) {}
 
   @Get()
   async list(@Param('businessId') businessId: string) {

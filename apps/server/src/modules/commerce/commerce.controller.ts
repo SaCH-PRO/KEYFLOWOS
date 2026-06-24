@@ -17,7 +17,7 @@ import { sanitizeString } from '../../core/utils/sanitize';
 import { readVisitorIdFromRequest } from '../../core/utils/visitor-cookie';
 import type { Request } from 'express';
 import { BulkProductsDto } from './dto/bulk-products.dto';
-import { ReceiptService } from './receipt.service';
+import { InvoiceReceiptBuilderService } from './invoice-receipt-builder.service';
 import { GmailService } from './gmail.service';
 import { UpdateInvoiceStatusDto } from './dto/update-invoice-status.dto';
 import { UpdateQuoteStatusDto } from './dto/update-quote-status.dto';
@@ -33,7 +33,7 @@ export class CommerceController {
 
   constructor(
     @Inject(CommerceService) private readonly commerce: CommerceService,
-    @Inject(ReceiptService) private readonly receipts: ReceiptService,
+    @Inject(InvoiceReceiptBuilderService) private readonly receipts: InvoiceReceiptBuilderService,
     @Inject(GmailService) private readonly gmail: GmailService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(CommerceVisionService) private readonly vision: CommerceVisionService,

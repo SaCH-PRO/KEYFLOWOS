@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from './ai-usage.service';
 import { BusinessGraphService } from './business-graph.service';
-import { GovernanceService } from './governance.service';
+import { AiOversightService } from './ai-oversight.service';
 import { AiMemoryService } from './ai-memory.service';
 import { ParsedIntent } from './intent-parser.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
@@ -73,7 +73,7 @@ export class PlannerService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
     @Inject(BusinessGraphService) private readonly businessGraph: BusinessGraphService,
-    @Inject(GovernanceService) private readonly governance: GovernanceService,
+    @Inject(AiOversightService) private readonly governance: AiOversightService,
     @Inject(AiMemoryService) private readonly memory: AiMemoryService,
     @Inject(BlueprintService) private readonly blueprint: BlueprintService,
   ) {}

@@ -5,7 +5,7 @@ import type { Redis } from 'ioredis';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { FlowOrchestratorService } from './flow-orchestrator.service';
-import { GovernanceService } from './governance.service';
+import { AiOversightService } from './ai-oversight.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
 import { UndoService } from './undo.service';
 import { AgentStateMachineService } from './agent-state-machine.service';
@@ -47,7 +47,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Inject(FlowOrchestratorService) private readonly flowOrchestrator: FlowOrchestratorService,
-    @Inject(GovernanceService) private readonly governance: GovernanceService,
+    @Inject(AiOversightService) private readonly governance: AiOversightService,
     @Inject(AiExecutionLogService) private readonly executionLog: AiExecutionLogService,
     @Inject(UndoService) private readonly undoService: UndoService,
     @Inject(AgentStateMachineService) private readonly stateMachine: AgentStateMachineService,

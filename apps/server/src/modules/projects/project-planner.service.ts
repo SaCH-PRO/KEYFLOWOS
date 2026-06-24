@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
-import { GovernanceService } from '../ai/governance.service';
+import { AiOversightService } from '../ai/ai-oversight.service';
 import { StrategicIntelligenceService } from '../ai/strategic-intelligence.service';
 import { WorkloadAggregatorService } from '../ai/workload-aggregator.service';
 
@@ -88,7 +88,7 @@ export class ProjectPlannerService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
     @Inject(BlueprintService) private readonly blueprint: BlueprintService,
-    @Inject(GovernanceService) private readonly governance: GovernanceService,
+    @Inject(AiOversightService) private readonly governance: AiOversightService,
     @Inject(StrategicIntelligenceService) private readonly strategic: StrategicIntelligenceService,
     @Inject(WorkloadAggregatorService) private readonly workload: WorkloadAggregatorService,
   ) {}

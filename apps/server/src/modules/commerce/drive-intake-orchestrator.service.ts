@@ -3,7 +3,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmService } from '../crm/crm.service';
 import { CrmCommunicationService } from '../crm/crm-communication.service';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
-import { GovernanceService } from '../ai/governance.service';
+import { AiOversightService } from '../ai/ai-oversight.service';
 import { CommerceService } from './commerce.service';
 import { InvoiceWorkflowService } from './invoice-workflow.service';
 import { CreditNoteService } from '../finance/credit-note.service';
@@ -49,7 +49,7 @@ export class DriveIntakeOrchestrator {
     @Inject(CrmService) private readonly crm: CrmService,
     @Inject(CrmCommunicationService) private readonly crmCommunication: CrmCommunicationService,
     @Inject(TransactionalEmailService) private readonly transactionalEmail: TransactionalEmailService,
-    @Inject(GovernanceService) private readonly governance: GovernanceService,
+    @Inject(AiOversightService) private readonly governance: AiOversightService,
     @Inject(CommerceService) private readonly commerce: CommerceService,
     @Inject(InvoiceWorkflowService) private readonly invoiceWorkflow: InvoiceWorkflowService,
     @Inject(CreditNoteService) private readonly creditNotes: CreditNoteService,

@@ -3,7 +3,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ModelGatewayService } from './model-gateway.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
-import { GovernanceService } from './governance.service';
+import { AiOversightService } from './ai-oversight.service';
 import { AiUsageService } from './ai-usage.service';
 
 export interface DocumentExtractionRequest {
@@ -86,7 +86,7 @@ export class DocumentIntelligenceService {
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Inject(ModelGatewayService) private readonly gateway: ModelGatewayService,
     @Inject(AiExecutionLogService) private readonly executionLog: AiExecutionLogService,
-    @Inject(GovernanceService) private readonly governance: GovernanceService,
+    @Inject(AiOversightService) private readonly governance: AiOversightService,
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
   ) {}
 

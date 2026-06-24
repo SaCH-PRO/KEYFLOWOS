@@ -4,7 +4,7 @@ import { CrmRateLimit, CrmRateLimitGuard } from '../crm/guards/rate-limit.guard'
 import { AiAdvisorService } from './ai-advisor.service';
 import { AiUsageService } from './ai-usage.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
-import { GovernanceService, RiskTier } from './governance.service';
+import { AiOversightService, RiskTier } from './ai-oversight.service';
 import { BusinessGraphService } from './business-graph.service';
 import { IntentParserService } from './intent-parser.service';
 import { PlannerService } from './planner.service';
@@ -68,7 +68,7 @@ export class AiController {
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AiExecutionLogService) private readonly executionLog: AiExecutionLogService,
-    @Inject(GovernanceService) private readonly governance: GovernanceService,
+    @Inject(AiOversightService) private readonly governance: AiOversightService,
     @Inject(BusinessGraphService) private readonly businessGraph: BusinessGraphService,
     @Inject(IntentParserService) private readonly intentParser: IntentParserService,
     @Inject(PlannerService) private readonly planner: PlannerService,

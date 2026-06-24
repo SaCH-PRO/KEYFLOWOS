@@ -3,7 +3,7 @@ import { PrismaModule } from '../../core/prisma/prisma.module';
 import { AuthModule } from '../../core/auth/auth.module';
 import { DeliveryNoteService } from './delivery-note.service';
 import { DeliveryNoteController } from './delivery-note.controller';
-import { ReceiptService } from './receipt.service';
+import { PaymentReceiptService } from './payment-receipt.service';
 import { ReceiptController } from './receipt.controller';
 import { GoodsReceiptService } from './goods-receipt.service';
 import { GoodsReceiptController } from './goods-receipt.controller';
@@ -20,13 +20,13 @@ import { StockCountController } from './stock-count.controller';
   ],
   providers: [
     DeliveryNoteService,
-    ReceiptService,
+    PaymentReceiptService,
     GoodsReceiptService,
     StockCountService,
   ],
   exports: [
     DeliveryNoteService,
-    ReceiptService,
+    PaymentReceiptService,
     GoodsReceiptService,
     StockCountService,
   ],

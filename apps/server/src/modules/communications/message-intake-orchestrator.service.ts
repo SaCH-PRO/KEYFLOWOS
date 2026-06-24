@@ -2,7 +2,7 @@ import { Injectable, Inject, Logger, NotFoundException, BadRequestException } fr
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { EntityResolutionService } from '../../core/connectors/entity-resolution.service';
 import { InteractionClassifierService, type ClassifiedIntent } from './interaction-classifier.service';
-import { GovernanceService } from '../ai/governance.service';
+import { AiOversightService } from '../ai/ai-oversight.service';
 import { CrmService } from '../crm/crm.service';
 import { CrmCommunicationService } from '../crm/crm-communication.service';
 import { CommandService } from '../command/command.service';
@@ -81,7 +81,7 @@ export class MessageIntakeOrchestrator {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EntityResolutionService) private readonly entityResolution: EntityResolutionService,
     @Inject(InteractionClassifierService) private readonly classifier: InteractionClassifierService,
-    @Inject(GovernanceService) private readonly governance: GovernanceService,
+    @Inject(AiOversightService) private readonly governance: AiOversightService,
     @Inject(CrmService) private readonly crm: CrmService,
     @Inject(CrmCommunicationService) private readonly crmCommunication: CrmCommunicationService,
     @Inject(CommandService) private readonly commandService: CommandService,

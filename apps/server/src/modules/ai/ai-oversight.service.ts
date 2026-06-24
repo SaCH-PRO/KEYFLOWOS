@@ -38,8 +38,8 @@ const DEFAULT_AUTONOMY: AutonomySettings = {
 
 
 @Injectable()
-export class GovernanceService {
-  private readonly logger = new Logger(GovernanceService.name);
+export class AiOversightService {
+  private readonly logger = new Logger(AiOversightService.name);
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,

@@ -2,7 +2,7 @@ import { Injectable, Logger, Inject } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { AnalyticsEngineService } from './analytics-engine.service';
 import { ProjectionService } from './projection.service';
-import { GrowthIntelligenceService } from './growth-intelligence.service';
+import { GrowthInsightGeneratorService } from './growth-insight-generator.service';
 import { MaturityAssessmentService } from './maturity-assessment.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
@@ -13,7 +13,7 @@ export class AnalyticsSchedulerService {
   constructor(
     @Inject(AnalyticsEngineService) private readonly engine: AnalyticsEngineService,
     @Inject(ProjectionService) private readonly projection: ProjectionService,
-    @Inject(GrowthIntelligenceService) private readonly intelligence: GrowthIntelligenceService,
+    @Inject(GrowthInsightGeneratorService) private readonly intelligence: GrowthInsightGeneratorService,
     @Inject(MaturityAssessmentService) private readonly maturity: MaturityAssessmentService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}

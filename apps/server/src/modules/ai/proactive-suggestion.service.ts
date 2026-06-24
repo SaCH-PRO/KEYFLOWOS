@@ -1,7 +1,7 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ProAutoMonitorService, ProAutoInsight } from './pro-auto-monitor.service';
-import { GovernanceService } from './governance.service';
+import { AiOversightService } from './ai-oversight.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 
 export interface ChatSuggestion {
@@ -29,7 +29,7 @@ export class ProactiveSuggestionService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(ProAutoMonitorService) private readonly monitor: ProAutoMonitorService,
-    @Inject(GovernanceService) private readonly governance: GovernanceService,
+    @Inject(AiOversightService) private readonly governance: AiOversightService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
   ) {}
 

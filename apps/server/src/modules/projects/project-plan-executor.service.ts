@@ -2,7 +2,7 @@ import { Injectable, Logger, Inject, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { TimelineService } from '../timeline/timeline.service';
-import { GovernanceService } from '../ai/governance.service';
+import { AiOversightService } from '../ai/ai-oversight.service';
 import { ProjectPlannerService } from './project-planner.service';
 
 @Injectable()
@@ -13,7 +13,7 @@ export class ProjectPlanExecutorService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Inject(TimelineService) private readonly timeline: TimelineService,
-    @Inject(GovernanceService) private readonly governance: GovernanceService,
+    @Inject(AiOversightService) private readonly governance: AiOversightService,
     @Inject(ProjectPlannerService) private readonly planner: ProjectPlannerService,
   ) {}
 

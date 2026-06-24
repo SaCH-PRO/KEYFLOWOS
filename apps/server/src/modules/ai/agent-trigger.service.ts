@@ -1,7 +1,7 @@
 import { Injectable, Logger, Inject, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { GovernanceService } from './governance.service';
+import { AiOversightService } from './ai-oversight.service';
 import { PlannerService } from './planner.service';
 import { PlanExecutorService } from './plan-executor.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
@@ -25,7 +25,7 @@ export class AgentTriggerService implements OnModuleInit {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
-    @Inject(GovernanceService) private readonly governance: GovernanceService,
+    @Inject(AiOversightService) private readonly governance: AiOversightService,
     @Inject(PlannerService) private readonly planner: PlannerService,
     @Inject(PlanExecutorService) private readonly planExecutor: PlanExecutorService,
     @Inject(AiExecutionLogService) private readonly executionLog: AiExecutionLogService,

@@ -4,7 +4,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CronSchedulerService } from './cron-scheduler.service';
 import { PlannerService } from './planner.service';
 import { RoleEngineService, BusinessRole } from './role-engine.service';
-import { GovernanceService } from './governance.service';
+import { AiOversightService } from './ai-oversight.service';
 import { WorkloadAggregatorService } from './workload-aggregator.service';
 
 export interface BriefingCard {
@@ -39,7 +39,7 @@ export class MorningBriefingService implements OnModuleInit {
     @Inject(CronSchedulerService) private readonly cron: CronSchedulerService,
     @Inject(PlannerService) private readonly planner: PlannerService,
     @Inject(RoleEngineService) private readonly roleEngine: RoleEngineService,
-    @Inject(GovernanceService) private readonly governance: GovernanceService,
+    @Inject(AiOversightService) private readonly governance: AiOversightService,
     @Inject(WorkloadAggregatorService) private readonly workload: WorkloadAggregatorService,
   ) {}
 
