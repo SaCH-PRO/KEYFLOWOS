@@ -600,6 +600,9 @@ model Business {
   genomeCustomerSegments       GenomeCustomerSegment[]
   genomeSalesMotions           GenomeSalesMotion[]
   genomeCustomerSalesSnapshots GenomeCustomerSalesSnapshot[]
+  genomeOperationalProcesses   GenomeOperationalProcess[]
+  genomeDeliveryCapabilities   GenomeDeliveryCapability[]
+  genomeOperationsSnapshots    GenomeOperationsSnapshot[]
   constitutionVersions         BusinessConstitutionVersion[]
   authorityGrants              AuthorityGrant[]
   timeEntries                  TimeEntry[]
@@ -1177,6 +1180,127 @@ model GenomeCustomerSalesSnapshot {
   @@index([businessId, period])
   @@index([businessId, overallRisk])
   @@map("genome_customer_sales_snapshots")
+}
+
+// Phase 15: Operations / Delivery Genome
+model GenomeOperationalProcess {
+  id         String @id @default(cuid())
+  businessId String @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  name        String
+  description String?
+
+  processType String @map("process_type")
+  ownerRole   String? @map("owner_role")
+
+  frequency String?
+  documented Boolean @default(false)
+  hasSop      Boolean @default(false) @map("has_sop")
+
+  averageCycleTimeHours Float? @map("average_cycle_time_hours")
+  failureRate           Float? @map("failure_rate")
+  reworkRate            Float? @map("rework_rate")
+  handoffCount          Int?   @map("handoff_count")
+
+  automationCandidate Boolean @default(false) @map("automation_candidate")
+  autonomySensitive   Boolean @default(false) @map("autonomy_sensitive")
+
+  maturityScore Float @default(0) @map("maturity_score")
+  riskLevel     String @default("MEDIUM") @map("risk_level")
+  confidence    Float @default(0.5)
+
+  bottlenecks     Json @default("[]")
+  missingInputs   Json @default("[]") @map("missing_inputs")
+  recommendations Json @default("[]")
+
+  sourceModule     String? @map("source_module")
+  sourceEntityType String? @map("source_entity_type")
+  sourceEntityId   String? @map("source_entity_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId, processType])
+  @@index([businessId, riskLevel])
+  @@index([businessId, hasSop])
+  @@map("genome_operational_processes")
+}
+
+model GenomeDeliveryCapability {
+  id         String @id @default(cuid())
+  businessId String @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  name        String
+  description String?
+
+  capabilityType String @map("capability_type")
+
+  currentCapacity Float? @map("current_capacity")
+  maxCapacity     Float? @map("max_capacity")
+  capacityUnit    String? @map("capacity_unit")
+
+  utilizationRate Float? @map("utilization_rate")
+  backlogVolume   Float? @map("backlog_volume")
+  averageLeadTimeDays Float? @map("average_lead_time_days")
+
+  qualityScore Float? @map("quality_score")
+  reliabilityScore Float? @map("reliability_score")
+
+  riskLevel  String @default("MEDIUM") @map("risk_level")
+  confidence Float @default(0.5)
+
+  constraints Json @default("[]")
+  dependencies Json @default("[]")
+  recommendations Json @default("[]")
+
+  sourceModule     String? @map("source_module")
+  sourceEntityType String? @map("source_entity_type")
+  sourceEntityId   String? @map("source_entity_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId, capabilityType])
+  @@index([businessId, riskLevel])
+  @@map("genome_delivery_capabilities")
+}
+
+model GenomeOperationsSnapshot {
+  id         String @id @default(cuid())
+  businessId String @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  period String?
+
+  processCount      Int @default(0) @map("process_count")
+  documentedCount   Int @default(0) @map("documented_count")
+  sopCoverageRate   Float? @map("sop_coverage_rate")
+
+  averageProcessMaturity Float? @map("average_process_maturity")
+  averageUtilizationRate Float? @map("average_utilization_rate")
+  averageLeadTimeDays    Float? @map("average_lead_time_days")
+
+  bottleneckCount     Int @default(0) @map("bottleneck_count")
+  highRiskProcessCount Int @default(0) @map("high_risk_process_count")
+  overloadedCapabilityCount Int @default(0) @map("overloaded_capability_count")
+
+  deliveryReadinessScore Float @default(0) @map("delivery_readiness_score")
+  qualityRisk            String @default("UNKNOWN") @map("quality_risk")
+  capacityRisk           String @default("UNKNOWN") @map("capacity_risk")
+  sopRisk                String @default("UNKNOWN") @map("sop_risk")
+  overallRisk            String @default("MEDIUM") @map("overall_risk")
+
+  missingInputs   Json @default("[]") @map("missing_inputs")
+  warnings        Json @default("[]")
+  recommendations Json @default("[]")
+
+  computedAt DateTime @default(now()) @map("computed_at")
+
+  @@index([businessId, period])
+  @@index([businessId, overallRisk])
+  @@map("genome_operations_snapshots")
 }
 
 // Phase 12: Living Constitution v2 — versioned, immutable operating document
