@@ -4,9 +4,8 @@ import { resolve } from 'path';
 // In monorepo .env lives at repo root; cwd is apps/server when running directly
 config({ path: resolve(process.cwd(), '../../.env') });
 import { NestFactory } from '@nestjs/core';
-import { AppModule } from './app.module';
 import { configureNestApp } from './app-bootstrap';
-import { ensureValidServerEnv } from './core/config/env';
+import { ensureValidServerEnv, assertNoDevAuthBypass } from './core/config/env';
 import { getReleaseVersion } from './core/utils/release-version';
 
 async function bootstrap() {
@@ -18,15 +17,7 @@ async function bootstrap() {
   // hardening pass. If anyone still has it set in their env, hard-fail at
   // boot in EVERY environment so they don't silently expect dev auto-login
   // and end up with a half-authenticated session instead.
-  if (
-    process.env.KEYFLOW_DEV_AUTH_BYPASS === 'true' ||
-    process.env.KEYFLOW_DEV_AUTH_BYPASS === '1'
-  ) {
-    console.error(
-      '[FATAL] KEYFLOW_DEV_AUTH_BYPASS is set, but the dev auth bypass code path no longer exists. Unset this env var (and remove it from any .env file or workflow command) to start the server. To sign in locally, use the real /auth/signup → email-verify → /auth/login flow.',
-    );
-    process.exit(1);
-  }
+  assertNoDevAuthBypass(process.env);
 
   // When email verification is required, signup absolutely cannot work without
   // both the Supabase service-role key (admin createUser / generateLink) and
@@ -58,6 +49,7 @@ async function bootstrap() {
     );
   }
 
+  const { AppModule } = await import('./app.module');
   const app = await NestFactory.create(AppModule, { rawBody: true });
   configureNestApp(app);
 

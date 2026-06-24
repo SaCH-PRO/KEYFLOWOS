@@ -1,23 +1,23 @@
-// TODO: Quarantined flaky test — timeout/ECONNRESET when exercising Google Calendar connector paths.
-// Remediation: mock connector boundaries, freeze time, and move to integration suite.
 import { Test } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
-import { CalendarController } from '../src/modules/calendar/calendar.controller';
-import { CalendarQueryService } from '../src/modules/calendar/calendar-query.service';
-import { CalendarPermissionService } from '../src/modules/calendar/calendar-permission.service';
-import { CalendarProjectionService } from '../src/modules/calendar/calendar-projection.service';
-import { CalendarConflictService } from '../src/modules/calendar/calendar-conflict.service';
-import { CalendarInsightService } from '../src/modules/calendar/calendar-insight.service';
-import { GoogleCalendarTemporalSyncService } from '../src/modules/calendar/connectors/google-calendar-temporal-sync.service';
-import { ModelGatewayService } from '../src/modules/ai/model-gateway.service';
-import { PrismaService } from '../src/core/prisma/prisma.service';
-import { AuthGuard } from '../src/core/auth/auth.guard';
-import { BusinessGuard } from '../src/core/auth/business.guard';
-import { ModuleScopeGuard } from '../src/core/auth/module-scope.guard';
+import { CalendarController } from './calendar.controller';
+import { CalendarQueryService } from './calendar-query.service';
+import { CalendarPermissionService } from './calendar-permission.service';
+import { CalendarProjectionService } from './calendar-projection.service';
+import { CalendarConflictService } from './calendar-conflict.service';
+import { CalendarInsightService } from './calendar-insight.service';
+import { GoogleCalendarTemporalSyncService } from './connectors/google-calendar-temporal-sync.service';
+import { ModelGatewayService } from '../ai/model-gateway.service';
+import { PrismaService } from '../../core/prisma/prisma.service';
+import { AuthGuard } from '../../core/auth/auth.guard';
+import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard } from '../../core/auth/module-scope.guard';
 import { Reflector } from '@nestjs/core';
+import { CalendarSyncService } from './calendar-sync.service';
+import { AiUsageService } from '../ai/ai-usage.service';
 
 interface DbEvent {
   id: string;
@@ -225,7 +225,7 @@ class PrismaMock {
   }
 }
 
-describe('CalendarController (C2)', () => {
+describe('CalendarController', () => {
   let app: INestApplication;
   let prismaMock: PrismaMock;
 
@@ -251,7 +251,7 @@ describe('CalendarController (C2)', () => {
           },
         },
         {
-          provide: (await import('../src/modules/calendar/calendar-sync.service')).CalendarSyncService,
+          provide: CalendarSyncService,
           useValue: {
             getStatus: vi.fn(),
             getSettings: vi.fn(),
@@ -273,9 +273,9 @@ describe('CalendarController (C2)', () => {
           },
         },
         {
-          provide: (await import('../src/modules/ai/ai-usage.service')).AiUsageService,
+          provide: AiUsageService,
           useValue: {
-            trackAndComplete: vi.fn(async (_biz: string, _uid: string | undefined, _feature: string, request: any) => ({
+            trackAndComplete: vi.fn(async () => ({
               text: '{}',
               usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
             })),
@@ -293,8 +293,6 @@ describe('CalendarController (C2)', () => {
     app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
     await app.init();
 
-    // Seed events: a booking, a content post, an external event, and a
-    // private event owned by another staff member.
     prismaMock.events.push(
       makeEvent({
         id: 'evt_booking',

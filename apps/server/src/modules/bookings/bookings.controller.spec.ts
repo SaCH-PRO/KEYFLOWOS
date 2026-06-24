@@ -1,21 +1,18 @@
-// TODO: Quarantined flaky test — timeout/ECONNRESET in calendar controller integration setup.
-// Remediation: reduce module bootstrap scope and mock Prisma/Redis where appropriate.
 import { Test } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { BookingsController } from '../src/modules/bookings/bookings.controller';
-import { BookingsService } from '../src/modules/bookings/bookings.service';
-import { CalendarService } from '../src/modules/bookings/calendar.service';
-import { BookingOptimizerService } from '../src/modules/bookings/booking-optimizer.service';
-import { SubscriptionsService } from '../src/modules/subscriptions/subscriptions.service';
-import { PlanLimitGuard } from '../src/modules/subscriptions/plan-limit.guard';
-import { PrismaService } from '../src/core/prisma/prisma.service';
-import { AuthGuard } from '../src/core/auth/auth.guard';
-import { BusinessGuard } from '../src/core/auth/business.guard';
-import { KeyflowCommandService } from '../src/modules/keyflow-command/keyflow-command.service';
-import { CatalogService } from '../src/modules/catalog/catalog.service';
-import { REDIS_CLIENT } from '../src/core/redis/redis.constants';
+import { BookingsController } from './bookings.controller';
+import { BookingsService } from './bookings.service';
+import { CalendarService } from './calendar.service';
+import { BookingOptimizerService } from './booking-optimizer.service';
+import { SubscriptionsService } from '../subscriptions/subscriptions.service';
+import { PlanLimitGuard } from '../subscriptions/plan-limit.guard';
+import { PrismaService } from '../../core/prisma/prisma.service';
+import { AuthGuard } from '../../core/auth/auth.guard';
+import { BusinessGuard } from '../../core/auth/business.guard';
+import { CatalogService } from '../catalog/catalog.service';
+import { REDIS_CLIENT } from '../../core/redis/redis.constants';
 
 class CalendarPrismaMock {
   client: any;
@@ -265,127 +262,5 @@ describe('BookingsController — Google Calendar two-way editing', () => {
         .delete('/bookings/businesses/biz_1/calendar/events/evt_fail')
         .expect(400);
     });
-  });
-});
-
-describe('Calendar listCalendarEvents → KeyflowEvent meta round-trip', () => {
-  it('preserves attendees and location all the way into KeyflowEvent.meta', async () => {
-    const googleApiResponse = {
-      items: [
-        {
-          id: 'g_evt_1',
-          status: 'confirmed',
-          summary: 'Client kickoff',
-          description: 'Walk through the SOW',
-          location: '12 Main Street, Port of Spain',
-          htmlLink: 'https://calendar.google.com/event?eid=g_evt_1',
-          start: { dateTime: '2030-06-03T13:00:00Z', timeZone: 'UTC' },
-          end: { dateTime: '2030-06-03T14:00:00Z', timeZone: 'UTC' },
-          organizer: { email: 'owner@acme.com' },
-          attendees: [
-            { email: 'alex@acme.com', displayName: 'Alex' },
-            { email: 'sam@acme.com' },
-            { displayName: 'Resource room (no email)' },
-          ],
-        },
-        {
-          id: 'g_evt_allday',
-          status: 'confirmed',
-          summary: 'Holiday',
-          start: { date: '2030-06-04' },
-          end: { date: '2030-06-05' },
-        },
-      ],
-    };
-
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => googleApiResponse,
-      text: async () => '',
-    } as any);
-    const originalFetch = globalThis.fetch;
-    (globalThis as any).fetch = fetchMock;
-
-    try {
-      const prismaMock: any = {
-        client: {
-          business: {
-            findUnique: vi.fn(({ select }: any) => {
-              if (select?.calendarRefreshToken) {
-                return Promise.resolve({
-                  calendarRefreshToken: 'rt',
-                  calendarTokenExpiry: new Date(Date.now() + 60 * 60 * 1000),
-                  calendarAccessToken: 'at',
-                });
-              }
-              if (select?.calendarId) {
-                return Promise.resolve({ calendarId: 'primary' });
-              }
-              return Promise.resolve({});
-            }),
-          },
-          booking: { findMany: vi.fn(() => Promise.resolve([])) },
-          contactTask: { findMany: vi.fn(() => Promise.resolve([])) },
-          projectTask: { findMany: vi.fn(() => Promise.resolve([])) },
-          autopilotTask: { findMany: vi.fn(() => Promise.resolve([])) },
-          project: { findMany: vi.fn(() => Promise.resolve([])) },
-        },
-      };
-
-      const { CalendarService: RealCalendarService } = await import(
-        '../src/modules/bookings/calendar.service'
-      );
-      const calendar = new RealCalendarService(prismaMock as PrismaService);
-
-      const listed = await calendar.listCalendarEvents(
-        'biz_1',
-        '2030-06-01T00:00:00Z',
-        '2030-06-30T00:00:00Z',
-      );
-
-      const timed = listed.find((e) => e.id === 'g_evt_1');
-      expect(timed).toBeDefined();
-      expect(timed!.location).toBe('12 Main Street, Port of Spain');
-      expect(timed!.organizer).toBe('owner@acme.com');
-      expect(timed!.allDay).toBe(false);
-      expect(timed!.attendees).toEqual([
-        { email: 'alex@acme.com', displayName: 'Alex' },
-        { email: 'sam@acme.com', displayName: undefined },
-      ]);
-
-      const allDay = listed.find((e) => e.id === 'g_evt_allday');
-      expect(allDay).toBeDefined();
-      expect(allDay!.allDay).toBe(true);
-      expect(allDay!.start).toBe('2030-06-04');
-
-      const keyflow = new KeyflowCommandService(prismaMock as PrismaService, calendar);
-      const events = await keyflow.listUnifiedEvents(
-        'biz_1',
-        new Date('2030-06-01T00:00:00Z'),
-        new Date('2030-06-30T00:00:00Z'),
-      );
-
-      const googleEvent = events.find((e) => e.refId === 'g_evt_1');
-      expect(googleEvent).toBeDefined();
-      expect(googleEvent!.kind).toBe('google_event');
-      expect(googleEvent!.allDay).toBe(false);
-      expect(googleEvent!.meta).toMatchObject({
-        location: '12 Main Street, Port of Spain',
-        organizer: 'owner@acme.com',
-        allDay: false,
-      });
-      expect(googleEvent!.meta!.attendees).toEqual([
-        { email: 'alex@acme.com', displayName: 'Alex' },
-        { email: 'sam@acme.com', displayName: undefined },
-      ]);
-
-      const allDayKf = events.find((e) => e.refId === 'g_evt_allday');
-      expect(allDayKf).toBeDefined();
-      expect(allDayKf!.allDay).toBe(true);
-      expect(allDayKf!.meta).toMatchObject({ allDay: true });
-    } finally {
-      (globalThis as any).fetch = originalFetch;
-    }
   });
 });

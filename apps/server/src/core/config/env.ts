@@ -199,3 +199,18 @@ export function ensureValidServerEnv(env: NodeJS.ProcessEnv = process.env): void
     process.exit(1);
   }
 }
+
+/**
+ * Hard-fail guard for the removed KEYFLOW_DEV_AUTH_BYPASS escape hatch.
+ *
+ * Call this before importing the Nest application module so a mis-set env var
+ * exits immediately with a readable message instead of booting into a half-
+ * authenticated state (or being buried under a module-load error).
+ */
+export function assertNoDevAuthBypass(env: NodeJS.ProcessEnv = process.env): void {
+  if (env.KEYFLOW_DEV_AUTH_BYPASS === 'true' || env.KEYFLOW_DEV_AUTH_BYPASS === '1') {
+    throw new Error(
+      '[FATAL] KEYFLOW_DEV_AUTH_BYPASS is set, but the dev auth bypass code path no longer exists. Unset this env var (and remove it from any .env file or workflow command) to start the server. To sign in locally, use the real /auth/signup → email-verify → /auth/login flow.',
+    );
+  }
+}

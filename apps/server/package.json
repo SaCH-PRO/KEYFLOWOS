@@ -12,7 +12,6 @@
     "test:unit": "vitest run -c vitest.unit.config.ts",
     "test:smoke": "vitest run -c vitest.smoke.config.ts",
     "test:integration": "vitest run -c vitest.integration.config.ts",
-    "test:flaky": "vitest run -c vitest.flaky.config.ts",
     "test:ci": "pnpm test:unit && pnpm test:smoke"
   },
   "dependencies": {
