@@ -24,6 +24,7 @@ export type GenomeMemorySourceType =
   | 'GENOME_FACT'
   | 'MODULE_READINESS'
   | 'GOVERNANCE_DECISION'
+  | 'FINANCE_GENOME'
   | 'MANUAL';
 
 export type GenomeMemoryEventType =
@@ -45,6 +46,12 @@ export type GenomeMemoryEventType =
   | 'READINESS_IMPROVED'
   | 'READINESS_DEGRADED'
   | 'FACT_CONFIDENCE_CHANGED'
+  | 'FINANCE_SNAPSHOT_COMPUTED'
+  | 'FINANCE_SIGNAL_GENERATED'
+  | 'FINANCE_RECOMMENDATION_GENERATED'
+  | 'FINANCE_METRIC_RECORDED'
+  | 'FINANCE_RISK_DETECTED'
+  | 'FINANCE_RISK_IMPROVED'
   | 'MANUAL_LESSON';
 
 export type GenomeSignalType =
@@ -633,3 +640,123 @@ export interface ListGenomeDepartmentsQuery {
   limit?: number;
 }
 
+
+// ---------------------------------------------------------------------------
+// Phase 13 — Finance Genome
+// ---------------------------------------------------------------------------
+
+export type GenomeFinancialMetricType =
+  | 'REVENUE'
+  | 'GROSS_PROFIT'
+  | 'NET_PROFIT'
+  | 'CASH_ON_HAND'
+  | 'MONTHLY_EXPENSE'
+  | 'PAYROLL_COST'
+  | 'MARKETING_SPEND'
+  | 'CUSTOMER_ACQUISITION_COST'
+  | 'AVERAGE_ORDER_VALUE'
+  | 'LIFETIME_VALUE'
+  | 'GROSS_MARGIN_PERCENT'
+  | 'NET_MARGIN_PERCENT'
+  | 'RUNWAY_MONTHS'
+  | 'ACCOUNTS_RECEIVABLE'
+  | 'ACCOUNTS_PAYABLE'
+  | 'TAX_RESERVE'
+  | 'REFUND_RATE'
+  | 'DEBT_PAYMENT'
+  | 'OWNER_DRAW'
+  | 'INVENTORY_VALUE';
+
+export type GenomeFinanceRiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' | 'UNKNOWN';
+
+export interface GenomeFinancialMetricData {
+  id: string;
+  businessId: string;
+  metricType: GenomeFinancialMetricType | string;
+  period?: string | null;
+  value: number;
+  currency: string;
+  sourceModule?: string | null;
+  sourceEntityType?: string | null;
+  sourceEntityId?: string | null;
+  confidence: number;
+  notes?: string | null;
+  occurredAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GenomeFinanceWarning {
+  code: string;
+  message: string;
+  severity: GenomeFinanceRiskLevel;
+}
+
+export interface GenomeFinanceRecommendation {
+  title: string;
+  reason: string;
+  priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  suggestedAction?: string;
+}
+
+export interface GenomeFinanceSnapshotData {
+  id: string;
+  businessId: string;
+  period?: string | null;
+  currency: string;
+
+  revenue?: number | null;
+  grossProfit?: number | null;
+  netProfit?: number | null;
+  monthlyExpenses?: number | null;
+  cashOnHand?: number | null;
+  accountsReceivable?: number | null;
+  accountsPayable?: number | null;
+  taxReserve?: number | null;
+
+  grossMarginPercent?: number | null;
+  netMarginPercent?: number | null;
+  runwayMonths?: number | null;
+  averageTicket?: number | null;
+
+  healthScore: number;
+  cashFlowRisk: GenomeFinanceRiskLevel;
+  marginRisk: GenomeFinanceRiskLevel;
+  pricingRisk: GenomeFinanceRiskLevel;
+  taxRisk: GenomeFinanceRiskLevel;
+  overallRisk: GenomeFinanceRiskLevel;
+
+  missingInputs: string[];
+  warnings: GenomeFinanceWarning[];
+  recommendations: GenomeFinanceRecommendation[];
+
+  computedAt: string;
+}
+
+export interface UpsertGenomeFinancialMetricInput {
+  businessId: string;
+  metricType: GenomeFinancialMetricType | string;
+  period?: string | null;
+  value: number;
+  currency?: string;
+  sourceModule?: string | null;
+  sourceEntityType?: string | null;
+  sourceEntityId?: string | null;
+  confidence?: number;
+  notes?: string | null;
+  occurredAt?: string | null;
+}
+
+export interface ListGenomeFinancialMetricsQuery {
+  metricType?: string;
+  period?: string;
+  currency?: string;
+  minConfidence?: number;
+  limit?: number;
+}
+
+export interface ListGenomeFinanceSnapshotsQuery {
+  period?: string;
+  riskLevel?: string;
+  limit?: number;
+}

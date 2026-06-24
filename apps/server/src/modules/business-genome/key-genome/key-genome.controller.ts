@@ -17,11 +17,14 @@ import { KeyGenomeGovernanceService } from './key-genome-governance.service';
 import { GenomeMemoryService } from './genome-memory.service';
 import { GenomeDepartmentService } from './genome-department.service';
 import { DepartmentReadinessService } from './department-readiness.service';
+import { GenomeFinancialMetricService } from './genome-financial-metric.service';
+import { FinanceGenomeService } from './finance-genome.service';
 import type {
   CreateGenomeExperimentInput,
   GenerateGenomeRecommendationsInput,
   GenomeOutcome,
   RecommendationOutcome,
+  UpsertGenomeFinancialMetricInput,
 } from './key-genome.types';
 
 @Controller('business-genome/businesses/:businessId/key-genome')
@@ -36,6 +39,8 @@ export class KeyGenomeController {
     @Inject(GenomeMemoryService) private readonly memoryService: GenomeMemoryService,
     @Inject(GenomeDepartmentService) private readonly departments: GenomeDepartmentService,
     @Inject(DepartmentReadinessService) private readonly departmentReadiness: DepartmentReadinessService,
+    @Inject(GenomeFinancialMetricService) private readonly financeMetrics: GenomeFinancialMetricService,
+    @Inject(FinanceGenomeService) private readonly financeGenome: FinanceGenomeService,
   ) {}
 
   @Get('signals')
@@ -326,5 +331,72 @@ export class KeyGenomeController {
     @Param('code') code: string,
   ) {
     return this.departmentReadiness.computeOneDepartment(businessId, code);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Phase 13: Finance Genome
+  // ---------------------------------------------------------------------------
+
+  @Get('finance/metrics')
+  async listFinanceMetrics(
+    @Param('businessId') businessId: string,
+    @Query('metricType') metricType?: string,
+    @Query('period') period?: string,
+    @Query('currency') currency?: string,
+    @Query('minConfidence') minConfidence?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.financeMetrics.listMetrics(businessId, {
+      metricType,
+      period,
+      currency,
+      minConfidence: minConfidence !== undefined ? Number(minConfidence) : undefined,
+      limit: limit !== undefined ? Number(limit) : undefined,
+    });
+  }
+
+  @Post('finance/metrics')
+  async upsertFinanceMetric(
+    @Param('businessId') businessId: string,
+    @Body() body: UpsertGenomeFinancialMetricInput,
+  ) {
+    return this.financeMetrics.upsertMetric({ ...body, businessId });
+  }
+
+  @Get('finance/snapshot')
+  async getFinanceSnapshot(@Param('businessId') businessId: string) {
+    return this.financeGenome.getLatestFinanceSnapshot(businessId);
+  }
+
+  @Post('finance/snapshot/compute')
+  async computeFinanceSnapshot(
+    @Param('businessId') businessId: string,
+    @Query('period') period?: string,
+  ) {
+    return this.financeGenome.computeFinanceSnapshot(businessId, period);
+  }
+
+  @Get('finance/snapshots')
+  async listFinanceSnapshots(
+    @Param('businessId') businessId: string,
+    @Query('period') period?: string,
+    @Query('riskLevel') riskLevel?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.financeGenome.listFinanceSnapshots(businessId, {
+      period,
+      riskLevel,
+      limit: limit !== undefined ? Number(limit) : undefined,
+    });
+  }
+
+  @Post('finance/signals/generate')
+  async generateFinanceSignals(@Param('businessId') businessId: string) {
+    return this.financeGenome.generateFinanceSignals(businessId);
+  }
+
+  @Post('finance/recommendations/generate')
+  async generateFinanceRecommendations(@Param('businessId') businessId: string) {
+    return this.financeGenome.generateFinanceRecommendations(businessId);
   }
 }

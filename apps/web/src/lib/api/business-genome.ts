@@ -915,3 +915,193 @@ export async function computeGenomeDepartment(businessId: string, code: string) 
     body: {},
   });
 }
+
+
+// ---------------------------------------------------------------------------
+// Phase 13 — Finance Genome
+// ---------------------------------------------------------------------------
+
+export type GenomeFinanceRiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' | 'UNKNOWN';
+
+export type GenomeFinancialMetricType =
+  | 'REVENUE'
+  | 'GROSS_PROFIT'
+  | 'NET_PROFIT'
+  | 'CASH_ON_HAND'
+  | 'MONTHLY_EXPENSE'
+  | 'PAYROLL_COST'
+  | 'MARKETING_SPEND'
+  | 'CUSTOMER_ACQUISITION_COST'
+  | 'AVERAGE_ORDER_VALUE'
+  | 'LIFETIME_VALUE'
+  | 'GROSS_MARGIN_PERCENT'
+  | 'NET_MARGIN_PERCENT'
+  | 'RUNWAY_MONTHS'
+  | 'ACCOUNTS_RECEIVABLE'
+  | 'ACCOUNTS_PAYABLE'
+  | 'TAX_RESERVE'
+  | 'REFUND_RATE'
+  | 'DEBT_PAYMENT'
+  | 'OWNER_DRAW'
+  | 'INVENTORY_VALUE';
+
+export interface GenomeFinancialMetricData {
+  id: string;
+  businessId: string;
+  metricType: GenomeFinancialMetricType | string;
+  period?: string | null;
+  value: number;
+  currency: string;
+  sourceModule?: string | null;
+  sourceEntityType?: string | null;
+  sourceEntityId?: string | null;
+  confidence: number;
+  notes?: string | null;
+  occurredAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GenomeFinanceWarning {
+  code: string;
+  message: string;
+  severity: GenomeFinanceRiskLevel;
+}
+
+export interface GenomeFinanceRecommendation {
+  title: string;
+  reason: string;
+  priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  suggestedAction?: string;
+}
+
+export interface GenomeFinanceSnapshotData {
+  id: string;
+  businessId: string;
+  period?: string | null;
+  currency: string;
+
+  revenue?: number | null;
+  grossProfit?: number | null;
+  netProfit?: number | null;
+  monthlyExpenses?: number | null;
+  cashOnHand?: number | null;
+  accountsReceivable?: number | null;
+  accountsPayable?: number | null;
+  taxReserve?: number | null;
+
+  grossMarginPercent?: number | null;
+  netMarginPercent?: number | null;
+  runwayMonths?: number | null;
+  averageTicket?: number | null;
+
+  healthScore: number;
+  cashFlowRisk: GenomeFinanceRiskLevel;
+  marginRisk: GenomeFinanceRiskLevel;
+  pricingRisk: GenomeFinanceRiskLevel;
+  taxRisk: GenomeFinanceRiskLevel;
+  overallRisk: GenomeFinanceRiskLevel;
+
+  missingInputs: string[];
+  warnings: GenomeFinanceWarning[];
+  recommendations: GenomeFinanceRecommendation[];
+
+  computedAt: string;
+}
+
+export interface UpsertGenomeFinancialMetricInput {
+  metricType: GenomeFinancialMetricType | string;
+  period?: string | null;
+  value: number;
+  currency?: string;
+  sourceModule?: string | null;
+  sourceEntityType?: string | null;
+  sourceEntityId?: string | null;
+  confidence?: number;
+  notes?: string | null;
+  occurredAt?: string | null;
+}
+
+export interface ListGenomeFinancialMetricsQuery {
+  metricType?: string;
+  period?: string;
+  currency?: string;
+  minConfidence?: number;
+  limit?: number;
+}
+
+export interface ListGenomeFinanceSnapshotsQuery {
+  period?: string;
+  riskLevel?: string;
+  limit?: number;
+}
+
+export async function listGenomeFinancialMetrics(
+  businessId: string,
+  filters: ListGenomeFinancialMetricsQuery = {},
+) {
+  const params = new URLSearchParams();
+  if (filters.metricType) params.set('metricType', filters.metricType);
+  if (filters.period) params.set('period', filters.period);
+  if (filters.currency) params.set('currency', filters.currency);
+  if (filters.minConfidence !== undefined) params.set('minConfidence', String(filters.minConfidence));
+  if (filters.limit !== undefined) params.set('limit', String(filters.limit));
+  const query = params.toString();
+  return apiGet<GenomeFinancialMetricData[]>(
+    `/business-genome/businesses/${businessId}/key-genome/finance/metrics${query ? `?${query}` : ''}`,
+  );
+}
+
+export async function upsertGenomeFinancialMetric(
+  businessId: string,
+  input: UpsertGenomeFinancialMetricInput,
+) {
+  return apiPost<GenomeFinancialMetricData>({
+    path: `/business-genome/businesses/${businessId}/key-genome/finance/metrics`,
+    body: input,
+  });
+}
+
+export async function getGenomeFinanceSnapshot(businessId: string) {
+  return apiGet<GenomeFinanceSnapshotData | null>(
+    `/business-genome/businesses/${businessId}/key-genome/finance/snapshot`,
+  );
+}
+
+export async function computeGenomeFinanceSnapshot(businessId: string, period?: string) {
+  const params = new URLSearchParams();
+  if (period) params.set('period', period);
+  const query = params.toString();
+  return apiPost<GenomeFinanceSnapshotData>({
+    path: `/business-genome/businesses/${businessId}/key-genome/finance/snapshot/compute${query ? `?${query}` : ''}`,
+    body: {},
+  });
+}
+
+export async function listGenomeFinanceSnapshots(
+  businessId: string,
+  filters: ListGenomeFinanceSnapshotsQuery = {},
+) {
+  const params = new URLSearchParams();
+  if (filters.period) params.set('period', filters.period);
+  if (filters.riskLevel) params.set('riskLevel', filters.riskLevel);
+  if (filters.limit !== undefined) params.set('limit', String(filters.limit));
+  const query = params.toString();
+  return apiGet<GenomeFinanceSnapshotData[]>(
+    `/business-genome/businesses/${businessId}/key-genome/finance/snapshots${query ? `?${query}` : ''}`,
+  );
+}
+
+export async function generateGenomeFinanceSignals(businessId: string) {
+  return apiPost<GenomeSignal[]>({
+    path: `/business-genome/businesses/${businessId}/key-genome/finance/signals/generate`,
+    body: {},
+  });
+}
+
+export async function generateGenomeFinanceRecommendations(businessId: string) {
+  return apiPost<GenomeRecommendationData[]>({
+    path: `/business-genome/businesses/${businessId}/key-genome/finance/recommendations/generate`,
+    body: {},
+  });
+}

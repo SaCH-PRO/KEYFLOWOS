@@ -10,6 +10,8 @@ import { KeyGenomeGovernanceService } from './key-genome-governance.service';
 import { GenomeMemoryService } from './genome-memory.service';
 import { GenomeDepartmentService } from './genome-department.service';
 import { DepartmentReadinessService } from './department-readiness.service';
+import { GenomeFinancialMetricService } from './genome-financial-metric.service';
+import { FinanceGenomeService } from './finance-genome.service';
 
 function mockProvider(
   token: string | symbol | (new (...args: any[]) => any),
@@ -107,6 +109,20 @@ async function makeController() {
         computeDepartmentReadiness: vi.fn().mockResolvedValue({}),
         computeOneDepartment: vi.fn().mockResolvedValue({}),
       }),
+      mockProvider(GenomeFinancialMetricService, {
+        listMetrics: vi.fn().mockResolvedValue([]),
+        upsertMetric: vi.fn().mockResolvedValue({ id: 'finm_1' }),
+        getLatestMetric: vi.fn().mockResolvedValue(null),
+        getLatestMetricsByType: vi.fn().mockResolvedValue({}),
+        deleteMetric: vi.fn().mockResolvedValue({ deleted: true }),
+      }),
+      mockProvider(FinanceGenomeService, {
+        computeFinanceSnapshot: vi.fn().mockResolvedValue({ id: 'finsnap_1' }),
+        getLatestFinanceSnapshot: vi.fn().mockResolvedValue({ id: 'finsnap_1' }),
+        listFinanceSnapshots: vi.fn().mockResolvedValue([]),
+        generateFinanceSignals: vi.fn().mockResolvedValue([]),
+        generateFinanceRecommendations: vi.fn().mockResolvedValue([]),
+      }),
     ],
   })
     .overrideGuard(AuthGuard)
@@ -167,5 +183,59 @@ describe('KeyGenomeController', () => {
 
     expect(memoryService.getMemoryEvent).toHaveBeenCalledWith('biz_1', 'mem_1');
     expect(result.id).toBe('mem_1');
+  });
+
+  it('lists finance metrics', async () => {
+    const { controller } = await makeController();
+    const result = await controller.listFinanceMetrics('biz_1', 'REVENUE', '2026-06', 'TTD', '0.8', '10');
+
+    expect(result).toEqual([]);
+  });
+
+  it('upserts a finance metric', async () => {
+    const { controller } = await makeController();
+    const result = await controller.upsertFinanceMetric('biz_1', {
+      businessId: 'biz_1',
+      metricType: 'REVENUE',
+      value: 10000,
+      period: '2026-06',
+    } as any);
+
+    expect(result.id).toBe('finm_1');
+  });
+
+  it('gets latest finance snapshot', async () => {
+    const { controller } = await makeController();
+    const result = await controller.getFinanceSnapshot('biz_1');
+
+    expect(result?.id).toBe('finsnap_1');
+  });
+
+  it('computes finance snapshot', async () => {
+    const { controller } = await makeController();
+    const result = await controller.computeFinanceSnapshot('biz_1', '2026-06');
+
+    expect(result.id).toBe('finsnap_1');
+  });
+
+  it('lists finance snapshots', async () => {
+    const { controller } = await makeController();
+    const result = await controller.listFinanceSnapshots('biz_1', '2026-06', 'MEDIUM', '5');
+
+    expect(result).toEqual([]);
+  });
+
+  it('generates finance signals', async () => {
+    const { controller } = await makeController();
+    const result = await controller.generateFinanceSignals('biz_1');
+
+    expect(result).toEqual([]);
+  });
+
+  it('generates finance recommendations', async () => {
+    const { controller } = await makeController();
+    const result = await controller.generateFinanceRecommendations('biz_1');
+
+    expect(result).toEqual([]);
   });
 });

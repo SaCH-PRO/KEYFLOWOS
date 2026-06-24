@@ -13,6 +13,8 @@ import { GenomeMemoryService } from './genome-memory.service';
 import { OutcomeLearningService } from './outcome-learning.service';
 import { GenomeDepartmentService } from './genome-department.service';
 import { DepartmentReadinessService } from './department-readiness.service';
+import { GenomeFinancialMetricService } from './genome-financial-metric.service';
+import { FinanceGenomeService } from './finance-genome.service';
 
 @Module({
   imports: [PrismaModule],
@@ -30,6 +32,8 @@ import { DepartmentReadinessService } from './department-readiness.service';
     OutcomeLearningService,
     GenomeDepartmentService,
     DepartmentReadinessService,
+    GenomeFinancialMetricService,
+    FinanceGenomeService,
   ],
   exports: [
     GenomeFactService,
@@ -45,6 +49,8 @@ import { DepartmentReadinessService } from './department-readiness.service';
     OutcomeLearningService,
     GenomeDepartmentService,
     DepartmentReadinessService,
+    GenomeFinancialMetricService,
+    FinanceGenomeService,
   ],
 })
 export class KeyGenomeModule {}

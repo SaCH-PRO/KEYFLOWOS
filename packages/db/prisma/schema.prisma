@@ -525,6 +525,8 @@ model Business {
   genomeRecommendations GenomeRecommendation[]
   genomeExperiments    GenomeExperiment[]
   genomeDepartments    GenomeDepartment[]
+  genomeFinancialMetrics GenomeFinancialMetric[]
+  genomeFinanceSnapshots GenomeFinanceSnapshot[]
   constitutionVersions BusinessConstitutionVersion[]
   authorityGrants      AuthorityGrant[]
   timeEntries          TimeEntry[]
@@ -927,6 +929,76 @@ model GenomeMemoryEvent {
   @@index([businessId, domain])
   @@index([businessId, occurredAt])
   @@map("genome_memory_events")
+}
+
+// Phase 13: Finance Genome — raw metrics and interpreted CFO snapshots
+model GenomeFinancialMetric {
+  id         String @id @default(cuid())
+  businessId String @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  metricType String @map("metric_type")
+  period     String?
+  value      Float
+  currency   String @default("TTD")
+
+  sourceModule     String? @map("source_module")
+  sourceEntityType String? @map("source_entity_type")
+  sourceEntityId   String? @map("source_entity_id")
+
+  confidence Float @default(0.5)
+  notes      String?
+
+  occurredAt DateTime? @map("occurred_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+
+  @@unique([businessId, metricType, period])
+  @@index([businessId, metricType])
+  @@index([businessId, period])
+  @@index([businessId, occurredAt])
+  @@map("genome_financial_metrics")
+}
+
+model GenomeFinanceSnapshot {
+  id         String @id @default(cuid())
+  businessId String @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  period String?
+
+  currency String @default("TTD")
+
+  revenue            Float? @map("revenue")
+  grossProfit        Float? @map("gross_profit")
+  netProfit          Float? @map("net_profit")
+  monthlyExpenses    Float? @map("monthly_expenses")
+  cashOnHand         Float? @map("cash_on_hand")
+  accountsReceivable Float? @map("accounts_receivable")
+  accountsPayable    Float? @map("accounts_payable")
+  taxReserve         Float? @map("tax_reserve")
+
+  grossMarginPercent Float? @map("gross_margin_percent")
+  netMarginPercent   Float? @map("net_margin_percent")
+  runwayMonths       Float? @map("runway_months")
+  averageTicket      Float? @map("average_ticket")
+
+  healthScore  Float  @default(0) @map("health_score")
+  cashFlowRisk String @default("UNKNOWN") @map("cash_flow_risk")
+  marginRisk   String @default("UNKNOWN") @map("margin_risk")
+  pricingRisk  String @default("UNKNOWN") @map("pricing_risk")
+  taxRisk      String @default("UNKNOWN") @map("tax_risk")
+  overallRisk  String @default("MEDIUM") @map("overall_risk")
+
+  missingInputs   Json @default("[]") @map("missing_inputs")
+  warnings        Json @default("[]")
+  recommendations Json @default("[]")
+
+  computedAt DateTime @default(now()) @map("computed_at")
+
+  @@index([businessId, period])
+  @@index([businessId, overallRisk])
+  @@map("genome_finance_snapshots")
 }
 
 // Phase 12: Living Constitution v2 — versioned, immutable operating document
