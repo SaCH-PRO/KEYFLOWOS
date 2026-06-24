@@ -1,3 +1,4 @@
+import { API_BASE } from "@/lib/api";
 import type { MetadataRoute } from "next";
 
 interface DirectoryItem {
@@ -27,7 +28,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   try {
     // Fetch all published businesses (max 5000 for sitemap)
     const res = await fetch(
-      `${baseUrl}/site/presence/directory?page=1&pageSize=5000`,
+      `${API_BASE}/site/presence/directory?page=1&pageSize=5000`,
       { next: { revalidate: 3600 } } // Revalidate every hour
     );
 

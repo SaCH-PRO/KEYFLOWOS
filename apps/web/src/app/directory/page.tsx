@@ -15,6 +15,7 @@ import {
   ChevronRight,
   Globe,
 } from "lucide-react";
+import { API_BASE } from "@/lib/api";
 
 interface DirectoryBusiness {
   slug: string;
@@ -66,7 +67,7 @@ export default function DirectoryPage() {
       if (activeCategory !== "All") params.set("industry", activeCategory);
       if (activeCity !== "All") params.set("city", activeCity);
 
-      const res = await fetch(`/site/presence/directory?${params.toString()}`, {
+      const res = await fetch(`${API_BASE}/site/presence/directory?${params.toString()}`, {
         cache: "no-store",
       });
       if (!res.ok) throw new Error(`Failed to load directory (${res.status})`);

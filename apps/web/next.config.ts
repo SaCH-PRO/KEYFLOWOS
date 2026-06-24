@@ -224,6 +224,10 @@ const nextConfig: NextConfig = {
     const upstream = process.env.KEYFLOW_API_INTERNAL_URL?.trim() || "http://localhost:3001";
     return [
       {
+        source: "/site/presence/directory",
+        destination: `${upstream}/site/presence/directory`,
+      },
+      {
         source: "/__api/:path*",
         destination: `${upstream}/:path*`,
       },
