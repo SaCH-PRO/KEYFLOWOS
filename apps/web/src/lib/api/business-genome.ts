@@ -1680,3 +1680,249 @@ export async function generateGenomeOperationsRecommendations(businessId: string
     body: {},
   });
 }
+
+export type GenomeMarketingGrowthRiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' | 'UNKNOWN';
+
+export interface GenomeMarketingGrowthWarning {
+  type: string;
+  message: string;
+  severity: GenomeMarketingGrowthRiskLevel;
+  channelKey?: string | null;
+}
+
+export interface GenomeMarketingGrowthRecommendation {
+  type: string;
+  title: string;
+  insight: string;
+  diagnosis: string;
+  recommendation: string;
+  expectedGain?: string | null;
+  riskLevel: GenomeMarketingGrowthRiskLevel;
+  effortLevel: 'LOW' | 'MEDIUM' | 'HIGH';
+  channelKey?: string | null;
+}
+
+export interface GenomeGrowthChannel {
+  id: string;
+  businessId: string;
+  key: string;
+  label: string;
+  channelType: 'owned' | 'earned' | 'paid';
+  status: 'ACTIVE' | 'TESTING' | 'PAUSED' | 'DEPRECATED';
+  monthlyBudget?: number | null;
+  currency: string;
+  targetCac?: number | null;
+  targetConversionRate?: number | null;
+  assumptions: Record<string, unknown>;
+  evidenceIds: string[];
+  confidence: number;
+  sourceModule?: string | null;
+  sourceEntityType?: string | null;
+  sourceEntityId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GenomeContentStrategy {
+  id: string;
+  businessId: string;
+  pillars: string[];
+  cadence?: string | null;
+  formats: string[];
+  distributionChannels: string[];
+  contentGoals: Record<string, unknown>;
+  confidence: number;
+  sourceModule?: string | null;
+  sourceEntityType?: string | null;
+  sourceEntityId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GenomeMarketingGrowthChannelMixItem {
+  channelKey: string;
+  label: string;
+  channelType: 'owned' | 'earned' | 'paid';
+  sharePercent: number;
+  status: 'ACTIVE' | 'TESTING' | 'PAUSED' | 'DEPRECATED';
+}
+
+export interface GenomeMarketingGrowthSnapshot {
+  id: string;
+  businessId: string;
+  period?: string | null;
+  channelMix: GenomeMarketingGrowthChannelMixItem[];
+  leadVolumeEstimate?: number | null;
+  blendedCac?: number | null;
+  contentConsistencyScore: number;
+  channelDiversificationScore: number;
+  funnelConversionEstimate?: number | null;
+  overallRisk: GenomeMarketingGrowthRiskLevel;
+  missingInputs: string[];
+  warnings: GenomeMarketingGrowthWarning[];
+  recommendations: GenomeMarketingGrowthRecommendation[];
+  signalsGeneratedAt?: string | null;
+  recommendationsGeneratedAt?: string | null;
+  computedAt: string;
+}
+
+export interface CreateGenomeGrowthChannelInput {
+  key: string;
+  label: string;
+  channelType: 'owned' | 'earned' | 'paid';
+  status?: 'ACTIVE' | 'TESTING' | 'PAUSED' | 'DEPRECATED';
+  monthlyBudget?: number | null;
+  currency?: string;
+  targetCac?: number | null;
+  targetConversionRate?: number | null;
+  assumptions?: Record<string, unknown>;
+  evidenceIds?: string[];
+  confidence?: number;
+}
+
+export interface UpdateGenomeGrowthChannelInput {
+  label?: string;
+  channelType?: 'owned' | 'earned' | 'paid';
+  status?: 'ACTIVE' | 'TESTING' | 'PAUSED' | 'DEPRECATED';
+  monthlyBudget?: number | null;
+  currency?: string;
+  targetCac?: number | null;
+  targetConversionRate?: number | null;
+  assumptions?: Record<string, unknown>;
+  evidenceIds?: string[];
+  confidence?: number;
+}
+
+export interface CreateGenomeContentStrategyInput {
+  pillars: string[];
+  cadence?: string;
+  formats: string[];
+  distributionChannels?: string[];
+  contentGoals?: Record<string, unknown>;
+  confidence?: number;
+}
+
+export interface UpdateGenomeContentStrategyInput {
+  pillars?: string[];
+  cadence?: string | null;
+  formats?: string[];
+  distributionChannels?: string[];
+  contentGoals?: Record<string, unknown>;
+  confidence?: number;
+}
+
+export interface ListGenomeMarketingGrowthSnapshotsQuery {
+  period?: string;
+  riskLevel?: string;
+  limit?: number;
+}
+
+export async function fetchGenomeGrowthChannels(businessId: string) {
+  return apiGet<GenomeGrowthChannel[]>(
+    `/business-genome/businesses/${businessId}/key-genome/marketing-growth/channels`,
+  );
+}
+
+export async function createGenomeGrowthChannel(
+  businessId: string,
+  input: CreateGenomeGrowthChannelInput,
+) {
+  return apiPost<GenomeGrowthChannel>({
+    path: `/business-genome/businesses/${businessId}/key-genome/marketing-growth/channels`,
+    body: input,
+  });
+}
+
+export async function updateGenomeGrowthChannel(
+  businessId: string,
+  channelId: string,
+  input: UpdateGenomeGrowthChannelInput,
+) {
+  return apiPatch<GenomeGrowthChannel>(
+    `/business-genome/businesses/${businessId}/key-genome/marketing-growth/channels/${channelId}`,
+    input,
+  );
+}
+
+export async function deleteGenomeGrowthChannel(businessId: string, channelId: string) {
+  return apiDelete<{ deleted: true }>(
+    `/business-genome/businesses/${businessId}/key-genome/marketing-growth/channels/${channelId}`,
+  );
+}
+
+export async function fetchGenomeContentStrategies(businessId: string) {
+  return apiGet<GenomeContentStrategy[]>(
+    `/business-genome/businesses/${businessId}/key-genome/marketing-growth/content-strategy`,
+  );
+}
+
+export async function createGenomeContentStrategy(
+  businessId: string,
+  input: CreateGenomeContentStrategyInput,
+) {
+  return apiPost<GenomeContentStrategy>({
+    path: `/business-genome/businesses/${businessId}/key-genome/marketing-growth/content-strategy`,
+    body: input,
+  });
+}
+
+export async function updateGenomeContentStrategy(
+  businessId: string,
+  strategyId: string,
+  input: UpdateGenomeContentStrategyInput,
+) {
+  return apiPatch<GenomeContentStrategy>(
+    `/business-genome/businesses/${businessId}/key-genome/marketing-growth/content-strategy/${strategyId}`,
+    input,
+  );
+}
+
+export async function deleteGenomeContentStrategy(businessId: string, strategyId: string) {
+  return apiDelete<{ deleted: true }>(
+    `/business-genome/businesses/${businessId}/key-genome/marketing-growth/content-strategy/${strategyId}`,
+  );
+}
+
+export async function getGenomeMarketingGrowthSnapshot(businessId: string) {
+  return apiGet<GenomeMarketingGrowthSnapshot | null>(
+    `/business-genome/businesses/${businessId}/key-genome/marketing-growth/snapshot`,
+  );
+}
+
+export async function computeGenomeMarketingGrowthSnapshot(businessId: string, period?: string) {
+  const params = new URLSearchParams();
+  if (period) params.set('period', period);
+  const query = params.toString();
+  return apiPost<GenomeMarketingGrowthSnapshot>({
+    path: `/business-genome/businesses/${businessId}/key-genome/marketing-growth/snapshot/compute${query ? `?${query}` : ''}`,
+    body: {},
+  });
+}
+
+export async function listGenomeMarketingGrowthSnapshots(
+  businessId: string,
+  filters: ListGenomeMarketingGrowthSnapshotsQuery = {},
+) {
+  const params = new URLSearchParams();
+  if (filters.period) params.set('period', filters.period);
+  if (filters.riskLevel) params.set('riskLevel', filters.riskLevel);
+  if (filters.limit !== undefined) params.set('limit', String(filters.limit));
+  const query = params.toString();
+  return apiGet<GenomeMarketingGrowthSnapshot[]>(
+    `/business-genome/businesses/${businessId}/key-genome/marketing-growth/snapshots${query ? `?${query}` : ''}`,
+  );
+}
+
+export async function generateGenomeMarketingGrowthSignals(businessId: string) {
+  return apiPost<GenomeSignal[]>({
+    path: `/business-genome/businesses/${businessId}/key-genome/marketing-growth/signals/generate`,
+    body: {},
+  });
+}
+
+export async function generateGenomeMarketingGrowthRecommendations(businessId: string) {
+  return apiPost<GenomeRecommendationData[]>({
+    path: `/business-genome/businesses/${businessId}/key-genome/marketing-growth/recommendations/generate`,
+    body: {},
+  });
+}

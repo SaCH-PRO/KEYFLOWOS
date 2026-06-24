@@ -603,6 +603,9 @@ model Business {
   genomeOperationalProcesses   GenomeOperationalProcess[]
   genomeDeliveryCapabilities   GenomeDeliveryCapability[]
   genomeOperationsSnapshots    GenomeOperationsSnapshot[]
+  genomeGrowthChannels         GenomeGrowthChannel[]
+  genomeContentStrategies      GenomeContentStrategy[]
+  genomeMarketingSnapshots     GenomeMarketingSnapshot[]
   constitutionVersions         BusinessConstitutionVersion[]
   authorityGrants              AuthorityGrant[]
   timeEntries                  TimeEntry[]
@@ -1301,6 +1304,91 @@ model GenomeOperationsSnapshot {
   @@index([businessId, period])
   @@index([businessId, overallRisk])
   @@map("genome_operations_snapshots")
+}
+
+// Phase 16: Marketing / Growth Genome
+model GenomeGrowthChannel {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  key         String
+  label       String
+  channelType String @map("channel_type") // owned | earned | paid
+  status      String @default("ACTIVE") // ACTIVE | TESTING | PAUSED | DEPRECATED
+
+  monthlyBudget        Float?  @map("monthly_budget")
+  currency             String  @default("TTD")
+  targetCac            Float?  @map("target_cac")
+  targetConversionRate Float?  @map("target_conversion_rate")
+
+  assumptions Json     @default("{}")
+  evidenceIds String[] @default([]) @map("evidence_ids")
+  confidence  Float    @default(0.5)
+
+  sourceModule     String? @map("source_module")
+  sourceEntityType String? @map("source_entity_type")
+  sourceEntityId   String? @map("source_entity_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId, key])
+  @@index([businessId, status])
+  @@index([businessId, channelType])
+  @@map("genome_growth_channels")
+}
+
+model GenomeContentStrategy {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  pillars              String[]
+  cadence              String?
+  formats              String[]
+  distributionChannels String[] @default([]) @map("distribution_channels")
+  contentGoals         Json     @default("{}") @map("content_goals")
+  confidence           Float    @default(0.5)
+
+  sourceModule     String? @map("source_module")
+  sourceEntityType String? @map("source_entity_type")
+  sourceEntityId   String? @map("source_entity_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId])
+  @@map("genome_content_strategies")
+}
+
+model GenomeMarketingSnapshot {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  period String?
+
+  channelMix                  Json    @default("[]")
+  leadVolumeEstimate          Float?  @map("lead_volume_estimate")
+  blendedCac                  Float?  @map("blended_cac")
+  contentConsistencyScore     Float   @default(0) @map("content_consistency_score")
+  channelDiversificationScore Float   @default(0) @map("channel_diversification_score")
+  funnelConversionEstimate    Float?  @map("funnel_conversion_estimate")
+
+  overallRisk String @default("MEDIUM") @map("overall_risk")
+
+  missingInputs   Json @default("[]") @map("missing_inputs")
+  warnings        Json @default("[]")
+  recommendations Json @default("[]")
+
+  signalsGeneratedAt         DateTime? @map("signals_generated_at")
+  recommendationsGeneratedAt DateTime? @map("recommendations_generated_at")
+  computedAt                 DateTime  @default(now()) @map("computed_at")
+
+  @@index([businessId, period])
+  @@index([businessId, overallRisk])
+  @@map("genome_marketing_snapshots")
 }
 
 // Phase 12: Living Constitution v2 — versioned, immutable operating document

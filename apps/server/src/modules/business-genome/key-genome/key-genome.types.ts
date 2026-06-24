@@ -27,6 +27,7 @@ export type GenomeMemorySourceType =
   | 'FINANCE_GENOME'
   | 'CUSTOMER_SALES_GENOME'
   | 'OPERATIONS_GENOME'
+  | 'MARKETING_GROWTH_GENOME'
   | 'MANUAL';
 
 export type GenomeMemoryEventType =
@@ -67,6 +68,12 @@ export type GenomeMemoryEventType =
   | 'OPERATIONS_RECOMMENDATION_GENERATED'
   | 'OPERATIONS_READINESS_IMPROVED'
   | 'OPERATIONS_READINESS_DEGRADED'
+  | 'MARKETING_GROWTH_SNAPSHOT_COMPUTED'
+  | 'MARKETING_GROWTH_SIGNAL_GENERATED'
+  | 'MARKETING_GROWTH_RECOMMENDATION_GENERATED'
+  | 'MARKETING_GROWTH_CHANNEL_RECORDED'
+  | 'MARKETING_GROWTH_CONTENT_STRATEGY_RECORDED'
+  | 'MARKETING_GROWTH_RISK_DETECTED'
   | 'MANUAL_LESSON';
 
 export type GenomeSignalType =
@@ -1171,6 +1178,148 @@ export interface ListGenomeDeliveryCapabilitiesQuery {
 }
 
 export interface ListGenomeOperationsSnapshotsQuery {
+  period?: string;
+  riskLevel?: string;
+  limit?: number;
+}
+
+export type GenomeMarketingGrowthRiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' | 'UNKNOWN';
+
+export interface GenomeMarketingGrowthWarning {
+  type: string;
+  message: string;
+  severity: GenomeMarketingGrowthRiskLevel;
+  channelKey?: string | null;
+}
+
+export interface GenomeMarketingGrowthRecommendation {
+  type: string;
+  title: string;
+  insight: string;
+  diagnosis: string;
+  recommendation: string;
+  expectedGain?: string | null;
+  riskLevel: GenomeMarketingGrowthRiskLevel;
+  effortLevel: 'LOW' | 'MEDIUM' | 'HIGH';
+  channelKey?: string | null;
+}
+
+export interface GenomeGrowthChannelData {
+  id: string;
+  businessId: string;
+  key: string;
+  label: string;
+  channelType: 'owned' | 'earned' | 'paid';
+  status: 'ACTIVE' | 'TESTING' | 'PAUSED' | 'DEPRECATED';
+  monthlyBudget?: number | null;
+  currency: string;
+  targetCac?: number | null;
+  targetConversionRate?: number | null;
+  assumptions: Record<string, unknown>;
+  evidenceIds: string[];
+  confidence: number;
+  sourceModule?: string | null;
+  sourceEntityType?: string | null;
+  sourceEntityId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GenomeContentStrategyData {
+  id: string;
+  businessId: string;
+  pillars: string[];
+  cadence?: string | null;
+  formats: string[];
+  distributionChannels: string[];
+  contentGoals: Record<string, unknown>;
+  confidence: number;
+  sourceModule?: string | null;
+  sourceEntityType?: string | null;
+  sourceEntityId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GenomeMarketingGrowthChannelMixItem {
+  channelKey: string;
+  label: string;
+  channelType: 'owned' | 'earned' | 'paid';
+  sharePercent: number;
+  status: 'ACTIVE' | 'TESTING' | 'PAUSED' | 'DEPRECATED';
+}
+
+export interface GenomeMarketingGrowthSnapshotData {
+  id: string;
+  businessId: string;
+  period?: string | null;
+  channelMix: GenomeMarketingGrowthChannelMixItem[];
+  leadVolumeEstimate?: number | null;
+  blendedCac?: number | null;
+  contentConsistencyScore: number;
+  channelDiversificationScore: number;
+  funnelConversionEstimate?: number | null;
+  overallRisk: GenomeMarketingGrowthRiskLevel;
+  missingInputs: string[];
+  warnings: GenomeMarketingGrowthWarning[];
+  recommendations: GenomeMarketingGrowthRecommendation[];
+  signalsGeneratedAt?: string | null;
+  recommendationsGeneratedAt?: string | null;
+  computedAt: string;
+}
+
+export interface CreateGenomeGrowthChannelInput {
+  key: string;
+  label: string;
+  channelType: 'owned' | 'earned' | 'paid';
+  status?: 'ACTIVE' | 'TESTING' | 'PAUSED' | 'DEPRECATED';
+  monthlyBudget?: number | null;
+  currency?: string;
+  targetCac?: number | null;
+  targetConversionRate?: number | null;
+  assumptions?: Record<string, unknown>;
+  evidenceIds?: string[];
+  confidence?: number;
+  sourceModule?: string;
+  sourceEntityType?: string;
+  sourceEntityId?: string;
+}
+
+export interface UpdateGenomeGrowthChannelInput {
+  label?: string;
+  channelType?: 'owned' | 'earned' | 'paid';
+  status?: 'ACTIVE' | 'TESTING' | 'PAUSED' | 'DEPRECATED';
+  monthlyBudget?: number | null;
+  currency?: string;
+  targetCac?: number | null;
+  targetConversionRate?: number | null;
+  assumptions?: Record<string, unknown>;
+  evidenceIds?: string[];
+  confidence?: number;
+}
+
+export interface CreateGenomeContentStrategyInput {
+  pillars: string[];
+  cadence?: string;
+  formats: string[];
+  distributionChannels?: string[];
+  contentGoals?: Record<string, unknown>;
+  confidence?: number;
+  sourceModule?: string;
+  sourceEntityType?: string;
+  sourceEntityId?: string;
+}
+
+export interface UpdateGenomeContentStrategyInput {
+  pillars?: string[];
+  cadence?: string | null;
+  formats?: string[];
+  distributionChannels?: string[];
+  contentGoals?: Record<string, unknown>;
+  confidence?: number;
+}
+
+export interface ListGenomeMarketingGrowthSnapshotsQuery {
   period?: string;
   riskLevel?: string;
   limit?: number;

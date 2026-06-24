@@ -222,12 +222,16 @@ export const KEY_GENOME_SECTION_CONFIG: Record<KeyGenomeSection, KeyGenomeSectio
     blueprintSources: ['marketing'],
     requiredFacts: [
       { section: 'MARKETING_GROWTH', domain: 'marketing', field: 'primary_channel', label: 'Primary channel', impact: 'DEGRADED' },
+      { section: 'MARKETING_GROWTH', domain: 'marketing', field: 'channel_mix', label: 'Channel mix', impact: 'DEGRADED' },
+      { section: 'MARKETING_GROWTH', domain: 'marketing', field: 'content_cadence', label: 'Content cadence', impact: 'DEGRADED' },
       { section: 'MARKETING_GROWTH', domain: 'marketing', field: 'content_strategy', label: 'Content strategy', impact: 'OPTIONAL' },
     ],
     optionalFacts: [
       { section: 'MARKETING_GROWTH', domain: 'marketing', field: 'ad_budget', label: 'Ad budget', impact: 'OPTIONAL' },
+      { section: 'MARKETING_GROWTH', domain: 'marketing', field: 'organic_traffic', label: 'Organic traffic', impact: 'OPTIONAL' },
+      { section: 'MARKETING_GROWTH', domain: 'marketing', field: 'conversion_funnel', label: 'Conversion funnel', impact: 'OPTIONAL' },
     ],
-    moduleImpact: ['marketing', 'social', 'key_inbox'],
+    moduleImpact: ['marketing', 'social', 'key_inbox', 'commerce'],
   },
   TECH_DATA_INTELLIGENCE: {
     key: 'TECH_DATA_INTELLIGENCE',

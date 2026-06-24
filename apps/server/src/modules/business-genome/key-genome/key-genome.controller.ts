@@ -5,6 +5,7 @@ import {
   Get,
   Inject,
   Param,
+  Patch,
   Post,
   Query,
   UseGuards,
@@ -26,11 +27,18 @@ import { CustomerSalesGenomeService } from './customer-sales-genome.service';
 import { GenomeOperationalProcessService } from './genome-operational-process.service';
 import { GenomeDeliveryCapabilityService } from './genome-delivery-capability.service';
 import { OperationsGenomeService } from './operations-genome.service';
+import { GenomeGrowthChannelService } from './genome-growth-channel.service';
+import { GenomeContentStrategyService } from './genome-content-strategy.service';
+import { MarketingGenomeService } from './marketing-genome.service';
 import type {
   CreateGenomeExperimentInput,
+  CreateGenomeContentStrategyInput,
+  CreateGenomeGrowthChannelInput,
   GenerateGenomeRecommendationsInput,
   GenomeOutcome,
   RecommendationOutcome,
+  UpdateGenomeContentStrategyInput,
+  UpdateGenomeGrowthChannelInput,
   UpsertGenomeCustomerSegmentInput,
   UpsertGenomeDeliveryCapabilityInput,
   UpsertGenomeFinancialMetricInput,
@@ -58,6 +66,9 @@ export class KeyGenomeController {
     @Inject(GenomeOperationalProcessService) private readonly operationalProcesses: GenomeOperationalProcessService,
     @Inject(GenomeDeliveryCapabilityService) private readonly deliveryCapabilities: GenomeDeliveryCapabilityService,
     @Inject(OperationsGenomeService) private readonly operationsGenome: OperationsGenomeService,
+    @Inject(GenomeGrowthChannelService) private readonly growthChannels: GenomeGrowthChannelService,
+    @Inject(GenomeContentStrategyService) private readonly contentStrategies: GenomeContentStrategyService,
+    @Inject(MarketingGenomeService) private readonly marketingGenome: MarketingGenomeService,
   ) {}
 
   @Get('signals')
@@ -629,5 +640,122 @@ export class KeyGenomeController {
   @Post('operations/recommendations/generate')
   async generateOperationsRecommendations(@Param('businessId') businessId: string) {
     return this.operationsGenome.generateOperationsRecommendations(businessId);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Phase 16: Marketing / Growth Genome
+  // ---------------------------------------------------------------------------
+
+  @Get('marketing-growth/channels')
+  async listGrowthChannels(
+    @Param('businessId') businessId: string,
+    @Query('status') status?: string,
+    @Query('channelType') channelType?: string,
+    @Query('minConfidence') minConfidence?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.growthChannels.findMany(businessId, {
+      status,
+      channelType,
+      minConfidence: minConfidence !== undefined ? Number(minConfidence) : undefined,
+      limit: limit !== undefined ? Number(limit) : undefined,
+    });
+  }
+
+  @Post('marketing-growth/channels')
+  async createGrowthChannel(
+    @Param('businessId') businessId: string,
+    @Body() body: CreateGenomeGrowthChannelInput,
+  ) {
+    return this.growthChannels.create(businessId, body);
+  }
+
+  @Patch('marketing-growth/channels/:channelId')
+  async updateGrowthChannel(
+    @Param('businessId') businessId: string,
+    @Param('channelId') channelId: string,
+    @Body() body: UpdateGenomeGrowthChannelInput,
+  ) {
+    return this.growthChannels.update(businessId, channelId, body);
+  }
+
+  @Delete('marketing-growth/channels/:channelId')
+  async deleteGrowthChannel(
+    @Param('businessId') businessId: string,
+    @Param('channelId') channelId: string,
+  ) {
+    return this.growthChannels.delete(businessId, channelId);
+  }
+
+  @Get('marketing-growth/content-strategy')
+  async listContentStrategies(
+    @Param('businessId') businessId: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.contentStrategies.findMany(businessId, {
+      limit: limit !== undefined ? Number(limit) : undefined,
+    });
+  }
+
+  @Post('marketing-growth/content-strategy')
+  async createContentStrategy(
+    @Param('businessId') businessId: string,
+    @Body() body: CreateGenomeContentStrategyInput,
+  ) {
+    return this.contentStrategies.create(businessId, body);
+  }
+
+  @Patch('marketing-growth/content-strategy/:strategyId')
+  async updateContentStrategy(
+    @Param('businessId') businessId: string,
+    @Param('strategyId') strategyId: string,
+    @Body() body: UpdateGenomeContentStrategyInput,
+  ) {
+    return this.contentStrategies.update(businessId, strategyId, body);
+  }
+
+  @Delete('marketing-growth/content-strategy/:strategyId')
+  async deleteContentStrategy(
+    @Param('businessId') businessId: string,
+    @Param('strategyId') strategyId: string,
+  ) {
+    return this.contentStrategies.delete(businessId, strategyId);
+  }
+
+  @Get('marketing-growth/snapshot')
+  async getMarketingGrowthSnapshot(@Param('businessId') businessId: string) {
+    return this.marketingGenome.getLatestMarketingGrowthSnapshot(businessId);
+  }
+
+  @Post('marketing-growth/snapshot/compute')
+  async computeMarketingGrowthSnapshot(
+    @Param('businessId') businessId: string,
+    @Query('period') period?: string,
+  ) {
+    return this.marketingGenome.computeMarketingGrowthSnapshot(businessId, period);
+  }
+
+  @Get('marketing-growth/snapshots')
+  async listMarketingGrowthSnapshots(
+    @Param('businessId') businessId: string,
+    @Query('period') period?: string,
+    @Query('riskLevel') riskLevel?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.marketingGenome.listMarketingGrowthSnapshots(businessId, {
+      period,
+      riskLevel,
+      limit: limit !== undefined ? Number(limit) : undefined,
+    });
+  }
+
+  @Post('marketing-growth/signals/generate')
+  async generateMarketingGrowthSignals(@Param('businessId') businessId: string) {
+    return this.marketingGenome.generateMarketingGrowthSignals(businessId);
+  }
+
+  @Post('marketing-growth/recommendations/generate')
+  async generateMarketingGrowthRecommendations(@Param('businessId') businessId: string) {
+    return this.marketingGenome.generateMarketingGrowthRecommendations(businessId);
   }
 }

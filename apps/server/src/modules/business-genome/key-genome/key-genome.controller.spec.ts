@@ -18,6 +18,9 @@ import { CustomerSalesGenomeService } from './customer-sales-genome.service';
 import { GenomeOperationalProcessService } from './genome-operational-process.service';
 import { GenomeDeliveryCapabilityService } from './genome-delivery-capability.service';
 import { OperationsGenomeService } from './operations-genome.service';
+import { GenomeGrowthChannelService } from './genome-growth-channel.service';
+import { GenomeContentStrategyService } from './genome-content-strategy.service';
+import { MarketingGenomeService } from './marketing-genome.service';
 
 function mockProvider(
   token: string | symbol | (new (...args: any[]) => any),
@@ -162,6 +165,27 @@ async function makeController() {
         listOperationsSnapshots: vi.fn().mockResolvedValue([]),
         generateOperationsSignals: vi.fn().mockResolvedValue([]),
         generateOperationsRecommendations: vi.fn().mockResolvedValue([]),
+      }),
+      mockProvider(GenomeGrowthChannelService, {
+        findMany: vi.fn().mockResolvedValue([]),
+        findById: vi.fn().mockResolvedValue({ id: 'ch_1' }),
+        create: vi.fn().mockResolvedValue({ id: 'ch_1' }),
+        update: vi.fn().mockResolvedValue({ id: 'ch_1' }),
+        delete: vi.fn().mockResolvedValue({ deleted: true }),
+      }),
+      mockProvider(GenomeContentStrategyService, {
+        findMany: vi.fn().mockResolvedValue([]),
+        findById: vi.fn().mockResolvedValue({ id: 'cs_1' }),
+        create: vi.fn().mockResolvedValue({ id: 'cs_1' }),
+        update: vi.fn().mockResolvedValue({ id: 'cs_1' }),
+        delete: vi.fn().mockResolvedValue({ deleted: true }),
+      }),
+      mockProvider(MarketingGenomeService, {
+        computeMarketingGrowthSnapshot: vi.fn().mockResolvedValue({ id: 'mgsnap_1' }),
+        getLatestMarketingGrowthSnapshot: vi.fn().mockResolvedValue({ id: 'mgsnap_1' }),
+        listMarketingGrowthSnapshots: vi.fn().mockResolvedValue([]),
+        generateMarketingGrowthSignals: vi.fn().mockResolvedValue([]),
+        generateMarketingGrowthRecommendations: vi.fn().mockResolvedValue([]),
       }),
     ],
   })
@@ -410,6 +434,76 @@ describe('KeyGenomeController', () => {
   it('generates operations recommendations', async () => {
     const { controller } = await makeController();
     const result = await controller.generateOperationsRecommendations('biz_1');
+
+    expect(result).toEqual([]);
+  });
+
+  it('lists growth channels', async () => {
+    const { controller } = await makeController();
+    const result = await controller.listGrowthChannels('biz_1', 'ACTIVE', 'paid', '0.8', '10');
+
+    expect(result).toEqual([]);
+  });
+
+  it('creates a growth channel', async () => {
+    const { controller } = await makeController();
+    const result = await controller.createGrowthChannel('biz_1', {
+      key: 'paid_social',
+      label: 'Paid Social',
+      channelType: 'paid',
+    } as any);
+
+    expect(result.id).toBe('ch_1');
+  });
+
+  it('lists content strategies', async () => {
+    const { controller } = await makeController();
+    const result = await controller.listContentStrategies('biz_1', '5');
+
+    expect(result).toEqual([]);
+  });
+
+  it('creates a content strategy', async () => {
+    const { controller } = await makeController();
+    const result = await controller.createContentStrategy('biz_1', {
+      pillars: ['Education', 'Product'],
+      formats: ['Video', 'Blog'],
+    } as any);
+
+    expect(result.id).toBe('cs_1');
+  });
+
+  it('gets latest marketing/growth snapshot', async () => {
+    const { controller } = await makeController();
+    const result = await controller.getMarketingGrowthSnapshot('biz_1');
+
+    expect(result?.id).toBe('mgsnap_1');
+  });
+
+  it('computes marketing/growth snapshot', async () => {
+    const { controller } = await makeController();
+    const result = await controller.computeMarketingGrowthSnapshot('biz_1', '2026-06');
+
+    expect(result.id).toBe('mgsnap_1');
+  });
+
+  it('lists marketing/growth snapshots', async () => {
+    const { controller } = await makeController();
+    const result = await controller.listMarketingGrowthSnapshots('biz_1', '2026-06', 'MEDIUM', '5');
+
+    expect(result).toEqual([]);
+  });
+
+  it('generates marketing/growth signals', async () => {
+    const { controller } = await makeController();
+    const result = await controller.generateMarketingGrowthSignals('biz_1');
+
+    expect(result).toEqual([]);
+  });
+
+  it('generates marketing/growth recommendations', async () => {
+    const { controller } = await makeController();
+    const result = await controller.generateMarketingGrowthRecommendations('biz_1');
 
     expect(result).toEqual([]);
   });
