@@ -39,4 +39,11 @@
 #     owner: SaCH-PRO
 #     expires: 2026-12-31
 
-overrides: []
+overrides:
+  - branch: archive/develop-2026-06-13
+    max_commits: 10000
+    max_files: 10000
+    max_lines: 500000
+    reason: "Retired develop branch preserved as an archive for historical Waves A-G gap-closure work. Intentionally divergent; does not merge into main."
+    owner: SaCH-PRO
+    expires: 2026-12-31
