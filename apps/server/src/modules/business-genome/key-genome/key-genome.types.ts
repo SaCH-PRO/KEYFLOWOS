@@ -25,6 +25,7 @@ export type GenomeMemorySourceType =
   | 'MODULE_READINESS'
   | 'GOVERNANCE_DECISION'
   | 'FINANCE_GENOME'
+  | 'CUSTOMER_SALES_GENOME'
   | 'MANUAL';
 
 export type GenomeMemoryEventType =
@@ -52,6 +53,12 @@ export type GenomeMemoryEventType =
   | 'FINANCE_METRIC_RECORDED'
   | 'FINANCE_RISK_DETECTED'
   | 'FINANCE_RISK_IMPROVED'
+  | 'CUSTOMER_SALES_SNAPSHOT_COMPUTED'
+  | 'CUSTOMER_SALES_SIGNAL_GENERATED'
+  | 'CUSTOMER_SALES_RECOMMENDATION_GENERATED'
+  | 'CUSTOMER_SALES_RISK_DETECTED'
+  | 'CUSTOMER_SALES_SEGMENT_RECORDED'
+  | 'CUSTOMER_SALES_MOTION_RECORDED'
   | 'MANUAL_LESSON';
 
 export type GenomeSignalType =
@@ -756,6 +763,193 @@ export interface ListGenomeFinancialMetricsQuery {
 }
 
 export interface ListGenomeFinanceSnapshotsQuery {
+  period?: string;
+  riskLevel?: string;
+  limit?: number;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 14 — Customer / Sales / Revenue Genome
+// ---------------------------------------------------------------------------
+
+export type GenomeCustomerSalesRiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' | 'UNKNOWN';
+
+export type GenomeCustomerSegmentType =
+  | 'HIGH_VALUE'
+  | 'LOW_MARGIN'
+  | 'NEW'
+  | 'AT_RISK'
+  | 'LOYAL'
+  | 'CHURNED'
+  | 'PROSPECT'
+  | 'CUSTOM';
+
+export interface GenomeCustomerSegmentData {
+  id: string;
+  businessId: string;
+  name: string;
+  description?: string | null;
+  segmentType: GenomeCustomerSegmentType | string;
+  estimatedSize?: number | null;
+  averageRevenue?: number | null;
+  averageCost?: number | null;
+  lifetimeValue?: number | null;
+  acquisitionCost?: number | null;
+  churnRate?: number | null;
+  conversionRate?: number | null;
+  channel?: string | null;
+  tags: string[];
+  confidence: number;
+  sourceModule?: string | null;
+  sourceEntityType?: string | null;
+  sourceEntityId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type GenomeSalesMotionType =
+  | 'INBOUND'
+  | 'OUTBOUND'
+  | 'REFERRAL'
+  | 'PARTNERSHIP'
+  | 'SELF_SERVICE'
+  | 'EVENT'
+  | 'CUSTOM';
+
+export type GenomeSalesMotionStage =
+  | 'AWARENESS'
+  | 'INTEREST'
+  | 'CONSIDERATION'
+  | 'INTENT'
+  | 'PURCHASE'
+  | 'RETENTION'
+  | 'ADVOCACY';
+
+export interface GenomeSalesMotionData {
+  id: string;
+  businessId: string;
+  name: string;
+  description?: string | null;
+  motionType: GenomeSalesMotionType | string;
+  stage?: GenomeSalesMotionStage | string | null;
+  conversionRate?: number | null;
+  averageDealSize?: number | null;
+  cycleDays?: number | null;
+  volume?: number | null;
+  channel?: string | null;
+  revenueContribution?: number | null;
+  costPerLead?: number | null;
+  isActive: boolean;
+  confidence: number;
+  sourceModule?: string | null;
+  sourceEntityType?: string | null;
+  sourceEntityId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GenomeCustomerSalesWarning {
+  code: string;
+  message: string;
+  severity: GenomeCustomerSalesRiskLevel;
+}
+
+export interface GenomeCustomerSalesRecommendation {
+  title: string;
+  reason: string;
+  priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  suggestedAction?: string;
+}
+
+export interface GenomeCustomerSalesSnapshotData {
+  id: string;
+  businessId: string;
+  period?: string | null;
+  currency: string;
+
+  totalCustomers?: number | null;
+  activeCustomers?: number | null;
+  newCustomers?: number | null;
+  churnedCustomers?: number | null;
+  retentionRate?: number | null;
+  conversionRate?: number | null;
+  averageRevenuePerCustomer?: number | null;
+  lifetimeValue?: number | null;
+  customerAcquisitionCost?: number | null;
+  ltvCacRatio?: number | null;
+
+  revenueQualityScore: number;
+  revenueConcentrationRisk: GenomeCustomerSalesRiskLevel;
+  cacRisk: GenomeCustomerSalesRiskLevel;
+  ltvRisk: GenomeCustomerSalesRiskLevel;
+  churnRisk: GenomeCustomerSalesRiskLevel;
+  conversionRisk: GenomeCustomerSalesRiskLevel;
+  overallRisk: GenomeCustomerSalesRiskLevel;
+
+  missingInputs: string[];
+  warnings: GenomeCustomerSalesWarning[];
+  recommendations: GenomeCustomerSalesRecommendation[];
+
+  computedAt: string;
+}
+
+export interface UpsertGenomeCustomerSegmentInput {
+  businessId: string;
+  name: string;
+  description?: string | null;
+  segmentType: GenomeCustomerSegmentType | string;
+  estimatedSize?: number | null;
+  averageRevenue?: number | null;
+  averageCost?: number | null;
+  lifetimeValue?: number | null;
+  acquisitionCost?: number | null;
+  churnRate?: number | null;
+  conversionRate?: number | null;
+  channel?: string | null;
+  tags?: string[];
+  confidence?: number;
+  sourceModule?: string | null;
+  sourceEntityType?: string | null;
+  sourceEntityId?: string | null;
+}
+
+export interface UpsertGenomeSalesMotionInput {
+  businessId: string;
+  name: string;
+  description?: string | null;
+  motionType: GenomeSalesMotionType | string;
+  stage?: GenomeSalesMotionStage | string | null;
+  conversionRate?: number | null;
+  averageDealSize?: number | null;
+  cycleDays?: number | null;
+  volume?: number | null;
+  channel?: string | null;
+  revenueContribution?: number | null;
+  costPerLead?: number | null;
+  isActive?: boolean;
+  confidence?: number;
+  sourceModule?: string | null;
+  sourceEntityType?: string | null;
+  sourceEntityId?: string | null;
+}
+
+export interface ListGenomeCustomerSegmentsQuery {
+  segmentType?: string;
+  channel?: string;
+  minConfidence?: number;
+  limit?: number;
+}
+
+export interface ListGenomeSalesMotionsQuery {
+  motionType?: string;
+  stage?: string;
+  channel?: string;
+  isActive?: boolean;
+  minConfidence?: number;
+  limit?: number;
+}
+
+export interface ListGenomeCustomerSalesSnapshotsQuery {
   period?: string;
   riskLevel?: string;
   limit?: number;

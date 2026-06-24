@@ -12,6 +12,9 @@ import { GenomeDepartmentService } from './genome-department.service';
 import { DepartmentReadinessService } from './department-readiness.service';
 import { GenomeFinancialMetricService } from './genome-financial-metric.service';
 import { FinanceGenomeService } from './finance-genome.service';
+import { GenomeCustomerSegmentService } from './genome-customer-segment.service';
+import { GenomeSalesMotionService } from './genome-sales-motion.service';
+import { CustomerSalesGenomeService } from './customer-sales-genome.service';
 
 function mockProvider(
   token: string | symbol | (new (...args: any[]) => any),
@@ -122,6 +125,23 @@ async function makeController() {
         listFinanceSnapshots: vi.fn().mockResolvedValue([]),
         generateFinanceSignals: vi.fn().mockResolvedValue([]),
         generateFinanceRecommendations: vi.fn().mockResolvedValue([]),
+      }),
+      mockProvider(GenomeCustomerSegmentService, {
+        listSegments: vi.fn().mockResolvedValue([]),
+        upsertSegment: vi.fn().mockResolvedValue({ id: 'seg_1' }),
+        deleteSegment: vi.fn().mockResolvedValue({ deleted: true }),
+      }),
+      mockProvider(GenomeSalesMotionService, {
+        listMotions: vi.fn().mockResolvedValue([]),
+        upsertMotion: vi.fn().mockResolvedValue({ id: 'mot_1' }),
+        deleteMotion: vi.fn().mockResolvedValue({ deleted: true }),
+      }),
+      mockProvider(CustomerSalesGenomeService, {
+        computeCustomerSalesSnapshot: vi.fn().mockResolvedValue({ id: 'cssnap_1' }),
+        getLatestCustomerSalesSnapshot: vi.fn().mockResolvedValue({ id: 'cssnap_1' }),
+        listCustomerSalesSnapshots: vi.fn().mockResolvedValue([]),
+        generateCustomerSalesSignals: vi.fn().mockResolvedValue([]),
+        generateCustomerSalesRecommendations: vi.fn().mockResolvedValue([]),
       }),
     ],
   })
@@ -235,6 +255,77 @@ describe('KeyGenomeController', () => {
   it('generates finance recommendations', async () => {
     const { controller } = await makeController();
     const result = await controller.generateFinanceRecommendations('biz_1');
+
+    expect(result).toEqual([]);
+  });
+
+  it('lists customer segments', async () => {
+    const { controller } = await makeController();
+    const result = await controller.listCustomerSegments('biz_1', 'HIGH_VALUE', 'online', '0.8', '10');
+
+    expect(result).toEqual([]);
+  });
+
+  it('upserts a customer segment', async () => {
+    const { controller } = await makeController();
+    const result = await controller.upsertCustomerSegment('biz_1', {
+      businessId: 'biz_1',
+      name: 'Enterprise',
+      segmentType: 'HIGH_VALUE',
+    } as any);
+
+    expect(result.id).toBe('seg_1');
+  });
+
+  it('lists sales motions', async () => {
+    const { controller } = await makeController();
+    const result = await controller.listSalesMotions('biz_1', 'INBOUND', 'AWARENESS', 'online', 'true', '0.8', '10');
+
+    expect(result).toEqual([]);
+  });
+
+  it('upserts a sales motion', async () => {
+    const { controller } = await makeController();
+    const result = await controller.upsertSalesMotion('biz_1', {
+      businessId: 'biz_1',
+      name: 'Inbound',
+      motionType: 'INBOUND',
+    } as any);
+
+    expect(result.id).toBe('mot_1');
+  });
+
+  it('gets latest customer/sales snapshot', async () => {
+    const { controller } = await makeController();
+    const result = await controller.getCustomerSalesSnapshot('biz_1');
+
+    expect(result?.id).toBe('cssnap_1');
+  });
+
+  it('computes customer/sales snapshot', async () => {
+    const { controller } = await makeController();
+    const result = await controller.computeCustomerSalesSnapshot('biz_1', '2026-06');
+
+    expect(result.id).toBe('cssnap_1');
+  });
+
+  it('lists customer/sales snapshots', async () => {
+    const { controller } = await makeController();
+    const result = await controller.listCustomerSalesSnapshots('biz_1', '2026-06', 'MEDIUM', '5');
+
+    expect(result).toEqual([]);
+  });
+
+  it('generates customer/sales signals', async () => {
+    const { controller } = await makeController();
+    const result = await controller.generateCustomerSalesSignals('biz_1');
+
+    expect(result).toEqual([]);
+  });
+
+  it('generates customer/sales recommendations', async () => {
+    const { controller } = await makeController();
+    const result = await controller.generateCustomerSalesRecommendations('biz_1');
 
     expect(result).toEqual([]);
   });

@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Inject,
   Param,
@@ -19,12 +20,17 @@ import { GenomeDepartmentService } from './genome-department.service';
 import { DepartmentReadinessService } from './department-readiness.service';
 import { GenomeFinancialMetricService } from './genome-financial-metric.service';
 import { FinanceGenomeService } from './finance-genome.service';
+import { GenomeCustomerSegmentService } from './genome-customer-segment.service';
+import { GenomeSalesMotionService } from './genome-sales-motion.service';
+import { CustomerSalesGenomeService } from './customer-sales-genome.service';
 import type {
   CreateGenomeExperimentInput,
   GenerateGenomeRecommendationsInput,
   GenomeOutcome,
   RecommendationOutcome,
+  UpsertGenomeCustomerSegmentInput,
   UpsertGenomeFinancialMetricInput,
+  UpsertGenomeSalesMotionInput,
 } from './key-genome.types';
 
 @Controller('business-genome/businesses/:businessId/key-genome')
@@ -41,6 +47,9 @@ export class KeyGenomeController {
     @Inject(DepartmentReadinessService) private readonly departmentReadiness: DepartmentReadinessService,
     @Inject(GenomeFinancialMetricService) private readonly financeMetrics: GenomeFinancialMetricService,
     @Inject(FinanceGenomeService) private readonly financeGenome: FinanceGenomeService,
+    @Inject(GenomeCustomerSegmentService) private readonly customerSegments: GenomeCustomerSegmentService,
+    @Inject(GenomeSalesMotionService) private readonly salesMotions: GenomeSalesMotionService,
+    @Inject(CustomerSalesGenomeService) private readonly customerSalesGenome: CustomerSalesGenomeService,
   ) {}
 
   @Get('signals')
@@ -398,5 +407,114 @@ export class KeyGenomeController {
   @Post('finance/recommendations/generate')
   async generateFinanceRecommendations(@Param('businessId') businessId: string) {
     return this.financeGenome.generateFinanceRecommendations(businessId);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Phase 14: Customer / Sales / Revenue Genome
+  // ---------------------------------------------------------------------------
+
+  @Get('customer-sales/segments')
+  async listCustomerSegments(
+    @Param('businessId') businessId: string,
+    @Query('segmentType') segmentType?: string,
+    @Query('channel') channel?: string,
+    @Query('minConfidence') minConfidence?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.customerSegments.listSegments(businessId, {
+      segmentType,
+      channel,
+      minConfidence: minConfidence !== undefined ? Number(minConfidence) : undefined,
+      limit: limit !== undefined ? Number(limit) : undefined,
+    });
+  }
+
+  @Post('customer-sales/segments')
+  async upsertCustomerSegment(
+    @Param('businessId') businessId: string,
+    @Body() body: UpsertGenomeCustomerSegmentInput,
+  ) {
+    return this.customerSegments.upsertSegment({ ...body, businessId });
+  }
+
+  @Delete('customer-sales/segments/:segmentId')
+  async deleteCustomerSegment(
+    @Param('businessId') businessId: string,
+    @Param('segmentId') segmentId: string,
+  ) {
+    return this.customerSegments.deleteSegment(businessId, segmentId);
+  }
+
+  @Get('customer-sales/motions')
+  async listSalesMotions(
+    @Param('businessId') businessId: string,
+    @Query('motionType') motionType?: string,
+    @Query('stage') stage?: string,
+    @Query('channel') channel?: string,
+    @Query('isActive') isActive?: string,
+    @Query('minConfidence') minConfidence?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.salesMotions.listMotions(businessId, {
+      motionType,
+      stage,
+      channel,
+      isActive: isActive !== undefined ? isActive === 'true' : undefined,
+      minConfidence: minConfidence !== undefined ? Number(minConfidence) : undefined,
+      limit: limit !== undefined ? Number(limit) : undefined,
+    });
+  }
+
+  @Post('customer-sales/motions')
+  async upsertSalesMotion(
+    @Param('businessId') businessId: string,
+    @Body() body: UpsertGenomeSalesMotionInput,
+  ) {
+    return this.salesMotions.upsertMotion({ ...body, businessId });
+  }
+
+  @Delete('customer-sales/motions/:motionId')
+  async deleteSalesMotion(
+    @Param('businessId') businessId: string,
+    @Param('motionId') motionId: string,
+  ) {
+    return this.salesMotions.deleteMotion(businessId, motionId);
+  }
+
+  @Get('customer-sales/snapshot')
+  async getCustomerSalesSnapshot(@Param('businessId') businessId: string) {
+    return this.customerSalesGenome.getLatestCustomerSalesSnapshot(businessId);
+  }
+
+  @Post('customer-sales/snapshot/compute')
+  async computeCustomerSalesSnapshot(
+    @Param('businessId') businessId: string,
+    @Query('period') period?: string,
+  ) {
+    return this.customerSalesGenome.computeCustomerSalesSnapshot(businessId, period);
+  }
+
+  @Get('customer-sales/snapshots')
+  async listCustomerSalesSnapshots(
+    @Param('businessId') businessId: string,
+    @Query('period') period?: string,
+    @Query('riskLevel') riskLevel?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.customerSalesGenome.listCustomerSalesSnapshots(businessId, {
+      period,
+      riskLevel,
+      limit: limit !== undefined ? Number(limit) : undefined,
+    });
+  }
+
+  @Post('customer-sales/signals/generate')
+  async generateCustomerSalesSignals(@Param('businessId') businessId: string) {
+    return this.customerSalesGenome.generateCustomerSalesSignals(businessId);
+  }
+
+  @Post('customer-sales/recommendations/generate')
+  async generateCustomerSalesRecommendations(@Param('businessId') businessId: string) {
+    return this.customerSalesGenome.generateCustomerSalesRecommendations(businessId);
   }
 }
