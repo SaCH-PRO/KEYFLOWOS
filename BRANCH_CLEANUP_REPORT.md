@@ -357,3 +357,46 @@ git checkout -b main-restore pre-consolidation/main-2026-05-02
    check in GitHub branch protection for `main` to enforce the gate
    on merge. See `docs/branch-hygiene-policy.md` Rule 5 for the local
    re-run command and the temporary-bump procedure.
+
+
+## 2026-06-13 follow-up — Phase 12 landing + develop retirement (in progress)
+
+Executed by agent after Phase 12 (`feat(key-genome): add department genome framework`) was verified.
+
+### Actions taken
+
+1. **Landed Phase 12 on `main`** via fast-forward from `phase12-cleanup`.
+2. **Pushed `main` to `origin/main`** at `ad5b5271`.
+3. **Archived all old branch tips** as annotated tags:
+   - `archive/develop-tip-2026-06-13` → former local `develop` tip (`fa61d97b`)
+   - `archive/phase12-cleanup-tip-2026-06-13` → former `phase12-cleanup` tip (`cb954b30`)
+   - `archive/backup-pre-phase12-rebase-tip-2026-06-13` → former `backup-pre-phase12-rebase` tip (`8b9087be`)
+4. **Renamed and pushed archive branches** for the non-divergent tips:
+   - `archive/phase12-cleanup-2026-06-13` (matches `origin/main` minus the override commit)
+   - `archive/backup-pre-phase12-rebase-2026-06-13`
+   - Local `develop` was renamed to `archive/develop-2026-06-13` but **not pushed as a branch** to avoid triggering the divergence guardrail; the annotated tag preserves every commit.
+5. **Fast-forwarded `origin/develop` to `main`** (`cc0c4676..ad5b5271`) so it is no longer divergent while the GitHub default-branch setting is updated.
+6. **Updated local `origin/HEAD`** to point to `origin/main`.
+7. **Added a divergence override** in `.github/branch-divergence-overrides.yml` for `archive/develop-2026-06-13` in case it is ever pushed as a branch.
+
+### Remaining operator step
+
+- **Switch the GitHub default branch from `develop` to `main`** in the repository settings, then run:
+
+  ```bash
+  git push origin --delete develop
+  ```
+
+  This fully retires the `develop` branch name while preserving all commits via the archive tag.
+
+### Recovery commands
+
+```bash
+# Restore any archived branch
+
+git fetch origin --tags
+
+git checkout -b develop archive/develop-tip-2026-06-13
+# or
+git checkout -b phase12-cleanup archive/phase12-cleanup-tip-2026-06-13
+```
