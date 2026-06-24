@@ -855,7 +855,7 @@ export class CrmStatsService {
           ...contactWhereBase(businessId),
           invoices: {
             some: {
-              status: { in: ['SENT', 'OVERDUE'] as string[] },
+              status: { in: ['SENT', 'OVERDUE'] as const },
               deletedAt: null,
             },
           },

@@ -1,4 +1,5 @@
 import { Injectable, Inject, Logger, NotFoundException } from '@nestjs/common';
+import { BusinessAssetStatus } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { TemporalFlowService } from '../temporal-flow/temporal-flow.service';
 import type { BusinessAssetType } from './dto/create-business-asset.dto';
@@ -6,7 +7,7 @@ import type { BusinessAssetType } from './dto/create-business-asset.dto';
 export interface CreateBusinessAssetInput {
   type: BusinessAssetType;
   name: string;
-  status?: string;
+  status?: BusinessAssetStatus;
   provider?: string;
   url?: string;
   identifier?: string;
@@ -18,7 +19,7 @@ export interface CreateBusinessAssetInput {
 export interface UpdateBusinessAssetInput {
   type?: string;
   name?: string;
-  status?: string;
+  status?: BusinessAssetStatus;
   provider?: string;
   url?: string;
   identifier?: string;

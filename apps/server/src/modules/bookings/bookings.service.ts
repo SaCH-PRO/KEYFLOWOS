@@ -1,6 +1,6 @@
 import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { Prisma } from '@prisma/client';
+import { BookingStatus, Prisma } from '@prisma/client';
 import {
   BookingCompletedPayload,
   BookingConfirmedPayload,
@@ -168,7 +168,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  async updateBookingStatus(businessId: string, bookingId: string, status: string) {
+  async updateBookingStatus(businessId: string, bookingId: string, status: BookingStatus) {
     const booking = await this.prisma.client.booking.findFirst({
       where: { id: bookingId, businessId, deletedAt: null },
     });
@@ -176,7 +176,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       const { NotFoundException } = await import('@nestjs/common');
       throw new NotFoundException('Booking not found');
     }
-    const allowed = ['PENDING', 'CONFIRMED', 'CANCELLED', 'COMPLETED', 'NO_SHOW'];
+    const allowed: BookingStatus[] = ['PENDING', 'CONFIRMED', 'CANCELLED', 'COMPLETED', 'NO_SHOW'];
     if (!allowed.includes(status)) {
       const { BadRequestException } = await import('@nestjs/common');
       throw new BadRequestException(

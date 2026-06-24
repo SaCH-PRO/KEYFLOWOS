@@ -1,3 +1,4 @@
+import { BusinessAssetStatus } from '@prisma/client';
 import { IsIn, IsOptional, IsString, IsUrl, IsISO8601, IsObject, MinLength } from 'class-validator';
 
 export const BUSINESS_ASSET_TYPES = [
@@ -27,7 +28,7 @@ export class CreateBusinessAssetDto {
 
   @IsOptional()
   @IsIn(BUSINESS_ASSET_STATUSES)
-  status?: string;
+  status?: BusinessAssetStatus;
 
   @IsOptional()
   @IsString()

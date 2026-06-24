@@ -1,5 +1,6 @@
 import { BadRequestException, Body, Controller, ForbiddenException, Get, Inject, NotFoundException, Param, Patch, Post, UseGuards, Delete, Query, Res } from '@nestjs/common';
 import { Response } from 'express';
+import { BookingStatus } from '@prisma/client';
 import { BookingsService } from './bookings.service';
 import { CalendarService } from './calendar.service';
 import { BookingOptimizerService } from './booking-optimizer.service';
@@ -53,7 +54,7 @@ export class BookingsController {
     @Param('bookingId') bookingId: string,
     @Body('status') status: string,
   ) {
-    return this.bookings.updateBookingStatus(businessId, bookingId, status);
+    return this.bookings.updateBookingStatus(businessId, bookingId, status as BookingStatus);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

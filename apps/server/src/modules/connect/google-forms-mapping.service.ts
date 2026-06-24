@@ -1,6 +1,7 @@
 import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { Prisma } from '@keyflow/db';
+import { QuoteStatus } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { GoogleFormsService } from './google-forms.service';
 import { CrmService } from '../crm/crm.service';
@@ -346,7 +347,7 @@ export class GoogleFormsMappingService {
               businessId: mapping.businessId,
               contactId,
               quoteNumber,
-              status: opp.defaultStatus ?? 'DRAFT',
+              status: (opp.defaultStatus as QuoteStatus | undefined) ?? 'DRAFT',
               subtotal: budget || 0,
               total: budget || 0,
               currency: opp.defaultCurrency ?? 'TTD',
