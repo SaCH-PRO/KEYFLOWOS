@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { Dna, Grid3X3, MessageSquare, FileText, Settings, Loader2, ScrollText, Briefcase, Sparkles, Radio, Lightbulb, Shield, Brain, Building2, Landmark } from "lucide-react";
+import { Dna, Grid3X3, MessageSquare, FileText, Settings, Loader2, ScrollText, Briefcase, Sparkles, Radio, Lightbulb, Shield, Brain, Building2, Landmark, Users } from "lucide-react";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { getGenome, type GenomeIntegrityResult } from "@/lib/api/business-genome";
 import { GenomeOverview } from "./business-genome/genome-overview";
@@ -20,8 +20,9 @@ import { KeyGenomeGovernanceConsole } from "./business-genome/key-genome-governa
 import { KeyGenomeMemoryPanel } from "./business-genome/key-genome-memory-panel";
 import { KeyGenomeDepartmentsPanel } from "./business-genome/key-genome-departments-panel";
 import { KeyGenomeFinancePanel } from "./business-genome/key-genome-finance-panel";
+import { KeyGenomeCustomerSalesPanel } from "./business-genome/key-genome-customer-sales-panel";
 
-type GenomeSubTab = "overview" | "dna-sections" | "genome-chat" | "reports" | "constitution" | "assets" | "evolution-proposals" | "signals" | "recommendations" | "governance" | "memory" | "departments" | "finance" | "advanced-editor";
+type GenomeSubTab = "overview" | "dna-sections" | "genome-chat" | "reports" | "constitution" | "assets" | "evolution-proposals" | "signals" | "recommendations" | "governance" | "memory" | "departments" | "finance" | "customer-sales" | "advanced-editor";
 
 const SUB_TABS: { id: GenomeSubTab; label: string; icon: React.ElementType }[] = [
   { id: "overview", label: "Overview", icon: Dna },
@@ -37,6 +38,7 @@ const SUB_TABS: { id: GenomeSubTab; label: string; icon: React.ElementType }[] =
   { id: "memory", label: "Memory", icon: Brain },
   { id: "departments", label: "Departments", icon: Building2 },
   { id: "finance", label: "Finance", icon: Landmark },
+  { id: "customer-sales", label: "Customer & Sales", icon: Users },
   { id: "advanced-editor", label: "Advanced Editor", icon: Settings },
 ];
 
@@ -235,6 +237,12 @@ export function BusinessGenomeTab() {
         {activeSubTab === "finance" && (
           <motion.div key="finance" {...fade}>
             <KeyGenomeFinancePanel onGenomeUpdate={handleGenomeUpdate} />
+          </motion.div>
+        )}
+
+        {activeSubTab === "customer-sales" && (
+          <motion.div key="customer-sales" {...fade}>
+            <KeyGenomeCustomerSalesPanel onGenomeUpdate={handleGenomeUpdate} />
           </motion.div>
         )}
 

@@ -1,4 +1,4 @@
-import { apiGet, apiPatch, apiPost } from "@/lib/api";
+import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api";
 
 export type DnaSectionKey =
   | "founder"
@@ -1102,6 +1102,300 @@ export async function generateGenomeFinanceSignals(businessId: string) {
 export async function generateGenomeFinanceRecommendations(businessId: string) {
   return apiPost<GenomeRecommendationData[]>({
     path: `/business-genome/businesses/${businessId}/key-genome/finance/recommendations/generate`,
+    body: {},
+  });
+}
+
+
+// ---------------------------------------------------------------------------
+// Phase 14 — Customer / Sales / Revenue Genome
+// ---------------------------------------------------------------------------
+
+export type GenomeCustomerSalesRiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' | 'UNKNOWN';
+
+export type GenomeCustomerSegmentType =
+  | 'HIGH_VALUE'
+  | 'LOW_MARGIN'
+  | 'NEW'
+  | 'AT_RISK'
+  | 'LOYAL'
+  | 'CHURNED'
+  | 'PROSPECT'
+  | 'CUSTOM';
+
+export interface GenomeCustomerSegmentData {
+  id: string;
+  businessId: string;
+  name: string;
+  description?: string | null;
+  segmentType: GenomeCustomerSegmentType | string;
+  estimatedSize?: number | null;
+  averageRevenue?: number | null;
+  averageCost?: number | null;
+  lifetimeValue?: number | null;
+  acquisitionCost?: number | null;
+  churnRate?: number | null;
+  conversionRate?: number | null;
+  channel?: string | null;
+  tags: string[];
+  confidence: number;
+  sourceModule?: string | null;
+  sourceEntityType?: string | null;
+  sourceEntityId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type GenomeSalesMotionType =
+  | 'INBOUND'
+  | 'OUTBOUND'
+  | 'REFERRAL'
+  | 'PARTNERSHIP'
+  | 'SELF_SERVICE'
+  | 'EVENT'
+  | 'CUSTOM';
+
+export type GenomeSalesMotionStage =
+  | 'AWARENESS'
+  | 'INTEREST'
+  | 'CONSIDERATION'
+  | 'INTENT'
+  | 'PURCHASE'
+  | 'RETENTION'
+  | 'ADVOCACY';
+
+export interface GenomeSalesMotionData {
+  id: string;
+  businessId: string;
+  name: string;
+  description?: string | null;
+  motionType: GenomeSalesMotionType | string;
+  stage?: GenomeSalesMotionStage | string | null;
+  conversionRate?: number | null;
+  averageDealSize?: number | null;
+  cycleDays?: number | null;
+  volume?: number | null;
+  channel?: string | null;
+  revenueContribution?: number | null;
+  costPerLead?: number | null;
+  isActive: boolean;
+  confidence: number;
+  sourceModule?: string | null;
+  sourceEntityType?: string | null;
+  sourceEntityId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GenomeCustomerSalesWarning {
+  code: string;
+  message: string;
+  severity: GenomeCustomerSalesRiskLevel;
+}
+
+export interface GenomeCustomerSalesRecommendation {
+  title: string;
+  reason: string;
+  priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  suggestedAction?: string;
+}
+
+export interface GenomeCustomerSalesSnapshotData {
+  id: string;
+  businessId: string;
+  period?: string | null;
+  currency: string;
+
+  totalCustomers?: number | null;
+  activeCustomers?: number | null;
+  newCustomers?: number | null;
+  churnedCustomers?: number | null;
+  retentionRate?: number | null;
+  conversionRate?: number | null;
+  averageRevenuePerCustomer?: number | null;
+  lifetimeValue?: number | null;
+  customerAcquisitionCost?: number | null;
+  ltvCacRatio?: number | null;
+
+  revenueQualityScore: number;
+  revenueConcentrationRisk: GenomeCustomerSalesRiskLevel;
+  cacRisk: GenomeCustomerSalesRiskLevel;
+  ltvRisk: GenomeCustomerSalesRiskLevel;
+  churnRisk: GenomeCustomerSalesRiskLevel;
+  conversionRisk: GenomeCustomerSalesRiskLevel;
+  overallRisk: GenomeCustomerSalesRiskLevel;
+
+  missingInputs: string[];
+  warnings: GenomeCustomerSalesWarning[];
+  recommendations: GenomeCustomerSalesRecommendation[];
+
+  computedAt: string;
+}
+
+export interface UpsertGenomeCustomerSegmentInput {
+  name: string;
+  description?: string | null;
+  segmentType: GenomeCustomerSegmentType | string;
+  estimatedSize?: number | null;
+  averageRevenue?: number | null;
+  averageCost?: number | null;
+  lifetimeValue?: number | null;
+  acquisitionCost?: number | null;
+  churnRate?: number | null;
+  conversionRate?: number | null;
+  channel?: string | null;
+  tags?: string[];
+  confidence?: number;
+  sourceModule?: string | null;
+  sourceEntityType?: string | null;
+  sourceEntityId?: string | null;
+}
+
+export interface UpsertGenomeSalesMotionInput {
+  name: string;
+  description?: string | null;
+  motionType: GenomeSalesMotionType | string;
+  stage?: GenomeSalesMotionStage | string | null;
+  conversionRate?: number | null;
+  averageDealSize?: number | null;
+  cycleDays?: number | null;
+  volume?: number | null;
+  channel?: string | null;
+  revenueContribution?: number | null;
+  costPerLead?: number | null;
+  isActive?: boolean;
+  confidence?: number;
+  sourceModule?: string | null;
+  sourceEntityType?: string | null;
+  sourceEntityId?: string | null;
+}
+
+export interface ListGenomeCustomerSegmentsQuery {
+  segmentType?: string;
+  channel?: string;
+  minConfidence?: number;
+  limit?: number;
+}
+
+export interface ListGenomeSalesMotionsQuery {
+  motionType?: string;
+  stage?: string;
+  channel?: string;
+  isActive?: boolean;
+  minConfidence?: number;
+  limit?: number;
+}
+
+export interface ListGenomeCustomerSalesSnapshotsQuery {
+  period?: string;
+  riskLevel?: string;
+  limit?: number;
+}
+
+export async function listGenomeCustomerSegments(
+  businessId: string,
+  filters: ListGenomeCustomerSegmentsQuery = {},
+) {
+  const params = new URLSearchParams();
+  if (filters.segmentType) params.set('segmentType', filters.segmentType);
+  if (filters.channel) params.set('channel', filters.channel);
+  if (filters.minConfidence !== undefined) params.set('minConfidence', String(filters.minConfidence));
+  if (filters.limit !== undefined) params.set('limit', String(filters.limit));
+  const query = params.toString();
+  return apiGet<GenomeCustomerSegmentData[]>(
+    `/business-genome/businesses/${businessId}/key-genome/customer-sales/segments${query ? `?${query}` : ''}`,
+  );
+}
+
+export async function upsertGenomeCustomerSegment(
+  businessId: string,
+  input: UpsertGenomeCustomerSegmentInput,
+) {
+  return apiPost<GenomeCustomerSegmentData>({
+    path: `/business-genome/businesses/${businessId}/key-genome/customer-sales/segments`,
+    body: input,
+  });
+}
+
+export async function deleteGenomeCustomerSegment(businessId: string, segmentId: string) {
+  return apiDelete<{ deleted: true }>(
+    `/business-genome/businesses/${businessId}/key-genome/customer-sales/segments/${segmentId}`,
+  );
+}
+
+export async function listGenomeSalesMotions(
+  businessId: string,
+  filters: ListGenomeSalesMotionsQuery = {},
+) {
+  const params = new URLSearchParams();
+  if (filters.motionType) params.set('motionType', filters.motionType);
+  if (filters.stage) params.set('stage', filters.stage);
+  if (filters.channel) params.set('channel', filters.channel);
+  if (filters.isActive !== undefined) params.set('isActive', String(filters.isActive));
+  if (filters.minConfidence !== undefined) params.set('minConfidence', String(filters.minConfidence));
+  if (filters.limit !== undefined) params.set('limit', String(filters.limit));
+  const query = params.toString();
+  return apiGet<GenomeSalesMotionData[]>(
+    `/business-genome/businesses/${businessId}/key-genome/customer-sales/motions${query ? `?${query}` : ''}`,
+  );
+}
+
+export async function upsertGenomeSalesMotion(
+  businessId: string,
+  input: UpsertGenomeSalesMotionInput,
+) {
+  return apiPost<GenomeSalesMotionData>({
+    path: `/business-genome/businesses/${businessId}/key-genome/customer-sales/motions`,
+    body: input,
+  });
+}
+
+export async function deleteGenomeSalesMotion(businessId: string, motionId: string) {
+  return apiDelete<{ deleted: true }>(
+    `/business-genome/businesses/${businessId}/key-genome/customer-sales/motions/${motionId}`,
+  );
+}
+
+export async function getGenomeCustomerSalesSnapshot(businessId: string) {
+  return apiGet<GenomeCustomerSalesSnapshotData | null>(
+    `/business-genome/businesses/${businessId}/key-genome/customer-sales/snapshot`,
+  );
+}
+
+export async function computeGenomeCustomerSalesSnapshot(businessId: string, period?: string) {
+  const params = new URLSearchParams();
+  if (period) params.set('period', period);
+  const query = params.toString();
+  return apiPost<GenomeCustomerSalesSnapshotData>({
+    path: `/business-genome/businesses/${businessId}/key-genome/customer-sales/snapshot/compute${query ? `?${query}` : ''}`,
+    body: {},
+  });
+}
+
+export async function listGenomeCustomerSalesSnapshots(
+  businessId: string,
+  filters: ListGenomeCustomerSalesSnapshotsQuery = {},
+) {
+  const params = new URLSearchParams();
+  if (filters.period) params.set('period', filters.period);
+  if (filters.riskLevel) params.set('riskLevel', filters.riskLevel);
+  if (filters.limit !== undefined) params.set('limit', String(filters.limit));
+  const query = params.toString();
+  return apiGet<GenomeCustomerSalesSnapshotData[]>(
+    `/business-genome/businesses/${businessId}/key-genome/customer-sales/snapshots${query ? `?${query}` : ''}`,
+  );
+}
+
+export async function generateGenomeCustomerSalesSignals(businessId: string) {
+  return apiPost<GenomeSignal[]>({
+    path: `/business-genome/businesses/${businessId}/key-genome/customer-sales/signals/generate`,
+    body: {},
+  });
+}
+
+export async function generateGenomeCustomerSalesRecommendations(businessId: string) {
+  return apiPost<GenomeRecommendationData[]>({
+    path: `/business-genome/businesses/${businessId}/key-genome/customer-sales/recommendations/generate`,
     body: {},
   });
 }
