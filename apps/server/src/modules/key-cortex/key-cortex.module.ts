@@ -83,6 +83,7 @@ import { BlueprintModule } from '../blueprint/blueprint.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { ProjectsModule } from '../projects/projects.module';
 import { ActivityModule } from '../activity/activity.module';
+import { KeystoreModule } from '../keystore/keystore.module';
 
 @Module({
   imports: [
@@ -120,6 +121,11 @@ import { ActivityModule } from '../activity/activity.module';
     forwardRef(() => NotificationsModule),
     forwardRef(() => ProjectsModule),
     forwardRef(() => ActivityModule),
+
+    // -- KeyStore Service Marketplace --
+    // Enables KEY Cortex to manage service orders, browse listings, and
+    // track deliverable requests through the KeyStore module.
+    forwardRef(() => KeystoreModule),
   ],
 
   controllers: [
