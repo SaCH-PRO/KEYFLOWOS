@@ -1,4 +1,15 @@
+/**
+ * Dev-only helper: fetch the local dev user record.
+ *
+ * NEVER run this in production or against a real user database.
+ * The script exits unless NODE_ENV=development.
+ */
 import { PrismaClient } from '@prisma/client';
+
+if (process.env.NODE_ENV !== 'development') {
+  console.error('This script is only allowed in NODE_ENV=development');
+  process.exit(1);
+}
 
 async function main() {
   const prisma = new PrismaClient();
