@@ -26,6 +26,7 @@ import {
   CortexActionResult,
   CortexActionType,
   CortexPersona,
+  ConsciousResponse,
 } from './key-cortex.types';
 import { KeyCortexPersonalityService } from './key-cortex-personality.service';
 import { KeyCortexContextService } from './key-cortex-context.service';
@@ -46,6 +47,9 @@ import { KeyCortexEventService } from './key-cortex-event.service';
 import { KeyProactiveEngineService } from './key-proactive-engine.service';
 import { TrustExplanationService } from './trust-explanation.service';
 import { isFeatureVisible, UserTier } from './calm-mode.config';
+
+// ── Consciousness Layer ──
+import { KeyCortexConsciousnessService } from './key-cortex-consciousness.service';
 
 // ── v3 Types ──
 
@@ -150,6 +154,11 @@ export interface InteractionFeedback {
  * - Trust explanation generation via TrustExplanationService
  * - Calm mode detail level adaptation
  *
+ * CONSCIOUSNESS LAYER:
+ * - Conscious query processing via KeyCortexConsciousnessService
+ * - All 9 cognitive layers: emotion, reasoning, reflection, intuition,
+ *   metacognition, creativity, ethics, temporal reasoning, and orchestration
+ *
  * Responsibilities:
  * - Process user queries through the ModelGatewayService
  * - Select appropriate AI provider based on query type and preferences
@@ -160,6 +169,7 @@ export interface InteractionFeedback {
  * - Execute direct commands and module queries (v2)
  * - Integrate with genome DNA, signals, recommendations (v3)
  * - Proactive suggestions and trust explanations (v4)
+ * - Conscious-aware processing with 9 cognitive layers (consciousness)
  */
 @Injectable()
 export class KeyCortexReasoningService {
@@ -231,6 +241,11 @@ export class KeyCortexReasoningService {
     @Optional()
     @Inject(TrustExplanationService)
     private readonly trustExplanation?: TrustExplanationService,
+
+    // ── Consciousness Layer (optional — graceful degradation) ──
+    @Optional()
+    @Inject(KeyCortexConsciousnessService)
+    private readonly consciousness?: KeyCortexConsciousnessService,
   ) {
     this.MAX_CONTEXT_TOKENS =
       parseInt(process.env.KEY_CORTEX_MAX_CONTEXT_TOKENS ?? '8000', 10);
@@ -267,6 +282,49 @@ export class KeyCortexReasoningService {
         'KEY Cortex v3 Genome Integration Layer is NOT active — genome-aware features unavailable.',
       );
     }
+
+    if (this.consciousness) {
+      this.logger.log(
+        'KEY Cortex Consciousness Layer is ACTIVE — 9 cognitive layers available.',
+      );
+    } else {
+      this.logger.warn(
+        'KEY Cortex Consciousness Layer is NOT active — conscious processing unavailable.',
+      );
+    }
+  }
+
+  // ==========================================================================
+  // Consciousness-Aware Query Processing
+  // ==========================================================================
+
+  /**
+   * Process a user query through the consciousness orchestrator.
+   *
+   * This routes the query through all 9 cognitive layers:
+   * - Emotion: affective analysis of user state
+   * - ReasoningEngine: enhanced cognitive processing
+   * - Reflection: self-correction and learning
+   * - Intuition: weak signal detection
+   * - Metacognition: self-monitoring and strategy selection
+   * - Creativity: novel idea generation
+   * - Ethics: moral framework checking
+   * - TemporalReasoning: time-aware analysis
+   * - ConsciousnessService: final orchestration and synthesis
+   *
+   * Falls back to regular processQuery() if consciousness service is unavailable.
+   *
+   * @param query  The user query
+   * @returns      ConsciousResponse with all 9 layer outputs
+   */
+  async processConsciousQuery(query: CortexQuery): Promise<ConsciousResponse> {
+    if (!this.consciousness) {
+      // Fall back to regular processing
+      return this.processQuery(query);
+    }
+
+    const session = await this.getOrCreateSession(query);
+    return this.consciousness.processConsciously(query.text, session);
   }
 
   // ==========================================================================
