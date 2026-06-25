@@ -6,6 +6,7 @@ import type {
   CloseGenomeRecommendationObservationInput,
   GenomeRecommendationDecision,
   GenomeRecommendationExecutionStatus,
+  GenomeRecommendationLearningSummary,
   GenomeRecommendationOutcomeData,
   GenomeRecommendationOutcomeSummary,
   GenomeOutcomeLearningWindowData,
@@ -437,6 +438,63 @@ export class GenomeRecommendationOutcomeService {
 
     // Normalize to [-1, 1] assuming max plausible swing is ±50 points
     return Math.max(-1, Math.min(1, raw / 50));
+  }
+
+  async getLearningSummary(
+    businessId: string,
+  ): Promise<GenomeRecommendationLearningSummary> {
+    const outcomes = await this.prisma.client.genomeRecommendationOutcome.findMany({
+      where: {
+        businessId,
+        observedAt: { not: null },
+        impactScore: { not: null },
+      },
+      orderBy: { observedAt: 'desc' },
+      take: 100,
+    });
+
+    const observed = outcomes.filter((o) => o.observedAt !== null && o.impactScore !== null);
+    const totalObserved = observed.length;
+    const averageImpactScore =
+      totalObserved > 0
+        ? observed.reduce((sum, o) => sum + (o.impactScore ?? 0), 0) / totalObserved
+        : 0;
+
+    const byDomain = new Map<
+      string,
+      { count: number; totalImpact: number }
+    >();
+    for (const o of observed) {
+      const entry = byDomain.get(o.domain) ?? { count: 0, totalImpact: 0 };
+      entry.count++;
+      entry.totalImpact += o.impactScore ?? 0;
+      byDomain.set(o.domain, entry);
+    }
+
+    const domainStats = Array.from(byDomain.entries()).map(([domain, stats]) => ({
+      domain,
+      count: stats.count,
+      averageImpact: stats.totalImpact / stats.count,
+    }));
+
+    const topPositiveDomains = domainStats
+      .filter((d) => d.averageImpact > 0)
+      .sort((a, b) => b.averageImpact - a.averageImpact)
+      .slice(0, 3);
+
+    const topNegativeDomains = domainStats
+      .filter((d) => d.averageImpact < 0)
+      .sort((a, b) => a.averageImpact - b.averageImpact)
+      .slice(0, 3);
+
+    return {
+      businessId,
+      totalObserved,
+      averageImpactScore,
+      topPositiveDomains,
+      topNegativeDomains,
+      recentOutcomes: outcomes.slice(0, 5).map(toOutcomeData),
+    };
   }
 
   async getExecutionStatus(

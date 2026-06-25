@@ -22,7 +22,7 @@ export default function IntelligencePage() {
   const [activeDomain, setActiveDomain] = useState<BusinessIntelligenceInsight["domain"] | "ALL">("ALL");
 
   useEffect(() => {
-    setBusinessId(getStoredBusinessId() ?? null);
+    setBusinessId(getStoredBusinessId() ?? null); // eslint-disable-line react-hooks/set-state-in-effect -- hydrate selected business from localStorage
   }, []);
 
   const load = async () => {
@@ -46,8 +46,7 @@ export default function IntelligencePage() {
   };
 
   useEffect(() => {
-    void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    void load(); // eslint-disable-line react-hooks/set-state-in-effect -- load executive brief on business change
   }, [businessId]);
 
   const filteredInsights = useMemo(() => {
