@@ -24,6 +24,7 @@ import { MarketingGenomeService } from './marketing-genome.service';
 import { GenomeCrossDomainService } from './genome-cross-domain.service';
 import { GenomeRecommendationRankerService } from './genome-recommendation-ranker.service';
 import { GenomeOpportunityDetectorService } from './genome-opportunity-detector.service';
+import { GenomeAutonomyGateService } from './genome-autonomy-gate.service';
 
 function mockProvider(
   token: string | symbol | (new (...args: any[]) => any),
@@ -201,6 +202,22 @@ async function makeController() {
       }),
       mockProvider(GenomeOpportunityDetectorService, {
         detectOpportunities: vi.fn().mockResolvedValue({ businessId: 'biz_1', opportunities: [] }),
+      }),
+      mockProvider(GenomeAutonomyGateService, {
+        checkGate: vi.fn().mockResolvedValue({
+          businessId: 'biz_1',
+          actionType: 'CREATE_TASK',
+          affectedDomains: ['operations_delivery'],
+          decision: 'ALLOW',
+          riskLevel: 'MEDIUM',
+          readinessScore: 75,
+          confidenceScore: 70,
+          blockingReasons: [],
+          approvalReasons: [],
+          evidenceWarnings: [],
+          recommendedNextStep: 'Action is cleared for autonomous execution.',
+          checkedAt: new Date().toISOString(),
+        }),
       }),
     ],
   })
@@ -570,5 +587,17 @@ describe('KeyGenomeController', () => {
     const result = await controller.detectOpportunities('biz_1', '5', 'MEDIUM', 'true');
 
     expect(result.businessId).toBe('biz_1');
+  });
+
+  it('checks autonomy gate', async () => {
+    const { controller } = await makeController();
+    const result = await controller.checkAutonomyGate('biz_1', {
+      businessId: 'biz_1',
+      actionType: 'CREATE_TASK',
+      affectedDomains: ['operations_delivery'],
+    });
+
+    expect(result.decision).toBe('ALLOW');
+    expect(result.actionType).toBe('CREATE_TASK');
   });
 });

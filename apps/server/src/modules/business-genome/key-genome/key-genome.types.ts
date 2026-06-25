@@ -78,6 +78,7 @@ export type GenomeMemoryEventType =
   | 'CROSS_DOMAIN_SNAPSHOT_COMPUTED'
   | 'CROSS_DOMAIN_RECOMMENDATIONS_RANKED'
   | 'CROSS_DOMAIN_OPPORTUNITIES_DETECTED'
+  | 'AUTONOMY_GATE_DECISION_RECORDED'
   | 'MANUAL_LESSON';
 
 export type GenomeSignalType =
@@ -1494,4 +1495,37 @@ export interface GenomeOpportunityDetectionResult {
   overallRiskLevel: GenomeCrossDomainRiskLevel;
   opportunities: GenomeCrossDomainOpportunityCandidate[];
   prioritizedOpportunities: GenomeCrossDomainOpportunityCandidate[];
+}
+
+// ---------------------------------------------------------------------------
+// Phase 17D — Genome Autonomy Gate
+// ---------------------------------------------------------------------------
+
+export type GenomeAutonomyGateDecision =
+  | 'ALLOW'
+  | 'ALLOW_WITH_APPROVAL'
+  | 'BLOCK'
+  | 'NEEDS_MORE_EVIDENCE';
+
+export interface CheckGenomeAutonomyGateInput {
+  businessId: string;
+  actionType: string;
+  affectedDomains?: GenomeCrossDomainDomainKey[];
+  payload?: Record<string, unknown>;
+  proposedBy?: string | null;
+}
+
+export interface GenomeAutonomyGateResult {
+  businessId: string;
+  actionType: string;
+  affectedDomains: string[];
+  decision: GenomeAutonomyGateDecision;
+  riskLevel: GenomeCrossDomainRiskLevel;
+  readinessScore: number;
+  confidenceScore: number;
+  blockingReasons: string[];
+  approvalReasons: string[];
+  evidenceWarnings: string[];
+  recommendedNextStep: string;
+  checkedAt: string;
 }

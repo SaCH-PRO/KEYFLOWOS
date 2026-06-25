@@ -33,7 +33,9 @@ import { MarketingGenomeService } from './marketing-genome.service';
 import { GenomeCrossDomainService } from './genome-cross-domain.service';
 import { GenomeRecommendationRankerService } from './genome-recommendation-ranker.service';
 import { GenomeOpportunityDetectorService } from './genome-opportunity-detector.service';
+import { GenomeAutonomyGateService } from './genome-autonomy-gate.service';
 import type { ListGenomeCrossDomainSnapshotsQuery } from './key-genome.types';
+import type { CheckGenomeAutonomyGateInput } from './key-genome.types';
 import type {
   CreateGenomeExperimentInput,
   CreateGenomeContentStrategyInput,
@@ -76,6 +78,7 @@ export class KeyGenomeController {
     @Inject(GenomeCrossDomainService) private readonly crossDomainGenome: GenomeCrossDomainService,
     @Inject(GenomeRecommendationRankerService) private readonly recommendationRanker: GenomeRecommendationRankerService,
     @Inject(GenomeOpportunityDetectorService) private readonly opportunityDetector: GenomeOpportunityDetectorService,
+    @Inject(GenomeAutonomyGateService) private readonly autonomyGate: GenomeAutonomyGateService,
   ) {}
 
   @Get('signals')
@@ -869,5 +872,13 @@ export class KeyGenomeController {
           ? includeRiskMitigation === 'true'
           : undefined,
     });
+  }
+
+  @Post('cross-domain/autonomy-gate/check')
+  async checkAutonomyGate(
+    @Param('businessId') businessId: string,
+    @Body() body: CheckGenomeAutonomyGateInput,
+  ) {
+    return this.autonomyGate.checkGate({ ...body, businessId });
   }
 }
