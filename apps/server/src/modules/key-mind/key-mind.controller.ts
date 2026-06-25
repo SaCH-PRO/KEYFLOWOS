@@ -6,19 +6,6 @@ import { KeySignalDetector } from './key-signal-detector.service';
 import { KeyLearningLoop } from './key-learning-loop.service';
 import { KEY_ROLE_TAXONOMY } from './key-role-taxonomy';
 
-/**
- * =============================================================================
- * KeyMindController — REST API for Role Intelligence
- * =============================================================================
- * Endpoints:
- *   POST /key-mind/process        — Full role intelligence pipeline
- *   POST /key-mind/classify       — Classify query into function+tier
- *   POST /key-mind/detect-signals — Detect hidden business signals
- *   GET  /key-mind/taxonomy       — List all 84 role archetypes
- *   GET  /key-mind/learning-stats — Learning loop statistics
- *   GET  /key-mind/health         — Health check
- * =============================================================================
- */
 @Controller('key-mind')
 export class KeyMindController {
   constructor(

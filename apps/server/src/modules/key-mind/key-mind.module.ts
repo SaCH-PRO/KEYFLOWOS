@@ -8,18 +8,6 @@ import { KeyBusinessStandard } from './key-business-standard.service';
 import { KeyOutputOrchestrator } from './key-output-orchestrator.service';
 import { KeyLearningLoop } from './key-learning-loop.service';
 
-/**
- * =============================================================================
- * KeyMindModule — KEY Role Intelligence Engine
- * =============================================================================
- * 84 business role archetypes across 12 functions x 7 tiers.
- * Detects what role KEY should think as, loads expert brains,
- * applies frameworks, detects signals, checks quality, learns.
- *
- * Providers: 7 services + 1 controller
- * Exports: KeyOutputOrchestrator, KeyRoleClassifier, KeyExpertBrain
- * =============================================================================
- */
 @Module({
   controllers: [KeyMindController],
   providers: [
