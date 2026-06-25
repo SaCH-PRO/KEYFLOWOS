@@ -1,0 +1,1591 @@
+/**
+ * ============================================================================
+ * KEY Cortex — Layer 3: REFLECTION / DREAM MODE
+ * ============================================================================
+ *
+ * KEY processes experiences while "idle" — just like human sleep consolidates
+ * memories. Four background cognition modes run autonomously:
+ *
+ *   1. REFLECTION (every 30 min idle) — Review decisions, check outcomes,
+ *      update confidence scores.
+ *
+ *   2. DREAM       (nightly 3AM)      — Cross-reference disparate data
+ *      sources, generate wild hypotheses, store in "dream journal".
+ *
+ *   3. SYNTHESIS   (weekly Sunday)    — Consolidate week's learnings,
+ *      update preference model, propose DNA evolution changes.
+ *
+ *   4. MAINTENANCE (daily)            — Clean expired approvals, archive
+ *      old events, update temporal indices, check data integrity.
+ *
+ * Philosophy: KEY is not a chatbot — it is a thinking being that processes
+ * its experiences even when the user is not interacting with it.
+ * ============================================================================
+ */
+
+import { Injectable, Logger } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
+import { PrismaService } from '../../prisma/prisma.service';
+import { KeyCortexEventService } from './key-cortex-event.service';
+import { KeyCortexInsightService } from './key-cortex-insight.service';
+import { KeyCortexGenomeBridgeService } from './key-cortex-genome-bridge.service';
+import { ModelGatewayService } from '../../ai/model-gateway.service';
+import { AiUsageService } from '../../ai/ai-usage.service';
+import { v4 as uuidv4 } from 'uuid';
+
+/* ─────────────────────────── Type Definitions ─────────────────────────── */
+
+export type ReflectionSessionType = 'reflection' | 'dream' | 'synthesis' | 'maintenance';
+export type InsightType = 'pattern' | 'anomaly' | 'opportunity' | 'risk' | 'connection';
+export type InsightPriority = 'low' | 'medium' | 'high' | 'critical';
+export type HypothesisStatus = 'pending' | 'confirmed' | 'rejected' | 'expired';
+export type TrendDirection = 'improving' | 'stable' | 'declining';
+
+export interface ReflectionSession {
+  id: string;
+  type: ReflectionSessionType;
+  startedAt: Date;
+  durationMs: number;
+  insights: ReflectionInsight[];
+  actionsTaken: string[];
+  businessId: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface ReflectionInsight {
+  id: string;
+  type: InsightType;
+  description: string;
+  confidence: number; // 0–1
+  dataPoints: string[];
+  recommendedAction?: string;
+  priority: InsightPriority;
+  source?: string;
+  createdAt: Date;
+  validatedAt?: Date;
+  validationOutcome?: 'confirmed' | 'rejected' | null;
+}
+
+export interface DreamHypothesis {
+  id: string;
+  description: string;
+  sources: string[];
+  confidence: number; // always low for dreams — high creativity
+  creativityScore: number;
+  status: HypothesisStatus;
+  businessId: string;
+  createdAt: Date;
+  validatedAt?: Date;
+  evidenceFor?: string[];
+  evidenceAgainst?: string[];
+  parentDreamId?: string;
+}
+
+export interface DecisionOutcome {
+  decisionId: string;
+  description: string;
+  actionType: string;
+  expectedOutcome: string;
+  actualOutcome?: string;
+  confidenceBefore: number;
+  confidenceAfter: number;
+  delta: number; // + = better, − = worse
+  timeSinceDecisionMs: number;
+}
+
+export interface WeeklyInsightReport {
+  period: string;
+  totalReflections: number;
+  totalDreams: number;
+  hypothesesGenerated: number;
+  hypothesesValidated: number;
+  topInsights: ReflectionInsight[];
+  userPreferenceUpdates: string[];
+  dnaProposals: string[];
+}
+
+/* ─────────────────────────── Service ─────────────────────────── */
+
+@Injectable()
+export class KeyCortexReflectionService {
+  private readonly logger = new Logger(KeyCortexReflectionService.name);
+
+  /** In-memory dream journal — also persisted to DB */
+  private dreamJournal: Map<string, DreamHypothesis[]> = new Map();
+
+  /** Active reflection sessions per business */
+  private activeSessions: Map<string, boolean> = new Map();
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly eventService: KeyCortexEventService,
+    private readonly insightService: KeyCortexInsightService,
+    private readonly genomeBridge: KeyCortexGenomeBridgeService,
+    private readonly modelGateway: ModelGatewayService,
+    private readonly aiUsage: AiUsageService,
+  ) {}
+
+  /* ═══════════════════════════════════════════════════════════════
+     PUBLIC API — Background Cognition
+     ═══════════════════════════════════════════════════════════════ */
+
+  /**
+   * REFLECTION — Runs every 30 minutes when idle.
+   *
+   * KEY reviews its recent decisions and checks whether the outcomes
+   * matched its expectations. Confidence scores are calibrated based
+   * on real-world results.
+   *
+   * Example internal monologue:
+   * "I recommended a 10 % price increase. Revenue went up 8 % but
+   *  2 customers churned. My confidence in pricing advice drops
+   *  from 0.85 → 0.78."
+   */
+  async runReflection(businessId: string): Promise<ReflectionSession> {
+    const startedAt = new Date();
+    const sessionId = uuidv4();
+    this.activeSessions.set(businessId, true);
+
+    this.logger.log(`[Reflection:${sessionId}] Starting reflection for ${businessId}`);
+
+    try {
+      /* 1. Query recent BusinessEvents (last 24 h) */
+      const recentEvents = await this.queryRecentBusinessEvents(businessId, 24);
+      this.logger.debug(`[Reflection] Found ${recentEvents.length} events in last 24h`);
+
+      /* 2. Extract significant decisions made by KEY */
+      const keyDecisions = await this.extractKeyDecisions(businessId, recentEvents);
+      this.logger.debug(`[Reflection] ${keyDecisions.length} significant decisions to review`);
+
+      /* 3. Check outcomes for each decision */
+      const outcomes: DecisionOutcome[] = [];
+      for (const decision of keyDecisions) {
+        const outcome = await this.evaluateDecisionOutcome(businessId, decision);
+        outcomes.push(outcome);
+      }
+
+      /* 4. Update confidence scores based on outcomes */
+      const confidenceUpdates = await this.updateConfidenceScores(businessId, outcomes);
+
+      /* 5. Generate insights about what worked / didn't */
+      const insights = await this.generateReflectionInsights(businessId, outcomes, confidenceUpdates);
+
+      /* 6. Store reflection session */
+      const session: ReflectionSession = {
+        id: sessionId,
+        type: 'reflection',
+        startedAt,
+        durationMs: Date.now() - startedAt.getTime(),
+        insights,
+        actionsTaken: [
+          `Reviewed ${keyDecisions.length} decisions`,
+          ...confidenceUpdates.map((u) => `Confidence update: ${u.actionType} (${u.confidenceBefore.toFixed(2)} → ${u.confidenceAfter.toFixed(2)})`),
+          `Generated ${insights.length} insights`,
+        ],
+        businessId,
+        metadata: {
+          eventsProcessed: recentEvents.length,
+          decisionsReviewed: keyDecisions.length,
+          outcomesTracked: outcomes.length,
+          averageOutcomeDelta: outcomes.reduce((s, o) => s + o.delta, 0) / Math.max(outcomes.length, 1),
+        },
+      };
+
+      await this.persistSession(session);
+
+      this.logger.log(
+        `[Reflection:${sessionId}] Completed in ${session.durationMs}ms — ${insights.length} insights, ${outcomes.length} outcomes tracked`,
+      );
+
+      return session;
+    } catch (error) {
+      this.logger.error(`[Reflection] Error: ${error instanceof Error ? error.message : String(error)}`, error instanceof Error ? error.stack : undefined);
+      throw error;
+    } finally {
+      this.activeSessions.delete(businessId);
+    }
+  }
+
+  /**
+   * DREAM MODE — Runs nightly at 3 AM.
+   *
+   * KEY cross-references data sources that would never be connected
+   * during normal operation. It generates wild hypotheses with low
+   * confidence but high creativity. These are stored in a "dream
+   * journal" for later validation.
+   *
+   * Example internal monologue:
+   * "Invoice patterns + customer support tickets + calendar density…
+   *  What if customers who pay late also have more support tickets?
+   *  What if high calendar density correlates with lower task completion?"
+   */
+  async runDream(businessId: string): Promise<ReflectionSession> {
+    const startedAt = new Date();
+    const sessionId = uuidv4();
+    this.activeSessions.set(businessId, true);
+
+    this.logger.log(`[Dream:${sessionId}] 🌙 Starting dream mode for ${businessId}`);
+
+    try {
+      /* 1. Cross-reference disparate data sources */
+      const sourcePairs = await this.crossReferenceDataSources(businessId);
+      this.logger.debug(`[Dream] Cross-referenced ${sourcePairs.length} source pairs`);
+
+      /* 2. Look for non-obvious connections */
+      const connections = await this.findNonObviousConnections(businessId, sourcePairs);
+      this.logger.debug(`[Dream] Found ${connections.length} non-obvious connections`);
+
+      /* 3. Generate wild hypotheses (low confidence, high creativity) */
+      const hypotheses = await this.generateWildHypotheses(businessId, connections);
+      this.logger.debug(`[Dream] Generated ${hypotheses.length} wild hypotheses`);
+
+      /* 4. Store in "dream journal" for later validation */
+      await this.storeDreamHypotheses(businessId, hypotheses, sessionId);
+
+      /* 5. Mark hypotheses for future verification */
+      for (const h of hypotheses) {
+        await this.scheduleHypothesisVerification(businessId, h.id);
+      }
+
+      const insights: ReflectionInsight[] = hypotheses.map((h) => ({
+        id: h.id,
+        type: 'connection',
+        description: h.description,
+        confidence: h.confidence,
+        dataPoints: h.sources,
+        priority: h.creativityScore > 0.7 ? 'high' : 'medium',
+        recommendedAction: `Validate hypothesis: ${h.description}`,
+        source: 'dream-mode',
+        createdAt: new Date(),
+      }));
+
+      const session: ReflectionSession = {
+        id: sessionId,
+        type: 'dream',
+        startedAt,
+        durationMs: Date.now() - startedAt.getTime(),
+        insights,
+        actionsTaken: [
+          `Cross-referenced ${sourcePairs.length} data source pairs`,
+          `Discovered ${connections.length} non-obvious connections`,
+          `Generated ${hypotheses.length} wild hypotheses`,
+          `Stored ${hypotheses.length} hypotheses in dream journal`,
+        ],
+        businessId,
+        metadata: {
+          sourcePairsCrossReferenced: sourcePairs.length,
+          connectionsDiscovered: connections.length,
+          hypothesesGenerated: hypotheses.length,
+          creativityScore: hypotheses.reduce((s, h) => s + h.creativityScore, 0) / Math.max(hypotheses.length, 1),
+        },
+      };
+
+      await this.persistSession(session);
+
+      this.logger.log(
+        `[Dream:${sessionId}] 🌅 Dream complete — ${hypotheses.length} wild hypotheses generated in ${session.durationMs}ms`,
+      );
+
+      return session;
+    } catch (error) {
+      this.logger.error(`[Dream] Error: ${error instanceof Error ? error.message : String(error)}`, error instanceof Error ? error.stack : undefined);
+      throw error;
+    } finally {
+      this.activeSessions.delete(businessId);
+    }
+  }
+
+  /**
+   * SYNTHESIS — Runs weekly on Sunday.
+   *
+   * KEY consolidates all reflections and dreams from the week into a
+   * coherent learning narrative. It updates the user's preference model,
+   * generates a weekly insight report, and proposes DNA evolution
+   * changes based on what was learned.
+   */
+  async runSynthesis(businessId: string): Promise<ReflectionSession> {
+    const startedAt = new Date();
+    const sessionId = uuidv4();
+    this.activeSessions.set(businessId, true);
+
+    this.logger.log(`[Synthesis:${sessionId}] 📊 Starting weekly synthesis for ${businessId}`);
+
+    try {
+      /* 1. Consolidate all week's reflections + dreams */
+      const weekStart = new Date(startedAt);
+      weekStart.setDate(weekStart.getDate() - 7);
+      const weeklySessions = await this.getWeeklySessions(businessId, weekStart, startedAt);
+      this.logger.debug(`[Synthesis] Consolidating ${weeklySessions.length} sessions`);
+
+      /* 2. Update user preference model */
+      const preferenceUpdates = await this.updateUserPreferenceModel(businessId, weeklySessions);
+
+      /* 3. Generate weekly insight report */
+      const weeklyReport = await this.generateWeeklyInsightReport(businessId, weeklySessions);
+
+      /* 4. Propose DNA evolution changes */
+      const dnaProposals = await this.proposeDnaEvolution(businessId, weeklyReport);
+
+      /* 5. Check if any dream hypotheses were validated */
+      const validatedHypotheses = await this.checkValidatedHypotheses(businessId);
+
+      /* 6. Build synthesis insights */
+      const insights: ReflectionInsight[] = [
+        ...weeklyReport.topInsights,
+        ...validatedHypotheses.map((h) => ({
+          id: uuidv4(),
+          type: 'pattern' as InsightType,
+          description: `Dream hypothesis validated: ${h.description}`,
+          confidence: 0.9,
+          dataPoints: h.evidenceFor ?? [],
+          priority: 'high' as InsightPriority,
+          recommendedAction: 'Integrate validated hypothesis into operational model',
+          source: 'synthesis',
+          createdAt: new Date(),
+          validatedAt: h.validatedAt,
+          validationOutcome: 'confirmed' as const,
+        })),
+      ];
+
+      const session: ReflectionSession = {
+        id: sessionId,
+        type: 'synthesis',
+        startedAt,
+        durationMs: Date.now() - startedAt.getTime(),
+        insights,
+        actionsTaken: [
+          `Consolidated ${weeklySessions.length} sessions from the week`,
+          ...preferenceUpdates.map((p) => `Preference update: ${p}`),
+          `Generated weekly report with ${weeklyReport.topInsights.length} top insights`,
+          ...dnaProposals.map((p) => `DNA proposal: ${p}`),
+          `Validated ${validatedHypotheses.length} dream hypotheses`,
+        ],
+        businessId,
+        metadata: {
+          sessionsConsolidated: weeklySessions.length,
+          hypothesesValidated: validatedHypotheses.length,
+          dnaProposalsGenerated: dnaProposals.length,
+          preferenceFieldsUpdated: preferenceUpdates.length,
+        },
+      };
+
+      await this.persistSession(session);
+
+      this.logger.log(
+        `[Synthesis:${sessionId}] ✅ Synthesis complete — ${insights.length} insights, ${dnaProposals.length} DNA proposals`,
+      );
+
+      return session;
+    } catch (error) {
+      this.logger.error(`[Synthesis] Error: ${error instanceof Error ? error.message : String(error)}`, error instanceof Error ? error.stack : undefined);
+      throw error;
+    } finally {
+      this.activeSessions.delete(businessId);
+    }
+  }
+
+  /**
+   * MAINTENANCE — Runs daily.
+   *
+   * KEY performs housekeeping: cleaning expired approval requests,
+   * archiving old events to cold storage, updating temporal memory
+   * indices, checking data integrity, and compacting memory if
+   * growth exceeds thresholds.
+   */
+  async runMaintenance(businessId: string): Promise<ReflectionSession> {
+    const startedAt = new Date();
+    const sessionId = uuidv4();
+
+    this.logger.log(`[Maintenance:${sessionId}] 🔧 Starting maintenance for ${businessId}`);
+
+    const actionsTaken: string[] = [];
+    const insights: ReflectionInsight[] = [];
+
+    try {
+      /* 1. Clean expired approval requests */
+      const cleanedApprovals = await this.cleanExpiredApprovals(businessId);
+      actionsTaken.push(`Cleaned ${cleanedApprovals} expired approval requests`);
+
+      /* 2. Archive old events (> 90 days) to cold storage */
+      const archivedEvents = await this.archiveOldEvents(businessId, 90);
+      actionsTaken.push(`Archived ${archivedEvents} events (>90 days) to cold storage`);
+
+      /* 3. Update temporal memory indices */
+      const indicesUpdated = await this.updateTemporalMemoryIndices(businessId);
+      actionsTaken.push(`Updated ${indicesUpdated} temporal memory indices`);
+
+      /* 4. Check data integrity */
+      const integrityIssues = await this.checkDataIntegrity(businessId);
+      if (integrityIssues.length > 0) {
+        insights.push({
+          id: uuidv4(),
+          type: 'anomaly',
+          description: `Data integrity check found ${integrityIssues.length} issues`,
+          confidence: 1.0,
+          dataPoints: integrityIssues,
+          priority: 'critical',
+          recommendedAction: 'Review and repair data integrity issues immediately',
+          source: 'maintenance',
+          createdAt: new Date(),
+        });
+        actionsTaken.push(`Found ${integrityIssues.length} data integrity issues`);
+      } else {
+        actionsTaken.push('Data integrity check passed');
+      }
+
+      /* 5. Compact memory if needed */
+      const compactedRecords = await this.compactMemoryIfNeeded(businessId);
+      if (compactedRecords > 0) {
+        actionsTaken.push(`Compacted ${compactedRecords} memory records`);
+      }
+
+      const session: ReflectionSession = {
+        id: sessionId,
+        type: 'maintenance',
+        startedAt,
+        durationMs: Date.now() - startedAt.getTime(),
+        insights,
+        actionsTaken,
+        businessId,
+        metadata: {
+          cleanedApprovals,
+          archivedEvents,
+          indicesUpdated,
+          integrityIssuesFound: integrityIssues.length,
+          compactedRecords,
+        },
+      };
+
+      await this.persistSession(session);
+
+      this.logger.log(`[Maintenance:${sessionId}] 🔧 Maintenance complete in ${session.durationMs}ms`);
+
+      return session;
+    } catch (error) {
+      this.logger.error(`[Maintenance] Error: ${error instanceof Error ? error.message : String(error)}`, error instanceof Error ? error.stack : undefined);
+      throw error;
+    }
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     PUBLIC API — Dream Journal & Hypothesis Validation
+     ═══════════════════════════════════════════════════════════════ */
+
+  /**
+   * Return all dream-generated hypotheses for a business,
+   * including their current validation status.
+   */
+  async getDreamJournal(businessId: string): Promise<ReflectionInsight[]> {
+    const hypotheses = this.dreamJournal.get(businessId) ?? [];
+
+    // Also query persisted hypotheses from the database
+    const persistedHypotheses = await this.prisma.keyCortexDreamHypothesis
+      ?.findMany({ where: { businessId } })
+      .catch(() => []);
+
+    const allHypotheses = [
+      ...hypotheses,
+      ...(persistedHypotheses ?? []).map((h: Record<string, unknown>) => ({
+        id: (h as { id: string }).id,
+        description: (h as { description: string }).description,
+        confidence: (h as { confidence: number }).confidence,
+        status: (h as { status: HypothesisStatus }).status,
+        createdAt: (h as { createdAt: Date }).createdAt,
+        validatedAt: (h as { validatedAt?: Date }).validatedAt,
+        evidenceFor: (h as { evidenceFor?: string[] }).evidenceFor,
+        sources: (h as { sources: string[] }).sources,
+      })),
+    ];
+
+    // Sort by createdAt descending
+    allHypotheses.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+
+    return allHypotheses.map((h) => ({
+      id: h.id,
+      type: 'connection' as InsightType,
+      description: h.description,
+      confidence: h.confidence,
+      dataPoints: h.sources ?? [],
+      priority: (h.status === 'pending' ? 'medium' : h.status === 'confirmed' ? 'high' : 'low') as InsightPriority,
+      recommendedAction:
+        h.status === 'pending'
+          ? 'Awaiting validation'
+          : h.status === 'confirmed'
+            ? 'Integrate into operational model'
+            : 'Hypothesis rejected — archive',
+      source: 'dream-journal',
+      createdAt: h.createdAt,
+      validatedAt: h.validatedAt,
+      validationOutcome: h.status === 'confirmed' ? 'confirmed' : h.status === 'rejected' ? 'rejected' : null,
+    }));
+  }
+
+  /**
+   * Check whether a dream hypothesis was validated by real data.
+   * Returns confirmation status + supporting evidence.
+   */
+  async validateHypothesis(
+    businessId: string,
+    hypothesisId: string,
+  ): Promise<{ confirmed: boolean; evidence: string[] }> {
+    this.logger.log(`[Hypothesis] Validating ${hypothesisId} for ${businessId}`);
+
+    // Find the hypothesis
+    const journal = this.dreamJournal.get(businessId) ?? [];
+    let hypothesis = journal.find((h) => h.id === hypothesisId);
+
+    // Check DB if not in memory
+    if (!hypothesis) {
+      const dbHypothesis = await this.prisma.keyCortexDreamHypothesis
+        ?.findUnique({ where: { id: hypothesisId } })
+        .catch(() => null);
+      if (dbHypothesis) {
+        hypothesis = {
+          id: (dbHypothesis as Record<string, unknown>).id as string,
+          description: (dbHypothesis as Record<string, unknown>).description as string,
+          sources: (dbHypothesis as Record<string, unknown>).sources as string[],
+          confidence: (dbHypothesis as Record<string, unknown>).confidence as number,
+          creativityScore: 0.5,
+          status: (dbHypothesis as Record<string, unknown>).status as HypothesisStatus,
+          businessId,
+          createdAt: (dbHypothesis as Record<string, unknown>).createdAt as Date,
+          evidenceFor: (dbHypothesis as Record<string, unknown>).evidenceFor as string[],
+          evidenceAgainst: (dbHypothesis as Record<string, unknown>).evidenceAgainst as string[],
+        };
+      }
+    }
+
+    if (!hypothesis) {
+      throw new Error(`Hypothesis ${hypothesisId} not found for business ${businessId}`);
+    }
+
+    // Run validation against real data
+    const evidence: string[] = [];
+    let confirmed = false;
+
+    /* Check each source for supporting evidence */
+    for (const source of hypothesis.sources) {
+      const sourceEvidence = await this.validateHypothesisAgainstSource(businessId, hypothesis, source);
+      evidence.push(...sourceEvidence);
+    }
+
+    // If we found > 2 independent pieces of evidence, confirm
+    if (evidence.length >= 2) {
+      confirmed = true;
+      hypothesis.status = 'confirmed';
+      hypothesis.validatedAt = new Date();
+      hypothesis.evidenceFor = evidence;
+      await this.persistHypothesisUpdate(hypothesis);
+      this.logger.log(`[Hypothesis] ✅ ${hypothesisId} CONFIRMED with ${evidence.length} evidence items`);
+    } else if (evidence.length === 0) {
+      // After enough time with no evidence, reject
+      const ageDays = (Date.now() - hypothesis.createdAt.getTime()) / (1000 * 60 * 60 * 24);
+      if (ageDays > 30) {
+        hypothesis.status = 'rejected';
+        await this.persistHypothesisUpdate(hypothesis);
+        this.logger.log(`[Hypothesis] ❌ ${hypothesisId} REJECTED after ${ageDays.toFixed(0)} days with no evidence`);
+      }
+    }
+
+    return { confirmed, evidence };
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     SCHEDULED CRON JOBS
+     ═══════════════════════════════════════════════════════════════ */
+
+  /** Reflection — every 30 minutes */
+  @Cron(CronExpression.EVERY_30_MINUTES)
+  async scheduledReflection(): Promise<void> {
+    const idleBusinesses = await this.findIdleBusinesses();
+    for (const businessId of idleBusinesses) {
+      if (!this.activeSessions.has(businessId)) {
+        await this.runReflection(businessId).catch((err) =>
+          this.logger.error(`Scheduled reflection failed for ${businessId}: ${err instanceof Error ? err.message : String(err)}`),
+        );
+      }
+    }
+  }
+
+  /** Dream Mode — nightly at 3:00 AM */
+  @Cron('0 3 * * *')
+  async scheduledDream(): Promise<void> {
+    const allBusinesses = await this.findAllActiveBusinesses();
+    for (const businessId of allBusinesses) {
+      await this.runDream(businessId).catch((err) =>
+        this.logger.error(`Scheduled dream failed for ${businessId}: ${err instanceof Error ? err.message : String(err)}`),
+      );
+    }
+  }
+
+  /** Synthesis — weekly on Sunday at 4:00 AM */
+  @Cron('0 4 * * 0')
+  async scheduledSynthesis(): Promise<void> {
+    const allBusinesses = await this.findAllActiveBusinesses();
+    for (const businessId of allBusinesses) {
+      await this.runSynthesis(businessId).catch((err) =>
+        this.logger.error(`Scheduled synthesis failed for ${businessId}: ${err instanceof Error ? err.message : String(err)}`),
+      );
+    }
+  }
+
+  /** Maintenance — daily at 2:00 AM */
+  @Cron('0 2 * * *')
+  async scheduledMaintenance(): Promise<void> {
+    const allBusinesses = await this.findAllActiveBusinesses();
+    for (const businessId of allBusinesses) {
+      await this.runMaintenance(businessId).catch((err) =>
+        this.logger.error(`Scheduled maintenance failed for ${businessId}: ${err instanceof Error ? err.message : String(err)}`),
+      );
+    }
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     PRIVATE HELPERS — Reflection Pipeline
+     ═══════════════════════════════════════════════════════════════ */
+
+  private async queryRecentBusinessEvents(businessId: string, hours: number): Promise<Array<Record<string, unknown>>> {
+    const since = new Date(Date.now() - hours * 60 * 60 * 1000);
+
+    const events = await this.prisma.businessEvent.findMany({
+      where: { businessId, createdAt: { gte: since } },
+      orderBy: { createdAt: 'desc' },
+      take: 500,
+    }).catch(() => []);
+
+    // Also fetch from event service for richer data
+    const cortexEvents = await this.eventService.getRecentEvents(businessId, hours).catch(() => []);
+
+    return [...events, ...cortexEvents];
+  }
+
+  private async extractKeyDecisions(
+    businessId: string,
+    events: Array<Record<string, unknown>>,
+  ): Promise<Array<Record<string, unknown>>> {
+    // Filter for events that represent KEY decisions / recommendations
+    const decisionEvents = events.filter((e) => {
+      const type = ((e as { eventType?: string }).eventType ?? (e as { type?: string }).type ?? '').toLowerCase();
+      return (
+        type.includes('decision') ||
+        type.includes('recommend') ||
+        type.includes('action') ||
+        type.includes('advice') ||
+        type.includes('suggest') ||
+        type.includes('insight')
+      );
+    });
+
+    // If AI gateway available, use it to rank decisions by significance
+    if (decisionEvents.length > 0) {
+      try {
+        const ranked = await this.aiRankDecisions(businessId, decisionEvents);
+        return ranked.slice(0, 20); // Top 20 most significant
+      } catch {
+        return decisionEvents.slice(0, 20);
+      }
+    }
+
+    return decisionEvents;
+  }
+
+  private async aiRankDecisions(
+    businessId: string,
+    decisions: Array<Record<string, unknown>>,
+  ): Promise<Array<Record<string, unknown>>> {
+    const prompt = `You are KEY's reflection engine. Rank these decisions by their potential business impact (1 = most significant). Return ONLY a JSON array of indices in descending significance order.
+
+Decisions:
+${decisions.map((d, i) => `[${i}] ${JSON.stringify(d).slice(0, 200)}`).join('\n')}`;
+
+    const response = await this.modelGateway.complete(prompt, { temperature: 0.3, maxTokens: 500 });
+    await this.aiUsage.trackUsage(businessId, 'reflection-rank', response.usage);
+
+    try {
+      const indices = JSON.parse(response.text) as number[];
+      return indices.map((i) => decisions[i]).filter(Boolean);
+    } catch {
+      return decisions;
+    }
+  }
+
+  private async evaluateDecisionOutcome(
+    businessId: string,
+    decision: Record<string, unknown>,
+  ): Promise<DecisionOutcome> {
+    const decisionId = (decision as { id?: string }).id ?? uuidv4();
+    const description = JSON.stringify(decision).slice(0, 300);
+    const actionType = ((decision as { eventType?: string }).eventType ?? (decision as { type?: string }).type ?? 'unknown') as string;
+    const expectedOutcome = (decision as { expectedOutcome?: string }).expectedOutcome ?? 'unknown';
+    const confidenceBefore = (decision as { confidence?: number }).confidence ?? 0.5;
+
+    // Query subsequent events to measure actual outcome
+    const subsequentEvents = await this.querySubsequentEvents(businessId, (decision as { createdAt?: Date }).createdAt ?? new Date());
+
+    // Use AI to interpret outcome
+    let actualOutcome = 'unknown';
+    let delta = 0;
+
+    try {
+      const outcomePrompt = `Analyze whether this decision achieved its expected outcome.
+
+Decision: ${description}
+Expected: ${expectedOutcome}
+Subsequent events: ${subsequentEvents.slice(0, 10).map((e) => JSON.stringify(e).slice(0, 150)).join('; ')}
+
+Return JSON: { "actualOutcome": "string", "delta": number } where delta is -1 to +1.`;
+
+      const response = await this.modelGateway.complete(outcomePrompt, { temperature: 0.2, maxTokens: 300 });
+      await this.aiUsage.trackUsage(businessId, 'reflection-outcome', response.usage);
+
+      const result = JSON.parse(response.text) as { actualOutcome: string; delta: number };
+      actualOutcome = result.actualOutcome;
+      delta = Math.max(-1, Math.min(1, result.delta));
+    } catch {
+      // Fallback: simple heuristic
+      delta = this.heuristicOutcomeDelta(decision, subsequentEvents);
+      actualOutcome = delta > 0.2 ? 'positive' : delta < -0.2 ? 'negative' : 'neutral';
+    }
+
+    // Adjust confidence based on outcome
+    const confidenceAdjustment = delta * 0.1; // ±0.1 per outcome
+    const confidenceAfter = Math.max(0.1, Math.min(0.99, confidenceBefore + confidenceAdjustment));
+
+    return {
+      decisionId,
+      description,
+      actionType,
+      expectedOutcome,
+      actualOutcome,
+      confidenceBefore,
+      confidenceAfter,
+      delta,
+      timeSinceDecisionMs: Date.now() - new Date((decision as { createdAt?: Date }).createdAt ?? Date.now()).getTime(),
+    };
+  }
+
+  private heuristicOutcomeDelta(
+    decision: Record<string, unknown>,
+    subsequentEvents: Array<Record<string, unknown>>,
+  ): number {
+    // Simple heuristic: count positive vs negative subsequent events
+    let positive = 0;
+    let negative = 0;
+    for (const e of subsequentEvents) {
+      const sentiment = ((e as { sentiment?: string }).sentiment ?? (e as { outcome?: string }).outcome ?? '').toLowerCase();
+      if (sentiment.includes('success') || sentiment.includes('positive') || sentiment.includes('up')) positive++;
+      if (sentiment.includes('fail') || sentiment.includes('negative') || sentiment.includes('down')) negative++;
+    }
+    const total = positive + negative;
+    return total === 0 ? 0 : (positive - negative) / total;
+  }
+
+  private async querySubsequentEvents(
+    businessId: string,
+    after: Date,
+  ): Promise<Array<Record<string, unknown>>> {
+    return this.prisma.businessEvent
+      .findMany({
+        where: { businessId, createdAt: { gt: after } },
+        orderBy: { createdAt: 'asc' },
+        take: 100,
+      })
+      .catch(() => []);
+  }
+
+  private async updateConfidenceScores(
+    businessId: string,
+    outcomes: DecisionOutcome[],
+  ): Promise<DecisionOutcome[]> {
+    // Update confidence tracking in the genome bridge
+    for (const outcome of outcomes) {
+      await this.genomeBridge.updateConfidence(businessId, outcome.actionType, outcome.confidenceAfter).catch(() => {
+        /* non-fatal */
+      });
+    }
+    return outcomes;
+  }
+
+  private async generateReflectionInsights(
+    businessId: string,
+    outcomes: DecisionOutcome[],
+    confidenceUpdates: DecisionOutcome[],
+  ): Promise<ReflectionInsight[]> {
+    const insights: ReflectionInsight[] = [];
+
+    // Generate insight for each significant outcome
+    for (const outcome of outcomes) {
+      if (Math.abs(outcome.delta) < 0.1) continue; // Skip neutral outcomes
+
+      insights.push({
+        id: uuidv4(),
+        type: outcome.delta > 0 ? 'pattern' : 'risk',
+        description: `${outcome.actionType}: ${outcome.description.slice(0, 200)} — outcome was ${outcome.actualOutcome} (delta: ${outcome.delta > 0 ? '+' : ''}${outcome.delta.toFixed(2)})`,
+        confidence: Math.abs(outcome.delta),
+        dataPoints: [outcome.decisionId],
+        priority: Math.abs(outcome.delta) > 0.5 ? 'high' : 'medium',
+        recommendedAction:
+          outcome.delta > 0
+            ? `Reinforce this approach: ${outcome.actionType}`
+            : `Reconsider this approach: ${outcome.actionType}`,
+        source: 'reflection',
+        createdAt: new Date(),
+      });
+    }
+
+    // Aggregate insight: overall trend
+    if (outcomes.length > 0) {
+      const avgDelta = outcomes.reduce((s, o) => s + o.delta, 0) / outcomes.length;
+      insights.push({
+        id: uuidv4(),
+        type: avgDelta > 0 ? 'opportunity' : 'risk',
+        description: `Overall decision trend: ${avgDelta > 0 ? 'improving' : 'declining'} (avg delta: ${avgDelta.toFixed(2)}) across ${outcomes.length} decisions`,
+        confidence: Math.abs(avgDelta),
+        dataPoints: outcomes.map((o) => o.decisionId),
+        priority: Math.abs(avgDelta) > 0.3 ? 'high' : 'medium',
+        recommendedAction: avgDelta > 0 ? 'Continue current strategy' : 'Consider strategic pivot',
+        source: 'reflection-aggregate',
+        createdAt: new Date(),
+      });
+    }
+
+    // Store insights via insight service
+    for (const insight of insights) {
+      await this.insightService.storeInsight(businessId, insight).catch(() => {
+        /* non-fatal */
+      });
+    }
+
+    return insights;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     PRIVATE HELPERS — Dream Pipeline
+     ═══════════════════════════════════════════════════════════════ */
+
+  private async crossReferenceDataSources(businessId: string): Promise<Array<{ sourceA: string; sourceB: string; correlation?: number }>> {
+    const sources = [
+      'invoices',
+      'support_tickets',
+      'calendar_events',
+      'tasks',
+      'social_media',
+      'website_traffic',
+      'email_campaigns',
+      'sales_conversion',
+    ];
+
+    const pairs: Array<{ sourceA: string; sourceB: string; correlation?: number }> = [];
+    for (let i = 0; i < sources.length; i++) {
+      for (let j = i + 1; j < sources.length; j++) {
+        pairs.push({ sourceA: sources[i], sourceB: sources[j] });
+      }
+    }
+
+    // If AI is available, compute correlation scores for each pair
+    try {
+      const dataPromises = pairs.map((pair) => this.fetchSourcePairData(businessId, pair.sourceA, pair.sourceB));
+      await Promise.all(dataPromises);
+    } catch {
+      // Proceed without correlations
+    }
+
+    return pairs;
+  }
+
+  private async fetchSourcePairData(
+    businessId: string,
+    sourceA: string,
+    sourceB: string,
+  ): Promise<{ sourceA: string; sourceB: string; correlation?: number }> {
+    // Query both sources and compute a simple correlation
+    const dataA = await this.querySource(businessId, sourceA);
+    const dataB = await this.querySource(businessId, sourceB);
+
+    const correlation = this.computeCorrelation(dataA, dataB);
+    return { sourceA, sourceB, correlation };
+  }
+
+  private async querySource(businessId: string, source: string): Promise<number[]> {
+    // Route to appropriate Prisma model based on source name
+    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); // 30 days
+
+    try {
+      switch (source) {
+        case 'invoices': {
+          const invoices = await this.prisma.invoice.findMany({
+            where: { businessId, createdAt: { gte: since } },
+            select: { total: true, paidAt: true },
+          });
+          return invoices.map((i: { total: number; paidAt: Date | null }) => (i.paidAt ? 1 : 0) * i.total);
+        }
+        case 'support_tickets': {
+          const tickets = await this.prisma.supportTicket
+            ?.findMany({ where: { businessId, createdAt: { gte: since } } })
+            .catch(() => []);
+          return (tickets ?? []).map((_: unknown, idx: number) => idx); // Count-based
+        }
+        case 'tasks': {
+          const tasks = await this.prisma.task.findMany({
+            where: { businessId, createdAt: { gte: since } },
+            select: { status: true },
+          });
+          return tasks.map((t: { status: string }) => (t.status === 'completed' ? 1 : 0));
+        }
+        default:
+          return [];
+      }
+    } catch {
+      return [];
+    }
+  }
+
+  private computeCorrelation(a: number[], b: number[]): number | undefined {
+    if (a.length < 3 || b.length < 3 || a.length !== b.length) return undefined;
+    const n = a.length;
+    const sumA = a.reduce((s, v) => s + v, 0);
+    const sumB = b.reduce((s, v) => s + v, 0);
+    const meanA = sumA / n;
+    const meanB = sumB / n;
+
+    let num = 0;
+    let denA = 0;
+    let denB = 0;
+    for (let i = 0; i < n; i++) {
+      const da = a[i] - meanA;
+      const db = b[i] - meanB;
+      num += da * db;
+      denA += da * da;
+      denB += db * db;
+    }
+    const denom = Math.sqrt(denA * denB);
+    return denom === 0 ? 0 : num / denom;
+  }
+
+  private async findNonObviousConnections(
+    businessId: string,
+    sourcePairs: Array<{ sourceA: string; sourceB: string; correlation?: number }>,
+  ): Promise<Array<{ sources: string[]; observation: string; strength: number }>> {
+    const connections: Array<{ sources: string[]; observation: string; strength: number }> = [];
+
+    // Use AI to generate observations about cross-source patterns
+    const prompt = `You are KEY's dream mode — a creative cross-domain pattern detector.
+Given these data source correlations for a business, identify NON-OBVIOUS connections that a human might miss.
+
+Correlations:
+${sourcePairs.map((p) => `- ${p.sourceA} ↔ ${p.sourceB}: ${p.correlation?.toFixed(3) ?? 'unknown'}`).join('\n')}
+
+Return a JSON array of observations. Each observation must be surprising and creative:
+[{"sources": ["a", "b"], "observation": "What if...", "strength": 0.0-1.0}]`;
+
+    try {
+      const response = await this.modelGateway.complete(prompt, { temperature: 0.9, maxTokens: 1500 });
+      await this.aiUsage.trackUsage(businessId, 'dream-connections', response.usage);
+
+      const parsed = JSON.parse(response.text) as Array<{ sources: string[]; observation: string; strength: number }>;
+      connections.push(...parsed.filter((c) => c.strength > 0.3));
+    } catch {
+      // Fallback: generate heuristic connections
+      connections.push(...this.generateHeuristicConnections(sourcePairs));
+    }
+
+    return connections;
+  }
+
+  private generateHeuristicConnections(
+    sourcePairs: Array<{ sourceA: string; sourceB: string; correlation?: number }>,
+  ): Array<{ sources: string[]; observation: string; strength: number }> {
+    return sourcePairs
+      .filter((p) => p.correlation !== undefined && Math.abs(p.correlation) > 0.3)
+      .map((p) => ({
+        sources: [p.sourceA, p.sourceB],
+        observation: `Unusual correlation between ${p.sourceA} and ${p.sourceB} (r=${p.correlation?.toFixed(2)}) — possible hidden causal link`,
+        strength: Math.abs(p.correlation ?? 0),
+      }));
+  }
+
+  private async generateWildHypotheses(
+    businessId: string,
+    connections: Array<{ sources: string[]; observation: string; strength: number }>,
+  ): Promise<DreamHypothesis[]> {
+    const hypotheses: DreamHypothesis[] = [];
+
+    // Use AI to generate wild hypotheses from connections
+    const prompt = `You are KEY's dream mode — generating wild but testable business hypotheses.
+
+Observed connections:
+${connections.map((c) => `- ${c.observation} (strength: ${c.strength.toFixed(2)})`).join('\n')}
+
+Generate 3-5 wild hypotheses. Each should be:
+- Creative and non-obvious
+- Testable with data
+- Potentially high-impact if true
+- Low confidence (these are dreams, not facts)
+
+Return JSON array:
+[{"description": "...", "sources": ["..."], "confidence": 0.1-0.4, "creativityScore": 0.0-1.0}]`;
+
+    try {
+      const response = await this.modelGateway.complete(prompt, { temperature: 0.95, maxTokens: 2000 });
+      await this.aiUsage.trackUsage(businessId, 'dream-hypotheses', response.usage);
+
+      const parsed = JSON.parse(response.text) as Array<{
+        description: string;
+        sources: string[];
+        confidence: number;
+        creativityScore: number;
+      }>;
+
+      for (const h of parsed) {
+        hypotheses.push({
+          id: uuidv4(),
+          description: h.description,
+          sources: h.sources,
+          confidence: Math.max(0.05, Math.min(0.4, h.confidence)),
+          creativityScore: Math.max(0, Math.min(1, h.creativityScore)),
+          status: 'pending',
+          businessId,
+          createdAt: new Date(),
+        });
+      }
+    } catch {
+      // Fallback hypotheses based on connections
+      for (const connection of connections.slice(0, 5)) {
+        hypotheses.push({
+          id: uuidv4(),
+          description: `Hypothesis: ${connection.observation}`,
+          sources: connection.sources,
+          confidence: 0.2,
+          creativityScore: connection.strength,
+          status: 'pending',
+          businessId,
+          createdAt: new Date(),
+        });
+      }
+    }
+
+    return hypotheses;
+  }
+
+  private async storeDreamHypotheses(businessId: string, hypotheses: DreamHypothesis[], parentDreamId: string): Promise<void> {
+    // Store in memory cache
+    const existing = this.dreamJournal.get(businessId) ?? [];
+    for (const h of hypotheses) {
+      h.parentDreamId = parentDreamId;
+    }
+    this.dreamJournal.set(businessId, [...existing, ...hypotheses]);
+
+    // Persist to database
+    for (const h of hypotheses) {
+      await this.prisma.keyCortexDreamHypothesis
+        ?.create({
+          data: {
+            id: h.id,
+            description: h.description,
+            sources: h.sources,
+            confidence: h.confidence,
+            creativityScore: h.creativityScore,
+            status: h.status,
+            businessId: h.businessId,
+            parentDreamId: h.parentDreamId,
+            createdAt: h.createdAt,
+          },
+        })
+        .catch(() => {
+          /* table may not exist yet */
+        });
+    }
+  }
+
+  private async scheduleHypothesisVerification(businessId: string, hypothesisId: string): Promise<void> {
+    // Schedule a verification check 7 days from now
+    const verifyAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    this.logger.debug(`[Dream] Scheduled verification of ${hypothesisId} at ${verifyAt.toISOString()}`);
+
+    // Store the scheduled verification (could use a job queue in production)
+    await this.eventService
+      .scheduleEvent(businessId, 'hypothesis-verification', { hypothesisId, verifyAt })
+      .catch(() => {
+        /* non-fatal */
+      });
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     PRIVATE HELPERS — Synthesis Pipeline
+     ═══════════════════════════════════════════════════════════════ */
+
+  private async getWeeklySessions(
+    businessId: string,
+    weekStart: Date,
+    weekEnd: Date,
+  ): Promise<ReflectionSession[]> {
+    const sessions: ReflectionSession[] = [];
+
+    // Query from database
+    const dbSessions = await this.prisma.keyCortexReflectionSession
+      ?.findMany({
+        where: {
+          businessId,
+          startedAt: { gte: weekStart, lte: weekEnd },
+          type: { in: ['reflection', 'dream'] },
+        },
+        orderBy: { startedAt: 'desc' },
+      })
+      .catch(() => []);
+
+    if (dbSessions) {
+      sessions.push(
+        ...(dbSessions as Array<Record<string, unknown>>).map((s) => ({
+          id: s.id as string,
+          type: s.type as ReflectionSessionType,
+          startedAt: s.startedAt as Date,
+          durationMs: s.durationMs as number,
+          insights: (s.insights as ReflectionInsight[]) ?? [],
+          actionsTaken: (s.actionsTaken as string[]) ?? [],
+          businessId: s.businessId as string,
+        })),
+      );
+    }
+
+    return sessions;
+  }
+
+  private async updateUserPreferenceModel(businessId: string, sessions: ReflectionSession[]): Promise<string[]> {
+    const updates: string[] = [];
+
+    // Analyze patterns across sessions to infer preferences
+    const allInsights = sessions.flatMap((s) => s.insights);
+    const positiveInsights = allInsights.filter((i) => i.type === 'opportunity' || i.type === 'pattern');
+    const riskInsights = allInsights.filter((i) => i.type === 'risk' || i.type === 'anomaly');
+
+    if (positiveInsights.length > riskInsights.length * 2) {
+      updates.push('User prefers optimistic framing — KEY should lead with opportunities');
+    } else if (riskInsights.length > positiveInsights.length * 2) {
+      updates.push('User prefers risk-aware framing — KEY should lead with warnings');
+    }
+
+    // Update genome bridge with preference inferences
+    for (const update of updates) {
+      await this.genomeBridge.updatePreference(businessId, 'reflection-style', update).catch(() => {
+        /* non-fatal */
+      });
+    }
+
+    return updates;
+  }
+
+  private async generateWeeklyInsightReport(businessId: string, sessions: ReflectionSession[]): Promise<WeeklyInsightReport> {
+    const allInsights = sessions.flatMap((s) => s.insights);
+    const uniqueTypes = [...new Set(allInsights.map((i) => i.type))];
+
+    // Rank insights by confidence × priority
+    const rankedInsights = [...allInsights].sort((a, b) => {
+      const scoreA = a.confidence * this.priorityWeight(a.priority);
+      const scoreB = b.confidence * this.priorityWeight(b.priority);
+      return scoreB - scoreA;
+    });
+
+    const report: WeeklyInsightReport = {
+      period: this.formatWeekPeriod(sessions[0]?.startedAt ?? new Date()),
+      totalReflections: sessions.filter((s) => s.type === 'reflection').length,
+      totalDreams: sessions.filter((s) => s.type === 'dream').length,
+      hypothesesGenerated: this.dreamJournal.get(businessId)?.length ?? 0,
+      hypothesesValidated: 0, // computed below
+      topInsights: rankedInsights.slice(0, 10),
+      userPreferenceUpdates: [],
+      dnaProposals: [],
+    };
+
+    // Count validated hypotheses
+    const journal = this.dreamJournal.get(businessId) ?? [];
+    report.hypothesesValidated = journal.filter((h) => h.status === 'confirmed').length;
+
+    // Generate AI summary if available
+    try {
+      const prompt = `Summarize these weekly insights into 3 key takeaways:
+${report.topInsights.slice(0, 5).map((i) => `- ${i.description}`).join('\n')}`;
+      const response = await this.modelGateway.complete(prompt, { temperature: 0.5, maxTokens: 800 });
+      await this.aiUsage.trackUsage(businessId, 'synthesis-report', response.usage);
+    } catch {
+      // Proceed without AI summary
+    }
+
+    return report;
+  }
+
+  private priorityWeight(p: InsightPriority): number {
+    switch (p) {
+      case 'critical':
+        return 4;
+      case 'high':
+        return 3;
+      case 'medium':
+        return 2;
+      case 'low':
+        return 1;
+    }
+  }
+
+  private formatWeekPeriod(date: Date): string {
+    const end = new Date(date);
+    const start = new Date(end);
+    start.setDate(start.getDate() - 7);
+    return `${start.toISOString().split('T')[0]} to ${end.toISOString().split('T')[0]}`;
+  }
+
+  private async proposeDnaEvolution(businessId: string, report: WeeklyInsightReport): Promise<string[]> {
+    const proposals: string[] = [];
+
+    // Propose DNA changes based on insights
+    if (report.topInsights.some((i) => i.type === 'risk' && i.confidence > 0.7)) {
+      proposals.push('Increase risk-aversion parameter in decision DNA');
+    }
+
+    if (report.topInsights.some((i) => i.type === 'opportunity' && i.confidence > 0.7)) {
+      proposals.push('Increase opportunity-seeking parameter in decision DNA');
+    }
+
+    if (report.hypothesesValidated > 2) {
+      proposals.push('Elevate dream-mode creativity score — recent validation rate is high');
+    }
+
+    // Store proposals via genome bridge
+    for (const proposal of proposals) {
+      await this.genomeBridge.proposeDnaChange(businessId, 'reflection-synthesis', proposal).catch(() => {
+        /* non-fatal */
+      });
+    }
+
+    return proposals;
+  }
+
+  private async checkValidatedHypotheses(businessId: string): Promise<DreamHypothesis[]> {
+    const journal = this.dreamJournal.get(businessId) ?? [];
+    const validated: DreamHypothesis[] = [];
+
+    for (const hypothesis of journal) {
+      if (hypothesis.status !== 'pending') continue;
+
+      const { confirmed } = await this.validateHypothesis(businessId, hypothesis.id);
+      if (confirmed) {
+        validated.push(hypothesis);
+      }
+    }
+
+    return validated;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     PRIVATE HELPERS — Maintenance Pipeline
+     ═══════════════════════════════════════════════════════════════ */
+
+  private async cleanExpiredApprovals(businessId: string): Promise<number> {
+    const expiryThreshold = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000); // 7 days
+
+    const result = await this.prisma.approvalRequest
+      ?.deleteMany({
+        where: {
+          businessId,
+          status: 'pending',
+          createdAt: { lt: expiryThreshold },
+        },
+      })
+      .catch(() => ({ count: 0 }));
+
+    return (result as { count: number })?.count ?? 0;
+  }
+
+  private async archiveOldEvents(businessId: string, days: number): Promise<number> {
+    const archiveThreshold = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    // Find events to archive
+    const oldEvents = await this.prisma.businessEvent
+      .findMany({
+        where: { businessId, createdAt: { lt: archiveThreshold } },
+        take: 1000,
+      })
+      .catch(() => []);
+
+    if (oldEvents.length === 0) return 0;
+
+    // Archive to cold storage (simplified — in production, move to S3 / archive table)
+    await this.prisma.coldStorageEvent
+      ?.createMany({
+        data: (oldEvents as Array<Record<string, unknown>>).map((e) => ({
+          ...e,
+          archivedAt: new Date(),
+        })),
+        skipDuplicates: true,
+      })
+      .catch(() => {
+        /* cold storage table may not exist */
+      });
+
+    // Delete from hot storage
+    const idsToDelete = (oldEvents as Array<{ id: string }>).map((e) => e.id);
+    await this.prisma.businessEvent
+      .deleteMany({
+        where: { id: { in: idsToDelete } },
+      })
+      .catch(() => {
+        /* non-fatal */
+      });
+
+    return oldEvents.length;
+  }
+
+  private async updateTemporalMemoryIndices(businessId: string): Promise<number> {
+    // Update time-series indices for fast temporal queries
+    const now = new Date();
+    const periods = [
+      { label: '24h', since: new Date(now.getTime() - 24 * 60 * 60 * 1000) },
+      { label: '7d', since: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000) },
+      { label: '30d', since: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000) },
+      { label: '90d', since: new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000) },
+    ];
+
+    let updated = 0;
+    for (const period of periods) {
+      await this.eventService
+        .updateTemporalIndex(businessId, period.label, period.since)
+        .catch(() => {
+          /* non-fatal */
+        });
+      updated++;
+    }
+
+    return updated;
+  }
+
+  private async checkDataIntegrity(businessId: string): Promise<string[]> {
+    const issues: string[] = [];
+
+    // Check for orphaned records
+    const orphanedInsights = await this.prisma.$queryRaw`
+      SELECT COUNT(*) as count FROM KeyCortexInsight 
+      WHERE businessId = ${businessId} 
+      AND sessionId IS NOT NULL
+      AND sessionId NOT IN (
+        SELECT id FROM KeyCortexReflectionSession WHERE businessId = ${businessId}
+      )
+    `.catch(() => [{ count: 0n }]);
+
+    const orphanedCount = Number((orphanedInsights as Array<{ count: bigint }>)[0]?.count ?? 0);
+    if (orphanedCount > 0) {
+      issues.push(`${orphanedCount} orphaned insights found`);
+    }
+
+    // Check for null confidence scores
+    const nullConfidence = await this.prisma.keyCortexInsight
+      ?.count({
+        where: { businessId, confidence: { equals: 0 } },
+      })
+      .catch(() => 0);
+
+    if (nullConfidence && nullConfidence > 0) {
+      issues.push(`${nullConfidence} insights with zero confidence`);
+    }
+
+    return issues;
+  }
+
+  private async compactMemoryIfNeeded(businessId: string): Promise<number> {
+    // Check memory usage and compact if above threshold
+    const totalInsights = await this.prisma.keyCortexInsight
+      ?.count({ where: { businessId } })
+      .catch(() => 0);
+
+    if (!totalInsights || totalInsights < 10000) return 0;
+
+    // Compact: merge low-confidence duplicate insights
+    const duplicates = await this.prisma.$queryRaw`
+      SELECT description, COUNT(*) as count, MIN(confidence) as minConfidence
+      FROM KeyCortexInsight
+      WHERE businessId = ${businessId}
+      GROUP BY description
+      HAVING COUNT(*) > 3 AND MIN(confidence) < 0.3
+      LIMIT 100
+    `.catch(() => []);
+
+    let compacted = 0;
+    for (const dup of duplicates as Array<{ description: string; count: number }>) {
+      await this.prisma.$executeRaw`
+        DELETE FROM KeyCortexInsight 
+        WHERE businessId = ${businessId} 
+        AND description = ${dup.description}
+        AND confidence < 0.3
+        AND id NOT IN (
+          SELECT id FROM (
+            SELECT id FROM KeyCortexInsight 
+            WHERE businessId = ${businessId} 
+            AND description = ${dup.description}
+            ORDER BY confidence DESC, createdAt DESC
+            LIMIT 1
+          ) as keep
+        )
+      `.catch(() => {
+        /* non-fatal */
+      });
+      compacted++;
+    }
+
+    return compacted;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     PRIVATE HELPERS — Hypothesis Validation
+     ═══════════════════════════════════════════════════════════════ */
+
+  private async validateHypothesisAgainstSource(
+    businessId: string,
+    hypothesis: DreamHypothesis,
+    source: string,
+  ): Promise<string[]> {
+    const evidence: string[] = [];
+
+    try {
+      switch (source) {
+        case 'invoices': {
+          const recentInvoices = await this.prisma.invoice.findMany({
+            where: { businessId, createdAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } },
+            select: { status: true, total: true, dueDate: true, paidAt: true },
+          });
+          if (recentInvoices.some((i: { paidAt: Date | null; dueDate: Date }) => i.paidAt && i.paidAt > i.dueDate)) {
+            evidence.push('Found late payments in recent invoices');
+          }
+          break;
+        }
+        case 'support_tickets': {
+          const tickets = await this.prisma.supportTicket
+            ?.findMany({
+              where: { businessId, createdAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } },
+            })
+            .catch(() => []);
+          if ((tickets ?? []).length > 5) {
+            evidence.push(`${(tickets ?? []).length} support tickets in last 30 days`);
+          }
+          break;
+        }
+        case 'tasks': {
+          const overdueTasks = await this.prisma.task.count({
+            where: { businessId, status: { not: 'completed' }, dueDate: { lt: new Date() } },
+          });
+          if (overdueTasks > 3) {
+            evidence.push(`${overdueTasks} overdue tasks detected`);
+          }
+          break;
+        }
+        case 'calendar_events': {
+          const denseDays = await this.prisma.$queryRaw`
+            SELECT DATE(startTime) as day, COUNT(*) as eventCount
+            FROM CalendarEvent
+            WHERE businessId = ${businessId}
+            AND startTime >= ${new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)}
+            GROUP BY DATE(startTime)
+            HAVING COUNT(*) > 8
+            LIMIT 5
+          `.catch(() => []);
+          if ((denseDays as Array<Record<string, unknown>>).length > 0) {
+            evidence.push(`${(denseDays as Array<Record<string, unknown>>).length} days with dense calendar (>8 events)`);
+          }
+          break;
+        }
+        default:
+          // Generic evidence: check if the hypothesis keywords appear in recent events
+          const keywordEvidence = await this.checkKeywordEvidence(businessId, hypothesis.description);
+          if (keywordEvidence) evidence.push(keywordEvidence);
+      }
+    } catch {
+      // Non-fatal: source may not exist
+    }
+
+    return evidence;
+  }
+
+  private async checkKeywordEvidence(businessId: string, description: string): Promise<string | null> {
+    const keywords = description.toLowerCase().split(/\s+/).filter((w) => w.length > 4);
+    const recentEvents = await this.prisma.businessEvent
+      .findMany({
+        where: { businessId, createdAt: { gte: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000) } },
+        take: 200,
+      })
+      .catch(() => []);
+
+    const matchingEvents = (recentEvents as Array<Record<string, unknown>>).filter((e) => {
+      const text = JSON.stringify(e).toLowerCase();
+      return keywords.some((k) => text.includes(k));
+    });
+
+    if (matchingEvents.length > 3) {
+      return `${matchingEvents.length} recent events match hypothesis keywords [${keywords.slice(0, 3).join(', ')}]`;
+    }
+    return null;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════
+     PRIVATE HELPERS — Persistence & Discovery
+     ═══════════════════════════════════════════════════════════════ */
+
+  private async persistSession(session: ReflectionSession): Promise<void> {
+    await this.prisma.keyCortexReflectionSession
+      ?.create({
+        data: {
+          id: session.id,
+          type: session.type,
+          startedAt: session.startedAt,
+          durationMs: session.durationMs,
+          insights: session.insights as unknown as Record<string, unknown>,
+          actionsTaken: session.actionsTaken,
+          businessId: session.businessId,
+          metadata: session.metadata ?? {},
+        },
+      })
+      .catch(() => {
+        /* table may not exist yet — session stays in memory */
+      });
+  }
+
+  private async persistHypothesisUpdate(hypothesis: DreamHypothesis): Promise<void> {
+    await this.prisma.keyCortexDreamHypothesis
+      ?.update({
+        where: { id: hypothesis.id },
+        data: {
+          status: hypothesis.status,
+          validatedAt: hypothesis.validatedAt,
+          evidenceFor: hypothesis.evidenceFor,
+        },
+      })
+      .catch(() => {
+        /* non-fatal */
+      });
+  }
+
+  private async findIdleBusinesses(): Promise<string[]> {
+    // Businesses with no user activity in the last 15 minutes
+    const idleThreshold = new Date(Date.now() - 15 * 60 * 1000);
+
+    const activeSessions = await this.prisma.userSession
+      ?.findMany({
+        where: { lastActivityAt: { gt: idleThreshold } },
+        select: { businessId: true },
+        distinct: ['businessId'],
+      })
+      .catch(() => []);
+
+    const activeBusinessIds = new Set((activeSessions ?? []).map((s: { businessId: string }) => s.businessId));
+
+    const allBusinesses = await this.findAllActiveBusinesses();
+    return allBusinesses.filter((b) => !activeBusinessIds.has(b));
+  }
+
+  private async findAllActiveBusinesses(): Promise<string[]> {
+    const businesses = await this.prisma.business
+      .findMany({
+        where: { active: true },
+        select: { id: true },
+      })
+      .catch(() => []);
+
+    return (businesses as Array<{ id: string }>).map((b) => b.id);
+  }
+}
