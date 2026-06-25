@@ -2,6 +2,8 @@
  * ╔═══════════════════════════════════════════════════════════════════════════╗
  * ║                         SLACK CONNECTOR                                   ║
  * ║          Send messages, manage channels, upload files                     ║
+ * ║  Production-hardened: rate limiting, retries, health checks,             ║
+ * ║  webhook security, sandbox mode                                          ║
  * ╚═══════════════════════════════════════════════════════════════════════════╝
  */
 
@@ -32,11 +34,79 @@ export const SlackConnector: ExternalConnectorDefinition = {
   defaultHeaders: {
     'Content-Type': 'application/json; charset=utf-8',
   },
+
+  // ── Legacy rate limit (backward compatibility) ──────────────────────────
   rateLimit: {
     requestsPerWindow: 100,
     windowSeconds: 60,
     burstLimit: 10,
   },
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // PRODUCTION HARDENING
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /** Rate limiting — Slack tiered limits */
+  rateLimitHardened: {
+    requestsPerSecond: 1,
+    requestsPerMinute: 200,
+    requestsPerHour: 10000,
+    burstAllowance: 10,
+  },
+
+  /** Retry configuration with exponential backoff + jitter */
+  retryConfig: {
+    maxRetries: 3,
+    baseDelayMs: 1000,
+    maxDelayMs: 30000,
+    retryableStatusCodes: [429, 500, 502, 503, 504],
+    retryableErrors: ['ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'ECONNREFUSED'],
+  },
+
+  /** Timeout configuration */
+  timeoutConfig: {
+    connectTimeoutMs: 10000,
+    requestTimeoutMs: 30000,
+    uploadTimeoutMs: 120000,
+  },
+
+  /** Health check endpoint */
+  healthCheck: {
+    endpoint: '/auth.test',
+    method: 'POST',
+    expectedStatus: 200,
+    expectedResponse: { ok: true },
+  },
+
+  /** Webhook signature verification (HMAC-SHA256) */
+  webhookSecurity: {
+    signatureHeader: 'x-slack-signature',
+    signatureAlgorithm: 'hmac-sha256',
+    signatureFormat: 'hex',
+    timestampHeader: 'x-slack-request-timestamp',
+    timestampToleranceSeconds: 300,
+  },
+
+  /** Required OAuth scopes for core functionality */
+  requiredScopes: [
+    'chat:write',
+    'channels:read',
+    'channels:manage',
+    'users:read',
+    'files:write',
+    'groups:read',
+    'im:read',
+    'mpim:read',
+    'team:read',
+  ],
+
+  /** Sandbox/test endpoints */
+  sandboxEndpoints: {
+    baseUrl: 'https://slack.com/api',
+    authUrl: 'https://slack.com/api/oauth.v2.access',
+  },
+
+  // ══════════════════════════════════════════════════════════════════════════
 
   configSchema: [
     {
