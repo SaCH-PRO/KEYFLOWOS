@@ -108,6 +108,7 @@ import { SecurityAuditModule } from './modules/security-audit/security-audit.mod
 import { IngestionModule } from './modules/ingestion/ingestion.module';
 import { KeyInboxModule } from './modules/key-inbox/key-inbox.module';
 import { KeyCortexModule } from './modules/key-cortex/key-cortex.module';
+import { KeystoreModule } from './modules/keystore/keystore.module';
 
 @Module({
   imports: [
@@ -215,6 +216,9 @@ import { KeyCortexModule } from './modules/key-cortex/key-cortex.module';
     DeviceModule,
     RealtimeModule,
     SecurityAuditModule,
+
+    // KeyStore Service Marketplace — Human-powered deliverables platform
+    KeystoreModule,
 
     // AI Intelligence Layer — JARVIS-like conversational engine
     KeyCortexModule,
