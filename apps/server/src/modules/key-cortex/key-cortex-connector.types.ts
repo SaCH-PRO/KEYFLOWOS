@@ -2,7 +2,7 @@
  * KEY Universal Connector — Type System
  * --------------------------------------
  * Defines the complete type contract for the integration layer that connects
- * KEY's AI reasoning engine to all 18 KeyFlowOS functional modules.
+ * KEY's AI reasoning engine to all 19 KeyFlowOS functional modules.
  *
  * Every type is fully specified — no `any` anywhere.
  */
@@ -29,7 +29,8 @@ export type ModuleName =
   | 'analytics'
   | 'finance'
   | 'settings'
-  | 'activity';
+  | 'activity'
+  | 'keystore';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CAPABILITY DESCRIPTOR TYPES
@@ -359,4 +360,14 @@ export interface ProjectsCreateProjectParams {
   dueDate?: string;
   priority?: 'low' | 'medium' | 'high' | 'urgent';
   assigneeId?: string;
+}
+
+/** Parameter bag for Keystore create_service_order action. */
+export interface KeystoreCreateOrderParams {
+  listingId: string;
+  pricingTier: string;
+  briefAnswers?: Array<{ questionId: string; question: string; answer: string | string[] }>;
+  selectedAddons?: Array<{ addonName: string; price: number }>;
+  notes?: string;
+  contactId?: string;
 }
