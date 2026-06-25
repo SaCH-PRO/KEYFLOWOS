@@ -2,6 +2,8 @@
  * ╔═══════════════════════════════════════════════════════════════════════════╗
  * ║                         STRIPE CONNECTOR                                  ║
  * ║      Process payments, manage subscriptions, handle refunds              ║
+ * ║  Production-hardened: 100/sec read+write rate limits, retries,         ║
+ * ║  webhook signature verification, health checks, sandbox mode             ║
  * ╚═══════════════════════════════════════════════════════════════════════════╝
  */
 
@@ -22,11 +24,68 @@ export const StripeConnector: ExternalConnectorDefinition = {
   defaultHeaders: {
     'Content-Type': 'application/x-www-form-urlencoded',
   },
+
+  // ── Legacy rate limit (backward compatibility) ──────────────────────────
   rateLimit: {
     requestsPerWindow: 100,
     windowSeconds: 60,
     burstLimit: 100,
   },
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // PRODUCTION HARDENING
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /** Rate limiting — Stripe: 100/sec read, 100/sec write */
+  rateLimitHardened: {
+    requestsPerSecond: 100,
+    requestsPerMinute: 6000,
+    requestsPerHour: 360000,
+    burstAllowance: 100,
+  },
+
+  /** Retry configuration with exponential backoff + jitter */
+  retryConfig: {
+    maxRetries: 3,
+    baseDelayMs: 500,
+    maxDelayMs: 30000,
+    retryableStatusCodes: [409, 429, 500, 502, 503, 504],
+    retryableErrors: ['ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'ECONNREFUSED'],
+  },
+
+  /** Timeout configuration */
+  timeoutConfig: {
+    connectTimeoutMs: 5000,
+    requestTimeoutMs: 30000,
+    uploadTimeoutMs: 120000,
+  },
+
+  /** Health check endpoint — Stripe account endpoint */
+  healthCheck: {
+    endpoint: '/v1/account',
+    method: 'GET',
+    expectedStatus: 200,
+  },
+
+  /** Webhook security — Stripe uses v1=timestamp,signature format */
+  webhookSecurity: {
+    signatureHeader: 'stripe-signature',
+    signatureAlgorithm: 'hmac-sha256',
+    signatureFormat: 'hex',
+    timestampHeader: 't',
+    timestampToleranceSeconds: 300,
+  },
+
+  /** Required OAuth scopes */
+  requiredScopes: ['read_write'],
+
+  /** Sandbox/test endpoints — Stripe has separate test environment */
+  sandboxEndpoints: {
+    baseUrl: 'https://api.stripe.com',
+    authUrl: 'https://connect.stripe.com/oauth/token',
+  },
+
+  // ══════════════════════════════════════════════════════════════════════════
 
   configSchema: [
     {
