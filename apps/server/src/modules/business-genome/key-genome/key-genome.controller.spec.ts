@@ -22,6 +22,8 @@ import { GenomeGrowthChannelService } from './genome-growth-channel.service';
 import { GenomeContentStrategyService } from './genome-content-strategy.service';
 import { MarketingGenomeService } from './marketing-genome.service';
 import { GenomeCrossDomainService } from './genome-cross-domain.service';
+import { GenomeRecommendationRankerService } from './genome-recommendation-ranker.service';
+import { GenomeOpportunityDetectorService } from './genome-opportunity-detector.service';
 
 function mockProvider(
   token: string | symbol | (new (...args: any[]) => any),
@@ -192,6 +194,13 @@ async function makeController() {
         computeCrossDomainSnapshot: vi.fn().mockResolvedValue({ id: 'cdsnap_1' }),
         getLatestCrossDomainSnapshot: vi.fn().mockResolvedValue({ id: 'cdsnap_1' }),
         listCrossDomainSnapshots: vi.fn().mockResolvedValue([]),
+      }),
+      mockProvider(GenomeRecommendationRankerService, {
+        rankRecommendations: vi.fn().mockResolvedValue({ businessId: 'biz_1', rankedRecommendations: [] }),
+        generateAndRankRecommendations: vi.fn().mockResolvedValue({ businessId: 'biz_1', rankedRecommendations: [] }),
+      }),
+      mockProvider(GenomeOpportunityDetectorService, {
+        detectOpportunities: vi.fn().mockResolvedValue({ businessId: 'biz_1', opportunities: [] }),
       }),
     ],
   })
@@ -533,5 +542,33 @@ describe('KeyGenomeController', () => {
     const result = await controller.listCrossDomainSnapshots('biz_1', '2026-06', 'MEDIUM', '5');
 
     expect(result).toEqual([]);
+  });
+
+  it('gets ranked recommendations', async () => {
+    const { controller } = await makeController();
+    const result = await controller.getRankedRecommendations('biz_1', 'ACTIVE', '5', '0.7', 'HIGH');
+
+    expect(result.businessId).toBe('biz_1');
+  });
+
+  it('generates and ranks recommendations', async () => {
+    const { controller } = await makeController();
+    const result = await controller.generateAndRankRecommendations('biz_1', '5', '0.7', 'HIGH');
+
+    expect(result.businessId).toBe('biz_1');
+  });
+
+  it('gets cross-domain opportunities', async () => {
+    const { controller } = await makeController();
+    const result = await controller.getOpportunities('biz_1', '5', 'MEDIUM', 'true');
+
+    expect(result.businessId).toBe('biz_1');
+  });
+
+  it('detects cross-domain opportunities', async () => {
+    const { controller } = await makeController();
+    const result = await controller.detectOpportunities('biz_1', '5', 'MEDIUM', 'true');
+
+    expect(result.businessId).toBe('biz_1');
   });
 });

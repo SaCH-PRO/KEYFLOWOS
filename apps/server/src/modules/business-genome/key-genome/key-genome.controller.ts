@@ -31,6 +31,8 @@ import { GenomeGrowthChannelService } from './genome-growth-channel.service';
 import { GenomeContentStrategyService } from './genome-content-strategy.service';
 import { MarketingGenomeService } from './marketing-genome.service';
 import { GenomeCrossDomainService } from './genome-cross-domain.service';
+import { GenomeRecommendationRankerService } from './genome-recommendation-ranker.service';
+import { GenomeOpportunityDetectorService } from './genome-opportunity-detector.service';
 import type { ListGenomeCrossDomainSnapshotsQuery } from './key-genome.types';
 import type {
   CreateGenomeExperimentInput,
@@ -72,6 +74,8 @@ export class KeyGenomeController {
     @Inject(GenomeContentStrategyService) private readonly contentStrategies: GenomeContentStrategyService,
     @Inject(MarketingGenomeService) private readonly marketingGenome: MarketingGenomeService,
     @Inject(GenomeCrossDomainService) private readonly crossDomainGenome: GenomeCrossDomainService,
+    @Inject(GenomeRecommendationRankerService) private readonly recommendationRanker: GenomeRecommendationRankerService,
+    @Inject(GenomeOpportunityDetectorService) private readonly opportunityDetector: GenomeOpportunityDetectorService,
   ) {}
 
   @Get('signals')
@@ -791,5 +795,79 @@ export class KeyGenomeController {
       riskLevel,
       limit: limit !== undefined ? Number(limit) : undefined,
     } as ListGenomeCrossDomainSnapshotsQuery);
+  }
+
+  @Get('cross-domain/recommendations/ranked')
+  async getRankedRecommendations(
+    @Param('businessId') businessId: string,
+    @Query('status') status?: string,
+    @Query('limit') limit?: string,
+    @Query('minConfidence') minConfidence?: string,
+    @Query('maxEffortLevel') maxEffortLevel?: string,
+  ) {
+    return this.recommendationRanker.rankRecommendations(businessId, {
+      status,
+      limit: limit !== undefined ? Number(limit) : undefined,
+      minConfidence:
+        minConfidence !== undefined ? Number(minConfidence) : undefined,
+      maxEffortLevel: maxEffortLevel as 'LOW' | 'MEDIUM' | 'HIGH' | undefined,
+    });
+  }
+
+  @Post('cross-domain/recommendations/ranked/generate')
+  async generateAndRankRecommendations(
+    @Param('businessId') businessId: string,
+    @Query('limit') limit?: string,
+    @Query('minConfidence') minConfidence?: string,
+    @Query('maxEffortLevel') maxEffortLevel?: string,
+  ) {
+    return this.recommendationRanker.generateAndRankRecommendations(businessId, {
+      limit: limit !== undefined ? Number(limit) : undefined,
+      minConfidence:
+        minConfidence !== undefined ? Number(minConfidence) : undefined,
+      maxEffortLevel: maxEffortLevel as 'LOW' | 'MEDIUM' | 'HIGH' | undefined,
+    });
+  }
+
+  @Get('cross-domain/opportunities')
+  async getOpportunities(
+    @Param('businessId') businessId: string,
+    @Query('limit') limit?: string,
+    @Query('minPotentialImpact') minPotentialImpact?: string,
+    @Query('includeRiskMitigation') includeRiskMitigation?: string,
+  ) {
+    return this.opportunityDetector.detectOpportunities(businessId, {
+      limit: limit !== undefined ? Number(limit) : undefined,
+      minPotentialImpact: minPotentialImpact as
+        | 'LOW'
+        | 'MEDIUM'
+        | 'HIGH'
+        | undefined,
+      includeRiskMitigation:
+        includeRiskMitigation !== undefined
+          ? includeRiskMitigation === 'true'
+          : undefined,
+    });
+  }
+
+  @Post('cross-domain/opportunities/detect')
+  async detectOpportunities(
+    @Param('businessId') businessId: string,
+    @Query('limit') limit?: string,
+    @Query('minPotentialImpact') minPotentialImpact?: string,
+    @Query('includeRiskMitigation') includeRiskMitigation?: string,
+  ) {
+    return this.opportunityDetector.detectOpportunities(businessId, {
+      limit: limit !== undefined ? Number(limit) : undefined,
+      minPotentialImpact: minPotentialImpact as
+        | 'LOW'
+        | 'MEDIUM'
+        | 'HIGH'
+        | undefined,
+      includeRiskMitigation:
+        includeRiskMitigation !== undefined
+          ? includeRiskMitigation === 'true'
+          : undefined,
+    });
   }
 }

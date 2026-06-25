@@ -28,6 +28,7 @@ export type GenomeMemorySourceType =
   | 'CUSTOMER_SALES_GENOME'
   | 'OPERATIONS_GENOME'
   | 'MARKETING_GROWTH_GENOME'
+  | 'CROSS_DOMAIN_GENOME'
   | 'MANUAL';
 
 export type GenomeMemoryEventType =
@@ -74,6 +75,9 @@ export type GenomeMemoryEventType =
   | 'MARKETING_GROWTH_CHANNEL_RECORDED'
   | 'MARKETING_GROWTH_CONTENT_STRATEGY_RECORDED'
   | 'MARKETING_GROWTH_RISK_DETECTED'
+  | 'CROSS_DOMAIN_SNAPSHOT_COMPUTED'
+  | 'CROSS_DOMAIN_RECOMMENDATIONS_RANKED'
+  | 'CROSS_DOMAIN_OPPORTUNITIES_DETECTED'
   | 'MANUAL_LESSON';
 
 export type GenomeSignalType =
@@ -1404,4 +1408,90 @@ export interface ListGenomeCrossDomainSnapshotsQuery {
   period?: string;
   riskLevel?: string;
   limit?: number;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 17C — Cross-Domain Recommendation Ranking + Opportunity Detection
+// ---------------------------------------------------------------------------
+
+export type GenomeRecommendationFinancialViability =
+  | 'POOR'
+  | 'FAIR'
+  | 'GOOD'
+  | 'STRONG';
+
+export type GenomeRecommendationCapacityGating =
+  | 'NO_CONSTRAINT'
+  | 'SOFT_CONSTRAINT'
+  | 'HARD_CONSTRAINT';
+
+export interface GenomeRecommendationRankScoreBreakdown {
+  expectedGain: number;
+  confidence: number;
+  readiness: number;
+  crossDomainSynergy: number;
+  financialViability: number;
+  riskPenalty: number;
+  effortPenalty: number;
+}
+
+export interface GenomeRankedRecommendation extends GenomeRecommendationData {
+  rankScore: number;
+  rankReason: string;
+  affectedDomains: GenomeCrossDomainDomainKey[];
+  readinessGating: {
+    blockingDomains: GenomeCrossDomainDomainKey[];
+    readyDomains: GenomeCrossDomainDomainKey[];
+  };
+  financialViability: GenomeRecommendationFinancialViability;
+  capacityGating: GenomeRecommendationCapacityGating;
+  scoreBreakdown: GenomeRecommendationRankScoreBreakdown;
+}
+
+export interface GenomeRecommendationRankingOptions {
+  status?: RecommendationStatus | string;
+  sources?: GenomeRecommendationSource[];
+  limit?: number;
+  includeRiskWeightedOnly?: boolean;
+  maxEffortLevel?: 'LOW' | 'MEDIUM' | 'HIGH';
+  minConfidence?: number;
+}
+
+export interface GenomeRecommendationRankingResult {
+  businessId: string;
+  generatedAt: string;
+  snapshotId?: string | null;
+  overallHealthScore: number;
+  overallRiskLevel: GenomeCrossDomainRiskLevel;
+  rankedRecommendations: GenomeRankedRecommendation[];
+  nextSafeActions: GenomeRankedRecommendation[];
+  blockedActions: GenomeRankedRecommendation[];
+}
+
+export interface GenomeCrossDomainOpportunityCandidate {
+  id: string;
+  label: string;
+  affectedDomains: GenomeCrossDomainDomainKey[];
+  requiredConditions: string[];
+  evidence: string[];
+  potentialImpact: 'LOW' | 'MEDIUM' | 'HIGH';
+  confidence: number;
+  suggestedAction: string;
+  estimatedValueScore: number;
+}
+
+export interface GenomeOpportunityDetectionOptions {
+  minPotentialImpact?: 'LOW' | 'MEDIUM' | 'HIGH';
+  limit?: number;
+  includeRiskMitigation?: boolean;
+}
+
+export interface GenomeOpportunityDetectionResult {
+  businessId: string;
+  generatedAt: string;
+  snapshotId?: string | null;
+  overallHealthScore: number;
+  overallRiskLevel: GenomeCrossDomainRiskLevel;
+  opportunities: GenomeCrossDomainOpportunityCandidate[];
+  prioritizedOpportunities: GenomeCrossDomainOpportunityCandidate[];
 }
