@@ -6,16 +6,23 @@
  * voice synthesis/recognition, personality management, business
  * insights, profit opportunities, and action execution.
  *
- * v2 — Integration Layer:
+ * v2 -- Integration Layer:
  *   Added command execution, module query, capabilities, full context,
  *   insights (revenue/churn/pipeline), monitors, alerts, batch execution,
  *   rollback, business reports, and AI recommendations.
+ *
+ * v3 -- Phase 3 & 4 Services:
+ *   Added Sandbox (code generation & execution), Flow Studio (workflow
+ *   management), External Connectors (third-party integrations), Phone
+ *   Agent (voice calls), Document Intelligence (RAG & extraction), and
+ *   Self-Evolution (adaptive learning & tuning).
  */
 
 import {
   Controller,
   Post,
   Get,
+  Put,
   Patch,
   Delete,
   Body,
@@ -43,13 +50,21 @@ import { KeyCortexPersonalityService } from './key-cortex-personality.service';
 import { KeyCortexActionsService } from './key-cortex-actions.service';
 import { KeyCortexContextService } from './key-cortex-context.service';
 
-// ── v2 Integration Layer Services ──────────────────────────────────
+// -- v2 Integration Layer Services --
 import { KeyCortexConnectorService } from './key-cortex-connector.service';
 import { KeyCortexCommandService } from './key-cortex-command.service';
 import { KeyCortexExecutorService } from './key-cortex-executor.service';
 import { KeyCortexContextV2Service } from './key-cortex-context-v2.service';
 import { KeyCortexInsightService } from './key-cortex-insight.service';
 import { KeyCortexMonitorV2Service } from './key-cortex-monitor-v2.service';
+
+// -- v3 Phase 3 & 4 Services --
+import { KeyCortexSandboxService } from './key-cortex-sandbox.service';
+import { KeyCortexFlowStudioService } from './key-cortex-flow-studio.service';
+import { KeyCortexExternalConnectorService } from './key-cortex-external-connector.service';
+import { KeyCortexEvolutionService } from './key-cortex-evolution.service';
+import { KeyCortexPhoneService } from './key-cortex-phone.service';
+import { KeyCortexDocumentService } from './key-cortex-document.service';
 
 import {
   CortexQuery,
@@ -150,13 +165,13 @@ class ProfitOpportunitiesQueryDto {
 /*  DTOs  (v2 Integration Layer)                                       */
 /* ------------------------------------------------------------------ */
 
-/** Command execution — natural language or structured command */
+/** Command execution -- natural language or structured command */
 class ExecuteCommandDto {
   /** Natural language command (e.g. "Create an invoice for John for $500") */
   command: string;
   businessId: string;
   userId: string;
-  /** Optional structured override — bypasses NL parsing */
+  /** Optional structured override -- bypasses NL parsing */
   module?: ModuleName;
   action?: string;
   parameters?: Record<string, unknown>;
@@ -240,6 +255,187 @@ class RollbackDto {
 }
 
 /* ------------------------------------------------------------------ */
+/*  DTOs  (v3 Sandbox)                                                 */
+/* ------------------------------------------------------------------ */
+
+class SandboxGenerateDto {
+  description: string;
+  language?: 'typescript' | 'javascript' | 'python' | 'json' | 'sql';
+  businessId: string;
+  context?: Record<string, unknown>;
+}
+
+class SandboxExecuteDto {
+  code: string;
+  language?: 'typescript' | 'javascript' | 'python' | 'json' | 'sql';
+  businessId: string;
+  timeoutMs?: number;
+  inputs?: Record<string, unknown>;
+}
+
+class SandboxAutoDto {
+  description: string;
+  language?: 'typescript' | 'javascript' | 'python' | 'json' | 'sql';
+  businessId: string;
+  execute?: boolean;
+  inputs?: Record<string, unknown>;
+}
+
+class SandboxApplyDto {
+  templateId: string;
+  parameters: Record<string, unknown>;
+  businessId: string;
+}
+
+class SandboxExplainDto {
+  code: string;
+  language?: string;
+  businessId: string;
+  detail?: 'brief' | 'detailed' | 'line-by-line';
+}
+
+/* ------------------------------------------------------------------ */
+/*  DTOs  (v3 Flow Studio)                                             */
+/* ------------------------------------------------------------------ */
+
+class FlowGenerateDto {
+  description: string;
+  businessId: string;
+  trigger?: string;
+  context?: Record<string, unknown>;
+}
+
+class FlowCreateDto {
+  name: string;
+  businessId: string;
+  description?: string;
+  nodes: Array<Record<string, unknown>>;
+  edges: Array<Record<string, unknown>>;
+  trigger?: Record<string, unknown>;
+  isActive?: boolean;
+}
+
+class FlowUpdateDto {
+  name?: string;
+  description?: string;
+  nodes?: Array<Record<string, unknown>>;
+  edges?: Array<Record<string, unknown>>;
+  trigger?: Record<string, unknown>;
+}
+
+class FlowApplyTemplateDto {
+  templateId: string;
+  name: string;
+  businessId: string;
+  parameters?: Record<string, unknown>;
+}
+
+/* ------------------------------------------------------------------ */
+/*  DTOs  (v3 External Connectors)                                     */
+/* ------------------------------------------------------------------ */
+
+class ConnectorConnectDto {
+  connectorType: string;
+  businessId: string;
+  config: Record<string, unknown>;
+  label?: string;
+}
+
+class ConnectorExecuteDto {
+  action: string;
+  parameters?: Record<string, unknown>;
+}
+
+class ConnectorCustomDto {
+  name: string;
+  type: 'rest' | 'graphql' | 'grpc' | 'webhook';
+  baseUrl: string;
+  auth?: Record<string, unknown>;
+  endpoints?: Array<Record<string, unknown>>;
+  businessId: string;
+}
+
+class WebhookRegisterDto {
+  event: string;
+  url: string;
+  businessId: string;
+  secret?: string;
+  metadata?: Record<string, unknown>;
+}
+
+class WebhookReceiveDto {
+  payload: Record<string, unknown>;
+  signature?: string;
+}
+
+/* ------------------------------------------------------------------ */
+/*  DTOs  (v3 Phone Agent)                                             */
+/* ------------------------------------------------------------------ */
+
+class PhoneCallDto {
+  phoneNumber: string;
+  businessId: string;
+  script?: string;
+  context?: Record<string, unknown>;
+  record?: boolean;
+}
+
+class PhoneScriptDto {
+  objective: string;
+  businessId: string;
+  tone?: 'professional' | 'friendly' | 'urgent' | 'casual';
+  context?: Record<string, unknown>;
+}
+
+class PhoneAnalyzeDto {
+  transcript: string;
+  businessId: string;
+  objective?: string;
+}
+
+/* ------------------------------------------------------------------ */
+/*  DTOs  (v3 Document Intelligence)                                   */
+/* ------------------------------------------------------------------ */
+
+class DocumentAskDto {
+  question: string;
+  businessId: string;
+  documentIds?: string[];
+  filters?: Record<string, unknown>;
+}
+
+class DocumentExtractDto {
+  documentId: string;
+  businessId: string;
+  schema: Record<string, unknown>;
+  prompt?: string;
+}
+
+class DocumentCompareDto {
+  documentIdA: string;
+  documentIdB: string;
+  businessId: string;
+  aspects?: string[];
+}
+
+/* ------------------------------------------------------------------ */
+/*  DTOs  (v3 Self-Evolution)                                          */
+/* ------------------------------------------------------------------ */
+
+class EvolutionTuneDto {
+  businessId: string;
+  scope?: 'global' | 'module' | 'user';
+  targetModule?: string;
+  force?: boolean;
+}
+
+class EvolutionExplainDto {
+  decisionId: string;
+  businessId: string;
+  detail?: 'summary' | 'full' | 'technical';
+}
+
+/* ------------------------------------------------------------------ */
 /*  Controller                                                         */
 /* ------------------------------------------------------------------ */
 
@@ -248,7 +444,7 @@ export class KeyCortexController {
   private readonly logger = new Logger(KeyCortexController.name);
 
   constructor(
-    // ── Core (legacy) ──
+    // -- Core (legacy) --
     private readonly reasoning: KeyCortexReasoningService,
     private readonly conversation: KeyCortexConversationService,
     private readonly voice: KeyCortexVoiceService,
@@ -256,13 +452,21 @@ export class KeyCortexController {
     private readonly actions: KeyCortexActionsService,
     private readonly context: KeyCortexContextService,
 
-    // ── v2 Integration Layer ──
+    // -- v2 Integration Layer --
     private readonly connector: KeyCortexConnectorService,
     private readonly command: KeyCortexCommandService,
     private readonly executor: KeyCortexExecutorService,
     private readonly contextV2: KeyCortexContextV2Service,
     private readonly insight: KeyCortexInsightService,
     private readonly monitorV2: KeyCortexMonitorV2Service,
+
+    // -- v3 Phase 3 & 4 Services --
+    private readonly sandbox: KeyCortexSandboxService,
+    private readonly flowStudio: KeyCortexFlowStudioService,
+    private readonly externalConnector: KeyCortexExternalConnectorService,
+    private readonly evolution: KeyCortexEvolutionService,
+    private readonly phone: KeyCortexPhoneService,
+    private readonly document: KeyCortexDocumentService,
   ) {}
 
   /* ================================================================== */
@@ -381,7 +585,7 @@ export class KeyCortexController {
 
   /**
    * POST /api/v1/cortex/chat
-   * Non-streaming chat — returns a complete CortexResponse.
+   * Non-streaming chat -- returns a complete CortexResponse.
    */
   @Post('chat')
   @HttpCode(HttpStatus.OK)
@@ -404,7 +608,7 @@ export class KeyCortexController {
 
   /**
    * POST /api/v1/cortex/chat/stream
-   * SSE streaming chat — returns a reactive stream of CortexStreamChunks.
+   * SSE streaming chat -- returns a reactive stream of CortexStreamChunks.
    */
   @Sse('chat/stream')
   async streamChat(
@@ -443,7 +647,7 @@ export class KeyCortexController {
 
   /**
    * POST /api/v1/cortex/voice/speak
-   * Text-to-Speech — synthesises audio and returns it as a binary buffer.
+   * Text-to-Speech -- synthesises audio and returns it as a binary buffer.
    */
   @Post('voice/speak')
   @HttpCode(HttpStatus.OK)
@@ -486,7 +690,7 @@ export class KeyCortexController {
 
   /**
    * POST /api/v1/cortex/voice/listen
-   * Speech-to-Text — accepts a multipart audio upload and returns transcript.
+   * Speech-to-Text -- accepts a multipart audio upload and returns transcript.
    */
   @Post('voice/listen')
   @HttpCode(HttpStatus.OK)
@@ -674,9 +878,9 @@ export class KeyCortexController {
     }
   }
 
-  /* ═══════════════════════════════════════════════════════════════════ */
-  /*  v2 — COMMAND EXECUTION  (KEY Integration Layer)                   */
-  /* ═══════════════════════════════════════════════════════════════════ */
+  /* ================================================================== */
+  /*  v2 -- COMMAND EXECUTION  (KEY Integration Layer)                   */
+  /* ================================================================== */
 
   /**
    * POST /api/v1/cortex/execute
@@ -756,7 +960,7 @@ export class KeyCortexController {
 
   /**
    * POST /api/v1/cortex/query
-   * Direct module query — no NL parsing, hits the module directly.
+   * Direct module query -- no NL parsing, hits the module directly.
    */
   @Post('query')
   @HttpCode(HttpStatus.OK)
@@ -844,9 +1048,9 @@ export class KeyCortexController {
     }
   }
 
-  /* ═══════════════════════════════════════════════════════════════════ */
-  /*  v2 — INSIGHTS                                                     */
-  /* ═══════════════════════════════════════════════════════════════════ */
+  /* ================================================================== */
+  /*  v2 -- INSIGHTS                                                     */
+  /* ================================================================== */
 
   /**
    * POST /api/v1/cortex/insights
@@ -999,9 +1203,9 @@ export class KeyCortexController {
     }
   }
 
-  /* ═══════════════════════════════════════════════════════════════════ */
-  /*  v2 — MONITORS                                                     */
-  /* ═══════════════════════════════════════════════════════════════════ */
+  /* ================================================================== */
+  /*  v2 -- MONITORS                                                     */
+  /* ================================================================== */
 
   /**
    * POST /api/v1/cortex/monitors
@@ -1117,9 +1321,9 @@ export class KeyCortexController {
     }
   }
 
-  /* ═══════════════════════════════════════════════════════════════════ */
-  /*  v2 — ALERTS                                                       */
-  /* ═══════════════════════════════════════════════════════════════════ */
+  /* ================================================================== */
+  /*  v2 -- ALERTS                                                       */
+  /* ================================================================== */
 
   /**
    * GET /api/v1/cortex/alerts
@@ -1149,9 +1353,9 @@ export class KeyCortexController {
     }
   }
 
-  /* ═══════════════════════════════════════════════════════════════════ */
-  /*  v2 — BATCH EXECUTION                                              */
-  /* ═══════════════════════════════════════════════════════════════════ */
+  /* ================================================================== */
+  /*  v2 -- BATCH EXECUTION                                              */
+  /* ================================================================== */
 
   /**
    * POST /api/v1/cortex/batch
@@ -1242,9 +1446,9 @@ export class KeyCortexController {
     }
   }
 
-  /* ═══════════════════════════════════════════════════════════════════ */
-  /*  v2 — ROLLBACK                                                     */
-  /* ═══════════════════════════════════════════════════════════════════ */
+  /* ================================================================== */
+  /*  v2 -- ROLLBACK                                                     */
+  /* ================================================================== */
 
   /**
    * POST /api/v1/cortex/rollback
@@ -1298,9 +1502,9 @@ export class KeyCortexController {
     }
   }
 
-  /* ═══════════════════════════════════════════════════════════════════ */
-  /*  v2 — BUSINESS REPORT                                              */
-  /* ═══════════════════════════════════════════════════════════════════ */
+  /* ================================================================== */
+  /*  v2 -- BUSINESS REPORT                                              */
+  /* ================================================================== */
 
   /**
    * GET /api/v1/cortex/report
@@ -1325,9 +1529,9 @@ export class KeyCortexController {
     }
   }
 
-  /* ═══════════════════════════════════════════════════════════════════ */
-  /*  v2 — RECOMMENDATIONS                                              */
-  /* ═══════════════════════════════════════════════════════════════════ */
+  /* ================================================================== */
+  /*  v2 -- RECOMMENDATIONS                                              */
+  /* ================================================================== */
 
   /**
    * GET /api/v1/cortex/recommendations
@@ -1358,7 +1562,7 @@ export class KeyCortexController {
   }
 
   /* ================================================================== */
-  /*  v2 — PROFIT OPPORTUNITIES (legacy compat)                         */
+  /*  v2 -- PROFIT OPPORTUNITIES (legacy compat)                         */
   /* ================================================================== */
 
   /**
@@ -1395,6 +1599,1276 @@ export class KeyCortexController {
       throw new ServiceUnavailableException(
         'Unable to find profit opportunities',
       );
+    }
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════ */
+  /*  v3 -- SANDBOX  (Code Generation & Execution)                      */
+  /* ═══════════════════════════════════════════════════════════════════ */
+
+  /**
+   * POST /api/v1/cortex/sandbox/generate
+   * Generate code from a natural language description.
+   */
+  @Post('sandbox/generate')
+  @HttpCode(HttpStatus.OK)
+  async sandboxGenerate(
+    @Body() dto: SandboxGenerateDto,
+  ): Promise<{
+    code: string;
+    language: string;
+    explanation?: string;
+  }> {
+    if (!dto.businessId) {
+      throw new BadRequestException('businessId is required');
+    }
+    if (!dto.description?.trim()) {
+      throw new BadRequestException('description is required');
+    }
+
+    try {
+      return await this.sandbox.generate(dto.description, {
+        language: dto.language,
+        context: dto.context,
+        businessId: dto.businessId,
+      });
+    } catch (err) {
+      this.logger.error(`Sandbox generate error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Code generation failed');
+    }
+  }
+
+  /**
+   * POST /api/v1/cortex/sandbox/execute
+   * Execute code in a sandboxed environment.
+   */
+  @Post('sandbox/execute')
+  @HttpCode(HttpStatus.OK)
+  async sandboxExecute(
+    @Body() dto: SandboxExecuteDto,
+  ): Promise<{
+    output: string;
+    exitCode: number;
+    executionTimeMs: number;
+    logs?: string[];
+  }> {
+    if (!dto.businessId) {
+      throw new BadRequestException('businessId is required');
+    }
+    if (!dto.code?.trim()) {
+      throw new BadRequestException('code is required');
+    }
+
+    try {
+      return await this.sandbox.execute(dto.code, {
+        language: dto.language,
+        inputs: dto.inputs,
+        timeoutMs: dto.timeoutMs,
+        businessId: dto.businessId,
+      });
+    } catch (err) {
+      this.logger.error(`Sandbox execute error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Code execution failed');
+    }
+  }
+
+  /**
+   * POST /api/v1/cortex/sandbox/auto
+   * Generate code from description and optionally execute it.
+   */
+  @Post('sandbox/auto')
+  @HttpCode(HttpStatus.OK)
+  async sandboxAuto(
+    @Body() dto: SandboxAutoDto,
+  ): Promise<{
+    code: string;
+    executed: boolean;
+    output?: string;
+    exitCode?: number;
+    explanation?: string;
+  }> {
+    if (!dto.businessId) {
+      throw new BadRequestException('businessId is required');
+    }
+    if (!dto.description?.trim()) {
+      throw new BadRequestException('description is required');
+    }
+
+    try {
+      return await this.sandbox.auto(dto.description, {
+        language: dto.language,
+        execute: dto.execute ?? true,
+        inputs: dto.inputs,
+        businessId: dto.businessId,
+      });
+    } catch (err) {
+      this.logger.error(`Sandbox auto error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Auto code generation failed');
+    }
+  }
+
+  /**
+   * GET /api/v1/cortex/sandbox/templates
+   * List available code templates.
+   */
+  @Get('sandbox/templates')
+  @HttpCode(HttpStatus.OK)
+  async sandboxTemplates(
+    @Query('language') language?: string,
+    @Query('category') category?: string,
+  ): Promise<{
+    templates: Array<{
+      id: string;
+      name: string;
+      description: string;
+      language: string;
+      category: string;
+    }>;
+  }> {
+    try {
+      return await this.sandbox.listTemplates({ language, category });
+    } catch (err) {
+      this.logger.error(`Sandbox templates error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Unable to list templates');
+    }
+  }
+
+  /**
+   * POST /api/v1/cortex/sandbox/apply
+   * Apply a template with parameters.
+   */
+  @Post('sandbox/apply')
+  @HttpCode(HttpStatus.OK)
+  async sandboxApply(
+    @Body() dto: SandboxApplyDto,
+  ): Promise<{
+    code: string;
+    templateId: string;
+  }> {
+    if (!dto.businessId) {
+      throw new BadRequestException('businessId is required');
+    }
+    if (!dto.templateId) {
+      throw new BadRequestException('templateId is required');
+    }
+
+    try {
+      return await this.sandbox.applyTemplate(dto.templateId, dto.parameters, {
+        businessId: dto.businessId,
+      });
+    } catch (err) {
+      this.logger.error(`Sandbox apply error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Template application failed');
+    }
+  }
+
+  /**
+   * POST /api/v1/cortex/sandbox/explain
+   * Explain what a piece of code does.
+   */
+  @Post('sandbox/explain')
+  @HttpCode(HttpStatus.OK)
+  async sandboxExplain(
+    @Body() dto: SandboxExplainDto,
+  ): Promise<{
+    explanation: string;
+    complexity?: string;
+    suggestions?: string[];
+  }> {
+    if (!dto.businessId) {
+      throw new BadRequestException('businessId is required');
+    }
+    if (!dto.code?.trim()) {
+      throw new BadRequestException('code is required');
+    }
+
+    try {
+      return await this.sandbox.explain(dto.code, {
+        language: dto.language,
+        detail: dto.detail ?? 'detailed',
+        businessId: dto.businessId,
+      });
+    } catch (err) {
+      this.logger.error(`Sandbox explain error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Code explanation failed');
+    }
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════ */
+  /*  v3 -- FLOW STUDIO  (Workflow Management)                          */
+  /* ═══════════════════════════════════════════════════════════════════ */
+
+  /**
+   * POST /api/v1/cortex/flows/generate
+   * Generate a flow from a natural language description.
+   */
+  @Post('flows/generate')
+  @HttpCode(HttpStatus.OK)
+  async flowGenerate(
+    @Body() dto: FlowGenerateDto,
+  ): Promise<{
+    flow: Record<string, unknown>;
+    nodes: Array<Record<string, unknown>>;
+    edges: Array<Record<string, unknown>>;
+  }> {
+    if (!dto.businessId) {
+      throw new BadRequestException('businessId is required');
+    }
+    if (!dto.description?.trim()) {
+      throw new BadRequestException('description is required');
+    }
+
+    try {
+      return await this.flowStudio.generate(dto.description, {
+        businessId: dto.businessId,
+        trigger: dto.trigger,
+        context: dto.context,
+      });
+    } catch (err) {
+      this.logger.error(`Flow generate error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Flow generation failed');
+    }
+  }
+
+  /**
+   * POST /api/v1/cortex/flows
+   * Create a new flow.
+   */
+  @Post('flows')
+  @HttpCode(HttpStatus.CREATED)
+  async flowCreate(
+    @Body() dto: FlowCreateDto,
+  ): Promise<Record<string, unknown>> {
+    if (!dto.businessId) {
+      throw new BadRequestException('businessId is required');
+    }
+    if (!dto.name?.trim()) {
+      throw new BadRequestException('name is required');
+    }
+    if (!dto.nodes || dto.nodes.length === 0) {
+      throw new BadRequestException('nodes array is required');
+    }
+
+    try {
+      return await this.flowStudio.create(dto.businessId, {
+        name: dto.name,
+        description: dto.description,
+        nodes: dto.nodes,
+        edges: dto.edges,
+        trigger: dto.trigger,
+        isActive: dto.isActive ?? false,
+      });
+    } catch (err) {
+      this.logger.error(`Flow create error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Flow creation failed');
+    }
+  }
+
+  /**
+   * GET /api/v1/cortex/flows
+   * List all flows for a business.
+   */
+  @Get('flows')
+  @HttpCode(HttpStatus.OK)
+  async flowList(
+    @Query('businessId') businessId: string,
+    @Query('status') status?: string,
+  ): Promise<{
+    flows: Array<Record<string, unknown>>;
+  }> {
+    if (!businessId) {
+      throw new BadRequestException('businessId query parameter is required');
+    }
+
+    try {
+      return await this.flowStudio.list(businessId, { status });
+    } catch (err) {
+      this.logger.error(`Flow list error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Unable to list flows');
+    }
+  }
+
+  /**
+   * GET /api/v1/cortex/flows/:id
+   * Get a single flow by ID.
+   */
+  @Get('flows/:id')
+  @HttpCode(HttpStatus.OK)
+  async flowGet(
+    @Param('id') flowId: string,
+    @Query('businessId') businessId?: string,
+  ): Promise<Record<string, unknown>> {
+    if (!businessId) {
+      throw new BadRequestException('businessId query parameter is required');
+    }
+
+    try {
+      return await this.flowStudio.get(flowId, businessId);
+    } catch (err) {
+      this.logger.error(`Flow get error: ${err.message}`, err.stack);
+      if (err instanceof NotFoundException) throw err;
+      throw new ServiceUnavailableException('Unable to retrieve flow');
+    }
+  }
+
+  /**
+   * PUT /api/v1/cortex/flows/:id
+   * Update an existing flow.
+   */
+  @Put('flows/:id')
+  @HttpCode(HttpStatus.OK)
+  async flowUpdate(
+    @Param('id') flowId: string,
+    @Body() dto: FlowUpdateDto,
+    @Query('businessId') businessId?: string,
+  ): Promise<Record<string, unknown>> {
+    if (!businessId) {
+      throw new BadRequestException('businessId query parameter is required');
+    }
+
+    try {
+      return await this.flowStudio.update(flowId, businessId, dto);
+    } catch (err) {
+      this.logger.error(`Flow update error: ${err.message}`, err.stack);
+      if (err instanceof NotFoundException) throw err;
+      throw new ServiceUnavailableException('Flow update failed');
+    }
+  }
+
+  /**
+   * DELETE /api/v1/cortex/flows/:id
+   * Delete a flow.
+   */
+  @Delete('flows/:id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async flowDelete(
+    @Param('id') flowId: string,
+    @Query('businessId') businessId?: string,
+  ): Promise<void> {
+    if (!businessId) {
+      throw new BadRequestException('businessId query parameter is required');
+    }
+
+    try {
+      await this.flowStudio.delete(flowId, businessId);
+    } catch (err) {
+      this.logger.error(`Flow delete error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Flow deletion failed');
+    }
+  }
+
+  /**
+   * POST /api/v1/cortex/flows/:id/execute
+   * Execute a flow by ID.
+   */
+  @Post('flows/:id/execute')
+  @HttpCode(HttpStatus.OK)
+  async flowExecute(
+    @Param('id') flowId: string,
+    @Body() body: { inputs?: Record<string, unknown>; businessId?: string },
+    @Query('businessId') queryBusinessId?: string,
+  ): Promise<{
+    executionId: string;
+    status: string;
+    results?: Array<Record<string, unknown>>;
+  }> {
+    const businessId = body.businessId ?? queryBusinessId;
+    if (!businessId) {
+      throw new BadRequestException('businessId is required');
+    }
+
+    try {
+      return await this.flowStudio.execute(flowId, businessId, body.inputs);
+    } catch (err) {
+      this.logger.error(`Flow execute error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Flow execution failed');
+    }
+  }
+
+  /**
+   * POST /api/v1/cortex/flows/:id/toggle
+   * Activate or deactivate a flow.
+   */
+  @Post('flows/:id/toggle')
+  @HttpCode(HttpStatus.OK)
+  async flowToggle(
+    @Param('id') flowId: string,
+    @Body() dto: { active: boolean },
+    @Query('businessId') businessId?: string,
+  ): Promise<{ flowId: string; active: boolean }> {
+    if (!businessId) {
+      throw new BadRequestException('businessId query parameter is required');
+    }
+
+    try {
+      await this.flowStudio.toggle(flowId, businessId, dto.active);
+      return { flowId, active: dto.active };
+    } catch (err) {
+      this.logger.error(`Flow toggle error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Flow toggle failed');
+    }
+  }
+
+  /**
+   * GET /api/v1/cortex/flows/templates
+   * List available flow templates.
+   */
+  @Get('flows/templates')
+  @HttpCode(HttpStatus.OK)
+  async flowTemplates(
+    @Query('category') category?: string,
+  ): Promise<{
+    templates: Array<Record<string, unknown>>;
+  }> {
+    try {
+      return await this.flowStudio.listTemplates(category);
+    } catch (err) {
+      this.logger.error(`Flow templates error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Unable to list flow templates');
+    }
+  }
+
+  /**
+   * POST /api/v1/cortex/flows/apply-template
+   * Apply a template to create a new flow.
+   */
+  @Post('flows/apply-template')
+  @HttpCode(HttpStatus.CREATED)
+  async flowApplyTemplate(
+    @Body() dto: FlowApplyTemplateDto,
+  ): Promise<Record<string, unknown>> {
+    if (!dto.businessId) {
+      throw new BadRequestException('businessId is required');
+    }
+    if (!dto.templateId) {
+      throw new BadRequestException('templateId is required');
+    }
+    if (!dto.name?.trim()) {
+      throw new BadRequestException('name is required');
+    }
+
+    try {
+      return await this.flowStudio.applyTemplate(
+        dto.templateId,
+        dto.businessId,
+        {
+          name: dto.name,
+          parameters: dto.parameters,
+        },
+      );
+    } catch (err) {
+      this.logger.error(`Flow apply template error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Template application failed');
+    }
+  }
+
+  /**
+   * GET /api/v1/cortex/flows/nodes
+   * Get the node registry (available node types).
+   */
+  @Get('flows/nodes')
+  @HttpCode(HttpStatus.OK)
+  async flowNodes(): Promise<{
+    nodes: Array<{
+      type: string;
+      name: string;
+      description: string;
+      inputs: Array<Record<string, unknown>>;
+      outputs: Array<Record<string, unknown>>;
+      configSchema?: Record<string, unknown>;
+    }>;
+  }> {
+    try {
+      return await this.flowStudio.getNodeRegistry();
+    } catch (err) {
+      this.logger.error(`Flow nodes error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Unable to retrieve node registry');
+    }
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════ */
+  /*  v3 -- EXTERNAL CONNECTORS  (Third-party Integrations)             */
+  /* ═══════════════════════════════════════════════════════════════════ */
+
+  /**
+   * GET /api/v1/cortex/connectors
+   * List available connector definitions.
+   */
+  @Get('connectors')
+  @HttpCode(HttpStatus.OK)
+  async connectorDefinitions(
+    @Query('category') category?: string,
+  ): Promise<{
+    connectors: Array<{
+      type: string;
+      name: string;
+      description: string;
+      category: string;
+      authType: string;
+    }>;
+  }> {
+    try {
+      return await this.externalConnector.listDefinitions(category);
+    } catch (err) {
+      this.logger.error(`Connector definitions error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Unable to list connector definitions');
+    }
+  }
+
+  /**
+   * POST /api/v1/cortex/connectors/connect
+   * Connect a third-party service.
+   */
+  @Post('connectors/connect')
+  @HttpCode(HttpStatus.CREATED)
+  async connectorConnect(
+    @Body() dto: ConnectorConnectDto,
+  ): Promise<{
+    instanceId: string;
+    status: string;
+    connectedAt: string;
+  }> {
+    if (!dto.businessId) {
+      throw new BadRequestException('businessId is required');
+    }
+    if (!dto.connectorType) {
+      throw new BadRequestException('connectorType is required');
+    }
+    if (!dto.config) {
+      throw new BadRequestException('config is required');
+    }
+
+    try {
+      return await this.externalConnector.connect(
+        dto.connectorType,
+        dto.businessId,
+        dto.config,
+        { label: dto.label },
+      );
+    } catch (err) {
+      this.logger.error(`Connector connect error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Failed to connect service');
+    }
+  }
+
+  /**
+   * GET /api/v1/cortex/connectors/instances
+   * List all connected service instances.
+   */
+  @Get('connectors/instances')
+  @HttpCode(HttpStatus.OK)
+  async connectorInstances(
+    @Query('businessId') businessId: string,
+  ): Promise<{
+    instances: Array<Record<string, unknown>>;
+  }> {
+    if (!businessId) {
+      throw new BadRequestException('businessId query parameter is required');
+    }
+
+    try {
+      return await this.externalConnector.listInstances(businessId);
+    } catch (err) {
+      this.logger.error(`Connector instances error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Unable to list connected services');
+    }
+  }
+
+  /**
+   * DELETE /api/v1/cortex/connectors/:id
+   * Disconnect a connected service.
+   */
+  @Delete('connectors/:id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async connectorDisconnect(
+    @Param('id') instanceId: string,
+    @Query('businessId') businessId?: string,
+  ): Promise<void> {
+    if (!businessId) {
+      throw new BadRequestException('businessId query parameter is required');
+    }
+
+    try {
+      await this.externalConnector.disconnect(instanceId, businessId);
+    } catch (err) {
+      this.logger.error(`Connector disconnect error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Failed to disconnect service');
+    }
+  }
+
+  /**
+   * POST /api/v1/cortex/connectors/:id/execute
+   * Execute an action on a connected service.
+   */
+  @Post('connectors/:id/execute')
+  @HttpCode(HttpStatus.OK)
+  async connectorExecute(
+    @Param('id') instanceId: string,
+    @Body() dto: ConnectorExecuteDto,
+    @Query('businessId') businessId?: string,
+  ): Promise<{
+    success: boolean;
+    data?: Record<string, unknown>;
+    executionTimeMs: number;
+  }> {
+    if (!businessId) {
+      throw new BadRequestException('businessId query parameter is required');
+    }
+    if (!dto.action) {
+      throw new BadRequestException('action is required');
+    }
+
+    try {
+      return await this.externalConnector.execute(
+        instanceId,
+        businessId,
+        dto.action,
+        dto.parameters ?? {},
+      );
+    } catch (err) {
+      this.logger.error(`Connector execute error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Connector action execution failed');
+    }
+  }
+
+  /**
+   * GET /api/v1/cortex/connectors/:id/status
+   * Check the status of a connected service.
+   */
+  @Get('connectors/:id/status')
+  @HttpCode(HttpStatus.OK)
+  async connectorStatus(
+    @Param('id') instanceId: string,
+    @Query('businessId') businessId?: string,
+  ): Promise<{
+    status: string;
+    healthy: boolean;
+    lastChecked: string;
+    details?: Record<string, unknown>;
+  }> {
+    if (!businessId) {
+      throw new BadRequestException('businessId query parameter is required');
+    }
+
+    try {
+      return await this.externalConnector.checkStatus(instanceId, businessId);
+    } catch (err) {
+      this.logger.error(`Connector status error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Unable to check connector status');
+    }
+  }
+
+  /**
+   * POST /api/v1/cortex/connectors/custom
+   * Create a custom connector definition.
+   */
+  @Post('connectors/custom')
+  @HttpCode(HttpStatus.CREATED)
+  async connectorCustom(
+    @Body() dto: ConnectorCustomDto,
+  ): Promise<{
+    connectorId: string;
+    name: string;
+    type: string;
+    status: string;
+  }> {
+    if (!dto.businessId) {
+      throw new BadRequestException('businessId is required');
+    }
+    if (!dto.name?.trim()) {
+      throw new BadRequestException('name is required');
+    }
+    if (!dto.baseUrl?.trim()) {
+      throw new BadRequestException('baseUrl is required');
+    }
+
+    try {
+      return await this.externalConnector.createCustom(dto.businessId, {
+        name: dto.name,
+        type: dto.type,
+        baseUrl: dto.baseUrl,
+        auth: dto.auth,
+        endpoints: dto.endpoints,
+      });
+    } catch (err) {
+      this.logger.error(`Connector custom error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Custom connector creation failed');
+    }
+  }
+
+  /**
+   * POST /api/v1/cortex/webhooks
+   * Register a webhook for an event.
+   */
+  @Post('webhooks')
+  @HttpCode(HttpStatus.CREATED)
+  async webhookRegister(
+    @Body() dto: WebhookRegisterDto,
+  ): Promise<{
+    webhookId: string;
+    event: string;
+    url: string;
+    status: string;
+  }> {
+    if (!dto.businessId) {
+      throw new BadRequestException('businessId is required');
+    }
+    if (!dto.event?.trim()) {
+      throw new BadRequestException('event is required');
+    }
+    if (!dto.url?.trim()) {
+      throw new BadRequestException('url is required');
+    }
+
+    try {
+      return await this.externalConnector.registerWebhook(
+        dto.businessId,
+        dto.event,
+        dto.url,
+        { secret: dto.secret, metadata: dto.metadata },
+      );
+    } catch (err) {
+      this.logger.error(`Webhook register error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Webhook registration failed');
+    }
+  }
+
+  /**
+   * POST /api/v1/cortex/webhooks/:id/receive
+   * Receive a webhook payload.
+   */
+  @Post('webhooks/:id/receive')
+  @HttpCode(HttpStatus.OK)
+  async webhookReceive(
+    @Param('id') webhookId: string,
+    @Body() dto: WebhookReceiveDto,
+  ): Promise<{
+    received: boolean;
+    processed: boolean;
+    eventId?: string;
+  }> {
+    try {
+      return await this.externalConnector.receiveWebhook(
+        webhookId,
+        dto.payload,
+        dto.signature,
+      );
+    } catch (err) {
+      this.logger.error(`Webhook receive error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Webhook processing failed');
+    }
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════ */
+  /*  v3 -- PHONE AGENT  (Voice Calls)                                  */
+  /* ═══════════════════════════════════════════════════════════════════ */
+
+  /**
+   * POST /api/v1/cortex/phone/call
+   * Make a phone call.
+   */
+  @Post('phone/call')
+  @HttpCode(HttpStatus.OK)
+  async phoneCall(
+    @Body() dto: PhoneCallDto,
+  ): Promise<{
+    callId: string;
+    status: string;
+    startedAt: string;
+  }> {
+    if (!dto.businessId) {
+      throw new BadRequestException('businessId is required');
+    }
+    if (!dto.phoneNumber?.trim()) {
+      throw new BadRequestException('phoneNumber is required');
+    }
+
+    try {
+      return await this.phone.call(dto.phoneNumber, dto.businessId, {
+        script: dto.script,
+        context: dto.context,
+        record: dto.record ?? false,
+      });
+    } catch (err) {
+      this.logger.error(`Phone call error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Failed to initiate call');
+    }
+  }
+
+  /**
+   * GET /api/v1/cortex/phone/history
+   * Get call history.
+   */
+  @Get('phone/history')
+  @HttpCode(HttpStatus.OK)
+  async phoneHistory(
+    @Query('businessId') businessId: string,
+    @Query('limit') limit?: number,
+    @Query('status') status?: string,
+  ): Promise<{
+    calls: Array<Record<string, unknown>>;
+  }> {
+    if (!businessId) {
+      throw new BadRequestException('businessId query parameter is required');
+    }
+
+    try {
+      return await this.phone.getHistory(businessId, {
+        limit: limit ? Number(limit) : 20,
+        status,
+      });
+    } catch (err) {
+      this.logger.error(`Phone history error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Unable to retrieve call history');
+    }
+  }
+
+  /**
+   * POST /api/v1/cortex/phone/script
+   * Generate a call script.
+   */
+  @Post('phone/script')
+  @HttpCode(HttpStatus.OK)
+  async phoneScript(
+    @Body() dto: PhoneScriptDto,
+  ): Promise<{
+    script: string;
+    talkingPoints: string[];
+    estimatedDuration: number;
+  }> {
+    if (!dto.businessId) {
+      throw new BadRequestException('businessId is required');
+    }
+    if (!dto.objective?.trim()) {
+      throw new BadRequestException('objective is required');
+    }
+
+    try {
+      return await this.phone.generateScript(dto.objective, dto.businessId, {
+        tone: dto.tone ?? 'professional',
+        context: dto.context,
+      });
+    } catch (err) {
+      this.logger.error(`Phone script error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Script generation failed');
+    }
+  }
+
+  /**
+   * POST /api/v1/cortex/phone/analyze
+   * Analyze a call transcript.
+   */
+  @Post('phone/analyze')
+  @HttpCode(HttpStatus.OK)
+  async phoneAnalyze(
+    @Body() dto: PhoneAnalyzeDto,
+  ): Promise<{
+    sentiment: string;
+    outcomes: Array<Record<string, unknown>>;
+    summary: string;
+    followUps: string[];
+  }> {
+    if (!dto.businessId) {
+      throw new BadRequestException('businessId is required');
+    }
+    if (!dto.transcript?.trim()) {
+      throw new BadRequestException('transcript is required');
+    }
+
+    try {
+      return await this.phone.analyzeTranscript(
+        dto.transcript,
+        dto.businessId,
+        { objective: dto.objective },
+      );
+    } catch (err) {
+      this.logger.error(`Phone analyze error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Transcript analysis failed');
+    }
+  }
+
+  /**
+   * GET /api/v1/cortex/phone/status
+   * Get phone service status.
+   */
+  @Get('phone/status')
+  @HttpCode(HttpStatus.OK)
+  async phoneStatus(
+    @Query('businessId') businessId?: string,
+  ): Promise<{
+    available: boolean;
+    provider: string;
+    region: string;
+    capabilities: string[];
+  }> {
+    try {
+      return await this.phone.getStatus(businessId);
+    } catch (err) {
+      this.logger.error(`Phone status error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Unable to retrieve phone status');
+    }
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════ */
+  /*  v3 -- DOCUMENT INTELLIGENCE  (RAG & Extraction)                   */
+  /* ═══════════════════════════════════════════════════════════════════ */
+
+  /**
+   * POST /api/v1/cortex/documents
+   * Upload a document.
+   */
+  @Post('documents')
+  @HttpCode(HttpStatus.CREATED)
+  @UseInterceptors(FileInterceptor('file'))
+  async documentUpload(
+    @UploadedFile() file: Express.Multer.File,
+    @Body() body: { businessId: string; metadata?: Record<string, unknown> },
+    @Query('businessId') queryBusinessId?: string,
+  ): Promise<{
+    documentId: string;
+    status: string;
+    uploadedAt: string;
+  }> {
+    const businessId = body.businessId ?? queryBusinessId;
+    if (!businessId) {
+      throw new BadRequestException('businessId is required');
+    }
+    if (!file) {
+      throw new BadRequestException('file is required (field name: file)');
+    }
+
+    try {
+      return await this.document.upload(file.buffer, file.originalname, file.mimetype, businessId, {
+        metadata: body.metadata,
+      });
+    } catch (err) {
+      this.logger.error(`Document upload error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Document upload failed');
+    }
+  }
+
+  /**
+   * GET /api/v1/cortex/documents
+   * List documents for a business.
+   */
+  @Get('documents')
+  @HttpCode(HttpStatus.OK)
+  async documentList(
+    @Query('businessId') businessId: string,
+    @Query('type') type?: string,
+    @Query('limit') limit?: number,
+  ): Promise<{
+    documents: Array<Record<string, unknown>>;
+  }> {
+    if (!businessId) {
+      throw new BadRequestException('businessId query parameter is required');
+    }
+
+    try {
+      return await this.document.list(businessId, {
+        type,
+        limit: limit ? Number(limit) : 50,
+      });
+    } catch (err) {
+      this.logger.error(`Document list error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Unable to list documents');
+    }
+  }
+
+  /**
+   * GET /api/v1/cortex/documents/:id
+   * Get a single document.
+   */
+  @Get('documents/:id')
+  @HttpCode(HttpStatus.OK)
+  async documentGet(
+    @Param('id') documentId: string,
+    @Query('businessId') businessId?: string,
+  ): Promise<Record<string, unknown>> {
+    if (!businessId) {
+      throw new BadRequestException('businessId query parameter is required');
+    }
+
+    try {
+      return await this.document.get(documentId, businessId);
+    } catch (err) {
+      this.logger.error(`Document get error: ${err.message}`, err.stack);
+      if (err instanceof NotFoundException) throw err;
+      throw new ServiceUnavailableException('Unable to retrieve document');
+    }
+  }
+
+  /**
+   * DELETE /api/v1/cortex/documents/:id
+   * Delete a document.
+   */
+  @Delete('documents/:id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async documentDelete(
+    @Param('id') documentId: string,
+    @Query('businessId') businessId?: string,
+  ): Promise<void> {
+    if (!businessId) {
+      throw new BadRequestException('businessId query parameter is required');
+    }
+
+    try {
+      await this.document.delete(documentId, businessId);
+    } catch (err) {
+      this.logger.error(`Document delete error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Document deletion failed');
+    }
+  }
+
+  /**
+   * POST /api/v1/cortex/documents/ask
+   * Ask a question across documents (RAG).
+   */
+  @Post('documents/ask')
+  @HttpCode(HttpStatus.OK)
+  async documentAsk(
+    @Body() dto: DocumentAskDto,
+  ): Promise<{
+    answer: string;
+    sources: Array<{
+      documentId: string;
+      documentName: string;
+      chunks: Array<{ text: string; score: number }>;
+    }>;
+    confidence: number;
+  }> {
+    if (!dto.businessId) {
+      throw new BadRequestException('businessId is required');
+    }
+    if (!dto.question?.trim()) {
+      throw new BadRequestException('question is required');
+    }
+
+    try {
+      return await this.document.ask(dto.question, dto.businessId, {
+        documentIds: dto.documentIds,
+        filters: dto.filters,
+      });
+    } catch (err) {
+      this.logger.error(`Document ask error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Document question failed');
+    }
+  }
+
+  /**
+   * POST /api/v1/cortex/documents/extract
+   * Extract structured data from a document.
+   */
+  @Post('documents/extract')
+  @HttpCode(HttpStatus.OK)
+  async documentExtract(
+    @Body() dto: DocumentExtractDto,
+  ): Promise<{
+    documentId: string;
+    extracted: Record<string, unknown>;
+    confidence: number;
+  }> {
+    if (!dto.businessId) {
+      throw new BadRequestException('businessId is required');
+    }
+    if (!dto.documentId) {
+      throw new BadRequestException('documentId is required');
+    }
+    if (!dto.schema || Object.keys(dto.schema).length === 0) {
+      throw new BadRequestException('schema is required');
+    }
+
+    try {
+      return await this.document.extract(dto.documentId, dto.businessId, {
+        schema: dto.schema,
+        prompt: dto.prompt,
+      });
+    } catch (err) {
+      this.logger.error(`Document extract error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Document extraction failed');
+    }
+  }
+
+  /**
+   * POST /api/v1/cortex/documents/compare
+   * Compare two documents.
+   */
+  @Post('documents/compare')
+  @HttpCode(HttpStatus.OK)
+  async documentCompare(
+    @Body() dto: DocumentCompareDto,
+  ): Promise<{
+    similarities: Array<Record<string, unknown>>;
+    differences: Array<Record<string, unknown>>;
+    summary: string;
+  }> {
+    if (!dto.businessId) {
+      throw new BadRequestException('businessId is required');
+    }
+    if (!dto.documentIdA) {
+      throw new BadRequestException('documentIdA is required');
+    }
+    if (!dto.documentIdB) {
+      throw new BadRequestException('documentIdB is required');
+    }
+
+    try {
+      return await this.document.compare(
+        dto.documentIdA,
+        dto.documentIdB,
+        dto.businessId,
+        { aspects: dto.aspects },
+      );
+    } catch (err) {
+      this.logger.error(`Document compare error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Document comparison failed');
+    }
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════ */
+  /*  v3 -- SELF-EVOLUTION  (Adaptive Learning & Tuning)                */
+  /* ═══════════════════════════════════════════════════════════════════ */
+
+  /**
+   * GET /api/v1/cortex/evolution/profile
+   * Get the preference profile for a business.
+   */
+  @Get('evolution/profile')
+  @HttpCode(HttpStatus.OK)
+  async evolutionProfile(
+    @Query('businessId') businessId: string,
+    @Query('userId') userId?: string,
+  ): Promise<{
+    profile: Record<string, unknown>;
+    generatedAt: string;
+  }> {
+    if (!businessId) {
+      throw new BadRequestException('businessId query parameter is required');
+    }
+
+    try {
+      return await this.evolution.getProfile(businessId, { userId });
+    } catch (err) {
+      this.logger.error(`Evolution profile error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Unable to retrieve preference profile');
+    }
+  }
+
+  /**
+   * GET /api/v1/cortex/evolution/patterns
+   * Get detected usage patterns.
+   */
+  @Get('evolution/patterns')
+  @HttpCode(HttpStatus.OK)
+  async evolutionPatterns(
+    @Query('businessId') businessId: string,
+    @Query('module') moduleName?: string,
+    @Query('timeRange') timeRange?: string,
+  ): Promise<{
+    patterns: Array<{
+      type: string;
+      description: string;
+      frequency: number;
+      confidence: number;
+    }>;
+    generatedAt: string;
+  }> {
+    if (!businessId) {
+      throw new BadRequestException('businessId query parameter is required');
+    }
+
+    try {
+      return await this.evolution.getPatterns(businessId, {
+        module: moduleName,
+        timeRange,
+      });
+    } catch (err) {
+      this.logger.error(`Evolution patterns error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Unable to retrieve patterns');
+    }
+  }
+
+  /**
+   * POST /api/v1/cortex/evolution/tune
+   * Trigger self-tuning.
+   */
+  @Post('evolution/tune')
+  @HttpCode(HttpStatus.OK)
+  async evolutionTune(
+    @Body() dto: EvolutionTuneDto,
+  ): Promise<{
+    tuned: boolean;
+    scope: string;
+    adjustments: Array<Record<string, unknown>>;
+    appliedAt: string;
+  }> {
+    if (!dto.businessId) {
+      throw new BadRequestException('businessId is required');
+    }
+
+    try {
+      return await this.evolution.tune(dto.businessId, {
+        scope: dto.scope ?? 'global',
+        targetModule: dto.targetModule,
+        force: dto.force ?? false,
+      });
+    } catch (err) {
+      this.logger.error(`Evolution tune error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Self-tuning failed');
+    }
+  }
+
+  /**
+   * GET /api/v1/cortex/evolution/report
+   * Get the learning report.
+   */
+  @Get('evolution/report')
+  @HttpCode(HttpStatus.OK)
+  async evolutionReport(
+    @Query('businessId') businessId: string,
+    @Query('period') period?: string,
+  ): Promise<{
+    report: Record<string, unknown>;
+    generatedAt: string;
+  }> {
+    if (!businessId) {
+      throw new BadRequestException('businessId query parameter is required');
+    }
+
+    try {
+      return await this.evolution.getReport(businessId, { period });
+    } catch (err) {
+      this.logger.error(`Evolution report error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Unable to generate learning report');
+    }
+  }
+
+  /**
+   * GET /api/v1/cortex/evolution/decision
+   * Explain a specific decision made by the AI.
+   */
+  @Get('evolution/decision')
+  @HttpCode(HttpStatus.OK)
+  async evolutionExplainDecision(
+    @Query('businessId') businessId: string,
+    @Query('decisionId') decisionId?: string,
+  ): Promise<{
+    explanation: string;
+    factors: Array<{ name: string; weight: number; value: unknown }>;
+    confidence: number;
+  }> {
+    if (!businessId) {
+      throw new BadRequestException('businessId query parameter is required');
+    }
+    if (!decisionId) {
+      throw new BadRequestException('decisionId query parameter is required');
+    }
+
+    try {
+      return await this.evolution.explainDecision(decisionId, businessId);
+    } catch (err) {
+      this.logger.error(`Evolution explain error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Unable to explain decision');
     }
   }
 
