@@ -17,6 +17,13 @@
  *   Agent (voice calls), Document Intelligence (RAG & extraction), and
  *   Self-Evolution (adaptive learning & tuning). Includes HttpModule for
  *   external HTTP calls via @nestjs/axios.
+ *
+ * v4 -- Genome Deep Integration Bridge:
+ *   Added KeyCortexGenomeBridgeService connecting KEY Cortex to the Business
+ *   Genome system. Wires genome intelligence, autonomy gating, opportunity
+ *   detection, recommendation ranking, outcome learning, signal creation,
+ *   and cross-domain analysis into KEY's decision loop. Adds BlueprintModule
+ *   and supporting event/evidence/approval services.
  */
 
 import { Module, forwardRef } from '@nestjs/common';
@@ -48,6 +55,12 @@ import { KeyCortexEvolutionService } from './key-cortex-evolution.service';
 import { KeyCortexPhoneService } from './key-cortex-phone.service';
 import { KeyCortexDocumentService } from './key-cortex-document.service';
 
+// -- v4 Genome Deep Integration Bridge --
+import { KeyCortexGenomeBridgeService } from './key-cortex-genome-bridge.service';
+import { KeyCortexEventService } from './key-cortex-event.service';
+import { KeyCortexEvidenceService } from './key-cortex-evidence.service';
+import { KeyCortexApprovalService } from './key-cortex-approval.service';
+
 // -- Infrastructure --
 import { PrismaModule } from '../../core/prisma/prisma.module';
 import { RedisModule } from '../../core/redis/redis.module';
@@ -66,6 +79,7 @@ import { AutopilotModule } from '../autopilot/autopilot.module';
 import { TemporalFlowModule } from '../temporal-flow/temporal-flow.module';
 import { KeyInboxModule } from '../key-inbox/key-inbox.module';
 import { BusinessGenomeModule } from '../genome/genome.module';
+import { BlueprintModule } from '../blueprint/blueprint.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { ProjectsModule } from '../projects/projects.module';
 import { ActivityModule } from '../activity/activity.module';
@@ -82,6 +96,11 @@ import { ActivityModule } from '../activity/activity.module';
     // AI provider gateway -- forwardRef to break any potential circular
     // dependency between KeyCortex and the legacy AiModule.
     forwardRef(() => AiModule),
+
+    // -- v4: Genome Deep Integration --
+    // BlueprintModule provides DNA integrity calculations and genome scoring
+    // needed by the bridge for AI-enriched context and proactive decisions.
+    forwardRef(() => BlueprintModule),
 
     // -- v2: Domain module adapters --
     // The universal connector needs to call services in each of these
@@ -165,6 +184,20 @@ import { ActivityModule } from '../activity/activity.module';
 
     // Document Intelligence -- RAG, extraction, comparison & Q&A
     KeyCortexDocumentService,
+
+    // -- v4: Genome Deep Integration Bridge --
+    // The critical bridge connecting KEY Cortex to the Business Genome.
+    // Provides bidirectional intelligence flow for autonomous decisions.
+    KeyCortexGenomeBridgeService,
+
+    // Event service -- emits bridge events for audit and monitoring
+    KeyCortexEventService,
+
+    // Evidence service -- manages evidence creation from KEY actions
+    KeyCortexEvidenceService,
+
+    // Approval service -- handles approval gating for supervised actions
+    KeyCortexApprovalService,
   ],
 
   exports: [
@@ -200,6 +233,15 @@ import { ActivityModule } from '../activity/activity.module';
 
     // Document Intelligence -- RAG & extraction available to other modules
     KeyCortexDocumentService,
+
+    // -- v4: Genome Deep Integration Bridge --
+    // Bridge service -- the primary export for genome integration
+    KeyCortexGenomeBridgeService,
+
+    // Supporting services -- event emission, evidence tracking, approval gating
+    KeyCortexEventService,
+    KeyCortexEvidenceService,
+    KeyCortexApprovalService,
   ],
 })
 export class KeyCortexModule {}
