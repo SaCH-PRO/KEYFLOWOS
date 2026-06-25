@@ -38,6 +38,80 @@ import { KeyCortexExecutorService } from './key-cortex-executor.service';
 import { KeyCortexContextV2Service } from './key-cortex-context-v2.service';
 import { KeyCortexInsightService } from './key-cortex-insight.service';
 
+// ── Genome Integration Layer v3 (optional — services may not exist yet) ──
+import { KeyCortexGenomeBridgeService } from './key-cortex-genome-bridge.service';
+import { KeyCortexEventService } from './key-cortex-event.service';
+
+// ── v3 Types ──
+
+export interface GenomeEnrichedContext {
+  dnaScores: Record<string, number>;
+  genomeStage: string;
+  executiveReadiness: number;
+  recommendations: GenomeRecommendation[];
+  signals: GenomeSignal[];
+  opportunities: GenomeOpportunity[];
+  autonomyMap: Record<string, boolean>;
+  timestamp: Date;
+}
+
+export interface GenomeRecommendation {
+  id: string;
+  title: string;
+  description: string;
+  impact: 'high' | 'medium' | 'low';
+  category: string;
+  confidence: number;
+  genomeScore: number;
+}
+
+export interface GenomeSignal {
+  id: string;
+  type: 'urgent' | 'warning' | 'opportunity' | 'info';
+  message: string;
+  module: string;
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  createdAt: Date;
+}
+
+export interface GenomeOpportunity {
+  id: string;
+  title: string;
+  estimatedValue: number;
+  category: string;
+  confidence: number;
+}
+
+export interface EnrichedContext {
+  businessId: string;
+  genome: GenomeEnrichedContext | null;
+  contextV2: Record<string, unknown> | null;
+  contextSnapshot: CortexContextSnapshot | null;
+  timestamp: Date;
+}
+
+export interface Suggestion {
+  id: string;
+  title: string;
+  description: string;
+  impact: 'high' | 'medium' | 'low';
+  category: string;
+  source: 'genome' | 'pattern' | 'insight';
+  confidence: number;
+  action?: string;
+}
+
+export interface InteractionFeedback {
+  query: string;
+  response: string;
+  userRating?: number;
+  userComment?: string;
+  actionsTaken: string[];
+  actionsSkipped: string[];
+  sessionId: string;
+  metadata?: Record<string, unknown>;
+}
+
 /**
  * KeyCortexReasoningService — The Core Reasoning Brain of KEY Cortex.
  *
@@ -54,6 +128,18 @@ import { KeyCortexInsightService } from './key-cortex-insight.service';
  * - Business insights via KeyCortexInsightService
  * - New public methods: executeCommand, queryModule, getCapabilities
  *
+ * v3 GENOME-AWARE ENHANCEMENTS:
+ * - Full genome integration via KeyCortexGenomeBridgeService
+ * - DNA-aware reasoning pipeline with 12 steps
+ * - Genome-enriched context with caching
+ * - Autonomy checking for each parsed intent
+ * - Ranked genome recommendations in AI prompts
+ * - Action outcome reporting back to genome
+ * - Proactive suggestion engine based on genome signals
+ * - Decision explanation with genome context
+ * - Interaction learning feeding genome outcome learning
+ * - Event correlation across all steps via KeyCortexEventService
+ *
  * Responsibilities:
  * - Process user queries through the ModelGatewayService
  * - Select appropriate AI provider based on query type and preferences
@@ -62,6 +148,7 @@ import { KeyCortexInsightService } from './key-cortex-insight.service';
  * - Generate business insights and profit opportunities
  * - Track token usage, latency, and costs
  * - Execute direct commands and module queries (v2)
+ * - Integrate with genome DNA, signals, recommendations (v3)
  */
 @Injectable()
 export class KeyCortexReasoningService {
@@ -72,6 +159,9 @@ export class KeyCortexReasoningService {
 
   /** Session TTL in seconds (default: 24 hours). */
   private readonly SESSION_TTL: number;
+
+  /** Genome-enriched context cache TTL in seconds (default: 60 seconds). */
+  private readonly GENOME_CONTEXT_TTL: number;
 
   /** Cost tracking: estimated cost per 1K tokens by provider. */
   private readonly COST_PER_1K_TOKENS: Record<CortexProvider, { input: number; output: number }> = {
@@ -85,6 +175,9 @@ export class KeyCortexReasoningService {
 
   /** Feature flag: enable integration layer v2 if services are available. */
   private readonly integrationV2Enabled: boolean;
+
+  /** Feature flag: enable genome integration layer v3 if services are available. */
+  private readonly genomeV3Enabled: boolean;
 
   constructor(
     @Inject(ModelGatewayService)
@@ -111,11 +204,21 @@ export class KeyCortexReasoningService {
     @Optional()
     @Inject(KeyCortexInsightService)
     private readonly insightService?: KeyCortexInsightService,
+
+    // ── v3 Genome Integration Layer (optional — graceful degradation) ──
+    @Optional()
+    @Inject(KeyCortexGenomeBridgeService)
+    private readonly genomeBridgeService?: KeyCortexGenomeBridgeService,
+    @Optional()
+    @Inject(KeyCortexEventService)
+    private readonly eventService?: KeyCortexEventService,
   ) {
     this.MAX_CONTEXT_TOKENS =
       parseInt(process.env.KEY_CORTEX_MAX_CONTEXT_TOKENS ?? '8000', 10);
     this.SESSION_TTL =
       parseInt(process.env.KEY_CORTEX_SESSION_TTL_HOURS ?? '24', 10) * 3600;
+    this.GENOME_CONTEXT_TTL =
+      parseInt(process.env.KEY_CORTEX_GENOME_CONTEXT_TTL_SECONDS ?? '60', 10);
 
     this.integrationV2Enabled = !!(
       this.connectorService &&
@@ -123,6 +226,8 @@ export class KeyCortexReasoningService {
       this.executorService &&
       this.contextV2Service
     );
+
+    this.genomeV3Enabled = !!(this.genomeBridgeService && this.eventService);
 
     if (this.integrationV2Enabled) {
       this.logger.log(
@@ -133,44 +238,124 @@ export class KeyCortexReasoningService {
         'KEY Cortex v2 Integration Layer is NOT active — running in legacy mode. Some v2 services are unavailable.',
       );
     }
+
+    if (this.genomeV3Enabled) {
+      this.logger.log(
+        'KEY Cortex v3 Genome Integration Layer is ACTIVE — genome-aware reasoning enabled.',
+      );
+    } else {
+      this.logger.warn(
+        'KEY Cortex v3 Genome Integration Layer is NOT active — genome-aware features unavailable.',
+      );
+    }
   }
 
   // ==========================================================================
-  // 1. Non-Streaming Query Processing (v2 Enhanced)
+  // 1. Non-Streaming Query Processing (v3 Genome-Aware Pipeline)
   // ==========================================================================
 
   /**
-   * Process a user query end-to-end (non-streaming).
+   * Process a user query end-to-end (non-streaming) with the v3 genome-aware pipeline.
    *
-   * v2 FLOW (when integration layer is active):
-   *  1. Get or create a session
-   *  2a. Parse user input into commands via CommandService
-   *  2b. Get full system context via ContextV2Service
-   *  3. Get personality config + role-aware system prompt
-   *  4. Build system prompt with context + capabilities + role expertise
-   *  5. Select the best AI provider for this query
-   *  6. Call AI for reasoning + response
-   *  7. Execute commands via ExecutorService (v2) or ActionsService (legacy)
-   *  8. Include execution results in response
-   *  9. Save messages to session
-   * 10. Generate suggestions based on context
+   * v3 GENOME-AWARE FLOW (when genome layer is active):
+   *  Step 1:  Receive query + create correlation ID
+   *  Step 2:  Get genome intelligence (DNA scores, recommendations, signals)
+   *  Step 3:  Get full context (v2 or legacy)
+   *  Step 4:  Parse intent into structured commands
+   *  Step 5:  Check autonomy for each action (genome-gated)
+   *  Step 6:  Get ranked genome recommendations
+   *  Step 7:  Build enriched prompt with genome context
+   *  Step 8:  AI reasoning via ModelGatewayService
+   *  Step 9:  Execute actions (v2 executor or legacy)
+   *  Step 10: Report action outcomes to genome
+   *  Step 11: Generate response with genome insights
+   *  Step 12: Log everything to event service
    *
-   * LEGACY FLOW (fallback):
+   * v2 FLOW (fallback when genome not available but v2 is):
+   *  Same as original v2 flow — uses ContextV2Service + ExecutorService.
+   *
+   * LEGACY FLOW (final fallback):
    *  Same as original — uses ContextService + ActionsService.
    */
   async processQuery(query: CortexQuery): Promise<CortexResponse> {
     const startTime = Date.now();
+    const correlationId = this.generateCorrelationId();
+
     this.logger.log(
-      `[processQuery] business=${query.businessId} user=${query.userId} persona=${query.persona ?? 'default'} v2=${this.integrationV2Enabled}`,
+      `[processQuery][${correlationId}] business=${query.businessId} user=${query.userId} persona=${query.persona ?? 'default'} v2=${this.integrationV2Enabled} v3=${this.genomeV3Enabled}`,
     );
 
+    // ── Step 1: RECEIVE QUERY ──
+    await this.logEvent(correlationId, 'STEP_1_RECEIVE_QUERY', {
+      businessId: query.businessId,
+      userId: query.userId,
+      queryText: query.text.substring(0, 200),
+      v2Enabled: this.integrationV2Enabled,
+      v3Enabled: this.genomeV3Enabled,
+    });
+
     try {
-      // Step 1 -- Get or create session
+      // Get or create session
       const session = await this.getOrCreateSession(query);
 
-      // Steps 2a & 2b -- Context + Command Parsing (v2 or legacy)
+      // ── Step 2: GET GENOME INTELLIGENCE (v3) ──
+      let genomeContext: GenomeEnrichedContext | null = null;
+      if (this.genomeV3Enabled && this.genomeBridgeService) {
+        try {
+          genomeContext = await this.getGenomeEnrichedContext(query.businessId);
+          this.logger.log(
+            `[processQuery][${correlationId}] Genome context loaded: ${genomeContext.recommendations.length} recommendations, ${genomeContext.signals.length} signals`,
+          );
+        } catch (err) {
+          this.logger.warn(
+            `[processQuery][${correlationId}] Genome context failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+
+      await this.logEvent(correlationId, 'STEP_2_GENOME_INTELLIGENCE', {
+        genomeAvailable: !!genomeContext,
+        dnaScores: genomeContext?.dnaScores ?? null,
+        recommendationCount: genomeContext?.recommendations.length ?? 0,
+        signalCount: genomeContext?.signals.length ?? 0,
+      });
+
+      // ── Step 3: GET FULL CONTEXT ──
       let contextSnapshot: CortexContextSnapshot;
       let v2Context: Record<string, unknown> | undefined;
+
+      if (this.integrationV2Enabled && this.contextV2Service) {
+        try {
+          v2Context = await this.contextV2Service.getFullContext(
+            query.businessId,
+          );
+          contextSnapshot =
+            await this.contextService.buildContextSnapshot(query.businessId);
+          this.enrichSnapshotFromV2(contextSnapshot, v2Context);
+        } catch (err) {
+          this.logger.warn(
+            `[processQuery][${correlationId}] V2 context failed, falling back: ${err instanceof Error ? err.message : String(err)}`,
+          );
+          contextSnapshot =
+            await this.contextService.buildContextSnapshot(query.businessId);
+        }
+      } else {
+        contextSnapshot =
+          await this.contextService.buildContextSnapshot(query.businessId);
+      }
+
+      // Enrich snapshot with genome data if available
+      if (genomeContext) {
+        this.enrichSnapshotFromGenome(contextSnapshot, genomeContext);
+      }
+
+      await this.logEvent(correlationId, 'STEP_3_FULL_CONTEXT', {
+        v2Available: !!v2Context,
+        genomeStage: contextSnapshot.genomeStage,
+        executiveReadiness: contextSnapshot.executiveReadiness,
+      });
+
+      // ── Step 4: PARSE INTENT ──
       let parsedCommands: Array<{
         module: string;
         action: string;
@@ -179,76 +364,130 @@ export class KeyCortexReasoningService {
         naturalLanguage: string;
       }> = [];
 
-      if (this.integrationV2Enabled && this.contextV2Service) {
-        // v2: Rich context from all modules
+      if (this.integrationV2Enabled && this.commandService && query.enableActions) {
         try {
-          v2Context = await this.contextV2Service.getFullContext(
-            query.businessId,
+          const capabilities =
+            this.connectorService!.getAllCapabilities();
+          const parsedIntents = await this.commandService.parseIntent(
+            query.text,
+            {
+              businessId: query.businessId,
+              userId: query.userId,
+              businessName: contextSnapshot.businessId,
+              currentPage: 'cortex_chat',
+              recentActions: [],
+            },
           );
-          contextSnapshot =
-            await this.contextService.buildContextSnapshot(query.businessId);
-
-          // Merge v2 context metrics into snapshot for prompt building
-          this.enrichSnapshotFromV2(contextSnapshot, v2Context);
+          parsedCommands = parsedIntents.map((intent) => ({
+            module: intent.module,
+            action: intent.action,
+            parameters: intent.parameters,
+            requiresApproval: intent.requiresApproval,
+            naturalLanguage: intent.naturalLanguage,
+          }));
+          this.logger.log(
+            `[processQuery][${correlationId}] Parsed ${parsedCommands.length} command(s) from user input`,
+          );
         } catch (err) {
           this.logger.warn(
-            `[processQuery] V2 context failed, falling back: ${err instanceof Error ? err.message : String(err)}`,
+            `[processQuery][${correlationId}] Command parsing failed: ${err instanceof Error ? err.message : String(err)}`,
           );
-          contextSnapshot =
-            await this.contextService.buildContextSnapshot(query.businessId);
         }
-
-        // v2: Parse user intent into structured commands
-        if (this.commandService && query.enableActions) {
-          try {
-            const capabilities =
-              this.connectorService!.getAllCapabilities();
-            const parsedIntents = await this.commandService.parseIntent(
-              query.text,
-              {
-                businessId: query.businessId,
-                userId: query.userId,
-                businessName: contextSnapshot.businessId,
-                currentPage: 'cortex_chat',
-                recentActions: [],
-              },
-            );
-            parsedCommands = parsedIntents.map((intent) => ({
-              module: intent.module,
-              action: intent.action,
-              parameters: intent.parameters,
-              requiresApproval: intent.requiresApproval,
-              naturalLanguage: intent.naturalLanguage,
-            }));
-            this.logger.log(
-              `[processQuery] Parsed ${parsedCommands.length} command(s) from user input`,
-            );
-          } catch (err) {
-            this.logger.warn(
-              `[processQuery] Command parsing failed: ${err instanceof Error ? err.message : String(err)}`,
-            );
-          }
-        }
-      } else {
-        // Legacy: Basic context snapshot
-        contextSnapshot =
-          await this.contextService.buildContextSnapshot(query.businessId);
       }
 
-      // Step 3 -- Get personality configuration (with role expertise in v2)
+      await this.logEvent(correlationId, 'STEP_4_PARSE_INTENT', {
+        commandsParsed: parsedCommands.length,
+        commands: parsedCommands.map((c) => ({ module: c.module, action: c.action })),
+      });
+
+      // ── Step 5: CHECK AUTONOMY (v3) ──
+      let autonomyCheckedCommands = parsedCommands;
+      let autonomyResults: Record<string, boolean> = {};
+
+      if (this.genomeV3Enabled && this.genomeBridgeService && parsedCommands.length > 0) {
+        try {
+          const approvedCommands: typeof parsedCommands = [];
+
+          for (const cmd of parsedCommands) {
+            const canAutonomouslyExecute = await this.genomeBridgeService.checkAutonomy(
+              query.businessId,
+              { module: cmd.module, action: cmd.action, parameters: cmd.parameters },
+            );
+
+            autonomyResults[`${cmd.module}:${cmd.action}`] = canAutonomouslyExecute;
+
+            if (canAutonomouslyExecute || !cmd.requiresApproval) {
+              approvedCommands.push(cmd);
+            } else {
+              this.logger.log(
+                `[processQuery][${correlationId}] Action ${cmd.module}.${cmd.action} requires approval — genome autonomy check returned false`,
+              );
+            }
+          }
+
+          autonomyCheckedCommands = approvedCommands;
+          this.logger.log(
+            `[processQuery][${correlationId}] Autonomy check: ${approvedCommands.length}/${parsedCommands.length} commands approved`,
+          );
+        } catch (err) {
+          this.logger.warn(
+            `[processQuery][${correlationId}] Autonomy check failed, using all parsed commands: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+
+      await this.logEvent(correlationId, 'STEP_5_CHECK_AUTONOMY', {
+        totalCommands: parsedCommands.length,
+        approvedCommands: autonomyCheckedCommands.length,
+        autonomyMap: autonomyResults,
+      });
+
+      // ── Step 6: GET RANKED RECOMMENDATIONS (v3) ──
+      let rankedRecommendations: GenomeRecommendation[] = [];
+      if (this.genomeV3Enabled && this.genomeBridgeService) {
+        try {
+          rankedRecommendations = await this.genomeBridgeService.getRankedRecommendations(
+            query.businessId,
+            v2Context ?? {},
+          );
+          this.logger.log(
+            `[processQuery][${correlationId}] Got ${rankedRecommendations.length} ranked genome recommendations`,
+          );
+        } catch (err) {
+          this.logger.warn(
+            `[processQuery][${correlationId}] Ranked recommendations failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+
+      await this.logEvent(correlationId, 'STEP_6_RANKED_RECOMMENDATIONS', {
+        recommendationCount: rankedRecommendations.length,
+        topCategories: rankedRecommendations.slice(0, 3).map((r) => r.category),
+      });
+
+      // ── Step 7: BUILD ENRICHED PROMPT (v3 enhanced) ──
       const persona: CortexPersona =
         query.persona ?? session.persona ?? 'jarvis';
       const personalityConfig =
         this.personalityService.getPersonalityConfig(persona);
 
-      // Step 4 -- Build system prompt with context + personality + role expertise
       let systemPrompt: string;
-      if (this.integrationV2Enabled) {
+      if (this.genomeV3Enabled && genomeContext) {
+        // v3: Genome-enriched system prompt
+        systemPrompt = this.buildV3SystemPrompt(
+          persona,
+          contextSnapshot,
+          v2Context,
+          genomeContext,
+          rankedRecommendations,
+          autonomyCheckedCommands.length > 0,
+        );
+      } else if (this.integrationV2Enabled) {
         systemPrompt = this.buildV2SystemPrompt(
           persona,
           contextSnapshot,
           v2Context,
-          parsedCommands.length > 0,
+          autonomyCheckedCommands.length > 0,
         );
       } else {
         systemPrompt = this.personalityService.buildSystemPrompt(
@@ -257,14 +496,18 @@ export class KeyCortexReasoningService {
         );
       }
 
-      // Step 5 -- Select AI provider
+      await this.logEvent(correlationId, 'STEP_7_BUILD_PROMPT', {
+        promptLength: systemPrompt.length,
+        genomeEnriched: this.genomeV3Enabled && !!genomeContext,
+      });
+
+      // ── Step 8: AI REASONING ──
       const preferences: AiPreferences = {
         preferredProvider: query.provider ?? personalityConfig.persona,
         budgetMode: false,
       };
       const { provider, model } = await this.selectProvider(query, preferences);
 
-      // Step 6 -- Build message array and call model gateway
       const messages = this.buildMessages(query, contextSnapshot, systemPrompt);
       const completionResult = await this.modelGateway.complete({
         messages,
@@ -276,7 +519,6 @@ export class KeyCortexReasoningService {
 
       const latencyMs = Date.now() - startTime;
 
-      // Build the assistant message
       const assistantMessage: CortexMessage = {
         id: this.generateId(),
         role: 'assistant',
@@ -293,21 +535,30 @@ export class KeyCortexReasoningService {
           ),
           latencyMs,
           mood: query.mood ?? (await this.detectMood(query.text)),
+          correlationId,
+          genomeEnriched: this.genomeV3Enabled && !!genomeContext,
         },
       };
 
-      // Step 7 -- Execute commands (v2 ExecutorService or legacy ActionsService)
+      await this.logEvent(correlationId, 'STEP_8_AI_REASONING', {
+        provider,
+        model,
+        tokensUsed: completionResult.usage?.totalTokens ?? 0,
+        latencyMs,
+      });
+
+      // ── Step 9: EXECUTE ACTIONS ──
       let executedActions: CortexActionResult[] = [];
 
       if (query.enableActions) {
         if (
           this.integrationV2Enabled &&
           this.executorService &&
-          parsedCommands.length > 0
+          autonomyCheckedCommands.length > 0
         ) {
-          // v2: Execute parsed commands via ExecutorService
+          // v2: Execute autonomy-checked commands via ExecutorService
           try {
-            const connectorCommands = parsedCommands.map((cmd) =>
+            const connectorCommands = autonomyCheckedCommands.map((cmd) =>
               this.commandService!.toConnectorCommand(
                 {
                   intent: cmd.action,
@@ -345,11 +596,11 @@ export class KeyCortexReasoningService {
 
             assistantMessage.metadata!.actionsTriggered = executedActions;
             this.logger.log(
-              `[processQuery] v2 executed ${executedActions.length} command(s)`,
+              `[processQuery][${correlationId}] v2 executed ${executedActions.length} command(s)`,
             );
           } catch (err) {
             this.logger.error(
-              `[processQuery] v2 execution failed: ${err instanceof Error ? err.message : String(err)}`,
+              `[processQuery][${correlationId}] v2 execution failed: ${err instanceof Error ? err.message : String(err)}`,
             );
             // Fallback to legacy action detection
             const detectedActions = await this.detectActions(
@@ -379,7 +630,95 @@ export class KeyCortexReasoningService {
         }
       }
 
-      // Step 9 -- Save messages to session
+      await this.logEvent(correlationId, 'STEP_9_EXECUTE_ACTIONS', {
+        actionsExecuted: executedActions.length,
+        actionResults: executedActions.map((a) => ({
+          actionType: a.actionType,
+          status: a.status,
+        })),
+      });
+
+      // ── Step 10: REPORT OUTCOMES (v3) ──
+      if (this.genomeV3Enabled && this.genomeBridgeService) {
+        try {
+          for (const action of executedActions) {
+            await this.genomeBridgeService.reportActionOutcome(
+              query.businessId,
+              {
+                actionId: action.actionType,
+                status: action.status,
+                description: action.description,
+                result: action.result ?? {},
+                timestamp: new Date(),
+                correlationId,
+              },
+            );
+          }
+
+          // Create evidence for successful actions
+          const successfulActions = executedActions.filter((a) => a.status === 'success');
+          for (const action of successfulActions) {
+            await this.genomeBridgeService.createEvidence(
+              query.businessId,
+              {
+                type: 'action_outcome',
+                description: `KEY executed ${action.actionType}: ${action.description}`,
+                source: 'key_cortex',
+                metadata: {
+                  correlationId,
+                  actionType: action.actionType,
+                  result: action.result,
+                },
+              },
+            );
+          }
+
+          this.logger.log(
+            `[processQuery][${correlationId}] Reported ${executedActions.length} action outcomes to genome`,
+          );
+        } catch (err) {
+          this.logger.warn(
+            `[processQuery][${correlationId}] Genome outcome reporting failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+
+      await this.logEvent(correlationId, 'STEP_10_REPORT_OUTCOMES', {
+        outcomesReported: executedActions.length,
+        genomeEnabled: this.genomeV3Enabled,
+      });
+
+      // ── Step 11: GENERATE RESPONSE (v3 with genome insights) ──
+      const suggestions = await this.generateSuggestions(
+        query.businessId,
+        assistantMessage.content,
+        v2Context,
+      );
+
+      // v3: Include proactive genome suggestions if warranted
+      let proactiveSuggestions: Suggestion[] = [];
+      if (this.genomeV3Enabled && genomeContext) {
+        try {
+          const shouldProactive = await this.shouldSuggestProactiveAction(query.businessId);
+          if (shouldProactive) {
+            proactiveSuggestions = await this.getProactiveSuggestions(query.businessId);
+            this.logger.log(
+              `[processQuery][${correlationId}] Generated ${proactiveSuggestions.length} proactive suggestions`,
+            );
+          }
+        } catch (err) {
+          this.logger.warn(
+            `[processQuery][${correlationId}] Proactive suggestions failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+
+      await this.logEvent(correlationId, 'STEP_11_GENERATE_RESPONSE', {
+        suggestionsCount: suggestions.length,
+        proactiveSuggestionsCount: proactiveSuggestions.length,
+      });
+
+      // ── Step 12: LOG EVERYTHING ──
       await this.saveMessage(session.id, {
         role: 'user',
         content: query.text,
@@ -387,15 +726,15 @@ export class KeyCortexReasoningService {
       });
       await this.saveMessage(session.id, assistantMessage);
 
-      // Step 10 -- Generate follow-up suggestions
-      const suggestions = await this.generateSuggestions(
-        query.businessId,
-        assistantMessage.content,
-        v2Context,
-      );
+      await this.logEvent(correlationId, 'STEP_12_LOG_COMPLETE', {
+        sessionId: session.id,
+        totalLatencyMs: Date.now() - startTime,
+        messageId: assistantMessage.id,
+      });
 
+      // Final summary log
       this.logger.log(
-        `[processQuery] Completed in ${latencyMs}ms | provider=${provider} model=${model} tokens=${assistantMessage.metadata?.tokensUsed} commands=${parsedCommands.length} executed=${executedActions.length}`,
+        `[processQuery][${correlationId}] Completed in ${latencyMs}ms | provider=${provider} model=${model} tokens=${assistantMessage.metadata?.tokensUsed} commands=${parsedCommands.length} autonomyApproved=${autonomyCheckedCommands.length} executed=${executedActions.length} genome=${this.genomeV3Enabled && !!genomeContext}`,
       );
 
       return {
@@ -408,12 +747,31 @@ export class KeyCortexReasoningService {
           assistantMessage.content,
           contextSnapshot,
         ),
-      };
+        // v3: Include genome enrichment in response
+        genomeInsights: genomeContext
+          ? {
+              dnaScores: genomeContext.dnaScores,
+              stage: genomeContext.genomeStage,
+              topRecommendation: rankedRecommendations[0] ?? null,
+              urgentSignals: genomeContext.signals.filter(
+                (s) => s.severity === 'critical' || s.severity === 'high',
+              ),
+              proactiveSuggestions: proactiveSuggestions.slice(0, 3),
+            }
+          : undefined,
+      } as CortexResponse;
     } catch (error) {
       this.logger.error(
-        `[processQuery] Failed: ${error instanceof Error ? error.message : String(error)}`,
+        `[processQuery][${correlationId}] Failed: ${error instanceof Error ? error.message : String(error)}`,
         error instanceof Error ? error.stack : undefined,
       );
+
+      await this.logEvent(correlationId, 'PROCESS_QUERY_ERROR', {
+        error: error instanceof Error ? error.message : String(error),
+        businessId: query.businessId,
+        userId: query.userId,
+      });
+
       throw new ServiceUnavailableException(
         `KEY Cortex reasoning failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
       );
@@ -421,26 +779,39 @@ export class KeyCortexReasoningService {
   }
 
   // ==========================================================================
-  // 2. Streaming Query Processing (SSE) — v2 Enhanced
+  // 2. Streaming Query Processing (SSE) — v3 Enhanced
   // ==========================================================================
 
   /**
    * Process a user query with Server-Sent Events (SSE) streaming.
    *
-   * v2: When integration layer is active, the enriched system prompt
-   * includes full module capabilities and role expertise.
+   * v3: When genome integration is active, the enriched system prompt
+   * includes genome DNA scores, recommendations, and signals.
    */
   async *streamQuery(
     query: CortexQuery,
   ): AsyncGenerator<CortexStreamChunk> {
     const startTime = Date.now();
+    const correlationId = this.generateCorrelationId();
+
     this.logger.log(
-      `[streamQuery] business=${query.businessId} user=${query.userId} stream=true v2=${this.integrationV2Enabled}`,
+      `[streamQuery][${correlationId}] business=${query.businessId} user=${query.userId} stream=true v2=${this.integrationV2Enabled} v3=${this.genomeV3Enabled}`,
     );
 
     try {
-      // Steps 1-5 -- Session, context, personality, provider
+      // Steps 1-3 — Session, genome context, full context
       const session = await this.getOrCreateSession(query);
+
+      // v3: Get genome context for enrichment
+      let genomeContext: GenomeEnrichedContext | null = null;
+      if (this.genomeV3Enabled && this.genomeBridgeService) {
+        try {
+          genomeContext = await this.getGenomeEnrichedContext(query.businessId);
+        } catch {
+          // Non-critical — continue without genome
+        }
+      }
+
       const contextSnapshot =
         await this.contextService.buildContextSnapshot(query.businessId);
 
@@ -457,14 +828,28 @@ export class KeyCortexReasoningService {
         }
       }
 
+      // Enrich with genome data
+      if (genomeContext) {
+        this.enrichSnapshotFromGenome(contextSnapshot, genomeContext);
+      }
+
       const persona: CortexPersona =
         query.persona ?? session.persona ?? 'jarvis';
       const personalityConfig =
         this.personalityService.getPersonalityConfig(persona);
 
-      // Build v2 system prompt if integration is active
+      // Build v3 or v2 system prompt
       let systemPrompt: string;
-      if (this.integrationV2Enabled) {
+      if (this.genomeV3Enabled && genomeContext) {
+        systemPrompt = this.buildV3SystemPrompt(
+          persona,
+          contextSnapshot,
+          v2Context,
+          genomeContext,
+          genomeContext.recommendations.slice(0, 5),
+          false,
+        );
+      } else if (this.integrationV2Enabled) {
         systemPrompt = this.buildV2SystemPrompt(
           persona,
           contextSnapshot,
@@ -488,7 +873,9 @@ export class KeyCortexReasoningService {
       // Yield initial "thought" chunk
       yield {
         type: 'thought',
-        thought: `Analyzing context for ${contextSnapshot.genomeStage} stage business${this.integrationV2Enabled ? ' with full module awareness' : ''}...`,
+        thought: genomeContext
+          ? `Analyzing genome-aware context for ${contextSnapshot.genomeStage} stage business — ${genomeContext.signals.length} active signals, ${genomeContext.recommendations.length} recommendations available...`
+          : `Analyzing context for ${contextSnapshot.genomeStage} stage business${this.integrationV2Enabled ? ' with full module awareness' : ''}...`,
       };
 
       // Stream completion
@@ -528,7 +915,7 @@ export class KeyCortexReasoningService {
         }
       }
 
-      // Detect actions from accumulated text
+      // Detect and execute actions
       const detectedActions = query.enableActions
         ? await this.detectActions(accumulatedText)
         : [];
@@ -546,7 +933,6 @@ export class KeyCortexReasoningService {
           };
         }
 
-        // Execute actions (prefer v2 executor when available)
         let executedActions: CortexActionResult[] = [];
         if (this.integrationV2Enabled && this.executorService) {
           try {
@@ -558,7 +944,7 @@ export class KeyCortexReasoningService {
               userId: query.userId,
               source: 'key_cortex' as const,
               timestamp: new Date(),
-              correlationId: this.generateId(),
+              correlationId,
             }));
             const results = await this.executorService.executeBatch(
               connectorCommands,
@@ -574,8 +960,24 @@ export class KeyCortexReasoningService {
                     : `Failed: ${r.error ?? ''}`,
                 }) as CortexActionResult,
             );
+
+            // v3: Report outcomes to genome
+            if (this.genomeV3Enabled && this.genomeBridgeService) {
+              for (const action of executedActions) {
+                await this.genomeBridgeService.reportActionOutcome(
+                  query.businessId,
+                  {
+                    actionId: action.actionType,
+                    status: action.status,
+                    description: action.description,
+                    result: action.result ?? {},
+                    timestamp: new Date(),
+                    correlationId,
+                  },
+                );
+              }
+            }
           } catch {
-            // Fallback to legacy execution
             executedActions = await this.actionsService.executeActions(
               detectedActions,
               session,
@@ -600,6 +1002,19 @@ export class KeyCortexReasoningService {
         }
       }
 
+      // v3: Yield genome insights if available
+      if (genomeContext && genomeContext.signals.length > 0) {
+        const urgentSignals = genomeContext.signals.filter(
+          (s) => s.severity === 'critical' || s.severity === 'high',
+        );
+        if (urgentSignals.length > 0) {
+          yield {
+            type: 'thought',
+            thought: `Genome alert: ${urgentSignals.length} signal(s) requiring attention — ${urgentSignals.map((s) => s.message).join('; ')}`,
+          };
+        }
+      }
+
       // Save final message
       const latencyMs = Date.now() - startTime;
       const assistantMessage: CortexMessage = {
@@ -612,6 +1027,8 @@ export class KeyCortexReasoningService {
           model,
           latencyMs,
           mood: query.mood ?? (await this.detectMood(query.text)),
+          correlationId,
+          genomeEnriched: this.genomeV3Enabled && !!genomeContext,
         },
       };
 
@@ -622,16 +1039,30 @@ export class KeyCortexReasoningService {
       });
       await this.saveMessage(session.id, assistantMessage);
 
+      // v3: Log stream completion event
+      await this.logEvent(correlationId, 'STREAM_QUERY_COMPLETE', {
+        sessionId: session.id,
+        provider,
+        model,
+        latencyMs,
+        tokens: accumulatedText.length / 4,
+      });
+
       this.logger.log(
-        `[streamQuery] Completed in ${latencyMs}ms | provider=${provider} model=${model}`,
+        `[streamQuery][${correlationId}] Completed in ${latencyMs}ms | provider=${provider} model=${model}`,
       );
 
       yield { type: 'done' };
     } catch (error) {
       this.logger.error(
-        `[streamQuery] Failed: ${error instanceof Error ? error.message : String(error)}`,
+        `[streamQuery][${correlationId}] Failed: ${error instanceof Error ? error.message : String(error)}`,
         error instanceof Error ? error.stack : undefined,
       );
+
+      await this.logEvent(correlationId, 'STREAM_QUERY_ERROR', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+
       yield {
         type: 'error',
         error: `Streaming failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
@@ -1340,7 +1771,516 @@ Example: ["Can you break that down by month?", "Create a task for this", "What a
   }
 
   // ==========================================================================
-  // 10. v2 PUBLIC API — Direct Command Execution
+  // 10. v3 NEW METHODS — Genome-Aware Reasoning
+  // ==========================================================================
+
+  /**
+   * Get a genome-enriched context by combining genome intelligence with the v2 context.
+   * Results are cached for 60 seconds to avoid repeated calls.
+   *
+   * v3 Pipeline Step 2 helper.
+   *
+   * @param businessId  The business ID to get context for
+   * @returns           Genome-enriched context object
+   */
+  async getGenomeEnrichedContext(
+    businessId: string,
+  ): Promise<GenomeEnrichedContext> {
+    // Check cache first
+    const cacheKey = `genome:context:${businessId}`;
+    const cached = await this.redis.getJson<GenomeEnrichedContext>(cacheKey);
+    if (cached) {
+      this.logger.debug(
+        `[getGenomeEnrichedContext] Cache hit for business=${businessId}`,
+      );
+      return cached;
+    }
+
+    if (!this.genomeBridgeService) {
+      throw new ServiceUnavailableException(
+        'Genome bridge service is not available',
+      );
+    }
+
+    this.logger.debug(
+      `[getGenomeEnrichedContext] Building genome-enriched context for business=${businessId}`,
+    );
+
+    // Call genome bridge for intelligence
+    const genomeIntelligence =
+      await this.genomeBridgeService.getGenomeIntelligence(businessId);
+
+    // Merge into a single enriched context object
+    const enriched: GenomeEnrichedContext = {
+      dnaScores: genomeIntelligence.dnaScores ?? {},
+      genomeStage: genomeIntelligence.genomeStage ?? 'unknown',
+      executiveReadiness: genomeIntelligence.executiveReadiness ?? 0,
+      recommendations: (genomeIntelligence.recommendations ?? []).map(
+        (rec: any) => ({
+          id: rec.id ?? this.generateId(),
+          title: rec.title ?? 'Untitled recommendation',
+          description: rec.description ?? '',
+          impact: rec.impact ?? 'medium',
+          category: rec.category ?? 'general',
+          confidence: rec.confidence ?? 0.5,
+          genomeScore: rec.genomeScore ?? 0,
+        }),
+      ),
+      signals: (genomeIntelligence.signals ?? []).map((sig: any) => ({
+        id: sig.id ?? this.generateId(),
+        type: sig.type ?? 'info',
+        message: sig.message ?? '',
+        module: sig.module ?? 'general',
+        severity: sig.severity ?? 'low',
+        createdAt: sig.createdAt ? new Date(sig.createdAt) : new Date(),
+      })),
+      opportunities: (genomeIntelligence.opportunities ?? []).map(
+        (opp: any) => ({
+          id: opp.id ?? this.generateId(),
+          title: opp.title ?? 'Untitled opportunity',
+          estimatedValue: opp.estimatedValue ?? 0,
+          category: opp.category ?? 'general',
+          confidence: opp.confidence ?? 0.5,
+        }),
+      ),
+      autonomyMap: genomeIntelligence.autonomyMap ?? {},
+      timestamp: new Date(),
+    };
+
+    // Cache for 60 seconds
+    await this.redis.setJson(cacheKey, enriched, this.GENOME_CONTEXT_TTL);
+
+    this.logger.debug(
+      `[getGenomeEnrichedContext] Built genome-enriched context: ${enriched.recommendations.length} recommendations, ${enriched.signals.length} signals, ${enriched.opportunities.length} opportunities`,
+    );
+
+    return enriched;
+  }
+
+  /**
+   * Determine whether KEY should suggest a proactive action based on genome signals.
+   *
+   * v3 Pipeline Step 11 helper.
+   *
+   * Checks for:
+   * - Critical or high-severity genome signals
+   * - Declining DNA score trends
+   * - Outstanding opportunities with high confidence
+   *
+   * @param businessId  The business ID to check
+   * @returns           True if proactive action is warranted
+   */
+  async shouldSuggestProactiveAction(businessId: string): Promise<boolean> {
+    if (!this.genomeBridgeService) {
+      return false;
+    }
+
+    try {
+      // Get latest genome context (uses cache)
+      const genomeContext = await this.getGenomeEnrichedContext(businessId);
+
+      // Check for urgent/critical signals
+      const hasCriticalSignals = genomeContext.signals.some(
+        (s) => s.severity === 'critical' || s.severity === 'high',
+      );
+      if (hasCriticalSignals) {
+        this.logger.debug(
+          `[shouldSuggestProactiveAction] business=${businessId}: critical signals detected — proactive action warranted`,
+        );
+        return true;
+      }
+
+      // Check for declining DNA trends (compare with cached previous)
+      const previousScores = await this.redis.getJson<Record<string, number>>(
+        `genome:dna:previous:${businessId}`,
+      );
+      if (previousScores && genomeContext.dnaScores) {
+        for (const [key, currentScore] of Object.entries(
+          genomeContext.dnaScores,
+        )) {
+          const previousScore = previousScores[key];
+          if (previousScore && currentScore < previousScore - 10) {
+            this.logger.debug(
+              `[shouldSuggestProactiveAction] business=${businessId}: DNA score ${key} declined from ${previousScore} to ${currentScore} — proactive action warranted`,
+            );
+            return true;
+          }
+        }
+      }
+
+      // Store current scores for next comparison
+      await this.redis.setJson(
+        `genome:dna:previous:${businessId}`,
+        genomeContext.dnaScores,
+        3600,
+      );
+
+      // Check for high-confidence opportunities
+      const hasHighValueOpportunities = genomeContext.opportunities.some(
+        (o) => o.confidence > 0.8 && o.estimatedValue > 5000,
+      );
+      if (hasHighValueOpportunities) {
+        this.logger.debug(
+          `[shouldSuggestProactiveAction] business=${businessId}: high-value opportunities detected — proactive action warranted`,
+        );
+        return true;
+      }
+
+      return false;
+    } catch (err) {
+      this.logger.warn(
+        `[shouldSuggestProactiveAction] business=${businessId}: check failed — ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Get proactive suggestions based on genome intelligence.
+   *
+   * v3 Pipeline Step 11 helper.
+   *
+   * Gets genome-ranked recommendations, filters to top 3 most impactful,
+   * and formats as human-readable suggestions.
+   *
+   * @param businessId  The business ID to get suggestions for
+   * @returns           Array of up to 3 proactive suggestions
+   */
+  async getProactiveSuggestions(businessId: string): Promise<Suggestion[]> {
+    if (!this.genomeBridgeService) {
+      return [];
+    }
+
+    try {
+      // Get genome context (uses cache)
+      const genomeContext = await this.getGenomeEnrichedContext(businessId);
+
+      // Also get v2 context for richer suggestions
+      let v2Context: Record<string, unknown> = {};
+      if (this.integrationV2Enabled && this.contextV2Service) {
+        try {
+          v2Context =
+            (await this.contextV2Service.getFullContext(businessId)) ?? {};
+        } catch {
+          // Non-critical
+        }
+      }
+
+      // Get genome-ranked recommendations
+      const rankedRecs = await this.genomeBridgeService.getRankedRecommendations(
+        businessId,
+        v2Context,
+      );
+
+      // Filter to top 3 most impactful
+      const topRecs = rankedRecs
+        .filter((r) => r.impact === 'high' || r.confidence > 0.7)
+        .slice(0, 3);
+
+      // Format as suggestions
+      const suggestions: Suggestion[] = topRecs.map((rec) => ({
+        id: rec.id ?? this.generateId(),
+        title: rec.title,
+        description: rec.description,
+        impact: rec.impact as 'high' | 'medium' | 'low',
+        category: rec.category,
+        source: 'genome',
+        confidence: rec.confidence,
+        action: `Consider ${rec.title.toLowerCase()} to improve ${rec.category}`,
+      }));
+
+      // If no high-impact recommendations, use urgent signals
+      if (suggestions.length === 0) {
+        const urgentSignals = genomeContext.signals.filter(
+          (s) => s.severity === 'critical' || s.severity === 'high',
+        );
+        for (const signal of urgentSignals.slice(0, 3)) {
+          suggestions.push({
+            id: signal.id,
+            title: `Action needed: ${signal.module}`,
+            description: signal.message,
+            impact:
+              signal.severity === 'critical'
+                ? 'high'
+                : signal.severity === 'high'
+                  ? 'high'
+                  : 'medium',
+            category: signal.module,
+            source: 'genome',
+            confidence: 0.9,
+            action: `Address ${signal.type} in ${signal.module}: ${signal.message}`,
+          });
+        }
+      }
+
+      this.logger.debug(
+        `[getProactiveSuggestions] business=${businessId}: generated ${suggestions.length} proactive suggestions`,
+      );
+
+      return suggestions;
+    } catch (err) {
+      this.logger.warn(
+        `[getProactiveSuggestions] business=${businessId}: failed — ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return [];
+    }
+  }
+
+  /**
+   * Explain a decision by looking it up in the event log and generating
+   * a human-readable explanation that includes genome context at the time.
+   *
+   * v3 Pipeline Step 11 / public API.
+   *
+   * @param decisionId  The decision ID (correlationId or event ID)
+   * @returns           Human-readable explanation string
+   */
+  async explainDecision(decisionId: string): Promise<string> {
+    this.logger.debug(`[explainDecision] Looking up decision: ${decisionId}`);
+
+    try {
+      // Look up the decision in the event log
+      let eventLog: Array<{
+        step: string;
+        timestamp: Date;
+        data: Record<string, unknown>;
+      }> = [];
+
+      if (this.eventService) {
+        try {
+          eventLog = await this.eventService.getEventLog(decisionId);
+        } catch {
+          // Event service may not have this decision
+        }
+      }
+
+      // If no event log, try to reconstruct from session/prisma
+      let decisionData: Record<string, unknown> = {};
+      if (eventLog.length === 0) {
+        // Try to find the session message with this correlation ID
+        const session = await this.prisma.cortexSession.findFirst({
+          where: {
+            messages: {
+              path: ['metadata', 'correlationId'],
+              equals: decisionId,
+            },
+          },
+          include: { messages: true },
+        });
+        if (session) {
+          decisionData = {
+            sessionId: session.id,
+            businessId: session.businessId,
+            messages: session.messages,
+          };
+        }
+      } else {
+        decisionData = {
+          eventLog,
+          steps: eventLog.map((e) => e.step),
+        };
+      }
+
+      // Get genome context at the time of decision (best effort)
+      let genomeContext: GenomeEnrichedContext | null = null;
+      if (this.genomeBridgeService && decisionData.businessId) {
+        try {
+          genomeContext = await this.getGenomeEnrichedContext(
+            decisionData.businessId as string,
+          );
+        } catch {
+          // Genome context may not be available
+        }
+      }
+
+      // Use AI to generate a human-readable explanation
+      const explanationPrompt = `You are KEY's decision-explanation engine. Explain this decision clearly and concisely.
+
+Decision ID: ${decisionId}
+
+Decision Steps:
+${eventLog.length > 0 ? eventLog.map((e) => `- ${e.step} at ${e.timestamp}`).join('\n') : 'Steps not available in event log'}
+
+${genomeContext ? `Genome Context at Decision Time:
+- Genome Stage: ${genomeContext.genomeStage}
+- Executive Readiness: ${genomeContext.executiveReadiness}%
+- DNA Scores: ${JSON.stringify(genomeContext.dnaScores)}
+- Active Signals: ${genomeContext.signals.length}
+- Top Recommendation: ${genomeContext.recommendations[0]?.title ?? 'None'}` : 'Genome context not available'}
+
+Write a 3-4 sentence explanation of this decision that a non-technical business owner can understand. Be transparent about what data was used and why the decision was made. Use first person ("I decided...").`;
+
+      const result = await this.modelGateway.complete({
+        messages: [
+          {
+            role: 'system',
+            content:
+              'You are KEY, an AI business partner. Explain your decisions clearly and transparently.',
+          },
+          { role: 'user', content: explanationPrompt },
+        ],
+        model: 'gpt-4o-mini',
+        temperature: 0.4,
+        maxTokens: 500,
+      });
+
+      return (
+        result.content?.trim() ??
+        `I made decision ${decisionId} based on the available business context and genome intelligence at that time.`
+      );
+    } catch (error) {
+      this.logger.error(
+        `[explainDecision] Failed for ${decisionId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return `Unable to explain decision ${decisionId}: ${error instanceof Error ? error.message : 'Unknown error'}`;
+    }
+  }
+
+  /**
+   * Learn from a user interaction by recording feedback, updating preferences,
+   * and feeding outcomes to the genome outcome learning system.
+   *
+   * v3 Pipeline Step 10+ / public API.
+   *
+   * @param sessionId   The session ID for the interaction
+   * @param interaction The interaction feedback data
+   */
+  async learnFromInteraction(
+    sessionId: string,
+    interaction: InteractionFeedback,
+  ): Promise<void> {
+    this.logger.log(
+      `[learnFromInteraction] session=${sessionId} rating=${interaction.userRating ?? 'none'}`,
+    );
+
+    try {
+      // Record user feedback in Prisma
+      await this.prisma.client.keyInteractionFeedback.create({
+        data: {
+          sessionId,
+          query: interaction.query.substring(0, 500),
+          response: interaction.response.substring(0, 2000),
+          userRating: interaction.userRating ?? null,
+          userComment: interaction.userComment ?? null,
+          actionsTaken: JSON.stringify(interaction.actionsTaken),
+          actionsSkipped: JSON.stringify(interaction.actionsSkipped),
+          metadata: interaction.metadata
+            ? JSON.stringify(interaction.metadata)
+            : null,
+        },
+      });
+
+      // Update preference model based on feedback
+      if (interaction.userRating !== undefined) {
+        const rating = interaction.userRating;
+        const redisKey = `learning:ratings:${sessionId}`;
+        const existing = await this.redis.getJson<{
+          ratings: number[];
+          count: number;
+        }>(redisKey);
+
+        const ratings = existing?.ratings ?? [];
+        ratings.push(rating);
+
+        await this.redis.setJson(
+          redisKey,
+          {
+            ratings,
+            count: ratings.length,
+            average: ratings.reduce((a, b) => a + b, 0) / ratings.length,
+          },
+          86400 * 30, // 30 days
+        );
+
+        this.logger.debug(
+          `[learnFromInteraction] Rating ${rating}/5 recorded. Average: ${(ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(2)}`,
+        );
+      }
+
+      // Feed to genome outcome learning
+      if (this.genomeV3Enabled && this.genomeBridgeService) {
+        try {
+          // Report successful actions as positive outcomes
+          for (const actionId of interaction.actionsTaken) {
+            await this.genomeBridgeService.reportActionOutcome(
+              interaction.metadata?.businessId as string,
+              {
+                actionId,
+                status: 'success',
+                description: `User-rated ${interaction.userRating ?? 'N/A'}/5 — action taken`,
+                result: {
+                  userRating: interaction.userRating,
+                  userComment: interaction.userComment,
+                  sessionId,
+                },
+                timestamp: new Date(),
+                correlationId: sessionId,
+              },
+            );
+          }
+
+          // Report skipped actions as neutral/negative outcomes
+          for (const actionId of interaction.actionsSkipped) {
+            await this.genomeBridgeService.reportActionOutcome(
+              interaction.metadata?.businessId as string,
+              {
+                actionId,
+                status: 'skipped',
+                description: `User skipped this action — may indicate low relevance`,
+                result: {
+                  userRating: interaction.userRating,
+                  sessionId,
+                },
+                timestamp: new Date(),
+                correlationId: sessionId,
+              },
+            );
+          }
+
+          // Create evidence for the overall interaction
+          if (interaction.userRating && interaction.userRating >= 4) {
+            await this.genomeBridgeService.createEvidence(
+              interaction.metadata?.businessId as string,
+              {
+                type: 'user_feedback_positive',
+                description: `User rated interaction ${interaction.userRating}/5: "${interaction.userComment ?? 'No comment'}"`,
+                source: 'key_cortex',
+                metadata: {
+                  sessionId,
+                  rating: interaction.userRating,
+                  actionsTaken: interaction.actionsTaken,
+                },
+              },
+            );
+          }
+
+          this.logger.log(
+            `[learnFromInteraction] Genome outcome learning updated for session=${sessionId}`,
+          );
+        } catch (err) {
+          this.logger.warn(
+            `[learnFromInteraction] Genome outcome learning failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+
+      // Log the learning event
+      await this.logEvent(sessionId, 'INTERACTION_LEARNED', {
+        sessionId,
+        userRating: interaction.userRating,
+        actionsTaken: interaction.actionsTaken.length,
+        actionsSkipped: interaction.actionsSkipped.length,
+      });
+    } catch (error) {
+      this.logger.error(
+        `[learnFromInteraction] Failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  }
+
+  // ==========================================================================
+  // 11. v2 PUBLIC API — Direct Command Execution
   // ==========================================================================
 
   /**
@@ -1348,6 +2288,7 @@ Example: ["Can you break that down by month?", "Create a task for this", "What a
    * Used by the controller for direct command execution endpoints.
    *
    * Falls back to legacy action execution if v2 is not available.
+   * v3: Reports outcomes to genome after execution.
    */
   async executeCommand(
     businessId: string,
@@ -1356,8 +2297,9 @@ Example: ["Can you break that down by month?", "Create a task for this", "What a
     action: string,
     parameters: Record<string, unknown>,
   ): Promise<CortexActionResult> {
+    const correlationId = this.generateCorrelationId();
     this.logger.log(
-      `[executeCommand] business=${businessId} module=${module} action=${action}`,
+      `[executeCommand][${correlationId}] business=${businessId} module=${module} action=${action}`,
     );
 
     if (this.integrationV2Enabled && this.executorService && this.connectorService) {
@@ -1370,7 +2312,7 @@ Example: ["Can you break that down by month?", "Create a task for this", "What a
           userId,
           source: 'key_cortex' as const,
           timestamp: new Date(),
-          correlationId: this.generateId(),
+          correlationId,
         };
 
         const result = await this.executorService.execute(command, {
@@ -1378,7 +2320,7 @@ Example: ["Can you break that down by month?", "Create a task for this", "What a
           userId,
         });
 
-        return {
+        const actionResult: CortexActionResult = {
           actionType: (action.toUpperCase().replace(/\s+/g, '_') ??
             'EXECUTE_TOOL') as CortexActionType,
           status: result.success ? 'success' : 'error',
@@ -1391,9 +2333,23 @@ Example: ["Can you break that down by month?", "Create a task for this", "What a
           error: result.error,
           requiresApproval: false,
         };
+
+        // v3: Report outcome to genome
+        if (this.genomeV3Enabled && this.genomeBridgeService) {
+          await this.genomeBridgeService.reportActionOutcome(businessId, {
+            actionId: action,
+            status: actionResult.status,
+            description: actionResult.description,
+            result: actionResult.result ?? {},
+            timestamp: new Date(),
+            correlationId,
+          });
+        }
+
+        return actionResult;
       } catch (err) {
         this.logger.error(
-          `[executeCommand] v2 execution failed: ${err instanceof Error ? err.message : String(err)}`,
+          `[executeCommand][${correlationId}] v2 execution failed: ${err instanceof Error ? err.message : String(err)}`,
         );
         return {
           actionType: 'EXECUTE_TOOL',
@@ -1417,7 +2373,7 @@ Example: ["Can you break that down by month?", "Create a task for this", "What a
   }
 
   // ==========================================================================
-  // 11. v2 PUBLIC API — Module Query
+  // 12. v2 PUBLIC API — Module Query
   // ==========================================================================
 
   /**
@@ -1472,7 +2428,7 @@ Example: ["Can you break that down by month?", "Create a task for this", "What a
   }
 
   // ==========================================================================
-  // 12. v2 PUBLIC API — Get Capabilities
+  // 13. v2 PUBLIC API — Get Capabilities
   // ==========================================================================
 
   /**
@@ -1501,7 +2457,146 @@ Example: ["Can you break that down by month?", "Create a task for this", "What a
   }
 
   // ==========================================================================
-  // v2 System Prompt Builder
+  // v3 System Prompt Builder (Genome-Aware)
+  // ==========================================================================
+
+  /**
+   * Build a genome-aware system prompt that includes:
+   * - Personality + business context
+   * - Genome DNA scores and stage
+   * - Genome recommendations (top 5 ranked)
+   * - Genome signals (urgent signals highlighted)
+   * - Role-specific module expertise
+   * - Available module capabilities
+   * - Context from all connected modules (v2)
+   * - Autonomy check results
+   */
+  private buildV3SystemPrompt(
+    persona: CortexPersona,
+    context: CortexContextSnapshot,
+    v2Context: Record<string, unknown> | undefined,
+    genomeContext: GenomeEnrichedContext,
+    rankedRecommendations: GenomeRecommendation[],
+    hasParsedCommands?: boolean,
+  ): string {
+    // Start with v2 base prompt
+    const basePrompt = this.buildV2SystemPrompt(
+      persona,
+      context,
+      v2Context,
+      hasParsedCommands,
+    );
+
+    // Add genome context block
+    const genomeBlock = this.buildGenomeContextBlock(
+      genomeContext,
+      rankedRecommendations,
+    );
+
+    // Add genome-aware behavioral guidance
+    const behavioralGuidance = this.buildGenomeBehavioralGuidance(
+      genomeContext.dnaScores,
+    );
+
+    const parts = [basePrompt, genomeBlock, behavioralGuidance].filter(Boolean);
+
+    return parts.join('\n\n');
+  }
+
+  /**
+   * Build the genome context block for the system prompt.
+   */
+  private buildGenomeContextBlock(
+    genomeContext: GenomeEnrichedContext,
+    rankedRecommendations: GenomeRecommendation[],
+  ): string {
+    const lines: string[] = ['=== GENOME INTELLIGENCE ==='];
+
+    // DNA scores
+    lines.push('DNA Scores:');
+    for (const [key, score] of Object.entries(genomeContext.dnaScores)) {
+      const bar = '█'.repeat(Math.round(score / 10)) + '░'.repeat(10 - Math.round(score / 10));
+      lines.push(`  ${key}: ${bar} ${score}%`);
+    }
+
+    lines.push(`Genome Stage: ${genomeContext.genomeStage}`);
+    lines.push(`Executive Readiness: ${genomeContext.executiveReadiness}%`);
+
+    // Urgent signals
+    const urgentSignals = genomeContext.signals.filter(
+      (s) => s.severity === 'critical' || s.severity === 'high',
+    );
+    if (urgentSignals.length > 0) {
+      lines.push(`\n🚨 URGENT SIGNALS (${urgentSignals.length}):`);
+      for (const signal of urgentSignals) {
+        lines.push(`  [${signal.severity.toUpperCase()}] ${signal.module}: ${signal.message}`);
+      }
+    }
+
+    // Top 5 ranked recommendations
+    const top5 = rankedRecommendations.slice(0, 5);
+    if (top5.length > 0) {
+      lines.push(`\n📋 TOP RECOMMENDATIONS:`);
+      for (const rec of top5) {
+        lines.push(
+          `  ${rec.impact === 'high' ? '🔥' : rec.impact === 'medium' ? '⚡' : '•'} [${rec.impact.toUpperCase()}] ${rec.title} (${rec.category}, ${Math.round(rec.confidence * 100)}% confidence)`,
+        );
+      }
+    }
+
+    // Opportunities
+    if (genomeContext.opportunities.length > 0) {
+      const topOpps = genomeContext.opportunities
+        .sort((a, b) => b.estimatedValue - a.estimatedValue)
+        .slice(0, 3);
+      lines.push(`\n💰 TOP OPPORTUNITIES:`);
+      for (const opp of topOpps) {
+        lines.push(
+          `  ${opp.title}: $${opp.estimatedValue.toLocaleString()} (${opp.category})`,
+        );
+      }
+    }
+
+    lines.push('=========================');
+
+    return lines.join('\n');
+  }
+
+  /**
+   * Build behavioral guidance based on DNA scores.
+   * Tells the AI how to adapt its behavior based on genome DNA.
+   */
+  private buildGenomeBehavioralGuidance(
+    dnaScores: Record<string, number>,
+  ): string {
+    const guidance: string[] = [
+      '=== GENOME-AWARE BEHAVIORAL GUIDANCE ===',
+    ];
+
+    for (const [key, score] of Object.entries(dnaScores)) {
+      const category = key.toLowerCase();
+      if (score < 30) {
+        guidance.push(
+          `${category.toUpperCase()} DNA is LOW (${score}%). Be proactive with ${category} suggestions. Recommend quick wins. Focus on fundamentals.`,
+        );
+      } else if (score < 60) {
+        guidance.push(
+          `${category.toUpperCase()} DNA is MODERATE (${score}%). Provide balanced ${category} recommendations. Highlight improvement opportunities.`,
+        );
+      } else if (score >= 80) {
+        guidance.push(
+          `${category.toUpperCase()} DNA is HIGH (${score}%). Leverage ${category} strengths in recommendations. Suggest advanced optimizations.`,
+        );
+      }
+    }
+
+    guidance.push('=========================');
+
+    return guidance.join('\n');
+  }
+
+  // ==========================================================================
+  // v2 System Prompt Builder (preserved)
   // ==========================================================================
 
   /**
@@ -1568,6 +2663,10 @@ Example: ["Can you break that down by month?", "Create a task for this", "What a
     return parts.join('\n\n');
   }
 
+  // ==========================================================================
+  // v2/v3 Context Enrichment (preserved + enhanced)
+  // ==========================================================================
+
   /**
    * Enrich a context snapshot with data from the v2 context service.
    */
@@ -1594,6 +2693,40 @@ Example: ["Can you break that down by month?", "Create a task for this", "What a
       if (bookingsCtx?.upcomingCount) {
         snapshot.keyMetrics['upcomingBookings'] = bookingsCtx.upcomingCount;
       }
+    } catch {
+      // Non-critical enrichment
+    }
+  }
+
+  /**
+   * Enrich a context snapshot with genome data.
+   */
+  private enrichSnapshotFromGenome(
+    snapshot: CortexContextSnapshot,
+    genomeContext: GenomeEnrichedContext,
+  ): void {
+    try {
+      // Merge DNA scores into keyMetrics
+      for (const [key, score] of Object.entries(genomeContext.dnaScores)) {
+        snapshot.keyMetrics[`dna_${key}`] = score;
+      }
+
+      // Override genome stage if genome provides one
+      if (genomeContext.genomeStage) {
+        snapshot.genomeStage = genomeContext.genomeStage;
+      }
+
+      // Override executive readiness
+      if (genomeContext.executiveReadiness) {
+        snapshot.executiveReadiness = genomeContext.executiveReadiness;
+      }
+
+      // Add genome recommendation count to metrics
+      snapshot.keyMetrics['genomeRecommendations'] =
+        genomeContext.recommendations.length;
+      snapshot.keyMetrics['genomeSignals'] = genomeContext.signals.length;
+      snapshot.keyMetrics['genomeOpportunities'] =
+        genomeContext.opportunities.length;
     } catch {
       // Non-critical enrichment
     }
@@ -1629,6 +2762,33 @@ Example: ["Can you break that down by month?", "Create a task for this", "What a
       }
     } catch {
       return '';
+    }
+  }
+
+  // ==========================================================================
+  // v3 Event Logging Helper
+  // ==========================================================================
+
+  /**
+   * Log an event to the event service if available.
+   */
+  private async logEvent(
+    correlationId: string,
+    step: string,
+    data: Record<string, unknown>,
+  ): Promise<void> {
+    if (this.eventService) {
+      try {
+        await this.eventService.logEvent({
+          correlationId,
+          step,
+          data,
+          timestamp: new Date(),
+          service: 'KeyCortexReasoningService',
+        });
+      } catch {
+        // Non-critical — event logging should not break the pipeline
+      }
     }
   }
 
@@ -2036,5 +3196,9 @@ Example: ["Can you break that down by month?", "Create a task for this", "What a
 
   private generateId(): string {
     return `crtx_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+  }
+
+  private generateCorrelationId(): string {
+    return `corr_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
   }
 }

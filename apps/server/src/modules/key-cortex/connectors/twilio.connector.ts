@@ -2,6 +2,8 @@
  * ╔═══════════════════════════════════════════════════════════════════════════╗
  * ║                         TWILIO CONNECTOR                                  ║
  * ║          Send SMS, make calls, manage phone numbers                      ║
+ * ║  Production-hardened: rate limiting, retries, health checks,           ║
+ * ║  webhook signature verification, sandbox mode                            ║
  * ╚═══════════════════════════════════════════════════════════════════════════╝
  */
 
@@ -21,11 +23,65 @@ export const TwilioConnector: ExternalConnectorDefinition = {
   defaultHeaders: {
     'Content-Type': 'application/x-www-form-urlencoded',
   },
+
+  // ── Legacy rate limit (backward compatibility) ──────────────────────────
   rateLimit: {
     requestsPerWindow: 100,
     windowSeconds: 60,
     burstLimit: 50,
   },
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // PRODUCTION HARDENING
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /** Rate limiting — Twilio: 1/sec for most, 100/min for messages */
+  rateLimitHardened: {
+    requestsPerSecond: 1,
+    requestsPerMinute: 100,
+    requestsPerHour: 6000,
+    burstAllowance: 50,
+  },
+
+  /** Retry configuration with exponential backoff + jitter */
+  retryConfig: {
+    maxRetries: 3,
+    baseDelayMs: 1000,
+    maxDelayMs: 30000,
+    retryableStatusCodes: [429, 500, 502, 503, 504],
+    retryableErrors: ['ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'ECONNREFUSED'],
+  },
+
+  /** Timeout configuration */
+  timeoutConfig: {
+    connectTimeoutMs: 10000,
+    requestTimeoutMs: 30000,
+    uploadTimeoutMs: 60000,
+  },
+
+  /** Health check endpoint */
+  healthCheck: {
+    endpoint: '/Accounts/{accountSid}.json',
+    method: 'GET',
+    expectedStatus: 200,
+  },
+
+  /** Webhook security — Twilio uses request body signing */
+  webhookSecurity: {
+    signatureHeader: 'x-twilio-signature',
+    signatureAlgorithm: 'hmac-sha256',
+    signatureFormat: 'base64',
+  },
+
+  /** Required scopes — Twilio uses Basic auth, not OAuth scopes */
+  requiredScopes: [],
+
+  /** Sandbox/test endpoints — Twilio test credentials */
+  sandboxEndpoints: {
+    baseUrl: 'https://api.twilio.com/2010-04-01',
+  },
+
+  // ══════════════════════════════════════════════════════════════════════════
 
   configSchema: [
     {

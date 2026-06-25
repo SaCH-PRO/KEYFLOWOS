@@ -2,6 +2,8 @@
  * ╔═══════════════════════════════════════════════════════════════════════════╗
  * ║                       SALESFORCE CONNECTOR                                ║
  * ║       Manage leads, contacts, opportunities, and tasks                   ║
+ * ║  Production-hardened: per-user/per-org rate limits, retries, SOQL       ║
+ * ║  health checks, webhook security, sandbox mode                           ║
  * ╚═══════════════════════════════════════════════════════════════════════════╝
  */
 
@@ -28,11 +30,70 @@ export const SalesforceConnector: ExternalConnectorDefinition = {
     'Content-Type': 'application/json',
     'Accept': 'application/json',
   },
+
+  // ── Legacy rate limit (backward compatibility) ──────────────────────────
   rateLimit: {
     requestsPerWindow: 100,
     windowSeconds: 60,
     burstLimit: 20,
   },
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // PRODUCTION HARDENING
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /** Rate limiting — Salesforce: 100/min per user, 15000/day per org */
+  rateLimitHardened: {
+    requestsPerSecond: 1,
+    requestsPerMinute: 100,
+    requestsPerHour: 625,
+    burstAllowance: 20,
+  },
+
+  /** Retry configuration with exponential backoff + jitter */
+  retryConfig: {
+    maxRetries: 3,
+    baseDelayMs: 1000,
+    maxDelayMs: 60000,
+    retryableStatusCodes: [429, 500, 502, 503, 504],
+    retryableErrors: ['ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'ECONNREFUSED'],
+  },
+
+  /** Timeout configuration */
+  timeoutConfig: {
+    connectTimeoutMs: 10000,
+    requestTimeoutMs: 30000,
+    uploadTimeoutMs: 120000,
+  },
+
+  /** Health check endpoint — Salesforce limits endpoint */
+  healthCheck: {
+    endpoint: '/services/data/v59.0/limits',
+    method: 'GET',
+    expectedStatus: 200,
+  },
+
+  /** Webhook security — Salesforce uses platform events */
+  webhookSecurity: {
+    signatureHeader: 'x-salesforce-signature',
+    signatureAlgorithm: 'hmac-sha256',
+    signatureFormat: 'base64',
+  },
+
+  /** Required OAuth scopes for core functionality */
+  requiredScopes: [
+    'api',
+    'refresh_token',
+    'full',
+  ],
+
+  /** Sandbox/test endpoints — Salesforce provides test.salesforce.com */
+  sandboxEndpoints: {
+    baseUrl: 'https://{instance}.sandbox.my.salesforce.com',
+    authUrl: 'https://test.salesforce.com/services/oauth2/token',
+  },
+
+  // ══════════════════════════════════════════════════════════════════════════
 
   configSchema: [
     {

@@ -2,6 +2,8 @@
  * ╔═══════════════════════════════════════════════════════════════════════════╗
  * ║                         SHOPIFY CONNECTOR                                 ║
  * ║        Manage products, orders, inventory, and customers                  ║
+ * ║  Production-hardened: Leaky Bucket rate limiting, retries, health        ║
+ * ║  checks, webhook HMAC verification, sandbox mode                         ║
  * ╚═══════════════════════════════════════════════════════════════════════════╝
  */
 
@@ -33,11 +35,77 @@ export const ShopifyConnector: ExternalConnectorDefinition = {
   defaultHeaders: {
     'Content-Type': 'application/json',
   },
+
+  // ── Legacy rate limit (backward compatibility) ──────────────────────────
   rateLimit: {
     requestsPerWindow: 40,
     windowSeconds: 60,
     burstLimit: 40,
   },
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // PRODUCTION HARDENING
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /** Rate limiting — Shopify Leaky Bucket: 2/sec, burst 40 */
+  rateLimitHardened: {
+    requestsPerSecond: 2,
+    requestsPerMinute: 120,
+    requestsPerHour: 7200,
+    burstAllowance: 40,
+  },
+
+  /** Retry configuration with exponential backoff + jitter */
+  retryConfig: {
+    maxRetries: 3,
+    baseDelayMs: 1000,
+    maxDelayMs: 30000,
+    retryableStatusCodes: [429, 500, 502, 503, 504],
+    retryableErrors: ['ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'ECONNREFUSED'],
+  },
+
+  /** Timeout configuration */
+  timeoutConfig: {
+    connectTimeoutMs: 10000,
+    requestTimeoutMs: 30000,
+    uploadTimeoutMs: 120000,
+  },
+
+  /** Health check endpoint */
+  healthCheck: {
+    endpoint: '/shop.json',
+    method: 'GET',
+    expectedStatus: 200,
+    expectedResponse: { shop: { id: 'number', name: 'string' } },
+  },
+
+  /** Webhook signature verification (HMAC-SHA256 base64) */
+  webhookSecurity: {
+    signatureHeader: 'x-shopify-hmac-sha256',
+    signatureAlgorithm: 'hmac-sha256',
+    signatureFormat: 'base64',
+  },
+
+  /** Required OAuth scopes for core functionality */
+  requiredScopes: [
+    'read_products',
+    'write_products',
+    'read_orders',
+    'write_orders',
+    'read_inventory',
+    'write_inventory',
+    'read_customers',
+    'write_customers',
+    'read_fulfillments',
+  ],
+
+  /** Sandbox/test endpoints */
+  sandboxEndpoints: {
+    baseUrl: 'https://{shop}.myshopify.com/admin/api/2024-01',
+    authUrl: 'https://{shop}.myshopify.com/admin/oauth/access_token',
+  },
+
+  // ══════════════════════════════════════════════════════════════════════════
 
   configSchema: [
     {

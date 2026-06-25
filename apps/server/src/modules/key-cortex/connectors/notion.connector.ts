@@ -2,6 +2,8 @@
  * ╔═══════════════════════════════════════════════════════════════════════════╗
  * ║                         NOTION CONNECTOR                                  ║
  * ║        Read, create, and update pages, databases, and blocks             ║
+ * ║  Production-hardened: 3/sec rate limit, retries, health checks,        ║
+ * ║  webhook signature verification, sandbox mode                            ║
  * ╚═══════════════════════════════════════════════════════════════════════════╝
  */
 
@@ -23,11 +25,73 @@ export const NotionConnector: ExternalConnectorDefinition = {
     'Content-Type': 'application/json',
     'Notion-Version': '2022-06-28',
   },
+
+  // ── Legacy rate limit (backward compatibility) ──────────────────────────
   rateLimit: {
     requestsPerWindow: 300,
     windowSeconds: 60,
     burstLimit: 30,
   },
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // PRODUCTION HARDENING
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /** Rate limiting — Notion: 3 requests per second */
+  rateLimitHardened: {
+    requestsPerSecond: 3,
+    requestsPerMinute: 180,
+    requestsPerHour: 10800,
+    burstAllowance: 30,
+  },
+
+  /** Retry configuration with exponential backoff + jitter */
+  retryConfig: {
+    maxRetries: 3,
+    baseDelayMs: 1000,
+    maxDelayMs: 30000,
+    retryableStatusCodes: [429, 500, 502, 503, 504],
+    retryableErrors: ['ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'ECONNREFUSED'],
+  },
+
+  /** Timeout configuration */
+  timeoutConfig: {
+    connectTimeoutMs: 10000,
+    requestTimeoutMs: 30000,
+    uploadTimeoutMs: 60000,
+  },
+
+  /** Health check endpoint — Notion users/me */
+  healthCheck: {
+    endpoint: '/users/me',
+    method: 'GET',
+    expectedStatus: 200,
+  },
+
+  /** Webhook security — Notion uses signed webhooks */
+  webhookSecurity: {
+    signatureHeader: 'x-notion-signature',
+    signatureAlgorithm: 'hmac-sha256',
+    signatureFormat: 'hex',
+    timestampHeader: 'x-notion-timestamp',
+    timestampToleranceSeconds: 300,
+  },
+
+  /** Required scopes — Notion uses integration capabilities */
+  requiredScopes: [
+    'read:user',
+    'read:page',
+    'write:page',
+    'read:database',
+    'write:database',
+  ],
+
+  /** Sandbox/test endpoints — Notion doesn't have a separate sandbox */
+  sandboxEndpoints: {
+    baseUrl: 'https://api.notion.com/v1',
+  },
+
+  // ══════════════════════════════════════════════════════════════════════════
 
   configSchema: [
     {

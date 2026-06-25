@@ -2,6 +2,8 @@
  * ╔═══════════════════════════════════════════════════════════════════════════╗
  * ║                      GOOGLE SHEETS CONNECTOR                              ║
  * ║        Read, write, and manage data in Google Sheets                      ║
+ * ║  Production-hardened: 100/sec user rate limit, retries, health          ║
+ * ║  checks, webhook security, sandbox mode                                  ║
  * ╚═══════════════════════════════════════════════════════════════════════════╝
  */
 
@@ -26,11 +28,72 @@ export const GoogleSheetsConnector: ExternalConnectorDefinition = {
   defaultHeaders: {
     'Content-Type': 'application/json',
   },
+
+  // ── Legacy rate limit (backward compatibility) ──────────────────────────
   rateLimit: {
     requestsPerWindow: 300,
     windowSeconds: 60,
     burstLimit: 60,
   },
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // PRODUCTION HARDENING
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /** Rate limiting — Google Sheets: 100/sec per user, 500/sec per project */
+  rateLimitHardened: {
+    requestsPerSecond: 100,
+    requestsPerMinute: 6000,
+    requestsPerHour: 360000,
+    burstAllowance: 60,
+  },
+
+  /** Retry configuration with exponential backoff + jitter */
+  retryConfig: {
+    maxRetries: 3,
+    baseDelayMs: 500,
+    maxDelayMs: 30000,
+    retryableStatusCodes: [429, 500, 502, 503, 504],
+    retryableErrors: ['ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'ECONNREFUSED'],
+  },
+
+  /** Timeout configuration */
+  timeoutConfig: {
+    connectTimeoutMs: 10000,
+    requestTimeoutMs: 30000,
+    uploadTimeoutMs: 120000,
+  },
+
+  /** Health check endpoint */
+  healthCheck: {
+    endpoint: '/spreadsheets',
+    method: 'GET',
+    expectedStatus: 200,
+  },
+
+  /** Webhook security — Google uses push notifications via Cloud Pub/Sub */
+  webhookSecurity: {
+    signatureHeader: 'x-goog-signature',
+    signatureAlgorithm: 'hmac-sha256',
+    signatureFormat: 'hex',
+    timestampHeader: 'x-goog-timestamp',
+    timestampToleranceSeconds: 600,
+  },
+
+  /** Required OAuth scopes */
+  requiredScopes: [
+    'https://www.googleapis.com/auth/spreadsheets',
+    'https://www.googleapis.com/auth/drive.file',
+    'https://www.googleapis.com/auth/drive.readonly',
+  ],
+
+  /** Sandbox/test endpoints — Google doesn't have a separate sandbox */
+  sandboxEndpoints: {
+    baseUrl: 'https://sheets.googleapis.com/v4',
+    authUrl: 'https://oauth2.googleapis.com/token',
+  },
+
+  // ══════════════════════════════════════════════════════════════════════════
 
   configSchema: [
     {
