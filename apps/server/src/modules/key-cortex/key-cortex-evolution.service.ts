@@ -1,8 +1,12 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { RedisService } from '../../core/redis/redis.service';
 import { ModelGatewayService } from '../ai/model-gateway.service';
 import { AiUsageService } from '../ai/ai-usage.service';
+
+// ── Genome Integration Layer v3 (optional — services may not exist yet) ──
+import { KeyCortexGenomeBridgeService } from './key-cortex-genome-bridge.service';
+import { KeyCortexEventService } from './key-cortex-event.service';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -82,6 +86,53 @@ export interface DecisionExplanation {
   alternativeRecommendations: string[];
 }
 
+// ── v3 Types: Genome-Evolution Unified Report ──
+
+export interface GenomeDnaChange {
+  section: string;
+  metric: string;
+  previousValue: number;
+  currentValue: number;
+  changePercent: number;
+  influencedBy: string;
+  timestamp: Date;
+}
+
+export interface RecommendationOutcome {
+  recommendationId: string;
+  title: string;
+  category: string;
+  timesSuggested: number;
+  timesAccepted: number;
+  timesRejected: number;
+  acceptanceRate: number;
+  genomeCorrelation: number;
+}
+
+export interface UnifiedReport {
+  businessId: string;
+  generatedAt: Date;
+  period: { start: Date; end: Date };
+  keyPreferences: {
+    responseLength: string;
+    preferredTone: string;
+    acceptanceRate: number;
+    totalInteractions: number;
+    activeRecommendationTypes: string[];
+  };
+  genomeDnaChanges: GenomeDnaChange[];
+  recommendationOutcomes: RecommendationOutcome[];
+  patternDetections: DetectedPattern[];
+  keyHighlights: string[];
+  narrative: string;
+  syncStatus: {
+    lastSyncAt: Date | null;
+    genomeConnected: boolean;
+    dnaSectionsSynced: number;
+    signalsCreated: number;
+  };
+}
+
 // ---------------------------------------------------------------------------
 // KeyCortexEvolutionService
 // ---------------------------------------------------------------------------
@@ -93,12 +144,22 @@ export interface DecisionExplanation {
  * - Track every KEY interaction (queries, recommendations, outcomes)
  * - Learn user preferences from interaction history
  * - Detect business patterns using AI-driven time-series analysis
- * - Self-tune KEY's behavior based on learned insights
+ * - Self-tune KEY's behaviour based on learned insights
  * - Generate weekly learning reports
  * - Explain individual recommendation decisions
  *
+ * v3 GENOME-EVOLUTION MERGE:
+ * - Sync KEY's learned preferences with genome DNA
+ * - Report detected patterns to genome as signals
+ * - Influence genome DNA based on KEY's observations
+ * - Adapt KEY's behavior based on genome DNA scores
+ * - Generate unified KEY+Genome learning reports
+ * - Bidirectional learning loop between KEY and genome
+ *
  * This is the "neuroplasticity" layer of KEY — it ensures the system
  * gets smarter, more personalised, and more accurate over time.
+ * v3 makes it genome-aware, so KEY's learning feeds genome evolution
+ * and genome evolution feeds KEY's adaptation.
  */
 @Injectable()
 export class KeyCortexEvolutionService {
@@ -109,10 +170,18 @@ export class KeyCortexEvolutionService {
     private readonly redis: RedisService,
     private readonly gateway: ModelGatewayService,
     private readonly aiUsage: AiUsageService,
+
+    // ── v3 Genome Integration Layer (optional — graceful degradation) ──
+    @Optional()
+    @Inject(KeyCortexGenomeBridgeService)
+    private readonly genomeBridgeService?: KeyCortexGenomeBridgeService,
+    @Optional()
+    @Inject(KeyCortexEventService)
+    private readonly eventService?: KeyCortexEventService,
   ) {}
 
   // ========================================================================
-  // 1. Interaction Tracking
+  // 1. Interaction Tracking (preserved)
   // ========================================================================
 
   /**
@@ -187,7 +256,7 @@ export class KeyCortexEvolutionService {
   }
 
   // ========================================================================
-  // 2. Preference Learning
+  // 2. Preference Learning (preserved)
   // ========================================================================
 
   /**
@@ -338,7 +407,7 @@ export class KeyCortexEvolutionService {
   }
 
   // ========================================================================
-  // 3. Pattern Detection
+  // 3. Pattern Detection (preserved)
   // ========================================================================
 
   /**
@@ -436,7 +505,7 @@ Respond ONLY with a JSON array of patterns in this exact shape:
   }
 
   // ========================================================================
-  // 4. Self-Tuning
+  // 4. Self-Tuning (preserved)
   // ========================================================================
 
   /**
@@ -559,7 +628,7 @@ Respond ONLY with a JSON object in this exact shape:
   }
 
   // ========================================================================
-  // 5. Learning Report Generation
+  // 5. Learning Report Generation (preserved)
   // ========================================================================
 
   /**
@@ -729,7 +798,7 @@ Write 3-4 engaging paragraphs as if KEY is speaking directly to the business own
   }
 
   // ========================================================================
-  // 6. Decision Explanation
+  // 6. Decision Explanation (preserved)
   // ========================================================================
 
   /**
@@ -844,7 +913,906 @@ ${relevantPatterns.map((p) => `- ${p.description} (${p.type}, confidence: ${Math
   }
 
   // ========================================================================
-  // Private Helpers
+  // 7. v3 NEW METHODS — Genome-Evolution Integration
+  // ========================================================================
+
+  /**
+   * Sync KEY's learned preferences and observations with the genome DNA system.
+   *
+   * Bidirectional sync:
+   * 1. Push KEY's learned preferences to genome DNA (recommendation acceptance patterns)
+   * 2. Pull genome DNA scores to influence KEY's recommendation weighting
+   * 3. Create genome signals for significant patterns KEY detected
+   * 4. Feed interaction outcomes to genome outcome learning
+   *
+   * @param businessId  The business ID to sync
+   */
+  async syncWithGenome(businessId: string): Promise<void> {
+    if (!this.genomeBridgeService) {
+      this.logger.warn(
+        `[syncWithGenome] business=${businessId}: Genome bridge not available — skipping sync`,
+      );
+      return;
+    }
+
+    this.logger.log(`[syncWithGenome] Starting genome sync for business=${businessId}`);
+    const syncStart = Date.now();
+
+    try {
+      // 1. Get KEY's latest preference profiles for all users
+      const since = new Date();
+      since.setDate(since.getDate() - 30);
+
+      const interactions = await this.prisma.client.keyEvolutionLog.findMany({
+        where: {
+          businessId,
+          createdAt: { gte: since },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 500,
+      });
+
+      // Compute aggregate acceptance rate by recommendation type
+      const typeStats: Record<
+        string,
+        { accepted: number; rejected: number; ignored: number }
+      > = {};
+      for (const interaction of interactions) {
+        const type = interaction.recommendationType;
+        if (!typeStats[type]) {
+          typeStats[type] = { accepted: 0, rejected: 0, ignored: 0 };
+        }
+        typeStats[type][
+          interaction.userAction as 'accepted' | 'rejected' | 'ignored'
+        ]++;
+      }
+
+      // Push to genome: update DNA scoring based on acceptance patterns
+      for (const [recType, stats] of Object.entries(typeStats)) {
+        const totalWithAction = stats.accepted + stats.rejected;
+        if (totalWithAction > 5) {
+          const acceptanceRate =
+            totalWithAction > 0 ? stats.accepted / totalWithAction : 0;
+
+          // Map recommendation types to DNA sections
+          const dnaSection = this.mapRecommendationTypeToDnaSection(recType);
+
+          // Update genome DNA via bridge
+          await this.genomeBridgeService.updateDnaScore(
+            businessId,
+            dnaSection,
+            recType,
+            Math.round(acceptanceRate * 100),
+            `KEY observed ${Math.round(acceptanceRate * 100)}% acceptance rate for ${recType} recommendations over ${totalWithAction} interactions`,
+          );
+
+          this.logger.debug(
+            `[syncWithGenome] Updated genome DNA: section=${dnaSection}, metric=${recType}, score=${Math.round(acceptanceRate * 100)}`,
+          );
+        }
+      }
+
+      // 2. Pull genome DNA to update KEY's internal scoring weights
+      const genomeIntelligence =
+        await this.genomeBridgeService.getGenomeIntelligence(businessId);
+
+      // Store genome DNA scores in Redis for the reasoning service to use
+      await this.redis.setJson(
+        `evolution:genome:dna:${businessId}`,
+        {
+          dnaScores: genomeIntelligence.dnaScores,
+          genomeStage: genomeIntelligence.genomeStage,
+          executiveReadiness: genomeIntelligence.executiveReadiness,
+          syncedAt: new Date().toISOString(),
+        },
+        3600,
+      );
+
+      // 3. Create genome signals for significant patterns
+      const patterns = await this.detectPatterns(businessId);
+      const significantPatterns = patterns.filter(
+        (p) => p.confidence > 0.75 && p.severity === 'high',
+      );
+
+      for (const pattern of significantPatterns) {
+        await this.genomeBridgeService.createSignal(
+          businessId,
+          {
+            type: pattern.type as 'urgent' | 'warning' | 'opportunity' | 'info',
+            message: pattern.description,
+            module: 'key_cortex',
+            severity: pattern.severity ?? 'medium',
+            source: 'pattern_detection',
+            metadata: {
+              patternId: pattern.id,
+              confidence: pattern.confidence,
+              dataPoints: pattern.dataPoints,
+              recommendation: pattern.recommendation,
+            },
+          },
+        );
+      }
+
+      // 4. Feed interaction outcomes to genome outcome learning
+      const outcomes = interactions
+        .filter((i) => i.outcome !== null && i.outcome !== undefined)
+        .map((i) => ({
+          actionId: i.recommendationType,
+          status: i.userAction === 'accepted' ? 'success' : i.userAction === 'rejected' ? 'failure' : 'skipped',
+          description: `Query: "${i.query.substring(0, 100)}" -> Recommendation: "${i.recommendation.substring(0, 100)}"`,
+          result: {
+            userAction: i.userAction,
+            outcome: i.outcome,
+            outcomeValue: i.outcomeValue,
+          },
+          timestamp: i.createdAt,
+        }));
+
+      for (const outcome of outcomes) {
+        await this.genomeBridgeService.reportActionOutcome(
+          businessId,
+          outcome,
+        );
+      }
+
+      const syncDuration = Date.now() - syncStart;
+
+      // Log the sync event
+      if (this.eventService) {
+        await this.eventService.logEvent({
+          correlationId: `sync_${Date.now()}`,
+          step: 'GENOME_SYNC_COMPLETE',
+          data: {
+            businessId,
+            dnaSectionsUpdated: Object.keys(typeStats).length,
+            signalsCreated: significantPatterns.length,
+            outcomesFed: outcomes.length,
+            syncDurationMs: syncDuration,
+          },
+          timestamp: new Date(),
+          service: 'KeyCortexEvolutionService',
+        });
+      }
+
+      this.logger.log(
+        `[syncWithGenome] Genome sync complete for business=${businessId}: ${Object.keys(typeStats).length} DNA sections updated, ${significantPatterns.length} signals created, ${outcomes.length} outcomes fed in ${syncDuration}ms`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `[syncWithGenome] Failed for business=${businessId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Report a detected pattern to the genome as a signal.
+   *
+   * Creates a genome signal for the pattern. If the pattern is significant
+   * (high confidence + high severity), also triggers a genome evolution
+   * proposal. Creates evidence and logs the event.
+   *
+   * @param businessId  The business ID
+   * @param pattern     The detected pattern to report
+   */
+  async reportPatternToGenome(
+    businessId: string,
+    pattern: DetectedPattern,
+  ): Promise<void> {
+    if (!this.genomeBridgeService) {
+      this.logger.warn(
+        `[reportPatternToGenome] Genome bridge not available — skipping pattern report`,
+      );
+      return;
+    }
+
+    this.logger.log(
+      `[reportPatternToGenome] Reporting pattern ${pattern.id} (${pattern.type}) to genome for business=${businessId}`,
+    );
+
+    try {
+      // 1. Create a genome signal for the pattern
+      const signal = await this.genomeBridgeService.createSignal(
+        businessId,
+        {
+          type: pattern.type as 'urgent' | 'warning' | 'opportunity' | 'info',
+          message: pattern.description,
+          module: 'key_cortex_patterns',
+          severity: pattern.severity ?? 'medium',
+          source: 'pattern_detection',
+          metadata: {
+            patternId: pattern.id,
+            confidence: pattern.confidence,
+            dataPoints: pattern.dataPoints,
+            timeRange: pattern.timeRange,
+            recommendation: pattern.recommendation,
+          },
+        },
+      );
+
+      this.logger.debug(
+        `[reportPatternToGenome] Created genome signal: ${signal.id}`,
+      );
+
+      // 2. If pattern is significant, trigger evolution proposal
+      if (pattern.confidence > 0.8 && pattern.severity === 'high') {
+        const proposal = await this.genomeBridgeService.createEvolutionProposal(
+          businessId,
+          {
+            title: `Pattern detected: ${pattern.description.substring(0, 80)}`,
+            description: `KEY's pattern detection engine identified a significant ${pattern.type} pattern with ${Math.round(pattern.confidence * 100)}% confidence. ${pattern.dataPoints} data points support this finding. Recommendation: ${pattern.recommendation}`,
+            source: 'key_cortex_pattern_detection',
+            impact: pattern.type === 'revenue' ? 'high' : pattern.type === 'anomaly' ? 'high' : 'medium',
+            evidenceIds: [signal.id],
+            confidence: pattern.confidence,
+          },
+        );
+
+        this.logger.log(
+          `[reportPatternToGenome] Triggered evolution proposal: ${proposal.id} for pattern ${pattern.id}`,
+        );
+      }
+
+      // 3. Create evidence
+      await this.genomeBridgeService.createEvidence(
+        businessId,
+        {
+          type: 'pattern_detection',
+          description: `KEY detected ${pattern.type} pattern: ${pattern.description}`,
+          source: 'key_cortex',
+          metadata: {
+            patternId: pattern.id,
+            confidence: pattern.confidence,
+            severity: pattern.severity,
+            recommendation: pattern.recommendation,
+          },
+        },
+      );
+
+      // 4. Log event
+      if (this.eventService) {
+        await this.eventService.logEvent({
+          correlationId: `pattern_${pattern.id}`,
+          step: 'PATTERN_REPORTED_TO_GENOME',
+          data: {
+            businessId,
+            patternId: pattern.id,
+            patternType: pattern.type,
+            confidence: pattern.confidence,
+            severity: pattern.severity,
+            signalId: signal.id,
+          },
+          timestamp: new Date(),
+          service: 'KeyCortexEvolutionService',
+        });
+      }
+    } catch (error) {
+      this.logger.error(
+        `[reportPatternToGenome] Failed for pattern ${pattern.id}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Generate a unified learning report that combines KEY's learning
+   * with the genome's evolution report.
+   *
+   * Shows how KEY's learning influenced genome DNA and vice versa.
+   *
+   * @param businessId  The business ID
+   * @returns           Unified KEY + Genome learning report
+   */
+  async getGenomeLearningReport(businessId: string): Promise<UnifiedReport> {
+    if (!this.genomeBridgeService) {
+      this.logger.warn(
+        `[getGenomeLearningReport] Genome bridge not available — returning KEY-only report`,
+      );
+
+      // Return a minimal report without genome data
+      const keyReport = await this.generateLearningReport(businessId);
+
+      return {
+        businessId,
+        generatedAt: new Date(),
+        period: { start: new Date(keyReport.weekOf), end: new Date() },
+        keyPreferences: {
+          responseLength: keyReport.stats.totalInteractions > 0 ? 'medium' : 'unknown',
+          preferredTone: 'professional',
+          acceptanceRate: keyReport.stats.recommendationAcceptanceRate,
+          totalInteractions: keyReport.stats.totalInteractions,
+          activeRecommendationTypes: [],
+        },
+        genomeDnaChanges: [],
+        recommendationOutcomes: [],
+        patternDetections: keyReport.patterns,
+        keyHighlights: keyReport.highlights,
+        narrative: `${keyReport.narrative}\n\n(Genome integration is not currently active — this report shows KEY's learning only.)`,
+        syncStatus: {
+          lastSyncAt: null,
+          genomeConnected: false,
+          dnaSectionsSynced: 0,
+          signalsCreated: 0,
+        },
+      };
+    }
+
+    this.logger.log(
+      `[getGenomeLearningReport] Generating unified report for business=${businessId}`,
+    );
+
+    try {
+      // 1. Get KEY's learning report
+      const keyReport = await this.generateLearningReport(businessId);
+
+      // 2. Get genome intelligence
+      const genomeIntelligence =
+        await this.genomeBridgeService.getGenomeIntelligence(businessId);
+
+      // 3. Get genome evolution history
+      const genomeHistory =
+        await this.genomeBridgeService.getEvolutionHistory(businessId);
+
+      // 4. Build genome DNA changes list
+      const dnaChanges: GenomeDnaChange[] = [];
+      if (genomeHistory?.changes) {
+        for (const change of genomeHistory.changes) {
+          dnaChanges.push({
+            section: change.section ?? 'unknown',
+            metric: change.metric ?? 'unknown',
+            previousValue: change.previousValue ?? 0,
+            currentValue: change.currentValue ?? 0,
+            changePercent: change.previousValue
+              ? ((change.currentValue - change.previousValue) /
+                  change.previousValue) *
+                100
+              : 0,
+            influencedBy: change.source ?? 'unknown',
+            timestamp: change.timestamp
+              ? new Date(change.timestamp)
+              : new Date(),
+          });
+        }
+      }
+
+      // 5. Build recommendation outcomes
+      const since = new Date();
+      since.setDate(since.getDate() - 30);
+
+      const interactions = await this.prisma.client.keyEvolutionLog.findMany({
+        where: {
+          businessId,
+          createdAt: { gte: since },
+        },
+      });
+
+      const recTypeStats: Record<
+        string,
+        { suggested: number; accepted: number; rejected: number }
+      > = {};
+      for (const interaction of interactions) {
+        const type = interaction.recommendationType;
+        if (!recTypeStats[type]) {
+          recTypeStats[type] = { suggested: 0, accepted: 0, rejected: 0 };
+        }
+        recTypeStats[type].suggested++;
+        if (interaction.userAction === 'accepted') {
+          recTypeStats[type].accepted++;
+        } else if (interaction.userAction === 'rejected') {
+          recTypeStats[type].rejected++;
+        }
+      }
+
+      const recommendationOutcomes: RecommendationOutcome[] = Object.entries(
+        recTypeStats,
+      ).map(([type, stats]) => ({
+        recommendationId: type,
+        title: type,
+        category: this.mapRecommendationTypeToDnaSection(type),
+        timesSuggested: stats.suggested,
+        timesAccepted: stats.accepted,
+        timesRejected: stats.rejected,
+        acceptanceRate:
+          stats.suggested > 0 ? stats.accepted / stats.suggested : 0,
+        genomeCorrelation: genomeIntelligence.dnaScores[
+          this.mapRecommendationTypeToDnaSection(type)
+        ] ?? 0,
+      }));
+
+      // 6. Get sync status
+      const lastSync = await this.redis.getJson<{
+        syncedAt: string;
+        dnaSectionsUpdated: number;
+        signalsCreated: number;
+      }>(`evolution:genome:lastSync:${businessId}`);
+
+      // 7. Build highlights
+      const highlights: string[] = [...keyReport.highlights];
+
+      if (dnaChanges.length > 0) {
+        const recentChanges = dnaChanges.filter(
+          (c) => c.timestamp > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
+        );
+        if (recentChanges.length > 0) {
+          highlights.push(
+            `${recentChanges.length} genome DNA changes in the last 7 days`,
+          );
+        }
+      }
+
+      if (genomeIntelligence.signals?.length > 0) {
+        highlights.push(
+          `${genomeIntelligence.signals.length} active genome signals`,
+        );
+      }
+
+      // 8. Generate unified narrative
+      const narrativePrompt = `You are KEY, an AI business partner. Write a unified learning report that combines KEY's learning with genome evolution insights.
+
+KEY's stats:
+- ${keyReport.stats.totalInteractions} interactions this week
+- ${Math.round(keyReport.stats.recommendationAcceptanceRate * 100)}% recommendation acceptance rate
+- ${keyReport.patterns.length} patterns detected
+- ${keyReport.stats.adjustmentsMade} self-tuning adjustments
+
+Genome insights:
+- Genome stage: ${genomeIntelligence.genomeStage ?? 'unknown'}
+- Executive readiness: ${genomeIntelligence.executiveReadiness ?? 'N/A'}%
+- DNA sections tracked: ${Object.keys(genomeIntelligence.dnaScores ?? {}).length}
+- Active signals: ${genomeIntelligence.signals?.length ?? 0}
+- Recent DNA changes: ${dnaChanges.filter((c) => c.timestamp > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)).length}
+
+Write 4-5 engaging paragraphs as KEY speaking directly to the business owner. Cover:
+1. What KEY learned this week
+2. How genome DNA evolved based on KEY's observations
+3. What patterns were detected and shared with genome
+4. Concrete improvements made
+5. What to expect next
+
+Be warm, specific, and insightful.`;
+
+      const narrativeResponse = await this.gateway.complete({
+        businessId,
+        taskCategory: 'content-generation',
+        messages: [
+          {
+            role: 'system',
+            content:
+              'You are KEY, an AI business partner. Write a warm, engaging unified learning report in first person. Be specific about how KEY and the genome learned together.',
+          },
+          { role: 'user', content: narrativePrompt },
+        ],
+        maxTokens: 1200,
+        temperature: 0.7,
+      });
+
+      const narrative =
+        narrativeResponse.content?.trim() ??
+        `${keyReport.narrative}\n\nGenome DNA is being actively tracked with ${Object.keys(genomeIntelligence.dnaScores ?? {}).length} sections. ${dnaChanges.length} DNA changes recorded to date.`;
+
+      const report: UnifiedReport = {
+        businessId,
+        generatedAt: new Date(),
+        period: { start: new Date(keyReport.weekOf), end: new Date() },
+        keyPreferences: {
+          responseLength: 'medium',
+          preferredTone: 'professional',
+          acceptanceRate: keyReport.stats.recommendationAcceptanceRate,
+          totalInteractions: keyReport.stats.totalInteractions,
+          activeRecommendationTypes: Object.keys(recTypeStats).slice(0, 5),
+        },
+        genomeDnaChanges: dnaChanges,
+        recommendationOutcomes,
+        patternDetections: keyReport.patterns,
+        keyHighlights: highlights,
+        narrative,
+        syncStatus: {
+          lastSyncAt: lastSync ? new Date(lastSync.syncedAt) : null,
+          genomeConnected: true,
+          dnaSectionsSynced: Object.keys(recTypeStats).length,
+          signalsCreated: genomeIntelligence.signals?.length ?? 0,
+        },
+      };
+
+      this.logger.log(
+        `[getGenomeLearningReport] Unified report generated for business=${businessId}: ${report.keyHighlights.length} highlights, ${report.genomeDnaChanges.length} DNA changes`,
+      );
+
+      return report;
+    } catch (error) {
+      this.logger.error(
+        `[getGenomeLearningReport] Failed for business=${businessId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+
+      // Return a minimal fallback report
+      const keyReport = await this.generateLearningReport(businessId);
+      return {
+        businessId,
+        generatedAt: new Date(),
+        period: { start: new Date(keyReport.weekOf), end: new Date() },
+        keyPreferences: {
+          responseLength: 'medium',
+          preferredTone: 'professional',
+          acceptanceRate: keyReport.stats.recommendationAcceptanceRate,
+          totalInteractions: keyReport.stats.totalInteractions,
+          activeRecommendationTypes: [],
+        },
+        genomeDnaChanges: [],
+        recommendationOutcomes: [],
+        patternDetections: keyReport.patterns,
+        keyHighlights: keyReport.highlights,
+        narrative: `${keyReport.narrative}\n\n(Genome data temporarily unavailable — showing KEY's learning only.)`,
+        syncStatus: {
+          lastSyncAt: null,
+          genomeConnected: false,
+          dnaSectionsSynced: 0,
+          signalsCreated: 0,
+        },
+      };
+    }
+  }
+
+  /**
+   * Influence genome DNA by creating an evolution proposal based on
+   * KEY's observations and reasoning.
+   *
+   * KEY's track record determines the confidence of the proposal:
+   * - High acceptance rate → higher confidence
+   * - Many interactions → higher confidence
+   * - Recent patterns detected → contextual confidence
+   *
+   * @param businessId  The business ID
+   * @param section     The DNA section to influence (e.g., 'sales', 'operations', 'risk')
+   * @param adjustment  The proposed adjustment to the DNA scores
+   */
+  async influenceGenomeDna(
+    businessId: string,
+    section: string,
+    adjustment: Record<string, unknown>,
+  ): Promise<string> {
+    if (!this.genomeBridgeService) {
+      throw new Error(
+        'Genome bridge service is not available — cannot influence DNA',
+      );
+    }
+
+    this.logger.log(
+      `[influenceGenomeDna] Creating DNA influence proposal: business=${businessId}, section=${section}`,
+    );
+
+    try {
+      // Determine confidence based on KEY's track record
+      const since = new Date();
+      since.setDate(since.getDate() - 30);
+
+      const interactions = await this.prisma.client.keyEvolutionLog.findMany({
+        where: {
+          businessId,
+          createdAt: { gte: since },
+        },
+      });
+
+      const acceptedCount = interactions.filter(
+        (i) => i.userAction === 'accepted',
+      ).length;
+      const totalWithAction = interactions.filter(
+        (i) => i.userAction !== 'ignored',
+      ).length;
+      const acceptanceRate =
+        totalWithAction > 0 ? acceptedCount / totalWithAction : 0;
+
+      // Build confidence calculation
+      let confidence = 0.5;
+      if (acceptanceRate > 0.7) confidence += 0.2;
+      else if (acceptanceRate > 0.5) confidence += 0.1;
+
+      if (interactions.length > 100) confidence += 0.15;
+      else if (interactions.length > 50) confidence += 0.1;
+      else if (interactions.length > 20) confidence += 0.05;
+
+      confidence = Math.min(0.95, confidence);
+
+      // Build KEY's reasoning
+      const reasoning = `KEY observed ${interactions.length} interactions with ${Math.round(acceptanceRate * 100)}% acceptance rate over the last 30 days. Based on pattern detection and preference learning, KEY recommends adjusting ${section} DNA: ${JSON.stringify(adjustment)}. KEY's track record confidence: ${Math.round(confidence * 100)}%.`;
+
+      // Create genome evolution proposal
+      const proposal = await this.genomeBridgeService.createEvolutionProposal(
+        businessId,
+        {
+          title: `KEY recommends ${section} DNA adjustment`,
+          description: reasoning,
+          source: 'key_cortex_dna_influence',
+          impact: section === 'risk' ? 'high' : 'medium',
+          evidenceIds: [],
+          confidence,
+          metadata: {
+            proposedAdjustment: adjustment,
+            keyAcceptanceRate: acceptanceRate,
+            keyInteractionCount: interactions.length,
+            section,
+          },
+        },
+      );
+
+      // Create evidence for the proposal
+      await this.genomeBridgeService.createEvidence(
+        businessId,
+        {
+          type: 'dna_influence_proposal',
+          description: reasoning,
+          source: 'key_cortex',
+          metadata: {
+            proposalId: proposal.id,
+            section,
+            confidence,
+            adjustment,
+          },
+        },
+      );
+
+      // Log event
+      if (this.eventService) {
+        await this.eventService.logEvent({
+          correlationId: `dna_${proposal.id}`,
+          step: 'GENOME_DNA_INFLUENCE_PROPOSED',
+          data: {
+            businessId,
+            section,
+            proposalId: proposal.id,
+            confidence,
+            acceptanceRate,
+            interactionCount: interactions.length,
+          },
+          timestamp: new Date(),
+          service: 'KeyCortexEvolutionService',
+        });
+      }
+
+      this.logger.log(
+        `[influenceGenomeDna] Created DNA influence proposal: ${proposal.id} (confidence: ${Math.round(confidence * 100)}%)`,
+      );
+
+      return proposal.id;
+    } catch (error) {
+      this.logger.error(
+        `[influenceGenomeDna] Failed for business=${businessId}, section=${section}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Adapt KEY's behavior based on genome DNA scores.
+   *
+   * Reads genome DNA and adjusts KEY's recommendations:
+   * - If sales DNA is low → be more aggressive with sales suggestions
+   * - If operations DNA is high → focus on optimization
+   * - If risk DNA is high → be more cautious
+   * - If marketing DNA is low → suggest marketing improvements
+   * - If finance DNA is high → focus on financial efficiency
+   *
+   * @param businessId  The business ID to adapt for
+   */
+  async adaptFromGenome(businessId: string): Promise<void> {
+    if (!this.genomeBridgeService) {
+      this.logger.warn(
+        `[adaptFromGenome] Genome bridge not available — skipping adaptation`,
+      );
+      return;
+    }
+
+    this.logger.log(`[adaptFromGenome] Adapting KEY behavior for business=${businessId}`);
+
+    try {
+      // Get genome DNA scores
+      const genomeIntelligence =
+        await this.genomeBridgeService.getGenomeIntelligence(businessId);
+
+      const dnaScores = genomeIntelligence.dnaScores ?? {};
+      const adaptations: string[] = [];
+
+      // Define adaptation rules based on DNA thresholds
+      const adaptationsMade: Array<{
+        dnaSection: string;
+        score: number;
+        action: string;
+        reason: string;
+      }> = [];
+
+      // Sales DNA
+      if (dnaScores['sales'] !== undefined && dnaScores['sales'] < 40) {
+        const action = 'Increase sales suggestion frequency and urgency';
+        adaptations.push(action);
+        adaptationsMade.push({
+          dnaSection: 'sales',
+          score: dnaScores['sales'],
+          action,
+          reason: `Sales DNA is low (${dnaScores['sales']}%) — business needs more aggressive sales focus`,
+        });
+
+        // Store adaptation in Redis for reasoning service to pick up
+        await this.redis.setJson(
+          `evolution:adaptation:${businessId}:sales`,
+          {
+            active: true,
+            strategy: 'aggressive_sales',
+            priority: 'high',
+            dnaScore: dnaScores['sales'],
+            adaptedAt: new Date().toISOString(),
+          },
+          86400,
+        );
+      } else if (dnaScores['sales'] !== undefined && dnaScores['sales'] > 75) {
+        const action = 'Focus on sales optimization and automation';
+        adaptations.push(action);
+        adaptationsMade.push({
+          dnaSection: 'sales',
+          score: dnaScores['sales'],
+          action,
+          reason: `Sales DNA is high (${dnaScores['sales']}%) — business has strong sales, suggest optimizations`,
+        });
+
+        await this.redis.setJson(
+          `evolution:adaptation:${businessId}:sales`,
+          {
+            active: true,
+            strategy: 'optimization',
+            priority: 'medium',
+            dnaScore: dnaScores['sales'],
+            adaptedAt: new Date().toISOString(),
+          },
+          86400,
+        );
+      }
+
+      // Operations DNA
+      if (dnaScores['operations'] !== undefined && dnaScores['operations'] > 70) {
+        const action = 'Focus on operational efficiency and process optimization';
+        adaptations.push(action);
+        adaptationsMade.push({
+          dnaSection: 'operations',
+          score: dnaScores['operations'],
+          action,
+          reason: `Operations DNA is high (${dnaScores['operations']}%) — suggest operational improvements`,
+        });
+
+        await this.redis.setJson(
+          `evolution:adaptation:${businessId}:operations`,
+          {
+            active: true,
+            strategy: 'optimization',
+            priority: 'high',
+            dnaScore: dnaScores['operations'],
+            adaptedAt: new Date().toISOString(),
+          },
+          86400,
+        );
+      }
+
+      // Risk DNA
+      if (dnaScores['risk'] !== undefined && dnaScores['risk'] > 60) {
+        const action = 'Be more cautious with recommendations; emphasize risk mitigation';
+        adaptations.push(action);
+        adaptationsMade.push({
+          dnaSection: 'risk',
+          score: dnaScores['risk'],
+          action,
+          reason: `Risk DNA is high (${dnaScores['risk']}%) — business environment is risky, be cautious`,
+        });
+
+        await this.redis.setJson(
+          `evolution:adaptation:${businessId}:risk`,
+          {
+            active: true,
+            strategy: 'cautious',
+            priority: 'high',
+            dnaScore: dnaScores['risk'],
+            adaptedAt: new Date().toISOString(),
+          },
+          86400,
+        );
+      }
+
+      // Marketing DNA
+      if (dnaScores['marketing'] !== undefined && dnaScores['marketing'] < 35) {
+        const action = 'Suggest marketing improvements and lead generation tactics';
+        adaptations.push(action);
+        adaptationsMade.push({
+          dnaSection: 'marketing',
+          score: dnaScores['marketing'],
+          action,
+          reason: `Marketing DNA is low (${dnaScores['marketing']}%) — business needs marketing focus`,
+        });
+
+        await this.redis.setJson(
+          `evolution:adaptation:${businessId}:marketing`,
+          {
+            active: true,
+            strategy: 'aggressive_marketing',
+            priority: 'high',
+            dnaScore: dnaScores['marketing'],
+            adaptedAt: new Date().toISOString(),
+          },
+          86400,
+        );
+      }
+
+      // Finance DNA
+      if (dnaScores['finance'] !== undefined && dnaScores['finance'] > 70) {
+        const action = 'Focus on financial efficiency and cost optimization';
+        adaptations.push(action);
+        adaptationsMade.push({
+          dnaSection: 'finance',
+          score: dnaScores['finance'],
+          action,
+          reason: `Finance DNA is high (${dnaScores['finance']}%) — suggest financial optimizations`,
+        });
+
+        await this.redis.setJson(
+          `evolution:adaptation:${businessId}:finance`,
+          {
+            active: true,
+            strategy: 'financial_optimization',
+            priority: 'medium',
+            dnaScore: dnaScores['finance'],
+            adaptedAt: new Date().toISOString(),
+          },
+          86400,
+        );
+      }
+
+      // Log adaptations
+      for (const adaptation of adaptationsMade) {
+        this.logger.log(
+          `[adaptFromGenome] Adaptation: ${adaptation.dnaSection} (score=${adaptation.score}) → ${adaptation.action}`,
+        );
+      }
+
+      // Persist adaptations to Prisma
+      if (adaptationsMade.length > 0) {
+        await this.prisma.client.keyTuningLog.create({
+          data: {
+            businessId,
+            adjustments: JSON.stringify(
+              adaptationsMade.map((a) => ({
+                parameter: `genome_adaptation_${a.dnaSection}`,
+                oldValue: 'none',
+                newValue: a.strategy,
+                reason: a.reason,
+              })),
+            ),
+            summary: `Genome-aware adaptations: ${adaptationsMade.map((a) => a.dnaSection).join(', ')}`,
+          },
+        });
+      }
+
+      // Log event
+      if (this.eventService) {
+        await this.eventService.logEvent({
+          correlationId: `adapt_${Date.now()}`,
+          step: 'GENOME_ADAPTATION_COMPLETE',
+          data: {
+            businessId,
+            adaptationsMade: adaptationsMade.length,
+            dnaSections: adaptationsMade.map((a) => a.dnaSection),
+          },
+          timestamp: new Date(),
+          service: 'KeyCortexEvolutionService',
+        });
+      }
+
+      this.logger.log(
+        `[adaptFromGenome] KEY behavior adapted for business=${businessId}: ${adaptationsMade.length} adaptations based on genome DNA`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `[adaptFromGenome] Failed for business=${businessId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  // ========================================================================
+  // Private Helpers (preserved)
   // ========================================================================
 
   /**
@@ -954,6 +1922,45 @@ ${relevantPatterns.map((p) => `- ${p.description} (${p.type}, confidence: ${Math
         this.logger.warn(`Unknown tuning parameter: ${adj.parameter}`);
       }
     }
+  }
+
+  /**
+   * Map a recommendation type to a genome DNA section.
+   */
+  private mapRecommendationTypeToDnaSection(recommendationType: string): string {
+    const mapping: Record<string, string> = {
+      sales: 'sales',
+      revenue: 'sales',
+      marketing: 'marketing',
+      lead: 'marketing',
+      operational: 'operations',
+      operational_efficiency: 'operations',
+      financial: 'finance',
+      cost: 'finance',
+      risk: 'risk',
+      compliance: 'risk',
+      customer: 'customer_success',
+      support: 'customer_success',
+      product: 'product',
+      innovation: 'product',
+      talent: 'talent',
+      hiring: 'talent',
+      strategy: 'strategy',
+      growth: 'strategy',
+    };
+
+    // Try direct match first
+    const directMatch = mapping[recommendationType.toLowerCase()];
+    if (directMatch) return directMatch;
+
+    // Try partial match
+    for (const [key, value] of Object.entries(mapping)) {
+      if (recommendationType.toLowerCase().includes(key)) {
+        return value;
+      }
+    }
+
+    return 'general';
   }
 
   /**
