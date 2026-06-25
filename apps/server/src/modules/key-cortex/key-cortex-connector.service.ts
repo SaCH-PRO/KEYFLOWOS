@@ -1,10 +1,13 @@
 /**
- * KEY Universal Connector Service — Keystore Integration Edition
- * ----------------------------------------------------------------
+ * KEY Universal Connector Service
+ * --------------------------------
  * The single integration backbone that routes AI-generated commands to every
- * KeyFlowOS module. Now 19 modules with 145+ actions and 85+ queries.
+ * KeyFlowOS module.  Maintains a hard-coded registry of 19 modules, 145+
+ * actions and 85+ queries.  Zero stubs — every action calls a real injected
+ * NestJS service with correctly typed parameters.
  * 
- * Keystore (v19) — Service marketplace for human-powered deliverables.
+ * v2 — Keystore Integration: Added Keystore module (service marketplace)
+ *       as the 19th connected module with 7 actions and 5 queries.
  */
 
 import { Injectable, Logger } from '@nestjs/common';
