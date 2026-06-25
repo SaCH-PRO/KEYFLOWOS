@@ -44,6 +44,8 @@ import { KeyCortexConnectorService } from './key-cortex-connector.service';
 const EXECUTION_TIMEOUT_MS = 30000;
 const BATCH_STOP_ON_FAILURE = true;
 const MAX_BATCH_SIZE = 50;
+const APPROVAL_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const APPROVAL_CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 
 // ─── Types ──────────────────────────────────────────────────────────────────────
 export interface ExecuteOptions {
@@ -121,12 +123,36 @@ export class KeyCortexExecutorService {
 
   // In-memory approval request cache (short-lived; persisted in DB)
   private pendingApprovals = new Map<string, ApprovalRequest>();
+  private approvalCleanupInterval?: NodeJS.Timeout;
 
   constructor(
     private readonly connector: KeyCortexConnectorService,
     private readonly prisma: PrismaService,
     private readonly eventEmitter: EventEmitter2,
-  ) {}
+  ) {
+    // Start periodic cleanup of stale pending approvals (Fix 2)
+    this.approvalCleanupInterval = setInterval(() => {
+      this.cleanupStaleApprovals();
+    }, APPROVAL_CLEANUP_INTERVAL_MS);
+  }
+
+  /**
+   * Cleanup stale pending approvals to prevent memory leak (Fix 2).
+   * Removes entries older than APPROVAL_TTL_MS.
+   */
+  private cleanupStaleApprovals(): void {
+    const cutoff = Date.now() - APPROVAL_TTL_MS;
+    let cleaned = 0;
+    for (const [id, req] of this.pendingApprovals.entries()) {
+      if (req.requestedAt.getTime() < cutoff) {
+        this.pendingApprovals.delete(id);
+        cleaned++;
+      }
+    }
+    if (cleaned > 0) {
+      this.logger.debug(`[cleanupStaleApprovals] Removed ${cleaned} stale approval(s)`);
+    }
+  }
 
   // ════════════════════════════════════════════════════════════════════════════
   // SECTION 3 — execute()
@@ -460,6 +486,11 @@ export class KeyCortexExecutorService {
     // Cache in memory for quick lookups
     this.pendingApprovals.set(approvalId, request);
 
+    // Auto-clear after TTL to prevent memory leak (Fix 2)
+    setTimeout(() => {
+      this.pendingApprovals.delete(approvalId);
+    }, APPROVAL_TTL_MS);
+
     // Emit notification event (non-blocking)
     this.eventEmitter.emit('key.cortex.approval.required', {
       approvalId,
@@ -772,20 +803,25 @@ export class KeyCortexExecutorService {
 
   /**
    * Execute a connector command with a hard timeout.
+   * Clears the timeout after race resolves to prevent memory leak (Fix 4).
    */
   private async executeWithTimeout(
     command: ConnectorCommand,
     timeoutMs: number,
   ): Promise<ConnectorResult> {
+    let timeout: NodeJS.Timeout;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeout = setTimeout(
+        () => reject(new Error(`Execution timed out after ${timeoutMs}ms`)),
+        timeoutMs,
+      );
+    });
     return Promise.race([
       this.connector.execute(command),
-      new Promise<never>((_, reject) =>
-        setTimeout(
-          () => reject(new Error(`Execution timed out after ${timeoutMs}ms`)),
-          timeoutMs,
-        ),
-      ),
-    ]);
+      timeoutPromise,
+    ]).finally(() => {
+      clearTimeout(timeout);
+    }) as Promise<ConnectorResult>;
   }
 
   /**
