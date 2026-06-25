@@ -29,7 +29,7 @@
  *   Added KeyCortexGateway (socket.io namespace /key-cortex) for live
  *   bidirectional streaming: chat, approvals, alerts, insights, health
  *   updates, and proactive suggestions. KeyCortexRealtimeService bridges
- *   domain events → WebSocket pushes via @nestjs/event-emitter.
+ *   domain events -> WebSocket pushes via @nestjs/event-emitter.
  */
 
 import { Module, forwardRef } from '@nestjs/common';
@@ -91,6 +91,7 @@ import { BusinessGenomeModule } from '../business-genome/business-genome.module'
 import { BlueprintModule } from '../blueprint/blueprint.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { ProjectsModule } from '../projects/projects.module';
+import { KeystoreModule } from '../keystore/keystore.module';
 
 @Module({
   imports: [
@@ -126,6 +127,11 @@ import { ProjectsModule } from '../projects/projects.module';
     forwardRef(() => BusinessGenomeModule),
     forwardRef(() => NotificationsModule),
     forwardRef(() => ProjectsModule),
+
+    // -- KeyStore Service Marketplace --
+    // Enables KEY Cortex to manage service orders, browse listings, and
+    // track deliverable requests through the Keystore module.
+    forwardRef(() => KeystoreModule),
   ],
 
   controllers: [
@@ -188,7 +194,7 @@ import { ProjectsModule } from '../projects/projects.module';
     // Phone Agent -- voice calls, scripts, transcripts & analysis
     KeyCortexPhoneService,
 
-    // Document Intelligence -- RAG, extraction, comparison & Q&A
+    // Document Intelligence -- RAG & extraction, comparison & Q&A
     KeyCortexDocumentService,
 
     // -- v4: Genome Deep Integration Bridge --
