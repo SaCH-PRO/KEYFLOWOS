@@ -21,7 +21,7 @@ import {
 import { CrmService } from '../crm/crm.service';
 import { CommerceService } from '../commerce/commerce.service';
 import { BookingsService } from '../bookings/bookings.service';
-import { ContentService } from '../content/content.service';
+import { ContentService } from './stubs/content.stub';
 import { CommunicationsService } from '../communications/communications.service';
 import { FlowService } from '../flow/flow.service';
 import { AutopilotService } from '../autopilot/autopilot.service';
@@ -29,7 +29,7 @@ import { TemporalFlowMemoryService } from '../temporal-flow/temporal-flow-memory
 import { KeyInboxService } from '../key-inbox/key-inbox.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ProjectsService } from '../projects/projects.service';
-import { ActivityService } from '../activity/activity.service';
+import { ActivityService } from './stubs/activity.stub';
 
 @Injectable()
 export class KeyCortexConnectorService {

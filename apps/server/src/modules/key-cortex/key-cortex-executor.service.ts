@@ -28,7 +28,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { v4 as uuidv4 } from 'uuid';
 
 // ─── Prisma ───────────────────────────────────────────────────────────────────
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService } from '../../core/prisma/prisma.service';
 
 // ─── Connector ──────────────────────────────────────────────────────────────────
 import {
@@ -40,10 +40,26 @@ import {
 } from './key-cortex-connector.types';
 import { KeyCortexConnectorService } from './key-cortex-connector.service';
 
+// ─── Genome Governance ──────────────────────────────────────────────────────────
+import { GenomeAutonomyGateService } from '../business-genome/key-genome/genome-autonomy-gate.service';
+
 // ─── Constants ──────────────────────────────────────────────────────────────────
 const EXECUTION_TIMEOUT_MS = 30000;
 const BATCH_STOP_ON_FAILURE = true;
 const MAX_BATCH_SIZE = 50;
+
+// Safety blocklist: actions that are too dangerous to expose through the AI
+// command surface until they are hardened with allowlists, read-only scopes,
+// and tenant isolation. See docs/key-cortex-safety.md.
+const BLOCKED_ACTIONS = new Set([
+  'EXECUTE_TOOL',
+  'QUERY_DATABASE',
+  'UPDATE_RECORD',
+]);
+
+function isBlockedCommand(command: ConnectorCommand): boolean {
+  return BLOCKED_ACTIONS.has(command.action);
+}
 
 // ─── Types ──────────────────────────────────────────────────────────────────────
 export interface ExecuteOptions {
@@ -126,6 +142,7 @@ export class KeyCortexExecutorService {
     private readonly connector: KeyCortexConnectorService,
     private readonly prisma: PrismaService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly autonomyGate: GenomeAutonomyGateService,
   ) {}
 
   // ════════════════════════════════════════════════════════════════════════════
@@ -152,6 +169,86 @@ export class KeyCortexExecutorService {
     this.logger.log(
       `[execute] ${command.module}.${command.action} trace=${traceId} biz=${command.businessId}`,
     );
+
+    // ── Safety gate: block high-risk actions ─────────────────────────────────
+    if (isBlockedCommand(command)) {
+      const reason = `Action "${command.action}" is disabled in this build for safety review.`;
+      this.logger.warn(`[execute] Blocked ${command.module}.${command.action}: ${reason}`);
+      return {
+        id: uuidv4(),
+        command,
+        result: {
+          success: false,
+          error: reason,
+          executionTimeMs: 0,
+          command,
+        },
+        startedAt,
+        finishedAt: new Date(),
+        durationMs: 0,
+        traceId,
+        rolledBack: false,
+      };
+    }
+
+    // ── Genome Autonomy Gate: high-impact commands must pass governance ────────
+    try {
+      const gate = await this.autonomyGate.checkGate({
+        businessId: command.businessId,
+        actionType: `${command.module}.${command.action}`,
+        affectedDomains: command.module ? [command.module as any] : undefined,
+        payload: command.parameters,
+        proposedBy: command.userId ?? null,
+      });
+
+      if (gate.decision === 'BLOCK') {
+        const reason =
+          gate.blockingReasons?.join('; ') ||
+          'Blocked by KEY Genome autonomy gate.';
+        this.logger.warn(`[execute] Autonomy gate BLOCKED ${command.module}.${command.action}: ${reason}`);
+        return {
+          id: uuidv4(),
+          command,
+          result: {
+            success: false,
+            error: reason,
+            executionTimeMs: 0,
+            command,
+          },
+          startedAt,
+          finishedAt: new Date(),
+          durationMs: 0,
+          traceId,
+          rolledBack: false,
+        };
+      }
+
+      // If the gate says the action needs explicit approval, force it.
+      if (gate.decision === 'APPROVE' && options.skipApproval) {
+        options = { ...options, skipApproval: false };
+      }
+    } catch (gateErr) {
+      // If the gate fails (e.g. missing genome data), log but do not silently
+      // allow high-impact actions. Treat as BLOCK in production.
+      this.logger.error(
+        `[execute] Autonomy gate error for ${command.module}.${command.action}: ${(gateErr as Error).message}`,
+      );
+      return {
+        id: uuidv4(),
+        command,
+        result: {
+          success: false,
+          error: 'Autonomy gate unavailable; execution blocked for safety.',
+          executionTimeMs: 0,
+          command,
+        },
+        startedAt,
+        finishedAt: new Date(),
+        durationMs: 0,
+        traceId,
+        rolledBack: false,
+      };
+    }
 
     // ── Emit START event ─────────────────────────────────────────────────────
     if (options.emitEvents !== false) {
@@ -322,6 +419,15 @@ export class KeyCortexExecutorService {
     this.logger.log(
       `[executeBatch] Starting batch of ${commands.length} commands trace=${traceId}`,
     );
+
+    // Safety gate: reject batches containing blocked high-risk actions
+    const blocked = commands.filter(isBlockedCommand);
+    if (blocked.length > 0) {
+      const names = blocked.map((c) => `${c.module}.${c.action}`).join(', ');
+      throw new InternalServerErrorException(
+        `Batch contains blocked high-risk actions: ${names}`,
+      );
+    }
 
     // Emit batch started
     this.eventEmitter.emit('key.cortex.batch.started', {

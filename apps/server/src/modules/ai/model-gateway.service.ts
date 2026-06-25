@@ -1594,14 +1594,16 @@ export class ModelGatewayService {
 
     const toolUseBlocks = data.content?.filter(block => block.type === 'tool_use') ?? [];
     const toolCalls = toolUseBlocks.length > 0
-      ? toolUseBlocks.map(block => ({
-          id: block.id ?? `call_${Date.now()}`,
-          type: 'function' as const,
-          function: {
-            name: block.name ?? '',
-            arguments: JSON.stringify(block.input ?? {}),
-          },
-        ))
+      ? toolUseBlocks.map((block) => {
+          return {
+            id: block.id ?? `call_${Date.now()}`,
+            type: 'function',
+            'function': {
+              name: block.name ?? '',
+              'arguments': JSON.stringify(block.input ?? {}),
+            },
+          };
+        })
       : undefined;
 
     const promptTokens = data.usage?.input_tokens ?? 0;
