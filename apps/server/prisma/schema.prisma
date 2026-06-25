@@ -1,0 +1,326 @@
+// ============================================
+// KeyFlowOS Prisma Schema
+// ============================================
+
+// ============================================
+// OPERATING KERNEL — Unified Business Event System
+// ============================================
+
+model BusinessEvent {
+  id              String   @id @default(cuid())
+  businessId      String
+  type            BusinessEventType
+  module          String   // 'crm', 'commerce', 'key_cortex', etc.
+  source          String   // 'key_cortex', 'autopilot', 'user', 'delegation_loop'
+  action          String   // 'create_invoice', 'send_message', etc.
+  payload         Json     // Full event payload
+  genomeSignal    Boolean  @default(false)
+  genomeImpact    Float?   // -1 to +1 impact score
+  userId          String?
+  sessionId       String?  // KEY Cortex session ID
+  correlationId   String?  // For tracking multi-step workflows
+  parentEventId   String?  // For event hierarchies
+
+  // Temporal
+  createdAt       DateTime @default(now())
+
+  // Index for fast queries
+  @@index([businessId, type, createdAt])
+  @@index([businessId, module, createdAt])
+  @@index([businessId, source, createdAt])
+  @@index([businessId, genomeSignal, createdAt])
+  @@index([correlationId])
+  @@index([parentEventId])
+}
+
+enum BusinessEventType {
+  ACTION_EXECUTED
+  DECISION_MADE
+  INSIGHT_GENERATED
+  ALERT_TRIGGERED
+  AUTONOMY_EXERCISED
+  GOVERNANCE_DECISION
+  RECOMMENDATION_OFFERED
+  RECOMMENDATION_ACTED
+  RECOMMENDATION_IGNORED
+  GENOME_EVOLUTION
+  USER_INTERACTION
+  SYSTEM_EVENT
+}
+
+// ============================================
+// APPROVAL REQUEST — General Business Approval System
+// ============================================
+
+model ApprovalRequest {
+  id              String   @id @default(cuid())
+  businessId      String
+  requester       String   // 'key_cortex', 'autopilot', 'delegation_loop', 'user'
+  requesterId     String?  // ID of the requesting entity
+  actionType      String   // 'create_invoice', 'send_bulk_email', etc.
+  actionModule    String   // 'commerce', 'communications', etc.
+  description     String   // Human-readable description
+  rationale       String   // Why this action was requested
+
+  // Payload
+  parameters      Json     // The actual parameters that would be used
+  estimatedImpact Json?    // { revenue: 500, risk: 'low', confidence: 0.85 }
+
+  // Status
+  status          ApprovalStatus @default(PENDING)
+
+  // Evidence
+  evidence        Json?    // Supporting data for the decision
+  genomeSignalId  String?
+
+  // Decision
+  decidedBy       String?  // userId who made the decision
+  decisionNote    String?
+  decidedAt       DateTime?
+
+  // Context
+  genomeDnaSnapshot Json?  // DNA scores at time of request
+  contextSnapshot Json?    // Full business context snapshot
+
+  // Timing
+  expiresAt       DateTime? // Auto-expire after N hours
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([businessId, status, createdAt])
+  @@index([businessId, actionType, createdAt])
+  @@index([businessId, requester, status])
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+  AUTO_APPROVED
+  ESCALATED
+}
+
+// ============================================
+// EVIDENCE — Proof of Work Completion
+// ============================================
+
+model Evidence {
+  id              String   @id @default(cuid())
+  businessId      String
+
+  // What is being claimed
+  claim           String   // "Invoice #1042 was collected"
+  claimType       EvidenceClaimType
+
+  // Proof
+  proof           Json     // { invoiceId: "...", paymentDate: "...", amount: 500 }
+  proofHash       String?  // SHA-256 hash for tamper detection
+
+  // Verification
+  confidence      Float    // 0.0 to 1.0
+  verified        Boolean  @default(false)
+  verifiedBy      String?  // 'key_cortex', 'user', 'system'
+  verifiedAt      DateTime?
+  verificationMethod String? // 'automated', 'manual', 'cross_reference'
+
+  // Source
+  source          String   // 'autopilot', 'key_cortex', 'delegation_loop', 'user'
+  sourceEventId   String?  // Links to BusinessEvent
+
+  // Cross-references
+  relatedModule   String   // 'commerce', 'crm', etc.
+  relatedEntityId String?  // ID of the related record
+
+  // Genome
+  contributesToDna Boolean @default(false)
+  dnaSection      String?  // 'marketing', 'sales', 'operations', etc.
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([businessId, claimType, createdAt])
+  @@index([businessId, relatedModule, relatedEntityId])
+  @@index([businessId, verified, createdAt])
+  @@index([sourceEventId])
+}
+
+enum EvidenceClaimType {
+  TASK_COMPLETED
+  INVOICE_COLLECTED
+  LEAD_CONVERTED
+  BOOKING_COMPLETED
+  CAMPAIGN_SENT
+  PAYMENT_RECEIVED
+  CUSTOMER_RETAINED
+  AUTOMATION_EXECUTED
+  RECOMMENDATION_ACTED
+  GOVERNANCE_DECISION
+}
+
+// ============================================
+// TASK ASSIGNMENT — Polymorphic Assignment Engine
+// ============================================
+
+model TaskAssignment {
+  id              String   @id @default(cuid())
+  businessId      String
+
+  // Assignment target (polymorphic)
+  assigneeType    AssigneeType
+  assigneeId      String   // userId, 'key_cortex', 'autopilot', 'delegation_loop'
+
+  // What is being assigned
+  taskType        String   // 'crm_task', 'autopilot_task', 'key_action', 'review'
+  taskId          String   // ID of the actual task record
+
+  // The entity being worked on (polymorphic)
+  targetModule    String   // 'crm', 'commerce', 'bookings', etc.
+  targetEntityType String  // 'contact', 'invoice', 'booking', etc.
+  targetEntityId  String
+
+  // Assignment metadata
+  priority        AssignmentPriority @default(NORMAL)
+  dueDate         DateTime?
+
+  // Status
+  status          AssignmentStatus @default(PENDING)
+
+  // Delegation chain
+  assignedBy      String   // who assigned this
+  assignedAt      DateTime @default(now())
+
+  // Reassignment tracking
+  previousAssigneeId String?
+  reassignmentReason String?
+
+  // Completion
+  completedAt     DateTime?
+  completedBy     String?
+  completionEvidenceId String? // Links to Evidence
+
+  // Genome
+  genomeReadinessImpact Float? // How this affects genome readiness
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([businessId, assigneeType, assigneeId, status])
+  @@index([businessId, targetModule, targetEntityId])
+  @@index([businessId, status, priority, dueDate])
+  @@index([businessId, taskType, taskId])
+}
+
+enum AssigneeType {
+  USER
+  KEY_CORTEX
+  AUTOPILOT
+  DELEGATION_LOOP
+  SYSTEM
+}
+
+enum AssignmentPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+  CRITICAL
+}
+
+enum AssignmentStatus {
+  PENDING
+  IN_PROGRESS
+  AWAITING_APPROVAL
+  COMPLETED
+  OVERDUE
+  REASSIGNED
+  CANCELLED
+}
+
+// ============================================
+// CALL LOG — Phone Call Tracking
+// ============================================
+
+model CallLog {
+  id              String   @id @default(cuid())
+  businessId      String
+
+  // Call details
+  callSid         String?  // Twilio call SID
+  direction       CallDirection
+  phoneNumber     String   // The number called/from
+  contactId       String?  // Links to CRM contact
+
+  // Status
+  status          CallStatus @default(INITIATED)
+
+  // Purpose
+  purpose         String   // 'payment_collection', 'lead_followup', 'booking_confirmation'
+  scriptUsed      String?  // ID of the script template
+
+  // Duration
+  startedAt       DateTime @default(now())
+  connectedAt     DateTime?
+  endedAt         DateTime?
+  durationSeconds Int?
+
+  // Transcription
+  transcript      String?  // Full transcript
+  transcriptConfidence Float?
+
+  // AI Analysis
+  sentiment       String?  // 'positive', 'negative', 'neutral'
+  keyPoints       Json?    // Array of key points discussed
+  actionItems     Json?    // Array of follow-up actions
+  customerSatisfaction Int? // 1-10 score
+
+  // Recording
+  recordingUrl    String?
+
+  // Outcome
+  outcome         CallOutcome?
+  outcomeNote     String?
+
+  // Follow-up
+  followUpRequired Boolean @default(false)
+  followUpTaskId  String?  // Links to CRM task
+
+  // Genome
+  genomeSignal    Boolean @default(false)
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([businessId, status, createdAt])
+  @@index([businessId, contactId, createdAt])
+  @@index([businessId, direction, outcome])
+  @@index([businessId, purpose, createdAt])
+}
+
+enum CallDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum CallStatus {
+  INITIATED
+  RINGING
+  CONNECTED
+  COMPLETED
+  FAILED
+  NO_ANSWER
+  BUSY
+  VOICEMAIL
+  CANCELLED
+}
+
+enum CallOutcome {
+  SUCCESSFUL
+  CALLBACK_SCHEDULED
+  VOICEMAIL_LEFT
+  NO_ANSWER
+  DECLINED
+  WRONG_NUMBER
+  FOLLOW_UP_NEEDED
+  CONVERTED
+}
