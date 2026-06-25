@@ -56,7 +56,7 @@ export class ConsciousnessOrchestrator {
     const layersUsed: string[] = [];
 
     try {
-      this.logger.log(`Consciousness pipeline starting for user=${input.userId}, business=${input.businessId}`);
+      this.logger.log(`🧠 Consciousness pipeline starting for user=${input.userId}, business=${input.businessId}`);
 
       // ── Step 1: L1 Emotion ──────────────────────────────────────────────
       const emotion = await this.emotion.detectEmotion({
@@ -108,7 +108,7 @@ export class ConsciousnessOrchestrator {
         (reasoning.overallConfidence * 0.7 + selfModel.recentAccuracy * 0.3) * 100,
       ) / 100;
       layersUsed.push('metacognition');
-      this.logger.verbose(`L5 Metacognition: confidence=${confidence}`);
+      this.logger.verbose(`L5 Metacognition: confidence=${confidence}, recentAccuracy=${selfModel.recentAccuracy}`);
 
       // ── Step 7: L3 Reflection ───────────────────────────────────────────
       const insights = await this.reflection.getRecentInsights(24);
@@ -119,35 +119,39 @@ export class ConsciousnessOrchestrator {
 
       // ── Step 8: L8 Temporal ─────────────────────────────────────────────
       layersUsed.push('temporal');
-      this.logger.verbose('L8 Temporal: layer registered');
+      // Placeholder: temporal analysis would process business time-series here
+      this.logger.verbose('L8 Temporal: layer registered (placeholder)');
 
       // ── Step 9: Synthesise response ─────────────────────────────────────
       let response = reasoning.synthesis;
 
+      // Add creativity alternatives if available
       if (alternatives.length > 0) {
-        response += '\n\nAlternative approaches:\n' +
+        response += '\n\n💡 Alternative approaches:\n' +
           alternatives.slice(0, 3).map((a, i) => `   ${i + 1}. ${a}`).join('\n');
       }
 
+      // Add intuition signals if detected
       if (signals.length > 0) {
-        response += '\n\nWeak signals detected:\n' +
-          signals.slice(0, 2).map(s => `   - ${s.source}: ${s.description.substring(0, 120)}...`).join('\n');
+        response += '\n\n📡 Weak signals detected:\n' +
+          signals.slice(0, 2).map(s => `   • ${s.source}: ${s.description.substring(0, 120)}...`).join('\n');
       }
 
+      // Add reflection insights if available
       if (insights.length > 0) {
-        response += '\n\nRecent insights:\n' +
-          insights.slice(0, 2).map(insight => `   - ${insight.substring(0, 120)}`).join('\n');
+        response += '\n\n🧩 Recent insights:\n' +
+          insights.slice(0, 2).map(insight => `   • ${insight.substring(0, 120)}`).join('\n');
       }
 
       // ── Step 10: Apply ethics warnings ──────────────────────────────────
       if (!ethics.approved) {
-        response += '\n\nEthical review flagged concerns:\n   ' + ethics.violations.join('\n   ');
+        response += '\n\n⚠️  Ethical review flagged concerns:\n   ' + ethics.violations.join('\n   ');
         this.logger.warn('Recommendation rejected by ethics layer');
       }
 
       // ── Step 11: Final output assembly ──────────────────────────────────
       const duration = Date.now() - startTime;
-      this.logger.log(`Consciousness pipeline complete: ${layersUsed.length} layers, ${duration}ms, confidence=${confidence}`);
+      this.logger.log(`✅ Consciousness pipeline complete: ${layersUsed.length} layers, ${duration}ms, confidence=${confidence}`);
 
       return {
         response,
@@ -158,8 +162,9 @@ export class ConsciousnessOrchestrator {
         ethicalReview: ethics,
       };
     } catch (err) {
-      this.logger.error(`Consciousness pipeline failure: ${(err as Error).message}`);
+      this.logger.error(`💥 Consciousness pipeline failure: ${(err as Error).message}`);
 
+      // Critical failure — return graceful degradation
       return {
         response: `I encountered an issue processing your request: "${input.query}". ` +
           `My consciousness layers are experiencing a transient fault. ` +

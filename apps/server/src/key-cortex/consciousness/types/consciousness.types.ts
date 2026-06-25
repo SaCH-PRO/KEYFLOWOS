@@ -31,15 +31,21 @@ export type Emotion =
 
 /** Complete emotional state with confidence calibration. */
 export interface EmotionState {
+  /** The dominant detected emotion. */
   primary: Emotion;
+  /** Intensity on a 0–1 scale. */
   intensity: number;
+  /** Detector confidence on a 0–1 scale. */
   confidence: number;
 }
 
 /** Input payload for the emotion detection engine. */
 export interface EmotionInput {
+  /** Raw user text to analyse. */
   text: string;
+  /** UUID of the user whose message is being analysed. */
   userId: string;
+  /** UUID of the business context. */
   businessId: string;
 }
 
@@ -107,6 +113,7 @@ export interface ReflectionResult {
 export interface WeakSignal {
   source: string;
   metric: string;
+  /** Z-score deviation (how many σ from the mean). */
   deviation: number;
   description: string;
 }
@@ -131,6 +138,7 @@ export interface CoreValue {
   id: string;
   name: string;
   description: string;
+  /** When true the value can never be violated regardless of confidence. */
   immutable: boolean;
 }
 
