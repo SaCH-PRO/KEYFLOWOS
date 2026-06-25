@@ -29,7 +29,8 @@ export type ModuleName =
   | 'analytics'
   | 'finance'
   | 'settings'
-  | 'activity';
+  | 'activity'
+  | 'keystore';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CAPABILITY DESCRIPTOR TYPES
