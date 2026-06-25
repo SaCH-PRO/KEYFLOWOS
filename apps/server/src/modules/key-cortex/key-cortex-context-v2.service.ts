@@ -266,16 +266,7 @@ export class KeyCortexContextV2Service {
     this.logger.log(`[getFullContext] Assembling full context for ${businessId}`);
     const start = Date.now();
 
-    const [
-      crm,
-      commerce,
-      bookings,
-      communications,
-      autopilot,
-      temporal,
-      inbox,
-      genome,
-    ] = await Promise.all([
+    const results = await Promise.allSettled([
       this.getCrmContext(businessId),
       this.getCommerceContext(businessId),
       this.getBookingsContext(businessId),
@@ -285,6 +276,18 @@ export class KeyCortexContextV2Service {
       this.getInboxContext(businessId),
       this.getGenomeContext(businessId),
     ]);
+
+    const contexts = results.map((r) => r.status === 'fulfilled' ? r.value : null);
+    const [
+      crm,
+      commerce,
+      bookings,
+      communications,
+      autopilot,
+      temporal,
+      inbox,
+      genome,
+    ] = contexts;
 
     const context: FullBusinessContext = {
       businessId,
