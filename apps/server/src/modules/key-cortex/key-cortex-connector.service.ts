@@ -26,6 +26,7 @@ import { KeyInboxService } from '../key-inbox/key-inbox.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ProjectsService } from '../projects/projects.service';
 import { ActivityService } from '../activity/activity.service';
+import { KeystoreService } from '../keystore/keystore.service';
 
 // ─── Shared Types ─────────────────────────────────────────────────────────────
 import { UnifiedEvent } from '../../shared/types';
@@ -1273,6 +1274,7 @@ export class KeyCortexConnectorService {
     private readonly notifications: NotificationsService,
     private readonly projects: ProjectsService,
     private readonly activity: ActivityService,
+    private readonly keystore: KeystoreService,
 
     // ── v4: Tool Registry (optional — graceful degradation) ──
     @Optional()
