@@ -1,1390 +1,3 @@
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  //  1. CAPABILITY REGISTRY — 18 modules × (5-12 actions + 3-5 queries)
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  private readonly MODULE_CAPABILITIES: ModuleCapability[] = [
-    // ── 1. CRM ──────────────────────────────────────────────────────────────
-    {
-      module: 'crm',
-      description: 'Contact relationship management — contacts, leads, tasks, notes, tags, timeline.',
-      actions: [
-        {
-          name: 'create_contact',
-          description: 'Create a new contact (lead, prospect, or customer).',
-          parameters: [
-            { name: 'firstName', type: 'string', description: 'First name', required: true },
-            { name: 'lastName', type: 'string', description: 'Last name', required: false },
-            { name: 'email', type: 'string', description: 'Email address', required: false },
-            { name: 'phone', type: 'string', description: 'Phone number', required: false },
-            { name: 'company', type: 'string', description: 'Company name', required: false },
-            { name: 'tags', type: 'array', description: 'Tags to attach', required: false },
-            { name: 'status', type: 'enum', description: 'Contact status', enumValues: ['lead', 'prospect', 'customer', 'churned', 'partner'], required: false, default: 'lead' },
-          ],
-          requiresApproval: false,
-          examples: ['Add a new lead named John Smith', 'Create contact for john@acme.com', 'Add customer Jane Doe from Acme Inc'],
-        },
-        {
-          name: 'get_contact',
-          description: 'Retrieve full details of a single contact by ID.',
-          parameters: [
-            { name: 'contactId', type: 'id', description: 'UUID of the contact', required: true },
-          ],
-          requiresApproval: false,
-          examples: ['Show me contact #abc123', 'Get details for contact abc-123', 'What do we know about John Smith?'],
-        },
-        {
-          name: 'update_contact',
-          description: 'Update fields on an existing contact.',
-          parameters: [
-            { name: 'contactId', type: 'id', description: 'UUID of the contact', required: true },
-            { name: 'firstName', type: 'string', description: 'New first name', required: false },
-            { name: 'lastName', type: 'string', description: 'New last name', required: false },
-            { name: 'email', type: 'string', description: 'New email', required: false },
-            { name: 'phone', type: 'string', description: 'New phone', required: false },
-            { name: 'status', type: 'enum', description: 'Updated status', enumValues: ['lead', 'prospect', 'customer', 'churned', 'partner'], required: false },
-            { name: 'tags', type: 'array', description: 'Replace tags', required: false },
-          ],
-          requiresApproval: false,
-          examples: ['Update contact abc123 phone to 555-0199', 'Change John Smith status to customer'],
-        },
-        {
-          name: 'delete_contact',
-          description: 'Permanently delete a contact and associated data.',
-          parameters: [
-            { name: 'contactId', type: 'id', description: 'UUID of the contact', required: true },
-          ],
-          requiresApproval: true,
-          examples: ['Delete contact abc123', 'Remove John Smith from CRM'],
-        },
-        {
-          name: 'list_contacts',
-          description: 'List contacts with optional filtering.',
-          parameters: [
-            { name: 'status', type: 'enum', description: 'Filter by status', enumValues: ['lead', 'prospect', 'customer', 'churned', 'partner'], required: false },
-            { name: 'tag', type: 'string', description: 'Filter by tag', required: false },
-            { name: 'search', type: 'string', description: 'Full-text search query', required: false },
-            { name: 'limit', type: 'number', description: 'Page size', required: false, default: 50 },
-            { name: 'offset', type: 'number', description: 'Page offset', required: false, default: 0 },
-          ],
-          requiresApproval: false,
-          examples: ['List all customers', 'Show me leads tagged VIP', 'Search contacts named John'],
-        },
-        {
-          name: 'add_task',
-          description: 'Add a task to a contact record.',
-          parameters: [
-            { name: 'contactId', type: 'id', description: 'UUID of the contact', required: true },
-            { name: 'title', type: 'string', description: 'Task description', required: true },
-            { name: 'priority', type: 'enum', description: 'Priority level', enumValues: ['low', 'medium', 'high', 'urgent'], required: false, default: 'medium' },
-            { name: 'dueDate', type: 'date', description: 'ISO due date', required: false },
-            { name: 'assignedTo', type: 'id', description: 'User ID to assign', required: false },
-          ],
-          requiresApproval: false,
-          examples: ['Add task "Follow up" to contact abc123', 'Remind me to call John tomorrow'],
-        },
-        {
-          name: 'complete_task',
-          description: 'Mark a task as completed.',
-          parameters: [
-            { name: 'taskId', type: 'id', description: 'UUID of the task', required: true },
-            { name: 'contactId', type: 'id', description: 'UUID of the contact', required: true },
-            { name: 'notes', type: 'string', description: 'Completion notes', required: false },
-          ],
-          requiresApproval: false,
-          examples: ['Mark task xyz as done', 'Complete the follow-up task for John'],
-        },
-        {
-          name: 'add_note',
-          description: 'Append a note to a contact timeline.',
-          parameters: [
-            { name: 'contactId', type: 'id', description: 'UUID of the contact', required: true },
-            { name: 'body', type: 'string', description: 'Note text', required: true },
-            { name: 'type', type: 'enum', description: 'Note category', enumValues: ['general', 'call', 'meeting', 'email', 'sms'], required: false, default: 'general' },
-          ],
-          requiresApproval: false,
-          examples: ['Add note to contact abc123: Had a great call', 'Log that John is interested'],
-        },
-        {
-          name: 'add_tag',
-          description: 'Attach one or more tags to a contact.',
-          parameters: [
-            { name: 'contactId', type: 'id', description: 'UUID of the contact', required: true },
-            { name: 'tags', type: 'array', description: 'Tag strings', required: true },
-          ],
-          requiresApproval: false,
-          examples: ['Tag contact abc123 as VIP', 'Add hot-lead tag to John'],
-        },
-        {
-          name: 'update_status',
-          description: 'Change the pipeline status of a contact.',
-          parameters: [
-            { name: 'contactId', type: 'id', description: 'UUID of the contact', required: true },
-            { name: 'status', type: 'enum', description: 'New status', enumValues: ['lead', 'prospect', 'customer', 'churned', 'partner'], required: true },
-            { name: 'reason', type: 'string', description: 'Reason for change', required: false },
-          ],
-          requiresApproval: false,
-          examples: ['Move John to customer', 'Change status of abc123 to prospect'],
-        },
-        {
-          name: 'log_event',
-          description: 'Log a custom event against a contact timeline.',
-          parameters: [
-            { name: 'contactId', type: 'id', description: 'UUID of the contact', required: true },
-            { name: 'eventType', type: 'string', description: 'Machine event key', required: true },
-            { name: 'metadata', type: 'object', description: 'Arbitrary event payload', required: false },
-          ],
-          requiresApproval: false,
-          examples: ['Log page_view event for contact abc123', 'Record purchase event for John'],
-        },
-        {
-          name: 'merge_contacts',
-          description: 'Merge two duplicate contacts into one master record.',
-          parameters: [
-            { name: 'masterContactId', type: 'id', description: 'UUID to keep', required: true },
-            { name: 'duplicateContactId', type: 'id', description: 'UUID to merge in', required: true },
-          ],
-          requiresApproval: true,
-          examples: ['Merge contact abc into def', 'Combine duplicate John Smith records'],
-        },
-      ],
-      queries: [
-        {
-          name: 'get_contact_timeline',
-          description: 'Retrieve chronological activity timeline for a contact.',
-          parameters: [
-            { name: 'contactId', type: 'id', description: 'UUID of the contact', required: true },
-            { name: 'limit', type: 'number', description: 'Events to fetch', required: false, default: 50 },
-          ],
-          returns: 'TimelineEvent[]',
-          examples: ['Show timeline for contact abc123', 'What happened with John last week?'],
-        },
-        {
-          name: 'count_contacts',
-          description: 'Count contacts matching a filter.',
-          parameters: [
-            { name: 'status', type: 'enum', description: 'Filter by status', enumValues: ['lead', 'prospect', 'customer', 'churned', 'partner'], required: false },
-            { name: 'tag', type: 'string', description: 'Filter by tag', required: false },
-          ],
-          returns: 'number',
-          examples: ['How many customers do we have?', 'Count leads tagged VIP'],
-        },
-        {
-          name: 'get_tasks',
-          description: 'List open tasks for a contact or across the business.',
-          parameters: [
-            { name: 'contactId', type: 'id', description: 'UUID of the contact (omit for all)', required: false },
-            { name: 'assignedTo', type: 'id', description: 'Filter by assignee', required: false },
-            { name: 'priority', type: 'enum', description: 'Filter by priority', enumValues: ['low', 'medium', 'high', 'urgent'], required: false },
-            { name: 'status', type: 'enum', description: 'Task status', enumValues: ['open', 'completed', 'overdue'], required: false, default: 'open' },
-          ],
-          returns: 'Task[]',
-          examples: ['What tasks are due today?', 'List open tasks for John'],
-        },
-        {
-          name: 'get_recent_contacts',
-          description: 'Fetch contacts created or updated recently.',
-          parameters: [
-            { name: 'since', type: 'date', description: 'ISO date cutoff', required: false },
-            { name: 'limit', type: 'number', description: 'Max results', required: false, default: 20 },
-          ],
-          returns: 'Contact[]',
-          examples: ['Show recently added contacts', 'Who signed up this week?'],
-        },
-        {
-          name: 'search_contacts',
-          description: 'Full-text search across contact fields.',
-          parameters: [
-            { name: 'query', type: 'string', description: 'Search string', required: true },
-            { name: 'limit', type: 'number', description: 'Max results', required: false, default: 20 },
-          ],
-          returns: 'Contact[]',
-          examples: ['Find contacts named Acme', 'Search for anyone with gmail'],
-        },
-      ],
-    },
-
-    // ── 2. COMMERCE ─────────────────────────────────────────────────────────
-    {
-      module: 'commerce',
-      description: 'Invoicing, products, orders, quotes, payments, and revenue tracking.',
-      actions: [
-        {
-          name: 'create_invoice',
-          description: 'Generate a new invoice for a contact.',
-          parameters: [
-            { name: 'contactId', type: 'id', description: 'UUID of the billed contact', required: true },
-            { name: 'items', type: 'array', description: 'Line items', required: true },
-            { name: 'dueDate', type: 'date', description: 'Payment due date', required: false },
-            { name: 'notes', type: 'string', description: 'Invoice notes', required: false },
-            { name: 'sendImmediately', type: 'boolean', description: 'Auto-send after creation', required: false, default: false },
-          ],
-          requiresApproval: false,
-          examples: ['Invoice John $500 for consulting', 'Create invoice with 3 line items for Acme Corp'],
-        },
-        {
-          name: 'send_invoice',
-          description: 'Deliver an existing invoice via email.',
-          parameters: [
-            { name: 'invoiceId', type: 'id', description: 'UUID of the invoice', required: true },
-            { name: 'message', type: 'string', description: 'Custom email body', required: false },
-          ],
-          requiresApproval: false,
-          examples: ['Send invoice INV-001 to John', 'Email the latest invoice'],
-        },
-        {
-          name: 'get_invoice',
-          description: 'Retrieve a single invoice by ID.',
-          parameters: [
-            { name: 'invoiceId', type: 'id', description: 'UUID of the invoice', required: true },
-          ],
-          requiresApproval: false,
-          examples: ['Show invoice INV-001', 'Get invoice details for abc123'],
-        },
-        {
-          name: 'list_invoices',
-          description: 'List invoices with optional filters.',
-          parameters: [
-            { name: 'contactId', type: 'id', description: 'Filter by contact', required: false },
-            { name: 'status', type: 'enum', description: 'Invoice status', enumValues: ['draft', 'sent', 'paid', 'overdue', 'cancelled'], required: false },
-            { name: 'limit', type: 'number', description: 'Page size', required: false, default: 50 },
-          ],
-          requiresApproval: false,
-          examples: ['List overdue invoices', 'Show all invoices for John', 'Get last 10 invoices'],
-        },
-        {
-          name: 'create_product',
-          description: 'Add a new product or service to the catalog.',
-          parameters: [
-            { name: 'name', type: 'string', description: 'Product name', required: true },
-            { name: 'description', type: 'string', description: 'Product description', required: false },
-            { name: 'price', type: 'number', description: 'Unit price', required: true },
-            { name: 'sku', type: 'string', description: 'Stock-keeping unit', required: false },
-            { name: 'taxable', type: 'boolean', description: 'Subject to tax', required: false, default: true },
-          ],
-          requiresApproval: false,
-          examples: ['Add product "Premium Plan" at $99/mo', 'Create service "Consulting Hour"'],
-        },
-        {
-          name: 'get_product',
-          description: 'Fetch a product by ID or SKU.',
-          parameters: [
-            { name: 'productId', type: 'id', description: 'UUID of the product', required: false },
-            { name: 'sku', type: 'string', description: 'SKU code', required: false },
-          ],
-          requiresApproval: false,
-          examples: ['Get product abc123', 'Look up SKU PREMIUM-001'],
-        },
-        {
-          name: 'create_order',
-          description: 'Create a new sales order.',
-          parameters: [
-            { name: 'contactId', type: 'id', description: 'UUID of the buyer', required: true },
-            { name: 'items', type: 'array', description: 'Line items with productId + qty', required: true },
-            { name: 'notes', type: 'string', description: 'Order notes', required: false },
-          ],
-          requiresApproval: false,
-          examples: ['Create order for John with 2x Premium Plan'],
-        },
-        {
-          name: 'process_payment',
-          description: 'Record or process a payment against an invoice.',
-          parameters: [
-            { name: 'invoiceId', type: 'id', description: 'UUID of the invoice', required: true },
-            { name: 'amount', type: 'number', description: 'Payment amount', required: true },
-            { name: 'method', type: 'enum', description: 'Payment method', enumValues: ['card', 'bank_transfer', 'cash', 'check', 'other'], required: true },
-            { name: 'reference', type: 'string', description: 'Transaction reference', required: false },
-          ],
-          requiresApproval: true,
-          examples: ['Record $500 payment on invoice INV-001', 'Process payment for invoice abc'],
-        },
-        {
-          name: 'create_quote',
-          description: 'Generate a price quote for a prospect.',
-          parameters: [
-            { name: 'contactId', type: 'id', description: 'UUID of the prospect', required: true },
-            { name: 'items', type: 'array', description: 'Line items', required: true },
-            { name: 'validUntil', type: 'date', description: 'Quote expiry date', required: false },
-            { name: 'notes', type: 'string', description: 'Quote notes', required: false },
-          ],
-          requiresApproval: false,
-          examples: ['Create a quote for John: 10 hrs at $150/hr'],
-        },
-        {
-          name: 'send_quote',
-          description: 'Email a quote to the prospect.',
-          parameters: [
-            { name: 'quoteId', type: 'id', description: 'UUID of the quote', required: true },
-            { name: 'message', type: 'string', description: 'Email body', required: false },
-          ],
-          requiresApproval: false,
-          examples: ['Send quote Q-001 to John', 'Email the quote we prepared'],
-        },
-      ],
-      queries: [
-        {
-          name: 'get_revenue_summary',
-          description: 'Aggregate revenue for a date range.',
-          parameters: [
-            { name: 'from', type: 'date', description: 'Start date (inclusive)', required: true },
-            { name: 'to', type: 'date', description: 'End date (inclusive)', required: true },
-          ],
-          returns: 'RevenueSummary',
-          examples: ['What was our revenue this month?', 'Show revenue for Q1'],
-        },
-        {
-          name: 'get_outstanding_invoices',
-          description: 'Fetch unpaid or overdue invoices.',
-          parameters: [
-            { name: 'contactId', type: 'id', description: 'Filter by contact', required: false },
-            { name: 'overdueOnly', type: 'boolean', description: 'Only overdue', required: false, default: false },
-          ],
-          returns: 'Invoice[]',
-          examples: ['What invoices are overdue?', 'Show unpaid invoices for John'],
-        },
-        {
-          name: 'get_product_catalog',
-          description: 'List all active products and services.',
-          parameters: [
-            { name: 'search', type: 'string', description: 'Name filter', required: false },
-          ],
-          returns: 'Product[]',
-          examples: ['List all products', 'What services do we offer?'],
-        },
-        {
-          name: 'get_payment_history',
-          description: 'Retrieve recorded payments for a contact or invoice.',
-          parameters: [
-            { name: 'contactId', type: 'id', description: 'Filter by contact', required: false },
-            { name: 'invoiceId', type: 'id', description: 'Filter by invoice', required: false },
-            { name: 'limit', type: 'number', description: 'Max results', required: false, default: 50 },
-          ],
-          returns: 'Payment[]',
-          examples: ['Show payment history for John', 'List payments on invoice INV-001'],
-        },
-        {
-          name: 'get_quote_status',
-          description: 'Check the status of a quote.',
-          parameters: [
-            { name: 'quoteId', type: 'id', description: 'UUID of the quote', required: true },
-          ],
-          returns: 'Quote',
-          examples: ['Has quote Q-001 been viewed?', 'Status of our proposal'],
-        },
-      ],
-    },
-
-    // ── 3. BOOKINGS ─────────────────────────────────────────────────────────
-    {
-      module: 'bookings',
-      description: 'Appointment scheduling, availability management, and service catalog.',
-      actions: [
-        {
-          name: 'create_booking',
-          description: 'Schedule a new appointment.',
-          parameters: [
-            { name: 'contactId', type: 'id', description: 'UUID of the client', required: true },
-            { name: 'serviceId', type: 'id', description: 'UUID of the service', required: true },
-            { name: 'startTime', type: 'date', description: 'ISO start datetime', required: true },
-            { name: 'endTime', type: 'date', description: 'ISO end datetime', required: false },
-            { name: 'staffId', type: 'id', description: 'Assigned staff member', required: false },
-            { name: 'notes', type: 'string', description: 'Booking notes', required: false },
-          ],
-          requiresApproval: false,
-          examples: ['Book John for a haircut tomorrow at 2pm', 'Schedule consultation with Jane on Friday'],
-        },
-        {
-          name: 'cancel_booking',
-          description: 'Cancel an existing appointment.',
-          parameters: [
-            { name: 'bookingId', type: 'id', description: 'UUID of the booking', required: true },
-            { name: 'reason', type: 'string', description: 'Cancellation reason', required: false },
-            { name: 'notifyClient', type: 'boolean', description: 'Send cancellation notice', required: false, default: true },
-          ],
-          requiresApproval: false,
-          examples: ['Cancel booking abc123', 'Cancel my 3pm appointment'],
-        },
-        {
-          name: 'reschedule_booking',
-          description: 'Move an appointment to a new time slot.',
-          parameters: [
-            { name: 'bookingId', type: 'id', description: 'UUID of the booking', required: true },
-            { name: 'newStartTime', type: 'date', description: 'New ISO start datetime', required: true },
-            { name: 'newEndTime', type: 'date', description: 'New ISO end datetime', required: false },
-            { name: 'notifyClient', type: 'boolean', description: 'Notify client of change', required: false, default: true },
-          ],
-          requiresApproval: false,
-          examples: ['Reschedule booking abc to Thursday 10am', 'Move my appointment to next week'],
-        },
-        {
-          name: 'confirm_booking',
-          description: 'Confirm a pending booking.',
-          parameters: [
-            { name: 'bookingId', type: 'id', description: 'UUID of the booking', required: true },
-            { name: 'sendConfirmation', type: 'boolean', description: 'Email confirmation', required: false, default: true },
-          ],
-          requiresApproval: false,
-          examples: ['Confirm booking abc123', 'Approve the pending appointment'],
-        },
-        {
-          name: 'add_service',
-          description: 'Add a new bookable service.',
-          parameters: [
-            { name: 'name', type: 'string', description: 'Service name', required: true },
-            { name: 'duration', type: 'number', description: 'Duration in minutes', required: true },
-            { name: 'price', type: 'number', description: 'Service price', required: false },
-            { name: 'description', type: 'string', description: 'Service description', required: false },
-            { name: 'buffer', type: 'number', description: 'Buffer time in minutes', required: false, default: 0 },
-          ],
-          requiresApproval: false,
-          examples: ['Add service "Deep Tissue Massage" 60 min', 'Create 30-min consultation service'],
-        },
-        {
-          name: 'update_service',
-          description: 'Modify an existing service.',
-          parameters: [
-            { name: 'serviceId', type: 'id', description: 'UUID of the service', required: true },
-            { name: 'name', type: 'string', description: 'New name', required: false },
-            { name: 'duration', type: 'number', description: 'New duration (min)', required: false },
-            { name: 'price', type: 'number', description: 'New price', required: false },
-            { name: 'active', type: 'boolean', description: 'Enable/disable', required: false },
-          ],
-          requiresApproval: false,
-          examples: ['Update service abc123 price to $75', 'Change massage duration to 90 min'],
-        },
-        {
-          name: 'set_availability',
-          description: 'Define when a staff member or resource is available.',
-          parameters: [
-            { name: 'staffId', type: 'id', description: 'UUID of staff member', required: true },
-            { name: 'dayOfWeek', type: 'enum', description: 'Day', enumValues: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'], required: true },
-            { name: 'startTime', type: 'string', description: 'HH:MM open time', required: true },
-            { name: 'endTime', type: 'string', description: 'HH:MM close time', required: true },
-          ],
-          requiresApproval: false,
-          examples: ['Set Dr. Smith availability Mon-Fri 9-5'],
-        },
-        {
-          name: 'block_time',
-          description: 'Block out time (break, time-off, buffer).',
-          parameters: [
-            { name: 'staffId', type: 'id', description: 'UUID of staff member', required: true },
-            { name: 'startTime', type: 'date', description: 'ISO start', required: true },
-            { name: 'endTime', type: 'date', description: 'ISO end', required: true },
-            { name: 'reason', type: 'string', description: 'Block reason', required: false },
-          ],
-          requiresApproval: false,
-          examples: ['Block lunch break 12-1pm for Dr. Smith'],
-        },
-      ],
-      queries: [
-        {
-          name: 'get_availability',
-          description: 'Find open appointment slots for a service and date range.',
-          parameters: [
-            { name: 'serviceId', type: 'id', description: 'UUID of the service', required: true },
-            { name: 'from', type: 'date', description: 'Start date', required: true },
-            { name: 'to', type: 'date', description: 'End date', required: true },
-            { name: 'staffId', type: 'id', description: 'Preferred staff (optional)', required: false },
-          ],
-          returns: 'AvailabilitySlot[]',
-          examples: ['When is Dr. Smith free next week?', 'Show availability for haircuts on Friday'],
-        },
-        {
-          name: 'get_upcoming_bookings',
-          description: 'List confirmed bookings in a date range.',
-          parameters: [
-            { name: 'from', type: 'date', description: 'Start date', required: false },
-            { name: 'to', type: 'date', description: 'End date', required: false },
-            { name: 'contactId', type: 'id', description: 'Filter by client', required: false },
-            { name: 'staffId', type: 'id', description: 'Filter by staff', required: false },
-            { name: 'limit', type: 'number', description: 'Max results', required: false, default: 50 },
-          ],
-          returns: 'Booking[]',
-          examples: ['What appointments do we have today?', 'Show bookings for John'],
-        },
-        {
-          name: 'get_services',
-          description: 'List all bookable services.',
-          parameters: [
-            { name: 'activeOnly', type: 'boolean', description: 'Only active services', required: false, default: true },
-          ],
-          returns: 'Service[]',
-          examples: ['What services do we offer?', 'List all active services'],
-        },
-        {
-          name: 'get_staff_schedule',
-          description: 'Retrieve schedule for a staff member.',
-          parameters: [
-            { name: 'staffId', type: 'id', description: 'UUID of staff', required: true },
-            { name: 'date', type: 'date', description: 'Date to retrieve', required: true },
-          ],
-          returns: 'ScheduleEntry[]',
-          examples: ['What does Dr. Smith schedule look like today?'],
-        },
-      ],
-    },
-
-    // ── 4. CONTENT ──────────────────────────────────────────────────────────
-    {
-      module: 'content',
-      description: 'Blog posts, social publishing, email campaigns, SEO, and content calendars.',
-      actions: [
-        {
-          name: 'create_post',
-          description: 'Create a new content post or article.',
-          parameters: [
-            { name: 'title', type: 'string', description: 'Post title', required: true },
-            { name: 'body', type: 'string', description: 'Post body (Markdown/HTML)', required: true },
-            { name: 'platform', type: 'enum', description: 'Target platform', enumValues: ['blog', 'facebook', 'instagram', 'linkedin', 'twitter'], required: false, default: 'blog' },
-            { name: 'status', type: 'enum', description: 'Publication status', enumValues: ['draft', 'scheduled', 'published'], required: false, default: 'draft' },
-            { name: 'scheduledAt', type: 'date', description: 'Publish date-time', required: false },
-            { name: 'tags', type: 'array', description: 'Content tags', required: false },
-            { name: 'seoTitle', type: 'string', description: 'SEO meta title', required: false },
-            { name: 'seoDescription', type: 'string', description: 'SEO meta description', required: false },
-          ],
-          requiresApproval: false,
-          examples: ['Write a blog post about productivity tips', 'Create a Facebook post announcing our sale'],
-        },
-        {
-          name: 'schedule_post',
-          description: 'Schedule an existing draft post for future publication.',
-          parameters: [
-            { name: 'postId', type: 'id', description: 'UUID of the post', required: true },
-            { name: 'scheduledAt', type: 'date', description: 'ISO publish datetime', required: true },
-            { name: 'platform', type: 'enum', description: 'Override platform', enumValues: ['blog', 'facebook', 'instagram', 'linkedin', 'twitter'], required: false },
-          ],
-          requiresApproval: false,
-          examples: ['Schedule post abc123 for Friday 9am', 'Publish the draft tomorrow morning'],
-        },
-        {
-          name: 'publish_post',
-          description: 'Immediately publish a draft post.',
-          parameters: [
-            { name: 'postId', type: 'id', description: 'UUID of the post', required: true },
-          ],
-          requiresApproval: false,
-          examples: ['Publish post abc123 now', 'Go live with the announcement'],
-        },
-        {
-          name: 'create_campaign',
-          description: 'Create an email marketing campaign.',
-          parameters: [
-            { name: 'name', type: 'string', description: 'Campaign name', required: true },
-            { name: 'subject', type: 'string', description: 'Email subject line', required: true },
-            { name: 'body', type: 'string', description: 'Email HTML body', required: true },
-            { name: 'segment', type: 'string', description: 'Target segment/tag', required: false },
-            { name: 'scheduledAt', type: 'date', description: 'Send date-time', required: false },
-          ],
-          requiresApproval: false,
-          examples: ['Create campaign "Summer Sale"', 'Build newsletter for this week'],
-        },
-        {
-          name: 'send_campaign',
-          description: 'Dispatch an email campaign to its segment.',
-          parameters: [
-            { name: 'campaignId', type: 'id', description: 'UUID of the campaign', required: true },
-            { name: 'testOnly', type: 'boolean', description: 'Send test to preview list', required: false, default: false },
-          ],
-          requiresApproval: true,
-          examples: ['Send campaign abc123', 'Launch the summer sale email'],
-        },
-        {
-          name: 'generate_content',
-          description: 'Use AI to generate a content draft.',
-          parameters: [
-            { name: 'topic', type: 'string', description: 'Content topic or prompt', required: true },
-            { name: 'platform', type: 'enum', description: 'Target platform', enumValues: ['blog', 'facebook', 'instagram', 'linkedin', 'twitter', 'email'], required: true },
-            { name: 'tone', type: 'enum', description: 'Writing tone', enumValues: ['professional', 'casual', 'witty', 'persuasive', 'educational'], required: false, default: 'professional' },
-            { name: 'length', type: 'enum', description: 'Approximate length', enumValues: ['short', 'medium', 'long'], required: false, default: 'medium' },
-          ],
-          requiresApproval: false,
-          examples: ['Generate a blog post about AI in small business', 'Write a casual Instagram caption about our launch'],
-        },
-        {
-          name: 'update_post',
-          description: 'Edit an existing post.',
-          parameters: [
-            { name: 'postId', type: 'id', description: 'UUID of the post', required: true },
-            { name: 'title', type: 'string', description: 'New title', required: false },
-            { name: 'body', type: 'string', description: 'New body', required: false },
-            { name: 'status', type: 'enum', description: 'New status', enumValues: ['draft', 'scheduled', 'published'], required: false },
-          ],
-          requiresApproval: false,
-          examples: ['Update post abc123 title', 'Edit the blog draft'],
-        },
-        {
-          name: 'delete_post',
-          description: 'Remove a post permanently.',
-          parameters: [
-            { name: 'postId', type: 'id', description: 'UUID of the post', required: true },
-          ],
-          requiresApproval: true,
-          examples: ['Delete post abc123'],
-        },
-      ],
-      queries: [
-        {
-          name: 'get_content_calendar',
-          description: 'Retrieve scheduled posts for a date range.',
-          parameters: [
-            { name: 'from', type: 'date', description: 'Start date', required: true },
-            { name: 'to', type: 'date', description: 'End date', required: true },
-            { name: 'platform', type: 'enum', description: 'Filter by platform', enumValues: ['blog', 'facebook', 'instagram', 'linkedin', 'twitter'], required: false },
-          ],
-          returns: 'Post[]',
-          examples: ['What content is scheduled this week?', 'Show me the social calendar'],
-        },
-        {
-          name: 'get_campaign_performance',
-          description: 'Fetch open/click metrics for a campaign.',
-          parameters: [
-            { name: 'campaignId', type: 'id', description: 'UUID of the campaign', required: true },
-          ],
-          returns: 'CampaignMetrics',
-          examples: ['How did the summer sale campaign perform?', 'Show campaign stats'],
-        },
-        {
-          name: 'get_recent_posts',
-          description: 'List recently created or published posts.',
-          parameters: [
-            { name: 'status', type: 'enum', description: 'Filter by status', enumValues: ['draft', 'scheduled', 'published'], required: false },
-            { name: 'platform', type: 'enum', description: 'Filter by platform', enumValues: ['blog', 'facebook', 'instagram', 'linkedin', 'twitter'], required: false },
-            { name: 'limit', type: 'number', description: 'Max results', required: false, default: 20 },
-          ],
-          returns: 'Post[]',
-          examples: ['Show recent blog posts', 'List published Instagram posts'],
-        },
-        {
-          name: 'get_drafts',
-          description: 'List all unpublished draft posts.',
-          parameters: [
-            { name: 'platform', type: 'enum', description: 'Filter by platform', enumValues: ['blog', 'facebook', 'instagram', 'linkedin', 'twitter'], required: false },
-            { name: 'limit', type: 'number', description: 'Max results', required: false, default: 50 },
-          ],
-          returns: 'Post[]',
-          examples: ['Show my drafts', 'List unfinished blog posts'],
-        },
-      ],
-    },
-
-    // ── 5. COMMUNICATIONS ───────────────────────────────────────────────────
-    {
-      module: 'communications',
-      description: 'SMS, email, WhatsApp, templates, conversations, and delivery tracking.',
-      actions: [
-        {
-          name: 'send_message',
-          description: 'Send a message via the chosen channel.',
-          parameters: [
-            { name: 'contactId', type: 'id', description: 'UUID of the recipient', required: true },
-            { name: 'channel', type: 'enum', description: 'Delivery channel', enumValues: ['sms', 'email', 'whatsapp'], required: true },
-            { name: 'body', type: 'string', description: 'Message body', required: true },
-            { name: 'templateId', type: 'id', description: 'Template to use', required: false },
-            { name: 'attachments', type: 'array', description: 'File URLs', required: false },
-            { name: 'scheduledAt', type: 'date', description: 'Deferred send time', required: false },
-          ],
-          requiresApproval: false,
-          examples: ['Send SMS to John: Your appointment is confirmed', 'Email Jane the invoice'],
-        },
-        {
-          name: 'send_whatsapp',
-          description: 'Send a WhatsApp message to a contact.',
-          parameters: [
-            { name: 'contactId', type: 'id', description: 'UUID of the recipient', required: true },
-            { name: 'body', type: 'string', description: 'Message text', required: true },
-            { name: 'templateId', type: 'id', description: 'WhatsApp template ID', required: false },
-          ],
-          requiresApproval: false,
-          examples: ['WhatsApp John his tracking number', 'Send Jane a reminder on WhatsApp'],
-        },
-        {
-          name: 'send_email',
-          description: 'Send an email to a contact.',
-          parameters: [
-            { name: 'contactId', type: 'id', description: 'UUID of the recipient', required: true },
-            { name: 'subject', type: 'string', description: 'Email subject', required: true },
-            { name: 'body', type: 'string', description: 'Email HTML/text body', required: true },
-            { name: 'attachments', type: 'array', description: 'File URLs', required: false },
-          ],
-          requiresApproval: false,
-          examples: ['Email John the proposal', 'Send welcome email to Jane'],
-        },
-        {
-          name: 'create_template',
-          description: 'Create a reusable message template.',
-          parameters: [
-            { name: 'name', type: 'string', description: 'Template name', required: true },
-            { name: 'channel', type: 'enum', description: 'Channel', enumValues: ['sms', 'email', 'whatsapp'], required: true },
-            { name: 'subject', type: 'string', description: 'Subject line (email only)', required: false },
-            { name: 'body', type: 'string', description: 'Template body with {{placeholders}}', required: true },
-            { name: 'variables', type: 'array', description: 'Variable names used', required: false },
-          ],
-          requiresApproval: false,
-          examples: ['Create SMS template "appointment_reminder"', 'Build email template for invoices'],
-        },
-        {
-          name: 'get_conversation',
-          description: 'Retrieve message thread with a contact.',
-          parameters: [
-            { name: 'contactId', type: 'id', description: 'UUID of the contact', required: true },
-            { name: 'channel', type: 'enum', description: 'Filter by channel', enumValues: ['sms', 'email', 'whatsapp', 'all'], required: false, default: 'all' },
-            { name: 'limit', type: 'number', description: 'Messages to fetch', required: false, default: 50 },
-          ],
-          requiresApproval: false,
-          examples: ['Show conversation with John', 'Get WhatsApp history with Jane'],
-        },
-        {
-          name: 'send_broadcast',
-          description: 'Send a message to a segment or tag group.',
-          parameters: [
-            { name: 'segment', type: 'string', description: 'Tag or segment name', required: true },
-            { name: 'channel', type: 'enum', description: 'Channel', enumValues: ['sms', 'email', 'whatsapp'], required: true },
-            { name: 'body', type: 'string', description: 'Message body', required: true },
-            { name: 'templateId', type: 'id', description: 'Template', required: false },
-          ],
-          requiresApproval: true,
-          examples: ['Broadcast sale announcement to all customers', 'Send reminder SMS to VIP tag'],
-        },
-        {
-          name: 'mark_read',
-          description: 'Mark conversation messages as read.',
-          parameters: [
-            { name: 'conversationId', type: 'id', description: 'UUID of the conversation', required: true },
-          ],
-          requiresApproval: false,
-          examples: ['Mark conversation abc123 as read'],
-        },
-        {
-          name: 'archive_conversation',
-          description: 'Archive a completed conversation.',
-          parameters: [
-            { name: 'conversationId', type: 'id', description: 'UUID of the conversation', required: true },
-          ],
-          requiresApproval: false,
-          examples: ['Archive conversation with John'],
-        },
-        {
-          name: 'send_reply',
-          description: 'Reply within an existing conversation thread.',
-          parameters: [
-            { name: 'conversationId', type: 'id', description: 'UUID of the conversation', required: true },
-            { name: 'body', type: 'string', description: 'Reply text', required: true },
-            { name: 'attachments', type: 'array', description: 'File URLs', required: false },
-          ],
-          requiresApproval: false,
-          examples: ['Reply to conversation abc123: Sounds great!', 'Respond to John in thread'],
-        },
-        {
-          name: 'delete_template',
-          description: 'Remove a message template.',
-          parameters: [
-            { name: 'templateId', type: 'id', description: 'UUID of the template', required: true },
-          ],
-          requiresApproval: true,
-          examples: ['Delete template abc123'],
-        },
-      ],
-      queries: [
-        {
-          name: 'get_unread_count',
-          description: 'Count unread messages across all conversations.',
-          parameters: [
-            { name: 'channel', type: 'enum', description: 'Filter by channel', enumValues: ['sms', 'email', 'whatsapp', 'all'], required: false, default: 'all' },
-          ],
-          returns: 'number',
-          examples: ['How many unread messages?', 'Count unread WhatsApp messages'],
-        },
-        {
-          name: 'get_recent_conversations',
-          description: 'List recently active conversations.',
-          parameters: [
-            { name: 'channel', type: 'enum', description: 'Filter by channel', enumValues: ['sms', 'email', 'whatsapp', 'all'], required: false, default: 'all' },
-            { name: 'limit', type: 'number', description: 'Max results', required: false, default: 20 },
-            { name: 'unreadOnly', type: 'boolean', description: 'Only unread', required: false, default: false },
-          ],
-          returns: 'Conversation[]',
-          examples: ['Show recent conversations', 'List unread message threads'],
-        },
-        {
-          name: 'get_templates',
-          description: 'List saved message templates.',
-          parameters: [
-            { name: 'channel', type: 'enum', description: 'Filter by channel', enumValues: ['sms', 'email', 'whatsapp'], required: false },
-            { name: 'search', type: 'string', description: 'Name search', required: false },
-          ],
-          returns: 'Template[]',
-          examples: ['List all SMS templates', 'Show email templates'],
-        },
-        {
-          name: 'get_delivery_status',
-          description: 'Check delivery/read receipts for a message.',
-          parameters: [
-            { name: 'messageId', type: 'id', description: 'UUID of the message', required: true },
-          ],
-          returns: 'DeliveryStatus',
-          examples: ['Was the message delivered?', 'Check status of message abc123'],
-        },
-        {
-          name: 'get_conversation_analytics',
-          description: 'Aggregate conversation metrics for a period.',
-          parameters: [
-            { name: 'from', type: 'date', description: 'Start date', required: true },
-            { name: 'to', type: 'date', description: 'End date', required: true },
-          ],
-          returns: 'ConversationAnalytics',
-          examples: ['How many conversations this month?', 'Show messaging stats'],
-        },
-      ],
-    },
-
-    // ── 6. FLOW ─────────────────────────────────────────────────────────────
-    {
-      module: 'flow',
-      description: 'Visual automation builder — triggers, conditions, actions, and flow orchestration.',
-      actions: [
-        {
-          name: 'create_automation',
-          description: 'Build a new automation flow.',
-          parameters: [
-            { name: 'name', type: 'string', description: 'Flow name', required: true },
-            { name: 'trigger', type: 'enum', description: 'Trigger type', enumValues: ['contact_created', 'contact_tagged', 'invoice_paid', 'booking_confirmed', 'form_submitted', 'timer', 'webhook', 'manual'], required: true },
-            { name: 'actions', type: 'array', description: 'Sequence of actions', required: true },
-            { name: 'conditions', type: 'array', description: 'Conditional branches', required: false },
-            { name: 'active', type: 'boolean', description: 'Enable immediately', required: false, default: false },
-          ],
-          requiresApproval: false,
-          examples: ['Create automation: when contact tagged VIP, send welcome email'],
-        },
-        {
-          name: 'enable_automation',
-          description: 'Activate a paused automation.',
-          parameters: [
-            { name: 'flowId', type: 'id', description: 'UUID of the flow', required: true },
-          ],
-          requiresApproval: false,
-          examples: ['Enable flow abc123', 'Turn on the welcome automation'],
-        },
-        {
-          name: 'disable_automation',
-          description: 'Pause an active automation.',
-          parameters: [
-            { name: 'flowId', type: 'id', description: 'UUID of the flow', required: true },
-          ],
-          requiresApproval: false,
-          examples: ['Disable flow abc123', 'Pause the follow-up automation'],
-        },
-        {
-          name: 'trigger_flow',
-          description: 'Manually fire a flow for a given contact.',
-          parameters: [
-            { name: 'flowId', type: 'id', description: 'UUID of the flow', required: true },
-            { name: 'contactId', type: 'id', description: 'UUID of the contact', required: true },
-            { name: 'payload', type: 'object', description: 'Extra trigger payload', required: false },
-          ],
-          requiresApproval: false,
-          examples: ['Run flow abc123 for contact def456', 'Manually trigger welcome flow for John'],
-        },
-        {
-          name: 'delete_automation',
-          description: 'Permanently remove an automation.',
-          parameters: [
-            { name: 'flowId', type: 'id', description: 'UUID of the flow', required: true },
-          ],
-          requiresApproval: true,
-          examples: ['Delete flow abc123'],
-        },
-        {
-          name: 'update_automation',
-          description: 'Edit an existing automation.',
-          parameters: [
-            { name: 'flowId', type: 'id', description: 'UUID of the flow', required: true },
-            { name: 'name', type: 'string', description: 'New name', required: false },
-            { name: 'actions', type: 'array', description: 'Replace action sequence', required: false },
-            { name: 'conditions', type: 'array', description: 'Replace conditions', required: false },
-            { name: 'active', type: 'boolean', description: 'Enable/disable', required: false },
-          ],
-          requiresApproval: false,
-          examples: ['Update flow abc123 actions', 'Rename automation to "Post-Sale Followup"'],
-        },
-        {
-          name: 'clone_automation',
-          description: 'Duplicate an automation as a starting point.',
-          parameters: [
-            { name: 'flowId', type: 'id', description: 'UUID of the source flow', required: true },
-            { name: 'newName', type: 'string', description: 'Name for the clone', required: true },
-          ],
-          requiresApproval: false,
-          examples: ['Clone flow abc123 as "Summer Variant"'],
-        },
-        {
-          name: 'run_test',
-          description: 'Execute a dry-run of a flow for validation.',
-          parameters: [
-            { name: 'flowId', type: 'id', description: 'UUID of the flow', required: true },
-            { name: 'contactId', type: 'id', description: 'Test contact UUID', required: true },
-          ],
-          requiresApproval: false,
-          examples: ['Test flow abc123 with contact def456'],
-        },
-      ],
-      queries: [
-        {
-          name: 'get_flow_status',
-          description: 'Check whether a flow is active and get run stats.',
-          parameters: [
-            { name: 'flowId', type: 'id', description: 'UUID of the flow', required: true },
-          ],
-          returns: 'FlowStatus',
-          examples: ['Is flow abc123 active?', 'Show flow stats'],
-        },
-        {
-          name: 'list_automations',
-          description: 'List all automations with optional filter.',
-          parameters: [
-            { name: 'active', type: 'boolean', description: 'Filter by active state', required: false },
-            { name: 'trigger', type: 'enum', description: 'Filter by trigger', enumValues: ['contact_created', 'contact_tagged', 'invoice_paid', 'booking_confirmed', 'form_submitted', 'timer', 'webhook', 'manual'], required: false },
-            { name: 'limit', type: 'number', description: 'Max results', required: false, default: 50 },
-          ],
-          returns: 'Automation[]',
-          examples: ['List all active automations', 'Show timer-based flows'],
-        },
-        {
-          name: 'get_flow_runs',
-          description: 'Retrieve execution history for a flow.',
-          parameters: [
-            { name: 'flowId', type: 'id', description: 'UUID of the flow', required: true },
-            { name: 'limit', type: 'number', description: 'Max results', required: false, default: 20 },
-          ],
-          returns: 'FlowRun[]',
-          examples: ['Show recent runs of flow abc123', 'Get execution history'],
-        },
-        {
-          name: 'get_flow_analytics',
-          description: 'Aggregate analytics across all flows.',
-          parameters: [
-            { name: 'from', type: 'date', description: 'Start date', required: true },
-            { name: 'to', type: 'date', description: 'End date', required: true },
-          ],
-          returns: 'FlowAnalytics',
-          examples: ['How are our automations performing?', 'Show flow analytics for this month'],
-        },
-      ],
-    },
-
-    // ── 7. AUTOPILOT ────────────────────────────────────────────────────────
-    {
-      module: 'autopilot',
-      description: 'Autonomous task delegation, recurring loops, governance, and approval chains.',
-      actions: [
-        {
-          name: 'get_tasks',
-          description: 'List autopilot-managed tasks.',
-          parameters: [
-            { name: 'status', type: 'enum', description: 'Task status', enumValues: ['pending', 'in_progress', 'completed', 'failed'], required: false },
-            { name: 'assignedTo', type: 'id', description: 'Filter by assignee', required: false },
-            { name: 'limit', type: 'number', description: 'Max results', required: false, default: 50 },
-          ],
-          requiresApproval: false,
-          examples: ['What autopilot tasks are pending?', 'Show failed tasks'],
-        },
-        {
-          name: 'create_task',
-          description: 'Create a new autopilot task.',
-          parameters: [
-            { name: 'title', type: 'string', description: 'Task title', required: true },
-            { name: 'description', type: 'string', description: 'Task details', required: false },
-            { name: 'assignedTo', type: 'id', description: 'Assignee user ID', required: false },
-            { name: 'priority', type: 'enum', description: 'Priority', enumValues: ['low', 'medium', 'high', 'urgent'], required: false, default: 'medium' },
-            { name: 'dueDate', type: 'date', description: 'Due date', required: false },
-            { name: 'automationId', type: 'id', description: 'Parent automation', required: false },
-          ],
-          requiresApproval: false,
-          examples: ['Create task: Review Q3 expenses', 'Add high-priority task for Jane'],
-        },
-        {
-          name: 'approve_task',
-          description: 'Approve a pending autopilot task.',
-          parameters: [
-            { name: 'taskId', type: 'id', description: 'UUID of the task', required: true },
-            { name: 'notes', type: 'string', description: 'Approval notes', required: false },
-          ],
-          requiresApproval: false,
-          examples: ['Approve task abc123', 'Sign off on the expense report'],
-        },
-        {
-          name: 'reject_task',
-          description: 'Reject a pending autopilot task.',
-          parameters: [
-            { name: 'taskId', type: 'id', description: 'UUID of the task', required: true },
-            { name: 'reason', type: 'string', description: 'Rejection reason', required: false },
-          ],
-          requiresApproval: false,
-          examples: ['Reject task abc123: insufficient data'],
-        },
-        {
-          name: 'enable_loop',
-          description: 'Activate a recurring autopilot loop.',
-          parameters: [
-            { name: 'loopId', type: 'id', description: 'UUID of the loop', required: true },
-          ],
-          requiresApproval: false,
-          examples: ['Enable loop abc123', 'Turn on the weekly report loop'],
-        },
-        {
-          name: 'disable_loop',
-          description: 'Pause a recurring autopilot loop.',
-          parameters: [
-            { name: 'loopId', type: 'id', description: 'UUID of the loop', required: true },
-          ],
-          requiresApproval: false,
-          examples: ['Disable loop abc123', 'Pause the daily check-in loop'],
-        },
-        {
-          name: 'complete_task',
-          description: 'Mark an autopilot task as finished.',
-          parameters: [
-            { name: 'taskId', type: 'id', description: 'UUID of the task', required: true },
-            { name: 'outcome', type: 'string', description: 'Result summary', required: false },
-          ],
-          requiresApproval: false,
-          examples: ['Complete task abc123', 'Finish the onboarding task'],
-        },
-        {
-          name: 'create_loop',
-          description: 'Create a recurring autopilot loop.',
-          parameters: [
-            { name: 'name', type: 'string', description: 'Loop name', required: true },
-            { name: 'frequency', type: 'enum', description: 'Recurrence', enumValues: ['hourly', 'daily', 'weekly', 'monthly'], required: true },
-            { name: 'taskTemplate', type: 'object', description: 'Task template', required: true },
-            { name: 'conditions', type: 'array', description: 'Conditions to trigger', required: false },
-            { name: 'active', type: 'boolean', description: 'Enable immediately', required: false, default: false },
-          ],
-          requiresApproval: false,
-          examples: ['Create daily loop: check overdue invoices'],
-        },
-      ],
-      queries: [
-        {
-          name: 'get_loop_status',
-          description: 'Check loop health and next run.',
-          parameters: [
-            { name: 'loopId', type: 'id', description: 'UUID of the loop', required: true },
-          ],
-          returns: 'LoopStatus',
-          examples: ['Show loop abc123 status', 'When does the weekly loop run next?'],
-        },
-        {
-          name: 'get_task_history',
-          description: 'Historical autopilot task outcomes.',
-          parameters: [
-            { name: 'loopId', type: 'id', description: 'Filter by loop', required: false },
-            { name: 'status', type: 'enum', description: 'Filter by status', enumValues: ['pending', 'in_progress', 'completed', 'failed'], required: false },
-            { name: 'limit', type: 'number', description: 'Max results', required: false, default: 50 },
-          ],
-          returns: 'Task[]',
-          examples: ['Show completed autopilot tasks', 'List failed tasks'],
-        },
-        {
-          name: 'get_governance_report',
-          description: 'Audit trail of autopilot decisions.',
-          parameters: [
-            { name: 'from', type: 'date', description: 'Start date', required: true },
-            { name: 'to', type: 'date', description: 'End date', required: true },
-          ],
-          returns: 'GovernanceEntry[]',
-          examples: ['Show autopilot audit log', 'What decisions were made this week?'],
-        },
-        {
-          name: 'get_approval_queue',
-          description: 'List tasks awaiting human approval.',
-          parameters: [
-            { name: 'limit', type: 'number', description: 'Max results', required: false, default: 20 },
-          ],
-          returns: 'Task[]',
-          examples: ['What needs approval?', 'Show pending approvals'],
-        },
-      ],
-    },
-
-    // ── 8. TEMPORAL / MEMORY ────────────────────────────────────────────────
-    {
-      module: 'temporal',
-      description: 'Memory system — store, recall, consolidate, and expire business facts and context.',
-      actions: [
-        {
-          name: 'store_memory',
-          description: 'Save a fact or context item to the memory system.',
-          parameters: [
-            { name: 'key', type: 'string', description: 'Unique memory key', required: true },
-            { name: 'value', type: 'object', description: 'Memory payload', required: true },
-            { name: 'ttlDays', type: 'number', description: 'Expiration in days (0=never)', required: false, default: 0 },
-            { name: 'tags', type: 'array', description: 'Search tags', required: false },
-            { name: 'importance', type: 'enum', description: 'Priority', enumValues: ['low', 'medium', 'high', 'critical'], required: false, default: 'medium' },
-          ],
-          requiresApproval: false,
-          examples: ['Remember that John prefers email', 'Store Q3 revenue as $450K'],
-        },
-        {
-          name: 'recall_memory',
-          description: 'Retrieve a stored memory by key.',
-          parameters: [
-            { name: 'key', type: 'string', description: 'Memory key', required: true },
-          ],
-          requiresApproval: false,
-          examples: ['What do we know about John?', 'Recall Q3 revenue figure'],
-        },
-        {
-          name: 'delete_memory',
-          description: 'Remove a memory entry.',
-          parameters: [
-            { name: 'memoryId', type: 'id', description: 'UUID of the memory', required: true },
-          ],
-          requiresApproval: false,
-          examples: ['Delete memory abc123'],
-        },
-        {
-          name: 'update_memory',
-          description: 'Update an existing memory.',
-          parameters: [
-            { name: 'memoryId', type: 'id', description: 'UUID of the memory', required: true },
-            { name: 'value', type: 'object', description: 'New payload', required: false },
-            { name: 'importance', type: 'enum', description: 'New priority', enumValues: ['low', 'medium', 'high', 'critical'], required: false },
-          ],
-          requiresApproval: false,
-          examples: ['Update memory abc123 value'],
-        },
-        {
-          name: 'tag_memory',
-          description: 'Add tags to a memory entry.',
-          parameters: [
-            { name: 'memoryId', type: 'id', description: 'UUID of the memory', required: true },
-            { name: 'tags', type: 'array', description: 'Tags to add', required: true },
-          ],
-          requiresApproval: false,
-          examples: ['Tag memory abc123 as priority'],
-        },
-        {
-          name: 'consolidate_memories',
-          description: 'Merge related memories into a summary.',
-          parameters: [
-            { name: 'keys', type: 'array', description: 'Memory keys to merge', required: true },
-            { name: 'summaryKey', type: 'string', description: 'New consolidated key', required: true },
-          ],
-          requiresApproval: false,
-          examples: ['Consolidate memories about John into a profile'],
-        },
-      ],
-      queries: [
-        {
-          name: 'search_memories',
-          description: 'Search memories by key pattern or tags.',
-          parameters: [
-            { name: 'query', type: 'string', description: 'Search string', required: false },
-            { name: 'tags', type: 'array', description: 'Filter by tags', required: false },
-            { name: 'limit', type: 'number', description: 'Max results', required: false, default: 20 },
-          ],
-          returns: 'MemoryEntry[]',
-          examples: ['Search memories about revenue', 'Find memories tagged priority'],
-        },
-        {
-          name: 'get_memory_stats',
-          description: 'Memory usage statistics.',
-          parameters: [],
-          returns: 'MemoryStats',
-          examples: ['Show memory usage', 'How many memories are stored?'],
-        },
-        {
-          name: 'get_expiring_memories',
-          description: 'List memories nearing expiration.',
-          parameters: [
-            { name: 'withinDays', type: 'number', description: 'Expiration window', required: false, default: 7 },
-          ],
-          returns: 'MemoryEntry[]',
-          examples: ['What memories expire soon?', 'Show expiring memories'],
-        },
-      ],
-    },
-
-    // ── 9. INBOX ────────────────────────────────────────────────────────────
-    {
-      module: 'inbox',
-      description: 'Unified inbox — threads, classification, assignment, snooze, and intelligence.',
-      actions: [
-        {
-          name: 'get_threads',
-          description: 'List conversation threads.',
-          parameters: [
-            { name: 'status', type: 'enum', description: 'Thread status', enumValues: ['open', 'closed', 'snoozed', 'all'], required: false, default: 'open' },
-            { name: 'priority', type: 'enum', description: 'Filter priority', enumValues: ['low', 'medium', 'high', 'urgent'], required: false },
-            { name: 'assignedTo', type: 'id', description: 'Filter assignee', required: false },
-            { name: 'limit', type: 'number', description: 'Max results', required: false, default: 50 },
-          ],
-          requiresApproval: false,
-          examples: ['Show open threads', 'List high-priority inbox items'],
-        },
-        {
-          name: 'send_reply',
-          description: 'Reply to a thread.',
-          parameters: [
-            { name: 'threadId', type: 'id', description: 'UUID of the thread', required: true },
-            { name: 'body', type: 'string', description: 'Reply text', required: true },
-            { name: 'channel', type: 'enum', description: 'Reply channel', enumValues: ['sms', 'email', 'whatsapp'], required: false },
-            { name: 'attachments', type: 'array', description: 'File URLs', required: false },
-          ],
-          requiresApproval: false,
-          examples: ['Reply to thread abc123', 'Respond to the customer inquiry'],
-        },
-        {
-          name: 'classify_message',
-          description: 'Classify a message by intent and priority.',
-          parameters: [
-            { name: 'threadId', type: 'id', description: 'UUID of the thread', required: true },
-            { name: 'intent', type: 'string', description: 'Detected intent', required: false },
-            { name: 'priority', type: 'enum', description: 'Assigned priority', enumValues: ['low', 'medium', 'high', 'urgent'], required: false },
-            { name: 'assignTo', type: 'id', description: 'User to assign', required: false },
-          ],
-          requiresApproval: false,
-          examples: ['Classify thread abc123', 'Auto-sort the new message'],
-        },
-        {
-          name: 'close_thread',
-          description: 'Close a resolved thread.',
-          parameters: [
-            { name: 'threadId', type: 'id', description: 'UUID of the thread', required: true },
-            { name: 'resolution', type: 'string', description: 'Resolution notes', required: false },
-          ],
-          requiresApproval: false,
-          examples: ['Close thread abc123', 'Resolve the customer issue'],
-        },
-        {
-          name: 'snooze_thread',
-          description: 'Snooze a thread for later.',
-          parameters: [
-            { name: 'threadId', type: 'id', description: 'UUID of the thread', required: true },
-            { name: 'until', type: 'date', description: 'Snooze until', required: true },
-            { name: 'reason', type: 'string', description: 'Snooze reason', required: false },
-          ],
-          requiresApproval: false,
-          examples: ['Snooze thread abc123 until tomorrow', 'Remind me about this later'],
-        },
-        {
-          name: 'assign_thread',
-          description: 'Assign a thread to a team member.',
-          parameters: [
-            { name: 'threadId', type: 'id', description: 'UUID of the thread', required: true },
-            { name: 'userId', type: 'id', description: 'Assignee', required: true },
-          ],
-          requiresApproval: false,
-          examples: ['Assign thread abc123 to Jane', 'Route to support team'],
-        },
-        {
-          name: 'get_intelligence_report',
-          description: 'Get AI analysis of a thread.',
-          parameters: [
-            { name: 'threadId', type: 'id', description: 'UUID of the thread', required: true },
-          ],
-          requiresApproval: false,
-          examples: ['Analyze thread abc123', 'Get AI insights on this conversation'],
-        },
-        {
-          name: 'merge_threads',
-          description: 'Merge duplicate threads.',
-          parameters: [
-            { name: 'masterThreadId', type: 'id', description: 'Thread to keep', required: true },
-            { name: 'duplicateThreadId', type: 'id', description: 'Thread to merge', required: true },
-          ],
-          requiresApproval: false,
-          examples: ['Merge thread abc into def', 'Combine duplicate conversations'],
-        },
-      ],
-      queries: [
-        {
-          name: 'get_thread_count',
-          description: 'Count threads by status.',
-          parameters: [
-            { name: 'status', type: 'enum', description: 'Thread status', enumValues: ['open', 'closed', 'snoozed', 'all'], required: false, default: 'open' },
-          ],
-          returns: 'number',
-          examples: ['How many open threads?', 'Count snoozed items'],
-        },
-        {
-          name: 'get_unassigned_threads',
-          description: 'List threads awaiting assignment.',
-          parameters: [
-            { name: 'limit', type: 'number', description: 'Max results', required: false, default: 20 },
-          ],
-          returns: 'Thread[]',
-          examples: ['What needs to be assigned?', 'Show unassigned threads'],
-        },
-        {
-          name: 'get_thread_analytics',
-          description: 'Inbox analytics for a period.',
-          parameters: [
-            { name: 'from', type: 'date', description: 'Start date', required: true },
-            { name: 'to', type: 'date', description: 'End date', required: true },
-          ],
-          returns: 'InboxAnalytics',
-          examples: ['Show inbox analytics', 'How are we performing?'],
-        },
-      ],
-    },
-
-    // ── 10. GENOME ──────────────────────────────────────────────────────────
-    {
-      module: 'genome',
-      description: 'Business Genome — DNA scoring, growth stage mapping, and readiness assessment.',
-      actions: [
-        {
-          name: 'get_dna',
-          description: 'Retrieve the full Business Genome DNA profile.',
-          parameters: [
-            { name: 'recalculate', type: 'boolean', description: 'Force recalculation', required: false, default: false },
-          ],
-          requiresApproval: false,
-          examples: ['Show our business DNA', 'Get genome profile'],
-        },
-        {
-          name: 'get_stage',
-          description: 'Determine the business growth stage.',
-          parameters: [
-            { name: 'detailed', type: 'boolean', description: 'Include detailed breakdown', required: false, default: false },
-          ],
-          requiresApproval: false,
-          examples: ['What stage is our business?', 'Show growth stage details'],
-        },
-        {
-          name: 'get_readiness',
-          description: 'Check readiness for a growth initiative.',
-          parameters: [
-            { name: 'initiative', type: 'string', description: 'Initiative name', required: true },
-          ],
-          requiresApproval: false,
-          examples: ['Are we ready to scale?', 'Check readiness for expansion'],
-        },
-        {
-          name: 'update_dna',
-          description: 'Manually update a DNA dimension score.',
-          parameters: [
-            { name: 'dimension', type: 'enum', description: 'DNA dimension', enumValues: ['revenue', 'operations', 'marketing', 'product', 'team', 'finance', 'customer_success'], required: true },
-            { name: 'score', type: 'number', description: 'New score 0-100', required: true },
-            { name: 'reason', type: 'string', description: 'Update reason', required: false },
-          ],
-          requiresApproval: false,
-          examples: ['Update revenue DNA to 85', 'Set team score to 70'],
-        },
-        {
-          name: 'trigger_assessment',
-          description: 'Run a full genome assessment.',
-          parameters: [
-            { name: 'notify', type: 'boolean', description: 'Notify team on completion', required: false, default: true },
-          ],
-          requiresApproval: false,
-          examples: ['Run genome assessment', 'Reassess our business DNA'],
-        },
-      ],
-      queries: [
-        {
           name: 'get_dna_history',
           description: 'Historical DNA score changes.',
           parameters: [
@@ -2178,7 +791,7 @@
         },
         {
           name: 'remove_team_member',
-          description: "Revoke a user's access.",
+          description: 'Revoke a user\'s access.',
           parameters: [
             { name: 'userId', type: 'id', description: 'UUID of the user', required: true },
           ],
@@ -2187,7 +800,7 @@
         },
         {
           name: 'update_role',
-          description: "Change a team member's permission role.",
+          description: 'Change a team member\'s permission role.',
           parameters: [
             { name: 'userId', type: 'id', description: 'UUID of the user', required: true },
             { name: 'role', type: 'enum', description: 'New role', enumValues: ['owner', 'admin', 'manager', 'member', 'viewer'], required: true },
@@ -2385,3 +998,438 @@
     lines.push('');
 
     for (const cap of this.MODULE_CAPABILITIES) {
+      lines.push(`Module: ${cap.module}`);
+      lines.push(`  Description: ${cap.description}`);
+      lines.push(`  Actions (${cap.actions.length}):`);
+      for (const action of cap.actions) {
+        const params = action.parameters.map((p) => `${p.name}${p.required ? '' : '?'}`).join(', ');
+        lines.push(`    • ${action.name}(${params}) ${action.requiresApproval ? '[APPROVAL REQUIRED]' : ''}`);
+        lines.push(`      ${action.description}`);
+      }
+      lines.push(`  Queries (${cap.queries.length}):`);
+      for (const query of cap.queries) {
+        const params = query.parameters.map((p) => `${p.name}${p.required ? '' : '?'}`).join(', ');
+        lines.push(`    • ${query.name}(${params}) → ${query.returns}`);
+        lines.push(`      ${query.description}`);
+      }
+      lines.push('');
+    }
+
+    return lines.join('\n');
+  }
+
+  /**
+   * Return a compact JSON representation of capabilities for a given set of modules.
+   */
+  formatCapabilitiesForJson(modules?: ModuleName[]): Record<string, unknown> {
+    const caps = modules ? this.getCapabilities(modules) : this.MODULE_CAPABILITIES;
+    return {
+      modules: caps.map((c) => ({
+        module: c.module,
+        description: c.description,
+        actions: c.actions.map((a) => ({
+          name: a.name,
+          description: a.description,
+          parameters: a.parameters,
+          requiresApproval: a.requiresApproval,
+        })),
+        queries: c.queries.map((q) => ({
+          name: q.name,
+          description: q.description,
+          parameters: q.parameters,
+          returns: q.returns,
+        })),
+      })),
+    };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  3. COMMAND ROUTER
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Execute a connector command by routing it to the appropriate module adapter.
+   */
+  async executeCommand(command: ConnectorCommand): Promise<ConnectorResult> {
+    // Validate command structure
+    if (!command.module || !command.action) {
+      return this.fail(command, Date.now(), 'Missing module or action in command');
+    }
+
+    // Route to module adapter
+    switch (command.module) {
+      case 'crm':
+        return this.executeCrmAction(command);
+      case 'commerce':
+        return this.executeCommerceAction(command);
+      case 'bookings':
+        return this.executeBookingsAction(command);
+      case 'content':
+        return this.executeContentAction(command);
+      case 'communications':
+        return this.executeCommunicationsAction(command);
+      case 'flow':
+        return this.executeFlowAction(command);
+      case 'autopilot':
+        return this.executeAutopilotAction(command);
+      case 'temporal':
+        return this.executeTemporalAction(command);
+      case 'inbox':
+        return this.executeInboxAction(command);
+      case 'genome':
+        return this.executeGenomeAction(command);
+      case 'intelligence':
+        return this.executeIntelligenceAction(command);
+      case 'notifications':
+        return this.executeNotificationsAction(command);
+      case 'projects':
+        return this.executeProjectsAction(command);
+      case 'social':
+        return this.executeSocialAction(command);
+      case 'analytics':
+        return this.executeAnalyticsAction(command);
+      case 'finance':
+        return this.executeFinanceAction(command);
+      case 'settings':
+        return this.executeSettingsAction(command);
+      case 'activity':
+        return this.executeActivityAction(command);
+      default:
+        return this.fail(command, Date.now(), `Unknown module: ${command.module}`);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  4. RESULT HELPERS
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  private ok(command: ConnectorCommand, startTime: number, data: unknown): ConnectorResult {
+    return {
+      success: true,
+      module: command.module,
+      action: command.action,
+      durationMs: Date.now() - startTime,
+      data,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  private fail(command: ConnectorCommand, startTime: number, error: string): ConnectorResult {
+    return {
+      success: false,
+      module: command.module,
+      action: command.action,
+      durationMs: Date.now() - startTime,
+      error,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  5. MODULE ADAPTERS — CRM (12 actions)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  private async executeCrmAction(command: ConnectorCommand): Promise<ConnectorResult> {
+    const start = Date.now();
+    switch (command.action) {
+      case 'create_contact': {
+        const contact = await this.crm.createContact({
+          businessId: command.businessId,
+          firstName: command.parameters.firstName as string,
+          lastName: command.parameters.lastName as string,
+          email: command.parameters.email as string,
+          phone: command.parameters.phone as string,
+          company: command.parameters.company as string,
+          tags: command.parameters.tags as string[],
+          status: (command.parameters.status as string) || 'lead',
+        });
+        return this.ok(command, start, contact);
+      }
+      case 'get_contact': {
+        const contact = await this.crm.getContact({
+          businessId: command.businessId,
+          contactId: command.parameters.contactId as string,
+        });
+        return this.ok(command, start, contact);
+      }
+      case 'update_contact': {
+        const contact = await this.crm.updateContact({
+          businessId: command.businessId,
+          contactId: command.parameters.contactId as string,
+          firstName: command.parameters.firstName as string,
+          lastName: command.parameters.lastName as string,
+          email: command.parameters.email as string,
+          phone: command.parameters.phone as string,
+          status: command.parameters.status as string,
+          tags: command.parameters.tags as string[],
+        });
+        return this.ok(command, start, contact);
+      }
+      case 'delete_contact': {
+        await this.crm.deleteContact({
+          businessId: command.businessId,
+          contactId: command.parameters.contactId as string,
+        });
+        return this.ok(command, start, { deleted: true });
+      }
+      case 'list_contacts': {
+        const contacts = await this.crm.listContacts({
+          businessId: command.businessId,
+          status: command.parameters.status as string,
+          tag: command.parameters.tag as string,
+          search: command.parameters.search as string,
+          limit: (command.parameters.limit as number) || 50,
+          offset: (command.parameters.offset as number) || 0,
+        });
+        return this.ok(command, start, contacts);
+      }
+      case 'add_task': {
+        const task = await this.crm.addTask({
+          businessId: command.businessId,
+          contactId: command.parameters.contactId as string,
+          title: command.parameters.title as string,
+          priority: (command.parameters.priority as string) || 'medium',
+          dueDate: command.parameters.dueDate as string,
+          assignedTo: command.parameters.assignedTo as string,
+        });
+        return this.ok(command, start, task);
+      }
+      case 'complete_task': {
+        const task = await this.crm.completeTask({
+          businessId: command.businessId,
+          taskId: command.parameters.taskId as string,
+          contactId: command.parameters.contactId as string,
+          notes: command.parameters.notes as string,
+        });
+        return this.ok(command, start, task);
+      }
+      case 'add_note': {
+        const note = await this.crm.addNote({
+          businessId: command.businessId,
+          contactId: command.parameters.contactId as string,
+          body: command.parameters.body as string,
+          type: (command.parameters.type as string) || 'general',
+        });
+        return this.ok(command, start, note);
+      }
+      case 'add_tag': {
+        const contact = await this.crm.addTag({
+          businessId: command.businessId,
+          contactId: command.parameters.contactId as string,
+          tags: command.parameters.tags as string[],
+        });
+        return this.ok(command, start, contact);
+      }
+      case 'update_status': {
+        const contact = await this.crm.updateStatus({
+          businessId: command.businessId,
+          contactId: command.parameters.contactId as string,
+          status: command.parameters.status as string,
+          reason: command.parameters.reason as string,
+        });
+        return this.ok(command, start, contact);
+      }
+      case 'log_event': {
+        const event = await this.crm.logEvent({
+          businessId: command.businessId,
+          contactId: command.parameters.contactId as string,
+          eventType: command.parameters.eventType as string,
+          metadata: command.parameters.metadata as Record<string, unknown>,
+        });
+        return this.ok(command, start, event);
+      }
+      case 'merge_contacts': {
+        const result = await this.crm.mergeContacts({
+          businessId: command.businessId,
+          masterContactId: command.parameters.masterContactId as string,
+          duplicateContactId: command.parameters.duplicateContactId as string,
+        });
+        return this.ok(command, start, result);
+      }
+      default:
+        return this.fail(command, start, `Unknown CRM action: ${command.action}`);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  6. MODULE ADAPTERS — COMMERCE (10 actions)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  private async executeCommerceAction(command: ConnectorCommand): Promise<ConnectorResult> {
+    const start = Date.now();
+    switch (command.action) {
+      case 'create_invoice': {
+        const invoice = await this.commerce.createInvoice({
+          businessId: command.businessId,
+          contactId: command.parameters.contactId as string,
+          items: command.parameters.items as Array<Record<string, unknown>>,
+          dueDate: command.parameters.dueDate as string,
+          notes: command.parameters.notes as string,
+          sendImmediately: (command.parameters.sendImmediately as boolean) || false,
+        });
+        return this.ok(command, start, invoice);
+      }
+      case 'send_invoice': {
+        const invoice = await this.commerce.sendInvoice({
+          businessId: command.businessId,
+          invoiceId: command.parameters.invoiceId as string,
+          message: command.parameters.message as string,
+        });
+        return this.ok(command, start, invoice);
+      }
+      case 'get_invoice': {
+        const invoice = await this.commerce.getInvoice({
+          businessId: command.businessId,
+          invoiceId: command.parameters.invoiceId as string,
+        });
+        return this.ok(command, start, invoice);
+      }
+      case 'list_invoices': {
+        const invoices = await this.commerce.listInvoices({
+          businessId: command.businessId,
+          contactId: command.parameters.contactId as string,
+          status: command.parameters.status as string,
+          limit: (command.parameters.limit as number) || 50,
+        });
+        return this.ok(command, start, invoices);
+      }
+      case 'create_product': {
+        const product = await this.commerce.createProduct({
+          businessId: command.businessId,
+          name: command.parameters.name as string,
+          description: command.parameters.description as string,
+          price: command.parameters.price as number,
+          sku: command.parameters.sku as string,
+          taxable: (command.parameters.taxable as boolean) ?? true,
+        });
+        return this.ok(command, start, product);
+      }
+      case 'get_product': {
+        const product = await this.commerce.getProduct({
+          businessId: command.businessId,
+          productId: command.parameters.productId as string,
+          sku: command.parameters.sku as string,
+        });
+        return this.ok(command, start, product);
+      }
+      case 'create_order': {
+        const order = await this.commerce.createOrder({
+          businessId: command.businessId,
+          contactId: command.parameters.contactId as string,
+          items: command.parameters.items as Array<Record<string, unknown>>,
+          notes: command.parameters.notes as string,
+        });
+        return this.ok(command, start, order);
+      }
+      case 'process_payment': {
+        const payment = await this.commerce.processPayment({
+          businessId: command.businessId,
+          invoiceId: command.parameters.invoiceId as string,
+          amount: command.parameters.amount as number,
+          method: command.parameters.method as string,
+          reference: command.parameters.reference as string,
+        });
+        return this.ok(command, start, payment);
+      }
+      case 'create_quote': {
+        const quote = await this.commerce.createQuote({
+          businessId: command.businessId,
+          contactId: command.parameters.contactId as string,
+          items: command.parameters.items as Array<Record<string, unknown>>,
+          validUntil: command.parameters.validUntil as string,
+          notes: command.parameters.notes as string,
+        });
+        return this.ok(command, start, quote);
+      }
+      case 'send_quote': {
+        const quote = await this.commerce.sendQuote({
+          businessId: command.businessId,
+          quoteId: command.parameters.quoteId as string,
+          message: command.parameters.message as string,
+        });
+        return this.ok(command, start, quote);
+      }
+      default:
+        return this.fail(command, start, `Unknown commerce action: ${command.action}`);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  7. MODULE ADAPTERS — BOOKINGS (8 actions)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  private async executeBookingsAction(command: ConnectorCommand): Promise<ConnectorResult> {
+    const start = Date.now();
+    switch (command.action) {
+      case 'create_booking': {
+        const booking = await this.bookings.createBooking({
+          businessId: command.businessId,
+          contactId: command.parameters.contactId as string,
+          serviceId: command.parameters.serviceId as string,
+          startTime: command.parameters.startTime as string,
+          endTime: command.parameters.endTime as string,
+          staffId: command.parameters.staffId as string,
+          notes: command.parameters.notes as string,
+        });
+        return this.ok(command, start, booking);
+      }
+      case 'cancel_booking': {
+        const booking = await this.bookings.cancelBooking({
+          businessId: command.businessId,
+          bookingId: command.parameters.bookingId as string,
+          reason: command.parameters.reason as string,
+          notifyClient: (command.parameters.notifyClient as boolean) ?? true,
+        });
+        return this.ok(command, start, booking);
+      }
+      case 'reschedule_booking': {
+        const booking = await this.bookings.rescheduleBooking({
+          businessId: command.businessId,
+          bookingId: command.parameters.bookingId as string,
+          newStartTime: command.parameters.newStartTime as string,
+          newEndTime: command.parameters.newEndTime as string,
+          notifyClient: (command.parameters.notifyClient as boolean) ?? true,
+        });
+        return this.ok(command, start, booking);
+      }
+      case 'confirm_booking': {
+        const booking = await this.bookings.confirmBooking({
+          businessId: command.businessId,
+          bookingId: command.parameters.bookingId as string,
+          sendConfirmation: (command.parameters.sendConfirmation as boolean) ?? true,
+        });
+        return this.ok(command, start, booking);
+      }
+      case 'add_service': {
+        const service = await this.bookings.addService({
+          businessId: command.businessId,
+          name: command.parameters.name as string,
+          duration: command.parameters.duration as number,
+          price: command.parameters.price as number,
+          description: command.parameters.description as string,
+          buffer: (command.parameters.buffer as number) || 0,
+        });
+        return this.ok(command, start, service);
+      }
+      case 'update_service': {
+        const service = await this.bookings.updateService({
+          businessId: command.businessId,
+          serviceId: command.parameters.serviceId as string,
+          name: command.parameters.name as string,
+          duration: command.parameters.duration as number,
+          price: command.parameters.price as number,
+          active: command.parameters.active as boolean,
+        });
+        return this.ok(command, start, service);
+      }
+      case 'set_availability': {
+        const avail = await this.bookings.setAvailability({
+          businessId: command.businessId,
+          staffId: command.parameters.staffId as string,
+          dayOfWeek: command.parameters.dayOfWeek as string,
+          startTime: command.parameters.startTime as string,
+          endTime: command.parameters.endTime as string,
+        });
+        return this.ok(command, start, avail);
+      }
+      case 'block_time': {
