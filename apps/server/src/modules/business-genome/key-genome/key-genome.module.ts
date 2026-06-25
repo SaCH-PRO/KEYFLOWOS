@@ -28,6 +28,7 @@ import { GenomeCrossDomainService } from './genome-cross-domain.service';
 import { GenomeRecommendationRankerService } from './genome-recommendation-ranker.service';
 import { GenomeOpportunityDetectorService } from './genome-opportunity-detector.service';
 import { GenomeAutonomyGateService } from './genome-autonomy-gate.service';
+import { GenomeRecommendationOutcomeService } from './genome-recommendation-outcome.service';
 
 @Module({
   imports: [PrismaModule],
@@ -60,6 +61,7 @@ import { GenomeAutonomyGateService } from './genome-autonomy-gate.service';
     GenomeRecommendationRankerService,
     GenomeOpportunityDetectorService,
     GenomeAutonomyGateService,
+    GenomeRecommendationOutcomeService,
   ],
   exports: [
     GenomeFactService,
@@ -90,6 +92,7 @@ import { GenomeAutonomyGateService } from './genome-autonomy-gate.service';
     GenomeRecommendationRankerService,
     GenomeOpportunityDetectorService,
     GenomeAutonomyGateService,
+    GenomeRecommendationOutcomeService,
   ],
 })
 export class KeyGenomeModule {}

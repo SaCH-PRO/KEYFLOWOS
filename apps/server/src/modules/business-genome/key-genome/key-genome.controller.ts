@@ -7,6 +7,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -34,6 +35,7 @@ import { GenomeCrossDomainService } from './genome-cross-domain.service';
 import { GenomeRecommendationRankerService } from './genome-recommendation-ranker.service';
 import { GenomeOpportunityDetectorService } from './genome-opportunity-detector.service';
 import { GenomeAutonomyGateService } from './genome-autonomy-gate.service';
+import { GenomeRecommendationOutcomeService } from './genome-recommendation-outcome.service';
 import type { ListGenomeCrossDomainSnapshotsQuery } from './key-genome.types';
 import type { CheckGenomeAutonomyGateInput } from './key-genome.types';
 import type {
@@ -45,6 +47,7 @@ import type {
   RecommendationOutcome,
   UpdateGenomeContentStrategyInput,
   UpdateGenomeGrowthChannelInput,
+  UpdateGenomeRecommendationOutcomeObservationInput,
   UpsertGenomeCustomerSegmentInput,
   UpsertGenomeDeliveryCapabilityInput,
   UpsertGenomeFinancialMetricInput,
@@ -79,6 +82,8 @@ export class KeyGenomeController {
     @Inject(GenomeRecommendationRankerService) private readonly recommendationRanker: GenomeRecommendationRankerService,
     @Inject(GenomeOpportunityDetectorService) private readonly opportunityDetector: GenomeOpportunityDetectorService,
     @Inject(GenomeAutonomyGateService) private readonly autonomyGate: GenomeAutonomyGateService,
+    @Inject(GenomeRecommendationOutcomeService)
+    private readonly outcomeService: GenomeRecommendationOutcomeService,
   ) {}
 
   @Get('signals')
@@ -189,8 +194,14 @@ export class KeyGenomeController {
   async dismissRecommendation(
     @Param('businessId') businessId: string,
     @Param('recommendationId') recommendationId: string,
+    @Body() body: { reason?: string },
   ) {
-    return this.recommendationService.dismissRecommendation(businessId, recommendationId);
+    return this.recommendationService.dismissRecommendation(
+      businessId,
+      recommendationId,
+      undefined,
+      body.reason,
+    );
   }
 
   @Post('recommendations/:recommendationId/apply')
@@ -201,6 +212,28 @@ export class KeyGenomeController {
     return this.recommendationService.applyRecommendation(businessId, recommendationId);
   }
 
+  @Post('recommendations/:recommendationId/ignore')
+  async ignoreRecommendation(
+    @Param('businessId') businessId: string,
+    @Param('recommendationId') recommendationId: string,
+    @Body() body: { reason?: string },
+  ) {
+    return this.recommendationService.ignoreRecommendation(
+      businessId,
+      recommendationId,
+      undefined,
+      body.reason,
+    );
+  }
+
+  @Post('recommendations/:recommendationId/escalate')
+  async escalateRecommendation(
+    @Param('businessId') businessId: string,
+    @Param('recommendationId') recommendationId: string,
+  ) {
+    return this.recommendationService.escalateRecommendation(businessId, recommendationId);
+  }
+
   @Post('recommendations/:recommendationId/track-outcome')
   async trackRecommendationOutcome(
     @Param('businessId') businessId: string,
@@ -208,6 +241,67 @@ export class KeyGenomeController {
     @Body() body: RecommendationOutcome,
   ) {
     return this.recommendationService.trackOutcome(businessId, recommendationId, body);
+  }
+
+  @Get('recommendations/:recommendationId/outcome')
+  async getRecommendationOutcome(
+    @Param('businessId') businessId: string,
+    @Param('recommendationId') recommendationId: string,
+  ) {
+    return this.outcomeService.getOutcomeByRecommendation(businessId, recommendationId);
+  }
+
+  @Get('outcomes')
+  async listRecommendationOutcomes(
+    @Param('businessId') businessId: string,
+    @Query('domain') domain?: string,
+    @Query('decision') decision?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    return this.outcomeService.listOutcomes(businessId, {
+      domain,
+      decision: decision as any,
+      limit: limit !== undefined ? Number(limit) : undefined,
+      offset: offset !== undefined ? Number(offset) : undefined,
+    });
+  }
+
+  @Get('outcomes/summary')
+  async getRecommendationOutcomesSummary(
+    @Param('businessId') businessId: string,
+  ) {
+    return this.outcomeService.getSummary(businessId);
+  }
+
+  @Patch('outcomes/:outcomeId/observation')
+  async updateOutcomeObservation(
+    @Param('businessId') businessId: string,
+    @Param('outcomeId') outcomeId: string,
+    @Body() body: Omit<UpdateGenomeRecommendationOutcomeObservationInput, 'outcomeId' | 'businessId'>,
+  ) {
+    return this.outcomeService.updateObservation({ ...body, outcomeId, businessId });
+  }
+
+  @Get('outcome-windows/:domain')
+  async getOutcomeLearningWindow(
+    @Param('businessId') businessId: string,
+    @Param('domain') domain: string,
+  ) {
+    return this.outcomeService.getLearningWindow(businessId, domain);
+  }
+
+  @Put('outcome-windows/:domain')
+  async setOutcomeLearningWindow(
+    @Param('businessId') businessId: string,
+    @Param('domain') domain: string,
+    @Body() body: { windowDays: number },
+  ) {
+    return this.outcomeService.setLearningWindow({
+      businessId,
+      domain,
+      windowDays: body.windowDays,
+    });
   }
 
   @Get('experiments')

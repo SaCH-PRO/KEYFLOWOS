@@ -18,9 +18,11 @@ import {
   acceptGenomeRecommendation,
   applyGenomeRecommendation,
   dismissGenomeRecommendation,
+  escalateGenomeRecommendation,
   generateGenomeRecommendations,
   getGenomeExperiments,
   getGenomeRecommendations,
+  ignoreGenomeRecommendation,
   startGenomeExperiment,
   completeGenomeExperiment,
   cancelGenomeExperiment,
@@ -61,6 +63,8 @@ export function KeyGenomeRecommendationsPanel({
   const [error, setError] = useState<string | null>(null);
   const [actionId, setActionId] = useState<string | null>(null);
   const [bridgeRecommendation, setBridgeRecommendation] = useState<GenomeRecommendationData | null>(null);
+  const [reasoning, setReasoning] = useState<{ recommendationId: string; action: "dismiss" | "ignore" } | null>(null);
+  const [reasonText, setReasonText] = useState("");
 
   const businessId = getStoredBusinessId();
 
@@ -99,7 +103,8 @@ export function KeyGenomeRecommendationsPanel({
 
   const handleRecommendationAction = async (
     recommendationId: string,
-    action: "accept" | "dismiss" | "apply",
+    action: "accept" | "dismiss" | "apply" | "ignore" | "escalate",
+    reason?: string,
   ) => {
     if (!businessId) return;
     setActionId(`${action}-${recommendationId}`);
@@ -109,19 +114,37 @@ export function KeyGenomeRecommendationsPanel({
         result = await acceptGenomeRecommendation(businessId, recommendationId);
         break;
       case "dismiss":
-        result = await dismissGenomeRecommendation(businessId, recommendationId);
+        result = await dismissGenomeRecommendation(businessId, recommendationId, reason);
         break;
       case "apply":
         result = await applyGenomeRecommendation(businessId, recommendationId);
+        break;
+      case "ignore":
+        result = await ignoreGenomeRecommendation(businessId, recommendationId, reason);
+        break;
+      case "escalate":
+        result = await escalateGenomeRecommendation(businessId, recommendationId);
         break;
     }
     if (result.error) {
       setError(result.error);
     } else {
+      setReasoning(null);
+      setReasonText("");
       await refresh();
       onGenomeUpdate?.();
     }
     setActionId(null);
+  };
+
+  const startReasoning = (recommendationId: string, action: "dismiss" | "ignore") => {
+    setReasoning({ recommendationId, action });
+    setReasonText("");
+  };
+
+  const cancelReasoning = () => {
+    setReasoning(null);
+    setReasonText("");
   };
 
   const handleExperimentAction = async (
@@ -272,18 +295,72 @@ export function KeyGenomeRecommendationsPanel({
                         )}
                         Accept
                       </button>
-                      <button
-                        onClick={() => handleRecommendationAction(rec.id, "dismiss")}
-                        disabled={isBusy}
-                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50"
-                      >
-                        {isBusy && actionId === `dismiss-${rec.id}` ? (
-                          <Loader2 className="w-3 h-3 animate-spin" />
-                        ) : (
-                          <X className="w-3 h-3" />
-                        )}
-                        Dismiss
-                      </button>
+                      {reasoning?.recommendationId === rec.id ? (
+                        <div className="flex items-center gap-2 w-full">
+                          <input
+                            type="text"
+                            value={reasonText}
+                            onChange={(e) => setReasonText(e.target.value)}
+                            placeholder={`Why are you ${reasoning.action}ing this?`}
+                            className="flex-1 min-w-0 px-2 py-1.5 rounded-md border border-border bg-background text-xs"
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                void handleRecommendationAction(rec.id, reasoning.action, reasonText);
+                              }
+                              if (e.key === "Escape") {
+                                cancelReasoning();
+                              }
+                            }}
+                          />
+                          <button
+                            onClick={() => handleRecommendationAction(rec.id, reasoning.action, reasonText)}
+                            disabled={isBusy}
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                          >
+                            Confirm
+                          </button>
+                          <button
+                            onClick={cancelReasoning}
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-muted text-muted-foreground hover:bg-muted/80"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => startReasoning(rec.id, "dismiss")}
+                            disabled={isBusy}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50"
+                          >
+                            {isBusy && actionId === `dismiss-${rec.id}` ? (
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                            ) : (
+                              <X className="w-3 h-3" />
+                            )}
+                            Dismiss
+                          </button>
+                          <button
+                            onClick={() => startReasoning(rec.id, "ignore")}
+                            disabled={isBusy}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium bg-muted text-muted-foreground hover:bg-muted/80 disabled:opacity-50"
+                          >
+                            Ignore
+                          </button>
+                          <button
+                            onClick={() => handleRecommendationAction(rec.id, "escalate")}
+                            disabled={isBusy}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium bg-[hsl(var(--kf-warning))] text-white hover:bg-[hsl(var(--kf-warning))]/90 disabled:opacity-50"
+                          >
+                            {isBusy && actionId === `escalate-${rec.id}` ? (
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                            ) : (
+                              <Check className="w-3 h-3" />
+                            )}
+                            Escalate
+                          </button>
+                        </>
+                      )}
                     </>
                   )}
                   {rec.status === "ACCEPTED" && (

@@ -75,7 +75,14 @@ export interface GenomeRecommendationsResponse {
   recommendations: GenomeRecommendation[];
 }
 
-export type GenomeRecommendationStatus = 'ACTIVE' | 'ACCEPTED' | 'DISMISSED' | 'APPLIED' | 'EXPIRED';
+export type GenomeRecommendationStatus =
+  | 'ACTIVE'
+  | 'ACCEPTED'
+  | 'DISMISSED'
+  | 'APPLIED'
+  | 'IGNORED'
+  | 'ESCALATED'
+  | 'EXPIRED';
 export type GenomeExperimentStatus = 'PROPOSED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
 
 export interface GenomeRecommendationData {
@@ -377,10 +384,14 @@ export async function acceptGenomeRecommendation(businessId: string, recommendat
   });
 }
 
-export async function dismissGenomeRecommendation(businessId: string, recommendationId: string) {
+export async function dismissGenomeRecommendation(
+  businessId: string,
+  recommendationId: string,
+  reason?: string,
+) {
   return apiPost<GenomeRecommendationData>({
     path: `/business-genome/businesses/${businessId}/key-genome/recommendations/${recommendationId}/dismiss`,
-    body: {},
+    body: reason ? { reason } : {},
   });
 }
 
@@ -400,6 +411,124 @@ export async function trackGenomeRecommendationOutcome(
     path: `/business-genome/businesses/${businessId}/key-genome/recommendations/${recommendationId}/track-outcome`,
     body: outcome,
   });
+}
+
+export async function ignoreGenomeRecommendation(
+  businessId: string,
+  recommendationId: string,
+  reason?: string,
+) {
+  return apiPost<GenomeRecommendationData>({
+    path: `/business-genome/businesses/${businessId}/key-genome/recommendations/${recommendationId}/ignore`,
+    body: reason ? { reason } : {},
+  });
+}
+
+export async function escalateGenomeRecommendation(businessId: string, recommendationId: string) {
+  return apiPost<GenomeRecommendationData>({
+    path: `/business-genome/businesses/${businessId}/key-genome/recommendations/${recommendationId}/escalate`,
+    body: {},
+  });
+}
+
+export interface GenomeRecommendationOutcome {
+  id: string;
+  businessId: string;
+  recommendationId: string;
+  domain: string;
+  actionType: string;
+  decision: GenomeRecommendationStatus;
+  decidedBy?: string | null;
+  decidedAt: string;
+  dismissalReason?: string | null;
+  preHealthScore?: number | null;
+  preReadinessScore?: number | null;
+  preConfidence?: number | null;
+  preRiskLevel?: string | null;
+  postHealthScore?: number | null;
+  postReadinessScore?: number | null;
+  postConfidence?: number | null;
+  postRiskLevel?: string | null;
+  observedAt?: string | null;
+  impactScore?: number | null;
+  impactEvidence: string[];
+  linkedActionType?: string | null;
+  linkedActionId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GenomeRecommendationOutcomeSummary {
+  businessId: string;
+  total: number;
+  accepted: number;
+  dismissed: number;
+  applied: number;
+  ignored: number;
+  escalated: number;
+  awaitingObservation: number;
+  winRate: number;
+  executionRate: number;
+}
+
+export interface GenomeOutcomeLearningWindow {
+  id: string;
+  businessId: string;
+  domain: string;
+  windowDays: number;
+  updatedAt: string;
+}
+
+export async function getGenomeRecommendationOutcome(
+  businessId: string,
+  recommendationId: string,
+) {
+  return apiGet<GenomeRecommendationOutcome | null>(
+    `/business-genome/businesses/${businessId}/key-genome/recommendations/${recommendationId}/outcome`,
+  );
+}
+
+export async function listGenomeRecommendationOutcomes(
+  businessId: string,
+  filters: {
+    domain?: string;
+    decision?: GenomeRecommendationStatus;
+    limit?: number;
+    offset?: number;
+  } = {},
+) {
+  const params = new URLSearchParams();
+  if (filters.domain) params.set('domain', filters.domain);
+  if (filters.decision) params.set('decision', filters.decision);
+  if (filters.limit !== undefined) params.set('limit', String(filters.limit));
+  if (filters.offset !== undefined) params.set('offset', String(filters.offset));
+  const query = params.toString();
+  return apiGet<GenomeRecommendationOutcome[]>(
+    `/business-genome/businesses/${businessId}/key-genome/outcomes${query ? `?${query}` : ''}`,
+  );
+}
+
+export async function getGenomeRecommendationOutcomesSummary(businessId: string) {
+  return apiGet<GenomeRecommendationOutcomeSummary>(
+    `/business-genome/businesses/${businessId}/key-genome/outcomes/summary`,
+  );
+}
+
+export async function getGenomeOutcomeLearningWindow(businessId: string, domain: string) {
+  return apiGet<GenomeOutcomeLearningWindow>(
+    `/business-genome/businesses/${businessId}/key-genome/outcome-windows/${domain}`,
+  );
+}
+
+export async function setGenomeOutcomeLearningWindow(
+  businessId: string,
+  domain: string,
+  windowDays: number,
+) {
+  return apiPatch<GenomeOutcomeLearningWindow>(
+    `/business-genome/businesses/${businessId}/key-genome/outcome-windows/${domain}`,
+    { windowDays },
+  );
 }
 
 export async function getGenomeExperiments(

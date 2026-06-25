@@ -9,7 +9,8 @@ type StatusType =
   | "draft" | "sent" | "paid" | "overdue" | "partial" | "void"
   | "scheduled" | "running" | "paused" | "ended"
   | "open" | "closed" | "won" | "lost"
-  | "success" | "warning" | "error" | "info" | "neutral";
+  | "success" | "warning" | "error" | "info" | "neutral"
+  | "accepted" | "dismissed" | "applied" | "ignored" | "escalated" | "expired";
 
 const STATUS_COLOR_MAP: Record<StatusType, string> = {
   active: "var(--kf-success)",
@@ -47,6 +48,13 @@ const STATUS_COLOR_MAP: Record<StatusType, string> = {
   error: "var(--kf-error)",
   info: "var(--kf-info)",
   neutral: "var(--kf-neutral)",
+
+  accepted: "var(--kf-success)",
+  dismissed: "var(--kf-error)",
+  applied: "var(--kf-success)",
+  ignored: "var(--kf-neutral)",
+  escalated: "var(--kf-warning)",
+  expired: "var(--kf-neutral)",
 };
 
 interface StatusBadgeProps {

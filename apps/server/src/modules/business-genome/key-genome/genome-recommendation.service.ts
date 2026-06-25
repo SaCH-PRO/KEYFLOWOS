@@ -7,6 +7,7 @@ import { GenomeScoringService } from './genome-scoring.service';
 import { GenomeExperimentService } from './genome-experiment.service';
 import { GenomeMemoryService } from './genome-memory.service';
 import { OutcomeLearningService } from './outcome-learning.service';
+import { GenomeRecommendationOutcomeService } from './genome-recommendation-outcome.service';
 import {
   KEY_GENOME_SECTION_CONFIG,
   type KeyGenomeSection,
@@ -141,6 +142,7 @@ export class GenomeRecommendationService {
     private readonly experimentService: GenomeExperimentService,
     private readonly memory: GenomeMemoryService,
     private readonly outcomeLearning: OutcomeLearningService,
+    private readonly outcomeService: GenomeRecommendationOutcomeService,
   ) {}
 
   async createRecommendation(
@@ -219,6 +221,7 @@ export class GenomeRecommendationService {
   async acceptRecommendation(
     businessId: string,
     recommendationId: string,
+    decidedBy?: string,
   ): Promise<GenomeRecommendationData> {
     await this.getRecommendation(businessId, recommendationId);
 
@@ -228,6 +231,12 @@ export class GenomeRecommendationService {
     });
 
     await this.outcomeLearning.recordRecommendationAccepted(businessId, toDomain(updated));
+    await this.outcomeService.recordOutcome({
+      recommendationId,
+      businessId,
+      decision: 'ACCEPTED',
+      decidedBy,
+    });
 
     return toDomain(updated);
   }
@@ -235,6 +244,8 @@ export class GenomeRecommendationService {
   async dismissRecommendation(
     businessId: string,
     recommendationId: string,
+    decidedBy?: string,
+    reason?: string,
   ): Promise<GenomeRecommendationData> {
     await this.getRecommendation(businessId, recommendationId);
 
@@ -244,6 +255,13 @@ export class GenomeRecommendationService {
     });
 
     await this.outcomeLearning.recordRecommendationDismissed(businessId, toDomain(updated));
+    await this.outcomeService.recordOutcome({
+      recommendationId,
+      businessId,
+      decision: 'DISMISSED',
+      decidedBy,
+      dismissalReason: reason,
+    });
 
     return toDomain(updated);
   }
@@ -251,6 +269,7 @@ export class GenomeRecommendationService {
   async applyRecommendation(
     businessId: string,
     recommendationId: string,
+    decidedBy?: string,
   ): Promise<GenomeRecommendationData> {
     await this.getRecommendation(businessId, recommendationId);
 
@@ -264,6 +283,58 @@ export class GenomeRecommendationService {
     });
 
     await this.outcomeLearning.recordRecommendationApplied(businessId, toDomain(updated));
+    await this.outcomeService.recordOutcome({
+      recommendationId,
+      businessId,
+      decision: 'APPLIED',
+      decidedBy,
+    });
+
+    return toDomain(updated);
+  }
+
+  async ignoreRecommendation(
+    businessId: string,
+    recommendationId: string,
+    decidedBy?: string,
+    reason?: string,
+  ): Promise<GenomeRecommendationData> {
+    await this.getRecommendation(businessId, recommendationId);
+
+    const updated = await this.prisma.client.genomeRecommendation.update({
+      where: { id: recommendationId },
+      data: { status: 'IGNORED' as RecommendationStatus, reviewedAt: new Date() },
+    });
+
+    await this.outcomeService.recordOutcome({
+      recommendationId,
+      businessId,
+      decision: 'IGNORED',
+      decidedBy,
+      dismissalReason: reason,
+    });
+
+    return toDomain(updated);
+  }
+
+  async escalateRecommendation(
+    businessId: string,
+    recommendationId: string,
+    decidedBy?: string,
+  ): Promise<GenomeRecommendationData> {
+    await this.getRecommendation(businessId, recommendationId);
+
+    const updated = await this.prisma.client.genomeRecommendation.update({
+      where: { id: recommendationId },
+      data: { status: 'ESCALATED' as RecommendationStatus, reviewedAt: new Date() },
+    });
+
+    await this.outcomeService.recordOutcome({
+      recommendationId,
+      businessId,
+      decision: 'ESCALATED',
+      decidedBy,
+    });
 
     return toDomain(updated);
   }

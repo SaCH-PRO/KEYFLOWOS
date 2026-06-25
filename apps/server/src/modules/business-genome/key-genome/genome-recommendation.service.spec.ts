@@ -131,6 +131,10 @@ function makeService() {
     recordRecommendationOutcome: vi.fn().mockResolvedValue({ id: 'mem_4' }),
   } as any;
 
+  const outcomeService = {
+    recordOutcome: vi.fn().mockResolvedValue({ id: 'outcome_1' }),
+  } as any;
+
   const service = new GenomeRecommendationService(
     prisma,
     signalService,
@@ -139,6 +143,7 @@ function makeService() {
     experimentService,
     memoryService,
     outcomeLearning,
+    outcomeService,
   );
 
   return {
@@ -150,6 +155,7 @@ function makeService() {
     experimentService,
     memoryService,
     outcomeLearning,
+    outcomeService,
     storedRecs,
     storedExperiments,
   };

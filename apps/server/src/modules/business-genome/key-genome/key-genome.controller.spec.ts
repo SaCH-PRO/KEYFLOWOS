@@ -25,6 +25,7 @@ import { GenomeCrossDomainService } from './genome-cross-domain.service';
 import { GenomeRecommendationRankerService } from './genome-recommendation-ranker.service';
 import { GenomeOpportunityDetectorService } from './genome-opportunity-detector.service';
 import { GenomeAutonomyGateService } from './genome-autonomy-gate.service';
+import { GenomeRecommendationOutcomeService } from './genome-recommendation-outcome.service';
 
 function mockProvider(
   token: string | symbol | (new (...args: any[]) => any),
@@ -95,8 +96,30 @@ async function makeController() {
         acceptRecommendation: vi.fn().mockResolvedValue({}),
         dismissRecommendation: vi.fn().mockResolvedValue({}),
         applyRecommendation: vi.fn().mockResolvedValue({}),
+        ignoreRecommendation: vi.fn().mockResolvedValue({}),
+        escalateRecommendation: vi.fn().mockResolvedValue({}),
         trackOutcome: vi.fn().mockResolvedValue({}),
         generateRecommendations: vi.fn().mockResolvedValue([]),
+      }),
+      mockProvider(GenomeRecommendationOutcomeService, {
+        recordOutcome: vi.fn().mockResolvedValue({}),
+        listOutcomes: vi.fn().mockResolvedValue([]),
+        getOutcomeByRecommendation: vi.fn().mockResolvedValue(null),
+        updateObservation: vi.fn().mockResolvedValue({}),
+        getSummary: vi.fn().mockResolvedValue({
+          businessId: 'biz_1',
+          total: 0,
+          accepted: 0,
+          dismissed: 0,
+          applied: 0,
+          ignored: 0,
+          escalated: 0,
+          awaitingObservation: 0,
+          winRate: 0,
+          executionRate: 0,
+        }),
+        getLearningWindow: vi.fn().mockResolvedValue({ id: 'win_1', businessId: 'biz_1', domain: 'finance', windowDays: 14, updatedAt: new Date().toISOString() }),
+        setLearningWindow: vi.fn().mockResolvedValue({ id: 'win_1', businessId: 'biz_1', domain: 'finance', windowDays: 14, updatedAt: new Date().toISOString() }),
       }),
       mockProvider(GenomeExperimentService, {
         listExperiments: vi.fn().mockResolvedValue([]),

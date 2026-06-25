@@ -285,6 +285,8 @@ model Business {
   businessSignals          BusinessSignal[]
   healthSnapshots          BusinessHealthSnapshot[]
   genomeMemoryEvents       GenomeMemoryEvent[]
+  genomeRecommendationOutcomes GenomeRecommendationOutcome[]
+  genomeOutcomeLearningWindows GenomeOutcomeLearningWindow[]
 
   // Finance OS (FIN1)
   financialAccounts       FinancialAccount[]
@@ -915,6 +917,58 @@ model GenomeRecommendation {
   @@index([businessId, domain])
   @@index([businessId, riskLevel])
   @@map("genome_recommendations")
+}
+
+model GenomeRecommendationOutcome {
+  id               String   @id @default(cuid())
+  businessId       String   @map("business_id")
+  business         Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  recommendationId String   @map("recommendation_id")
+
+  domain          String
+  actionType      String   @map("action_type")
+  decision        String   // ACTIVE | ACCEPTED | DISMISSED | APPLIED | IGNORED | ESCALATED
+  decidedBy       String?  @map("decided_by") // userId or key-agent
+  decidedAt       DateTime @default(now()) @map("decided_at")
+  dismissalReason String?  @map("dismissal_reason")
+
+  preHealthScore     Int?     @map("pre_health_score")
+  preReadinessScore  Int?     @map("pre_readiness_score")
+  preConfidence      Int?     @map("pre_confidence")
+  preRiskLevel       String?  @map("pre_risk_level")
+
+  postHealthScore    Int?     @map("post_health_score")
+  postReadinessScore Int?     @map("post_readiness_score")
+  postConfidence     Int?     @map("post_confidence")
+  postRiskLevel      String?  @map("post_risk_level")
+  observedAt         DateTime? @map("observed_at")
+
+  impactScore    Float?   @map("impact_score") // -1 .. 1 normalized
+  impactEvidence String[] @default([]) @map("impact_evidence")
+
+  linkedActionType String? @map("linked_action_type")
+  linkedActionId   String? @map("linked_action_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId, domain])
+  @@index([businessId, decision])
+  @@index([recommendationId])
+  @@index([decidedAt])
+  @@map("genome_recommendation_outcomes")
+}
+
+model GenomeOutcomeLearningWindow {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  domain     String
+  windowDays Int      @default(14) @map("window_days")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@unique([businessId, domain])
+  @@map("genome_outcome_learning_windows")
 }
 
 model GenomeExperiment {

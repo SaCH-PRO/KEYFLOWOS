@@ -10,7 +10,14 @@
 export type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 export type VerificationStatus = 'INFERRED' | 'USER_VERIFIED' | 'UNVERIFIED_IMPORTED' | 'STALE' | 'DISPUTED';
 export type SignalStatus = 'NEW' | 'REVIEWED' | 'ACCEPTED' | 'REJECTED' | 'MERGED';
-export type RecommendationStatus = 'ACTIVE' | 'ACCEPTED' | 'DISMISSED' | 'APPLIED' | 'EXPIRED';
+export type RecommendationStatus =
+  | 'ACTIVE'
+  | 'ACCEPTED'
+  | 'DISMISSED'
+  | 'APPLIED'
+  | 'IGNORED'
+  | 'ESCALATED'
+  | 'EXPIRED';
 export type ExperimentStatus = 'PROPOSED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
 export type FactValueType = 'STRING' | 'NUMBER' | 'BOOLEAN' | 'DATE' | 'JSON' | 'LIST';
 
@@ -1528,4 +1535,100 @@ export interface GenomeAutonomyGateResult {
   evidenceWarnings: string[];
   recommendedNextStep: string;
   checkedAt: string;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 18 — Outcome Learning + Closed-Loop Genome Intelligence
+// ---------------------------------------------------------------------------
+
+export type GenomeRecommendationDecision =
+  | 'ACTIVE'
+  | 'ACCEPTED'
+  | 'DISMISSED'
+  | 'APPLIED'
+  | 'IGNORED'
+  | 'ESCALATED';
+
+export interface GenomeRecommendationOutcomeData {
+  id: string;
+  businessId: string;
+  recommendationId: string;
+  domain: string;
+  actionType: string;
+  decision: GenomeRecommendationDecision;
+  decidedBy?: string | null;
+  decidedAt: string;
+  dismissalReason?: string | null;
+  preHealthScore?: number | null;
+  preReadinessScore?: number | null;
+  preConfidence?: number | null;
+  preRiskLevel?: string | null;
+  postHealthScore?: number | null;
+  postReadinessScore?: number | null;
+  postConfidence?: number | null;
+  postRiskLevel?: string | null;
+  observedAt?: string | null;
+  impactScore?: number | null;
+  impactEvidence: string[];
+  linkedActionType?: string | null;
+  linkedActionId?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RecordGenomeRecommendationOutcomeInput {
+  recommendationId: string;
+  businessId: string;
+  decision: GenomeRecommendationDecision;
+  decidedBy?: string | null;
+  dismissalReason?: string | null;
+  linkedActionType?: string | null;
+  linkedActionId?: string | null;
+}
+
+export interface UpdateGenomeRecommendationOutcomeObservationInput {
+  outcomeId: string;
+  businessId: string;
+  postHealthScore?: number;
+  postReadinessScore?: number;
+  postConfidence?: number;
+  postRiskLevel?: string;
+  impactScore?: number;
+  impactEvidence?: string[];
+  observedAt?: string;
+}
+
+export interface ListGenomeRecommendationOutcomesQuery {
+  domain?: string;
+  decision?: GenomeRecommendationDecision;
+  recommendationId?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface GenomeRecommendationOutcomeSummary {
+  businessId: string;
+  total: number;
+  accepted: number;
+  dismissed: number;
+  applied: number;
+  ignored: number;
+  escalated: number;
+  awaitingObservation: number;
+  winRate: number;
+  executionRate: number;
+}
+
+export interface GenomeOutcomeLearningWindowData {
+  id: string;
+  businessId: string;
+  domain: string;
+  windowDays: number;
+  updatedAt: string;
+}
+
+export interface SetGenomeOutcomeLearningWindowInput {
+  businessId: string;
+  domain: string;
+  windowDays: number;
 }
