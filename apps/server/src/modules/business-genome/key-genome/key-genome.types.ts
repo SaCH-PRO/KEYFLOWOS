@@ -1324,3 +1324,84 @@ export interface ListGenomeMarketingGrowthSnapshotsQuery {
   riskLevel?: string;
   limit?: number;
 }
+
+// ---------------------------------------------------------------------------
+// Phase 17B — Cross-Domain Genome Intelligence
+// ---------------------------------------------------------------------------
+
+export type GenomeCrossDomainRiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' | 'UNKNOWN';
+
+export type GenomeCrossDomainDomainKey =
+  | 'finance'
+  | 'customer_sales_revenue'
+  | 'operations_delivery'
+  | 'marketing_growth';
+
+export interface GenomeCrossDomainDomainScore {
+  domain: GenomeCrossDomainDomainKey;
+  healthScore: number;
+  riskLevel: GenomeCrossDomainRiskLevel;
+  snapshotId?: string | null;
+  computedAt?: string | null;
+}
+
+export interface GenomeCrossDomainReadinessSummary {
+  averageReadinessScore: number;
+  departmentCount: number;
+  readyDepartments: string[];
+  atRiskDepartments: string[];
+}
+
+export interface GenomeCrossDomainEvidenceSummary {
+  totalFacts: number;
+  highConfidenceFacts: number;
+  totalEvidence: number;
+  verifiedEvidence: number;
+}
+
+export interface GenomeCrossDomainBottleneck {
+  domain: GenomeCrossDomainDomainKey;
+  label: string;
+  severity: GenomeCrossDomainRiskLevel;
+  reason?: string;
+}
+
+export interface GenomeCrossDomainOpportunity {
+  domain: GenomeCrossDomainDomainKey;
+  label: string;
+  potentialImpact: 'LOW' | 'MEDIUM' | 'HIGH';
+  reason?: string;
+}
+
+export interface GenomeCrossDomainRecommendedFocus {
+  domain: GenomeCrossDomainDomainKey;
+  priority: number;
+  label: string;
+  reason: string;
+}
+
+export interface GenomeCrossDomainSnapshotData {
+  id: string;
+  businessId: string;
+  period?: string | null;
+
+  overallHealthScore: number;
+  overallRiskLevel: GenomeCrossDomainRiskLevel;
+
+  domainScores: GenomeCrossDomainDomainScore[];
+  domainRisks: Record<GenomeCrossDomainDomainKey, GenomeCrossDomainRiskLevel>;
+  readinessSummary: GenomeCrossDomainReadinessSummary;
+  evidenceSummary: GenomeCrossDomainEvidenceSummary;
+
+  bottlenecks: GenomeCrossDomainBottleneck[];
+  opportunities: GenomeCrossDomainOpportunity[];
+  recommendedFocus: GenomeCrossDomainRecommendedFocus[];
+
+  computedAt: string;
+}
+
+export interface ListGenomeCrossDomainSnapshotsQuery {
+  period?: string;
+  riskLevel?: string;
+  limit?: number;
+}

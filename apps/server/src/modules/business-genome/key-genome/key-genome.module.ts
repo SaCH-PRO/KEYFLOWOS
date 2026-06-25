@@ -24,6 +24,7 @@ import { OperationsGenomeService } from './operations-genome.service';
 import { GenomeGrowthChannelService } from './genome-growth-channel.service';
 import { GenomeContentStrategyService } from './genome-content-strategy.service';
 import { MarketingGenomeService } from './marketing-genome.service';
+import { GenomeCrossDomainService } from './genome-cross-domain.service';
 
 @Module({
   imports: [PrismaModule],
@@ -52,6 +53,7 @@ import { MarketingGenomeService } from './marketing-genome.service';
     GenomeGrowthChannelService,
     GenomeContentStrategyService,
     MarketingGenomeService,
+    GenomeCrossDomainService,
   ],
   exports: [
     GenomeFactService,
@@ -78,6 +80,7 @@ import { MarketingGenomeService } from './marketing-genome.service';
     GenomeGrowthChannelService,
     GenomeContentStrategyService,
     MarketingGenomeService,
+    GenomeCrossDomainService,
   ],
 })
 export class KeyGenomeModule {}
