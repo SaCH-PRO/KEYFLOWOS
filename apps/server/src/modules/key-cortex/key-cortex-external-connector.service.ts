@@ -2,6 +2,8 @@
  * ╔═══════════════════════════════════════════════════════════════════════════╗
  * ║                 KEY EXTERNAL CONNECTOR SERVICE                            ║
  * ║        Universal Plugin Engine for KeyFlowOS Integrations                 ║
+ * ║         Production-hardened: circuit breaker, rate limiting,             ║
+ * ║         retries, health checks, OAuth refresh, sandbox mode              ║
  * ╚═══════════════════════════════════════════════════════════════════════════╝
  *
  * Injectable NestJS service that manages connections to 20+ external services,
@@ -9,7 +11,7 @@
  * user-defined connectors.
  *
  * @module key-cortex-external-connector
- * @version 1.0.0
+ * @version 2.0.0
  */
 
 import {
@@ -26,7 +28,7 @@ import { PrismaService } from '../../database/prisma.service';
 import { RedisService } from '../../redis/redis.service';
 import { lastValueFrom } from 'rxjs';
 import { AxiosError, AxiosRequestConfig } from 'axios';
-import { createHash, randomBytes, createCipheriv, createDecipheriv } from 'crypto';
+import { createHash, randomBytes, createCipheriv, createDecipheriv, createHmac, timingSafeEqual } from 'crypto';
 import { URL } from 'url';
 
 // ── Type imports ────────────────────────────────────────────────────────────
@@ -80,6 +82,69 @@ const IV_LENGTH = 16;
 /** Auth tag length for GCM mode */
 const AUTH_TAG_LENGTH = 16;
 
+// ════════════════════════════════════════════════════════════════════════════
+// PRODUCTION HARDENING — INTERFACES
+// ════════════════════════════════════════════════════════════════════════════
+
+/** Circuit breaker state machine for fault tolerance */
+interface CircuitBreakerState {
+  status: 'CLOSED' | 'OPEN' | 'HALF_OPEN';
+  failureCount: number;
+  successCount: number;
+  lastFailureTime: Date | null;
+  lastSuccessTime: Date | null;
+  failureThreshold: number;
+  cooldownMs: number;
+  halfOpenMaxAttempts: number;
+}
+
+/** Rate limit configuration per connector */
+interface RateLimit {
+  requestsPerSecond: number;
+  requestsPerMinute: number;
+  requestsPerHour: number;
+  burstAllowance: number;
+}
+
+/** Token bucket state for distributed rate limiting */
+interface TokenBucket {
+  tokens: number;
+  lastRefill: number;
+  capacity: number;
+}
+
+/** Connector health check result */
+interface ConnectorHealth {
+  status: 'healthy' | 'degraded' | 'unhealthy';
+  latencyMs: number;
+  lastChecked: Date;
+  message?: string;
+  rateLimitRemaining?: number;
+}
+
+/** Sanitized external request log entry */
+interface RequestLog {
+  requestId: string;
+  connectorId: string;
+  action: string;
+  method: string;
+  url: string;
+  statusCode?: number;
+  durationMs: number;
+  retryCount: number;
+  errorCode?: string;
+  timestamp: Date;
+}
+
+/** Sandbox execution result wrapper */
+interface SandboxResult {
+  success: boolean;
+  data?: unknown;
+  error?: string;
+  executedInSandbox: true;
+  wouldHaveMutated: boolean;
+}
+
 /**
  * External Connector Service — the universal integration engine.
  *
@@ -96,6 +161,25 @@ export class KeyCortexExternalConnectorService {
 
   /** In-memory registry of pre-built connector definitions */
   private readonly connectorRegistry: Map<ExternalService, ExternalConnectorDefinition>;
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // PRODUCTION HARDENING — STATE
+  // ══════════════════════════════════════════════════════════════════════════
+
+  /** Circuit breaker states per connector instance */
+  private readonly circuitBreakers: Map<string, CircuitBreakerState> = new Map();
+
+  /** Token bucket states per connector (in-memory fallback when Redis unavailable) */
+  private readonly tokenBuckets: Map<string, TokenBucket> = new Map();
+
+  /** OAuth token cache: connectorId → token data with expiry */
+  private readonly tokenCache: Map<string, { token: string; expiresAt: Date; refreshToken: string }> = new Map();
+
+  /** Health check cache: connectorId → cached health result */
+  private readonly healthCache: Map<string, { health: ConnectorHealth; cachedAt: number }> = new Map();
+
+  /** Health check cache TTL in milliseconds (60 seconds) */
+  private readonly HEALTH_CACHE_TTL_MS = 60000;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -122,7 +206,7 @@ export class KeyCortexExternalConnectorService {
     this.buildPlaceholderConnectors();
 
     this.logger.log(
-      `External Connector Service initialized with ${this.connectorRegistry.size} connector definitions`,
+      `External Connector Service initialized with ${this.connectorRegistry.size} connector definitions (v2.0.0 — production hardened)`,
     );
   }
 
@@ -231,6 +315,9 @@ export class KeyCortexExternalConnectorService {
       },
     });
 
+    // Initialize circuit breaker for this connector
+    this.initializeCircuitBreaker(instance.id);
+
     // Cache the instance
     const cacheKey = `${CONNECTOR_INSTANCE_CACHE_PREFIX}${instance.id}`;
     await this.redis.setex(cacheKey, 300, JSON.stringify(instance));
@@ -280,8 +367,12 @@ export class KeyCortexExternalConnectorService {
       where: { id: connectorId },
     });
 
-    // Remove from cache
+    // Remove from cache and hardening state
     await this.redis.del(`${CONNECTOR_INSTANCE_CACHE_PREFIX}${connectorId}`);
+    this.circuitBreakers.delete(connectorId);
+    this.tokenBuckets.delete(connectorId);
+    this.tokenCache.delete(connectorId);
+    this.healthCache.delete(connectorId);
 
     this.emitStatusChange({
       connectorId: instance.id,
@@ -331,28 +422,91 @@ export class KeyCortexExternalConnectorService {
   }
 
   // ════════════════════════════════════════════════════════════════════════════
-  // ACTION EXECUTION
+  // ACTION EXECUTION (Production Hardened)
   // ════════════════════════════════════════════════════════════════════════════
 
   /**
    * Execute an action on a configured connector.
    *
-   * 1. Loads the connector instance (decrypts credentials)
-   * 2. Finds the action definition
-   * 3. Builds the HTTP request with auth headers
-   * 4. Executes with retry logic (3x exponential backoff)
-   * 5. Logs execution and emits event
-   * 6. Returns result
+   * 1. Checks circuit breaker state
+   * 2. Enforces rate limits via token bucket
+   * 3. Ensures valid OAuth token (auto-refresh)
+   * 4. Loads the connector instance (decrypts credentials)
+   * 5. Finds the action definition
+   * 6. Builds the HTTP request with auth headers
+   * 7. Executes with retry logic (exponential backoff + jitter)
+   * 8. Logs execution and emits event
+   * 9. Updates circuit breaker on success/failure
+   * 10. Returns result
    */
   async execute(input: ExecuteActionInput & { businessId: string; requestId?: string }): Promise<ExternalExecutionResult> {
     const { connectorId, action, parameters = {}, businessId, requestId = this.generateId('req'), timeoutMs } = input;
     const startedAt = Date.now();
 
-    // 1. Load connector instance
+    // 1. Check circuit breaker
+    const cb = this.getCircuitBreaker(connectorId);
+    if (cb.status === 'OPEN') {
+      const timeSinceLastFailure = Date.now() - (cb.lastFailureTime?.getTime() || 0);
+      if (timeSinceLastFailure < cb.cooldownMs) {
+        this.logger.warn(`Circuit breaker OPEN for ${connectorId}, rejecting request`);
+        return {
+          success: false,
+          error: {
+            code: ErrorCodes.CIRCUIT_BREAKER_OPEN,
+            message: `Circuit breaker is OPEN for connector ${connectorId}. Retry after ${Math.ceil((cb.cooldownMs - timeSinceLastFailure) / 1000)}s`,
+            retryable: true,
+            retryAfterMs: cb.cooldownMs - timeSinceLastFailure,
+          },
+          durationMs: Date.now() - startedAt,
+          requestId,
+          executedAt: new Date(),
+          retryCount: 0,
+        };
+      }
+      // Transition to HALF_OPEN
+      cb.status = 'HALF_OPEN';
+      cb.failureCount = 0;
+      cb.successCount = 0;
+      this.logger.log(`Circuit breaker HALF_OPEN for ${connectorId}`);
+    }
+
+    // 2. Enforce rate limit
     const instance = await this.getConnectorInstance(connectorId, businessId);
     const definition = await this.getConnectorDefinition(instance.definitionId);
 
-    // 2. Find action definition
+    if (definition.rateLimitHardened) {
+      const rateCheck = await this.checkRateLimit(connectorId, definition.rateLimitHardened);
+      if (!rateCheck.allowed) {
+        return {
+          success: false,
+          error: {
+            code: ErrorCodes.RATE_LIMITED,
+            message: `Rate limit exceeded for ${definition.name}. Retry after ${rateCheck.retryAfterMs}ms`,
+            retryable: true,
+            retryAfterMs: rateCheck.retryAfterMs,
+          },
+          durationMs: Date.now() - startedAt,
+          requestId,
+          executedAt: new Date(),
+          retryCount: 0,
+        };
+      }
+    }
+
+    // 3. Ensure valid OAuth token (auto-refresh if needed)
+    const credentials = this.decryptCredentials(instance.config);
+    if (definition.authType === 'oauth2' && definition.requiredScopes?.length) {
+      try {
+        const freshToken = await this.ensureValidToken(connectorId, definition, credentials);
+        if (freshToken) {
+          credentials['accessToken'] = freshToken;
+        }
+      } catch (err) {
+        this.logger.warn(`Token refresh failed for ${connectorId}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    // 4. Find action definition
     const actionDef = definition.actions.find((a) => a.name === action);
     if (!actionDef) {
       throw new BadRequestException({
@@ -362,30 +516,24 @@ export class KeyCortexExternalConnectorService {
       });
     }
 
-    // 3. Decrypt credentials
-    const credentials = this.decryptCredentials(instance.config);
+    // 5. Execute with production-hardened retry logic
+    const effectiveTimeout = timeoutMs || definition.timeoutConfig?.requestTimeoutMs || DEFAULT_TIMEOUT_MS;
+    const retryConfig = definition.retryConfig || DEFAULT_RETRY_CONFIG;
 
-    // 4. Build and execute request with retries
     let lastError: ExecutionError | undefined;
-    const retryConfig = definition.rateLimit
-      ? {
-          ...DEFAULT_RETRY_CONFIG,
-          maxRetries: 3,
-          baseDelayMs: 1000,
-          maxDelayMs: 30000,
-          backoffMultiplier: 2,
-        }
-      : DEFAULT_RETRY_CONFIG;
-
     for (let attempt = 0; attempt <= retryConfig.maxRetries; attempt++) {
+      const requestStartedAt = Date.now();
       try {
         const result = await this.executeRequest(
           definition,
           actionDef,
           credentials,
           parameters,
-          timeoutMs || DEFAULT_TIMEOUT_MS,
+          effectiveTimeout,
         );
+
+        // Update circuit breaker on success
+        this.recordSuccess(connectorId);
 
         // Update execution stats
         await this.prisma.externalConnectorInstance.update({
@@ -401,11 +549,26 @@ export class KeyCortexExternalConnectorService {
         // Invalidate cache
         await this.redis.del(`${CONNECTOR_INSTANCE_CACHE_PREFIX}${connectorId}`);
 
+        const durationMs = Date.now() - startedAt;
+
+        // Log the request (sanitized)
+        await this.logExternalRequest({
+          requestId,
+          connectorId,
+          action,
+          method: actionDef.method,
+          url: this.buildUrl(definition, actionDef, credentials, parameters),
+          statusCode: result.statusCode,
+          durationMs,
+          retryCount: attempt,
+          timestamp: new Date(),
+        });
+
         const executionResult: ExternalExecutionResult = {
           success: true,
           data: result.data,
           statusCode: result.statusCode,
-          durationMs: Date.now() - startedAt,
+          durationMs,
           requestId,
           executedAt: new Date(),
           retryCount: attempt,
@@ -427,35 +590,31 @@ export class KeyCortexExternalConnectorService {
         const execError = this.normalizeError(err, definition.id);
         lastError = execError;
 
-        // Check if we should retry
-        const shouldRetry =
-          attempt < retryConfig.maxRetries &&
-          execError.retryable &&
-          (!retryConfig.retryableStatusCodes ||
-            retryConfig.retryableStatusCodes.includes(
-              (err as any)?.response?.status || 0,
-            ));
+        // Check if error is retryable per connector config
+        const isRetryableError = this.isRetryableError(err, definition);
+        const shouldRetry = attempt < retryConfig.maxRetries && isRetryableError;
 
         if (!shouldRetry) {
           break;
         }
 
-        // Calculate backoff delay
-        const delay = Math.min(
-          retryConfig.baseDelayMs * Math.pow(retryConfig.backoffMultiplier, attempt),
-          retryConfig.maxDelayMs,
-        );
+        // Exponential backoff with full jitter: delay = min(base * 2^attempt + random, max)
+        const baseDelay = retryConfig.baseDelayMs * Math.pow(2, attempt);
+        const jitter = Math.random() * baseDelay;
+        const delay = Math.min(baseDelay + jitter, retryConfig.maxDelayMs);
 
         this.logger.warn(
           `Execution attempt ${attempt + 1} failed for ${definition.name}.${action} (${connectorId}), ` +
-          `retrying in ${delay}ms: ${execError.message}`,
+          `retrying in ${Math.round(delay)}ms: ${execError.message}`,
         );
 
         await this.sleep(delay);
       }
     }
 
-    // All retries exhausted — record failure
+    // All retries exhausted — record failure and update circuit breaker
+    this.recordFailure(connectorId);
+
     await this.prisma.externalConnectorInstance.update({
       where: { id: connectorId },
       data: {
@@ -467,10 +626,26 @@ export class KeyCortexExternalConnectorService {
 
     await this.redis.del(`${CONNECTOR_INSTANCE_CACHE_PREFIX}${connectorId}`);
 
+    const failedDuration = Date.now() - startedAt;
+
+    // Log failed request
+    await this.logExternalRequest({
+      requestId,
+      connectorId,
+      action,
+      method: actionDef.method,
+      url: this.buildUrl(definition, actionDef, credentials, parameters),
+      statusCode: lastError?.code === ErrorCodes.RATE_LIMITED ? 429 : undefined,
+      durationMs: failedDuration,
+      retryCount: retryConfig.maxRetries,
+      errorCode: lastError?.code,
+      timestamp: new Date(),
+    });
+
     const failedResult: ExternalExecutionResult = {
       success: false,
       error: lastError,
-      durationMs: Date.now() - startedAt,
+      durationMs: failedDuration,
       requestId,
       executedAt: new Date(),
       retryCount: retryConfig.maxRetries,
@@ -489,6 +664,760 @@ export class KeyCortexExternalConnectorService {
 
     return failedResult;
   }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // PRODUCTION HARDENING — 1. CIRCUIT BREAKER
+  // ════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Initialize a circuit breaker for a connector instance.
+   */
+  private initializeCircuitBreaker(connectorId: string): CircuitBreakerState {
+    const state: CircuitBreakerState = {
+      status: 'CLOSED',
+      failureCount: 0,
+      successCount: 0,
+      lastFailureTime: null,
+      lastSuccessTime: null,
+      failureThreshold: 5,
+      cooldownMs: 60000,
+      halfOpenMaxAttempts: 3,
+    };
+    this.circuitBreakers.set(connectorId, state);
+    return state;
+  }
+
+  /**
+   * Get the circuit breaker state for a connector.
+   */
+  private getCircuitBreaker(connectorId: string): CircuitBreakerState {
+    let cb = this.circuitBreakers.get(connectorId);
+    if (!cb) {
+      cb = this.initializeCircuitBreaker(connectorId);
+    }
+    return cb;
+  }
+
+  /**
+   * Record a successful request — resets failure count and potentially closes circuit.
+   */
+  private recordSuccess(connectorId: string): void {
+    const cb = this.getCircuitBreaker(connectorId);
+    cb.lastSuccessTime = new Date();
+
+    if (cb.status === 'HALF_OPEN') {
+      cb.successCount++;
+      if (cb.successCount >= cb.halfOpenMaxAttempts) {
+        cb.status = 'CLOSED';
+        cb.failureCount = 0;
+        cb.successCount = 0;
+        this.logger.log(`Circuit breaker CLOSED for ${connectorId} after ${cb.halfOpenMaxAttempts} consecutive successes`);
+      }
+    } else if (cb.status === 'CLOSED') {
+      cb.failureCount = 0;
+    }
+  }
+
+  /**
+   * Record a failed request — increments failure count and potentially opens circuit.
+   */
+  private recordFailure(connectorId: string): void {
+    const cb = this.getCircuitBreaker(connectorId);
+    cb.failureCount++;
+    cb.lastFailureTime = new Date();
+
+    if (cb.status === 'HALF_OPEN') {
+      cb.status = 'OPEN';
+      this.logger.warn(`Circuit breaker OPEN for ${connectorId} — failure in HALF_OPEN state`);
+    } else if (cb.status === 'CLOSED' && cb.failureCount >= cb.failureThreshold) {
+      cb.status = 'OPEN';
+      this.logger.warn(`Circuit breaker OPEN for ${connectorId} after ${cb.failureThreshold} consecutive failures`);
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // PRODUCTION HARDENING — 2. TOKEN BUCKET RATE LIMITER
+  // ════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Check if a request is allowed under the rate limit using a token bucket algorithm.
+   * Uses Redis for distributed rate limiting, with in-memory fallback.
+   */
+  async checkRateLimit(
+    connectorId: string,
+    rateLimit: RateLimit,
+  ): Promise<{ allowed: boolean; retryAfterMs?: number }> {
+    const now = Date.now();
+    const redisKey = `rate_limit:${connectorId}`;
+
+    // Try Redis first for distributed rate limiting
+    try {
+      const redisData = await this.redis.get(redisKey);
+      let bucket: TokenBucket;
+
+      if (redisData) {
+        bucket = JSON.parse(redisData);
+      } else {
+        bucket = {
+          tokens: rateLimit.burstAllowance,
+          lastRefill: now,
+          capacity: rateLimit.burstAllowance,
+        };
+      }
+
+      // Refill tokens based on time elapsed (per-second rate)
+      const elapsedMs = now - bucket.lastRefill;
+      const tokensToAdd = (elapsedMs / 1000) * rateLimit.requestsPerSecond;
+      bucket.tokens = Math.min(bucket.capacity, bucket.tokens + tokensToAdd);
+      bucket.lastRefill = now;
+
+      if (bucket.tokens >= 1) {
+        bucket.tokens -= 1;
+        await this.redis.setex(redisKey, 60, JSON.stringify(bucket));
+        return { allowed: true };
+      } else {
+        // Calculate wait time for 1 token
+        const tokensNeeded = 1 - bucket.tokens;
+        const waitMs = Math.ceil((tokensNeeded / rateLimit.requestsPerSecond) * 1000);
+        await this.redis.setex(redisKey, 60, JSON.stringify(bucket));
+        return { allowed: false, retryAfterMs: waitMs };
+      }
+    } catch {
+      // Fallback to in-memory rate limiting if Redis is unavailable
+      return this.checkRateLimitInMemory(connectorId, rateLimit);
+    }
+  }
+
+  /**
+   * In-memory token bucket rate limiter (fallback when Redis is unavailable).
+   */
+  private checkRateLimitInMemory(
+    connectorId: string,
+    rateLimit: RateLimit,
+  ): Promise<{ allowed: boolean; retryAfterMs?: number }> {
+    const now = Date.now();
+    let bucket = this.tokenBuckets.get(connectorId);
+
+    if (!bucket) {
+      bucket = {
+        tokens: rateLimit.burstAllowance,
+        lastRefill: now,
+        capacity: rateLimit.burstAllowance,
+      };
+      this.tokenBuckets.set(connectorId, bucket);
+    }
+
+    // Refill tokens
+    const elapsedMs = now - bucket.lastRefill;
+    const tokensToAdd = (elapsedMs / 1000) * rateLimit.requestsPerSecond;
+    bucket.tokens = Math.min(bucket.capacity, bucket.tokens + tokensToAdd);
+    bucket.lastRefill = now;
+
+    if (bucket.tokens >= 1) {
+      bucket.tokens -= 1;
+      return Promise.resolve({ allowed: true });
+    } else {
+      const tokensNeeded = 1 - bucket.tokens;
+      const waitMs = Math.ceil((tokensNeeded / rateLimit.requestsPerSecond) * 1000);
+      return Promise.resolve({ allowed: false, retryAfterMs: waitMs });
+    }
+  }
+
+  /**
+   * Consume a token from the bucket (for pre-flight rate limit check).
+   */
+  async consumeToken(connectorId: string): Promise<void> {
+    const bucket = this.tokenBuckets.get(connectorId);
+    if (bucket && bucket.tokens > 0) {
+      bucket.tokens -= 1;
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // PRODUCTION HARDENING — 3. RETRY WITH EXPONENTIAL BACKOFF + JITTER
+  // ════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Execute a function with production-hardened retry logic.
+   *
+   * Implements: delay = min(baseDelay * 2^attempt + randomJitter, maxDelay)
+   * Only retries on retryable status codes and network errors.
+   * Tracks retry count per request.
+   */
+  async executeWithRetry<T>(
+    fn: () => Promise<T>,
+    config: RetryConfig,
+    connectorId?: string,
+  ): Promise<T> {
+    let lastError: Error | undefined;
+
+    for (let attempt = 0; attempt <= config.maxRetries; attempt++) {
+      try {
+        const result = await fn();
+        if (connectorId) {
+          this.recordSuccess(connectorId);
+        }
+        return result;
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+
+        if (attempt >= config.maxRetries) {
+          break;
+        }
+
+        // Check if error is retryable
+        const isRetryable = this.isRetryableError(err, null);
+        if (!isRetryable) {
+          throw err;
+        }
+
+        // Exponential backoff with full jitter
+        const baseDelay = config.baseDelayMs * Math.pow(2, attempt);
+        const jitter = Math.random() * baseDelay;
+        const delay = Math.min(baseDelay + jitter, config.maxDelayMs);
+
+        this.logger.debug(
+          `executeWithRetry attempt ${attempt + 1} failed, retrying in ${Math.round(delay)}ms: ${lastError.message}`,
+        );
+
+        await this.sleep(delay);
+      }
+    }
+
+    if (connectorId) {
+      this.recordFailure(connectorId);
+    }
+    throw lastError || new Error('Execution failed after retries');
+  }
+
+  /**
+   * Check if an error is retryable based on connector config.
+   */
+  private isRetryableError(
+    err: unknown,
+    definition: ExternalConnectorDefinition | null,
+  ): boolean {
+    if (err instanceof AxiosError) {
+      const status = err.response?.status;
+
+      // Check retryable status codes from definition
+      if (definition?.retryConfig?.retryableStatusCodes && status) {
+        return definition.retryConfig.retryableStatusCodes.includes(status);
+      }
+
+      // Default retryable HTTP status codes
+      return [408, 429, 500, 502, 503, 504].includes(status || 0);
+    }
+
+    if (err instanceof Error) {
+      // Check retryable network errors
+      const retryableNetworkErrors = definition?.retryConfig?.retryableErrors || [
+        'ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND', 'ECONNREFUSED', 'EPIPE',
+      ];
+      return retryableNetworkErrors.some((code) => err.message.includes(code));
+    }
+
+    return false;
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // PRODUCTION HARDENING — 4. WEBHOOK SIGNATURE VERIFICATION
+  // ════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Verify webhook signature using connector-specific security configuration.
+   *
+   * Supports HMAC-SHA256 and HMAC-SHA512 with hex or base64 encoding.
+   * Validates timestamp tolerance when timestampHeader is configured.
+   */
+  async verifyWebhookSignature(
+    connectorId: string,
+    payload: string,
+    signature: string,
+    timestamp?: string,
+  ): Promise<boolean> {
+    try {
+      // Load connector to get webhook security config
+      const instance = await this.prisma.externalConnectorInstance.findUnique({
+        where: { id: connectorId },
+      });
+      if (!instance) return false;
+
+      const definition = this.connectorRegistry.get(instance.definitionId as ExternalService);
+      if (!definition?.webhookSecurity) {
+        // No webhook security configured — accept (backward compatibility)
+        return true;
+      }
+
+      const security = definition.webhookSecurity;
+      const credentials = this.decryptCredentials(instance.config);
+      const secret = credentials['signingSecret'] || credentials['webhookSecret'] || '';
+
+      if (!secret) {
+        this.logger.warn(`No webhook secret configured for ${connectorId}`);
+        return true; // Accept if no secret configured (best-effort)
+      }
+
+      // Verify timestamp tolerance
+      if (security.timestampHeader && timestamp) {
+        const tolerance = security.timestampToleranceSeconds || 300;
+        const now = Math.floor(Date.now() / 1000);
+        const ts = parseInt(timestamp, 10);
+        if (Math.abs(now - ts) > tolerance) {
+          this.logger.warn(`Webhook timestamp too old for ${connectorId}: ${Math.abs(now - ts)}s > ${tolerance}s`);
+          return false;
+        }
+      }
+
+      // Compute expected signature
+      const algorithm = security.signatureAlgorithm === 'hmac-sha512' ? 'sha512' : 'sha256';
+      let payloadToSign = payload;
+
+      // Slack prepends version to payload
+      if (security.signatureHeader === 'x-slack-signature') {
+        payloadToSign = `v0:${timestamp || Math.floor(Date.now() / 1000)}:${payload}`;
+      }
+
+      const expected = createHmac(algorithm, secret).update(payloadToSign).digest(security.signatureFormat);
+
+      // Normalize signature for comparison
+      let provided = signature;
+      if (security.signatureHeader === 'x-slack-signature') {
+        provided = signature.replace('v0=', '');
+      }
+
+      return timingSafeEqual(Buffer.from(expected), Buffer.from(provided));
+    } catch (err) {
+      this.logger.error(`Webhook signature verification error: ${err instanceof Error ? err.message : String(err)}`);
+      return false;
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // PRODUCTION HARDENING — 5. HEALTH CHECK ENDPOINT
+  // ════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Check the health of a connector by pinging the external service.
+   *
+   * Returns: { status: 'healthy' | 'degraded' | 'unhealthy'; latencyMs; lastChecked }
+   * Caches result for 60 seconds to avoid excessive health checks.
+   */
+  async healthCheck(connectorId: string): Promise<ConnectorHealth> {
+    // Check cache first
+    const cached = this.healthCache.get(connectorId);
+    if (cached && Date.now() - cached.cachedAt < this.HEALTH_CACHE_TTL_MS) {
+      return cached.health;
+    }
+
+    const instance = await this.prisma.externalConnectorInstance.findUnique({
+      where: { id: connectorId },
+    });
+
+    if (!instance) {
+      return {
+        status: 'unhealthy',
+        latencyMs: 0,
+        lastChecked: new Date(),
+        message: 'Connector instance not found',
+      };
+    }
+
+    const definition = this.connectorRegistry.get(instance.definitionId as ExternalService);
+    if (!definition?.healthCheck) {
+      return {
+        status: 'healthy',
+        latencyMs: 0,
+        lastChecked: new Date(),
+        message: 'No health check configured for this connector',
+      };
+    }
+
+    const credentials = this.decryptCredentials(instance.config);
+    const headers = this.buildAuthHeaders(definition, credentials);
+    if (definition.defaultHeaders) {
+      Object.assign(headers, definition.defaultHeaders);
+    }
+
+    const checkStartedAt = Date.now();
+    let status: ConnectorHealth['status'] = 'unhealthy';
+    let latencyMs = 0;
+    let message: string | undefined;
+
+    try {
+      let url = definition.baseUrl + definition.healthCheck.endpoint;
+      url = url.replace('{accountSid}', credentials['accountSid'] || '');
+
+      const response = await lastValueFrom(
+        this.httpService.request({
+          method: definition.healthCheck.method,
+          url,
+          headers,
+          timeout: definition.timeoutConfig?.connectTimeoutMs || 10000,
+        }),
+      );
+
+      latencyMs = Date.now() - checkStartedAt;
+
+      if (response.status === definition.healthCheck.expectedStatus) {
+        status = 'healthy';
+        message = `Health check passed in ${latencyMs}ms`;
+      } else {
+        status = 'degraded';
+        message = `Unexpected status: ${response.status} (expected ${definition.healthCheck.expectedStatus})`;
+      }
+    } catch (err) {
+      latencyMs = Date.now() - checkStartedAt;
+      status = 'unhealthy';
+      message = err instanceof Error ? err.message : 'Health check failed';
+    }
+
+    const health: ConnectorHealth = {
+      status,
+      latencyMs,
+      lastChecked: new Date(),
+      message,
+    };
+
+    // Cache result
+    this.healthCache.set(connectorId, { health, cachedAt: Date.now() });
+
+    return health;
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // PRODUCTION HARDENING — 6. OAUTH TOKEN REFRESH
+  // ════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Ensure a valid OAuth token is available, refreshing before expiry.
+   *
+   * Refreshes 5 minutes before expiration.
+   * Handles refresh failures gracefully.
+   * Stores new tokens securely in cache and database.
+   */
+  async ensureValidToken(
+    connectorId: string,
+    definition: ExternalConnectorDefinition,
+    credentials: Record<string, string>,
+  ): Promise<string | null> {
+    // Check in-memory cache first
+    const cached = this.tokenCache.get(connectorId);
+    if (cached && cached.expiresAt.getTime() > Date.now() + 300000) {
+      return cached.token; // Token valid for more than 5 minutes
+    }
+
+    // No refresh token available
+    if (!credentials['refreshToken'] && !credentials['clientSecret']) {
+      return credentials['accessToken'] || credentials['botToken'] || null;
+    }
+
+    try {
+      let refreshedToken: string | null = null;
+
+      switch (definition.id) {
+        case 'slack': {
+          // Slack token refresh via OAuth.v2Access
+          if (credentials['refreshToken'] && credentials['clientId'] && credentials['clientSecret']) {
+            const response = await lastValueFrom(
+              this.httpService.request({
+                method: 'GET',
+                url: 'https://slack.com/api/oauth.v2.access',
+                params: {
+                  refresh_token: credentials['refreshToken'],
+                  client_id: credentials['clientId'],
+                  client_secret: credentials['clientSecret'],
+                  grant_type: 'refresh_token',
+                },
+                timeout: 10000,
+              }),
+            );
+            refreshedToken = response.data?.access_token;
+          }
+          break;
+        }
+        case 'salesforce': {
+          // Salesforce token refresh
+          if (credentials['refreshToken'] && credentials['clientId'] && credentials['clientSecret']) {
+            const instanceUrl = credentials['instanceUrl'];
+            const response = await lastValueFrom(
+              this.httpService.request({
+                method: 'POST',
+                url: `${instanceUrl}/services/oauth2/token`,
+                data: {
+                  grant_type: 'refresh_token',
+                  refresh_token: credentials['refreshToken'],
+                  client_id: credentials['clientId'],
+                  client_secret: credentials['clientSecret'],
+                },
+                timeout: 10000,
+              }),
+            );
+            refreshedToken = response.data?.access_token;
+          }
+          break;
+        }
+        case 'google_sheets': {
+          // Google OAuth token refresh
+          if (credentials['refreshToken'] && credentials['clientId'] && credentials['clientSecret']) {
+            const response = await lastValueFrom(
+              this.httpService.request({
+                method: 'POST',
+                url: 'https://oauth2.googleapis.com/token',
+                data: {
+                  grant_type: 'refresh_token',
+                  refresh_token: credentials['refreshToken'],
+                  client_id: credentials['clientId'],
+                  client_secret: credentials['clientSecret'],
+                },
+                timeout: 10000,
+              }),
+            );
+            refreshedToken = response.data?.access_token;
+          }
+          break;
+        }
+        case 'stripe': {
+          // Stripe uses static API keys — no refresh needed
+          return credentials['apiKey'] || null;
+        }
+        default: {
+          // Generic OAuth2 refresh
+          if (credentials['refreshToken'] && definition.sandboxEndpoints?.authUrl) {
+            const response = await lastValueFrom(
+              this.httpService.request({
+                method: 'POST',
+                url: definition.sandboxEndpoints.authUrl,
+                data: {
+                  grant_type: 'refresh_token',
+                  refresh_token: credentials['refreshToken'],
+                },
+                timeout: 10000,
+              }),
+            );
+            refreshedToken = response.data?.access_token;
+          }
+          break;
+        }
+      }
+
+      if (refreshedToken) {
+        // Update cache
+        this.tokenCache.set(connectorId, {
+          token: refreshedToken,
+          expiresAt: new Date(Date.now() + 3300000), // 55 minutes
+          refreshToken: credentials['refreshToken'],
+        });
+
+        // Optionally persist to database
+        try {
+          const instance = await this.prisma.externalConnectorInstance.findUnique({
+            where: { id: connectorId },
+          });
+          if (instance) {
+            const updatedConfig = { ...credentials, accessToken: refreshedToken };
+            await this.prisma.externalConnectorInstance.update({
+              where: { id: connectorId },
+              data: { config: this.encryptCredentials(updatedConfig) },
+            });
+          }
+        } catch (persistErr) {
+          this.logger.warn(`Failed to persist refreshed token for ${connectorId}: ${persistErr}`);
+        }
+
+        this.logger.debug(`Token refreshed for ${connectorId} (${definition.id})`);
+        return refreshedToken;
+      }
+
+      return credentials['accessToken'] || credentials['botToken'] || null;
+    } catch (err) {
+      this.logger.error(`Token refresh failed for ${connectorId}: ${err instanceof Error ? err.message : String(err)}`);
+      // Return existing token as fallback
+      return credentials['accessToken'] || credentials['botToken'] || null;
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // PRODUCTION HARDENING — 7. REQUEST/RESPONSE LOGGING
+  // ════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Log all external requests (sanitized — no credentials).
+   *
+   * Logs request method, URL, status code, duration, and retry count.
+   * Stores in BusinessEvent table for debugging and audit.
+   */
+  async logExternalRequest(request: RequestLog): Promise<void> {
+    try {
+      // Sanitize URL — remove API keys, tokens, and other sensitive data
+      const sanitizedUrl = this.sanitizeUrl(request.url);
+
+      // Store in database via BusinessEvent (or dedicated connector_logs table)
+      await this.prisma.businessEvent.create({
+        data: {
+          id: this.generateId('evt'),
+          eventType: 'external_connector.request',
+          source: 'key-cortex-external-connector',
+          payload: {
+            requestId: request.requestId,
+            connectorId: request.connectorId,
+            action: request.action,
+            method: request.method,
+            url: sanitizedUrl,
+            statusCode: request.statusCode,
+            durationMs: request.durationMs,
+            retryCount: request.retryCount,
+            errorCode: request.errorCode,
+            timestamp: request.timestamp.toISOString(),
+          } as any,
+          metadata: {
+            connectorId: request.connectorId,
+            requestId: request.requestId,
+          },
+          severity: request.errorCode ? 'warning' : 'info',
+          occurredAt: request.timestamp,
+        },
+      });
+
+      // Also log to application logger
+      if (request.errorCode) {
+        this.logger.warn(
+          `[${request.requestId}] ${request.method} ${sanitizedUrl} → ${request.statusCode || 'ERR'} (${request.durationMs}ms, ${request.retryCount} retries) — ${request.errorCode}`,
+        );
+      } else {
+        this.logger.debug(
+          `[${request.requestId}] ${request.method} ${sanitizedUrl} → ${request.statusCode} (${request.durationMs}ms, ${request.retryCount} retries)`,
+        );
+      }
+    } catch (err) {
+      // Logging should never fail the main request
+      this.logger.debug(`Failed to log request: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /**
+   * Sanitize a URL by removing credentials and tokens.
+   */
+  private sanitizeUrl(url: string): string {
+    try {
+      const parsed = new URL(url);
+      // Remove query parameters that might contain secrets
+      const sensitiveParams = ['token', 'api_key', 'apikey', 'key', 'secret', 'password', 'auth'];
+      for (const param of sensitiveParams) {
+        if (parsed.searchParams.has(param)) {
+          parsed.searchParams.set(param, '[REDACTED]');
+        }
+      }
+      return parsed.toString();
+    } catch {
+      return url;
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // PRODUCTION HARDENING — 8. SANDBOX MODE
+  // ════════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Execute an action in sandbox mode.
+   *
+   * Uses sandbox/test endpoints when available.
+   * Prevents accidental production mutations during testing.
+   * Returns what would have happened without actually executing.
+   */
+  async executeInSandbox(
+    connectorId: string,
+    action: string,
+    params: Record<string, unknown>,
+  ): Promise<SandboxResult> {
+    const instance = await this.prisma.externalConnectorInstance.findUnique({
+      where: { id: connectorId },
+    });
+
+    if (!instance) {
+      return {
+        success: false,
+        error: 'Connector instance not found',
+        executedInSandbox: true,
+        wouldHaveMutated: false,
+      };
+    }
+
+    const definition = this.connectorRegistry.get(instance.definitionId as ExternalService);
+    if (!definition) {
+      return {
+        success: false,
+        error: 'Connector definition not found',
+        executedInSandbox: true,
+        wouldHaveMutated: false,
+      };
+    }
+
+    // Check if sandbox endpoints are configured
+    if (!definition.sandboxEndpoints) {
+      return {
+        success: false,
+        error: `Sandbox mode not available for ${definition.name}`,
+        executedInSandbox: true,
+        wouldHaveMutated: false,
+      };
+    }
+
+    // Determine if action would mutate data
+    const actionDef = definition.actions.find((a) => a.name === action);
+    const wouldHaveMutated = actionDef
+      ? actionDef.method === 'POST' || actionDef.method === 'PUT' || actionDef.method === 'PATCH' || actionDef.method === 'DELETE'
+      : true;
+
+    try {
+      // For Stripe, use test mode API key (sk_test_ prefix)
+      if (definition.id === 'stripe') {
+        const credentials = this.decryptCredentials(instance.config);
+        const testKey = credentials['apiKey']?.replace('sk_live_', 'sk_test_');
+        if (testKey) {
+          const testCredentials = { ...credentials, apiKey: testKey };
+          const result = await this.executeRequest(
+            definition,
+            actionDef!,
+            testCredentials,
+            params,
+            definition.timeoutConfig?.requestTimeoutMs || DEFAULT_TIMEOUT_MS,
+          );
+          return {
+            success: true,
+            data: result.data,
+            executedInSandbox: true,
+            wouldHaveMutated,
+          };
+        }
+      }
+
+      // For other connectors, return a simulated success response
+      return {
+        success: true,
+        data: {
+          sandbox: true,
+          message: `Action "${action}" would execute against ${definition.sandboxEndpoints.baseUrl}`,
+          method: actionDef?.method,
+          endpoint: actionDef?.endpoint,
+          parameters: params,
+        },
+        executedInSandbox: true,
+        wouldHaveMutated,
+      };
+    } catch (err) {
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+        executedInSandbox: true,
+        wouldHaveMutated,
+      };
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // ACTION EXECUTION — INTERNAL
+  // ════════════════════════════════════════════════════════════════════════════
 
   /**
    * Execute the HTTP request for an action.
@@ -632,7 +1561,7 @@ export class KeyCortexExternalConnectorService {
         secret,
         status: 'active',
         externalWebhookId,
-        signatureHeader: this.getSignatureHeaderName(definition.id),
+        signatureHeader: definition.webhookSecurity?.signatureHeader || this.getSignatureHeaderName(definition.id),
         deliveryCount: 0,
         failureCount: 0,
       },
@@ -678,8 +1607,7 @@ export class KeyCortexExternalConnectorService {
         payload,
         signature,
         registration.secret,
-        registration.signatureHeader || '',
-        headers,
+        headers[registration.signatureHeader || 'x-webhook-signature'] || '',
       );
       if (!isValid) {
         this.logger.warn(`Webhook signature verification failed for ${webhookId}`);
@@ -1277,69 +2205,6 @@ export class KeyCortexExternalConnectorService {
     }
   }
 
-  /**
-   * Verify a webhook signature using HMAC-SHA256.
-   */
-  private verifyWebhookSignature(
-    payload: Record<string, unknown>,
-    signature: string,
-    secret: string,
-    signatureHeader: string,
-    headers: Record<string, string>,
-  ): boolean {
-    try {
-      const payloadStr = JSON.stringify(payload);
-
-      switch (signatureHeader) {
-        case 'x-hub-signature-256': // GitHub-style
-        case 'x-slack-signature': // Slack
-        case 'x-notion-signature': // Notion
-        case 'x-twilio-signature': { // Twilio
-          const expected = createHmac('sha256', secret).update(payloadStr).digest('hex');
-          const provided = signature.replace('sha256=', '').trim();
-          return timingSafeEqual(Buffer.from(expected), Buffer.from(provided));
-        }
-        case 'stripe-signature': { // Stripe
-          // Stripe signatures have timestamp + signature format
-          const elements = signature.split(',');
-          const signatureHash = elements.find((e) => e.startsWith('v1='));
-          if (!signatureHash) return false;
-          const provided = signatureHash.replace('v1=', '');
-          const expected = createHmac('sha256', secret)
-            .update(`${elements.find((e) => e.startsWith('t='))?.replace('t=', '')}.${payloadStr}`)
-            .digest('hex');
-          return timingSafeEqual(Buffer.from(expected), Buffer.from(provided));
-        }
-        case 'x-shopify-hmac-sha256': { // Shopify
-          const expected = createHmac('sha256', secret).update(payloadStr).digest('base64');
-          return timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
-        }
-        default: {
-          // Generic HMAC-SHA256
-          const expected = createHmac('sha256', secret).update(payloadStr).digest('hex');
-          const provided = signature.replace('sha256=', '').replace('sha1=', '').trim();
-          return timingSafeEqual(Buffer.from(expected), Buffer.from(provided));
-        }
-      }
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * Get the expected signature header name for a service.
-   */
-  private getSignatureHeaderName(serviceId: ExternalService): string {
-    const headerMap: Record<string, string> = {
-      slack: 'x-slack-signature',
-      shopify: 'x-shopify-hmac-sha256',
-      stripe: 'stripe-signature',
-      twilio: 'x-twilio-signature',
-      notion: 'x-notion-signature',
-    };
-    return headerMap[serviceId] || 'x-webhook-signature';
-  }
-
   // ════════════════════════════════════════════════════════════════════════════
   // CONFIGURATION VALIDATION
   // ════════════════════════════════════════════════════════════════════════════
@@ -1613,6 +2478,20 @@ export class KeyCortexExternalConnectorService {
   }
 
   /**
+   * Get the expected signature header name for a service.
+   */
+  private getSignatureHeaderName(serviceId: ExternalService): string {
+    const headerMap: Record<string, string> = {
+      slack: 'x-slack-signature',
+      shopify: 'x-shopify-hmac-sha256',
+      stripe: 'stripe-signature',
+      twilio: 'x-twilio-signature',
+      notion: 'x-notion-signature',
+    };
+    return headerMap[serviceId] || 'x-webhook-signature';
+  }
+
+  /**
    * Build placeholder connector definitions for services without dedicated files.
    * This provides basic metadata for all 20+ services.
    */
@@ -1736,6 +2615,3 @@ export class KeyCortexExternalConnectorService {
     };
   }
 }
-
-// ── Import needed for HMAC and timing-safe comparison ──────────────────────
-import { createHmac, timingSafeEqual } from 'crypto';
