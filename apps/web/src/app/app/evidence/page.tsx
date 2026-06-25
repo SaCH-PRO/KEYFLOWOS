@@ -51,7 +51,7 @@ function EvidencePage() {
     try {
       const res = await fetchEvidence(businessId);
       if (res.data) setEvidence(res.data);
-    } catch (err) {
+    } catch (_err) {
       toast.error("Failed to load evidence");
     } finally {
       setLoading(false);

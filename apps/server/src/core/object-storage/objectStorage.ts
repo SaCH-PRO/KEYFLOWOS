@@ -130,7 +130,6 @@ function makeFileRef(bucket: string, key: string, client: S3Client): S3FileRef {
         );
         return head.Metadata ?? {};
       } catch (err) {
-        // eslint-disable-next-line no-console
         console.error(`Failed to read object metadata: ${(err as Error).message}`);
         return {};
       }

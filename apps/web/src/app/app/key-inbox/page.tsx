@@ -449,7 +449,7 @@ export default function KeyInboxPage() {
     );
   };
 
-  const ActionButton = ({
+  const _ActionButton = ({
     action,
     index,
     messageId,

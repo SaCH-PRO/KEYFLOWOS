@@ -102,8 +102,8 @@ const SHORTCUTS: ShortcutConfig[] = [
 ];
 
 export function useKeyboardShortcuts(legacyGroups?: LegacyShortcutGroup[], _enabled?: boolean) {
-  const router = useRouter();
-  const pathname = usePathname();
+  const _router = useRouter();
+  const _pathname = usePathname();
   const lastNavTime = useRef(0);
 
   const isInputFocused = useCallback(() => {

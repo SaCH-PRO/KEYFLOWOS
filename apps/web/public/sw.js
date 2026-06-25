@@ -5,7 +5,7 @@ const IS_LOCALHOST =
   self.location.hostname === '127.0.0.1';
 
 if (IS_LOCALHOST) {
-  self.addEventListener('install', (event) => {
+  self.addEventListener('install', (_event) => {
     self.skipWaiting();
   });
   self.addEventListener('activate', (event) => {

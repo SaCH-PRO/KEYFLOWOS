@@ -11,7 +11,7 @@ import { fetchCreditNotes, createCreditNote, applyCreditNote, voidCreditNote, ty
 export default function CreditNotesPage() {
   const businessId = getStoredBusinessId() ?? "";
   const [notes, setNotes] = useState<CreditNote[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [_loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);

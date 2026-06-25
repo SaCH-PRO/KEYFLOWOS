@@ -395,6 +395,7 @@ function BusinessCard({ business }: { business: DirectoryBusiness }) {
       <div className="flex items-start gap-4 mb-4">
         <div className="h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-gradient-to-br from-[hsl(24_95%_53%/0.15)] to-[hsl(173_58%_39%/0.1)] ring-1 ring-white/[0.08] flex items-center justify-center text-sm font-bold text-[hsl(30_20%_85%)]">
           {business.logoUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element -- external logo URL from S3/R2; unoptimized img acceptable here
             <img
               src={business.logoUrl}
               alt={`${business.name} logo`}

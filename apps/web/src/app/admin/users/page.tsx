@@ -76,6 +76,7 @@ export default function AdminUsers() {
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
                       {u.avatarUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element -- external avatar URL from S3/R2; unoptimized img acceptable here
                         <img src={u.avatarUrl} alt="" className="w-6 h-6 rounded-full" />
                       ) : (
                         <div className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center text-[10px] font-bold">

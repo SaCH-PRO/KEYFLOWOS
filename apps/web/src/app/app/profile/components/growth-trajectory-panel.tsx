@@ -206,7 +206,7 @@ export function GrowthTrajectoryPanel({ businessId }: GrowthTrajectoryPanelProps
     }));
   }, [projections]);
 
-  const healthColor = snapshot?.healthScore && snapshot.healthScore >= 70
+  const _healthColor = snapshot?.healthScore && snapshot.healthScore >= 70
     ? "text-emerald-500"
     : snapshot?.healthScore && snapshot.healthScore >= 50
       ? "text-amber-500"

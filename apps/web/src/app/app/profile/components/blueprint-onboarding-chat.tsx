@@ -78,7 +78,7 @@ export function BlueprintOnboardingChat({
   const [messages, setMessages] = useState<OnboardingMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(() => !!businessId);
-  const [blueprint, setBlueprint] = useState<BlueprintData | null>(null);
+  const [_blueprint, setBlueprint] = useState<BlueprintData | null>(null);
   const [completeness, setCompleteness] = useState(0);
   const [currentSection, setCurrentSection] = useState<BlueprintSectionKey | null>("identity");
   const bottomRef = useRef<HTMLDivElement>(null);

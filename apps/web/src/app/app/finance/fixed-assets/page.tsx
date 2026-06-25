@@ -11,7 +11,7 @@ import { fetchFixedAssets, createFixedAsset, depreciateFixedAsset, deleteFixedAs
 export default function FixedAssetsPage() {
   const businessId = getStoredBusinessId() ?? "";
   const [assets, setAssets] = useState<FixedAsset[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [_loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);

@@ -14,7 +14,7 @@ import {
 export default function StockCountsPage() {
   const businessId = getStoredBusinessId() ?? "";
   const [counts, setCounts] = useState<StockCount[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [_loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);

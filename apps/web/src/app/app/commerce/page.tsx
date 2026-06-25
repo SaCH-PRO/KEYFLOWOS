@@ -58,7 +58,7 @@ const REVENUE_TABS: { key: RevenueTabKey; label: string; icon: React.ElementType
 const VALID_TABS = new Set<RevenueTabKey>(REVENUE_TABS.map((t) => t.key));
 
 export default function CommercePage() {
-  const router = useRouter();
+  const _router = useRouter();
   const searchParams = useSearchParams();
   const { getOriginContext } = useNavigationContext();
   const { getReturnLabel, navigateBack } = useReturnNavigation({ skipScrollListener: true });
@@ -172,7 +172,7 @@ export default function CommercePage() {
   );
 
   const financialSummary = useFinancialSummary(invoices, quotes);
-  const actionQueue = useActionQueue(invoices, quotes, businessCurrency, handleTabChange, openRecordDrawer);
+  const _actionQueue = useActionQueue(invoices, quotes, businessCurrency, handleTabChange, openRecordDrawer);
 
   const mobileSheetItems = useMemo<MobileActionSheetItem[]>(
     () => [
@@ -258,7 +258,7 @@ export default function CommercePage() {
 
   useKeyboardShortcuts(commerceShortcuts, !shell.workspaceLoading);
 
-  const renderTimelineBadge = useCallback(() => null, []);
+  const _renderTimelineBadge = useCallback(() => null, []);
 
   if (shell.workspaceLoading) return <ListPageSkeleton />;
   if (shell.workspaceError) return <WorkspaceError />;
@@ -321,7 +321,7 @@ export default function CommercePage() {
             { label: "Collected", value: formatCurrencyCompact(financialSummary.collectedThisMonth, businessCurrency), color: "text-emerald-400" },
             { label: "Drafts", value: String(financialSummary.draftCount), color: financialSummary.draftCount > 0 ? "text-foreground" : "text-muted-foreground" },
             { label: "Quotes", value: String(financialSummary.pendingQuotes), color: financialSummary.pendingQuotes > 0 ? "text-foreground" : "text-muted-foreground" },
-          ].map((stat, i) => (
+          ].map((stat, _i) => (
             <span key={stat.label} className="flex items-center gap-1.5 text-muted-foreground">
               <span className="text-xs">{stat.label}:</span>
               <span className={cn("text-xs font-semibold", stat.color)}>{stat.value}</span>

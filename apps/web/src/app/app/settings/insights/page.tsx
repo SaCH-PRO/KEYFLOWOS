@@ -53,7 +53,7 @@ export default function InsightsPage() {
       setFeedback(fRes.data?.items ?? []);
       setAiQuality(aRes.data?.items ?? []);
       setEvents(eRes.data?.items ?? []);
-    } catch (err) {
+    } catch (_err) {
       toast.error("Failed to load insights");
     } finally {
       setLoading(false);

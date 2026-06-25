@@ -53,7 +53,7 @@ export function FlowShell({
   showBackToCenter = true,
 }: FlowShellProps) {
   const router = useRouter();
-  const pathname = usePathname();
+  const _pathname = usePathname();
 
   const activeFlow = FLOWS.find((f) => f.id === activeFlowId);
   const accent = iconColor ?? activeFlow?.color ?? "hsl(var(--kf-accent1))";

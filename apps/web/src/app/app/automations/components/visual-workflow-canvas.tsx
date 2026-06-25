@@ -59,7 +59,7 @@ export function VisualWorkflowCanvas() {
     { id: "7", type: "action", label: "Create Task", module: "crm", icon: "users", status: "draft" },
   ], []);
 
-  const edges: WorkflowEdge[] = useMemo(() => [
+  const _edges: WorkflowEdge[] = useMemo(() => [
     { from: "1", to: "2" },
     { from: "2", to: "3", label: "Yes" },
     { from: "2", to: "4", label: "No" },

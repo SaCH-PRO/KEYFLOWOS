@@ -196,10 +196,10 @@ export default function ExpensesInboxPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [showAddDrawer, setShowAddDrawer] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
-  const [detailExpense, setDetailExpense] = useState<Expense | null>(null);
+  const [_detailExpense, _setDetailExpense] = useState<Expense | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
-  const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
+  const [_actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
 
   // Debounced search sync with hook
   useEffect(() => {
@@ -297,7 +297,7 @@ export default function ExpensesInboxPage() {
     setConfirmDelete(null);
   };
 
-  const handleMarkPaid = async (expense: Expense) => {
+  const _handleMarkPaid = async (expense: Expense) => {
     if (!d.businessId) return;
     setActionLoading((prev) => ({ ...prev, [`paid-${expense.id}`]: true }));
     try {
@@ -323,7 +323,7 @@ export default function ExpensesInboxPage() {
   };
 
   const openAdd = () => { setEditingExpense(null); setShowAddDrawer(true); };
-  const openEdit = (exp: Expense) => { setEditingExpense(exp); setShowAddDrawer(true); };
+  const _openEdit = (exp: Expense) => { setEditingExpense(exp); setShowAddDrawer(true); };
 
   const totalPages = Math.max(1, Math.ceil(d.totalExpenses / d.pageSize));
 

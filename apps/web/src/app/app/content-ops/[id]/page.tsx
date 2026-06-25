@@ -9,7 +9,7 @@ import {
   FileText,
   Megaphone,
   Mail,
-  Image,
+  Image as ImageIcon,
   Video,
   PenTool,
   CheckCircle2,
@@ -79,7 +79,7 @@ const CONTENT_TYPE_ICONS: Record<string, React.ReactNode> = {
   social_post: <Megaphone className="w-4 h-4" />,
   email: <Mail className="w-4 h-4" />,
   video_script: <Video className="w-4 h-4" />,
-  flyer: <Image className="w-4 h-4" />,
+  flyer: <ImageIcon className="w-4 h-4" aria-hidden="true" />,
   whitepaper: <PenTool className="w-4 h-4" />,
   landing_page: <FileText className="w-4 h-4" />,
   case_study: <FileText className="w-4 h-4" />,
@@ -138,7 +138,7 @@ export default function ContentRequestDetailPage() {
       if (res.error) throw new Error(res.error);
       setReq(res.data ?? null);
       setDeliveryStatus(deliveryRes?.data ?? null);
-    } catch (err) {
+    } catch (_err) {
       toast.error("Failed to load content request");
     } finally {
       setLoading(false);
@@ -306,7 +306,7 @@ export default function ContentRequestDetailPage() {
             {STATUS_FLOW.map((status, idx) => {
               const isActive = idx === currentStep;
               const isDone = idx < currentStep;
-              const isFuture = idx > currentStep;
+              const _isFuture = idx > currentStep;
               return (
                 <div key={status} className="flex items-center shrink-0">
                   <div

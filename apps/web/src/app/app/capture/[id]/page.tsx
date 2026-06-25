@@ -296,6 +296,7 @@ export default function CaptureDetailPage() {
           <div className="lg:col-span-2 space-y-6">
             {asset.publicUrl && asset.mediaType === "image" && (
               <SectionCard noPadding>
+                {/* eslint-disable-next-line @next/next/no-img-element -- external capture URL from S3/R2; unoptimized img acceptable here */}
                 <img
                   src={asset.publicUrl}
                   alt={asset.fileName ?? "capture"}

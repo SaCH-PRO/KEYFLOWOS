@@ -225,7 +225,7 @@ export function MoneyActivityFeed({
             No activity in this period
           </div>
         ) : (
-          filtered.slice(0, 10).map((item, idx) => {
+          filtered.slice(0, 10).map((item, _idx) => {
             const Icon = item.icon;
             return (
               <Link

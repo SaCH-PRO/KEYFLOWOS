@@ -52,7 +52,7 @@ export default function OperationsPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [contentRequests, setContentRequests] = useState<ContentRequest[]>([]);
-  const [pendingApprovals, setPendingApprovals] = useState<ApprovalRequest[]>([]);
+  const [_pendingApprovals, setPendingApprovals] = useState<ApprovalRequest[]>([]);
   const [myApprovals, setMyApprovals] = useState<ApprovalRequest[]>([]);
   const [scheduledCalls, setScheduledCalls] = useState<CallLog[]>([]);
   const [pendingEvidence, setPendingEvidence] = useState<Evidence[]>([]);
@@ -127,7 +127,7 @@ export default function OperationsPage() {
         callsToday: calls.length,
         evidencePending: evidence.length,
       });
-    } catch (err) {
+    } catch (_err) {
       toast.error("Failed to load operations dashboard");
     } finally {
       setLoading(false);
@@ -149,7 +149,7 @@ export default function OperationsPage() {
       } else {
         toast.info("No rebalancing needed — team capacity looks good");
       }
-    } catch (err) {
+    } catch (_err) {
       toast.error("Rebalance failed");
     } finally {
       setRebalancing(false);
