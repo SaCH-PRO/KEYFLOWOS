@@ -107,6 +107,7 @@ import { PushNotificationModule } from './modules/push-notifications/push-notifi
 import { SecurityAuditModule } from './modules/security-audit/security-audit.module';
 import { IngestionModule } from './modules/ingestion/ingestion.module';
 import { KeyInboxModule } from './modules/key-inbox/key-inbox.module';
+import { KeyCortexModule } from './modules/key-cortex/key-cortex.module';
 
 @Module({
   imports: [
@@ -214,6 +215,9 @@ import { KeyInboxModule } from './modules/key-inbox/key-inbox.module';
     DeviceModule,
     RealtimeModule,
     SecurityAuditModule,
+
+    // AI Intelligence Layer — JARVIS-like conversational engine
+    KeyCortexModule,
   ],
   controllers: [AppController],
   providers: [

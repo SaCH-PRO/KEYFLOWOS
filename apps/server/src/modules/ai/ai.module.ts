@@ -187,8 +187,6 @@ import { KeyAgentConfigService } from './key-agent-config.service';
     TaskRebalancerService,
     ChaserService,
     KeyAgentConfigService,
-    ConnectorIntelligenceService,
-    DocumentIntelligenceService,
   ],
 })
 export class AiModule {}

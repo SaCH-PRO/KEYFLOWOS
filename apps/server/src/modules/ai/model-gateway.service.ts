@@ -4,7 +4,7 @@ import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'crypt
 import OpenAI from 'openai';
 import { validateOutputContract, type ContractType } from './ai-output-contracts';
 
-export type AiProvider = 'openai' | 'anthropic' | 'xai' | 'kimi';
+export type AiProvider = 'openai' | 'anthropic' | 'xai' | 'kimi' | 'native' | 'opensource';
 
 export type TaskCategory =
   | 'extraction'
@@ -148,6 +148,7 @@ export interface AiPreferences {
   byokAnthropic?: string;
   byokXai?: string;
   byokKimi?: string;
+  byokNative?: string;
   budgetCaps?: BudgetCaps;
 }
 
@@ -173,103 +174,175 @@ const DEFAULT_ROUTING_TABLE: Record<AiMode, Record<TaskCategory, ModelStrategy>>
   balanced: {
     extraction: {
       primary: { provider: 'openai', model: 'gpt-4o-mini' },
-      fallbacks: [{ provider: 'anthropic', model: 'claude-3-5-haiku-20241022' }],
+      fallbacks: [
+        { provider: 'anthropic', model: 'claude-3-5-haiku-20241022' },
+        { provider: 'kimi', model: 'moonshot-v1-8k' },
+      ],
     },
     classification: {
       primary: { provider: 'openai', model: 'gpt-4o-mini' },
-      fallbacks: [{ provider: 'anthropic', model: 'claude-3-5-haiku-20241022' }],
+      fallbacks: [
+        { provider: 'anthropic', model: 'claude-3-5-haiku-20241022' },
+        { provider: 'kimi', model: 'moonshot-v1-8k' },
+      ],
     },
     reasoning: {
       primary: { provider: 'openai', model: 'gpt-4o' },
-      fallbacks: [{ provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' }],
+      fallbacks: [
+        { provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' },
+        { provider: 'kimi', model: 'moonshot-v1-8k' },
+      ],
     },
     'content-generation': {
       primary: { provider: 'openai', model: 'gpt-4o' },
-      fallbacks: [{ provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' }],
+      fallbacks: [
+        { provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' },
+        { provider: 'kimi', model: 'moonshot-v1-8k' },
+      ],
     },
     summarization: {
       primary: { provider: 'openai', model: 'gpt-4o-mini' },
-      fallbacks: [{ provider: 'anthropic', model: 'claude-3-5-haiku-20241022' }],
+      fallbacks: [
+        { provider: 'anthropic', model: 'claude-3-5-haiku-20241022' },
+        { provider: 'kimi', model: 'moonshot-v1-8k' },
+      ],
     },
     'tool-calling': {
       primary: { provider: 'openai', model: 'gpt-4o' },
-      fallbacks: [{ provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' }],
+      fallbacks: [
+        { provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' },
+        { provider: 'kimi', model: 'moonshot-v1-8k' },
+      ],
     },
     analysis: {
       primary: { provider: 'openai', model: 'gpt-4o-mini' },
-      fallbacks: [{ provider: 'anthropic', model: 'claude-3-5-haiku-20241022' }],
+      fallbacks: [
+        { provider: 'anthropic', model: 'claude-3-5-haiku-20241022' },
+        { provider: 'kimi', model: 'moonshot-v1-8k' },
+      ],
     },
     general: {
       primary: { provider: 'openai', model: 'gpt-4o' },
-      fallbacks: [{ provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' }],
+      fallbacks: [
+        { provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' },
+        { provider: 'kimi', model: 'moonshot-v1-8k' },
+      ],
     },
   },
   premium: {
     extraction: {
       primary: { provider: 'openai', model: 'gpt-4o' },
-      fallbacks: [{ provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' }],
+      fallbacks: [
+        { provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' },
+        { provider: 'kimi', model: 'moonshot-v1-32k' },
+      ],
     },
     classification: {
       primary: { provider: 'openai', model: 'gpt-4o' },
-      fallbacks: [{ provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' }],
+      fallbacks: [
+        { provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' },
+        { provider: 'kimi', model: 'moonshot-v1-32k' },
+      ],
     },
     reasoning: {
       primary: { provider: 'openai', model: 'gpt-4o' },
-      fallbacks: [{ provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' }],
+      fallbacks: [
+        { provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' },
+        { provider: 'kimi', model: 'moonshot-v1-32k' },
+      ],
     },
     'content-generation': {
       primary: { provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' },
-      fallbacks: [{ provider: 'openai', model: 'gpt-4o' }],
+      fallbacks: [
+        { provider: 'openai', model: 'gpt-4o' },
+        { provider: 'kimi', model: 'moonshot-v1-32k' },
+      ],
     },
     summarization: {
       primary: { provider: 'openai', model: 'gpt-4o' },
-      fallbacks: [{ provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' }],
+      fallbacks: [
+        { provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' },
+        { provider: 'kimi', model: 'moonshot-v1-32k' },
+      ],
     },
     'tool-calling': {
       primary: { provider: 'openai', model: 'gpt-4o' },
-      fallbacks: [{ provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' }],
+      fallbacks: [
+        { provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' },
+        { provider: 'kimi', model: 'moonshot-v1-32k' },
+      ],
     },
     analysis: {
       primary: { provider: 'openai', model: 'gpt-4o' },
-      fallbacks: [{ provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' }],
+      fallbacks: [
+        { provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' },
+        { provider: 'kimi', model: 'moonshot-v1-32k' },
+      ],
     },
     general: {
       primary: { provider: 'openai', model: 'gpt-4o' },
-      fallbacks: [{ provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' }],
+      fallbacks: [
+        { provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' },
+        { provider: 'kimi', model: 'moonshot-v1-32k' },
+      ],
     },
   },
   fast: {
     extraction: {
       primary: { provider: 'openai', model: 'gpt-4o-mini' },
-      fallbacks: [{ provider: 'xai', model: 'grok-2-mini' }],
+      fallbacks: [
+        { provider: 'xai', model: 'grok-2-mini' },
+        { provider: 'kimi', model: 'moonshot-v1-8k' },
+      ],
     },
     classification: {
       primary: { provider: 'openai', model: 'gpt-4o-mini' },
-      fallbacks: [{ provider: 'xai', model: 'grok-2-mini' }],
+      fallbacks: [
+        { provider: 'xai', model: 'grok-2-mini' },
+        { provider: 'kimi', model: 'moonshot-v1-8k' },
+      ],
     },
     reasoning: {
       primary: { provider: 'openai', model: 'gpt-4o-mini' },
-      fallbacks: [{ provider: 'xai', model: 'grok-2-mini' }],
+      fallbacks: [
+        { provider: 'xai', model: 'grok-2-mini' },
+        { provider: 'kimi', model: 'moonshot-v1-8k' },
+      ],
     },
     'content-generation': {
       primary: { provider: 'openai', model: 'gpt-4o-mini' },
-      fallbacks: [{ provider: 'xai', model: 'grok-2-mini' }],
+      fallbacks: [
+        { provider: 'xai', model: 'grok-2-mini' },
+        { provider: 'kimi', model: 'moonshot-v1-8k' },
+      ],
     },
     summarization: {
       primary: { provider: 'openai', model: 'gpt-4o-mini' },
-      fallbacks: [{ provider: 'xai', model: 'grok-2-mini' }],
+      fallbacks: [
+        { provider: 'xai', model: 'grok-2-mini' },
+        { provider: 'kimi', model: 'moonshot-v1-8k' },
+      ],
     },
     'tool-calling': {
       primary: { provider: 'openai', model: 'gpt-4o-mini' },
-      fallbacks: [{ provider: 'xai', model: 'grok-2-mini' }],
+      fallbacks: [
+        { provider: 'xai', model: 'grok-2-mini' },
+        { provider: 'kimi', model: 'moonshot-v1-8k' },
+      ],
     },
     analysis: {
       primary: { provider: 'openai', model: 'gpt-4o-mini' },
-      fallbacks: [{ provider: 'xai', model: 'grok-2-mini' }],
+      fallbacks: [
+        { provider: 'xai', model: 'grok-2-mini' },
+        { provider: 'kimi', model: 'moonshot-v1-8k' },
+      ],
     },
     general: {
       primary: { provider: 'openai', model: 'gpt-4o-mini' },
-      fallbacks: [{ provider: 'xai', model: 'grok-2-mini' }],
+      fallbacks: [
+        { provider: 'xai', model: 'grok-2-mini' },
+        { provider: 'kimi', model: 'moonshot-v1-8k' },
+      ],
     },
   },
 };
@@ -330,8 +403,14 @@ export class ModelGatewayService {
     this.providerClients.set('kimi', {
       configured: !!process.env.KIMI_API_KEY,
     });
+    this.providerClients.set('native', {
+      configured: !!process.env.NATIVE_AI_API_KEY,
+    });
+    this.providerClients.set('opensource', {
+      configured: !!process.env.OPENROUTER_API_KEY || !!process.env.OLLAMA_BASE_URL,
+    });
 
-    for (const provider of ['openai', 'anthropic', 'xai', 'kimi'] as AiProvider[]) {
+    for (const provider of ['openai', 'anthropic', 'xai', 'kimi', 'native', 'opensource'] as AiProvider[]) {
       this.providerMetrics.set(provider, {
         totalCalls: 0,
         totalErrors: 0,
@@ -585,6 +664,12 @@ export class ModelGatewayService {
         break;
       case 'kimi':
         yield* this.streamKimi(normalizedMessages, model, request, preferences.byokKimi);
+        break;
+      case 'native':
+        yield* this.streamNative(normalizedMessages, model, request, preferences.byokNative);
+        break;
+      case 'opensource':
+        yield* this.streamOpensource(normalizedMessages, model, request);
         break;
       default:
         throw new Error(`Unsupported provider: ${provider}`);
@@ -952,6 +1037,164 @@ export class ModelGatewayService {
     yield { type: 'done' };
   }
 
+  private async *streamNative(
+    messages: GatewayMessage[],
+    model: string,
+    request: GatewayRequest,
+    byokKey?: string,
+  ): AsyncGenerator<StreamChunk> {
+    const apiKey = byokKey || process.env.NATIVE_AI_API_KEY || 'native-key';
+    const baseURL = process.env.KEYFLOW_NATIVE_AI_URL || process.env.NATIVE_AI_BASE_URL;
+    if (!baseURL) throw new Error('Native AI base URL not configured');
+
+    const client = new OpenAI({
+      apiKey,
+      baseURL,
+    });
+
+    const params: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
+      model,
+      messages: messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+      max_tokens: request.maxTokens ?? 500,
+      temperature: request.temperature ?? 0.7,
+      stream: true,
+      stream_options: { include_usage: true },
+    };
+
+    if (request.tools && request.tools.length > 0) {
+      params.tools = request.tools as OpenAI.Chat.Completions.ChatCompletionTool[];
+      if (request.toolChoice) {
+        params.tool_choice = request.toolChoice as OpenAI.Chat.Completions.ChatCompletionToolChoiceOption;
+      }
+    }
+
+    const stream = await client.chat.completions.create(params);
+
+    for await (const chunk of stream) {
+      const delta = chunk.choices?.[0]?.delta;
+
+      if (delta?.content) {
+        yield { type: 'content_delta', content: delta.content };
+      }
+
+      if (delta?.tool_calls) {
+        for (const tc of delta.tool_calls) {
+          yield {
+            type: 'tool_call_delta',
+            toolCall: {
+              index: tc.index,
+              id: tc.id,
+              name: tc.function?.name,
+              argumentsDelta: tc.function?.arguments,
+            },
+          };
+        }
+      }
+
+      if (chunk.usage) {
+        const promptTokens = chunk.usage.prompt_tokens ?? 0;
+        const completionTokens = chunk.usage.completion_tokens ?? 0;
+        const costs = TOKEN_COST_PER_1K[model] || { input: 0, output: 0 };
+        const estimatedCost =
+          (promptTokens / 1000) * costs.input +
+          (completionTokens / 1000) * costs.output;
+
+        yield {
+          type: 'usage',
+          usage: {
+            promptTokens,
+            completionTokens,
+            totalTokens: promptTokens + completionTokens,
+            estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+          },
+        };
+      }
+    }
+
+    yield { type: 'done' };
+  }
+
+  private async *streamOpensource(
+    messages: GatewayMessage[],
+    model: string,
+    request: GatewayRequest,
+  ): AsyncGenerator<StreamChunk> {
+    const openrouterKey = process.env.OPENROUTER_API_KEY;
+    const ollamaBase = process.env.OLLAMA_BASE_URL;
+
+    if (!openrouterKey && !ollamaBase) {
+      throw new Error('No open-source AI provider configured (OPENROUTER_API_KEY or OLLAMA_BASE_URL)');
+    }
+
+    const client = ollamaBase
+      ? new OpenAI({ apiKey: 'ollama', baseURL: `${ollamaBase}/v1` })
+      : new OpenAI({
+          apiKey: openrouterKey,
+          baseURL: 'https://openrouter.ai/api/v1',
+        });
+
+    const params: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
+      model,
+      messages: messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+      max_tokens: request.maxTokens ?? 500,
+      temperature: request.temperature ?? 0.7,
+      stream: true,
+      stream_options: { include_usage: true },
+    };
+
+    if (request.tools && request.tools.length > 0) {
+      params.tools = request.tools as OpenAI.Chat.Completions.ChatCompletionTool[];
+      if (request.toolChoice) {
+        params.tool_choice = request.toolChoice as OpenAI.Chat.Completions.ChatCompletionToolChoiceOption;
+      }
+    }
+
+    const stream = await client.chat.completions.create(params);
+
+    for await (const chunk of stream) {
+      const delta = chunk.choices?.[0]?.delta;
+
+      if (delta?.content) {
+        yield { type: 'content_delta', content: delta.content };
+      }
+
+      if (delta?.tool_calls) {
+        for (const tc of delta.tool_calls) {
+          yield {
+            type: 'tool_call_delta',
+            toolCall: {
+              index: tc.index,
+              id: tc.id,
+              name: tc.function?.name,
+              argumentsDelta: tc.function?.arguments,
+            },
+          };
+        }
+      }
+
+      if (chunk.usage) {
+        const promptTokens = chunk.usage.prompt_tokens ?? 0;
+        const completionTokens = chunk.usage.completion_tokens ?? 0;
+        const costs = TOKEN_COST_PER_1K[model] || { input: 0, output: 0 };
+        const estimatedCost =
+          (promptTokens / 1000) * costs.input +
+          (completionTokens / 1000) * costs.output;
+
+        yield {
+          type: 'usage',
+          usage: {
+            promptTokens,
+            completionTokens,
+            totalTokens: promptTokens + completionTokens,
+            estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+          },
+        };
+      }
+    }
+
+    yield { type: 'done' };
+  }
+
   private hasBudgetCaps(caps?: BudgetCaps): boolean {
     if (!caps) return false;
     return !!(caps.monthlyOverall || caps.monthlyOpenai || caps.monthlyAnthropic || caps.monthlyXai || caps.monthlyKimi);
@@ -1037,7 +1280,7 @@ export class ModelGatewayService {
     const overallCap = budgetCaps?.monthlyOverall ?? null;
     const overallUtilization = overallCap ? (spend.total / overallCap) * 100 : null;
 
-    const byProvider: ProviderBudgetStatus[] = (['openai', 'anthropic', 'xai'] as AiProvider[]).map(provider => {
+    const byProvider: ProviderBudgetStatus[] = (['openai', 'anthropic', 'xai', 'kimi'] as AiProvider[]).map(provider => {
       const cap = this.getProviderBudgetCap(provider, budgetCaps) ?? null;
       const providerSpend = spend.byProvider[provider] || 0;
       const remaining = cap !== null ? Math.max(0, cap - providerSpend) : null;
@@ -1097,6 +1340,12 @@ export class ModelGatewayService {
     if (provider === 'kimi') {
       return !!(preferences.byokKimi || process.env.KIMI_API_KEY);
     }
+    if (provider === 'native') {
+      return !!(preferences.byokNative || process.env.NATIVE_AI_API_KEY || process.env.KEYFLOW_NATIVE_AI_URL);
+    }
+    if (provider === 'opensource') {
+      return !!(process.env.OPENROUTER_API_KEY || process.env.OLLAMA_BASE_URL);
+    }
     return false;
   }
 
@@ -1155,13 +1404,17 @@ export class ModelGatewayService {
         return this.callXai(normalizedMessages, model, request, preferences.byokXai);
       case 'kimi':
         return this.callKimi(normalizedMessages, model, request, preferences.byokKimi);
+      case 'native':
+        return this.callNative(normalizedMessages, model, request, preferences.byokNative);
+      case 'opensource':
+        return this.callOpensource(normalizedMessages, model, request);
       default:
         throw new Error(`Unsupported provider: ${provider}`);
     }
   }
 
   private normalizeMessages(messages: GatewayMessage[], provider: AiProvider): GatewayMessage[] {
-    if (provider === 'openai' || provider === 'xai' || provider === 'kimi') {
+    if (provider === 'openai' || provider === 'xai' || provider === 'kimi' || provider === 'native' || provider === 'opensource') {
       return messages;
     }
 
@@ -1348,7 +1601,7 @@ export class ModelGatewayService {
             name: block.name ?? '',
             arguments: JSON.stringify(block.input ?? {}),
           },
-        }))
+        ))
       : undefined;
 
     const promptTokens = data.usage?.input_tokens ?? 0;
@@ -1495,6 +1748,136 @@ export class ModelGatewayService {
     };
   }
 
+  private async callNative(
+    messages: GatewayMessage[],
+    model: string,
+    request: GatewayRequest,
+    byokKey?: string,
+  ): Promise<Omit<GatewayResponse, 'provider' | 'model' | 'latencyMs' | 'fallbackUsed' | 'fallbackProvider'>> {
+    const apiKey = byokKey || process.env.NATIVE_AI_API_KEY || 'native-key';
+    const baseURL = process.env.KEYFLOW_NATIVE_AI_URL || process.env.NATIVE_AI_BASE_URL;
+    if (!baseURL) throw new Error('Native AI base URL not configured');
+
+    const client = new OpenAI({
+      apiKey,
+      baseURL,
+    });
+
+    const params: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
+      model,
+      messages: messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+      max_tokens: request.maxTokens ?? 500,
+      temperature: request.temperature ?? 0.7,
+    };
+
+    if (request.tools && request.tools.length > 0) {
+      params.tools = request.tools as OpenAI.Chat.Completions.ChatCompletionTool[];
+      if (request.toolChoice) {
+        params.tool_choice = request.toolChoice as OpenAI.Chat.Completions.ChatCompletionToolChoiceOption;
+      }
+    }
+
+    const response = await client.chat.completions.create(params);
+
+    const choice = response.choices[0];
+    const promptTokens = response.usage?.prompt_tokens ?? 0;
+    const completionTokens = response.usage?.completion_tokens ?? 0;
+    const totalTokens = promptTokens + completionTokens;
+    const costs = TOKEN_COST_PER_1K[model] || { input: 0, output: 0 };
+    const estimatedCost =
+      (promptTokens / 1000) * costs.input +
+      (completionTokens / 1000) * costs.output;
+
+    const nativeToolCalls = choice?.message?.tool_calls
+      ?.filter(tc => tc.type === 'function')
+      .map(tc => ({
+        id: tc.id,
+        type: 'function' as const,
+        function: {
+          name: tc.function.name,
+          arguments: tc.function.arguments,
+        },
+      }));
+
+    return {
+      content: choice?.message?.content ?? null,
+      toolCalls: nativeToolCalls && nativeToolCalls.length > 0 ? nativeToolCalls : undefined,
+      usage: {
+        promptTokens,
+        completionTokens,
+        totalTokens,
+        estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+      },
+    };
+  }
+
+  private async callOpensource(
+    messages: GatewayMessage[],
+    model: string,
+    request: GatewayRequest,
+  ): Promise<Omit<GatewayResponse, 'provider' | 'model' | 'latencyMs' | 'fallbackUsed' | 'fallbackProvider'>> {
+    const openrouterKey = process.env.OPENROUTER_API_KEY;
+    const ollamaBase = process.env.OLLAMA_BASE_URL;
+
+    if (!openrouterKey && !ollamaBase) {
+      throw new Error('No open-source AI provider configured (OPENROUTER_API_KEY or OLLAMA_BASE_URL)');
+    }
+
+    const client = ollamaBase
+      ? new OpenAI({ apiKey: 'ollama', baseURL: `${ollamaBase}/v1` })
+      : new OpenAI({
+          apiKey: openrouterKey,
+          baseURL: 'https://openrouter.ai/api/v1',
+        });
+
+    const params: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
+      model,
+      messages: messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+      max_tokens: request.maxTokens ?? 500,
+      temperature: request.temperature ?? 0.7,
+    };
+
+    if (request.tools && request.tools.length > 0) {
+      params.tools = request.tools as OpenAI.Chat.Completions.ChatCompletionTool[];
+      if (request.toolChoice) {
+        params.tool_choice = request.toolChoice as OpenAI.Chat.Completions.ChatCompletionToolChoiceOption;
+      }
+    }
+
+    const response = await client.chat.completions.create(params);
+
+    const choice = response.choices[0];
+    const promptTokens = response.usage?.prompt_tokens ?? 0;
+    const completionTokens = response.usage?.completion_tokens ?? 0;
+    const totalTokens = promptTokens + completionTokens;
+    const costs = TOKEN_COST_PER_1K[model] || { input: 0, output: 0 };
+    const estimatedCost =
+      (promptTokens / 1000) * costs.input +
+      (completionTokens / 1000) * costs.output;
+
+    const osToolCalls = choice?.message?.tool_calls
+      ?.filter(tc => tc.type === 'function')
+      .map(tc => ({
+        id: tc.id,
+        type: 'function' as const,
+        function: {
+          name: tc.function.name,
+          arguments: tc.function.arguments,
+        },
+      }));
+
+    return {
+      content: choice?.message?.content ?? null,
+      toolCalls: osToolCalls && osToolCalls.length > 0 ? osToolCalls : undefined,
+      usage: {
+        promptTokens,
+        completionTokens,
+        totalTokens,
+        estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+      },
+    };
+  }
+
   async getPreferences(businessId: string): Promise<AiPreferences> {
     const cached = this.preferencesCache.get(businessId);
     if (cached && cached.expiresAt > Date.now()) {
@@ -1520,6 +1903,7 @@ export class ModelGatewayService {
         if (prefs.byokAnthropic) prefs.byokAnthropic = this.safeDecrypt(prefs.byokAnthropic);
         if (prefs.byokXai) prefs.byokXai = this.safeDecrypt(prefs.byokXai);
         if (prefs.byokKimi) prefs.byokKimi = this.safeDecrypt(prefs.byokKimi);
+        if (prefs.byokNative) prefs.byokNative = this.safeDecrypt(prefs.byokNative);
 
         this.preferencesCache.set(businessId, {
           data: prefs,
@@ -1554,7 +1938,9 @@ export class ModelGatewayService {
     const hasByokUpdate = !!(
       (updates.byokOpenai && updates.byokOpenai !== '') ||
       (updates.byokAnthropic && updates.byokAnthropic !== '') ||
-      (updates.byokXai && updates.byokXai !== '')
+      (updates.byokXai && updates.byokXai !== '') ||
+      (updates.byokKimi && updates.byokKimi !== '') ||
+      (updates.byokNative && updates.byokNative !== '')
     );
     if (hasByokUpdate && !this.byokEncryptionAvailable) {
       throw new Error('BYOK key storage requires BYOK_ENCRYPTION_SECRET to be configured');
@@ -1566,6 +1952,8 @@ export class ModelGatewayService {
     if (merged.byokOpenai === '') merged.byokOpenai = undefined;
     if (merged.byokAnthropic === '') merged.byokAnthropic = undefined;
     if (merged.byokXai === '') merged.byokXai = undefined;
+    if (merged.byokKimi === '') merged.byokKimi = undefined;
+    if (merged.byokNative === '') merged.byokNative = undefined;
 
     const validModes: AiMode[] = ['balanced', 'premium', 'fast'];
     if (!validModes.includes(merged.aiMode)) {
@@ -1576,6 +1964,8 @@ export class ModelGatewayService {
     if (toStore.byokOpenai) toStore.byokOpenai = this.encryptSecret(toStore.byokOpenai);
     if (toStore.byokAnthropic) toStore.byokAnthropic = this.encryptSecret(toStore.byokAnthropic);
     if (toStore.byokXai) toStore.byokXai = this.encryptSecret(toStore.byokXai);
+    if (toStore.byokKimi) toStore.byokKimi = this.encryptSecret(toStore.byokKimi);
+    if (toStore.byokNative) toStore.byokNative = this.encryptSecret(toStore.byokNative);
 
     await this.prisma.client.aiMemory.upsert({
       where: {
@@ -1604,7 +1994,7 @@ export class ModelGatewayService {
   getProviderHealth(): ProviderHealth[] {
     const results: ProviderHealth[] = [];
 
-    for (const provider of ['openai', 'anthropic', 'xai'] as AiProvider[]) {
+    for (const provider of ['openai', 'anthropic', 'xai', 'kimi', 'native', 'opensource'] as AiProvider[]) {
       const config = this.providerClients.get(provider);
       const metrics = this.providerMetrics.get(provider)!;
 
