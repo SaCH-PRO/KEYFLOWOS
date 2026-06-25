@@ -30,6 +30,8 @@ import { OperationsGenomeService } from './operations-genome.service';
 import { GenomeGrowthChannelService } from './genome-growth-channel.service';
 import { GenomeContentStrategyService } from './genome-content-strategy.service';
 import { MarketingGenomeService } from './marketing-genome.service';
+import { GenomeCrossDomainService } from './genome-cross-domain.service';
+import type { ListGenomeCrossDomainSnapshotsQuery } from './key-genome.types';
 import type {
   CreateGenomeExperimentInput,
   CreateGenomeContentStrategyInput,
@@ -69,6 +71,7 @@ export class KeyGenomeController {
     @Inject(GenomeGrowthChannelService) private readonly growthChannels: GenomeGrowthChannelService,
     @Inject(GenomeContentStrategyService) private readonly contentStrategies: GenomeContentStrategyService,
     @Inject(MarketingGenomeService) private readonly marketingGenome: MarketingGenomeService,
+    @Inject(GenomeCrossDomainService) private readonly crossDomainGenome: GenomeCrossDomainService,
   ) {}
 
   @Get('signals')
@@ -757,5 +760,36 @@ export class KeyGenomeController {
   @Post('marketing-growth/recommendations/generate')
   async generateMarketingGrowthRecommendations(@Param('businessId') businessId: string) {
     return this.marketingGenome.generateMarketingGrowthRecommendations(businessId);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Phase 17B: Cross-Domain Genome Intelligence
+  // ---------------------------------------------------------------------------
+
+  @Get('cross-domain/snapshot')
+  async getCrossDomainSnapshot(@Param('businessId') businessId: string) {
+    return this.crossDomainGenome.getLatestCrossDomainSnapshot(businessId);
+  }
+
+  @Post('cross-domain/snapshot/compute')
+  async computeCrossDomainSnapshot(
+    @Param('businessId') businessId: string,
+    @Query('period') period?: string,
+  ) {
+    return this.crossDomainGenome.computeCrossDomainSnapshot(businessId, period);
+  }
+
+  @Get('cross-domain/snapshots')
+  async listCrossDomainSnapshots(
+    @Param('businessId') businessId: string,
+    @Query('period') period?: string,
+    @Query('riskLevel') riskLevel?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.crossDomainGenome.listCrossDomainSnapshots(businessId, {
+      period,
+      riskLevel,
+      limit: limit !== undefined ? Number(limit) : undefined,
+    } as ListGenomeCrossDomainSnapshotsQuery);
   }
 }

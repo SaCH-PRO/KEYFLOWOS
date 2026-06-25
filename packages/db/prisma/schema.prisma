@@ -606,6 +606,7 @@ model Business {
   genomeGrowthChannels         GenomeGrowthChannel[]
   genomeContentStrategies      GenomeContentStrategy[]
   genomeMarketingSnapshots     GenomeMarketingSnapshot[]
+  genomeCrossDomainSnapshots   GenomeCrossDomainSnapshot[]
   constitutionVersions         BusinessConstitutionVersion[]
   authorityGrants              AuthorityGrant[]
   timeEntries                  TimeEntry[]
@@ -1389,6 +1390,33 @@ model GenomeMarketingSnapshot {
   @@index([businessId, period])
   @@index([businessId, overallRisk])
   @@map("genome_marketing_snapshots")
+}
+
+// Phase 17B: Cross-Domain Genome Intelligence
+model GenomeCrossDomainSnapshot {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  period String?
+
+  overallHealthScore Float  @default(0) @map("overall_health_score")
+  overallRiskLevel   String @default("MEDIUM") @map("overall_risk_level")
+
+  domainScores    Json @default("{}") @map("domain_scores")
+  domainRisks     Json @default("{}") @map("domain_risks")
+  readinessSummary Json @default("{}") @map("readiness_summary")
+  evidenceSummary Json @default("{}") @map("evidence_summary")
+
+  bottlenecks      Json @default("[]") @map("bottlenecks")
+  opportunities    Json @default("[]") @map("opportunities")
+  recommendedFocus Json @default("[]") @map("recommended_focus")
+
+  computedAt DateTime @default(now()) @map("computed_at")
+
+  @@index([businessId, period])
+  @@index([businessId, overallRiskLevel])
+  @@map("genome_cross_domain_snapshots")
 }
 
 // Phase 12: Living Constitution v2 — versioned, immutable operating document

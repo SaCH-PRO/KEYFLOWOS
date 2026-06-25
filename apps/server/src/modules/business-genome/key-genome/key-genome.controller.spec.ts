@@ -21,6 +21,7 @@ import { OperationsGenomeService } from './operations-genome.service';
 import { GenomeGrowthChannelService } from './genome-growth-channel.service';
 import { GenomeContentStrategyService } from './genome-content-strategy.service';
 import { MarketingGenomeService } from './marketing-genome.service';
+import { GenomeCrossDomainService } from './genome-cross-domain.service';
 
 function mockProvider(
   token: string | symbol | (new (...args: any[]) => any),
@@ -186,6 +187,11 @@ async function makeController() {
         listMarketingGrowthSnapshots: vi.fn().mockResolvedValue([]),
         generateMarketingGrowthSignals: vi.fn().mockResolvedValue([]),
         generateMarketingGrowthRecommendations: vi.fn().mockResolvedValue([]),
+      }),
+      mockProvider(GenomeCrossDomainService, {
+        computeCrossDomainSnapshot: vi.fn().mockResolvedValue({ id: 'cdsnap_1' }),
+        getLatestCrossDomainSnapshot: vi.fn().mockResolvedValue({ id: 'cdsnap_1' }),
+        listCrossDomainSnapshots: vi.fn().mockResolvedValue([]),
       }),
     ],
   })
@@ -504,6 +510,27 @@ describe('KeyGenomeController', () => {
   it('generates marketing/growth recommendations', async () => {
     const { controller } = await makeController();
     const result = await controller.generateMarketingGrowthRecommendations('biz_1');
+
+    expect(result).toEqual([]);
+  });
+
+  it('gets latest cross-domain snapshot', async () => {
+    const { controller } = await makeController();
+    const result = await controller.getCrossDomainSnapshot('biz_1');
+
+    expect(result?.id).toBe('cdsnap_1');
+  });
+
+  it('computes cross-domain snapshot', async () => {
+    const { controller } = await makeController();
+    const result = await controller.computeCrossDomainSnapshot('biz_1', '2026-06');
+
+    expect(result.id).toBe('cdsnap_1');
+  });
+
+  it('lists cross-domain snapshots', async () => {
+    const { controller } = await makeController();
+    const result = await controller.listCrossDomainSnapshots('biz_1', '2026-06', 'MEDIUM', '5');
 
     expect(result).toEqual([]);
   });
