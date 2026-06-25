@@ -42,6 +42,11 @@ import { KeyCortexInsightService } from './key-cortex-insight.service';
 import { KeyCortexGenomeBridgeService } from './key-cortex-genome-bridge.service';
 import { KeyCortexEventService } from './key-cortex-event.service';
 
+// ── v4 Completion Layer (optional — Phase 18 services) ──
+import { KeyProactiveEngineService } from './key-proactive-engine.service';
+import { TrustExplanationService } from './trust-explanation.service';
+import { isFeatureVisible, UserTier } from './calm-mode.config';
+
 // ── v3 Types ──
 
 export interface GenomeEnrichedContext {
@@ -140,6 +145,11 @@ export interface InteractionFeedback {
  * - Interaction learning feeding genome outcome learning
  * - Event correlation across all steps via KeyCortexEventService
  *
+ * v4 COMPLETION LAYER ENHANCEMENTS:
+ * - Proactive action detection via KeyProactiveEngineService
+ * - Trust explanation generation via TrustExplanationService
+ * - Calm mode detail level adaptation
+ *
  * Responsibilities:
  * - Process user queries through the ModelGatewayService
  * - Select appropriate AI provider based on query type and preferences
@@ -149,6 +159,7 @@ export interface InteractionFeedback {
  * - Track token usage, latency, and costs
  * - Execute direct commands and module queries (v2)
  * - Integrate with genome DNA, signals, recommendations (v3)
+ * - Proactive suggestions and trust explanations (v4)
  */
 @Injectable()
 export class KeyCortexReasoningService {
@@ -212,6 +223,14 @@ export class KeyCortexReasoningService {
     @Optional()
     @Inject(KeyCortexEventService)
     private readonly eventService?: KeyCortexEventService,
+
+    // ── v4 Completion Layer (optional — Phase 18 services) ──
+    @Optional()
+    @Inject(KeyProactiveEngineService)
+    private readonly proactive?: KeyProactiveEngineService,
+    @Optional()
+    @Inject(TrustExplanationService)
+    private readonly trustExplanation?: TrustExplanationService,
   ) {
     this.MAX_CONTEXT_TOKENS =
       parseInt(process.env.KEY_CORTEX_MAX_CONTEXT_TOKENS ?? '8000', 10);
@@ -270,6 +289,8 @@ export class KeyCortexReasoningService {
    *  Step 10: Report action outcomes to genome
    *  Step 11: Generate response with genome insights
    *  Step 12: Log everything to event service
+   *  Step 13: Check if proactive action warranted (v4)
+   *  Step 14: Generate trust explanation (v4)
    *
    * v2 FLOW (fallback when genome not available but v2 is):
    *  Same as original v2 flow — uses ContextV2Service + ExecutorService.
@@ -496,9 +517,14 @@ export class KeyCortexReasoningService {
         );
       }
 
+      // v4: Apply calm mode detail level to prompt
+      const detailLevel = this.getCalmModeDetailLevel(session);
+      systemPrompt += `\nRespond with ${detailLevel} level of detail.`;
+
       await this.logEvent(correlationId, 'STEP_7_BUILD_PROMPT', {
         promptLength: systemPrompt.length,
         genomeEnriched: this.genomeV3Enabled && !!genomeContext,
+        detailLevel,
       });
 
       // ── Step 8: AI REASONING ──
@@ -732,6 +758,51 @@ export class KeyCortexReasoningService {
         messageId: assistantMessage.id,
       });
 
+      // ── Step 13: Check if proactive action warranted ──
+      if (this.proactive) {
+        try {
+          const proactiveCheck = await this.proactive.shouldAct(session.businessId);
+          if (proactiveCheck.shouldAct) {
+            proactiveSuggestions = proactiveCheck.suggestions;
+            this.logger.log(
+              `[processQuery][${correlationId}] Proactive actions triggered: ${proactiveSuggestions.length} suggestion(s)`,
+            );
+          }
+        } catch (err) {
+          this.logger.warn(
+            `[processQuery][${correlationId}] Proactive check failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+
+      // ── Step 14: Generate trust explanation for recommendations ──
+      let explanation: Record<string, unknown> | undefined;
+      if (this.trustExplanation && executedActions.length > 0) {
+        try {
+          const firstAction = executedActions[0];
+          explanation = await this.trustExplanation.explain(
+            firstAction.actionType,
+            firstAction.result ?? {},
+            contextSnapshot,
+            null,
+            firstAction.status === 'success',
+            firstAction.requiresApproval ?? false,
+          );
+          this.logger.log(
+            `[processQuery][${correlationId}] Trust explanation generated for ${firstAction.actionType}`,
+          );
+        } catch (err) {
+          this.logger.warn(
+            `[processQuery][${correlationId}] Trust explanation failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+
+      await this.logEvent(correlationId, 'STEP_13_14_COMPLETION_LAYER', {
+        proactiveSuggestions: proactiveSuggestions.length,
+        hasExplanation: !!explanation,
+      });
+
       // Final summary log
       this.logger.log(
         `[processQuery][${correlationId}] Completed in ${latencyMs}ms | provider=${provider} model=${model} tokens=${assistantMessage.metadata?.tokensUsed} commands=${parsedCommands.length} autonomyApproved=${autonomyCheckedCommands.length} executed=${executedActions.length} genome=${this.genomeV3Enabled && !!genomeContext}`,
@@ -747,6 +818,10 @@ export class KeyCortexReasoningService {
           assistantMessage.content,
           contextSnapshot,
         ),
+        // v4: Proactive suggestions from completion layer
+        proactiveSuggestions: proactiveSuggestions.length > 0 ? proactiveSuggestions : undefined,
+        // v4: Trust explanation for transparency
+        explanation: explanation ?? undefined,
         // v3: Include genome enrichment in response
         genomeInsights: genomeContext
           ? {
@@ -3200,5 +3275,27 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
 
   private generateCorrelationId(): string {
     return `corr_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+  }
+
+  /**
+   * v4: Determine detail level based on calm mode / user tier.
+   * Maps user preference to simple | detailed | expert detail levels.
+   */
+  private getCalmModeDetailLevel(
+    session: { preferredDetail?: string; persona?: string },
+  ): string {
+    const preference = session.preferredDetail ?? 'auto';
+
+    if (preference === 'simple' || preference === 'beginner') return 'simple';
+    if (preference === 'detailed' || preference === 'intermediate') return 'detailed';
+    if (preference === 'expert' || preference === 'advanced') return 'expert';
+
+    // Auto-detect based on persona
+    const persona = session.persona ?? 'jarvis';
+    if (persona === 'jarvis') return 'detailed';
+    if (persona === 'executive') return 'simple';
+    if (persona === 'analyst') return 'expert';
+
+    return 'detailed';
   }
 }

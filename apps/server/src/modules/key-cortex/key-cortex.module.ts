@@ -24,6 +24,12 @@
  *   detection, recommendation ranking, outcome learning, signal creation,
  *   and cross-domain analysis into KEY's decision loop. Adds BlueprintModule
  *   and supporting event/evidence/approval services.
+ *
+ * v5 -- Real-time WebSocket Layer:
+ *   Added KeyCortexGateway (socket.io namespace /key-cortex) for live
+ *   bidirectional streaming: chat, approvals, alerts, insights, health
+ *   updates, and proactive suggestions. KeyCortexRealtimeService bridges
+ *   domain events → WebSocket pushes via @nestjs/event-emitter.
  */
 
 import { Module, forwardRef } from '@nestjs/common';
@@ -60,6 +66,10 @@ import { KeyCortexGenomeBridgeService } from './key-cortex-genome-bridge.service
 import { KeyCortexEventService } from './key-cortex-event.service';
 import { KeyCortexEvidenceService } from './key-cortex-evidence.service';
 import { KeyCortexApprovalService } from './key-cortex-approval.service';
+
+// -- v5 Real-time WebSocket Layer --
+import { KeyCortexGateway } from './key-cortex.gateway';
+import { KeyCortexRealtimeService } from './key-cortex-realtime.service';
 
 // -- Infrastructure --
 import { PrismaModule } from '../../core/prisma/prisma.module';
@@ -194,6 +204,15 @@ import { ProjectsModule } from '../projects/projects.module';
 
     // Approval service -- handles approval gating for supervised actions
     KeyCortexApprovalService,
+
+    // -- v5: Real-time WebSocket Layer --
+    // WebSocket gateway -- live bidirectional streaming (chat, approvals,
+    // alerts, insights, suggestions, health). Runs on /key-cortex namespace.
+    KeyCortexGateway,
+
+    // Realtime event bridge -- listens to domain events and forwards them
+    // to connected browser clients via the gateway above.
+    KeyCortexRealtimeService,
   ],
 
   exports: [
@@ -238,6 +257,14 @@ import { ProjectsModule } from '../projects/projects.module';
     KeyCortexEventService,
     KeyCortexEvidenceService,
     KeyCortexApprovalService,
+
+    // -- v5: Real-time WebSocket Layer --
+    // Gateway -- so other modules can push events directly to clients
+    KeyCortexGateway,
+
+    // Realtime service -- so other modules can emit domain events that
+    // get forwarded to WebSocket clients automatically
+    KeyCortexRealtimeService,
   ],
 })
 export class KeyCortexModule {}

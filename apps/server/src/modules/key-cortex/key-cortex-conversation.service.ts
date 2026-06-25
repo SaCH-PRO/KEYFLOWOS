@@ -1,11 +1,14 @@
 import {
   Injectable,
   Logger,
+  Inject,
+  Optional,
   NotFoundException,
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { RedisService } from '../../core/redis/redis.service';
+import { KeyCortexMemoryService } from './key-cortex-memory.service';
 import {
   CortexSession,
   CortexMessage,
@@ -68,6 +71,11 @@ export class KeyCortexConversationService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
+
+    // ── v4: Advanced Memory (optional — graceful degradation) ──
+    @Optional()
+    @Inject(KeyCortexMemoryService)
+    private readonly memory?: KeyCortexMemoryService,
   ) {
     this.SESSION_TTL =
       parseInt(process.env.KEY_CORTEX_SESSION_TTL_HOURS ?? '24', 10) * 3600;
@@ -190,6 +198,36 @@ export class KeyCortexConversationService {
   }
 
   /**
+   * v4: Get enriched session context with memory integration.
+   * Loads the session and enriches it with context from the advanced memory service.
+   */
+  async getSessionContext(sessionId: string): Promise<CortexSession & { memoryContext?: string }> {
+    const session = await this.getSession(sessionId);
+    if (!session) {
+      throw new NotFoundException(`Session not found: ${sessionId}`);
+    }
+
+    // v4: Enrich with memory context if available
+    if (this.memory) {
+      try {
+        const memories = await this.memory.retrieve({
+          businessId: session.businessId,
+          userId: session.userId,
+          limit: 20,
+        });
+        (session as CortexSession & { memoryContext?: string }).memoryContext =
+          this.memory.formatForPrompt(memories);
+      } catch (err) {
+        this.logger.warn(
+          `[getSessionContext] Memory retrieval failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
+    return session as CortexSession & { memoryContext?: string };
+  }
+
+  /**
    * Get a session or throw NotFoundException.
    */
   async getSessionOrThrow(sessionId: string): Promise<CortexSession> {
@@ -241,6 +279,21 @@ export class KeyCortexConversationService {
     // Update Redis cache
     const updatedSession = { ...session, messages: updatedMessages };
     await this.cacheSession(updatedSession);
+
+    // v4: Store message in advanced memory service
+    if (this.memory) {
+      try {
+        await this.memory.store(session.businessId, 'communication_style', `msg_${sessionId}`, message.content ?? '', {
+          userId: session.userId,
+          confidence: 0.9,
+          source: 'conversation',
+        });
+      } catch (err) {
+        this.logger.warn(
+          `[addMessage] Memory store failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
 
     // Trigger context compression if threshold exceeded
     if (updatedMessages.length >= this.COMPRESSION_THRESHOLD) {

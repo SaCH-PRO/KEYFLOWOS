@@ -11,6 +11,8 @@ import { TaskAssignmentModule } from './modules/task-assignments/task-assignment
 import { EventStreamModule } from './modules/event-stream/event-stream.module';
 import { ApprovalModule } from './modules/approvals/approval.module';
 import { ContentOpsModule } from './modules/content-ops/content-ops.module';
+import { ContentModule } from './modules/content/content.module';
+import { ActivityModule } from './modules/activity/activity.module';
 import { EventBusModule } from './core/event-bus/event-bus.module';
 import { AuthModule } from './core/auth/auth.module';
 import { TrpcModule } from './trpc.module';
@@ -124,6 +126,8 @@ import { KeyCortexModule } from './modules/key-cortex/key-cortex.module';
     EventStreamModule,
     ApprovalModule,
     ContentOpsModule,
+    ContentModule,
+    ActivityModule,
 
     // Feature Modules
     IdentityModule,

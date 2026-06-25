@@ -17,7 +17,7 @@
 //   9. Utility Helpers
 // ============================================================================
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -32,6 +32,9 @@ import {
 
 // ─── Connector Service ────────────────────────────────────────────────────────
 import { KeyCortexConnectorService } from './key-cortex-connector.service';
+
+// ─── Command Router (v4) ─────────────────────────────────────────────────────
+import { KeyCommandRouterService } from './key-command-router.service';
 
 // ─── AI Services ──────────────────────────────────────────────────────────────
 import { ModelGatewayService } from '../ai/model-gateway.service';
@@ -85,6 +88,11 @@ export class KeyCortexCommandService {
     private readonly modelGateway: ModelGatewayService,
     private readonly connector: KeyCortexConnectorService,
     private readonly aiUsage: AiUsageService,
+
+    // ── v4: Command Router (optional — graceful degradation) ──
+    @Optional()
+    @Inject(KeyCommandRouterService)
+    private readonly router?: KeyCommandRouterService,
   ) {}
 
   // ══════════════════════════════════════════════════════════════════════════════
@@ -93,13 +101,14 @@ export class KeyCortexCommandService {
   /**
    * Parse a single natural-language request into one or more structured intents.
    *
-   * 1. Fetch all module capabilities from the connector.
-   * 2. Build a comprehensive AI prompt including capabilities, business context,
+   * 1. Try command router first (v4) for high-confidence matches.
+   * 2. Fetch all module capabilities from the connector.
+   * 3. Build a comprehensive AI prompt including capabilities, business context,
    *    and the user's request.
-   * 3. Call gpt-4o-mini with the prompt.
-   * 4. Parse the JSON response safely — with retry/fallback logic.
-   * 5. Optionally validate each intent against registered capabilities.
-   * 6. Return an ordered array of ParsedIntent objects.
+   * 4. Call gpt-4o-mini with the prompt.
+   * 5. Parse the JSON response safely — with retry/fallback logic.
+   * 6. Optionally validate each intent against registered capabilities.
+   * 7. Return an ordered array of ParsedIntent objects.
    */
   async parseIntent(
     input: string,
@@ -112,6 +121,36 @@ export class KeyCortexCommandService {
     this.logger.debug(
       `[parseIntent] Parsing: "${inputTrimmed.substring(0, 80)}…" for biz=${context.businessId}`,
     );
+
+    // ── 0. Try command router first (v4) ───────────────────────────────────
+    if (this.router) {
+      try {
+        const routed = await this.router.route(inputTrimmed, {
+          businessId: context.businessId,
+          userId: context.userId,
+          query: inputTrimmed,
+        });
+        if (routed.confidence > 0.7) {
+          this.logger.log(
+            `[parseIntent] Command router matched with confidence ${routed.confidence} — returning routed intents`,
+          );
+          // Convert routed intents to ParsedIntent[] format
+          return routed.intents.map((intent) => ({
+            intent: intent.intent ?? intent.action ?? 'unknown',
+            confidence: routed.confidence,
+            module: intent.module as any,
+            action: intent.action,
+            parameters: intent.parameters ?? {},
+            requiresApproval: intent.requiresApproval ?? false,
+            naturalLanguage: intent.naturalLanguage ?? inputTrimmed,
+          }));
+        }
+      } catch (err) {
+        this.logger.warn(
+          `[parseIntent] Router failed, falling back to AI: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
 
     // ── 1. Capabilities ──────────────────────────────────────────────────────
     const capabilities = this.connector.getAllCapabilities();
@@ -827,7 +866,7 @@ Expected output: [
 
   /**
    * Check whether a specific action requires approval by looking it up in
-   * the connector's capability registry.
+     * the connector's capability registry.
    */
   private actionRequiresApproval(module: ModuleName, action: string): boolean {
     try {
