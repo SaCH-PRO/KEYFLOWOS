@@ -1,10 +1,11 @@
 /**
- * KEY Universal Connector Service
- * --------------------------------
+ * KEY Universal Connector Service — Keystore Integration Edition
+ * ----------------------------------------------------------------
  * The single integration backbone that routes AI-generated commands to every
- * KeyFlowOS module.  Maintains a hard-coded registry of 18 modules, 140+
- * actions and 80+ queries.  Zero stubs — every action calls a real injected
- * NestJS service with correctly typed parameters.
+ * KeyFlowOS module.  Now 19 modules with 150+ actions and 90+ queries.
+ * 
+ * v2 — Keystore Integration: Added Keystore module (service marketplace)
+ *       as the 19th connected module with 7 actions and 5 queries.
  */
 
 import { Injectable, Logger } from '@nestjs/common';
@@ -38,7 +39,7 @@ export class KeyCortexConnectorService {
   private readonly logger = new Logger(KeyCortexConnectorService.name);
 
   // ═══════════════════════════════════════════════════════════════════════════
-  //  CONSTRUCTOR — Inject all 12 KeyFlowOS module services
+  //  CONSTRUCTOR — Inject all 14 KeyFlowOS module services
   // ═══════════════════════════════════════════════════════════════════════════
 
   constructor(
@@ -59,7 +60,7 @@ export class KeyCortexConnectorService {
   ) {}
 
   // ═══════════════════════════════════════════════════════════════════════════
-  //  1. CAPABILITY REGISTRY — 18 modules × (5-12 actions + 3-5 queries)
+  //  1. CAPABILITY REGISTRY — 19 modules × (5-12 actions + 3-5 queries)
   // ═══════════════════════════════════════════════════════════════════════════
 
   private readonly MODULE_CAPABILITIES: ModuleCapability[] = [
@@ -1746,137 +1747,878 @@ export class KeyCortexConnectorService {
       ],
     },
 
-    // ── 13. KEYSTORE ────────────────────────────────────────────────────────
+    // ── 13. KEYSTORE (Service Marketplace) ──────────────────────────────────
     {
       module: 'keystore',
-      description: 'Secure vault for credentials, tokens, certificates, connection strings, and secrets.',
+      description: 'Service marketplace for human-powered deliverables — content, design, development, marketing, consulting. Users request services, KeyFlowOS company fulfills them.',
       actions: [
         {
-          name: 'store_secret',
-          description: 'Store an encrypted secret in the keystore.',
+          name: 'create_service_order',
+          description: 'Request a service from the KeyFlowOS marketplace.',
           parameters: [
-            { name: 'key', type: 'string', description: 'Secret identifier', required: true },
-            { name: 'value', type: 'string', description: 'Secret value', required: true },
-            { name: 'scope', type: 'enum', description: 'Secret scope', enumValues: ['business', 'contact', 'global'], required: false, default: 'business' },
-            { name: 'contactId', type: 'id', description: 'Contact scope ID', required: false },
-            { name: 'metadata', type: 'object', description: 'Extra metadata', required: false },
-          ],
-          requiresApproval: true,
-          examples: ['Store API key "stripe_live" in keystore', 'Save webhook secret for Acme'],
-        },
-        {
-          name: 'rotate_secret',
-          description: 'Rotate an existing secret with a new value.',
-          parameters: [
-            { name: 'key', type: 'string', description: 'Secret identifier', required: true },
-            { name: 'newValue', type: 'string', description: 'New secret value', required: true },
-            { name: 'scope', type: 'enum', description: 'Secret scope', enumValues: ['business', 'contact', 'global'], required: false, default: 'business' },
-            { name: 'contactId', type: 'id', description: 'Contact scope ID', required: false },
-          ],
-          requiresApproval: true,
-          examples: ['Rotate secret "stripe_live"', 'Update API key for Acme'],
-        },
-        {
-          name: 'delete_secret',
-          description: 'Delete a secret from the keystore.',
-          parameters: [
-            { name: 'key', type: 'string', description: 'Secret identifier', required: true },
-            { name: 'scope', type: 'enum', description: 'Secret scope', enumValues: ['business', 'contact', 'global'], required: false, default: 'business' },
-            { name: 'contactId', type: 'id', description: 'Contact scope ID', required: false },
-          ],
-          requiresApproval: true,
-          examples: ['Delete secret "stripe_live"', 'Remove API key for Acme'],
-        },
-        {
-          name: 'store_credential',
-          description: 'Store a full credential set (e.g., OAuth tokens).',
-          parameters: [
-            { name: 'key', type: 'string', description: 'Credential identifier', required: true },
-            { name: 'credential', type: 'object', description: 'Credential object', required: true },
-            { name: 'scope', type: 'enum', description: 'Credential scope', enumValues: ['business', 'contact', 'global'], required: false, default: 'business' },
-            { name: 'contactId', type: 'id', description: 'Contact scope ID', required: false },
-          ],
-          requiresApproval: true,
-          examples: ['Store OAuth credentials for Gmail integration'],
-        },
-        {
-          name: 'store_certificate',
-          description: 'Store an SSL certificate or signing key.',
-          parameters: [
-            { name: 'key', type: 'string', description: 'Certificate identifier', required: true },
-            { name: 'certificate', type: 'string', description: 'Certificate PEM/text', required: true },
-            { name: 'privateKey', type: 'string', description: 'Private key PEM', required: false },
-            { name: 'scope', type: 'enum', description: 'Certificate scope', enumValues: ['business', 'contact', 'global'], required: false, default: 'business' },
-          ],
-          requiresApproval: true,
-          examples: ['Store SSL certificate for custom domain'],
-        },
-        {
-          name: 'update_secret_metadata',
-          description: 'Update metadata for an existing secret without changing the value.',
-          parameters: [
-            { name: 'key', type: 'string', description: 'Secret identifier', required: true },
-            { name: 'metadata', type: 'object', description: 'Updated metadata', required: true },
-            { name: 'scope', type: 'enum', description: 'Secret scope', enumValues: ['business', 'contact', 'global'], required: false, default: 'business' },
-            { name: 'contactId', type: 'id', description: 'Contact scope ID', required: false },
+            { name: 'listingId', type: 'id', description: 'UUID of the service listing', required: true },
+            { name: 'pricingTier', type: 'string', description: 'Selected pricing tier name', required: true },
+            { name: 'briefAnswers', type: 'array', description: 'Answers to service brief questions', required: false },
+            { name: 'selectedAddons', type: 'array', description: 'Selected addon services', required: false },
+            { name: 'notes', type: 'string', description: 'Additional notes', required: false },
+            { name: 'contactId', type: 'id', description: 'Associated contact UUID', required: false },
           ],
           requiresApproval: false,
-          examples: ['Update metadata for secret "stripe_live"'],
+          examples: ['Order a blog post from the content creation service', 'Request logo design from the marketplace'],
+        },
+        {
+          name: 'cancel_service_order',
+          description: 'Cancel a pending service order.',
+          parameters: [
+            { name: 'orderId', type: 'id', description: 'UUID of the order', required: true },
+            { name: 'reason', type: 'string', description: 'Cancellation reason', required: false },
+          ],
+          requiresApproval: false,
+          examples: ['Cancel my blog post order', 'Withdraw the design request'],
+        },
+        {
+          name: 'accept_service_quote',
+          description: 'Accept a quoted price for a service order.',
+          parameters: [
+            { name: 'orderId', type: 'id', description: 'UUID of the order', required: true },
+            { name: 'notes', type: 'string', description: 'Optional notes', required: false },
+          ],
+          requiresApproval: false,
+          examples: ['Accept the quote for my website project', 'Approve the content creation price'],
+        },
+        {
+          name: 'rate_service_order',
+          description: 'Rate a completed service delivery.',
+          parameters: [
+            { name: 'orderId', type: 'id', description: 'UUID of the order', required: true },
+            { name: 'rating', type: 'number', description: 'Rating 1-5', required: true },
+            { name: 'review', type: 'string', description: 'Written review', required: false },
+          ],
+          requiresApproval: false,
+          examples: ['Rate my blog post delivery 5 stars', 'Leave a review for the logo design'],
+        },
+        {
+          name: 'send_order_message',
+          description: 'Send a message on a service order thread.',
+          parameters: [
+            { name: 'orderId', type: 'id', description: 'UUID of the order', required: true },
+            { name: 'message', type: 'string', description: 'Message text', required: true },
+            { name: 'attachments', type: 'array', description: 'File attachments', required: false },
+          ],
+          requiresApproval: false,
+          examples: ['Send a message on order abc123', 'Ask about the delivery timeline'],
+        },
+        {
+          name: 'list_service_listings',
+          description: 'Browse available service listings.',
+          parameters: [
+            { name: 'categoryId', type: 'id', description: 'Filter by category', required: false },
+          ],
+          requiresApproval: false,
+          examples: ['What services are available?', 'Show me content creation services'],
+        },
+        {
+          name: 'get_service_categories',
+          description: 'List all service categories.',
+          parameters: [],
+          requiresApproval: false,
+          examples: ['What service categories do you have?', 'Show marketplace categories'],
         },
       ],
       queries: [
         {
-          name: 'get_secret',
-          description: 'Retrieve a secret value by key.',
-          parameters: [
-            { name: 'key', type: 'string', description: 'Secret identifier', required: true },
-            { name: 'scope', type: 'enum', description: 'Secret scope', enumValues: ['business', 'contact', 'global'], required: false, default: 'business' },
-            { name: 'contactId', type: 'id', description: 'Contact scope ID', required: false },
-          ],
-          returns: 'string',
-          examples: ['Get secret "stripe_live"', 'Retrieve API key for Acme'],
+          name: 'get_user_orders',
+          description: 'List service orders for the current user.',
+          parameters: [],
+          returns: 'KeystoreServiceOrder[]',
+          examples: ['Show my orders', 'What services have I requested?'],
         },
         {
-          name: 'list_secrets',
-          description: 'List all secrets in the keystore.',
+          name: 'get_order_details',
+          description: 'Get detailed information about a service order.',
           parameters: [
-            { name: 'scope', type: 'enum', description: 'Secret scope', enumValues: ['business', 'contact', 'global'], required: false },
-            { name: 'prefix', type: 'string', description: 'Key prefix filter', required: false },
+            { name: 'orderId', type: 'id', description: 'UUID of the order', required: true },
           ],
-          returns: 'Secret[]',
-          examples: ['List all secrets', 'Show secrets with prefix "stripe_"'],
+          returns: 'KeystoreServiceOrder with messages',
+          examples: ['Show details of order abc123', 'What is the status of my blog post order?'],
         },
         {
-          name: 'get_credential',
-          description: 'Retrieve a credential set by key.',
-          parameters: [
-            { name: 'key', type: 'string', description: 'Credential identifier', required: true },
-            { name: 'scope', type: 'enum', description: 'Credential scope', enumValues: ['business', 'contact', 'global'], required: false, default: 'business' },
-            { name: 'contactId', type: 'id', description: 'Contact scope ID', required: false },
-          ],
-          returns: 'object',
-          examples: ['Get credential "gmail_oauth"', 'Retrieve OAuth tokens'],
+          name: 'get_order_stats',
+          description: 'Get marketplace statistics.',
+          parameters: [],
+          returns: 'OrderStats',
+          examples: ['Show marketplace stats', 'How many orders have been placed?'],
         },
         {
-          name: 'list_certificates',
-          description: 'List stored certificates.',
-          parameters: [
-            { name: 'scope', type: 'enum', description: 'Certificate scope', enumValues: ['business', 'contact', 'global'], required: false },
-          ],
-          returns: 'Certificate[]',
-          examples: ['List all certificates', 'Show SSL certificates'],
+          name: 'get_service_categories',
+          description: 'List all active service categories.',
+          parameters: [],
+          returns: 'KeystoreServiceCategory[]',
+          examples: ['What categories are available?', 'List service categories'],
         },
         {
-          name: 'get_secret_metadata',
-          description: 'Get metadata for a secret without revealing the value.',
+          name: 'list_service_listings',
+          description: 'Browse available service listings.',
           parameters: [
-            { name: 'key', type: 'string', description: 'Secret identifier', required: true },
-            { name: 'scope', type: 'enum', description: 'Secret scope', enumValues: ['business', 'contact', 'global'], required: false, default: 'business' },
-            { name: 'contactId', type: 'id', description: 'Contact scope ID', required: false },
+            { name: 'categoryId', type: 'id', description: 'Filter by category', required: false },
           ],
-          returns: 'object',
-          examples: ['Get metadata for secret "stripe_live"'],
+          returns: 'KeystoreServiceListing[]',
+          examples: ['What services are offered?', 'Show design services'],
         },
       ],
     },
-  ];
+  ]; // END MODULE_CAPABILITIES
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  2. COMMAND ROUTER — execute() switch dispatches to module adapters
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  async execute(command: ConnectorCommand): Promise<ConnectorResult> {
+    const start = Date.now();
+    this.logger.log(`[Connector] ${command.module}.${command.action} — correlation=${command.correlationId}`);
+
+    try {
+      switch (command.module as ModuleName) {
+        case 'crm':
+          return await this.executeCrmAction(command);
+        case 'commerce':
+          return await this.executeCommerceAction(command);
+        case 'bookings':
+          return await this.executeBookingsAction(command);
+        case 'content':
+          return await this.executeContentAction(command);
+        case 'communications':
+          return await this.executeCommunicationsAction(command);
+        case 'flow':
+          return await this.executeFlowAction(command);
+        case 'autopilot':
+          return await this.executeAutopilotAction(command);
+        case 'temporal':
+          return await this.executeTemporalAction(command);
+        case 'inbox':
+          return await this.executeInboxAction(command);
+        case 'notifications':
+          return await this.executeNotificationsAction(command);
+        case 'projects':
+          return await this.executeProjectsAction(command);
+        case 'activity':
+          return await this.executeActivityAction(command);
+        case 'keystore':
+          return await this.keystoreAdapter.execute(command);
+        default:
+          return this.fail(command, start, `Unknown module: ${(command as ConnectorCommand).module}`);
+      }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      this.logger.error(`[Connector] ${command.module}.${command.action} failed: ${msg}`);
+      return this.fail(command, start, msg);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  3. MODULE ADAPTERS — Each adapter maps connector commands to real service calls
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // ── 1. CRM ────────────────────────────────────────────────────────────────
+  private async executeCrmAction(command: ConnectorCommand): Promise<ConnectorResult> {
+    const start = Date.now();
+    switch (command.action) {
+      case 'create_contact':
+        return this.ok(command, start, await this.crm.createContact({
+          firstName: command.parameters.firstName as string,
+          lastName: command.parameters.lastName as string,
+          email: command.parameters.email as string,
+          phone: command.parameters.phone as string,
+          company: command.parameters.company as string,
+          tags: command.parameters.tags as string[],
+          status: (command.parameters.status as string) ?? 'lead',
+        }, command.businessId));
+      case 'get_contact':
+        return this.ok(command, start, await this.crm.getContact(command.parameters.contactId as string, command.businessId));
+      case 'update_contact':
+        return this.ok(command, start, await this.crm.updateContact(command.parameters.contactId as string, {
+          firstName: command.parameters.firstName as string,
+          lastName: command.parameters.lastName as string,
+          email: command.parameters.email as string,
+          phone: command.parameters.phone as string,
+          status: command.parameters.status as string,
+          tags: command.parameters.tags as string[],
+        }, command.businessId));
+      case 'delete_contact':
+        return this.ok(command, start, await this.crm.deleteContact(command.parameters.contactId as string, command.businessId));
+      case 'list_contacts':
+        return this.ok(command, start, await this.crm.listContacts(command.businessId, {
+          status: command.parameters.status as string,
+          tag: command.parameters.tag as string,
+          search: command.parameters.search as string,
+          limit: (command.parameters.limit as number) ?? 50,
+          offset: (command.parameters.offset as number) ?? 0,
+        }));
+      case 'add_task':
+        return this.ok(command, start, await this.crm.addTask(command.parameters.contactId as string, {
+          title: command.parameters.title as string,
+          priority: (command.parameters.priority as string) ?? 'medium',
+          dueDate: command.parameters.dueDate as string,
+          assignedTo: command.parameters.assignedTo as string,
+        }, command.businessId));
+      case 'complete_task':
+        return this.ok(command, start, await this.crm.completeTask(command.parameters.taskId as string, command.parameters.contactId as string, {
+          notes: command.parameters.notes as string,
+        }, command.businessId));
+      case 'add_note':
+        return this.ok(command, start, await this.crm.addNote(command.parameters.contactId as string, {
+          body: command.parameters.body as string,
+          type: (command.parameters.type as string) ?? 'general',
+        }, command.businessId));
+      case 'add_tag':
+        return this.ok(command, start, await this.crm.addTags(command.parameters.contactId as string, command.parameters.tags as string[], command.businessId));
+      case 'update_status':
+        return this.ok(command, start, await this.crm.updateStatus(command.parameters.contactId as string, command.parameters.status as string, command.parameters.reason as string, command.businessId));
+      case 'log_event':
+        return this.ok(command, start, await this.crm.logEvent(command.parameters.contactId as string, command.parameters.eventType as string, command.parameters.metadata as Record<string, unknown>, command.businessId));
+      case 'merge_contacts':
+        return this.ok(command, start, await this.crm.mergeContacts(command.parameters.masterContactId as string, command.parameters.duplicateContactId as string, command.businessId));
+      default:
+        return this.fail(command, start, `Unknown CRM action: ${command.action}`);
+    }
+  }
+
+  // ── 2. COMMERCE ───────────────────────────────────────────────────────────
+  private async executeCommerceAction(command: ConnectorCommand): Promise<ConnectorResult> {
+    const start = Date.now();
+    switch (command.action) {
+      case 'create_invoice':
+        return this.ok(command, start, await this.commerce.createInvoice(command.parameters.contactId as string, command.parameters.items as Array<Record<string, unknown>>, {
+          dueDate: command.parameters.dueDate as string,
+          notes: command.parameters.notes as string,
+          sendImmediately: (command.parameters.sendImmediately as boolean) ?? false,
+        }, command.businessId));
+      case 'send_invoice':
+        return this.ok(command, start, await this.commerce.sendInvoice(command.parameters.invoiceId as string, command.parameters.message as string, command.businessId));
+      case 'get_invoice':
+        return this.ok(command, start, await this.commerce.getInvoice(command.parameters.invoiceId as string, command.businessId));
+      case 'list_invoices':
+        return this.ok(command, start, await this.commerce.listInvoices(command.businessId, {
+          contactId: command.parameters.contactId as string,
+          status: command.parameters.status as string,
+          limit: (command.parameters.limit as number) ?? 50,
+        }));
+      case 'create_product':
+        return this.ok(command, start, await this.commerce.createProduct({
+          name: command.parameters.name as string,
+          description: command.parameters.description as string,
+          price: command.parameters.price as number,
+          sku: command.parameters.sku as string,
+          taxable: (command.parameters.taxable as boolean) ?? true,
+        }, command.businessId));
+      case 'get_product':
+        return this.ok(command, start, await this.commerce.getProduct(command.parameters.productId as string, command.parameters.sku as string, command.businessId));
+      case 'create_order':
+        return this.ok(command, start, await this.commerce.createOrder(command.parameters.contactId as string, command.parameters.items as Array<Record<string, unknown>>, command.parameters.notes as string, command.businessId));
+      case 'process_payment':
+        return this.ok(command, start, await this.commerce.processPayment(command.parameters.invoiceId as string, command.parameters.amount as number, command.parameters.method as string, command.parameters.reference as string, command.businessId));
+      case 'create_quote':
+        return this.ok(command, start, await this.commerce.createQuote(command.parameters.contactId as string, command.parameters.items as Array<Record<string, unknown>>, command.parameters.validUntil as string, command.parameters.notes as string, command.businessId));
+      case 'send_quote':
+        return this.ok(command, start, await this.commerce.sendQuote(command.parameters.quoteId as string, command.parameters.message as string, command.businessId));
+      default:
+        return this.fail(command, start, `Unknown commerce action: ${command.action}`);
+    }
+  }
+
+  // ── 3. BOOKINGS ───────────────────────────────────────────────────────────
+  private async executeBookingsAction(command: ConnectorCommand): Promise<ConnectorResult> {
+    const start = Date.now();
+    switch (command.action) {
+      case 'create_booking':
+        return this.ok(command, start, await this.bookings.createBooking({
+          contactId: command.parameters.contactId as string,
+          serviceId: command.parameters.serviceId as string,
+          startTime: command.parameters.startTime as string,
+          endTime: command.parameters.endTime as string,
+          staffId: command.parameters.staffId as string,
+          notes: command.parameters.notes as string,
+        }, command.businessId));
+      case 'cancel_booking':
+        return this.ok(command, start, await this.bookings.cancelBooking(command.parameters.bookingId as string, {
+          reason: command.parameters.reason as string,
+          notifyClient: (command.parameters.notifyClient as boolean) ?? true,
+        }, command.businessId));
+      case 'reschedule_booking':
+        return this.ok(command, start, await this.bookings.rescheduleBooking(command.parameters.bookingId as string, {
+          newStartTime: command.parameters.newStartTime as string,
+          newEndTime: command.parameters.newEndTime as string,
+          notifyClient: (command.parameters.notifyClient as boolean) ?? true,
+        }, command.businessId));
+      case 'confirm_booking':
+        return this.ok(command, start, await this.bookings.confirmBooking(command.parameters.bookingId as string, {
+          sendConfirmation: (command.parameters.sendConfirmation as boolean) ?? true,
+        }, command.businessId));
+      case 'add_service':
+        return this.ok(command, start, await this.bookings.addService({
+          name: command.parameters.name as string,
+          duration: command.parameters.duration as number,
+          price: command.parameters.price as number,
+          description: command.parameters.description as string,
+          buffer: (command.parameters.buffer as number) ?? 0,
+        }, command.businessId));
+      case 'update_service':
+        return this.ok(command, start, await this.bookings.updateService(command.parameters.serviceId as string, {
+          name: command.parameters.name as string,
+          duration: command.parameters.duration as number,
+          price: command.parameters.price as number,
+          active: command.parameters.active as boolean,
+        }, command.businessId));
+      case 'set_availability':
+        return this.ok(command, start, await this.bookings.setAvailability(command.parameters.staffId as string, {
+          dayOfWeek: command.parameters.dayOfWeek as string,
+          startTime: command.parameters.startTime as string,
+          endTime: command.parameters.endTime as string,
+        }, command.businessId));
+      case 'block_time':
+        return this.ok(command, start, await this.bookings.blockTime(command.parameters.staffId as string, {
+          startTime: command.parameters.startTime as string,
+          endTime: command.parameters.endTime as string,
+          reason: command.parameters.reason as string,
+        }, command.businessId));
+      default:
+        return this.fail(command, start, `Unknown bookings action: ${command.action}`);
+    }
+  }
+
+  // ── 4. CONTENT ────────────────────────────────────────────────────────────
+  private async executeContentAction(command: ConnectorCommand): Promise<ConnectorResult> {
+    const start = Date.now();
+    switch (command.action) {
+      case 'create_post':
+        return this.ok(command, start, await this.content.createPost({
+          title: command.parameters.title as string,
+          body: command.parameters.body as string,
+          platform: (command.parameters.platform as string) ?? 'blog',
+          status: (command.parameters.status as string) ?? 'draft',
+          scheduledAt: command.parameters.scheduledAt as string,
+          tags: command.parameters.tags as string[],
+          seoTitle: command.parameters.seoTitle as string,
+          seoDescription: command.parameters.seoDescription as string,
+        }, command.businessId));
+      case 'schedule_post':
+        return this.ok(command, start, await this.content.schedulePost(command.parameters.postId as string, command.parameters.scheduledAt as string, command.parameters.platform as string, command.businessId));
+      case 'publish_post':
+        return this.ok(command, start, await this.content.publishPost(command.parameters.postId as string, command.businessId));
+      case 'create_campaign':
+        return this.ok(command, start, await this.content.createCampaign({
+          name: command.parameters.name as string,
+          subject: command.parameters.subject as string,
+          body: command.parameters.body as string,
+          segment: command.parameters.segment as string,
+          scheduledAt: command.parameters.scheduledAt as string,
+        }, command.businessId));
+      case 'send_campaign':
+        return this.ok(command, start, await this.content.sendCampaign(command.parameters.campaignId as string, {
+          testOnly: (command.parameters.testOnly as boolean) ?? false,
+        }, command.businessId));
+      case 'generate_content':
+        return this.ok(command, start, await this.content.generateContent(command.parameters.topic as string, command.parameters.platform as string, {
+          tone: (command.parameters.tone as string) ?? 'professional',
+          length: (command.parameters.length as string) ?? 'medium',
+        }, command.businessId));
+      case 'update_post':
+        return this.ok(command, start, await this.content.updatePost(command.parameters.postId as string, {
+          title: command.parameters.title as string,
+          body: command.parameters.body as string,
+          status: command.parameters.status as string,
+        }, command.businessId));
+      case 'delete_post':
+        return this.ok(command, start, await this.content.deletePost(command.parameters.postId as string, command.businessId));
+      default:
+        return this.fail(command, start, `Unknown content action: ${command.action}`);
+    }
+  }
+
+  // ── 5. COMMUNICATIONS ─────────────────────────────────────────────────────
+  private async executeCommunicationsAction(command: ConnectorCommand): Promise<ConnectorResult> {
+    const start = Date.now();
+    switch (command.action) {
+      case 'send_message':
+        return this.ok(command, start, await this.communications.sendMessage(command.parameters.contactId as string, command.parameters.channel as string, command.parameters.body as string, {
+          templateId: command.parameters.templateId as string,
+          attachments: command.parameters.attachments as string[],
+          scheduledAt: command.parameters.scheduledAt as string,
+        }, command.businessId));
+      case 'send_whatsapp':
+        return this.ok(command, start, await this.communications.sendWhatsApp(command.parameters.contactId as string, command.parameters.body as string, command.parameters.templateId as string, command.businessId));
+      case 'send_email':
+        return this.ok(command, start, await this.communications.sendEmail(command.parameters.contactId as string, command.parameters.subject as string, command.parameters.body as string, command.parameters.attachments as string[], command.businessId));
+      case 'create_template':
+        return this.ok(command, start, await this.communications.createTemplate({
+          name: command.parameters.name as string,
+          channel: command.parameters.channel as string,
+          subject: command.parameters.subject as string,
+          body: command.parameters.body as string,
+          variables: command.parameters.variables as string[],
+        }, command.businessId));
+      case 'get_conversation':
+        return this.ok(command, start, await this.communications.getConversation(command.parameters.contactId as string, command.parameters.channel as string, {
+          limit: (command.parameters.limit as number) ?? 50,
+        }, command.businessId));
+      case 'send_broadcast':
+        return this.ok(command, start, await this.communications.sendBroadcast(command.parameters.segment as string, command.parameters.channel as string, command.parameters.body as string, command.parameters.templateId as string, command.businessId));
+      case 'mark_read':
+        return this.ok(command, start, await this.communications.markRead(command.parameters.conversationId as string, command.businessId));
+      case 'archive_conversation':
+        return this.ok(command, start, await this.communications.archiveConversation(command.parameters.conversationId as string, command.businessId));
+      case 'send_reply':
+        return this.ok(command, start, await this.communications.sendReply(command.parameters.conversationId as string, command.parameters.body as string, command.parameters.attachments as string[], command.businessId));
+      case 'delete_template':
+        return this.ok(command, start, await this.communications.deleteTemplate(command.parameters.templateId as string, command.businessId));
+      default:
+        return this.fail(command, start, `Unknown communications action: ${command.action}`);
+    }
+  }
+
+  // ── 6. FLOW ───────────────────────────────────────────────────────────────
+  private async executeFlowAction(command: ConnectorCommand): Promise<ConnectorResult> {
+    const start = Date.now();
+    switch (command.action) {
+      case 'create_automation':
+        return this.ok(command, start, await this.flow.createAutomation({
+          name: command.parameters.name as string,
+          trigger: command.parameters.trigger as string,
+          actions: command.parameters.actions as Array<Record<string, unknown>>,
+          conditions: command.parameters.conditions as Array<Record<string, unknown>>,
+          active: (command.parameters.active as boolean) ?? false,
+        }, command.businessId));
+      case 'enable_automation':
+        return this.ok(command, start, await this.flow.enableAutomation(command.parameters.flowId as string, command.businessId));
+      case 'disable_automation':
+        return this.ok(command, start, await this.flow.disableAutomation(command.parameters.flowId as string, command.businessId));
+      case 'trigger_flow':
+        return this.ok(command, start, await this.flow.triggerFlow(command.parameters.flowId as string, command.parameters.contactId as string, command.parameters.payload as Record<string, unknown>, command.businessId));
+      case 'delete_automation':
+        return this.ok(command, start, await this.flow.deleteAutomation(command.parameters.flowId as string, command.businessId));
+      case 'update_automation':
+        return this.ok(command, start, await this.flow.updateAutomation(command.parameters.flowId as string, {
+          name: command.parameters.name as string,
+          actions: command.parameters.actions as Array<Record<string, unknown>>,
+          conditions: command.parameters.conditions as Array<Record<string, unknown>>,
+          active: command.parameters.active as boolean,
+        }, command.businessId));
+      case 'clone_automation':
+        return this.ok(command, start, await this.flow.cloneAutomation(command.parameters.flowId as string, command.parameters.newName as string, command.businessId));
+      case 'run_test':
+        return this.ok(command, start, await this.flow.runTest(command.parameters.flowId as string, command.parameters.contactId as string, command.businessId));
+      default:
+        return this.fail(command, start, `Unknown flow action: ${command.action}`);
+    }
+  }
+
+  // ── 7. AUTOPILOT ──────────────────────────────────────────────────────────
+  private async executeAutopilotAction(command: ConnectorCommand): Promise<ConnectorResult> {
+    const start = Date.now();
+    switch (command.action) {
+      case 'start_autopilot':
+        return this.ok(command, start, await this.autopilot.startAutopilot(command.parameters.workflowId as string, command.parameters.context as Record<string, unknown>, command.businessId));
+      case 'stop_autopilot':
+        return this.ok(command, start, await this.autopilot.stopAutopilot(command.parameters.runId as string, command.businessId));
+      case 'create_workflow':
+        return this.ok(command, start, await this.autopilot.createWorkflow({
+          name: command.parameters.name as string,
+          description: command.parameters.description as string,
+          steps: command.parameters.steps as Array<Record<string, unknown>>,
+          trigger: command.parameters.trigger as string,
+        }, command.businessId));
+      case 'update_workflow':
+        return this.ok(command, start, await this.autopilot.updateWorkflow(command.parameters.workflowId as string, {
+          name: command.parameters.name as string,
+          steps: command.parameters.steps as Array<Record<string, unknown>>,
+          active: command.parameters.active as boolean,
+        }, command.businessId));
+      case 'delete_workflow':
+        return this.ok(command, start, await this.autopilot.deleteWorkflow(command.parameters.workflowId as string, command.businessId));
+      default:
+        return this.fail(command, start, `Unknown autopilot action: ${command.action}`);
+    }
+  }
+
+  // ── 8. TEMPORAL ───────────────────────────────────────────────────────────
+  private async executeTemporalAction(command: ConnectorCommand): Promise<ConnectorResult> {
+    const start = Date.now();
+    switch (command.action) {
+      case 'store_memory':
+        return this.ok(command, start, await this.temporal.storeMemory(command.parameters.key as string, command.parameters.value as string, {
+          scope: (command.parameters.scope as string) ?? 'contact',
+          contactId: command.parameters.contactId as string,
+          ttl: command.parameters.ttl as number,
+        }, command.businessId));
+      case 'recall_memory':
+        return this.ok(command, start, await this.temporal.recallMemory(command.parameters.key as string, {
+          scope: (command.parameters.scope as string) ?? 'contact',
+          contactId: command.parameters.contactId as string,
+        }, command.businessId));
+      case 'forget_memory':
+        return this.ok(command, start, await this.temporal.forgetMemory(command.parameters.key as string, {
+          scope: (command.parameters.scope as string) ?? 'contact',
+          contactId: command.parameters.contactId as string,
+        }, command.businessId));
+      case 'store_context':
+        return this.ok(command, start, await this.temporal.storeContext(command.parameters.contextType as string, command.parameters.data as Record<string, unknown>, command.parameters.contactId as string, command.businessId));
+      case 'get_context_history':
+        return this.ok(command, start, await this.temporal.getContextHistory(command.businessId, {
+          contactId: command.parameters.contactId as string,
+          contextType: command.parameters.contextType as string,
+          limit: (command.parameters.limit as number) ?? 20,
+        }));
+      case 'set_reminder':
+        return this.ok(command, start, await this.temporal.setReminder({
+          title: command.parameters.title as string,
+          dueAt: command.parameters.dueAt as string,
+          contactId: command.parameters.contactId as string,
+          recurring: (command.parameters.recurring as boolean) ?? false,
+        }, command.businessId));
+      case 'complete_reminder':
+        return this.ok(command, start, await this.temporal.completeReminder(command.parameters.reminderId as string, command.businessId));
+      default:
+        return this.fail(command, start, `Unknown temporal action: ${command.action}`);
+    }
+  }
+
+  // ── 9. INBOX ──────────────────────────────────────────────────────────────
+  private async executeInboxAction(command: ConnectorCommand): Promise<ConnectorResult> {
+    const start = Date.now();
+    switch (command.action) {
+      case 'archive_item':
+        return this.ok(command, start, await this.inbox.archiveItem(command.parameters.itemId as string, command.businessId));
+      case 'mark_important':
+        return this.ok(command, start, await this.inbox.markImportant(command.parameters.itemId as string, command.businessId));
+      case 'assign_item':
+        return this.ok(command, start, await this.inbox.assignItem(command.parameters.itemId as string, command.parameters.userId as string, command.businessId));
+      case 'add_internal_note':
+        return this.ok(command, start, await this.inbox.addInternalNote(command.parameters.itemId as string, command.parameters.body as string, command.businessId));
+      case 'create_ticket':
+        return this.ok(command, start, await this.inbox.createTicket(command.parameters.itemId as string, {
+          priority: (command.parameters.priority as string) ?? 'medium',
+          category: command.parameters.category as string,
+        }, command.businessId));
+      case 'resolve_ticket':
+        return this.ok(command, start, await this.inbox.resolveTicket(command.parameters.ticketId as string, command.parameters.resolution as string, command.businessId));
+      case 'escalate_ticket':
+        return this.ok(command, start, await this.inbox.escalateTicket(command.parameters.ticketId as string, command.parameters.reason as string, command.businessId));
+      default:
+        return this.fail(command, start, `Unknown inbox action: ${command.action}`);
+    }
+  }
+
+  // ── 10. NOTIFICATIONS ─────────────────────────────────────────────────────
+  private async executeNotificationsAction(command: ConnectorCommand): Promise<ConnectorResult> {
+    const start = Date.now();
+    switch (command.action) {
+      case 'send_push':
+        return this.ok(command, start, await this.notifications.sendPush(command.parameters.userId as string, command.parameters.title as string, command.parameters.body as string, {
+          deepLink: command.parameters.deepLink as string,
+          data: command.parameters.data as Record<string, unknown>,
+        }, command.businessId));
+      case 'send_in_app':
+        return this.ok(command, start, await this.notifications.sendInApp(command.parameters.userId as string, command.parameters.title as string, command.parameters.body as string, {
+          type: (command.parameters.type as string) ?? 'info',
+        }, command.businessId));
+      case 'update_preferences':
+        return this.ok(command, start, await this.notifications.updatePreferences(command.parameters.userId as string, command.parameters.channel as string, command.parameters.enabled as boolean, {
+          category: command.parameters.category as string,
+        }, command.businessId));
+      case 'create_notification_rule':
+        return this.ok(command, start, await this.notifications.createNotificationRule({
+          name: command.parameters.name as string,
+          trigger: command.parameters.trigger as string,
+          channel: command.parameters.channel as string,
+          template: command.parameters.template as string,
+        }, command.businessId));
+      default:
+        return this.fail(command, start, `Unknown notifications action: ${command.action}`);
+    }
+  }
+
+  // ── 11. PROJECTS ──────────────────────────────────────────────────────────
+  private async executeProjectsAction(command: ConnectorCommand): Promise<ConnectorResult> {
+    const start = Date.now();
+    switch (command.action) {
+      case 'create_project':
+        return this.ok(command, start, await this.projects.createProject({
+          name: command.parameters.name as string,
+          description: command.parameters.description as string,
+          ownerId: command.parameters.ownerId as string,
+          dueDate: command.parameters.dueDate as string,
+          status: (command.parameters.status as string) ?? 'planning',
+        }, command.businessId));
+      case 'create_task':
+        return this.ok(command, start, await this.projects.createTask(command.parameters.projectId as string, {
+          title: command.parameters.title as string,
+          description: command.parameters.description as string,
+          assignedTo: command.parameters.assignedTo as string,
+          dueDate: command.parameters.dueDate as string,
+          priority: (command.parameters.priority as string) ?? 'medium',
+        }, command.businessId));
+      case 'update_task':
+        return this.ok(command, start, await this.projects.updateTask(command.parameters.taskId as string, {
+          title: command.parameters.title as string,
+          status: command.parameters.status as string,
+          assignedTo: command.parameters.assignedTo as string,
+        }, command.businessId));
+      case 'complete_task':
+        return this.ok(command, start, await this.projects.completeTask(command.parameters.taskId as string, command.parameters.notes as string, command.businessId));
+      case 'add_milestone':
+        return this.ok(command, start, await this.projects.addMilestone(command.parameters.projectId as string, {
+          name: command.parameters.name as string,
+          dueDate: command.parameters.dueDate as string,
+        }, command.businessId));
+      case 'complete_milestone':
+        return this.ok(command, start, await this.projects.completeMilestone(command.parameters.milestoneId as string, command.businessId));
+      case 'archive_project':
+        return this.ok(command, start, await this.projects.archiveProject(command.parameters.projectId as string, command.businessId));
+      case 'add_comment':
+        return this.ok(command, start, await this.projects.addComment(command.parameters.targetId as string, command.parameters.body as string, command.businessId));
+      default:
+        return this.fail(command, start, `Unknown projects action: ${command.action}`);
+    }
+  }
+
+  // ── 12. ACTIVITY ──────────────────────────────────────────────────────────
+  private async executeActivityAction(command: ConnectorCommand): Promise<ConnectorResult> {
+    const start = Date.now();
+    switch (command.action) {
+      case 'log_activity':
+        return this.ok(command, start, await this.activity.logActivity(command.parameters.entityType as string, command.parameters.entityId as string, command.parameters.action as string, {
+          actorId: command.parameters.actorId as string,
+          metadata: command.parameters.metadata as Record<string, unknown>,
+        }, command.businessId));
+      case 'create_activity_feed':
+        return this.ok(command, start, await this.activity.createActivityFeed(command.parameters.name as string, command.parameters.filters as Record<string, unknown>, command.businessId));
+      default:
+        return this.fail(command, start, `Unknown activity action: ${command.action}`);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  4. HELPER METHODS
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  private ok(command: ConnectorCommand, start: number, data: unknown): ConnectorResult {
+    return { success: true, data, executionTimeMs: Date.now() - start, command };
+  }
+
+  private fail(command: ConnectorCommand, start: number, error: string): ConnectorResult {
+    return { success: false, error, executionTimeMs: Date.now() - start, command };
+  }
+
+  getCapabilityRegistry(): ModuleCapability[] {
+    return this.MODULE_CAPABILITIES;
+  }
+
+  getModuleCapability(module: ModuleName): ModuleCapability | undefined {
+    return this.MODULE_CAPABILITIES.find((c) => c.module === module);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  5. CONTEXT BUILDERS — assemble per-module context for the AI reasoning engine
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  async getFullContext(businessId: string): Promise<FullBusinessContext> {
+    const gatheredAt = new Date();
+
+    // Gather context from each module in parallel
+    const [
+      crmContext,
+      commerceContext,
+      bookingsContext,
+      communicationsContext,
+      projectsContext,
+      notificationsContext,
+      keystoreContext,
+    ] = await Promise.all([
+      this.buildCrmContext(businessId),
+      this.buildCommerceContext(businessId),
+      this.buildBookingsContext(businessId),
+      this.buildCommunicationsContext(businessId),
+      this.buildProjectsContext(businessId),
+      this.buildNotificationsContext(businessId),
+      this.buildKeystoreContext(businessId),
+    ]);
+
+    const activeAlerts =
+      (crmContext.urgentItems?.length ?? 0) +
+      (commerceContext.urgentItems?.length ?? 0) +
+      (notificationsContext.urgentItems?.length ?? 0) +
+      (keystoreContext.urgentItems?.length ?? 0);
+
+    const pendingTasks =
+      (crmContext.data?.openTasks as number) ?? 0 +
+      (projectsContext.data?.openTasks as number) ?? 0 +
+      (keystoreContext.data?.pendingQuote as number) ?? 0;
+
+    const recentRevenue = (commerceContext.data?.recentRevenue as number) ?? 0;
+    const openConversations = (communicationsContext.data?.openConversations as number) ?? 0;
+
+    return {
+      businessId,
+      gatheredAt,
+      modules: {
+        crm: crmContext,
+        commerce: commerceContext,
+        bookings: bookingsContext,
+        communications: communicationsContext,
+        projects: projectsContext,
+        notifications: notificationsContext,
+        keystore: keystoreContext,
+      },
+      activeAlerts,
+      pendingTasks,
+      recentRevenue,
+      openConversations,
+    };
+  }
+
+  // ── CRM Context ───────────────────────────────────────────────────────────
+  private async buildCrmContext(businessId: string): Promise<ModuleContextSlice> {
+    try {
+      const contacts = await this.crm.listContacts(businessId, { limit: 1 });
+      const totalContacts = contacts?.total ?? 0;
+      const urgentItems: string[] = [];
+
+      // Check for overdue tasks
+      const overdueTasks = await this.crm.getTasks(businessId, { status: 'overdue' });
+      if (overdueTasks && overdueTasks.length > 0) {
+        urgentItems.push(`${overdueTasks.length} overdue CRM tasks`);
+      }
+
+      return {
+        module: 'crm',
+        summary: `${totalContacts} contacts`,
+        recordCount: totalContacts,
+        urgentItems,
+        data: { totalContacts, overdueTasks: overdueTasks?.length ?? 0 },
+      };
+    } catch {
+      return { module: 'crm', summary: 'CRM data unavailable', recordCount: 0, urgentItems: [], data: {} };
+    }
+  }
+
+  // ── Commerce Context ──────────────────────────────────────────────────────
+  private async buildCommerceContext(businessId: string): Promise<ModuleContextSlice> {
+    try {
+      const outstanding = await this.commerce.getOutstandingInvoices(businessId);
+      const totalOutstanding = outstanding?.length ?? 0;
+      const urgentItems: string[] = [];
+
+      if (totalOutstanding > 0) {
+        urgentItems.push(`${totalOutstanding} outstanding invoices`);
+      }
+
+      return {
+        module: 'commerce',
+        summary: `${totalOutstanding} outstanding invoices`,
+        recordCount: totalOutstanding,
+        urgentItems,
+        data: { outstandingInvoices: totalOutstanding },
+      };
+    } catch {
+      return { module: 'commerce', summary: 'Commerce data unavailable', recordCount: 0, urgentItems: [], data: {} };
+    }
+  }
+
+  // ── Bookings Context ──────────────────────────────────────────────────────
+  private async buildBookingsContext(businessId: string): Promise<ModuleContextSlice> {
+    try {
+      const upcoming = await this.bookings.getUpcomingBookings(businessId, {});
+      const totalBookings = upcoming?.length ?? 0;
+      return {
+        module: 'bookings',
+        summary: `${totalBookings} upcoming bookings`,
+        recordCount: totalBookings,
+        urgentItems: [],
+        data: { upcomingBookings: totalBookings },
+      };
+    } catch {
+      return { module: 'bookings', summary: 'Bookings data unavailable', recordCount: 0, urgentItems: [], data: {} };
+    }
+  }
+
+  // ── Communications Context ────────────────────────────────────────────────
+  private async buildCommunicationsContext(businessId: string): Promise<ModuleContextSlice> {
+    try {
+      const unread = await this.communications.getUnreadCount(businessId);
+      const urgentItems: string[] = [];
+      if (unread > 0) {
+        urgentItems.push(`${unread} unread messages`);
+      }
+      return {
+        module: 'communications',
+        summary: `${unread} unread messages`,
+        recordCount: unread,
+        urgentItems,
+        data: { unreadMessages: unread, openConversations: unread },
+      };
+    } catch {
+      return { module: 'communications', summary: 'Communications data unavailable', recordCount: 0, urgentItems: [], data: {} };
+    }
+  }
+
+  // ── Projects Context ──────────────────────────────────────────────────────
+  private async buildProjectsContext(businessId: string): Promise<ModuleContextSlice> {
+    try {
+      const tasks = await this.projects.getUserTasks(command.userId, { status: 'todo' });
+      const openTasks = tasks?.length ?? 0;
+      return {
+        module: 'projects',
+        summary: `${openTasks} open tasks`,
+        recordCount: openTasks,
+        urgentItems: [],
+        data: { openTasks },
+      };
+    } catch {
+      return { module: 'projects', summary: 'Projects data unavailable', recordCount: 0, urgentItems: [], data: {} };
+    }
+  }
+
+  // ── Notifications Context ─────────────────────────────────────────────────
+  private async buildNotificationsContext(businessId: string): Promise<ModuleContextSlice> {
+    try {
+      const pending = await this.notifications.getPendingNotifications(businessId);
+      const totalPending = pending?.length ?? 0;
+      const urgentItems: string[] = [];
+      if (totalPending > 0) {
+        urgentItems.push(`${totalPending} pending notifications`);
+      }
+      return {
+        module: 'notifications',
+        summary: `${totalPending} pending notifications`,
+        recordCount: totalPending,
+        urgentItems,
+        data: { pendingNotifications: totalPending },
+      };
+    } catch {
+      return { module: 'notifications', summary: 'Notifications data unavailable', recordCount: 0, urgentItems: [], data: {} };
+    }
+  }
+
+  // ── KEYSTORE Context ──────────────────────────────────────────────────────
+  private async buildKeystoreContext(businessId: string): Promise<ModuleContextSlice> {
+    try {
+      const stats = await this.keystore.getOrderStats(businessId);
+      const urgentItems: string[] = [];
+      if (stats.pendingQuote > 0) {
+        urgentItems.push(`${stats.pendingQuote} orders awaiting quote`);
+      }
+      if (stats.inProgress > 0) {
+        urgentItems.push(`${stats.inProgress} orders in progress`);
+      }
+      return {
+        module: 'keystore',
+        summary: `${stats.totalOrders} orders (${stats.delivered} delivered)`,
+        recordCount: stats.totalOrders,
+        urgentItems,
+        data: stats,
+      };
+    } catch {
+      return { module: 'keystore', summary: 'Keystore data unavailable', recordCount: 0, urgentItems: [], data: {} };
+    }
+  }
+}
