@@ -4,19 +4,27 @@
  *
  * Orchestrates multi-provider AI reasoning, voice synthesis/recognition,
  * personality management, conversation state, business context awareness,
- * and action execution — all scoped behind a unified REST + SSE API.
+ * and action execution -- all scoped behind a unified REST + SSE API.
  *
- * v2 — Integration Layer:
+ * v2 -- Integration Layer:
  *   Added universal connector, command parser, action executor, context v2,
  *   insight engine, and background monitor integration. All wired with
  *   forwardRef to break circular dependency chains with domain modules.
+ *
+ * v3 -- Phase 3 & 4 Services:
+ *   Added Sandbox (code generation & execution), Flow Studio (workflow
+ *   management), External Connectors (third-party integrations), Phone
+ *   Agent (voice calls), Document Intelligence (RAG & extraction), and
+ *   Self-Evolution (adaptive learning & tuning). Includes HttpModule for
+ *   external HTTP calls via @nestjs/axios.
  */
 
 import { Module, forwardRef } from '@nestjs/common';
+import { HttpModule } from '@nestjs/axios';
 
 import { KeyCortexController } from './key-cortex.controller';
 
-// ── Core (legacy) ──
+// -- Core (legacy) --
 import { KeyCortexPersonalityService } from './key-cortex-personality.service';
 import { KeyCortexContextService } from './key-cortex-context.service';
 import { KeyCortexReasoningService } from './key-cortex-reasoning.service';
@@ -24,7 +32,7 @@ import { KeyCortexConversationService } from './key-cortex-conversation.service'
 import { KeyCortexActionsService } from './key-cortex-actions.service';
 import { KeyCortexVoiceService } from './key-cortex-voice.service';
 
-// ── v2 Integration Layer ──
+// -- v2 Integration Layer --
 import { KeyCortexConnectorService } from './key-cortex-connector.service';
 import { KeyCortexCommandService } from './key-cortex-command.service';
 import { KeyCortexExecutorService } from './key-cortex-executor.service';
@@ -32,14 +40,22 @@ import { KeyCortexContextV2Service } from './key-cortex-context-v2.service';
 import { KeyCortexInsightService } from './key-cortex-insight.service';
 import { KeyCortexMonitorV2Service } from './key-cortex-monitor-v2.service';
 
-// ── Infrastructure ──
+// -- v3 Phase 3 & 4 Services --
+import { KeyCortexSandboxService } from './key-cortex-sandbox.service';
+import { KeyCortexFlowStudioService } from './key-cortex-flow-studio.service';
+import { KeyCortexExternalConnectorService } from './key-cortex-external-connector.service';
+import { KeyCortexEvolutionService } from './key-cortex-evolution.service';
+import { KeyCortexPhoneService } from './key-cortex-phone.service';
+import { KeyCortexDocumentService } from './key-cortex-document.service';
+
+// -- Infrastructure --
 import { PrismaModule } from '../../core/prisma/prisma.module';
 import { RedisModule } from '../../core/redis/redis.module';
 
-// ── AI Gateway ──
+// -- AI Gateway --
 import { AiModule } from '../ai/ai.module';
 
-// ── Domain modules (forwardRef to break circular deps) ──
+// -- Domain modules (forwardRef to break circular deps) --
 import { CrmModule } from '../crm/crm.module';
 import { CommerceModule } from '../commerce/commerce.module';
 import { BookingsModule } from '../bookings/bookings.module';
@@ -60,14 +76,17 @@ import { ActivityModule } from '../activity/activity.module';
     PrismaModule,
     RedisModule,
 
-    // AI provider gateway — forwardRef to break any potential circular
+    // HTTP client for external connector calls
+    HttpModule,
+
+    // AI provider gateway -- forwardRef to break any potential circular
     // dependency between KeyCortex and the legacy AiModule.
     forwardRef(() => AiModule),
 
-    // ── v2: Domain module adapters ──
+    // -- v2: Domain module adapters --
     // The universal connector needs to call services in each of these
     // modules.  forwardRef prevents circular dependency issues at
-    // bootstrap time (e.g. CrmModule → AiModule → KeyCortexModule →
+    // bootstrap time (e.g. CrmModule -> AiModule -> KeyCortexModule ->
     // CrmModule).
     forwardRef(() => CrmModule),
     forwardRef(() => CommerceModule),
@@ -90,47 +109,66 @@ import { ActivityModule } from '../activity/activity.module';
   ],
 
   providers: [
-    // ── Core (legacy) ──
-    // Personality engine — voice, tone, persona management
+    // -- Core (legacy) --
+    // Personality engine -- voice, tone, persona management
     KeyCortexPersonalityService,
 
-    // Genome context assembler — business DNA & activity snapshotting
+    // Genome context assembler -- business DNA & activity snapshotting
     KeyCortexContextService,
 
-    // Reasoning engine — core brain, streaming, provider routing
+    // Reasoning engine -- core brain, streaming, provider routing
     KeyCortexReasoningService,
 
-    // Conversation manager — session lifecycle & message history
+    // Conversation manager -- session lifecycle & message history
     KeyCortexConversationService,
 
-    // Action executor — tool calling, approval flow, execution tracking
+    // Action executor -- tool calling, approval flow, execution tracking
     KeyCortexActionsService,
 
-    // Voice interface — TTS / STT with personality voice mapping
+    // Voice interface -- TTS / STT with personality voice mapping
     KeyCortexVoiceService,
 
-    // ── v2: Integration Layer ──
-    // Universal connector — knows how to talk to every KeyFlowOS module
+    // -- v2: Integration Layer --
+    // Universal connector -- knows how to talk to every KeyFlowOS module
     KeyCortexConnectorService,
 
-    // NL → Command parser — converts natural language to structured commands
+    // NL -> Command parser -- converts natural language to structured commands
     KeyCortexCommandService,
 
-    // Action executor — real execution with error handling, rollback, audit
+    // Action executor -- real execution with error handling, rollback, audit
     KeyCortexExecutorService,
 
-    // Full context assembler — aggregates context from all 90+ modules
+    // Full context assembler -- aggregates context from all 90+ modules
     KeyCortexContextV2Service,
 
-    // Business insight engine — profit, revenue, churn, pipeline analysis
+    // Business insight engine -- profit, revenue, churn, pipeline analysis
     KeyCortexInsightService,
 
-    // Background monitor integration — autonomous loop management
+    // Background monitor integration -- autonomous loop management
     KeyCortexMonitorV2Service,
+
+    // -- v3: Phase 3 & 4 Services --
+    // Sandbox -- AI-powered code generation & secure execution
+    KeyCortexSandboxService,
+
+    // Flow Studio -- visual workflow builder & automation engine
+    KeyCortexFlowStudioService,
+
+    // External Connector -- third-party integrations (REST, GraphQL, gRPC)
+    KeyCortexExternalConnectorService,
+
+    // Self-Evolution -- adaptive learning, pattern detection & auto-tuning
+    KeyCortexEvolutionService,
+
+    // Phone Agent -- voice calls, scripts, transcripts & analysis
+    KeyCortexPhoneService,
+
+    // Document Intelligence -- RAG, extraction, comparison & Q&A
+    KeyCortexDocumentService,
   ],
 
   exports: [
-    // ── Core (legacy) ──
+    // -- Core (legacy) --
     // Re-export all services so other modules can compose
     // KeyCortex capabilities (e.g. autopilot, command centre,
     // onboarding concierge) without duplicating providers.
@@ -141,7 +179,7 @@ import { ActivityModule } from '../activity/activity.module';
     KeyCortexActionsService,
     KeyCortexVoiceService,
 
-    // ── v2: Integration Layer ──
+    // -- v2: Integration Layer --
     // These are the primary services other modules will consume.
     // Connector + Executor form the "command API" surface.
     // ContextV2 + Insight provide the "query API" surface.
@@ -149,6 +187,19 @@ import { ActivityModule } from '../activity/activity.module';
     KeyCortexExecutorService,
     KeyCortexContextV2Service,
     KeyCortexInsightService,
+
+    // -- v3: Phase 3 & 4 Services --
+    // Sandbox -- reusable code generation & execution for other modules
+    KeyCortexSandboxService,
+
+    // Flow Studio -- workflow automation accessible by other modules
+    KeyCortexFlowStudioService,
+
+    // External Connector -- third-party integrations usable by domain modules
+    KeyCortexExternalConnectorService,
+
+    // Document Intelligence -- RAG & extraction available to other modules
+    KeyCortexDocumentService,
   ],
 })
 export class KeyCortexModule {}
