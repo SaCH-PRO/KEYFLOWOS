@@ -18,3 +18,29 @@ export type { KeyBusinessHealthProps, HealthMetric, HealthAlert, BusinessContext
 
 export { KeyVoiceButton, speakText } from "./KeyVoiceButton";
 export type { KeyVoiceButtonProps, VoiceState } from "./KeyVoiceButton";
+
+// ── Flow Studio (Visual Automation Builder) ──────────────────────────
+export { KeyFlowStudio } from "./KeyFlowStudio";
+export type { KeyFlowStudioProps } from "./KeyFlowStudio";
+
+export { KeyFlowNode } from "./KeyFlowNode";
+export type { KeyFlowNodeProps } from "./KeyFlowNode";
+
+export { KeyFlowProperties } from "./KeyFlowProperties";
+export type { KeyFlowPropertiesProps } from "./KeyFlowProperties";
+
+export { KeyFlowToolbar } from "./KeyFlowToolbar";
+export type { KeyFlowToolbarProps } from "./KeyFlowToolbar";
+
+export { KeyFlowNodePalette } from "./KeyFlowNodePalette";
+export type { KeyFlowNodePaletteProps } from "./KeyFlowNodePalette";
+
+export type {
+  FlowNodeUI,
+  FlowEdgeUI,
+  FlowNodeType,
+  FlowTemplate,
+  ViewportState,
+  FlowStudioState,
+  Port,
+} from "./flow-studio-types";
