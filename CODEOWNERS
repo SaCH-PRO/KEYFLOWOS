@@ -1,0 +1,18 @@
+# KEYFLOW OS Code Owners
+* @SaCH-PRO
+
+# AI / KeyCortex subsystem
+/apps/server/src/modules/key-cortex/ @SaCH-PRO
+/apps/server/src/modules/ai/ @SaCH-PRO
+
+# Core infrastructure
+/apps/server/src/core/ @SaCH-PRO
+/packages/db/ @SaCH-PRO
+
+# Security-sensitive files
+/.env.example @SaCH-PRO
+/Dockerfile @SaCH-PRO
+/docker-compose.yml @SaCH-PRO
+
+# CI/CD
+/.github/workflows/ @SaCH-PRO
