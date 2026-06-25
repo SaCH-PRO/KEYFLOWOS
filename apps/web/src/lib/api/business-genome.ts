@@ -543,6 +543,16 @@ export async function setGenomeOutcomeLearningWindow(
   );
 }
 
+export async function closeGenomeRecommendationObservation(
+  businessId: string,
+  outcomeId: string,
+) {
+  return apiPost<GenomeRecommendationOutcome>({
+    path: `/business-genome/businesses/${businessId}/key-genome/outcomes/${outcomeId}/close-observation`,
+    body: {},
+  });
+}
+
 export async function getGenomeExperiments(
   businessId: string,
   filters: { status?: string; limit?: number } = {},

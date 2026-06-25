@@ -17,17 +17,20 @@ import { getStoredBusinessId } from "@/lib/workspace";
 import {
   acceptGenomeRecommendation,
   applyGenomeRecommendation,
+  closeGenomeRecommendationObservation,
   dismissGenomeRecommendation,
   escalateGenomeRecommendation,
   generateGenomeRecommendations,
   getGenomeExperiments,
   getGenomeRecommendations,
   getGenomeRecommendationExecutionStatus,
+  getGenomeRecommendationOutcome,
   ignoreGenomeRecommendation,
   startGenomeExperiment,
   completeGenomeExperiment,
   cancelGenomeExperiment,
   type GenomeRecommendationExecutionStatus,
+  type GenomeRecommendationOutcome,
   type GenomeExperimentData,
   type GenomeRecommendationData,
 } from "@/lib/api/business-genome";
@@ -68,6 +71,8 @@ export function KeyGenomeRecommendationsPanel({
   const [reasoning, setReasoning] = useState<{ recommendationId: string; action: "dismiss" | "ignore" } | null>(null);
   const [reasonText, setReasonText] = useState("");
   const [executionStatuses, setExecutionStatuses] = useState<Record<string, GenomeRecommendationExecutionStatus>>({});
+  const [outcomes, setOutcomes] = useState<Record<string, GenomeRecommendationOutcome>>({});
+  const [closingObservationId, setClosingObservationId] = useState<string | null>(null);
 
   const businessId = getStoredBusinessId();
 
@@ -90,12 +95,19 @@ export function KeyGenomeRecommendationsPanel({
       const statusResults = await Promise.all(
         actionable.map((r) => getGenomeRecommendationExecutionStatus(businessId, r.id)),
       );
+      const outcomeResults = await Promise.all(
+        actionable.map((r) => getGenomeRecommendationOutcome(businessId, r.id)),
+      );
       const statusMap: Record<string, GenomeRecommendationExecutionStatus> = {};
+      const outcomeMap: Record<string, GenomeRecommendationOutcome> = {};
       actionable.forEach((r, idx) => {
         const s = statusResults[idx].data;
+        const o = outcomeResults[idx].data;
         if (s) statusMap[r.id] = s;
+        if (o) outcomeMap[r.id] = o;
       });
       setExecutionStatuses(statusMap);
+      setOutcomes(outcomeMap);
     }
     setLoading(false);
   }, [businessId]);
@@ -161,6 +173,18 @@ export function KeyGenomeRecommendationsPanel({
   const cancelReasoning = () => {
     setReasoning(null);
     setReasonText("");
+  };
+
+  const handleCloseObservation = async (outcomeId: string) => {
+    if (!businessId) return;
+    setClosingObservationId(outcomeId);
+    const result = await closeGenomeRecommendationObservation(businessId, outcomeId);
+    if (result.error) {
+      setError(result.error);
+    } else {
+      await refresh();
+    }
+    setClosingObservationId(null);
   };
 
   const handleExperimentAction = async (
@@ -302,6 +326,61 @@ export function KeyGenomeRecommendationsPanel({
                     </span>
                   )}
                 </div>
+
+                {outcomes[rec.id] && (
+                  <div className="rounded-lg border border-border/40 bg-muted/20 p-2.5 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[10px] font-medium text-foreground">Outcome Snapshot</span>
+                      {outcomes[rec.id].impactScore !== null && outcomes[rec.id].impactScore !== undefined && (
+                        <span
+                          className={`text-[10px] font-semibold ${
+                            (outcomes[rec.id].impactScore ?? 0) > 0
+                              ? "text-[hsl(var(--kf-success))]"
+                              : (outcomes[rec.id].impactScore ?? 0) < 0
+                                ? "text-destructive"
+                                : "text-muted-foreground"
+                          }`}
+                        >
+                          Impact {(outcomes[rec.id].impactScore! * 100).toFixed(0)}%
+                        </span>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 text-center">
+                      <div className="rounded-md bg-muted/40 p-1.5">
+                        <div className="text-[10px] text-muted-foreground">Health</div>
+                        <div className="text-xs font-semibold text-foreground">
+                          {outcomes[rec.id].preHealthScore ?? "-"} → {outcomes[rec.id].postHealthScore ?? "?"}
+                        </div>
+                      </div>
+                      <div className="rounded-md bg-muted/40 p-1.5">
+                        <div className="text-[10px] text-muted-foreground">Readiness</div>
+                        <div className="text-xs font-semibold text-foreground">
+                          {outcomes[rec.id].preReadinessScore ?? "-"} → {outcomes[rec.id].postReadinessScore ?? "?"}
+                        </div>
+                      </div>
+                      <div className="rounded-md bg-muted/40 p-1.5">
+                        <div className="text-[10px] text-muted-foreground">Confidence</div>
+                        <div className="text-xs font-semibold text-foreground">
+                          {outcomes[rec.id].preConfidence ?? "-"} → {outcomes[rec.id].postConfidence ?? "?"}
+                        </div>
+                      </div>
+                    </div>
+                    {rec.status === "APPLIED" && !outcomes[rec.id].observedAt && (
+                      <button
+                        onClick={() => handleCloseObservation(outcomes[rec.id].id)}
+                        disabled={closingObservationId === outcomes[rec.id].id}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                      >
+                        {closingObservationId === outcomes[rec.id].id ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <Check className="w-3 h-3" />
+                        )}
+                        Close observation window
+                      </button>
+                    )}
+                  </div>
+                )}
 
                 <div className="flex items-center gap-2 pt-1 flex-wrap">
                   {rec.status === "ACTIVE" && (

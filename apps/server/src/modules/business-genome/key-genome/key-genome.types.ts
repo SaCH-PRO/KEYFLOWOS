@@ -1598,6 +1598,11 @@ export interface UpdateGenomeRecommendationOutcomeObservationInput {
   observedAt?: string;
 }
 
+export interface CloseGenomeRecommendationObservationInput {
+  outcomeId: string;
+  businessId: string;
+}
+
 export interface ListGenomeRecommendationOutcomesQuery {
   domain?: string;
   decision?: GenomeRecommendationDecision;

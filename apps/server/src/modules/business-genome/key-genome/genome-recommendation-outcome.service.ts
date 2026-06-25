@@ -1,6 +1,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../core/prisma/prisma.service';
+import { GenomeCrossDomainService } from './genome-cross-domain.service';
 import type {
+  CloseGenomeRecommendationObservationInput,
   GenomeRecommendationDecision,
   GenomeRecommendationExecutionStatus,
   GenomeRecommendationOutcomeData,
@@ -81,7 +83,10 @@ function toOutcomeData(row: {
 
 @Injectable()
 export class GenomeRecommendationOutcomeService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly crossDomain: GenomeCrossDomainService,
+  ) {}
 
   async recordOutcome(
     input: RecordGenomeRecommendationOutcomeInput,
@@ -131,7 +136,13 @@ export class GenomeRecommendationOutcomeService {
       },
     });
 
-    return toOutcomeData(row);
+    await this.capturePreSnapshot(row.id, input.businessId, recommendation.domain).catch(() => null);
+
+    const updated = await this.prisma.client.genomeRecommendationOutcome.findUniqueOrThrow({
+      where: { id: row.id },
+    });
+
+    return toOutcomeData(updated);
   }
 
   async listOutcomes(
@@ -278,6 +289,148 @@ export class GenomeRecommendationOutcomeService {
       windowDays: row.windowDays,
       updatedAt: row.updatedAt.toISOString(),
     };
+  }
+
+  private async capturePreSnapshot(
+    outcomeId: string,
+    businessId: string,
+    domain: string,
+  ): Promise<void> {
+    const outcome = await this.prisma.client.genomeRecommendationOutcome.findUnique({
+      where: { id: outcomeId },
+    });
+    if (!outcome || outcome.preHealthScore !== null) return;
+
+    const snapshot = await this.crossDomain
+      .getLatestCrossDomainSnapshot(businessId)
+      .catch(() => null);
+    if (!snapshot) return;
+
+    const domainScore = snapshot.domainScores.find((d) => d.domain === domain);
+    const healthScore = domainScore?.healthScore ?? snapshot.overallHealthScore;
+    const readinessScore = snapshot.readinessSummary.averageReadinessScore;
+    const confidenceScore =
+      snapshot.evidenceSummary.totalFacts > 0
+        ? Math.round(
+            (snapshot.evidenceSummary.highConfidenceFacts /
+              snapshot.evidenceSummary.totalFacts) *
+              100,
+          )
+        : 0;
+
+    await this.prisma.client.genomeRecommendationOutcome.update({
+      where: { id: outcomeId },
+      data: {
+        preHealthScore: healthScore,
+        preReadinessScore: readinessScore,
+        preConfidence: confidenceScore,
+        preRiskLevel: snapshot.overallRiskLevel,
+      },
+    });
+  }
+
+  async closeObservationWindow(
+    input: CloseGenomeRecommendationObservationInput,
+  ): Promise<GenomeRecommendationOutcomeData> {
+    const outcome = await this.prisma.client.genomeRecommendationOutcome.findFirst({
+      where: { id: input.outcomeId, businessId: input.businessId },
+    });
+
+    if (!outcome) {
+      throw new NotFoundException(
+        `Outcome ${input.outcomeId} not found for business ${input.businessId}`,
+      );
+    }
+
+    const snapshot = await this.crossDomain.computeCrossDomainSnapshot(input.businessId).catch(() => null);
+    if (!snapshot) {
+      throw new Error(`Unable to compute cross-domain snapshot for business ${input.businessId}`);
+    }
+
+    const domainScore = snapshot.domainScores.find((d) => d.domain === outcome.domain);
+    const postHealthScore = domainScore?.healthScore ?? snapshot.overallHealthScore;
+    const postReadinessScore = snapshot.readinessSummary.averageReadinessScore;
+    const postConfidence =
+      snapshot.evidenceSummary.totalFacts > 0
+        ? Math.round(
+            (snapshot.evidenceSummary.highConfidenceFacts /
+              snapshot.evidenceSummary.totalFacts) *
+              100,
+          )
+        : 0;
+
+    const impactScore = this.computeImpactScore(
+      {
+        healthScore: outcome.preHealthScore ?? postHealthScore,
+        readinessScore: outcome.preReadinessScore ?? postReadinessScore,
+        confidence: outcome.preConfidence ?? postConfidence,
+        riskLevel: outcome.preRiskLevel ?? snapshot.overallRiskLevel,
+      },
+      {
+        healthScore: postHealthScore,
+        readinessScore: postReadinessScore,
+        confidence: postConfidence,
+        riskLevel: snapshot.overallRiskLevel,
+      },
+    );
+
+    const evidence: string[] = [];
+    if (impactScore > 0) evidence.push('Cross-domain health/readiness/confidence improved.');
+    if (impactScore < 0) evidence.push('Cross-domain health/readiness/confidence declined.');
+    if (impactScore === 0) evidence.push('No measurable cross-domain change.');
+
+    const updated = await this.prisma.client.genomeRecommendationOutcome.update({
+      where: { id: input.outcomeId },
+      data: {
+        postHealthScore,
+        postReadinessScore,
+        postConfidence,
+        postRiskLevel: snapshot.overallRiskLevel,
+        observedAt: new Date(),
+        impactScore,
+        impactEvidence: evidence,
+      },
+    });
+
+    return toOutcomeData(updated);
+  }
+
+  private computeImpactScore(
+    before: {
+      healthScore: number;
+      readinessScore: number;
+      confidence: number;
+      riskLevel: string;
+    },
+    after: {
+      healthScore: number;
+      readinessScore: number;
+      confidence: number;
+      riskLevel: string;
+    },
+  ): number {
+    const healthDelta = after.healthScore - before.healthScore;
+    const readinessDelta = after.readinessScore - before.readinessScore;
+    const confidenceDelta = after.confidence - before.confidence;
+
+    const riskRank: Record<string, number> = {
+      LOW: 1,
+      MEDIUM: 2,
+      HIGH: 3,
+      CRITICAL: 4,
+      UNKNOWN: 0,
+    };
+    const riskDelta =
+      (riskRank[before.riskLevel] ?? 0) - (riskRank[after.riskLevel] ?? 0);
+
+    const raw =
+      healthDelta * 0.35 +
+      readinessDelta * 0.35 +
+      confidenceDelta * 0.2 +
+      riskDelta * 10;
+
+    // Normalize to [-1, 1] assuming max plausible swing is ±50 points
+    return Math.max(-1, Math.min(1, raw / 50));
   }
 
   async getExecutionStatus(

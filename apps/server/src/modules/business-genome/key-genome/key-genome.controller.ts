@@ -42,6 +42,7 @@ import type {
   CreateGenomeExperimentInput,
   CreateGenomeContentStrategyInput,
   CreateGenomeGrowthChannelInput,
+  CloseGenomeRecommendationObservationInput,
   GenerateGenomeRecommendationsInput,
   GenomeOutcome,
   GenomeRecommendationExecutionStatus,
@@ -290,6 +291,14 @@ export class KeyGenomeController {
     @Body() body: Omit<UpdateGenomeRecommendationOutcomeObservationInput, 'outcomeId' | 'businessId'>,
   ) {
     return this.outcomeService.updateObservation({ ...body, outcomeId, businessId });
+  }
+
+  @Post('outcomes/:outcomeId/close-observation')
+  async closeObservationWindow(
+    @Param('businessId') businessId: string,
+    @Param('outcomeId') outcomeId: string,
+  ) {
+    return this.outcomeService.closeObservationWindow({ outcomeId, businessId });
   }
 
   @Get('outcome-windows/:domain')

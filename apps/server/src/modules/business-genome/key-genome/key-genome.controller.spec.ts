@@ -106,6 +106,7 @@ async function makeController() {
         listOutcomes: vi.fn().mockResolvedValue([]),
         getOutcomeByRecommendation: vi.fn().mockResolvedValue(null),
         updateObservation: vi.fn().mockResolvedValue({}),
+        closeObservationWindow: vi.fn().mockResolvedValue({ id: 'outcome_1', decision: 'APPLIED', impactScore: 0.5 }),
         getSummary: vi.fn().mockResolvedValue({
           businessId: 'biz_1',
           total: 0,
