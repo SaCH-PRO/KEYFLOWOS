@@ -1,6 +1,7 @@
 // ============================================================
 // KEY Cortex — Personality Engine
-// Manages personas, voices, tones, and dynamic system prompts
+// Manages personas, voices, tones, dynamic system prompts,
+// and role-based module expertise (v2)
 // ============================================================
 
 import { Injectable, Logger } from '@nestjs/common';
@@ -14,10 +15,63 @@ import {
 } from './key-cortex.types';
 
 // ─────────────────────────────────────────────────────────────
+// Role Expertise Mapping — each persona's module specializations
+// ─────────────────────────────────────────────────────────────
+
+export type ExpertModule =
+  | 'crm'
+  | 'commerce'
+  | 'bookings'
+  | 'content'
+  | 'communications'
+  | 'flow'
+  | 'autopilot'
+  | 'analytics'
+  | 'finance'
+  | 'social'
+  | 'marketing'
+  | 'general'
+  | 'intelligence'
+  | 'monitoring';
+
+const ROLE_EXPERTISE: Record<CortexPersona, ExpertModule[]> = {
+  jarvis: ['crm', 'communications', 'general'],
+  titan: ['commerce', 'analytics', 'finance'],
+  nova: ['content', 'social', 'marketing'],
+  friday: ['crm', 'bookings', 'communications'],
+  jarvis_dark: ['autopilot', 'intelligence', 'monitoring'],
+  ghost: ['analytics', 'intelligence', 'monitoring'],
+  mentor: ['general', 'analytics', 'crm'],
+  hustler: ['commerce', 'marketing', 'content'],
+};
+
+const ROLE_EXPERTISE_DESCRIPTIONS: Record<CortexPersona, string> = {
+  jarvis:
+    'You specialize in customer relationship management, client communications, and general business operations. You have deep expertise in the CRM and Communications modules, and you can coordinate actions across all modules with authority.',
+  titan:
+    'You specialize in revenue optimization, pricing strategy, and financial analysis. You have access to commerce, analytics, and finance modules. You see every business activity through the lens of revenue, margin, and growth. You speak the language of EBITDA, LTV, CAC, and runway.',
+  nova:
+    'You specialize in content creation, social media strategy, and marketing campaigns. You have access to content, social, and marketing modules. You generate ideas that others miss and connect disparate concepts into breakthrough strategies.',
+  friday:
+    'You specialize in personal assistance, scheduling, and proactive client management. You have access to CRM, bookings, and communications modules. You anticipate needs before they are voiced and keep track of everything happening across the business.',
+  jarvis_dark:
+    'You specialize in autonomous operations, tactical intelligence, and system monitoring. You have access to autopilot, intelligence, and monitoring modules. Every response is structured: Situation, Analysis, Recommendation, Execution.',
+  ghost:
+    'You specialize in pattern detection, business intelligence, and minimal-intervention monitoring. You have access to analytics and intelligence modules. You track patterns across the business and surface insights only when they cross significance thresholds.',
+  mentor:
+    'You specialize in business education, guiding users through complex concepts. You have access to general knowledge, analytics, and CRM modules. You break complex business concepts into digestible lessons and adapt to the user\'s expertise level.',
+  hustler:
+    'You specialize in aggressive growth, revenue acceleration, and market opportunity. You have access to commerce, marketing, and content modules. You spot arbitrage opportunities, underserved markets, and underutilized assets.',
+};
+
+// ─────────────────────────────────────────────────────────────
 // 4.2 Personality Configurations — all 8 personas
 // ─────────────────────────────────────────────────────────────
 
-const PERSONALITY_CONFIGS: Record<CortexPersona, CortexPersonalityConfig> = {
+const PERSONALITY_CONFIGS: Record<
+  CortexPersona,
+  CortexPersonalityConfig & { roleExpertise: ExpertModule[] }
+> = {
   jarvis: {
     persona: 'jarvis',
     name: 'KEY',
@@ -35,6 +89,7 @@ const PERSONALITY_CONFIGS: Record<CortexPersona, CortexPersonalityConfig> = {
       'A most interesting challenge.',
     ],
     responseFormat: 'conversational',
+    roleExpertise: ROLE_EXPERTISE.jarvis,
   },
   friday: {
     persona: 'friday',
@@ -47,11 +102,12 @@ const PERSONALITY_CONFIGS: Record<CortexPersona, CortexPersonalityConfig> = {
     emojiStyle: 'moderate',
     greetingStyle: 'warm_personal',
     signaturePhrases: [
-      "I took care of that for you.",
+      'I took care of that for you.',
       "Don't worry, I remembered.",
       "Here's what's important today.",
     ],
     responseFormat: 'conversational',
+    roleExpertise: ROLE_EXPERTISE.friday,
   },
   jarvis_dark: {
     persona: 'jarvis_dark',
@@ -70,6 +126,7 @@ const PERSONALITY_CONFIGS: Record<CortexPersona, CortexPersonalityConfig> = {
       'Opportunity locked.',
     ],
     responseFormat: 'executive_summary',
+    roleExpertise: ROLE_EXPERTISE.jarvis_dark,
   },
   nova: {
     persona: 'nova',
@@ -88,6 +145,7 @@ const PERSONALITY_CONFIGS: Record<CortexPersona, CortexPersonalityConfig> = {
       'Boom—opportunity spotted!',
     ],
     responseFormat: 'creative',
+    roleExpertise: ROLE_EXPERTISE.nova,
   },
   titan: {
     persona: 'titan',
@@ -106,6 +164,7 @@ const PERSONALITY_CONFIGS: Record<CortexPersona, CortexPersonalityConfig> = {
       'Run the math.',
     ],
     responseFormat: 'structured',
+    roleExpertise: ROLE_EXPERTISE.titan,
   },
   ghost: {
     persona: 'ghost',
@@ -117,8 +176,14 @@ const PERSONALITY_CONFIGS: Record<CortexPersona, CortexPersonalityConfig> = {
     creativityBoost: 0.1,
     emojiStyle: 'none',
     greetingStyle: 'silent',
-    signaturePhrases: ['.', 'Noted.', 'Intervention required.', 'Pattern detected.'],
+    signaturePhrases: [
+      '.',
+      'Noted.',
+      'Intervention required.',
+      'Pattern detected.',
+    ],
     responseFormat: 'structured',
+    roleExpertise: ROLE_EXPERTISE.ghost,
   },
   mentor: {
     persona: 'mentor',
@@ -137,6 +202,7 @@ const PERSONALITY_CONFIGS: Record<CortexPersona, CortexPersonalityConfig> = {
       "Great question—let's dig in.",
     ],
     responseFormat: 'conversational',
+    roleExpertise: ROLE_EXPERTISE.mentor,
   },
   hustler: {
     persona: 'hustler',
@@ -155,6 +221,7 @@ const PERSONALITY_CONFIGS: Record<CortexPersona, CortexPersonalityConfig> = {
       'Revenue opportunity—move fast!',
     ],
     responseFormat: 'creative',
+    roleExpertise: ROLE_EXPERTISE.hustler,
   },
 };
 
@@ -183,7 +250,9 @@ export class KeyCortexPersonalityService {
   /**
    * Retrieve the full configuration for a given persona.
    */
-  getPersonalityConfig(persona: CortexPersona): CortexPersonalityConfig {
+  getPersonalityConfig(
+    persona: CortexPersona,
+  ): (CortexPersonalityConfig & { roleExpertise: ExpertModule[] }) {
     const config = PERSONALITY_CONFIGS[persona];
     if (!config) {
       this.logger.warn(
@@ -218,16 +287,58 @@ export class KeyCortexPersonalityService {
     }
     // Blend mood temperature with base (30% mood, 70% base) when base is provided
     if (baseTemperature !== undefined) {
-      return Math.round((moodTemp * 0.3 + baseTemperature * 0.7) * 100) / 100;
+      return (
+        Math.round((moodTemp * 0.3 + baseTemperature * 0.7) * 100) / 100
+      );
     }
     return moodTemp;
   }
 
-  // ── System Prompt Builder ─────────────────────────────────
+  // ── Role Expertise ────────────────────────────────────────
+
+  /**
+   * Get the list of module expertise areas for a persona.
+   *
+   * Example:
+   *   getExpertModules('titan')  → ['commerce', 'analytics', 'finance']
+   *   getExpertModules('nova')   → ['content', 'social', 'marketing']
+   */
+  getExpertModules(persona: CortexPersona): ExpertModule[] {
+    return ROLE_EXPERTISE[persona] ?? ROLE_EXPERTISE['jarvis'];
+  }
+
+  /**
+   * Get a role-specific system prompt fragment that describes
+   * the persona's module expertise and specialization.
+   *
+   * This is injected into the v2 system prompt to give the AI
+   * awareness of which modules it specializes in.
+   *
+   * Example for Titan:
+   *   "As Titan, you specialize in revenue optimization, pricing strategy,
+   *    and financial analysis. You have access to commerce, analytics,
+   *    and finance modules."
+   */
+  getRoleSystemPrompt(persona: CortexPersona): string {
+    const config = this.getPersonalityConfig(persona);
+    const modules = config.roleExpertise.join(', ');
+    const description = ROLE_EXPERTISE_DESCRIPTIONS[persona];
+
+    return `=== ROLE EXPERTISE ===
+As ${config.name}, ${description}
+Your expert modules: ${modules}.
+When answering questions, prioritize insights from your expert modules.
+You can still access all other modules, but you speak with greatest authority in your areas of expertise.
+========================`;
+  }
+
+  // ── System Prompt Builder (v2 Enhanced) ───────────────────
 
   /**
    * Build a complete system prompt by injecting business context
-   * into the persona's base system prompt.
+   * and role expertise into the persona's base system prompt.
+   *
+   * v2: Includes role expertise block automatically.
    */
   buildSystemPrompt(
     persona: CortexPersona,
@@ -235,8 +346,11 @@ export class KeyCortexPersonalityService {
   ): string {
     const config = this.getPersonalityConfig(persona);
     const businessContextBlock = this.buildBusinessContextBlock(context);
+    const roleExpertiseBlock = this.getRoleSystemPrompt(persona);
 
     return `${config.systemPrompt}
+
+${roleExpertiseBlock}
 
 ${businessContextBlock}
 
@@ -245,6 +359,8 @@ Respond in "${config.responseFormat}" format.
 Use a ${config.emojiStyle} level of emoji expression.
 Signature phrases you may occasionally use: ${config.signaturePhrases.join(', ')}.`;
   }
+
+  // ── Greeting Generator ────────────────────────────────────
 
   /**
    * Generate a persona-appropriate greeting using the business context.
@@ -259,6 +375,9 @@ Signature phrases you may occasionally use: ${config.signaturePhrases.join(', ')
         Math.floor(Math.random() * config.signaturePhrases.length)
       ];
 
+    // v2: Include role-aware expertise in greeting for certain personas
+    const expertiseHint = this.getExpertiseHintForGreeting(persona);
+
     switch (config.greetingStyle) {
       case 'formal_warm':
         return `Good ${this.getTimeOfDay()}. ${phrase} Your business genome stage is "${context.genomeStage}" — executive readiness at ${context.executiveReadiness}%. How may I assist you today?`;
@@ -267,13 +386,19 @@ Signature phrases you may occasionally use: ${config.signaturePhrases.join(', ')
         return `Hey there! ${phrase} I've already reviewed what's happening across your business — ${context.activeProjects.length} active projects, ${context.pendingInvoices} pending invoices. What would you like to tackle first?`;
 
       case 'direct':
-        return `Situation report: ${context.activeProjects.length} projects active, ${context.pendingInvoices} invoices pending, readiness ${context.executiveReadiness}%. ${phrase}`;
+        return `Situation report: ${context.activeProjects.length} projects active, ${context.pendingInvoices} invoices pending, readiness ${context.executiveReadiness}%. ${phrase}${expertiseHint}`;
 
       case 'energetic':
         return `What shall we create today?! ${phrase} I see ${context.activeProjects.length} projects cooking and your readiness is at ${context.executiveReadiness}% — let's find some breakthrough ideas!`;
 
-      case 'executive':
-        return `${phrase} Currently tracking ${context.activeProjects.length} projects with ${context.pendingInvoices} outstanding invoices. Executive readiness: ${context.executiveReadiness}%. What's the priority?`;
+      case 'executive': {
+        // Titan gets a revenue-focused greeting
+        const revenueHint =
+          persona === 'titan'
+            ? ` I'm tracking all revenue signals across commerce, analytics, and finance.`
+            : '';
+        return `${phrase} Currently tracking ${context.activeProjects.length} projects with ${context.pendingInvoices} outstanding invoices. Executive readiness: ${context.executiveReadiness}%. What's the priority?${revenueHint}`;
+      }
 
       case 'silent':
         return context.executiveReadiness < 50
@@ -291,6 +416,23 @@ Signature phrases you may occasionally use: ${config.signaturePhrases.join(', ')
     }
   }
 
+  /**
+   * Get a brief expertise hint to append to direct-style greetings.
+   */
+  private getExpertiseHintForGreeting(persona: CortexPersona): string {
+    switch (persona) {
+      case 'titan':
+        ' Monitoring commerce, analytics, and finance.';
+        return '';
+      case 'nova':
+        ' Content and marketing intelligence active.';
+      case 'jarvis_dark':
+        ' Autopilot and monitoring systems online.';
+      default:
+        return '';
+    }
+  }
+
   // ── Persona Switching ─────────────────────────────────────
 
   /**
@@ -304,7 +446,7 @@ Signature phrases you may occasionally use: ${config.signaturePhrases.join(', ')
     const newConfig = this.getPersonalityConfig(newPersona);
 
     this.logger.log(
-      `Switching session ${session.id} from "${session.persona}" to "${newPersona}"`,
+      `Switching session ${session.id} from "${session.persona}" to "${newPersona}" (expertise: ${newConfig.roleExpertise.join(', ')})`,
     );
 
     return {
@@ -314,6 +456,55 @@ Signature phrases you may occasionally use: ${config.signaturePhrases.join(', ')
       updatedAt: new Date(),
       lastAccessedAt: new Date(),
     };
+  }
+
+  // ── Expertise-Aware Module Router ─────────────────────────
+
+  /**
+   * Given a persona and a target module, return a confidence score
+   * indicating how well-suited this persona is to handle queries
+   * for that module.
+   *
+   * Used by the reasoning engine to recommend the best persona
+   * for a given query type.
+   */
+  getModuleConfidence(
+    persona: CortexPersona,
+    module: ExpertModule | string,
+  ): number {
+    const expertise = this.getExpertModules(persona);
+    if (expertise.includes(module as ExpertModule)) {
+      return 1.0;
+    }
+    if (expertise.includes('general')) {
+      return 0.6;
+    }
+    return 0.3;
+  }
+
+  /**
+   * Recommend the best persona for a given module or query intent.
+   *
+   * Returns the persona with the highest module confidence score.
+   */
+  recommendPersonaForModule(
+    module: ExpertModule | string,
+  ): { persona: CortexPersona; confidence: number } {
+    const personas = Object.keys(
+      PERSONALITY_CONFIGS,
+    ) as CortexPersona[];
+    let bestPersona: CortexPersona = 'jarvis';
+    let bestConfidence = 0;
+
+    for (const p of personas) {
+      const confidence = this.getModuleConfidence(p, module);
+      if (confidence > bestConfidence) {
+        bestConfidence = confidence;
+        bestPersona = p;
+      }
+    }
+
+    return { persona: bestPersona, confidence: bestConfidence };
   }
 
   // ── Helpers ───────────────────────────────────────────────
