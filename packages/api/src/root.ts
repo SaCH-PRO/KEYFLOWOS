@@ -9,6 +9,7 @@ import { siteRouter } from './routers/site';
 import { adminRouter } from './routers/admin';
 import { diagnosticsRouter } from './routers/diagnostics';
 import { supplierRouter } from './routers/supplier';
+import { keyConnectorRouter } from './routers/key-connector';
 
 export const appRouter = router({
   identity: identityRouter,
@@ -21,6 +22,7 @@ export const appRouter = router({
   admin: adminRouter,
   diagnostics: diagnosticsRouter,
   supplier: supplierRouter,
+  keyConnector: keyConnectorRouter,
 });
 
 export type AppRouter = typeof appRouter;
