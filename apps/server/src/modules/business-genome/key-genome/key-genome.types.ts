@@ -1441,6 +1441,7 @@ export interface GenomeRecommendationRankScoreBreakdown {
   financialViability: number;
   riskPenalty: number;
   effortPenalty: number;
+  outcomeLearning: number;
 }
 
 export interface GenomeRankedRecommendation extends GenomeRecommendationData {

@@ -47,7 +47,7 @@ export default function IntelligencePage() {
 
   useEffect(() => {
     void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [businessId]);
 
   const filteredInsights = useMemo(() => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { Calendar, CheckCircle, Clock, ExternalLink } from "lucide-react";
+import { CheckCircle, Clock, ExternalLink } from "lucide-react";
 import { TemporalFlowEvent, resolveTemporalFlowEvent } from "@/lib/api/temporal-flow";
 import { getStoredBusinessId } from "@/lib/workspace";
 

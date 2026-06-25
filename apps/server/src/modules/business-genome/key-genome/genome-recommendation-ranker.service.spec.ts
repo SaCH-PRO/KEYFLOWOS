@@ -74,10 +74,16 @@ function makeService() {
     computeCrossDomainSnapshot: vi.fn().mockResolvedValue(makeSnapshot()),
   };
 
+  const outcomeLearningService = {
+    getLearnedImpact: vi.fn().mockResolvedValue(0),
+    applyOutcomeToConfidence: vi.fn().mockResolvedValue(undefined),
+  };
+
   const service = new GenomeRecommendationRankerService(
     recommendationService as any,
     crossDomainService as any,
     memoryService as any,
+    outcomeLearningService as any,
   );
 
   return {
@@ -85,6 +91,7 @@ function makeService() {
     recommendationService,
     crossDomainService,
     memoryService,
+    outcomeLearningService,
   };
 }
 

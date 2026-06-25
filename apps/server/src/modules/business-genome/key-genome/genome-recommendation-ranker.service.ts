@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { GenomeCrossDomainService } from './genome-cross-domain.service';
 import { GenomeMemoryService } from './genome-memory.service';
 import { GenomeRecommendationService } from './genome-recommendation.service';
+import { GenomeOutcomeLearningService } from './genome-outcome-learning.service';
 import type {
   GenomeCrossDomainDomainKey,
   GenomeCrossDomainRiskLevel,
@@ -99,8 +100,12 @@ function buildRankReason(
     drivers.push('cross-domain synergy');
   if (breakdown.financialViability >= 0.66)
     drivers.push('solid financial viability');
+  if (breakdown.outcomeLearning >= 0.15)
+    drivers.push('positive outcome history');
 
   const penalties: string[] = [];
+  if (breakdown.outcomeLearning <= -0.15)
+    penalties.push('negative outcome history');
   if (breakdown.riskPenalty >= 0.7) penalties.push('high risk');
   if (breakdown.effortPenalty >= 0.5) penalties.push('high effort');
   if (capacity === 'HARD_CONSTRAINT') penalties.push('capacity hard constraint');
@@ -120,6 +125,7 @@ export class GenomeRecommendationRankerService {
     private readonly recommendations: GenomeRecommendationService,
     private readonly crossDomain: GenomeCrossDomainService,
     private readonly memory: GenomeMemoryService,
+    private readonly outcomeLearning: GenomeOutcomeLearningService,
   ) {}
 
   async rankRecommendations(
@@ -132,7 +138,9 @@ export class GenomeRecommendationRankerService {
       limit: 200,
     });
 
-    let ranked = recs.map((rec) => this.scoreRecommendation(rec, snapshot));
+    let ranked = await Promise.all(
+      recs.map((rec) => this.scoreRecommendation(rec, snapshot)),
+    );
 
     if (options.minConfidence !== undefined) {
       ranked = ranked.filter((r) => r.confidence >= options.minConfidence!);
@@ -212,10 +220,10 @@ export class GenomeRecommendationRankerService {
     );
   }
 
-  private scoreRecommendation(
+  private async scoreRecommendation(
     rec: GenomeRecommendationData,
     snapshot: GenomeCrossDomainSnapshotData | null,
-  ): GenomeRankedRecommendation {
+  ): Promise<GenomeRankedRecommendation> {
     const domainKey = mapDomainToCrossDomainKey(rec.domain);
     const domainScore = domainKey
       ? snapshot?.domainScores.find((d) => d.domain === domainKey) ?? null
@@ -256,13 +264,19 @@ export class GenomeRecommendationRankerService {
     const financial = financialViabilityFromSnapshot(snapshot);
     const financialValue = FINANCIAL_VIABILITY_SCORE[financial];
     const capacity = capacityGatingFromSnapshot(snapshot);
+    const outcomeLearning = await this.outcomeLearning.getLearnedImpact(
+      rec.businessId,
+      rec.domain,
+      rec.title,
+    );
 
     const rawScore =
       (clamp(rec.expectedGainScore) / 100) * 0.3 +
       rec.confidence * 0.2 +
       readinessValue * 0.15 +
       crossDomainSynergy +
-      financialValue * 0.1 -
+      financialValue * 0.1 +
+      outcomeLearning * 0.1 -
       riskPenalty * 0.15 -
       effortPenalty * 0.05;
 
@@ -276,6 +290,7 @@ export class GenomeRecommendationRankerService {
       financialViability: financialValue,
       riskPenalty,
       effortPenalty,
+      outcomeLearning,
     };
 
     return {

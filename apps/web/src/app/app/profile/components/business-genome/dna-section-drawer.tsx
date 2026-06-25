@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Loader2, Save } from "lucide-react";
 import { apiGet } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
@@ -249,7 +249,7 @@ export function DnaSectionDrawer({ section, onClose, onUpdate }: DnaSectionDrawe
     setSaving(false);
 
     if (error) {
-      // eslint-disable-next-line no-alert
+       
       alert(`Failed to save: ${error}`);
       return;
     }

@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../core/prisma/prisma.service';
 import { GenomeCrossDomainService } from './genome-cross-domain.service';
+import { GenomeOutcomeLearningService } from './genome-outcome-learning.service';
 import type {
   CloseGenomeRecommendationObservationInput,
   GenomeRecommendationDecision,
@@ -86,6 +87,7 @@ export class GenomeRecommendationOutcomeService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly crossDomain: GenomeCrossDomainService,
+    private readonly outcomeLearning: GenomeOutcomeLearningService,
   ) {}
 
   async recordOutcome(
@@ -391,6 +393,10 @@ export class GenomeRecommendationOutcomeService {
         impactEvidence: evidence,
       },
     });
+
+    await this.outcomeLearning
+      .applyOutcomeToConfidence(input.businessId, outcome.domain, outcome.actionType, impactScore)
+      .catch(() => null);
 
     return toOutcomeData(updated);
   }

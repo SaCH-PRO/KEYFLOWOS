@@ -2165,6 +2165,7 @@ export interface GenomeRecommendationRankScoreBreakdown {
   financialViability: number;
   riskPenalty: number;
   effortPenalty: number;
+  outcomeLearning: number;
 }
 
 export type GenomeRecommendationFinancialViability = 'POOR' | 'FAIR' | 'GOOD' | 'STRONG';
