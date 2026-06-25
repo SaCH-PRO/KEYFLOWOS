@@ -29,7 +29,12 @@
  *   Added KeyCortexGateway (socket.io namespace /key-cortex) for live
  *   bidirectional streaming: chat, approvals, alerts, insights, health
  *   updates, and proactive suggestions. KeyCortexRealtimeService bridges
- *   domain events → WebSocket pushes via @nestjs/event-emitter.
+ *   domain events -> WebSocket pushes via @nestjs/event-emitter.
+ *
+ * CONSCIOUSNESS LAYER:
+ *   Added 9 cognitive services forming the consciousness architecture:
+ *   Emotion, ReasoningEngine, Reflection, Intuition, Metacognition,
+ *   Creativity, Ethics, TemporalReasoning, and Consciousness orchestration.
  */
 
 import { Module, forwardRef } from '@nestjs/common';
@@ -70,6 +75,17 @@ import { KeyCortexApprovalService } from './key-cortex-approval.service';
 // -- v5 Real-time WebSocket Layer --
 import { KeyCortexGateway } from './key-cortex.gateway';
 import { KeyCortexRealtimeService } from './key-cortex-realtime.service';
+
+// -- Consciousness Layer (9 cognitive services) --
+import { KeyCortexEmotionService } from './key-cortex-emotion.service';
+import { KeyCortexReasoningEngineService } from './key-cortex-reasoning-engine.service';
+import { KeyCortexReflectionService } from './key-cortex-reflection.service';
+import { KeyCortexIntuitionService } from './key-cortex-intuition.service';
+import { KeyCortexMetacognitionService } from './key-cortex-metacognition.service';
+import { KeyCortexCreativityService } from './key-cortex-creativity.service';
+import { KeyCortexEthicsService } from './key-cortex-ethics.service';
+import { KeyCortexTemporalReasoningService } from './key-cortex-temporal-reasoning.service';
+import { KeyCortexConsciousnessService } from './key-cortex-consciousness.service';
 
 // -- Infrastructure --
 import { PrismaModule } from '../../core/prisma/prisma.module';
@@ -213,6 +229,35 @@ import { ProjectsModule } from '../projects/projects.module';
     // Realtime event bridge -- listens to domain events and forwards them
     // to connected browser clients via the gateway above.
     KeyCortexRealtimeService,
+
+    // -- Consciousness Layer (9 cognitive services) --
+    // Emotion service -- affective analysis and emotional state tracking
+    KeyCortexEmotionService,
+
+    // Reasoning engine -- enhanced cognitive processing and inference
+    KeyCortexReasoningEngineService,
+
+    // Reflection service -- self-correction, learning, and insight generation
+    KeyCortexReflectionService,
+
+    // Intuition service -- weak signal detection and pattern recognition
+    KeyCortexIntuitionService,
+
+    // Metacognition service -- self-monitoring and strategy selection
+    KeyCortexMetacognitionService,
+
+    // Creativity service -- novel idea generation and brainstorming
+    KeyCortexCreativityService,
+
+    // Ethics service -- moral framework and value-based decision checking
+    KeyCortexEthicsService,
+
+    // Temporal reasoning service -- time-aware analysis and forecasting
+    KeyCortexTemporalReasoningService,
+
+    // Consciousness orchestrator -- integrates all 9 layers into unified
+    // conscious processing pipeline
+    KeyCortexConsciousnessService,
   ],
 
   exports: [
@@ -265,6 +310,35 @@ import { ProjectsModule } from '../projects/projects.module';
     // Realtime service -- so other modules can emit domain events that
     // get forwarded to WebSocket clients automatically
     KeyCortexRealtimeService,
+
+    // -- Consciousness Layer (9 cognitive services) --
+    // All 9 consciousness services exported for composition by other modules.
+    // Emotion -- emotional analysis available to other modules
+    KeyCortexEmotionService,
+
+    // Reasoning engine -- cognitive processing for other modules
+    KeyCortexReasoningEngineService,
+
+    // Reflection -- self-correction and learning capabilities
+    KeyCortexReflectionService,
+
+    // Intuition -- weak signal detection for other modules
+    KeyCortexIntuitionService,
+
+    // Metacognition -- self-monitoring and strategy selection
+    KeyCortexMetacognitionService,
+
+    // Creativity -- idea generation for other modules
+    KeyCortexCreativityService,
+
+    // Ethics -- moral framework for value-based decisions
+    KeyCortexEthicsService,
+
+    // Temporal reasoning -- time-aware analysis for other modules
+    KeyCortexTemporalReasoningService,
+
+    // Consciousness orchestrator -- unified conscious processing
+    KeyCortexConsciousnessService,
   ],
 })
 export class KeyCortexModule {}
