@@ -2,12 +2,9 @@
  * KEY Universal Connector Service
  * --------------------------------
  * The single integration backbone that routes AI-generated commands to every
- * KeyFlowOS module.  Maintains a hard-coded registry of 19 modules, 145+
- * actions and 85+ queries.  Zero stubs — every action calls a real injected
+ * KeyFlowOS module.  Maintains a hard-coded registry of 18 modules, 140+
+ * actions and 80+ queries.  Zero stubs — every action calls a real injected
  * NestJS service with correctly typed parameters.
- * 
- * v2 — Keystore Integration: Added Keystore module (service marketplace)
- *       as the 19th connected module with 7 actions and 5 queries.
  */
 
 import { Injectable, Logger } from '@nestjs/common';
@@ -34,6 +31,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { ProjectsService } from '../projects/projects.service';
 import { ActivityService } from '../activity/activity.service';
 import { KeystoreService } from '../keystore/keystore.service';
+import { KeyCortexKeystoreAdapterService } from './key-cortex-keystore-adapter.service';
 
 @Injectable()
 export class KeyCortexConnectorService {
@@ -57,4 +55,5 @@ export class KeyCortexConnectorService {
     private readonly projects: ProjectsService,
     private readonly activity: ActivityService,
     private readonly keystore: KeystoreService,
+    private readonly keystoreAdapter: KeyCortexKeystoreAdapterService,
   ) {}
