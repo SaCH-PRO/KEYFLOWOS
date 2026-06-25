@@ -1,0 +1,42 @@
+--- a/packages/db/prisma/schema.prisma
++++ b/packages/db/prisma/schema.prisma
+@@ -2709,10 +2709,13 @@ model IntegrationConnection {
+   id          String    @id @default(cuid())
+   businessId  String    @map("business_id")
+   providerKey String    @map("provider_key")
++  displayName String?   @map("display_name")
+   status      String    @default("CONNECTED") // CONNECTED | NEEDS_ATTENTION | DISCONNECTED | ERROR
+   authDataRef String?   @map("auth_data_ref") // encrypted secret reference
++  authData    Json?     @map("auth_data")
++  healthScore Int       @default(100) @map("health_score")
+   scopes      Json      @default("[]")
+   settings    Json      @default("{}")
+   lastSyncAt  DateTime? @map("last_sync_at")
+--- a/packages/db/prisma/schema.prisma
++++ b/packages/db/prisma/schema.prisma
+@@ -10774,3 +10774,24 @@ model ContactSavedView {
+   @@unique([userId, businessId, name])
+   @@index([businessId, userId])
+   @@map("contact_saved_views")
+ }
++
++// ═══════════════════════════════════════════════════════════════════════════════
++// KEY CONNECTOR — Audit Log for connector operations
++// ═══════════════════════════════════════════════════════════════════════════════
++
++model ConnectorAuditLog {
++  id           String   @id @default(cuid())
++  businessId   String   @map("business_id")
++  userId       String?  @map("user_id")
++  providerKey  String?  @map("provider_key")
++  connectionId String?  @map("connection_id")
++  action       String
++  status       String   // success | error | warning
++  details      String?
++  createdAt    DateTime @default(now()) @map("created_at")
++
++  @@index([businessId])
++  @@index([businessId, createdAt])
++  @@index([connectionId])
++  @@map("connector_audit_logs")
++}
