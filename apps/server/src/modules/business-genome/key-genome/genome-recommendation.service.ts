@@ -270,6 +270,8 @@ export class GenomeRecommendationService {
     businessId: string,
     recommendationId: string,
     decidedBy?: string,
+    linkedActionType?: string,
+    linkedActionId?: string,
   ): Promise<GenomeRecommendationData> {
     await this.getRecommendation(businessId, recommendationId);
 
@@ -288,6 +290,8 @@ export class GenomeRecommendationService {
       businessId,
       decision: 'APPLIED',
       decidedBy,
+      linkedActionType,
+      linkedActionId,
     });
 
     return toDomain(updated);

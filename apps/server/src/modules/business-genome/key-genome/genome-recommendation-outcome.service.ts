@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../core/prisma/prisma.service';
 import type {
   GenomeRecommendationDecision,
+  GenomeRecommendationExecutionStatus,
   GenomeRecommendationOutcomeData,
   GenomeRecommendationOutcomeSummary,
   GenomeOutcomeLearningWindowData,
@@ -276,6 +277,69 @@ export class GenomeRecommendationOutcomeService {
       domain: row.domain,
       windowDays: row.windowDays,
       updatedAt: row.updatedAt.toISOString(),
+    };
+  }
+
+  async getExecutionStatus(
+    businessId: string,
+    recommendationId: string,
+  ): Promise<GenomeRecommendationExecutionStatus | null> {
+    const outcome = await this.prisma.client.genomeRecommendationOutcome.findFirst({
+      where: { businessId, recommendationId },
+      orderBy: { decidedAt: 'desc' },
+    });
+
+    if (!outcome) return null;
+
+    const { linkedActionType, linkedActionId } = outcome;
+    if (!linkedActionType || !linkedActionId) {
+      return {
+        recommendationId,
+        linkedActionType: null,
+        linkedActionId: null,
+        status: outcome.decision,
+        checkedAt: new Date().toISOString(),
+      };
+    }
+
+    let status = 'UNKNOWN';
+    let executedAt: string | null = null;
+    let executedBy: string | null = null;
+    let executionResult: string | null = null;
+    let failureReason: string | null = null;
+
+    if (linkedActionType === 'key_action_proposal') {
+      const proposal = await this.prisma.client.keyActionProposal.findFirst({
+        where: { id: linkedActionId, businessId },
+      });
+      if (proposal) {
+        status = proposal.status;
+        executedAt = proposal.executedAt?.toISOString() ?? null;
+        executedBy = proposal.executedBy ?? null;
+        executionResult = proposal.executionResult ? JSON.stringify(proposal.executionResult) : null;
+        failureReason = proposal.failureReason ?? null;
+      }
+    } else if (linkedActionType === 'genome_experiment') {
+      const experiment = await this.prisma.client.genomeExperiment.findFirst({
+        where: { id: linkedActionId, businessId },
+      });
+      if (experiment) {
+        status = experiment.status;
+        executedAt = experiment.endedAt?.toISOString() ?? null;
+        executionResult = experiment.result ? JSON.stringify(experiment.result) : null;
+      }
+    }
+
+    return {
+      recommendationId,
+      linkedActionType,
+      linkedActionId,
+      status,
+      executedAt,
+      executedBy,
+      executionResult,
+      failureReason,
+      checkedAt: new Date().toISOString(),
     };
   }
 }

@@ -1632,3 +1632,15 @@ export interface SetGenomeOutcomeLearningWindowInput {
   domain: string;
   windowDays: number;
 }
+
+export interface GenomeRecommendationExecutionStatus {
+  recommendationId: string;
+  linkedActionType?: string | null;
+  linkedActionId?: string | null;
+  status: string;
+  executedAt?: string | null;
+  executedBy?: string | null;
+  executionResult?: string | null;
+  failureReason?: string | null;
+  checkedAt: string;
+}

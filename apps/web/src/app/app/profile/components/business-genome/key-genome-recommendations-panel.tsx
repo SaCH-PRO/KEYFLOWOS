@@ -22,10 +22,12 @@ import {
   generateGenomeRecommendations,
   getGenomeExperiments,
   getGenomeRecommendations,
+  getGenomeRecommendationExecutionStatus,
   ignoreGenomeRecommendation,
   startGenomeExperiment,
   completeGenomeExperiment,
   cancelGenomeExperiment,
+  type GenomeRecommendationExecutionStatus,
   type GenomeExperimentData,
   type GenomeRecommendationData,
 } from "@/lib/api/business-genome";
@@ -65,6 +67,7 @@ export function KeyGenomeRecommendationsPanel({
   const [bridgeRecommendation, setBridgeRecommendation] = useState<GenomeRecommendationData | null>(null);
   const [reasoning, setReasoning] = useState<{ recommendationId: string; action: "dismiss" | "ignore" } | null>(null);
   const [reasonText, setReasonText] = useState("");
+  const [executionStatuses, setExecutionStatuses] = useState<Record<string, GenomeRecommendationExecutionStatus>>({});
 
   const businessId = getStoredBusinessId();
 
@@ -80,6 +83,19 @@ export function KeyGenomeRecommendationsPanel({
       setRecommendations(recs.data);
       setExperiments(exps.data ?? []);
       setError(null);
+
+      const actionable = recs.data.filter((r) =>
+        ["ACCEPTED", "APPLIED", "ESCALATED"].includes(r.status),
+      );
+      const statusResults = await Promise.all(
+        actionable.map((r) => getGenomeRecommendationExecutionStatus(businessId, r.id)),
+      );
+      const statusMap: Record<string, GenomeRecommendationExecutionStatus> = {};
+      actionable.forEach((r, idx) => {
+        const s = statusResults[idx].data;
+        if (s) statusMap[r.id] = s;
+      });
+      setExecutionStatuses(statusMap);
     }
     setLoading(false);
   }, [businessId]);
@@ -276,6 +292,13 @@ export function KeyGenomeRecommendationsPanel({
                   {rec.evidenceIds.length > 0 && (
                     <span className="px-2 py-1 rounded-md bg-muted/40 border border-border/50">
                       {rec.evidenceIds.length} evidence item(s)
+                    </span>
+                  )}
+                  {executionStatuses[rec.id] && (
+                    <span className="px-2 py-1 rounded-md bg-[hsl(var(--kf-accent1))]/10 border border-[hsl(var(--kf-accent1))]/20 text-[hsl(var(--kf-accent1))]">
+                      Action: {executionStatuses[rec.id].status.replace(/_/g, " ").toLowerCase()}
+                      {executionStatuses[rec.id].executedAt &&
+                        ` • ${new Date(executionStatuses[rec.id].executedAt!).toLocaleDateString()}`}
                     </span>
                   )}
                 </div>

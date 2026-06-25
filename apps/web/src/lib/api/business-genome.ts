@@ -471,6 +471,18 @@ export interface GenomeRecommendationOutcomeSummary {
   executionRate: number;
 }
 
+export interface GenomeRecommendationExecutionStatus {
+  recommendationId: string;
+  linkedActionType?: string | null;
+  linkedActionId?: string | null;
+  status: string;
+  executedAt?: string | null;
+  executedBy?: string | null;
+  executionResult?: string | null;
+  failureReason?: string | null;
+  checkedAt: string;
+}
+
 export interface GenomeOutcomeLearningWindow {
   id: string;
   businessId: string;
@@ -870,6 +882,15 @@ export async function bridgeRecommendationAction(
     path: `/business-genome/businesses/${businessId}/key-genome/recommendations/${recommendationId}/bridge-action`,
     body: input,
   });
+}
+
+export async function getGenomeRecommendationExecutionStatus(
+  businessId: string,
+  recommendationId: string,
+) {
+  return apiGet<GenomeRecommendationExecutionStatus | null>(
+    `/business-genome/businesses/${businessId}/key-genome/recommendations/${recommendationId}/execution-status`,
+  );
 }
 
 

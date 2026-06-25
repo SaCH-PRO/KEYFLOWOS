@@ -120,6 +120,7 @@ async function makeController() {
         }),
         getLearningWindow: vi.fn().mockResolvedValue({ id: 'win_1', businessId: 'biz_1', domain: 'finance', windowDays: 14, updatedAt: new Date().toISOString() }),
         setLearningWindow: vi.fn().mockResolvedValue({ id: 'win_1', businessId: 'biz_1', domain: 'finance', windowDays: 14, updatedAt: new Date().toISOString() }),
+        getExecutionStatus: vi.fn().mockResolvedValue({ recommendationId: 'rec_1', status: 'PENDING', checkedAt: new Date().toISOString() }),
       }),
       mockProvider(GenomeExperimentService, {
         listExperiments: vi.fn().mockResolvedValue([]),

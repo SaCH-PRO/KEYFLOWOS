@@ -149,7 +149,13 @@ export class GenomeRecommendationActionBridgeService {
       },
     });
 
-    const applied = await this.recommendations.applyRecommendation(businessId, recommendation.id);
+    const applied = await this.recommendations.applyRecommendation(
+      businessId,
+      recommendation.id,
+      undefined,
+      'key_action_proposal',
+      proposal.id,
+    );
 
     return {
       recommendationId: applied.id,
@@ -194,7 +200,13 @@ export class GenomeRecommendationActionBridgeService {
       data: { suggestedExperimentId: experiment.id },
     });
 
-    const applied = await this.recommendations.applyRecommendation(businessId, recommendation.id);
+    const applied = await this.recommendations.applyRecommendation(
+      businessId,
+      recommendation.id,
+      undefined,
+      'genome_experiment',
+      experiment.id,
+    );
 
     return {
       recommendationId: applied.id,

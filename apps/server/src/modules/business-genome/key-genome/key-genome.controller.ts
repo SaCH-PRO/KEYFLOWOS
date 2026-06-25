@@ -44,6 +44,7 @@ import type {
   CreateGenomeGrowthChannelInput,
   GenerateGenomeRecommendationsInput,
   GenomeOutcome,
+  GenomeRecommendationExecutionStatus,
   RecommendationOutcome,
   UpdateGenomeContentStrategyInput,
   UpdateGenomeGrowthChannelInput,
@@ -249,6 +250,14 @@ export class KeyGenomeController {
     @Param('recommendationId') recommendationId: string,
   ) {
     return this.outcomeService.getOutcomeByRecommendation(businessId, recommendationId);
+  }
+
+  @Get('recommendations/:recommendationId/execution-status')
+  async getRecommendationExecutionStatus(
+    @Param('businessId') businessId: string,
+    @Param('recommendationId') recommendationId: string,
+  ): Promise<GenomeRecommendationExecutionStatus | null> {
+    return this.outcomeService.getExecutionStatus(businessId, recommendationId);
   }
 
   @Get('outcomes')
