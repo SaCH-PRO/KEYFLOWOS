@@ -16,6 +16,11 @@
  *   management), External Connectors (third-party integrations), Phone
  *   Agent (voice calls), Document Intelligence (RAG & extraction), and
  *   Self-Evolution (adaptive learning & tuning).
+ *
+ * CONSCIOUSNESS LAYER:
+ *   Added 9 cognitive layer endpoints: emotion, reasoning, reflection,
+ *   intuition, metacognition, creativity, ethics, temporal reasoning,
+ *   and consciousness orchestration.
  */
 
 import {
@@ -66,6 +71,17 @@ import { KeyCortexEvolutionService } from './key-cortex-evolution.service';
 import { KeyCortexPhoneService } from './key-cortex-phone.service';
 import { KeyCortexDocumentService } from './key-cortex-document.service';
 
+// -- Consciousness Layer (9 cognitive services) --
+import { KeyCortexEmotionService } from './key-cortex-emotion.service';
+import { KeyCortexReasoningEngineService } from './key-cortex-reasoning-engine.service';
+import { KeyCortexReflectionService } from './key-cortex-reflection.service';
+import { KeyCortexIntuitionService } from './key-cortex-intuition.service';
+import { KeyCortexMetacognitionService } from './key-cortex-metacognition.service';
+import { KeyCortexCreativityService } from './key-cortex-creativity.service';
+import { KeyCortexEthicsService } from './key-cortex-ethics.service';
+import { KeyCortexTemporalReasoningService } from './key-cortex-temporal-reasoning.service';
+import { KeyCortexConsciousnessService } from './key-cortex-consciousness.service';
+
 import {
   CortexQuery,
   CortexPersona,
@@ -81,6 +97,7 @@ import {
   CortexProfitOpportunity,
   CortexActionResult,
   CortexPersonalityConfig,
+  ConsciousResponse,
 } from './key-cortex.types';
 
 import {
@@ -129,6 +146,19 @@ class ChatQueryDto implements CortexQuery {
     mimeType: string;
     name: string;
   }>;
+}
+
+class ChatDto {
+  text: string;
+  sessionId?: string;
+  businessId: string;
+  userId: string;
+  persona?: CortexPersona;
+  voice?: CortexVoice;
+  provider?: CortexProvider;
+  mood?: string;
+  enableActions?: boolean;
+  enableVoice?: boolean;
 }
 
 class VoiceSpeakDto implements CortexVoiceRequest {
@@ -467,6 +497,17 @@ export class KeyCortexController {
     private readonly evolution: KeyCortexEvolutionService,
     private readonly phone: KeyCortexPhoneService,
     private readonly document: KeyCortexDocumentService,
+
+    // -- Consciousness Layer (9 cognitive services) --
+    private readonly emotion: KeyCortexEmotionService,
+    private readonly reasoningEngine: KeyCortexReasoningEngineService,
+    private readonly reflection: KeyCortexReflectionService,
+    private readonly intuition: KeyCortexIntuitionService,
+    private readonly metacognition: KeyCortexMetacognitionService,
+    private readonly creativity: KeyCortexCreativityService,
+    private readonly ethics: KeyCortexEthicsService,
+    private readonly temporalReasoning: KeyCortexTemporalReasoningService,
+    private readonly consciousness: KeyCortexConsciousnessService,
   ) {}
 
   /* ================================================================== */
@@ -603,6 +644,33 @@ export class KeyCortexController {
     } catch (err) {
       this.logger.error(`Chat error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Cortex reasoning engine unavailable');
+    }
+  }
+
+  /**
+   * POST /api/v1/cortex/chat/conscious
+   * Consciousness-aware chat -- routes through all 9 cognitive layers.
+   */
+  @Post('chat/conscious')
+  @HttpCode(HttpStatus.OK)
+  async consciousChat(@Body() dto: ChatDto): Promise<ConsciousResponse> {
+    if (!dto.text?.trim()) {
+      throw new BadRequestException('Query text is required');
+    }
+    if (!dto.businessId) {
+      throw new BadRequestException('businessId is required');
+    }
+
+    try {
+      const query: CortexQuery = {
+        ...dto,
+        stream: false,
+      };
+      const response = await this.reasoning.processConsciousQuery(query);
+      return response;
+    } catch (err) {
+      this.logger.error(`Conscious chat error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Consciousness layer unavailable');
     }
   }
 
@@ -2869,6 +2937,292 @@ export class KeyCortexController {
     } catch (err) {
       this.logger.error(`Evolution explain error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Unable to explain decision');
+    }
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════ */
+  /*  CONSCIOUSNESS LAYER  (9 Cognitive Services)                       */
+  /* ═══════════════════════════════════════════════════════════════════ */
+
+  /**
+   * POST /api/v1/cortex/consciousness/chat
+   * Consciousness-aware chat processing through all 9 cognitive layers.
+   */
+  @Post('consciousness/chat')
+  @HttpCode(HttpStatus.OK)
+  async consciousChat(@Body() dto: ChatDto): Promise<ConsciousResponse> {
+    if (!dto.text?.trim()) {
+      throw new BadRequestException('Query text is required');
+    }
+    if (!dto.businessId) {
+      throw new BadRequestException('businessId is required');
+    }
+
+    try {
+      const query: CortexQuery = {
+        ...dto,
+        stream: false,
+      };
+      const response = await this.reasoning.processConsciousQuery(query);
+      return response;
+    } catch (err) {
+      this.logger.error(`Consciousness chat error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Consciousness layer unavailable');
+    }
+  }
+
+  /**
+   * GET /api/v1/cortex/consciousness/state
+   * Return KEY's current conscious mind state for a business.
+   */
+  @Get('consciousness/state')
+  @HttpCode(HttpStatus.OK)
+  async getConsciousnessState(
+    @Query('businessId') businessId: string,
+  ): Promise<{
+    mindState: Record<string, unknown>;
+    activeLayers: string[];
+    timestamp: string;
+  }> {
+    if (!businessId) {
+      throw new BadRequestException('businessId query parameter is required');
+    }
+
+    try {
+      const mindState = await this.consciousness.getMindState(businessId);
+      return {
+        mindState,
+        activeLayers: [
+          'emotion',
+          'reasoning',
+          'reflection',
+          'intuition',
+          'metacognition',
+          'creativity',
+          'ethics',
+          'temporal',
+        ],
+        timestamp: new Date().toISOString(),
+      };
+    } catch (err) {
+      this.logger.error(`Consciousness state error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Unable to retrieve consciousness state');
+    }
+  }
+
+  /**
+   * GET /api/v1/cortex/consciousness/emotion
+   * Return the user's emotional profile.
+   */
+  @Get('consciousness/emotion')
+  @HttpCode(HttpStatus.OK)
+  async getEmotionalProfile(
+    @Query('businessId') businessId: string,
+    @Query('userId') userId?: string,
+  ): Promise<{
+    profile: Record<string, unknown>;
+    dominantEmotion: string;
+    emotionalTrend: string;
+  }> {
+    if (!businessId) {
+      throw new BadRequestException('businessId query parameter is required');
+    }
+
+    try {
+      return await this.emotion.getProfile(businessId, userId);
+    } catch (err) {
+      this.logger.error(`Emotional profile error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Unable to retrieve emotional profile');
+    }
+  }
+
+  /**
+   * POST /api/v1/cortex/consciousness/brainstorm
+   * Generate creative ideas using the creativity service.
+   */
+  @Post('consciousness/brainstorm')
+  @HttpCode(HttpStatus.OK)
+  async brainstorm(
+    @Body() dto: { prompt: string; businessId: string; category?: string },
+  ): Promise<{
+    ideas: Array<Record<string, unknown>>;
+    generatedAt: string;
+  }> {
+    if (!dto.businessId) {
+      throw new BadRequestException('businessId is required');
+    }
+    if (!dto.prompt?.trim()) {
+      throw new BadRequestException('prompt is required');
+    }
+
+    try {
+      const ideas = await this.creativity.brainstorm(
+        dto.prompt,
+        dto.businessId,
+        { category: dto.category },
+      );
+      return { ideas, generatedAt: new Date().toISOString() };
+    } catch (err) {
+      this.logger.error(`Brainstorm error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Creativity service unavailable');
+    }
+  }
+
+  /**
+   * GET /api/v1/cortex/consciousness/metacognition
+   * Return KEY's self-model / metacognitive state.
+   */
+  @Get('consciousness/metacognition')
+  @HttpCode(HttpStatus.OK)
+  async getMetacognition(
+    @Query('businessId') businessId: string,
+  ): Promise<{
+    selfModel: Record<string, unknown>;
+    confidence: number;
+    strategies: string[];
+  }> {
+    if (!businessId) {
+      throw new BadRequestException('businessId query parameter is required');
+    }
+
+    try {
+      return await this.metacognition.getSelfModel(businessId);
+    } catch (err) {
+      this.logger.error(`Metacognition error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Unable to retrieve metacognition');
+    }
+  }
+
+  /**
+   * GET /api/v1/cortex/consciousness/ethics
+   * Return KEY's ethical framework and values.
+   */
+  @Get('consciousness/ethics')
+  @HttpCode(HttpStatus.OK)
+  async getEthicsFramework(): Promise<{
+    values: string[];
+    principles: Array<{ name: string; description: string; priority: number }>;
+    framework: string;
+  }> {
+    try {
+      return await this.ethics.getFramework();
+    } catch (err) {
+      this.logger.error(`Ethics framework error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Unable to retrieve ethics framework');
+    }
+  }
+
+  /**
+   * GET /api/v1/cortex/consciousness/temporal
+   * Return temporal analysis for a business.
+   */
+  @Get('consciousness/temporal')
+  @HttpCode(HttpStatus.OK)
+  async getTemporalAnalysis(
+    @Query('businessId') businessId: string,
+    @Query('metric') metric?: string,
+  ): Promise<{
+    analysis: Record<string, unknown>;
+    trends: Array<Record<string, unknown>>;
+    predictions: Array<Record<string, unknown>>;
+  }> {
+    if (!businessId) {
+      throw new BadRequestException('businessId query parameter is required');
+    }
+
+    try {
+      return await this.temporalReasoning.analyze(businessId, metric);
+    } catch (err) {
+      this.logger.error(`Temporal analysis error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Unable to retrieve temporal analysis');
+    }
+  }
+
+  /**
+   * POST /api/v1/cortex/consciousness/reflect
+   * Trigger a reflection session.
+   */
+  @Post('consciousness/reflect')
+  @HttpCode(HttpStatus.OK)
+  async triggerReflection(
+    @Body() dto: { businessId: string; type: string },
+  ): Promise<{
+    reflectionId: string;
+    insights: Array<Record<string, unknown>>;
+    timestamp: string;
+  }> {
+    if (!dto.businessId) {
+      throw new BadRequestException('businessId is required');
+    }
+    if (!dto.type?.trim()) {
+      throw new BadRequestException('type is required');
+    }
+
+    try {
+      const result = await this.reflection.reflect(dto.businessId, dto.type);
+      return {
+        reflectionId: result.id,
+        insights: result.insights,
+        timestamp: new Date().toISOString(),
+      };
+    } catch (err) {
+      this.logger.error(`Reflection error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Reflection service unavailable');
+    }
+  }
+
+  /**
+   * GET /api/v1/cortex/consciousness/intuition
+   * Return weak signal / intuition data.
+   */
+  @Get('consciousness/intuition')
+  @HttpCode(HttpStatus.OK)
+  async getIntuitionSignals(
+    @Query('businessId') businessId: string,
+  ): Promise<{
+    signals: Array<Record<string, unknown>>;
+    confidence: number;
+    generatedAt: string;
+  }> {
+    if (!businessId) {
+      throw new BadRequestException('businessId query parameter is required');
+    }
+
+    try {
+      const signals = await this.intuition.detectWeakSignals(businessId);
+      return {
+        signals,
+        confidence: 0.75,
+        generatedAt: new Date().toISOString(),
+      };
+    } catch (err) {
+      this.logger.error(`Intuition signals error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Unable to retrieve intuition signals');
+    }
+  }
+
+  /**
+   * GET /api/v1/cortex/consciousness/creativity
+   * Return recent creative ideas for a business.
+   */
+  @Get('consciousness/creativity')
+  @HttpCode(HttpStatus.OK)
+  async getCreativeIdeas(
+    @Query('businessId') businessId: string,
+  ): Promise<{
+    ideas: Array<Record<string, unknown>>;
+    generatedAt: string;
+  }> {
+    if (!businessId) {
+      throw new BadRequestException('businessId query parameter is required');
+    }
+
+    try {
+      const ideas = await this.creativity.getRecentIdeas(businessId);
+      return { ideas, generatedAt: new Date().toISOString() };
+    } catch (err) {
+      this.logger.error(`Creative ideas error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Unable to retrieve creative ideas');
     }
   }
 
