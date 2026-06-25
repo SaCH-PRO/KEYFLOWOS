@@ -13,9 +13,11 @@ import {
   Shield,
   X,
   Eye,
+  Filter,
 } from "lucide-react";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
 import { MetricCard } from "@/components/ui/metric-card";
+import { SectionCard } from "@/components/ui/section-card";
 import { EmptyState } from "@/components/ui/empty-state";
 import {
   Evidence,

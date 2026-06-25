@@ -21,6 +21,7 @@ import {
   RefreshCw,
   BarChart3,
   Flag,
+  Receipt,
 } from "lucide-react";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
 import { MetricCard } from "@/components/ui/metric-card";

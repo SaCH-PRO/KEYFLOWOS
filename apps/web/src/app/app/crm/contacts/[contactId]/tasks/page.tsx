@@ -12,7 +12,7 @@ import {
 } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { Button, Card, Input } from "@keyflow/ui";
-import { CheckSquare, Plus, Trash2, Calendar, Flag, Loader2, X, Check } from "lucide-react";
+import { CheckSquare, Plus, Trash2, Calendar, Flag, Loader2, Pencil, X, Check } from "lucide-react";
 import { toast } from "sonner";
 
 interface Task {

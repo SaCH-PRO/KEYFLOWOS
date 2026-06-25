@@ -5,7 +5,10 @@ import { motion } from "framer-motion";
 import {
   Brain,
   TrendingUp,
+  TrendingDown,
   AlertTriangle,
+  Lightbulb,
+  Shield,
   Briefcase,
   Clock,
   Dna,

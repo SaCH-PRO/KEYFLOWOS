@@ -6,6 +6,7 @@ import {
   Users,
   Loader2,
   TrendingUp,
+  TrendingDown,
   AlertTriangle,
   RefreshCw,
   Lightbulb,

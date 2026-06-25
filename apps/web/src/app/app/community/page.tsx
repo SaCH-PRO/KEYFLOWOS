@@ -21,6 +21,8 @@ import {
   Activity,
   BarChart3,
   Link2,
+  TrendingUp,
+  Sparkles,
 } from "lucide-react";
 import { MetricCard } from "@/components/ui/metric-card";
 import {

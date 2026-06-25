@@ -4,6 +4,7 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import { Check, Play, X, Loader2, AlertCircle, ChevronDown, ChevronUp, ShieldAlert, Target } from "lucide-react";
 import Link from "next/link";
+import { SectionCard } from "@/components/ui/section-card";
 import {
   approveKeyActionProposal,
   cancelKeyActionProposal,

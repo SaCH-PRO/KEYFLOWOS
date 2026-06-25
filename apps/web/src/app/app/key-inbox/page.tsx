@@ -12,6 +12,7 @@ import {
   Sparkles,
   ShieldCheck,
   CheckCircle2,
+  XCircle,
   CalendarDays,
   Bot,
   Tag,

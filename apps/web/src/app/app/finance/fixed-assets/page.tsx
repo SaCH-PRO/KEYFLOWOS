@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Package, Plus, Loader2, Trash2, TrendingDown } from "lucide-react";
+import { Package, Plus, Loader2, Trash2, TrendingDown, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { UnifiedPageShell } from "@/components/layout/unified-page-shell";
 import { DataTable } from "@/components/ui/data-table";

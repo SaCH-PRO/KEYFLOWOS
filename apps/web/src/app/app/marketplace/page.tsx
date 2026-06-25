@@ -15,6 +15,8 @@ import {
   Loader2,
   Lightbulb,
   X,
+  BarChart3,
+  Boxes,
 } from "lucide-react";
 import { MetricCard } from "@/components/ui/metric-card";
 import { apiGet, apiPost, apiPatch, apiDelete } from "@/lib/api";

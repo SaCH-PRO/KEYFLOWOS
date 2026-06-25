@@ -9,6 +9,7 @@ import {
   BarChart3,
   Brain,
   Calendar,
+  FileText,
   Inbox,
   Loader2,
   Minus,
