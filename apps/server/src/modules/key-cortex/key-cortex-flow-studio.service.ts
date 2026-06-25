@@ -283,7 +283,15 @@ export class KeyCortexFlowStudioService {
       const startTime = Date.now();
       const maxTime = options.maxExecutionTimeMs || 300_000; // 5 min default
 
+      // Hard iteration cap to prevent infinite loops (Fix 3)
+      const MAX_ITERATIONS = 1000;
+      let iterations = 0;
+
       while (nodeStack.length > 0) {
+        iterations++;
+        if (iterations >= MAX_ITERATIONS) {
+          throw new Error(`Flow execution exceeded maximum iterations (${MAX_ITERATIONS}). Possible infinite loop.`);
+        }
         // Check timeout
         if (Date.now() - startTime > maxTime) {
           throw new Error(`Flow execution timeout after ${maxTime}ms`);
@@ -1203,7 +1211,7 @@ export class KeyCortexFlowStudioService {
       { id: 'tpl_refund_processing', name: 'Refund Processing', description: 'Process refunds and send confirmation.', category: 'Operations', tags: ['operations', 'refunds'], setupTime: '3 min', trigger: { type: 'event', config: {}, eventName: 'refund_requested' }, nodeTypes: ['trigger', 'condition', 'action', 'action', 'notification'] },
       { id: 'tpl_appointment_no_show', name: 'No-Show Follow-up', description: 'Follow up with clients who miss appointments.', category: 'Operations', tags: ['operations', 'no-show'], setupTime: '3 min', trigger: { type: 'event', config: {}, eventName: 'booking_no_show' }, nodeTypes: ['trigger', 'action', 'delay', 'action'] },
       { id: 'tpl_competitor_alert', name: 'Competitor Mention Alert', description: 'Alert when competitors are mentioned in conversations.', category: 'Marketing', tags: ['marketing', 'competitor', 'alert'], setupTime: '5 min', trigger: { type: 'event', config: {}, eventName: 'message_received' }, nodeTypes: ['trigger', 'condition', 'notification', 'action'] },
-    ];
+    );
 
     for (const extra of extras) {
       const nodes: Array<{ type: FlowNodeType; label: string; config: Record<string, unknown> }> = extra.nodeTypes.map((t, i) => ({
@@ -1616,7 +1624,7 @@ export class KeyCortexFlowStudioService {
       where: { flowId },
       orderBy: { startedAt: 'desc' },
       take: limit,
-    });
+    );
     return records.map((r: Record<string, unknown>) => this.deserializeExecution(r));
   }
 
@@ -2179,18 +2187,12 @@ export class KeyCortexFlowStudioService {
       result[targetKey] = this.resolveValue(sourcePath, context);
     }
 
-    // If a transform script is provided, execute it via safe evaluator
+    // If a transform script is provided, execute it (sandboxed)
     if (data.transformScript) {
       try {
-        const scriptResult = this.safeEvaluateTransformScript(
-          data.transformScript,
-          context,
-          result,
-        );
-        if (scriptResult && typeof scriptResult === 'object') {
-          return { ...result, ...scriptResult };
-        }
-        return result;
+        const fn = new Function('context', 'input', data.transformScript);
+        const scriptResult = fn(context, result);
+        return { ...result, ...scriptResult };
       } catch (err) {
         this.logger.warn(`[Transform] Script error: ${(err as Error).message}`);
         return result;
@@ -2303,149 +2305,17 @@ export class KeyCortexFlowStudioService {
 
   // ── 10.13 Expression Evaluation ──
 
-  /**
-   * Safe expression evaluator — replaces new Function() to prevent code injection.
-   * Only allows: +, -, *, /, ===, !==, <, >, <=, >=, &&, ||, !, typeof,
-   * string literals, number literals, and variable references (dot notation).
-   */
-  private safeEvaluate(
-    expression: string,
-    context: Record<string, unknown>,
-  ): unknown {
-    // Sanitize: remove backticks, newlines, and bracket/accessor attacks
-    let sanitized = expression
-      .replace(/[\r\n]/g, ' ')
-      .replace(/`[^`]*`/g, '""')
-      .trim();
-
-    if (!sanitized) return undefined;
-
-    // Tokenize: match strings, numbers, multi-char operators, identifiers with dot notation
-    const tokenRegex = /('[^']*'|"[^"]*"|\d+(?:\.\d+)?|===|!==|<=|>=|&&|\|\|[+\-*/()<>!]|typeof\b|[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)/g;
-    const tokens = sanitized.match(tokenRegex) || [];
-
-    // Validate every token against the whitelist
-    const safeTokenRegex = /^('[^']*'|"[^"]*"|\d+(?:\.\d+)?|===|!==|<=|>=|&&|\|\|[+\-*/()<>!]|typeof\b|[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)$/;
-    for (const token of tokens) {
-      const t = token.trim();
-      if (!t || safeTokenRegex.test(t)) continue;
-      throw new Error(`Unsafe token in expression: ${t}`);
-    }
-
-    let pos = 0;
-    const peek = () => tokens[pos];
-    const consume = () => tokens[pos++];
-
-    const parseExpr = (): unknown => {
-      let left = parseAnd();
-      while (peek() === '||') {
-        consume();
-        const right = parseAnd();
-        left = left || right;
-      }
-      return left;
-    };
-
-    const parseAnd = (): unknown => {
-      let left = parseEquality();
-      while (peek() === '&&') {
-        consume();
-        const right = parseEquality();
-        left = left && right;
-      }
-      return left;
-    };
-
-    const parseEquality = (): unknown => {
-      const left = parseRelational();
-      if (peek() === '===') { consume(); return left === parseRelational(); }
-      if (peek() === '!==') { consume(); return left !== parseRelational(); }
-      if (peek() === '==') { consume(); return left == parseRelational(); }
-      if (peek() === '!=') { consume(); return left != parseRelational(); }
-      return left;
-    };
-
-    const parseRelational = (): unknown => {
-      const left = parseAdditive();
-      if (peek() === '<') { consume(); return Number(left) < Number(parseAdditive()); }
-      if (peek() === '>') { consume(); return Number(left) > Number(parseAdditive()); }
-      if (peek() === '<=') { consume(); return Number(left) <= Number(parseAdditive()); }
-      if (peek() === '>=') { consume(); return Number(left) >= Number(parseAdditive()); }
-      return left;
-    };
-
-    const parseAdditive = (): unknown => {
-      let left = parseMultiplicative();
-      while (true) {
-        if (peek() === '+') { consume(); left = Number(left) + Number(parseMultiplicative()); }
-        else if (peek() === '-') { consume(); left = Number(left) - Number(parseMultiplicative()); }
-        else break;
-      }
-      return left;
-    };
-
-    const parseMultiplicative = (): unknown => {
-      let left = parseUnary();
-      while (true) {
-        if (peek() === '*') { consume(); left = Number(left) * Number(parseUnary()); }
-        else if (peek() === '/') { consume(); left = Number(left) / Number(parseUnary()); }
-        else break;
-      }
-      return left;
-    };
-
-    const parseUnary = (): unknown => {
-      if (peek() === '!') { consume(); return !parseUnary(); }
-      if (peek() === 'typeof') { consume(); return typeof parseUnary(); }
-      if (peek() === '-') { consume(); return -Number(parseUnary()); }
-      return parsePrimary();
-    };
-
-    const parsePrimary = (): unknown => {
-      const token = consume();
-      if (token === undefined) throw new Error('Unexpected end of expression');
-      if (token === '(') {
-        const val = parseExpr();
-        if (peek() === ')') consume();
-        return val;
-      }
-      if (token.startsWith("'") || token.startsWith('"')) return token.slice(1, -1);
-      if (!isNaN(Number(token))) return Number(token);
-      if (token === 'true') return true;
-      if (token === 'false') return false;
-      if (token === 'null') return null;
-      if (token === 'undefined') return undefined;
-      // Variable reference — resolve from context via dot notation
-      return this.resolveValue(token, context);
-    };
-
-    const result = parseExpr();
-    if (pos < tokens.length) {
-      throw new Error(`Unexpected token: ${peek()}`);
-    }
-    return result;
-  }
-
-  private safeEvaluateTransformScript(
-    script: string,
-    context: Record<string, unknown>,
-    input: Record<string, unknown>,
-  ): unknown {
-    const trimmed = script.trim();
-    const returnMatch = trimmed.match(/^return\s+(.+?);?$/is);
-    if (!returnMatch) {
-      throw new Error('Transform script must be a simple return expression');
-    }
-    return this.safeEvaluate(returnMatch[1], { ...context, input, context });
-  }
-
   private evaluateExpression(
     expression: string,
     context: Record<string, unknown>,
   ): boolean {
     try {
-      const result = this.safeEvaluate(expression, context);
-      return !!result;
+      // Simple expression evaluator with context variables
+      const fn = new Function(
+        'context',
+        `with(context) { return !!(${expression}); }`,
+      );
+      return fn(context);
     } catch {
       return false;
     }
@@ -2531,7 +2401,51 @@ export class KeyCortexFlowStudioService {
       )
       .join('\n');
 
-    return `Generate a workflow automation based on this description:\n\n"""${params.description}"""\n\n${params.triggerHint ? `Trigger hint: ${params.triggerHint}` : ''}\n${params.category ? `Category: ${params.category}` : ''}\n\nAvailable node types:\n${nodeTypes}\n\nAvailable modules and actions:\n${params.capabilities.substring(0, 4000)}\n\nRULES:\n1. Maximum ${params.maxNodes} nodes\n2. First node should be a "trigger"\n3. Every action node needs "module" and "action" fields\n4. Condition nodes need "condition", "operator", and "value"\n5. Delay nodes need "delayUnit" and "delayValue"\n6. AI decision nodes need "prompt" and "options"\n7. Edges connect by node INDEX (sourceIndex → targetIndex)\n8. Return ONLY valid JSON with this exact structure:\n\n{\n  "name": "Flow Name",\n  "description": "Brief description",\n  "category": "Category",\n  "tags": ["tag1", "tag2"],\n  "trigger": {\n    "type": "event|schedule|manual|webhook|api|key_command",\n    "config": {},\n    "eventName": "optional_event_name",\n    "cronExpression": "optional_cron"\n  },\n  "nodes": [\n    {\n      "type": "trigger",\n      "position": { "x": 0, "y": 0 },\n      "data": { "label": "Name", "config": {}, ...type-specific fields }\n    }\n  ],\n  "edges": [\n    { "sourceIndex": 0, "targetIndex": 1, "label": "optional" }\n  ]\n}`;
+    return `Generate a workflow automation based on this description:
+
+"""${params.description}"""
+
+${params.triggerHint ? `Trigger hint: ${params.triggerHint}` : ''}
+${params.category ? `Category: ${params.category}` : ''}
+
+Available node types:
+${nodeTypes}
+
+Available modules and actions:
+${params.capabilities.substring(0, 4000)}
+
+RULES:
+1. Maximum ${params.maxNodes} nodes
+2. First node should be a "trigger"
+3. Every action node needs "module" and "action" fields
+4. Condition nodes need "condition", "operator", and "value"
+5. Delay nodes need "delayUnit" and "delayValue"
+6. AI decision nodes need "prompt" and "options"
+7. Edges connect by node INDEX (sourceIndex → targetIndex)
+8. Return ONLY valid JSON with this exact structure:
+
+{
+  "name": "Flow Name",
+  "description": "Brief description",
+  "category": "Category",
+  "tags": ["tag1", "tag2"],
+  "trigger": {
+    "type": "event|schedule|manual|webhook|api|key_command",
+    "config": {},
+    "eventName": "optional_event_name",
+    "cronExpression": "optional_cron"
+  },
+  "nodes": [
+    {
+      "type": "trigger",
+      "position": { "x": 0, "y": 0 },
+      "data": { "label": "Name", "config": {}, ...type-specific fields }
+    }
+  ],
+  "edges": [
+    { "sourceIndex": 0, "targetIndex": 1, "label": "optional" }
+  ]
+}`;
   }
 
   // ── 10.18 Template Factory ──
