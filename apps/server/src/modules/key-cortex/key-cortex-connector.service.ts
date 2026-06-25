@@ -1122,7 +1122,109 @@ const MODULE_CAPABILITIES: Record<ModuleName, Omit<ModuleCapability, 'module'>> 
       },
     ],
   },
-};
+  keystore: {
+    description:
+      'Keystore — Service marketplace for human-powered deliverables. Users request services (content, design, development, marketing, consulting), KeyFlowOS company fulfills them.',
+    actions: [
+      {
+        name: 'create_service_order',
+        description: 'Request a service from the KeyFlowOS marketplace.',
+        parameters: [
+          { name: 'listingId', type: 'string', required: true, description: 'UUID of the service listing' },
+          { name: 'pricingTier', type: 'string', required: true, description: 'Selected pricing tier name' },
+          { name: 'briefAnswers', type: 'array', required: false, description: 'Answers to service brief questions' },
+          { name: 'selectedAddons', type: 'array', required: false, description: 'Selected addon services' },
+          { name: 'notes', type: 'string', required: false, description: 'Additional notes' },
+          { name: 'contactId', type: 'string', required: false, description: 'Associated contact UUID' },
+        ],
+        examples: ['Order a blog post from the content creation service', 'Request logo design from the marketplace'],
+      },
+      {
+        name: 'cancel_service_order',
+        description: 'Cancel a pending service order.',
+        parameters: [
+          { name: 'orderId', type: 'string', required: true, description: 'UUID of the order' },
+          { name: 'reason', type: 'string', required: false, description: 'Cancellation reason' },
+        ],
+        examples: ['Cancel my blog post order', 'Withdraw the design request'],
+      },
+      {
+        name: 'accept_service_quote',
+        description: 'Accept a quoted price for a service order.',
+        parameters: [
+          { name: 'orderId', type: 'string', required: true, description: 'UUID of the order' },
+          { name: 'notes', type: 'string', required: false, description: 'Optional notes' },
+        ],
+        examples: ['Accept the quote for my website project', 'Approve the content creation price'],
+      },
+      {
+        name: 'rate_service_order',
+        description: 'Rate a completed service delivery.',
+        parameters: [
+          { name: 'orderId', type: 'string', required: true, description: 'UUID of the order' },
+          { name: 'rating', type: 'number', required: true, description: 'Rating 1-5' },
+          { name: 'review', type: 'string', required: false, description: 'Written review' },
+        ],
+        examples: ['Rate my blog post delivery 5 stars', 'Leave a review for the logo design'],
+      },
+      {
+        name: 'send_order_message',
+        description: 'Send a message on a service order thread.',
+        parameters: [
+          { name: 'orderId', type: 'string', required: true, description: 'UUID of the order' },
+          { name: 'message', type: 'string', required: true, description: 'Message text' },
+          { name: 'attachments', type: 'array', required: false, description: 'File attachments' },
+        ],
+        examples: ['Send a message on order abc123', 'Ask about the delivery timeline'],
+      },
+      {
+        name: 'list_service_listings',
+        description: 'Browse available service listings.',
+        parameters: [
+          { name: 'categoryId', type: 'string', required: false, description: 'Filter by category' },
+        ],
+        examples: ['What services are available?', 'Show me content creation services'],
+      },
+      {
+        name: 'get_service_categories',
+        description: 'List all service categories.',
+        parameters: [],
+        examples: ['What service categories do you have?', 'Show marketplace categories'],
+      },
+    ],
+    queries: [
+      {
+        name: 'get_user_orders',
+        description: 'List service orders for the current user.',
+        parameters: [],
+      },
+      {
+        name: 'get_order_details',
+        description: 'Get detailed information about a service order.',
+        parameters: [
+          { name: 'orderId', type: 'string', required: true, description: 'UUID of the order' },
+        ],
+      },
+      {
+        name: 'get_order_stats',
+        description: 'Get marketplace statistics.',
+        parameters: [],
+      },
+      {
+        name: 'get_service_categories',
+        description: 'List all active service categories.',
+        parameters: [],
+      },
+      {
+        name: 'list_service_listings',
+        description: 'Browse available service listings.',
+        parameters: [
+          { name: 'categoryId', type: 'string', required: false, description: 'Filter by category' },
+        ],
+      },
+    ],
+  },
+}; // END MODULE_CAPABILITIES
 
 // ─── Capability compilation helper ────────────────────────────────────────────
 
