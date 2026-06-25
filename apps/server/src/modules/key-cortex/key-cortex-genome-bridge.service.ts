@@ -14,7 +14,7 @@
  *   shouldActProactively, enrichContextWithGenome, reportActionOutcome
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { BusinessGenomeService } from '../business-genome/business-genome.service';
 import { GenomeEvolutionService } from '../business-genome/genome-evolution/genome-evolution.service';
@@ -240,16 +240,16 @@ export class KeyCortexGenomeBridgeService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly genome: BusinessGenomeService,
-    private readonly evolution: GenomeEvolutionService,
-    private readonly opportunityDetector: GenomeOpportunityDetectorService,
-    private readonly recommendation: GenomeRecommendationService,
-    private readonly ranker: GenomeRecommendationRankerService,
-    private readonly outcomeLearning: OutcomeLearningService,
-    private readonly autonomyGate: GenomeAutonomyGateService,
-    private readonly signal: GenomeSignalService,
-    private readonly scoring: GenomeScoringService,
-    private readonly crossDomain: GenomeCrossDomainService,
+    @Optional() @Inject(BusinessGenomeService) private readonly genome?: BusinessGenomeService,
+    @Optional() @Inject(GenomeEvolutionService) private readonly evolution?: GenomeEvolutionService,
+    @Optional() @Inject(GenomeOpportunityDetectorService) private readonly opportunityDetector?: GenomeOpportunityDetectorService,
+    @Optional() @Inject(GenomeRecommendationService) private readonly recommendation?: GenomeRecommendationService,
+    @Optional() @Inject(GenomeRecommendationRankerService) private readonly ranker?: GenomeRecommendationRankerService,
+    @Optional() @Inject(OutcomeLearningService) private readonly outcomeLearning?: OutcomeLearningService,
+    @Optional() @Inject(GenomeAutonomyGateService) private readonly autonomyGate?: GenomeAutonomyGateService,
+    @Optional() @Inject(GenomeSignalService) private readonly signal?: GenomeSignalService,
+    @Optional() @Inject(GenomeScoringService) private readonly scoring?: GenomeScoringService,
+    @Optional() @Inject(GenomeCrossDomainService) private readonly crossDomain?: GenomeCrossDomainService,
     private readonly blueprint: BlueprintService,
     private readonly temporal: TemporalFlowService,
     private readonly eventService: KeyCortexEventService,
@@ -262,6 +262,11 @@ export class KeyCortexGenomeBridgeService {
 
   async getGenomeIntelligence(businessId: string): Promise<GenomeIntelligence> {
     this.logger.debug(`[getGenomeIntelligence] businessId=${businessId}`);
+
+    if (!this.recommendation) throw new Error('Genome recommendation service not available');
+    if (!this.signal) throw new Error('Genome signal service not available');
+    if (!this.crossDomain) throw new Error('Genome cross-domain service not available');
+    if (!this.opportunityDetector) throw new Error('Genome opportunity detector service not available');
 
     const [
       dnaScores,
@@ -321,6 +326,9 @@ export class KeyCortexGenomeBridgeService {
     context?: string,
   ): Promise<RankedRecommendation[]> {
     this.logger.debug(`[getRankedRecommendations] businessId=${businessId} context=${context ?? 'none'}`);
+
+    if (!this.recommendation) throw new Error('Genome recommendation service not available');
+    if (!this.ranker) throw new Error('Genome recommendation ranker service not available');
 
     // Generate fresh recommendations, then rank them
     await this.recommendation.generateRecommendations({
@@ -386,6 +394,8 @@ export class KeyCortexGenomeBridgeService {
   ): Promise<AutonomyCheck> {
     this.logger.debug(`[checkAutonomy] businessId=${businessId} action=${action}`);
 
+    if (!this.autonomyGate) throw new Error('Genome autonomy gate service not available');
+
     const gateResult: GenomeAutonomyGateResult = await this.autonomyGate.checkGate({
       businessId,
       actionType: action,
@@ -445,6 +455,8 @@ export class KeyCortexGenomeBridgeService {
   ): Promise<GenomeEvolutionProposalData[]> {
     this.logger.debug(`[triggerEvolution] businessId=${businessId} section=${evidence.section}`);
 
+    if (!this.evolution) throw new Error('Genome evolution service not available');
+
     let proposals: GenomeEvolutionProposalData[] = [];
 
     if (evidence.autoDetect) {
@@ -481,6 +493,8 @@ export class KeyCortexGenomeBridgeService {
 
   async detectOpportunities(businessId: string): Promise<Opportunity[]> {
     this.logger.debug(`[detectOpportunities] businessId=${businessId}`);
+
+    if (!this.opportunityDetector) throw new Error('Genome opportunity detector service not available');
 
     // Get DNA context for enrichment
     const [detectionResult, dnaScores] = await Promise.allSettled([
@@ -534,6 +548,9 @@ export class KeyCortexGenomeBridgeService {
   ): Promise<void> {
     this.logger.debug(`[recordOutcome] businessId=${businessId} recommendationId=${recommendationId}`);
 
+    if (!this.recommendation) throw new Error('Genome recommendation service not available');
+    if (!this.outcomeLearning) throw new Error('Genome outcome learning service not available');
+
     const recommendation = await this.recommendation.getRecommendation(businessId, recommendationId).catch(() => null);
 
     const recOutcome: RecommendationOutcome = {
@@ -579,6 +596,8 @@ export class KeyCortexGenomeBridgeService {
   ): Promise<GenomeSignal> {
     this.logger.debug(`[createGenomeSignal] businessId=${businessId} type=${signal.signalType}`);
 
+    if (!this.signal) throw new Error('Genome signal service not available');
+
     const input: CreateGenomeSignalInput = {
       businessId,
       sourceModule: 'key_autonomy',
@@ -622,6 +641,8 @@ export class KeyCortexGenomeBridgeService {
 
   async getDnaScores(businessId: string): Promise<DnaScores> {
     this.logger.debug(`[getDnaScores] businessId=${businessId}`);
+
+    if (!this.scoring) throw new Error('Genome scoring service not available');
 
     const [integrity, facts] = await Promise.allSettled([
       this.blueprint.calculateGenomeIntegrity(businessId),
@@ -709,6 +730,9 @@ export class KeyCortexGenomeBridgeService {
   async getCrossDomainInsights(businessId: string): Promise<CrossDomainInsight[]> {
     this.logger.debug(`[getCrossDomainInsights] businessId=${businessId}`);
 
+    if (!this.crossDomain) throw new Error('Genome cross-domain service not available');
+    if (!this.outcomeLearning) throw new Error('Genome outcome learning service not available');
+
     const [snapshot, learningSummary] = await Promise.allSettled([
       this.crossDomain.computeCrossDomainSnapshot(businessId),
       this.outcomeLearning.computeLearningSummary(businessId),
@@ -771,6 +795,9 @@ export class KeyCortexGenomeBridgeService {
     businessId: string,
   ): Promise<{ shouldAct: boolean; actions: ProposedAction[]; reason: string }> {
     this.logger.debug(`[shouldActProactively] businessId=${businessId}`);
+
+    if (!this.signal) throw new Error('Genome signal service not available');
+    if (!this.autonomyGate) throw new Error('Genome autonomy gate service not available');
 
     // Gather all intelligence in parallel
     const [dnaScores, signals, autonomy, opportunities] = await Promise.allSettled([
@@ -918,6 +945,10 @@ export class KeyCortexGenomeBridgeService {
   ): Promise<EnrichedContext> {
     this.logger.debug(`[enrichContextWithGenome] businessId=${businessId}`);
 
+    if (!this.recommendation) throw new Error('Genome recommendation service not available');
+    if (!this.signal) throw new Error('Genome signal service not available');
+    if (!this.autonomyGate) throw new Error('Genome autonomy gate service not available');
+
     const [dnaScores, recommendations, signals, autonomy] = await Promise.allSettled([
       this.blueprint.calculateGenomeIntegrity(businessId),
       this.recommendation.listRecommendations(businessId, { status: 'ACTIVE', limit: 5 }),
@@ -975,6 +1006,9 @@ export class KeyCortexGenomeBridgeService {
     details?: Record<string, unknown>,
   ): Promise<void> {
     this.logger.debug(`[reportActionOutcome] businessId=${businessId} action=${action} result=${result}`);
+
+    if (!this.outcomeLearning) throw new Error('Genome outcome learning service not available');
+    if (!this.signal) throw new Error('Genome signal service not available');
 
     // Update outcome learning
     await this.outcomeLearning.recordActionOutcome(

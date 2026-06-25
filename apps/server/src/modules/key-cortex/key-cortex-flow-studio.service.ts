@@ -122,7 +122,7 @@ export class KeyCortexFlowStudioService {
 
     const rawContent =
       typeof aiResponse.content === 'string'
-        ? aiContent
+        ? aiResponse.content
         : aiResponse.content?.[0]?.text || '{}';
 
     // ── 1.3 Parse AI response ──
@@ -283,7 +283,15 @@ export class KeyCortexFlowStudioService {
       const startTime = Date.now();
       const maxTime = options.maxExecutionTimeMs || 300_000; // 5 min default
 
+      // Hard iteration cap to prevent infinite loops (Fix 3)
+      const MAX_ITERATIONS = 1000;
+      let iterations = 0;
+
       while (nodeStack.length > 0) {
+        iterations++;
+        if (iterations >= MAX_ITERATIONS) {
+          throw new Error(`Flow execution exceeded maximum iterations (${MAX_ITERATIONS}). Possible infinite loop.`);
+        }
         // Check timeout
         if (Date.now() - startTime > maxTime) {
           throw new Error(`Flow execution timeout after ${maxTime}ms`);
@@ -1203,7 +1211,7 @@ export class KeyCortexFlowStudioService {
       { id: 'tpl_refund_processing', name: 'Refund Processing', description: 'Process refunds and send confirmation.', category: 'Operations', tags: ['operations', 'refunds'], setupTime: '3 min', trigger: { type: 'event', config: {}, eventName: 'refund_requested' }, nodeTypes: ['trigger', 'condition', 'action', 'action', 'notification'] },
       { id: 'tpl_appointment_no_show', name: 'No-Show Follow-up', description: 'Follow up with clients who miss appointments.', category: 'Operations', tags: ['operations', 'no-show'], setupTime: '3 min', trigger: { type: 'event', config: {}, eventName: 'booking_no_show' }, nodeTypes: ['trigger', 'action', 'delay', 'action'] },
       { id: 'tpl_competitor_alert', name: 'Competitor Mention Alert', description: 'Alert when competitors are mentioned in conversations.', category: 'Marketing', tags: ['marketing', 'competitor', 'alert'], setupTime: '5 min', trigger: { type: 'event', config: {}, eventName: 'message_received' }, nodeTypes: ['trigger', 'condition', 'notification', 'action'] },
-    ];
+    );
 
     for (const extra of extras) {
       const nodes: Array<{ type: FlowNodeType; label: string; config: Record<string, unknown> }> = extra.nodeTypes.map((t, i) => ({
@@ -1616,7 +1624,7 @@ export class KeyCortexFlowStudioService {
       where: { flowId },
       orderBy: { startedAt: 'desc' },
       take: limit,
-    });
+    );
     return records.map((r: Record<string, unknown>) => this.deserializeExecution(r));
   }
 

@@ -72,17 +72,15 @@ import { AiModule } from '../ai/ai.module';
 import { CrmModule } from '../crm/crm.module';
 import { CommerceModule } from '../commerce/commerce.module';
 import { BookingsModule } from '../bookings/bookings.module';
-import { ContentModule } from '../content/content.module';
 import { CommunicationsModule } from '../communications/communications.module';
 import { FlowModule } from '../flow/flow.module';
 import { AutopilotModule } from '../autopilot/autopilot.module';
 import { TemporalFlowModule } from '../temporal-flow/temporal-flow.module';
 import { KeyInboxModule } from '../key-inbox/key-inbox.module';
-import { BusinessGenomeModule } from '../genome/genome.module';
+import { BusinessGenomeModule } from '../business-genome/business-genome.module';
 import { BlueprintModule } from '../blueprint/blueprint.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { ProjectsModule } from '../projects/projects.module';
-import { ActivityModule } from '../activity/activity.module';
 
 @Module({
   imports: [
@@ -110,7 +108,6 @@ import { ActivityModule } from '../activity/activity.module';
     forwardRef(() => CrmModule),
     forwardRef(() => CommerceModule),
     forwardRef(() => BookingsModule),
-    forwardRef(() => ContentModule),
     forwardRef(() => CommunicationsModule),
     forwardRef(() => FlowModule),
     forwardRef(() => AutopilotModule),
@@ -119,7 +116,6 @@ import { ActivityModule } from '../activity/activity.module';
     forwardRef(() => BusinessGenomeModule),
     forwardRef(() => NotificationsModule),
     forwardRef(() => ProjectsModule),
-    forwardRef(() => ActivityModule),
   ],
 
   controllers: [

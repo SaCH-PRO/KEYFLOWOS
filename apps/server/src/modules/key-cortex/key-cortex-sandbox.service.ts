@@ -335,19 +335,7 @@ export class KeyCortexSandboxService {
         name: 'Revenue by Customer This Month',
         description: 'Query total revenue grouped by customer for the current month.',
         language: 'sql',
-        code: `SELECT
-  c.id AS customer_id,
-  c.name AS customer_name,
-  COALESCE(SUM(i.total_amount), 0) AS total_revenue,
-  COUNT(i.id) AS invoice_count
-FROM customers c
-LEFT JOIN invoices i ON i.customer_id = c.id
-  AND i.created_at >= DATE_TRUNC('month', CURRENT_DATE)
-  AND i.created_at < DATE_TRUNC('month', CURRENT_DATE + INTERVAL '1 month')
-WHERE c.business_id = '{{businessId}}'
-GROUP BY c.id, c.name
-ORDER BY total_revenue DESC
-LIMIT 100;`,
+        code: `SELECT\n  c.id AS customer_id,\n  c.name AS customer_name,\n  COALESCE(SUM(i.total_amount), 0) AS total_revenue,\n  COUNT(i.id) AS invoice_count\nFROM customers c\nLEFT JOIN invoices i ON i.customer_id = c.id\n  AND i.created_at >= DATE_TRUNC('month', CURRENT_DATE)\n  AND i.created_at < DATE_TRUNC('month', CURRENT_DATE + INTERVAL '1 month')\nWHERE c.business_id = '{{businessId}}'\nGROUP BY c.id, c.name\nORDER BY total_revenue DESC\nLIMIT 100;`,
         parameters: [
           { name: 'businessId', type: 'string', description: 'Business UUID for row-level filtering', required: true },
         ],
@@ -359,18 +347,7 @@ LIMIT 100;`,
         name: 'Find Duplicate Contacts',
         description: 'Identify potential duplicate contacts by email or phone.',
         language: 'sql',
-        code: `SELECT
-  email,
-  phone,
-  COUNT(*) AS duplicate_count,
-  STRING_AGG(name, ', ') AS names
-FROM contacts
-WHERE business_id = '{{businessId}}'
-  AND (email IS NOT NULL OR phone IS NOT NULL)
-GROUP BY email, phone
-HAVING COUNT(*) > 1
-ORDER BY duplicate_count DESC
-LIMIT 100;`,
+        code: `SELECT\n  email,\n  phone,\n  COUNT(*) AS duplicate_count,\n  STRING_AGG(name, ', ') AS names\nFROM contacts\nWHERE business_id = '{{businessId}}'\n  AND (email IS NOT NULL OR phone IS NOT NULL)\nGROUP BY email, phone\nHAVING COUNT(*) > 1\nORDER BY duplicate_count DESC\nLIMIT 100;`,
         parameters: [
           { name: 'businessId', type: 'string', description: 'Business UUID for row-level filtering', required: true },
         ],
@@ -382,19 +359,7 @@ LIMIT 100;`,
         name: 'Calculate Customer Lifetime Value',
         description: 'Calculate lifetime revenue and average order value per customer.',
         language: 'sql',
-        code: `SELECT
-  c.id AS customer_id,
-  c.name AS customer_name,
-  COALESCE(SUM(o.total_amount), 0) AS lifetime_value,
-  COUNT(o.id) AS total_orders,
-  ROUND(COALESCE(AVG(o.total_amount), 0), 2) AS avg_order_value,
-  MAX(o.created_at) AS last_order_date
-FROM customers c
-LEFT JOIN orders o ON o.customer_id = c.id
-WHERE c.business_id = '{{businessId}}'
-GROUP BY c.id, c.name
-ORDER BY lifetime_value DESC
-LIMIT 100;`,
+        code: `SELECT\n  c.id AS customer_id,\n  c.name AS customer_name,\n  COALESCE(SUM(o.total_amount), 0) AS lifetime_value,\n  COUNT(o.id) AS total_orders,\n  ROUND(COALESCE(AVG(o.total_amount), 0), 2) AS avg_order_value,\n  MAX(o.created_at) AS last_order_date\nFROM customers c\nLEFT JOIN orders o ON o.customer_id = c.id\nWHERE c.business_id = '{{businessId}}'\nGROUP BY c.id, c.name\nORDER BY lifetime_value DESC\nLIMIT 100;`,
         parameters: [
           { name: 'businessId', type: 'string', description: 'Business UUID for row-level filtering', required: true },
         ],
@@ -406,28 +371,7 @@ LIMIT 100;`,
         name: 'Send Bulk Personalized Emails',
         description: 'Generate personalized email content for a list of contacts.',
         language: 'javascript',
-        code: `const contacts = JSON.parse('{{contacts}}');
-const subjectTemplate = '{{subject}}';
-const bodyTemplate = '{{body}}';
-
-const results = contacts.map(contact => {
-  const personalizedSubject = subjectTemplate
-    .replace(/{{firstName}}/g, contact.firstName || 'Valued Customer')
-    .replace(/{{company}}/g, contact.company || 'Your Company');
-  const personalizedBody = bodyTemplate
-    .replace(/{{firstName}}/g, contact.firstName || 'Valued Customer')
-    .replace(/{{company}}/g, contact.company || 'Your Company')
-    .replace(/{{lastName}}/g, contact.lastName || '');
-
-  return {
-    to: contact.email,
-    subject: personalizedSubject,
-    body: personalizedBody,
-    preview: personalizedBody.substring(0, 200) + '...',
-  };
-});
-
-console.log(JSON.stringify({ count: results.length, emails: results }, null, 2));`,
+        code: `const contacts = JSON.parse('{{contacts}}');\nconst subjectTemplate = '{{subject}}';\nconst bodyTemplate = '{{body}}';\n\nconst results = contacts.map(contact => {\n  const personalizedSubject = subjectTemplate\n    .replace(/{{firstName}}/g, contact.firstName || 'Valued Customer')\n    .replace(/{{company}}/g, contact.company || 'Your Company');\n  const personalizedBody = bodyTemplate\n    .replace(/{{firstName}}/g, contact.firstName || 'Valued Customer')\n    .replace(/{{company}}/g, contact.company || 'Your Company')\n    .replace(/{{lastName}}/g, contact.lastName || '');\n\n  return {\n    to: contact.email,\n    subject: personalizedSubject,\n    body: personalizedBody,\n    preview: personalizedBody.substring(0, 200) + '...',\n  };\n});\n\nconsole.log(JSON.stringify({ count: results.length, emails: results }, null, 2));`,
         parameters: [
           { name: 'contacts', type: 'json', description: 'JSON array of contact objects', required: true },
           { name: 'subject', type: 'string', description: 'Email subject template with {{placeholders}}', required: true },
@@ -441,31 +385,7 @@ console.log(JSON.stringify({ count: results.length, emails: results }, null, 2))
         name: 'Generate Weekly Report',
         description: 'Generate a summary report of key business metrics for the week.',
         language: 'javascript',
-        code: `const reportData = JSON.parse('{{reportData}}');
-const { newCustomers, totalRevenue, newOrders, topProducts } = reportData;
-
-const startDate = new Date();
-startDate.setDate(startDate.getDate() - 7);
-const endDate = new Date();
-
-const report = {
-  period: { start: startDate.toISOString().split('T')[0], end: endDate.toISOString().split('T')[0] },
-  summary: {
-    newCustomers: newCustomers || 0,
-    totalRevenue: totalRevenue || 0,
-    newOrders: newOrders || 0,
-    avgOrderValue: newOrders > 0 ? (totalRevenue / newOrders).toFixed(2) : '0.00',
-  },
-  highlights: [
-    \`\${newCustomers || 0} new customers acquired\`,
-    \`\$\${(totalRevenue || 0).toFixed(2)} in total revenue\`,
-    \`\${newOrders || 0} orders placed\`,
-  ],
-  topProducts: (topProducts || []).slice(0, 5),
-  generatedAt: new Date().toISOString(),
-};
-
-console.log(JSON.stringify(report, null, 2));`,
+        code: `const reportData = JSON.parse('{{reportData}}');\nconst { newCustomers, totalRevenue, newOrders, topProducts } = reportData;\n\nconst startDate = new Date();\nstartDate.setDate(startDate.getDate() - 7);\nconst endDate = new Date();\n\nconst report = {\n  period: { start: startDate.toISOString().split('T')[0], end: endDate.toISOString().split('T')[0] },\n  summary: {\n    newCustomers: newCustomers || 0,\n    totalRevenue: totalRevenue || 0,\n    newOrders: newOrders || 0,\n    avgOrderValue: newOrders > 0 ? (totalRevenue / newOrders).toFixed(2) : '0.00',\n  },\n  highlights: [\n    \\`\${newCustomers || 0} new customers acquired\\`,\n    \\`\\$\\${(totalRevenue || 0).toFixed(2)} in total revenue\\`,\n    \\`\${newOrders || 0} orders placed\\`,\n  ],\n  topProducts: (topProducts || []).slice(0, 5),\n  generatedAt: new Date().toISOString(),\n};\n\nconsole.log(JSON.stringify(report, null, 2));`,
         parameters: [
           { name: 'reportData', type: 'json', description: 'JSON object with newCustomers, totalRevenue, newOrders, topProducts', required: true },
         ],
@@ -477,30 +397,7 @@ console.log(JSON.stringify(report, null, 2));`,
         name: 'Clean Up Old Data',
         description: 'Generate a cleanup script for archiving or removing old records.',
         language: 'javascript',
-        code: `const config = JSON.parse('{{config}}');
-const { tableName, dateField, daysOld, dryRun = true } = config;
-
-if (!tableName || !dateField || !daysOld) {
-  throw new Error('tableName, dateField, and daysOld are required');
-}
-
-const cutoffDate = new Date();
-cutoffDate.setDate(cutoffDate.getDate() - daysOld);
-const cutoffIso = cutoffDate.toISOString();
-
-const plan = {
-  action: dryRun ? 'DRY_RUN' : 'EXECUTE',
-  table: tableName,
-  dateField: dateField,
-  cutoffDate: cutoffIso,
-  daysOld: daysOld,
-  query: \`SELECT COUNT(*) FROM \${tableName} WHERE \${dateField} < '\${cutoffIso}'\`,
-  deleteQuery: \`DELETE FROM \${tableName} WHERE \${dateField} < '\${cutoffIso}'\`,
-  warning: 'Review the dry run results before executing.',
-  generatedAt: new Date().toISOString(),
-};
-
-console.log(JSON.stringify(plan, null, 2));`,
+        code: `const config = JSON.parse('{{config}}');\nconst { tableName, dateField, daysOld, dryRun = true } = config;\n\nif (!tableName || !dateField || !daysOld) {\n  throw new Error('tableName, dateField, and daysOld are required');\n}\n\nconst cutoffDate = new Date();\ncutoffDate.setDate(cutoffDate.getDate() - daysOld);\nconst cutoffIso = cutoffDate.toISOString();\n\nconst plan = {\n  action: dryRun ? 'DRY_RUN' : 'EXECUTE',\n  table: tableName,\n  dateField: dateField,\n  cutoffDate: cutoffIso,\n  daysOld: daysOld,\n  query: \\`SELECT COUNT(*) FROM \\${tableName} WHERE \\${dateField} < '\\${cutoffIso}'\\`,\n  deleteQuery: \\`DELETE FROM \\${tableName} WHERE \\${dateField} < '\\${cutoffIso}'\\`,\n  warning: 'Review the dry run results before executing.',\n  generatedAt: new Date().toISOString(),\n};\n\nconsole.log(JSON.stringify(plan, null, 2));`,
         parameters: [
           { name: 'config', type: 'json', description: 'JSON with tableName, dateField, daysOld, dryRun', required: true },
         ],
@@ -512,37 +409,7 @@ console.log(JSON.stringify(plan, null, 2));`,
         name: 'Custom Email Template',
         description: 'A customizable HTML email template with business branding.',
         language: 'html',
-        code: `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <title>{{title}}</title>
-  <style>
-    body { font-family: Arial, sans-serif; background: #f5f5f5; margin: 0; padding: 20px; }
-    .container { max-width: 600px; margin: 0 auto; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-    .header { background: {{headerColor}}; color: white; padding: 24px; text-align: center; }
-    .content { padding: 24px; color: #333; line-height: 1.6; }
-    .footer { background: #fafafa; padding: 16px; text-align: center; font-size: 12px; color: #888; }
-    .btn { display: inline-block; padding: 12px 24px; background: {{headerColor}}; color: white; text-decoration: none; border-radius: 4px; margin-top: 16px; }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="header">
-      <h1>{{companyName}}</h1>
-    </div>
-    <div class="content">
-      <h2>{{title}}</h2>
-      <p>{{message}}</p>
-      <a href="{{ctaUrl}}" class="btn">{{ctaText}}</a>
-    </div>
-    <div class="footer">
-      <p>&copy; {{year}} {{companyName}}. All rights reserved.</p>
-      <p>{{companyAddress}}</p>
-    </div>
-  </div>
-</body>
-</html>`,
+        code: `<!DOCTYPE html>\n<html>\n<head>\n  <meta charset="UTF-8">\n  <title>{{title}}</title>\n  <style>\n    body { font-family: Arial, sans-serif; background: #f5f5f5; margin: 0; padding: 20px; }\n    .container { max-width: 600px; margin: 0 auto; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }\n    .header { background: {{headerColor}}; color: white; padding: 24px; text-align: center; }\n    .content { padding: 24px; color: #333; line-height: 1.6; }\n    .footer { background: #fafafa; padding: 16px; text-align: center; font-size: 12px; color: #888; }\n    .btn { display: inline-block; padding: 12px 24px; background: {{headerColor}}; color: white; text-decoration: none; border-radius: 4px; margin-top: 16px; }\n  </style>\n</head>\n<body>\n  <div class="container">\n    <div class="header">\n      <h1>{{companyName}}</h1>\n    </div>\n    <div class="content">\n      <h2>{{title}}</h2>\n      <p>{{message}}</p>\n      <a href="{{ctaUrl}}" class="btn">{{ctaText}}</a>\n    </div>\n    <div class="footer">\n      <p>&copy; {{year}} {{companyName}}. All rights reserved.</p>\n      <p>{{companyAddress}}</p>\n    </div>\n  </div>\n</body>\n</html>`,
         parameters: [
           { name: 'companyName', type: 'string', description: 'Business name for header and footer', required: true },
           { name: 'title', type: 'string', description: 'Email subject/title', required: true },
@@ -561,75 +428,7 @@ console.log(JSON.stringify(plan, null, 2));`,
         name: 'Invoice PDF Template',
         description: 'A styled HTML template for generating invoice PDFs.',
         language: 'html',
-        code: `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <title>Invoice {{invoiceNumber}}</title>
-  <style>
-    body { font-family: 'Segoe UI', Arial, sans-serif; margin: 40px; color: #333; }
-    .invoice-header { display: flex; justify-content: space-between; border-bottom: 3px solid {{accentColor}}; padding-bottom: 20px; margin-bottom: 30px; }
-    .company-info h1 { margin: 0; color: {{accentColor}}; }
-    .invoice-meta { text-align: right; }
-    .invoice-meta h2 { margin: 0; color: {{accentColor}}; }
-    .client-section { margin-bottom: 30px; }
-    table { width: 100%; border-collapse: collapse; margin: 20px 0; }
-    th { background: {{accentColor}}; color: white; padding: 12px; text-align: left; }
-    td { padding: 12px; border-bottom: 1px solid #eee; }
-    .totals { text-align: right; margin-top: 20px; }
-    .totals .grand { font-size: 1.3em; font-weight: bold; color: {{accentColor}}; }
-    .notes { margin-top: 30px; padding: 15px; background: #f9f9f9; border-radius: 4px; }
-    .status { display: inline-block; padding: 6px 16px; border-radius: 20px; font-weight: bold; text-transform: uppercase; font-size: 0.85em; }
-    .status-paid { background: #d4edda; color: #155724; }
-    .status-pending { background: #fff3cd; color: #856404; }
-    .status-overdue { background: #f8d7da; color: #721c24; }
-  </style>
-</head>
-<body>
-  <div class="invoice-header">
-    <div class="company-info">
-      <h1>{{companyName}}</h1>
-      <p>{{companyAddress}}<br>{{companyEmail}}<br>{{companyPhone}}</p>
-    </div>
-    <div class="invoice-meta">
-      <h2>INVOICE</h2>
-      <p><strong>#{{invoiceNumber}}</strong></p>
-      <p>Date: {{invoiceDate}}</p>
-      <p>Due: {{dueDate}}</p>
-      <span class="status status-{{status}}">{{status}}</span>
-    </div>
-  </div>
-  <div class="client-section">
-    <strong>Bill To:</strong><br>
-    {{clientName}}<br>
-    {{clientAddress}}
-  </div>
-  <table>
-    <thead>
-      <tr><th>Item</th><th>Description</th><th>Qty</th><th>Rate</th><th>Amount</th></tr>
-    </thead>
-    <tbody>
-      {{#each lineItems}}
-      <tr>
-        <td>{{name}}</td>
-        <td>{{description}}</td>
-        <td>{{quantity}}</td>
-        <td>${{rate}}</td>
-        <td>${{amount}}</td>
-      </tr>
-      {{/each}}
-    </tbody>
-  </table>
-  <div class="totals">
-    <p>Subtotal: ${{subtotal}}</p>
-    <p>Tax ({{taxRate}}%): ${{taxAmount}}</p>
-    <p class="grand">Total: ${{total}}</p>
-  </div>
-  <div class="notes">
-    <strong>Notes:</strong> {{notes}}
-  </div>
-</body>
-</html>`,
+        code: `<!DOCTYPE html>\n<html>\n<head>\n  <meta charset="UTF-8">\n  <title>Invoice {{invoiceNumber}}</title>\n  <style>\n    body { font-family: 'Segoe UI', Arial, sans-serif; margin: 40px; color: #333; }\n    .invoice-header { display: flex; justify-content: space-between; border-bottom: 3px solid {{accentColor}}; padding-bottom: 20px; margin-bottom: 30px; }\n    .company-info h1 { margin: 0; color: {{accentColor}}; }\n    .invoice-meta { text-align: right; }\n    .invoice-meta h2 { margin: 0; color: {{accentColor}}; }\n    .client-section { margin-bottom: 30px; }\n    table { width: 100%; border-collapse: collapse; margin: 20px 0; }\n    th { background: {{accentColor}}; color: white; padding: 12px; text-align: left; }\n    td { padding: 12px; border-bottom: 1px solid #eee; }\n    .totals { text-align: right; margin-top: 20px; }\n    .totals .grand { font-size: 1.3em; font-weight: bold; color: {{accentColor}}; }\n    .notes { margin-top: 30px; padding: 15px; background: #f9f9f9; border-radius: 4px; }\n    .status { display: inline-block; padding: 6px 16px; border-radius: 20px; font-weight: bold; text-transform: uppercase; font-size: 0.85em; }\n    .status-paid { background: #d4edda; color: #155724; }\n    .status-pending { background: #fff3cd; color: #856404; }\n    .status-overdue { background: #f8d7da; color: #721c24; }\n  </style>\n</head>\n<body>\n  <div class="invoice-header">\n    <div class="company-info">\n      <h1>{{companyName}}</h1>\n      <p>{{companyAddress}}<br>{{companyEmail}}<br>{{companyPhone}}</p>\n    </div>\n    <div class="invoice-meta">\n      <h2>INVOICE</h2>\n      <p><strong>#{{invoiceNumber}}</strong></p>\n      <p>Date: {{invoiceDate}}</p>\n      <p>Due: {{dueDate}}</p>\n      <span class="status status-{{status}}">{{status}}</span>\n    </div>\n  </div>\n  <div class="client-section">\n    <strong>Bill To:</strong><br>\n    {{clientName}}<br>\n    {{clientAddress}}\n  </div>\n  <table>\n    <thead>\n      <tr><th>Item</th><th>Description</th><th>Qty</th><th>Rate</th><th>Amount</th></tr>\n    </thead>\n    <tbody>\n      {{#each lineItems}}\n      <tr>\n        <td>{{name}}</td>\n        <td>{{description}}</td>\n        <td>{{quantity}}</td>\n        <td>${{rate}}</td>\n        <td>${{amount}}</td>\n      </tr>\n      {{/each}}\n    </tbody>\n  </table>\n  <div class="totals">\n    <p>Subtotal: ${{subtotal}}</p>\n    <p>Tax ({{taxRate}}%): ${{taxAmount}}</p>\n    <p class="grand">Total: ${{total}}</p>\n  </div>\n  <div class="notes">\n    <strong>Notes:</strong> {{notes}}\n  </div>\n</body>\n</html>`,
         parameters: [
           { name: 'companyName', type: 'string', description: 'Business name', required: true },
           { name: 'companyAddress', type: 'string', description: 'Business address', required: true },
@@ -833,6 +632,14 @@ console.log(JSON.stringify(plan, null, 2));`,
       }
     }
 
+    // Whitelist validation for SQL injection prevention
+    const ALLOWED_TABLES = ['Invoice', 'Contact', 'Booking', 'Product', 'Order', 'Task', 'Campaign'];
+    const isSafe = /^(\s*SELECT\s+.*\s+FROM\s*"?(\w+)"?.*)$/i.test(code);
+    if (!isSafe) throw new Error('Only SELECT queries are allowed');
+    const tableMatch = code.match(/FROM\s*"?(\w+)"?/i);
+    const table = tableMatch?.[1];
+    if (table && !ALLOWED_TABLES.includes(table)) throw new Error(`Table ${table} not in whitelist`);
+
     // Execute via Prisma with timeout
     try {
       const result = await Promise.race([
@@ -891,32 +698,20 @@ console.log(JSON.stringify(plan, null, 2));`,
           logs.push(`[INFO] ${line}`);
         },
       },
-      Math: Object.create(Math),
-      JSON: Object.create(JSON),
-      Date: Date,
-      Array: Array,
-      Object: Object,
-      String: String,
-      Number: Number,
-      Boolean: Boolean,
-      RegExp: RegExp,
-      Error: Error,
-      Promise: Promise,
-      Set: Set,
-      Map: Map,
-      parseInt,
-      parseFloat,
-      isNaN,
-      isFinite,
-      encodeURIComponent,
-      decodeURIComponent,
+      Math,
+      Date,
+      JSON,
+      Array,
+      Object,
+      String,
+      Number,
+      Boolean,
+      RegExp,
+      Error,
+      // DENY: require, process, fs, http, child_process, etc.
       // Inject user-provided variables
       ...variables,
     };
-
-    // Additional hardening: prevent access to constructor chains
-    Object.freeze(sandbox.Math);
-    Object.freeze(sandbox.JSON);
 
     try {
       // Wrap code to capture return value and handle async
@@ -928,7 +723,7 @@ console.log(JSON.stringify(plan, null, 2));`,
       `;
 
       const result = runInNewContext(wrappedCode, sandbox, {
-        timeout: timeoutMs,
+        timeout: Math.min(timeoutMs, 10000),
         displayErrors: true,
         breakOnSigint: true,
       });
@@ -1031,8 +826,9 @@ console.log(JSON.stringify(plan, null, 2));`,
       ].join('\n');
 
       const child = spawn('python3', ['-c', wrappedCode], {
-        timeout: timeoutMs,
+        timeout: Math.min(timeoutMs, 10000),
         killSignal: 'SIGKILL',
+        env: { PYTHONDONTWRITEBYTECODE: '1', PATH: '/usr/bin:/bin' },
       });
 
       let stdout = '';
@@ -1153,22 +949,7 @@ console.log(JSON.stringify(plan, null, 2));`,
   // ══════════════════════════════════════════════════════════
 
   private buildGenerationSystemPrompt(language: SandboxLanguage): string {
-    return `You are an expert code generator. Generate clean, well-commented ${language} code based on the user's description.
-
-Rules:
-1. Output ONLY valid ${language} code wrapped in triple backticks with the language tag.
-2. After the code block, provide a brief explanation of what the code does.
-3. For SQL: always include WHERE business_id = '{{businessId}}' for row-level security.
-4. For JavaScript: use only console.log() for output. No require(), no imports, no network calls.
-5. For Python: use only standard library. No os, sys, subprocess, or network modules.
-6. Include comments explaining the logic.
-
-Respond in this format:
-\`\`\`${language}
-<your code here>
-\`\`\`
-
-Explanation: <brief explanation>`;
+    return `You are an expert code generator. Generate clean, well-commented ${language} code based on the user's description.\n\nRules:\n1. Output ONLY valid ${language} code wrapped in triple backticks with the language tag.\n2. After the code block, provide a brief explanation of what the code does.\n3. For SQL: always include WHERE business_id = '{{businessId}}' for row-level security.\n4. For JavaScript: use only console.log() for output. No require(), no imports, no network calls.\n5. For Python: use only standard library. No os, sys, subprocess, or network modules.\n6. Include comments explaining the logic.\n\nRespond in this format:\n\`\`\`${language}\n<your code here>\n\`\`\`\n\nExplanation: <brief explanation>`;
   }
 
   private buildGenerationUserPrompt(
