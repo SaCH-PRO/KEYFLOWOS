@@ -16,6 +16,7 @@ import { CommandGenomeCard } from "./components/command-genome-card";
 import { CommandKeyGenomeCard } from "./components/command-key-genome-card";
 import { CommandModuleReadinessPanel } from "./components/command-module-readiness-panel";
 import { CommandConstitutionCard } from "./components/command-constitution-card";
+import { CrossDomainPanel } from "./components/cross-domain-panel";
 
 export default function CommandCenterPage() {
   const [businessId, setBusinessId] = useState<string | null>(null);
@@ -166,6 +167,8 @@ export default function CommandCenterPage() {
             </SectionCard>
           </div>
         </div>
+
+        <CrossDomainPanel businessId={businessId} />
       </motion.div>
     </WorkspaceShell>
   );

@@ -1,3 +1,9 @@
+import type {
+  GenomeAutonomyGateResult,
+  GenomeCrossDomainOpportunityCandidate,
+  GenomeRankedRecommendation,
+} from '../business-genome/key-genome/key-genome.types';
+
 export type CommandCenterPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 
 export type CommandCenterItemType =
@@ -93,6 +99,20 @@ export interface CommandCenterGenome {
   weakestSections: CommandCenterItem[];
 }
 
+export interface CommandCenterKeyGenomeCrossDomain {
+  healthScore: number;
+  readinessScore: number;
+  confidenceScore: number;
+  overallRiskLevel: string;
+  domainHealth: Record<string, number>;
+  domainReadiness: Record<string, number>;
+  topRecommendations: GenomeRankedRecommendation[];
+  topOpportunities: GenomeCrossDomainOpportunityCandidate[];
+  unsafeAutomationBlocks: GenomeAutonomyGateResult[];
+  staleFactCount: number;
+  criticalMissingFactCount: number;
+}
+
 export interface CommandCenterKeyGenome {
   overall: number;
   integrity: number;
@@ -119,6 +139,7 @@ export interface CommandCenterKeyGenome {
     freshness: number;
     readiness: number;
   }[];
+  crossDomain?: CommandCenterKeyGenomeCrossDomain;
 }
 
 export interface CommandCenterModuleReadiness {

@@ -1926,3 +1926,281 @@ export async function generateGenomeMarketingGrowthRecommendations(businessId: s
     body: {},
   });
 }
+
+// === Phase 17E: Cross-domain key genome ranking and autonomy gating ===
+// Types mirror the backend GenomeCrossDomainSnapshotData/ranker/gate shapes.
+
+export type GenomeCrossDomainDomainKey =
+  | 'finance'
+  | 'customer_sales_revenue'
+  | 'operations_delivery'
+  | 'marketing_growth';
+
+export type GenomeCrossDomainRiskLevel = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' | 'UNKNOWN';
+
+export interface GenomeCrossDomainDomainScore {
+  domain: GenomeCrossDomainDomainKey;
+  healthScore: number;
+  riskLevel: GenomeCrossDomainRiskLevel;
+  snapshotId?: string | null;
+  computedAt?: string | null;
+}
+
+export interface GenomeCrossDomainReadinessSummary {
+  averageReadinessScore: number;
+  departmentCount: number;
+  readyDepartments: string[];
+  atRiskDepartments: string[];
+}
+
+export interface GenomeCrossDomainEvidenceSummary {
+  totalFacts: number;
+  highConfidenceFacts: number;
+  totalEvidence: number;
+  verifiedEvidence: number;
+}
+
+export interface GenomeCrossDomainBottleneck {
+  domain: GenomeCrossDomainDomainKey;
+  label: string;
+  severity: GenomeCrossDomainRiskLevel;
+  reason?: string;
+}
+
+export interface GenomeCrossDomainOpportunity {
+  domain: GenomeCrossDomainDomainKey;
+  label: string;
+  potentialImpact: 'LOW' | 'MEDIUM' | 'HIGH';
+  reason?: string;
+}
+
+export interface GenomeCrossDomainRecommendedFocus {
+  domain: GenomeCrossDomainDomainKey;
+  priority: number;
+  label: string;
+  reason: string;
+}
+
+export interface GenomeCrossDomainSnapshot {
+  id: string;
+  businessId: string;
+  period?: string | null;
+  overallHealthScore: number;
+  overallRiskLevel: GenomeCrossDomainRiskLevel;
+  domainScores: GenomeCrossDomainDomainScore[];
+  domainRisks: Record<GenomeCrossDomainDomainKey, GenomeCrossDomainRiskLevel>;
+  readinessSummary: GenomeCrossDomainReadinessSummary;
+  evidenceSummary: GenomeCrossDomainEvidenceSummary;
+  bottlenecks: GenomeCrossDomainBottleneck[];
+  opportunities: GenomeCrossDomainOpportunity[];
+  recommendedFocus: GenomeCrossDomainRecommendedFocus[];
+  computedAt: string;
+}
+
+export interface GenomeRecommendationRankScoreBreakdown {
+  expectedGain: number;
+  confidence: number;
+  readiness: number;
+  crossDomainSynergy: number;
+  financialViability: number;
+  riskPenalty: number;
+  effortPenalty: number;
+}
+
+export type GenomeRecommendationFinancialViability = 'POOR' | 'FAIR' | 'GOOD' | 'STRONG';
+export type GenomeRecommendationCapacityGating = 'NO_CONSTRAINT' | 'SOFT_CONSTRAINT' | 'HARD_CONSTRAINT';
+
+export interface GenomeRankedRecommendation extends GenomeRecommendationData {
+  rankScore: number;
+  rankReason: string;
+  affectedDomains: GenomeCrossDomainDomainKey[];
+  readinessGating: {
+    blockingDomains: GenomeCrossDomainDomainKey[];
+    readyDomains: GenomeCrossDomainDomainKey[];
+  };
+  financialViability: GenomeRecommendationFinancialViability;
+  capacityGating: GenomeRecommendationCapacityGating;
+  scoreBreakdown: GenomeRecommendationRankScoreBreakdown;
+}
+
+export interface GenomeRecommendationRankingResult {
+  businessId: string;
+  generatedAt: string;
+  snapshotId?: string | null;
+  overallHealthScore: number;
+  overallRiskLevel: GenomeCrossDomainRiskLevel;
+  rankedRecommendations: GenomeRankedRecommendation[];
+  nextSafeActions: GenomeRankedRecommendation[];
+  blockedActions: GenomeRankedRecommendation[];
+}
+
+export interface GenomeCrossDomainOpportunityCandidate {
+  id: string;
+  label: string;
+  affectedDomains: GenomeCrossDomainDomainKey[];
+  requiredConditions: string[];
+  evidence: string[];
+  potentialImpact: 'LOW' | 'MEDIUM' | 'HIGH';
+  confidence: number;
+  suggestedAction: string;
+  estimatedValueScore: number;
+}
+
+export interface GenomeOpportunityDetectionResult {
+  businessId: string;
+  generatedAt: string;
+  snapshotId?: string | null;
+  overallHealthScore: number;
+  overallRiskLevel: GenomeCrossDomainRiskLevel;
+  opportunities: GenomeCrossDomainOpportunityCandidate[];
+  prioritizedOpportunities: GenomeCrossDomainOpportunityCandidate[];
+}
+
+export type GenomeAutonomyGateDecisionValue =
+  | 'ALLOW'
+  | 'ALLOW_WITH_APPROVAL'
+  | 'BLOCK'
+  | 'NEEDS_MORE_EVIDENCE';
+
+export interface GenomeAutonomyGateResult {
+  businessId: string;
+  actionType: string;
+  affectedDomains: string[];
+  decision: GenomeAutonomyGateDecisionValue;
+  riskLevel: GenomeCrossDomainRiskLevel;
+  readinessScore: number;
+  confidenceScore: number;
+  blockingReasons: string[];
+  approvalReasons: string[];
+  evidenceWarnings: string[];
+  recommendedNextStep: string;
+  checkedAt: string;
+}
+
+export interface CheckGenomeAutonomyGateInput {
+  actionType: string;
+  affectedDomains?: GenomeCrossDomainDomainKey[];
+  payload?: Record<string, unknown>;
+}
+
+export interface GetCrossDomainSnapshotOptions {
+  domain?: GenomeCrossDomainDomainKey | GenomeCrossDomainDomainKey[];
+  includeOpportunities?: boolean;
+}
+
+export interface ListCrossDomainSnapshotsOptions {
+  limit?: number;
+  offset?: number;
+}
+
+export interface RankRecommendationsOptions {
+  limit?: number;
+  minConfidence?: number;
+  maxEffortLevel?: 'LOW' | 'MEDIUM' | 'HIGH';
+}
+
+export interface DetectOpportunitiesOptions {
+  limit?: number;
+  minPotentialImpact?: 'LOW' | 'MEDIUM' | 'HIGH';
+  includeRiskMitigation?: boolean;
+}
+
+function toDomainParam(
+  domain?: GenomeCrossDomainDomainKey | GenomeCrossDomainDomainKey[],
+): string | undefined {
+  if (!domain) return undefined;
+  return Array.isArray(domain) ? domain.join(',') : domain;
+}
+
+export function getGenomeCrossDomainSnapshot(
+  businessId: string,
+  options: GetCrossDomainSnapshotOptions = {},
+) {
+  const params = new URLSearchParams();
+  const domainParam = toDomainParam(options.domain);
+  if (domainParam) params.set('domain', domainParam);
+  if (options.includeOpportunities !== undefined) {
+    params.set('includeOpportunities', String(options.includeOpportunities));
+  }
+  const query = params.toString();
+  return apiGet<GenomeCrossDomainSnapshot>(
+    `/business-genome/businesses/${businessId}/cross-domain/snapshot${query ? `?${query}` : ''}`,
+  );
+}
+
+export function computeGenomeCrossDomainSnapshot(businessId: string, period?: string) {
+  const params = new URLSearchParams();
+  if (period) params.set('period', period);
+  const query = params.toString();
+  return apiPost<GenomeCrossDomainSnapshot>({
+    path: `/business-genome/businesses/${businessId}/cross-domain/snapshot/compute${query ? `?${query}` : ''}`,
+    body: {},
+  });
+}
+
+export function listGenomeCrossDomainSnapshots(
+  businessId: string,
+  options: ListCrossDomainSnapshotsOptions = {},
+) {
+  const params = new URLSearchParams();
+  if (options.limit !== undefined) params.set('limit', String(options.limit));
+  if (options.offset !== undefined) params.set('offset', String(options.offset));
+  const query = params.toString();
+  return apiGet<GenomeCrossDomainSnapshot[]>(
+    `/business-genome/businesses/${businessId}/cross-domain/snapshots${query ? `?${query}` : ''}`,
+  );
+}
+
+export function getGenomeCrossDomainRankedRecommendations(businessId: string) {
+  return apiGet<GenomeRecommendationRankingResult>(
+    `/business-genome/businesses/${businessId}/cross-domain/recommendations/ranked`,
+  );
+}
+
+export function generateAndRankGenomeRecommendations(
+  businessId: string,
+  options: RankRecommendationsOptions = {},
+) {
+  const params = new URLSearchParams();
+  if (options.limit !== undefined) params.set('limit', String(options.limit));
+  if (options.minConfidence !== undefined) params.set('minConfidence', String(options.minConfidence));
+  if (options.maxEffortLevel) params.set('maxEffortLevel', options.maxEffortLevel);
+  const query = params.toString();
+  return apiPost<GenomeRecommendationRankingResult>({
+    path: `/business-genome/businesses/${businessId}/cross-domain/recommendations/ranked/generate${query ? `?${query}` : ''}`,
+    body: {},
+  });
+}
+
+export function getGenomeCrossDomainOpportunities(businessId: string) {
+  return apiGet<GenomeOpportunityDetectionResult>(
+    `/business-genome/businesses/${businessId}/cross-domain/opportunities`,
+  );
+}
+
+export function detectGenomeCrossDomainOpportunities(
+  businessId: string,
+  options: DetectOpportunitiesOptions = {},
+) {
+  const params = new URLSearchParams();
+  if (options.limit !== undefined) params.set('limit', String(options.limit));
+  if (options.minPotentialImpact) params.set('minPotentialImpact', options.minPotentialImpact);
+  if (options.includeRiskMitigation !== undefined) {
+    params.set('includeRiskMitigation', String(options.includeRiskMitigation));
+  }
+  const query = params.toString();
+  return apiPost<GenomeOpportunityDetectionResult>({
+    path: `/business-genome/businesses/${businessId}/cross-domain/opportunities/detect${query ? `?${query}` : ''}`,
+    body: {},
+  });
+}
+
+export function checkGenomeAutonomyGate(
+  businessId: string,
+  input: CheckGenomeAutonomyGateInput,
+) {
+  return apiPost<GenomeAutonomyGateResult>({
+    path: `/business-genome/businesses/${businessId}/cross-domain/autonomy-gate/check`,
+    body: input,
+  });
+}

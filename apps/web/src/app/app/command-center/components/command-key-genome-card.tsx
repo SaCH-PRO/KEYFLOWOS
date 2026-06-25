@@ -78,6 +78,43 @@ export function CommandKeyGenomeCard({ keyGenome }: CommandKeyGenomeCardProps) {
               </div>
             </div>
           )}
+
+          {keyGenome.crossDomain && (
+            <div className="rounded-xl border border-[hsl(var(--kf-accent1))]/20 bg-[hsl(var(--kf-accent1))]/5 p-2.5 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] font-semibold text-foreground">Cross-domain view</span>
+                <span
+                  className={`text-[10px] font-medium ${
+                    keyGenome.crossDomain.overallRiskLevel === "LOW"
+                      ? "text-[hsl(var(--kf-success))]"
+                      : keyGenome.crossDomain.overallRiskLevel === "MEDIUM"
+                        ? "text-[hsl(var(--kf-warning))]"
+                        : "text-destructive"
+                  }`}
+                >
+                  {keyGenome.crossDomain.overallRiskLevel} risk
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <Metric label="Health" value={keyGenome.crossDomain.healthScore} />
+                <Metric label="Ready" value={keyGenome.crossDomain.readinessScore} />
+                <Metric label="Conf" value={keyGenome.crossDomain.confidenceScore} />
+              </div>
+              <div className="flex flex-wrap gap-2 text-[10px] text-muted-foreground">
+                <span>{keyGenome.crossDomain.topRecommendations.length} ranked recs</span>
+                <span>•</span>
+                <span>{keyGenome.crossDomain.topOpportunities.length} opportunities</span>
+                {keyGenome.crossDomain.unsafeAutomationBlocks.length > 0 && (
+                  <>
+                    <span>•</span>
+                    <span className="text-destructive">
+                      {keyGenome.crossDomain.unsafeAutomationBlocks.length} blocked
+                    </span>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
         </>
       )}
 

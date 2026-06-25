@@ -93,6 +93,44 @@ export interface CommandCenterGenome {
   weakestSections: CommandCenterItem[];
 }
 
+export interface CommandCenterKeyGenomeCrossDomain {
+  healthScore: number;
+  readinessScore: number;
+  confidenceScore: number;
+  overallRiskLevel: string;
+  domainHealth: Record<string, number>;
+  domainReadiness: Record<string, number>;
+  topRecommendations: Array<{
+    id: string;
+    title: string;
+    insight: string;
+    rankScore: number;
+    rankReason: string;
+    affectedDomains: string[];
+    riskLevel: string;
+    effortLevel: string;
+    confidence: number;
+  }>;
+  topOpportunities: Array<{
+    id: string;
+    label: string;
+    potentialImpact: string;
+    confidence: number;
+    estimatedValueScore: number;
+    affectedDomains: string[];
+    suggestedAction: string;
+  }>;
+  unsafeAutomationBlocks: Array<{
+    actionType: string;
+    decision: string;
+    riskLevel: string;
+    blockingReasons: string[];
+    recommendedNextStep: string;
+  }>;
+  staleFactCount: number;
+  criticalMissingFactCount: number;
+}
+
 export interface CommandCenterKeyGenome {
   overall: number;
   integrity: number;
@@ -119,6 +157,7 @@ export interface CommandCenterKeyGenome {
     freshness: number;
     readiness: number;
   }[];
+  crossDomain?: CommandCenterKeyGenomeCrossDomain;
 }
 
 export interface CommandCenterModuleReadiness {

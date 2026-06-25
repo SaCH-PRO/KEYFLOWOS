@@ -11,6 +11,7 @@ import { GenomeScoringService } from '../business-genome/key-genome/genome-scori
 import { GenomeModuleReadinessService } from '../business-genome/key-genome/genome-module-readiness.service';
 import { GenomeSignalService } from '../business-genome/key-genome/genome-signal.service';
 import { GenomeRecommendationService } from '../business-genome/key-genome/genome-recommendation.service';
+import { CommandCenterKeyGenomeBridgeService } from './command-center-key-genome-bridge.service';
 import type { BusinessAsset } from '@prisma/client';
 import type { KeyGenomeScore, ModuleReadinessData } from '../business-genome/key-genome/key-genome.types';
 import type { KeyExecutiveMode } from '../intelligence/key-executive-mode.types';
@@ -94,6 +95,8 @@ export class BusinessCommandCenterService {
     private readonly genomeSignal: GenomeSignalService,
     @Inject(GenomeRecommendationService)
     private readonly genomeRecommendation: GenomeRecommendationService,
+    @Inject(CommandCenterKeyGenomeBridgeService)
+    private readonly keyGenomeBridge: CommandCenterKeyGenomeBridgeService,
   ) {}
 
   async snapshot(businessId: string): Promise<BusinessCommandCenterSnapshot> {
@@ -129,6 +132,7 @@ export class BusinessCommandCenterService {
     const keyGenomeScore = this.genomeScoring.computeBusinessScore(businessId, keyGenomeFacts);
     const moduleReadiness = await this.genomeReadiness.computeReadiness(businessId, keyGenomeFacts);
     const keyGenome = this.buildKeyGenome(keyGenomeScore);
+    keyGenome.crossDomain = await this.keyGenomeBridge.buildCrossDomainBrief(businessId, moduleReadiness);
 
     const approvalItems = this.mapPendingApprovals(pendingApprovals);
     const approvedItems = this.mapApprovedAwaitingExecution(approvedAwaitingExecution);

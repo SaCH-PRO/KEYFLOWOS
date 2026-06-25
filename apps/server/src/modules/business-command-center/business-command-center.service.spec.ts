@@ -13,6 +13,7 @@ import { GenomeScoringService } from '../business-genome/key-genome/genome-scori
 import { GenomeModuleReadinessService } from '../business-genome/key-genome/genome-module-readiness.service';
 import { GenomeSignalService } from '../business-genome/key-genome/genome-signal.service';
 import { GenomeRecommendationService } from '../business-genome/key-genome/genome-recommendation.service';
+import { CommandCenterKeyGenomeBridgeService } from './command-center-key-genome-bridge.service';
 import type { BusinessExecutiveBrief } from '../intelligence/business-intelligence.types';
 import type { KeyExecutiveModeBrief } from '../intelligence/key-executive-mode.types';
 import type { TemporalFlowAnalysis } from '../temporal-flow/temporal-flow.types';
@@ -208,6 +209,20 @@ const mockModuleReadiness = [
   },
 ];
 
+const mockCrossDomainBrief = {
+  healthScore: 72,
+  readinessScore: 68,
+  confidenceScore: 80,
+  overallRiskLevel: 'MEDIUM',
+  domainHealth: { finance: 75, customer_sales_revenue: 70, operations_delivery: 65, marketing_growth: 80 },
+  domainReadiness: { finance: 75, customer_sales_revenue: 70, operations_delivery: 65, marketing_growth: 80 },
+  topRecommendations: [],
+  topOpportunities: [],
+  unsafeAutomationBlocks: [],
+  staleFactCount: 2,
+  criticalMissingFactCount: 1,
+};
+
 const mockKeyProposal: KeyActionProposalData = {
   id: 'kap_1',
   businessId: 'biz_1',
@@ -249,6 +264,7 @@ describe('BusinessCommandCenterService', () => {
         { provide: GenomeModuleReadinessService, useValue: { computeReadiness: vi.fn().mockResolvedValue(mockModuleReadiness) } },
         { provide: GenomeSignalService, useValue: { listSignals: mockSignalList } },
         { provide: GenomeRecommendationService, useValue: { listRecommendations: mockRecommendationList } },
+        { provide: CommandCenterKeyGenomeBridgeService, useValue: { buildCrossDomainBrief: vi.fn().mockResolvedValue(mockCrossDomainBrief) } },
       ],
     }).compile();
 
@@ -346,6 +362,14 @@ describe('BusinessCommandCenterService', () => {
     const snapshot = await service.snapshot('biz_1');
     expect(snapshot.moduleReadiness.length).toBe(2);
     expect(snapshot.moduleReadiness.some((m) => m.module === 'key_inbox')).toBe(true);
+  });
+
+  it('includes cross-domain intelligence from the bridge', async () => {
+    const snapshot = await service.snapshot('biz_1');
+    expect(snapshot.keyGenome.crossDomain).toBeDefined();
+    expect(snapshot.keyGenome.crossDomain?.healthScore).toBe(72);
+    expect(snapshot.keyGenome.crossDomain?.staleFactCount).toBe(2);
+    expect(snapshot.keyGenome.crossDomain?.criticalMissingFactCount).toBe(1);
   });
 
   it('creates a MODULE_READINESS priority item for blocked modules', async () => {

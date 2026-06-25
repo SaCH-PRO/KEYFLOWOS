@@ -8,6 +8,7 @@ import { BlueprintModule } from '../blueprint/blueprint.module';
 import { KeyGenomeModule } from '../business-genome/key-genome/key-genome.module';
 import { BusinessCommandCenterController } from './business-command-center.controller';
 import { BusinessCommandCenterService } from './business-command-center.service';
+import { CommandCenterKeyGenomeBridgeService } from './command-center-key-genome-bridge.service';
 
 @Module({
   imports: [
@@ -20,7 +21,7 @@ import { BusinessCommandCenterService } from './business-command-center.service'
     KeyGenomeModule,
   ],
   controllers: [BusinessCommandCenterController],
-  providers: [BusinessCommandCenterService],
-  exports: [BusinessCommandCenterService],
+  providers: [BusinessCommandCenterService, CommandCenterKeyGenomeBridgeService],
+  exports: [BusinessCommandCenterService, CommandCenterKeyGenomeBridgeService],
 })
 export class BusinessCommandCenterModule {}

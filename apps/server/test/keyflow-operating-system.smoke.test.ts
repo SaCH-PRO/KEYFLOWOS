@@ -75,6 +75,21 @@ describe('KEYFlowOS operating system smoke', () => {
       {
         listRecommendations: vi.fn().mockResolvedValue([]),
       } as any,
+      {
+        buildCrossDomainBrief: vi.fn().mockResolvedValue({
+          healthScore: 0,
+          readinessScore: 0,
+          confidenceScore: 0,
+          overallRiskLevel: 'UNKNOWN',
+          domainHealth: {},
+          domainReadiness: {},
+          topRecommendations: [],
+          topOpportunities: [],
+          unsafeAutomationBlocks: [],
+          staleFactCount: 0,
+          criticalMissingFactCount: 0,
+        }),
+      } as any,
     );
 
     const snapshot = await service.snapshot('biz_smoke');
