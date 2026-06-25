@@ -1889,6 +1889,83 @@ export class KeyCortexController {
   }
 
   /**
+   * GET /api/v1/cortex/flows/templates
+   * List available flow templates.
+   */
+  @Get('flows/templates')
+  @HttpCode(HttpStatus.OK)
+  async flowTemplates(
+    @Query('category') category?: string,
+  ): Promise<{
+    templates: Array<Record<string, unknown>>;
+  }> {
+    try {
+      return await this.flowStudio.listTemplates(category);
+    } catch (err) {
+      this.logger.error(`Flow templates error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Unable to list flow templates');
+    }
+  }
+
+  /**
+   * POST /api/v1/cortex/flows/apply-template
+   * Apply a template to create a new flow.
+   */
+  @Post('flows/apply-template')
+  @HttpCode(HttpStatus.CREATED)
+  async flowApplyTemplate(
+    @Body() dto: FlowApplyTemplateDto,
+  ): Promise<Record<string, unknown>> {
+    if (!dto.businessId) {
+      throw new BadRequestException('businessId is required');
+    }
+    if (!dto.templateId) {
+      throw new BadRequestException('templateId is required');
+    }
+    if (!dto.name?.trim()) {
+      throw new BadRequestException('name is required');
+    }
+
+    try {
+      return await this.flowStudio.applyTemplate(
+        dto.templateId,
+        dto.businessId,
+        {
+          name: dto.name,
+          parameters: dto.parameters,
+        },
+      );
+    } catch (err) {
+      this.logger.error(`Flow apply template error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Template application failed');
+    }
+  }
+
+  /**
+   * GET /api/v1/cortex/flows/nodes
+   * Get the node registry (available node types).
+   */
+  @Get('flows/nodes')
+  @HttpCode(HttpStatus.OK)
+  async flowNodes(): Promise<{
+    nodes: Array<{
+      type: string;
+      name: string;
+      description: string;
+      inputs: Array<Record<string, unknown>>;
+      outputs: Array<Record<string, unknown>>;
+      configSchema?: Record<string, unknown>;
+    }>;
+  }> {
+    try {
+      return await this.flowStudio.getNodeRegistry();
+    } catch (err) {
+      this.logger.error(`Flow nodes error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Unable to retrieve node registry');
+    }
+  }
+
+  /**
    * GET /api/v1/cortex/flows/:id
    * Get a single flow by ID.
    */
@@ -2006,83 +2083,6 @@ export class KeyCortexController {
     } catch (err) {
       this.logger.error(`Flow toggle error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Flow toggle failed');
-    }
-  }
-
-  /**
-   * GET /api/v1/cortex/flows/templates
-   * List available flow templates.
-   */
-  @Get('flows/templates')
-  @HttpCode(HttpStatus.OK)
-  async flowTemplates(
-    @Query('category') category?: string,
-  ): Promise<{
-    templates: Array<Record<string, unknown>>;
-  }> {
-    try {
-      return await this.flowStudio.listTemplates(category);
-    } catch (err) {
-      this.logger.error(`Flow templates error: ${err.message}`, err.stack);
-      throw new ServiceUnavailableException('Unable to list flow templates');
-    }
-  }
-
-  /**
-   * POST /api/v1/cortex/flows/apply-template
-   * Apply a template to create a new flow.
-   */
-  @Post('flows/apply-template')
-  @HttpCode(HttpStatus.CREATED)
-  async flowApplyTemplate(
-    @Body() dto: FlowApplyTemplateDto,
-  ): Promise<Record<string, unknown>> {
-    if (!dto.businessId) {
-      throw new BadRequestException('businessId is required');
-    }
-    if (!dto.templateId) {
-      throw new BadRequestException('templateId is required');
-    }
-    if (!dto.name?.trim()) {
-      throw new BadRequestException('name is required');
-    }
-
-    try {
-      return await this.flowStudio.applyTemplate(
-        dto.templateId,
-        dto.businessId,
-        {
-          name: dto.name,
-          parameters: dto.parameters,
-        },
-      );
-    } catch (err) {
-      this.logger.error(`Flow apply template error: ${err.message}`, err.stack);
-      throw new ServiceUnavailableException('Template application failed');
-    }
-  }
-
-  /**
-   * GET /api/v1/cortex/flows/nodes
-   * Get the node registry (available node types).
-   */
-  @Get('flows/nodes')
-  @HttpCode(HttpStatus.OK)
-  async flowNodes(): Promise<{
-    nodes: Array<{
-      type: string;
-      name: string;
-      description: string;
-      inputs: Array<Record<string, unknown>>;
-      outputs: Array<Record<string, unknown>>;
-      configSchema?: Record<string, unknown>;
-    }>;
-  }> {
-    try {
-      return await this.flowStudio.getNodeRegistry();
-    } catch (err) {
-      this.logger.error(`Flow nodes error: ${err.message}`, err.stack);
-      throw new ServiceUnavailableException('Unable to retrieve node registry');
     }
   }
 
