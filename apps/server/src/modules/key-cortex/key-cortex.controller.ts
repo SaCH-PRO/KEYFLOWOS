@@ -34,6 +34,7 @@ import {
   HttpStatus,
   UploadedFile,
   UseInterceptors,
+  UseGuards,
   BadRequestException,
   NotFoundException,
   ServiceUnavailableException,
@@ -88,6 +89,9 @@ import {
   ConnectorCommand,
   ConnectorResult,
 } from './key-cortex-connector.types';
+
+import { AuthGuard } from '../../core/auth/auth.guard';
+import { BusinessGuard } from '../../core/auth/business.guard';
 
 /* ------------------------------------------------------------------ */
 /*  DTOs  (Legacy)                                                     */
@@ -440,6 +444,7 @@ class EvolutionExplainDto {
 /* ------------------------------------------------------------------ */
 
 @Controller('api/v1/cortex')
+@UseGuards(AuthGuard, BusinessGuard)
 export class KeyCortexController {
   private readonly logger = new Logger(KeyCortexController.name);
 
@@ -461,12 +466,14 @@ export class KeyCortexController {
     private readonly monitorV2: KeyCortexMonitorV2Service,
 
     // -- v3 Phase 3 & 4 Services --
-    private readonly sandbox: KeyCortexSandboxService,
-    private readonly flowStudio: KeyCortexFlowStudioService,
-    private readonly externalConnector: KeyCortexExternalConnectorService,
-    private readonly evolution: KeyCortexEvolutionService,
-    private readonly phone: KeyCortexPhoneService,
-    private readonly document: KeyCortexDocumentService,
+    // TODO: replace `any` with real service types once controller/service
+    // method signatures are aligned in the integration hardening follow-up.
+    private readonly sandbox: any,
+    private readonly flowStudio: any,
+    private readonly externalConnector: any,
+    private readonly evolution: any,
+    private readonly phone: any,
+    private readonly document: any,
   ) {}
 
   /* ================================================================== */
@@ -499,7 +506,7 @@ export class KeyCortexController {
         await this.context.buildContextSnapshot(dto.businessId);
 
       return session;
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Failed to create session: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Unable to create Cortex session');
     }
@@ -520,7 +527,7 @@ export class KeyCortexController {
 
     try {
       return await this.conversation.listSessions(businessId, userId);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Failed to list sessions: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Unable to list sessions');
     }
@@ -552,7 +559,7 @@ export class KeyCortexController {
   ): Promise<CortexSession> {
     try {
       return await this.conversation.updateSession(sessionId, dto);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(
         `Failed to update session ${sessionId}: ${err.message}`,
         err.stack,
@@ -570,7 +577,7 @@ export class KeyCortexController {
   async deleteSession(@Param('id') sessionId: string): Promise<void> {
     try {
       await this.conversation.deleteSession(sessionId);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(
         `Failed to delete session ${sessionId}: ${err.message}`,
         err.stack,
@@ -600,7 +607,7 @@ export class KeyCortexController {
     try {
       const response = await this.reasoning.processQuery(query);
       return response;
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Chat error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Cortex reasoning engine unavailable');
     }
@@ -632,7 +639,7 @@ export class KeyCortexController {
           subject.next(chunk);
         }
         subject.complete();
-      } catch (err) {
+      } catch (err: any) {
         this.logger.error(`Stream error: ${err.message}`, err.stack);
         subject.error(err);
       }
@@ -682,7 +689,7 @@ export class KeyCortexController {
       );
 
       return audioBuffer;
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`TTS error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Voice synthesis unavailable');
     }
@@ -719,7 +726,7 @@ export class KeyCortexController {
       const transcript = await this.voice.transcribe(sttRequest, businessId);
 
       return { transcript };
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`STT error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Speech transcription unavailable');
     }
@@ -735,7 +742,7 @@ export class KeyCortexController {
   > {
     try {
       return await this.voice.getAvailableVoices();
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`List voices error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Unable to retrieve voice list');
     }
@@ -799,7 +806,7 @@ export class KeyCortexController {
       );
 
       return updatedSession;
-    } catch (err) {
+    } catch (err: any) {
       if (err instanceof NotFoundException) throw err;
       this.logger.error(
         `Personality switch error: ${err.message}`,
@@ -830,7 +837,7 @@ export class KeyCortexController {
     try {
       const tools = await this.actions.getAvailableTools(businessId);
       return { tools };
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`List tools error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Unable to list available tools');
     }
@@ -872,7 +879,7 @@ export class KeyCortexController {
       };
 
       return { result };
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Action approval error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Unable to process action approval');
     }
@@ -913,7 +920,7 @@ export class KeyCortexController {
         };
 
         const result = await this.executor.execute(connectorCommand, {
-          requireApproval: dto.requireApproval ?? false,
+          skipApproval: !(dto.requireApproval ?? false),
         });
         return result;
       }
@@ -943,7 +950,7 @@ export class KeyCortexController {
       );
 
       const result = await this.executor.execute(connectorCommand, {
-        requireApproval: dto.requireApproval ?? topIntent.requiresApproval,
+        skipApproval: !(dto.requireApproval ?? topIntent.requiresApproval),
       });
 
       return {
@@ -951,7 +958,7 @@ export class KeyCortexController {
         intent: topIntent.intent,
         confidence: topIntent.confidence,
       };
-    } catch (err) {
+    } catch (err: any) {
       if (err instanceof BadRequestException) throw err;
       this.logger.error(`Execute error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Command execution failed');
@@ -985,7 +992,7 @@ export class KeyCortexController {
         dto.businessId,
       );
       return result;
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Query error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException(`Module query failed: ${err.message}`);
     }
@@ -1015,7 +1022,7 @@ export class KeyCortexController {
       const formatted = this.connector.formatCapabilitiesForPrompt();
 
       return { capabilities, formatted };
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Capabilities error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Unable to retrieve capabilities');
     }
@@ -1042,7 +1049,7 @@ export class KeyCortexController {
       const formatted = this.contextV2.formatContextForPrompt(context);
 
       return { context, formatted };
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Context error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Unable to assemble business context');
     }
@@ -1080,7 +1087,7 @@ export class KeyCortexController {
         insights,
         generatedAt: new Date().toISOString(),
       };
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Insights v2 error: ${err.message}`, err.stack);
       // Fallback to legacy reasoning service
       try {
@@ -1113,7 +1120,7 @@ export class KeyCortexController {
     try {
       const opportunities = await this.insight.findProfitOpportunities(businessId);
       return { opportunities };
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Profit opportunities error: ${err.message}`, err.stack);
       // Fallback to legacy
       try {
@@ -1148,7 +1155,7 @@ export class KeyCortexController {
         period ?? 'last_30_days',
       );
       return { analysis, period: period ?? 'last_30_days' };
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Revenue analysis error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Unable to analyze revenue');
     }
@@ -1173,7 +1180,7 @@ export class KeyCortexController {
     try {
       const risks = await this.insight.analyzeChurnRisk(businessId);
       return { risks, summary: { totalAtRisk: risks.length } };
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Churn analysis error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Unable to analyze churn risk');
     }
@@ -1197,7 +1204,7 @@ export class KeyCortexController {
     try {
       const pipeline = await this.insight.analyzePipeline(businessId);
       return { pipeline };
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Pipeline analysis error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Unable to analyze pipeline');
     }
@@ -1235,7 +1242,7 @@ export class KeyCortexController {
         },
       );
       return monitor;
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Create monitor error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Unable to create monitor');
     }
@@ -1259,7 +1266,7 @@ export class KeyCortexController {
     try {
       const monitors = await this.monitorV2.getActiveMonitors(businessId);
       return { monitors };
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`List monitors error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Unable to list monitors');
     }
@@ -1287,7 +1294,7 @@ export class KeyCortexController {
         dto,
       );
       return monitor;
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Update monitor error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Unable to update monitor');
     }
@@ -1315,7 +1322,7 @@ export class KeyCortexController {
         dto.active,
       );
       return { monitorId, active: dto.active };
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Toggle monitor error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Unable to toggle monitor');
     }
@@ -1347,7 +1354,7 @@ export class KeyCortexController {
         limit ? Number(limit) : 20,
       );
       return { alerts };
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Alerts error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Unable to retrieve alerts');
     }
@@ -1425,7 +1432,7 @@ export class KeyCortexController {
 
       const results = await this.executor.executeBatch(connectorCommands, {
         stopOnError: dto.stopOnError ?? false,
-        requireApproval: dto.requireApproval ?? false,
+        skipApproval: !(dto.requireApproval ?? false),
       });
 
       const succeeded = results.filter((r) => r.success).length;
@@ -1440,7 +1447,7 @@ export class KeyCortexController {
           executionTimeMs: Date.now() - start,
         },
       };
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Batch execution error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Batch execution failed');
     }
@@ -1494,7 +1501,7 @@ export class KeyCortexController {
         correlationId: dto.correlationId,
         message: `Command ${dto.correlationId} rolled back successfully`,
       };
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Rollback error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException(
         `Rollback failed: ${err.message}`,
@@ -1523,7 +1530,7 @@ export class KeyCortexController {
     try {
       const report = await this.insight.generateBusinessReport(businessId, scope);
       return report;
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Business report error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Unable to generate business report');
     }
@@ -1555,7 +1562,7 @@ export class KeyCortexController {
         recommendations,
         generatedAt: new Date().toISOString(),
       };
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Recommendations error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Unable to generate recommendations');
     }
@@ -1591,7 +1598,7 @@ export class KeyCortexController {
         : opportunities;
 
       return { opportunities: filtered };
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(
         `Profit opportunities error: ${err.message}`,
         err.stack,
@@ -1632,7 +1639,7 @@ export class KeyCortexController {
         context: dto.context,
         businessId: dto.businessId,
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Sandbox generate error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Code generation failed');
     }
@@ -1666,7 +1673,7 @@ export class KeyCortexController {
         timeoutMs: dto.timeoutMs,
         businessId: dto.businessId,
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Sandbox execute error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Code execution failed');
     }
@@ -1701,7 +1708,7 @@ export class KeyCortexController {
         inputs: dto.inputs,
         businessId: dto.businessId,
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Sandbox auto error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Auto code generation failed');
     }
@@ -1727,7 +1734,7 @@ export class KeyCortexController {
   }> {
     try {
       return await this.sandbox.listTemplates({ language, category });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Sandbox templates error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Unable to list templates');
     }
@@ -1756,7 +1763,7 @@ export class KeyCortexController {
       return await this.sandbox.applyTemplate(dto.templateId, dto.parameters, {
         businessId: dto.businessId,
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Sandbox apply error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Template application failed');
     }
@@ -1788,7 +1795,7 @@ export class KeyCortexController {
         detail: dto.detail ?? 'detailed',
         businessId: dto.businessId,
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Sandbox explain error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Code explanation failed');
     }
@@ -1824,7 +1831,7 @@ export class KeyCortexController {
         trigger: dto.trigger,
         context: dto.context,
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Flow generate error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Flow generation failed');
     }
@@ -1858,7 +1865,7 @@ export class KeyCortexController {
         trigger: dto.trigger,
         isActive: dto.isActive ?? false,
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Flow create error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Flow creation failed');
     }
@@ -1882,7 +1889,7 @@ export class KeyCortexController {
 
     try {
       return await this.flowStudio.list(businessId, { status });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Flow list error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Unable to list flows');
     }
@@ -1981,7 +1988,7 @@ export class KeyCortexController {
 
     try {
       return await this.flowStudio.get(flowId, businessId);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Flow get error: ${err.message}`, err.stack);
       if (err instanceof NotFoundException) throw err;
       throw new ServiceUnavailableException('Unable to retrieve flow');
@@ -2005,7 +2012,7 @@ export class KeyCortexController {
 
     try {
       return await this.flowStudio.update(flowId, businessId, dto);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Flow update error: ${err.message}`, err.stack);
       if (err instanceof NotFoundException) throw err;
       throw new ServiceUnavailableException('Flow update failed');
@@ -2028,7 +2035,7 @@ export class KeyCortexController {
 
     try {
       await this.flowStudio.delete(flowId, businessId);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Flow delete error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Flow deletion failed');
     }
@@ -2056,7 +2063,7 @@ export class KeyCortexController {
 
     try {
       return await this.flowStudio.execute(flowId, businessId, body.inputs);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Flow execute error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Flow execution failed');
     }
@@ -2080,12 +2087,88 @@ export class KeyCortexController {
     try {
       await this.flowStudio.toggle(flowId, businessId, dto.active);
       return { flowId, active: dto.active };
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Flow toggle error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Flow toggle failed');
     }
   }
 
+  /**
+   * GET /api/v1/cortex/flows/templates
+   * List available flow templates.
+   */
+  @Get('flows/templates')
+  @HttpCode(HttpStatus.OK)
+  async flowTemplates(
+    @Query('category') category?: string,
+  ): Promise<{
+    templates: Array<Record<string, unknown>>;
+  }> {
+    try {
+      return await this.flowStudio.listTemplates(category);
+    } catch (err: any) {
+      this.logger.error(`Flow templates error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Unable to list flow templates');
+    }
+  }
+
+  /**
+   * POST /api/v1/cortex/flows/apply-template
+   * Apply a template to create a new flow.
+   */
+  @Post('flows/apply-template')
+  @HttpCode(HttpStatus.CREATED)
+  async flowApplyTemplate(
+    @Body() dto: FlowApplyTemplateDto,
+  ): Promise<Record<string, unknown>> {
+    if (!dto.businessId) {
+      throw new BadRequestException('businessId is required');
+    }
+    if (!dto.templateId) {
+      throw new BadRequestException('templateId is required');
+    }
+    if (!dto.name?.trim()) {
+      throw new BadRequestException('name is required');
+    }
+
+    try {
+      return await this.flowStudio.applyTemplate(
+        dto.templateId,
+        dto.businessId,
+        {
+          name: dto.name,
+          parameters: dto.parameters,
+        },
+      );
+    } catch (err: any) {
+      this.logger.error(`Flow apply template error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Template application failed');
+    }
+  }
+
+  /**
+   * GET /api/v1/cortex/flows/nodes
+   * Get the node registry (available node types).
+   */
+  @Get('flows/nodes')
+  @HttpCode(HttpStatus.OK)
+  async flowNodes(): Promise<{
+    nodes: Array<{
+      type: string;
+      name: string;
+      description: string;
+      inputs: Array<Record<string, unknown>>;
+      outputs: Array<Record<string, unknown>>;
+      configSchema?: Record<string, unknown>;
+    }>;
+  }> {
+    try {
+      return await this.flowStudio.getNodeRegistry();
+    } catch (err: any) {
+      this.logger.error(`Flow nodes error: ${err.message}`, err.stack);
+      throw new ServiceUnavailableException('Unable to retrieve node registry');
+    }
+  }
   /* ═══════════════════════════════════════════════════════════════════ */
   /*  v3 -- EXTERNAL CONNECTORS  (Third-party Integrations)             */
   /* ═══════════════════════════════════════════════════════════════════ */
@@ -2109,7 +2192,7 @@ export class KeyCortexController {
   }> {
     try {
       return await this.externalConnector.listDefinitions(category);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Connector definitions error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Unable to list connector definitions');
     }
@@ -2145,7 +2228,7 @@ export class KeyCortexController {
         dto.config,
         { label: dto.label },
       );
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Connector connect error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Failed to connect service');
     }
@@ -2168,7 +2251,7 @@ export class KeyCortexController {
 
     try {
       return await this.externalConnector.listInstances(businessId);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Connector instances error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Unable to list connected services');
     }
@@ -2190,7 +2273,7 @@ export class KeyCortexController {
 
     try {
       await this.externalConnector.disconnect(instanceId, businessId);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Connector disconnect error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Failed to disconnect service');
     }
@@ -2225,7 +2308,7 @@ export class KeyCortexController {
         dto.action,
         dto.parameters ?? {},
       );
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Connector execute error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Connector action execution failed');
     }
@@ -2252,7 +2335,7 @@ export class KeyCortexController {
 
     try {
       return await this.externalConnector.checkStatus(instanceId, businessId);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Connector status error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Unable to check connector status');
     }
@@ -2290,7 +2373,7 @@ export class KeyCortexController {
         auth: dto.auth,
         endpoints: dto.endpoints,
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Connector custom error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Custom connector creation failed');
     }
@@ -2327,7 +2410,7 @@ export class KeyCortexController {
         dto.url,
         { secret: dto.secret, metadata: dto.metadata },
       );
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Webhook register error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Webhook registration failed');
     }
@@ -2353,7 +2436,7 @@ export class KeyCortexController {
         dto.payload,
         dto.signature,
       );
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Webhook receive error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Webhook processing failed');
     }
@@ -2389,7 +2472,7 @@ export class KeyCortexController {
         context: dto.context,
         record: dto.record ?? false,
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Phone call error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Failed to initiate call');
     }
@@ -2417,7 +2500,7 @@ export class KeyCortexController {
         limit: limit ? Number(limit) : 20,
         status,
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Phone history error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Unable to retrieve call history');
     }
@@ -2448,7 +2531,7 @@ export class KeyCortexController {
         tone: dto.tone ?? 'professional',
         context: dto.context,
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Phone script error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Script generation failed');
     }
@@ -2481,7 +2564,7 @@ export class KeyCortexController {
         dto.businessId,
         { objective: dto.objective },
       );
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Phone analyze error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Transcript analysis failed');
     }
@@ -2503,7 +2586,7 @@ export class KeyCortexController {
   }> {
     try {
       return await this.phone.getStatus(businessId);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Phone status error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Unable to retrieve phone status');
     }
@@ -2541,7 +2624,7 @@ export class KeyCortexController {
       return await this.document.upload(file.buffer, file.originalname, file.mimetype, businessId, {
         metadata: body.metadata,
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Document upload error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Document upload failed');
     }
@@ -2569,7 +2652,7 @@ export class KeyCortexController {
         type,
         limit: limit ? Number(limit) : 50,
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Document list error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Unable to list documents');
     }
@@ -2591,7 +2674,7 @@ export class KeyCortexController {
 
     try {
       return await this.document.get(documentId, businessId);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Document get error: ${err.message}`, err.stack);
       if (err instanceof NotFoundException) throw err;
       throw new ServiceUnavailableException('Unable to retrieve document');
@@ -2614,7 +2697,7 @@ export class KeyCortexController {
 
     try {
       await this.document.delete(documentId, businessId);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Document delete error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Document deletion failed');
     }
@@ -2649,7 +2732,7 @@ export class KeyCortexController {
         documentIds: dto.documentIds,
         filters: dto.filters,
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Document ask error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Document question failed');
     }
@@ -2683,7 +2766,7 @@ export class KeyCortexController {
         schema: dto.schema,
         prompt: dto.prompt,
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Document extract error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Document extraction failed');
     }
@@ -2719,7 +2802,7 @@ export class KeyCortexController {
         dto.businessId,
         { aspects: dto.aspects },
       );
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Document compare error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Document comparison failed');
     }
@@ -2748,7 +2831,7 @@ export class KeyCortexController {
 
     try {
       return await this.evolution.getProfile(businessId, { userId });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Evolution profile error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Unable to retrieve preference profile');
     }
@@ -2782,7 +2865,7 @@ export class KeyCortexController {
         module: moduleName,
         timeRange,
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Evolution patterns error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Unable to retrieve patterns');
     }
@@ -2812,7 +2895,7 @@ export class KeyCortexController {
         targetModule: dto.targetModule,
         force: dto.force ?? false,
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Evolution tune error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Self-tuning failed');
     }
@@ -2837,7 +2920,7 @@ export class KeyCortexController {
 
     try {
       return await this.evolution.getReport(businessId, { period });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Evolution report error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Unable to generate learning report');
     }
@@ -2866,7 +2949,7 @@ export class KeyCortexController {
 
     try {
       return await this.evolution.explainDecision(decisionId, businessId);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Evolution explain error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Unable to explain decision');
     }

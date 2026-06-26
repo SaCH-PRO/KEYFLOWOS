@@ -587,6 +587,58 @@ export class KeyCortexSandboxService {
     }
   }
 
+  // Controller-facing aliases (the controller uses shorter method names)
+  async generate(dto: {
+    prompt: string;
+    language?: SandboxLanguage;
+    businessId?: string;
+  }): Promise<SandboxExecutionResult> {
+    return this.generateCode(dto.prompt, dto.language ?? 'javascript', dto.businessId);
+  }
+
+  async execute(dto: {
+    code: string;
+    language?: SandboxLanguage;
+    businessId?: string;
+    parameters?: Record<string, unknown>;
+  }): Promise<SandboxExecutionResult> {
+    return this.executeCode(dto.code, dto.language ?? 'javascript', dto.businessId, {
+      parameters: dto.parameters,
+    });
+  }
+
+  async auto(dto: {
+    prompt: string;
+    language?: SandboxLanguage;
+    businessId?: string;
+  }): Promise<SandboxExecutionResult> {
+    const generated = await this.generateCode(
+      dto.prompt,
+      dto.language ?? 'javascript',
+      dto.businessId,
+    );
+    if (!generated.success || !generated.output) {
+      return generated;
+    }
+    return this.executeCode(
+      generated.output,
+      dto.language ?? 'javascript',
+      dto.businessId,
+    );
+  }
+
+  listTemplates(): CodeTemplateLibrary {
+    return this.getTemplates();
+  }
+
+  async explain(dto: {
+    code: string;
+    language?: SandboxLanguage;
+    businessId?: string;
+  }): Promise<CodeExplanationResult> {
+    return this.explainCode(dto.code, dto.language ?? 'javascript', dto.businessId);
+  }
+
   // ══════════════════════════════════════════════════════════
   // SQL Execution
   // ══════════════════════════════════════════════════════════
@@ -605,17 +657,17 @@ export class KeyCortexSandboxService {
       };
     }
 
-    // Validate the SQL is a query (SELECT, INSERT, UPDATE with conditions)
+    // Validate the SQL is read-only (SELECT or CTE). INSERT/UPDATE/DELETE are
+    // disabled in this build until we have a real query parser, allowlisted
+    // tables, and row-level policy enforcement.
     const trimmed = code.trim().toUpperCase();
-    const isQuery = trimmed.startsWith('SELECT') ||
-      trimmed.startsWith('WITH') ||
-      trimmed.startsWith('INSERT') ||
-      trimmed.startsWith('UPDATE');
+    const isReadOnlyQuery =
+      trimmed.startsWith('SELECT') || trimmed.startsWith('WITH');
 
-    if (!isQuery) {
+    if (!isReadOnlyQuery) {
       return {
         success: false,
-        error: 'Only SELECT, INSERT, UPDATE, and CTE queries are allowed',
+        error: 'Only read-only SELECT / WITH queries are allowed in the sandbox',
         errorType: 'security',
       };
     }
@@ -639,7 +691,6 @@ export class KeyCortexSandboxService {
     const tableMatch = code.match(/FROM\s*"?(\w+)"?/i);
     const table = tableMatch?.[1];
     if (table && !ALLOWED_TABLES.includes(table)) throw new Error(`Table ${table} not in whitelist`);
-
     // Execute via Prisma with timeout
     try {
       const result = await Promise.race([
@@ -779,6 +830,17 @@ export class KeyCortexSandboxService {
     timeoutMs: number,
     _memoryLimitMb: number,
   ): Promise<Pick<SandboxExecutionResult, 'success' | 'output' | 'error' | 'errorType'>> {
+    // Python execution is disabled outside of development until it can run in a
+    // hardened container / firecracker-style worker with filesystem, network,
+    // and resource isolation.
+    if (process.env.NODE_ENV === 'production') {
+      return {
+        success: false,
+        error: 'Python sandbox execution is disabled in production.',
+        errorType: 'security',
+      };
+    }
+
     return new Promise((resolve) => {
       const timeout = setTimeout(() => {
         child.kill('SIGKILL');
