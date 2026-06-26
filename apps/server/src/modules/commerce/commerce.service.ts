@@ -280,7 +280,7 @@ export class CommerceService {
           target === 'SENT' ? { sentAt: new Date() } : {},
         );
         updated++;
-      } catch (err) {
+      } catch (err: any) {
           this.logger.warn(`409 illegal transition -> skip silently in bulk mode.: ${err instanceof Error ? err.message : err}`);
         }
     }
@@ -1646,7 +1646,7 @@ export class CommerceService {
     if (!link) {
       try {
         link = await this.createPaymentLink(invoice.id, input.businessId);
-      } catch (err) {
+      } catch (err: any) {
         // Reminders are only sent for non-PAID/non-VOID invoices, so the
         // "paid or voided" refusal shouldn't normally fire — but if a
         // payment landed between the status check above and link creation
@@ -1671,7 +1671,7 @@ export class CommerceService {
       const result = await input.deliver({ invoice, recipientEmail, paymentUrl });
       delivered = result.delivered;
       messageId = result.messageId;
-    } catch (err) {
+    } catch (err: any) {
       // Persist the event regardless so the timeline shows the operator's
       // intent even when delivery fails — but surface the error to the UI.
       this.events.emit('invoice.reminder_failed', {

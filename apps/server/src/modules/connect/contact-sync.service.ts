@@ -37,14 +37,14 @@ export class ContactSyncService {
     if (business?.contactsAccessToken) {
       try {
         results.google_contacts = await this.google.sync(businessId);
-      } catch (err) {
+      } catch (err: any) {
         results.google_contacts = { error: err instanceof Error ? err.message : String(err) };
       }
     }
     if (business?.msContactsAccessToken) {
       try {
         results.outlook_contacts = await this.outlook.sync(businessId);
-      } catch (err) {
+      } catch (err: any) {
         results.outlook_contacts = { error: err instanceof Error ? err.message : String(err) };
       }
     }
@@ -92,7 +92,7 @@ export class ContactSyncService {
     if (!businessId || !contactId) return;
     try {
       await this.pushLocalChange(businessId, contactId);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `pushLocalChange failed for ${contactId}: ${
           err instanceof Error ? err.message : String(err)

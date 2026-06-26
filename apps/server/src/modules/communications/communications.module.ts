@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { CommunicationsController } from './communications.controller';
+import { CommunicationsService } from './communications.service';
 import { ChannelConnectionService } from './channel-connection.service';
 import { OutboundContentService } from './outbound-content.service';
 import { DeliveryQueueService } from './delivery-queue.service';
@@ -46,6 +47,7 @@ import { TimelineModule } from '../timeline/timeline.module';
     OmnichannelProcessorService,
     MessageIntakeOrchestrator,
     MessageIntakeListener,
+    CommunicationsService,
   ],
   exports: [
     ChannelConnectionService,
@@ -61,6 +63,7 @@ import { TimelineModule } from '../timeline/timeline.module';
     TriggerDefinitionService,
     OmnichannelProcessorService,
     MessageIntakeOrchestrator,
+    CommunicationsService,
   ],
 })
 export class CommunicationsModule {}

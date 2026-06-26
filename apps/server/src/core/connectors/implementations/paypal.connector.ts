@@ -125,7 +125,7 @@ export class PayPalConnector implements IConnector, IPaymentGatewayConnector {
         account: user.email ?? user.name ?? user.payer_id ?? token.app_id ?? clientId,
         detail: `${isSandbox ? 'Sandbox' : 'Live'}${user.payer_id ? ` • payer ${user.payer_id}` : ''}`,
       };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }
@@ -346,7 +346,7 @@ export class PayPalConnector implements IConnector, IPaymentGatewayConnector {
           const cap = (await capRes.json()) as { amount?: { currency_code?: string } };
           if (cap.amount?.currency_code) captureCurrency = cap.amount.currency_code.toUpperCase();
         }
-      } catch (err) {
+      } catch (err: any) {
           this.logger.debug(`Fall back to USD if capture lookup fails: ${err instanceof Error ? err.message : err}`);
         }
       body.amount = { value: input.amount.toFixed(2), currency_code: captureCurrency };

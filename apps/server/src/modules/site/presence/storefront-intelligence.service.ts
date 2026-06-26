@@ -1203,7 +1203,7 @@ Rules:
           };
         }
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `Presence insights AI narration failed for ${businessId}: ${(err as Error).message}`,
       );

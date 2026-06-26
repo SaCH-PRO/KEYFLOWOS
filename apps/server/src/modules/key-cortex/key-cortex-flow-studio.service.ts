@@ -104,6 +104,8 @@ export class KeyCortexFlowStudioService {
 
     // ── 1.2 Call AI to generate structured flow ──
     const aiResponse = await this.modelGateway.complete({
+      businessId,
+      taskCategory: 'tool-calling',
       model: 'gpt-4o',
       messages: [
         {
@@ -117,13 +119,10 @@ export class KeyCortexFlowStudioService {
         { role: 'user', content: prompt },
       ],
       temperature: 0.3,
-      response_format: { type: 'json_object' },
+      responseFormat: { type: 'json_object' },
     });
 
-    const rawContent =
-      typeof aiResponse.content === 'string'
-        ? aiResponse.content
-        : aiResponse.content?.[0]?.text || '{}';
+    const rawContent = typeof aiResponse.content === 'string' ? aiResponse.content : '{}';
 
     // ── 1.3 Parse AI response ──
     let generated: {
@@ -216,8 +215,8 @@ export class KeyCortexFlowStudioService {
       businessId,
       feature: 'flow_studio_ai_generation',
       model: aiResponse.model || 'gpt-4o',
-      tokensUsed: aiResponse.usage?.total_tokens || 0,
-      costUsd: aiResponse.usage?.cost || 0,
+      tokensUsed: aiResponse.usage?.totalTokens || 0,
+      costUsd: aiResponse.usage?.estimatedCost || 0,
       metadata: {
         flowId: flow.id,
         nodeCount: nodes.length,
@@ -437,12 +436,12 @@ export class KeyCortexFlowStudioService {
           );
 
           const command = {
-            module: node.data.module,
+            module: node.data.module as any,
             action: node.data.action,
             parameters: resolvedParams,
             businessId: flow.businessId,
             userId: (context._userId as string) || 'system',
-            source: 'flow_studio',
+            source: 'key_cortex' as const,
             timestamp: new Date(),
             correlationId: `flow_${flow.id}_${Date.now()}`,
           };
@@ -557,7 +556,7 @@ export class KeyCortexFlowStudioService {
 
       this.eventEmitter.emit(FLOW_EVENTS.NODE_COMPLETED, { result, node, flow });
       return result;
-    } catch (err) {
+    } catch (err: any) {
       const executionTimeMs = Date.now() - startMs;
       const error = err instanceof Error ? err.message : String(err);
       this.logger.error(`[Node Exec] Error on node=${node.id}: ${error}`);
@@ -1211,7 +1210,7 @@ export class KeyCortexFlowStudioService {
       { id: 'tpl_refund_processing', name: 'Refund Processing', description: 'Process refunds and send confirmation.', category: 'Operations', tags: ['operations', 'refunds'], setupTime: '3 min', trigger: { type: 'event', config: {}, eventName: 'refund_requested' }, nodeTypes: ['trigger', 'condition', 'action', 'action', 'notification'] },
       { id: 'tpl_appointment_no_show', name: 'No-Show Follow-up', description: 'Follow up with clients who miss appointments.', category: 'Operations', tags: ['operations', 'no-show'], setupTime: '3 min', trigger: { type: 'event', config: {}, eventName: 'booking_no_show' }, nodeTypes: ['trigger', 'action', 'delay', 'action'] },
       { id: 'tpl_competitor_alert', name: 'Competitor Mention Alert', description: 'Alert when competitors are mentioned in conversations.', category: 'Marketing', tags: ['marketing', 'competitor', 'alert'], setupTime: '5 min', trigger: { type: 'event', config: {}, eventName: 'message_received' }, nodeTypes: ['trigger', 'condition', 'notification', 'action'] },
-    );
+    ];
 
     for (const extra of extras) {
       const nodes: Array<{ type: FlowNodeType; label: string; config: Record<string, unknown> }> = extra.nodeTypes.map((t, i) => ({
@@ -1521,12 +1520,12 @@ export class KeyCortexFlowStudioService {
    */
   async loadFlow(flowId: string): Promise<FlowDefinition | null> {
     try {
-      const record = await this.prisma.flowDefinition.findUnique({
+      const record = await (this.prisma.client as any).flowDefinition.findUnique({
         where: { id: flowId },
       });
       if (!record) return null;
       return this.deserializeFlow(record);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`[Load Flow] ${flowId}: ${(err as Error).message}`);
       return null;
     }
@@ -1537,12 +1536,12 @@ export class KeyCortexFlowStudioService {
    */
   async persistFlow(flow: FlowDefinition): Promise<void> {
     try {
-      await this.prisma.flowDefinition.upsert({
+      await (this.prisma.client as any).flowDefinition.upsert({
         where: { id: flow.id },
         update: this.serializeFlow(flow),
         create: this.serializeFlow(flow),
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`[Persist Flow] ${flow.id}: ${(err as Error).message}`);
       throw err;
     }
@@ -1552,7 +1551,7 @@ export class KeyCortexFlowStudioService {
    * Delete a flow.
    */
   async deleteFlow(flowId: string): Promise<void> {
-    await this.prisma.flowDefinition.delete({ where: { id: flowId } });
+    await (this.prisma.client as any).flowDefinition.delete({ where: { id: flowId } });
     this.eventEmitter.emit(FLOW_EVENTS.FLOW_DELETED, { flowId });
   }
 
@@ -1563,7 +1562,7 @@ export class KeyCortexFlowStudioService {
     businessId: string,
     filters: { status?: string; category?: string } = {},
   ): Promise<FlowDefinition[]> {
-    const records = await this.prisma.flowDefinition.findMany({
+    const records = await (this.prisma.client as any).flowDefinition.findMany({
       where: {
         businessId,
         ...(filters.status ? { status: filters.status } : {}),
@@ -1583,7 +1582,7 @@ export class KeyCortexFlowStudioService {
    */
   async persistExecution(execution: FlowExecution): Promise<void> {
     try {
-      await this.prisma.flowExecution.upsert({
+      await (this.prisma.client as any).flowExecution.upsert({
         where: { id: execution.id },
         update: {
           status: execution.status,
@@ -1606,7 +1605,7 @@ export class KeyCortexFlowStudioService {
           error: execution.error,
         },
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(
         `[Persist Execution] ${execution.id}: ${(err as Error).message}`,
       );
@@ -1620,11 +1619,11 @@ export class KeyCortexFlowStudioService {
     flowId: string,
     limit = 20,
   ): Promise<FlowExecution[]> {
-    const records = await this.prisma.flowExecution.findMany({
+    const records = await (this.prisma.client as any).flowExecution.findMany({
       where: { flowId },
       orderBy: { startedAt: 'desc' },
       take: limit,
-    );
+    });
     return records.map((r: Record<string, unknown>) => this.deserializeExecution(r));
   }
 
@@ -1946,6 +1945,8 @@ export class KeyCortexFlowStudioService {
     const enrichedPrompt = `${prompt}\n\nContext: ${JSON.stringify(context)}\n\nChoose one of: ${options.join(', ')}. Respond with ONLY the chosen option.`;
 
     const aiResponse = await this.modelGateway.complete({
+      businessId: context.businessId as string,
+      taskCategory: 'classification',
       model: 'gpt-4o-mini',
       messages: [
         {
@@ -2155,12 +2156,12 @@ export class KeyCortexFlowStudioService {
         },
         businessId,
         userId: recipient,
-        source: 'flow_studio',
+        source: 'key_cortex' as const,
         timestamp: new Date(),
         correlationId: `flow_notif_${Date.now()}`,
       });
       return { sent: true, channel, title, result };
-    } catch (err) {
+    } catch (err: any) {
       // Fallback: emit event for in-app delivery
       this.eventEmitter.emit('notification.send', {
         businessId,
@@ -2193,7 +2194,7 @@ export class KeyCortexFlowStudioService {
         const fn = new Function('context', 'input', data.transformScript);
         const scriptResult = fn(context, result);
         return { ...result, ...scriptResult };
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(`[Transform] Script error: ${(err as Error).message}`);
         return result;
       }
@@ -2579,7 +2580,7 @@ RULES:
     status: FlowExecution['status'],
   ): Promise<void> {
     try {
-      await this.prisma.flowDefinition.update({
+      await (this.prisma.client as any).flowDefinition.update({
         where: { id: flowId },
         data: {
           executionCount: { increment: 1 },
@@ -2592,7 +2593,7 @@ RULES:
                 : 'warning',
         },
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`[Update Stats] ${flowId}: ${(err as Error).message}`);
     }
   }

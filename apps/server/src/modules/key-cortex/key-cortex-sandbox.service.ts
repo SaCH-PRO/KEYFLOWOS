@@ -177,7 +177,7 @@ export class KeyCortexSandboxService {
         syntaxValid,
         complexity,
       };
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`Code generation failed: ${(error as Error).message}`);
       throw new BadRequestException(
         `Failed to generate code: ${(error as Error).message}`,
@@ -229,7 +229,7 @@ export class KeyCortexSandboxService {
         };
       }
 
-      let result: SandboxExecutionResult;
+      let result: Partial<SandboxExecutionResult>;
 
       switch (language) {
         case 'sql':
@@ -255,8 +255,8 @@ export class KeyCortexSandboxService {
         context?.userId,
         code,
         language,
-        result.success,
-        result.errorType,
+        result.success ?? false,
+        result.errorType ?? 'runtime',
         executionTimeMs,
       );
 
@@ -265,8 +265,8 @@ export class KeyCortexSandboxService {
         executionTimeMs,
         language,
         code,
-      };
-    } catch (error) {
+      } as SandboxExecutionResult;
+    } catch (error: any) {
       executionTimeMs = Date.now() - startTime;
       const errorMsg = (error as Error).message;
 
@@ -385,7 +385,7 @@ export class KeyCortexSandboxService {
         name: 'Generate Weekly Report',
         description: 'Generate a summary report of key business metrics for the week.',
         language: 'javascript',
-        code: `const reportData = JSON.parse('{{reportData}}');\nconst { newCustomers, totalRevenue, newOrders, topProducts } = reportData;\n\nconst startDate = new Date();\nstartDate.setDate(startDate.getDate() - 7);\nconst endDate = new Date();\n\nconst report = {\n  period: { start: startDate.toISOString().split('T')[0], end: endDate.toISOString().split('T')[0] },\n  summary: {\n    newCustomers: newCustomers || 0,\n    totalRevenue: totalRevenue || 0,\n    newOrders: newOrders || 0,\n    avgOrderValue: newOrders > 0 ? (totalRevenue / newOrders).toFixed(2) : '0.00',\n  },\n  highlights: [\n    \\`\${newCustomers || 0} new customers acquired\\`,\n    \\`\\$\\${(totalRevenue || 0).toFixed(2)} in total revenue\\`,\n    \\`\${newOrders || 0} orders placed\\`,\n  ],\n  topProducts: (topProducts || []).slice(0, 5),\n  generatedAt: new Date().toISOString(),\n};\n\nconsole.log(JSON.stringify(report, null, 2));`,
+        code: `const reportData = JSON.parse('{{reportData}}');\nconst { newCustomers, totalRevenue, newOrders, topProducts } = reportData;\n\nconst startDate = new Date();\nstartDate.setDate(startDate.getDate() - 7);\nconst endDate = new Date();\n\nconst report = {\n  period: { start: startDate.toISOString().split('T')[0], end: endDate.toISOString().split('T')[0] },\n  summary: {\n    newCustomers: newCustomers || 0,\n    totalRevenue: totalRevenue || 0,\n    newOrders: newOrders || 0,\n    avgOrderValue: newOrders > 0 ? (totalRevenue / newOrders).toFixed(2) : '0.00',\n  },\n  highlights: [\n    \`\${newCustomers || 0} new customers acquired\`,\n    \`\$\${(totalRevenue || 0).toFixed(2)} in total revenue\`,\n    \`\${newOrders || 0} orders placed\`,\n  ],\n  topProducts: (topProducts || []).slice(0, 5),\n  generatedAt: new Date().toISOString(),\n};\n\nconsole.log(JSON.stringify(report, null, 2));`,
         parameters: [
           { name: 'reportData', type: 'json', description: 'JSON object with newCustomers, totalRevenue, newOrders, topProducts', required: true },
         ],
@@ -397,7 +397,7 @@ export class KeyCortexSandboxService {
         name: 'Clean Up Old Data',
         description: 'Generate a cleanup script for archiving or removing old records.',
         language: 'javascript',
-        code: `const config = JSON.parse('{{config}}');\nconst { tableName, dateField, daysOld, dryRun = true } = config;\n\nif (!tableName || !dateField || !daysOld) {\n  throw new Error('tableName, dateField, and daysOld are required');\n}\n\nconst cutoffDate = new Date();\ncutoffDate.setDate(cutoffDate.getDate() - daysOld);\nconst cutoffIso = cutoffDate.toISOString();\n\nconst plan = {\n  action: dryRun ? 'DRY_RUN' : 'EXECUTE',\n  table: tableName,\n  dateField: dateField,\n  cutoffDate: cutoffIso,\n  daysOld: daysOld,\n  query: \\`SELECT COUNT(*) FROM \\${tableName} WHERE \\${dateField} < '\\${cutoffIso}'\\`,\n  deleteQuery: \\`DELETE FROM \\${tableName} WHERE \\${dateField} < '\\${cutoffIso}'\\`,\n  warning: 'Review the dry run results before executing.',\n  generatedAt: new Date().toISOString(),\n};\n\nconsole.log(JSON.stringify(plan, null, 2));`,
+        code: `const config = JSON.parse('{{config}}');\nconst { tableName, dateField, daysOld, dryRun = true } = config;\n\nif (!tableName || !dateField || !daysOld) {\n  throw new Error('tableName, dateField, and daysOld are required');\n}\n\nconst cutoffDate = new Date();\ncutoffDate.setDate(cutoffDate.getDate() - daysOld);\nconst cutoffIso = cutoffDate.toISOString();\n\nconst plan = {\n  action: dryRun ? 'DRY_RUN' : 'EXECUTE',\n  table: tableName,\n  dateField: dateField,\n  cutoffDate: cutoffIso,\n  daysOld: daysOld,\n  query: \`SELECT COUNT(*) FROM \${tableName} WHERE \${dateField} < '\${cutoffIso}'\`,\n  deleteQuery: \`DELETE FROM \${tableName} WHERE \${dateField} < '\${cutoffIso}'\`,\n  warning: 'Review the dry run results before executing.',\n  generatedAt: new Date().toISOString(),\n};\n\nconsole.log(JSON.stringify(plan, null, 2));`,
         parameters: [
           { name: 'config', type: 'json', description: 'JSON with tableName, dateField, daysOld, dryRun', required: true },
         ],
@@ -428,7 +428,7 @@ export class KeyCortexSandboxService {
         name: 'Invoice PDF Template',
         description: 'A styled HTML template for generating invoice PDFs.',
         language: 'html',
-        code: `<!DOCTYPE html>\n<html>\n<head>\n  <meta charset="UTF-8">\n  <title>Invoice {{invoiceNumber}}</title>\n  <style>\n    body { font-family: 'Segoe UI', Arial, sans-serif; margin: 40px; color: #333; }\n    .invoice-header { display: flex; justify-content: space-between; border-bottom: 3px solid {{accentColor}}; padding-bottom: 20px; margin-bottom: 30px; }\n    .company-info h1 { margin: 0; color: {{accentColor}}; }\n    .invoice-meta { text-align: right; }\n    .invoice-meta h2 { margin: 0; color: {{accentColor}}; }\n    .client-section { margin-bottom: 30px; }\n    table { width: 100%; border-collapse: collapse; margin: 20px 0; }\n    th { background: {{accentColor}}; color: white; padding: 12px; text-align: left; }\n    td { padding: 12px; border-bottom: 1px solid #eee; }\n    .totals { text-align: right; margin-top: 20px; }\n    .totals .grand { font-size: 1.3em; font-weight: bold; color: {{accentColor}}; }\n    .notes { margin-top: 30px; padding: 15px; background: #f9f9f9; border-radius: 4px; }\n    .status { display: inline-block; padding: 6px 16px; border-radius: 20px; font-weight: bold; text-transform: uppercase; font-size: 0.85em; }\n    .status-paid { background: #d4edda; color: #155724; }\n    .status-pending { background: #fff3cd; color: #856404; }\n    .status-overdue { background: #f8d7da; color: #721c24; }\n  </style>\n</head>\n<body>\n  <div class="invoice-header">\n    <div class="company-info">\n      <h1>{{companyName}}</h1>\n      <p>{{companyAddress}}<br>{{companyEmail}}<br>{{companyPhone}}</p>\n    </div>\n    <div class="invoice-meta">\n      <h2>INVOICE</h2>\n      <p><strong>#{{invoiceNumber}}</strong></p>\n      <p>Date: {{invoiceDate}}</p>\n      <p>Due: {{dueDate}}</p>\n      <span class="status status-{{status}}">{{status}}</span>\n    </div>\n  </div>\n  <div class="client-section">\n    <strong>Bill To:</strong><br>\n    {{clientName}}<br>\n    {{clientAddress}}\n  </div>\n  <table>\n    <thead>\n      <tr><th>Item</th><th>Description</th><th>Qty</th><th>Rate</th><th>Amount</th></tr>\n    </thead>\n    <tbody>\n      {{#each lineItems}}\n      <tr>\n        <td>{{name}}</td>\n        <td>{{description}}</td>\n        <td>{{quantity}}</td>\n        <td>${{rate}}</td>\n        <td>${{amount}}</td>\n      </tr>\n      {{/each}}\n    </tbody>\n  </table>\n  <div class="totals">\n    <p>Subtotal: ${{subtotal}}</p>\n    <p>Tax ({{taxRate}}%): ${{taxAmount}}</p>\n    <p class="grand">Total: ${{total}}</p>\n  </div>\n  <div class="notes">\n    <strong>Notes:</strong> {{notes}}\n  </div>\n</body>\n</html>`,
+        code: `<!DOCTYPE html>\n<html>\n<head>\n  <meta charset="UTF-8">\n  <title>Invoice {{invoiceNumber}}</title>\n  <style>\n    body { font-family: 'Segoe UI', Arial, sans-serif; margin: 40px; color: #333; }\n    .invoice-header { display: flex; justify-content: space-between; border-bottom: 3px solid {{accentColor}}; padding-bottom: 20px; margin-bottom: 30px; }\n    .company-info h1 { margin: 0; color: {{accentColor}}; }\n    .invoice-meta { text-align: right; }\n    .invoice-meta h2 { margin: 0; color: {{accentColor}}; }\n    .client-section { margin-bottom: 30px; }\n    table { width: 100%; border-collapse: collapse; margin: 20px 0; }\n    th { background: {{accentColor}}; color: white; padding: 12px; text-align: left; }\n    td { padding: 12px; border-bottom: 1px solid #eee; }\n    .totals { text-align: right; margin-top: 20px; }\n    .totals .grand { font-size: 1.3em; font-weight: bold; color: {{accentColor}}; }\n    .notes { margin-top: 30px; padding: 15px; background: #f9f9f9; border-radius: 4px; }\n    .status { display: inline-block; padding: 6px 16px; border-radius: 20px; font-weight: bold; text-transform: uppercase; font-size: 0.85em; }\n    .status-paid { background: #d4edda; color: #155724; }\n    .status-pending { background: #fff3cd; color: #856404; }\n    .status-overdue { background: #f8d7da; color: #721c24; }\n  </style>\n</head>\n<body>\n  <div class="invoice-header">\n    <div class="company-info">\n      <h1>{{companyName}}</h1>\n      <p>{{companyAddress}}<br>{{companyEmail}}<br>{{companyPhone}}</p>\n    </div>\n    <div class="invoice-meta">\n      <h2>INVOICE</h2>\n      <p><strong>#{{invoiceNumber}}</strong></p>\n      <p>Date: {{invoiceDate}}</p>\n      <p>Due: {{dueDate}}</p>\n      <span class="status status-{{status}}">{{status}}</span>\n    </div>\n  </div>\n  <div class="client-section">\n    <strong>Bill To:</strong><br>\n    {{clientName}}<br>\n    {{clientAddress}}\n  </div>\n  <table>\n    <thead>\n      <tr><th>Item</th><th>Description</th><th>Qty</th><th>Rate</th><th>Amount</th></tr>\n    </thead>\n    <tbody>\n      {{#each lineItems}}\n      <tr>\n        <td>{{name}}</td>\n        <td>{{description}}</td>\n        <td>{{quantity}}</td>\n        <td>\${{rate}}</td>\n        <td>\${{amount}}</td>\n      </tr>\n      {{/each}}\n    </tbody>\n  </table>\n  <div class="totals">\n    <p>Subtotal: \${{subtotal}}</p>\n    <p>Tax ({{taxRate}}%): \${{taxAmount}}</p>\n    <p class="grand">Total: \${{total}}</p>\n  </div>\n  <div class="notes">\n    <strong>Notes:</strong> {{notes}}\n  </div>\n</body>\n</html>`,
         parameters: [
           { name: 'companyName', type: 'string', description: 'Business name', required: true },
           { name: 'companyAddress', type: 'string', description: 'Business address', required: true },
@@ -574,7 +574,7 @@ export class KeyCortexSandboxService {
         warnings: parsed.warnings,
         suggestions: parsed.suggestions,
       };
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`Code explanation failed: ${(error as Error).message}`);
 
       // Fallback: return basic explanation
@@ -588,55 +588,116 @@ export class KeyCortexSandboxService {
   }
 
   // Controller-facing aliases (the controller uses shorter method names)
-  async generate(dto: {
-    prompt: string;
-    language?: SandboxLanguage;
-    businessId?: string;
-  }): Promise<SandboxExecutionResult> {
-    return this.generateCode(dto.prompt, dto.language ?? 'javascript', dto.businessId);
-  }
-
-  async execute(dto: {
-    code: string;
-    language?: SandboxLanguage;
-    businessId?: string;
-    parameters?: Record<string, unknown>;
-  }): Promise<SandboxExecutionResult> {
-    return this.executeCode(dto.code, dto.language ?? 'javascript', dto.businessId, {
-      parameters: dto.parameters,
+  async generate(
+    prompt: string,
+    options: {
+      language?: SandboxLanguage;
+      context?: Record<string, unknown>;
+      businessId?: string;
+    } = {},
+  ): Promise<SandboxGenerationResult> {
+    if (!options.businessId) {
+      throw new BadRequestException('businessId is required');
+    }
+    return this.generateCode({
+      description: prompt,
+      language: options.language ?? 'javascript',
+      context: { businessId: options.businessId },
     });
   }
 
-  async auto(dto: {
-    prompt: string;
-    language?: SandboxLanguage;
-    businessId?: string;
-  }): Promise<SandboxExecutionResult> {
-    const generated = await this.generateCode(
-      dto.prompt,
-      dto.language ?? 'javascript',
-      dto.businessId,
-    );
-    if (!generated.success || !generated.output) {
-      return generated;
+  async execute(
+    code: string,
+    options: {
+      language?: SandboxLanguage;
+      inputs?: Record<string, unknown>;
+      timeoutMs?: number;
+      businessId?: string;
+    } = {},
+  ): Promise<{ output: string; exitCode: number; executionTimeMs: number; logs?: string[] }> {
+    if (!options.businessId) {
+      throw new BadRequestException('businessId is required');
     }
-    return this.executeCode(
-      generated.output,
-      dto.language ?? 'javascript',
-      dto.businessId,
-    );
+    const result = await this.executeCode({
+      code,
+      language: options.language ?? 'javascript',
+      context: {
+        businessId: options.businessId,
+        userId: '',
+        variables: options.inputs,
+        databaseAccess: true,
+      },
+      timeoutMs: options.timeoutMs,
+    });
+    return {
+      output: result.success ? (result.output ?? '') : (result.error ?? ''),
+      exitCode: result.success ? 0 : 1,
+      executionTimeMs: result.executionTimeMs,
+      logs: [],
+    };
   }
 
-  listTemplates(): CodeTemplateLibrary {
-    return this.getTemplates();
-  }
-
-  async explain(dto: {
+  async auto(
+    prompt: string,
+    options: {
+      language?: SandboxLanguage;
+      execute?: boolean;
+      inputs?: Record<string, unknown>;
+      businessId?: string;
+    } = {},
+  ): Promise<{
     code: string;
-    language?: SandboxLanguage;
-    businessId?: string;
-  }): Promise<CodeExplanationResult> {
-    return this.explainCode(dto.code, dto.language ?? 'javascript', dto.businessId);
+    executed: boolean;
+    output?: string;
+    exitCode?: number;
+    explanation?: string;
+  }> {
+    if (!options.businessId) {
+      throw new BadRequestException('businessId is required');
+    }
+    const generation = await this.generate(prompt, options);
+    if (options.execute === false || !generation.code) {
+      return {
+        code: generation.code,
+        executed: false,
+        explanation: generation.explanation,
+      };
+    }
+    const execution = await this.execute(generation.code, {
+      language: generation.language,
+      businessId: options.businessId,
+      inputs: options.inputs,
+    });
+    return {
+      code: generation.code,
+      executed: true,
+      output: execution.output,
+      exitCode: execution.exitCode,
+      explanation: generation.explanation,
+    };
+  }
+
+  listTemplates(options?: { language?: string; category?: string }): CodeTemplateLibrary {
+    const all = this.getTemplates();
+    if (!options) return all;
+    return {
+      ...all,
+      templates: all.templates.filter(
+        (t) =>
+          (!options.language || t.language === options.language) &&
+          (!options.category || t.category === options.category),
+      ),
+    };
+  }
+
+  async explain(
+    code: string,
+    options: {
+      language?: SandboxLanguage;
+      businessId?: string;
+    } = {},
+  ): Promise<CodeExplanationResult> {
+    return this.explainCode(code, options.language ?? 'javascript', options.businessId);
   }
 
   // ══════════════════════════════════════════════════════════
@@ -694,7 +755,7 @@ export class KeyCortexSandboxService {
     // Execute via Prisma with timeout
     try {
       const result = await Promise.race([
-        this.prisma.client.$queryRawUnsafe(code),
+        (this.prisma.client as any).$queryRawUnsafe(code),
         new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error('SQL execution timeout')), timeoutMs),
         ),
@@ -707,7 +768,7 @@ export class KeyCortexSandboxService {
         success: true,
         output: JSON.stringify(limited, null, 2),
       };
-    } catch (error) {
+    } catch (error: any) {
       const msg = (error as Error).message;
       if (msg.includes('timeout')) {
         return { success: false, error: msg, errorType: 'timeout' };
@@ -812,7 +873,7 @@ export class KeyCortexSandboxService {
         success: true,
         output: output || '(no output)',
       };
-    } catch (error) {
+    } catch (error: any) {
       const msg = (error as Error).message;
       if (msg.includes('Script execution timed out')) {
         return { success: false, error: 'Execution timed out', errorType: 'timeout' };
@@ -1183,7 +1244,7 @@ export class KeyCortexSandboxService {
       const codeHash = await this.hashCode(code);
 
       // Log to Prisma
-      await this.prisma.client.sandboxExecutionLog.create({
+      await (this.prisma.client as any).sandboxExecutionLog.create({
         data: {
           businessId,
           userId: userId || null,

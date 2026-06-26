@@ -69,7 +69,7 @@ export class TemporalFlowMemoryService {
             confidence: record.confidence,
           },
         });
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(`Embedding failed for memory ${record.id}: ${(err as Error).message}`);
       }
     }
@@ -265,7 +265,7 @@ export class TemporalFlowMemoryService {
       try {
         await this.summarizeThread(businessId, threadId);
         results.threads++;
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(`Thread compaction failed ${threadId}: ${(err as Error).message}`);
       }
     }
@@ -274,7 +274,7 @@ export class TemporalFlowMemoryService {
       try {
         await this.summarizeContact(businessId, contactId);
         results.contacts++;
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(`Contact compaction failed ${contactId}: ${(err as Error).message}`);
       }
     }
@@ -283,7 +283,7 @@ export class TemporalFlowMemoryService {
       try {
         await this.summarizeChannel(businessId, channel);
         results.channels++;
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(`Channel compaction failed ${channel}: ${(err as Error).message}`);
       }
     }

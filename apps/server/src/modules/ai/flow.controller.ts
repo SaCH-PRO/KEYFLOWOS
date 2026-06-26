@@ -68,7 +68,7 @@ export class FlowController {
         if (res.destroyed) break;
         res.write(`data: ${JSON.stringify(chunk)}\n\n`);
       }
-    } catch (error) {
+    } catch (error: any) {
       if (!res.destroyed) {
         res.write(`data: ${JSON.stringify({ type: 'error', error: (error as Error).message })}\n\n`);
       }

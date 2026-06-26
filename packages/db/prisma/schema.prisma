@@ -195,96 +195,99 @@ model Business {
   crmAttributionWindowDays Int? @map("crm_attribution_window_days")
 
   // Module Relationships
-  members                  Membership[]
-  contacts                 Contact[]
-  accounts                 Account[]
-  deals                    Deal[]
-  dealStages               DealStage[]
-  wonLostReasons           WonLostReason[]
-  invoices                 Invoice[]
-  quotes                   Quote[]
-  products                 Product[]
-  bookings                 Booking[]
-  contactEvents            ContactEvent[]
-  publicVisitorEvents      PublicVisitorEvent[]
-  publicEvents             PublicEvent[]
-  publicVisitors           PublicVisitor[]
-  presenceDailyStats       PresenceDailyStat[]
-  presenceInsightSnapshot  PresenceInsightSnapshot?
-  contactChannelStats      ContactChannelStat[]
-  contactNotes             ContactNote[]
-  contactTasks             ContactTask[]
-  contactImports           ContactImport[]
-  contactMedia             ContactMedia[]
-  playbooks                ContactPlaybook[]
-  services                 Service[]
-  staff                    StaffMember[]
-  socialPosts              SocialPost[]
-  socialConns              SocialConnection[]
-  socialEngagements        SocialEngagement[]
-  automations              Automation[]
-  projects                 Project[]
-  projectTasks             ProjectTask[]
-  projectTemplates         ProjectTemplate[]
-  sites                    Site[]
-  autopilotTasks           AutopilotTask[]
-  delegationLoops          DelegationLoop[]
-  ingestionItems           IngestionItem[]
-  delegationLoopRuns       DelegationLoopRun[]
-  notifications            Notification[]
-  subscriptions            Subscription[]
-  activities               Activity[]
-  expenses                 Expense[]
-  expenseCategories        ExpenseCategory[]
-  expenseBudgets           ExpenseBudget[]
-  recurringInvoices        RecurringInvoice[]
-  recurringExpenses        RecurringExpense[]
-  emailCampaigns           EmailCampaign[]
-  emailContacts            EmailCampaignContact[]
-  leadForms                LeadForm[]
-  leadSubmissions          LeadFormSubmission[]
-  googleFormMappings       GoogleFormMapping[]
-  businessTemplates        BusinessTemplateUsage[]
-  courses                  Course[]
-  courseEnrollments        CourseEnrollment[]
-  communityPosts           CommunityPost[]
-  communityComments        CommunityComment[]
-  cohorts                  Cohort[]
-  cohortMembers            CohortMember[]
-  landingPages             LandingPage[]
-  webhooks                 Webhook[]
-  aiUsageLogs              AiUsageLog[]
-  marketplaceListings      MarketplaceListing[]
-  shippingZones            ShippingZone[]
-  warehouses               Warehouse[]
-  inventoryStocks          InventoryStock[]
-  stockMovements           StockMovement[]
-  shipments                Shipment[]
-  customsDeclarations      CustomsDeclaration[]
-  preOrders                PreOrder[]
-  purchaseOrders           PurchaseOrder[]
-  goodsReceipts            GoodsReceipt[]
-  marketplaceOrders        MarketplaceOrder[]
-  fulfillmentRoutes        FulfillmentRoute[]
-  promoCodes               PromoCode[]
-  crmSequences             CrmSequence[]
-  crossModuleWorkflows     CrossModuleWorkflow[]
-  scheduledAgentJobs       ScheduledAgentJob[]
-  customerNotificationLogs CustomerNotificationLog[]
-  apiKeys                  ApiKey[]
-  guidanceProfile          BusinessGuidanceProfile?
-  guidanceAssessments      GuidanceAssessment[]
-  revenueActions           RevenueAction[]
-  financeActionItems       FinanceActionItem[]
-  supportTickets           SupportTicket[]
-  orgUnits                 OrgUnit[]
-  jobRoles                 JobRole[]
-  orgAssignments           OrgAssignment[]
-  delegationRules          DelegationRule[]
-  businessRules            BusinessRule[]
-  businessSignals          BusinessSignal[]
-  healthSnapshots          BusinessHealthSnapshot[]
-  genomeMemoryEvents       GenomeMemoryEvent[]
+  members                      Membership[]
+  contacts                     Contact[]
+  accounts                     Account[]
+  deals                        Deal[]
+  dealStages                   DealStage[]
+  wonLostReasons               WonLostReason[]
+  invoices                     Invoice[]
+  quotes                       Quote[]
+  products                     Product[]
+  bookings                     Booking[]
+  contactEvents                ContactEvent[]
+  publicVisitorEvents          PublicVisitorEvent[]
+  publicEvents                 PublicEvent[]
+  publicVisitors               PublicVisitor[]
+  presenceDailyStats           PresenceDailyStat[]
+  presenceInsightSnapshot      PresenceInsightSnapshot?
+  contactChannelStats          ContactChannelStat[]
+  contactNotes                 ContactNote[]
+  contactTasks                 ContactTask[]
+  contactImports               ContactImport[]
+  contactMedia                 ContactMedia[]
+  playbooks                    ContactPlaybook[]
+  services                     Service[]
+  staff                        StaffMember[]
+  socialPosts                  SocialPost[]
+  socialConns                  SocialConnection[]
+  socialEngagements            SocialEngagement[]
+  automations                  Automation[]
+  projects                     Project[]
+  projectTasks                 ProjectTask[]
+  projectTemplates             ProjectTemplate[]
+  sites                        Site[]
+  autopilotTasks               AutopilotTask[]
+  delegationLoops              DelegationLoop[]
+  ingestionItems               IngestionItem[]
+  delegationLoopRuns           DelegationLoopRun[]
+  notifications                Notification[]
+  subscriptions                Subscription[]
+  activities                   Activity[]
+  expenses                     Expense[]
+  expenseCategories            ExpenseCategory[]
+  expenseBudgets               ExpenseBudget[]
+  recurringInvoices            RecurringInvoice[]
+  recurringExpenses            RecurringExpense[]
+  emailCampaigns               EmailCampaign[]
+  emailContacts                EmailCampaignContact[]
+  leadForms                    LeadForm[]
+  leadSubmissions              LeadFormSubmission[]
+  googleFormMappings           GoogleFormMapping[]
+  businessTemplates            BusinessTemplateUsage[]
+  courses                      Course[]
+  courseEnrollments            CourseEnrollment[]
+  communityPosts               CommunityPost[]
+  communityComments            CommunityComment[]
+  cohorts                      Cohort[]
+  cohortMembers                CohortMember[]
+  landingPages                 LandingPage[]
+  webhooks                     Webhook[]
+  aiUsageLogs                  AiUsageLog[]
+  marketplaceListings          MarketplaceListing[]
+  keystoreServiceCategories    KeystoreServiceCategory[]
+  keystoreServiceListings      KeystoreServiceListing[]
+  keystoreServiceOrders        KeystoreServiceOrder[]
+  shippingZones                ShippingZone[]
+  warehouses                   Warehouse[]
+  inventoryStocks              InventoryStock[]
+  stockMovements               StockMovement[]
+  shipments                    Shipment[]
+  customsDeclarations          CustomsDeclaration[]
+  preOrders                    PreOrder[]
+  purchaseOrders               PurchaseOrder[]
+  goodsReceipts                GoodsReceipt[]
+  marketplaceOrders            MarketplaceOrder[]
+  fulfillmentRoutes            FulfillmentRoute[]
+  promoCodes                   PromoCode[]
+  crmSequences                 CrmSequence[]
+  crossModuleWorkflows         CrossModuleWorkflow[]
+  scheduledAgentJobs           ScheduledAgentJob[]
+  customerNotificationLogs     CustomerNotificationLog[]
+  apiKeys                      ApiKey[]
+  guidanceProfile              BusinessGuidanceProfile?
+  guidanceAssessments          GuidanceAssessment[]
+  revenueActions               RevenueAction[]
+  financeActionItems           FinanceActionItem[]
+  supportTickets               SupportTicket[]
+  orgUnits                     OrgUnit[]
+  jobRoles                     JobRole[]
+  orgAssignments               OrgAssignment[]
+  delegationRules              DelegationRule[]
+  businessRules                BusinessRule[]
+  businessSignals              BusinessSignal[]
+  healthSnapshots              BusinessHealthSnapshot[]
+  genomeMemoryEvents           GenomeMemoryEvent[]
   genomeRecommendationOutcomes GenomeRecommendationOutcome[]
   genomeOutcomeLearningWindows GenomeOutcomeLearningWindow[]
 
@@ -567,6 +570,37 @@ model Business {
   // Phase 1 MD: KEY Commands
   keyCommands  KeyCommand[]
   commandItems CommandItem[]
+
+  // KEY Cortex & Connector merged-remote compatibility tables
+  cortexSessions         CortexSession[]
+  cortexActionLogs       CortexActionLog[]
+  keyDocuments           KeyDocument[]
+  keyEvolutionLogs       KeyEvolutionLog[]
+  keyCallSessions        KeyCallSession[]
+  keyTuningLogs          KeyTuningLog[]
+  keyUserPreferences     KeyUserPreferences[]
+  keyInteractionFeedback KeyInteractionFeedback[]
+  sandboxExecutionLogs   SandboxExecutionLog[]
+  aiApprovalRequests     AiApprovalRequest[]
+  connectorHealthLogs    ConnectorHealthLog[]
+  syncJobs               SyncJob[]
+  businessSetting        BusinessSetting?
+  businessGenome         BusinessGenome?
+  activityLogs           ActivityLog[]
+  tasks                  Task[]
+  messages               Message[]
+  flowDefinitions        FlowDefinition[]
+  flowExecutions         FlowExecution[]
+  reports                Report[]
+  reminders              Reminder[]
+  workflows              Workflow[]
+  documents              Document[]
+  leads                  Lead[]
+  campaigns              Campaign[]
+  outboundCampaigns      OutboundCampaign[]
+  crmTasks               CrmTask[]
+  crmActivities          CrmActivity[]
+  helpdeskTickets        HelpdeskTicket[]
 
   // OS-2 through OS-7: Business Knowledge Graph, Governance, Finance, Operations, Marketing, Strategy
   entityLinks            BusinessEntityLink[]
@@ -927,20 +961,20 @@ model GenomeRecommendationOutcome {
 
   domain          String
   actionType      String   @map("action_type")
-  decision        String   // ACTIVE | ACCEPTED | DISMISSED | APPLIED | IGNORED | ESCALATED
+  decision        String // ACTIVE | ACCEPTED | DISMISSED | APPLIED | IGNORED | ESCALATED
   decidedBy       String?  @map("decided_by") // userId or key-agent
   decidedAt       DateTime @default(now()) @map("decided_at")
   dismissalReason String?  @map("dismissal_reason")
 
-  preHealthScore     Int?     @map("pre_health_score")
-  preReadinessScore  Int?     @map("pre_readiness_score")
-  preConfidence      Int?     @map("pre_confidence")
-  preRiskLevel       String?  @map("pre_risk_level")
+  preHealthScore    Int?    @map("pre_health_score")
+  preReadinessScore Int?    @map("pre_readiness_score")
+  preConfidence     Int?    @map("pre_confidence")
+  preRiskLevel      String? @map("pre_risk_level")
 
-  postHealthScore    Int?     @map("post_health_score")
-  postReadinessScore Int?     @map("post_readiness_score")
-  postConfidence     Int?     @map("post_confidence")
-  postRiskLevel      String?  @map("post_risk_level")
+  postHealthScore    Int?      @map("post_health_score")
+  postReadinessScore Int?      @map("post_readiness_score")
+  postConfidence     Int?      @map("post_confidence")
+  postRiskLevel      String?   @map("post_risk_level")
   observedAt         DateTime? @map("observed_at")
 
   impactScore    Float?   @map("impact_score") // -1 .. 1 normalized
@@ -1242,19 +1276,19 @@ model GenomeCustomerSalesSnapshot {
 
 // Phase 15: Operations / Delivery Genome
 model GenomeOperationalProcess {
-  id         String @id @default(cuid())
-  businessId String @map("business_id")
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
   name        String
   description String?
 
-  processType String @map("process_type")
+  processType String  @map("process_type")
   ownerRole   String? @map("owner_role")
 
-  frequency String?
+  frequency  String?
   documented Boolean @default(false)
-  hasSop      Boolean @default(false) @map("has_sop")
+  hasSop     Boolean @default(false) @map("has_sop")
 
   averageCycleTimeHours Float? @map("average_cycle_time_hours")
   failureRate           Float? @map("failure_rate")
@@ -1264,9 +1298,9 @@ model GenomeOperationalProcess {
   automationCandidate Boolean @default(false) @map("automation_candidate")
   autonomySensitive   Boolean @default(false) @map("autonomy_sensitive")
 
-  maturityScore Float @default(0) @map("maturity_score")
+  maturityScore Float  @default(0) @map("maturity_score")
   riskLevel     String @default("MEDIUM") @map("risk_level")
-  confidence    Float @default(0.5)
+  confidence    Float  @default(0.5)
 
   bottlenecks     Json @default("[]")
   missingInputs   Json @default("[]") @map("missing_inputs")
@@ -1286,8 +1320,8 @@ model GenomeOperationalProcess {
 }
 
 model GenomeDeliveryCapability {
-  id         String @id @default(cuid())
-  businessId String @map("business_id")
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
   name        String
@@ -1295,22 +1329,22 @@ model GenomeDeliveryCapability {
 
   capabilityType String @map("capability_type")
 
-  currentCapacity Float? @map("current_capacity")
-  maxCapacity     Float? @map("max_capacity")
+  currentCapacity Float?  @map("current_capacity")
+  maxCapacity     Float?  @map("max_capacity")
   capacityUnit    String? @map("capacity_unit")
 
-  utilizationRate Float? @map("utilization_rate")
-  backlogVolume   Float? @map("backlog_volume")
+  utilizationRate     Float? @map("utilization_rate")
+  backlogVolume       Float? @map("backlog_volume")
   averageLeadTimeDays Float? @map("average_lead_time_days")
 
-  qualityScore Float? @map("quality_score")
+  qualityScore     Float? @map("quality_score")
   reliabilityScore Float? @map("reliability_score")
 
   riskLevel  String @default("MEDIUM") @map("risk_level")
-  confidence Float @default(0.5)
+  confidence Float  @default(0.5)
 
-  constraints Json @default("[]")
-  dependencies Json @default("[]")
+  constraints     Json @default("[]")
+  dependencies    Json @default("[]")
   recommendations Json @default("[]")
 
   sourceModule     String? @map("source_module")
@@ -1326,25 +1360,25 @@ model GenomeDeliveryCapability {
 }
 
 model GenomeOperationsSnapshot {
-  id         String @id @default(cuid())
-  businessId String @map("business_id")
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
   period String?
 
-  processCount      Int @default(0) @map("process_count")
-  documentedCount   Int @default(0) @map("documented_count")
-  sopCoverageRate   Float? @map("sop_coverage_rate")
+  processCount    Int    @default(0) @map("process_count")
+  documentedCount Int    @default(0) @map("documented_count")
+  sopCoverageRate Float? @map("sop_coverage_rate")
 
   averageProcessMaturity Float? @map("average_process_maturity")
   averageUtilizationRate Float? @map("average_utilization_rate")
   averageLeadTimeDays    Float? @map("average_lead_time_days")
 
-  bottleneckCount     Int @default(0) @map("bottleneck_count")
-  highRiskProcessCount Int @default(0) @map("high_risk_process_count")
+  bottleneckCount           Int @default(0) @map("bottleneck_count")
+  highRiskProcessCount      Int @default(0) @map("high_risk_process_count")
   overloadedCapabilityCount Int @default(0) @map("overloaded_capability_count")
 
-  deliveryReadinessScore Float @default(0) @map("delivery_readiness_score")
+  deliveryReadinessScore Float  @default(0) @map("delivery_readiness_score")
   qualityRisk            String @default("UNKNOWN") @map("quality_risk")
   capacityRisk           String @default("UNKNOWN") @map("capacity_risk")
   sopRisk                String @default("UNKNOWN") @map("sop_risk")
@@ -1372,10 +1406,10 @@ model GenomeGrowthChannel {
   channelType String @map("channel_type") // owned | earned | paid
   status      String @default("ACTIVE") // ACTIVE | TESTING | PAUSED | DEPRECATED
 
-  monthlyBudget        Float?  @map("monthly_budget")
-  currency             String  @default("TTD")
-  targetCac            Float?  @map("target_cac")
-  targetConversionRate Float?  @map("target_conversion_rate")
+  monthlyBudget        Float? @map("monthly_budget")
+  currency             String @default("TTD")
+  targetCac            Float? @map("target_cac")
+  targetConversionRate Float? @map("target_conversion_rate")
 
   assumptions Json     @default("{}")
   evidenceIds String[] @default([]) @map("evidence_ids")
@@ -1424,12 +1458,12 @@ model GenomeMarketingSnapshot {
 
   period String?
 
-  channelMix                  Json    @default("[]")
-  leadVolumeEstimate          Float?  @map("lead_volume_estimate")
-  blendedCac                  Float?  @map("blended_cac")
-  contentConsistencyScore     Float   @default(0) @map("content_consistency_score")
-  channelDiversificationScore Float   @default(0) @map("channel_diversification_score")
-  funnelConversionEstimate    Float?  @map("funnel_conversion_estimate")
+  channelMix                  Json   @default("[]")
+  leadVolumeEstimate          Float? @map("lead_volume_estimate")
+  blendedCac                  Float? @map("blended_cac")
+  contentConsistencyScore     Float  @default(0) @map("content_consistency_score")
+  channelDiversificationScore Float  @default(0) @map("channel_diversification_score")
+  funnelConversionEstimate    Float? @map("funnel_conversion_estimate")
 
   overallRisk String @default("MEDIUM") @map("overall_risk")
 
@@ -1457,10 +1491,10 @@ model GenomeCrossDomainSnapshot {
   overallHealthScore Float  @default(0) @map("overall_health_score")
   overallRiskLevel   String @default("MEDIUM") @map("overall_risk_level")
 
-  domainScores    Json @default("{}") @map("domain_scores")
-  domainRisks     Json @default("{}") @map("domain_risks")
+  domainScores     Json @default("{}") @map("domain_scores")
+  domainRisks      Json @default("{}") @map("domain_risks")
   readinessSummary Json @default("{}") @map("readiness_summary")
-  evidenceSummary Json @default("{}") @map("evidence_summary")
+  evidenceSummary  Json @default("{}") @map("evidence_summary")
 
   bottlenecks      Json @default("[]") @map("bottlenecks")
   opportunities    Json @default("[]") @map("opportunities")
@@ -2000,6 +2034,8 @@ model Contact {
   searchVector      Unsupported("tsvector")?  @map("search_vector")
   contactTags       ContactTag[]
   customFieldValues ContactCustomFieldValue[]
+  crmTasks          CrmTask[]
+  crmActivities     CrmActivity[]
 
   @@unique([businessId, emailNormalized])
   @@unique([businessId, phoneNormalized])
@@ -3332,6 +3368,9 @@ model OutboundContent {
 
   businessId String   @map("business_id")
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  campaignId String?           @map("campaign_id")
+  campaign   OutboundCampaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
 
   variants   OutboundVariant[]
   deliveries OutboundDelivery[]
@@ -9880,10 +9919,13 @@ model IntegrationConnection {
   id          String    @id @default(cuid())
   businessId  String    @map("business_id")
   providerKey String    @map("provider_key")
+  displayName String?   @map("display_name")
   status      String    @default("CONNECTED") // CONNECTED | NEEDS_ATTENTION | DISCONNECTED | ERROR
   authDataRef String?   @map("auth_data_ref") // encrypted secret reference
+  authData    Json?     @map("auth_data")
   scopes      Json      @default("[]")
   settings    Json      @default("{}")
+  healthScore Int       @default(100) @map("health_score")
   lastSyncAt  DateTime? @map("last_sync_at")
   lastError   String?   @map("last_error")
   createdAt   DateTime  @default(now()) @map("created_at")
@@ -10746,4 +10788,779 @@ model KeyInboxInsight {
 
   @@index([businessId, periodStart, periodEnd])
   @@map("key_inbox_insights")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// KEY Cortex / Key Connector / Keystore schema additions
+// (added during main integration repair to expose tables the merged code expects)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+  AUTO_APPROVED
+  ESCALATED
+}
+
+enum BusinessEventType {
+  ACTION_EXECUTED
+  DECISION_MADE
+  INSIGHT_GENERATED
+  ALERT_TRIGGERED
+  AUTONOMY_EXERCISED
+  GOVERNANCE_DECISION
+  RECOMMENDATION_OFFERED
+  RECOMMENDATION_ACTED
+  RECOMMENDATION_IGNORED
+  GENOME_EVOLUTION
+  USER_INTERACTION
+  SYSTEM_EVENT
+}
+
+enum EvidenceClaimType {
+  TASK_COMPLETED
+  INVOICE_COLLECTED
+  LEAD_CONVERTED
+  BOOKING_COMPLETED
+  CAMPAIGN_SENT
+  PAYMENT_RECEIVED
+  CUSTOMER_RETAINED
+  AUTOMATION_EXECUTED
+  RECOMMENDATION_ACTED
+  GOVERNANCE_DECISION
+}
+
+model ConnectorAuditLog {
+  id           String   @id @default(cuid())
+  businessId   String   @map("business_id")
+  userId       String?  @map("user_id")
+  providerKey  String?  @map("provider_key")
+  connectionId String?  @map("connection_id")
+  action       String
+  status       String
+  details      String?
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([businessId])
+  @@index([businessId, createdAt])
+  @@index([connectionId])
+  @@map("connector_audit_logs")
+}
+
+model KeystoreServiceCategory {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  name        String
+  slug        String
+  icon        String?
+  description String?
+  sortOrder   Int      @default(0) @map("sort_order")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  listings KeystoreServiceListing[]
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, slug])
+  @@index([businessId])
+  @@index([businessId, isActive])
+  @@map("keystore_service_categories")
+}
+
+model KeystoreServiceListing {
+  id               String   @id @default(cuid())
+  businessId       String   @map("business_id")
+  categoryId       String   @map("category_id")
+  name             String
+  slug             String
+  description      String
+  shortDescription String?  @map("short_description")
+  features         String[] @default([])
+  deliverables     Json     @default("[]")
+  pricingTiers     Json     @default("[]") @map("pricing_tiers")
+  addons           Json     @default("[]")
+  faq              Json     @default("[]")
+  briefQuestions   Json     @default("[]") @map("brief_questions")
+  estimatedDays    Int      @default(7) @map("estimated_days")
+  requiresBrief    Boolean  @default(true) @map("requires_brief")
+  status           String   @default("ACTIVE")
+  sortOrder        Int      @default(0) @map("sort_order")
+  metadata         Json     @default("{}")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  category KeystoreServiceCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  business Business                @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  orders   KeystoreServiceOrder[]
+
+  @@unique([businessId, slug])
+  @@index([businessId])
+  @@index([businessId, status])
+  @@index([categoryId])
+  @@map("keystore_service_listings")
+}
+
+model KeystoreServiceOrder {
+  id             String    @id @default(cuid())
+  businessId     String    @map("business_id")
+  listingId      String    @map("listing_id")
+  contactId      String?   @map("contact_id")
+  userId         String    @map("user_id")
+  status         String    @default("REQUESTED")
+  pricingTier    String    @map("pricing_tier")
+  selectedAddons Json      @default("[]") @map("selected_addons")
+  briefAnswers   Json      @default("[]") @map("brief_answers")
+  estimatedPrice Float     @default(0) @map("estimated_price")
+  finalPrice     Float?    @map("final_price")
+  depositAmount  Float?    @map("deposit_amount")
+  depositPaid    Boolean   @default(false) @map("deposit_paid")
+  invoiceId      String?   @map("invoice_id")
+  deliveryDueAt  DateTime? @map("delivery_due_at")
+  startedAt      DateTime?
+  completedAt    DateTime?
+  deliveredAt    DateTime?
+  deliveryFiles  Json      @default("[]") @map("delivery_files")
+  timeline       Json      @default("[]")
+  notes          String?
+  rating         Int?
+  review         String?
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  listing  KeystoreServiceListing        @relation(fields: [listingId], references: [id], onDelete: Restrict)
+  business Business                      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  messages KeystoreServiceOrderMessage[]
+
+  @@index([businessId])
+  @@index([businessId, status])
+  @@index([userId])
+  @@index([listingId])
+  @@index([createdAt])
+  @@map("keystore_service_orders")
+}
+
+model KeystoreServiceOrderMessage {
+  id          String    @id @default(cuid())
+  orderId     String    @map("order_id")
+  senderType  String    @map("sender_type")
+  senderId    String    @map("sender_id")
+  message     String
+  attachments Json      @default("[]")
+  internal    Boolean   @default(false)
+  readAt      DateTime? @map("read_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  order KeystoreServiceOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([orderId, createdAt])
+  @@map("keystore_service_order_messages")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// KEY CORTEX & CONNECTOR MISSING MODELS (merged-remote compatibility)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+model CortexSession {
+  id                String   @id @default(cuid())
+  businessId        String   @map("business_id")
+  userId            String   @map("user_id")
+  status            String   @default("active")
+  persona           String   @default("jarvis")
+  voice             String   @default("echo")
+  mood              String   @default("focused")
+  preferredProvider String   @default("openai") @map("preferred_provider")
+  title             String?
+  messages          Json     @default("[]")
+  contextSnapshot   Json?    @map("context_snapshot")
+  lastAccessedAt    DateTime @default(now()) @map("last_accessed_at")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, status])
+  @@index([businessId, lastAccessedAt])
+  @@index([businessId, createdAt])
+  @@map("cortex_sessions")
+}
+
+model CortexActionLog {
+  id               String    @id @default(cuid())
+  sessionId        String    @map("session_id")
+  actionType       String    @map("action_type")
+  status           String
+  description      String?
+  result           String?   @db.Text
+  error            String?   @db.Text
+  requiresApproval Boolean   @default(false) @map("requires_approval")
+  estimatedImpact  String?   @map("estimated_impact")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  business         Business? @relation(fields: [businessId], references: [id])
+  businessId       String?
+
+  @@index([sessionId, createdAt])
+  @@map("cortex_action_logs")
+}
+
+model KeyDocument {
+  id            String   @id @default(cuid())
+  businessId    String   @map("business_id")
+  fileName      String   @map("file_name")
+  fileType      String   @map("file_type")
+  fileSize      Int      @default(0) @map("file_size")
+  storageUrl    String?  @map("storage_url")
+  status        String   @default("processing")
+  chunksIndexed Int      @default(0) @map("chunks_indexed")
+  metadata      Json?    @default("{}")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, status])
+  @@index([businessId, createdAt])
+  @@map("key_documents")
+}
+
+model KeyEvolutionLog {
+  id                 String   @id @default(cuid())
+  businessId         String   @map("business_id")
+  userId             String   @map("user_id")
+  query              String   @db.Text
+  recommendation     String   @db.Text
+  recommendationType String   @map("recommendation_type")
+  userAction         String   @map("user_action")
+  outcome            String?  @db.Text
+  outcomeValue       Float?   @map("outcome_value")
+  metadata           Json?    @default("{}")
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, userId, createdAt])
+  @@index([businessId, recommendationType])
+  @@index([businessId, createdAt])
+  @@map("key_evolution_logs")
+}
+
+model KeyCallSession {
+  id              String    @id @default(cuid())
+  businessId      String    @map("business_id")
+  callSid         String?   @map("call_sid")
+  phoneNumber     String    @map("phone_number")
+  direction       String
+  status          String
+  script          String?   @db.Text
+  transcript      Json?     @default("[]")
+  summary         String?   @db.Text
+  sentiment       String?
+  outcome         String?
+  recordingUrl    String?   @map("recording_url")
+  durationSeconds Int?      @map("duration_seconds")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  endedAt         DateTime? @map("ended_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, status])
+  @@index([businessId, createdAt])
+  @@map("key_call_sessions")
+}
+
+model KeyTuningLog {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  adjustments Json     @default("[]")
+  summary     String   @db.Text
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, createdAt])
+  @@map("key_tuning_logs")
+}
+
+model KeyUserPreferences {
+  id                          String   @id @default(cuid())
+  businessId                  String   @map("business_id")
+  userId                      String   @map("user_id")
+  responseLength              String   @default("medium") @map("response_length")
+  preferredTone               String   @default("professional") @map("preferred_tone")
+  activeRecommendationTypes   Json     @default("[]") @map("active_recommendation_types")
+  ignoredRecommendationTypes  Json     @default("[]") @map("ignored_recommendation_types")
+  peakActivityHours           Json     @default("[]") @map("peak_activity_hours")
+  preferredCommunicationStyle String   @default("concise") @map("preferred_communication_style")
+  acceptanceRate              Float    @default(0) @map("acceptance_rate")
+  totalInteractions           Int      @default(0) @map("total_interactions")
+  lastUpdated                 DateTime @default(now()) @map("last_updated")
+  createdAt                   DateTime @default(now()) @map("created_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, userId])
+  @@index([businessId, createdAt])
+  @@map("key_user_preferences")
+}
+
+model KeyInteractionFeedback {
+  id             String    @id @default(cuid())
+  sessionId      String    @map("session_id")
+  query          String    @db.Text
+  response       String    @db.Text
+  userRating     Int?      @map("user_rating")
+  userComment    String?   @map("user_comment") @db.Text
+  actionsTaken   Json      @default("[]") @map("actions_taken")
+  actionsSkipped Json      @default("[]") @map("actions_skipped")
+  metadata       Json?     @default("{}")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  business       Business? @relation(fields: [businessId], references: [id])
+  businessId     String?
+
+  @@index([sessionId, createdAt])
+  @@map("key_interaction_feedback")
+}
+
+model SandboxExecutionLog {
+  id              String   @id @default(cuid())
+  businessId      String   @map("business_id")
+  userId          String?  @map("user_id")
+  code            String   @db.Text
+  language        String
+  success         Boolean
+  errorType       String?  @map("error_type")
+  error           String?  @db.Text
+  output          String?  @db.Text
+  executionTimeMs Int      @default(0) @map("execution_time_ms")
+  metadata        Json?    @default("{}")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, language])
+  @@index([businessId, success])
+  @@index([businessId, createdAt])
+  @@map("sandbox_execution_logs")
+}
+
+model AiApprovalRequest {
+  id            String    @id @default(cuid())
+  businessId    String    @map("business_id")
+  userId        String?   @map("user_id")
+  correlationId String    @map("correlation_id")
+  module        String
+  action        String
+  parameters    Json?     @default("{}")
+  commandJson   Json?     @map("command_json")
+  status        String    @default("PENDING")
+  requestedAt   DateTime  @default(now()) @map("requested_at")
+  expiresAt     DateTime? @map("expires_at")
+  resolvedAt    DateTime? @map("resolved_at")
+  resolvedBy    String?   @map("resolved_by")
+  resolution    String?   @db.Text
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, status])
+  @@index([businessId, userId])
+  @@index([correlationId])
+  @@index([businessId, createdAt])
+  @@map("ai_approval_requests")
+}
+
+model ConnectorHealthLog {
+  id           String   @id @default(cuid())
+  businessId   String   @map("business_id")
+  connectionId String?  @map("connection_id")
+  providerKey  String   @map("provider_key")
+  status       String
+  latencyMs    Int      @default(0) @map("latency_ms")
+  message      String?  @db.Text
+  checkedAt    DateTime @default(now()) @map("checked_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, providerKey, checkedAt])
+  @@index([businessId, status])
+  @@index([businessId, createdAt])
+  @@map("connector_health_logs")
+}
+
+model SyncJob {
+  id             String    @id @default(cuid())
+  connectionId   String    @map("connection_id")
+  providerKey    String    @map("provider_key")
+  businessId     String    @map("business_id")
+  status         String    @default("scheduled")
+  direction      String    @default("bidirectional")
+  recordsRead    Int       @default(0) @map("records_read")
+  recordsCreated Int       @default(0) @map("records_created")
+  recordsUpdated Int       @default(0) @map("records_updated")
+  recordsFailed  Int       @default(0) @map("records_failed")
+  error          String?   @db.Text
+  meta           Json?     @default("{}")
+  startedAt      DateTime  @default(now()) @map("started_at")
+  completedAt    DateTime? @map("completed_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, status])
+  @@index([connectionId, startedAt])
+  @@index([businessId, startedAt])
+  @@map("sync_jobs")
+}
+
+model BusinessSetting {
+  id                         String   @id @default(cuid())
+  businessId                 String   @unique @map("business_id")
+  aiAutonomyLevel            String   @default("supervised") @map("ai_autonomy_level")
+  aiAlwaysRequireApproval    Json     @default("[]") @map("ai_always_require_approval")
+  aiNeverRequireApproval     Json     @default("[]") @map("ai_never_require_approval")
+  aiSpendingThreshold        Float?   @map("ai_spending_threshold")
+  aiActionSpendingLimits     Json     @default("{}") @map("ai_action_spending_limits")
+  aiMaxAutoExecutionsPerHour Int      @default(100) @map("ai_max_auto_executions_per_hour")
+  preferences                Json?    @default("{}")
+  createdAt                  DateTime @default(now()) @map("created_at")
+  updatedAt                  DateTime @updatedAt @map("updated_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+  @@map("business_settings")
+}
+
+model BusinessGenome {
+  id                 String   @id @default(cuid())
+  businessId         String   @unique @map("business_id")
+  dnaScores          Json     @default("{}") @map("dna_scores")
+  stage              String   @default("seed")
+  currentStage       String?  @map("current_stage")
+  stageProgress      Float    @default(0) @map("stage_progress")
+  readinessScore     Float    @default(0) @map("readiness_score")
+  executiveReadiness Float    @default(0) @map("executive_readiness")
+  growthTrajectory   String   @default("stable") @map("growth_trajectory")
+  recommendations    Json     @default("[]")
+  metadata           Json?    @default("{}")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+  @@map("business_genomes")
+}
+
+model ActivityLog {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  type        String
+  description String?  @db.Text
+  userId      String?  @map("user_id")
+  metadata    Json?    @default("{}")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, type])
+  @@index([businessId, createdAt])
+  @@map("activity_logs")
+}
+
+model Task {
+  id          String    @id @default(cuid())
+  businessId  String    @map("business_id")
+  title       String
+  description String?   @db.Text
+  assigneeId  String?   @map("assignee_id")
+  dueDate     DateTime? @map("due_date")
+  priority    String    @default("medium")
+  status      String    @default("todo")
+  completedAt DateTime? @map("completed_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, status])
+  @@index([businessId, priority])
+  @@index([businessId, dueDate])
+  @@index([businessId, createdAt])
+  @@map("tasks")
+}
+
+model Message {
+  id          String    @id @default(cuid())
+  businessId  String    @map("business_id")
+  recipientId String    @map("recipient_id")
+  content     String    @db.Text
+  channel     String    @default("in_app")
+  direction   String    @default("outbound")
+  status      String    @default("sent")
+  read        Boolean   @default(false)
+  sentAt      DateTime? @map("sent_at")
+  readAt      DateTime? @map("read_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, direction])
+  @@index([businessId, status])
+  @@index([businessId, createdAt])
+  @@map("messages")
+}
+
+model FlowDefinition {
+  id                  String    @id @default(cuid())
+  businessId          String    @map("business_id")
+  name                String
+  description         String?   @db.Text
+  version             Int       @default(1)
+  nodes               Json      @default("[]")
+  edges               Json      @default("[]")
+  trigger             Json      @default("{}")
+  status              String    @default("draft")
+  category            String    @default("general")
+  tags                Json      @default("[]")
+  createdBy           String?   @map("created_by")
+  executionCount      Int       @default(0) @map("execution_count")
+  lastExecutionAt     DateTime? @map("last_execution_at")
+  lastExecutionStatus String?   @map("last_execution_status")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  business   Business        @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  executions FlowExecution[]
+
+  @@index([businessId, status])
+  @@index([businessId, category])
+  @@index([businessId, updatedAt])
+  @@map("flow_definitions")
+}
+
+model FlowExecution {
+  id                String    @id @default(cuid())
+  flowId            String    @map("flow_id")
+  businessId        String    @map("business_id")
+  status            String    @default("pending")
+  startedAt         DateTime  @default(now()) @map("started_at")
+  completedAt       DateTime? @map("completed_at")
+  currentNodeId     String?   @map("current_node_id")
+  context           Json?     @default("{}")
+  results           Json?     @default("[]")
+  error             String?   @db.Text
+  parentExecutionId String?   @map("parent_execution_id")
+  iterationIndex    Int?      @map("iteration_index")
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  business Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  flow     FlowDefinition @relation(fields: [flowId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, status])
+  @@index([flowId, startedAt])
+  @@index([businessId, createdAt])
+  @@map("flow_executions")
+}
+
+model Report {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  type       String
+  timeframe  String   @default("30d")
+  format     String   @default("pdf")
+  status     String   @default("generating")
+  resultUrl  String?  @map("result_url")
+  metadata   Json?    @default("{}")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, status])
+  @@index([businessId, createdAt])
+  @@map("reports")
+}
+
+model Reminder {
+  id          String    @id @default(cuid())
+  businessId  String    @map("business_id")
+  message     String    @db.Text
+  triggerTime DateTime  @map("trigger_time")
+  recipientId String?   @map("recipient_id")
+  status      String    @default("scheduled")
+  sentAt      DateTime? @map("sent_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, status])
+  @@index([businessId, triggerTime])
+  @@index([businessId, createdAt])
+  @@map("reminders")
+}
+
+model Workflow {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  name        String
+  description String?  @db.Text
+  module      String   @default("general")
+  status      String   @default("active")
+  triggerType String?  @map("trigger_type")
+  steps       Json     @default("[]")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, status])
+  @@index([businessId, module, status])
+  @@index([businessId, createdAt])
+  @@map("workflows")
+}
+
+model Document {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  title      String
+  content    String   @db.Text
+  type       String   @default("note")
+  metadata   Json?    @default("{}")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, type])
+  @@index([businessId, createdAt])
+  @@map("documents")
+}
+
+model Lead {
+  id             String   @id @default(cuid())
+  businessId     String   @map("business_id")
+  name           String
+  email          String
+  phone          String?
+  source         String   @default("cortex_ai")
+  notes          String?  @db.Text
+  status         String   @default("new")
+  estimatedValue Float?   @map("estimated_value")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, status])
+  @@index([businessId, email])
+  @@index([businessId, createdAt])
+  @@map("leads")
+}
+
+model Campaign {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  name       String
+  status     String   @default("draft")
+  sentCount  Int      @default(0) @map("sent_count")
+  openCount  Int      @default(0) @map("open_count")
+  clickCount Int      @default(0) @map("click_count")
+  metadata   Json?    @default("{}")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, status])
+  @@index([businessId, createdAt])
+  @@map("campaigns")
+}
+
+model OutboundCampaign {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  name        String
+  description String?  @db.Text
+  status      String   @default("draft")
+  metadata    Json?    @default("{}")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  business Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  contents OutboundContent[]
+
+  @@index([businessId, status])
+  @@index([businessId, createdAt])
+  @@map("outbound_campaigns")
+}
+
+model CrmTask {
+  id          String    @id @default(cuid())
+  businessId  String    @map("business_id")
+  contactId   String?   @map("contact_id")
+  title       String
+  description String?   @db.Text
+  dueDate     DateTime? @map("due_date")
+  priority    String    @default("medium")
+  status      String    @default("todo")
+  completedAt DateTime? @map("completed_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  contact  Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  @@index([businessId, status])
+  @@index([businessId, contactId])
+  @@index([businessId, dueDate])
+  @@index([businessId, createdAt])
+  @@map("crm_tasks")
+}
+
+model CrmActivity {
+  id          String   @id @default(cuid())
+  businessId  String   @map("business_id")
+  contactId   String?  @map("contact_id")
+  type        String
+  description String?  @db.Text
+  metadata    Json?    @default("{}")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  contact  Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  @@index([businessId, type])
+  @@index([businessId, contactId])
+  @@index([businessId, createdAt])
+  @@map("crm_activities")
+}
+
+model HelpdeskTicket {
+  id          String    @id @default(cuid())
+  businessId  String    @map("business_id")
+  requesterId String?   @map("requester_id")
+  subject     String
+  description String?   @db.Text
+  status      String    @default("open")
+  priority    String    @default("medium")
+  assignedTo  String?   @map("assigned_to")
+  resolvedAt  DateTime? @map("resolved_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, status])
+  @@index([businessId, priority])
+  @@index([businessId, createdAt])
+  @@map("helpdesk_tickets")
 }

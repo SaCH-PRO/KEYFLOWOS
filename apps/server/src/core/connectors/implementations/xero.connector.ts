@@ -126,7 +126,7 @@ export class XeroConnector implements IConnector {
         account: first?.tenantName ?? undefined,
         detail: `${data.length} tenant(s)${first?.tenantType ? ` • ${first.tenantType}` : ''}`,
       };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }
@@ -270,7 +270,7 @@ export class XeroConnector implements IConnector {
       const id = data.Contacts?.[0]?.ContactID;
       if (!id) return { success: false, error: 'Xero response missing ContactID' };
       externalId = id;
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
 
@@ -329,7 +329,7 @@ export class XeroConnector implements IConnector {
       const id = data.Invoices?.[0]?.InvoiceID;
       if (!id) return { success: false, error: 'Xero response missing InvoiceID' };
       externalId = id;
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
 
@@ -360,7 +360,7 @@ export class XeroConnector implements IConnector {
       }));
       await this.trackActivity(businessId);
       return { success: true, accounts };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }

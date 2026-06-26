@@ -45,7 +45,7 @@ export class ConnectorActivityService {
           metadata: (opts.metadata ?? null) as never,
         },
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `Failed to record connector activity: ${err instanceof Error ? err.message : String(err)}`,
       );

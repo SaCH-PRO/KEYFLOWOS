@@ -342,7 +342,7 @@ export class GoogleBusinessProfileService {
         };
         published += 1;
         mutated = true;
-      } catch (err) {
+      } catch (err: any) {
         list[i] = {
           ...p,
           status: 'failed',

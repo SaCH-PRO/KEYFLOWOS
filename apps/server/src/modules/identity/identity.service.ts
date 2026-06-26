@@ -750,7 +750,7 @@ export class IdentityService {
         await tx.user.delete({ where: { id: oldId } });
         return newUser;
       });
-    } catch (err) {
+    } catch (err: any) {
       const code = (err as { code?: string })?.code;
       if (code === 'P2002') {
         this.logger.warn(
@@ -875,7 +875,7 @@ export class IdentityService {
               ...userData,
             },
           });
-        } catch (err) {
+        } catch (err: any) {
           // Defence-in-depth: if a race created a colliding row between the
           // findUnique above and the create here, surface a clean 409 instead
           // of an opaque Prisma 500.

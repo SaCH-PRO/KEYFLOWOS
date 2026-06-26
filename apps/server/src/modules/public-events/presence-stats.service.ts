@@ -131,7 +131,7 @@ export class PresenceStatsService {
             ...(isFirstSeenToday ? { uniques: { increment: 1 } } : {}),
           },
         });
-      } catch (err) {
+      } catch (err: any) {
         this.logger.debug?.(`[presence] upsert skipped ${(err as Error).message}`);
       }
     }

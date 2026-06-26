@@ -142,7 +142,7 @@ export class MessageIntakeOrchestrator {
 
     try {
       await this.buildPlan(intake.id);
-    } catch (err) {
+    } catch (err: any) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.error(`Failed to build message intake plan for ${intake.id}: ${message}`);
       await this.prisma.client.messageIntake.update({
@@ -445,7 +445,7 @@ export class MessageIntakeOrchestrator {
       }).catch((err) => this.logger.warn(`Timeline event failed: ${(err as Error).message}`));
 
       return { success: true, results };
-    } catch (err) {
+    } catch (err: any) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.error(`Message intake execution failed for ${intakeId}: ${message}`);
       await this.prisma.client.messageIntake.update({

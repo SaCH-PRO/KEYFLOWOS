@@ -253,7 +253,7 @@ export class TransactionalEmailService implements OnModuleInit, OnModuleDestroy 
       const url = `${base}/me/refer?slug=${encodeURIComponent(slug)}&email=${encodeURIComponent(normalizedEmail)}`;
       templateData.referUrl = url;
       return true;
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Referral CTA injection skipped for ${businessId}/${recipientEmail}: ${(err as Error).message}`);
       return false;
     }
@@ -287,7 +287,7 @@ export class TransactionalEmailService implements OnModuleInit, OnModuleDestroy 
           sentAt: params.status === 'SENT' ? new Date() : null,
         },
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Failed to log notification: ${(err as Error).message}`);
     }
   }
@@ -670,7 +670,7 @@ export class TransactionalEmailService implements OnModuleInit, OnModuleDestroy 
           this.logger.warn(`Unknown notification type: ${params.type}`);
           return { status: 'FAILED' };
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Template rendering failed for ${params.type}: ${(err as Error).message}`);
       await this.logNotification({
         businessId: params.businessId,
@@ -723,7 +723,7 @@ export class TransactionalEmailService implements OnModuleInit, OnModuleDestroy 
 
         this.logger.log(`Sent ${params.type} to ${params.recipientEmail} for business ${params.businessId}`);
         return { status: 'SENT', messageId: result.messageId };
-      } catch (err) {
+      } catch (err: any) {
         lastError = err as Error;
         this.logger.warn(`Attempt ${attempt}/${MAX_RETRIES} failed for ${params.type} to ${params.recipientEmail}: ${lastError.message}`);
         if (attempt < MAX_RETRIES) {
@@ -817,7 +817,7 @@ export class TransactionalEmailService implements OnModuleInit, OnModuleDestroy 
           });
           sent++;
         }
-      } catch (err) {
+      } catch (err: any) {
         this.logger.error(`Queue drain failed for entry ${entry.id}: ${(err as Error).message}`);
       }
     }

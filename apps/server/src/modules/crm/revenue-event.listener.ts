@@ -398,7 +398,7 @@ export class RevenueEventListener {
         { actorType: 'SYSTEM', source: 'event-bus' },
       );
       await this.insights.markStale(businessId, contactId);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `revenue-event log failed for ${type} contact=${contactId}: ${(err as Error).message}`,
       );

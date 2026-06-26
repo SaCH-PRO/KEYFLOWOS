@@ -92,7 +92,7 @@ export class CrmGoogleService {
       }
       
       return state;
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn('Failed to verify OAuth state');
       return null;
     }
@@ -253,7 +253,7 @@ export class CrmGoogleService {
           sourceDetail: person.resourceName,
         });
         imported++;
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(`Failed to import contact: ${(err as Error).message}`);
         skipped++;
       }

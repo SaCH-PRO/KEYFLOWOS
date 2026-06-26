@@ -62,7 +62,7 @@ export class FinanceAuditService {
           meta: meta as Prisma.InputJsonValue,
         },
       });
-    } catch (err) {
+    } catch (err: any) {
         this.logger.warn(`— audit must never break the financial write path.: ${err instanceof Error ? err.message : err}`);
       }
   }

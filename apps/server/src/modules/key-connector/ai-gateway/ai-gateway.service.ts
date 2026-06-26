@@ -87,7 +87,7 @@ export class AiGatewayService {
         error: `Could not determine route for command: "${nlCommand}"`,
         executionTimeMs: Date.now() - start,
       };
-    } catch (error) {
+    } catch (error: any) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error(`AI gateway error: ${message}`);
       return {
@@ -148,7 +148,7 @@ export class AiGatewayService {
         routedTo: module,
         executionTimeMs: Date.now() - context.start,
       };
-    } catch (error) {
+    } catch (error: any) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error(`Module action ${module}.${action} failed: ${message}`);
       return {
@@ -215,7 +215,7 @@ export class AiGatewayService {
         routedTo: provider,
         executionTimeMs: Date.now() - context.start,
       };
-    } catch (error) {
+    } catch (error: any) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error(
         `Provider action ${provider}.${action} failed: ${message}`,
@@ -259,7 +259,7 @@ export class AiGatewayService {
       }
 
       return context;
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(
         `getProviderContext failed: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -525,7 +525,7 @@ export class AiGatewayService {
           createdAt: new Date(),
         },
       });
-    } catch (error) {
+    } catch (error: any) {
       this.logger.warn(
         `Failed to audit AI command: ${error instanceof Error ? error.message : String(error)}`,
       );

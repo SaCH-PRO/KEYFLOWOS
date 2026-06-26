@@ -92,6 +92,8 @@ import { BlueprintModule } from '../blueprint/blueprint.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { ProjectsModule } from '../projects/projects.module';
 import { KeystoreModule } from '../keystore/keystore.module';
+import { ContentService } from '../content/content.service';
+import { ActivityService } from '../activity/activity.service';
 
 @Module({
   imports: [
@@ -162,6 +164,11 @@ import { KeystoreModule } from '../keystore/keystore.module';
     // -- v2: Integration Layer --
     // Universal connector -- knows how to talk to every KeyFlowOS module
     KeyCortexConnectorService,
+
+    // Stub domain services used by the connector until full module integrations
+    // are hardened with typed adapters.
+    ContentService,
+    ActivityService,
 
     // NL -> Command parser -- converts natural language to structured commands
     KeyCortexCommandService,

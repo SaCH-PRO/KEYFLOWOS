@@ -131,7 +131,7 @@ export class MailchimpConnector implements IConnector {
         account: root.account_name ?? root.email ?? accountName ?? `Mailchimp (${dc})`,
         detail: `${lists.total_items ?? 0} audience(s)${typeof root.total_subscribers === 'number' ? ` • ${root.total_subscribers} subscribers` : ''}`,
       };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }
@@ -201,7 +201,7 @@ export class MailchimpConnector implements IConnector {
       }));
       await this.trackActivity(businessId);
       return { success: true, lists };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }
@@ -248,7 +248,7 @@ export class MailchimpConnector implements IConnector {
       const errors = (data.errors ?? []).map((e) => e.error);
       await this.trackActivity(businessId);
       return { success: true, created, updated, failed, errors };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, created: 0, updated: 0, failed: contacts.length, errors: [err instanceof Error ? err.message : 'Network error'] };
     }
   }
@@ -273,7 +273,7 @@ export class MailchimpConnector implements IConnector {
         emailsSent: c.emails_sent,
       }));
       return { success: true, campaigns };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }
@@ -293,7 +293,7 @@ export class MailchimpConnector implements IConnector {
       }
       await this.trackActivity(businessId);
       return { success: true };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }

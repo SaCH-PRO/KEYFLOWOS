@@ -114,7 +114,7 @@ export class ReportsService {
       totalRevenue = pnl.revenue.total - pnl.discounts.total;
       totalExpenses = pnl.cogs.total + pnl.operatingExpenses.total;
       netProfit = pnl.netProfit;
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`PnL ledger fallback: ${(err as Error).message}`);
       totalRevenue = Number(paidInvoicesInPeriod._sum.total ?? 0);
       totalExpenses = allExpensesInPeriod.reduce((sum, e) => sum + Number(e.amount), 0);
@@ -262,7 +262,7 @@ Use ${currency} for all monetary values. Be specific with numbers. Keep each sec
       });
 
       aiNarrative = result.content;
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`Report AI narrative error: ${(error as Error).message}`);
       aiNarrative = 'AI analysis is temporarily unavailable. Please review the data metrics below.';
     }

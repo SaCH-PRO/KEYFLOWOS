@@ -162,7 +162,7 @@ export class ContactAuditService {
           userAgent: opts.userAgent?.slice(0, 512) ?? null,
         },
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `[ContactAudit] write failed action=${opts.action} contact=${opts.contactId}: ${
           err instanceof Error ? err.message : err

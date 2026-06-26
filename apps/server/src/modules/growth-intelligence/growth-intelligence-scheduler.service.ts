@@ -70,7 +70,7 @@ export class GrowthIntelligenceSchedulerService implements OnModuleInit, OnModul
       this.logger.log(
         `Nightly journey recompute complete for ${dateKey}: ${result.journeysRecomputed} journeys, ${result.insightsRefreshed} insight refreshes across ${result.businesses} businesses (${result.failed} failures)`,
       );
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(
         `Nightly journey recompute failed: ${err instanceof Error ? err.message : String(err)}`,
       );
@@ -98,7 +98,7 @@ export class GrowthIntelligenceSchedulerService implements OnModuleInit, OnModul
         const recompute = await this.journeys.recomputeAllForBusiness(business.id);
         journeysRecomputed += recompute.processed;
         if (recompute.failed > 0) failed += recompute.failed;
-      } catch (err) {
+      } catch (err: any) {
         failed += 1;
         this.logger.warn(
           `Recompute failed for business ${business.id}: ${err instanceof Error ? err.message : String(err)}`,
@@ -108,7 +108,7 @@ export class GrowthIntelligenceSchedulerService implements OnModuleInit, OnModul
       try {
         await this.growth.generateInsights(business.id);
         insightsRefreshed += 1;
-      } catch (err) {
+      } catch (err: any) {
         failed += 1;
         this.logger.warn(
           `Insight regeneration failed for business ${business.id}: ${err instanceof Error ? err.message : String(err)}`,

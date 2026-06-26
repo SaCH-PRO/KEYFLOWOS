@@ -116,7 +116,7 @@ export abstract class FormPlatformConnector implements IConnector {
       const result = await this.pingProvider(credential);
       if (result.success) await this.trackActivity(businessId);
       return result;
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }
@@ -222,7 +222,7 @@ export abstract class FormPlatformConnector implements IConnector {
         });
         leadFormId = created.id;
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Could not upsert virtual LeadForm: ${(err as Error).message}`);
     }
 
@@ -237,7 +237,7 @@ export abstract class FormPlatformConnector implements IConnector {
             source: this.source,
           },
         });
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(`Could not persist submission: ${(err as Error).message}`);
       }
     }

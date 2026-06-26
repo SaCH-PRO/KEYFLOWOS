@@ -21,7 +21,7 @@ export class IngestionListener {
     for (const input of event.inputs) {
       try {
         await this.orchestrator.receive(input, event.businessId);
-      } catch (err) {
+      } catch (err: any) {
         this.logger.error(
           `Failed to process ingestion item for business ${event.businessId}: ${err instanceof Error ? err.message : String(err)}`,
         );

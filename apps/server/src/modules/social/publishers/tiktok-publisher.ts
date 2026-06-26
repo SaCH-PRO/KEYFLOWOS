@@ -25,7 +25,7 @@ export class TikTokPublisher extends BasePublisher {
       }
 
       return await this.publishTextPost(accessToken, content);
-    } catch (err) {
+    } catch (err: any) {
       return { platform: this.platform, success: false, error: (err as Error).message };
     }
   }

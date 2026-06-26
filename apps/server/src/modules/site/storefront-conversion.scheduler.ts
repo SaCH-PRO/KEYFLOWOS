@@ -46,7 +46,7 @@ export class StorefrontConversionScheduler implements OnModuleInit, OnModuleDest
         where: { createdAt: { gte: since } },
         _count: { _all: true },
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`[conversion-scheduler] business scan failed: ${(err as Error).message}`);
       return;
     }
@@ -59,7 +59,7 @@ export class StorefrontConversionScheduler implements OnModuleInit, OnModuleDest
       try {
         await this.conversion.aggregateDay(businessId, today);
         await this.conversion.aggregateDay(businessId, yesterday);
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(`[conversion-scheduler] business=${businessId} failed: ${(err as Error).message}`);
       }
     }

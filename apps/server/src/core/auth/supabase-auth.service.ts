@@ -45,7 +45,7 @@ export class SupabaseAuthService {
         clockTolerance: 60,
       });
       return payload as JwtPayload;
-    } catch (err) {
+    } catch (err: any) {
       if (err instanceof JoseErrors.JWSSignatureVerificationFailed) {
         this.logger.debug('Local JWT verification: signature invalid');
       } else if (err instanceof JoseErrors.JWTExpired) {

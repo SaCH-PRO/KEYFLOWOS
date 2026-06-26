@@ -52,12 +52,14 @@ export function KeyFlowProperties({
   const [labelDraft, setLabelDraft] = useState("");
 
   /* Sync draft when node changes */
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (node) {
       setDraft({ ...node.data.config });
       setLabelDraft(node.data.label);
     }
   }, [node?.id]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   if (!isOpen) return null;
 

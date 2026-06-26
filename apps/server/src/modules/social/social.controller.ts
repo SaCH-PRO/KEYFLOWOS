@@ -79,7 +79,7 @@ export class SocialController {
     try {
       const result = await this.ingestion.receiveInbound(businessId, body);
       return { success: true, ...result };
-    } catch (err) {
+    } catch (err: any) {
       const message = err instanceof Error ? err.message : String(err);
       return { success: false, error: message };
     }
@@ -490,7 +490,7 @@ export class SocialController {
         default:
           throw new BadRequestException(`Unsupported platform: ${platform}`);
       }
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: (err as Error).message };
     }
   }
@@ -567,7 +567,7 @@ export class SocialController {
         default:
           return { success: false, error: `Unsupported platform: ${platform}` };
       }
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: (err as Error).message, status: 'ERROR' };
     }
   }

@@ -39,7 +39,7 @@ export class SeoListener {
           },
         },
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Failed to create task from ranking drop: ${(err as Error).message}`);
     }
   }
@@ -66,7 +66,7 @@ export class SeoListener {
           },
         },
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Failed to create task from SEO issue: ${(err as Error).message}`);
     }
   }
@@ -91,7 +91,7 @@ export class SeoListener {
           },
         },
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Failed to create task from content brief: ${(err as Error).message}`);
     }
   }

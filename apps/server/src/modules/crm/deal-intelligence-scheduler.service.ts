@@ -75,7 +75,7 @@ export class DealIntelligenceSchedulerService implements OnModuleInit, OnModuleD
           const r = await this.runForBusiness(b.id);
           totalUpdated += r.healthUpdated;
           totalBottlenecks += r.bottlenecksFlagged;
-        } catch (err) {
+        } catch (err: any) {
           this.logger.warn(`Daily intel run failed for business=${b.id}: ${(err as Error).message}`);
         }
       }
@@ -179,7 +179,7 @@ export class DealIntelligenceSchedulerService implements OnModuleInit, OnModuleD
         relatedId: deal.id,
         aiContext: { source: 'deal_bottleneck', daysInStage: days, stageName: deal.stage.name },
       });
-    } catch (err) {
+    } catch (err: any) {
       // Daily task limit (3/day) is the most common reason — log and continue.
       this.logger.debug(`Skipped bottleneck task for deal=${deal.id}: ${(err as Error).message}`);
     }
@@ -197,7 +197,7 @@ export class DealIntelligenceSchedulerService implements OnModuleInit, OnModuleD
         where: { id: payload.dealId, businessId: payload.businessId, bottleneckFlag: true },
         data: { bottleneckFlag: false, bottleneckAt: null },
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`onDealStageChanged failed for deal=${payload.dealId}: ${(err as Error).message}`);
     }
   }
@@ -207,7 +207,7 @@ export class DealIntelligenceSchedulerService implements OnModuleInit, OnModuleD
     if (!payload?.businessId || !payload?.dealId) return;
     try {
       await this.health.recomputeDeal({ businessId: payload.businessId, dealId: payload.dealId });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`onDealCreated health recompute failed for deal=${payload.dealId}: ${(err as Error).message}`);
     }
   }
@@ -227,7 +227,7 @@ export class DealIntelligenceSchedulerService implements OnModuleInit, OnModuleD
       for (const d of openDeals) {
         await this.health.recomputeDeal({ businessId: payload.businessId, dealId: d.id }).catch(() => null);
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`onContactEvent health refresh failed: ${(err as Error).message}`);
     }
   }

@@ -114,7 +114,7 @@ export class SeoGoogleAnalyticsService {
         synced: true,
         pagesUpdated: result.updated,
       };
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`GA4 sync failed: ${(err as Error).message}`);
       return {
         synced: false,

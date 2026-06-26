@@ -43,7 +43,7 @@ export class BusinessGuard implements CanActivate {
       if (!business) {
         throw new ForbiddenException('No access to this business');
       }
-    } catch (err) {
+    } catch (err: any) {
       if (err instanceof ForbiddenException || err instanceof UnauthorizedException) {
         throw err;
       }

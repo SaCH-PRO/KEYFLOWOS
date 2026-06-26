@@ -226,7 +226,7 @@ Use null or omit fields when unknown. Keep the summary concrete and actionable.`
         temperature: 0.4,
       });
       raw = response.content ? JSON.parse(response.content) : {};
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `analyzeIdea model call failed for ${businessId}: ${(err as Error).message}`,
       );

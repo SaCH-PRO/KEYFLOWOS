@@ -102,7 +102,7 @@ export class CurrencyRatesService {
     if (this.lastAttemptAt && now - this.lastAttemptAt < FAILURE_BACKOFF_MS) return;
     try {
       await this.refresh();
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `FX refresh failed, continuing with ${this.snapshot.source} rates from ${this.snapshot.fetchedAt.toISOString()}: ${
           err instanceof Error ? err.message : String(err)

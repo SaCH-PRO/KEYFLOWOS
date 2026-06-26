@@ -164,7 +164,7 @@ export class IdentityController {
         email: outcome.email,
         verificationRequired: true,
       };
-    } catch (err) {
+    } catch (err: any) {
       const reason = err instanceof BadRequestException
         ? (((err.getResponse() as { code?: string })?.code) ?? err.message)
         : err instanceof Error ? err.message : 'unknown';
@@ -201,7 +201,7 @@ export class IdentityController {
         accessToken: session.accessToken,
         refreshToken: session.refreshToken,
       };
-    } catch (err) {
+    } catch (err: any) {
       const reason = err instanceof BadRequestException
         ? (((err.getResponse() as { code?: string })?.code) ?? err.message)
         : err instanceof Error ? err.message : 'unknown';

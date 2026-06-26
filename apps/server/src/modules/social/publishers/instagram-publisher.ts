@@ -60,7 +60,7 @@ export class InstagramPublisher extends BasePublisher {
         const linkRes = await fetch(`https://graph.facebook.com/v19.0/${publishData.id}?fields=permalink&access_token=${accessToken}`);
         const linkData = await linkRes.json() as any;
         permalink = linkData?.permalink;
-      } catch (err) {
+      } catch (err: any) {
           this.logger.debug(`Silent catch: ${err instanceof Error ? err.message : err}`);
         }
 
@@ -71,7 +71,7 @@ export class InstagramPublisher extends BasePublisher {
         externalUrl: permalink,
         publishedAt: new Date().toISOString(),
       };
-    } catch (err) {
+    } catch (err: any) {
       return { platform: this.platform, success: false, error: (err as Error).message };
     }
   }

@@ -95,6 +95,8 @@ export interface CortexMessage {
     actionsTriggered?: CortexActionResult[];
     mood?: CortexMood;
     voiceUsed?: CortexVoice;
+    isSummary?: boolean;
+    originalMessageCount?: number;
   };
 }
 

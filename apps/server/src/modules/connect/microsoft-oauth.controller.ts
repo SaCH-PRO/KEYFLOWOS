@@ -49,7 +49,7 @@ export class MicrosoftOAuthController {
         ...(result.error ? { reason: result.error } : {}),
       });
       return res.redirect(`${appUrl}/app/settings/contact-sources?${params.toString()}`);
-    } catch (err) {
+    } catch (err: any) {
       const reason = err instanceof Error ? err.message : 'unknown';
       return res.redirect(`${failure}&reason=${encodeURIComponent(reason)}`);
     }

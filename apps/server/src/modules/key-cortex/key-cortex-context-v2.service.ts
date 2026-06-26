@@ -277,17 +277,26 @@ export class KeyCortexContextV2Service {
       this.getGenomeContext(businessId),
     ]);
 
-    const contexts = results.map((r) => r.status === 'fulfilled' ? r.value : null);
+    const contexts = results.map((r: any) => r.status === 'fulfilled' ? r.value : null);
     const [
-      crm,
-      commerce,
-      bookings,
-      communications,
-      autopilot,
-      temporal,
-      inbox,
-      genome,
+      crmCtx,
+      commerceCtx,
+      bookingsCtx,
+      communicationsCtx,
+      autopilotCtx,
+      temporalCtx,
+      inboxCtx,
+      genomeCtx,
     ] = contexts;
+
+    const crm = (crmCtx ?? this.emptyCrmContext()) as CrmContext;
+    const commerce = (commerceCtx ?? this.emptyCommerceContext()) as CommerceContext;
+    const bookings = (bookingsCtx ?? this.emptyBookingsContext()) as BookingsContext;
+    const communications = (communicationsCtx ?? this.emptyCommunicationsContext()) as CommunicationsContext;
+    const autopilot = (autopilotCtx ?? this.emptyAutopilotContext()) as AutopilotContext;
+    const temporal = (temporalCtx ?? this.emptyTemporalContext()) as TemporalContext;
+    const inbox = (inboxCtx ?? this.emptyInboxContext()) as InboxContext;
+    const genome = (genomeCtx ?? this.emptyGenomeContext()) as GenomeContext;
 
     const context: FullBusinessContext = {
       businessId,
@@ -331,11 +340,11 @@ export class KeyCortexContextV2Service {
 
       const [totalContacts, newLeads, hotLeadsRaw, overdueTasksRaw, recentActivityRaw, leadStages] =
         await Promise.all([
-          this.prisma.contact.count({ where: { businessId } }),
-          this.prisma.contact.count({
+          (this.prisma.client as any).contact.count({ where: { businessId } }),
+          (this.prisma.client as any).contact.count({
             where: { businessId, createdAt: { gte: weekStart } },
           }),
-          this.prisma.contact.findMany({
+          (this.prisma.client as any).contact.findMany({
             where: {
               businessId,
               status: 'lead',
@@ -352,7 +361,7 @@ export class KeyCortexContextV2Service {
               stage: true,
             },
           }),
-          this.prisma.crmTask.findMany({
+          (this.prisma.client as any).crmTask.findMany({
             where: {
               businessId,
               dueDate: { lt: new Date() },
@@ -364,7 +373,7 @@ export class KeyCortexContextV2Service {
               contact: { select: { name: true } },
             },
           }),
-          this.prisma.crmActivity.findMany({
+          (this.prisma.client as any).crmActivity.findMany({
             where: { businessId },
             orderBy: { createdAt: 'desc' },
             take: 10,
@@ -372,7 +381,7 @@ export class KeyCortexContextV2Service {
               contact: { select: { name: true } },
             },
           }),
-          this.prisma.contact.groupBy({
+          (this.prisma.client as any).contact.groupBy({
             by: ['stage'],
             where: { businessId, status: 'lead' },
             _count: { stage: true },
@@ -380,14 +389,14 @@ export class KeyCortexContextV2Service {
         ]);
 
       // Calculate conversion rate
-      const convertedThisMonth = await this.prisma.contact.count({
+      const convertedThisMonth = await (this.prisma.client as any).contact.count({
         where: {
           businessId,
           status: 'customer',
           createdAt: { gte: monthStart },
         },
       });
-      const leadsCreatedThisMonth = await this.prisma.contact.count({
+      const leadsCreatedThisMonth = await (this.prisma.client as any).contact.count({
         where: {
           businessId,
           status: 'lead',
@@ -401,7 +410,7 @@ export class KeyCortexContextV2Service {
       return {
         totalContacts,
         newLeadsThisWeek: newLeads,
-        hotLeads: hotLeadsRaw.map((l) => ({
+        hotLeads: hotLeadsRaw.map((l: any) => ({
           id: l.id,
           name: l.name || 'Unknown',
           email: l.email || '',
@@ -409,26 +418,26 @@ export class KeyCortexContextV2Service {
           lastActivity: l.lastActivityAt || new Date(),
           stage: l.stage || 'new',
         })),
-        overdueTasks: overdueTasksRaw.map((t) => ({
+        overdueTasks: overdueTasksRaw.map((t: any) => ({
           id: t.id,
           title: t.title,
           contactName: t.contact?.name || 'Unknown',
           dueDate: t.dueDate,
           priority: t.priority || 'medium',
         })),
-        recentActivity: recentActivityRaw.map((a) => ({
+        recentActivity: recentActivityRaw.map((a: any) => ({
           type: a.type,
           description: a.description || '',
           timestamp: a.createdAt,
           contactName: a.contact?.name || 'Unknown',
         })),
-        leadStages: leadStages.reduce((acc, s) => {
+        leadStages: leadStages.reduce((acc: any, s: any) => {
           acc[s.stage || 'unknown'] = s._count.stage;
           return acc;
         }, {} as Record<string, number>),
         conversionRateThisMonth: conversionRate,
       };
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`[getCrmContext] Error for ${businessId}: ${error.message}`);
       return this.emptyCrmContext();
     }
@@ -452,28 +461,28 @@ export class KeyCortexContextV2Service {
         totalPaid,
         totalBilled,
       ] = await Promise.all([
-        this.prisma.invoice.findMany({
+        (this.prisma.client as any).invoice.findMany({
           where: {
             businessId,
             createdAt: { gte: monthStart },
           },
           select: { total: true },
         }),
-        this.prisma.invoice.findMany({
+        (this.prisma.client as any).invoice.findMany({
           where: {
             businessId,
             createdAt: { gte: weekStart },
           },
           select: { total: true },
         }),
-        this.prisma.invoice.findMany({
+        (this.prisma.client as any).invoice.findMany({
           where: {
             businessId,
             createdAt: { gte: today },
           },
           select: { total: true },
         }),
-        this.prisma.invoice.findMany({
+        (this.prisma.client as any).invoice.findMany({
           where: {
             businessId,
             status: { in: ['sent', 'pending', 'partial'] },
@@ -483,7 +492,7 @@ export class KeyCortexContextV2Service {
           },
           orderBy: { dueDate: 'asc' },
         }),
-        this.prisma.payment.findMany({
+        (this.prisma.client as any).payment.findMany({
           where: {
             businessId,
             createdAt: { gte: subDays(new Date(), 7) },
@@ -494,7 +503,7 @@ export class KeyCortexContextV2Service {
           orderBy: { createdAt: 'desc' },
           take: 10,
         }),
-        this.prisma.invoiceItem.groupBy({
+        (this.prisma.client as any).invoiceItem.groupBy({
           by: ['productId'],
           where: {
             invoice: { businessId, createdAt: { gte: monthStart } },
@@ -503,25 +512,25 @@ export class KeyCortexContextV2Service {
           orderBy: { _sum: { total: 'desc' } },
           take: 5,
         }),
-        this.prisma.payment.aggregate({
+        (this.prisma.client as any).payment.aggregate({
           where: { businessId, status: 'completed' },
           _sum: { amount: true },
         }),
-        this.prisma.invoice.aggregate({
+        (this.prisma.client as any).invoice.aggregate({
           where: { businessId },
           _sum: { total: true },
         }),
       ]);
 
-      const revenueThisMonth = invoicesThisMonth.reduce((s, i) => s + (i.total || 0), 0);
-      const revenueThisWeek = invoicesThisWeek.reduce((s, i) => s + (i.total || 0), 0);
-      const revenueToday = invoicesToday.reduce((s, i) => s + (i.total || 0), 0);
+      const revenueThisMonth = invoicesThisMonth.reduce((s: any, i: any) => s + (i.total || 0), 0);
+      const revenueThisWeek = invoicesThisWeek.reduce((s: any, i: any) => s + (i.total || 0), 0);
+      const revenueToday = invoicesToday.reduce((s: any, i: any) => s + (i.total || 0), 0);
 
       const overdueInvoices = outstandingInvoices.filter(
-        (i) => i.dueDate && i.dueDate < new Date(),
+        (i: any) => i.dueDate && i.dueDate < new Date(),
       );
-      const totalOutstanding = outstandingInvoices.reduce((s, i) => s + (i.total || 0), 0);
-      const overdueTotal = overdueInvoices.reduce((s, i) => s + (i.total || 0), 0);
+      const totalOutstanding = outstandingInvoices.reduce((s: any, i: any) => s + (i.total || 0), 0);
+      const overdueTotal = overdueInvoices.reduce((s: any, i: any) => s + (i.total || 0), 0);
 
       const collectionRate = (totalBilled._sum.total || 0) > 0
         ? Math.round(((totalPaid._sum.amount || 0) / (totalBilled._sum.total || 1)) * 100)
@@ -532,14 +541,14 @@ export class KeyCortexContextV2Service {
         : 0;
 
       // Resolve top product names
-      const productIds = topProducts.map((p) => p.productId).filter(Boolean);
+      const productIds = topProducts.map((p: any) => p.productId).filter(Boolean);
       const products = productIds.length
-        ? await this.prisma.product.findMany({
+        ? await (this.prisma.client as any).product.findMany({
             where: { id: { in: productIds } },
             select: { id: true, name: true },
           })
         : [];
-      const productMap = new Map(products.map((p) => [p.id, p.name]));
+      const productMap = new Map(products.map((p: any) => [p.id, p.name]));
 
       return {
         revenueThisMonth,
@@ -550,7 +559,7 @@ export class KeyCortexContextV2Service {
           total: totalOutstanding,
           overdue: overdueInvoices.length,
           overdueTotal,
-          invoices: overdueInvoices.slice(0, 10).map((i) => ({
+          invoices: overdueInvoices.slice(0, 10).map((i: any) => ({
             id: i.id,
             contactName: i.contact?.name || 'Unknown',
             amount: i.total || 0,
@@ -559,14 +568,14 @@ export class KeyCortexContextV2Service {
             daysOverdue: Math.max(0, Math.floor((Date.now() - new Date(i.dueDate).getTime()) / 86400000)),
           })),
         },
-        recentPayments: recentPayments.map((p) => ({
+        recentPayments: recentPayments.map((p: any) => ({
           id: p.id,
           contactName: p.contact?.name || 'Unknown',
           amount: p.amount || 0,
           date: p.createdAt,
           method: p.method || 'unknown',
         })),
-        topProducts: topProducts.map((p) => ({
+        topProducts: topProducts.map((p: any) => ({
           id: p.productId || 'unknown',
           name: productMap.get(p.productId || '') || 'Unknown Product',
           totalSold: p._sum.quantity || 0,
@@ -576,7 +585,7 @@ export class KeyCortexContextV2Service {
         averageInvoiceValue: avgInvoiceValue,
         totalInvoicesThisMonth: invoicesThisMonth.length,
       };
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`[getCommerceContext] Error for ${businessId}: ${error.message}`);
       return this.emptyCommerceContext();
     }
@@ -593,7 +602,7 @@ export class KeyCortexContextV2Service {
 
       const [upcomingAppointments, todayAppts, weekAppts, completedWeek, noShowsWeek, noShowsMonth] =
         await Promise.all([
-          this.prisma.booking.findMany({
+          (this.prisma.client as any).booking.findMany({
             where: {
               businessId,
               startTime: { gte: now },
@@ -606,7 +615,7 @@ export class KeyCortexContextV2Service {
               service: { select: { name: true, duration: true, price: true } },
             },
           }),
-          this.prisma.booking.findMany({
+          (this.prisma.client as any).booking.findMany({
             where: {
               businessId,
               startTime: { gte: todayStart, lte: todayEnd },
@@ -616,7 +625,7 @@ export class KeyCortexContextV2Service {
               service: { select: { name: true, duration: true, price: true } },
             },
           }),
-          this.prisma.booking.findMany({
+          (this.prisma.client as any).booking.findMany({
             where: {
               businessId,
               startTime: { gte: weekStart },
@@ -625,21 +634,21 @@ export class KeyCortexContextV2Service {
               service: { select: { price: true } },
             },
           }),
-          this.prisma.booking.count({
+          (this.prisma.client as any).booking.count({
             where: {
               businessId,
               startTime: { gte: weekStart },
               status: 'completed',
             },
           }),
-          this.prisma.booking.count({
+          (this.prisma.client as any).booking.count({
             where: {
               businessId,
               startTime: { gte: weekStart },
               status: 'no_show',
             },
           }),
-          this.prisma.booking.count({
+          (this.prisma.client as any).booking.count({
             where: {
               businessId,
               startTime: { gte: startOfMonth(now) },
@@ -648,25 +657,25 @@ export class KeyCortexContextV2Service {
           }),
         ]);
 
-      const todayCompleted = todayAppts.filter((a) => a.status === 'completed').length;
+      const todayCompleted = todayAppts.filter((a: any) => a.status === 'completed').length;
       const todayRemaining = todayAppts.filter(
-        (a) => a.status === 'confirmed' || a.status === 'pending',
+        (a: any) => a.status === 'confirmed' || a.status === 'pending',
       ).length;
-      const todayValue = todayAppts.reduce((s, a) => s + (a.service?.price || 0), 0);
+      const todayValue = todayAppts.reduce((s: any, a: any) => s + (a.service?.price || 0), 0);
 
       const totalWeek = weekAppts.length;
       const completionRate = totalWeek > 0 ? Math.round((completedWeek / totalWeek) * 100) : 0;
 
       // Busiest day this week
       const dayCounts: Record<string, number> = {};
-      weekAppts.forEach((a) => {
+      weekAppts.forEach((a: any) => {
         const day = format(new Date(a.startTime), 'EEEE');
         dayCounts[day] = (dayCounts[day] || 0) + 1;
       });
       const busiestDay = Object.entries(dayCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || 'N/A';
 
       return {
-        upcomingAppointments: upcomingAppointments.map((a) => ({
+        upcomingAppointments: upcomingAppointments.map((a: any) => ({
           id: a.id,
           contactName: a.contact?.name || 'Unknown',
           service: a.service?.name || 'Unknown',
@@ -689,7 +698,7 @@ export class KeyCortexContextV2Service {
         availabilityToday: Math.max(0, 8 - todayRemaining),
         busiestDayThisWeek: busiestDay,
       };
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`[getBookingsContext] Error for ${businessId}: ${error.message}`);
       return this.emptyBookingsContext();
     }
@@ -702,13 +711,13 @@ export class KeyCortexContextV2Service {
       const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
 
       const [sent, received, campaigns, conversations] = await Promise.all([
-        this.prisma.message.count({
+        (this.prisma.client as any).message.count({
           where: { businessId, direction: 'outbound', createdAt: { gte: weekStart } },
         }),
-        this.prisma.message.count({
+        (this.prisma.client as any).message.count({
           where: { businessId, direction: 'inbound', createdAt: { gte: weekStart } },
         }),
-        this.prisma.campaign.findMany({
+        (this.prisma.client as any).campaign.findMany({
           where: {
             businessId,
             status: { in: ['running', 'scheduled'] },
@@ -723,7 +732,7 @@ export class KeyCortexContextV2Service {
             clickCount: true,
           },
         }),
-        this.prisma.conversation.count({
+        (this.prisma.client as any).conversation.count({
           where: {
             businessId,
             updatedAt: { gte: subDays(new Date(), 1) },
@@ -731,7 +740,7 @@ export class KeyCortexContextV2Service {
         }),
       ]);
 
-      const campaignStats = campaigns.map((c) => {
+      const campaignStats = campaigns.map((c: any) => {
         const openRate = (c.sentCount || 0) > 0 ? Math.round(((c.openCount || 0) / c.sentCount) * 100) : 0;
         const clickRate = (c.sentCount || 0) > 0 ? Math.round(((c.clickCount || 0) / c.sentCount) * 100) : 0;
         return {
@@ -747,7 +756,7 @@ export class KeyCortexContextV2Service {
       });
 
       const totalSent = sent || 1;
-      const responded = await this.prisma.message.count({
+      const responded = await (this.prisma.client as any).message.count({
         where: {
           businessId,
           direction: 'inbound',
@@ -765,7 +774,7 @@ export class KeyCortexContextV2Service {
         },
         recentConversations: conversations,
       };
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`[getCommunicationsContext] Error for ${businessId}: ${error.message}`);
       return this.emptyCommunicationsContext();
     }
@@ -779,7 +788,7 @@ export class KeyCortexContextV2Service {
 
       const [activeTasks, delegatedToday, completedToday, pendingApprovals, workflows] =
         await Promise.all([
-          this.prisma.autopilotTask.findMany({
+          (this.prisma.client as any).autopilotTask.findMany({
             where: {
               businessId,
               status: { in: ['pending', 'in_progress'] },
@@ -795,27 +804,27 @@ export class KeyCortexContextV2Service {
               dueDate: true,
             },
           }),
-          this.prisma.autopilotTask.count({
+          (this.prisma.client as any).autopilotTask.count({
             where: {
               businessId,
               source: 'delegation_loop',
               createdAt: { gte: todayStart },
             },
           }),
-          this.prisma.autopilotTask.count({
+          (this.prisma.client as any).autopilotTask.count({
             where: {
               businessId,
               status: 'completed',
               completedAt: { gte: todayStart },
             },
           }),
-          this.prisma.autopilotTask.count({
+          (this.prisma.client as any).autopilotTask.count({
             where: {
               businessId,
               status: 'awaiting_approval',
             },
           }),
-          this.prisma.workflow.findMany({
+          (this.prisma.client as any).workflow.findMany({
             where: {
               businessId,
               status: 'active',
@@ -828,14 +837,14 @@ export class KeyCortexContextV2Service {
       const efficiency = Math.round((completedToday / totalTasks) * 100);
 
       // Automation rate = tasks created by automation vs manually
-      const automatedTasks = await this.prisma.autopilotTask.count({
+      const automatedTasks = await (this.prisma.client as any).autopilotTask.count({
         where: {
           businessId,
           source: { in: ['workflow', 'automation', 'delegation_loop'] },
           createdAt: { gte: subDays(new Date(), 30) },
         },
       });
-      const totalTasksMonth = await this.prisma.autopilotTask.count({
+      const totalTasksMonth = await (this.prisma.client as any).autopilotTask.count({
         where: {
           businessId,
           createdAt: { gte: subDays(new Date(), 30) },
@@ -843,7 +852,7 @@ export class KeyCortexContextV2Service {
       });
 
       return {
-        activeTasks: activeTasks.map((t) => ({
+        activeTasks: activeTasks.map((t: any) => ({
           id: t.id,
           title: t.title,
           status: t.status,
@@ -861,7 +870,7 @@ export class KeyCortexContextV2Service {
         pendingApprovals,
         workflowsRunning: workflows.length,
       };
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`[getAutopilotContext] Error for ${businessId}: ${error.message}`);
       return this.emptyAutopilotContext();
     }
@@ -872,8 +881,8 @@ export class KeyCortexContextV2Service {
   async getTemporalContext(businessId: string): Promise<TemporalContext> {
     try {
       const [memories, patterns] = await Promise.all([
-        this.temporal.getRecentMemories(businessId, 20),
-        this.temporal.getDetectedPatterns(businessId, 10),
+        (this.temporal as any).getRecentMemories(businessId, 20),
+        (this.temporal as any).getDetectedPatterns(businessId, 10),
       ]);
 
       return {
@@ -893,7 +902,7 @@ export class KeyCortexContextV2Service {
         })),
         contextWindow: 20,
       };
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`[getTemporalContext] Error for ${businessId}: ${error.message}`);
       return { recentMemories: [], patternsDetected: [], contextWindow: 0 };
     }
@@ -905,14 +914,14 @@ export class KeyCortexContextV2Service {
     try {
       const [unreadThreads, unreadMsgs, urgentMsgs, threadsNeedingAction, avgResponse] =
         await Promise.all([
-          this.inbox.getUnreadThreadCount(businessId),
-          this.inbox.getUnreadMessageCount(businessId),
-          this.inbox.getUrgentMessages(businessId, 5),
-          this.inbox.getThreadsRequiringAction(businessId),
-          this.inbox.getAverageResponseTime(businessId),
+          (this.inbox as any).getUnreadThreadCount(businessId),
+          (this.inbox as any).getUnreadMessageCount(businessId),
+          (this.inbox as any).getUrgentMessages(businessId, 5),
+          (this.inbox as any).getThreadsRequiringAction(businessId),
+          (this.inbox as any).getAverageResponseTime(businessId),
         ]);
 
-      const aiSummary = await this.inbox.getAiSummary(businessId);
+      const aiSummary = await (this.inbox as any).getAiSummary(businessId);
 
       return {
         unreadThreads: unreadThreads || 0,
@@ -929,7 +938,7 @@ export class KeyCortexContextV2Service {
         threadsRequiringAction: threadsNeedingAction || 0,
         avgResponseTime: avgResponse || 0,
       };
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`[getInboxContext] Error for ${businessId}: ${error.message}`);
       return {
         unreadThreads: 0,
@@ -946,7 +955,7 @@ export class KeyCortexContextV2Service {
 
   async getGenomeContext(businessId: string): Promise<GenomeContext> {
     try {
-      const genome = await this.prisma.businessGenome.findUnique({
+      const genome = await (this.prisma.client as any).businessGenome.findUnique({
         where: { businessId },
       });
 
@@ -971,7 +980,7 @@ export class KeyCortexContextV2Service {
         recommendations: (genome.recommendations as string[]) || [],
         lastAssessment: genome.updatedAt || new Date(),
       };
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`[getGenomeContext] Error for ${businessId}: ${error.message}`);
       return {
         dnaScores: {},
@@ -1119,7 +1128,7 @@ export class KeyCortexContextV2Service {
 
     try {
       // New leads since
-      newLeads = await this.prisma.contact.count({
+      newLeads = await (this.prisma.client as any).contact.count({
         where: { businessId, createdAt: { gte: since }, status: 'lead' },
       });
       if (newLeads > 0) {
@@ -1133,12 +1142,12 @@ export class KeyCortexContextV2Service {
       }
 
       // New payments since
-      const payments = await this.prisma.payment.findMany({
+      const payments = await (this.prisma.client as any).payment.findMany({
         where: { businessId, createdAt: { gte: since }, status: 'completed' },
         select: { amount: true },
       });
       newPayments = payments.length;
-      const paymentTotal = payments.reduce((s, p) => s + (p.amount || 0), 0);
+      const paymentTotal = payments.reduce((s: any, p: any) => s + (p.amount || 0), 0);
       if (newPayments > 0) {
         changes.push({
           module: 'commerce',
@@ -1150,7 +1159,7 @@ export class KeyCortexContextV2Service {
       }
 
       // New tasks since
-      newTasks = await this.prisma.autopilotTask.count({
+      newTasks = await (this.prisma.client as any).autopilotTask.count({
         where: { businessId, createdAt: { gte: since } },
       });
       if (newTasks > 0) {
@@ -1164,7 +1173,7 @@ export class KeyCortexContextV2Service {
       }
 
       // New messages since
-      newMessages = await this.prisma.message.count({
+      newMessages = await (this.prisma.client as any).message.count({
         where: { businessId, createdAt: { gte: since } },
       });
       if (newMessages > 0) {
@@ -1178,7 +1187,7 @@ export class KeyCortexContextV2Service {
       }
 
       // Overdue invoices check
-      const newlyOverdue = await this.prisma.invoice.count({
+      const newlyOverdue = await (this.prisma.client as any).invoice.count({
         where: {
           businessId,
           dueDate: { gte: since, lt: new Date() },
@@ -1196,7 +1205,7 @@ export class KeyCortexContextV2Service {
       }
 
       // New bookings since
-      const newBookings = await this.prisma.booking.count({
+      const newBookings = await (this.prisma.client as any).booking.count({
         where: { businessId, createdAt: { gte: since } },
       });
       if (newBookings > 0) {
@@ -1210,7 +1219,7 @@ export class KeyCortexContextV2Service {
       }
 
       // Cancelled bookings since
-      const cancelledBookings = await this.prisma.booking.count({
+      const cancelledBookings = await (this.prisma.client as any).booking.count({
         where: {
           businessId,
           updatedAt: { gte: since },
@@ -1236,12 +1245,12 @@ export class KeyCortexContextV2Service {
         newPayments,
         newTasks,
         newMessages,
-        alertsTriggered: changes.filter((c) => c.severity === 'critical' || c.severity === 'warning').length,
+        alertsTriggered: changes.filter((c: any) => c.severity === 'critical' || c.severity === 'warning').length,
       };
 
       await this.redis.set(cacheKey, JSON.stringify(diff), 300);
       return diff;
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`[getContextDiff] Error for ${businessId}: ${error.message}`);
       return {
         businessId,
@@ -1264,7 +1273,7 @@ export class KeyCortexContextV2Service {
     try {
       await this.redis.del(cacheKey);
       this.logger.debug(`[invalidateCache] Cleared context cache for ${businessId}`);
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`[invalidateCache] Error for ${businessId}: ${error.message}`);
     }
   }
@@ -1391,6 +1400,37 @@ export class KeyCortexContextV2Service {
       automationRate: 0,
       pendingApprovals: 0,
       workflowsRunning: 0,
+    };
+  }
+
+  private emptyTemporalContext(): TemporalContext {
+    return {
+      recentMemories: [],
+      patternsDetected: [],
+      contextWindow: 0,
+    };
+  }
+
+  private emptyInboxContext(): InboxContext {
+    return {
+      unreadThreads: 0,
+      unreadMessages: 0,
+      urgentMessages: [],
+      aiSummary: '',
+      threadsRequiringAction: 0,
+      avgResponseTime: 0,
+    };
+  }
+
+  private emptyGenomeContext(): GenomeContext {
+    return {
+      dnaScores: {},
+      currentStage: '',
+      stageProgress: 0,
+      readinessScore: 0,
+      growthTrajectory: '',
+      recommendations: [],
+      lastAssessment: new Date(),
     };
   }
 }

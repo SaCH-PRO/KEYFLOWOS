@@ -32,7 +32,7 @@ export class TemporalFlowMemoryQueueService implements OnModuleInit, OnModuleDes
   async onModuleInit() {
     try {
       await this.redis.ping();
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Redis unavailable; temporal flow memory worker disabled: ${(err as Error).message}`);
       return;
     }
@@ -70,7 +70,7 @@ export class TemporalFlowMemoryQueueService implements OnModuleInit, OnModuleDes
           removeOnFail: { count: 20 },
         },
       );
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Failed to schedule periodic compaction: ${(err as Error).message}`);
     }
 
@@ -112,7 +112,7 @@ export class TemporalFlowMemoryQueueService implements OnModuleInit, OnModuleDes
         for (const row of rows) {
           try {
             await this.memoryService.compactBusiness(row.businessId);
-          } catch (err) {
+          } catch (err: any) {
             this.logger.warn(`Compaction failed for ${row.businessId}: ${(err as Error).message}`);
           }
         }

@@ -73,6 +73,8 @@ export interface ExecuteOptions {
   rollbackOnFailure?: boolean;
   /** Stop batch on first failure? */
   stopOnFailure?: boolean;
+  /** Alias used by the controller */
+  stopOnError?: boolean;
   /** Emit real-time events? */
   emitEvents?: boolean;
   /** Request source info */
@@ -250,7 +252,7 @@ export class KeyCortexExecutorService {
       }
 
       // If the gate says the action needs explicit approval, force it.
-      if (gate.decision === 'APPROVE' && options.skipApproval) {
+      if (gate.decision === 'ALLOW_WITH_APPROVAL' && options.skipApproval) {
         options = { ...options, skipApproval: false };
       }
     } catch (gateErr) {
@@ -318,7 +320,7 @@ export class KeyCortexExecutorService {
     let result: ConnectorResult;
     try {
       result = await this.executeWithTimeout(command, EXECUTION_TIMEOUT_MS);
-    } catch (error) {
+    } catch (error: any) {
       const errMsg =
         error instanceof Error
           ? error.message
@@ -567,7 +569,7 @@ export class KeyCortexExecutorService {
 
     // Persist to database
     try {
-      await this.prisma.aiApprovalRequest.create({
+      await (this.prisma.client as any).aiApprovalRequest.create({
         data: {
           id: approvalId,
           businessId: command.businessId,
@@ -700,7 +702,7 @@ export class KeyCortexExecutorService {
    */
   async logExecution(record: ExecutionRecord): Promise<void> {
     try {
-      await this.prisma.aiExecutionLog.create({
+      await (this.prisma.client as any).aiExecutionLog.create({
         data: {
           id: record.id,
           businessId: record.command.businessId,
@@ -730,7 +732,7 @@ export class KeyCortexExecutorService {
       this.logger.debug(
         `[logExecution] Logged execution ${record.id} trace=${record.traceId}`,
       );
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(
         `[logExecution] Failed to persist audit log: ${(err as Error).message}`,
       );
@@ -802,7 +804,7 @@ export class KeyCortexExecutorService {
       });
 
       return rollbackResult;
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(
         `[rollback] Rollback execution failed: ${(err as Error).message}`,
       );
@@ -938,7 +940,7 @@ export class KeyCortexExecutorService {
     _userId: string,
   ): Promise<ApprovalPolicy> {
     try {
-      const setting = await this.prisma.businessSetting.findUnique({
+      const setting = await (this.prisma.client as any).businessSetting.findUnique({
         where: { businessId },
         select: {
           aiAutonomyLevel: true,
@@ -952,7 +954,7 @@ export class KeyCortexExecutorService {
 
       // Count recent auto-executions for rate-limiting
       const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
-      const recentCount = await this.prisma.aiExecutionLog.count({
+      const recentCount = await (this.prisma.client as any).aiExecutionLog.count({
         where: {
           businessId,
           success: true,
@@ -1228,7 +1230,7 @@ export class KeyCortexExecutorService {
    */
   private async logBatchExecution(batch: BatchResult): Promise<void> {
     try {
-      await this.prisma.aiExecutionLog.create({
+      await (this.prisma.client as any).aiExecutionLog.create({
         data: {
           id: uuidv4(),
           businessId:
@@ -1273,7 +1275,7 @@ export class KeyCortexExecutorService {
           source: 'key_cortex',
         },
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(
         `[logBatchExecution] Failed: ${(err as Error).message}`,
       );
@@ -1313,5 +1315,29 @@ export class KeyCortexExecutorService {
     const ts = Date.now().toString(36);
     const rand = Math.random().toString(36).substring(2, 6);
     return `${prefix}_${ts}_${rand}`;
+  }
+
+  /**
+   * Gateway alias: execute the command attached to an already-approved request.
+   */
+  async executeApprovedAction(approvalId: string): Promise<ExecutionRecord> {
+    const request = await (this.prisma.client as any).approvalRequest.findUnique({
+      where: { id: approvalId },
+    });
+    if (!request) {
+      throw new Error(`Approval request ${approvalId} not found`);
+    }
+    const payload = (request.payload ?? {}) as Record<string, unknown>;
+    const command: ConnectorCommand = {
+      businessId: request.businessId,
+      userId: request.requesterId,
+      module: ((request as any).actionModule || 'system') as any,
+      action: request.actionType,
+      parameters: payload,
+      source: 'key_cortex',
+      timestamp: new Date(),
+      correlationId: approvalId,
+    };
+    return this.execute(command);
   }
 }

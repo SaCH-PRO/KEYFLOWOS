@@ -269,7 +269,7 @@ export class BestChannelService {
       try {
         await this.recompute(businessId, row.contactId);
         processed += 1;
-      } catch (err) {
+      } catch (err: any) {
         failed += 1;
         this.logger.warn(
           `Best-channel recompute failed for contact=${row.contactId}: ${(err as Error).message}`,
@@ -413,7 +413,7 @@ export class BestChannelService {
       const parts = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'short' })
         .formatToParts(new Date());
       abbr = parts.find((p) => p.type === 'timeZoneName')?.value || tz;
-    } catch (err) {
+    } catch (err: any) {
         this.logger.warn(`Silent catch: ${err instanceof Error ? err.message : err}`);
       }
     return `${PLURAL_DAY[dow] ?? DAY_NAMES[dow]} ${fmt(start)}–${fmt(start + span)} ${abbr}`;

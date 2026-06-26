@@ -626,7 +626,7 @@ export class FlowOrchestratorService {
         toolResults,
         usage,
       };
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`Flow chat error: ${(error as Error).message}`);
       throw error;
     }
@@ -644,7 +644,7 @@ export class FlowOrchestratorService {
 
     try {
       this.aiUsage.checkRateLimit(businessId);
-    } catch (err) {
+    } catch (err: any) {
       yield { type: 'error', error: (err as Error).message };
       return;
     }
@@ -921,7 +921,7 @@ export class FlowOrchestratorService {
 
       yield { type: 'usage', usage };
       yield { type: 'done' };
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`Flow stream chat error: ${(error as Error).message}`);
       yield { type: 'error', error: (error as Error).message };
     }
@@ -974,7 +974,7 @@ export class FlowOrchestratorService {
         riskTier: envelope.riskTier,
         success: true,
       };
-    } catch (error) {
+    } catch (error: any) {
       const durationMs = Date.now() - startTime;
       const tier = this.governance.getToolTier(toolName);
       this.executionLog.logToolExecution(businessId, toolName, args, (error as Error).message, false, durationMs, {
@@ -3465,7 +3465,7 @@ export class FlowOrchestratorService {
       });
       this.businessGraph.invalidateCache(businessId);
       return { success: true, result: envelope.result };
-    } catch (error) {
+    } catch (error: any) {
       const durationMs = Date.now() - startTime;
       const tier = this.governance.getToolTier(toolName);
       this.executionLog.logToolExecution(businessId, toolName, args, (error as Error).message, false, durationMs, {

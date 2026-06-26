@@ -366,7 +366,7 @@ export class CrmCommunicationService {
           body,
         });
         return { ok: true, channel, message };
-      } catch (err) {
+      } catch (err: any) {
         // Fall back to logging it as a copy-to-send event so the thread still records intent.
         const event = await this.timeline.logContactEvent({
           businessId: input.businessId,
@@ -441,7 +441,7 @@ export class CrmCommunicationService {
     for (const s of set) {
       try {
         s.next({ data: payload });
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(`[crm-comm] sse broadcast failed: ${(err as Error).message}`);
       }
     }

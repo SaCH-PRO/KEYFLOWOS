@@ -7,10 +7,14 @@
 
 import { Injectable } from '@nestjs/common';
 import { KeystoreService } from '../keystore/keystore.service';
-import type {
-  ConnectorCommand,
-  ConnectorCommandResult,
-} from './key-cortex-connector.types';
+import type { ConnectorCommand } from './key-cortex-connector.types';
+
+interface ConnectorCommandResult {
+  success: boolean;
+  data?: unknown;
+  error?: string;
+  executionTimeMs: number;
+}
 
 @Injectable()
 export class KeyCortexKeystoreAdapterService {
@@ -94,7 +98,7 @@ export class KeyCortexKeystoreAdapterService {
         default:
           return this.fail(start, `Unknown keystore action: ${command.action}`);
       }
-    } catch (error) {
+    } catch (error: any) {
       const msg = error instanceof Error ? error.message : String(error);
       return this.fail(start, msg);
     }
@@ -140,7 +144,7 @@ export class KeyCortexKeystoreAdapterService {
         default:
           return this.fail(start, `Unknown keystore query: ${command.action}`);
       }
-    } catch (error) {
+    } catch (error: any) {
       const msg = error instanceof Error ? error.message : String(error);
       return this.fail(start, msg);
     }

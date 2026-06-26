@@ -199,7 +199,7 @@ Error: ${ctx.errorMessage ?? 'none'}`;
       if (jsonMatch) {
         return JSON.parse(jsonMatch[0]) as FeedbackAnalysis;
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`AI feedback analysis failed: ${(err as Error).message}`);
     }
 

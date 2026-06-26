@@ -11,10 +11,12 @@
     "emitDecoratorMetadata": true,
     "declaration": false,
     "declarationMap": false,
-    "composite": false
+    "composite": false,
+    "strictPropertyInitialization": false
   },
   "ts-node": {
     "swc": true
   },
-  "include": ["src/**/*", "test/**/*"]
+  "include": ["src/**/*", "test/**/*"],
+  "exclude": ["node_modules", "dist", "**/*.spec.ts", "**/*.test.ts"]
 }

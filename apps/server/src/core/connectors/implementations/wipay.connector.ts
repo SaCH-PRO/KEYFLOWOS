@@ -118,7 +118,7 @@ export class WiPayConnector implements IConnector, IPaymentGatewayConnector {
       let parsed: Record<string, unknown> | null = null;
       try {
         parsed = JSON.parse(text);
-      } catch (err) {
+      } catch (err: any) {
           this.logger.debug(`Non-JSON response (e.g. HTML form page) — that's still a real round trip: ${err instanceof Error ? err.message : err}`);
         }
       const message = (parsed?.message as string | undefined) ?? (parsed?.status as string | undefined) ?? null;
@@ -138,7 +138,7 @@ export class WiPayConnector implements IConnector, IPaymentGatewayConnector {
         account: String(accountNumber),
         detail: message ?? `HTTP ${res.status} from WiPay gateway`,
       };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }

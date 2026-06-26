@@ -97,7 +97,7 @@ export class WhatsAppConnector implements IConnector {
         account: data.verified_name ?? data.display_phone_number ?? phoneNumberId,
         detail: `${data.display_phone_number ?? phoneNumberId}${data.quality_rating ? ` • quality: ${data.quality_rating}` : ''}`,
       };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }

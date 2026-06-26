@@ -110,7 +110,7 @@ export class ConversationalAIService {
         try {
           const result = await this.executeAction(ctx.businessId, action);
           executedActions.push({ ...action, ...result });
-        } catch (err) {
+        } catch (err: any) {
           this.logger.error(`Action ${action.action} failed: ${(err as Error).message}`);
           executedActions.push({ ...action, requiresConfirmation: true });
         }
@@ -191,7 +191,7 @@ export class ConversationalAIService {
             `- ${s.start.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`
           ).join('\n') + '\nSuggest one of these slots if the customer wants to book.\n';
         }
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(`Calendar context fetch failed: ${(err as Error).message}`);
       }
     }
@@ -271,7 +271,7 @@ Respond with JSON only:
           requiresConfirmation: a.requiresConfirmation ?? true,
         })) : [],
       };
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Message analysis failed: ${(err as Error).message}`);
       return this.fallbackResponse(ctx);
     }

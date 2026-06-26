@@ -129,7 +129,7 @@ export class CrmTimelineService {
           where: { id: contactId },
           data: { lastContactedAt: new Date() },
         });
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(
           `[CRM] failed to update lastContactedAt for contact=${contactId}: ${(err as Error).message}`,
         );
@@ -597,7 +597,7 @@ export class CrmTimelineService {
           }
         }
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error creating task for autopilot approval:', err);
     }
 

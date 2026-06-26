@@ -72,7 +72,7 @@ export class KeyInboxAnalysisService {
 
       const raw = (response.content ?? '').trim();
       return this.parseAnalysis(raw, content);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`analyzeMessage failed: ${(err as Error).message}`);
       return this.fallbackAnalysis(content);
     }
@@ -112,7 +112,7 @@ export class KeyInboxAnalysisService {
     try {
       const parsed = JSON.parse(jsonString) as Partial<InboxAnalysis>;
       return this.normalizeAnalysis(parsed, originalContent);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Failed to parse analysis JSON: ${(err as Error).message}`);
       return this.fallbackAnalysis(originalContent);
     }

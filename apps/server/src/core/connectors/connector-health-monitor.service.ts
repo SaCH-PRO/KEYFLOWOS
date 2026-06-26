@@ -102,7 +102,7 @@ export class ConnectorHealthMonitorService implements OnModuleInit, OnModuleDest
             row.status as ConnectorStatus,
           );
           if (flipped) alerts += 1;
-        } catch (err) {
+        } catch (err: any) {
           this.logger.warn(
             `Health check failed for ${row.connectorType} (business ${row.businessId}): ${
               err instanceof Error ? err.message : String(err)
@@ -116,7 +116,7 @@ export class ConnectorHealthMonitorService implements OnModuleInit, OnModuleDest
           `Health monitor tick complete: ${rows.length} connectors across ${businesses.size} businesses, ${alerts} new alerts`,
         );
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(
         `Health monitor tick failed: ${err instanceof Error ? err.message : String(err)}`,
       );
@@ -150,7 +150,7 @@ export class ConnectorHealthMonitorService implements OnModuleInit, OnModuleDest
           row.status as ConnectorStatus,
         );
         if (flipped) alerts += 1;
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(
           `Health check failed for ${row.connectorType} (business ${businessId}): ${
             err instanceof Error ? err.message : String(err)
@@ -264,7 +264,7 @@ export class ConnectorHealthMonitorService implements OnModuleInit, OnModuleDest
           link: '/app/connect',
         },
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `Failed to create connector_health notification for ${type} (business ${businessId}): ${
           err instanceof Error ? err.message : String(err)

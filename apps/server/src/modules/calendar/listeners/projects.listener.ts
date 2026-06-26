@@ -53,7 +53,7 @@ export class CalendarProjectsListener {
     }
     try {
       await this.projection.upsertFromSource(input);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`project projection failed id=${p.id}: ${(err as Error).message}`);
     }
   }
@@ -92,7 +92,7 @@ export class CalendarProjectsListener {
     }
     try {
       await this.projection.upsertFromSource(input);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`project_task projection failed id=${t.id}: ${(err as Error).message}`);
     }
   }

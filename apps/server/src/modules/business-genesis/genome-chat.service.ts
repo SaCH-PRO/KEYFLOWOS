@@ -90,7 +90,7 @@ export class GenomeChatService {
         maxTokens: 2048,
       });
       assistantContent = response.content ?? 'I\'m not sure how to respond to that. Could you rephrase?';
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Genome Chat AI call failed for ${businessId}: ${(err as Error).message}`);
       assistantContent = 'KEY is having trouble thinking right now. Please try again in a moment.';
     }
@@ -264,7 +264,7 @@ Rules:
           },
         };
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Failed to parse genome_update block: ${(err as Error).message}`);
     }
 

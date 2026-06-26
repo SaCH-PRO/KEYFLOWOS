@@ -319,7 +319,7 @@ export class CommerceController {
           isActive: p.isActive ?? true,
         });
         created.push(result);
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(`Failed to import product "${p.name}":`, err);
         errors.push(p.name);
       }
@@ -939,7 +939,7 @@ export class CommerceController {
     try {
       const link = await this.commerce.createPaymentLink(invoiceId, businessId);
       return `${appUrl()}/public/invoice/${link.token}`;
-    } catch (err) {
+    } catch (err: any) {
       const msg = err instanceof Error ? err.message : String(err);
       if (!/paid or voided/i.test(msg)) throw err;
       const existing = await this.commerce.findAnyPaymentLink(invoiceId, businessId);

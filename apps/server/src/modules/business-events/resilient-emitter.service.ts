@@ -48,7 +48,7 @@ export class ResilientEmitterService {
       this.logger.warn('Circuit OPEN: enqueueing business event for later replay');
       try {
         await this.queue.enqueue(job, { priority: 1 });
-      } catch (err) {
+      } catch (err: any) {
         this.logger.error(`Failed to enqueue event: ${(err as Error).message}`);
       }
       return;
@@ -59,7 +59,7 @@ export class ResilientEmitterService {
         this.logger.warn('Circuit HALF_OPEN limit reached: enqueueing business event');
         try {
           await this.queue.enqueue(job, { priority: 1 });
-        } catch (err) {
+        } catch (err: any) {
           this.logger.error(`Failed to enqueue event: ${(err as Error).message}`);
         }
         return;

@@ -102,7 +102,7 @@ export abstract class SocialPlatformConnector implements IConnector {
         ...result,
         account: result.account ?? conn.accountName ?? undefined,
       };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }

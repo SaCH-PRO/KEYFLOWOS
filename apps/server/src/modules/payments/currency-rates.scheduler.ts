@@ -42,7 +42,7 @@ export class CurrencyRatesScheduler implements OnModuleInit, OnModuleDestroy {
       this.logger.log(
         `FX rates refreshed (source=${snap.source}, fetchedAt=${snap.fetchedAt.toISOString()})`,
       );
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `FX rate refresh failed: ${err instanceof Error ? err.message : String(err)}`,
       );

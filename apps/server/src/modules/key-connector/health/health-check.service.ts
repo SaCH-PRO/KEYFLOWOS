@@ -53,14 +53,14 @@ export class HealthCheckService {
       }
 
       const results = await Promise.all(
-        connections.map((c) => this.checkProvider(c.providerKey, c)),
+        connections.map((c) => this.checkProvider(c.providerKey, c as any)),
       );
 
       // Persist results
       await this.persistResults(businessId, results);
 
       return results;
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(
         `Health check all failed for business ${businessId}: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -89,7 +89,7 @@ export class HealthCheckService {
       } else {
         result = await this.checkExternalProvider(providerKey, connection);
       }
-    } catch (error) {
+    } catch (error: any) {
       const latency = Date.now() - start;
       const message = error instanceof Error ? error.message : String(error);
       result = this.buildResult(
@@ -131,7 +131,7 @@ export class HealthCheckService {
         message: r.message ?? undefined,
         checkedAt: r.checkedAt,
       }));
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(
         `Failed to load health history: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -167,7 +167,7 @@ export class HealthCheckService {
       }
 
       this.logger.log('Scheduled health checks completed');
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(
         `Scheduled health checks failed: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -277,7 +277,7 @@ export class HealthCheckService {
         );
       }
       return this.buildResult(providerKey, connectionId, 'degraded', latency, `Unexpected status: ${response.status}`);
-    } catch (error) {
+    } catch (error: any) {
       const latency = Date.now() - start;
       return this.buildResult(providerKey, connectionId, 'unhealthy', latency, error instanceof Error ? error.message : String(error));
     }
@@ -305,7 +305,7 @@ export class HealthCheckService {
         return this.buildResult(providerKey, connectionId, 'healthy', latency, 'SendGrid API responding');
       }
       return this.buildResult(providerKey, connectionId, 'degraded', latency, `Status: ${response.status}`);
-    } catch (error) {
+    } catch (error: any) {
       const latency = Date.now() - start;
       return this.buildResult(providerKey, connectionId, 'unhealthy', latency, error instanceof Error ? error.message : String(error));
     }
@@ -333,7 +333,7 @@ export class HealthCheckService {
         return this.buildResult(providerKey, connectionId, 'healthy', latency, `Slack workspace: ${response.data.team}`);
       }
       return this.buildResult(providerKey, connectionId, 'unhealthy', latency, `Slack error: ${response.data?.error ?? 'unknown'}`);
-    } catch (error) {
+    } catch (error: any) {
       const latency = Date.now() - start;
       return this.buildResult(providerKey, connectionId, 'unhealthy', latency, error instanceof Error ? error.message : String(error));
     }
@@ -362,7 +362,7 @@ export class HealthCheckService {
         return this.buildResult(providerKey, connectionId, 'healthy', latency, `Google auth valid for: ${response.data.email ?? 'unknown'}`);
       }
       return this.buildResult(providerKey, connectionId, 'degraded', latency, `Status: ${response.status}`);
-    } catch (error) {
+    } catch (error: any) {
       const latency = Date.now() - start;
       return this.buildResult(providerKey, connectionId, 'unhealthy', latency, error instanceof Error ? error.message : String(error));
     }
@@ -390,7 +390,7 @@ export class HealthCheckService {
         return this.buildResult(providerKey, connectionId, 'healthy', latency, `Microsoft auth valid for: ${response.data.displayName ?? 'unknown'}`);
       }
       return this.buildResult(providerKey, connectionId, 'degraded', latency, `Status: ${response.status}`);
-    } catch (error) {
+    } catch (error: any) {
       const latency = Date.now() - start;
       return this.buildResult(providerKey, connectionId, 'unhealthy', latency, error instanceof Error ? error.message : String(error));
     }
@@ -422,7 +422,7 @@ export class HealthCheckService {
         return this.buildResult(providerKey, connectionId, 'healthy', latency, 'WhatsApp Business API responding');
       }
       return this.buildResult(providerKey, connectionId, 'degraded', latency, `Status: ${response.status}`);
-    } catch (error) {
+    } catch (error: any) {
       const latency = Date.now() - start;
       return this.buildResult(providerKey, connectionId, 'unhealthy', latency, error instanceof Error ? error.message : String(error));
     }
@@ -450,7 +450,7 @@ export class HealthCheckService {
         return this.buildResult(providerKey, connectionId, 'healthy', latency, `Typeform: ${response.data.alias ?? 'connected'}`);
       }
       return this.buildResult(providerKey, connectionId, 'degraded', latency, `Status: ${response.status}`);
-    } catch (error) {
+    } catch (error: any) {
       const latency = Date.now() - start;
       return this.buildResult(providerKey, connectionId, 'unhealthy', latency, error instanceof Error ? error.message : String(error));
     }
@@ -478,7 +478,7 @@ export class HealthCheckService {
         return this.buildResult(providerKey, connectionId, 'healthy', latency, 'Jotform API responding');
       }
       return this.buildResult(providerKey, connectionId, 'degraded', latency, `Response code: ${response.data?.responseCode}`);
-    } catch (error) {
+    } catch (error: any) {
       const latency = Date.now() - start;
       return this.buildResult(providerKey, connectionId, 'unhealthy', latency, error instanceof Error ? error.message : String(error));
     }
@@ -507,7 +507,7 @@ export class HealthCheckService {
         return this.buildResult(providerKey, connectionId, 'healthy', latency, `Mailchimp: ${response.data.account_name ?? 'connected'}`);
       }
       return this.buildResult(providerKey, connectionId, 'degraded', latency, `Status: ${response.status}`);
-    } catch (error) {
+    } catch (error: any) {
       const latency = Date.now() - start;
       return this.buildResult(providerKey, connectionId, 'unhealthy', latency, error instanceof Error ? error.message : String(error));
     }
@@ -541,7 +541,7 @@ export class HealthCheckService {
         return this.buildResult(providerKey, connectionId, 'healthy', latency, `WiPay ${env} API responding`);
       }
       return this.buildResult(providerKey, connectionId, 'degraded', latency, `Status: ${response.status}`);
-    } catch (error) {
+    } catch (error: any) {
       const latency = Date.now() - start;
       return this.buildResult(providerKey, connectionId, 'unhealthy', latency, error instanceof Error ? error.message : String(error));
     }
@@ -579,7 +579,7 @@ export class HealthCheckService {
         latency,
         'Webhook URL does not match expected format',
       );
-    } catch (error) {
+    } catch (error: any) {
       const latency = Date.now() - start;
       return this.buildResult(
         providerKey,
@@ -611,7 +611,7 @@ export class HealthCheckService {
           checkedAt: r.checkedAt,
         })),
       });
-    } catch (error) {
+    } catch (error: any) {
       this.logger.warn(
         `Failed to persist health results: ${error instanceof Error ? error.message : String(error)}`,
       );

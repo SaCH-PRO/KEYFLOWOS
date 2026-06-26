@@ -939,7 +939,7 @@ export class CrmActionsService {
       }
 
       return { success: true, message: 'Action marked complete' };
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error completing action:', error);
       return { success: false, message: 'Failed to complete action' };
     }
@@ -1228,7 +1228,7 @@ Return max 10 actions. Sort by priority (high first), then by estimated impact (
           reason: a.reason.slice(0, 140),
           priority: a.priority,
         }));
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn('AI next actions generation failed', (err as Error).message);
       return this.getFallbackAiActions(
         staleContacts, highScoreNoQuote, overdueInvoiceContacts, newLeadsNoNotes,

@@ -75,12 +75,13 @@ describe('Phase 18C — KeyCortexMemoryService', () => {
 
       mockRedis.keys = vi.fn().mockResolvedValue(['key1', 'key2']);
       mockRedis.get = vi.fn()
+        .mockResolvedValueOnce(null) // cache miss
         .mockResolvedValueOnce(JSON.stringify(mem1))
         .mockResolvedValueOnce(JSON.stringify(mem2));
 
       const result = await service.retrieve({ businessId: 'biz_1', memoryTypes: ['business_fact'] });
 
-      expect(result).toHaveLength(2); // Both loaded, filter applied in service
+      expect(result).toHaveLength(1); // Only business_fact survives the filter
     });
   });
 

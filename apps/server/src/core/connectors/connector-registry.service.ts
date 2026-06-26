@@ -175,7 +175,7 @@ export class ConnectorRegistryService {
         const isConn = await connector.isConnected(businessId);
         result = isConn ? { success: true } : { success: false, error: 'Not connected' };
       }
-    } catch (err) {
+    } catch (err: any) {
       result = { success: false, error: err instanceof Error ? err.message : String(err) };
     }
 
@@ -216,7 +216,7 @@ export class ConnectorRegistryService {
           ? { success: true, action: 'Verified stored connection' }
           : { success: false, error: 'Not connected' };
       }
-    } catch (err) {
+    } catch (err: any) {
       result = {
         success: false,
         error: err instanceof Error ? err.message : String(err),
@@ -272,7 +272,7 @@ export class ConnectorRegistryService {
 
     try {
       await connector.disconnect(businessId);
-    } catch (err) {
+    } catch (err: any) {
         this.logger.warn(`Silent catch: ${err instanceof Error ? err.message : err}`);
       }
 

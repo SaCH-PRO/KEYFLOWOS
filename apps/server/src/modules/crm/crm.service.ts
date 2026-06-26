@@ -393,7 +393,7 @@ export class CrmService {
         LIMIT 1000
       `;
       return rows.map((r) => r.id);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`TSVector search failed: ${(err as Error).message}`);
       return [];
     }
@@ -1475,7 +1475,7 @@ export class CrmService {
     try {
       await c.contact.update({ where: { id: op.duplicateId }, data: restoreData as Prisma.ContactUpdateInput });
       restored.contact = 1;
-    } catch (err) {
+    } catch (err: any) {
       // Failing to restore the surviving "duplicate" row is the only true blocker:
       // the rest of the revert depends on this row existing as a contact.
       throw new BadRequestException(`Failed to restore duplicate contact: ${reasonOf(err)}`);
@@ -1513,7 +1513,7 @@ export class CrmService {
           skipped[label] = (skipped[label] ?? 0) + (ids.length - r.count);
           conflicts.push({ table: label, ids, reason: `${ids.length - r.count} row(s) missing or already moved` });
         }
-      } catch (err) {
+      } catch (err: any) {
         skipped[label] = (skipped[label] ?? 0) + ids.length;
         conflicts.push({ table: label, ids, reason: reasonOf(err) });
       }
@@ -1531,7 +1531,7 @@ export class CrmService {
         try {
           await create(row);
           restored[table] = (restored[table] ?? 0) + 1;
-        } catch (err) {
+        } catch (err: any) {
           skipped[table] = (skipped[table] ?? 0) + 1;
           conflicts.push({ table, id: typeof row.id === 'string' ? row.id : undefined, reason: reasonOf(err) });
         }
@@ -1559,7 +1559,7 @@ export class CrmService {
           repointedCounts: { ...(stored as Record<string, unknown>), _revertReport: conflictReport } as Prisma.InputJsonValue,
         },
       });
-    } catch (err) {
+    } catch (err: any) {
         this.logger.warn(`Don't fail the user-visible revert because we couldn't persist the: ${err instanceof Error ? err.message : err}`);
       }
 

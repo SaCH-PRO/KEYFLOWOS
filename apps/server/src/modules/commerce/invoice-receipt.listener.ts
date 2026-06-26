@@ -41,7 +41,7 @@ export class InvoiceReceiptListener {
       if (!link) {
         try {
           link = await this.commerce.createPaymentLink(invoice.id, payload.businessId);
-        } catch (err) {
+        } catch (err: any) {
           if (!isExpectedLinkRefusal(err)) throw err;
           link = null;
         }
@@ -103,7 +103,7 @@ export class InvoiceReceiptListener {
         messageId: result.messageId,
         actorId: null,
       });
-    } catch (err) {
+    } catch (err: any) {
       // Don't propagate — receipt auto-send is best-effort. The user can
       // always click "Resend receipt" from the invoice detail drawer. We
       // log loudly so an outage in Gmail/CRM is observable.

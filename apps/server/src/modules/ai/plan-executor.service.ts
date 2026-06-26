@@ -64,7 +64,7 @@ export class PlanExecutorService implements OnModuleInit, OnModuleDestroy {
     this.logger.log(`Plan ${payload.planId} approved — immediate execution triggered`);
     try {
       await this.enqueuePlanSteps(payload.planId, payload.businessId);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Immediate execution failed for plan ${payload.planId}: ${(err as Error).message}`);
     }
   }
@@ -82,7 +82,7 @@ export class PlanExecutorService implements OnModuleInit, OnModuleDestroy {
     this.isRunning = true;
     try {
       await this.enqueueReadySteps();
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Plan executor tick failed: ${(err as Error).message}`);
     } finally {
       this.isRunning = false;
@@ -102,7 +102,7 @@ export class PlanExecutorService implements OnModuleInit, OnModuleDestroy {
     for (const plan of plans) {
       try {
         await this.enqueuePlanSteps(plan.id, plan.businessId);
-      } catch (err) {
+      } catch (err: any) {
         this.logger.error(`Failed to enqueue plan ${plan.id}: ${(err as Error).message}`);
       }
     }
@@ -205,7 +205,7 @@ export class PlanExecutorService implements OnModuleInit, OnModuleDestroy {
         });
 
         this.logger.log(`Enqueued step ${step.id} (${toolName}) for plan ${planId}`);
-      } catch (err) {
+      } catch (err: any) {
         this.logger.error(`Failed to enqueue step ${step.id}: ${(err as Error).message}`);
       }
     }
@@ -332,7 +332,7 @@ export class PlanExecutorService implements OnModuleInit, OnModuleDestroy {
           data: { status: 'executing', startedAt: new Date() },
         });
         this.logger.log(`Enqueued unblocked step ${step.id} (${toolName}) for plan ${planId}`);
-      } catch (err) {
+      } catch (err: any) {
         this.logger.error(`Failed to enqueue unblocked step ${step.id}: ${(err as Error).message}`);
       }
     }

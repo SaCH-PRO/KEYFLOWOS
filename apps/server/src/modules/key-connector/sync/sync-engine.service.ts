@@ -70,7 +70,7 @@ export class SyncEngineService {
           recordsUpdated: 0,
           recordsFailed: 0,
           error: null,
-          meta: null,
+          meta: null as any,
           startedAt: new Date(),
           completedAt: null,
         },
@@ -83,7 +83,7 @@ export class SyncEngineService {
         `Sync job ${job.id} scheduled for connection ${connection.id}`,
       );
       return job;
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(
         `Failed to schedule sync for ${connection.id}: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -121,7 +121,7 @@ export class SyncEngineService {
       // ── Delegate to provider-specific sync logic ──
       const result = await this.executeProviderSync(
         job.providerKey,
-        connection,
+        connection as any,
         job.direction,
       );
 
@@ -135,7 +135,7 @@ export class SyncEngineService {
           recordsUpdated: result.recordsUpdated,
           recordsFailed: result.recordsFailed,
           error: result.error ?? null,
-          meta: result.meta ? JSON.stringify(result.meta) : null,
+          meta: (result.meta ? JSON.stringify(result.meta) : null) as any,
           completedAt: new Date(),
         },
       });
@@ -149,7 +149,7 @@ export class SyncEngineService {
       const updated = await this.loadJob(jobId);
       if (updated) this.activeJobs.set(jobId, updated);
       return updated ?? job;
-    } catch (error) {
+    } catch (error: any) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error(`Sync job ${jobId} failed: ${message}`);
 
@@ -223,7 +223,7 @@ export class SyncEngineService {
           lastError: c.lastError ?? undefined,
         };
       });
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(
         `getSyncStatus failed: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -246,7 +246,7 @@ export class SyncEngineService {
       });
 
       return rows.map((r) => this.mapDbToSyncJob(r));
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(
         `getSyncHistory failed: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -283,7 +283,7 @@ export class SyncEngineService {
       this.activeJobs.set(syncJobId, reset);
       this.logger.log(`Retry scheduled for sync job ${syncJobId}`);
       return reset;
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(
         `retryFailedSync failed: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -377,7 +377,7 @@ export class SyncEngineService {
       recordsUpdated: number;
       recordsFailed: number;
       error: string | null;
-      meta: string | null | Record<string, unknown>;
+      meta: unknown;
       startedAt: Date;
       completedAt: Date | null;
     },
@@ -386,7 +386,7 @@ export class SyncEngineService {
     if (row.meta) {
       try {
         parsedMeta =
-          typeof row.meta === 'string' ? JSON.parse(row.meta) : row.meta;
+          typeof row.meta === 'string' ? JSON.parse(row.meta) : (row.meta as Record<string, unknown>);
       } catch {
         parsedMeta = undefined;
       }

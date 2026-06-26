@@ -47,7 +47,7 @@ export class ProjectRevenueListener {
       for (const p of projects) {
         await this.transition(payload.businessId, p.id, cfg.fromStatus, cfg.toStatusOnInvoicePaid, 'invoice.paid');
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`project advance from invoice failed: ${(err as Error).message}`);
     }
   }
@@ -66,7 +66,7 @@ export class ProjectRevenueListener {
       for (const p of projects) {
         await this.transition(payload.businessId, p.id, cfg.fromStatus, cfg.toStatusOnBookingCompleted, 'booking.completed');
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`project advance from booking failed: ${(err as Error).message}`);
     }
   }

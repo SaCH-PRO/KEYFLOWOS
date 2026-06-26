@@ -191,7 +191,7 @@ export class DefaultTriggersService {
           },
         });
         created++;
-      } catch (err) {
+      } catch (err: any) {
         this.logger.error(`Failed to seed trigger "${trigger.name}": ${(err as Error).message}`);
       }
     }

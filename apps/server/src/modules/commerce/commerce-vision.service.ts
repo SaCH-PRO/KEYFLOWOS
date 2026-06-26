@@ -95,7 +95,7 @@ Only return the JSON array, no markdown or explanation.`,
         duration: typeof item.duration === 'number' ? item.duration : undefined,
         sku: item.sku || undefined,
       })).filter(item => item.name);
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('Failed to extract products from image', error);
       return [];
     }

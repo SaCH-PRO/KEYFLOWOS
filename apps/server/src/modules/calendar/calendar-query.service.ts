@@ -453,7 +453,7 @@ export class CalendarQueryService {
             description: patch.description,
           },
         });
-      } catch (err) {
+      } catch (err: any) {
         const msg = (err as Error).message ?? '';
         if (msg.includes('cannot be edited')) {
           throw new BadRequestException(
@@ -504,7 +504,7 @@ export class CalendarQueryService {
           patch: { status: 'CANCELLED' },
           soft: true,
         });
-      } catch (err) {
+      } catch (err: any) {
         const msg = (err as Error).message ?? '';
         if (msg.includes('cannot be edited')) {
           throw new BadRequestException(
@@ -614,7 +614,7 @@ function cryptoId(): string {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const c = require('node:crypto') as { randomUUID?: () => string };
     if (c.randomUUID) return c.randomUUID().replace(/-/g, '');
-  } catch (err) {
+  } catch (err: any) {
       console.error(`Silent catch:`, err);
     }
   return Math.random().toString(36).slice(2, 14) + Date.now().toString(36);

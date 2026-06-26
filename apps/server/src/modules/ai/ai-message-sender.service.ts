@@ -154,7 +154,7 @@ export class AiMessageSenderService {
       }
 
       return { success: false, channel: 'whatsapp', error: result.error };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, channel: 'whatsapp', error: (err as Error).message };
     }
   }
@@ -188,7 +188,7 @@ export class AiMessageSenderService {
       }
 
       return { success: false, channel: 'sms', error: result.error };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, channel: 'sms', error: (err as Error).message };
     }
   }

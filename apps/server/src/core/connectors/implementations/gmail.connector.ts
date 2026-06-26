@@ -111,7 +111,7 @@ export class GmailConnector implements IConnector {
       }
       const data = await res.json();
       return { success: true, account: data.emailAddress ?? business.gmailEmail ?? undefined };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }
@@ -168,7 +168,7 @@ export class GmailConnector implements IConnector {
         account: address,
         detail: `Delivered to ${address} • id ${sent.id ?? 'unknown'}`,
       };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }

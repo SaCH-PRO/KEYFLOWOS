@@ -24,7 +24,7 @@ export class AnalyticsSchedulerService {
     try {
       const result = await this.engine.generateDailySnapshots();
       this.logger.log(`Generated ${result.count} daily snapshots`);
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('Daily snapshot generation failed', error);
     }
   }
@@ -35,7 +35,7 @@ export class AnalyticsSchedulerService {
     try {
       const result = await this.engine.generateWeeklySnapshots();
       this.logger.log(`Generated ${result.count} weekly snapshots`);
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('Weekly snapshot generation failed', error);
     }
   }
@@ -46,7 +46,7 @@ export class AnalyticsSchedulerService {
     try {
       const result = await this.engine.generateMonthlySnapshots();
       this.logger.log(`Generated ${result.count} monthly snapshots`);
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('Monthly snapshot generation failed', error);
     }
   }
@@ -63,12 +63,12 @@ export class AnalyticsSchedulerService {
         try {
           await this.projection.generateRevenueProjection(business.id);
           count++;
-        } catch (error) {
+        } catch (error: any) {
           this.logger.error(`Failed projection for ${business.id}`, error);
         }
       }
       this.logger.log(`Generated ${count} projections`);
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('Projection generation failed', error);
     }
   }
@@ -85,12 +85,12 @@ export class AnalyticsSchedulerService {
         try {
           const result = await this.intelligence.generateInsights(business.id);
           count += result.generated;
-        } catch (error) {
+        } catch (error: any) {
           this.logger.error(`Failed insights for ${business.id}`, error);
         }
       }
       this.logger.log(`Generated ${count} insights`);
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('Insight generation failed', error);
     }
   }
@@ -107,12 +107,12 @@ export class AnalyticsSchedulerService {
         try {
           await this.maturity.assessBusiness(business.id);
           count++;
-        } catch (error) {
+        } catch (error: any) {
           this.logger.error(`Failed maturity for ${business.id}`, error);
         }
       }
       this.logger.log(`Assessed ${count} businesses`);
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('Maturity assessment failed', error);
     }
   }

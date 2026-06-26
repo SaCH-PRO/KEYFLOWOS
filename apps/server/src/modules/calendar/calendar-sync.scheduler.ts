@@ -58,14 +58,14 @@ export class CalendarSyncScheduler implements OnModuleInit, OnModuleDestroy {
             continue;
           }
           await this.sync.runResyncCycle(id);
-        } catch (err) {
+        } catch (err: any) {
           this.logger.warn(`Calendar resync failed for ${id}: ${(err as Error).message}`);
         }
         if (PER_BUSINESS_GAP_MS > 0) {
           await new Promise((r) => setTimeout(r, PER_BUSINESS_GAP_MS));
         }
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Calendar resync tick errored: ${(err as Error).message}`);
     } finally {
       this.running = false;

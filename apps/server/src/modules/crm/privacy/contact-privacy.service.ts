@@ -424,7 +424,7 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
         try {
           await this.purgeOne(req.businessId, req.contactId);
           purged += 1;
-        } catch (err) {
+        } catch (err: any) {
           this.logger.warn(
             `[ContactPrivacy] purge failed contact=${req.contactId}: ${err instanceof Error ? err.message : err}`,
           );

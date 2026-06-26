@@ -10,12 +10,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { InvoiceStatus } from '@prisma/client';
 import { KeyCortexContextService } from './key-cortex-context.service';
 import {
   ProactiveTrigger,
   ProactiveTriggerType,
-  CortexContextSnapshot,
 } from './cortex-genome-contracts';
+import { CortexContextSnapshot } from './key-cortex.types';
 
 interface SignalSummary {
   dnaTrend: 'improving' | 'stable' | 'declining';
@@ -227,7 +228,7 @@ export class KeyProactiveEngineService {
 
   private async countOverdueTasks(businessId: string): Promise<number> {
     try {
-      return this.prisma.task.count({
+      return this.prisma.client.task.count({
         where: {
           businessId,
           status: { in: ['todo', 'in_progress'] },
@@ -241,7 +242,7 @@ export class KeyProactiveEngineService {
 
   private async countUnconvertedLeads(businessId: string): Promise<number> {
     try {
-      return this.prisma.lead.count({
+      return this.prisma.client.lead.count({
         where: {
           businessId,
           status: { in: ['new', 'contacted'] },
@@ -255,15 +256,15 @@ export class KeyProactiveEngineService {
 
   private async getRecentRevenue(businessId: string): Promise<number> {
     try {
-      const result = await this.prisma.invoice.aggregate({
+      const result = await this.prisma.client.invoice.aggregate({
         where: {
           businessId,
-          status: 'paid',
+          status: InvoiceStatus.PAID,
           createdAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
         },
         _sum: { total: true },
       });
-      return result._sum.total ?? 0;
+      return result._sum?.total ?? 0;
     } catch {
       return 0;
     }

@@ -40,13 +40,28 @@ export class KeyCortexEventService {
     correlationId?: string;
     parentEventId?: string;
   }): Promise<BusinessEvent> {
-    const event = await this.prisma.client.businessEvent.create({
+    const event = await (this.prisma.client as any).businessEvent.create({
       data: { ...params, createdAt: new Date() },
     });
     this.logger.debug(
       `[Event] ${params.source}/${params.module}: ${params.action}`,
     );
     return event;
+  }
+
+  /**
+   * Gateway-compatible alias: emit a named event payload.
+   * Internally logs it as a generic system event.
+   */
+  emit(eventName: string, payload: Record<string, unknown>): void {
+    this.logEvent({
+      businessId: (payload.businessId as string) || 'system',
+      type: BusinessEventType.SYSTEM_EVENT,
+      module: 'gateway',
+      source: eventName,
+      action: 'emit',
+      payload,
+    }).catch((err: Error) => this.logger.warn(`Emit failed: ${err.message}`));
   }
 
   /**
@@ -322,7 +337,7 @@ export class KeyCortexEventService {
       offset?: number;
     } = {},
   ): Promise<BusinessEvent[]> {
-    return this.prisma.client.businessEvent.findMany({
+    return (this.prisma.client as any).businessEvent.findMany({
       where: { businessId, ...filters },
       orderBy: { createdAt: 'desc' },
       take: filters.limit ?? 100,
@@ -335,7 +350,7 @@ export class KeyCortexEventService {
    * Used to trace multi-step workflows across services.
    */
   async getEventChain(correlationId: string): Promise<BusinessEvent[]> {
-    return this.prisma.client.businessEvent.findMany({
+    return (this.prisma.client as any).businessEvent.findMany({
       where: { correlationId },
       orderBy: { createdAt: 'asc' },
     });
@@ -354,13 +369,13 @@ export class KeyCortexEventService {
     else if (period === 'week') start.setDate(start.getDate() - 7);
     else start.setMonth(start.getMonth() - 1);
 
-    const events = await this.prisma.client.businessEvent.groupBy({
+    const events = await (this.prisma.client as any).businessEvent.groupBy({
       by: ['type'],
       where: { businessId, createdAt: { gte: start } },
       _count: true,
     });
 
-    return Object.fromEntries(events.map((e) => [e.type, e._count]));
+    return Object.fromEntries(events.map((e: any) => [e.type, e._count]));
   }
 
   /**
@@ -371,7 +386,7 @@ export class KeyCortexEventService {
     businessId: string,
     limit = 100,
   ): Promise<BusinessEvent[]> {
-    return this.prisma.client.businessEvent.findMany({
+    return (this.prisma.client as any).businessEvent.findMany({
       where: { businessId, genomeSignal: true },
       orderBy: { createdAt: 'desc' },
       take: limit,
@@ -398,7 +413,7 @@ export class KeyCortexEventService {
       if (options.startDate) (where.createdAt as Record<string, Date>).gte = options.startDate;
       if (options.endDate) (where.createdAt as Record<string, Date>).lte = options.endDate;
     }
-    return this.prisma.client.businessEvent.findMany({
+    return (this.prisma.client as any).businessEvent.findMany({
       where,
       orderBy: { createdAt: 'desc' },
       take: options.limit ?? 100,

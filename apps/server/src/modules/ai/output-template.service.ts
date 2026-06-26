@@ -188,7 +188,7 @@ export class OutputTemplateService {
           customInstructions: userTemplate.customInstructions,
         };
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Template resolution failed for ${businessId}/${category}: ${(err as Error).message}`);
     }
 

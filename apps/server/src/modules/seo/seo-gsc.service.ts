@@ -123,7 +123,7 @@ export class SeoGoogleSearchConsoleService {
         queriesUpdated: queryResult.updated,
         pagesUpdated: pageResult.updated,
       };
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`GSC sync failed: ${(err as Error).message}`);
       return {
         synced: false,

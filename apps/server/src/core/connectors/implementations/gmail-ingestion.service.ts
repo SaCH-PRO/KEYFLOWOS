@@ -171,7 +171,7 @@ export class GmailIngestionService {
 
           await this.keyInbox.addMessage(messageInput);
           ingested += 1;
-        } catch (err) {
+        } catch (err: any) {
           const message = err instanceof Error ? err.message : String(err);
           this.logger.warn(`Failed to ingest Gmail message ${ref.id} for ${businessId}: ${message}`);
           errors.push(`${ref.id}: ${message}`);
@@ -209,7 +209,7 @@ export class GmailIngestionService {
         errors,
         duration: Date.now() - start,
       };
-    } catch (err) {
+    } catch (err: any) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.error(`Gmail ingestion failed for ${businessId}: ${message}`);
 
@@ -260,7 +260,7 @@ export class GmailIngestionService {
     try {
       const refs = await this.listHistoryMessages(accessToken, lastHistoryId);
       return { refs, historyId: currentHistoryId };
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `Gmail history sync failed, falling back to message list: ${err instanceof Error ? err.message : String(err)}`,
       );

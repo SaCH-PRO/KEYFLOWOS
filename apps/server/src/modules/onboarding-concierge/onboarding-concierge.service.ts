@@ -459,7 +459,7 @@ export class OnboardingConciergeService {
         industry: template.label,
         channels: ['STOREFRONT'],
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.debug(`Blueprint inference failed: ${(err as Error).message}`);
     }
 
@@ -552,7 +552,7 @@ export class OnboardingConciergeService {
 
       const parsed = this.parseAiResponse(result.content, setupStatus);
       return parsed;
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`Concierge AI error: ${(error as Error).message}`);
       return this.getFallbackResponse(setupStatus);
     }
@@ -1015,7 +1015,7 @@ ACTION:confirm|Set Up Salon Defaults`;
           },
         });
       }
-    } catch (error) {
+    } catch (error: any) {
       this.logger.warn(`Failed to award milestone ${milestone}: ${(error as Error).message}`);
     }
   }

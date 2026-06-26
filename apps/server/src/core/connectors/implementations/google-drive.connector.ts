@@ -118,7 +118,7 @@ export class GoogleDriveConnector implements IConnector {
       }
       const data = await res.json();
       return { success: true, account: data.user?.emailAddress ?? business.driveEmail ?? undefined };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }
@@ -185,7 +185,7 @@ export class GoogleDriveConnector implements IConnector {
         account: business.driveEmail ?? undefined,
         detail: file.webViewLink ?? undefined,
       };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }

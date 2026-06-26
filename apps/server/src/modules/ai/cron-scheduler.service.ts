@@ -42,7 +42,7 @@ export class CronSchedulerService implements OnModuleInit {
           trigger.schedule,
         );
         this.logger.log(`Registered cron trigger: ${trigger.name} (${trigger.schedule})`);
-      } catch (err) {
+      } catch (err: any) {
         this.logger.error(`Failed to register cron trigger ${trigger.id}: ${(err as Error).message}`);
       }
     }

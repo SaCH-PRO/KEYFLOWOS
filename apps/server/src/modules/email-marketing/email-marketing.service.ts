@@ -422,7 +422,7 @@ export class EmailMarketingService {
                 });
                 gmailDelivered++;
                 await new Promise((r) => setTimeout(r, 200));
-              } catch (err) {
+              } catch (err: any) {
                 gmailFailed++;
                 this.logger.warn(`Failed to send email to ${recipient.email}: ${err}`);
                 await this.prisma.client.emailCampaignContact.updateMany({
@@ -432,7 +432,7 @@ export class EmailMarketingService {
               }
             }
           }
-        } catch (err) {
+        } catch (err: any) {
           this.logger.warn(`Gmail check failed: ${err}`);
         }
       }
@@ -461,7 +461,7 @@ export class EmailMarketingService {
         gmailFailed,
         warning,
       };
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`sendCampaign failed for ${id}, reverting to DRAFT`, err);
       await this.prisma.client.emailCampaign.updateMany({
         where: { id, status: 'SENDING' },

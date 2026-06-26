@@ -62,7 +62,7 @@ export class StoreOrderRoutingListener {
         strategies,
         routeCount: routes?.length ?? 0,
       });
-    } catch (err) {
+    } catch (err: any) {
       const errMsg = (err as Error).message;
       this.logger.warn(
         `store_order.paid → routeOrder failed for ${orderId}: ${errMsg}`,
@@ -80,7 +80,7 @@ export class StoreOrderRoutingListener {
           });
           contactId = contact?.id ?? null;
         }
-      } catch (err) {
+      } catch (err: any) {
           this.logger.warn(`; do not block the failure event: ${err instanceof Error ? err.message : err}`);
         }
       const failurePayload: StoreOrderRoutingFailedPayload = {

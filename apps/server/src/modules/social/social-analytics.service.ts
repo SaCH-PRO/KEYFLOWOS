@@ -121,7 +121,7 @@ export class SocialAnalyticsService {
             if (engagement.saves) platformTotals[platform].saves = (platformTotals[platform].saves || 0) + engagement.saves;
             if (engagement.views) platformTotals[platform].views = (platformTotals[platform].views || 0) + engagement.views;
           }
-        } catch (err) {
+        } catch (err: any) {
             this.logger.warn(`Silently skip failed engagement fetches: ${err instanceof Error ? err.message : err}`);
           }
       }

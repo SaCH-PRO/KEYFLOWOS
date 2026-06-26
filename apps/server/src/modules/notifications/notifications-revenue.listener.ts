@@ -133,7 +133,7 @@ export class NotificationsRevenueListener {
         body: input.body,
         data: { ...(input.data ?? {}), dedupeKey: input.dedupeKey },
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `notifications-revenue write failed for ${input.type}: ${(err as Error).message}`,
       );

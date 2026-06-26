@@ -139,7 +139,7 @@ export class OutlookContactsConnector implements IConnector {
       });
       if (!res.ok) return { success: false, error: `Graph API returned ${res.status}` };
       return { success: true, account: business.msContactsEmail ?? undefined };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }
@@ -170,7 +170,7 @@ export class OutlookContactsConnector implements IConnector {
         account: business.msContactsEmail ?? undefined,
         detail: `${data.value?.length ?? 0} returned`,
       };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }

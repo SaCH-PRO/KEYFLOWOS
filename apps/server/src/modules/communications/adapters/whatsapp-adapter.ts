@@ -131,7 +131,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
         externalPostId: messageId,
         raw: result as unknown as Record<string, unknown>,
       };
-    } catch (err) {
+    } catch (err: any) {
       const normalized = this.normalizeError(err);
       return { success: false, errorCode: normalized.code, errorMessage: normalized.message, isTransient: normalized.isTransient };
     }
@@ -160,7 +160,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
         return { valid: false, error: errorData?.error?.message || `API error: ${response.status}` };
       }
       return { valid: true };
-    } catch (err) {
+    } catch (err: any) {
       return { valid: false, error: (err instanceof Error) ? err.message : String(err) };
     }
   }

@@ -121,7 +121,7 @@ export interface FollowUpTask {
 @Injectable()
 export class KeyCortexPhoneService {
   private readonly logger = new Logger(KeyCortexPhoneService.name);
-  private readonly twilio: Twilio.Twilio | null = null;
+  private readonly twilio: any | null = null;
   private readonly twilioPhoneNumber: string | null = null;
   private readonly webhookBaseUrl: string;
 
@@ -181,7 +181,7 @@ export class KeyCortexPhoneService {
     );
 
     // Create the call session record in Prisma
-    const sessionRecord = await this.prisma.client.keyCallSession.create({
+    const sessionRecord = await (this.prisma.client as any).keyCallSession.create({
       data: {
         businessId,
         phoneNumber,
@@ -210,7 +210,7 @@ export class KeyCortexPhoneService {
       });
 
       // Update the session with the Twilio Call SID
-      await this.prisma.client.keyCallSession.update({
+      await (this.prisma.client as any).keyCallSession.update({
         where: { id: sessionRecord.id },
         data: {
           callSid: call.sid,
@@ -242,7 +242,7 @@ export class KeyCortexPhoneService {
       this.logger.error(`Failed to initiate outbound call: ${message}`);
 
       // Update the session as failed
-      await this.prisma.client.keyCallSession.update({
+      await (this.prisma.client as any).keyCallSession.update({
         where: { id: sessionRecord.id },
         data: { status: 'failed', endedAt: new Date() },
       });
@@ -274,7 +274,7 @@ export class KeyCortexPhoneService {
     this.logger.log(`Incoming call: callSid=${callSid}, from=${from}, to=${to}`);
 
     // Resolve the business from the called number
-    const business = await this.prisma.client.business.findFirst({
+    const business = await (this.prisma.client as any).business.findFirst({
       where: { phoneNumber: to },
       select: { id: true, name: true },
     });
@@ -283,7 +283,7 @@ export class KeyCortexPhoneService {
     const businessName = business?.name ?? 'our business';
 
     // Create a session record
-    const sessionRecord = await this.prisma.client.keyCallSession.create({
+    const sessionRecord = await (this.prisma.client as any).keyCallSession.create({
       data: {
         businessId,
         phoneNumber: from,
@@ -365,7 +365,7 @@ export class KeyCortexPhoneService {
     this.logger.debug(`Generating call script: purpose="${purpose}", business=${businessId}`);
 
     // Fetch business details for personalisation
-    const business = await this.prisma.client.business.findUnique({
+    const business = await (this.prisma.client as any).business.findUnique({
       where: { id: businessId },
       select: { name: true, industry: true, phoneNumber: true },
     });
@@ -453,13 +453,13 @@ Generate a call script for this purpose.`,
   ): Promise<CallHistoryEntry[]> {
     this.logger.debug(`Fetching call history: business=${businessId}, limit=${limit}`);
 
-    const sessions = await this.prisma.client.keyCallSession.findMany({
+    const sessions = await (this.prisma.client as any).keyCallSession.findMany({
       where: { businessId },
       orderBy: { createdAt: 'desc' },
       take: limit,
     });
 
-    return sessions.map((s) => ({
+    return sessions.map((s: any) => ({
       id: s.id,
       callSid: s.callSid,
       phoneNumber: s.phoneNumber,
@@ -611,7 +611,7 @@ Respond ONLY with valid JSON in this exact shape:
     // If we have an analysis with action items, create tasks from them
     if (callResult.analysis?.actionItems) {
       for (const item of callResult.analysis.actionItems) {
-        const taskRecord = await this.prisma.client.task.create({
+        const taskRecord = await (this.prisma.client as any).task.create({
           data: {
             businessId,
             title: `[Follow-up] ${item.task}`,
@@ -642,7 +642,7 @@ Respond ONLY with valid JSON in this exact shape:
 
     // If the call outcome indicates a callback is needed, create one
     if (callResult.outcome?.toLowerCase().includes('callback')) {
-      const callbackTask = await this.prisma.client.task.create({
+      const callbackTask = await (this.prisma.client as any).task.create({
         data: {
           businessId,
           title: `[Callback] ${callResult.phoneNumber}`,
@@ -672,7 +672,7 @@ Respond ONLY with valid JSON in this exact shape:
 
     // If sentiment is negative, create an escalation task
     if (callResult.analysis?.sentiment === 'negative') {
-      const escalationTask = await this.prisma.client.task.create({
+      const escalationTask = await (this.prisma.client as any).task.create({
         data: {
           businessId,
           title: `[Escalation] Negative call with ${callResult.phoneNumber}`,
@@ -731,7 +731,7 @@ Respond ONLY with valid JSON in this exact shape:
     }
 
     // Update Prisma
-    await this.prisma.client.keyCallSession.updateMany({
+    await (this.prisma.client as any).keyCallSession.updateMany({
       where: { callSid },
       data: {
         status: mappedStatus,
@@ -755,7 +755,7 @@ Respond ONLY with valid JSON in this exact shape:
   ): Promise<void> {
     this.logger.debug(`Recording callback: callSid=${callSid}`);
 
-    await this.prisma.client.keyCallSession.updateMany({
+    await (this.prisma.client as any).keyCallSession.updateMany({
       where: { callSid },
       data: { recordingUrl },
     });
@@ -882,13 +882,13 @@ Respond ONLY with valid JSON in this exact shape:
           },
           session.businessId,
         );
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(`Call analysis failed: ${(err as Error).message}`);
       }
     }
 
     // Persist final state
-    await this.prisma.client.keyCallSession.update({
+    await (this.prisma.client as any).keyCallSession.update({
       where: { id: session.id },
       data: {
         status: session.status,
@@ -943,7 +943,7 @@ Respond ONLY with valid JSON in this exact shape:
     businessId: string,
   ): Promise<string> {
     // Check if business has a custom greeting configured
-    const customGreeting = await this.prisma.client.aiMemory.findUnique({
+    const customGreeting = await (this.prisma.client as any).aiMemory.findUnique({
       where: {
         businessId_category_key: {
           businessId,
@@ -1010,7 +1010,7 @@ ${session.script ? `Script/context: ${session.script}` : ''}`,
    * Persist the current transcript to Prisma.
    */
   private async persistTranscript(session: CallSession): Promise<void> {
-    await this.prisma.client.keyCallSession.update({
+    await (this.prisma.client as any).keyCallSession.update({
       where: { id: session.id },
       data: {
         transcript: JSON.stringify(session.transcript),

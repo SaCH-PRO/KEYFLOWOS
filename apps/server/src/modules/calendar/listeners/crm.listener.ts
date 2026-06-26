@@ -53,7 +53,7 @@ export class CalendarCrmListener {
     }
     try {
       await this.projection.upsertFromSource(input);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `contact_task projection failed id=${payload.task.id}: ${(err as Error).message}`,
       );
@@ -98,7 +98,7 @@ export class CalendarCrmListener {
     }
     try {
       await this.projection.upsertFromSource(input);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `contact.next_action projection failed contact=${payload.contactId}: ${(err as Error).message}`,
       );

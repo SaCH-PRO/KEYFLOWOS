@@ -149,7 +149,7 @@ export class KeyCortexActionsService {
     }
 
     this.logger.log(
-      `Batch execution complete: ${results.filter((r) => r.status === 'success').length}/${actions.length} succeeded`,
+      `Batch execution complete: ${results.filter((r: any) => r.status === 'success').length}/${actions.length} succeeded`,
     );
     return results;
   }
@@ -263,8 +263,8 @@ export class KeyCortexActionsService {
     this.logger.debug(`Fetching available tools for business ${businessId}`);
 
     try {
-      const tools = await this.toolRegistry.listTools(businessId);
-      return tools.map((tool) => ({
+      const tools = await (this.toolRegistry as any).listTools(businessId);
+      return tools.map((tool: any) => ({
         name: tool.name,
         description: tool.description,
         params: tool.parameters ?? {},
@@ -288,7 +288,7 @@ export class KeyCortexActionsService {
   ): Promise<GatewayToolDefinition[]> {
     const tools = await this.getAvailableTools(businessId);
 
-    const definitions: GatewayToolDefinition[] = tools.map((tool) => ({
+    const definitions: GatewayToolDefinition[] = tools.map((tool: any) => ({
       name: tool.name,
       description: tool.description,
       parameters: {
@@ -440,7 +440,7 @@ export class KeyCortexActionsService {
     sessionId: string,
   ): Promise<void> {
     try {
-      await this.prisma.cortexActionLog.create({
+      await (this.prisma.client as any).cortexActionLog.create({
         data: {
           sessionId,
           actionType: action.actionType,
@@ -468,12 +468,12 @@ export class KeyCortexActionsService {
    */
   async getActionHistory(sessionId: string): Promise<CortexActionResult[]> {
     try {
-      const logs = await this.prisma.cortexActionLog.findMany({
+      const logs = await (this.prisma.client as any).cortexActionLog.findMany({
         where: { sessionId },
         orderBy: { createdAt: 'asc' },
       });
 
-      return logs.map((log) => ({
+      return logs.map((log: any) => ({
         actionType: log.actionType as CortexActionType,
         status: log.status as 'success' | 'error' | 'pending_approval',
         description: log.description,
@@ -502,7 +502,7 @@ export class KeyCortexActionsService {
   ): Promise<CortexActionResult> {
     const { title, description, assigneeId, dueDate, priority } = params;
 
-    const task = await this.prisma.task.create({
+    const task = await (this.prisma.client as any).task.create({
       data: {
         title: String(title),
         description: description ? String(description) : null,
@@ -531,7 +531,7 @@ export class KeyCortexActionsService {
   ): Promise<CortexActionResult> {
     const { title, startTime, endTime, attendees, description } = params;
 
-    const event = await this.prisma.calendarEvent.create({
+    const event = await (this.prisma.client as any).calendarEvent.create({
       data: {
         title: String(title),
         startTime: new Date(String(startTime)),
@@ -561,7 +561,7 @@ export class KeyCortexActionsService {
   ): Promise<CortexActionResult> {
     const { recipientId, content, channel = 'in_app' } = params;
 
-    const message = await this.prisma.message.create({
+    const message = await (this.prisma.client as any).message.create({
       data: {
         recipientId: String(recipientId),
         content: String(content),
@@ -589,7 +589,7 @@ export class KeyCortexActionsService {
   ): Promise<CortexActionResult> {
     const { title, content, type = 'note' } = params;
 
-    const doc = await this.prisma.document.create({
+    const doc = await (this.prisma.client as any).document.create({
       data: {
         title: String(title),
         content: String(content),
@@ -617,7 +617,7 @@ export class KeyCortexActionsService {
     const { dataSource, metric, timeframe = '30d' } = params;
 
     // Delegate to the tool registry for data analysis capabilities
-    const analysisResult = await this.toolRegistry.executeTool(
+    const analysisResult = await (this.toolRegistry as any).executeTool(
       'data_analyzer',
       {
         source: String(dataSource),
@@ -645,7 +645,7 @@ export class KeyCortexActionsService {
   ): Promise<CortexActionResult> {
     const { reportType, timeframe = '30d', format = 'pdf' } = params;
 
-    const report = await this.prisma.report.create({
+    const report = await (this.prisma.client as any).report.create({
       data: {
         type: String(reportType),
         timeframe: String(timeframe),
@@ -657,7 +657,7 @@ export class KeyCortexActionsService {
     });
 
     // Trigger async report generation via command service
-    await this.commandService.enqueue({
+    await (this.commandService as any).enqueue({
       type: 'GENERATE_REPORT',
       payload: { reportId: report.id, reportType, timeframe, format, businessId },
     });
@@ -679,7 +679,7 @@ export class KeyCortexActionsService {
   ): Promise<CortexActionResult> {
     const { flowId, flowInputs = {} } = params;
 
-    const execution = await this.prisma.flowExecution.create({
+    const execution = await (this.prisma.client as any).flowExecution.create({
       data: {
         flowId: String(flowId),
         businessId,
@@ -690,7 +690,7 @@ export class KeyCortexActionsService {
     });
 
     // Trigger flow execution via command service
-    await this.commandService.enqueue({
+    await (this.commandService as any).enqueue({
       type: 'EXECUTE_FLOW',
       payload: { executionId: execution.id, flowId, inputs: flowInputs, businessId },
     });
@@ -712,7 +712,7 @@ export class KeyCortexActionsService {
   ): Promise<CortexActionResult> {
     const { name, email, phone, source = 'cortex_ai', notes } = params;
 
-    const lead = await this.prisma.lead.create({
+    const lead = await (this.prisma.client as any).lead.create({
       data: {
         name: String(name),
         email: String(email),
@@ -756,7 +756,7 @@ export class KeyCortexActionsService {
     }
 
     // Use Prisma's dynamic model access
-    const updated = await (this.prisma as Record<string, unknown>)[modelName].update({
+    const updated = await (this.prisma as any)[modelName].update({
       where: { id: String(entityId), businessId },
       data: {
         ...(updates as Record<string, unknown>),
@@ -787,12 +787,11 @@ export class KeyCortexActionsService {
       unitPrice: number;
     }>;
 
-    const totalAmount = itemsArray.reduce(
-      (sum, item) => sum + item.quantity * item.unitPrice,
+    const totalAmount = itemsArray.reduce((sum: any, item: any) => sum + item.quantity * item.unitPrice,
       0,
     );
 
-    const invoice = await this.prisma.invoice.create({
+    const invoice = await (this.prisma.client as any).invoice.create({
       data: {
         customerId: String(customerId),
         businessId,
@@ -823,7 +822,7 @@ export class KeyCortexActionsService {
     const { query, limit = 5 } = params;
 
     // Use the tool registry for knowledge base search
-    const searchResult = await this.toolRegistry.executeTool(
+    const searchResult = await (this.toolRegistry as any).executeTool(
       'knowledge_search',
       {
         query: String(query),
@@ -850,7 +849,7 @@ export class KeyCortexActionsService {
   ): Promise<CortexActionResult> {
     const { toolName, toolParams = {} } = params;
 
-    const result = await this.toolRegistry.executeTool(
+    const result = await (this.toolRegistry as any).executeTool(
       String(toolName),
       toolParams as Record<string, unknown>,
       businessId,
@@ -876,7 +875,7 @@ export class KeyCortexActionsService {
     const { query } = params;
 
     // Execute via command service for safety/audit
-    const result = await this.commandService.execute({
+    const result = await (this.commandService as any).execute({
       type: 'DATABASE_QUERY',
       payload: { query: String(query) },
     });
@@ -898,7 +897,7 @@ export class KeyCortexActionsService {
   ): Promise<CortexActionResult> {
     const { recordType, recordId, data } = params;
 
-    const updated = await (this.prisma as Record<string, unknown>)[
+    const updated = await (this.prisma as any)[
       String(recordType)
     ].update({
       where: { id: String(recordId), businessId },
@@ -923,7 +922,7 @@ export class KeyCortexActionsService {
     const { to, subject, body, cc, bcc } = params;
 
     // Delegate to command service for email delivery
-    await this.commandService.enqueue({
+    await (this.commandService as any).enqueue({
       type: 'SEND_EMAIL',
       payload: {
         to: String(to),
@@ -952,7 +951,7 @@ export class KeyCortexActionsService {
   ): Promise<CortexActionResult> {
     const { message, triggerTime, recipientId } = params;
 
-    const reminder = await this.prisma.reminder.create({
+    const reminder = await (this.prisma.client as any).reminder.create({
       data: {
         message: String(message),
         triggerTime: new Date(String(triggerTime)),
@@ -989,7 +988,7 @@ export class KeyCortexActionsService {
     const required = ACTION_PARAM_SCHEMA[actionType];
     if (!required) return;
 
-    const missing = required.filter((key) => params[key] === undefined);
+    const missing = required.filter((key: any) => params[key] === undefined);
     if (missing.length > 0) {
       throw new BadRequestException(
         `Action "${actionType}" missing required parameters: ${missing.join(', ')}`,

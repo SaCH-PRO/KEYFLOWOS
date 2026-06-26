@@ -89,7 +89,7 @@ function makePrismaStub() {
         for (const t of pendingTxns) txns.set(t.id, t);
         ledger.push(...pendingLedger);
         return result;
-      } catch (err) {
+      } catch (err: any) {
         // Rollback — drop staged writes.
         pendingTxns = [];
         pendingLedger = [];

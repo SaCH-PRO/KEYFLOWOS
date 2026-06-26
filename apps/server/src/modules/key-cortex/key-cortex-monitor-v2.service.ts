@@ -157,7 +157,7 @@ export class KeyCortexMonitorV2Service {
           recentRunStatus: lastRun?.status ?? null,
         };
       });
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(
         `[getActiveMonitors] Failed: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -206,7 +206,7 @@ export class KeyCortexMonitorV2Service {
 
     // Persist via Prisma directly — the DelegationLoopService will pick
     // it up on the next check cycle.
-    const loop = await this.prisma.client.delegationLoop.create({
+    const loop = await (this.prisma.client as any).delegationLoop.create({
       data: {
         businessId,
         loopType: config.loopType,
@@ -261,7 +261,7 @@ export class KeyCortexMonitorV2Service {
     this.logger.log(`[updateMonitor] business=${businessId} monitor=${monitorId}`);
 
     // Verify ownership
-    const existing = await this.prisma.client.delegationLoop.findFirst({
+    const existing = await (this.prisma.client as any).delegationLoop.findFirst({
       where: { id: monitorId, businessId },
     });
     if (!existing) {
@@ -290,7 +290,7 @@ export class KeyCortexMonitorV2Service {
       updateData.config = { ...currentConfig, ...updates.config };
     }
 
-    const loop = await this.prisma.client.delegationLoop.update({
+    const loop = await (this.prisma.client as any).delegationLoop.update({
       where: { id: monitorId },
       data: updateData,
     });
@@ -364,7 +364,7 @@ export class KeyCortexMonitorV2Service {
       `[getMonitorStatus] business=${businessId} monitor=${monitorId}`,
     );
 
-    const loop = await this.prisma.client.delegationLoop.findFirst({
+    const loop = await (this.prisma.client as any).delegationLoop.findFirst({
       where: { id: monitorId, businessId },
       include: {
         runs: {
@@ -446,7 +446,7 @@ export class KeyCortexMonitorV2Service {
 
     const [recentRuns, pendingTasks, criticalAlerts] = await Promise.all([
       // Recent failed or blocked runs
-      this.prisma.client.delegationLoopRun.findMany({
+      (this.prisma.client as any).delegationLoopRun.findMany({
         where: {
           businessId,
           OR: [{ status: 'failed' }, { actionsBlocked: { gt: 0 } }],
@@ -459,7 +459,7 @@ export class KeyCortexMonitorV2Service {
       }),
 
       // High-priority pending tasks created by delegation loops
-      this.prisma.client.autopilotTask.findMany({
+      (this.prisma.client as any).autopilotTask.findMany({
         where: {
           businessId,
           priority: { in: ['URGENT', 'HIGH'] },
@@ -557,12 +557,12 @@ export class KeyCortexMonitorV2Service {
     weekAgo.setDate(weekAgo.getDate() - 7);
 
     const [weekRuns, allTimeRuns, taskStats] = await Promise.all([
-      this.prisma.client.delegationLoopRun.aggregate({
+      (this.prisma.client as any).delegationLoopRun.aggregate({
         where: { businessId, startedAt: { gte: weekAgo } },
         _count: true,
         _sum: { actionsCreated: true, itemsMatched: true },
       }),
-      this.prisma.client.delegationLoopRun.aggregate({
+      (this.prisma.client as any).delegationLoopRun.aggregate({
         where: { businessId },
         _count: true,
         _sum: { actionsCreated: true, itemsMatched: true },
@@ -582,7 +582,7 @@ export class KeyCortexMonitorV2Service {
 
     // Approval-required rate
     const approvalRequiredRuns =
-      await this.prisma.client.delegationLoopRun.aggregate({
+      await (this.prisma.client as any).delegationLoopRun.aggregate({
         where: { businessId },
         _sum: { actionsBlocked: true },
       });

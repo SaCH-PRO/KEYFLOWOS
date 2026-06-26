@@ -178,7 +178,7 @@ export class WhatsAppService {
           rawPayload: payload.rawPayload ?? {},
         },
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `Failed to ingest WhatsApp message to KEYInbox for ${businessId}: ${(err as Error).message}`,
       );

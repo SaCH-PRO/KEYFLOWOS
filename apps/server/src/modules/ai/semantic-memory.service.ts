@@ -55,7 +55,7 @@ export class SemanticMemoryService {
       });
 
       return input.sourceId;
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Failed to store semantic memory: ${(err as Error).message}`);
       throw err;
     }
@@ -109,7 +109,7 @@ export class SemanticMemoryService {
         metadata: typeof r.metadata === 'string' ? JSON.parse(r.metadata) : r.metadata,
         similarity: Number(r.similarity),
       }));
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Semantic search failed: ${(err as Error).message}`);
       return [];
     }
@@ -132,7 +132,7 @@ export class SemanticMemoryService {
           metadata: { category: memory.category, key: memory.key, confidence: memory.confidence },
         });
         stored++;
-      } catch (err) {
+      } catch (err: any) {
           this.logger.warn(`On error: ${err instanceof Error ? err.message : err}`);
         }
     }

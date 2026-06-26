@@ -349,7 +349,7 @@ export class ClientMomentumService {
               recommendationsGenerated++;
             }
           }
-        } catch (err) {
+        } catch (err: any) {
           this.logger.warn(`[Momentum] Failed to process contact ${contact.id}: ${(err as Error).message}`);
         }
       }
@@ -516,7 +516,7 @@ export class ClientMomentumService {
         if (parsed.title) rec.title = parsed.title;
         if (parsed.description) rec.description = parsed.description;
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.debug(`[Momentum] AI enrichment skipped for ${rec.type}: ${(err as Error).message}`);
     }
   }
@@ -555,7 +555,7 @@ export class ClientMomentumService {
           };
         }
       }
-    } catch (err) {
+    } catch (err: any) {
         this.logger.warn(`Invalid dates: ${err instanceof Error ? err.message : err}`);
       }
     return null;

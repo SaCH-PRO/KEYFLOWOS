@@ -15,7 +15,7 @@ export class ProjectPlanListener {
     this.logger.log(`Plan ${payload.planId} materialized into project ${payload.projectId}`);
     try {
       await this.executor.autoExecutePlanEvents(payload.businessId, payload.planId);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Auto-execution failed for plan ${payload.planId}: ${(err as Error).message}`);
     }
   }

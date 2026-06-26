@@ -94,6 +94,25 @@ export interface ExternalConnectorDefinition {
   configSchema: ConfigField[];
   /** Rate limit configuration */
   rateLimit?: RateLimitConfig;
+  /** Hardened rate-limit flag or detailed per-window config */
+  rateLimitHardened?: boolean | {
+    requestsPerSecond: number;
+    requestsPerMinute: number;
+    requestsPerHour: number;
+    burstAllowance: number;
+  };
+  /** Required OAuth scopes */
+  requiredScopes?: string[];
+  /** Request timeout configuration */
+  timeoutConfig?: { requestMs?: number; requestTimeoutMs?: number; connectTimeoutMs?: number; uploadTimeoutMs?: number };
+  /** Retry configuration */
+  retryConfig?: Partial<RetryConfig>;
+  /** Webhook security settings */
+  webhookSecurity?: any;
+  /** Health check configuration */
+  healthCheck?: { path?: string; intervalMs?: number; endpoint?: string; method?: string; expectedStatus?: number; expectedResponse?: Record<string, unknown> };
+  /** Sandbox endpoint overrides */
+  sandboxEndpoints?: Record<string, string>;
   /** Whether the connector supports OAuth2 */
   supportsOAuth: boolean;
   /** OAuth2 scopes required (if applicable) */
@@ -146,7 +165,7 @@ export interface ActionParameter {
   /** Parameter name */
   name: string;
   /** Parameter type */
-  type: 'string' | 'number' | 'boolean' | 'object' | 'array' | 'file' | 'json';
+  type: 'string' | 'number' | 'boolean' | 'object' | 'array' | 'file' | 'json' | 'textarea' | 'url';
   /** Human-readable label */
   label: string;
   /** Parameter description */
@@ -459,6 +478,8 @@ export interface RetryConfig {
   backoffMultiplier: number;
   /** HTTP status codes that trigger a retry */
   retryableStatusCodes?: number[];
+  /** Error codes that trigger a retry */
+  retryableErrors?: string[];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -630,6 +651,7 @@ export const ErrorCodes = {
   DECRYPTION_ERROR: 'DECRYPTION_ERROR',
   OAUTH_TOKEN_EXPIRED: 'OAUTH_TOKEN_EXPIRED',
   OAUTH_REFRESH_FAILED: 'OAUTH_REFRESH_FAILED',
+  CIRCUIT_BREAKER_OPEN: 'CIRCUIT_BREAKER_OPEN',
 } as const;
 
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];

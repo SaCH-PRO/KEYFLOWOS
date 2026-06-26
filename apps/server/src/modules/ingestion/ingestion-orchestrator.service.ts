@@ -82,7 +82,7 @@ export class IngestionOrchestrator {
 
     try {
       await this.buildPlan(item.id);
-    } catch (err) {
+    } catch (err: any) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.error(`buildPlan failed for ${item.id}: ${message}`);
       await this.prisma.client.ingestionItem.update({
@@ -107,7 +107,7 @@ export class IngestionOrchestrator {
       } else {
         await this.persistGenericPlan(item);
       }
-    } catch (err) {
+    } catch (err: any) {
       const message = err instanceof Error ? err.message : String(err);
       if (attempt < maxAttempts) {
         const delay = Math.pow(3, attempt) * 1000;
@@ -146,7 +146,7 @@ export class IngestionOrchestrator {
         where: { id: itemId, status: { in: ['reviewing', 'error'] } },
         data: { status: 'approved', executedResults: results as any, errorMessage: null },
       });
-    } catch (err) {
+    } catch (err: any) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.error(`Execution failed for ${itemId}: ${message}`);
       return await this.prisma.client.ingestionItem.update({

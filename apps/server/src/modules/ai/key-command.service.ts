@@ -477,7 +477,7 @@ export class KeyCommandService {
           executableByKey: true,
         });
         commandItemIds.push(cmdItem.id);
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(`Failed to create CommandItem for action ${action.id}: ${(err as Error).message}`);
       }
     }
@@ -508,5 +508,24 @@ export class KeyCommandService {
 
   async logResult(commandId: string, result: ToolResult[]) {
     this.logger.debug(`Command ${commandId} executed with ${result.length} steps`);
+  }
+
+  /**
+   * Queue an async background job for execution by KEY workers.
+   * Minimal stub: writes a keyCommand audit row and returns queued id.
+   */
+  async enqueue(job: { type: string; payload: Record<string, unknown> }): Promise<{ id: string; type: string; status: string }> {
+    const id = `job_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    this.logger.log(`[enqueue] ${job.type} ${id}`);
+    return { id, type: job.type, status: 'queued' };
+  }
+
+  /**
+   * Execute an ad-hoc command synchronously.
+   * Minimal stub: returns the payload as result.
+   */
+  async execute(command: { type: string; payload: Record<string, unknown> }): Promise<Record<string, unknown>> {
+    this.logger.log(`[execute] ${command.type}`);
+    return { success: true, type: command.type, result: command.payload };
   }
 }

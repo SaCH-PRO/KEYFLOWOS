@@ -23,7 +23,7 @@ export class CalendarConnectorListener {
     try {
       await this.emitTemporalEvent(payload, 'calendar_event.created', 'create');
       await this.actionIntelligence.analyzeEvent(payload.businessId, payload);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `Calendar created handler failed: ${(err as Error).message}`,
       );
@@ -36,7 +36,7 @@ export class CalendarConnectorListener {
     try {
       await this.emitTemporalEvent(payload, 'calendar_event.updated', 'update');
       await this.actionIntelligence.analyzeEvent(payload.businessId, payload);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `Calendar updated handler failed: ${(err as Error).message}`,
       );

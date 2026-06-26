@@ -78,7 +78,7 @@ export class AuthMiddleware implements NestMiddleware {
           this.logger.warn('Token provided but Supabase verification failed — rejecting');
         }
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.debug(`AuthMiddleware error: ${(err as Error).message}`);
     }
 

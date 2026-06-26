@@ -48,11 +48,11 @@ export class CampaignSchedulerService implements OnModuleInit, OnModuleDestroy {
         try {
           await this.emailMarketing.sendCampaign(campaign.businessId, campaign.id);
           this.logger.log(`Scheduled campaign ${campaign.id} sent successfully`);
-        } catch (err) {
+        } catch (err: any) {
           this.logger.error(`Failed to send scheduled campaign ${campaign.id}`, err);
         }
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error('Campaign scheduler tick failed', err);
     }
   }
@@ -63,7 +63,7 @@ export class CampaignSchedulerService implements OnModuleInit, OnModuleDestroy {
       if (generated > 0) {
         this.logger.log(`Auto-generated ${generated} campaign briefing(s)`);
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error('Briefing scheduler tick failed', err);
     }
   }

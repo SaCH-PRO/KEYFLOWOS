@@ -84,11 +84,11 @@ export class KeyConnectorService {
         return {
           provider: def,
           connection: dbConn
-            ? this.mapDbToConnection(dbConn)
+            ? this.mapDbToConnection(dbConn as any)
             : undefined,
         };
       });
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(
         `getProviders failed: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -187,7 +187,7 @@ export class KeyConnectorService {
       );
 
       return this.mapDbToConnection(connection);
-    } catch (error) {
+    } catch (error: any) {
       await this.audit(
         businessId,
         userId,
@@ -236,7 +236,7 @@ export class KeyConnectorService {
       this.logger.log(
         `Business ${businessId} disconnected provider ${connection.providerKey} (connection: ${connectionId})`,
       );
-    } catch (error) {
+    } catch (error: any) {
       await this.audit(
         businessId,
         userId,
@@ -263,7 +263,7 @@ export class KeyConnectorService {
       });
 
       return rows.map((r) => this.mapDbToConnection(r));
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(
         `getConnections failed: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -396,7 +396,7 @@ export class KeyConnectorService {
         details: r.details ? JSON.parse(r.details as string) : undefined,
         createdAt: r.createdAt,
       }));
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(
         `getAuditLog failed: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -414,9 +414,9 @@ export class KeyConnectorService {
       businessId: string;
       providerKey: string;
       status: string;
-      displayName: string;
-      authData: Record<string, unknown> | null;
-      settings: Record<string, unknown> | null;
+      displayName: string | null;
+      authData: unknown;
+      settings: unknown;
       lastSyncAt: Date | null;
       lastError: string | null;
       healthScore: number;
@@ -429,9 +429,9 @@ export class KeyConnectorService {
       businessId: row.businessId,
       providerKey: row.providerKey,
       status: row.status as ConnectionStatus,
-      displayName: row.displayName,
-      authData: row.authData ?? undefined,
-      settings: row.settings ?? undefined,
+      displayName: row.displayName || row.providerKey,
+      authData: (row.authData as Record<string, unknown>) ?? undefined,
+      settings: (row.settings as Record<string, unknown>) ?? undefined,
       lastSyncAt: row.lastSyncAt ?? undefined,
       lastError: row.lastError ?? undefined,
       healthScore: row.healthScore,
@@ -462,7 +462,7 @@ export class KeyConnectorService {
           createdAt: new Date(),
         },
       });
-    } catch (error) {
+    } catch (error: any) {
       this.logger.warn(
         `Audit log write failed: ${error instanceof Error ? error.message : String(error)}`,
       );

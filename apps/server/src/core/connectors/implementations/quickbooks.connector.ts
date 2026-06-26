@@ -145,7 +145,7 @@ export class QuickbooksConnector implements IConnector {
         account: info?.CompanyName ?? info?.LegalName ?? `Realm ${realmId}`,
         detail: `${isSandbox ? 'Sandbox' : 'Production'}${info?.Country ? ` • ${info.Country}` : ''}`,
       };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }
@@ -306,7 +306,7 @@ export class QuickbooksConnector implements IConnector {
       const data = (await res.json()) as { Invoice?: { Id?: string } };
       if (!data.Invoice?.Id) return { success: false, error: 'QuickBooks response missing Invoice.Id' };
       externalId = data.Invoice.Id;
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
 
@@ -370,7 +370,7 @@ export class QuickbooksConnector implements IConnector {
       const data = (await res.json()) as { Customer?: { Id?: string } };
       if (!data.Customer?.Id) return { success: false, error: 'QuickBooks response missing Customer.Id' };
       externalId = data.Customer.Id;
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
 
@@ -410,7 +410,7 @@ export class QuickbooksConnector implements IConnector {
       }));
       await this.trackActivity(businessId);
       return { success: true, accounts };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }

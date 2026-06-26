@@ -26,7 +26,7 @@ export class MetaAdapter implements ChannelAdapter {
         return await this.publishToInstagram(pageId, accessToken, payload);
       }
       return { success: false, errorCode: 'UNSUPPORTED_PLATFORM', errorMessage: `Unsupported Meta platform: ${platform}`, isTransient: false };
-    } catch (err) {
+    } catch (err: any) {
       const normalized = this.normalizeError(err);
       return { success: false, errorCode: normalized.code, errorMessage: normalized.message, isTransient: normalized.isTransient };
     }

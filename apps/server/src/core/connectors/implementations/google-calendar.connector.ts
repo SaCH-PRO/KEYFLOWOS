@@ -144,7 +144,7 @@ export class GoogleCalendarConnector implements IConnector {
         return { success: false, error: `Calendar API ${res.status}${body ? `: ${body.slice(0, 160)}` : ''}` };
       }
       return { success: true, account: business.calendarEmail ?? undefined };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }
@@ -203,7 +203,7 @@ export class GoogleCalendarConnector implements IConnector {
         account: business.calendarEmail ?? undefined,
         detail: event.htmlLink ?? undefined,
       };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }

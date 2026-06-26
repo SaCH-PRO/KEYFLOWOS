@@ -41,7 +41,7 @@ export class BusinessEventService {
           metadata: input.metadata ?? undefined,
         },
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(
         `Failed to emit business event: ${(err as Error).message}`,
         { input: JSON.stringify(input).slice(0, 500) },
@@ -80,7 +80,7 @@ export class BusinessEventService {
           }),
         ),
       );
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(
         `Failed to emit ${inputs.length} business events: ${(err as Error).message}`,
       );

@@ -72,7 +72,7 @@ export class ConnectorSyncSchedulerService implements OnModuleInit, OnModuleDest
       this.logger.log(
         `Nightly connector sync complete for ${dateKey}: ${result.synced} succeeded, ${result.failed} failed across ${result.businesses} businesses (${result.attempted} attempts)`,
       );
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(
         `Nightly connector sync run failed: ${err instanceof Error ? err.message : String(err)}`,
       );
@@ -122,7 +122,7 @@ export class ConnectorSyncSchedulerService implements OnModuleInit, OnModuleDest
             metadata: { source: 'nightly_scheduler' },
           });
         }
-      } catch (err) {
+      } catch (err: any) {
         failed += 1;
         const message = err instanceof Error ? err.message : String(err);
         this.logger.warn(

@@ -385,7 +385,7 @@ export class DriveIntakeOrchestrator {
       await this.resolvePendingApproval(businessId, intakeFileId, 'approved', userId);
 
       return { success: true, results };
-    } catch (err) {
+    } catch (err: any) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.error(`Drive intake execution failed for ${intakeFileId}: ${message}`);
       await this.prisma.client.driveIntakeFile.update({

@@ -50,7 +50,7 @@ export class KeyCortexApprovalService {
       ? new Date(Date.now() + params.expiresInHours * 60 * 60 * 1000)
       : null;
 
-    const request = await this.prisma.client.approvalRequest.create({
+    const request = await (this.prisma.client as any).approvalRequest.create({
       data: {
         businessId: params.businessId,
         requester: params.requester,
@@ -85,14 +85,14 @@ export class KeyCortexApprovalService {
     note?: string,
   ): Promise<ApprovalRequest> {
     const request =
-      await this.prisma.client.approvalRequest.findUnique({
+      await (this.prisma.client as any).approvalRequest.findUnique({
         where: { id: requestId },
       });
     if (!request) throw new NotFoundException('Approval request not found');
     if (request.status !== ApprovalStatus.PENDING)
       throw new Error(`Request is ${request.status}`);
 
-    const updated = await this.prisma.client.approvalRequest.update({
+    const updated = await (this.prisma.client as any).approvalRequest.update({
       where: { id: requestId },
       data: {
         status: ApprovalStatus.APPROVED,
@@ -118,14 +118,14 @@ export class KeyCortexApprovalService {
     note?: string,
   ): Promise<ApprovalRequest> {
     const request =
-      await this.prisma.client.approvalRequest.findUnique({
+      await (this.prisma.client as any).approvalRequest.findUnique({
         where: { id: requestId },
       });
     if (!request) throw new NotFoundException('Approval request not found');
     if (request.status !== ApprovalStatus.PENDING)
       throw new Error(`Request is ${request.status}`);
 
-    const updated = await this.prisma.client.approvalRequest.update({
+    const updated = await (this.prisma.client as any).approvalRequest.update({
       where: { id: requestId },
       data: {
         status: ApprovalStatus.REJECTED,
@@ -150,7 +150,7 @@ export class KeyCortexApprovalService {
     requestId: string,
     reason: string,
   ): Promise<ApprovalRequest> {
-    const updated = await this.prisma.client.approvalRequest.update({
+    const updated = await (this.prisma.client as any).approvalRequest.update({
       where: { id: requestId },
       data: {
         status: ApprovalStatus.AUTO_APPROVED,
@@ -174,7 +174,7 @@ export class KeyCortexApprovalService {
     requestId: string,
     reason: string,
   ): Promise<ApprovalRequest> {
-    const updated = await this.prisma.client.approvalRequest.update({
+    const updated = await (this.prisma.client as any).approvalRequest.update({
       where: { id: requestId },
       data: {
         status: ApprovalStatus.ESCALATED,
@@ -193,7 +193,7 @@ export class KeyCortexApprovalService {
    * This is the primary queue that users see in their dashboard.
    */
   async getPendingRequests(businessId: string): Promise<ApprovalRequest[]> {
-    return this.prisma.client.approvalRequest.findMany({
+    return (this.prisma.client as any).approvalRequest.findMany({
       where: { businessId, status: ApprovalStatus.PENDING },
       orderBy: { createdAt: 'desc' },
     });
@@ -208,7 +208,7 @@ export class KeyCortexApprovalService {
   ): Promise<ApprovalRequest[]> {
     const where: Record<string, unknown> = { businessId };
     if (status) where.status = status;
-    return this.prisma.client.approvalRequest.findMany({
+    return (this.prisma.client as any).approvalRequest.findMany({
       where,
       orderBy: { createdAt: 'desc' },
     });
@@ -218,7 +218,7 @@ export class KeyCortexApprovalService {
    * Get a single request by ID.
    */
   async getRequest(requestId: string): Promise<ApprovalRequest | null> {
-    return this.prisma.client.approvalRequest.findUnique({
+    return (this.prisma.client as any).approvalRequest.findUnique({
       where: { id: requestId },
     });
   }
@@ -230,7 +230,7 @@ export class KeyCortexApprovalService {
    * @returns The number of requests that were expired
    */
   async expireOldRequests(): Promise<number> {
-    const result = await this.prisma.client.approvalRequest.updateMany({
+    const result = await (this.prisma.client as any).approvalRequest.updateMany({
       where: {
         status: ApprovalStatus.PENDING,
         expiresAt: { lt: new Date() },
@@ -258,7 +258,7 @@ export class KeyCortexApprovalService {
     expired: number;
     escalated: number;
   }> {
-    const all = await this.prisma.client.approvalRequest.groupBy({
+    const all = await (this.prisma.client as any).approvalRequest.groupBy({
       by: ['status'],
       where: { businessId },
       _count: true,
@@ -344,5 +344,22 @@ export class KeyCortexApprovalService {
     }
 
     return true; // Default to requiring approval for safety
+  }
+
+  // Gateway-compatible aliases
+  async approveAction(
+    requestId: string,
+    opts: { approvedBy: string; approvedAt?: Date; reason?: string },
+  ): Promise<ApprovalRequest & { actionDescription: string }> {
+    const result = await this.approve(requestId, opts.approvedBy, opts.reason);
+    return { ...result, actionDescription: (result as any).description || requestId };
+  }
+
+  async rejectAction(
+    requestId: string,
+    opts: { rejectedBy: string; rejectedAt?: Date; reason?: string },
+  ): Promise<ApprovalRequest & { actionDescription: string }> {
+    const result = await this.reject(requestId, opts.rejectedBy, opts.reason);
+    return { ...result, actionDescription: (result as any).description || requestId };
   }
 }

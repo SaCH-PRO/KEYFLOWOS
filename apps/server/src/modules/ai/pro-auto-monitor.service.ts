@@ -119,7 +119,7 @@ export class ProAutoMonitorService implements OnModuleInit, OnModuleDestroy {
 
         const insights = await this.scanInsights(biz.id);
         await this.escalateInsights(biz.id, insights, settings);
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(`Scan failed for business ${biz.id}: ${(err as Error).message}`);
       }
     }
@@ -147,7 +147,7 @@ export class ProAutoMonitorService implements OnModuleInit, OnModuleDestroy {
       this.checkStorefrontHealth(snapshot, insights);
 
       await this.checkClientRisk(businessId, new Date(), insights);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Monitoring scan failed for ${businessId}: ${(err as Error).message}`);
     }
 
@@ -210,7 +210,7 @@ export class ProAutoMonitorService implements OnModuleInit, OnModuleDestroy {
               } else {
                 this.logger.warn(`Auto-execution of ${insight.suggestedTool} returned error for ${businessId}: ${result.error}`);
               }
-            } catch (err) {
+            } catch (err: any) {
               this.logger.warn(`Auto-execution of ${insight.suggestedTool} failed for ${businessId}: ${(err as Error).message}`);
             }
           }
@@ -619,7 +619,7 @@ export class ProAutoMonitorService implements OnModuleInit, OnModuleDestroy {
           timestamp: new Date().toISOString(),
         });
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Client risk check failed: ${(err as Error).message}`);
     }
   }

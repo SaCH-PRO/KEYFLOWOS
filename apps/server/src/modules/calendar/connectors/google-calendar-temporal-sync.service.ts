@@ -75,12 +75,12 @@ export class GoogleCalendarTemporalSyncService implements TemporalConnectorNorma
             await this.temporal.emit(input);
             synced += 1;
           }
-        } catch (err) {
+        } catch (err: any) {
           this.logger.warn(`Google Calendar temporal sync skipped event: ${(err as Error).message}`);
           skipped += 1;
         }
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Google Calendar temporal sync failed: ${(err as Error).message}`);
     }
 

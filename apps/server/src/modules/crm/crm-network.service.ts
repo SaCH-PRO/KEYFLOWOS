@@ -383,7 +383,7 @@ export class CrmNetworkService {
       if (!c) return;
       const next = Math.max(0, Math.min(100, (c.leadScore ?? 0) + by));
       await this.db.contact.update({ where: { id: c.id }, data: { leadScore: next } });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`bumpLeadScore failed for ${contactId}: ${(err as Error).message}`);
     }
   }
@@ -424,11 +424,11 @@ export class CrmNetworkService {
       if (referrerEdges.length > 0) {
         try {
           await this.reputation.recalculate(businessId);
-        } catch (err) {
+        } catch (err: any) {
           this.logger.warn(`reputation.recalculate failed: ${(err as Error).message}`);
         }
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`onInvoicePaid handler failed: ${(err as Error).message}`);
     }
   }

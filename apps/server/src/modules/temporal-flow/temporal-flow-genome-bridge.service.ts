@@ -96,7 +96,7 @@ export class TemporalFlowGenomeBridgeService {
             })),
             confidence,
           });
-        } catch (err) {
+        } catch (err: any) {
           this.logger.warn(`Failed to create genome signal ${pattern.key}: ${(err as Error).message}`);
         }
       }

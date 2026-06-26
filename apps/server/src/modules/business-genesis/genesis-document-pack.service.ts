@@ -67,7 +67,7 @@ export class GenesisDocumentPackService {
           contextInputs: this.buildContextInputs(blueprint),
         });
         generatedDocs.push(this.toGeneratedDoc(instance, selection.slug));
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(
           `Failed to generate document ${selection.slug} for ${businessId}: ${(err as Error).message}`,
         );

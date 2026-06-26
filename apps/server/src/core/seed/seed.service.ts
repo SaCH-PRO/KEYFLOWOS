@@ -171,7 +171,7 @@ export class SeedService implements OnApplicationBootstrap {
       } else {
         this.logger.log('Document taxonomy up to date');
       }
-    } catch (error) {
+    } catch (error: any) {
       this.logger.warn('Document taxonomy seed failed: ' + (error as Error).message);
     }
   }

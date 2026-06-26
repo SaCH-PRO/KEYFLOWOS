@@ -1,6 +1,6 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { HttpModule } from '@nestjs/axios';
-import { PrismaModule } from '@keyflow/db';
+import { PrismaModule } from '../../core/prisma/prisma.module';
 
 import { KeyConnectorService } from './key-connector.service';
 import { KeyConnectorController } from './key-connector.controller';

@@ -267,11 +267,11 @@ export class FinancialBriefingSchedulerService implements OnModuleInit, OnModule
           }
 
           this.logger.log(`[FinancialBriefingScheduler] Briefing saved for ${business.name}`);
-        } catch (error) {
+        } catch (error: any) {
           this.logger.error(`[FinancialBriefingScheduler] Failed for ${business.id}: ${(error as Error).message}`);
         }
       }
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`[FinancialBriefingScheduler] Check failed: ${(error as Error).message}`);
     }
   }

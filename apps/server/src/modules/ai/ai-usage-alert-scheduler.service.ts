@@ -66,7 +66,7 @@ export class AiUsageAlertSchedulerService implements OnModuleInit, OnModuleDestr
           await this.dispatchAlert(alert);
           this.failureCounts.delete(alert.id);
           dispatched++;
-        } catch (err) {
+        } catch (err: any) {
           const count = (this.failureCounts.get(alert.id) ?? 0) + 1;
           this.failureCounts.set(alert.id, count);
           this.logger.error(`Failed to dispatch alert ${alert.id} (attempt ${count}): ${(err as Error).message}`);
@@ -129,7 +129,7 @@ export class AiUsageAlertSchedulerService implements OnModuleInit, OnModuleDestr
           body,
           data: { alertId: alert.id, threshold: alert.threshold, metadata: alert.metadata },
         });
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(`In-app notification failed for alert ${alert.id}: ${(err as Error).message}`);
       }
     }
@@ -146,7 +146,7 @@ export class AiUsageAlertSchedulerService implements OnModuleInit, OnModuleDestr
             text: body,
           });
         }
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(`Email notification failed for alert ${alert.id}: ${(err as Error).message}`);
       }
     }

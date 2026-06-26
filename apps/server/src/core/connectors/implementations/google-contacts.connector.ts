@@ -117,7 +117,7 @@ export class GoogleContactsConnector implements IConnector {
       );
       if (!res.ok) return { success: false, error: `People API returned ${res.status}` };
       return { success: true, account: business.contactsEmail ?? undefined };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }
@@ -149,7 +149,7 @@ export class GoogleContactsConnector implements IConnector {
         account: business.contactsEmail ?? undefined,
         detail: `${data.connections?.length ?? 0} returned${typeof data.totalPeople === 'number' ? ` of ${data.totalPeople} total` : ''}`,
       };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }

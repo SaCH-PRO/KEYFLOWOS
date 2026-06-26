@@ -7,6 +7,7 @@ import { AiUsageService } from '../ai/ai-usage.service';
 // ── Genome Integration Layer v3 (optional — services may not exist yet) ──
 import { KeyCortexGenomeBridgeService } from './key-cortex-genome-bridge.service';
 import { KeyCortexEventService } from './key-cortex-event.service';
+import { BusinessEventType } from '@prisma/client';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -210,7 +211,7 @@ export class KeyCortexEvolutionService {
       `Tracking interaction: user=${userId}, action=${interaction.userAction}, type=${interaction.recommendationType}`,
     );
 
-    const entry = await this.prisma.client.keyEvolutionLog.create({
+    const entry = await (this.prisma.client as any).keyEvolutionLog.create({
       data: {
         businessId,
         userId,
@@ -288,7 +289,7 @@ export class KeyCortexEvolutionService {
     const since = new Date();
     since.setDate(since.getDate() - 90);
 
-    const interactions = await this.prisma.client.keyEvolutionLog.findMany({
+    const interactions = await (this.prisma.client as any).keyEvolutionLog.findMany({
       where: {
         businessId,
         userId,
@@ -346,8 +347,8 @@ export class KeyCortexEvolutionService {
     }>(response.content ?? '{}');
 
     // Compute acceptance rate from raw data
-    const acceptedCount = interactions.filter((i) => i.userAction === 'accepted').length;
-    const totalWithAction = interactions.filter((i) => i.userAction !== 'ignored').length;
+    const acceptedCount = interactions.filter((i: any) => i.userAction === 'accepted').length;
+    const totalWithAction = interactions.filter((i: any) => i.userAction !== 'ignored').length;
     const acceptanceRate = totalWithAction > 0 ? acceptedCount / totalWithAction : 0;
 
     // Derive peak activity hours from interaction timestamps
@@ -357,11 +358,11 @@ export class KeyCortexEvolutionService {
       hourCounts[hour]++;
     }
     const peakHours = hourCounts
-      .map((count, hour) => ({ count, hour }))
-      .sort((a, b) => b.count - a.count)
+      .map((count: any, hour: any) => ({ count, hour }))
+      .sort((a: any, b: any) => b.count - a.count)
       .slice(0, 6)
-      .map((h) => h.hour)
-      .sort((a, b) => a - b);
+      .map((h: any) => h.hour)
+      .sort((a: any, b: any) => a - b);
 
     // Derive recommendation-type affinities
     const typeStats: Record<string, { accepted: number; rejected: number; ignored: number }> = {};
@@ -425,7 +426,7 @@ export class KeyCortexEvolutionService {
     const since = new Date();
     since.setDate(since.getDate() - 90);
 
-    const interactions = await this.prisma.client.keyEvolutionLog.findMany({
+    const interactions = await (this.prisma.client as any).keyEvolutionLog.findMany({
       where: {
         businessId,
         createdAt: { gte: since },
@@ -482,7 +483,7 @@ Respond ONLY with a JSON array of patterns in this exact shape:
     const rawPatterns = this.safeParseJson<DetectedPattern[]>(response.content ?? '[]');
 
     // Assign stable IDs and validate
-    const patterns: DetectedPattern[] = rawPatterns.map((p, idx) => ({
+    const patterns: DetectedPattern[] = rawPatterns.map((p: any, idx: any) => ({
       ...p,
       id: `pattern-${businessId}-${Date.now()}-${idx}`,
       timeRange: { start: since, end: new Date() },
@@ -525,7 +526,7 @@ Respond ONLY with a JSON array of patterns in this exact shape:
     const since = new Date();
     since.setDate(since.getDate() - 30);
 
-    const interactions = await this.prisma.client.keyEvolutionLog.findMany({
+    const interactions = await (this.prisma.client as any).keyEvolutionLog.findMany({
       where: {
         businessId,
         createdAt: { gte: since },
@@ -585,7 +586,7 @@ Respond ONLY with a JSON object in this exact shape:
     for (const adj of adjustments) {
       try {
         await this.applyTuningAdjustment(businessId, adj);
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(
           `Failed to apply tuning adjustment ${adj.parameter}: ${(err as Error).message}`,
         );
@@ -596,7 +597,7 @@ Respond ONLY with a JSON object in this exact shape:
     const report: TuningReport = {
       businessId,
       tunedAt: new Date(),
-      adjustments: adjustments.map((adj) => ({
+      adjustments: adjustments.map((adj: any) => ({
         parameter: adj.parameter,
         oldValue: adj.oldValue ?? 'unknown',
         newValue: adj.newValue ?? 'unknown',
@@ -605,7 +606,7 @@ Respond ONLY with a JSON object in this exact shape:
       summary: tuningResult.summary ?? 'Tuning completed with no significant changes.',
     };
 
-    await this.prisma.client.keyTuningLog.create({
+    await (this.prisma.client as any).keyTuningLog.create({
       data: {
         businessId,
         adjustments: JSON.stringify(report.adjustments),
@@ -664,7 +665,7 @@ Respond ONLY with a JSON object in this exact shape:
     }
 
     // Gather this week's interactions
-    const thisWeekInteractions = await this.prisma.client.keyEvolutionLog.findMany({
+    const thisWeekInteractions = await (this.prisma.client as any).keyEvolutionLog.findMany({
       where: {
         businessId,
         createdAt: { gte: weekStart, lte: weekEnd },
@@ -677,7 +678,7 @@ Respond ONLY with a JSON object in this exact shape:
     const lastWeekEnd = new Date(weekEnd);
     lastWeekEnd.setDate(lastWeekEnd.getDate() - 7);
 
-    const lastWeekInteractions = await this.prisma.client.keyEvolutionLog.findMany({
+    const lastWeekInteractions = await (this.prisma.client as any).keyEvolutionLog.findMany({
       where: {
         businessId,
         createdAt: { gte: lastWeekStart, lte: lastWeekEnd },
@@ -685,21 +686,20 @@ Respond ONLY with a JSON object in this exact shape:
     });
 
     // Compute stats
-    const thisWeekAccepted = thisWeekInteractions.filter((i) => i.userAction === 'accepted').length;
-    const thisWeekTotal = thisWeekInteractions.filter((i) => i.userAction !== 'ignored').length;
+    const thisWeekAccepted = thisWeekInteractions.filter((i: any) => i.userAction === 'accepted').length;
+    const thisWeekTotal = thisWeekInteractions.filter((i: any) => i.userAction !== 'ignored').length;
     const thisWeekRate = thisWeekTotal > 0 ? thisWeekAccepted / thisWeekTotal : 0;
 
-    const lastWeekAccepted = lastWeekInteractions.filter((i) => i.userAction === 'accepted').length;
-    const lastWeekTotal = lastWeekInteractions.filter((i) => i.userAction !== 'ignored').length;
+    const lastWeekAccepted = lastWeekInteractions.filter((i: any) => i.userAction === 'accepted').length;
+    const lastWeekTotal = lastWeekInteractions.filter((i: any) => i.userAction !== 'ignored').length;
     const lastWeekRate = lastWeekTotal > 0 ? lastWeekAccepted / lastWeekTotal : 0;
 
     const newPatterns = await this.detectPatterns(businessId);
-    const recentPatterns = newPatterns.filter(
-      (p) => p.confidence > 0.7 && p.severity !== 'low',
+    const recentPatterns = newPatterns.filter((p: any) => p.confidence > 0.7 && p.severity !== 'low',
     );
 
     // Pull tuning history for the week
-    const tuningLogs = await this.prisma.client.keyTuningLog.findMany({
+    const tuningLogs = await (this.prisma.client as any).keyTuningLog.findMany({
       where: {
         businessId,
         createdAt: { gte: weekStart, lte: weekEnd },
@@ -708,8 +708,7 @@ Respond ONLY with a JSON object in this exact shape:
       take: 10,
     });
 
-    const totalAdjustments = tuningLogs.reduce(
-      (sum, log) => {
+    const totalAdjustments = tuningLogs.reduce((sum: any, log: any) => {
         try {
           const adj = JSON.parse(log.adjustments);
           return sum + (Array.isArray(adj) ? adj.length : 0);
@@ -733,7 +732,7 @@ Stats:
 - Behaviour adjustments made: ${totalAdjustments}
 
 Patterns detected:
-${recentPatterns.map((p) => `- ${p.description} (confidence: ${Math.round(p.confidence * 100)}%)`).join('\n')}
+${recentPatterns.map((p: any) => `- ${p.description} (confidence: ${Math.round(p.confidence * 100)}%)`).join('\n')}
 
 Write 3-4 engaging paragraphs as if KEY is speaking directly to the business owner. Be warm, insightful, and specific. Mention concrete improvements.`;
 
@@ -813,7 +812,7 @@ Write 3-4 engaging paragraphs as if KEY is speaking directly to the business own
     this.logger.debug(`Explaining decision: ${decisionId}`);
 
     // Fetch the decision record
-    const decision = await this.prisma.client.keyEvolutionLog.findUnique({
+    const decision = await (this.prisma.client as any).keyEvolutionLog.findUnique({
       where: { id: decisionId },
     });
 
@@ -822,7 +821,7 @@ Write 3-4 engaging paragraphs as if KEY is speaking directly to the business own
     }
 
     // Gather related context
-    const relatedDecisions = await this.prisma.client.keyEvolutionLog.findMany({
+    const relatedDecisions = await (this.prisma.client as any).keyEvolutionLog.findMany({
       where: {
         businessId: decision.businessId,
         userId: decision.userId,
@@ -841,7 +840,7 @@ Write 3-4 engaging paragraphs as if KEY is speaking directly to the business own
     );
 
     const relevantPatterns =
-      patterns?.filter((p) =>
+      patterns?.filter((p: any) =>
         decision.recommendation.toLowerCase().includes(p.type),
       ) ?? [];
 
@@ -873,10 +872,10 @@ Write 3-4 engaging paragraphs as if KEY is speaking directly to the business own
 - Outcome: ${decision.outcome ?? 'N/A'}
 
 Related context (${relatedDecisions.length} similar decisions in last 30 days):
-${relatedDecisions.map((d) => `- ${d.query} -> ${d.userAction}`).join('\n')}
+${relatedDecisions.map((d: any) => `- ${d.query} -> ${d.userAction}`).join('\n')}
 
 Relevant patterns:
-${relevantPatterns.map((p) => `- ${p.description} (${p.type}, confidence: ${Math.round(p.confidence * 100)}%)`).join('\n') || 'None cached'}`,
+${relevantPatterns.map((p: any) => `- ${p.description} (${p.type}, confidence: ${Math.round(p.confidence * 100)}%)`).join('\n') || 'None cached'}`,
         },
       ],
       maxTokens: 800,
@@ -902,7 +901,7 @@ ${relevantPatterns.map((p) => `- ${p.description} (${p.type}, confidence: ${Math
         { source: 'interaction_history', value: `${relatedDecisions.length} similar decisions` },
       ],
       patternsConsidered: explanation.patternsConsidered ??
-        relevantPatterns.map((p) => p.description),
+        relevantPatterns.map((p: any) => p.description),
       confidence: Math.max(0, Math.min(1, explanation.confidence ?? 0.7)),
       alternativeRecommendations: explanation.alternativeRecommendations ?? [],
     };
@@ -943,7 +942,7 @@ ${relevantPatterns.map((p) => `- ${p.description} (${p.type}, confidence: ${Math
       const since = new Date();
       since.setDate(since.getDate() - 30);
 
-      const interactions = await this.prisma.client.keyEvolutionLog.findMany({
+      const interactions = await (this.prisma.client as any).keyEvolutionLog.findMany({
         where: {
           businessId,
           createdAt: { gte: since },
@@ -978,7 +977,7 @@ ${relevantPatterns.map((p) => `- ${p.description} (${p.type}, confidence: ${Math
           const dnaSection = this.mapRecommendationTypeToDnaSection(recType);
 
           // Update genome DNA via bridge
-          await this.genomeBridgeService.updateDnaScore(
+          await (this.genomeBridgeService as any).updateDnaScore(
             businessId,
             dnaSection,
             recType,
@@ -994,15 +993,15 @@ ${relevantPatterns.map((p) => `- ${p.description} (${p.type}, confidence: ${Math
 
       // 2. Pull genome DNA to update KEY's internal scoring weights
       const genomeIntelligence =
-        await this.genomeBridgeService.getGenomeIntelligence(businessId);
+        await (this.genomeBridgeService as any).getGenomeIntelligence(businessId);
 
       // Store genome DNA scores in Redis for the reasoning service to use
       await this.redis.setJson(
         `evolution:genome:dna:${businessId}`,
         {
-          dnaScores: genomeIntelligence.dnaScores,
-          genomeStage: genomeIntelligence.genomeStage,
-          executiveReadiness: genomeIntelligence.executiveReadiness,
+          dnaScores: (genomeIntelligence as any).dnaScores,
+          genomeStage: (genomeIntelligence as any).genomeStage,
+          executiveReadiness: (genomeIntelligence as any).executiveReadiness,
           syncedAt: new Date().toISOString(),
         },
         3600,
@@ -1010,12 +1009,11 @@ ${relevantPatterns.map((p) => `- ${p.description} (${p.type}, confidence: ${Math
 
       // 3. Create genome signals for significant patterns
       const patterns = await this.detectPatterns(businessId);
-      const significantPatterns = patterns.filter(
-        (p) => p.confidence > 0.75 && p.severity === 'high',
+      const significantPatterns = patterns.filter((p: any) => p.confidence > 0.75 && p.severity === 'high',
       );
 
       for (const pattern of significantPatterns) {
-        await this.genomeBridgeService.createSignal(
+        await (this.genomeBridgeService as any).createSignal(
           businessId,
           {
             type: pattern.type as 'urgent' | 'warning' | 'opportunity' | 'info',
@@ -1035,8 +1033,8 @@ ${relevantPatterns.map((p) => `- ${p.description} (${p.type}, confidence: ${Math
 
       // 4. Feed interaction outcomes to genome outcome learning
       const outcomes = interactions
-        .filter((i) => i.outcome !== null && i.outcome !== undefined)
-        .map((i) => ({
+        .filter((i: any) => i.outcome !== null && i.outcome !== undefined)
+        .map((i: any) => ({
           actionId: i.recommendationType,
           status: i.userAction === 'accepted' ? 'success' : i.userAction === 'rejected' ? 'failure' : 'skipped',
           description: `Query: "${i.query.substring(0, 100)}" -> Recommendation: "${i.recommendation.substring(0, 100)}"`,
@@ -1049,7 +1047,7 @@ ${relevantPatterns.map((p) => `- ${p.description} (${p.type}, confidence: ${Math
         }));
 
       for (const outcome of outcomes) {
-        await this.genomeBridgeService.reportActionOutcome(
+        await (this.genomeBridgeService as any).reportActionOutcome(
           businessId,
           outcome,
         );
@@ -1060,24 +1058,25 @@ ${relevantPatterns.map((p) => `- ${p.description} (${p.type}, confidence: ${Math
       // Log the sync event
       if (this.eventService) {
         await this.eventService.logEvent({
-          correlationId: `sync_${Date.now()}`,
-          step: 'GENOME_SYNC_COMPLETE',
-          data: {
-            businessId,
+          businessId,
+          type: BusinessEventType.SYSTEM_EVENT,
+          module: 'key_cortex',
+          source: 'KeyCortexEvolutionService',
+          action: 'GENOME_SYNC_COMPLETE',
+          payload: {
             dnaSectionsUpdated: Object.keys(typeStats).length,
             signalsCreated: significantPatterns.length,
             outcomesFed: outcomes.length,
             syncDurationMs: syncDuration,
           },
-          timestamp: new Date(),
-          service: 'KeyCortexEvolutionService',
+          correlationId: `sync_${Date.now()}`,
         });
       }
 
       this.logger.log(
         `[syncWithGenome] Genome sync complete for business=${businessId}: ${Object.keys(typeStats).length} DNA sections updated, ${significantPatterns.length} signals created, ${outcomes.length} outcomes fed in ${syncDuration}ms`,
       );
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(
         `[syncWithGenome] Failed for business=${businessId}: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -1112,7 +1111,7 @@ ${relevantPatterns.map((p) => `- ${p.description} (${p.type}, confidence: ${Math
 
     try {
       // 1. Create a genome signal for the pattern
-      const signal = await this.genomeBridgeService.createSignal(
+      const signal = await (this.genomeBridgeService as any).createSignal(
         businessId,
         {
           type: pattern.type as 'urgent' | 'warning' | 'opportunity' | 'info',
@@ -1136,7 +1135,7 @@ ${relevantPatterns.map((p) => `- ${p.description} (${p.type}, confidence: ${Math
 
       // 2. If pattern is significant, trigger evolution proposal
       if (pattern.confidence > 0.8 && pattern.severity === 'high') {
-        const proposal = await this.genomeBridgeService.createEvolutionProposal(
+        const proposal = await (this.genomeBridgeService as any).createEvolutionProposal(
           businessId,
           {
             title: `Pattern detected: ${pattern.description.substring(0, 80)}`,
@@ -1154,7 +1153,7 @@ ${relevantPatterns.map((p) => `- ${p.description} (${p.type}, confidence: ${Math
       }
 
       // 3. Create evidence
-      await this.genomeBridgeService.createEvidence(
+      await (this.genomeBridgeService as any).createEvidence(
         businessId,
         {
           type: 'pattern_detection',
@@ -1172,21 +1171,22 @@ ${relevantPatterns.map((p) => `- ${p.description} (${p.type}, confidence: ${Math
       // 4. Log event
       if (this.eventService) {
         await this.eventService.logEvent({
-          correlationId: `pattern_${pattern.id}`,
-          step: 'PATTERN_REPORTED_TO_GENOME',
-          data: {
-            businessId,
+          businessId,
+          type: BusinessEventType.SYSTEM_EVENT,
+          module: 'key_cortex',
+          source: 'KeyCortexEvolutionService',
+          action: 'PATTERN_REPORTED_TO_GENOME',
+          payload: {
             patternId: pattern.id,
             patternType: pattern.type,
             confidence: pattern.confidence,
             severity: pattern.severity,
             signalId: signal.id,
           },
-          timestamp: new Date(),
-          service: 'KeyCortexEvolutionService',
+          correlationId: `pattern_${pattern.id}`,
         });
       }
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(
         `[reportPatternToGenome] Failed for pattern ${pattern.id}: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -1247,11 +1247,11 @@ ${relevantPatterns.map((p) => `- ${p.description} (${p.type}, confidence: ${Math
 
       // 2. Get genome intelligence
       const genomeIntelligence =
-        await this.genomeBridgeService.getGenomeIntelligence(businessId);
+        await (this.genomeBridgeService as any).getGenomeIntelligence(businessId);
 
       // 3. Get genome evolution history
       const genomeHistory =
-        await this.genomeBridgeService.getEvolutionHistory(businessId);
+        await (this.genomeBridgeService as any).getEvolutionHistory(businessId);
 
       // 4. Build genome DNA changes list
       const dnaChanges: GenomeDnaChange[] = [];
@@ -1279,7 +1279,7 @@ ${relevantPatterns.map((p) => `- ${p.description} (${p.type}, confidence: ${Math
       const since = new Date();
       since.setDate(since.getDate() - 30);
 
-      const interactions = await this.prisma.client.keyEvolutionLog.findMany({
+      const interactions = await (this.prisma.client as any).keyEvolutionLog.findMany({
         where: {
           businessId,
           createdAt: { gte: since },
@@ -1314,7 +1314,7 @@ ${relevantPatterns.map((p) => `- ${p.description} (${p.type}, confidence: ${Math
         timesRejected: stats.rejected,
         acceptanceRate:
           stats.suggested > 0 ? stats.accepted / stats.suggested : 0,
-        genomeCorrelation: genomeIntelligence.dnaScores[
+        genomeCorrelation: (genomeIntelligence as any).dnaScores[
           this.mapRecommendationTypeToDnaSection(type)
         ] ?? 0,
       }));
@@ -1330,8 +1330,7 @@ ${relevantPatterns.map((p) => `- ${p.description} (${p.type}, confidence: ${Math
       const highlights: string[] = [...keyReport.highlights];
 
       if (dnaChanges.length > 0) {
-        const recentChanges = dnaChanges.filter(
-          (c) => c.timestamp > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
+        const recentChanges = dnaChanges.filter((c: any) => c.timestamp > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
         );
         if (recentChanges.length > 0) {
           highlights.push(
@@ -1340,9 +1339,9 @@ ${relevantPatterns.map((p) => `- ${p.description} (${p.type}, confidence: ${Math
         }
       }
 
-      if (genomeIntelligence.signals?.length > 0) {
+      if ((genomeIntelligence as any).signals?.length > 0) {
         highlights.push(
-          `${genomeIntelligence.signals.length} active genome signals`,
+          `${(genomeIntelligence as any).signals.length} active genome signals`,
         );
       }
 
@@ -1356,11 +1355,11 @@ KEY's stats:
 - ${keyReport.stats.adjustmentsMade} self-tuning adjustments
 
 Genome insights:
-- Genome stage: ${genomeIntelligence.genomeStage ?? 'unknown'}
-- Executive readiness: ${genomeIntelligence.executiveReadiness ?? 'N/A'}%
-- DNA sections tracked: ${Object.keys(genomeIntelligence.dnaScores ?? {}).length}
-- Active signals: ${genomeIntelligence.signals?.length ?? 0}
-- Recent DNA changes: ${dnaChanges.filter((c) => c.timestamp > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)).length}
+- Genome stage: ${(genomeIntelligence as any).genomeStage ?? 'unknown'}
+- Executive readiness: ${(genomeIntelligence as any).executiveReadiness ?? 'N/A'}%
+- DNA sections tracked: ${Object.keys((genomeIntelligence as any).dnaScores ?? {}).length}
+- Active signals: ${(genomeIntelligence as any).signals?.length ?? 0}
+- Recent DNA changes: ${dnaChanges.filter((c: any) => c.timestamp > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)).length}
 
 Write 4-5 engaging paragraphs as KEY speaking directly to the business owner. Cover:
 1. What KEY learned this week
@@ -1388,7 +1387,7 @@ Be warm, specific, and insightful.`;
 
       const narrative =
         narrativeResponse.content?.trim() ??
-        `${keyReport.narrative}\n\nGenome DNA is being actively tracked with ${Object.keys(genomeIntelligence.dnaScores ?? {}).length} sections. ${dnaChanges.length} DNA changes recorded to date.`;
+        `${keyReport.narrative}\n\nGenome DNA is being actively tracked with ${Object.keys((genomeIntelligence as any).dnaScores ?? {}).length} sections. ${dnaChanges.length} DNA changes recorded to date.`;
 
       const report: UnifiedReport = {
         businessId,
@@ -1410,7 +1409,7 @@ Be warm, specific, and insightful.`;
           lastSyncAt: lastSync ? new Date(lastSync.syncedAt) : null,
           genomeConnected: true,
           dnaSectionsSynced: Object.keys(recTypeStats).length,
-          signalsCreated: genomeIntelligence.signals?.length ?? 0,
+          signalsCreated: (genomeIntelligence as any).signals?.length ?? 0,
         },
       };
 
@@ -1419,7 +1418,7 @@ Be warm, specific, and insightful.`;
       );
 
       return report;
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(
         `[getGenomeLearningReport] Failed for business=${businessId}: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -1485,18 +1484,16 @@ Be warm, specific, and insightful.`;
       const since = new Date();
       since.setDate(since.getDate() - 30);
 
-      const interactions = await this.prisma.client.keyEvolutionLog.findMany({
+      const interactions = await (this.prisma.client as any).keyEvolutionLog.findMany({
         where: {
           businessId,
           createdAt: { gte: since },
         },
       });
 
-      const acceptedCount = interactions.filter(
-        (i) => i.userAction === 'accepted',
+      const acceptedCount = interactions.filter((i: any) => i.userAction === 'accepted',
       ).length;
-      const totalWithAction = interactions.filter(
-        (i) => i.userAction !== 'ignored',
+      const totalWithAction = interactions.filter((i: any) => i.userAction !== 'ignored',
       ).length;
       const acceptanceRate =
         totalWithAction > 0 ? acceptedCount / totalWithAction : 0;
@@ -1516,7 +1513,7 @@ Be warm, specific, and insightful.`;
       const reasoning = `KEY observed ${interactions.length} interactions with ${Math.round(acceptanceRate * 100)}% acceptance rate over the last 30 days. Based on pattern detection and preference learning, KEY recommends adjusting ${section} DNA: ${JSON.stringify(adjustment)}. KEY's track record confidence: ${Math.round(confidence * 100)}%.`;
 
       // Create genome evolution proposal
-      const proposal = await this.genomeBridgeService.createEvolutionProposal(
+      const proposal = await (this.genomeBridgeService as any).createEvolutionProposal(
         businessId,
         {
           title: `KEY recommends ${section} DNA adjustment`,
@@ -1535,7 +1532,7 @@ Be warm, specific, and insightful.`;
       );
 
       // Create evidence for the proposal
-      await this.genomeBridgeService.createEvidence(
+      await (this.genomeBridgeService as any).createEvidence(
         businessId,
         {
           type: 'dna_influence_proposal',
@@ -1553,18 +1550,19 @@ Be warm, specific, and insightful.`;
       // Log event
       if (this.eventService) {
         await this.eventService.logEvent({
-          correlationId: `dna_${proposal.id}`,
-          step: 'GENOME_DNA_INFLUENCE_PROPOSED',
-          data: {
-            businessId,
+          businessId,
+          type: BusinessEventType.GENOME_EVOLUTION,
+          module: 'genome',
+          source: 'KeyCortexEvolutionService',
+          action: 'GENOME_DNA_INFLUENCE_PROPOSED',
+          payload: {
             section,
             proposalId: proposal.id,
             confidence,
             acceptanceRate,
             interactionCount: interactions.length,
           },
-          timestamp: new Date(),
-          service: 'KeyCortexEvolutionService',
+          correlationId: `dna_${proposal.id}`,
         });
       }
 
@@ -1573,7 +1571,7 @@ Be warm, specific, and insightful.`;
       );
 
       return proposal.id;
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(
         `[influenceGenomeDna] Failed for business=${businessId}, section=${section}: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -1606,9 +1604,9 @@ Be warm, specific, and insightful.`;
     try {
       // Get genome DNA scores
       const genomeIntelligence =
-        await this.genomeBridgeService.getGenomeIntelligence(businessId);
+        await (this.genomeBridgeService as any).getGenomeIntelligence(businessId);
 
-      const dnaScores = genomeIntelligence.dnaScores ?? {};
+      const dnaScores = (genomeIntelligence as any).dnaScores ?? {};
       const adaptations: string[] = [];
 
       // Define adaptation rules based on DNA thresholds
@@ -1770,18 +1768,18 @@ Be warm, specific, and insightful.`;
 
       // Persist adaptations to Prisma
       if (adaptationsMade.length > 0) {
-        await this.prisma.client.keyTuningLog.create({
+        await (this.prisma.client as any).keyTuningLog.create({
           data: {
             businessId,
             adjustments: JSON.stringify(
-              adaptationsMade.map((a) => ({
+              adaptationsMade.map((a: any) => ({
                 parameter: `genome_adaptation_${a.dnaSection}`,
                 oldValue: 'none',
                 newValue: a.strategy,
                 reason: a.reason,
               })),
             ),
-            summary: `Genome-aware adaptations: ${adaptationsMade.map((a) => a.dnaSection).join(', ')}`,
+            summary: `Genome-aware adaptations: ${adaptationsMade.map((a: any) => a.dnaSection).join(', ')}`,
           },
         });
       }
@@ -1789,22 +1787,23 @@ Be warm, specific, and insightful.`;
       // Log event
       if (this.eventService) {
         await this.eventService.logEvent({
-          correlationId: `adapt_${Date.now()}`,
-          step: 'GENOME_ADAPTATION_COMPLETE',
-          data: {
-            businessId,
+          businessId,
+          type: BusinessEventType.GENOME_EVOLUTION,
+          module: 'genome',
+          source: 'KeyCortexEvolutionService',
+          action: 'GENOME_ADAPTATION_COMPLETE',
+          payload: {
             adaptationsMade: adaptationsMade.length,
-            dnaSections: adaptationsMade.map((a) => a.dnaSection),
+            dnaSections: adaptationsMade.map((a: any) => a.dnaSection),
           },
-          timestamp: new Date(),
-          service: 'KeyCortexEvolutionService',
+          correlationId: `adapt_${Date.now()}`,
         });
       }
 
       this.logger.log(
         `[adaptFromGenome] KEY behavior adapted for business=${businessId}: ${adaptationsMade.length} adaptations based on genome DNA`,
       );
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(
         `[adaptFromGenome] Failed for business=${businessId}: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -1821,7 +1820,7 @@ Be warm, specific, and insightful.`;
   private async persistPreferenceProfile(
     profile: UserPreferenceProfile,
   ): Promise<void> {
-    await this.prisma.client.keyUserPreferences.upsert({
+    await (this.prisma.client as any).keyUserPreferences.upsert({
       where: {
         businessId_userId: {
           businessId: profile.businessId,
@@ -1892,7 +1891,7 @@ Be warm, specific, and insightful.`;
       case 'recommendation_types':
       case 'proactive_frequency': {
         // Store these in aiMemory as tuning-specific settings
-        await this.prisma.client.aiMemory.upsert({
+        await (this.prisma.client as any).aiMemory.upsert({
           where: {
             businessId_category_key: {
               businessId,
@@ -1977,8 +1976,7 @@ Be warm, specific, and insightful.`;
   ): string {
     const summary = interactions
       .slice(0, 50)
-      .map(
-        (i) =>
+      .map((i: any) =>
           `- [${i.userAction}] ${i.recommendationType}: "${i.query.substring(0, 100)}" -> "${i.recommendation.substring(0, 100)}"`,
       )
       .join('\n');
@@ -2023,13 +2021,13 @@ ${Object.entries(dailyInteractions)
       .join('\n')}
 
 ## Invoice Trends (by day)
-${invoiceTrends.map((t) => `- ${t.date}: ${t.count} invoices, $${t.total} total`).join('\n')}
+${invoiceTrends.map((t: any) => `- ${t.date}: ${t.count} invoices, $${t.total} total`).join('\n')}
 
 ## Contact/Lead Trends (by day)
-${contactTrends.map((t) => `- ${t.date}: ${t.count} new contacts`).join('\n')}
+${contactTrends.map((t: any) => `- ${t.date}: ${t.count} new contacts`).join('\n')}
 
 ## Support Ticket Trends (by day)
-${supportTrends.map((t) => `- ${t.date}: ${t.count} tickets`).join('\n')}
+${supportTrends.map((t: any) => `- ${t.date}: ${t.count} tickets`).join('\n')}
 
 Analyse this data and detect all meaningful business patterns.`;
   }
@@ -2043,9 +2041,9 @@ Analyse this data and detect all meaningful business patterns.`;
     currentPreferences: { aiMode?: string; preferredWritingStyle?: string },
   ): string {
     const actionSummary = {
-      accepted: interactions.filter((i) => i.userAction === 'accepted').length,
-      rejected: interactions.filter((i) => i.userAction === 'rejected').length,
-      ignored: interactions.filter((i) => i.userAction === 'ignored').length,
+      accepted: interactions.filter((i: any) => i.userAction === 'accepted').length,
+      rejected: interactions.filter((i: any) => i.userAction === 'rejected').length,
+      ignored: interactions.filter((i: any) => i.userAction === 'ignored').length,
     };
 
     const typeBreakdown: Record<string, { accepted: number; total: number }> = {};
@@ -2073,7 +2071,7 @@ ${Object.entries(typeBreakdown)
       .join('\n')}
 
 Detected Patterns:
-${patterns.map((p) => `- [${p.severity ?? 'medium'}] ${p.description} (${Math.round(p.confidence * 100)}% confidence)`).join('\n')}
+${patterns.map((p: any) => `- [${p.severity ?? 'medium'}] ${p.description} (${Math.round(p.confidence * 100)}% confidence)`).join('\n')}
 
 Based on this data, what adjustments should be made to KEY's behaviour?`;
   }
@@ -2085,7 +2083,7 @@ Based on this data, what adjustments should be made to KEY's behaviour?`;
     businessId: string,
     since: Date,
   ): Promise<Array<{ date: string; count: number; total: number }>> {
-    const invoices = await this.prisma.client.invoice.findMany({
+    const invoices = await (this.prisma.client as any).invoice.findMany({
       where: {
         businessId,
         createdAt: { gte: since },
@@ -2108,7 +2106,7 @@ Based on this data, what adjustments should be made to KEY's behaviour?`;
 
     return Object.entries(byDay)
       .map(([date, stats]) => ({ date, ...stats }))
-      .sort((a, b) => a.date.localeCompare(b.date));
+      .sort((a: any, b: any) => a.date.localeCompare(b.date));
   }
 
   /**
@@ -2118,7 +2116,7 @@ Based on this data, what adjustments should be made to KEY's behaviour?`;
     businessId: string,
     since: Date,
   ): Promise<Array<{ date: string; count: number }>> {
-    const contacts = await this.prisma.client.contact.findMany({
+    const contacts = await (this.prisma.client as any).contact.findMany({
       where: {
         businessId,
         createdAt: { gte: since },
@@ -2134,7 +2132,7 @@ Based on this data, what adjustments should be made to KEY's behaviour?`;
 
     return Object.entries(byDay)
       .map(([date, count]) => ({ date, count }))
-      .sort((a, b) => a.date.localeCompare(b.date));
+      .sort((a: any, b: any) => a.date.localeCompare(b.date));
   }
 
   /**
@@ -2145,7 +2143,7 @@ Based on this data, what adjustments should be made to KEY's behaviour?`;
     since: Date,
   ): Promise<Array<{ date: string; count: number }>> {
     try {
-      const tickets = await this.prisma.client.helpdeskTicket.findMany({
+      const tickets = await (this.prisma.client as any).helpdeskTicket.findMany({
         where: {
           businessId,
           createdAt: { gte: since },
@@ -2161,7 +2159,7 @@ Based on this data, what adjustments should be made to KEY's behaviour?`;
 
       return Object.entries(byDay)
         .map(([date, count]) => ({ date, count }))
-        .sort((a, b) => a.date.localeCompare(b.date));
+        .sort((a: any, b: any) => a.date.localeCompare(b.date));
     } catch {
       // helpdeskTicket table may not exist in all deployments
       return [];

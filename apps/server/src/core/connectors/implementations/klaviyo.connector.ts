@@ -115,7 +115,7 @@ export class KlaviyoConnector implements IConnector {
         account: first?.attributes?.contact_information?.organization_name ?? accountName ?? first?.id ?? 'Klaviyo Account',
         detail: first?.attributes?.preferred_currency ? `Currency: ${first.attributes.preferred_currency}` : undefined,
       };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }
@@ -181,7 +181,7 @@ export class KlaviyoConnector implements IConnector {
       }));
       await this.trackActivity(businessId);
       return { success: true, lists };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }
@@ -241,7 +241,7 @@ export class KlaviyoConnector implements IConnector {
           continue;
         }
         if (profileId) profileIds.push(profileId);
-      } catch (err) {
+      } catch (err: any) {
         failed += 1;
         errors.push(`${contact.email}: ${err instanceof Error ? err.message : 'Network error'}`);
       }
@@ -265,7 +265,7 @@ export class KlaviyoConnector implements IConnector {
           errors.push(`List subscribe ${subRes.status}${body ? `: ${body.slice(0, 120)}` : ''}`);
           failed += profileIds.length;
         }
-      } catch (err) {
+      } catch (err: any) {
         errors.push(err instanceof Error ? err.message : 'Network error');
         failed += profileIds.length;
       }
@@ -294,7 +294,7 @@ export class KlaviyoConnector implements IConnector {
         status: c.attributes?.status ?? 'unknown',
       }));
       return { success: true, campaigns };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }
@@ -315,7 +315,7 @@ export class KlaviyoConnector implements IConnector {
       }
       await this.trackActivity(businessId);
       return { success: true };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }

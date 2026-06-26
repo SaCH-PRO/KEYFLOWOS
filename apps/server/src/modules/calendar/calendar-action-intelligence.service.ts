@@ -83,7 +83,7 @@ export class CalendarActionIntelligenceService {
           actionCount: actions.length,
         },
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `Calendar action intelligence failed for ${businessId}: ${(err as Error).message}`,
       );
@@ -129,7 +129,7 @@ Rules:
         },
       );
       return this.parseAnalysis(response.content ?? '', payload);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`AI analysis failed: ${(err as Error).message}`);
       return this.fallbackAnalysis(payload);
     }
@@ -170,7 +170,7 @@ Rules:
             : `Calendar event: ${payload.title}`,
         suggestedActions: actions,
       };
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Failed to parse calendar action JSON: ${(err as Error).message}`);
       return this.fallbackAnalysis(payload);
     }

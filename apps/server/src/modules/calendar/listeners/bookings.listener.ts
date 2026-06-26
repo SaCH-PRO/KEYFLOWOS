@@ -40,7 +40,7 @@ export class CalendarBookingsListener {
     if (!input) return;
     try {
       await this.projection.upsertFromSource(input);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `booking projection failed booking=${booking.id}: ${(err as Error).message}`,
       );
@@ -56,7 +56,7 @@ export class CalendarBookingsListener {
         sourceType: 'booking',
         sourceId: payload.bookingId,
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `booking projection delete failed booking=${payload.bookingId}: ${(err as Error).message}`,
       );

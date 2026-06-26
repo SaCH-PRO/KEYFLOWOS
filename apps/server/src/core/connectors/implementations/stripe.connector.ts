@@ -114,7 +114,7 @@ export class StripeConnector implements IConnector, IPaymentGatewayConnector {
         account: data.livemode ? 'Live mode' : 'Test mode',
         detail: top ? `Available: ${(top.amount / 100).toFixed(2)} ${top.currency.toUpperCase()}` : 'Zero balance',
       };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }
@@ -262,7 +262,7 @@ export class StripeConnector implements IConnector, IPaymentGatewayConnector {
         }
       }
       await this.trackActivity(businessId);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `Stripe live transaction fetch failed; serving ${local.length} local row(s): ${err instanceof Error ? err.message : err}`,
       );
@@ -379,7 +379,7 @@ export class StripeConnector implements IConnector, IPaymentGatewayConnector {
           createdAt: new Date(r.created * 1000),
         });
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Stripe refunds list failed: ${err instanceof Error ? err.message : err}`);
     }
     return out;
@@ -438,7 +438,7 @@ export class StripeConnector implements IConnector, IPaymentGatewayConnector {
           currency = (first.currency || 'usd').toUpperCase();
           description = first.description || '';
         }
-      } catch (err) {
+      } catch (err: any) {
           this.logger.warn(`Line item lookup failures: ${err instanceof Error ? err.message : err}`);
         }
       links.push({

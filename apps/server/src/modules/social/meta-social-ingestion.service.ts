@@ -217,7 +217,7 @@ export class MetaSocialIngestionService {
           aiHandled: false,
         },
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Failed to record legacy social engagement: ${(err as Error).message}`);
     }
   }

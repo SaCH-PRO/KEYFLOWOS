@@ -197,7 +197,7 @@ export class CalendarSyncService {
     if (status.syncEnabled !== false && status.syncDirection !== 'pull' && status.syncDirection !== 'disabled') {
       try {
         pushed = await this.pushSelectedTypes(businessId, settings);
-      } catch (err) {
+      } catch (err: any) {
         errors.push(`push:${(err as Error).message}`);
       }
     }
@@ -210,7 +210,7 @@ export class CalendarSyncService {
     ) {
       try {
         pulled = await this.pullExternalEvents(businessId);
-      } catch (err) {
+      } catch (err: any) {
         errors.push(`pull:${(err as Error).message}`);
       }
     }
@@ -295,7 +295,7 @@ export class CalendarSyncService {
           });
           pushed += 1;
         }
-      } catch (err) {
+      } catch (err: any) {
         await this.prisma.client.calendarEvent
           .update({
             where: { id: row.id },
@@ -362,7 +362,7 @@ export class CalendarSyncService {
           })
           .catch(() => undefined);
         pulled += 1;
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(`Pull external event ${ev.id} failed: ${(err as Error).message}`);
       }
     }

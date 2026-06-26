@@ -188,7 +188,7 @@ export class CrmController {
     try {
       await this.crm.healthPing();
       dbOk = true;
-    } catch (err) {
+    } catch (err: any) {
         this.logger.warn(`Silent catch: ${err instanceof Error ? err.message : err}`);
       }
     const cacheMetrics = this.crmStats.getCacheMetrics();

@@ -912,7 +912,7 @@ export class GoogleDriveService {
           );
         }
         return { html, mimeType, name: meta.name };
-      } catch (err) {
+      } catch (err: any) {
         this.logger.error('Failed to convert .docx with mammoth', err as Error);
         throw new BadRequestException(
           'Could not read this Word document. It may be password-protected or corrupted.',

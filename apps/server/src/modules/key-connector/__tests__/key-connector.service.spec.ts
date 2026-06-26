@@ -1,78 +1,68 @@
-import { Test, TestingModule } from '@nestjs/testing';
-import { HttpService } from '@nestjs/axios';
-import { of } from 'rxjs';
+import { vi } from 'vitest';
+import { createMock } from '@golevelup/ts-vitest';
+import { db } from '@keyflow/db';
 import { KeyConnectorService } from '../key-connector.service';
 import { ProviderRegistryService } from '../providers/provider-registry.service';
 import { HealthCheckService } from '../health/health-check.service';
 import { SyncEngineService } from '../sync/sync-engine.service';
 import { AiGatewayService } from '../ai-gateway/ai-gateway.service';
 
-// ── Mock @keyflow/db ──────────────────────────────────────────────────
-const mockDb = {
-  integrationConnection: {
-    findMany: jest.fn(),
-    findFirst: jest.fn(),
-    findUnique: jest.fn(),
-    create: jest.fn(),
-    delete: jest.fn(),
-    update: jest.fn(),
+vi.mock('@keyflow/db', () => ({
+  db: {
+    integrationConnection: {
+      findMany: vi.fn(),
+      findFirst: vi.fn(),
+      findUnique: vi.fn(),
+      create: vi.fn(),
+      delete: vi.fn(),
+      update: vi.fn(),
+    },
+    syncJob: {
+      findMany: vi.fn(),
+      findUnique: vi.fn(),
+      findFirst: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+    },
+    connectorAuditLog: {
+      findMany: vi.fn(),
+      create: vi.fn(),
+    },
+    connectorHealthLog: {
+      findMany: vi.fn(),
+      createMany: vi.fn(),
+    },
   },
-  syncJob: {
-    findMany: jest.fn(),
-    findUnique: jest.fn(),
-    findFirst: jest.fn(),
-    create: jest.fn(),
-    update: jest.fn(),
-  },
-  connectorAuditLog: {
-    findMany: jest.fn(),
-    create: jest.fn(),
-  },
-  connectorHealthLog: {
-    findMany: jest.fn(),
-    createMany: jest.fn(),
-  },
-};
-
-jest.mock('@keyflow/db', () => ({ db: mockDb }));
+}));
 
 // ── Test Suite ────────────────────────────────────────────────────────
 
 describe('KeyConnectorService', () => {
   let service: KeyConnectorService;
   let registry: ProviderRegistryService;
+  let healthCheck: HealthCheckService;
+  let syncEngine: SyncEngineService;
+  let aiGateway: AiGatewayService;
 
   const TEST_BUSINESS_ID = 'biz_123';
   const TEST_USER_ID = 'user_456';
   const TEST_CONNECTION_ID = 'conn_789';
   const TEST_PROVIDER_KEY = 'google_contacts';
 
-  beforeEach(async () => {
-    jest.clearAllMocks();
+  beforeEach(() => {
+    vi.clearAllMocks();
 
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [
-        KeyConnectorService,
-        ProviderRegistryService,
-        HealthCheckService,
-        SyncEngineService,
-        AiGatewayService,
-        {
-          provide: HttpService,
-          useValue: {
-            get: jest.fn().mockReturnValue(of({ status: 200, data: {} })),
-            post: jest.fn().mockReturnValue(of({ status: 200, data: {} })),
-          },
-        },
-      ],
-    }).compile();
+    registry = new ProviderRegistryService();
+    healthCheck = createMock<HealthCheckService>();
+    syncEngine = createMock<SyncEngineService>();
+    aiGateway = createMock<AiGatewayService>();
 
-    service = module.get<KeyConnectorService>(KeyConnectorService);
-    registry = module.get<ProviderRegistryService>(ProviderRegistryService);
-  });
-
-  afterEach(() => {
-    jest.restoreAllMocks();
+    service = new KeyConnectorService(
+      registry,
+      healthCheck,
+      syncEngine,
+      aiGateway,
+    );
   });
 
   it('should be defined', () => {
@@ -86,7 +76,7 @@ describe('KeyConnectorService', () => {
 
   describe('getProviders', () => {
     it('should return all providers with connection status', async () => {
-      mockDb.integrationConnection.findMany.mockResolvedValue([
+      (db.integrationConnection.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
         {
           id: TEST_CONNECTION_ID,
           businessId: TEST_BUSINESS_ID,
@@ -109,7 +99,6 @@ describe('KeyConnectorService', () => {
       expect(Array.isArray(result)).toBe(true);
       expect(result.length).toBeGreaterThan(0);
 
-      // Should contain the google_contacts provider with a connection
       const googleContacts = result.find(
         (r) => r.provider.key === TEST_PROVIDER_KEY,
       );
@@ -119,7 +108,7 @@ describe('KeyConnectorService', () => {
     });
 
     it('should filter providers by category', async () => {
-      mockDb.integrationConnection.findMany.mockResolvedValue([]);
+      (db.integrationConnection.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
 
       const result = await service.getProviders(
         TEST_BUSINESS_ID,
@@ -139,8 +128,8 @@ describe('KeyConnectorService', () => {
 
   describe('connectProvider', () => {
     it('should create a new connection', async () => {
-      mockDb.integrationConnection.findFirst.mockResolvedValue(null);
-      mockDb.integrationConnection.create.mockResolvedValue({
+      (db.integrationConnection.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+      (db.integrationConnection.create as ReturnType<typeof vi.fn>).mockResolvedValue({
         id: TEST_CONNECTION_ID,
         businessId: TEST_BUSINESS_ID,
         providerKey: TEST_PROVIDER_KEY,
@@ -154,7 +143,7 @@ describe('KeyConnectorService', () => {
         createdAt: new Date(),
         updatedAt: new Date(),
       });
-      mockDb.connectorAuditLog.create.mockResolvedValue({});
+      (db.connectorAuditLog.create as ReturnType<typeof vi.fn>).mockResolvedValue({});
 
       const result = await service.connectProvider(
         TEST_BUSINESS_ID,
@@ -168,11 +157,11 @@ describe('KeyConnectorService', () => {
       expect(result).toBeDefined();
       expect(result.providerKey).toBe(TEST_PROVIDER_KEY);
       expect(result.status).toBe('connected');
-      expect(mockDb.integrationConnection.create).toHaveBeenCalledTimes(1);
+      expect(db.integrationConnection.create).toHaveBeenCalledTimes(1);
     });
 
     it('should reject duplicate connections', async () => {
-      mockDb.integrationConnection.findFirst.mockResolvedValue({
+      (db.integrationConnection.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({
         id: TEST_CONNECTION_ID,
         providerKey: TEST_PROVIDER_KEY,
       });
@@ -205,13 +194,13 @@ describe('KeyConnectorService', () => {
 
   describe('disconnectProvider', () => {
     it('should delete an existing connection', async () => {
-      mockDb.integrationConnection.findFirst.mockResolvedValue({
+      (db.integrationConnection.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({
         id: TEST_CONNECTION_ID,
         businessId: TEST_BUSINESS_ID,
         providerKey: TEST_PROVIDER_KEY,
       });
-      mockDb.integrationConnection.delete.mockResolvedValue({});
-      mockDb.connectorAuditLog.create.mockResolvedValue({});
+      (db.integrationConnection.delete as ReturnType<typeof vi.fn>).mockResolvedValue({});
+      (db.connectorAuditLog.create as ReturnType<typeof vi.fn>).mockResolvedValue({});
 
       await service.disconnectProvider(
         TEST_BUSINESS_ID,
@@ -219,13 +208,13 @@ describe('KeyConnectorService', () => {
         TEST_USER_ID,
       );
 
-      expect(mockDb.integrationConnection.delete).toHaveBeenCalledWith({
+      expect(db.integrationConnection.delete).toHaveBeenCalledWith({
         where: { id: TEST_CONNECTION_ID },
       });
     });
 
     it('should throw for non-existent connection', async () => {
-      mockDb.integrationConnection.findFirst.mockResolvedValue(null);
+      (db.integrationConnection.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(null);
 
       await expect(
         service.disconnectProvider(
@@ -243,7 +232,7 @@ describe('KeyConnectorService', () => {
 
   describe('getConnections', () => {
     it('should return all connections for a business', async () => {
-      mockDb.integrationConnection.findMany.mockResolvedValue([
+      (db.integrationConnection.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
         {
           id: TEST_CONNECTION_ID,
           businessId: TEST_BUSINESS_ID,
@@ -274,11 +263,13 @@ describe('KeyConnectorService', () => {
 
   describe('getConnectionHealth', () => {
     it('should return health results for all connections', async () => {
-      mockDb.integrationConnection.findMany.mockResolvedValue([]);
+      (db.integrationConnection.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+      (healthCheck.checkAll as ReturnType<typeof vi.fn>).mockResolvedValue([]);
 
       const result = await service.getConnectionHealth(TEST_BUSINESS_ID);
 
       expect(Array.isArray(result)).toBe(true);
+      expect(healthCheck.checkAll).toHaveBeenCalledWith(TEST_BUSINESS_ID);
     });
   });
 
@@ -288,6 +279,8 @@ describe('KeyConnectorService', () => {
 
   describe('processAiCommand', () => {
     it('should route a command to a module', async () => {
+      (aiGateway.executeModuleAction as ReturnType<typeof vi.fn>).mockResolvedValue({ routedTo: 'crm' });
+
       const command = {
         intent: 'list contacts',
         module: 'crm',
@@ -308,10 +301,11 @@ describe('KeyConnectorService', () => {
     });
 
     it('should route a command to an external provider', async () => {
-      mockDb.integrationConnection.findFirst.mockResolvedValue({
+      (db.integrationConnection.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue({
         id: TEST_CONNECTION_ID,
         status: 'connected',
       });
+      (aiGateway.executeProviderAction as ReturnType<typeof vi.fn>).mockResolvedValue({ routedTo: 'sendgrid' });
 
       const command = {
         intent: 'send email',
@@ -333,7 +327,8 @@ describe('KeyConnectorService', () => {
     });
 
     it('should handle NL routing via intent keywords', async () => {
-      mockDb.connectorAuditLog.create.mockResolvedValue({});
+      (db.connectorAuditLog.create as ReturnType<typeof vi.fn>).mockResolvedValue({});
+      (aiGateway.routeCommand as ReturnType<typeof vi.fn>).mockResolvedValue({ success: true });
 
       const command = {
         intent: 'find leads',
@@ -359,7 +354,7 @@ describe('KeyConnectorService', () => {
 
   describe('getAuditLog', () => {
     it('should return audit entries', async () => {
-      mockDb.connectorAuditLog.findMany.mockResolvedValue([
+      (db.connectorAuditLog.findMany as ReturnType<typeof vi.fn>).mockResolvedValue([
         {
           id: 'audit_1',
           businessId: TEST_BUSINESS_ID,
@@ -387,11 +382,12 @@ describe('KeyConnectorService', () => {
 
   describe('getSyncHistory', () => {
     it('should return sync history', async () => {
-      mockDb.syncJob.findMany.mockResolvedValue([]);
+      (syncEngine.getSyncHistory as ReturnType<typeof vi.fn>).mockResolvedValue([]);
 
       const result = await service.getSyncHistory(TEST_BUSINESS_ID);
 
       expect(Array.isArray(result)).toBe(true);
+      expect(syncEngine.getSyncHistory).toHaveBeenCalledWith(TEST_BUSINESS_ID, 50);
     });
   });
 });

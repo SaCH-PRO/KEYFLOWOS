@@ -83,7 +83,7 @@ export class KeyInboxIntelligenceService {
         trends,
         evidence,
       );
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`AI intelligence report failed: ${(err as Error).message}`);
       generatedBy = 'fallback';
       report = this.buildFallbackReport(dto.scope, currentMetrics, trends);

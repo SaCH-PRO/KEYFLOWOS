@@ -47,7 +47,7 @@ export class JourneyOrchestratorService implements OnModuleInit {
       try {
         const result = await this.executeJourney(businessId, template, payload);
         if (result) results.push(result);
-      } catch (err) {
+      } catch (err: any) {
         this.logger.error(`Journey ${template.key} failed for event ${eventName}: ${(err as Error).message}`);
       }
     }

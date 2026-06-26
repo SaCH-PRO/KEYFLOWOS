@@ -128,7 +128,7 @@ export class IdentitySignupService {
         emailConfirm: !requireVerification,
         userMetadata,
       });
-    } catch (err) {
+    } catch (err: any) {
       this.translateAndThrow(err);
     }
 
@@ -158,7 +158,7 @@ export class IdentitySignupService {
         password: args.password,
         redirectTo,
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `generateSignupLink failed for ${email}: ${err instanceof Error ? err.message : err}`,
       );
@@ -175,7 +175,7 @@ export class IdentitySignupService {
         recipientName: fullName || undefined,
         confirmationUrl: link,
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `sendVerificationEmail failed for ${email}: ${err instanceof Error ? err.message : err}`,
       );
@@ -226,7 +226,7 @@ export class IdentitySignupService {
     let user;
     try {
       user = await this.supabaseAdmin.findUserByEmail(email);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `resendVerification lookup failed for ${email}: ${err instanceof Error ? err.message : err}`,
       );
@@ -241,7 +241,7 @@ export class IdentitySignupService {
     let link: string;
     try {
       link = await this.supabaseAdmin.generateConfirmationLink({ email, redirectTo });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `resendVerification link gen failed for ${email}: ${err instanceof Error ? err.message : err}`,
       );
@@ -256,7 +256,7 @@ export class IdentitySignupService {
         recipientName: typeof recipientName === 'string' ? recipientName : undefined,
         confirmationUrl: link,
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `resendVerification send failed for ${email}: ${err instanceof Error ? err.message : err}`,
       );

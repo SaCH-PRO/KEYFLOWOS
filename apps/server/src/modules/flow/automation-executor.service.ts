@@ -722,7 +722,7 @@ export class AutomationExecutorService {
           this.logger.log(`Auto-created project "${tmpl.name}" from template for invoice ${inv.id}`);
         }
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Auto-project creation from template failed: ${err}`);
     }
   }

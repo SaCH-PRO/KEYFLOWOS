@@ -65,7 +65,7 @@ export class AgentHealthService implements OnModuleInit, OnModuleDestroy {
       for (const business of businesses) {
         await this.checkBusinessHealth(business.id);
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Health check run failed: ${(err as Error).message}`);
     }
   }

@@ -46,7 +46,7 @@ export class CrmGoogleController {
       });
 
       return res.redirect(`/app/crm/pipeline?google_success=true&imported=${result.imported}`);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error('Google OAuth callback failed', (err as Error).message);
       return res.redirect('/app/crm/pipeline?google_error=import_failed');
     }

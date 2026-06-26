@@ -592,7 +592,7 @@ export class BookingOptimizerService {
       this.logger.log(
         `Rebooking suggestion created for contact ${contactId} — next ${serviceName} in ~${Math.round(avgInterval)} days`,
       );
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Failed to generate rebooking suggestion: ${(err as Error).message}`);
     }
   }

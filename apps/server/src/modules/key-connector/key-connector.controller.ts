@@ -203,7 +203,7 @@ export class KeyConnectorController {
     // In a real application the business ID is injected by an auth
     // guard or middleware and attached to the request object.
     const id =
-      (req as Record<string, unknown>)['businessId'] as string | undefined;
+      (req as any)['businessId'] as string | undefined;
     if (!id) {
       throw new Error('Business ID not found in request context');
     }
@@ -211,7 +211,7 @@ export class KeyConnectorController {
   }
 
   private extractUserId(req: Request): string {
-    const id = (req as Record<string, unknown>)['userId'] as
+    const id = (req as any)['userId'] as
       | string
       | undefined;
     if (!id) {

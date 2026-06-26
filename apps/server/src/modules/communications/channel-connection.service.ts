@@ -648,7 +648,7 @@ export class ChannelConnectionService {
       }
 
       this.logger.log(`Discovered ${phoneNumbers.length} WhatsApp phone number(s) for connection ${connectionId}`);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`WhatsApp destination discovery error: ${(err as Error).message}`);
     }
   }

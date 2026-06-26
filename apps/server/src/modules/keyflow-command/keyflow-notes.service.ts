@@ -119,7 +119,7 @@ ${note.body}`,
         },
       );
       brief = response.content?.trim() || null;
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Keyflow note brief generation failed: ${(err as Error).message}`);
       brief = note.body.slice(0, 220) + (note.body.length > 220 ? '…' : '');
     }

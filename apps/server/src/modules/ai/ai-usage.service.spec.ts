@@ -115,7 +115,7 @@ describe('AiUsageService', () => {
       try {
         service.checkRateLimit('biz-1');
         expect.unreachable('Should have thrown');
-      } catch (err) {
+      } catch (err: any) {
         expect(err).toBeInstanceOf(HttpException);
         const response = (err as HttpException).getResponse();
         expect((response as any).statusCode).toBe(429);
@@ -422,7 +422,7 @@ describe('AiUsageService', () => {
           messages: [{ role: 'user', content: 'Hello' }],
         });
         expect.unreachable('Should have thrown');
-      } catch (err) {
+      } catch (err: any) {
         expect((err as ForbiddenException).message).toContain('50/50');
       }
     });
@@ -439,7 +439,7 @@ describe('AiUsageService', () => {
           messages: [{ role: 'user', content: 'Hello' }],
         });
         expect.unreachable('Should have thrown');
-      } catch (err) {
+      } catch (err: any) {
         expect(err).toBeInstanceOf(HttpException);
         expect((err as HttpException).getStatus()).toBe(429);
       }

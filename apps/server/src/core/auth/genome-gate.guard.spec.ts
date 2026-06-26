@@ -44,7 +44,7 @@ describe('GenomeGateGuard', () => {
     try {
       await guard.canActivate(makeContext('biz_1'));
       expect.unreachable();
-    } catch (err) {
+    } catch (err: any) {
       expect(err).toBeInstanceOf(ForbiddenException);
       const response = (err as ForbiddenException).getResponse() as Record<string, unknown>;
       expect(response.code).toBe('GENOME_GATE_BLOCKED');

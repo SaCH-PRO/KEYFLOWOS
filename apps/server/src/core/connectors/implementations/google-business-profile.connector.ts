@@ -112,7 +112,7 @@ export class GoogleBusinessProfileConnector implements IConnector {
       });
       if (!res.ok) return { success: false, error: `Business Profile API returned ${res.status}` };
       return { success: true, account: business.bpEmail ?? undefined };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }
@@ -166,7 +166,7 @@ export class GoogleBusinessProfileConnector implements IConnector {
           ? `Location: "${loc.title}"${loc.storeCode ? ` (${loc.storeCode})` : ''}`
           : 'Account is reachable but has no published locations',
       };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }

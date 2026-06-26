@@ -80,7 +80,7 @@ export class MomentumSchedulerService implements OnModuleInit, OnModuleDestroy {
           const result = await this.momentumService.runDailySweep(business.id);
           this.sweepTracker.set(trackerKey, 'done');
           this.logger.log(`[MomentumScheduler] Sweep complete for ${business.id}: ${result.contactsProcessed} contacts, ${result.recommendationsGenerated} recs, ${result.snapshotsSaved} snapshots`);
-        } catch (err) {
+        } catch (err: any) {
           this.sweepTracker.set(trackerKey, 'failed');
           this.logger.error(`[MomentumScheduler] Sweep failed for ${business.id}: ${(err as Error).message}`);
         }
@@ -94,7 +94,7 @@ export class MomentumSchedulerService implements OnModuleInit, OnModuleDestroy {
           this.sweepTracker.delete(key);
         }
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`[MomentumScheduler] Check failed: ${(err as Error).message}`);
     }
   }

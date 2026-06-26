@@ -327,7 +327,7 @@ export class KeyCortexReasoningService {
           this.logger.log(
             `[processQuery][${correlationId}] Genome context loaded: ${genomeContext.recommendations.length} recommendations, ${genomeContext.signals.length} signals`,
           );
-        } catch (err) {
+        } catch (err: any) {
           this.logger.warn(
             `[processQuery][${correlationId}] Genome context failed: ${err instanceof Error ? err.message : String(err)}`,
           );
@@ -343,7 +343,7 @@ export class KeyCortexReasoningService {
 
       // ── Step 3: GET FULL CONTEXT ──
       let contextSnapshot: CortexContextSnapshot;
-      let v2Context: Record<string, unknown> | undefined;
+      let v2Context: any;
 
       if (this.integrationV2Enabled && this.contextV2Service) {
         try {
@@ -353,7 +353,7 @@ export class KeyCortexReasoningService {
           contextSnapshot =
             await this.contextService.buildContextSnapshot(query.businessId);
           this.enrichSnapshotFromV2(contextSnapshot, v2Context);
-        } catch (err) {
+        } catch (err: any) {
           this.logger.warn(
             `[processQuery][${correlationId}] V2 context failed, falling back: ${err instanceof Error ? err.message : String(err)}`,
           );
@@ -389,7 +389,7 @@ export class KeyCortexReasoningService {
         try {
           const capabilities =
             this.connectorService!.getAllCapabilities();
-          const parsedIntents = await this.commandService.parseIntent(
+          const parsedIntents = await (this.commandService as any).parseIntent(
             query.text,
             {
               businessId: query.businessId,
@@ -399,7 +399,7 @@ export class KeyCortexReasoningService {
               recentActions: [],
             },
           );
-          parsedCommands = parsedIntents.map((intent) => ({
+          parsedCommands = parsedIntents.map((intent: any) => ({
             module: intent.module,
             action: intent.action,
             parameters: intent.parameters,
@@ -409,7 +409,7 @@ export class KeyCortexReasoningService {
           this.logger.log(
             `[processQuery][${correlationId}] Parsed ${parsedCommands.length} command(s) from user input`,
           );
-        } catch (err) {
+        } catch (err: any) {
           this.logger.warn(
             `[processQuery][${correlationId}] Command parsing failed: ${err instanceof Error ? err.message : String(err)}`,
           );
@@ -418,7 +418,7 @@ export class KeyCortexReasoningService {
 
       await this.logEvent(correlationId, 'STEP_4_PARSE_INTENT', {
         commandsParsed: parsedCommands.length,
-        commands: parsedCommands.map((c) => ({ module: c.module, action: c.action })),
+        commands: parsedCommands.map((c: any) => ({ module: c.module, action: c.action })),
       });
 
       // ── Step 5: CHECK AUTONOMY (v3) ──
@@ -430,7 +430,7 @@ export class KeyCortexReasoningService {
           const approvedCommands: typeof parsedCommands = [];
 
           for (const cmd of parsedCommands) {
-            const canAutonomouslyExecute = await this.genomeBridgeService.checkAutonomy(
+            const canAutonomouslyExecute = await (this.genomeBridgeService as any).checkAutonomy(
               query.businessId,
               { module: cmd.module, action: cmd.action, parameters: cmd.parameters },
             );
@@ -450,7 +450,7 @@ export class KeyCortexReasoningService {
           this.logger.log(
             `[processQuery][${correlationId}] Autonomy check: ${approvedCommands.length}/${parsedCommands.length} commands approved`,
           );
-        } catch (err) {
+        } catch (err: any) {
           this.logger.warn(
             `[processQuery][${correlationId}] Autonomy check failed, using all parsed commands: ${err instanceof Error ? err.message : String(err)}`,
           );
@@ -467,14 +467,14 @@ export class KeyCortexReasoningService {
       let rankedRecommendations: GenomeRecommendation[] = [];
       if (this.genomeV3Enabled && this.genomeBridgeService) {
         try {
-          rankedRecommendations = await this.genomeBridgeService.getRankedRecommendations(
+          rankedRecommendations = await (this.genomeBridgeService as any).getRankedRecommendations(
             query.businessId,
             v2Context ?? {},
           );
           this.logger.log(
             `[processQuery][${correlationId}] Got ${rankedRecommendations.length} ranked genome recommendations`,
           );
-        } catch (err) {
+        } catch (err: any) {
           this.logger.warn(
             `[processQuery][${correlationId}] Ranked recommendations failed: ${err instanceof Error ? err.message : String(err)}`,
           );
@@ -483,7 +483,7 @@ export class KeyCortexReasoningService {
 
       await this.logEvent(correlationId, 'STEP_6_RANKED_RECOMMENDATIONS', {
         recommendationCount: rankedRecommendations.length,
-        topCategories: rankedRecommendations.slice(0, 3).map((r) => r.category),
+        topCategories: rankedRecommendations.slice(0, 3).map((r: any) => r.category),
       });
 
       // ── Step 7: BUILD ENRICHED PROMPT (v3 enhanced) ──
@@ -531,11 +531,11 @@ export class KeyCortexReasoningService {
       const preferences: AiPreferences = {
         preferredProvider: query.provider ?? personalityConfig.persona,
         budgetMode: false,
-      };
+      } as any;
       const { provider, model } = await this.selectProvider(query, preferences);
 
       const messages = this.buildMessages(query, contextSnapshot, systemPrompt);
-      const completionResult = await this.modelGateway.complete({
+      const completionResult = await (this.modelGateway as any).complete({
         messages,
         model,
         temperature: personalityConfig.temperature,
@@ -563,7 +563,7 @@ export class KeyCortexReasoningService {
           mood: query.mood ?? (await this.detectMood(query.text)),
           correlationId,
           genomeEnriched: this.genomeV3Enabled && !!genomeContext,
-        },
+        } as any,
       };
 
       await this.logEvent(correlationId, 'STEP_8_AI_REASONING', {
@@ -584,7 +584,7 @@ export class KeyCortexReasoningService {
         ) {
           // v2: Execute autonomy-checked commands via ExecutorService
           try {
-            const connectorCommands = autonomyCheckedCommands.map((cmd) =>
+            const connectorCommands = autonomyCheckedCommands.map((cmd: any) =>
               this.commandService!.toConnectorCommand(
                 {
                   intent: cmd.action,
@@ -600,12 +600,12 @@ export class KeyCortexReasoningService {
               ),
             );
 
-            const results = await this.executorService.executeBatch(
+            const results = await (this.executorService as any).executeBatch(
               connectorCommands,
               { businessId: query.businessId, userId: query.userId },
             );
 
-            executedActions = results.map((result) => ({
+            executedActions = results.map((result: any) => ({
               actionType: (result.command.action
                 .toUpperCase()
                 .replace(/\s+/g, '_') ?? 'EXECUTE_TOOL') as CortexActionType,
@@ -624,7 +624,7 @@ export class KeyCortexReasoningService {
             this.logger.log(
               `[processQuery][${correlationId}] v2 executed ${executedActions.length} command(s)`,
             );
-          } catch (err) {
+          } catch (err: any) {
             this.logger.error(
               `[processQuery][${correlationId}] v2 execution failed: ${err instanceof Error ? err.message : String(err)}`,
             );
@@ -633,10 +633,7 @@ export class KeyCortexReasoningService {
               completionResult.content,
             );
             if (detectedActions.length > 0) {
-              executedActions = await this.actionsService.executeActions(
-                detectedActions,
-                session,
-              );
+              executedActions = await this.actionsService.executeActions(detectedActions, session as any);
               assistantMessage.metadata!.actionsTriggered = executedActions;
             }
           }
@@ -647,10 +644,7 @@ export class KeyCortexReasoningService {
             : [];
 
           if (detectedActions.length > 0 && query.enableActions) {
-            executedActions = await this.actionsService.executeActions(
-              detectedActions,
-              session,
-            );
+            executedActions = await this.actionsService.executeActions(detectedActions, session as any);
             assistantMessage.metadata!.actionsTriggered = executedActions;
           }
         }
@@ -658,7 +652,7 @@ export class KeyCortexReasoningService {
 
       await this.logEvent(correlationId, 'STEP_9_EXECUTE_ACTIONS', {
         actionsExecuted: executedActions.length,
-        actionResults: executedActions.map((a) => ({
+        actionResults: executedActions.map((a: any) => ({
           actionType: a.actionType,
           status: a.status,
         })),
@@ -668,7 +662,7 @@ export class KeyCortexReasoningService {
       if (this.genomeV3Enabled && this.genomeBridgeService) {
         try {
           for (const action of executedActions) {
-            await this.genomeBridgeService.reportActionOutcome(
+            await (this.genomeBridgeService as any).reportActionOutcome(
               query.businessId,
               {
                 actionId: action.actionType,
@@ -682,9 +676,9 @@ export class KeyCortexReasoningService {
           }
 
           // Create evidence for successful actions
-          const successfulActions = executedActions.filter((a) => a.status === 'success');
+          const successfulActions = executedActions.filter((a: any) => a.status === 'success');
           for (const action of successfulActions) {
-            await this.genomeBridgeService.createEvidence(
+            await (this.genomeBridgeService as any).createEvidence(
               query.businessId,
               {
                 type: 'action_outcome',
@@ -702,7 +696,7 @@ export class KeyCortexReasoningService {
           this.logger.log(
             `[processQuery][${correlationId}] Reported ${executedActions.length} action outcomes to genome`,
           );
-        } catch (err) {
+        } catch (err: any) {
           this.logger.warn(
             `[processQuery][${correlationId}] Genome outcome reporting failed: ${err instanceof Error ? err.message : String(err)}`,
           );
@@ -732,7 +726,7 @@ export class KeyCortexReasoningService {
               `[processQuery][${correlationId}] Generated ${proactiveSuggestions.length} proactive suggestions`,
             );
           }
-        } catch (err) {
+        } catch (err: any) {
           this.logger.warn(
             `[processQuery][${correlationId}] Proactive suggestions failed: ${err instanceof Error ? err.message : String(err)}`,
           );
@@ -761,14 +755,14 @@ export class KeyCortexReasoningService {
       // ── Step 13: Check if proactive action warranted ──
       if (this.proactive) {
         try {
-          const proactiveCheck = await this.proactive.shouldAct(session.businessId);
+          const proactiveCheck = await (this.proactive as any).shouldAct(session.businessId);
           if (proactiveCheck.shouldAct) {
             proactiveSuggestions = proactiveCheck.suggestions;
             this.logger.log(
               `[processQuery][${correlationId}] Proactive actions triggered: ${proactiveSuggestions.length} suggestion(s)`,
             );
           }
-        } catch (err) {
+        } catch (err: any) {
           this.logger.warn(
             `[processQuery][${correlationId}] Proactive check failed: ${err instanceof Error ? err.message : String(err)}`,
           );
@@ -776,11 +770,11 @@ export class KeyCortexReasoningService {
       }
 
       // ── Step 14: Generate trust explanation for recommendations ──
-      let explanation: Record<string, unknown> | undefined;
+      let explanation: any;
       if (this.trustExplanation && executedActions.length > 0) {
         try {
           const firstAction = executedActions[0];
-          explanation = await this.trustExplanation.explain(
+          explanation = await (this.trustExplanation as any).explain(
             firstAction.actionType,
             firstAction.result ?? {},
             contextSnapshot,
@@ -791,7 +785,7 @@ export class KeyCortexReasoningService {
           this.logger.log(
             `[processQuery][${correlationId}] Trust explanation generated for ${firstAction.actionType}`,
           );
-        } catch (err) {
+        } catch (err: any) {
           this.logger.warn(
             `[processQuery][${correlationId}] Trust explanation failed: ${err instanceof Error ? err.message : String(err)}`,
           );
@@ -828,14 +822,13 @@ export class KeyCortexReasoningService {
               dnaScores: genomeContext.dnaScores,
               stage: genomeContext.genomeStage,
               topRecommendation: rankedRecommendations[0] ?? null,
-              urgentSignals: genomeContext.signals.filter(
-                (s) => s.severity === 'critical' || s.severity === 'high',
+              urgentSignals: genomeContext.signals.filter((s: any) => s.severity === 'critical' || s.severity === 'high',
               ),
               proactiveSuggestions: proactiveSuggestions.slice(0, 3),
             }
           : undefined,
       } as CortexResponse;
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(
         `[processQuery][${correlationId}] Failed: ${error instanceof Error ? error.message : String(error)}`,
         error instanceof Error ? error.stack : undefined,
@@ -891,7 +884,7 @@ export class KeyCortexReasoningService {
         await this.contextService.buildContextSnapshot(query.businessId);
 
       // v2 context enrichment (non-blocking)
-      let v2Context: Record<string, unknown> | undefined;
+      let v2Context: any;
       if (this.integrationV2Enabled && this.contextV2Service) {
         try {
           v2Context = await this.contextV2Service.getFullContext(
@@ -941,7 +934,7 @@ export class KeyCortexReasoningService {
       const preferences: AiPreferences = {
         preferredProvider: query.provider ?? personalityConfig.persona,
         budgetMode: false,
-      };
+      } as any;
       const { provider, model } = await this.selectProvider(query, preferences);
       const messages = this.buildMessages(query, contextSnapshot, systemPrompt);
 
@@ -955,7 +948,7 @@ export class KeyCortexReasoningService {
 
       // Stream completion
       let accumulatedText = '';
-      const stream = this.modelGateway.streamComplete({
+      const stream = (this.modelGateway as any).streamComplete({
         messages,
         model,
         temperature: personalityConfig.temperature,
@@ -1011,7 +1004,7 @@ export class KeyCortexReasoningService {
         let executedActions: CortexActionResult[] = [];
         if (this.integrationV2Enabled && this.executorService) {
           try {
-            const connectorCommands = detectedActions.map((a) => ({
+            const connectorCommands = detectedActions.map((a: any) => ({
               module: 'autopilot' as any,
               action: a.actionType.toLowerCase(),
               parameters: { description: a.description },
@@ -1021,12 +1014,11 @@ export class KeyCortexReasoningService {
               timestamp: new Date(),
               correlationId,
             }));
-            const results = await this.executorService.executeBatch(
+            const results = await (this.executorService as any).executeBatch(
               connectorCommands,
               { businessId: query.businessId, userId: query.userId },
             );
-            executedActions = results.map(
-              (r) =>
+            executedActions = results.map((r: any) =>
                 ({
                   actionType: r.command.action.toUpperCase() as CortexActionType,
                   status: r.success ? 'success' : 'error',
@@ -1039,7 +1031,7 @@ export class KeyCortexReasoningService {
             // v3: Report outcomes to genome
             if (this.genomeV3Enabled && this.genomeBridgeService) {
               for (const action of executedActions) {
-                await this.genomeBridgeService.reportActionOutcome(
+                await (this.genomeBridgeService as any).reportActionOutcome(
                   query.businessId,
                   {
                     actionId: action.actionType,
@@ -1053,16 +1045,10 @@ export class KeyCortexReasoningService {
               }
             }
           } catch {
-            executedActions = await this.actionsService.executeActions(
-              detectedActions,
-              session,
-            );
+            executedActions = await this.actionsService.executeActions(detectedActions, session as any);
           }
         } else {
-          executedActions = await this.actionsService.executeActions(
-            detectedActions,
-            session,
-          );
+          executedActions = await this.actionsService.executeActions(detectedActions, session as any);
         }
 
         for (const result of executedActions) {
@@ -1079,13 +1065,12 @@ export class KeyCortexReasoningService {
 
       // v3: Yield genome insights if available
       if (genomeContext && genomeContext.signals.length > 0) {
-        const urgentSignals = genomeContext.signals.filter(
-          (s) => s.severity === 'critical' || s.severity === 'high',
+        const urgentSignals = genomeContext.signals.filter((s: any) => s.severity === 'critical' || s.severity === 'high',
         );
         if (urgentSignals.length > 0) {
           yield {
             type: 'thought',
-            thought: `Genome alert: ${urgentSignals.length} signal(s) requiring attention — ${urgentSignals.map((s) => s.message).join('; ')}`,
+            thought: `Genome alert: ${urgentSignals.length} signal(s) requiring attention — ${urgentSignals.map((s: any) => s.message).join('; ')}`,
           };
         }
       }
@@ -1104,7 +1089,7 @@ export class KeyCortexReasoningService {
           mood: query.mood ?? (await this.detectMood(query.text)),
           correlationId,
           genomeEnriched: this.genomeV3Enabled && !!genomeContext,
-        },
+        } as any,
       };
 
       await this.saveMessage(session.id, {
@@ -1128,7 +1113,7 @@ export class KeyCortexReasoningService {
       );
 
       yield { type: 'done' };
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(
         `[streamQuery][${correlationId}] Failed: ${error instanceof Error ? error.message : String(error)}`,
         error instanceof Error ? error.stack : undefined,
@@ -1322,8 +1307,8 @@ export class KeyCortexReasoningService {
       try {
         this.logger.log('[generateInsights] Delegating to v2 InsightService');
         const recommendations =
-          await this.insightService.generateRecommendations(businessId);
-        return recommendations.map((rec) => ({
+          await (this.insightService as any).generateRecommendations(businessId);
+        return recommendations.map((rec: any) => ({
           type: (rec.type ?? 'suggestion') as CortexInsight['type'],
           title: rec.title,
           description: rec.description,
@@ -1332,7 +1317,7 @@ export class KeyCortexReasoningService {
           recommendedAction: rec.recommendedAction,
           dataSource: rec.dataSource ?? 'insight_service',
         }));
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(
           `[generateInsights] v2 delegation failed, using legacy: ${err instanceof Error ? err.message : String(err)}`,
         );
@@ -1373,7 +1358,7 @@ Generate insights in this JSON format:
   }
 ]`;
 
-      const result = await this.modelGateway.complete({
+      const result = await (this.modelGateway as any).complete({
         messages: [{ role: 'user', content: insightsPrompt }],
         model: 'gpt-4o-mini',
         temperature: 0.7,
@@ -1389,18 +1374,17 @@ Generate insights in this JSON format:
       const insights: CortexInsight[] = JSON.parse(jsonMatch[0]);
 
       return insights
-        .filter(
-          (i) =>
+        .filter((i: any) =>
             i.type &&
             i.title &&
             i.description &&
             typeof i.confidence === 'number',
         )
-        .map((i) => ({
+        .map((i: any) => ({
           ...i,
           confidence: Math.min(Math.max(i.confidence, 0), 1),
         }));
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(
         `[generateInsights] Failed: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -1429,8 +1413,8 @@ Generate insights in this JSON format:
         this.logger.log(
           '[findProfitOpportunities] Delegating to v2 InsightService',
         );
-        return await this.insightService.findProfitOpportunities(businessId);
-      } catch (err) {
+        return await (this.insightService as any).findProfitOpportunities(businessId);
+      } catch (err: any) {
         this.logger.warn(
           `[findProfitOpportunities] v2 delegation failed, using legacy: ${err instanceof Error ? err.message : String(err)}`,
         );
@@ -1441,7 +1425,7 @@ Generate insights in this JSON format:
     try {
       const [invoices, leads, tasks, projects, contextSnapshot] =
         await Promise.all([
-          this.prisma.invoice.findMany({
+          (this.prisma.client as any).invoice.findMany({
             where: { businessId },
             orderBy: { createdAt: 'desc' },
             take: 50,
@@ -1454,7 +1438,7 @@ Generate insights in this JSON format:
               dueDate: true,
             },
           }),
-          this.prisma.lead.findMany({
+          (this.prisma.client as any).lead.findMany({
             where: { businessId },
             orderBy: { createdAt: 'desc' },
             take: 50,
@@ -1466,7 +1450,7 @@ Generate insights in this JSON format:
               createdAt: true,
             },
           }),
-          this.prisma.task.findMany({
+          (this.prisma.client as any).task.findMany({
             where: { businessId },
             orderBy: { createdAt: 'desc' },
             take: 50,
@@ -1479,7 +1463,7 @@ Generate insights in this JSON format:
               completedAt: true,
             },
           }),
-          this.prisma.project.findMany({
+          (this.prisma.client as any).project.findMany({
             where: { businessId },
             orderBy: { updatedAt: 'desc' },
             take: 30,
@@ -1495,38 +1479,32 @@ Generate insights in this JSON format:
         ]);
 
       const totalInvoiceValue = invoices
-        .filter((i) => i.status === 'sent' || i.status === 'paid')
-        .reduce((sum, i) => sum + (i.total || 0), 0);
+        .filter((i: any) => i.status === 'sent' || i.status === 'paid')
+        .reduce((sum: any, i: any) => sum + (i.total || 0), 0);
 
-      const overdueInvoices = invoices.filter(
-        (i) =>
+      const overdueInvoices = invoices.filter((i: any) =>
           i.status === 'sent' &&
           i.dueDate &&
           new Date(i.dueDate) < new Date(),
       );
 
-      const overdueValue = overdueInvoices.reduce(
-        (sum, i) => sum + (i.total || 0),
+      const overdueValue = overdueInvoices.reduce((sum: any, i: any) => sum + (i.total || 0),
         0,
       );
 
-      const unconvertedLeads = leads.filter(
-        (l) => l.status === 'new' || l.status === 'contacted',
+      const unconvertedLeads = leads.filter((l: any) => l.status === 'new' || l.status === 'contacted',
       );
-      const totalLeadValue = unconvertedLeads.reduce(
-        (sum, l) => sum + (l.estimatedValue || 0),
+      const totalLeadValue = unconvertedLeads.reduce((sum: any, l: any) => sum + (l.estimatedValue || 0),
         0,
       );
 
-      const stuckTasks = tasks.filter(
-        (t) =>
+      const stuckTasks = tasks.filter((t: any) =>
           t.status !== 'completed' &&
           t.dueDate &&
           new Date(t.dueDate) < new Date(),
       );
 
-      const projectsOverBudget = projects.filter(
-        (p) => p.budget && p.spent && p.spent > p.budget,
+      const projectsOverBudget = projects.filter((p: any) => p.budget && p.spent && p.spent > p.budget,
       );
 
       const profitPrompt = `You are KEY Cortex -- the world's most aggressive profit-focused AI business engine.
@@ -1546,16 +1524,16 @@ INVOICES:
 LEADS:
 - Unconverted leads: ${unconvertedLeads.length}
 - Total estimated value of unconverted leads: $${totalLeadValue.toFixed(2)}
-- Lead sources: ${[...new Set(leads.map((l) => l.source).filter(Boolean))].join(', ')}
+- Lead sources: ${[...new Set(leads.map((l: any) => l.source).filter(Boolean))].join(', ')}
 
 TASKS:
 - Stuck/overdue tasks: ${stuckTasks.length}
-- Total active tasks: ${tasks.filter((t) => t.status !== 'completed').length}
+- Total active tasks: ${tasks.filter((t: any) => t.status !== 'completed').length}
 
 PROJECTS:
 - Projects over budget: ${projectsOverBudget.length}
-- Active projects: ${projects.filter((p) => p.status === 'active').length}
-- Budget at risk: $${projectsOverBudget.reduce((s, p) => s + ((p.spent || 0) - (p.budget || 0)), 0).toFixed(2)}
+- Active projects: ${projects.filter((p: any) => p.status === 'active').length}
+- Budget at risk: $${projectsOverBudget.reduce((s: any, p: any) => s + ((p.spent || 0) - (p.budget || 0)), 0).toFixed(2)}
 
 KEY METRICS:
 ${JSON.stringify(contextSnapshot.keyMetrics, null, 2)}
@@ -1578,7 +1556,7 @@ Rank by estimated revenue impact (highest first).
   }
 ]`;
 
-      const result = await this.modelGateway.complete({
+      const result = await (this.modelGateway as any).complete({
         messages: [{ role: 'user', content: profitPrompt }],
         model: 'gpt-4o',
         temperature: 0.8,
@@ -1602,8 +1580,7 @@ Rank by estimated revenue impact (highest first).
       const opportunities: CortexProfitOpportunity[] = JSON.parse(jsonMatch[0]);
 
       const validated = opportunities
-        .filter(
-          (o) =>
+        .filter((o: any) =>
             o.id &&
             o.title &&
             o.description &&
@@ -1611,7 +1588,7 @@ Rank by estimated revenue impact (highest first).
             o.confidence &&
             o.category,
         )
-        .map((o) => ({
+        .map((o: any) => ({
           ...o,
           estimatedRevenue: Math.max(0, o.estimatedRevenue),
           confidence: Math.min(Math.max(o.confidence, 0), 1),
@@ -1623,8 +1600,7 @@ Rank by estimated revenue impact (highest first).
           dataSources: o.dataSources ?? [],
         }));
 
-      validated.sort(
-        (a, b) =>
+      validated.sort((a: any, b: any) =>
           b.estimatedRevenue * b.confidence -
           a.estimatedRevenue * a.confidence,
       );
@@ -1634,7 +1610,7 @@ Rank by estimated revenue impact (highest first).
       );
 
       return validated;
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(
         `[findProfitOpportunities] Failed: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -1676,7 +1652,7 @@ Rank by estimated revenue impact (highest first).
         text,
       );
     const isFast = query.stream === false && text.length < 100;
-    const isBudget = preferences.budgetMode;
+    const isBudget = (preferences as any).budgetMode;
 
     if (isBudget) {
       return { provider: 'openai', model: 'gpt-4o-mini' };
@@ -1817,7 +1793,7 @@ Business context:
 Return ONLY a JSON array of 3 strings. Each should be a complete, natural sentence.
 Example: ["Can you break that down by month?", "Create a task for this", "What are the risks?"]`;
 
-      const result = await this.modelGateway.complete({
+      const result = await (this.modelGateway as any).complete({
         messages: [{ role: 'user', content: suggestionPrompt }],
         model: 'gpt-4o-mini',
         temperature: 0.8,
@@ -1831,9 +1807,9 @@ Example: ["Can you break that down by month?", "Create a task for this", "What a
 
       const suggestions: string[] = JSON.parse(jsonMatch[0]);
       return suggestions
-        .filter((s) => typeof s === 'string' && s.length > 5)
+        .filter((s: any) => typeof s === 'string' && s.length > 5)
         .slice(0, 3);
-    } catch (error) {
+    } catch (error: any) {
       this.logger.warn(
         `[generateSuggestions] Failed: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -1883,7 +1859,7 @@ Example: ["Can you break that down by month?", "Create a task for this", "What a
 
     // Call genome bridge for intelligence
     const genomeIntelligence =
-      await this.genomeBridgeService.getGenomeIntelligence(businessId);
+      await (this.genomeBridgeService as any).getGenomeIntelligence(businessId);
 
     // Merge into a single enriched context object
     const enriched: GenomeEnrichedContext = {
@@ -2002,7 +1978,7 @@ Example: ["Can you break that down by month?", "Create a task for this", "What a
       }
 
       return false;
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `[shouldSuggestProactiveAction] business=${businessId}: check failed — ${err instanceof Error ? err.message : String(err)}`,
       );
@@ -2031,7 +2007,7 @@ Example: ["Can you break that down by month?", "Create a task for this", "What a
       const genomeContext = await this.getGenomeEnrichedContext(businessId);
 
       // Also get v2 context for richer suggestions
-      let v2Context: Record<string, unknown> = {};
+      let v2Context: any = {};
       if (this.integrationV2Enabled && this.contextV2Service) {
         try {
           v2Context =
@@ -2042,18 +2018,18 @@ Example: ["Can you break that down by month?", "Create a task for this", "What a
       }
 
       // Get genome-ranked recommendations
-      const rankedRecs = await this.genomeBridgeService.getRankedRecommendations(
+      const rankedRecs = await (this.genomeBridgeService as any).getRankedRecommendations(
         businessId,
         v2Context,
       );
 
       // Filter to top 3 most impactful
       const topRecs = rankedRecs
-        .filter((r) => r.impact === 'high' || r.confidence > 0.7)
+        .filter((r: any) => r.impact === 'high' || r.confidence > 0.7)
         .slice(0, 3);
 
       // Format as suggestions
-      const suggestions: Suggestion[] = topRecs.map((rec) => ({
+      const suggestions: Suggestion[] = topRecs.map((rec: any) => ({
         id: rec.id ?? this.generateId(),
         title: rec.title,
         description: rec.description,
@@ -2066,8 +2042,7 @@ Example: ["Can you break that down by month?", "Create a task for this", "What a
 
       // If no high-impact recommendations, use urgent signals
       if (suggestions.length === 0) {
-        const urgentSignals = genomeContext.signals.filter(
-          (s) => s.severity === 'critical' || s.severity === 'high',
+        const urgentSignals = genomeContext.signals.filter((s: any) => s.severity === 'critical' || s.severity === 'high',
         );
         for (const signal of urgentSignals.slice(0, 3)) {
           suggestions.push({
@@ -2093,7 +2068,7 @@ Example: ["Can you break that down by month?", "Create a task for this", "What a
       );
 
       return suggestions;
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `[getProactiveSuggestions] business=${businessId}: failed — ${err instanceof Error ? err.message : String(err)}`,
       );
@@ -2123,7 +2098,7 @@ Example: ["Can you break that down by month?", "Create a task for this", "What a
 
       if (this.eventService) {
         try {
-          eventLog = await this.eventService.getEventLog(decisionId);
+          eventLog = await (this.eventService as any).getEventLog(decisionId);
         } catch {
           // Event service may not have this decision
         }
@@ -2133,7 +2108,7 @@ Example: ["Can you break that down by month?", "Create a task for this", "What a
       let decisionData: Record<string, unknown> = {};
       if (eventLog.length === 0) {
         // Try to find the session message with this correlation ID
-        const session = await this.prisma.cortexSession.findFirst({
+        const session = await (this.prisma.client as any).cortexSession.findFirst({
           where: {
             messages: {
               path: ['metadata', 'correlationId'],
@@ -2152,7 +2127,7 @@ Example: ["Can you break that down by month?", "Create a task for this", "What a
       } else {
         decisionData = {
           eventLog,
-          steps: eventLog.map((e) => e.step),
+          steps: eventLog.map((e: any) => e.step),
         };
       }
 
@@ -2174,7 +2149,7 @@ Example: ["Can you break that down by month?", "Create a task for this", "What a
 Decision ID: ${decisionId}
 
 Decision Steps:
-${eventLog.length > 0 ? eventLog.map((e) => `- ${e.step} at ${e.timestamp}`).join('\n') : 'Steps not available in event log'}
+${eventLog.length > 0 ? eventLog.map((e: any) => `- ${e.step} at ${e.timestamp}`).join('\n') : 'Steps not available in event log'}
 
 ${genomeContext ? `Genome Context at Decision Time:
 - Genome Stage: ${genomeContext.genomeStage}
@@ -2185,7 +2160,7 @@ ${genomeContext ? `Genome Context at Decision Time:
 
 Write a 3-4 sentence explanation of this decision that a non-technical business owner can understand. Be transparent about what data was used and why the decision was made. Use first person ("I decided...").`;
 
-      const result = await this.modelGateway.complete({
+      const result = await (this.modelGateway as any).complete({
         messages: [
           {
             role: 'system',
@@ -2203,7 +2178,7 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
         result.content?.trim() ??
         `I made decision ${decisionId} based on the available business context and genome intelligence at that time.`
       );
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(
         `[explainDecision] Failed for ${decisionId}: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -2230,7 +2205,7 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
 
     try {
       // Record user feedback in Prisma
-      await this.prisma.client.keyInteractionFeedback.create({
+      await (this.prisma.client as any).keyInteractionFeedback.create({
         data: {
           sessionId,
           query: interaction.query.substring(0, 500),
@@ -2262,13 +2237,13 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
           {
             ratings,
             count: ratings.length,
-            average: ratings.reduce((a, b) => a + b, 0) / ratings.length,
+            average: ratings.reduce((a: any, b: any) => a + b, 0) / ratings.length,
           },
           86400 * 30, // 30 days
         );
 
         this.logger.debug(
-          `[learnFromInteraction] Rating ${rating}/5 recorded. Average: ${(ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(2)}`,
+          `[learnFromInteraction] Rating ${rating}/5 recorded. Average: ${(ratings.reduce((a: any, b: any) => a + b, 0) / ratings.length).toFixed(2)}`,
         );
       }
 
@@ -2277,7 +2252,7 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
         try {
           // Report successful actions as positive outcomes
           for (const actionId of interaction.actionsTaken) {
-            await this.genomeBridgeService.reportActionOutcome(
+            await (this.genomeBridgeService as any).reportActionOutcome(
               interaction.metadata?.businessId as string,
               {
                 actionId,
@@ -2296,7 +2271,7 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
 
           // Report skipped actions as neutral/negative outcomes
           for (const actionId of interaction.actionsSkipped) {
-            await this.genomeBridgeService.reportActionOutcome(
+            await (this.genomeBridgeService as any).reportActionOutcome(
               interaction.metadata?.businessId as string,
               {
                 actionId,
@@ -2314,7 +2289,7 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
 
           // Create evidence for the overall interaction
           if (interaction.userRating && interaction.userRating >= 4) {
-            await this.genomeBridgeService.createEvidence(
+            await (this.genomeBridgeService as any).createEvidence(
               interaction.metadata?.businessId as string,
               {
                 type: 'user_feedback_positive',
@@ -2332,7 +2307,7 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
           this.logger.log(
             `[learnFromInteraction] Genome outcome learning updated for session=${sessionId}`,
           );
-        } catch (err) {
+        } catch (err: any) {
           this.logger.warn(
             `[learnFromInteraction] Genome outcome learning failed: ${err instanceof Error ? err.message : String(err)}`,
           );
@@ -2346,7 +2321,7 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
         actionsTaken: interaction.actionsTaken.length,
         actionsSkipped: interaction.actionsSkipped.length,
       });
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(
         `[learnFromInteraction] Failed: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -2390,7 +2365,7 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
           correlationId,
         };
 
-        const result = await this.executorService.execute(command, {
+        const result = await (this.executorService as any).execute(command, {
           businessId,
           userId,
         });
@@ -2411,7 +2386,7 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
 
         // v3: Report outcome to genome
         if (this.genomeV3Enabled && this.genomeBridgeService) {
-          await this.genomeBridgeService.reportActionOutcome(businessId, {
+          await (this.genomeBridgeService as any).reportActionOutcome(businessId, {
             actionId: action,
             status: actionResult.status,
             description: actionResult.description,
@@ -2422,7 +2397,7 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
         }
 
         return actionResult;
-      } catch (err) {
+      } catch (err: any) {
         this.logger.error(
           `[executeCommand][${correlationId}] v2 execution failed: ${err instanceof Error ? err.message : String(err)}`,
         );
@@ -2467,7 +2442,7 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
 
     if (this.integrationV2Enabled && this.connectorService) {
       try {
-        const result = await this.connectorService.query(
+        const result = await (this.connectorService as any).query(
           module as any,
           queryName,
           { ...params, businessId },
@@ -2477,7 +2452,7 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
           data: result.data,
           error: result.error,
         };
-      } catch (err) {
+      } catch (err: any) {
         return {
           success: false,
           error: err instanceof Error ? err.message : 'Query failed',
@@ -2494,7 +2469,7 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
         params,
       );
       return { success: true, data };
-    } catch (err) {
+    } catch (err: any) {
       return {
         success: false,
         error: err instanceof Error ? err.message : 'Legacy query failed',
@@ -2519,10 +2494,10 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
     if (this.integrationV2Enabled && this.connectorService) {
       return this.connectorService
         .getAllCapabilities()
-        .map((cap) => ({
+        .map((cap: any) => ({
           module: cap.module,
-          actions: cap.actions.map((a) => a.name),
-          queries: cap.queries.map((q) => q.name),
+          actions: cap.actions.map((a: any) => a.name),
+          queries: cap.queries.map((q: any) => q.name),
           description: cap.description,
         }));
     }
@@ -2598,8 +2573,7 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
     lines.push(`Executive Readiness: ${genomeContext.executiveReadiness}%`);
 
     // Urgent signals
-    const urgentSignals = genomeContext.signals.filter(
-      (s) => s.severity === 'critical' || s.severity === 'high',
+    const urgentSignals = genomeContext.signals.filter((s: any) => s.severity === 'critical' || s.severity === 'high',
     );
     if (urgentSignals.length > 0) {
       lines.push(`\n🚨 URGENT SIGNALS (${urgentSignals.length}):`);
@@ -2622,7 +2596,7 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
     // Opportunities
     if (genomeContext.opportunities.length > 0) {
       const topOpps = genomeContext.opportunities
-        .sort((a, b) => b.estimatedValue - a.estimatedValue)
+        .sort((a: any, b: any) => b.estimatedValue - a.estimatedValue)
         .slice(0, 3);
       lines.push(`\n💰 TOP OPPORTUNITIES:`);
       for (const opp of topOpps) {
@@ -2701,7 +2675,7 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
     if (this.integrationV2Enabled && this.connectorService) {
       try {
         capabilitiesBlock =
-          this.connectorService.formatCapabilitiesForPrompt();
+          (this.connectorService as any).formatCapabilitiesForPrompt();
       } catch {
         capabilitiesBlock = '';
       }
@@ -2713,7 +2687,7 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
       const summaries: string[] = [];
       for (const [mod, ctx] of Object.entries(v2Context)) {
         if (ctx && typeof ctx === 'object') {
-          const summary = this.summarizeModuleContext(mod, ctx);
+          const summary = this.summarizeModuleContext(mod, ctx as any);
           if (summary) summaries.push(summary);
         }
       }
@@ -2854,7 +2828,7 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
   ): Promise<void> {
     if (this.eventService) {
       try {
-        await this.eventService.logEvent({
+        await (this.eventService as any).logEvent({
           correlationId,
           step,
           data,
@@ -2883,14 +2857,14 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
     switch (module) {
       case 'crm': {
         if (queryName === 'get_contacts') {
-          return this.prisma.contact.findMany({
+          return (this.prisma.client as any).contact.findMany({
             where: { businessId, deletedAt: null },
             take: (params.limit as number) ?? 50,
             orderBy: { updatedAt: 'desc' },
           });
         }
         if (queryName === 'get_contact') {
-          return this.prisma.contact.findFirst({
+          return (this.prisma.client as any).contact.findFirst({
             where: {
               businessId,
               id: params.contactId as string,
@@ -2902,7 +2876,7 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
       }
       case 'commerce': {
         if (queryName === 'get_invoices') {
-          return this.prisma.invoice.findMany({
+          return (this.prisma.client as any).invoice.findMany({
             where: { businessId, deletedAt: null },
             take: (params.limit as number) ?? 50,
             orderBy: { createdAt: 'desc' },
@@ -2912,7 +2886,7 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
       }
       case 'bookings': {
         if (queryName === 'get_bookings') {
-          return this.prisma.booking.findMany({
+          return (this.prisma.client as any).booking.findMany({
             where: { businessId, deletedAt: null },
             take: (params.limit as number) ?? 50,
             orderBy: { startTime: 'desc' },
@@ -2922,7 +2896,7 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
       }
       case 'autopilot': {
         if (queryName === 'get_tasks') {
-          return this.prisma.autopilotTask.findMany({
+          return (this.prisma.client as any).autopilotTask.findMany({
             where: { businessId },
             take: (params.limit as number) ?? 50,
             orderBy: { createdAt: 'desc' },
@@ -3005,7 +2979,7 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
       );
       if (cached) {
         const session = JSON.parse(cached);
-        await this.redis.setex(
+        await (this.redis as any).setex(
           `cortex:session:${query.sessionId}`,
           this.SESSION_TTL,
           cached,
@@ -3013,11 +2987,11 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
         return session;
       }
 
-      const dbSession = await this.prisma.cortexSession.findUnique({
+      const dbSession = await (this.prisma.client as any).cortexSession.findUnique({
         where: { id: query.sessionId },
       });
       if (dbSession) {
-        await this.redis.setex(
+        await (this.redis as any).setex(
           `cortex:session:${query.sessionId}`,
           this.SESSION_TTL,
           JSON.stringify(dbSession),
@@ -3029,7 +3003,7 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
       }
     }
 
-    const newSession = await this.prisma.cortexSession.create({
+    const newSession = await (this.prisma.client as any).cortexSession.create({
       data: {
         id: this.generateId(),
         businessId: query.businessId,
@@ -3046,7 +3020,7 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
       },
     });
 
-    await this.redis.setex(
+    await (this.redis as any).setex(
       `cortex:session:${newSession.id}`,
       this.SESSION_TTL,
       JSON.stringify(newSession),
@@ -3063,7 +3037,7 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
     sessionId: string,
     message: Omit<CortexMessage, 'id'> & { id?: string },
   ): Promise<void> {
-    const session = await this.prisma.cortexSession.findUnique({
+    const session = await (this.prisma.client as any).cortexSession.findUnique({
       where: { id: sessionId },
       select: { messages: true },
     });
@@ -3072,7 +3046,7 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
       const messages = (session.messages as unknown as CortexMessage[]) ?? [];
       messages.push(message as CortexMessage);
 
-      await this.prisma.cortexSession.update({
+      await (this.prisma.client as any).cortexSession.update({
         where: { id: sessionId },
         data: {
           messages: messages as unknown as Record<string, unknown>[],
@@ -3088,7 +3062,7 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
       parsed.messages = parsed.messages ?? [];
       parsed.messages.push(message);
       parsed.lastAccessedAt = new Date().toISOString();
-      await this.redis.setex(
+      await (this.redis as any).setex(
         `cortex:session:${sessionId}`,
         this.SESSION_TTL,
         JSON.stringify(parsed),
@@ -3240,8 +3214,7 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
       });
     }
 
-    return ops.sort(
-      (a, b) =>
+    return ops.sort((a: any, b: any) =>
         b.estimatedRevenue * b.confidence -
         a.estimatedRevenue * a.confidence,
     );
@@ -3297,5 +3270,45 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
     if (persona === 'analyst') return 'expert';
 
     return 'detailed';
+  }
+
+  /**
+   * Gateway-compatible streaming alias.
+   * Yields the response as a single text chunk (full-response fallback).
+   */
+  async *streamReasoning(query: {
+    userId: string;
+    businessId: string;
+    message: string;
+    sessionId?: string;
+    persona?: string;
+    context?: Record<string, unknown>;
+  }): AsyncIterable<{
+    type: 'text' | 'thought' | 'error';
+    content: string;
+    done?: boolean;
+    metadata?: Record<string, unknown>;
+  }> {
+    yield { type: 'thought', content: 'Reasoning...' };
+    try {
+      const response = await this.processQuery({
+        text: query.message,
+        businessId: query.businessId,
+        userId: query.userId,
+        sessionId: query.sessionId,
+        persona: query.persona as any,
+      });
+      yield {
+        type: 'text',
+        content: typeof (response as any)?.response === 'string' ? (response as any).response : JSON.stringify((response as any)?.response ?? ''),
+        done: true,
+      };
+    } catch (err: any) {
+      yield {
+        type: 'error',
+        content: err instanceof Error ? err.message : String(err),
+        done: true,
+      };
+    }
   }
 }

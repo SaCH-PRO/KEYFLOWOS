@@ -355,7 +355,7 @@ export class GoogleFormsMappingService {
             },
           });
           opportunityCreated = true;
-        } catch (err) {
+        } catch (err: any) {
           this.logger.warn(
             `Failed to create opportunity from form ${mapping.formId}: ${(err as Error).message}`,
           );
@@ -427,7 +427,7 @@ export class GoogleFormsMappingService {
           if (out.contactCreated) result.contactsCreated += 1;
           if (out.opportunityCreated) result.opportunitiesCreated += 1;
           newlyProcessed.push(response.responseId);
-        } catch (err) {
+        } catch (err: any) {
           result.errors.push(`${response.responseId}: ${(err as Error).message}`);
         }
         if (submitted) {
@@ -468,7 +468,7 @@ export class GoogleFormsMappingService {
     for (const record of mappings) {
       try {
         await this.runProcess(this.toRow(record), { onlyNew: true });
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(
           `Auto-process failed for form ${record.formId} (business ${payload.businessId}): ${(err as Error).message}`,
         );

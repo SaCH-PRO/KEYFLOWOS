@@ -108,7 +108,7 @@ export class CrmSequenceSchedulerService implements OnModuleInit, OnModuleDestro
     for (const enrollment of dueEnrollments) {
       try {
         await this.processEnrollmentWithRetry(enrollment);
-      } catch (err) {
+      } catch (err: any) {
         this.logger.error(`Failed to process enrollment ${enrollment.id}`, err);
       }
     }
@@ -135,7 +135,7 @@ export class CrmSequenceSchedulerService implements OnModuleInit, OnModuleDestro
           },
         });
       }
-    } catch (err) {
+    } catch (err: any) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       const { retries } = this.getRetryMeta(enrollment);
       const newRetries = retries + 1;
@@ -534,7 +534,7 @@ export class CrmSequenceSchedulerService implements OnModuleInit, OnModuleDestro
       const snap = (delivery.resultSnapshot ?? null) as { sequenceEnrollmentId?: string } | null;
       const enrollmentId = snap?.sequenceEnrollmentId ?? null;
       await this.markEngagementOnEnrollment(delivery.contactId, field, { enrollmentId });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Failed to mark ${field} engagement: ${(err as Error).message}`);
     }
   }
@@ -642,7 +642,7 @@ export class CrmSequenceSchedulerService implements OnModuleInit, OnModuleDestro
         actorType: 'system',
         source: 'sequence_scheduler',
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Failed to log event ${type} for contact ${contactId}`, err);
     }
   }

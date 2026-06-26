@@ -198,7 +198,7 @@ Respond ONLY with valid JSON in this exact shape:
       });
 
       return result;
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Document extraction failed: ${(err as Error).message}`);
       return {
         documentType: 'unknown',
@@ -310,7 +310,7 @@ Respond ONLY with valid JSON in this exact shape:
               invoiceId: invoice.id,
               source: 'document_intelligence',
             });
-          } catch (err) {
+          } catch (err: any) {
             outcomes.push({ action: 'create_invoice', success: false, error: (err as Error).message });
           }
         } else {
@@ -348,7 +348,7 @@ Respond ONLY with valid JSON in this exact shape:
             });
           }
           outcomes.push({ action: 'resolve_credit_note_contact', success: true });
-        } catch (err) {
+        } catch (err: any) {
           outcomes.push({ action: 'resolve_credit_note_contact', success: false, error: (err as Error).message });
         }
       }
@@ -396,7 +396,7 @@ Respond ONLY with valid JSON in this exact shape:
             });
             outcomes.push({ action: 'create_contact', success: true, entityId: contact.id });
           }
-        } catch (err) {
+        } catch (err: any) {
           outcomes.push({ action: 'create_contact', success: false, error: (err as Error).message });
         }
       }

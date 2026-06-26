@@ -164,7 +164,7 @@ export class BlueprintOnboardingService {
         extracted: extractions,
         nextSection,
       };
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Blueprint onboarding chat failed: ${(err as Error).message}`);
       const fallback = "I'm having trouble thinking that through. Could you tell me a bit more about your business?";
       state.messages.push({ role: 'assistant', content: fallback });
@@ -280,7 +280,7 @@ Confidence: 0.6 for inferred, 0.85 for stated clearly, 1.0 for explicitly confir
             confidence: typeof item.confidence === 'number' ? Math.min(item.confidence, 1) : 0.8,
           });
         }
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(`Failed to parse onboarding extraction block: ${(err as Error).message}`);
       }
     }

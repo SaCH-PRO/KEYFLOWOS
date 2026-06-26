@@ -672,7 +672,7 @@ ${finActionLines}`;
           outlook: 'Keep monitoring your cash flow closely.',
         };
       }
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`Weekly briefing generation failed: ${(error as Error).message}`);
       return {
         summary: `Last week you earned ${this.formatTTD(rev)} and spent ${this.formatTTD(exp)}, for a net of ${this.formatTTD(net)}.`,

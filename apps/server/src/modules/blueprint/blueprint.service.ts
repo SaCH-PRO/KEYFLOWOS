@@ -1373,7 +1373,7 @@ export class BlueprintService {
         executionRoadmap: bp.executionRoadmap,
         documentProfile: bp.documentProfile,
       };
-    } catch (err) {
+    } catch (err: any) {
       this.logger.debug(`getBlueprintContext failed for ${businessId}: ${(err as Error).message}`);
       return null;
     }

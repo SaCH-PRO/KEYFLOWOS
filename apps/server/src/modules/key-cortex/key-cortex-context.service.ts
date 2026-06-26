@@ -5,8 +5,8 @@
 // ============================================================
 
 import { Injectable, Logger } from '@nestjs/common';
-import { PrismaService } from '../../prisma/prisma.service';
-import { RedisService } from '../../redis/redis.service';
+import { PrismaService } from '../../core/prisma/prisma.service';
+import { RedisService } from '../../core/redis/redis.service';
 import { CortexContextSnapshot } from './key-cortex.types';
 
 // ─────────────────────────────────────────────────────────────
@@ -95,7 +95,7 @@ export class KeyCortexContextService {
     businessId: string,
   ): Promise<{ dna: Record<string, number>; stage: string; readiness: number }> {
     try {
-      const genome = await this.prisma.businessGenome.findUnique({
+      const genome = await this.prisma.client.businessGenome.findUnique({
         where: { businessId },
       });
 
@@ -114,7 +114,7 @@ export class KeyCortexContextService {
       const readiness = (genome.executiveReadiness as number) ?? 0;
 
       return { dna, stage, readiness };
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(
         `Failed to load genome for business ${businessId}: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -137,31 +137,31 @@ export class KeyCortexContextService {
   ): Promise<{ tasks: string[]; events: string[]; messages: number }> {
     try {
       const [tasks, events, unreadMessages] = await Promise.all([
-        this.prisma.task
+        this.prisma.client.task
           .findMany({
             where: { businessId },
             orderBy: { updatedAt: 'desc' },
             take: limit,
             select: { title: true },
           })
-          .then((rows) => rows.map((r) => r.title)),
+          .then((rows: { title: string }[]) => rows.map((r) => r.title)),
 
-        this.prisma.event
+        this.prisma.client.calendarEvent
           .findMany({
             where: { businessId },
-            orderBy: { startTime: 'desc' },
+            orderBy: { startAt: 'desc' },
             take: limit,
             select: { title: true },
           })
-          .then((rows) => rows.map((r) => r.title)),
+          .then((rows: { title: string }[]) => rows.map((r) => r.title)),
 
-        this.prisma.message.count({
+        this.prisma.client.message.count({
           where: { businessId, read: false },
         }),
       ]);
 
       return { tasks, events, messages: unreadMessages };
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(
         `Failed to load recent activity for business ${businessId}: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -182,19 +182,19 @@ export class KeyCortexContextService {
         openTasks,
         conversionRate,
       ] = await Promise.all([
-        this.prisma.invoice
+        this.prisma.client.invoice
           .aggregate({
-            where: { businessId, status: 'paid' },
+            where: { businessId, status: 'PAID' },
             _sum: { total: true },
           })
-          .then((r) => r._sum.total ?? 0),
+          .then((r) => r._sum?.total ?? 0),
 
-        this.prisma.client.count({
-          where: { businessId, status: 'active' },
+        this.prisma.client.contact.count({
+          where: { businessId, status: 'active' as any },
         }),
 
-        this.prisma.task.count({
-          where: { businessId, status: { in: ['todo', 'in_progress'] } },
+        this.prisma.client.task.count({
+          where: { businessId, status: { in: ['todo', 'in_progress'] as any } },
         }),
 
         // Conversion rate placeholder — can be replaced with real funnel analytics
@@ -207,7 +207,7 @@ export class KeyCortexContextService {
         openTasks,
         conversionRate,
       };
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(
         `Failed to compute key metrics for business ${businessId}: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -222,12 +222,12 @@ export class KeyCortexContextService {
    */
   async getActiveProjects(businessId: string): Promise<string[]> {
     try {
-      const projects = await this.prisma.project.findMany({
+      const projects = await this.prisma.client.project.findMany({
         where: { businessId, status: 'active' },
         select: { name: true },
       });
       return projects.map((p) => p.name);
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(
         `Failed to load active projects for business ${businessId}: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -242,10 +242,10 @@ export class KeyCortexContextService {
    */
   async getPendingInvoices(businessId: string): Promise<number> {
     try {
-      return this.prisma.invoice.count({
-        where: { businessId, status: { in: ['pending', 'sent', 'overdue'] } },
+      return this.prisma.client.invoice.count({
+        where: { businessId, status: { in: ['PENDING', 'SENT', 'OVERDUE'] } },
       });
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(
         `Failed to count pending invoices for business ${businessId}: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -297,7 +297,7 @@ Recent: ${recentSummary}
       // Restore Date objects that were serialized as strings
       parsed.timestamp = new Date(parsed.timestamp);
       return parsed;
-    } catch (error) {
+    } catch (error: any) {
       this.logger.warn(
         `Failed to read cached context for business ${businessId}: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -314,7 +314,7 @@ Recent: ${recentSummary}
       const key = `${CONTEXT_CACHE_PREFIX}:${businessId}`;
       await this.redis.del(key);
       this.logger.debug(`Invalidated context cache for business ${businessId}`);
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(
         `Failed to invalidate cache for business ${businessId}: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -341,7 +341,7 @@ Recent: ${recentSummary}
       this.logger.debug(
         `Cached context for business ${businessId} (TTL: ${CONTEXT_CACHE_TTL_MS}ms)`,
       );
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(
         `Failed to cache context for business ${businessId}: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -353,11 +353,11 @@ Recent: ${recentSummary}
    */
   private async getTeamStatus(businessId: string): Promise<string> {
     try {
-      const memberCount = await this.prisma.teamMember.count({
-        where: { businessId, status: 'active' },
+      const memberCount = await this.prisma.client.user.count({
+        where: { businesses: { some: { businessId } } },
       });
       return `${memberCount} active member${memberCount === 1 ? '' : 's'}`;
-    } catch (error) {
+    } catch (error: any) {
       this.logger.warn(
         `Failed to load team status for business ${businessId}: ${error instanceof Error ? error.message : String(error)}`,
       );

@@ -32,7 +32,7 @@ export class MarginOnPaymentListener {
     if (!invoiceId || !payload.businessId) return;
     try {
       await this.captureForInvoice(payload.businessId, invoiceId);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`margin-on-payment failed invoice=${invoiceId}: ${(err as Error).message}`);
     }
   }

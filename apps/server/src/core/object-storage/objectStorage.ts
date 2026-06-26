@@ -129,7 +129,7 @@ function makeFileRef(bucket: string, key: string, client: S3Client): S3FileRef {
           new HeadObjectCommand({ Bucket: bucket, Key: key }),
         );
         return head.Metadata ?? {};
-      } catch (err) {
+      } catch (err: any) {
         console.error(`Failed to read object metadata: ${(err as Error).message}`);
         return {};
       }
@@ -263,7 +263,7 @@ export class ObjectStorageService {
         }
       });
       body.pipe(res);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error downloading file:", error);
       if (!res.headersSent) {
         res.status(500).json({ error: "Error downloading file" });

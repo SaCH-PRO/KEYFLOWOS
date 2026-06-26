@@ -105,7 +105,7 @@ export class DealHealthService {
           },
         });
         updated += 1;
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(`Health recompute failed for deal=${deal.id}: ${(err as Error).message}`);
       }
     }

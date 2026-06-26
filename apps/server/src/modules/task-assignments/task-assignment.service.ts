@@ -282,7 +282,7 @@ export class TaskAssignmentService {
           assignedBy,
         });
         results.push({ success: true, taskId: t.taskId, assignmentId: r.id });
-      } catch (err) {
+      } catch (err: any) {
         results.push({ success: false, taskId: t.taskId, error: (err as Error).message });
       }
     }
@@ -375,7 +375,7 @@ export class TaskAssignmentService {
           assignableId: input.assignableId,
         },
       });
-    } catch (err) {
+    } catch (err: any) {
         this.logger.warn(`Best-effort: ${err instanceof Error ? err.message : err}`);
       }
   }

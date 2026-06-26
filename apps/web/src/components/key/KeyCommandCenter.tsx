@@ -406,7 +406,7 @@ export function KeyCommandCenter({
   /*  Toggle mute                                                       */
   /* ---------------------------------------------------------------- */
   const toggleMute = useCallback(() => {
-    setTtsMuted((m) => {
+    setTtsMuted((m: boolean) => {
       const next = !m;
       try {
         const settings = JSON.parse(localStorage.getItem("kf_voice_settings") || "{}");

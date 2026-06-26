@@ -408,7 +408,7 @@ describe('ModelGatewayService', () => {
   describe('Provider health tracking', () => {
     it('starts with zero metrics for all providers', () => {
       const health = service.getProviderHealth();
-      expect(health).toHaveLength(3);
+      expect(health).toHaveLength(6);
 
       for (const h of health) {
         expect(h.totalCalls).toBe(0);

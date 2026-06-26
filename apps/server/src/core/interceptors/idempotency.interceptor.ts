@@ -92,7 +92,7 @@ export class IdempotencyInterceptor implements NestInterceptor {
             return new Observable((subscriber) => {
               subscriber.complete();
             });
-          } catch (err) {
+          } catch (err: any) {
             this.logger.warn(`Fall through: ${err instanceof Error ? err.message : err}`);
           }
         }
@@ -112,7 +112,7 @@ export class IdempotencyInterceptor implements NestInterceptor {
               createdAt: new Date().toISOString(),
             };
             await this.redis.set(key, JSON.stringify(payload), 'EX', IDEMPOTENCY_TTL_SECONDS);
-          } catch (err) {
+          } catch (err: any) {
             this.logger.warn(`Non-fatal: idempotency cache write failure should not fail the request: ${err instanceof Error ? err.message : err}`);
           } finally {
             await this.redis.del(lockKey);

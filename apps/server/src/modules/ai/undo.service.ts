@@ -137,7 +137,7 @@ export class UndoService {
       });
 
       return { success: true, message: `${action.entityType} action undone successfully`, restored };
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Undo failed for ${undoId}: ${(err as Error).message}`);
       return { success: false, message: `Undo failed: ${(err as Error).message}` };
     }

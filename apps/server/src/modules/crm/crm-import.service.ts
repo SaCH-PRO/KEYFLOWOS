@@ -278,7 +278,7 @@ export class CrmImportService {
             recordId: record.id,
           });
           processed += 1;
-        } catch (error) {
+        } catch (error: any) {
           await this.prisma.client.contactImportContact.update({
             where: { id: record.id },
             data: {
@@ -304,7 +304,7 @@ export class CrmImportService {
       );
 
       return this.prisma.client.contactImport.findUnique({ where: { id: importJob.id } });
-    } catch (err) {
+    } catch (err: any) {
       await this.prisma.client.contactImport.update({
         where: { id: importJob.id },
         data: {
@@ -439,7 +439,7 @@ export class CrmImportService {
       });
 
       return this.prisma.client.contactImport.findUnique({ where: { id: importRecord.id } });
-    } catch (err) {
+    } catch (err: any) {
       await this.prisma.client.contactImport.update({
         where: { id: importRecord.id },
         data: {
@@ -557,7 +557,7 @@ Only return the JSON object, no markdown or explanation.`,
         address: parsed.address || undefined,
         website: parsed.website || undefined,
       };
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('Failed to extract contact from image', error as Error);
       throw error;
     }

@@ -338,7 +338,7 @@ export class GoogleSuiteService {
     try {
       const body = (await r.json()) as { error?: { message?: string; status?: string } };
       detail = body?.error?.message ?? body?.error?.status ?? '';
-    } catch (err) {
+    } catch (err: any) {
         this.logger.debug(`Parse failure: ${err instanceof Error ? err.message : err}`);
       }
     return `${label} API ${r.status}${detail ? `: ${detail}` : ''}`;

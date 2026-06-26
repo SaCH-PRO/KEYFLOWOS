@@ -73,7 +73,7 @@ export class PaymentsOpsService {
         try {
           const gw = this.getGateway(s.id);
           return await gw.listRecentTransactions(businessId, limit);
-        } catch (err) {
+        } catch (err: any) {
           const msg = err instanceof Error ? err.message : String(err);
           this.logger.warn(`listRecentTransactions failed for ${s.id}: ${msg}`);
           return [] as PaymentGatewayTransaction[];
@@ -102,7 +102,7 @@ export class PaymentsOpsService {
     const gw = this.getGateway(gatewayId);
     try {
       return await gw.createPaymentLink(businessId, input);
-    } catch (err) {
+    } catch (err: any) {
       if (err instanceof GatewayNotSupportedError) {
         throw new BadRequestException(err.message);
       }
@@ -117,7 +117,7 @@ export class PaymentsOpsService {
       .map(async (s) => {
         try {
           return await this.getGateway(s.id).listPaymentLinks(businessId);
-        } catch (err) {
+        } catch (err: any) {
           this.logger.warn(`listPaymentLinks failed for ${s.id}: ${err instanceof Error ? err.message : err}`);
           return [];
         }
@@ -130,7 +130,7 @@ export class PaymentsOpsService {
     const gw = this.getGateway(gatewayId);
     try {
       await gw.revokePaymentLink(businessId, linkId);
-    } catch (err) {
+    } catch (err: any) {
       if (err instanceof GatewayNotSupportedError) {
         throw new BadRequestException(err.message);
       }
@@ -171,7 +171,7 @@ export class PaymentsOpsService {
         this.logger.warn(`Failed to persist refund row: ${e instanceof Error ? e.message : e}`);
       }
       return refund;
-    } catch (err) {
+    } catch (err: any) {
       if (err instanceof GatewayNotSupportedError) {
         throw new BadRequestException(err.message);
       }

@@ -119,7 +119,7 @@ export class KeyInboxReplySenderService {
         result,
       );
       return result;
-    } catch (err) {
+    } catch (err: any) {
       const error = err instanceof Error ? err.message : String(err);
       this.logger.error(`WhatsApp reply failed for message ${message.id}: ${error}`);
       const result: SendReplyResult = { success: false, status: 'FAILED', error, sentVia: 'whatsapp' };
@@ -195,7 +195,7 @@ export class KeyInboxReplySenderService {
       await this.persistSendResult(message.id, result, userId);
       this.emitReplyEvent(businessId, thread.id, message.id, 'key_inbox.reply_sent', userId, result);
       return result;
-    } catch (err) {
+    } catch (err: any) {
       const error = err instanceof Error ? err.message : String(err);
       this.logger.error(`Gmail reply failed for message ${message.id}: ${error}`);
       const result: SendReplyResult = { success: false, status: 'FAILED', error, sentVia: 'gmail' };
@@ -235,7 +235,7 @@ export class KeyInboxReplySenderService {
       const mod = await import('../whatsapp/whatsapp.service');
       this.whatsappServiceCache = this.moduleRef.get(mod.WhatsAppService, { strict: false });
       return this.whatsappServiceCache;
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Unable to resolve WhatsAppService: ${(err as Error).message}`);
       return null;
     }
@@ -247,7 +247,7 @@ export class KeyInboxReplySenderService {
       const mod = await import('../commerce/gmail.service');
       this.gmailServiceCache = this.moduleRef.get(mod.GmailService, { strict: false });
       return this.gmailServiceCache;
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Unable to resolve GmailService: ${(err as Error).message}`);
       return null;
     }

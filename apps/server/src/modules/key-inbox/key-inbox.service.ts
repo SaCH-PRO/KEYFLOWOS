@@ -49,7 +49,7 @@ export class KeyInboxService {
           metadata: input.metadata ?? {},
         },
       });
-    } catch (err) {
+    } catch (err: any) {
       if (input.externalThreadId && this.isUniqueConstraintError(err)) {
         const thread = await this.prisma.client.keyInboxThread.findFirst({
           where: { businessId: input.businessId, channel, externalThreadId: input.externalThreadId },
@@ -141,12 +141,12 @@ export class KeyInboxService {
     try {
       await this.analyzeMessage(input.businessId, message.id);
       await this.analyzeThread(input.businessId, thread.id);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Background analysis failed for message ${message.id}: ${(err as Error).message}`);
     }
 
       return { thread: updatedThread, message };
-    } catch (err) {
+    } catch (err: any) {
       if (input.externalMessageId && this.isUniqueConstraintError(err)) {
         const existingMessage = await this.prisma.client.keyInboxMessage.findFirst({
           where: { businessId: input.businessId, channel, externalMessageId: input.externalMessageId },
@@ -437,7 +437,7 @@ Return ONLY valid JSON:
         taskSuggestions: Array.isArray(parsed.taskSuggestions) ? parsed.taskSuggestions.map(String) : [],
         metrics: parsed.metrics && typeof parsed.metrics === 'object' ? (parsed.metrics as Record<string, number>) : {},
       };
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Brief generation failed: ${(err as Error).message}`);
       brief = {
         summary: `Inbox brief for ${scope.toLowerCase()} period.`,

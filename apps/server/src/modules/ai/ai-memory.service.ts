@@ -275,7 +275,7 @@ export class AiMemoryService {
           });
         }
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Failed to record approval signal: ${(err as Error).message}`);
     }
   }
@@ -383,7 +383,7 @@ export class AiMemoryService {
       }
 
       return patterns;
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Pattern summarization failed: ${(err as Error).message}`);
       return [];
     }

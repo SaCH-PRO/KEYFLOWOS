@@ -89,7 +89,7 @@ export class EmailAdapter implements ChannelAdapter {
 
       const result = (await response.json()) as any;
       return { success: true, externalPostId: result.id, raw: result };
-    } catch (err) {
+    } catch (err: any) {
       const normalized = this.normalizeError(err);
       return { success: false, errorCode: normalized.code, errorMessage: normalized.message, isTransient: normalized.isTransient };
     }

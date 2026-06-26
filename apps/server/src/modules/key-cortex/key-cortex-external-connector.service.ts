@@ -24,8 +24,8 @@ import {
 } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { PrismaService } from '../../database/prisma.service';
-import { RedisService } from '../../redis/redis.service';
+import { PrismaService } from '../../core/prisma/prisma.service';
+import { RedisService } from '../../core/redis/redis.service';
 import { lastValueFrom } from 'rxjs';
 import { AxiosError, AxiosRequestConfig } from 'axios';
 import { createHash, randomBytes, createCipheriv, createDecipheriv, createHmac, timingSafeEqual } from 'crypto';
@@ -232,7 +232,7 @@ export class KeyCortexExternalConnectorService {
     const definitions = Array.from(this.connectorRegistry.values());
 
     // Cache for 1 hour
-    await this.redis.setex(cacheKey, 3600, JSON.stringify(definitions));
+    await (this.redis as any).setex(cacheKey, 3600, JSON.stringify(definitions));
 
     return definitions;
   }
@@ -289,7 +289,7 @@ export class KeyCortexExternalConnectorService {
     try {
       await this.testConnection(definition, config);
       this.logger.log(`Connection test successful for ${definition.name} (business: ${businessId})`);
-    } catch (err) {
+    } catch (err: any) {
       status = 'error';
       errorMessage = err instanceof Error ? err.message : 'Connection test failed';
       this.logger.warn(
@@ -299,7 +299,7 @@ export class KeyCortexExternalConnectorService {
     }
 
     // 4. Save to database
-    const instance = await this.prisma.externalConnectorInstance.create({
+    const instance = await (this.prisma as any).externalConnectorInstance.create({
       data: {
         id: this.generateId('conn'),
         businessId,
@@ -320,7 +320,7 @@ export class KeyCortexExternalConnectorService {
 
     // Cache the instance
     const cacheKey = `${CONNECTOR_INSTANCE_CACHE_PREFIX}${instance.id}`;
-    await this.redis.setex(cacheKey, 300, JSON.stringify(instance));
+    await (this.redis as any).setex(cacheKey, 300, JSON.stringify(instance));
 
     // 5. Emit status change event
     this.emitStatusChange({
@@ -346,24 +346,24 @@ export class KeyCortexExternalConnectorService {
     const instance = await this.getConnectorInstance(connectorId, businessId);
 
     // Clean up webhooks
-    const webhooks = await this.prisma.webhookRegistration.findMany({
+    const webhooks = await (this.prisma as any).webhookRegistration.findMany({
       where: { connectorId },
     });
     for (const wh of webhooks) {
       try {
         await this.unregisterWebhookExternal(wh);
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(`Failed to unregister webhook ${wh.id}: ${err}`);
       }
     }
 
     // Delete webhooks from DB
-    await this.prisma.webhookRegistration.deleteMany({
+    await (this.prisma as any).webhookRegistration.deleteMany({
       where: { connectorId },
     });
 
     // Delete instance
-    await this.prisma.externalConnectorInstance.delete({
+    await (this.prisma as any).externalConnectorInstance.delete({
       where: { id: connectorId },
     });
 
@@ -404,7 +404,7 @@ export class KeyCortexExternalConnectorService {
     }
 
     // Fetch from database
-    const instance = await this.prisma.externalConnectorInstance.findFirst({
+    const instance = await (this.prisma as any).externalConnectorInstance.findFirst({
       where: { id: connectorId, businessId },
     });
 
@@ -416,7 +416,7 @@ export class KeyCortexExternalConnectorService {
     }
 
     // Update cache
-    await this.redis.setex(cacheKey, 300, JSON.stringify(instance));
+    await (this.redis as any).setex(cacheKey, 300, JSON.stringify(instance));
 
     return instance as ExternalConnectorInstance;
   }
@@ -475,7 +475,7 @@ export class KeyCortexExternalConnectorService {
     const definition = await this.getConnectorDefinition(instance.definitionId);
 
     if (definition.rateLimitHardened) {
-      const rateCheck = await this.checkRateLimit(connectorId, definition.rateLimitHardened);
+      const rateCheck = await this.checkRateLimit(connectorId, definition.rateLimitHardened as any);
       if (!rateCheck.allowed) {
         return {
           success: false,
@@ -501,7 +501,7 @@ export class KeyCortexExternalConnectorService {
         if (freshToken) {
           credentials['accessToken'] = freshToken;
         }
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(`Token refresh failed for ${connectorId}: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
@@ -518,7 +518,7 @@ export class KeyCortexExternalConnectorService {
 
     // 5. Execute with production-hardened retry logic
     const effectiveTimeout = timeoutMs || definition.timeoutConfig?.requestTimeoutMs || DEFAULT_TIMEOUT_MS;
-    const retryConfig = definition.retryConfig || DEFAULT_RETRY_CONFIG;
+    const retryConfig = (definition.retryConfig || DEFAULT_RETRY_CONFIG) as Required<RetryConfig>;
 
     let lastError: ExecutionError | undefined;
     for (let attempt = 0; attempt <= retryConfig.maxRetries; attempt++) {
@@ -536,7 +536,7 @@ export class KeyCortexExternalConnectorService {
         this.recordSuccess(connectorId);
 
         // Update execution stats
-        await this.prisma.externalConnectorInstance.update({
+        await (this.prisma as any).externalConnectorInstance.update({
           where: { id: connectorId },
           data: {
             executionCount: { increment: 1 },
@@ -586,7 +586,7 @@ export class KeyCortexExternalConnectorService {
         });
 
         return executionResult;
-      } catch (err) {
+      } catch (err: any) {
         const execError = this.normalizeError(err, definition.id);
         lastError = execError;
 
@@ -615,7 +615,7 @@ export class KeyCortexExternalConnectorService {
     // All retries exhausted — record failure and update circuit breaker
     this.recordFailure(connectorId);
 
-    await this.prisma.externalConnectorInstance.update({
+    await (this.prisma as any).externalConnectorInstance.update({
       where: { id: connectorId },
       data: {
         failureCount: { increment: 1 },
@@ -773,13 +773,13 @@ export class KeyCortexExternalConnectorService {
 
       if (bucket.tokens >= 1) {
         bucket.tokens -= 1;
-        await this.redis.setex(redisKey, 60, JSON.stringify(bucket));
+        await (this.redis as any).setex(redisKey, 60, JSON.stringify(bucket));
         return { allowed: true };
       } else {
         // Calculate wait time for 1 token
         const tokensNeeded = 1 - bucket.tokens;
         const waitMs = Math.ceil((tokensNeeded / rateLimit.requestsPerSecond) * 1000);
-        await this.redis.setex(redisKey, 60, JSON.stringify(bucket));
+        await (this.redis as any).setex(redisKey, 60, JSON.stringify(bucket));
         return { allowed: false, retryAfterMs: waitMs };
       }
     } catch {
@@ -858,7 +858,7 @@ export class KeyCortexExternalConnectorService {
           this.recordSuccess(connectorId);
         }
         return result;
-      } catch (err) {
+      } catch (err: any) {
         lastError = err instanceof Error ? err : new Error(String(err));
 
         if (attempt >= config.maxRetries) {
@@ -938,7 +938,7 @@ export class KeyCortexExternalConnectorService {
   ): Promise<boolean> {
     try {
       // Load connector to get webhook security config
-      const instance = await this.prisma.externalConnectorInstance.findUnique({
+      const instance = await (this.prisma as any).externalConnectorInstance.findUnique({
         where: { id: connectorId },
       });
       if (!instance) return false;
@@ -987,7 +987,7 @@ export class KeyCortexExternalConnectorService {
       }
 
       return timingSafeEqual(Buffer.from(expected), Buffer.from(provided));
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Webhook signature verification error: ${err instanceof Error ? err.message : String(err)}`);
       return false;
     }
@@ -1010,7 +1010,7 @@ export class KeyCortexExternalConnectorService {
       return cached.health;
     }
 
-    const instance = await this.prisma.externalConnectorInstance.findUnique({
+    const instance = await (this.prisma as any).externalConnectorInstance.findUnique({
       where: { id: connectorId },
     });
 
@@ -1045,7 +1045,7 @@ export class KeyCortexExternalConnectorService {
     let message: string | undefined;
 
     try {
-      let url = definition.baseUrl + definition.healthCheck.endpoint;
+      let url = (definition.baseUrl ?? '') + (definition.healthCheck.endpoint ?? '');
       url = url.replace('{accountSid}', credentials['accountSid'] || '');
 
       const response = await lastValueFrom(
@@ -1066,7 +1066,7 @@ export class KeyCortexExternalConnectorService {
         status = 'degraded';
         message = `Unexpected status: ${response.status} (expected ${definition.healthCheck.expectedStatus})`;
       }
-    } catch (err) {
+    } catch (err: any) {
       latencyMs = Date.now() - checkStartedAt;
       status = 'unhealthy';
       message = err instanceof Error ? err.message : 'Health check failed';
@@ -1211,12 +1211,12 @@ export class KeyCortexExternalConnectorService {
 
         // Optionally persist to database
         try {
-          const instance = await this.prisma.externalConnectorInstance.findUnique({
+          const instance = await (this.prisma as any).externalConnectorInstance.findUnique({
             where: { id: connectorId },
           });
           if (instance) {
             const updatedConfig = { ...credentials, accessToken: refreshedToken };
-            await this.prisma.externalConnectorInstance.update({
+            await (this.prisma as any).externalConnectorInstance.update({
               where: { id: connectorId },
               data: { config: this.encryptCredentials(updatedConfig) },
             });
@@ -1230,7 +1230,7 @@ export class KeyCortexExternalConnectorService {
       }
 
       return credentials['accessToken'] || credentials['botToken'] || null;
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Token refresh failed for ${connectorId}: ${err instanceof Error ? err.message : String(err)}`);
       // Return existing token as fallback
       return credentials['accessToken'] || credentials['botToken'] || null;
@@ -1253,7 +1253,7 @@ export class KeyCortexExternalConnectorService {
       const sanitizedUrl = this.sanitizeUrl(request.url);
 
       // Store in database via BusinessEvent (or dedicated connector_logs table)
-      await this.prisma.businessEvent.create({
+      await (this.prisma as any).businessEvent.create({
         data: {
           id: this.generateId('evt'),
           eventType: 'external_connector.request',
@@ -1289,7 +1289,7 @@ export class KeyCortexExternalConnectorService {
           `[${request.requestId}] ${request.method} ${sanitizedUrl} → ${request.statusCode} (${request.durationMs}ms, ${request.retryCount} retries)`,
         );
       }
-    } catch (err) {
+    } catch (err: any) {
       // Logging should never fail the main request
       this.logger.debug(`Failed to log request: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -1330,7 +1330,7 @@ export class KeyCortexExternalConnectorService {
     action: string,
     params: Record<string, unknown>,
   ): Promise<SandboxResult> {
-    const instance = await this.prisma.externalConnectorInstance.findUnique({
+    const instance = await (this.prisma as any).externalConnectorInstance.findUnique({
       where: { id: connectorId },
     });
 
@@ -1405,7 +1405,7 @@ export class KeyCortexExternalConnectorService {
         executedInSandbox: true,
         wouldHaveMutated,
       };
-    } catch (err) {
+    } catch (err: any) {
       return {
         success: false,
         error: err instanceof Error ? err.message : String(err),
@@ -1544,7 +1544,7 @@ export class KeyCortexExternalConnectorService {
         callbackUrl,
         secret,
       );
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `External webhook registration failed for ${definition.name}: ${err instanceof Error ? err.message : String(err)}`,
       );
@@ -1552,7 +1552,7 @@ export class KeyCortexExternalConnectorService {
     }
 
     // Store registration
-    const registration = await this.prisma.webhookRegistration.create({
+    const registration = await (this.prisma as any).webhookRegistration.create({
       data: {
         id: webhookId,
         connectorId,
@@ -1584,7 +1584,7 @@ export class KeyCortexExternalConnectorService {
     signature?: string,
   ): Promise<{ success: boolean; eventEmitted: boolean }> {
     // Find the webhook registration
-    const registration = await this.prisma.webhookRegistration.findUnique({
+    const registration = await (this.prisma as any).webhookRegistration.findUnique({
       where: { id: webhookId },
       include: { connectorInstance: true },
     });
@@ -1604,7 +1604,7 @@ export class KeyCortexExternalConnectorService {
     // Verify signature if a secret is configured
     if (registration.secret && signature) {
       const isValid = this.verifyWebhookSignature(
-        payload,
+        payload as any,
         signature,
         registration.secret,
         headers[registration.signatureHeader || 'x-webhook-signature'] || '',
@@ -1612,7 +1612,7 @@ export class KeyCortexExternalConnectorService {
       if (!isValid) {
         this.logger.warn(`Webhook signature verification failed for ${webhookId}`);
 
-        await this.prisma.webhookRegistration.update({
+        await (this.prisma as any).webhookRegistration.update({
           where: { id: webhookId },
           data: {
             failureCount: { increment: 1 },
@@ -1628,7 +1628,7 @@ export class KeyCortexExternalConnectorService {
     }
 
     // Update delivery stats
-    await this.prisma.webhookRegistration.update({
+    await (this.prisma as any).webhookRegistration.update({
       where: { id: webhookId },
       data: {
         deliveryCount: { increment: 1 },
@@ -1679,7 +1679,7 @@ export class KeyCortexExternalConnectorService {
     // Verify ownership
     await this.getConnectorInstance(connectorId, businessId);
 
-    const webhooks = await this.prisma.webhookRegistration.findMany({
+    const webhooks = await (this.prisma as any).webhookRegistration.findMany({
       where: { connectorId },
       orderBy: { createdAt: 'desc' },
     });
@@ -1694,7 +1694,7 @@ export class KeyCortexExternalConnectorService {
     webhookId: string,
     businessId: string,
   ): Promise<WebhookRegistration> {
-    const registration = await this.prisma.webhookRegistration.findUnique({
+    const registration = await (this.prisma as any).webhookRegistration.findUnique({
       where: { id: webhookId },
       include: { connectorInstance: true },
     });
@@ -1706,7 +1706,7 @@ export class KeyCortexExternalConnectorService {
       });
     }
 
-    const updated = await this.prisma.webhookRegistration.update({
+    const updated = await (this.prisma as any).webhookRegistration.update({
       where: { id: webhookId },
       data: { status: 'inactive' },
     });
@@ -1752,7 +1752,7 @@ export class KeyCortexExternalConnectorService {
       credentials: this.encryptCredentials(authConfig.credentials),
     };
 
-    const customConnector = await this.prisma.customConnector.create({
+    const customConnector = await (this.prisma as any).customConnector.create({
       data: {
         id: this.generateId('custom'),
         businessId,
@@ -1776,7 +1776,7 @@ export class KeyCortexExternalConnectorService {
    * Get custom connectors for a business.
    */
   async getCustomConnectors(businessId: string): Promise<CustomConnector[]> {
-    const connectors = await this.prisma.customConnector.findMany({
+    const connectors = await (this.prisma as any).customConnector.findMany({
       where: { businessId },
       orderBy: { createdAt: 'desc' },
     });
@@ -1791,7 +1791,7 @@ export class KeyCortexExternalConnectorService {
     connectorId: string,
     businessId: string,
   ): Promise<void> {
-    const connector = await this.prisma.customConnector.findFirst({
+    const connector = await (this.prisma as any).customConnector.findFirst({
       where: { id: connectorId, businessId },
     });
 
@@ -1802,7 +1802,7 @@ export class KeyCortexExternalConnectorService {
       });
     }
 
-    await this.prisma.customConnector.delete({
+    await (this.prisma as any).customConnector.delete({
       where: { id: connectorId },
     });
 
@@ -1831,14 +1831,14 @@ export class KeyCortexExternalConnectorService {
       await this.testConnection(definition, credentials);
       status = 'connected';
       errorMessage = undefined;
-    } catch (err) {
+    } catch (err: any) {
       status = 'error';
       errorMessage = err instanceof Error ? err.message : 'Connection check failed';
     }
 
     // Update if status changed
     if (status !== instance.status) {
-      await this.prisma.externalConnectorInstance.update({
+      await (this.prisma as any).externalConnectorInstance.update({
         where: { id: connectorId },
         data: { status, errorMessage },
       });
@@ -1867,7 +1867,7 @@ export class KeyCortexExternalConnectorService {
    * List all connector instances for a business.
    */
   async getBusinessConnectors(businessId: string): Promise<ExternalConnectorInstance[]> {
-    const instances = await this.prisma.externalConnectorInstance.findMany({
+    const instances = await (this.prisma as any).externalConnectorInstance.findMany({
       where: { businessId },
       orderBy: { createdAt: 'desc' },
     });
@@ -1903,7 +1903,7 @@ export class KeyCortexExternalConnectorService {
     }
     if (updates.metadata) updateData.metadata = updates.metadata;
 
-    const updated = await this.prisma.externalConnectorInstance.update({
+    const updated = await (this.prisma as any).externalConnectorInstance.update({
       where: { id: connectorId },
       data: updateData,
     });
@@ -2149,7 +2149,7 @@ export class KeyCortexExternalConnectorService {
         default:
           return undefined;
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`External webhook registration failed for ${definition.id}: ${err}`);
       return undefined;
     }
@@ -2164,7 +2164,7 @@ export class KeyCortexExternalConnectorService {
     if (!registration.externalWebhookId) return;
 
     try {
-      const instance = await this.prisma.externalConnectorInstance.findUnique({
+      const instance = await (this.prisma as any).externalConnectorInstance.findUnique({
         where: { id: registration.connectorId },
       });
       if (!instance) return;
@@ -2200,7 +2200,7 @@ export class KeyCortexExternalConnectorService {
         default:
           break;
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Failed to unregister external webhook ${registration.id}: ${err}`);
     }
   }

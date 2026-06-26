@@ -241,7 +241,7 @@ export class KeyflowCommandService {
           },
         });
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.debug(`Google calendar unavailable: ${(err as Error).message}`);
     }
 

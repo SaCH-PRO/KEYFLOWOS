@@ -128,7 +128,7 @@ export class MetaSocialConnector implements IConnector {
         account: data.name ?? conn.accountName ?? undefined,
         detail: data.id ? `Account ID ${data.id}` : undefined,
       };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }

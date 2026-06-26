@@ -196,7 +196,7 @@ export class AutopilotAiService {
         tone: parsed.tone || 'warm',
         suggestedChannel: preferredChannel as 'whatsapp' | 'email',
       };
-    } catch (error) {
+    } catch (error: any) {
       this.logger.warn(`AI draft generation failed, using fallback: ${(error as Error).message}`);
       return this.fallbackDraft(action, contactFirstName, ctx);
     }

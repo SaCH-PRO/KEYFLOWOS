@@ -48,7 +48,7 @@ export class GoogleDriveController {
     try {
       await this.driveService.saveDriveCredentials(oauthState.businessId, code);
       return res.redirect(`${returnPath}?drive=success`);
-    } catch (err) {
+    } catch (err: any) {
       return res.redirect(`${returnPath}?drive=error&reason=token_exchange`);
     }
   }

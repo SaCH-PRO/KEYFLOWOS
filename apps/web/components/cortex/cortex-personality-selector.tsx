@@ -88,7 +88,7 @@ export function CortexPersonalitySelector({ currentPersona, onSwitch, disabled }
                       flex-shrink-0 mt-0.5 ${isActive ? 'ring-2 ring-offset-1' : ''}`}
                     style={{
                       backgroundColor: config.color,
-                      ringColor: config.color,
+                      ['--tw-ring-color' as string]: config.color,
                     }}
                   >
                     {config.name[0]}

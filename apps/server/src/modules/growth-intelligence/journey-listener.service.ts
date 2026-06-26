@@ -44,7 +44,7 @@ export class JourneyListenerService {
     if (!businessId || !contactId) return;
     try {
       await this.journeys.recordTouchpoint({ businessId, contactId, ...hint });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Failed to record journey touchpoint: ${(err as Error).message}`);
     }
   }

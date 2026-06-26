@@ -50,6 +50,10 @@ export interface GatewayRequest {
   temperature?: number;
   providerOverride?: AiProvider;
   modelOverride?: string;
+  /** @deprecated Use modelOverride */
+  model?: string;
+  /** Response format hint (e.g. json_object) */
+  responseFormat?: { type: string };
   expectedContract?: ContractType;
 }
 
@@ -557,7 +561,7 @@ export class ModelGatewayService {
         }
 
         return response;
-      } catch (err) {
+      } catch (err: any) {
         lastError = err as Error;
         this.recordProviderError(candidate.provider);
         this.logger.error(
@@ -629,7 +633,7 @@ export class ModelGatewayService {
         const latencyMs = Date.now() - startTime;
         this.recordProviderSuccess(candidate.provider, latencyMs);
         return;
-      } catch (err) {
+      } catch (err: any) {
         lastError = err as Error;
         this.recordProviderError(candidate.provider);
         this.logger.error(
@@ -1372,7 +1376,7 @@ export class ModelGatewayService {
           latencyMs,
           fallbackUsed: false,
         };
-      } catch (err) {
+      } catch (err: any) {
         lastError = err as Error;
 
         if (this.isRetryable(lastError) && attempt < ModelGatewayService.MAX_RETRIES) {
@@ -1597,7 +1601,7 @@ export class ModelGatewayService {
       ? toolUseBlocks.map((block) => {
           return {
             id: block.id ?? `call_${Date.now()}`,
-            type: 'function',
+            type: 'function' as const,
             'function': {
               name: block.name ?? '',
               'arguments': JSON.stringify(block.input ?? {}),
@@ -2044,7 +2048,7 @@ export class ModelGatewayService {
         this.routingTable = this.mergeWithDefaults(parsed);
         this.logger.log('Loaded routing config from database');
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Failed to load routing config from DB, using defaults: ${(err as Error).message}`);
     }
     this.routingTableLoaded = true;

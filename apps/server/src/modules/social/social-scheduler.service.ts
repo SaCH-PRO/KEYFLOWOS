@@ -88,7 +88,7 @@ export class SocialSchedulerService implements OnModuleInit, OnModuleDestroy {
         businessId: post.businessId,
         success: anySuccess,
       });
-    } catch (err) {
+    } catch (err: any) {
       await this.prisma.client.socialPost.update({
         where: { id: post.id },
         data: {

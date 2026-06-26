@@ -229,7 +229,7 @@ export class AiUsageService {
       try {
         resolvedTemplate = await this.outputTemplateService.resolveTemplate(businessId, outputCategory);
         messages = this.injectDirectivesIntoMessages(messages, resolvedTemplate);
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(`Quality directive injection failed for ${feature}: ${(err as Error).message}`);
       }
     }
@@ -335,7 +335,7 @@ export class AiUsageService {
           estimatedCost: Math.round(result.estimatedCost * 10000) / 10000,
         },
       };
-    } catch (error) {
+    } catch (error: any) {
       if (error instanceof ForbiddenException) throw error;
       this.logger.error(`AI call failed for ${feature}: ${(error as Error).message}`);
       throw error;
@@ -424,7 +424,7 @@ export class AiUsageService {
     let budget: BudgetStatus | undefined;
     try {
       budget = await this.gateway.getBudgetStatus(businessId);
-    } catch (err) {
+    } catch (err: any) {
         this.logger.warn(`Silent catch: ${err instanceof Error ? err.message : err}`);
       }
 
@@ -499,7 +499,7 @@ export class AiUsageService {
     let budgetStatus: BudgetStatus | undefined;
     try {
       budgetStatus = await this.gateway.getBudgetStatus(businessId);
-    } catch (err) {
+    } catch (err: any) {
         this.logger.warn(`Silent catch: ${err instanceof Error ? err.message : err}`);
       }
 
@@ -624,7 +624,7 @@ export class AiUsageService {
         creditCost,
       ).catch((err) => this.logger.error(`Background usage log failed: ${(err as Error).message}`));
       return response;
-    } catch (error) {
+    } catch (error: any) {
       if (error instanceof ForbiddenException) throw error;
       this.logger.error(`trackAndComplete failed for ${feature}: ${(error as Error).message}`);
       throw error;
@@ -707,7 +707,7 @@ export class AiUsageService {
         businessId,
         creditCost,
       ).catch((err) => this.logger.error(`Background usage log failed: ${(err as Error).message}`));
-    } catch (error) {
+    } catch (error: any) {
       if (error instanceof ForbiddenException) throw error;
       this.logger.error(`trackAndStream failed for ${feature}: ${(error as Error).message}`);
       throw error;
@@ -774,7 +774,7 @@ export class AiUsageService {
         creditCost,
       ).catch((err) => this.logger.error(`Background usage log failed: ${(err as Error).message}`));
       return embeddings;
-    } catch (error) {
+    } catch (error: any) {
       if (error instanceof ForbiddenException) throw error;
       this.logger.error(`trackEmbedding failed for ${feature}: ${(error as Error).message}`);
       throw error;
@@ -856,7 +856,7 @@ export class AiUsageService {
         creditCost,
       ).catch((err) => this.logger.error(`Background usage log failed: ${(err as Error).message}`));
       return { content, usage: { promptTokens, completionTokens, totalTokens, estimatedCost } };
-    } catch (error) {
+    } catch (error: any) {
       if (error instanceof ForbiddenException) throw error;
       this.logger.error(`trackVision failed for ${feature}: ${(error as Error).message}`);
       throw error;
@@ -944,7 +944,7 @@ export class AiUsageService {
         creditCost,
       ).catch((err) => this.logger.error(`Background usage log failed: ${(err as Error).message}`));
       return result;
-    } catch (error) {
+    } catch (error: any) {
       if (error instanceof ForbiddenException) throw error;
       this.logger.error(`trackAudio failed for ${feature}: ${(error as Error).message}`);
       throw error;
@@ -982,7 +982,7 @@ export class AiUsageService {
         await this.prisma.client.aiUsageLog.create({ data: data as any });
         await this.checkAlertThresholds(businessId, creditCost);
         return;
-      } catch (err) {
+      } catch (err: any) {
         this.logger.error(
           `AI usage log attempt ${attempt + 1} failed for ${data.feature}: ${(err as Error).message}`,
         );
@@ -993,6 +993,146 @@ export class AiUsageService {
     }
     this.logger.error(
       `CRITICAL: Failed to persist AI usage log after 3 attempts. Feature=${data.feature} business=${businessId}`,
+    );
+  }
+
+  /**
+   * Fire-and-forget audio usage logger for services that already perform the
+   * OpenAI audio call themselves.
+   */
+  trackAudioUsage(opts: {
+    businessId: string;
+    userId?: string;
+    type: 'audio_tts' | 'audio_stt';
+    model?: string;
+    inputLength?: number;
+    outputLength?: number;
+    metadata?: Record<string, unknown>;
+  }): void {
+    const feature = opts.type;
+    const creditCost = AI_CREDIT_COSTS[feature] || 1;
+    const mode = opts.type === 'audio_tts' ? 'tts' : 'stt';
+    const estimatedCost =
+      mode === 'tts'
+        ? ((opts.inputLength ?? 0) / 1000) * 0.015
+        : ((opts.outputLength ?? 0) / 1000) * 0.006;
+    this.persistUsageLog(
+      {
+        businessId: opts.businessId,
+        userId: opts.userId,
+        feature,
+        model: opts.model,
+        provider: 'openai',
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+        estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+        creditsUsed: creditCost,
+        taskCategory: mode === 'tts' ? 'content-generation' : 'extraction',
+        metadata: opts.metadata,
+      },
+      opts.businessId,
+      creditCost,
+    ).catch((err) => this.logger.error(`Background audio usage log failed: ${(err as Error).message}`));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Legacy / alias tracking methods used by KEY Cortex services
+  // ---------------------------------------------------------------------------
+
+  async track(opts: {
+    businessId: string;
+    userId?: string;
+    feature?: string;
+    model?: string;
+    tokensUsed?: number;
+    promptTokens?: number;
+    completionTokens?: number;
+    durationMs?: number;
+    cost?: number;
+  }): Promise<void> {
+    const feature = opts.feature || 'key_cortex';
+    const creditCost = AI_CREDIT_COSTS[feature] || 1;
+    await this.persistUsageLog(
+      {
+        businessId: opts.businessId,
+        userId: opts.userId,
+        feature,
+        model: opts.model,
+        provider: 'openai',
+        promptTokens: opts.promptTokens ?? opts.tokensUsed ?? 0,
+        completionTokens: opts.completionTokens ?? 0,
+        totalTokens: opts.tokensUsed ?? (opts.promptTokens ?? 0) + (opts.completionTokens ?? 0),
+        estimatedCost: opts.cost ?? 0,
+        creditsUsed: creditCost,
+        latencyMs: opts.durationMs,
+        taskCategory: 'general',
+      },
+      opts.businessId,
+      creditCost,
+    );
+  }
+
+  async log(opts: {
+    businessId: string;
+    userId?: string;
+    feature?: string;
+    model?: string;
+    tokensUsed?: number;
+    costUsd?: number;
+    metadata?: Record<string, unknown>;
+  }): Promise<void> {
+    const feature = opts.feature || 'key_cortex';
+    const creditCost = AI_CREDIT_COSTS[feature] || 1;
+    await this.persistUsageLog(
+      {
+        businessId: opts.businessId,
+        userId: opts.userId,
+        feature,
+        model: opts.model,
+        provider: 'openai',
+        promptTokens: opts.tokensUsed ?? 0,
+        completionTokens: 0,
+        totalTokens: opts.tokensUsed ?? 0,
+        estimatedCost: opts.costUsd ?? 0,
+        creditsUsed: creditCost,
+        taskCategory: 'general',
+        metadata: opts.metadata,
+      },
+      opts.businessId,
+      creditCost,
+    );
+  }
+
+  async trackText(opts: {
+    businessId: string;
+    userId?: string;
+    type?: string;
+    model?: string;
+    inputTokens?: number;
+    outputTokens?: number;
+    estimatedCost?: number;
+  }): Promise<void> {
+    const feature = opts.type || 'document_qa';
+    const creditCost = AI_CREDIT_COSTS[feature] || 1;
+    const promptTokens = opts.inputTokens ?? 0;
+    const completionTokens = opts.outputTokens ?? 0;
+    await this.persistUsageLog(
+      {
+        businessId: opts.businessId,
+        userId: opts.userId,
+        feature,
+        model: opts.model,
+        provider: 'openai',
+        promptTokens,
+        completionTokens,
+        totalTokens: promptTokens + completionTokens,
+        estimatedCost: 0,
+        creditsUsed: creditCost,
+        taskCategory: 'extraction',
+      },
+      opts.businessId,
+      creditCost,
     );
   }
 
@@ -1072,7 +1212,7 @@ export class AiUsageService {
           });
         }
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Alert threshold check failed: ${(err as Error).message}`);
     }
   }

@@ -269,7 +269,7 @@ export class CrmDataQualityService {
           map.set(pair.primaryId, { primaryId: pair.primaryId, duplicateId: pair.duplicateId, reason: pair.reason, confidence: pair.confidence });
         }
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Duplicate detection failed during scan: ${(err as Error).message}`);
     }
     return map;
@@ -494,7 +494,7 @@ export class CrmDataQualityService {
       try {
         await this.applyFix({ businessId: input.businessId, issueId: id, actorId: input.actorId });
         results.push({ issueId: id, ok: true });
-      } catch (err) {
+      } catch (err: any) {
         results.push({ issueId: id, ok: false, error: (err as Error).message });
       }
     }
