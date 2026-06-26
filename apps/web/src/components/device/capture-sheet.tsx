@@ -402,6 +402,7 @@ function CaptureResultView({
       {asset.publicUrl && (
         <div className="rounded-lg overflow-hidden border bg-muted">
           {asset.mediaType === "image" ? (
+            // eslint-disable-next-line @next/next/no-img-element -- external capture URL from S3/R2; unoptimized img acceptable here
             <img
               src={asset.publicUrl}
               alt={asset.fileName ?? "capture"}

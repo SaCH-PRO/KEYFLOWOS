@@ -46,7 +46,6 @@ export function RevenueComposer({
     showQuoteBuilder,
     setShowQuoteBuilder,
     editingQuoteId,
-    setEditingQuoteId,
     quoteForm,
     setQuoteForm,
     resetQuoteForm,
@@ -73,11 +72,9 @@ export function RevenueComposer({
     showInvoiceBuilder,
     setShowInvoiceBuilder,
     editingInvoiceId,
-    setEditingInvoiceId,
     invoiceForm,
     setInvoiceForm,
     resetInvoiceForm,
-    handleNewInvoice,
   } = useInvoiceForm();
 
   const invoiceItems = invoiceForm.items;

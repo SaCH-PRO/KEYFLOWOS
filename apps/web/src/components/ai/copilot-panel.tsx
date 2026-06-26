@@ -459,7 +459,7 @@ export function CopilotPanel({ open, onClose, currentModule, initialPrompt, onIn
   const [insights, setInsights] = useState<ProAutoInsight[]>([]);
   const [insightsLoading, setInsightsLoading] = useState(false);
   const [suggestions, setSuggestions] = useState<ChatSuggestion[]>([]);
-  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const [_suggestionsLoading, setSuggestionsLoading] = useState(false);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
   const [executionLogs, setExecutionLogs] = useState<AiExecutionLogEntry[]>([]);
   const [actionQueue, setActionQueue] = useState<ActionQueueItem[]>([]);
@@ -579,7 +579,7 @@ export function CopilotPanel({ open, onClose, currentModule, initialPrompt, onIn
     }
   }, []);
 
-  const loadSuggestions = useCallback(async () => {
+  const _loadSuggestions = useCallback(async () => {
     const biz = getStoredBusinessId();
     if (!biz) return;
     setSuggestionsLoading(true);

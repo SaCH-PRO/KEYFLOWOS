@@ -14,7 +14,7 @@ import {
 export default function GoodsReceiptsPage() {
   const businessId = getStoredBusinessId() ?? "";
   const [receipts, setReceipts] = useState<GoodsReceipt[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [_loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);

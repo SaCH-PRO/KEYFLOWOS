@@ -30,7 +30,7 @@ export default function EvidenceDetailPage() {
   const [loading, setLoading] = useState(true);
   const [verifying, setVerifying] = useState(false);
 
-  const businessId = getStoredBusinessId();
+  const _businessId = getStoredBusinessId();
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -39,7 +39,7 @@ export default function EvidenceDetailPage() {
       const res = await fetchEvidenceItem(id);
       if (res.error) throw new Error(res.error);
       setItem(res.data ?? null);
-    } catch (err) {
+    } catch (_err) {
       toast.error("Failed to load evidence");
     } finally {
       setLoading(false);

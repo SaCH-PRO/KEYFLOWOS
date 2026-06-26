@@ -107,7 +107,6 @@ export default function QuotesPanel({
   products,
   businessId,
   loading,
-  gmailStatus,
   setProducts,
   setQuotes,
   setInvoices,
@@ -828,7 +827,11 @@ export default function QuotesPanel({
                   checked={filteredQuotes.length > 0 && filteredQuotes.every((q) => selectedIds.has(q.id))}
                   onChange={() => {
                     const allSelected = filteredQuotes.every((q) => selectedIds.has(q.id));
-                    allSelected ? clearSelection() : selectAll(filteredQuotes.map((q) => q.id));
+                    if (allSelected) {
+                      clearSelection();
+                    } else {
+                      selectAll(filteredQuotes.map((q) => q.id));
+                    }
                   }}
                   className="w-4 h-4 rounded border-border/50 accent-[hsl(var(--kf-accent1))]"
                   aria-label="Select all visible quotes"

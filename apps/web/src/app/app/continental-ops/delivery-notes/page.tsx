@@ -14,7 +14,7 @@ import {
 export default function DeliveryNotesPage() {
   const businessId = getStoredBusinessId() ?? "";
   const [notes, setNotes] = useState<DeliveryNote[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [_loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);

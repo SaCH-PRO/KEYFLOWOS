@@ -198,7 +198,6 @@ export default function AiSettingsPage() {
 
 function CapacityTab({
   members,
-  skills,
   onChange,
 }: {
   members: TeamCapacityMember[];

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Clock, CalendarDays, Bell, Sparkles, List, Plus, Brain } from "lucide-react";
+import { CalendarDays, Bell, Sparkles, List, Plus, Brain } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   TemporalFlowEvent,

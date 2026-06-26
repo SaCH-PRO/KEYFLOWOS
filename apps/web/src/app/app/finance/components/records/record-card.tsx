@@ -90,7 +90,7 @@ function PaymentProgress({ record }: { record: FinancialRecord }) {
   );
 }
 
-export function RecordCard({ record, onClick, selected, onToggleSelect, onAction, actionLoading, compact }: RecordCardProps) {
+export function RecordCard({ record, onClick, selected, onToggleSelect, onAction, actionLoading }: RecordCardProps) {
   const [showActions, setShowActions] = useState(false);
   const meta = RECORD_TYPE_META[record.type];
   const statusStyle = getStatusStyle(record.status);
@@ -103,7 +103,7 @@ export function RecordCard({ record, onClick, selected, onToggleSelect, onAction
   const isDraft = record.status === "DRAFT";
   const isSent = record.status === "SENT";
   const isVoid = record.status === "VOID";
-  const isRejected = record.status === "REJECTED";
+  const _isRejected = record.status === "REJECTED";
 
   const handleAction = (action: PipelineAction) => (e: React.MouseEvent) => {
     e.stopPropagation();

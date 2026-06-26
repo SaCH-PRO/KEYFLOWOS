@@ -70,7 +70,7 @@ export default function CartWidgetPage() {
     }
   }, [step, cart.length]);
 
-  const removeFromCart = useCallback((productId: string) => {
+  const _removeFromCart = useCallback((productId: string) => {
     setCart((prev) => prev.filter((i) => i.productId !== productId));
   }, []);
 
@@ -177,6 +177,7 @@ export default function CartWidgetPage() {
               {products.map((p) => (
                 <div key={p.id} className={`flex items-center gap-3 rounded-xl border p-3 ${card}`}>
                   {p.imageUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- external product image URL from S3/R2; unoptimized img acceptable in widget
                     <img src={p.imageUrl} alt={p.name} className="h-12 w-12 rounded-lg object-cover" />
                   ) : (
                     <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-current opacity-10">

@@ -49,7 +49,7 @@ interface KeyGenomeMemoryPanelProps {
   onGenomeUpdate?: () => void;
 }
 
-export function KeyGenomeMemoryPanel({ onGenomeUpdate }: KeyGenomeMemoryPanelProps) {
+export function KeyGenomeMemoryPanel({}: KeyGenomeMemoryPanelProps) {
   const [summary, setSummary] = useState<GenomeLearningSummary | null>(null);
   const [events, setEvents] = useState<GenomeMemoryEventData[]>([]);
   const [loading, setLoading] = useState(() => !!getStoredBusinessId());

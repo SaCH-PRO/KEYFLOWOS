@@ -64,7 +64,7 @@ export default function ApprovalsPage() {
       ]);
       if (allRes.data) setRequests(allRes.data.items);
       if (pendingRes.data) setPendingForMe(pendingRes.data);
-    } catch (err) {
+    } catch (_err) {
       toast.error("Failed to load approvals");
     } finally {
       setLoading(false);

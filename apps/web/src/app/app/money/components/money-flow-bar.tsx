@@ -46,7 +46,7 @@ export function MoneyFlowBar({
   const expenseTotal = expenseSummary?.total ?? expenses.reduce((s, e) => s + e.amount, 0);
   const billsTotal = overview?.billsDue ?? 0;
   const budgetTotal = budgets.reduce((s, b) => s + b.amount, 0);
-  const budgetSpent = budgets.reduce((s, b) => s + b.spent, 0);
+  const _budgetSpent = budgets.reduce((s, b) => s + b.spent, 0);
 
   const stages: FlowStage[] = [
     {

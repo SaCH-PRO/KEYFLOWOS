@@ -60,26 +60,20 @@ export function ExpensePipeline({
   setCustomEnd,
   searchQuery,
   setSearchQuery,
-  filterCategory,
-  setFilterCategory,
-  filterPayment,
-  setFilterPayment,
-  filterStatus,
   setFilterStatus,
   page,
   setPage,
   pageSize,
-  setPageSize,
   onReload,
   onEdit,
   onAdd,
 }: ExpensePipelineProps) {
   const searchParams = useSearchParams();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
+  const [_actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
 
   // Sync view with URL ?view= query param
-  const paramView = searchParams.get("view") as ExpenseView | null;
+  const _paramView = searchParams.get("view") as ExpenseView | null;
   const validViews: ExpenseView[] = ["all", "expenses", "bills", "receipts"];
   const [view, setViewState] = useState<ExpenseView>(() => {
     const param = new URLSearchParams(window.location.search).get("view") as ExpenseView | null;
@@ -127,7 +121,7 @@ export function ExpensePipeline({
     });
   };
 
-  const toggleAll = () => {
+  const _toggleAll = () => {
     if (selectedIds.size === filteredExpenses.length) {
       setSelectedIds(new Set());
     } else {

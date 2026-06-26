@@ -34,7 +34,7 @@ export function GenesisConversation() {
   const [questions, setQuestions] = useState<GenesisQuestion[]>([]);
   const [readiness, setReadiness] = useState<GenesisReadinessScore | null>(null);
   const [blueprint, setBlueprint] = useState<BlueprintData | null>(null);
-  const [complianceItems, setComplianceItems] = useState<ComplianceItem[]>([]);
+  const [_complianceItems, setComplianceItems] = useState<ComplianceItem[]>([]);
   const [actionPlan, setActionPlan] = useState<GenesisActionPlan | null>(null);
   const [loadingActionPlan, setLoadingActionPlan] = useState(false);
 

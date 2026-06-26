@@ -12,7 +12,7 @@ import { LegalChecklist } from "./components/LegalChecklist";
 import { LegalDocumentPack } from "./components/LegalDocumentPack";
 import { RiskRegisterSummary } from "./components/RiskRegisterSummary";
 
-interface LegalReadiness {
+interface _LegalReadiness {
   legal: number;
   compliance: number;
   overall: number;

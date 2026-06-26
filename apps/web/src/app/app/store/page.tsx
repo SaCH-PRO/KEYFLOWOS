@@ -110,7 +110,7 @@ export default function StorePage() {
     window.history.replaceState({}, "", url.toString());
   }, [activeTab, emitEvent, setCurrentMeta]);
 
-  const handleStoreAiAction = useCallback((actionKey: string) => {
+  const _handleStoreAiAction = useCallback((actionKey: string) => {
     if (!actionKey.startsWith("switch_tab:")) return;
     const tab = actionKey.replace("switch_tab:", "");
     if (TAB_KEYS.includes(tab as TabKey)) {

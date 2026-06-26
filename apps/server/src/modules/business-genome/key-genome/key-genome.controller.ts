@@ -46,6 +46,7 @@ import type {
   GenerateGenomeRecommendationsInput,
   GenomeOutcome,
   GenomeRecommendationExecutionStatus,
+  GenomeRecommendationLearningSummary,
   RecommendationOutcome,
   UpdateGenomeContentStrategyInput,
   UpdateGenomeGrowthChannelInput,
@@ -282,6 +283,13 @@ export class KeyGenomeController {
     @Param('businessId') businessId: string,
   ) {
     return this.outcomeService.getSummary(businessId);
+  }
+
+  @Get('outcomes/learning-summary')
+  async getRecommendationLearningSummary(
+    @Param('businessId') businessId: string,
+  ): Promise<GenomeRecommendationLearningSummary> {
+    return this.outcomeService.getLearningSummary(businessId);
   }
 
   @Patch('outcomes/:outcomeId/observation')

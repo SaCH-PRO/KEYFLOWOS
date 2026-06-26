@@ -34,7 +34,7 @@ import { useLineItemHandlers } from "../../hooks/use-line-item-handlers";
 export default function NewInvoicePage() {
   const router = useRouter();
   const [businessId, setBusinessId] = useState<string | null>(null);
-  const [businessCurrency, setBusinessCurrency] = useState("TTD");
+  const [businessCurrency, _setBusinessCurrency] = useState("TTD");
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
@@ -116,7 +116,11 @@ export default function NewInvoicePage() {
       if (pe) { setFormError(`Failed to add "${name}" to catalog: ${pe}`); return; }
     }
 
-    send ? setSending(true) : setSaving(true);
+    if (send) {
+      setSending(true);
+    } else {
+      setSaving(true);
+    }
     try {
       const { data, error } = await createInvoice({
         businessId, contactId: contactId || undefined,
@@ -210,7 +214,7 @@ export default function NewInvoicePage() {
                 <span></span>
               </div>
               <div className="space-y-3">
-                {items.map((item, idx) => {
+                {items.map((item, _idx) => {
                   const qty = parseFloat(item.quantity) || 0;
                   const price = parseFloat(item.unitPrice) || 0;
                   const total = qty * price;

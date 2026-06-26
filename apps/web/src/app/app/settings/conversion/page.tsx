@@ -26,7 +26,7 @@ interface FeatureToggle {
 }
 
 export default function ConversionSettingsPage() {
-  const businessId = getStoredBusinessId() ?? "";
+  const _businessId = getStoredBusinessId() ?? "";
   const [saving, setSaving] = useState<string | null>(null);
   const [features, setFeatures] = useState<FeatureToggle[]>([
     {

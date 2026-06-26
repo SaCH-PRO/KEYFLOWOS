@@ -131,7 +131,7 @@ function FunnelStage({ stage, index, maxCount }: { stage: ConversionFunnel; inde
 }
 
 export default function StorefrontIntelligencePage() {
-  const router = useRouter();
+  const _router = useRouter();
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {

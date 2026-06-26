@@ -11,7 +11,7 @@ import { fetchBankRules, createBankRule, updateBankRule, deleteBankRule, applyBa
 export default function BankRulesPage() {
   const businessId = getStoredBusinessId() ?? "";
   const [rules, setRules] = useState<BankRule[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [_loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);

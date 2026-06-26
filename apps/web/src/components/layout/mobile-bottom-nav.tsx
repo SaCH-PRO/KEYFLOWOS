@@ -39,7 +39,7 @@ export function MobileBottomNav({
           boxShadow: "0 8px 32px -4px rgb(0 0 0 / 0.4), 0 0 0 1px hsl(var(--kf-border) / 0.5)",
         }}
       >
-        {mobileBottomNav.map((item, index) => {
+        {mobileBottomNav.map((item, _index) => {
           const Icon = item.icon;
 
           // Center AI button

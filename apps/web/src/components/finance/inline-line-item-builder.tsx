@@ -120,7 +120,7 @@ export function InlineLineItemBuilder({
             </tr>
           </thead>
           <tbody className="divide-y divide-border/40">
-            {items.map((item, idx) => (
+            {items.map((item, _idx) => (
               <tr key={item.id} className="group hover:bg-muted/20">
                 {mode === "journal" ? (
                   <>

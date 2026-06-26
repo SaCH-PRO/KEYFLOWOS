@@ -135,7 +135,7 @@ export function AssignmentsPanel() {
     } else toast.error("Failed to delete");
   };
 
-  const selectedMember = members.find((m) => m.id === form.membershipId);
+  const _selectedMember = members.find((m) => m.id === form.membershipId);
 
   return (
     <div className="space-y-4">

@@ -35,7 +35,7 @@ import { formatCurrency, formatDate } from "../components/expense-utils";
 import { ExpenseFormSideSheet } from "../components/expense-form-sidesheet";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
-function getMerchantColor(vendor?: string): string {
+function _getMerchantColor(vendor?: string): string {
   if (!vendor) return "#94a3b8";
   const colors = ["#f97316", "#ef4444", "#8b5cf6", "#06b6d4", "#22c55e", "#eab308", "#ec4899", "#6366f1", "#14b8a6", "#f43f5e"];
   let hash = 0;
@@ -61,7 +61,7 @@ export default function ExpenseDetailPage() {
   const [categories, setCategories] = useState<ExpenseCategory[]>([]);
   const [budgets, setBudgets] = useState<ExpenseBudget[]>([]);
   const [loading, setLoading] = useState(true);
-  const [businessId, setBusinessId] = useState<string | null>(() => getStoredBusinessId() ?? null);
+  const [businessId, _setBusinessId] = useState<string | null>(() => getStoredBusinessId() ?? null);
   const [showEdit, setShowEdit] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);

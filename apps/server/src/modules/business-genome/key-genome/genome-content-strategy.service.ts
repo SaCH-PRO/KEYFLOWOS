@@ -97,7 +97,6 @@ export class GenomeContentStrategyService {
     });
     if (existingCount > 0) {
       // Soft guard: multiple strategies are allowed, but this is unusual.
-      // eslint-disable-next-line no-console
       console.warn(
         `Business ${businessId} already has a content strategy; creating an additional one.`,
       );
