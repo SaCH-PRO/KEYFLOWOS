@@ -11,7 +11,7 @@ import { AiUsageService } from './ai-usage.service';
 import { OutputTemplateService } from './output-template.service';
 import { OutputTemplateController } from './output-template.controller';
 import { FlowOrchestratorService } from './flow-orchestrator.service';
-import { FlowController } from './flow.controller';
+import { AiFlowController } from './flow.controller';
 import { GraphActionsController } from './graph-actions.controller';
 import { BusinessGraphService } from './business-graph.service';
 import { AiOversightService } from './ai-oversight.service';
@@ -75,7 +75,7 @@ import { KeyAgentConfigService } from './key-agent-config.service';
 
 @Module({
   imports: [PrismaModule, RedisModule, SubscriptionsModule, BlueprintModule, TimelineModule, forwardRef(() => FinanceModule), CommandModule, GoogleDriveModule],
-  controllers: [AiController, AiSettingsController, OutputTemplateController, FlowController, GraphActionsController, AiUsageAdminController, AiIntelligenceController, BlueprintOnboardingController],
+  controllers: [AiController, AiSettingsController, OutputTemplateController, AiFlowController, GraphActionsController, AiUsageAdminController, AiIntelligenceController, BlueprintOnboardingController],
   providers: [
     AiListener,
     ModelGatewayService,

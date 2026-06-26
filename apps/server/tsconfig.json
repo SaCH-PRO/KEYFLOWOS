@@ -12,7 +12,13 @@
     "declaration": false,
     "declarationMap": false,
     "composite": false,
-    "strictPropertyInitialization": false
+    "strictPropertyInitialization": false,
+    "paths": {
+      "@keyflow/db/*": ["packages/db/src/*"],
+      "@keyflow/api/*": ["packages/api/src/*"],
+      "@keyflow/ui/*": ["packages/ui/src/*"],
+      "@keyflow/shared/*": ["packages/shared/src/*"]
+    }
   },
   "ts-node": {
     "swc": true

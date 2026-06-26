@@ -68,7 +68,7 @@ import {
 import { SlackConnector } from './connectors/slack.connector';
 import { ShopifyConnector } from './connectors/shopify.connector';
 import { SalesforceConnector } from './connectors/salesforce.connector';
-import { StripeConnector } from './connectors/stripe.connector';
+import { StripeExternalConnector } from './connectors/stripe.connector';
 import { TwilioConnector } from './connectors/twilio.connector';
 import { GoogleSheetsConnector } from './connectors/google-sheets.connector';
 import { NotionConnector } from './connectors/notion.connector';
@@ -196,7 +196,7 @@ export class KeyCortexExternalConnectorService {
       ['slack', SlackConnector],
       ['shopify', ShopifyConnector],
       ['salesforce', SalesforceConnector],
-      ['stripe', StripeConnector],
+      ['stripe', StripeExternalConnector],
       ['twilio', TwilioConnector],
       ['google_sheets', GoogleSheetsConnector],
       ['notion', NotionConnector],

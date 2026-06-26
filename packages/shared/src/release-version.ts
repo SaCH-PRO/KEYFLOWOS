@@ -1,7 +1,7 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-import { existsSync, readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 
 const execFileAsync = promisify(execFile);
 
@@ -26,10 +26,10 @@ let pending: Promise<string> | null = null;
 function readDeployVersionFile(): string | null {
   let dir = process.cwd();
   for (let i = 0; i < 6; i++) {
-    const candidate = resolve(dir, '.deploy-version');
+    const candidate = resolve(dir, ".deploy-version");
     if (existsSync(candidate)) {
       try {
-        const value = readFileSync(candidate, 'utf8').trim();
+        const value = readFileSync(candidate, "utf8").trim();
         if (value) return value;
       } catch {
         return null;
@@ -44,7 +44,7 @@ function readDeployVersionFile(): string | null {
 
 async function readGitHead(): Promise<string | null> {
   try {
-    const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], {
+    const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], {
       cwd: process.cwd(),
       timeout: 1500,
     });
@@ -65,12 +65,12 @@ export async function getReleaseVersion(): Promise<{ full: string; short: string
         process.env.GIT_COMMIT ||
         process.env.REPL_COMMIT_SHA ||
         process.env.SOURCE_COMMIT ||
-        '';
+        "";
       const value = (
         fromEnv ||
         readDeployVersionFile() ||
         (await readGitHead()) ||
-        'unknown'
+        "unknown"
       ).trim();
       cached = value;
       return value;

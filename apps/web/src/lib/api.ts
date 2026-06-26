@@ -10,6 +10,9 @@ const API_BASE = (() => {
 })();
 const AI_SUGGEST_URL = process.env.NEXT_PUBLIC_AI_SUGGEST_URL;
 
+import { fetchWithRetry } from "./fetch-with-retry";
+import { refreshAccessToken } from "./workspace";
+
 // One-shot reachability check: the first time a network error is observed
 // against API_BASE, log a single loud warning so the developer knows the
 // configured backend URL is wrong. We only nag once per session.
@@ -106,9 +109,6 @@ function fetchWithTimeout(
 ): Promise<Response> {
   return fetchWithRetry(url, init, { timeoutMs, retries: 3 });
 }
-
-import { fetchWithRetry } from "./fetch-with-retry";
-import { refreshAccessToken } from "./workspace";
 
 /**
  * Wrapper around fetch that attempts to refresh the Supabase access token

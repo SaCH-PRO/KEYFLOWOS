@@ -13,10 +13,16 @@ import { BULK_LIMIT, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from './crm.constants';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { CrmTimelineService } from './crm-timeline.service';
 import { ContactCustomFieldValueService } from './contact-custom-field-value.service';
-import { CrmStatsService } from './crm-stats.service';
+import { CrmStatsService, type ContactMeta, type ContactWithStats } from './crm-stats.service';
 import { CrmListsService } from './crm-lists.service';
 import { CrmFlowService } from './crm-flow.service';
 import { ContactAuditService, ContactAuditActor } from './privacy/contact-audit.service';
+import { contactWhereBase, contactWhereWithId } from './crm.helpers';
+import { buildContactWhere } from './contact-filters.helper';
+import { resolveCrmAccess, visibilityClause, type CrmAccess } from './crm-permissions.helper';
+import { normalizeEmail, normalizePhone, findExistingBulk } from './crm-duplicate.util';
+import { CONTACT_EVENT } from '@keyflow/shared';
+import { EntityResolutionService } from '../../core/connectors/entity-resolution.service';
 
 /**
  * Optional request-scoped audit context that controllers can plumb
@@ -30,13 +36,6 @@ export interface AuditContext {
   userAgent?: string | null;
   reason?: string | null;
 }
-import type { ContactMeta, ContactWithStats } from './crm-stats.service';
-import { contactWhereBase, contactWhereWithId } from './crm.helpers';
-import { buildContactWhere } from './contact-filters.helper';
-import { resolveCrmAccess, visibilityClause, type CrmAccess } from './crm-permissions.helper';
-import { normalizeEmail, normalizePhone, findExistingBulk } from './crm-duplicate.util';
-import { CONTACT_EVENT } from '@keyflow/shared';
-import { EntityResolutionService } from '../../core/connectors/entity-resolution.service';
 
 type ContactSortBy = 'name' | 'newest' | 'oldest' | 'revenue' | 'score' | 'lastInteraction';
 

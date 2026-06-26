@@ -93,7 +93,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { ProjectsModule } from '../projects/projects.module';
 import { KeystoreModule } from '../keystore/keystore.module';
 import { ContentService } from '../content/content.service';
-import { ActivityService } from '../activity/activity.service';
+import { ActivityLogService } from '../activity/activity.service';
 
 @Module({
   imports: [
@@ -168,7 +168,7 @@ import { ActivityService } from '../activity/activity.service';
     // Stub domain services used by the connector until full module integrations
     // are hardened with typed adapters.
     ContentService,
-    ActivityService,
+    ActivityLogService,
 
     // NL -> Command parser -- converts natural language to structured commands
     KeyCortexCommandService,

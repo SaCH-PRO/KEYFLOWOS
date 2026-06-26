@@ -9,7 +9,7 @@
 
 import { ExternalConnectorDefinition } from '../key-cortex-external-connector.types';
 
-export const StripeConnector: ExternalConnectorDefinition = {
+export const StripeExternalConnector: ExternalConnectorDefinition = {
   id: 'stripe',
   name: 'Stripe',
   description: 'Process payments, manage subscriptions, create refunds, and track customers',

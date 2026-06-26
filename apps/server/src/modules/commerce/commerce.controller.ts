@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, ForbiddenException, Get, Inject, Logger, Param, Patch, Post, Query, Req, Res, UseGuards, UseInterceptors, UploadedFile } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { Response } from 'express';
+import type { Request, Response } from 'express';
 import { CommerceService } from './commerce.service';
 import { CommerceVisionService } from './commerce-vision.service';
 import { StoreReadinessService } from './store-readiness.service';
@@ -15,7 +15,6 @@ import { PlanLimitGuard, RequirePlanLimit } from '../subscriptions/plan-limit.gu
 import { PublicRateLimitGuard, PublicRateLimit } from '../../core/guards/public-rate-limit.guard';
 import { sanitizeString } from '../../core/utils/sanitize';
 import { readVisitorIdFromRequest } from '../../core/utils/visitor-cookie';
-import type { Request } from 'express';
 import { BulkProductsDto } from './dto/bulk-products.dto';
 import { InvoiceReceiptBuilderService } from './invoice-receipt-builder.service';
 import { GmailService } from './gmail.service';

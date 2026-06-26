@@ -9,6 +9,10 @@
     ".": {
       "types": "./src/index.ts",
       "default": "./src/index.ts"
+    },
+    "./release-version": {
+      "types": "./src/release-version.ts",
+      "default": "./src/release-version.ts"
     }
   },
   "scripts": {

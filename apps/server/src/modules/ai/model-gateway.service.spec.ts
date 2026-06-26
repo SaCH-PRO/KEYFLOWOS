@@ -699,4 +699,111 @@ describe('ModelGatewayService', () => {
       expect(openaiAfter.totalCalls).toBeGreaterThan(openai.totalCalls);
     });
   });
+
+  describe('Circuit breaker', () => {
+    beforeEach(() => {
+      (service as any).routingTableLoaded = true;
+      (service as any).delay = vi.fn().mockResolvedValue(undefined);
+    });
+
+    it('opens circuit after 3 consecutive failures', async () => {
+      const callOpenAiSpy = vi.fn().mockRejectedValue(new Error('rate limit exceeded'));
+      (service as any).callOpenAi = callOpenAiSpy;
+
+      // Exhaust primary and fallbacks
+      await expect(service.complete(baseRequest())).rejects.toThrow();
+
+      const circuit = (service as any).circuitBreakers.get('openai');
+      expect(circuit.failures).toBeGreaterThanOrEqual(3);
+      expect(circuit.openUntil).not.toBeNull();
+
+      const health = service.getProviderHealth();
+      const openai = health.find(h => h.provider === 'openai')!;
+      expect(openai.circuitOpen).toBe(true);
+      expect(openai.available).toBe(false);
+    });
+
+    it('skips provider with open circuit and uses fallback', async () => {
+      const breaker = (service as any).circuitBreakers.get('openai');
+      breaker.failures = 3;
+      breaker.openUntil = new Date(Date.now() + 60_000);
+
+      const callOpenAiSpy = vi.fn().mockResolvedValue({
+        content: 'should not be called',
+        usage: { promptTokens: 10, completionTokens: 20, totalTokens: 30, estimatedCost: 0.001 },
+      });
+      (service as any).callOpenAi = callOpenAiSpy;
+
+      const callAnthropicSpy = vi.fn().mockResolvedValue({
+        content: 'fallback ok',
+        usage: { promptTokens: 10, completionTokens: 20, totalTokens: 30, estimatedCost: 0.001 },
+      });
+      (service as any).callAnthropic = callAnthropicSpy;
+
+      const result = await service.complete(baseRequest());
+
+      expect(callOpenAiSpy).not.toHaveBeenCalled();
+      expect(callAnthropicSpy).toHaveBeenCalledTimes(1);
+      expect(result.provider).toBe('anthropic');
+      expect(result.fallbackUsed).toBe(true);
+      expect(result.fallbackProvider).toBe('anthropic');
+    });
+
+    it('resets circuit breaker on success', async () => {
+      const breaker = (service as any).circuitBreakers.get('openai');
+      breaker.failures = 2;
+      breaker.openUntil = null;
+
+      (service as any).recordProviderSuccess('openai', 100);
+
+      expect(breaker.failures).toBe(0);
+      expect(breaker.openUntil).toBeNull();
+    });
+
+    it('closes expired circuit after cooldown', async () => {
+      const breaker = (service as any).circuitBreakers.get('openai');
+      breaker.failures = 3;
+      breaker.openUntil = new Date(Date.now() - 1000); // expired
+
+      const health = service.getProviderHealth();
+      const openai = health.find(h => h.provider === 'openai')!;
+      expect(openai.circuitOpen).toBe(false);
+      expect(openai.available).toBe(true);
+    });
+  });
+
+  describe('Task-type routing', () => {
+    it('routes emotion-analysis to anthropic in balanced mode', () => {
+      const config = service.getRoutingConfig();
+      const strategy = config.balanced['emotion-analysis'];
+      expect(strategy.primary.provider).toBe('anthropic');
+    });
+
+    it('routes creative tasks to openai in balanced mode', () => {
+      const config = service.getRoutingConfig();
+      const strategy = config.balanced.creative;
+      expect(strategy.primary.provider).toBe('openai');
+      expect(strategy.primary.model).toBe('gpt-4o');
+    });
+
+    it('routes code tasks to openai in balanced mode', () => {
+      const config = service.getRoutingConfig();
+      const strategy = config.balanced.code;
+      expect(strategy.primary.provider).toBe('openai');
+    });
+
+    it('routes forecasting tasks to openai in balanced mode', () => {
+      const config = service.getRoutingConfig();
+      const strategy = config.balanced.forecasting;
+      expect(strategy.primary.provider).toBe('openai');
+    });
+
+    it('route() returns selected provider without calling', async () => {
+      (service as any).routingTableLoaded = true;
+      const decision = await service.route(baseRequest({ taskCategory: 'reasoning' }));
+      expect(decision.provider).toBe('openai');
+      expect(decision.model).toBe('gpt-4o');
+      expect(decision.fallbackUsed).toBe(false);
+    });
+  });
 });

@@ -7,7 +7,7 @@ import { FlowOrchestratorService, FlowPageContext } from './flow-orchestrator.se
 
 @Controller('ai')
 @UseGuards(CrmRateLimitGuard)
-export class FlowController {
+export class AiFlowController {
   constructor(
     @Inject(FlowOrchestratorService) private readonly flow: FlowOrchestratorService,
   ) {}

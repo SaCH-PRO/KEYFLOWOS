@@ -17,12 +17,12 @@ import { ModelGatewayService, AiMode, BudgetCaps } from './model-gateway.service
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { Request } from 'express';
+import { PrismaService } from '../../core/prisma/prisma.service';
+import { KeyCommandService } from './key-command.service';
 
 interface AuthenticatedRequest extends Request {
   user?: { id: string; email?: string; role?: string };
 }
-import { PrismaService } from '../../core/prisma/prisma.service';
-import { KeyCommandService } from './key-command.service';
 import { AutopilotRulesService } from './autopilot-rules.service';
 import { AgentHealthService } from './agent-health.service';
 import { JourneyOrchestratorService } from './journey-orchestrator.service';

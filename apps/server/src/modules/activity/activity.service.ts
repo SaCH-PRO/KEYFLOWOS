@@ -2,8 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 @Injectable()
-export class ActivityService {
-  private readonly logger = new Logger(ActivityService.name);
+export class ActivityLogService {
+  private readonly logger = new Logger(ActivityLogService.name);
   constructor(private readonly prisma: PrismaService) {}
 
   async logActivity(businessId: string, data: { type: string; description: string; userId?: string; metadata?: any }) {

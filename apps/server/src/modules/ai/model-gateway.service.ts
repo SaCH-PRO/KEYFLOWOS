@@ -10,6 +10,10 @@ export type TaskCategory =
   | 'extraction'
   | 'classification'
   | 'reasoning'
+  | 'emotion-analysis'
+  | 'creative'
+  | 'code'
+  | 'forecasting'
   | 'content-generation'
   | 'summarization'
   | 'analysis'
@@ -101,6 +105,8 @@ export interface StreamChunk {
   };
   provider?: AiProvider;
   model?: string;
+  fallbackUsed?: boolean;
+  fallbackProvider?: AiProvider;
   error?: string;
 }
 
@@ -108,6 +114,7 @@ export interface ProviderHealth {
   provider: AiProvider;
   available: boolean;
   configured: boolean;
+  circuitOpen: boolean;
   avgLatencyMs: number;
   errorRate: number;
   lastErrorAt: Date | null;
@@ -225,6 +232,34 @@ const DEFAULT_ROUTING_TABLE: Record<AiMode, Record<TaskCategory, ModelStrategy>>
         { provider: 'kimi', model: 'moonshot-v1-8k' },
       ],
     },
+    'emotion-analysis': {
+      primary: { provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' },
+      fallbacks: [
+        { provider: 'openai', model: 'gpt-4o' },
+        { provider: 'kimi', model: 'moonshot-v1-8k' },
+      ],
+    },
+    creative: {
+      primary: { provider: 'openai', model: 'gpt-4o' },
+      fallbacks: [
+        { provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' },
+        { provider: 'kimi', model: 'moonshot-v1-8k' },
+      ],
+    },
+    code: {
+      primary: { provider: 'openai', model: 'gpt-4o' },
+      fallbacks: [
+        { provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' },
+        { provider: 'kimi', model: 'moonshot-v1-8k' },
+      ],
+    },
+    forecasting: {
+      primary: { provider: 'openai', model: 'gpt-4o' },
+      fallbacks: [
+        { provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' },
+        { provider: 'kimi', model: 'moonshot-v1-8k' },
+      ],
+    },
     general: {
       primary: { provider: 'openai', model: 'gpt-4o' },
       fallbacks: [
@@ -277,6 +312,34 @@ const DEFAULT_ROUTING_TABLE: Record<AiMode, Record<TaskCategory, ModelStrategy>>
       ],
     },
     analysis: {
+      primary: { provider: 'openai', model: 'gpt-4o' },
+      fallbacks: [
+        { provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' },
+        { provider: 'kimi', model: 'moonshot-v1-32k' },
+      ],
+    },
+    'emotion-analysis': {
+      primary: { provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' },
+      fallbacks: [
+        { provider: 'openai', model: 'gpt-4o' },
+        { provider: 'kimi', model: 'moonshot-v1-32k' },
+      ],
+    },
+    creative: {
+      primary: { provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' },
+      fallbacks: [
+        { provider: 'openai', model: 'gpt-4o' },
+        { provider: 'kimi', model: 'moonshot-v1-32k' },
+      ],
+    },
+    code: {
+      primary: { provider: 'openai', model: 'gpt-4o' },
+      fallbacks: [
+        { provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' },
+        { provider: 'kimi', model: 'moonshot-v1-32k' },
+      ],
+    },
+    forecasting: {
       primary: { provider: 'openai', model: 'gpt-4o' },
       fallbacks: [
         { provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' },
@@ -341,6 +404,34 @@ const DEFAULT_ROUTING_TABLE: Record<AiMode, Record<TaskCategory, ModelStrategy>>
         { provider: 'kimi', model: 'moonshot-v1-8k' },
       ],
     },
+    'emotion-analysis': {
+      primary: { provider: 'anthropic', model: 'claude-3-5-haiku-20241022' },
+      fallbacks: [
+        { provider: 'openai', model: 'gpt-4o-mini' },
+        { provider: 'kimi', model: 'moonshot-v1-8k' },
+      ],
+    },
+    creative: {
+      primary: { provider: 'openai', model: 'gpt-4o-mini' },
+      fallbacks: [
+        { provider: 'xai', model: 'grok-2-mini' },
+        { provider: 'kimi', model: 'moonshot-v1-8k' },
+      ],
+    },
+    code: {
+      primary: { provider: 'openai', model: 'gpt-4o-mini' },
+      fallbacks: [
+        { provider: 'xai', model: 'grok-2-mini' },
+        { provider: 'kimi', model: 'moonshot-v1-8k' },
+      ],
+    },
+    forecasting: {
+      primary: { provider: 'openai', model: 'gpt-4o-mini' },
+      fallbacks: [
+        { provider: 'xai', model: 'grok-2-mini' },
+        { provider: 'kimi', model: 'moonshot-v1-8k' },
+      ],
+    },
     general: {
       primary: { provider: 'openai', model: 'gpt-4o-mini' },
       fallbacks: [
@@ -358,6 +449,12 @@ interface ProviderMetrics {
   lastErrorAt: Date | null;
 }
 
+interface CircuitBreakerState {
+  failures: number;
+  lastFailureAt: Date | null;
+  openUntil: Date | null;
+}
+
 @Injectable()
 export class ModelGatewayService {
   private readonly logger = new Logger(ModelGatewayService.name);
@@ -365,6 +462,7 @@ export class ModelGatewayService {
   private readonly openai: OpenAI;
   private readonly providerClients = new Map<AiProvider, { configured: boolean }>();
   private readonly providerMetrics = new Map<AiProvider, ProviderMetrics>();
+  private readonly circuitBreakers = new Map<AiProvider, CircuitBreakerState>();
   private readonly preferencesCache = new Map<string, { data: AiPreferences; expiresAt: number }>();
   private readonly encryptionKey: Buffer;
   private readonly byokEncryptionAvailable: boolean;
@@ -374,6 +472,8 @@ export class ModelGatewayService {
   private static readonly PREFERENCES_TTL_MS = 120_000;
   private static readonly MAX_RETRIES = 2;
   private static readonly RETRY_DELAY_MS = 500;
+  private static readonly CIRCUIT_BREAKER_FAILURE_THRESHOLD = 3;
+  private static readonly CIRCUIT_BREAKER_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
   private static readonly ENCRYPTION_ALGORITHM = 'aes-256-gcm';
 
   constructor(
@@ -420,6 +520,11 @@ export class ModelGatewayService {
         totalErrors: 0,
         latencies: [],
         lastErrorAt: null,
+      });
+      this.circuitBreakers.set(provider, {
+        failures: 0,
+        lastFailureAt: null,
+        openUntil: null,
       });
     }
   }
@@ -563,7 +668,6 @@ export class ModelGatewayService {
         return response;
       } catch (err: any) {
         lastError = err as Error;
-        this.recordProviderError(candidate.provider);
         this.logger.error(
           `Provider ${candidate.provider}/${candidate.model} failed: ${lastError.message}`,
         );
@@ -608,6 +712,8 @@ export class ModelGatewayService {
     }
 
     let lastError: Error | null = null;
+    let fallbackUsed = false;
+    let fallbackProvider: AiProvider | undefined;
 
     for (let i = 0; i < effectiveCandidates.length; i++) {
       const candidate = effectiveCandidates[i];
@@ -616,7 +722,9 @@ export class ModelGatewayService {
         continue;
       }
 
-      if (i > 0) {
+      if (i > 0 || (budgetFilteredCandidates.length === 0 && candidate !== candidates[0])) {
+        fallbackUsed = true;
+        fallbackProvider = candidate.provider;
         this.logger.warn(
           `Stream falling back to ${candidate.provider}/${candidate.model} for ${request.taskCategory} (business: ${request.businessId})`,
         );
@@ -627,7 +735,13 @@ export class ModelGatewayService {
         const stream = this.callProviderStream(request, candidate.provider, candidate.model, preferences);
 
         for await (const chunk of stream) {
-          yield { ...chunk, provider: candidate.provider, model: candidate.model };
+          yield {
+            ...chunk,
+            provider: candidate.provider,
+            model: candidate.model,
+            fallbackUsed,
+            fallbackProvider,
+          };
         }
 
         const latencyMs = Date.now() - startTime;
@@ -645,6 +759,8 @@ export class ModelGatewayService {
     yield {
       type: 'error',
       error: lastError?.message || 'No AI providers available',
+      fallbackUsed,
+      fallbackProvider,
     };
   }
 
@@ -1332,24 +1448,38 @@ export class ModelGatewayService {
   }
 
   private isProviderAvailable(provider: AiProvider, preferences: AiPreferences): boolean {
+    let configured = false;
     if (provider === 'openai') {
-      return !!(preferences.byokOpenai || process.env.AI_INTEGRATIONS_OPENAI_API_KEY);
+      configured = !!(preferences.byokOpenai || process.env.AI_INTEGRATIONS_OPENAI_API_KEY);
+    } else if (provider === 'anthropic') {
+      configured = !!(preferences.byokAnthropic || process.env.ANTHROPIC_API_KEY);
+    } else if (provider === 'xai') {
+      configured = !!(preferences.byokXai || process.env.XAI_API_KEY);
+    } else if (provider === 'kimi') {
+      configured = !!(preferences.byokKimi || process.env.KIMI_API_KEY);
+    } else if (provider === 'native') {
+      configured = !!(preferences.byokNative || process.env.NATIVE_AI_API_KEY || process.env.KEYFLOW_NATIVE_AI_URL);
+    } else if (provider === 'opensource') {
+      configured = !!(process.env.OPENROUTER_API_KEY || process.env.OLLAMA_BASE_URL);
     }
-    if (provider === 'anthropic') {
-      return !!(preferences.byokAnthropic || process.env.ANTHROPIC_API_KEY);
+
+    return configured && !this.isCircuitOpen(provider);
+  }
+
+  private isCircuitOpen(provider: AiProvider): boolean {
+    const state = this.circuitBreakers.get(provider);
+    if (!state) return false;
+
+    if (state.openUntil && state.openUntil.getTime() > Date.now()) {
+      return true;
     }
-    if (provider === 'xai') {
-      return !!(preferences.byokXai || process.env.XAI_API_KEY);
+
+    // Reset expired open state
+    if (state.openUntil && state.openUntil.getTime() <= Date.now()) {
+      state.openUntil = null;
+      state.failures = 0;
     }
-    if (provider === 'kimi') {
-      return !!(preferences.byokKimi || process.env.KIMI_API_KEY);
-    }
-    if (provider === 'native') {
-      return !!(preferences.byokNative || process.env.NATIVE_AI_API_KEY || process.env.KEYFLOW_NATIVE_AI_URL);
-    }
-    if (provider === 'opensource') {
-      return !!(process.env.OPENROUTER_API_KEY || process.env.OLLAMA_BASE_URL);
-    }
+
     return false;
   }
 
@@ -1378,6 +1508,7 @@ export class ModelGatewayService {
         };
       } catch (err: any) {
         lastError = err as Error;
+        this.recordProviderError(provider);
 
         if (this.isRetryable(lastError) && attempt < ModelGatewayService.MAX_RETRIES) {
           await this.delay(ModelGatewayService.RETRY_DELAY_MS * (attempt + 1));
@@ -2003,6 +2134,7 @@ export class ModelGatewayService {
     for (const provider of ['openai', 'anthropic', 'xai', 'kimi', 'native', 'opensource'] as AiProvider[]) {
       const config = this.providerClients.get(provider);
       const metrics = this.providerMetrics.get(provider)!;
+      const circuitOpen = this.isCircuitOpen(provider);
 
       const recentLatencies = metrics.latencies.slice(-100);
       const avgLatency = recentLatencies.length > 0
@@ -2014,8 +2146,9 @@ export class ModelGatewayService {
 
       results.push({
         provider,
-        available: !!config?.configured,
+        available: !!config?.configured && !circuitOpen,
         configured: !!config?.configured,
+        circuitOpen,
         avgLatencyMs: Math.round(avgLatency),
         errorRate: Math.round(errorRate * 10000) / 10000,
         lastErrorAt: metrics.lastErrorAt,
@@ -2025,6 +2158,65 @@ export class ModelGatewayService {
     }
 
     return results;
+  }
+
+  /**
+   * Select the provider/model that would be used for a request without actually calling it.
+   * Useful for previewing routing decisions and cost estimates.
+   */
+  async route(request: GatewayRequest): Promise<{ provider: AiProvider; model: string; fallbackUsed: boolean }> {
+    if (!this.routingTableLoaded) {
+      await this.loadRoutingConfig();
+    }
+
+    const preferences = await this.getPreferences(request.businessId);
+    const mode = preferences.aiMode;
+    const strategy = this.resolveStrategy(request, mode, preferences);
+    const candidates = [strategy.primary, ...strategy.fallbacks];
+
+    const budgetCaps = preferences.budgetCaps;
+    let spendByProvider: Record<string, number> | undefined;
+    let totalSpend: number | undefined;
+
+    if (budgetCaps && this.hasBudgetCaps(budgetCaps)) {
+      const spendData = await this.getCurrentMonthSpend(request.businessId);
+      spendByProvider = spendData.byProvider;
+      totalSpend = spendData.total;
+    }
+
+    const budgetFilteredCandidates = this.filterCandidatesByBudget(
+      candidates, budgetCaps, spendByProvider, totalSpend,
+    );
+
+    const effectiveCandidates = budgetFilteredCandidates.length > 0
+      ? budgetFilteredCandidates
+      : candidates;
+
+    for (let i = 0; i < effectiveCandidates.length; i++) {
+      const candidate = effectiveCandidates[i];
+      if (this.isProviderAvailable(candidate.provider, preferences)) {
+        return {
+          provider: candidate.provider,
+          model: candidate.model,
+          fallbackUsed: i > 0,
+        };
+      }
+    }
+
+    // Fallback of last resort: return the first candidate even if unavailable
+    return {
+      provider: effectiveCandidates[0].provider,
+      model: effectiveCandidates[0].model,
+      fallbackUsed: false,
+    };
+  }
+
+  /**
+   * Lightweight health check that returns the current provider health snapshot.
+   * Does not perform live probe calls (use provider-specific probes separately if needed).
+   */
+  async healthCheck(): Promise<ProviderHealth[]> {
+    return this.getProviderHealth();
   }
 
   getRoutingConfig(): Record<AiMode, Record<TaskCategory, ModelStrategy>> {
@@ -2117,6 +2309,13 @@ export class ModelGatewayService {
         metrics.latencies = metrics.latencies.slice(-250);
       }
     }
+
+    // Reset circuit breaker on success
+    const circuit = this.circuitBreakers.get(provider);
+    if (circuit) {
+      circuit.failures = 0;
+      circuit.openUntil = null;
+    }
   }
 
   private recordProviderError(provider: AiProvider): void {
@@ -2125,6 +2324,19 @@ export class ModelGatewayService {
       metrics.totalCalls++;
       metrics.totalErrors++;
       metrics.lastErrorAt = new Date();
+    }
+
+    const circuit = this.circuitBreakers.get(provider);
+    if (circuit) {
+      circuit.failures++;
+      circuit.lastFailureAt = new Date();
+
+      if (circuit.failures >= ModelGatewayService.CIRCUIT_BREAKER_FAILURE_THRESHOLD) {
+        circuit.openUntil = new Date(Date.now() + ModelGatewayService.CIRCUIT_BREAKER_COOLDOWN_MS);
+        this.logger.warn(
+          `Circuit breaker opened for ${provider} until ${circuit.openUntil.toISOString()}`,
+        );
+      }
     }
   }
 

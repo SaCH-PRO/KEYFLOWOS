@@ -88,7 +88,7 @@ type BatchBody = {
 };
 
 @Controller()
-export class PresenceController {
+export class PublicPresenceController {
   constructor(
     @Inject(PublicEventsIngestService) private readonly ingest: PublicEventsIngestService,
     @Inject(PresenceStatsService) private readonly stats: PresenceStatsService,

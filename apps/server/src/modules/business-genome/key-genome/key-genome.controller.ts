@@ -36,17 +36,17 @@ import { GenomeRecommendationRankerService } from './genome-recommendation-ranke
 import { GenomeOpportunityDetectorService } from './genome-opportunity-detector.service';
 import { GenomeAutonomyGateService } from './genome-autonomy-gate.service';
 import { GenomeRecommendationOutcomeService } from './genome-recommendation-outcome.service';
-import type { ListGenomeCrossDomainSnapshotsQuery } from './key-genome.types';
-import type { CheckGenomeAutonomyGateInput } from './key-genome.types';
 import type {
-  CreateGenomeExperimentInput,
-  CreateGenomeContentStrategyInput,
-  CreateGenomeGrowthChannelInput,
+  CheckGenomeAutonomyGateInput,
   CloseGenomeRecommendationObservationInput,
+  CreateGenomeContentStrategyInput,
+  CreateGenomeExperimentInput,
+  CreateGenomeGrowthChannelInput,
   GenerateGenomeRecommendationsInput,
   GenomeOutcome,
   GenomeRecommendationExecutionStatus,
   GenomeRecommendationLearningSummary,
+  ListGenomeCrossDomainSnapshotsQuery,
   RecommendationOutcome,
   UpdateGenomeContentStrategyInput,
   UpdateGenomeGrowthChannelInput,

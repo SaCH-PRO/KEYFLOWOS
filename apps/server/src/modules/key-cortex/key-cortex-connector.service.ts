@@ -29,7 +29,7 @@ import { TemporalFlowMemoryService } from '../temporal-flow/temporal-flow-memory
 import { KeyInboxService } from '../key-inbox/key-inbox.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ProjectsService } from '../projects/projects.service';
-import { ActivityService } from '../activity/activity.service';
+import { ActivityLogService } from '../activity/activity.service';
 
 @Injectable()
 export class KeyCortexConnectorService {
@@ -51,7 +51,7 @@ export class KeyCortexConnectorService {
     private readonly inbox: KeyInboxService,
     private readonly notifications: NotificationsService,
     private readonly projects: ProjectsService,
-    private readonly activity: ActivityService,
+    private readonly activity: ActivityLogService,
   ) {}
 
   // ═══════════════════════════════════════════════════════════════════════════
