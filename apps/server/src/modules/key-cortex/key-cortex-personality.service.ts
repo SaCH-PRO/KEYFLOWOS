@@ -14,6 +14,7 @@ import {
   CortexSession,
 } from './key-cortex.types';
 import { BlueprintService } from '../blueprint/blueprint.service';
+import { ModelGatewayService } from '../ai/model-gateway.service';
 
 // ─────────────────────────────────────────────────────────────
 // Role Expertise Mapping — each persona's module specializations
@@ -248,6 +249,7 @@ export class KeyCortexPersonalityService {
 
   constructor(
     @Optional() @Inject(BlueprintService) private readonly blueprint?: BlueprintService,
+    @Optional() @Inject(ModelGatewayService) private readonly modelGateway?: ModelGatewayService,
   ) {}
 
   // ── Retrieval ─────────────────────────────────────────────
@@ -266,6 +268,118 @@ export class KeyCortexPersonalityService {
       return PERSONALITY_CONFIGS['jarvis'];
     }
     return config;
+  }
+
+  // ── LLM-Powered Persona & Tone ────────────────────────────
+
+  /**
+   * Use a tiny LLM prompt to classify the best persona for a query.
+   *
+   * Returns `null` when the LLM is unavailable or the classification is
+   * ambiguous; callers should fall back to the current/default persona.
+   */
+  async classifyPersona(
+    queryText: string,
+    businessId: string,
+  ): Promise<CortexPersona | null> {
+    if (!this.modelGateway) {
+      return null;
+    }
+
+    const personas = Object.keys(
+      PERSONALITY_CONFIGS,
+    ) as CortexPersona[];
+
+    const classifierPrompt = `You are a persona classifier for KEY, an AI business partner built into KeyFlowOS.
+Pick the single best persona from this list: ${personas.join(', ')}.
+
+Persona sketches:
+- jarvis: witty, sophisticated, general business advisor
+- friday: warm, proactive personal assistant
+- titan: profit-focused executive who speaks EBITDA, LTV, CAC
+- nova: wildly creative ideation partner
+- ghost: minimal-intervention observer
+- mentor: patient, educational guide
+- hustler: aggressive growth-focused revenue accelerator
+- jarvis_dark: tactical, no-nonsense operations commander
+
+Respond with ONLY the persona name (lowercase). If the query is ambiguous or general, respond with "ambiguous".`;
+
+    try {
+      const result = await this.modelGateway.complete({
+        businessId,
+        taskCategory: 'classification',
+        messages: [
+          { role: 'system', content: classifierPrompt },
+          { role: 'user', content: `Query: "${queryText.slice(0, 1000)}"\n\nBest persona:` },
+        ],
+        temperature: 0,
+        maxTokens: 20,
+      });
+
+      const raw = (result.content ?? '').trim().toLowerCase();
+      if (raw === 'ambiguous' || !personas.includes(raw as CortexPersona)) {
+        return null;
+      }
+      return raw as CortexPersona;
+    } catch (err: any) {
+      this.logger.warn(
+        `Persona classification failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Select a tone phrase and small temperature adjustment for a query.
+   *
+   * Uses mood-driven or query-driven heuristics. When no clear signal is
+   * present, falls back to the persona's default greeting style.
+   */
+  async selectTone(
+    queryText: string,
+    persona: CortexPersona,
+    mood?: CortexMood,
+  ): Promise<{ tone: string; temperatureAdjustment: number }> {
+    const config = this.getPersonalityConfig(persona);
+    const lower = (queryText ?? '').toLowerCase();
+
+    // Mood-driven baseline
+    if (mood && MOOD_TEMPERATURE_MAP[mood] !== undefined) {
+      const moodTemp = MOOD_TEMPERATURE_MAP[mood];
+      const delta = Math.round((moodTemp - config.temperature) * 100) / 100;
+      const clampedDelta = Math.max(-0.1, Math.min(0.1, delta));
+
+      const toneMap: Record<CortexMood, string> = {
+        focused: 'direct and focused',
+        creative: 'imaginative and energetic',
+        analytical: 'precise and data-driven',
+        casual: 'relaxed and conversational',
+        urgent: 'urgent and concise',
+      };
+
+      return { tone: toneMap[mood], temperatureAdjustment: clampedDelta };
+    }
+
+    // Query-driven heuristics
+    if (/\b(urgent|asap|immediately|critical|emergency|panic)\b/.test(lower)) {
+      return { tone: 'urgent and decisive', temperatureAdjustment: -0.1 };
+    }
+    if (/\b(idea|creative|brainstorm|write|draft|campaign|story|slogan)\b/.test(lower)) {
+      return { tone: 'creative and expansive', temperatureAdjustment: 0.1 };
+    }
+    if (/\b(analyze|data|numbers|metric|kpi|report|roi|forecast)\b/.test(lower)) {
+      return { tone: 'analytical and precise', temperatureAdjustment: -0.05 };
+    }
+    if (/\b(hi|hello|hey|thanks|thank you|good morning|good afternoon)\b/.test(lower)) {
+      return { tone: 'warm and conversational', temperatureAdjustment: 0 };
+    }
+
+    // Persona default
+    return {
+      tone: config.greetingStyle.replace(/_/g, ' '),
+      temperatureAdjustment: 0,
+    };
   }
 
   // ── Voice & Temperature ───────────────────────────────────
