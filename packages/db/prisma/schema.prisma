@@ -291,6 +291,8 @@ model Business {
   genomeRecommendationOutcomes GenomeRecommendationOutcome[]
   genomeOutcomeLearningWindows GenomeOutcomeLearningWindow[]
   cognitionMemories            CognitionMemory[]
+  cognitionSessions            CognitionSession[]
+  llmProviderCosts             LLMProviderCost[]
 
   // Finance OS (FIN1)
   financialAccounts       FinancialAccount[]
@@ -11566,6 +11568,53 @@ model CognitionMemory {
   @@index([businessId, userResponse])
   @@index([createdAt])
   @@map("cognition_memories")
+}
+
+// ── KEY 10/10: Cognition Session Context ─────────────────────────────
+model CognitionSession {
+  id              String   @id @default(cuid())
+  businessId      String   @map("business_id")
+  userId          String?  @map("user_id")
+  sessionId       String   @map("session_id") // external correlation id, e.g. CortexSession.id
+  status          String   @default("active") // active | paused | completed | failed
+  contextSnapshot Json?    @map("context_snapshot") @default("{}")
+  metadata        Json?    @default("{}")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, sessionId])
+  @@index([businessId, status])
+  @@index([createdAt])
+  @@map("cognition_sessions")
+}
+
+// ── KEY 10/10: LLM Provider Cost Telemetry ───────────────────────────
+model LLMProviderCost {
+  id                String   @id @default(cuid())
+  businessId        String   @map("business_id")
+  sessionId         String?  @map("session_id")
+  provider          String
+  model             String
+  taskCategory      String   @map("task_category")
+  promptTokens      Int      @map("prompt_tokens")
+  completionTokens  Int      @map("completion_tokens")
+  totalTokens       Int      @map("total_tokens")
+  inputCost         Float    @map("input_cost")
+  outputCost        Float    @map("output_cost")
+  totalCost         Float    @map("total_cost")
+  latencyMs         Int      @map("latency_ms")
+  fallbackUsed      Boolean  @default(false) @map("fallback_used")
+  metadata          Json?    @default("{}")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, createdAt])
+  @@index([businessId, provider])
+  @@index([businessId, taskCategory])
+  @@map("llm_provider_costs")
 }
 
 model ConnectorHealthLog {

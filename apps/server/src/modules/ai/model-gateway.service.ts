@@ -3,6 +3,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'crypto';
 import OpenAI from 'openai';
 import { validateOutputContract, type ContractType } from './ai-output-contracts';
+import { LLMCostService } from './llm-cost.service';
 
 export type AiProvider = 'openai' | 'anthropic' | 'xai' | 'kimi' | 'native' | 'opensource';
 
@@ -478,6 +479,7 @@ export class ModelGatewayService {
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
+    private readonly llmCost: LLMCostService,
   ) {
     this.openai = new OpenAI({
       apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
@@ -665,6 +667,10 @@ export class ModelGatewayService {
           }
         }
 
+        this.recordCostFromResponse(request, response).catch((err: unknown) => {
+          this.logger.warn(`Failed to record LLM cost: ${err instanceof Error ? err.message : String(err)}`);
+        });
+
         return response;
       } catch (err: any) {
         lastError = err as Error;
@@ -675,6 +681,54 @@ export class ModelGatewayService {
     }
 
     throw lastError || new Error('No AI providers available');
+  }
+
+  private async recordCostFromResponse(
+    request: GatewayRequest,
+    response: GatewayResponse,
+  ): Promise<void> {
+    await this.llmCost.recordCost({
+      businessId: request.businessId,
+      sessionId: null,
+      provider: response.provider,
+      model: response.model,
+      taskCategory: request.taskCategory,
+      promptTokens: response.usage.promptTokens,
+      completionTokens: response.usage.completionTokens,
+      totalTokens: response.usage.totalTokens,
+      inputCost: (response.usage.promptTokens / 1000) * (TOKEN_COST_PER_1K[response.model]?.input ?? 0),
+      outputCost: (response.usage.completionTokens / 1000) * (TOKEN_COST_PER_1K[response.model]?.output ?? 0),
+      totalCost: response.usage.estimatedCost,
+      latencyMs: response.latencyMs,
+      fallbackUsed: response.fallbackUsed,
+      metadata: { contractType: request.expectedContract },
+    });
+  }
+
+  private async recordCostFromStream(
+    request: GatewayRequest,
+    provider: AiProvider,
+    model: string,
+    usage: NonNullable<StreamChunk['usage']>,
+    latencyMs: number,
+    fallbackUsed: boolean,
+  ): Promise<void> {
+    await this.llmCost.recordCost({
+      businessId: request.businessId,
+      sessionId: null,
+      provider,
+      model,
+      taskCategory: request.taskCategory,
+      promptTokens: usage.promptTokens,
+      completionTokens: usage.completionTokens,
+      totalTokens: usage.totalTokens,
+      inputCost: (usage.promptTokens / 1000) * (TOKEN_COST_PER_1K[model]?.input ?? 0),
+      outputCost: (usage.completionTokens / 1000) * (TOKEN_COST_PER_1K[model]?.output ?? 0),
+      totalCost: usage.estimatedCost,
+      latencyMs,
+      fallbackUsed,
+      metadata: { source: 'stream', contractType: request.expectedContract },
+    });
   }
 
   async *streamComplete(request: GatewayRequest): AsyncGenerator<StreamChunk> {
@@ -733,10 +787,38 @@ export class ModelGatewayService {
       try {
         const startTime = Date.now();
         const stream = this.callProviderStream(request, candidate.provider, candidate.model, preferences);
+        let lastUsageChunk: StreamChunk | undefined;
 
         for await (const chunk of stream) {
-          yield {
+          const enriched = {
             ...chunk,
+            provider: candidate.provider,
+            model: candidate.model,
+            fallbackUsed,
+            fallbackProvider,
+          };
+
+          if (enriched.type === 'usage' && enriched.usage) {
+            lastUsageChunk = enriched;
+          }
+
+          yield enriched;
+        }
+
+        const latencyMs = Date.now() - startTime;
+        this.recordProviderSuccess(candidate.provider, latencyMs);
+
+        const usage = lastUsageChunk?.usage ?? {
+          promptTokens: 0,
+          completionTokens: 0,
+          totalTokens: 0,
+          estimatedCost: 0,
+        };
+
+        if (!lastUsageChunk) {
+          yield {
+            type: 'usage',
+            usage,
             provider: candidate.provider,
             model: candidate.model,
             fallbackUsed,
@@ -744,8 +826,10 @@ export class ModelGatewayService {
           };
         }
 
-        const latencyMs = Date.now() - startTime;
-        this.recordProviderSuccess(candidate.provider, latencyMs);
+        this.recordCostFromStream(request, candidate.provider, candidate.model, usage, latencyMs, fallbackUsed).catch((err: unknown) => {
+          this.logger.warn(`Failed to record stream LLM cost: ${err instanceof Error ? err.message : String(err)}`);
+        });
+
         return;
       } catch (err: any) {
         lastError = err as Error;

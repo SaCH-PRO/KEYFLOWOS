@@ -1,6 +1,8 @@
 # KEY 10/10 Roadmap v2 — Renovation-First Integration Plan
 
-> **Status:** Draft integration roadmap  
+> **Status:** In execution  
+> **Current phase:** Phase A — DB Primitives + Gateway Resilience (`feat/key-phase-a-gateway`)  
+> **Completed:** Phase 0 execution foundation merged to `main`.
 > **Scope:** How to evolve KEYFLOWOS toward a 10/10 autonomous business employee by *renovating the existing house*, not building a parallel mansion.  
 > **Companion documents:**
 > - `docs/development/KEY_10_10_ROADMAP.md` — the original strategic/target-state roadmap.

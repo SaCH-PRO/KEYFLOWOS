@@ -140,6 +140,7 @@ import { SelfAssessmentService } from './self-assessment.service';
 import { EscalationService } from './escalation.service';
 import { DigitalEmployeeAcceptanceService } from './digital-employee-acceptance.service';
 import { KeyCortexMemoryService } from './key-cortex-memory.service';
+import { CognitionSessionService } from './cognition-session.service';
 
 // -- Infrastructure --
 import { PrismaModule } from '../../core/prisma/prisma.module';
@@ -494,6 +495,9 @@ import { ActivityLogService } from '../activity/activity.service';
     KeyBiEngineService,
     KeyCortexLearningService,
     KeyCortexMemoryService,
+
+    // -- Phase A: Cognition session context primitive --
+    CognitionSessionService,
 
     // Canonical structured-memory writer (Phase 0.9 unification)
     UnifiedMemoryWriterService,
