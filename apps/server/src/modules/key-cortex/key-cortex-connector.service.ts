@@ -2920,7 +2920,7 @@ export class KeyCortexConnectorService {
     const start = Date.now();
     switch (command.action) {
       case 'create_post': {
-        const post = await (this.content as any).createPost({
+        const post = await this.content.createPost({
           businessId: command.businessId,
           title: command.parameters.title as string,
           body: command.parameters.body as string,
@@ -2934,7 +2934,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, post);
       }
       case 'schedule_post': {
-        const scheduled = await (this.content as any).schedulePost({
+        const scheduled = await this.content.schedulePost({
           businessId: command.businessId,
           postId: command.parameters.postId as string,
           scheduledAt: command.parameters.scheduledAt as string,
@@ -2943,14 +2943,14 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, scheduled);
       }
       case 'publish_post': {
-        const published = await (this.content as any).publishPost({
+        const published = await this.content.publishPost({
           businessId: command.businessId,
           postId: command.parameters.postId as string,
         });
         return this.ok(command, start, published);
       }
       case 'create_campaign': {
-        const campaign = await (this.content as any).createCampaign({
+        const campaign = await this.content.createCampaign({
           businessId: command.businessId,
           name: command.parameters.name as string,
           subject: command.parameters.subject as string,
@@ -2961,7 +2961,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, campaign);
       }
       case 'send_campaign': {
-        const sent = await (this.content as any).sendCampaign({
+        const sent = await this.content.sendCampaign({
           businessId: command.businessId,
           campaignId: command.parameters.campaignId as string,
           testOnly: (command.parameters.testOnly as boolean) || false,
@@ -2969,7 +2969,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, sent);
       }
       case 'generate_content': {
-        const generated = await (this.content as any).generateContent({
+        const generated = await this.content.generateContent({
           businessId: command.businessId,
           topic: command.parameters.topic as string,
           platform: command.parameters.platform as string,
@@ -2979,7 +2979,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, generated);
       }
       case 'update_post': {
-        const updated = await (this.content as any).updatePost({
+        const updated = await this.content.updatePost({
           businessId: command.businessId,
           postId: command.parameters.postId as string,
           title: command.parameters.title as string,
@@ -2989,7 +2989,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, updated);
       }
       case 'delete_post': {
-        await (this.content as any).deletePost({
+        await this.content.deletePost({
           businessId: command.businessId,
           postId: command.parameters.postId as string,
         });
@@ -3661,7 +3661,7 @@ export class KeyCortexConnectorService {
     // Phase 2: Social module integration via content service bridge
     switch (command.action) {
       case 'connect_account': {
-        const result = await (this.content as any).connectSocialAccount({
+        const result = await this.content.connectSocialAccount({
           businessId: command.businessId,
           platform: command.parameters.platform as string,
           handle: command.parameters.handle as string,
@@ -3670,14 +3670,14 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, result);
       }
       case 'disconnect_account': {
-        const result = await (this.content as any).disconnectSocialAccount({
+        const result = await this.content.disconnectSocialAccount({
           businessId: command.businessId,
           accountId: command.parameters.accountId as string,
         });
         return this.ok(command, start, result);
       }
       case 'schedule_social_post': {
-        const result = await (this.content as any).scheduleSocialPost({
+        const result = await this.content.scheduleSocialPost({
           businessId: command.businessId,
           accountId: command.parameters.accountId as string,
           body: command.parameters.body as string,
@@ -3687,7 +3687,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, result);
       }
       case 'publish_now': {
-        const result = await (this.content as any).publishSocialNow({
+        const result = await this.content.publishSocialNow({
           businessId: command.businessId,
           accountId: command.parameters.accountId as string,
           body: command.parameters.body as string,
@@ -3696,7 +3696,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, result);
       }
       case 'reply_to_comment': {
-        const result = await (this.content as any).replyToSocialComment({
+        const result = await this.content.replyToSocialComment({
           businessId: command.businessId,
           accountId: command.parameters.accountId as string,
           postId: command.parameters.postId as string,
@@ -3706,7 +3706,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, result);
       }
       case 'delete_social_post': {
-        const result = await (this.content as any).deleteSocialPost({
+        const result = await this.content.deleteSocialPost({
           businessId: command.businessId,
           accountId: command.parameters.accountId as string,
           postId: command.parameters.postId as string,
@@ -3914,7 +3914,7 @@ export class KeyCortexConnectorService {
     const start = Date.now();
     switch (command.action) {
       case 'log_activity': {
-        const entry = await (this.activity as any).log({
+        const entry = await this.activity.log({
           businessId: command.businessId,
           entityType: command.parameters.entityType as string,
           entityId: command.parameters.entityId as string,
@@ -3926,14 +3926,14 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, entry);
       }
       case 'log_bulk_activity': {
-        const entries = await (this.activity as any).logBulk({
+        const entries = await this.activity.logBulk({
           businessId: command.businessId,
           events: command.parameters.events as Array<Record<string, unknown>>,
         });
         return this.ok(command, start, entries);
       }
       case 'create_audit_note': {
-        const note = await (this.activity as any).createAuditNote({
+        const note = await this.activity.createAuditNote({
           businessId: command.businessId,
           entityType: command.parameters.entityType as string,
           entityId: command.parameters.entityId as string,
@@ -3942,7 +3942,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, note);
       }
       case 'export_audit_log': {
-        const exported = await (this.activity as any).exportAuditLog({
+        const exported = await this.activity.exportAuditLog({
           businessId: command.businessId,
           from: command.parameters.from as string,
           to: command.parameters.to as string,
@@ -3952,7 +3952,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, exported);
       }
       case 'delete_old_logs': {
-        const deleted = await (this.activity as any).deleteOldLogs({
+        const deleted = await this.activity.deleteOldLogs({
           businessId: command.businessId,
           olderThanDays: command.parameters.olderThanDays as number,
           entityType: command.parameters.entityType as string,
@@ -4043,8 +4043,8 @@ export class KeyCortexConnectorService {
 
     // Content context
     try {
-      const drafts = await (this.content as any).getDrafts({ businessId, limit: 5 });
-      const scheduled = await (this.content as any).getScheduledPosts({ businessId, from: new Date().toISOString(), limit: 5 });
+      const drafts = await this.content.getDrafts({ businessId, limit: 5 });
+      const scheduled = await this.content.getScheduledPosts({ businessId, from: new Date().toISOString(), limit: 5 });
       modules.content = {
         module: 'content',
         summary: `${drafts.length} drafts, ${scheduled.length} scheduled posts`,
@@ -4146,7 +4146,7 @@ export class KeyCortexConnectorService {
 
     // Activity context
     try {
-      const recentActivity = await (this.activity as any).getRecent({ businessId, limit: 20 });
+      const recentActivity = await this.activity.getRecent({ businessId, limit: 20 });
       modules.activity = {
         module: 'activity',
         summary: `${recentActivity.length} recent activity entries`,
