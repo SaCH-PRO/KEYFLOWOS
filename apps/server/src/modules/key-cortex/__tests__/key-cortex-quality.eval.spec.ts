@@ -14,10 +14,30 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { KeyCortexReasoningService } from '../key-cortex-reasoning.service';
 import { AdaptiveRouterService } from '../adaptive-router.service';
+import { KeyCortexSessionService } from '../key-cortex-session.service';
+import { KeyCortexPromptContextService } from '../key-cortex-prompt-context.service';
+import { KeyCortexToolLoopService } from '../key-cortex-tool-loop.service';
+import { KeyCortexActionDetectionService } from '../key-cortex-action-detection.service';
+import { KeyCortexLegacyInsightService } from '../key-cortex-legacy-insight.service';
+import { KeyCortexProviderSelectionService } from '../key-cortex-provider-selection.service';
+import { KeyCortexStructuredOutputService } from '../key-cortex-structured-output.service';
+import { KeyCortexMoodDetectionService } from '../key-cortex-mood-detection.service';
+import { KeyCortexSuggestionService } from '../key-cortex-suggestion.service';
+import { KeyCortexGenomeContextService } from '../key-cortex-genome-context.service';
+import { KeyCortexSystemPromptService } from '../key-cortex-system-prompt.service';
+import { KeyCortexInteractionService } from '../key-cortex-interaction.service';
+import { KeyCortexCommandExecutionService } from '../key-cortex-command-execution.service';
+import { KeyCortexQueryPipelineService } from '../key-cortex-query-pipeline.service';
 
 const baseContextSnapshot = {
   businessId: 'biz-1',
-  genomeDna: { execution: 60, strategy: 55, finance: 50, marketing: 65, operations: 60 },
+  genomeDna: {
+    execution: 60,
+    strategy: 55,
+    finance: 50,
+    marketing: 65,
+    operations: 60,
+  },
   genomeStage: 'growth',
   executiveReadiness: 60,
   recentTasks: [],
@@ -80,7 +100,12 @@ function createMocks() {
 **Confidence**: 75%`,
         provider: 'openai',
         model: 'gpt-4o',
-        usage: { totalTokens: 120, promptTokens: 70, completionTokens: 50, estimatedCost: 0.003 },
+        usage: {
+          totalTokens: 120,
+          promptTokens: 70,
+          completionTokens: 50,
+          estimatedCost: 0.003,
+        },
         fallbackUsed: false,
       }),
       streamComplete: vi.fn().mockImplementation(async function* () {
@@ -88,9 +113,13 @@ function createMocks() {
       }),
     },
     personalityService: {
-      getPersonalityConfig: vi.fn().mockReturnValue({ persona: 'jarvis', temperature: 0.7 }),
+      getPersonalityConfig: vi.fn().mockReturnValue({
+        persona: 'jarvis',
+        temperature: 0.7,
+      }),
       buildSystemPrompt: vi.fn().mockReturnValue('You are KEY.'),
       getRoleSystemPrompt: vi.fn().mockReturnValue(''),
+      buildValueBlock: vi.fn().mockResolvedValue(''),
     },
     contextService: {
       buildContextSnapshot: vi.fn().mockResolvedValue(baseContextSnapshot),
@@ -104,6 +133,63 @@ function createMocks() {
 }
 
 function createEvalService(mocks: ReturnType<typeof createMocks>) {
+  const sessionService = new KeyCortexSessionService(
+    mocks.prisma as any,
+    mocks.redis as any,
+  );
+  const promptContextService = new KeyCortexPromptContextService(
+    mocks.contextService as any,
+  );
+  const structuredOutputService = new KeyCortexStructuredOutputService();
+  const moodDetectionService = new KeyCortexMoodDetectionService();
+  const actionDetectionService = new KeyCortexActionDetectionService();
+  const providerSelectionService = new KeyCortexProviderSelectionService();
+  const systemPromptService = new KeyCortexSystemPromptService(
+    mocks.personalityService as any,
+  );
+  const genomeContextService = new KeyCortexGenomeContextService(
+    mocks.redis as any,
+  );
+  const suggestionService = new KeyCortexSuggestionService(
+    mocks.modelGateway as any,
+    mocks.contextService as any,
+  );
+  const legacyInsightService = new KeyCortexLegacyInsightService(
+    mocks.modelGateway as any,
+    mocks.prisma as any,
+    mocks.contextService as any,
+  );
+  const toolLoopService = new KeyCortexToolLoopService(
+    mocks.modelGateway as any,
+    mocks.prisma as any,
+  );
+  const interactionService = new KeyCortexInteractionService(
+    mocks.modelGateway as any,
+    mocks.prisma as any,
+    mocks.redis as any,
+    genomeContextService,
+  );
+  const commandExecutionService = new KeyCortexCommandExecutionService(
+    mocks.prisma as any,
+  );
+  const queryPipeline = new KeyCortexQueryPipelineService(
+    mocks.modelGateway as any,
+    mocks.prisma as any,
+    mocks.redis as any,
+    mocks.personalityService as any,
+    mocks.contextService as any,
+    mocks.actionsService as any,
+    sessionService,
+    promptContextService,
+    toolLoopService,
+    actionDetectionService,
+    suggestionService,
+    genomeContextService,
+    systemPromptService,
+    structuredOutputService,
+    moodDetectionService,
+  );
+
   return new KeyCortexReasoningService(
     mocks.modelGateway as any,
     mocks.prisma as any,
@@ -111,17 +197,51 @@ function createEvalService(mocks: ReturnType<typeof createMocks>) {
     mocks.personalityService as any,
     mocks.contextService as any,
     mocks.actionsService as any,
+    sessionService,
+    promptContextService,
+    toolLoopService,
+    actionDetectionService,
+    legacyInsightService,
+    providerSelectionService,
+    structuredOutputService,
+    moodDetectionService,
+    suggestionService,
+    genomeContextService,
+    systemPromptService,
+    interactionService,
+    commandExecutionService,
+    queryPipeline,
     new AdaptiveRouterService(),
   );
 }
 
 describe('KEY Cortex Quality Evaluation Harness', () => {
   const queries = [
-    { text: 'What should I focus on this week?', complexity: 'simple', targetMs: 1000 },
-    { text: 'How can I improve cash flow and reduce overdue invoices?', complexity: 'moderate', targetMs: 2000 },
-    { text: 'Create a 90-day growth plan considering my team capacity, customer churn, and current pipeline.', complexity: 'complex', targetMs: 4000 },
-    { text: 'My best employee just resigned. What should I do?', complexity: 'moderate', targetMs: 2000 },
-    { text: 'Write a follow-up email to a client who has not paid their invoice.', complexity: 'simple', targetMs: 1000 },
+    {
+      text: 'What should I focus on this week?',
+      complexity: 'simple',
+      targetMs: 1000,
+    },
+    {
+      text: 'How can I improve cash flow and reduce overdue invoices?',
+      complexity: 'moderate',
+      targetMs: 2000,
+    },
+    {
+      text: 'Create a 90-day growth plan considering my team capacity, customer churn, and current pipeline.',
+      complexity: 'complex',
+      targetMs: 4000,
+    },
+    {
+      text: 'My best employee just resigned. What should I do?',
+      complexity: 'moderate',
+      targetMs: 2000,
+    },
+    {
+      text: 'Write a follow-up email to a client who has not paid their invoice.',
+      complexity: 'simple',
+      targetMs: 1000,
+    },
   ];
 
   beforeEach(() => {

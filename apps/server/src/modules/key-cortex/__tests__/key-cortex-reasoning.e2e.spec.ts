@@ -2,10 +2,30 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { KeyCortexReasoningService } from '../key-cortex-reasoning.service';
 import { AdaptiveRouterService } from '../adaptive-router.service';
 import { KeyCortexLearningService } from '../key-cortex-learning.service';
+import { KeyCortexSessionService } from '../key-cortex-session.service';
+import { KeyCortexPromptContextService } from '../key-cortex-prompt-context.service';
+import { KeyCortexToolLoopService } from '../key-cortex-tool-loop.service';
+import { KeyCortexActionDetectionService } from '../key-cortex-action-detection.service';
+import { KeyCortexLegacyInsightService } from '../key-cortex-legacy-insight.service';
+import { KeyCortexProviderSelectionService } from '../key-cortex-provider-selection.service';
+import { KeyCortexStructuredOutputService } from '../key-cortex-structured-output.service';
+import { KeyCortexMoodDetectionService } from '../key-cortex-mood-detection.service';
+import { KeyCortexSuggestionService } from '../key-cortex-suggestion.service';
+import { KeyCortexGenomeContextService } from '../key-cortex-genome-context.service';
+import { KeyCortexSystemPromptService } from '../key-cortex-system-prompt.service';
+import { KeyCortexInteractionService } from '../key-cortex-interaction.service';
+import { KeyCortexCommandExecutionService } from '../key-cortex-command-execution.service';
+import { KeyCortexQueryPipelineService } from '../key-cortex-query-pipeline.service';
 
 const baseContextSnapshot = {
   businessId: 'biz-1',
-  genomeDna: { execution: 50, strategy: 50, finance: 50, marketing: 50, operations: 50 },
+  genomeDna: {
+    execution: 50,
+    strategy: 50,
+    finance: 50,
+    marketing: 50,
+    operations: 50,
+  },
   genomeStage: 'startup',
   executiveReadiness: 50,
   recentTasks: [],
@@ -70,7 +90,12 @@ const mockModelGateway = {
 **Confidence**: 80%`,
     provider: 'openai',
     model: 'gpt-4o',
-    usage: { totalTokens: 100, promptTokens: 60, completionTokens: 40, estimatedCost: 0.002 },
+    usage: {
+      totalTokens: 100,
+      promptTokens: 60,
+      completionTokens: 40,
+      estimatedCost: 0.002,
+    },
     fallbackUsed: false,
   }),
   streamComplete: vi.fn().mockImplementation(async function* () {
@@ -86,6 +111,7 @@ const mockPersonalityService = {
   }),
   buildSystemPrompt: vi.fn().mockReturnValue('You are KEY.'),
   getRoleSystemPrompt: vi.fn().mockReturnValue(''),
+  buildValueBlock: vi.fn().mockResolvedValue(''),
 };
 
 const mockContextService = {
@@ -101,18 +127,105 @@ const mockActionsService = {
 const mockLearningService = {
   recordObservation: vi.fn().mockResolvedValue(undefined),
   retrieveLessons: vi.fn().mockResolvedValue([]),
-  calibrateConfidence: vi.fn().mockResolvedValue({ calibrated: 0.75, gap: 0, reliable: false }),
+  calibrateConfidence: vi.fn().mockResolvedValue({
+    calibrated: 0.75,
+    gap: 0,
+    reliable: false,
+  }),
 };
 
 function createService(options: { learning?: boolean } = {}) {
-  const learning = options.learning ? (mockLearningService as any) : undefined;
-  return new KeyCortexReasoningService(
+  const prisma = createMockPrisma();
+  const sessionService = new KeyCortexSessionService(prisma as any, mockRedis as any);
+  const promptContextService = new KeyCortexPromptContextService(
+    mockContextService as any,
+  );
+  const structuredOutputService = new KeyCortexStructuredOutputService();
+  const moodDetectionService = new KeyCortexMoodDetectionService();
+  const actionDetectionService = new KeyCortexActionDetectionService();
+  const providerSelectionService = new KeyCortexProviderSelectionService();
+  const systemPromptService = new KeyCortexSystemPromptService(
+    mockPersonalityService as any,
+  );
+  const genomeContextService = new KeyCortexGenomeContextService(
+    mockRedis as any,
+  );
+  const suggestionService = new KeyCortexSuggestionService(
     mockModelGateway as any,
-    createMockPrisma() as any,
+    mockContextService as any,
+  );
+  const legacyInsightService = new KeyCortexLegacyInsightService(
+    mockModelGateway as any,
+    prisma as any,
+    mockContextService as any,
+  );
+  const toolLoopService = new KeyCortexToolLoopService(
+    mockModelGateway as any,
+    prisma as any,
+  );
+  const interactionService = new KeyCortexInteractionService(
+    mockModelGateway as any,
+    prisma as any,
+    mockRedis as any,
+    genomeContextService,
+  );
+  const commandExecutionService = new KeyCortexCommandExecutionService(
+    prisma as any,
+  );
+  const queryPipeline = new KeyCortexQueryPipelineService(
+    mockModelGateway as any,
+    prisma as any,
     mockRedis as any,
     mockPersonalityService as any,
     mockContextService as any,
     mockActionsService as any,
+    sessionService,
+    promptContextService,
+    toolLoopService,
+    actionDetectionService,
+    suggestionService,
+    genomeContextService,
+    systemPromptService,
+    structuredOutputService,
+    moodDetectionService,
+    ...(options.learning
+      ? [
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          mockLearningService as any,
+        ]
+      : []),
+  );
+  const learning = options.learning ? (mockLearningService as any) : undefined;
+
+  return new KeyCortexReasoningService(
+    mockModelGateway as any,
+    prisma as any,
+    mockRedis as any,
+    mockPersonalityService as any,
+    mockContextService as any,
+    mockActionsService as any,
+    sessionService,
+    promptContextService,
+    toolLoopService,
+    actionDetectionService,
+    legacyInsightService,
+    providerSelectionService,
+    structuredOutputService,
+    moodDetectionService,
+    suggestionService,
+    genomeContextService,
+    systemPromptService,
+    interactionService,
+    commandExecutionService,
+    queryPipeline,
     new AdaptiveRouterService(),
     undefined,
     undefined,

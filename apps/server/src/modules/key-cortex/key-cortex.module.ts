@@ -91,6 +91,22 @@ import { KeyCortexContextV2Service } from './key-cortex-context-v2.service';
 import { KeyCortexInsightService } from './key-cortex-insight.service';
 import { KeyCortexMonitorV2Service } from './key-cortex-monitor-v2.service';
 
+// -- Phase 0.7b: Decomposed reasoning services --
+import { KeyCortexSessionService } from './key-cortex-session.service';
+import { KeyCortexPromptContextService } from './key-cortex-prompt-context.service';
+import { KeyCortexToolLoopService } from './key-cortex-tool-loop.service';
+import { KeyCortexActionDetectionService } from './key-cortex-action-detection.service';
+import { KeyCortexLegacyInsightService } from './key-cortex-legacy-insight.service';
+import { KeyCortexProviderSelectionService } from './key-cortex-provider-selection.service';
+import { KeyCortexStructuredOutputService } from './key-cortex-structured-output.service';
+import { KeyCortexMoodDetectionService } from './key-cortex-mood-detection.service';
+import { KeyCortexSuggestionService } from './key-cortex-suggestion.service';
+import { KeyCortexGenomeContextService } from './key-cortex-genome-context.service';
+import { KeyCortexSystemPromptService } from './key-cortex-system-prompt.service';
+import { KeyCortexInteractionService } from './key-cortex-interaction.service';
+import { KeyCortexCommandExecutionService } from './key-cortex-command-execution.service';
+import { KeyCortexQueryPipelineService } from './key-cortex-query-pipeline.service';
+
 // -- v3 Phase 3 & 4 Services --
 import { KeyCortexSandboxService } from './key-cortex-sandbox.service';
 import { KeyCortexFlowStudioService } from './key-cortex-flow-studio.service';
@@ -224,6 +240,22 @@ import { ActivityLogService } from '../activity/activity.service';
 
     // Reasoning engine -- core brain, streaming, provider routing
     KeyCortexReasoningService,
+
+    // -- Phase 0.7b: Decomposed reasoning delegate services --
+    KeyCortexSessionService,
+    KeyCortexPromptContextService,
+    KeyCortexToolLoopService,
+    KeyCortexActionDetectionService,
+    KeyCortexLegacyInsightService,
+    KeyCortexProviderSelectionService,
+    KeyCortexStructuredOutputService,
+    KeyCortexMoodDetectionService,
+    KeyCortexSuggestionService,
+    KeyCortexGenomeContextService,
+    KeyCortexSystemPromptService,
+    KeyCortexInteractionService,
+    KeyCortexCommandExecutionService,
+    KeyCortexQueryPipelineService,
 
     // Adaptive router -- lightweight multi-dimensional query classifier
     AdaptiveRouterService,
@@ -394,6 +426,20 @@ import { ActivityLogService } from '../activity/activity.service';
     KeyCortexPersonalityService,
     KeyCortexContextService,
     KeyCortexReasoningService,
+    KeyCortexSessionService,
+    KeyCortexPromptContextService,
+    KeyCortexToolLoopService,
+    KeyCortexActionDetectionService,
+    KeyCortexLegacyInsightService,
+    KeyCortexProviderSelectionService,
+    KeyCortexStructuredOutputService,
+    KeyCortexMoodDetectionService,
+    KeyCortexSuggestionService,
+    KeyCortexGenomeContextService,
+    KeyCortexSystemPromptService,
+    KeyCortexInteractionService,
+    KeyCortexCommandExecutionService,
+    KeyCortexQueryPipelineService,
     AdaptiveRouterService,
     KeyCortexConversationService,
     KeyCortexActionsService,
