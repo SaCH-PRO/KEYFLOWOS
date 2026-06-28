@@ -82,6 +82,7 @@ export interface BlueprintBrand {
   secondaryColor?: string;
   logoUrl?: string;
   valueProps?: string[];
+  doNotSay?: string[];
 }
 
 export interface BlueprintCustomerModel {

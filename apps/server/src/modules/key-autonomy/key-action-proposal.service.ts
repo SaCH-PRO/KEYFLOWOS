@@ -5,6 +5,7 @@ import { TemporalFlowService } from '../temporal-flow/temporal-flow.service';
 import { KeyActionExecutorService } from './key-action-executor.service';
 import { KeyActionPolicyService } from './key-action-policy.service';
 import { KeyActionGenomePolicyService } from './key-action-genome-policy.service';
+import { AutonomyOrchestratorService } from './autonomy-orchestrator.service';
 import type {
   CreateKeyActionProposalInput,
   KeyActionProposalData,
@@ -24,6 +25,7 @@ export class KeyActionProposalService {
     @Inject(KeyActionPolicyService) private readonly policy: KeyActionPolicyService,
     @Inject(KeyActionExecutorService) private readonly executor: KeyActionExecutorService,
     @Inject(KeyActionGenomePolicyService) private readonly genomePolicy: KeyActionGenomePolicyService,
+    @Inject(AutonomyOrchestratorService) private readonly autonomyOrchestrator: AutonomyOrchestratorService,
   ) {}
 
   async create(
@@ -194,6 +196,45 @@ export class KeyActionProposalService {
 
     if ((proposal.riskLevel === 'HIGH' || proposal.riskLevel === 'CRITICAL') && !confirm) {
       throw new NotFoundException('High-risk action requires explicit confirmation');
+    }
+
+    const actionKey = `key_autonomy.${proposal.actionType}`;
+    const autonomyVerdict = await this.autonomyOrchestrator.evaluateAction(
+      businessId,
+      actionKey,
+      (proposal.payload as Record<string, unknown>) ?? {},
+      { proposedBy: executedBy },
+    );
+
+    if (!autonomyVerdict.allowed) {
+      const row = await this.prisma.client.keyActionProposal.update({
+        where: { id: proposalId },
+        data: {
+          status: 'BLOCKED',
+          executedBy: executedBy ?? null,
+          executedAt: new Date(),
+          failureReason: autonomyVerdict.reason,
+        },
+      });
+
+      await this.emitLifecycleEvent(
+        businessId,
+        proposalId,
+        proposal.actionType,
+        'key.action.blocked_by_autonomy',
+        'HIGH',
+        {
+          executedBy,
+          reason: autonomyVerdict.reason,
+          ruleTrace: autonomyVerdict.ruleTrace,
+        },
+      );
+
+      throw new BadRequestException(autonomyVerdict.reason);
+    }
+
+    if (autonomyVerdict.requiresApproval && !confirm) {
+      throw new BadRequestException(autonomyVerdict.reason);
     }
 
     const genomeDecision = await this.genomePolicy.evaluateExecution(businessId, proposal);

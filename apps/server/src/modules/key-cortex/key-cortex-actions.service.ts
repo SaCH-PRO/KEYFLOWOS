@@ -1,18 +1,43 @@
+/**
+ * KeyCortexActionsService — Legacy action execution facade.
+ *
+ * This service now delegates all execution to the canonical
+ * KeyCortexToolRegistry. It exists to preserve the existing
+ * CortexActionType API and approval flow while the body migrates
+ * to the unified tool registry.
+ *
+ * Long-term: callers should use KeyCortexToolRegistryService directly.
+ */
+
 import {
   Injectable,
   Logger,
   BadRequestException,
   ServiceUnavailableException,
+  OnModuleInit,
+  Optional,
+  Inject,
 } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { KeyToolRegistryService } from '../ai/key-tool-registry.service';
 import { KeyCommandService } from '../ai/key-command.service';
 import { KeyCortexApprovalService } from './key-cortex-approval.service';
+import { KeyCortexSafeDatabaseService } from './key-cortex-safe-database.service';
+import {
+  KeyCortexEventBusService,
+  KeyCortexEvent,
+} from './key-cortex-event-bus.service';
+import {
+  KeyCortexToolContext,
+  KeyCortexToolDefinition,
+  KeyCortexToolRegistryService,
+  KeyCortexToolResult,
+} from './key-cortex-tool-registry.service';
 import {
   CortexActionResult,
   CortexActionType,
   CortexSession,
-  CortexMessage,
+  GatewayToolDefinition,
 } from './key-cortex.types';
 
 /**
@@ -51,57 +76,81 @@ const ACTION_PARAM_SCHEMA: Record<CortexActionType, string[]> = {
   EXECUTE_TOOL: ['toolName'],
 };
 
-/**
- * GatewayToolDefinition — shape of tool definitions passed to the AI gateway
- * for function-calling support.
- */
-export interface GatewayToolDefinition {
-  name: string;
-  description: string;
-  parameters: {
-    type: 'object';
-    properties: Record<string, unknown>;
-    required: string[];
-  };
-}
-
-/**
- * KeyCortexActionsService — Action execution engine for KEY Cortex.
- *
- * Responsibilities:
- * - Parse action intents from AI responses
- * - Execute actions via existing service layer (KeyToolRegistryService, KeyCommandService)
- * - Request user approval for high-impact actions
- * - Track action execution history via Prisma
- * - Rollback failed actions where possible
- *
- * @example
- * const results = await actionsService.executeActions(parsedActions, session);
- */
 @Injectable()
-export class KeyCortexActionsService {
+export class KeyCortexActionsService implements OnModuleInit {
   private readonly logger = new Logger(KeyCortexActionsService.name);
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly toolRegistry: KeyToolRegistryService,
+    @Optional()
+    @Inject(KeyToolRegistryService)
+    private readonly toolRegistry: KeyToolRegistryService | undefined,
     private readonly commandService: KeyCommandService,
+    private readonly keyCortexToolRegistry: KeyCortexToolRegistryService,
+    private readonly eventBus?: KeyCortexEventBusService,
     private readonly approvalService?: KeyCortexApprovalService,
+    @Optional()
+    @Inject(KeyCortexSafeDatabaseService)
+    private readonly safeDatabase?: KeyCortexSafeDatabaseService,
   ) {}
+
+  onModuleInit(): void {
+    this.registerLegacyTools();
+  }
+
+  // ========================================================================
+  // Legacy tool registration (migrated to canonical registry)
+  // ========================================================================
+
+  private registerLegacyTools(): void {
+    const definitions: KeyCortexToolDefinition[] = [
+      this.makeTool('cortex.create_task', 'workflow', 'Create a task or to-do item', 1, false, ['title'], { description: { type: 'string' }, assigneeId: { type: 'string' }, dueDate: { type: 'string' }, priority: { type: 'string' } }, this.handleCreateTask.bind(this)),
+      this.makeTool('cortex.create_event', 'calendar', 'Create a calendar event', 1, false, ['title', 'startTime'], { endTime: { type: 'string' }, attendees: { type: 'array', items: { type: 'string' } }, description: { type: 'string' } }, this.handleCreateEvent.bind(this)),
+      this.makeTool('cortex.send_message', 'communication', 'Send a message or notification', 2, true, ['recipientId', 'content'], { channel: { type: 'string', enum: ['in_app', 'email', 'sms', 'push'] } }, this.handleSendMessage.bind(this)),
+      this.makeTool('cortex.create_document', 'document', 'Create a document', 1, false, ['title', 'content'], { type: { type: 'string' } }, this.handleCreateDocument.bind(this)),
+      this.makeTool('cortex.analyze_data', 'data', 'Run data analysis', 1, false, ['dataSource'], { metric: { type: 'string' }, timeframe: { type: 'string' } }, this.handleAnalyzeData.bind(this)),
+      this.makeTool('cortex.generate_report', 'data', 'Generate a business report', 1, false, ['reportType'], { timeframe: { type: 'string' }, format: { type: 'string' } }, this.handleGenerateReport.bind(this)),
+      this.makeTool('cortex.execute_flow', 'workflow', 'Execute a workflow or automation', 3, true, ['flowId'], { flowInputs: { type: 'object' } }, this.handleExecuteFlow.bind(this)),
+      this.makeTool('cortex.create_lead', 'crm', 'Create a new CRM lead', 2, true, ['name', 'email'], { phone: { type: 'string' }, source: { type: 'string' }, notes: { type: 'string' } }, this.handleCreateLead.bind(this)),
+      this.makeTool('cortex.update_crm', 'crm', 'Update a CRM record', 2, true, ['entityType', 'entityId'], { updates: { type: 'object' } }, this.handleUpdateCrm.bind(this)),
+      this.makeTool('cortex.create_invoice', 'finance', 'Generate an invoice for a customer', 3, true, ['customerId', 'items'], { dueDate: { type: 'string' }, notes: { type: 'string' } }, this.handleCreateInvoice.bind(this)),
+      this.makeTool('cortex.send_email', 'communication', 'Send an email', 3, true, ['to', 'subject', 'body'], { cc: { type: 'string' }, bcc: { type: 'string' } }, this.handleSendEmail.bind(this)),
+      this.makeTool('cortex.search_knowledge', 'ai', 'Search the knowledge base', 1, false, ['query'], { limit: { type: 'number' } }, this.handleSearchKnowledge.bind(this)),
+      this.makeTool('cortex.execute_tool', 'ai', 'Execute any registered tool by name', 2, true, ['toolName'], { toolParams: { type: 'object' } }, this.handleExecuteTool.bind(this)),
+      this.makeTool('cortex.query_database', 'data', 'Run a raw database query', 4, true, ['query'], {}, this.handleQueryDatabase.bind(this)),
+      this.makeTool('cortex.update_record', 'data', 'Update any record', 3, true, ['recordType', 'recordId'], { data: { type: 'object' } }, this.handleUpdateRecord.bind(this)),
+      this.makeTool('cortex.schedule_reminder', 'calendar', 'Schedule a reminder', 1, false, ['message', 'triggerTime'], { recipientId: { type: 'string' } }, this.handleScheduleReminder.bind(this)),
+    ];
+
+    this.keyCortexToolRegistry.registerMany(definitions);
+    this.logger.log(`[KeyCortexActionsService] Registered ${definitions.length} legacy tools into canonical registry`);
+  }
+
+  private makeTool(
+    name: string,
+    module: string,
+    description: string,
+    riskTier: 1 | 2 | 3 | 4,
+    requiresApproval: boolean,
+    required: string[],
+    properties: Record<string, unknown>,
+    legacyHandler: (params: Record<string, unknown>, businessId: string) => Promise<KeyCortexToolResult>,
+  ): KeyCortexToolDefinition {
+    return {
+      name,
+      module,
+      description,
+      riskTier,
+      requiresApproval,
+      parameters: { type: 'object', properties, required },
+      handler: async (ctx, input) => legacyHandler(input, ctx.businessId),
+    };
+  }
 
   // ========================================================================
   // Batch & Single Action Execution
   // ========================================================================
 
-  /**
-   * Execute a batch of actions sequentially within a session context.
-   * Each action is executed in order; failures are captured but do not
-   * halt subsequent actions unless `stopOnError` is enabled.
-   *
-   * @param actions   Array of action results (may come from AI parsing)
-   * @param session   Current Cortex session for context & audit
-   * @returns         Array of executed action results with status
-   */
   async executeActions(
     actions: CortexActionResult[],
     session: CortexSession,
@@ -114,7 +163,6 @@ export class KeyCortexActionsService {
 
     for (const action of actions) {
       try {
-        // Check approval gate for high-impact actions
         if (this.requiresApproval(action)) {
           const approval = await this.requestApproval(action, session);
           if (!approval.approved) {
@@ -130,114 +178,76 @@ export class KeyCortexActionsService {
           }
         }
 
-        const result = await this.executeAction(action, session.businessId);
+        const result = await this.executeAction(action, session.businessId, session.userId, session.id);
         results.push(result);
-
-        // Track execution for audit trail
         await this.trackActionExecution(result, session.id);
+        this.emitActionEvent(action.actionType, result, session);
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : 'Unknown error';
         this.logger.error(
           `Action "${action.actionType}" failed: ${message}`,
           error instanceof Error ? error.stack : undefined,
         );
-        results.push({
+        const failedResult: CortexActionResult = {
           ...action,
           status: 'error',
           description: `Failed to execute ${action.actionType}`,
           error: message,
-        });
-        await this.trackActionExecution(results[results.length - 1], session.id);
+        };
+        results.push(failedResult);
+        await this.trackActionExecution(failedResult, session.id);
       }
     }
 
     this.logger.log(
-      `Batch execution complete: ${results.filter((r: any) => r.status === 'success').length}/${actions.length} succeeded`,
+      `Batch execution complete: ${results.filter((r: any) => r.status === 'success').length}/${results.length} succeeded`,
     );
     return results;
   }
 
-  /**
-   * Execute a single action by delegating to the appropriate handler.
-   *
-   * @param action     The action to execute
-   * @param businessId Tenant-scoped business identifier
-   * @returns          Action result with status and payload
-   */
   async executeAction(
     action: CortexActionResult,
     businessId: string,
+    userId?: string,
+    sessionId?: string,
   ): Promise<CortexActionResult> {
     const { actionType, result: params = {} } = action;
-
     this.logger.debug(`Executing action "${actionType}" for business ${businessId}`);
-
-    // Validate required parameters
     this.validateActionParams(actionType, params);
 
-    // Dispatch to the appropriate handler
-    switch (actionType) {
-      case 'CREATE_TASK':
-        return this.handleCreateTask(params, businessId);
-      case 'CREATE_EVENT':
-        return this.handleCreateEvent(params, businessId);
-      case 'SEND_MESSAGE':
-        return this.handleSendMessage(params, businessId);
-      case 'CREATE_DOCUMENT':
-        return this.handleCreateDocument(params, businessId);
-      case 'ANALYZE_DATA':
-        return this.handleAnalyzeData(params, businessId);
-      case 'GENERATE_REPORT':
-        return this.handleGenerateReport(params, businessId);
-      case 'EXECUTE_FLOW':
-        return this.handleExecuteFlow(params, businessId);
-      case 'CREATE_LEAD':
-        return this.handleCreateLead(params, businessId);
-      case 'UPDATE_CRM':
-        return this.handleUpdateCrm(params, businessId);
-      case 'CREATE_INVOICE':
-        return this.handleCreateInvoice(params, businessId);
-      case 'SEARCH_KNOWLEDGE':
-        return this.handleSearchKnowledge(params, businessId);
-      case 'EXECUTE_TOOL':
-        return this.handleExecuteTool(params, businessId);
-      case 'QUERY_DATABASE':
-        return this.handleQueryDatabase(params, businessId);
-      case 'UPDATE_RECORD':
-        return this.handleUpdateRecord(params, businessId);
-      case 'SEND_EMAIL':
-        return this.handleSendEmail(params, businessId);
-      case 'SCHEDULE_REMINDER':
-        return this.handleScheduleReminder(params, businessId);
-      default:
-        throw new BadRequestException(`Unsupported action type: ${actionType}`);
-    }
+    const toolName = this.actionTypeToToolName(actionType);
+    const ctx: KeyCortexToolContext = {
+      businessId,
+      userId,
+      sessionId,
+      autonomyLevel: 4,
+    };
+
+    const toolResult = await this.keyCortexToolRegistry.execute(toolName, ctx, params as Record<string, unknown>);
+
+    return {
+      actionType,
+      status: toolResult.success ? 'success' : 'error',
+      description: toolResult.success
+        ? `Executed ${actionType}`
+        : `Failed to execute ${actionType}: ${toolResult.error}`,
+      result: toolResult.success ? (toolResult.data as Record<string, unknown> ?? {}) : undefined,
+      error: toolResult.success ? undefined : toolResult.error,
+    };
+  }
+
+  private actionTypeToToolName(actionType: CortexActionType): string {
+    return `cortex.${actionType.toLowerCase()}`;
   }
 
   // ========================================================================
   // Approval Gate
   // ========================================================================
 
-  /**
-   * Determine whether an action requires explicit user approval.
-   * High-impact actions (financial, CRM, workflow) are gated.
-   *
-   * @param action The action to evaluate
-   * @returns      true if approval is required
-   */
   requiresApproval(action: CortexActionResult): boolean {
     return HIGH_IMPACT_ACTIONS.includes(action.actionType);
   }
 
-  /**
-   * Request user approval for a high-impact action.
-   * Persists an AiApprovalRequest row and returns pending state.
-   * The action remains in pending_approval until a human approves.
-   *
-   * @param action  The action awaiting approval
-   * @param session Current Cortex session for context
-   * @returns       Approval decision with request ID
-   */
   async requestApproval(
     action: CortexActionResult,
     session?: CortexSession,
@@ -247,47 +257,28 @@ export class KeyCortexActionsService {
         `Impact: ${action.estimatedImpact ?? 'unknown'}`,
     );
 
+    if (!this.approvalService) {
+      this.logger.error('[requestApproval] No approval service available');
+      return { approved: false };
+    }
+
     try {
-      const request = await (this.prisma.client as any).aiApprovalRequest.create({
-        data: {
-          businessId: session?.businessId ?? 'unknown',
-          userId: session?.userId ?? null,
-          correlationId: session?.id ?? 'unknown',
-          module: 'key_cortex',
-          action: action.actionType,
-          parameters: (action.result as Record<string, unknown>) ?? {},
-          commandJson: { ...action },
-          status: 'PENDING',
-          requestedAt: new Date(),
-        },
+      const request = await this.approvalService.createRequest({
+        businessId: session?.businessId ?? 'unknown',
+        requester: 'key_cortex',
+        requesterId: session?.userId,
+        actionType: action.actionType,
+        actionModule: 'key_cortex',
+        description: action.description,
+        rationale: `High-impact action requires approval: ${action.estimatedImpact ?? 'unknown impact'}`,
+        parameters: (action.result as Record<string, unknown>) ?? {},
+        estimatedImpact: { impact: action.estimatedImpact ?? 'unknown' },
+        contextSnapshot: { sessionId: session?.id },
       });
 
       this.logger.log(
-        `[requestApproval] Created AiApprovalRequest ${request.id} for ${action.actionType}`,
+        `[requestApproval] Created ApprovalRequest ${request.id} for ${action.actionType}`,
       );
-
-      // Optionally also create a general ApprovalRequest for dashboard visibility
-      if (this.approvalService) {
-        const approvalRequestPromise = this.approvalService.createRequest({
-          businessId: session?.businessId ?? 'unknown',
-          requester: 'key_cortex',
-          requesterId: session?.userId,
-          actionType: action.actionType,
-          actionModule: 'key_cortex',
-          description: action.description,
-          rationale: `High-impact action requires approval: ${action.estimatedImpact ?? 'unknown impact'}`,
-          parameters: (action.result as Record<string, unknown>) ?? {},
-          estimatedImpact: { impact: action.estimatedImpact ?? 'unknown' },
-          contextSnapshot: { sessionId: session?.id },
-        });
-        if (approvalRequestPromise && typeof approvalRequestPromise.catch === 'function') {
-          await approvalRequestPromise.catch((err: any) => {
-            this.logger.warn(
-              `[requestApproval] ApprovalRequest create failed: ${err instanceof Error ? err.message : String(err)}`,
-            );
-          });
-        }
-      }
 
       return { approved: false, approvalRequestId: request.id };
     } catch (err: any) {
@@ -298,38 +289,27 @@ export class KeyCortexActionsService {
     }
   }
 
-  /**
-   * Get pending AI approval requests for a business.
-   */
   async getPendingApprovals(businessId: string): Promise<any[]> {
-    return (this.prisma.client as any).aiApprovalRequest.findMany({
-      where: { businessId, status: 'PENDING' },
-      orderBy: { requestedAt: 'desc' },
-    });
+    if (this.approvalService) {
+      return this.approvalService.getPendingRequests(businessId);
+    }
+    return [];
   }
 
   // ========================================================================
-  // Tool Registry Integration
+  // Tool Registry Integration (legacy API preserved)
   // ========================================================================
 
-  /**
-   * Retrieve the list of tools available for a given business tenant.
-   * Delegates to KeyToolRegistryService.
-   *
-   * @param businessId Tenant-scoped business identifier
-   * @returns          Array of tool metadata objects
-   */
   async getAvailableTools(
     businessId: string,
   ): Promise<Array<{ name: string; description: string; params: object }>> {
     this.logger.debug(`Fetching available tools for business ${businessId}`);
-
     try {
-      const tools = await (this.toolRegistry as any).listTools(businessId);
-      return tools.map((tool: any) => ({
+      const tools = this.keyCortexToolRegistry.listTools();
+      return tools.map((tool) => ({
         name: tool.name,
         description: tool.description,
-        params: tool.parameters ?? {},
+        params: tool.parameters.properties,
       }));
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error';
@@ -338,165 +318,16 @@ export class KeyCortexActionsService {
     }
   }
 
-  /**
-   * Build OpenAI-compatible function/tool definitions for the AI gateway.
-   * These definitions enable the model to call system tools via function calling.
-   *
-   * @param businessId Tenant-scoped business identifier
-   * @returns          Array of GatewayToolDefinition for AI function calling
-   */
   async buildToolDefinitions(
-    businessId: string,
+    _businessId: string,
   ): Promise<GatewayToolDefinition[]> {
-    const tools = await this.getAvailableTools(businessId);
-
-    const definitions: GatewayToolDefinition[] = tools.map((tool: any) => ({
-      name: tool.name,
-      description: tool.description,
-      parameters: {
-        type: 'object',
-        properties: (tool.params as Record<string, unknown>) ?? {},
-        required: Object.keys((tool.params as Record<string, unknown>) ?? {}),
-      },
-    }));
-
-    // Append built-in Cortex action types as tool definitions
-    const actionDefinitions: GatewayToolDefinition[] = [
-      {
-        name: 'CREATE_TASK',
-        description: 'Create a task or to-do item in the system',
-        parameters: {
-          type: 'object',
-          properties: {
-            title: { type: 'string', description: 'Task title' },
-            description: { type: 'string', description: 'Optional task description' },
-            assigneeId: { type: 'string', description: 'User ID to assign the task to' },
-            dueDate: { type: 'string', description: 'ISO 8601 due date' },
-            priority: { type: 'string', enum: ['low', 'medium', 'high', 'urgent'] },
-          },
-          required: ['title'],
-        },
-      },
-      {
-        name: 'CREATE_EVENT',
-        description: 'Create a calendar event',
-        parameters: {
-          type: 'object',
-          properties: {
-            title: { type: 'string', description: 'Event title' },
-            startTime: { type: 'string', description: 'ISO 8601 start time' },
-            endTime: { type: 'string', description: 'ISO 8601 end time' },
-            attendees: { type: 'array', items: { type: 'string' } },
-            description: { type: 'string' },
-          },
-          required: ['title', 'startTime'],
-        },
-      },
-      {
-        name: 'SEND_MESSAGE',
-        description: 'Send a message or notification to a user',
-        parameters: {
-          type: 'object',
-          properties: {
-            recipientId: { type: 'string', description: 'Recipient user ID' },
-            content: { type: 'string', description: 'Message body' },
-            channel: { type: 'string', enum: ['in_app', 'email', 'sms', 'push'] },
-          },
-          required: ['recipientId', 'content'],
-        },
-      },
-      {
-        name: 'CREATE_LEAD',
-        description: 'Create a new CRM lead',
-        parameters: {
-          type: 'object',
-          properties: {
-            name: { type: 'string', description: 'Lead full name' },
-            email: { type: 'string', description: 'Lead email address' },
-            phone: { type: 'string', description: 'Lead phone number' },
-            source: { type: 'string', description: 'Lead source/channel' },
-            notes: { type: 'string' },
-          },
-          required: ['name', 'email'],
-        },
-      },
-      {
-        name: 'CREATE_INVOICE',
-        description: 'Generate an invoice for a customer',
-        parameters: {
-          type: 'object',
-          properties: {
-            customerId: { type: 'string', description: 'Customer ID' },
-            items: {
-              type: 'array',
-              items: {
-                type: 'object',
-                properties: {
-                  description: { type: 'string' },
-                  quantity: { type: 'number' },
-                  unitPrice: { type: 'number' },
-                },
-              },
-            },
-            dueDate: { type: 'string', description: 'ISO 8601 due date' },
-            notes: { type: 'string' },
-          },
-          required: ['customerId', 'items'],
-        },
-      },
-      {
-        name: 'SEARCH_KNOWLEDGE',
-        description: 'Search the knowledge base for information',
-        parameters: {
-          type: 'object',
-          properties: {
-            query: { type: 'string', description: 'Search query' },
-            limit: { type: 'number', description: 'Max results to return' },
-          },
-          required: ['query'],
-        },
-      },
-      {
-        name: 'ANALYZE_DATA',
-        description: 'Run data analysis on a dataset or metric',
-        parameters: {
-          type: 'object',
-          properties: {
-            dataSource: { type: 'string', description: 'Data source or table name' },
-            metric: { type: 'string', description: 'Metric to analyze' },
-            timeframe: { type: 'string', description: 'e.g. "7d", "30d", "1y"' },
-          },
-          required: ['dataSource'],
-        },
-      },
-      {
-        name: 'EXECUTE_TOOL',
-        description: 'Execute any registered tool by name with parameters',
-        parameters: {
-          type: 'object',
-          properties: {
-            toolName: { type: 'string', description: 'Name of the registered tool' },
-            params: { type: 'object', description: 'Tool-specific parameters' },
-          },
-          required: ['toolName'],
-        },
-      },
-    ];
-
-    return [...definitions, ...actionDefinitions];
+    return this.keyCortexToolRegistry.buildGatewayDefinitions();
   }
 
   // ========================================================================
   // Audit & History
   // ========================================================================
 
-  /**
-   * Log an action execution to the Prisma audit table for compliance
-   * and debugging purposes.
-   *
-   * @param action    The action result to log
-   * @param sessionId The session ID under which the action ran
-   */
   async trackActionExecution(
     action: CortexActionResult,
     sessionId: string,
@@ -518,16 +349,9 @@ export class KeyCortexActionsService {
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Unknown error';
       this.logger.error(`Failed to track action execution: ${message}`);
-      // Non-blocking: audit failures should not break action flow
     }
   }
 
-  /**
-   * Retrieve the action execution history for a given session.
-   *
-   * @param sessionId The session ID to query
-   * @returns         Array of action results ordered by creation time
-   */
   async getActionHistory(sessionId: string): Promise<CortexActionResult[]> {
     try {
       const logs = await (this.prisma.client as any).cortexActionLog.findMany({
@@ -552,18 +376,11 @@ export class KeyCortexActionsService {
   }
 
   // ========================================================================
-  // Action Handlers — Built-in Actions
+  // Action Handlers — migrated to canonical registry closures
   // ========================================================================
 
-  /**
-   * CREATE_TASK — Create a task in the system.
-   */
-  private async handleCreateTask(
-    params: Record<string, unknown>,
-    businessId: string,
-  ): Promise<CortexActionResult> {
+  private async handleCreateTask(params: Record<string, unknown>, businessId: string): Promise<KeyCortexToolResult> {
     const { title, description, assigneeId, dueDate, priority } = params;
-
     const task = await (this.prisma.client as any).task.create({
       data: {
         title: String(title),
@@ -575,54 +392,26 @@ export class KeyCortexActionsService {
         status: 'todo',
       },
     });
-
-    return {
-      actionType: 'CREATE_TASK',
-      status: 'success',
-      description: `Created task "${title}"`,
-      result: { taskId: task.id, title: task.title },
-    };
+    return { success: true, data: { taskId: task.id, title: task.title } };
   }
 
-  /**
-   * CREATE_EVENT — Create a calendar event.
-   */
-  private async handleCreateEvent(
-    params: Record<string, unknown>,
-    businessId: string,
-  ): Promise<CortexActionResult> {
+  private async handleCreateEvent(params: Record<string, unknown>, businessId: string): Promise<KeyCortexToolResult> {
     const { title, startTime, endTime, attendees, description } = params;
-
     const event = await (this.prisma.client as any).calendarEvent.create({
       data: {
         title: String(title),
         startTime: new Date(String(startTime)),
         endTime: endTime ? new Date(String(endTime)) : null,
         description: description ? String(description) : null,
-        attendees: attendees
-          ? JSON.stringify(attendees)
-          : '[]',
+        attendees: attendees ? JSON.stringify(attendees) : '[]',
         businessId,
       },
     });
-
-    return {
-      actionType: 'CREATE_EVENT',
-      status: 'success',
-      description: `Created calendar event "${title}"`,
-      result: { eventId: event.id, title: event.title, startTime: event.startTime },
-    };
+    return { success: true, data: { eventId: event.id, title: event.title, startTime: event.startTime } };
   }
 
-  /**
-   * SEND_MESSAGE — Send a message or notification.
-   */
-  private async handleSendMessage(
-    params: Record<string, unknown>,
-    businessId: string,
-  ): Promise<CortexActionResult> {
+  private async handleSendMessage(params: Record<string, unknown>, businessId: string): Promise<KeyCortexToolResult> {
     const { recipientId, content, channel = 'in_app' } = params;
-
     const message = await (this.prisma.client as any).message.create({
       data: {
         recipientId: String(recipientId),
@@ -633,24 +422,11 @@ export class KeyCortexActionsService {
         sentAt: new Date(),
       },
     });
-
-    return {
-      actionType: 'SEND_MESSAGE',
-      status: 'success',
-      description: `Message sent to ${recipientId} via ${channel}`,
-      result: { messageId: message.id, channel },
-    };
+    return { success: true, data: { messageId: message.id, channel } };
   }
 
-  /**
-   * CREATE_DOCUMENT — Generate a document.
-   */
-  private async handleCreateDocument(
-    params: Record<string, unknown>,
-    businessId: string,
-  ): Promise<CortexActionResult> {
+  private async handleCreateDocument(params: Record<string, unknown>, businessId: string): Promise<KeyCortexToolResult> {
     const { title, content, type = 'note' } = params;
-
     const doc = await (this.prisma.client as any).document.create({
       data: {
         title: String(title),
@@ -660,53 +436,42 @@ export class KeyCortexActionsService {
         createdAt: new Date(),
       },
     });
-
-    return {
-      actionType: 'CREATE_DOCUMENT',
-      status: 'success',
-      description: `Created document "${title}"`,
-      result: { documentId: doc.id, title: doc.title, type },
-    };
+    return { success: true, data: { documentId: doc.id, title: doc.title, type } };
   }
 
-  /**
-   * ANALYZE_DATA — Run data analysis.
-   */
-  private async handleAnalyzeData(
-    params: Record<string, unknown>,
-    businessId: string,
-  ): Promise<CortexActionResult> {
+  private async handleAnalyzeData(params: Record<string, unknown>, businessId: string): Promise<KeyCortexToolResult> {
     const { dataSource, metric, timeframe = '30d' } = params;
-
-    // Delegate to the tool registry for data analysis capabilities
-    const analysisResult = await (this.toolRegistry as any).executeTool(
-      'data_analyzer',
-      {
-        source: String(dataSource),
-        metric: metric ? String(metric) : undefined,
-        timeframe: String(timeframe),
-        businessId,
-      },
-      businessId,
+    // Phase 3 Skeleton: old AI-module registry removed; use safe database wrapper for known sources.
+    const sourceMap: Record<string, string> = {
+      invoices: 'Invoice',
+      deals: 'Deal',
+      contacts: 'Contact',
+      bookings: 'Booking',
+      tasks: 'ProjectTask',
+    };
+    const model = sourceMap[String(dataSource).toLowerCase()];
+    if (!model || !this.safeDatabase) {
+      return { success: false, error: `Analysis not available for data source "${dataSource}"` };
+    }
+    const result = await this.safeDatabase.safeQuery(
+      { businessId, autonomyLevel: 2 },
+      { model, take: 100 },
     );
-
+    if (!result.success) return result;
     return {
-      actionType: 'ANALYZE_DATA',
-      status: 'success',
-      description: `Analyzed ${metric ?? 'data'} from ${String(dataSource)} (${timeframe})`,
-      result: analysisResult as Record<string, unknown>,
+      success: true,
+      data: {
+        source: dataSource,
+        metric,
+        timeframe,
+        rowCount: (result.data as any)?.count ?? 0,
+        sample: (result.data as any)?.rows?.slice(0, 5) ?? [],
+      },
     };
   }
 
-  /**
-   * GENERATE_REPORT — Generate a business report.
-   */
-  private async handleGenerateReport(
-    params: Record<string, unknown>,
-    businessId: string,
-  ): Promise<CortexActionResult> {
+  private async handleGenerateReport(params: Record<string, unknown>, businessId: string): Promise<KeyCortexToolResult> {
     const { reportType, timeframe = '30d', format = 'pdf' } = params;
-
     const report = await (this.prisma.client as any).report.create({
       data: {
         type: String(reportType),
@@ -717,30 +482,15 @@ export class KeyCortexActionsService {
         createdAt: new Date(),
       },
     });
-
-    // Trigger async report generation via command service
     await (this.commandService as any).enqueue({
       type: 'GENERATE_REPORT',
       payload: { reportId: report.id, reportType, timeframe, format, businessId },
     });
-
-    return {
-      actionType: 'GENERATE_REPORT',
-      status: 'success',
-      description: `Report generation started: "${reportType}"`,
-      result: { reportId: report.id, status: 'generating' },
-    };
+    return { success: true, data: { reportId: report.id, status: 'generating' } };
   }
 
-  /**
-   * EXECUTE_FLOW — Execute a workflow.
-   */
-  private async handleExecuteFlow(
-    params: Record<string, unknown>,
-    businessId: string,
-  ): Promise<CortexActionResult> {
+  private async handleExecuteFlow(params: Record<string, unknown>, businessId: string): Promise<KeyCortexToolResult> {
     const { flowId, flowInputs = {} } = params;
-
     const execution = await (this.prisma.client as any).flowExecution.create({
       data: {
         flowId: String(flowId),
@@ -750,30 +500,15 @@ export class KeyCortexActionsService {
         startedAt: new Date(),
       },
     });
-
-    // Trigger flow execution via command service
     await (this.commandService as any).enqueue({
       type: 'EXECUTE_FLOW',
       payload: { executionId: execution.id, flowId, inputs: flowInputs, businessId },
     });
-
-    return {
-      actionType: 'EXECUTE_FLOW',
-      status: 'success',
-      description: `Workflow "${flowId}" execution started`,
-      result: { executionId: execution.id, flowId, status: 'running' },
-    };
+    return { success: true, data: { executionId: execution.id, flowId, status: 'running' } };
   }
 
-  /**
-   * CREATE_LEAD — Create a CRM lead.
-   */
-  private async handleCreateLead(
-    params: Record<string, unknown>,
-    businessId: string,
-  ): Promise<CortexActionResult> {
+  private async handleCreateLead(params: Record<string, unknown>, businessId: string): Promise<KeyCortexToolResult> {
     const { name, email, phone, source = 'cortex_ai', notes } = params;
-
     const lead = await (this.prisma.client as any).lead.create({
       data: {
         name: String(name),
@@ -786,73 +521,32 @@ export class KeyCortexActionsService {
         createdAt: new Date(),
       },
     });
-
-    return {
-      actionType: 'CREATE_LEAD',
-      status: 'success',
-      description: `Created lead for ${name} (${email})`,
-      result: { leadId: lead.id, name: lead.name, email: lead.email },
-    };
+    return { success: true, data: { leadId: lead.id, name: lead.name, email: lead.email } };
   }
 
-  /**
-   * UPDATE_CRM — Update a CRM record.
-   */
-  private async handleUpdateCrm(
-    params: Record<string, unknown>,
-    businessId: string,
-  ): Promise<CortexActionResult> {
+  private async handleUpdateCrm(params: Record<string, unknown>, businessId: string): Promise<KeyCortexToolResult> {
     const { entityType, entityId, updates } = params;
-
-    // Map entity types to Prisma models
     const modelMap: Record<string, string> = {
       lead: 'lead',
       contact: 'contact',
       deal: 'deal',
       customer: 'customer',
     };
-
     const modelName = modelMap[String(entityType)];
     if (!modelName) {
-      throw new BadRequestException(`Unknown CRM entity type: ${entityType}`);
+      return { success: false, error: `Unknown CRM entity type: ${entityType}` };
     }
-
-    // Use Prisma's dynamic model access
     const updated = await (this.prisma as any)[modelName].update({
       where: { id: String(entityId), businessId },
-      data: {
-        ...(updates as Record<string, unknown>),
-        updatedAt: new Date(),
-      },
+      data: { ...(updates as Record<string, unknown>), updatedAt: new Date() },
     });
-
-    return {
-      actionType: 'UPDATE_CRM',
-      status: 'success',
-      description: `Updated ${String(entityType)} "${String(entityId)}"`,
-      result: { entityType, entityId: (updated as { id: string }).id },
-    };
+    return { success: true, data: { entityType, entityId: (updated as { id: string }).id } };
   }
 
-  /**
-   * CREATE_INVOICE — Generate an invoice.
-   */
-  private async handleCreateInvoice(
-    params: Record<string, unknown>,
-    businessId: string,
-  ): Promise<CortexActionResult> {
+  private async handleCreateInvoice(params: Record<string, unknown>, businessId: string): Promise<KeyCortexToolResult> {
     const { customerId, items, dueDate, notes } = params;
-
-    const itemsArray = items as Array<{
-      description: string;
-      quantity: number;
-      unitPrice: number;
-    }>;
-
-    const totalAmount = itemsArray.reduce((sum: any, item: any) => sum + item.quantity * item.unitPrice,
-      0,
-    );
-
+    const itemsArray = items as Array<{ description: string; quantity: number; unitPrice: number }>;
+    const totalAmount = itemsArray.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
     const invoice = await (this.prisma.client as any).invoice.create({
       data: {
         customerId: String(customerId),
@@ -865,125 +559,77 @@ export class KeyCortexActionsService {
         createdAt: new Date(),
       },
     });
-
-    return {
-      actionType: 'CREATE_INVOICE',
-      status: 'success',
-      description: `Created invoice #${invoice.id} for $${totalAmount.toFixed(2)}`,
-      result: { invoiceId: invoice.id, totalAmount, itemCount: itemsArray.length },
-    };
+    return { success: true, data: { invoiceId: invoice.id, totalAmount, itemCount: itemsArray.length } };
   }
 
-  /**
-   * SEARCH_KNOWLEDGE — Search the knowledge base.
-   */
-  private async handleSearchKnowledge(
-    params: Record<string, unknown>,
-    businessId: string,
-  ): Promise<CortexActionResult> {
+  private async handleSearchKnowledge(params: Record<string, unknown>, businessId: string): Promise<KeyCortexToolResult> {
     const { query, limit = 5 } = params;
-
-    // Use the tool registry for knowledge base search
-    const searchResult = await (this.toolRegistry as any).executeTool(
-      'knowledge_search',
-      {
-        query: String(query),
-        limit: Number(limit),
-        businessId,
-      },
-      businessId,
-    );
-
-    return {
-      actionType: 'SEARCH_KNOWLEDGE',
-      status: 'success',
-      description: `Searched knowledge base for "${String(query)}"`,
-      result: searchResult as Record<string, unknown>,
-    };
+    // Phase 3 Skeleton: old AI-module registry removed; search KnowledgeSource directly.
+    try {
+      const sources = await (this.prisma.client as any).knowledgeSource.findMany({
+        where: {
+          businessId,
+          OR: [
+            { title: { contains: String(query), mode: 'insensitive' } },
+            { content: { contains: String(query), mode: 'insensitive' } },
+          ],
+        },
+        take: Math.min(Number(limit), 25),
+        orderBy: { createdAt: 'desc' },
+      });
+      return {
+        success: true,
+        data: {
+          query,
+          count: sources.length,
+          results: sources.map((s: any) => ({ id: s.id, title: s.title, sourceType: s.sourceType })),
+        },
+      };
+    } catch (err: any) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
   }
 
-  /**
-   * EXECUTE_TOOL — Execute any registered tool dynamically.
-   */
-  private async handleExecuteTool(
-    params: Record<string, unknown>,
-    businessId: string,
-  ): Promise<CortexActionResult> {
+  private async handleExecuteTool(params: Record<string, unknown>, businessId: string): Promise<KeyCortexToolResult> {
     const { toolName, toolParams = {} } = params;
-
-    const result = await (this.toolRegistry as any).executeTool(
-      String(toolName),
-      toolParams as Record<string, unknown>,
-      businessId,
-    );
-
-    return {
-      actionType: 'EXECUTE_TOOL',
-      status: 'success',
-      description: `Executed tool "${String(toolName)}"`,
-      result: result as Record<string, unknown>,
-    };
+    // Phase 3 Skeleton: delegate to canonical registry instead of old AI-module registry.
+    return this.keyCortexToolRegistry.execute(String(toolName), { businessId, autonomyLevel: 2 }, toolParams as Record<string, unknown>);
   }
 
-  /**
-   * QUERY_DATABASE — Run a raw database query.
-   * Note: In production, this should use a read-only connection
-   * or a query builder to prevent destructive operations.
-   */
-  private async handleQueryDatabase(
-    params: Record<string, unknown>,
-    _businessId: string,
-  ): Promise<CortexActionResult> {
+  private async handleQueryDatabase(params: Record<string, unknown>, businessId: string): Promise<KeyCortexToolResult> {
     const { query } = params;
-
-    // Execute via command service for safety/audit
-    const result = await (this.commandService as any).execute({
-      type: 'DATABASE_QUERY',
-      payload: { query: String(query) },
-    });
-
-    return {
-      actionType: 'QUERY_DATABASE',
-      status: 'success',
-      description: 'Database query executed',
-      result: result as Record<string, unknown>,
-    };
+    if (!this.safeDatabase) {
+      return {
+        success: false,
+        error: `Raw database queries are disabled. Requested: "${String(query)}".`,
+      };
+    }
+    // Phase 3 Skeleton: route through safe database wrapper with model allow-list.
+    const model = String(query).charAt(0).toUpperCase() + String(query).slice(1);
+    return this.safeDatabase.safeQuery(
+      { businessId, autonomyLevel: 2 },
+      { model, take: 25 },
+    );
   }
 
-  /**
-   * UPDATE_RECORD — Update a generic record.
-   */
-  private async handleUpdateRecord(
-    params: Record<string, unknown>,
-    businessId: string,
-  ): Promise<CortexActionResult> {
+  private async handleUpdateRecord(params: Record<string, unknown>, businessId: string): Promise<KeyCortexToolResult> {
     const { recordType, recordId, data } = params;
-
-    const updated = await (this.prisma as any)[
-      String(recordType)
-    ].update({
+    if (this.safeDatabase) {
+      // Phase 3 Skeleton: route through safe database wrapper.
+      return this.safeDatabase.safeUpdate(
+        { businessId, autonomyLevel: 2 },
+        { model: String(recordType), id: String(recordId), data: data as Record<string, unknown> },
+      );
+    }
+    const updated = await (this.prisma as any)[String(recordType)].update({
       where: { id: String(recordId), businessId },
       data: data as Record<string, unknown>,
     });
-
-    return {
-      actionType: 'UPDATE_RECORD',
-      status: 'success',
-      description: `Updated ${String(recordType)} "${String(recordId)}"`,
-      result: { recordType, recordId: (updated as { id: string }).id },
-    };
+    return { success: true, data: { recordType, recordId: (updated as { id: string }).id } };
   }
 
-  /**
-   * SEND_EMAIL — Send an email.
-   */
-  private async handleSendEmail(
-    params: Record<string, unknown>,
-    businessId: string,
-  ): Promise<CortexActionResult> {
+  private async handleSendEmail(params: Record<string, unknown>, businessId: string): Promise<KeyCortexToolResult> {
     const { to, subject, body, cc, bcc } = params;
-
-    // Delegate to command service for email delivery
     await (this.commandService as any).enqueue({
       type: 'SEND_EMAIL',
       payload: {
@@ -995,24 +641,11 @@ export class KeyCortexActionsService {
         businessId,
       },
     });
-
-    return {
-      actionType: 'SEND_EMAIL',
-      status: 'success',
-      description: `Email queued to ${to}: "${subject}"`,
-      result: { recipient: to, subject },
-    };
+    return { success: true, data: { recipient: to, subject } };
   }
 
-  /**
-   * SCHEDULE_REMINDER — Schedule a reminder.
-   */
-  private async handleScheduleReminder(
-    params: Record<string, unknown>,
-    businessId: string,
-  ): Promise<CortexActionResult> {
+  private async handleScheduleReminder(params: Record<string, unknown>, businessId: string): Promise<KeyCortexToolResult> {
     const { message, triggerTime, recipientId } = params;
-
     const reminder = await (this.prisma.client as any).reminder.create({
       data: {
         message: String(message),
@@ -1023,33 +656,50 @@ export class KeyCortexActionsService {
         createdAt: new Date(),
       },
     });
+    return { success: true, data: { reminderId: reminder.id, triggerTime: reminder.triggerTime } };
+  }
 
-    return {
-      actionType: 'SCHEDULE_REMINDER',
-      status: 'success',
-      description: `Reminder scheduled for ${String(triggerTime)}`,
-      result: { reminderId: reminder.id, triggerTime: reminder.triggerTime },
-    };
+  // ========================================================================
+  // Event emission
+  // ========================================================================
+
+  private emitActionEvent(
+    actionType: CortexActionType,
+    result: CortexActionResult,
+    session: CortexSession,
+  ): void {
+    if (!this.eventBus) return;
+    this.eventBus.emit({
+      source: 'key_cortex',
+      type: `action.${result.status}`,
+      businessId: session.businessId,
+      userId: session.userId,
+      payload: {
+        actionType,
+        status: result.status,
+        description: result.description,
+        result: result.result,
+        error: result.error,
+        sessionId: session.id,
+      },
+      metadata: {
+        sessionId: session.id,
+        correlationId: session.id,
+        importance: result.status === 'error' ? 'high' : 'normal',
+      },
+    });
   }
 
   // ========================================================================
   // Validation
   // ========================================================================
 
-  /**
-   * Validate that all required parameters for an action type are present.
-   *
-   * @param actionType The action type to validate against
-   * @param params     The provided parameters
-   * @throws BadRequestException if required params are missing
-   */
   private validateActionParams(
     actionType: CortexActionType,
     params: Record<string, unknown>,
   ): void {
     const required = ACTION_PARAM_SCHEMA[actionType];
     if (!required) return;
-
     const missing = required.filter((key: any) => params[key] === undefined);
     if (missing.length > 0) {
       throw new BadRequestException(

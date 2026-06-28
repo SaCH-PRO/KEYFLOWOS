@@ -110,12 +110,17 @@ function makeService() {
     riskLevel: vi.fn(() => 'LOW'),
   } as any;
 
+  const readinessService = {
+    getReadiness: vi.fn(async () => null),
+  } as any;
+
   const service = new GenomeRecommendationActionBridgeService(
     prisma,
     recommendationService,
     experimentService,
     proposalService,
     policyService,
+    readinessService,
   );
 
   return {

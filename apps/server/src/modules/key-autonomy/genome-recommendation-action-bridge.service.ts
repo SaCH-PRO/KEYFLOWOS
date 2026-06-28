@@ -2,6 +2,8 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { GenomeRecommendationService } from '../business-genome/key-genome/genome-recommendation.service';
 import { GenomeExperimentService } from '../business-genome/key-genome/genome-experiment.service';
+import { GenomeModuleReadinessService } from '../business-genome/key-genome/genome-module-readiness.service';
+import type { KeyGenomeModuleName } from '../business-genome/key-genome/key-genome.ontology';
 import { KeyActionProposalService } from './key-action-proposal.service';
 import { KeyActionPolicyService } from './key-action-policy.service';
 import type {
@@ -29,6 +31,7 @@ export class GenomeRecommendationActionBridgeService {
     private readonly experiments: GenomeExperimentService,
     private readonly proposals: KeyActionProposalService,
     private readonly policy: KeyActionPolicyService,
+    private readonly readiness: GenomeModuleReadinessService,
   ) {}
 
   async previewRecommendationAction(
@@ -380,6 +383,47 @@ export class GenomeRecommendationActionBridgeService {
     businessId: string,
     recommendation: GenomeRecommendationData,
   ): Promise<string | null> {
+    const module = this.mapDomainToModule(recommendation.domain);
+    if (!module) return null;
+
+    const readinessResult = await this.readiness.getReadiness(businessId, module);
+    if (Array.isArray(readinessResult) || !readinessResult) {
+      return `KEY has not yet computed readiness for the ${module} module. Run a Genome readiness scan before executing this recommendation.`;
+    }
+
+    const { readinessScore, automationAllowed, missingFacts, blockedReasons } = readinessResult;
+
+    if (!automationAllowed) {
+      const factList = missingFacts
+        .filter((f) => f.impact === 'BLOCKING')
+        .slice(0, 3)
+        .map((f) => f.reason)
+        .join('; ');
+      return `Automation is blocked for ${module}. ${blockedReasons[0] ?? ''} ${factList ? `Missing facts: ${factList}.` : ''}`;
+    }
+
+    if (readinessScore < 70) {
+      const factList = missingFacts
+        .slice(0, 3)
+        .map((f) => f.reason)
+        .join('; ');
+      return `${module} readiness is only ${readinessScore}%. ${factList ? `Consider gathering: ${factList}.` : 'More Genome evidence is recommended before executing.'}`;
+    }
+
+    return null;
+  }
+
+  private mapDomainToModule(domain?: string | null): KeyGenomeModuleName | null {
+    if (!domain) return null;
+    const d = domain.toLowerCase();
+    if (d.includes('finance')) return 'finance';
+    if (d.includes('customer') || d.includes('sales') || d.includes('crm') || d.includes('revenue')) return 'crm';
+    if (d.includes('operations') || d.includes('delivery') || d.includes('sop')) return 'sop';
+    if (d.includes('marketing') || d.includes('growth')) return 'marketing';
+    if (d.includes('key_inbox') || d.includes('inbox')) return 'key_inbox';
+    if (d.includes('commerce') || d.includes('invoice')) return 'commerce';
+    if (d.includes('documents') || d.includes('document')) return 'documents';
+    if (d.includes('command_center') || d.includes('command')) return 'command_center';
     return null;
   }
 

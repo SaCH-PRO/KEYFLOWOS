@@ -1,4 +1,5 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AiUsageService } from './ai-usage.service';
@@ -73,33 +74,30 @@ export class SemanticMemoryService {
       const limit = params.limit ?? 5;
       const minSim = params.minSimilarity ?? 0.7;
 
-      let sourceFilter = '';
-      if (params.sourceTypes && params.sourceTypes.length > 0) {
-        sourceFilter = `AND source_type IN (${params.sourceTypes.map((_, i) => `$${i + 4}`).join(',')})`;
-      }
+      const vectorLiteral = `[${embedding.join(',')}]`;
 
-      const query = `
+      let query = Prisma.sql`
         SELECT id, content, source_type, source_id, metadata,
-               1 - (embedding <=> $3::vector) as similarity
+               1 - (embedding <=> ${vectorLiteral}::vector) as similarity
         FROM "ai_memory_embeddings"
-        WHERE business_id = $1
-          AND 1 - (embedding <=> $3::vector) >= $2
-          ${sourceFilter}
-        ORDER BY embedding <=> $3::vector
-        LIMIT ${limit}
+        WHERE business_id = ${params.businessId}
+          AND 1 - (embedding <=> ${vectorLiteral}::vector) >= ${minSim}
       `;
 
-      const args: any[] = [params.businessId, minSim, `[${embedding.join(',')}]`];
-      if (params.sourceTypes) args.push(...params.sourceTypes);
+      if (params.sourceTypes && params.sourceTypes.length > 0) {
+        query = Prisma.sql`${query} AND source_type IN (${Prisma.join(params.sourceTypes)})`;
+      }
 
-      const results = await this.prisma.client.$queryRawUnsafe<Array<{
+      query = Prisma.sql`${query} ORDER BY embedding <=> ${vectorLiteral}::vector LIMIT ${limit}`;
+
+      const results = await this.prisma.client.$queryRaw<Array<{
         id: string;
         content: string;
         source_type: string;
         source_id: string;
         metadata: any;
         similarity: number;
-      }>>(query, ...args);
+      }>>(query);
 
       return results.map((r) => ({
         id: r.id,

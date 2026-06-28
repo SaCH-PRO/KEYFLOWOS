@@ -1,8 +1,9 @@
-import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { TimelineService } from '../timeline/timeline.service';
-import { ToolResult } from './key-tool.registry';
+import { ToolResult } from './key-tool-registry.service';
 import { KeyToolRegistryService } from './key-tool-registry.service';
+import { KeyCortexToolRegistryService } from '../key-cortex/key-cortex-tool-registry.service';
 import { CommandService } from '../command/command.service';
 
 export enum KeyMode {
@@ -55,8 +56,13 @@ export class KeyCommandService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(TimelineService) private readonly timeline: TimelineService,
-    @Inject(forwardRef(() => KeyToolRegistryService)) private readonly toolRegistry: KeyToolRegistryService,
+    @Optional()
+    @Inject(forwardRef(() => KeyToolRegistryService))
+    private readonly toolRegistry: KeyToolRegistryService | undefined,
     @Inject(forwardRef(() => CommandService)) private readonly commandService: CommandService,
+    @Optional()
+    @Inject(forwardRef(() => KeyCortexToolRegistryService))
+    private readonly keyCortexToolRegistry?: KeyCortexToolRegistryService,
   ) {}
 
   async receiveCommand(
@@ -194,12 +200,25 @@ export class KeyCommandService {
     const results: ToolResult[] = [];
 
     for (const step of plan.steps) {
-      const result = await this.toolRegistry.execute(
-        step.module,
-        step.tool,
-        { businessId, userId: userId ?? null, commandId, autonomyLevel: 2 },
-        step.input,
-      );
+      // Phase 3 Skeleton: prefer canonical registry; fall back to legacy AI-module registry.
+      const canonicalName = `${step.module}.${step.tool}`;
+      let result: ToolResult;
+      if (this.keyCortexToolRegistry?.getTool(canonicalName)) {
+        result = await this.keyCortexToolRegistry.execute(
+          canonicalName,
+          { businessId, userId: userId ?? undefined, commandId, autonomyLevel: 2 },
+          step.input,
+        );
+      } else if (this.toolRegistry) {
+        result = await this.toolRegistry.execute(
+          step.module,
+          step.tool,
+          { businessId, userId: userId ?? undefined, commandId, autonomyLevel: 2 },
+          step.input,
+        );
+      } else {
+        result = { success: false, error: 'No tool registry available' };
+      }
       results.push(result);
     }
 

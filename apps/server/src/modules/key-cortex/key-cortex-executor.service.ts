@@ -42,6 +42,7 @@ import { KeyCortexConnectorService } from './key-cortex-connector.service';
 
 // ─── Genome Governance ──────────────────────────────────────────────────────────
 import { GenomeAutonomyGateService } from '../business-genome/key-genome/genome-autonomy-gate.service';
+import { AutonomyOrchestratorService } from '../key-autonomy/autonomy-orchestrator.service';
 
 // ─── Constants ──────────────────────────────────────────────────────────────────
 const EXECUTION_TIMEOUT_MS = 30000;
@@ -148,6 +149,7 @@ export class KeyCortexExecutorService {
     private readonly prisma: PrismaService,
     private readonly eventEmitter: EventEmitter2,
     private readonly autonomyGate: GenomeAutonomyGateService,
+    private readonly autonomyOrchestrator?: AutonomyOrchestratorService,
   ) {
     // Start periodic cleanup of stale pending approvals (Fix 2)
     this.approvalCleanupInterval = setInterval(() => {
@@ -219,45 +221,76 @@ export class KeyCortexExecutorService {
       };
     }
 
-    // ── Genome Autonomy Gate: high-impact commands must pass governance ────────
+    // ── Unified Autonomy Orchestrator: canonical verdict ───────────────────────
     try {
-      const gate = await this.autonomyGate.checkGate({
-        businessId: command.businessId,
-        actionType: `${command.module}.${command.action}`,
-        affectedDomains: command.module ? [command.module as any] : undefined,
-        payload: command.parameters,
-        proposedBy: command.userId ?? null,
-      });
+      if (this.autonomyOrchestrator) {
+        const verdict = await this.autonomyOrchestrator.evaluateAction(
+          command.businessId,
+          `${command.module}.${command.action}`,
+          command.parameters,
+          { proposedBy: command.userId },
+        );
 
-      if (gate.decision === 'BLOCK') {
-        const reason =
-          gate.blockingReasons?.join('; ') ||
-          'Blocked by KEY Genome autonomy gate.';
-        this.logger.warn(`[execute] Autonomy gate BLOCKED ${command.module}.${command.action}: ${reason}`);
-        return {
-          id: uuidv4(),
-          command,
-          result: {
-            success: false,
-            error: reason,
-            executionTimeMs: 0,
+        if (!verdict.allowed) {
+          const reason = verdict.reason || 'Blocked by autonomy orchestrator';
+          this.logger.warn(`[execute] Autonomy orchestrator BLOCKED ${command.module}.${command.action}: ${reason}`);
+          return {
+            id: uuidv4(),
             command,
-          },
-          startedAt,
-          finishedAt: new Date(),
-          durationMs: 0,
-          traceId,
-          rolledBack: false,
-        };
-      }
+            result: {
+              success: false,
+              error: reason,
+              executionTimeMs: 0,
+              command,
+            },
+            startedAt,
+            finishedAt: new Date(),
+            durationMs: 0,
+            traceId,
+            rolledBack: false,
+          };
+        }
 
-      // If the gate says the action needs explicit approval, force it.
-      if (gate.decision === 'ALLOW_WITH_APPROVAL' && options.skipApproval) {
-        options = { ...options, skipApproval: false };
+        if (verdict.requiresApproval && options.skipApproval) {
+          options = { ...options, skipApproval: false };
+        }
+      } else {
+        // Legacy fallback: KEY Genome autonomy gate
+        const gate = await this.autonomyGate.checkGate({
+          businessId: command.businessId,
+          actionType: `${command.module}.${command.action}`,
+          affectedDomains: command.module ? [command.module as any] : undefined,
+          payload: command.parameters,
+          proposedBy: command.userId ?? null,
+        });
+
+        if (gate.decision === 'BLOCK') {
+          const reason =
+            gate.blockingReasons?.join('; ') ||
+            'Blocked by KEY Genome autonomy gate.';
+          this.logger.warn(`[execute] Autonomy gate BLOCKED ${command.module}.${command.action}: ${reason}`);
+          return {
+            id: uuidv4(),
+            command,
+            result: {
+              success: false,
+              error: reason,
+              executionTimeMs: 0,
+              command,
+            },
+            startedAt,
+            finishedAt: new Date(),
+            durationMs: 0,
+            traceId,
+            rolledBack: false,
+          };
+        }
+
+        if (gate.decision === 'ALLOW_WITH_APPROVAL' && options.skipApproval) {
+          options = { ...options, skipApproval: false };
+        }
       }
     } catch (gateErr) {
-      // If the gate fails (e.g. missing genome data), log but do not silently
-      // allow high-impact actions. Treat as BLOCK in production.
       this.logger.error(
         `[execute] Autonomy gate error for ${command.module}.${command.action}: ${(gateErr as Error).message}`,
       );

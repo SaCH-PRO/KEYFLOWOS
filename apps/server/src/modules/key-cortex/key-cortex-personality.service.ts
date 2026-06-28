@@ -4,7 +4,7 @@
 // and role-based module expertise (v2)
 // ============================================================
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import {
   CortexPersona,
   CortexPersonalityConfig,
@@ -13,6 +13,7 @@ import {
   CortexContextSnapshot,
   CortexSession,
 } from './key-cortex.types';
+import { BlueprintService } from '../blueprint/blueprint.service';
 
 // ─────────────────────────────────────────────────────────────
 // Role Expertise Mapping — each persona's module specializations
@@ -245,6 +246,10 @@ const MOOD_TEMPERATURE_MAP: Record<CortexMood, number> = {
 export class KeyCortexPersonalityService {
   private readonly logger = new Logger(KeyCortexPersonalityService.name);
 
+  constructor(
+    @Optional() @Inject(BlueprintService) private readonly blueprint?: BlueprintService,
+  ) {}
+
   // ── Retrieval ─────────────────────────────────────────────
 
   /**
@@ -358,6 +363,54 @@ You are operating as "${config.name}" — ${config.tagline}
 Respond in "${config.responseFormat}" format.
 Use a ${config.emojiStyle} level of emoji expression.
 Signature phrases you may occasionally use: ${config.signaturePhrases.join(', ')}.`;
+  }
+
+  /**
+   * Build an async Blueprint values block that callers can append to the system prompt.
+   */
+  async buildValueBlock(businessId: string): Promise<string> {
+    if (!this.blueprint) return '';
+    try {
+      const blueprint = await this.blueprint.getBlueprint(businessId);
+      const brand = blueprint.brand;
+      const constraints = blueprint.constraints;
+
+      const parts: string[] = [];
+      if (brand.voice) parts.push(`Brand voice: ${brand.voice}`);
+      if (brand.tone) parts.push(`Brand tone: ${brand.tone}`);
+      if (brand.valueProps?.length) parts.push(`Value propositions: ${brand.valueProps.join(', ')}`);
+      if (brand.doNotSay?.length) parts.push(`Never say: ${brand.doNotSay.join(', ')}`);
+      if (constraints.dealbreakers?.length) parts.push(`Business dealbreakers: ${constraints.dealbreakers.join(', ')}`);
+
+      if (parts.length === 0) return '';
+      return `=== BLUEPRINT VALUES ===\n${parts.join('\n')}\n========================`;
+    } catch {
+      return '';
+    }
+  }
+
+  async detectValueConflict(
+    businessId: string,
+    responseText: string,
+  ): Promise<{ conflict: boolean; terms: string[] }> {
+    if (!this.blueprint) return { conflict: false, terms: [] };
+
+    try {
+      const blueprint = await this.blueprint.getBlueprint(businessId);
+      const terms: string[] = [];
+      const text = responseText.toLowerCase();
+
+      for (const term of blueprint.brand?.doNotSay ?? []) {
+        if (text.includes(term.toLowerCase())) terms.push(term);
+      }
+      for (const term of blueprint.constraints?.dealbreakers ?? []) {
+        if (text.includes(term.toLowerCase())) terms.push(term);
+      }
+
+      return { conflict: terms.length > 0, terms };
+    } catch {
+      return { conflict: false, terms: [] };
+    }
   }
 
   // ── Greeting Generator ────────────────────────────────────

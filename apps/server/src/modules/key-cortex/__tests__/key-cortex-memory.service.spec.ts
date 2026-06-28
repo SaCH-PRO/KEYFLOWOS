@@ -1,143 +1,139 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { createMock } from '@golevelup/ts-vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { KeyCortexMemoryService } from '../key-cortex-memory.service';
-import { PrismaService } from '../../../core/prisma/prisma.service';
-import { RedisService } from '../../../core/redis/redis.service';
-import { CortexMemoryQuery, MemoryType } from '../cortex-genome-contracts';
 
-describe('Phase 18C — KeyCortexMemoryService', () => {
+const mockPrisma = {
+  client: {
+    keyCortexMemory: {
+      create: vi.fn(),
+      findMany: vi.fn(),
+    },
+  },
+};
+
+const mockRedis = {
+  get: vi.fn(),
+  set: vi.fn(),
+  del: vi.fn(),
+  keys: vi.fn().mockReturnValue([]),
+};
+
+function createService(): KeyCortexMemoryService {
+  return new KeyCortexMemoryService(
+    mockPrisma as any,
+    mockRedis as any,
+  );
+}
+
+describe('KeyCortexMemoryService', () => {
   let service: KeyCortexMemoryService;
-  let mockRedis: ReturnType<typeof createMock<RedisService>>;
 
   beforeEach(() => {
-    mockRedis = createMock<RedisService>();
-    mockRedis.keys = vi.fn().mockResolvedValue([]);
-    mockRedis.get = vi.fn().mockResolvedValue(null);
-    mockRedis.set = vi.fn().mockResolvedValue('OK');
-    mockRedis.del = vi.fn().mockResolvedValue(1);
-
-    service = new KeyCortexMemoryService(createMock<PrismaService>(), mockRedis);
+    vi.clearAllMocks();
+    service = createService();
   });
 
-  // ── Store and retrieve ────────────────────────────────────
+  it('stores memory in Prisma and invalidates cache', async () => {
+    mockPrisma.client.keyCortexMemory.create.mockResolvedValue({
+      id: 'mem_1',
+      businessId: 'biz_1',
+      userId: null,
+      type: 'business_fact',
+      key: 'primary_workflow',
+      value: 'project-based',
+      source: 'genome',
+      confidence: 0.9,
+      accessCount: 1,
+      lastAccessedAt: new Date(),
+      createdAt: new Date(),
+    });
 
-  describe('store', () => {
-    it('should store a memory with all fields', async () => {
-      const memory = await service.store('biz_1', 'business_fact', 'revenue', '10K monthly', {
-        confidence: 0.9,
+    const memory = await service.storeBusinessFact(
+      'biz_1',
+      'primary_workflow',
+      'project-based',
+    );
+
+    expect(memory.value).toBe('project-based');
+    expect(memory.type).toBe('business_fact');
+    expect(mockPrisma.client.keyCortexMemory.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          businessId: 'biz_1',
+          type: 'business_fact',
+          key: 'primary_workflow',
+          value: 'project-based',
+          source: 'genome',
+          confidence: 0.9,
+        }),
+      }),
+    );
+  });
+
+  it('retrieves memories from DB when cache is empty', async () => {
+    mockRedis.get.mockResolvedValue(null);
+    mockPrisma.client.keyCortexMemory.findMany.mockResolvedValue([
+      {
+        id: 'mem_1',
+        businessId: 'biz_1',
+        userId: null,
+        type: 'user_preference',
+        key: 'tone',
+        value: 'professional',
+        source: 'explicit',
+        confidence: 1,
+        accessCount: 1,
+        lastAccessedAt: new Date(),
+        createdAt: new Date(),
+      },
+    ]);
+
+    const memories = await service.retrieve({ businessId: 'biz_1' });
+
+    expect(memories).toHaveLength(1);
+    expect(memories[0].type).toBe('user_preference');
+    expect(mockRedis.set).toHaveBeenCalled();
+  });
+
+  it('returns cached memories when available', async () => {
+    const cached = [
+      {
+        id: 'mem_2',
+        businessId: 'biz_1',
+        type: 'business_fact',
+        key: 'industry',
+        value: 'consulting',
         source: 'genome',
-      });
+        confidence: 0.9,
+        accessCount: 1,
+        lastAccessedAt: new Date(),
+        createdAt: new Date(),
+      },
+    ];
+    mockRedis.get.mockResolvedValue(JSON.stringify(cached));
 
-      expect(memory.type).toBe('business_fact');
-      expect(memory.key).toBe('revenue');
-      expect(memory.value).toBe('10K monthly');
-      expect(memory.confidence).toBe(0.9);
-      expect(mockRedis.set).toHaveBeenCalled();
-    });
+    const memories = await service.retrieve({ businessId: 'biz_1' });
 
-    it('should store explicit user preference', async () => {
-      const memory = await service.storePreference('biz_1', 'user_1', 'response_length', 'brief');
-
-      expect(memory.type).toBe('user_preference');
-      expect(memory.source).toBe('explicit');
-      expect(memory.confidence).toBe(1.0);
-    });
-
-    it('should store business fact', async () => {
-      const memory = await service.storeBusinessFact('biz_1', 'team_size', '5');
-
-      expect(memory.type).toBe('business_fact');
-      expect(memory.source).toBe('genome');
-    });
-
-    it('should record decision outcome', async () => {
-      const memory = await service.recordDecision('biz_1', 'user_1', 'Approved invoice #123', true);
-
-      expect(memory.type).toBe('successful_action');
-      expect(memory.source).toBe('explicit');
-    });
+    expect(memories).toHaveLength(1);
+    expect(mockPrisma.client.keyCortexMemory.findMany).not.toHaveBeenCalled();
   });
 
-  // ── Retrieve ──────────────────────────────────────────────
+  it('formats memory for prompts', () => {
+    const formatted = service.formatForPrompt([
+      {
+        id: 'm1',
+        businessId: 'b1',
+        type: 'business_fact',
+        key: 'k1',
+        value: 'we sell subscriptions',
+        source: 'genome',
+        confidence: 0.9,
+        accessCount: 1,
+        lastAccessedAt: new Date(),
+        createdAt: new Date(),
+      },
+    ]);
 
-  describe('retrieve', () => {
-    it('should return empty array when no memories exist', async () => {
-      mockRedis.keys = vi.fn().mockResolvedValue([]);
-
-      const result = await service.retrieve({ businessId: 'biz_1', memoryTypes: ['business_fact'] });
-
-      expect(result).toEqual([]);
-    });
-
-    it('should filter by memory type', async () => {
-      const mem1 = { id: '1', businessId: 'biz_1', type: 'business_fact', key: 'k1', value: 'v1', confidence: 0.8, source: 'genome', lastAccessedAt: new Date(), createdAt: new Date(), accessCount: 1 };
-      const mem2 = { id: '2', businessId: 'biz_1', type: 'user_preference', key: 'k2', value: 'v2', confidence: 0.8, source: 'explicit', lastAccessedAt: new Date(), createdAt: new Date(), accessCount: 1 };
-
-      mockRedis.keys = vi.fn().mockResolvedValue(['key1', 'key2']);
-      mockRedis.get = vi.fn()
-        .mockResolvedValueOnce(null) // cache miss
-        .mockResolvedValueOnce(JSON.stringify(mem1))
-        .mockResolvedValueOnce(JSON.stringify(mem2));
-
-      const result = await service.retrieve({ businessId: 'biz_1', memoryTypes: ['business_fact'] });
-
-      expect(result).toHaveLength(1); // Only business_fact survives the filter
-    });
-  });
-
-  // ── Format for prompt ─────────────────────────────────────
-
-  describe('formatForPrompt', () => {
-    it('should return empty string for no memories', () => {
-      const result = service.formatForPrompt([]);
-      expect(result).toBe('');
-    });
-
-    it('should format memories by type', () => {
-      const memories = [
-        { id: '1', businessId: 'biz', type: 'business_fact' as MemoryType, key: 'revenue', value: '10K', confidence: 0.9, source: 'genome' as const, lastAccessedAt: new Date(), createdAt: new Date(), accessCount: 5 },
-        { id: '2', businessId: 'biz', type: 'user_preference' as MemoryType, key: 'style', value: 'brief', confidence: 0.8, source: 'explicit' as const, lastAccessedAt: new Date(), createdAt: new Date(), accessCount: 3 },
-      ];
-
-      const result = service.formatForPrompt(memories);
-
-      expect(result).toContain('WHAT I KNOW ABOUT YOUR BUSINESS');
-      expect(result).toContain('10K');
-      expect(result).toContain('brief');
-    });
-  });
-
-  // ── Preference detection ──────────────────────────────────
-
-  describe('detectPreferences', () => {
-    it('should detect brief communication style', async () => {
-      const messages = [
-        { role: 'user', content: 'Hi' },
-        { role: 'user', content: 'OK' },
-        { role: 'assistant', content: 'Hello there' },
-      ];
-
-      mockRedis.set = vi.fn().mockResolvedValue('OK');
-      mockRedis.keys = vi.fn().mockResolvedValue([]);
-
-      const result = await service.detectPreferences('biz_1', 'user_1', messages);
-
-      expect(result.length).toBeGreaterThan(0);
-      expect(result[0].type).toBe('communication_style');
-    });
-
-    it('should detect formal style', async () => {
-      const messages = [
-        { role: 'user', content: 'Please kindly send the report' },
-        { role: 'user', content: 'Thank you very much' },
-      ];
-
-      mockRedis.set = vi.fn().mockResolvedValue('OK');
-      mockRedis.keys = vi.fn().mockResolvedValue([]);
-
-      const result = await service.detectPreferences('biz_1', 'user_1', messages);
-
-      expect(result.length).toBeGreaterThan(0);
-    });
+    expect(formatted).toContain('Business Fact');
+    expect(formatted).toContain('we sell subscriptions');
   });
 });

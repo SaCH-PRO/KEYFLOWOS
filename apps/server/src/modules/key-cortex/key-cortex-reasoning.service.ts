@@ -38,6 +38,8 @@ import {
   AdaptiveRouterService,
   RouteDecision,
 } from './adaptive-router.service';
+import { KeyCortexToolRegistryService } from './key-cortex-tool-registry.service';
+import { KeyCortexLifecycleService } from './key-cortex-lifecycle.service';
 
 // ── Integration Layer v2 (optional — services may not exist yet) ──
 import { KeyCortexConnectorService } from './key-cortex-connector.service';
@@ -47,7 +49,10 @@ import { KeyCortexContextV2Service } from './key-cortex-context-v2.service';
 import { KeyCortexInsightService } from './key-cortex-insight.service';
 
 // ── Genome Integration Layer v3 (optional — services may not exist yet) ──
-import { KeyCortexGenomeBridgeService } from './key-cortex-genome-bridge.service';
+import { KeyCortexGenomeBridgeService, AutonomyCheck } from './key-cortex-genome-bridge.service';
+import { AutonomyOrchestratorService } from '../key-autonomy/autonomy-orchestrator.service';
+import type { AutonomyVerdict } from '../key-autonomy/autonomy-orchestrator.types';
+import { UnifiedMemoryRetrievalService } from './unified-memory-retrieval.service';
 import { KeyCortexEventService } from './key-cortex-event.service';
 
 // ── v4 Completion Layer (optional — Phase 18 services) ──
@@ -262,6 +267,22 @@ export class KeyCortexReasoningService {
     @Optional()
     @Inject(KeyCortexLearningService)
     private readonly learningService?: KeyCortexLearningService,
+
+    // ── Unified Mind/Soul layer ──
+    @Optional()
+    @Inject(AutonomyOrchestratorService)
+    private readonly autonomyOrchestrator?: AutonomyOrchestratorService,
+    @Optional()
+    @Inject(UnifiedMemoryRetrievalService)
+    private readonly unifiedMemory?: UnifiedMemoryRetrievalService,
+
+    // ── Phase 3 Skeleton: canonical tool registry + lifecycle ──
+    @Optional()
+    @Inject(KeyCortexToolRegistryService)
+    private readonly toolRegistry?: KeyCortexToolRegistryService,
+    @Optional()
+    @Inject(KeyCortexLifecycleService)
+    private readonly lifecycle?: KeyCortexLifecycleService,
   ) {
     this.MAX_CONTEXT_TOKENS =
       parseInt(process.env.KEY_CORTEX_MAX_CONTEXT_TOKENS ?? '8000', 10);
@@ -349,6 +370,27 @@ export class KeyCortexReasoningService {
     try {
       // Get or create session
       const session = await this.getOrCreateSession(query);
+
+      // Phase 3 Skeleton: start a unified lifecycle turn (best-effort)
+      let turnIdentity: { correlationId: string; sessionId: string; commandId: string; businessId: string; userId?: string | null } | undefined;
+      if (this.lifecycle) {
+        try {
+          const { identity } = await this.lifecycle.startTurn({
+            businessId: query.businessId,
+            userId: query.userId,
+            sessionId: session.id,
+            rawInput: query.text,
+            mode: query.enableActions ? 'do' : 'ask',
+            persona: query.persona,
+            provider: query.provider,
+          });
+          turnIdentity = identity;
+        } catch (err: any) {
+          this.logger.warn(
+            `[processQuery][${correlationId}] Lifecycle startTurn failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
 
       // ── Step 1b: ADAPTIVE ROUTING (Phase C) ──
       const routeDecision: RouteDecision = this.adaptiveRouter
@@ -477,27 +519,53 @@ export class KeyCortexReasoningService {
         commands: parsedCommands.map((c: any) => ({ module: c.module, action: c.action })),
       });
 
-      // ── Step 5: CHECK AUTONOMY (v3) ──
+      // ── Step 5: CHECK AUTONOMY (unified orchestrator) ──
       let autonomyCheckedCommands = parsedCommands;
-      let autonomyResults: Record<string, boolean> = {};
+      let autonomyResults: Record<string, AutonomyVerdict | AutonomyCheck> = {};
 
-      if (this.genomeV3Enabled && this.genomeBridgeService && parsedCommands.length > 0) {
+      if (parsedCommands.length > 0) {
         try {
           const approvedCommands: typeof parsedCommands = [];
 
           for (const cmd of parsedCommands) {
-            const canAutonomouslyExecute = await (this.genomeBridgeService as any).checkAutonomy(
-              query.businessId,
-              { module: cmd.module, action: cmd.action, parameters: cmd.parameters },
-            );
+            const actionKey = `${cmd.module}.${cmd.action}`;
+            let autonomyCheck: AutonomyVerdict | AutonomyCheck;
 
-            autonomyResults[`${cmd.module}:${cmd.action}`] = canAutonomouslyExecute;
+            if (this.autonomyOrchestrator) {
+              autonomyCheck = await this.autonomyOrchestrator.evaluateAction(
+                query.businessId,
+                actionKey,
+                cmd.parameters ?? {},
+                { proposedBy: query.userId, role: session.detectedRole },
+              );
+            } else if (this.genomeV3Enabled && this.genomeBridgeService) {
+              autonomyCheck = await this.genomeBridgeService.checkAutonomy(
+                query.businessId,
+                actionKey,
+                cmd.parameters ?? {},
+              );
+            } else {
+              // No autonomy layer available — require approval for safety.
+              autonomyCheck = {
+                allowed: false,
+                requiresApproval: true,
+                reason: 'No autonomy oracle available',
+              } as AutonomyCheck;
+            }
 
-            if (canAutonomouslyExecute || !cmd.requiresApproval) {
+            autonomyResults[`${cmd.module}:${cmd.action}`] = autonomyCheck;
+
+            const requiresApproval =
+              ('requiresApproval' in autonomyCheck && autonomyCheck.requiresApproval) ||
+              ('tier' in autonomyCheck && autonomyCheck.tier === 'manual');
+            const isAllowed =
+              autonomyCheck.allowed && !requiresApproval && !cmd.requiresApproval;
+
+            if (isAllowed) {
               approvedCommands.push(cmd);
             } else {
               this.logger.log(
-                `[processQuery][${correlationId}] Action ${cmd.module}.${cmd.action} requires approval — genome autonomy check returned false`,
+                `[processQuery][${correlationId}] Action ${actionKey} requires approval — autonomy: ${'reason' in autonomyCheck ? autonomyCheck.reason : ''}`,
               );
             }
           }
@@ -516,17 +584,28 @@ export class KeyCortexReasoningService {
       await this.logEvent(correlationId, 'STEP_5_CHECK_AUTONOMY', {
         totalCommands: parsedCommands.length,
         approvedCommands: autonomyCheckedCommands.length,
-        autonomyMap: autonomyResults,
+        autonomyMap: Object.fromEntries(
+          Object.entries(autonomyResults).map(([k, v]) => [k, v.allowed]),
+        ),
       });
 
       // ── Step 6: GET RANKED RECOMMENDATIONS (v3) ──
       let rankedRecommendations: GenomeRecommendation[] = [];
       if (this.genomeV3Enabled && this.genomeBridgeService) {
         try {
-          rankedRecommendations = await (this.genomeBridgeService as any).getRankedRecommendations(
+          const bridgeRanked = await this.genomeBridgeService.getRankedRecommendations(
             query.businessId,
-            v2Context ?? {},
+            5,
           );
+          rankedRecommendations = bridgeRanked.map((r) => ({
+            id: r.id,
+            title: r.title,
+            description: r.recommendation ?? r.insight,
+            impact: this.impactNumberToLevel(r.impact),
+            category: r.domain,
+            confidence: r.confidence,
+            genomeScore: r.rankScore,
+          }));
           this.logger.log(
             `[processQuery][${correlationId}] Got ${rankedRecommendations.length} ranked genome recommendations`,
           );
@@ -573,6 +652,16 @@ export class KeyCortexReasoningService {
         );
       }
 
+      // Phase 3: Append Blueprint values / brand grounding when available
+      try {
+        const valueBlock = await this.personalityService.buildValueBlock(query.businessId);
+        if (valueBlock) {
+          systemPrompt += `\n\n${valueBlock}`;
+        }
+      } catch {
+        // Non-blocking: persona grounding is additive.
+      }
+
       // v4: Apply calm mode detail level to prompt
       const detailLevel = this.getCalmModeDetailLevel(session);
       systemPrompt += `\nRespond with ${detailLevel} level of detail.`;
@@ -616,10 +705,22 @@ export class KeyCortexReasoningService {
         maxTokens:
           routeDecision.maxTokensOverride ?? this.MAX_CONTEXT_TOKENS,
         tools: routeDecision.includeActions
-          ? ((await this.actionsService.buildToolDefinitions(query.businessId)) as unknown as GatewayToolDefinition[])
+          ? (this.toolRegistry?.buildGatewayDefinitions() ??
+             (await this.actionsService.buildToolDefinitions(query.businessId)) as unknown as GatewayToolDefinition[])
           : undefined,
         responseFormat: { type: 'text' },
       });
+
+      // Phase 3 Skeleton: real LLM tool-call loop
+      const toolLoopResult = await this.handleToolCalls(
+        completionResult,
+        messages,
+        query,
+        routeDecision,
+        personalityConfig,
+        taskCategory,
+        turnIdentity,
+      );
 
       const latencyMs = Date.now() - startTime;
       const provider = completionResult.provider as CortexProvider;
@@ -628,10 +729,15 @@ export class KeyCortexReasoningService {
       // Parse structured reasoning output
       const structured = this.parseStructuredResponse(completionResult.content ?? '');
 
+      const finalContent = toolLoopResult?.content
+        ?? structured.recommendation
+        ?? completionResult.content
+        ?? '';
+
       const assistantMessage: CortexMessage = {
         id: this.generateId(),
         role: 'assistant',
-        content: structured.recommendation || completionResult.content || '',
+        content: finalContent,
         timestamp: new Date(),
         metadata: {
           provider,
@@ -714,9 +820,9 @@ export class KeyCortexReasoningService {
       };
 
       // ── Step 9: EXECUTE ACTIONS ──
-      let executedActions: CortexActionResult[] = [];
+      let executedActions: CortexActionResult[] = toolLoopResult?.actions ?? [];
 
-      if (query.enableActions) {
+      if (query.enableActions && executedActions.length === 0) {
         if (
           this.integrationV2Enabled &&
           this.executorService &&
@@ -1036,6 +1142,27 @@ export class KeyCortexReasoningService {
       // Steps 1-3 — Session, adaptive route, genome context, full context
       const session = await this.getOrCreateSession(query);
 
+      // Phase 3 Skeleton: start a unified lifecycle turn (best-effort)
+      let turnIdentity: { correlationId: string; sessionId: string; commandId: string; businessId: string; userId?: string | null } | undefined;
+      if (this.lifecycle) {
+        try {
+          const { identity } = await this.lifecycle.startTurn({
+            businessId: query.businessId,
+            userId: query.userId,
+            sessionId: session.id,
+            rawInput: query.text,
+            mode: query.enableActions ? 'do' : 'ask',
+            persona: query.persona,
+            provider: query.provider,
+          });
+          turnIdentity = identity;
+        } catch (err: any) {
+          this.logger.warn(
+            `[streamQuery][${correlationId}] Lifecycle startTurn failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+
       // Phase C: Adaptive routing
       const routeDecision: RouteDecision = this.adaptiveRouter
         ? this.adaptiveRouter.route(query, session, session.messages.slice(-10))
@@ -1157,7 +1284,8 @@ export class KeyCortexReasoningService {
         maxTokens:
           routeDecision.maxTokensOverride ?? this.MAX_CONTEXT_TOKENS,
         tools: routeDecision.includeActions
-          ? ((await this.actionsService.buildToolDefinitions(query.businessId)) as unknown as GatewayToolDefinition[])
+          ? (this.toolRegistry?.buildGatewayDefinitions() ??
+             (await this.actionsService.buildToolDefinitions(query.businessId)) as unknown as GatewayToolDefinition[])
           : undefined,
       });
 
@@ -1369,7 +1497,155 @@ export class KeyCortexReasoningService {
   }
 
   // ==========================================================================
-  // 3. Action Detection (preserved from original)
+  // 3. Canonical Tool Execution Loop (Phase 3 Skeleton)
+  // ==========================================================================
+
+  /**
+   * If the LLM returned real tool calls, execute them through the canonical
+   * KeyCortexToolRegistry and feed the results back to the LLM for a final
+   * answer. Returns the final content and a list of executed actions.
+   */
+  private async handleToolCalls(
+    completionResult: any,
+    messages: GatewayMessage[],
+    query: CortexQuery,
+    routeDecision: RouteDecision,
+    personalityConfig: any,
+    taskCategory: TaskCategory,
+    turnIdentity?: { correlationId: string; sessionId: string; commandId: string; businessId: string; userId?: string | null },
+  ): Promise<{ content: string; actions: CortexActionResult[] } | undefined> {
+    const toolCalls = completionResult.toolCalls;
+    if (!toolCalls || toolCalls.length === 0 || !this.toolRegistry) {
+      return undefined;
+    }
+
+    const ctx: any = {
+      businessId: query.businessId,
+      userId: query.userId ?? null,
+      autonomyLevel: await this.resolveAutonomyLevel(query.businessId),
+      commandId: turnIdentity?.commandId,
+      sessionId: turnIdentity?.sessionId,
+      correlationId: turnIdentity?.correlationId,
+    };
+
+    const toolMessages: GatewayMessage[] = [];
+    const executedActions: CortexActionResult[] = [];
+
+    for (const tc of toolCalls) {
+      const toolName = tc.function?.name;
+      let args: Record<string, unknown> = {};
+      try {
+        args = JSON.parse(tc.function?.arguments ?? '{}');
+      } catch {
+        this.logger.warn(`[handleToolCalls] Failed to parse arguments for ${toolName}`);
+      }
+
+      const startedAt = Date.now();
+      let result: any;
+      try {
+        result = await this.toolRegistry.execute(toolName, ctx, args);
+      } catch (err: any) {
+        result = { success: false, error: err instanceof Error ? err.message : String(err) };
+      }
+
+      executedActions.push({
+        actionType: (toolName?.toUpperCase()?.replace(/\./g, '_') ?? 'EXECUTE_TOOL') as CortexActionType,
+        status: result.success ? 'success' : 'error',
+        description: result.success
+          ? `Executed ${toolName}`
+          : `Failed: ${result.error ?? 'Unknown error'}`,
+        result: result.success ? (result.data as Record<string, unknown>) : undefined,
+        error: result.error,
+        requiresApproval: false,
+      });
+
+      toolMessages.push({
+        role: 'tool',
+        tool_call_id: tc.id,
+        name: toolName,
+        content: JSON.stringify(result),
+      } as GatewayMessage);
+
+      // Best-effort lifecycle audit
+      if (this.lifecycle) {
+        const tool = this.toolRegistry.getTool(toolName);
+        this.lifecycle.recordExecution({
+          identity: turnIdentity ?? {
+            correlationId: ctx.correlationId ?? this.generateCorrelationId(),
+            sessionId: ctx.sessionId ?? 'unknown',
+            commandId: ctx.commandId ?? 'unknown',
+            businessId: query.businessId,
+            userId: query.userId ?? null,
+          },
+          toolName,
+          module: tool?.module ?? 'unknown',
+          riskTier: tool?.riskTier ?? 1,
+          requiresApproval: tool?.requiresApproval ?? false,
+          input: args,
+          output: result.data,
+          success: result.success,
+          error: result.error,
+          durationMs: Date.now() - startedAt,
+          startedAt: new Date(startedAt),
+          completedAt: new Date(),
+        }).catch(() => {});
+      }
+    }
+
+    // Re-call LLM with tool results to get final answer
+    const finalMessages: GatewayMessage[] = [
+      ...messages,
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: toolCalls.map((tc: any) => ({
+          id: tc.id,
+          type: tc.type,
+          function: tc.function,
+        })),
+      } as any,
+      ...toolMessages,
+    ];
+
+    try {
+      const finalResult = await this.modelGateway.complete({
+        businessId: query.businessId,
+        taskCategory,
+        messages: finalMessages,
+        temperature: routeDecision.temperatureOverride ?? personalityConfig.temperature,
+        maxTokens: routeDecision.maxTokensOverride ?? this.MAX_CONTEXT_TOKENS,
+        responseFormat: { type: 'text' },
+      });
+
+      return {
+        content: finalResult.content ?? '',
+        actions: executedActions,
+      };
+    } catch (err: any) {
+      this.logger.error(
+        `[handleToolCalls] Final LLM call failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return {
+        content: `I executed ${executedActions.length} tool(s) but could not generate a final summary.`,
+        actions: executedActions,
+      };
+    }
+  }
+
+  private async resolveAutonomyLevel(businessId: string): Promise<number> {
+    try {
+      const settings = await (this.prisma.client as any).businessSetting.findUnique({
+        where: { businessId },
+        select: { aiAutonomyLevel: true },
+      });
+      return settings?.aiAutonomyLevel ?? 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  // ==========================================================================
+  // 4. Action Detection (preserved from original)
   // ==========================================================================
 
   /**
@@ -2024,43 +2300,24 @@ Rank by estimated revenue impact (highest first).
       memoryContext.runningSummary = session.runningSummary;
     }
 
-    // Structured business memory
-    if (this.aiMemoryService) {
-      try {
-        const aiCtx = await this.aiMemoryService.buildContextBlock(businessId);
-        memoryContext.aiMemory = this.aiMemoryService.buildPromptSection(aiCtx);
-      } catch (err: any) {
-        this.logger.warn(
-          `[buildMemoryContext] AiMemory load failed: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-    }
+    const currentQuery = session.messages.length > 0
+      ? session.messages[session.messages.length - 1]?.content ?? ''
+      : '';
 
-    // Semantic / vector memory: find relevant past conversations
-    if (this.semanticMemoryService) {
+    // Phase 3 Skeleton: unified memory retrieval is the single canonical source.
+    if (this.unifiedMemory) {
       try {
-        const semanticHits = await this.semanticMemoryService.search({
-          businessId,
-          query: session.messages.length > 0
-            ? session.messages[session.messages.length - 1]?.content ?? ''
-            : '',
-          limit: 3,
-          minSimilarity: 0.75,
+        const fragments = await this.unifiedMemory.retrieveContext(businessId, {
+          query: currentQuery,
+          limit: 15,
         });
-        if (semanticHits.length > 0) {
-          memoryContext.semanticMemory =
-            '=== RELEVANT PAST CONTEXT ===\n' +
-            semanticHits
-              .map(
-                (h: any, i: number) =>
-                  `${i + 1}. [${h.sourceType}] ${h.content.slice(0, 250)}`,
-              )
-              .join('\n') +
-            '\n===========================';
+
+        if (fragments.length > 0) {
+          memoryContext.aiMemory = this.formatUnifiedMemory(fragments);
         }
       } catch (err: any) {
         this.logger.warn(
-          `[buildMemoryContext] Semantic memory search failed: ${err instanceof Error ? err.message : String(err)}`,
+          `[buildMemoryContext] Unified memory retrieval failed: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
     }
@@ -2068,9 +2325,6 @@ Rank by estimated revenue impact (highest first).
     // Phase D: Retrieve relevant learned lessons from past feedback
     if (this.learningService) {
       try {
-        const currentQuery = session.messages.length > 0
-          ? session.messages[session.messages.length - 1]?.content ?? ''
-          : '';
         const lessons = await this.learningService.retrieveLessons(
           businessId,
           currentQuery,
@@ -2094,6 +2348,18 @@ Rank by estimated revenue impact (highest first).
     }
 
     return memoryContext;
+  }
+
+  private formatUnifiedMemory(fragments: any[]): string {
+    const lines = [
+      '=== RELEVANT MEMORY ===',
+      ...fragments.map(
+        (f, i) =>
+          `${i + 1}. [${f.sourceType}] ${(f.title ?? 'memory').replace(/\n/g, ' ')}: ${(f.content ?? '').toString().slice(0, 250)}`,
+      ),
+      '========================',
+    ];
+    return lines.join('\n');
   }
 
   /**
@@ -2716,26 +2982,26 @@ Example: ["Can you break that down by month?", "Create a task for this", "What a
       }
 
       // Get genome-ranked recommendations
-      const rankedRecs = await (this.genomeBridgeService as any).getRankedRecommendations(
+      const rankedRecs = await this.genomeBridgeService.getRankedRecommendations(
         businessId,
-        v2Context,
+        5,
       );
 
       // Filter to top 3 most impactful
       const topRecs = rankedRecs
-        .filter((r: any) => r.impact === 'high' || r.confidence > 0.7)
+        .filter((r) => r.impact >= 0.7 || r.confidence > 0.7)
         .slice(0, 3);
 
       // Format as suggestions
-      const suggestions: Suggestion[] = topRecs.map((rec: any) => ({
+      const suggestions: Suggestion[] = topRecs.map((rec) => ({
         id: rec.id ?? this.generateId(),
         title: rec.title,
-        description: rec.description,
-        impact: rec.impact as 'high' | 'medium' | 'low',
-        category: rec.category,
+        description: rec.recommendation ?? rec.insight,
+        impact: this.impactNumberToLevel(rec.impact),
+        category: rec.domain,
         source: 'genome',
         confidence: rec.confidence,
-        action: `Consider ${rec.title.toLowerCase()} to improve ${rec.category}`,
+        action: `Consider ${rec.title.toLowerCase()} to improve ${rec.domain}`,
       }));
 
       // If no high-impact recommendations, use urgent signals
@@ -3977,6 +4243,12 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
     }
 
     return suggestions.slice(0, 3);
+  }
+
+  private impactNumberToLevel(impact: number): 'high' | 'medium' | 'low' {
+    if (impact >= 0.7) return 'high';
+    if (impact >= 0.4) return 'medium';
+    return 'low';
   }
 
   private generateId(): string {

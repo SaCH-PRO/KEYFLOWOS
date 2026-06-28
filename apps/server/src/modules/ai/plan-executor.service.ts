@@ -8,6 +8,7 @@ import { AiExecutionLogService } from './ai-execution-log.service';
 import { TimelineService } from '../timeline/timeline.service';
 import { QueueService } from './queue.service';
 import { AgentStateMachineService, type AgentState } from './agent-state-machine.service';
+import { AutonomyOrchestratorService } from '../key-autonomy/autonomy-orchestrator.service';
 
 export interface PlanExecutionResult {
   planId: string;
@@ -43,6 +44,7 @@ export class PlanExecutorService implements OnModuleInit, OnModuleDestroy {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Inject(forwardRef(() => AiOversightService)) private readonly governance: AiOversightService,
+    @Inject(forwardRef(() => AutonomyOrchestratorService)) private readonly autonomyOrchestrator: AutonomyOrchestratorService,
     @Inject(forwardRef(() => FlowOrchestratorService)) private readonly flowOrchestrator: FlowOrchestratorService,
     @Inject(AiExecutionLogService) private readonly executionLog: AiExecutionLogService,
     @Inject(TimelineService) private readonly timeline: TimelineService,
@@ -151,7 +153,7 @@ export class PlanExecutorService implements OnModuleInit, OnModuleDestroy {
 
       // Governance pre-check
       const toolName = step.toolName ?? step.action;
-      const decision = await this.governance.evaluate(businessId, toolName);
+      const decision = await this.evaluateStep(businessId, toolName);
       if (!decision.allowed) {
         await this.prisma.client.aiPlanStep.update({
           where: { id: step.id },
@@ -286,7 +288,7 @@ export class PlanExecutorService implements OnModuleInit, OnModuleDestroy {
 
       // Dependency just resolved — enqueue this step now
       const toolName = step.toolName ?? step.action;
-      const decision = await this.governance.evaluate(businessId, toolName);
+      const decision = await this.evaluateStep(businessId, toolName);
       if (!decision.allowed) {
         await this.prisma.client.aiPlanStep.update({
           where: { id: step.id },
@@ -336,5 +338,34 @@ export class PlanExecutorService implements OnModuleInit, OnModuleDestroy {
         this.logger.error(`Failed to enqueue unblocked step ${step.id}: ${(err as Error).message}`);
       }
     }
+  }
+
+  private async evaluateStep(
+    businessId: string,
+    toolName: string,
+  ): Promise<{ allowed: boolean; reason: string; requiresFormalApproval: boolean; requiresAdminApproval: boolean }> {
+    if (this.autonomyOrchestrator) {
+      try {
+        const verdict = await this.autonomyOrchestrator.evaluateAction(businessId, toolName);
+        return {
+          allowed: verdict.allowed,
+          reason: verdict.reason,
+          requiresFormalApproval: verdict.requiresApproval && verdict.tier === 'supervised',
+          requiresAdminApproval: verdict.tier === 'manual',
+        };
+      } catch (err: any) {
+        this.logger.warn(
+          `Autonomy orchestrator step evaluation failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
+    const decision = await this.governance.evaluate(businessId, toolName);
+    return {
+      allowed: decision.allowed,
+      reason: decision.reason,
+      requiresFormalApproval: decision.requiresFormalApproval,
+      requiresAdminApproval: decision.requiresAdminApproval,
+    };
   }
 }

@@ -36,7 +36,20 @@ import { Module, forwardRef } from '@nestjs/common';
 import { HttpModule } from '@nestjs/axios';
 
 import { KeyCortexController } from './key-cortex.controller';
+import { KeyCortexAuditController } from './key-cortex-audit.controller';
 import { AdaptiveRouterService } from './adaptive-router.service';
+import { KeyCortexEventBusService } from './key-cortex-event-bus.service';
+import { KeyCortexToolRegistryService } from './key-cortex-tool-registry.service';
+import { KeyCortexOrganRegistrarService } from './key-cortex-organ-registrar.service';
+import { KeyCortexLifecycleService } from './key-cortex-lifecycle.service';
+import { KeyCortexSafeDatabaseService } from './key-cortex-safe-database.service';
+
+// -- Phase 2 Body: Organ Adapters --
+import { TemporalFlowAdapterService } from './organs/temporal-flow-adapter.service';
+import { KeyInboxAdapterService } from './organs/key-inbox-adapter.service';
+import { KeyGenomeAdapterService } from './organs/key-genome-adapter.service';
+import { StorelinkAdapterService } from './organs/storelink-adapter.service';
+import { KeyConnectorAdapterService } from './organs/key-connector-adapter.service';
 
 // -- Core (legacy) --
 import { KeyCortexPersonalityService } from './key-cortex-personality.service';
@@ -75,6 +88,17 @@ import { KeyCortexRealtimeService } from './key-cortex-realtime.service';
 // -- Phase D: Data & Persistent Learning --
 import { KeyBiEngineService } from './key-bi-engine.service';
 import { KeyCortexLearningService } from './key-cortex-learning.service';
+import { UnifiedMemoryRetrievalService } from './unified-memory-retrieval.service';
+import { EvalHarnessService } from './eval-harness.service';
+import { CognitiveEventBusService } from './cognitive-event-bus.service';
+import { PlanEngineService } from './plan-engine.service';
+import { ValueLearningService } from './value-learning.service';
+import { KnowledgeIngestionService } from './knowledge-ingestion.service';
+import { MemoryConsolidationService } from './memory-consolidation.service';
+import { SelfAssessmentService } from './self-assessment.service';
+import { EscalationService } from './escalation.service';
+import { DigitalEmployeeAcceptanceService } from './digital-employee-acceptance.service';
+import { KeyCortexMemoryService } from './key-cortex-memory.service';
 
 // -- Infrastructure --
 import { PrismaModule } from '../../core/prisma/prisma.module';
@@ -95,9 +119,13 @@ import { KeyInboxModule } from '../key-inbox/key-inbox.module';
 import { BusinessGenomeModule } from '../business-genome/business-genome.module';
 import { KeyGenomeModule } from '../business-genome/key-genome/key-genome.module';
 import { BlueprintModule } from '../blueprint/blueprint.module';
+import { KeyAutonomyModule } from '../key-autonomy/key-autonomy.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { ProjectsModule } from '../projects/projects.module';
 import { KeystoreModule } from '../keystore/keystore.module';
+import { PortalModule } from '../portal/portal.module';
+import { SiteModule } from '../site/site.module';
+import { KeyConnectorModule } from '../key-connector/key-connector.module';
 import { ContentService } from '../content/content.service';
 import { ActivityLogService } from '../activity/activity.service';
 
@@ -134,6 +162,7 @@ import { ActivityLogService } from '../activity/activity.service';
     forwardRef(() => KeyInboxModule),
     forwardRef(() => BusinessGenomeModule),
     forwardRef(() => KeyGenomeModule),
+    forwardRef(() => KeyAutonomyModule),
     forwardRef(() => NotificationsModule),
     forwardRef(() => ProjectsModule),
 
@@ -141,11 +170,18 @@ import { ActivityLogService } from '../activity/activity.service';
     // Enables KEY Cortex to manage service orders, browse listings, and
     // track deliverable requests through the Keystore module.
     forwardRef(() => KeystoreModule),
+
+    // -- Phase 2 Body: Outward-facing modules --
+    forwardRef(() => PortalModule),
+    forwardRef(() => SiteModule),
+    forwardRef(() => KeyConnectorModule),
   ],
 
   controllers: [
     // REST + SSE surface (see key-cortex.controller.ts)
     KeyCortexController,
+    // Mind / Soul / Evolution audit + eval surface
+    KeyCortexAuditController,
   ],
 
   providers: [
@@ -167,6 +203,30 @@ import { ActivityLogService } from '../activity/activity.service';
 
     // Action executor -- tool calling, approval flow, execution tracking
     KeyCortexActionsService,
+
+    // -- Phase 1 Body: Peripheral Nervous System --
+    // Unified event bus and canonical tool registry that all organs plug into.
+    KeyCortexEventBusService,
+    KeyCortexToolRegistryService,
+
+    // -- Phase 2 Body: Organ Adapters --
+    // Adapters that wire each organ into the nervous system.
+    TemporalFlowAdapterService,
+    KeyInboxAdapterService,
+    KeyGenomeAdapterService,
+    StorelinkAdapterService,
+    KeyConnectorAdapterService,
+
+    // -- Phase 2 Body: Organ Registrar --
+    // Registers all organ tools into the canonical registry at boot.
+    KeyCortexOrganRegistrarService,
+
+    // -- Phase 3 Body: Skeleton --
+    // Identity/lifecycle manager that ties sessions, commands, execution logs,
+    // and audit events together with a single correlationId thread.
+    KeyCortexLifecycleService,
+    // Authority-granted safe database wrappers for QUERY_DATABASE / UPDATE_RECORD.
+    KeyCortexSafeDatabaseService,
 
     // Voice interface -- TTS / STT with personality voice mapping
     KeyCortexVoiceService,
@@ -200,6 +260,25 @@ import { ActivityLogService } from '../activity/activity.service';
     KeyBiEngineService,
     // Persistent learning loop + metacognition / confidence calibration
     KeyCortexLearningService,
+
+    // Persistent multi-type KEY Cortex memory
+    KeyCortexMemoryService,
+
+    // Unified memory retrieval layer over all KEY memory stores
+    UnifiedMemoryRetrievalService,
+
+    // Automated evaluation harness for Mind / Soul / Evolution
+    EvalHarnessService,
+
+    // Mind / Soul / Evolution foundation services
+    CognitiveEventBusService,
+    PlanEngineService,
+    ValueLearningService,
+    KnowledgeIngestionService,
+    MemoryConsolidationService,
+    SelfAssessmentService,
+    EscalationService,
+    DigitalEmployeeAcceptanceService,
 
     // -- v3: Phase 3 & 4 Services --
     // Sandbox -- AI-powered code generation & secure execution
@@ -299,6 +378,41 @@ import { ActivityLogService } from '../activity/activity.service';
     // -- Phase D: Data & Persistent Learning --
     KeyBiEngineService,
     KeyCortexLearningService,
+    KeyCortexMemoryService,
+
+    // Unified memory retrieval layer
+    UnifiedMemoryRetrievalService,
+
+    // Automated evaluation harness
+    EvalHarnessService,
+
+    // Mind / Soul / Evolution foundation services
+    CognitiveEventBusService,
+    PlanEngineService,
+    ValueLearningService,
+    KnowledgeIngestionService,
+    MemoryConsolidationService,
+    SelfAssessmentService,
+    EscalationService,
+    DigitalEmployeeAcceptanceService,
+
+    // -- Phase 1 Body: Peripheral Nervous System --
+    KeyCortexEventBusService,
+    KeyCortexToolRegistryService,
+
+    // -- Phase 2 Body: Organ Adapters --
+    TemporalFlowAdapterService,
+    KeyInboxAdapterService,
+    KeyGenomeAdapterService,
+    StorelinkAdapterService,
+    KeyConnectorAdapterService,
+
+    // -- Phase 2 Body: Organ Registrar --
+    KeyCortexOrganRegistrarService,
+
+    // -- Phase 3 Body: Skeleton --
+    KeyCortexLifecycleService,
+    KeyCortexSafeDatabaseService,
   ],
 })
 export class KeyCortexModule {}

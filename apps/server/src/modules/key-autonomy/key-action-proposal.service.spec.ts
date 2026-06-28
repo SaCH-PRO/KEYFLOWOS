@@ -6,6 +6,7 @@ import { TemporalFlowService } from '../temporal-flow/temporal-flow.service';
 import { KeyActionPolicyService } from './key-action-policy.service';
 import { KeyActionExecutorService } from './key-action-executor.service';
 import { KeyActionGenomePolicyService } from './key-action-genome-policy.service';
+import { AutonomyOrchestratorService } from './autonomy-orchestrator.service';
 
 function createMockClient() {
   const rows: any[] = [];
@@ -63,6 +64,20 @@ describe('KeyActionProposalService', () => {
               allowed: true,
               requiresExtraConfirmation: false,
               message: 'KEY Genome readiness permits this action.',
+            }),
+          },
+        },
+        {
+          provide: AutonomyOrchestratorService,
+          useValue: {
+            evaluateAction: vi.fn().mockResolvedValue({
+              allowed: true,
+              requiresApproval: false,
+              tier: 'full',
+              confidence: 1,
+              reason: 'Mock autonomy passed',
+              ruleTrace: [],
+              createdAt: new Date(),
             }),
           },
         },

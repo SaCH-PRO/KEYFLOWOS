@@ -3,22 +3,34 @@ import { KeyCortexActionsService } from '../key-cortex-actions.service';
 
 const mockPrisma = {
   client: {
-    aiApprovalRequest: {
-      create: vi.fn(),
-      findMany: vi.fn(),
-    },
     cortexActionLog: {
+      create: vi.fn(),
+    },
+    task: {
       create: vi.fn(),
     },
   },
 };
 
 const mockToolRegistry = {
-  listTools: vi.fn(),
+  listTools: vi.fn().mockReturnValue([]),
+  executeTool: vi.fn(),
 };
 
 const mockCommandService = {
   execute: vi.fn(),
+  enqueue: vi.fn(),
+};
+
+const mockKeyCortexToolRegistry = {
+  registerMany: vi.fn(),
+  execute: vi.fn(),
+  listTools: vi.fn().mockReturnValue([]),
+  buildGatewayDefinitions: vi.fn().mockReturnValue([]),
+};
+
+const mockEventBus = {
+  emit: vi.fn(),
 };
 
 const mockApprovalService = {
@@ -30,6 +42,8 @@ function createService(): KeyCortexActionsService {
     mockPrisma as any,
     mockToolRegistry as any,
     mockCommandService as any,
+    mockKeyCortexToolRegistry as any,
+    mockEventBus as any,
     mockApprovalService as any,
   );
 }
@@ -42,8 +56,8 @@ describe('KeyCortexActionsService — approval gate', () => {
     service = createService();
   });
 
-  it('creates an AiApprovalRequest for high-impact actions', async () => {
-    mockPrisma.client.aiApprovalRequest.create.mockResolvedValue({ id: 'ar_1' });
+  it('creates an ApprovalRequest for high-impact actions', async () => {
+    mockApprovalService.createRequest.mockResolvedValue({ id: 'apr_1' });
 
     const approval = await service['requestApproval'](
       {
@@ -56,38 +70,39 @@ describe('KeyCortexActionsService — approval gate', () => {
     );
 
     expect(approval.approved).toBe(false);
-    expect(approval.approvalRequestId).toBe('ar_1');
-    expect(mockPrisma.client.aiApprovalRequest.create).toHaveBeenCalledWith(
+    expect(approval.approvalRequestId).toBe('apr_1');
+    expect(mockApprovalService.createRequest).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({
-          businessId: 'biz_1',
-          userId: 'user_1',
-          module: 'key_cortex',
-          action: 'CREATE_INVOICE',
-          status: 'PENDING',
-        }),
+        businessId: 'biz_1',
+        requester: 'key_cortex',
+        requesterId: 'user_1',
+        actionType: 'CREATE_INVOICE',
+        actionModule: 'key_cortex',
       }),
     );
   });
 
-  it('also creates a dashboard ApprovalRequest when approval service is available', async () => {
-    mockPrisma.client.aiApprovalRequest.create.mockResolvedValue({ id: 'ar_1' });
-    mockApprovalService.createRequest.mockResolvedValue({ id: 'apr_1' });
+  it('returns approved=false without requestId if approval service is missing', async () => {
+    const serviceWithoutApproval = new KeyCortexActionsService(
+      mockPrisma as any,
+      mockToolRegistry as any,
+      mockCommandService as any,
+      mockKeyCortexToolRegistry as any,
+      mockEventBus as any,
+      undefined,
+    );
 
-    await (service as any).requestApproval(
-      {
-        actionType: 'SEND_EMAIL',
-        status: 'pending_approval',
-        description: 'Send campaign email',
-      },
+    const approval = await (serviceWithoutApproval as any).requestApproval(
+      { actionType: 'CREATE_INVOICE', status: 'pending_approval', description: 'x' },
       { id: 'sess_1', businessId: 'biz_1', userId: 'user_1' } as any,
     );
 
-    expect(mockApprovalService.createRequest).toHaveBeenCalled();
+    expect(approval.approved).toBe(false);
+    expect(approval.approvalRequestId).toBeUndefined();
   });
 
   it('returns approved=false without requestId if persistence fails', async () => {
-    mockPrisma.client.aiApprovalRequest.create.mockRejectedValue(new Error('DB down'));
+    mockApprovalService.createRequest.mockRejectedValue(new Error('DB down'));
 
     const approval = await (service as any).requestApproval(
       { actionType: 'CREATE_INVOICE', status: 'pending_approval', description: 'x' },
@@ -99,7 +114,7 @@ describe('KeyCortexActionsService — approval gate', () => {
   });
 
   it('executeActions marks high-impact action as pending_approval with requestId', async () => {
-    mockPrisma.client.aiApprovalRequest.create.mockResolvedValue({ id: 'ar_2' });
+    mockApprovalService.createRequest.mockResolvedValue({ id: 'apr_2' });
 
     const results = await service.executeActions(
       [
@@ -115,11 +130,16 @@ describe('KeyCortexActionsService — approval gate', () => {
 
     expect(results).toHaveLength(1);
     expect(results[0].status).toBe('pending_approval');
-    expect(results[0].approvalRequestId).toBe('ar_2');
+    expect(results[0].approvalRequestId).toBe('apr_2');
     expect(results[0].requiresApproval).toBe(true);
   });
 
-  it('executeActions runs low-risk actions without approval', async () => {
+  it('executeActions runs low-risk actions without approval via canonical registry', async () => {
+    mockKeyCortexToolRegistry.execute.mockResolvedValue({
+      success: true,
+      data: { taskId: 'task_1', title: 'Follow up' },
+    });
+
     const results = await service.executeActions(
       [
         {
@@ -133,6 +153,33 @@ describe('KeyCortexActionsService — approval gate', () => {
     );
 
     expect(results[0].status).not.toBe('pending_approval');
-    expect(mockPrisma.client.aiApprovalRequest.create).not.toHaveBeenCalled();
+    expect(mockApprovalService.createRequest).not.toHaveBeenCalled();
+    expect(mockKeyCortexToolRegistry.execute).toHaveBeenCalledWith(
+      'cortex.create_task',
+      expect.objectContaining({ businessId: 'biz_1', sessionId: 'sess_1', userId: 'user_1', autonomyLevel: 4 }),
+      expect.objectContaining({ title: 'Follow up' }),
+    );
+  });
+
+  it('executeActions surfaces tool execution errors', async () => {
+    mockKeyCortexToolRegistry.execute.mockResolvedValue({
+      success: false,
+      error: 'Missing required parameters: title',
+    });
+
+    const results = await service.executeActions(
+      [
+        {
+          actionType: 'CREATE_TASK',
+          status: 'success',
+          description: 'Create follow-up task',
+          result: {},
+        },
+      ],
+      { id: 'sess_1', businessId: 'biz_1', userId: 'user_1' } as any,
+    );
+
+    expect(results[0].status).toBe('error');
+    expect(results[0].error).toContain('missing required parameters');
   });
 });

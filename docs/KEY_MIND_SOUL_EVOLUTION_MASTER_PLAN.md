@@ -3,7 +3,7 @@
 **Subtitle:** From AI Co-Pilot to Autonomous Digital Employee  
 **Scope:** Mind, Soul, and Evolution capabilities only. Body / tools / new connectors are explicitly out of scope.  
 **Date:** 2026-06-26  
-**Status:** Draft — ready for review and sequencing  
+**Status:** Updated after fresh baseline audit — ready for execution  
 
 ---
 
@@ -12,7 +12,7 @@
 ### 1.1 The goal
 KEYFLOWOS should feel like the best business partner and employee a user could hire:  
 - It **remembers** the business like an institutional veteran.  
-- It **reasons** across functions like a senior operator.  
+- It **reasones** across functions like a senior operator.  
 - It **acts** with judgment, not just speed.  
 - It **explains itself** so users trust it.  
 - It **learns** from every interaction and outcome.  
@@ -43,31 +43,54 @@ The Mind / Soul / Evolution layer is considered complete when:
 
 ---
 
-## 3. Current State Baseline
+## 3. Current State Baseline (Fresh Audit)
 
-### 3.1 What already exists
-| Layer | Existing assets | Maturity |
+### 3.1 Capability maturity (L1–L5)
+
+| Subsystem | Score | Rationale |
 |---|---|---|
-| **Mind — Perception** | `key-inbox-*`, `temporal-flow`, connectors, event listeners | L2-L3 |
-| **Mind — Reasoning** | `key-cortex-reasoning.service.ts`, `adaptive-router.service.ts`, `ModelGatewayService` | L3 |
-| **Mind — Memory** | `CortexSession`, `KeyCortexMemoryService`, `AiMemory`, `GenomeMemoryEvent`, `CognitionMemory`, `TemporalFlowMemory` | L2 (fragmented) |
-| **Mind — Planning** | `key-cortex-command.service.ts`, `key-cortex-executor.service.ts`, `key-autonomy` | L2 (reactive) |
-| **Mind — Metacognition** | `trust-explanation.service.ts`, `outcome-learning.service.ts`, `genome-scoring.service.ts` | L3 |
-| **Soul — Identity** | `BusinessBlueprint`, `BusinessGenome`, DNA sections, genome stage | L4 |
-| **Soul — Values** | Rule-based guardrails, risk penalties, approval requirements | L2 |
-| **Soul — Governance** | `BusinessConstitutionVersion`, `genome-autonomy-gate.service.ts`, `AuthorityGrant`, `AutopilotSettings` | L3-L4 |
-| **Soul — Trust** | Audit trails, `trust-explanation.service.ts`, WebSocket presence | L3 |
-| **Soul — Voice** | `key-cortex-personality.service.ts` personas, Blueprint brand voice | L2 |
-| **Evolution** | `outcome-learning.service.ts`, `GenomeMemoryEvent`, `CognitionMemory` | L2 |
+| **Mind — Perception** | **L2** | `key-inbox`, `temporal-flow`, connectors produce events, but there is no normalized `CognitiveEventBus`; signals are module-specific. |
+| **Mind — Reasoning** | **L2–L3** | `KeyCortexReasoningService` orchestrates LLM + router + actions, but the live autonomy integration is **broken** and there is no chain-of-thought verification or tool-use validation. |
+| **Mind — Memory** | **L2** | Multiple stores exist; semantic search works but is empty without backfill; no unified retrieval; `KeyCortexMemoryService` is Redis-only with a 10-minute TTL. |
+| **Mind — Planning** | **L2** | `PlannerService`/`PlanExecutorService` are reactive; no simulation, long-horizon planning, or replanning. |
+| **Mind — Metacognition** | **L2–L3** | `TrustExplanationService` generates static explanations; `KeyCortexLearningService` records feedback and calibrates confidence, but calibration is coarse and not surfaced in UX. |
+| **Soul — Identity** | **L4** | `BusinessBlueprint` + `BusinessGenome` + DNA mapping are robust; integrity/completeness scoring exists. |
+| **Soul — Values** | **L2** | `BusinessConstitutionVersion` exists, but values are static; no feedback-driven `ValueLearningService` yet. |
+| **Soul — Governance** | **L3** | Constitution, `AuthorityGrant`, `AutopilotSettings`, and `GenomeAutonomyGateService` exist, but multiple overlapping approval/autonomy services create inconsistent verdicts. |
+| **Soul — Trust** | **L3** | Explanations and audit trails exist, but confidence/uncertainty is not consistently shown to users. |
+| **Soul — Voice** | **L2** | Personas are rich but not grounded in Blueprint values; no value-conflict warnings. |
+| **Evolution** | **L2** | Learning loops exist, but no eval harness, knowledge ingestion, or automated consolidation. |
 
-### 3.2 Critical blockers
-1. `KeyCortexGenomeBridgeService.checkAutonomy()` is **stubbed** — Mind cannot consult Soul live.
-2. **Five+ memory stores** with no unified retrieval layer.
-3. **Multiple overlapping approval/autonomy services** (`AiOversightService`, `KeyCortexApprovalService`, `GenomeAutonomyGateService`, `KeyActionPolicyService`, `KeyActionGenomePolicyService`).
-4. **Reactive planning only** — no long-horizon plan generation or simulation.
-5. **No automated eval harness** for autonomy, explanation quality, or recommendation accuracy.
-6. **Values are static** — no feedback-driven value refinement.
-7. **No live knowledge ingestion** pipeline for best practices, science, or regulation.
+**Summary:** The foundation is broad but not coherent. The two biggest risks are (1) the live autonomy gate is bypassed in the reasoning path, and (2) memory is fragmented and partly ephemeral.
+
+### 3.2 What already exists
+
+| Layer | Existing assets |
+|---|---|
+| **Mind — Perception** | `key-inbox-*`, `temporal-flow`, connectors, event listeners |
+| **Mind — Reasoning** | `key-cortex-reasoning.service.ts`, `adaptive-router.service.ts`, `ModelGatewayService` |
+| **Mind — Memory** | `CortexSession`, `KeyCortexMemoryService`, `AiMemory`/`AiMemoryEmbedding`, `GenomeMemoryEvent`, `CognitionMemory`, `TemporalFlowMemory` |
+| **Mind — Planning** | `key-cortex-command.service.ts`, `key-cortex-executor.service.ts`, `key-autonomy` proposals |
+| **Mind — Metacognition** | `trust-explanation.service.ts`, `outcome-learning.service.ts`, `genome-scoring.service.ts` |
+| **Soul — Identity** | `BusinessBlueprint`, `BusinessGenome`, DNA sections, genome stage |
+| **Soul — Values** | Rule-based guardrails, risk penalties, approval requirements |
+| **Soul — Governance** | `BusinessConstitutionVersion`, `genome-autonomy-gate.service.ts`, `AuthorityGrant`, `AutopilotSettings` |
+| **Soul — Trust** | Audit trails, `trust-explanation.service.ts`, WebSocket presence |
+| **Soul — Voice** | `key-cortex-personality.service.ts` personas, Blueprint brand voice |
+| **Evolution** | `outcome-learning.service.ts`, `GenomeMemoryEvent`, `CognitionMemory` |
+
+### 3.3 Critical blockers (updated from audit)
+
+1. **Autonomy gate is bypassed in the live path.** `KeyCortexReasoningService.processQuery` passes the wrong argument shape to `genomeBridgeService.checkAutonomy()` and treats the returned object as a boolean, so every action appears approved.
+2. **Five overlapping approval/autonomy services/tables:** `AiOversightService`, `KeyCortexApprovalService`, `GenomeAutonomyGateService`, `KeyActionPolicyService`, `KeyActionGenomePolicyService`, plus tables `aiApprovalRequest`, `aiApprovalItem`, `approvalRequest`, `keyActionProposal`.
+3. **Memory is fragmented and partly ephemeral.** `KeyCortexMemoryService` stores typed memory in Redis with a 10-minute TTL and no DB path.
+4. **Semantic search is unpopulated and unsafe.** `SemanticMemoryService.search` uses `$queryRawUnsafe` with direct interpolation (`limit`, `sourceTypes`) and requires backfill from `AiMemory`.
+5. **Reactive planning only** — no long-horizon plan generation or simulation.
+6. **No automated eval harness** for autonomy verdict consistency, memory retrieval, or recommendation accuracy.
+7. **Values are static** — no feedback-driven value refinement.
+8. **No live knowledge ingestion** pipeline for best practices, science, or regulation.
+9. **Three autonomy-level settings sources:** `BusinessBlueprint.aiPreferences.autonomyLevel`, `AutopilotSettings.autonomyLevel`, `BusinessSettings.aiAutonomyLevel`. No canonical source.
+10. **Widespread `(as any)` casts** bypass compile-time checks and allowed the autonomy-call signature mismatch to slip through a passing build.
 
 ---
 
@@ -125,7 +148,7 @@ The Mind / Soul / Evolution layer is considered complete when:
 **Objective:** Turn fragmented cognition into one coherent brain.
 
 **Key initiatives:**
-1. **Perception unification** — build a `CognitiveEventBus` that turns every input (message, event, connector sync, user action) into a normalized signal with embeddings, provenance, and confidence.
+1. **Perception unification** — build a `CognitiveEventBus` that turns every input into a normalized signal with embeddings, provenance, and confidence.
 2. **Reasoning engine** — complete the Cortex↔Genome bridge; add chain-of-thought verification, tool-use validation, and uncertainty quantification.
 3. **Unified memory retrieval** — build `UnifiedMemoryRetrievalService` that ranks context from conversation, Genome, cognition, and temporal memory.
 4. **Planning engine** — build `PlanEngineService` for goal decomposition, simulation, execution monitoring, and replanning.
@@ -156,16 +179,25 @@ The Mind / Soul / Evolution layer is considered complete when:
 ## 6. Phase Roadmap
 
 ### Phase 0 — Stabilization (Weeks 1-4)
-**Goal:** Clean up the foundation so we can build without regressions.
+**Goal:** Fix the live autonomy bypass, secure memory, establish interfaces, and prevent regressions.
 
 **Deliverables:**
-- [ ] Merge and validate all current Mind/Soul stubs (especially `KeyCortexGenomeBridgeService.checkAutonomy()`).
-- [ ] Resolve duplicate approval/autonomy symbols.
-- [ ] Complete import cleanup and package normalization.
-- [ ] Establish baseline eval metrics for current recommendation/explanation quality.
-- [ ] Lock Body scope: no new connectors or operational modules during this plan.
+| # | Deliverable | New / Modified Files | Success Criteria |
+|---|---|---|---|
+| 0.1 | Fix live autonomy bypass in `KeyCortexReasoningService.processQuery` | `apps/server/src/modules/key-cortex/key-cortex-reasoning.service.ts:489–496` | `checkAutonomy()` receives correct input and verdict `allowed`/`requiresApproval` is respected. |
+| 0.2 | Fix `getRankedRecommendations` call signature | `apps/server/src/modules/key-cortex/key-cortex-reasoning.service.ts:526–529` | No silent signature misuse; returns recommendations correctly. |
+| 0.3 | Add `AutonomyOrchestratorService` interface + register in `KeyAutonomyModule` | `apps/server/src/modules/key-autonomy/autonomy-orchestrator.service.ts`, `key-autonomy.module.ts` | Service exists and is injectable; initial implementation delegates to existing providers. |
+| 0.4 | Add `UnifiedMemoryRetrievalService` interface + register in `KeyCortexModule` | `apps/server/src/modules/key-cortex/unified-memory-retrieval.service.ts`, `key-cortex.module.ts` | Service exists and is injectable. |
+| 0.5 | Add `EvalHarnessService` skeleton | `apps/server/src/modules/key-cortex/eval-harness.service.ts` | CI runs two suites: autonomy consistency + memory retrieval precision. |
+| 0.6 | Fix `SemanticMemoryService.search` SQL injection | `apps/server/src/modules/ai/semantic-memory.service.ts:81–90` | Parameters are parameterized; no `$queryRawUnsafe` interpolation. |
+| 0.7 | Add vector similarity index on `ai_memory_embeddings` | `packages/db/prisma/schema.prisma`, migration | Semantic search is performant at scale. |
+| 0.8 | Backfill `AiMemory` → `AiMemoryEmbedding` | `apps/server/src/modules/ai/semantic-memory.service.ts` | Existing tenants have searchable embeddings. |
+| 0.9 | Deprecate or DB-back `KeyCortexMemoryService` | `apps/server/src/modules/key-cortex/key-cortex-memory.service.ts`, `key-cortex-conversation.service.ts` | No business memory can evaporate on cache eviction. |
+| 0.10 | Implement `buildReadinessWarning` stub | `apps/server/src/modules/key-autonomy/genome-recommendation-action-bridge.service.ts:379–384` | Returns actionable readiness warnings. |
+| 0.11 | Document approval-table consolidation plan | `docs/KEY_APPROVAL_TABLE_SUNSET_PLAN.md` | Team agrees on canonical pending-state table. |
+| 0.12 | Freeze Body scope | Team comms + architecture board | No new connectors/commerce modules during this plan. |
 
-**Success metric:** All existing tests pass; zero known stubbed functions on the critical path.
+**Success metric:** All existing tests pass; zero known stubbed functions on the critical path; eval harness runs green.
 
 ---
 
@@ -175,18 +207,22 @@ The Mind / Soul / Evolution layer is considered complete when:
 **Deliverables:**
 | # | Deliverable | New / Modified Files | Owner |
 |---|---|---|---|
-| 1.1 | `AutonomyOrchestratorService` | `apps/server/src/modules/key-autonomy/autonomy-orchestrator.service.ts` | Platform |
-| 1.2 | Unified autonomy schema & data model | Prisma: `AutonomyVerdict`, `AutonomyRule`, `AuthorityGrant` migration | Data |
-| 1.3 | Refactor existing autonomy services to call orchestrator | `AiOversightService`, `GenomeAutonomyGateService`, `KeyActionPolicyService`, `KeyCortexApprovalService` | Platform |
-| 1.4 | `UnifiedMemoryRetrievalService` | `apps/server/src/modules/key-cortex/unified-memory-retrieval.service.ts` | Mind |
-| 1.5 | Memory indexing strategy | Add vector/embedding retrieval to `AiMemoryEmbedding` or introduce `MemoryFragment` model | Data |
-| 1.6 | Complete Cortex↔Genome bridge | `KeyCortexGenomeBridgeService` | Mind+Soul |
-| 1.7 | Mind/Soul contract documentation | `docs/KEY_MIND_SOUL_CONTRACT.md` | Product |
+| 1.1 | `AutonomyOrchestratorService` full implementation | `apps/server/src/modules/key-autonomy/autonomy-orchestrator.service.ts` | Platform |
+| 1.2 | Unified autonomy schema & data model | Prisma: `AutonomyVerdict`, `AutonomyRule` migration; keep `AuthorityGrant` | Data |
+| 1.3 | Refactor existing autonomy services to call orchestrator | `AiOversightService`, `GenomeAutonomyGateService`, `KeyActionPolicyService`, `KeyActionGenomePolicyService` | Platform |
+| 1.4 | `UnifiedMemoryRetrievalService` full implementation | `apps/server/src/modules/key-cortex/unified-memory-retrieval.service.ts` | Mind |
+| 1.5 | Memory fragment normalization | Add `MemoryFragment` shape used across `AiMemory`, `AiMemoryEmbedding`, `GenomeMemoryEvent`, `TemporalFlowMemory`, `CognitionMemory` | Data |
+| 1.6 | Complete Cortex↔Genome bridge | `KeyCortexGenomeBridgeService`, `KeyCortexReasoningService` | Mind+Soul |
+| 1.7 | Consolidate approval writes | `KeyCortexActionsService`, `KeyCortexApprovalService`, `KeyActionProposalService` | Platform |
+| 1.8 | Canonical autonomy-level source | Pick one source (`AutopilotSettings.autonomyLevel`) with explicit fallback chain | Platform |
+| 1.9 | Mind/Soul contract documentation | `docs/KEY_MIND_SOUL_CONTRACT.md` | Product |
+| 1.10 | Expand eval harness | Add zero-contradictory-verdicts and memory retrieval ≥70% precision suites | Evolution |
 
 **Success metrics:**
 - 100% of autonomous actions route through `AutonomyOrchestratorService`.
-- Unified memory retrieval used by `key-cortex-reasoning.service.ts`.
+- Unified memory retrieval used by `KeyCortexReasoningService`.
 - Zero contradictory autonomy verdicts in synthetic test suite.
+- `SemanticMemoryService.search` passes security review.
 
 ---
 
@@ -204,7 +240,7 @@ The Mind / Soul / Evolution layer is considered complete when:
 | 2.6 | Neurosymbolic guardrails | Combine LLM reasoning with deterministic rule checks for high-stakes actions. |
 
 **Success metrics:**
-- KEY can execute a 5-step plan (e.g., “follow up on overdue invoice → send reminder → schedule call → create task → update CRM”) with < 1 human escalation per 10 steps.
+- KEY can execute a 5-step plan with < 1 human escalation per 10 steps.
 - Memory retrieval precision ≥ 80% on held-out relevance tests.
 - Hallucination rate on action proposals reduced by 50% from baseline.
 
@@ -321,10 +357,13 @@ The Mind / Soul / Evolution layer is considered complete when:
 
 | Risk | Impact | Likelihood | Mitigation |
 |---|---|---|---|
+| Live autonomy bypass causes unsafe autonomous actions | **Critical** | **Now** | Phase 0.1 fix before any autonomy expansion. |
 | Overlapping autonomy services cause inconsistent behavior | High | High | Phase 1 consolidation into `AutonomyOrchestratorService`. |
 | Unified memory retrieval is slow or inaccurate | High | Medium | Start with simple ranking; add vector search incrementally; benchmark. |
 | Users reject autonomous actions due to lack of trust | High | Medium | Invest heavily in trust explanations, confidence scores, and gradual authority grants. |
 | Value learning drifts away from user intent | High | Low | Human-reviewed value dashboard; sandbox value updates; rollback. |
+| `KeyCortexMemoryService` Redis TTL causes data loss | High | Now | Phase 0.9 deprecate or DB-back. |
+| `SemanticMemoryService.search` SQL injection | High | Now | Phase 0.6 parameterize query. |
 | Real-time knowledge ingestion introduces bad advice | Medium | Medium | Source allowlisting, confidence scoring, human curation of constitution amendments. |
 | Phase scope creep into Body/tools | Medium | High | Explicit Body freeze; architecture review board; tie every PR to Mind/Soul/Evolution. |
 | Regulatory / liability concerns | High | Medium | Compliance mapping in Phase 5; immutable audit logs; human escalation design. |
@@ -332,36 +371,61 @@ The Mind / Soul / Evolution layer is considered complete when:
 
 ---
 
-## 10. Appendix: Existing Code → Plan Mapping
+## 10. Appendix A: Existing Code → Plan Mapping
 
 | Existing asset | Role in plan |
 |---|---|
 | `key-cortex-reasoning.service.ts` | Becomes the reasoning orchestrator; consumes unified memory and autonomy verdicts. |
 | `adaptive-router.service.ts` | Remains the meta-controller; extended with confidence and safety signals. |
 | `ModelGatewayService` / `AiUsageService` | Remains the LLM router; augmented with eval logging and prompt versioning. |
-| `KeyCortexMemoryService` | Refactored into the memory storage backend; unified retrieval built on top. |
-| `AiMemory` / `AiMemoryEmbedding` | Core semantic memory tables; enhance with memory fragment abstraction. |
+| `KeyCortexMemoryService` | **Deprecate / rewrite** — either migrate to DB-backed store or replace usage with `AiMemoryService`. |
+| `AiMemory` / `AiMemoryEmbedding` | Core semantic memory tables; enhance with memory fragment abstraction and vector index. |
 | `GenomeMemoryEvent` / `CognitionMemory` / `TemporalFlowMemory` | Sources for unified retrieval and consolidation. |
 | `BusinessBlueprint` / `BusinessGenome` | Identity kernel; auto-updating integrity and stage logic. |
 | `BusinessConstitutionVersion` | Immutable governance document; amendment flow in Phase 3. |
 | `genome-autonomy-gate.service.ts` | Refactored into `AutonomyOrchestratorService` rule provider. |
-| `AiOversightService` / `KeyCortexApprovalService` / `KeyActionPolicyService` | Refactored to call orchestrator; duplicated logic removed. |
+| `AiOversightService` | Refactored to settings/authority provider for orchestrator. |
+| `KeyActionPolicyService` | Refactored to action metadata only; no final verdicts. |
+| `KeyActionGenomePolicyService` | Merged into orchestrator as module-readiness rule provider. |
+| `KeyCortexApprovalService` | **Deprecate** — superseded by unified `AutonomyVerdict` / `KeyActionProposal`. |
 | `trust-explanation.service.ts` | Core trust surface; extended with confidence calibration. |
 | `outcome-learning.service.ts` | Core learning loop; formalized into Evolution Engine. |
 | `key-cortex-personality.service.ts` | Grounded in Blueprint values in Phase 3. |
 
 ---
 
-## 11. Immediate Next Steps (This Week)
+## 11. Appendix B: Stub Registry (from audit)
 
-1. **Review and approve this plan.** Identify the three highest-priority deliverables for the next sprint.
-2. **Create the `AutonomyOrchestratorService` interface** before implementation so all existing services can migrate toward it.
-3. **Inventory every stub in the Mind/Soul path** and schedule fixes in Phase 0.
-4. **Set up eval harness skeleton** (`EvalHarnessService`) now, even with basic tests, so every future PR can be measured.
-5. **Communicate Body freeze** to the team: no new connectors, commerce features, or operational modules unless they are required to feed Mind/Soul/Evolution.
+| File | Line | Symbol | Impact | Plan fix |
+|---|---|---|---|---|
+| `key-cortex/key-cortex-reasoning.service.ts` | 489–496 | `processQuery` autonomy call | **Critical** | Phase 0.1 |
+| `key-cortex/key-cortex-reasoning.service.ts` | 526–529 | `getRankedRecommendations` call | **Critical** | Phase 0.2 |
+| `key-cortex/key-cortex-memory.service.ts` | 91–121, 229–232 | `store`, `persistMemory` | **Critical** | Phase 0.9 |
+| `key-cortex/key-cortex-actions.service.ts` | 241–299 | `requestApproval` | **Critical** | Phase 1.7 |
+| `ai/semantic-memory.service.ts` | 81–90 | `search` SQL injection | **Critical** | Phase 0.6 |
+| `key-cortex/key-cortex-connector.service.ts` | 4205–4229 | Genome DNA placeholders | Medium | Phase 2 |
+| `key-autonomy/genome-recommendation-action-bridge.service.ts` | 379–384 | `buildReadinessWarning` | Medium | Phase 0.10 |
+| `key-cortex/key-cortex-insight.service.ts` | 1293, 1301 | `getActiveBusinessIds`, `getBusinessHealth` | Low | Phase 2+ |
+| `ai/key-command.service.ts` | 517–530 | `enqueue`, `execute` | Low | Deprecate |
+| `ai/key-tool.registry.ts` | 244 | `procurement.generateBrief` | Low | Body-related, freeze |
+| `ai/flow-orchestrator.service.ts` | 2575 | `generate_content_brief` | Low | Body-related, freeze |
+| `key-cortex/key-cortex-document.service.ts` | 1202–1204 | `uploadFile` | Low | Body-related, freeze |
+| `key-cortex/key-cortex-voice.service.ts` | 647–651 | audio upload | Low | Body-related, freeze |
+| `key-cortex/key-cortex-context.service.ts` | ~200 | conversion rate | Low | Body-related, freeze |
 
 ---
 
-## 12. Final Note
+## 12. Immediate Next Steps (This Week)
+
+1. **Approve the updated plan** and confirm Body freeze.
+2. **Implement Phase 0.1–0.6** (autonomy bypass fix, ranked-rec fix, orchestrator interface, memory interface, eval skeleton, SQL injection fix).
+3. **Run `pnpm test:ci` and `pnpm build`** after each change.
+4. **Create Prisma migration** for `AutonomyVerdict`/`AutonomyRule` + vector index.
+5. **Backfill `AiMemory` → `AiMemoryEmbedding`** so semantic search is usable.
+6. **Schedule Phase 0.9** (deprecate Redis-only `KeyCortexMemoryService`) for the following week.
+
+---
+
+## 13. Final Note
 
 This plan deliberately avoids building more Body. The Body of KEYFLOWOS — CRM, commerce, bookings, finance, projects, connectors — is already large. The risk is not that the Body is too weak; it is that the Mind and Soul are not yet coherent enough to direct it. By focusing every engineering cycle on **one autonomy oracle, one memory layer, one reasoning loop, one value model, and one evolution engine**, KEYFLOWOS can become the autonomous business partner the vision demands.

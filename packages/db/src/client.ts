@@ -85,6 +85,9 @@ const BUSINESS_ID_MODELS = new Set([
   'BusinessEntityLink', 'BusinessRisk', 'CashReserveBucket',
   'WorkflowTemplate', 'WorkflowRun', 'SopDocument',
   'MarketingCampaignPlan', 'BusinessInitiative',
+  // Phase 3 Skeleton: KEY Cortex identity & audit tables
+  'CortexSession', 'CortexActionLog', 'KeyCommand', 'AiExecutionLog',
+  'KeyCortexMemory', 'AiApprovalItem', 'AiApprovalRequest',
 ]);
 
 /**

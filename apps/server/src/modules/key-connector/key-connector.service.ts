@@ -327,6 +327,20 @@ export class KeyConnectorService {
     return this.syncEngine.getSyncHistory(businessId, limit);
   }
 
+  // Convenience aliases for organ adapters
+  async listProviders(businessId: string, category?: string): Promise<ReturnType<KeyConnectorService['getProviders']>> {
+    return this.getProviders(businessId, category);
+  }
+
+  async listConnections(businessId: string): Promise<KeyConnectorConnection[]> {
+    return this.getConnections(businessId);
+  }
+
+  async checkHealth(businessId: string, connectionId: string): Promise<HealthCheckResult | undefined> {
+    const results = await this.getConnectionHealth(businessId);
+    return results.find((r) => r.connectionId === connectionId);
+  }
+
   // ═══════════════════════════════════════════════════════════════════════
   // AI Gateway
   // ═══════════════════════════════════════════════════════════════════════

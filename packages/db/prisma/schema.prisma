@@ -646,6 +646,12 @@ model Business {
   genomeCrossDomainSnapshots   GenomeCrossDomainSnapshot[]
   constitutionVersions         BusinessConstitutionVersion[]
   authorityGrants              AuthorityGrant[]
+  autonomyRules                AutonomyRule[]
+  autonomyVerdicts             AutonomyVerdict[]
+  keyCortexMemories            KeyCortexMemory[]
+  cognitiveEvents              CognitiveEvent[]
+  valueConstraints             ValueConstraint[]
+  knowledgeSources             KnowledgeSource[]
   timeEntries                  TimeEntry[]
 
   // Analytics & Growth Engine
@@ -1555,6 +1561,9 @@ model KeyActionProposal {
   actionType String  @map("action_type")
   payload    Json    @default("{}")
 
+  planId     String? @map("plan_id")
+  planStepId String? @map("plan_step_id")
+
   riskLevel String @default("LOW") @map("risk_level")
   status    String @default("PENDING")
 
@@ -1577,6 +1586,8 @@ model KeyActionProposal {
   @@index([businessId, status])
   @@index([businessId, sourceType])
   @@index([businessId, actionType])
+  @@index([planId])
+  @@index([planStepId])
   @@map("key_action_proposals")
 }
 
@@ -6790,10 +6801,16 @@ model AiExecutionLog {
 
   createdAt DateTime @default(now()) @map("created_at")
 
+  // Phase 3 Skeleton: identity thread
+  sessionId     String? @map("session_id")
+  commandId     String? @map("command_id")
+  correlationId String? @map("correlation_id")
+
   @@index([businessId, createdAt])
   @@index([businessId, idempotencyKey])
   @@index([businessId, module])
   @@index([businessId, toolName])
+  @@index([businessId, correlationId])
   @@index([planId])
   @@index([planStepId])
   @@map("ai_execution_logs")
@@ -6828,8 +6845,12 @@ model AiApprovalItem {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
+  // Phase 3 Skeleton: identity thread
+  correlationId String? @map("correlation_id")
+
   @@index([businessId, status])
   @@index([businessId, createdAt])
+  @@index([businessId, correlationId])
   @@index([planId])
   @@map("ai_approval_items")
 }
@@ -6881,6 +6902,136 @@ model AuthorityGrant {
   @@index([businessId])
   @@index([granteeType, granteeId])
   @@map("authority_grants")
+}
+
+// Mind/Soul governance: canonical rule cache for the AutonomyOrchestratorService
+model AutonomyRule {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  source    String // e.g. 'ai_oversight', 'genome_gate', 'constitution'
+  ruleKey   String  @map("rule_key")
+  actionKey String? @map("action_key")
+  decision  String // allow | block | supervised
+  reason    String
+  priority  Int     @default(0)
+  active    Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId, active])
+  @@index([businessId, actionKey])
+  @@map("autonomy_rules")
+}
+
+// Mind/Soul governance: immutable audit trail of autonomy verdicts
+model AutonomyVerdict {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  actionKey        String  @map("action_key")
+  allowed          Boolean
+  requiresApproval Boolean @map("requires_approval")
+  tier             String
+  confidence       Float
+  reason           String
+  ruleTrace        Json    @map("rule_trace")
+  outcome          String? // success | failure | cancelled | pending
+  proposalId       String? @map("proposal_id")
+  contextHash      String? @map("context_hash")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([businessId, actionKey])
+  @@index([businessId, createdAt])
+  @@map("autonomy_verdicts")
+}
+
+// Mind/Soul: persistent KEY Cortex memory (replaces Redis-only store)
+model KeyCortexMemory {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  userId     String?  @map("user_id")
+
+  type           String
+  key            String
+  value          String
+  source         String   @default("inferred")
+  confidence     Float    @default(0.8)
+  accessCount    Int      @default(1) @map("access_count")
+  lastAccessedAt DateTime @default(now()) @map("last_accessed_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId, type])
+  @@index([businessId, createdAt])
+  @@index([businessId, key])
+  @@map("key_cortex_memories")
+}
+
+// Mind/Soul: normalized cognitive event bus store
+model CognitiveEvent {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  sourceType String  @map("source_type")
+  sourceId   String? @map("source_id")
+  eventType  String  @map("event_type")
+  payload    Json
+  confidence Float   @default(0.8)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([businessId, sourceType])
+  @@index([businessId, eventType])
+  @@index([businessId, createdAt])
+  @@map("cognitive_events")
+}
+
+// Soul: weighted value constraints inferred from feedback
+model ValueConstraint {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  valueKey      String @map("value_key")
+  weight        Float  @default(0.5)
+  evidenceCount Int    @default(0) @map("evidence_count")
+  source        String @default("feedback")
+  examples      Json   @default("[]")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([businessId, valueKey, source])
+  @@index([businessId, weight])
+  @@map("value_constraints")
+}
+
+// Evolution: ingested knowledge sources
+model KnowledgeSource {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  title      String
+  sourceType String  @map("source_type") // url | document | text
+  sourceUrl  String? @map("source_url")
+  content    String  @db.Text
+  status     String  @default("pending") // pending | processed | failed
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId, status])
+  @@index([businessId, sourceType])
+  @@map("knowledge_sources")
 }
 
 model AgentTrigger {
@@ -9233,8 +9384,13 @@ model KeyCommand {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
+  // Phase 3 Skeleton: identity thread
+  sessionId     String? @map("session_id")
+  correlationId String? @map("correlation_id")
+
   @@index([businessId, status, createdAt])
   @@index([businessId, userId, createdAt])
+  @@index([businessId, correlationId])
   @@map("key_commands")
 }
 
@@ -9305,8 +9461,14 @@ model BusinessEvent {
 
   createdAt DateTime @default(now()) @map("created_at")
 
+  // Phase 3 Skeleton: identity thread
+  sessionId     String? @map("session_id")
+  commandId     String? @map("command_id")
+  correlationId String? @map("correlation_id")
+
   @@index([businessId, createdAt])
   @@index([businessId, eventType])
+  @@index([businessId, correlationId])
   @@index([subjectType, subjectId])
   @@index([actorType, actorId])
   @@index([businessId, eventType, createdAt])
@@ -10978,7 +11140,7 @@ model CortexSession {
   title             String?
   messages          Json     @default("[]")
   contextSnapshot   Json?    @map("context_snapshot")
-  runningSummary    String?  @db.Text @map("running_summary")
+  runningSummary    String?  @map("running_summary") @db.Text
   lastAccessedAt    DateTime @default(now()) @map("last_accessed_at")
   createdAt         DateTime @default(now()) @map("created_at")
   updatedAt         DateTime @updatedAt @map("updated_at")
@@ -10991,12 +11153,17 @@ model CortexSession {
   responseTimeMs   Int?     @map("response_time_ms")
   userFeedback     String?  @map("user_feedback") // positive | negative | unhelpful | accepted | rejected
 
+  // Phase 3 Skeleton: cross-turn identity thread
+  correlationId String? @map("correlation_id")
+  commandId     String? @map("command_id")
+
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
   @@index([businessId, status])
   @@index([businessId, lastAccessedAt])
   @@index([businessId, createdAt])
   @@index([businessId, detectedRole])
+  @@index([businessId, correlationId])
   @@map("cortex_sessions")
 }
 
@@ -11011,10 +11178,20 @@ model CortexActionLog {
   requiresApproval Boolean   @default(false) @map("requires_approval")
   estimatedImpact  String?   @map("estimated_impact")
   createdAt        DateTime  @default(now()) @map("created_at")
-  business         Business? @relation(fields: [businessId], references: [id])
-  businessId       String?
+  startedAt        DateTime? @map("started_at")
+  completedAt      DateTime? @map("completed_at")
+  durationMs       Int?      @map("duration_ms")
+
+  // Phase 3 Skeleton: identity thread + required tenant
+  businessId    String   @map("business_id")
+  business      Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  userId        String?  @map("user_id")
+  commandId     String?  @map("command_id")
+  correlationId String?  @map("correlation_id")
 
   @@index([sessionId, createdAt])
+  @@index([businessId, createdAt])
+  @@index([businessId, correlationId])
   @@map("cortex_action_logs")
 }
 
