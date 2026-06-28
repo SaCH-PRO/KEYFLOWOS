@@ -21,6 +21,7 @@ import { AuthorityGrantRuleService } from './authority-grant-rule.service';
 import { AutonomyRuleDbService } from './autonomy-rule-db.service';
 import { SafetyShellService } from './safety-shell.service';
 import { ComplianceMapService } from './compliance-map.service';
+import { KeyAutonomySafetyService } from './key-autonomy-safety.service';
 
 @Module({
   imports: [
@@ -47,6 +48,7 @@ import { ComplianceMapService } from './compliance-map.service';
     AutonomyRuleDbService,
     SafetyShellService,
     ComplianceMapService,
+    KeyAutonomySafetyService,
   ],
   exports: [
     KeyActionProposalService,
@@ -62,6 +64,7 @@ import { ComplianceMapService } from './compliance-map.service';
     AutonomyRuleDbService,
     SafetyShellService,
     ComplianceMapService,
+    KeyAutonomySafetyService,
   ],
 })
 export class KeyAutonomyModule {}

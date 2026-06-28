@@ -14,6 +14,7 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { KeyAutonomySafetyService } from '../key-autonomy/key-autonomy-safety.service';
 import { GatewayToolDefinition } from './key-cortex.types';
 
 export interface KeyCortexToolContext {
@@ -29,6 +30,7 @@ export interface KeyCortexToolResult<T = unknown> {
   success: boolean;
   data?: T;
   error?: string;
+  costTtd?: number;
 }
 
 export interface KeyCortexToolDefinition {
@@ -72,7 +74,10 @@ export class KeyCortexToolRegistryService {
   private readonly logger = new Logger(KeyCortexToolRegistryService.name);
   private readonly tools = new Map<string, KeyCortexToolDefinition>();
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly safety: KeyAutonomySafetyService,
+  ) {}
 
   // ========================================================================
   // Registration
@@ -139,6 +144,19 @@ export class KeyCortexToolRegistryService {
       return { success: false, error: `Tool "${name}" not found in canonical registry` };
     }
 
+    // Phase 0: global autonomy kill switch and safety limits are the first gate.
+    const safetyCheck = await this.safety.check({
+      businessId: ctx.businessId,
+      toolName: name,
+      riskTier: tool.riskTier,
+      mode: ctx.autonomyLevel && ctx.autonomyLevel >= 2 ? 'auto' : 'manual',
+      estimatedCostTtd: 0,
+    });
+    if (!safetyCheck.allowed) {
+      this.logger.warn(`[execute][${ctx.businessId}] Safety gate blocked ${name}: ${safetyCheck.reason}`);
+      return { success: false, error: safetyCheck.reason ?? 'Blocked by autonomy safety gate' };
+    }
+
     const validation = this.validateInput(tool, input);
     if (!validation.valid) {
       return { success: false, error: validation.error };
@@ -153,6 +171,22 @@ export class KeyCortexToolRegistryService {
     try {
       const result = await tool.handler(ctx, validation.parsed);
       const durationMs = Date.now() - startMs;
+
+      // Record successful autonomous execution against daily limits.
+      if (safetyCheck.allowed) {
+        await this.safety
+          .recordExecution({
+            businessId: ctx.businessId,
+            toolName: name,
+            riskTier: tool.riskTier,
+            mode: ctx.autonomyLevel && ctx.autonomyLevel >= 2 ? 'auto' : 'manual',
+            actualCostTtd: result.costTtd,
+          })
+          .catch((err) => {
+            this.logger.warn(`Safety record failed: ${(err as Error).message}`);
+          });
+      }
+
       await this.audit(ctx, name, input, result, durationMs).catch((err) => {
         this.logger.warn(`Tool audit failed: ${(err as Error).message}`);
       });

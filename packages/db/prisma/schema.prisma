@@ -372,8 +372,11 @@ model Business {
   aiMemories          AiMemory[]
   aiMemoryEmbeddings  AiMemoryEmbedding[]
   aiPlans             AiPlan[]
-  autopilotSettings   AutopilotSettings?
-  agentTriggers       AgentTrigger[]
+  autopilotSettings         AutopilotSettings?
+  businessAutonomyProfile   BusinessAutonomyProfile?
+  autonomyDailySpends       AutonomyDailySpend[]
+  autonomyDailyActionCounts AutonomyDailyActionCount[]
+  agentTriggers             AgentTrigger[]
   journeyInstances    JourneyInstance[]
   conversationThreads ConversationThread[]
   businessGoals       BusinessGoal[]
@@ -6904,6 +6907,67 @@ model AutopilotSettings {
 
   @@index([businessId])
   @@map("autopilot_settings")
+}
+
+// Phase 0: Global autonomy kill switch and safety limits.
+// BusinessAutonomyProfile is the canonical source for whether KEY may act
+// autonomously for a business and what daily boundaries apply.
+model BusinessAutonomyProfile {
+  id                    String   @id @default(cuid())
+  businessId            String   @unique @map("business_id")
+  business              Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  // Global kill switch — when true KEY refuses all autonomous tool execution.
+  globalKillSwitch      Boolean  @default(false) @map("global_kill_switch")
+
+  // Daily safety limits (all autonomous executions are counted against these).
+  maxDailyAutoActions   Int      @default(10) @map("max_daily_auto_actions")
+  maxDailySpendTtd      Float    @default(0) @map("max_daily_spend_ttd") // 0 = unlimited
+
+  // Notification / escalation
+  notifyOnBlock         Boolean  @default(true) @map("notify_on_block")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId])
+  @@map("business_autonomy_profiles")
+}
+
+// Daily spend accumulator tracked by the autonomy safety service.
+model AutonomyDailySpend {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  date       DateTime @db.Date @map("date")
+  amountTtd  Float    @default(0) @map("amount_ttd")
+  currency   String   @default("TTD") @map("currency")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([businessId, date, currency])
+  @@index([businessId, date])
+  @@map("autonomy_daily_spends")
+}
+
+// Daily action-count accumulator tracked by the autonomy safety service.
+model AutonomyDailyActionCount {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  date       DateTime @db.Date @map("date")
+  actionType String   @map("action_type") // e.g. 'auto', 'approved', or a specific tool category
+  count      Int      @default(0) @map("count")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([businessId, date, actionType])
+  @@index([businessId, date])
+  @@map("autonomy_daily_action_counts")
 }
 
 // L4 Manager — delegated authority for tier-4 autopilot actions

@@ -12,8 +12,13 @@ const mockPrisma = {
   },
 };
 
+const mockSafety = {
+  check: vi.fn().mockResolvedValue({ allowed: true }),
+  recordExecution: vi.fn().mockResolvedValue(undefined),
+};
+
 function createRegistry(): KeyCortexToolRegistryService {
-  return new KeyCortexToolRegistryService(mockPrisma as any);
+  return new KeyCortexToolRegistryService(mockPrisma as any, mockSafety as any);
 }
 
 describe('KeyCortexToolRegistryService', () => {
@@ -21,6 +26,7 @@ describe('KeyCortexToolRegistryService', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockSafety.check.mockResolvedValue({ allowed: true });
     registry = createRegistry();
   });
 
