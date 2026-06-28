@@ -26,6 +26,7 @@ import { BlueprintOnboardingService } from './blueprint-onboarding.service';
 import { BlueprintOnboardingController } from './blueprint-onboarding.controller';
 import { WorkspaceRecommendationsService } from './workspace-recommendations.service';
 import { ModelGatewayService } from './model-gateway.service';
+import { LLMCostService } from './llm-cost.service';
 import { BusinessMatchingService } from './business-matching.service';
 import { MatchRefreshSchedulerService } from './match-refresh-scheduler.service';
 import { PrismaModule } from '../../core/prisma/prisma.module';
@@ -81,6 +82,7 @@ import { KeyAgentConfigService } from './key-agent-config.service';
   providers: [
     AiListener,
     ModelGatewayService,
+    LLMCostService,
     AiAdvisorService,
     AiUsageService,
     AiUsageAlertSchedulerService,
@@ -139,6 +141,7 @@ import { KeyAgentConfigService } from './key-agent-config.service';
   ],
   exports: [
     ModelGatewayService,
+    LLMCostService,
     AiAdvisorService,
     AiUsageService,
     AiUsageAlertSchedulerService,

@@ -1,16 +1,27 @@
 import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
 import { ModelGatewayService, type GatewayRequest, type AiProvider, type AiMode, type TaskCategory } from './model-gateway.service';
+import { LLMCostService } from './llm-cost.service';
 
 const mockPrismaClient = {
   aiMemory: {
     findUnique: vi.fn(),
     upsert: vi.fn(),
   },
+  llmProviderCost: {
+    create: vi.fn(),
+    aggregate: vi.fn(),
+    groupBy: vi.fn(),
+  },
 };
 
 const mockPrisma = {
   client: mockPrismaClient,
 };
+
+const mockLLMCostService = {
+  recordCost: vi.fn(),
+  getCurrentMonthSpend: vi.fn(),
+} as unknown as LLMCostService;
 
 let savedEnv: NodeJS.ProcessEnv;
 
@@ -32,7 +43,7 @@ function setTestEnv(overrides: Record<string, string | null> = {}) {
 
 function createService(envOverrides: Record<string, string | null> = {}): ModelGatewayService {
   setTestEnv(envOverrides);
-  return new ModelGatewayService(mockPrisma as any);
+  return new ModelGatewayService(mockPrisma as any, mockLLMCostService);
 }
 
 function baseRequest(overrides: Partial<GatewayRequest> = {}): GatewayRequest {
@@ -53,6 +64,8 @@ describe('ModelGatewayService', () => {
     vi.resetAllMocks();
     mockPrismaClient.aiMemory.findUnique.mockResolvedValue(null);
     mockPrismaClient.aiMemory.upsert.mockResolvedValue({});
+    mockLLMCostService.recordCost = vi.fn().mockResolvedValue({});
+    mockLLMCostService.getCurrentMonthSpend = vi.fn().mockResolvedValue({ total: 0, byProvider: {} });
     service = createService();
   });
 
@@ -619,6 +632,29 @@ describe('ModelGatewayService', () => {
         },
       });
       expect(result.latencyMs).toBeGreaterThanOrEqual(0);
+    });
+
+    it('complete() records cost telemetry after a successful provider call', async () => {
+      (service as any).callOpenAi = vi.fn().mockResolvedValue({
+        content: 'Costed response',
+        usage: { promptTokens: 10, completionTokens: 20, totalTokens: 30, estimatedCost: 0.001 },
+      });
+
+      await service.complete(baseRequest({ taskCategory: 'general' }));
+
+      expect(mockLLMCostService.recordCost).toHaveBeenCalledTimes(1);
+      const recorded = (mockLLMCostService.recordCost as Mock).mock.calls[0][0];
+      expect(recorded).toMatchObject({
+        businessId: 'biz-1',
+        provider: 'openai',
+        model: expect.any(String),
+        taskCategory: 'general',
+        promptTokens: 10,
+        completionTokens: 20,
+        totalTokens: 30,
+        totalCost: 0.001,
+        fallbackUsed: false,
+      });
     });
 
     it('complete() with premium mode and stored preferences routes to correct model', async () => {
