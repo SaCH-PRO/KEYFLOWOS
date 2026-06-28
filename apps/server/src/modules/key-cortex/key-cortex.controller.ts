@@ -28,6 +28,7 @@ import {
   Body,
   Param,
   Query,
+  Req,
   Res,
   Sse,
   HttpCode,
@@ -38,6 +39,7 @@ import {
   BadRequestException,
   NotFoundException,
   ServiceUnavailableException,
+  UnauthorizedException,
   Logger,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -96,6 +98,7 @@ import {
 
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { KeyCortexApprovalOrchestratorService } from './key-cortex-approval-orchestrator.service';
 
 /* ------------------------------------------------------------------ */
 /*  DTOs  (Legacy)                                                     */
@@ -155,6 +158,7 @@ class SwitchPersonalityDto {
 
 class ApproveActionDto {
   sessionId: string;
+  businessId: string;
   actionId: string;
   approved: boolean;
 }
@@ -492,6 +496,9 @@ export class KeyCortexController {
 
     // -- Phase D: Learning & Metacognition --
     private readonly learning: KeyCortexLearningService,
+
+    // -- Phase 0.6: Unified approval orchestrator --
+    private readonly approvalOrchestrator: KeyCortexApprovalOrchestratorService,
   ) {}
 
   /* ================================================================== */
@@ -889,40 +896,48 @@ export class KeyCortexController {
   /**
    * POST /api/v1/cortex/actions/approve
    * Approve (or reject) a pending action that requires user confirmation.
+   *
+   * Phase 0.6: This endpoint now delegates to the unified approval orchestrator
+   * using `dto.actionId` as the canonical KeyActionProposal id. The response
+   * `result` field now contains a KeyActionProposalData shape instead of the
+   * legacy CortexActionResult.
    */
   @Post('actions/approve')
   @HttpCode(HttpStatus.OK)
   async approveAction(
     @Body() dto: ApproveActionDto,
+    @Req() req: { user?: { id?: string } },
   ): Promise<{ result: CortexActionResult }> {
     if (!dto.sessionId) {
       throw new BadRequestException('sessionId is required');
+    }
+    if (!dto.businessId) {
+      throw new BadRequestException('businessId is required');
     }
     if (!dto.actionId) {
       throw new BadRequestException('actionId is required');
     }
 
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new UnauthorizedException('Authenticated user required');
+    }
+
     try {
-      // Build a partial action result to pass to the approval flow
-      const action: CortexActionResult = {
-        actionType: 'EXECUTE_TOOL',
-        status: dto.approved ? 'success' : 'error',
-        description: dto.approved
-          ? `Action ${dto.actionId} approved`
-          : `Action ${dto.actionId} rejected`,
-        requiresApproval: false,
-      };
+      const proposal = dto.approved
+        ? await this.approvalOrchestrator.approve({
+            proposalId: dto.actionId,
+            businessId: dto.businessId,
+            userId,
+            autoExecute: false,
+          })
+        : await this.approvalOrchestrator.reject({
+            proposalId: dto.actionId,
+            businessId: dto.businessId,
+            userId,
+          });
 
-      const approval = await this.actions.requestApproval(action);
-
-      const result: CortexActionResult = {
-        ...action,
-        status: approval.approved ? 'success' : 'error',
-        result: { approved: approval.approved, actionId: dto.actionId, sessionId: dto.sessionId },
-        approvalRequestId: approval.approvalRequestId,
-      };
-
-      return { result };
+      return { result: proposal as unknown as CortexActionResult };
     } catch (err: any) {
       this.logger.error(`Action approval error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Unable to process action approval');

@@ -37,6 +37,7 @@ import { FinanceModule } from '../finance/finance.module';
 import { CommandModule } from '../command/command.module';
 import { GoogleDriveModule } from '../google-drive/google-drive.module';
 import { KeyAutonomyModule } from '../key-autonomy/key-autonomy.module';
+import { KeyCortexModule } from '../key-cortex/key-cortex.module';
 import { KeyCommandService } from './key-command.service';
 import { KeyToolRegistryService } from './key-tool-registry.service';
 import { AutopilotRulesService } from './autopilot-rules.service';
@@ -75,7 +76,7 @@ import { AiIntelligenceController } from './ai-intelligence.controller';
 import { KeyAgentConfigService } from './key-agent-config.service';
 
 @Module({
-  imports: [PrismaModule, RedisModule, SubscriptionsModule, BlueprintModule, TimelineModule, forwardRef(() => FinanceModule), CommandModule, GoogleDriveModule, forwardRef(() => KeyAutonomyModule)],
+  imports: [PrismaModule, RedisModule, SubscriptionsModule, BlueprintModule, TimelineModule, forwardRef(() => FinanceModule), CommandModule, GoogleDriveModule, forwardRef(() => KeyAutonomyModule), forwardRef(() => KeyCortexModule)],
   controllers: [AiController, AiSettingsController, OutputTemplateController, AiFlowController, GraphActionsController, AiUsageAdminController, AiIntelligenceController, BlueprintOnboardingController],
   providers: [
     AiListener,

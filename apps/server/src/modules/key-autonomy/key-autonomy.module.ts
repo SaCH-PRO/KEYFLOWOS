@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { PrismaModule } from '../../core/prisma/prisma.module';
 import { AiModule } from '../ai/ai.module';
 import { BlueprintModule } from '../blueprint/blueprint.module';
@@ -22,6 +22,7 @@ import { AutonomyRuleDbService } from './autonomy-rule-db.service';
 import { SafetyShellService } from './safety-shell.service';
 import { ComplianceMapService } from './compliance-map.service';
 import { KeyAutonomySafetyService } from './key-autonomy-safety.service';
+import { KeyCortexModule } from '../key-cortex/key-cortex.module';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { KeyAutonomySafetyService } from './key-autonomy-safety.service';
     BusinessGenomeModule,
     GenomeDocumentPackModule,
     KeyGenomeModule,
+    forwardRef(() => KeyCortexModule),
   ],
   controllers: [KeyActionProposalController, KeyGenomeBridgeController],
   providers: [

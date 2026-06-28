@@ -13,6 +13,7 @@ export interface ProposeApprovalInput {
   userId?: string;
   sourceType?: KeyActionSourceType;
   sourceId?: string;
+  sourceMode?: string;
   actionType?: string;
   toolName?: string;
   module?: string;
@@ -24,6 +25,7 @@ export interface ProposeApprovalInput {
   risks?: string;
   parameters?: Record<string, unknown>;
   affectedEntities?: Record<string, unknown>;
+  evidence?: string[];
   planId?: string;
   planStepId?: string;
   correlationId?: string;
@@ -77,10 +79,12 @@ export class KeyCortexApprovalOrchestratorService {
       {
         sourceType: input.sourceType ?? 'KEY_CORTEX',
         sourceId: input.sourceId,
+        sourceMode: input.sourceMode,
         title,
         summary: input.summary ?? input.description,
         description: input.description,
         rationale: input.rationale,
+        evidence: input.evidence,
         actionType: (input.actionType as any) ?? 'EXECUTE_TOOL',
         payload: input.parameters,
         toolName: input.toolName,
