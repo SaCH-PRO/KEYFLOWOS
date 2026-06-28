@@ -1,4 +1,5 @@
 import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { TemporalFlowService } from '../temporal-flow/temporal-flow.service';
@@ -22,6 +23,7 @@ export class KeyActionProposalService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(TemporalFlowService) private readonly temporal: TemporalFlowService,
+    @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Inject(KeyActionPolicyService) private readonly policy: KeyActionPolicyService,
     @Inject(KeyActionExecutorService) private readonly executor: KeyActionExecutorService,
     @Inject(KeyActionGenomePolicyService) private readonly genomePolicy: KeyActionGenomePolicyService,
@@ -50,6 +52,8 @@ export class KeyActionProposalService {
         evidence: (input.evidence ?? []) as Prisma.InputJsonValue,
         actionType: input.actionType,
         payload: (input.payload ?? {}) as Prisma.InputJsonValue,
+        planId: input.planId ?? null,
+        planStepId: input.planStepId ?? null,
         riskLevel,
         status: 'PENDING',
         requiresApproval,
@@ -90,6 +94,14 @@ export class KeyActionProposalService {
     return this.serialize(row);
   }
 
+  async getById(proposalId: string): Promise<KeyActionProposalData> {
+    const row = await this.prisma.client.keyActionProposal.findUnique({
+      where: { id: proposalId },
+    });
+    if (!row) throw new NotFoundException('Action proposal not found');
+    return this.serialize(row);
+  }
+
   async approve(
     businessId: string,
     proposalId: string,
@@ -118,7 +130,14 @@ export class KeyActionProposalService {
       { approvedBy },
     );
 
-    return this.serialize(row);
+    const proposal = this.serialize(row);
+    this.events.emit('key.action.approved', {
+      proposalId,
+      businessId,
+      proposal,
+    });
+
+    return proposal;
   }
 
   async reject(
@@ -151,7 +170,15 @@ export class KeyActionProposalService {
       { rejectedBy, reason },
     );
 
-    return this.serialize(row);
+    const proposal = this.serialize(row);
+    this.events.emit('key.action.rejected', {
+      proposalId,
+      businessId,
+      proposal,
+      reason,
+    });
+
+    return proposal;
   }
 
   async cancel(businessId: string, proposalId: string): Promise<KeyActionProposalData> {
@@ -388,6 +415,8 @@ export class KeyActionProposalService {
       evidence: (row.evidence ?? []) as string[],
       actionType: row.actionType as KeyExecutableActionType,
       payload: (row.payload ?? {}) as Record<string, unknown>,
+      planId: row.planId,
+      planStepId: row.planStepId,
       riskLevel: row.riskLevel,
       status: row.status as KeyActionProposalStatus,
       requiresApproval: row.requiresApproval,

@@ -189,7 +189,7 @@ export interface CortexResponse {
 
 export interface CortexActionResult {
   actionType: CortexActionType;
-  status: 'success' | 'error' | 'pending_approval';
+  status: 'success' | 'error' | 'pending_approval' | 'blocked';
   description: string;
   result?: Record<string, unknown>;
   error?: string;

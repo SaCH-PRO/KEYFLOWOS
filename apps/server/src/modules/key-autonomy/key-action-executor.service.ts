@@ -4,13 +4,10 @@ import { TemporalFlowService } from '../temporal-flow/temporal-flow.service';
 import { GenomeEvolutionService } from '../business-genome/genome-evolution.service';
 import { ConstitutionVersionService } from '../business-genome/constitution-version.service';
 import { GenomeDocumentPackService } from '../business-genome/document-pack/genome-document-pack.service';
+import { KeyActionExecutorRegistryService } from './key-action-executor-registry.service';
 import type { KeyActionProposalData, KeyExecutableActionType } from './key-action-proposal.types';
-
-export interface ExecutionOutcome {
-  success: boolean;
-  result?: Record<string, unknown>;
-  error?: string;
-}
+import type { ExecutionOutcome } from './key-action-executor-plugin.interface';
+export { ExecutionOutcome } from './key-action-executor-plugin.interface';
 
 @Injectable()
 export class KeyActionExecutorService {
@@ -19,6 +16,8 @@ export class KeyActionExecutorService {
     @Inject(GenomeEvolutionService) private readonly genomeEvolution: GenomeEvolutionService,
     @Inject(ConstitutionVersionService) private readonly constitution: ConstitutionVersionService,
     @Inject(GenomeDocumentPackService) private readonly documentPack: GenomeDocumentPackService,
+    @Inject(KeyActionExecutorRegistryService)
+    private readonly pluginRegistry: KeyActionExecutorRegistryService,
   ) {}
 
   async execute(
@@ -26,6 +25,10 @@ export class KeyActionExecutorService {
     proposal: KeyActionProposalData,
     executedBy?: string,
   ): Promise<ExecutionOutcome> {
+    if (this.pluginRegistry.hasPlugin(proposal.actionType)) {
+      return this.pluginRegistry.execute(businessId, proposal, executedBy);
+    }
+
     switch (proposal.actionType) {
       case 'CREATE_TASK':
         return this.executeCreateTask(businessId, proposal, executedBy);

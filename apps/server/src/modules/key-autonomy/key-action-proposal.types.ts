@@ -28,6 +28,8 @@ export const KEY_ACTION_SOURCE_TYPES: KeyActionSourceType[] = [
   'EXECUTIVE_BRIEF',
   'TEMPORAL_FLOW',
   'GENOME_EVOLUTION',
+  'AI_PLAN',
+  'KEY_CORTEX',
   'MANUAL',
 ];
 
@@ -36,6 +38,8 @@ export type KeyActionSourceType =
   | 'EXECUTIVE_BRIEF'
   | 'TEMPORAL_FLOW'
   | 'GENOME_EVOLUTION'
+  | 'AI_PLAN'
+  | 'KEY_CORTEX'
   | 'MANUAL';
 
 export const KEY_EXECUTABLE_ACTION_TYPES: KeyExecutableActionType[] = [
@@ -54,6 +58,7 @@ export const KEY_EXECUTABLE_ACTION_TYPES: KeyExecutableActionType[] = [
   'CREATE_GENOME_EVOLUTION_PROPOSAL',
   'SCHEDULE_FOLLOWUP',
   'ESCALATE_THREAD',
+  'EXECUTE_TOOL',
 ];
 
 export type KeyExecutableActionType =
@@ -71,7 +76,8 @@ export type KeyExecutableActionType =
   | 'GENERATE_DOCUMENT_EXPORT'
   | 'CREATE_GENOME_EVOLUTION_PROPOSAL'
   | 'SCHEDULE_FOLLOWUP'
-  | 'ESCALATE_THREAD';
+  | 'ESCALATE_THREAD'
+  | 'EXECUTE_TOOL';
 
 export interface KeyActionProposalData {
   id: string;
@@ -86,6 +92,8 @@ export interface KeyActionProposalData {
   evidence: string[];
   actionType: KeyExecutableActionType;
   payload: Record<string, unknown>;
+  planId?: string | null;
+  planStepId?: string | null;
   riskLevel: KeyActionRiskLevel;
   status: KeyActionProposalStatus;
   requiresApproval: boolean;
@@ -112,6 +120,8 @@ export interface CreateKeyActionProposalInput {
   evidence?: string[];
   actionType: KeyExecutableActionType;
   payload?: Record<string, unknown>;
+  planId?: string;
+  planStepId?: string;
 }
 
 export interface ListKeyActionProposalsQuery {

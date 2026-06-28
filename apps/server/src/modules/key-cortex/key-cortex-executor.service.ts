@@ -23,6 +23,7 @@ import {
   Injectable,
   Logger,
   InternalServerErrorException,
+  Optional,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { v4 as uuidv4 } from 'uuid';
@@ -43,6 +44,7 @@ import { KeyCortexConnectorService } from './key-cortex-connector.service';
 // ─── Genome Governance ──────────────────────────────────────────────────────────
 import { GenomeAutonomyGateService } from '../business-genome/key-genome/genome-autonomy-gate.service';
 import { AutonomyOrchestratorService } from '../key-autonomy/autonomy-orchestrator.service';
+import { KeyActionProposalService } from '../key-autonomy/key-action-proposal.service';
 
 // ─── Constants ──────────────────────────────────────────────────────────────────
 const EXECUTION_TIMEOUT_MS = 30000;
@@ -150,6 +152,8 @@ export class KeyCortexExecutorService {
     private readonly eventEmitter: EventEmitter2,
     private readonly autonomyGate: GenomeAutonomyGateService,
     private readonly autonomyOrchestrator?: AutonomyOrchestratorService,
+    @Optional()
+    private readonly proposalService?: KeyActionProposalService,
   ) {
     // Start periodic cleanup of stale pending approvals (Fix 2)
     this.approvalCleanupInterval = setInterval(() => {
@@ -588,53 +592,59 @@ export class KeyCortexExecutorService {
   async executeWithApproval(
     command: ConnectorCommand,
   ): Promise<ApprovalRequest> {
-    const approvalId = uuidv4();
     const correlationId =
       command.correlationId ?? this.generateTraceId('approval');
 
+    let proposalId = uuidv4();
+
+    // Persist as a canonical KeyActionProposal when available
+    if (this.proposalService) {
+      try {
+        const proposal = await this.proposalService.create(
+          command.businessId,
+          {
+            sourceType: 'KEY_CORTEX',
+            sourceMode: command.module,
+            title: this.summarizeCommandForNotification(command),
+            summary: `Pending approval for ${command.module}.${command.action}`,
+            actionType: 'EXECUTE_TOOL',
+            payload: {
+              toolName: `${command.module}.${command.action}`,
+              parameters: command.parameters,
+              correlationId,
+              commandJson: command,
+            },
+          },
+          command.userId,
+        );
+        proposalId = proposal.id;
+      } catch (dbErr) {
+        this.logger.error(
+          `[executeWithApproval] Failed to persist approval proposal: ${(dbErr as Error).message}`,
+        );
+        // Continue with in-memory tracking
+      }
+    }
+
     const request: ApprovalRequest = {
-      id: approvalId,
+      id: proposalId,
       command,
       status: 'pending',
       requestedAt: new Date(),
       correlationId,
     };
 
-    // Persist to database
-    try {
-      await (this.prisma.client as any).aiApprovalRequest.create({
-        data: {
-          id: approvalId,
-          businessId: command.businessId,
-          userId: command.userId,
-          correlationId,
-          module: command.module,
-          action: command.action,
-          parameters: JSON.stringify(command.parameters),
-          commandJson: JSON.stringify(command),
-          status: 'PENDING',
-          requestedAt: new Date(),
-          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24h expiry
-        },
-      });
-    } catch (dbErr) {
-      this.logger.error(
-        `[executeWithApproval] Failed to persist approval request: ${(dbErr as Error).message}`,
-      );
-      // Continue with in-memory tracking
-    }
-
     // Cache in memory for quick lookups
-    this.pendingApprovals.set(approvalId, request);
+    this.pendingApprovals.set(proposalId, request);
 
     // Auto-clear after TTL to prevent memory leak (Fix 2)
     setTimeout(() => {
-      this.pendingApprovals.delete(approvalId);
+      this.pendingApprovals.delete(proposalId);
     }, APPROVAL_TTL_MS);
 
     // Emit notification event (non-blocking)
     this.eventEmitter.emit('key.cortex.approval.required', {
-      approvalId,
+      approvalId: proposalId,
       correlationId,
       command,
       summary: this.summarizeCommandForNotification(command),
@@ -643,7 +653,7 @@ export class KeyCortexExecutorService {
     });
 
     this.logger.log(
-      `[executeWithApproval] Created approval request ${approvalId} for ${command.module}.${command.action}`,
+      `[executeWithApproval] Created approval proposal ${proposalId} for ${command.module}.${command.action}`,
     );
 
     return request;
@@ -1354,6 +1364,46 @@ export class KeyCortexExecutorService {
    * Gateway alias: execute the command attached to an already-approved request.
    */
   async executeApprovedAction(approvalId: string): Promise<ExecutionRecord> {
+    if (this.proposalService) {
+      try {
+        const proposal = await this.proposalService.getById(approvalId);
+        if (proposal.status !== 'APPROVED') {
+          throw new Error(`Proposal ${approvalId} is not approved`);
+        }
+        const executed = await this.proposalService.execute(
+          proposal.businessId,
+          approvalId,
+          proposal.approvedBy ?? undefined,
+        );
+        const command = (proposal.payload?.commandJson ?? {
+          businessId: proposal.businessId,
+          userId: proposal.userId,
+        }) as ConnectorCommand;
+        const success = executed.status === 'EXECUTED';
+        return {
+          id: approvalId,
+          command,
+          result: {
+            success,
+            data: success ? (executed.executionResult ?? {}) : undefined,
+            error: executed.failureReason ?? undefined,
+            executionTimeMs: 0,
+            command,
+          },
+          startedAt: new Date(),
+          finishedAt: new Date(),
+          durationMs: 0,
+          traceId: approvalId,
+          rolledBack: false,
+        };
+      } catch (err: unknown) {
+        this.logger.error(
+          `[executeApprovedAction] Failed to execute proposal ${approvalId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
+    // Legacy fallback (should no longer be used)
     const request = await (this.prisma.client as any).approvalRequest.findUnique({
       where: { id: approvalId },
     });

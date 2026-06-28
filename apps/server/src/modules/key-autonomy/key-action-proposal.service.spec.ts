@@ -7,6 +7,7 @@ import { KeyActionPolicyService } from './key-action-policy.service';
 import { KeyActionExecutorService } from './key-action-executor.service';
 import { KeyActionGenomePolicyService } from './key-action-genome-policy.service';
 import { AutonomyOrchestratorService } from './autonomy-orchestrator.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 
 function createMockClient() {
   const rows: any[] = [];
@@ -46,6 +47,10 @@ describe('KeyActionProposalService', () => {
         {
           provide: PrismaService,
           useValue: { client: mockClient },
+        },
+        {
+          provide: EventEmitter2,
+          useValue: { emit: vi.fn() },
         },
         {
           provide: TemporalFlowService,

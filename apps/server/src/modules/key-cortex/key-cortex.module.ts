@@ -40,6 +40,7 @@ import { KeyCortexAuditController } from './key-cortex-audit.controller';
 import { AdaptiveRouterService } from './adaptive-router.service';
 import { KeyCortexEventBusService } from './key-cortex-event-bus.service';
 import { KeyCortexToolRegistryService } from './key-cortex-tool-registry.service';
+import { KeyCortexActionExecutorPlugin } from './key-cortex-action-executor.plugin';
 import { KeyCortexOrganRegistrarService } from './key-cortex-organ-registrar.service';
 import { KeyCortexLifecycleService } from './key-cortex-lifecycle.service';
 import { KeyCortexSafeDatabaseService } from './key-cortex-safe-database.service';
@@ -208,6 +209,7 @@ import { ActivityLogService } from '../activity/activity.service';
     // Unified event bus and canonical tool registry that all organs plug into.
     KeyCortexEventBusService,
     KeyCortexToolRegistryService,
+    KeyCortexActionExecutorPlugin,
 
     // -- Phase 2 Body: Organ Adapters --
     // Adapters that wire each organ into the nervous system.

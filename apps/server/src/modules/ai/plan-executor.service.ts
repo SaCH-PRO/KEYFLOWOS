@@ -9,6 +9,7 @@ import { TimelineService } from '../timeline/timeline.service';
 import { QueueService } from './queue.service';
 import { AgentStateMachineService, type AgentState } from './agent-state-machine.service';
 import { AutonomyOrchestratorService } from '../key-autonomy/autonomy-orchestrator.service';
+import { KeyActionProposalService } from '../key-autonomy/key-action-proposal.service';
 
 export interface PlanExecutionResult {
   planId: string;
@@ -45,6 +46,7 @@ export class PlanExecutorService implements OnModuleInit, OnModuleDestroy {
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Inject(forwardRef(() => AiOversightService)) private readonly governance: AiOversightService,
     @Inject(forwardRef(() => AutonomyOrchestratorService)) private readonly autonomyOrchestrator: AutonomyOrchestratorService,
+    @Inject(forwardRef(() => KeyActionProposalService)) private readonly proposalService: KeyActionProposalService,
     @Inject(forwardRef(() => FlowOrchestratorService)) private readonly flowOrchestrator: FlowOrchestratorService,
     @Inject(AiExecutionLogService) private readonly executionLog: AiExecutionLogService,
     @Inject(TimelineService) private readonly timeline: TimelineService,
@@ -163,14 +165,7 @@ export class PlanExecutorService implements OnModuleInit, OnModuleDestroy {
       }
 
       if (decision.requiresFormalApproval || decision.requiresAdminApproval) {
-        await this.governance.createApprovalItem(businessId, {
-          toolName,
-          title: `Plan step: ${step.action}`,
-          description: step.description ?? undefined,
-          inputPayload: step.inputPayload,
-          planId,
-          planStepId: step.id,
-        });
+        await this.createStepProposal(businessId, planId, step, toolName);
         await this.prisma.client.aiPlanStep.update({
           where: { id: step.id },
           data: { status: 'awaiting_approval' },
@@ -298,14 +293,7 @@ export class PlanExecutorService implements OnModuleInit, OnModuleDestroy {
       }
 
       if (decision.requiresFormalApproval || decision.requiresAdminApproval) {
-        await this.governance.createApprovalItem(businessId, {
-          toolName,
-          title: `Plan step: ${step.action}`,
-          description: step.description ?? undefined,
-          inputPayload: step.inputPayload,
-          planId,
-          planStepId: step.id,
-        });
+        await this.createStepProposal(businessId, planId, step, toolName);
         await this.prisma.client.aiPlanStep.update({
           where: { id: step.id },
           data: { status: 'awaiting_approval' },
@@ -367,5 +355,94 @@ export class PlanExecutorService implements OnModuleInit, OnModuleDestroy {
       requiresFormalApproval: decision.requiresFormalApproval,
       requiresAdminApproval: decision.requiresAdminApproval,
     };
+  }
+
+  private async createStepProposal(
+    businessId: string,
+    planId: string,
+    step: StepNode,
+    toolName: string,
+  ): Promise<void> {
+    const riskLevel = this.mapRiskTier(step.riskTier);
+    try {
+      await this.proposalService.create(
+        businessId,
+        {
+          sourceType: 'AI_PLAN',
+          sourceId: planId,
+          planId,
+          planStepId: step.id,
+          title: `Plan step: ${step.action}`,
+          summary: step.description ?? undefined,
+          actionType: 'EXECUTE_TOOL',
+          payload: {
+            toolName,
+            inputPayload: step.inputPayload,
+            planContext: { planId, planStepId: step.id },
+          },
+        },
+        undefined, // requesterId unknown at this layer
+      );
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.error(`Failed to create proposal for plan step ${step.id}: ${message}`);
+      // Fallback to legacy governance item so the plan does not silently stall
+      await this.governance.createApprovalItem(businessId, {
+        toolName,
+        title: `Plan step: ${step.action}`,
+        description: step.description ?? undefined,
+        inputPayload: step.inputPayload,
+        planId,
+        planStepId: step.id,
+      });
+    }
+  }
+
+  private mapRiskTier(riskTier: number): 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' {
+    if (riskTier >= 4) return 'CRITICAL';
+    if (riskTier === 3) return 'HIGH';
+    if (riskTier === 2) return 'MEDIUM';
+    return 'LOW';
+  }
+
+  @OnEvent('key.action.approved', { async: true })
+  async onProposalApproved(payload: {
+    proposalId: string;
+    businessId: string;
+    proposal: { planId?: string | null; planStepId?: string | null };
+  }): Promise<void> {
+    const { planId, planStepId } = payload.proposal;
+    if (!planId || !planStepId) return;
+    this.logger.log(`Proposal ${payload.proposalId} approved — resuming plan ${planId} step ${planStepId}`);
+    try {
+      await this.prisma.client.aiPlanStep.update({
+        where: { id: planStepId },
+        data: { status: 'pending', errorMessage: null },
+      });
+      await this.enqueuePlanSteps(planId, payload.businessId);
+    } catch (err: any) {
+      this.logger.error(`Failed to resume plan ${planId}: ${(err as Error).message}`);
+    }
+  }
+
+  @OnEvent('key.action.rejected', { async: true })
+  async onProposalRejected(payload: {
+    proposalId: string;
+    businessId: string;
+    proposal: { planId?: string | null; planStepId?: string | null };
+    reason?: string;
+  }): Promise<void> {
+    const { planId, planStepId } = payload.proposal;
+    if (!planId || !planStepId) return;
+    this.logger.log(`Proposal ${payload.proposalId} rejected — failing plan ${planId} step ${planStepId}`);
+    try {
+      await this.prisma.client.aiPlanStep.update({
+        where: { id: planStepId },
+        data: { status: 'failed', errorMessage: payload.reason || 'Approval rejected' },
+      });
+      await this.enqueuePlanSteps(planId, payload.businessId);
+    } catch (err: any) {
+      this.logger.error(`Failed to fail plan step ${planStepId}: ${(err as Error).message}`);
+    }
   }
 }

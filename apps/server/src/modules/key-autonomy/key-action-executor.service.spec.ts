@@ -5,6 +5,7 @@ import { TemporalFlowService } from '../temporal-flow/temporal-flow.service';
 import { GenomeEvolutionService } from '../business-genome/genome-evolution.service';
 import { ConstitutionVersionService } from '../business-genome/constitution-version.service';
 import { GenomeDocumentPackService } from '../business-genome/document-pack/genome-document-pack.service';
+import { KeyActionExecutorRegistryService } from './key-action-executor-registry.service';
 import type { KeyActionProposalData } from './key-action-proposal.types';
 
 const baseProposal = (actionType: KeyActionProposalData['actionType'], payload: Record<string, unknown> = {}): KeyActionProposalData => ({
@@ -33,6 +34,10 @@ describe('KeyActionExecutorService', () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         KeyActionExecutorService,
+        {
+          provide: KeyActionExecutorRegistryService,
+          useValue: { register: vi.fn(), execute: vi.fn(), hasPlugin: vi.fn().mockReturnValue(false) },
+        },
         {
           provide: TemporalFlowService,
           useValue: { emit: vi.fn(async () => ({})) },

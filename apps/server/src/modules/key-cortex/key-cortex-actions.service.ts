@@ -21,6 +21,8 @@ import {
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { KeyToolRegistryService } from '../ai/key-tool-registry.service';
 import { KeyCommandService } from '../ai/key-command.service';
+import { KeyActionProposalService } from '../key-autonomy/key-action-proposal.service';
+import { AutonomyOrchestratorService } from '../key-autonomy/autonomy-orchestrator.service';
 import { KeyCortexApprovalService } from './key-cortex-approval.service';
 import { KeyCortexSafeDatabaseService } from './key-cortex-safe-database.service';
 import {
@@ -87,6 +89,12 @@ export class KeyCortexActionsService implements OnModuleInit {
     private readonly toolRegistry: KeyToolRegistryService | undefined,
     private readonly commandService: KeyCommandService,
     private readonly keyCortexToolRegistry: KeyCortexToolRegistryService,
+    @Optional()
+    @Inject(KeyActionProposalService)
+    private readonly proposalService?: KeyActionProposalService,
+    @Optional()
+    @Inject(AutonomyOrchestratorService)
+    private readonly autonomyOrchestrator?: AutonomyOrchestratorService,
     private readonly eventBus?: KeyCortexEventBusService,
     private readonly approvalService?: KeyCortexApprovalService,
     @Optional()
@@ -163,7 +171,19 @@ export class KeyCortexActionsService implements OnModuleInit {
 
     for (const action of actions) {
       try {
-        if (this.requiresApproval(action)) {
+        const verdict = await this.evaluateAutonomy(action, session);
+        if (!verdict.allowed) {
+          results.push({
+            ...action,
+            status: 'blocked',
+            description: verdict.reason || `Action "${action.actionType}" blocked by autonomy guard.`,
+            requiresApproval: false,
+            error: verdict.reason,
+          });
+          continue;
+        }
+
+        if (verdict.requiresApproval) {
           const approval = await this.requestApproval(action, session);
           if (!approval.approved) {
             results.push({
@@ -241,10 +261,42 @@ export class KeyCortexActionsService implements OnModuleInit {
   }
 
   // ========================================================================
-  // Approval Gate
+  // Autonomy + Approval Gate
   // ========================================================================
 
+  private async evaluateAutonomy(
+    action: CortexActionResult,
+    session?: CortexSession,
+  ): Promise<{ allowed: boolean; requiresApproval: boolean; reason?: string }> {
+    if (!this.autonomyOrchestrator) {
+      // Legacy static fallback
+      return {
+        allowed: true,
+        requiresApproval: HIGH_IMPACT_ACTIONS.includes(action.actionType),
+      };
+    }
+
+    try {
+      const verdict = await this.autonomyOrchestrator.evaluateAction(
+        session?.businessId ?? 'unknown',
+        `key_cortex.${action.actionType}`,
+        (action.result as Record<string, unknown>) ?? {},
+        { proposedBy: session?.userId },
+      );
+      return {
+        allowed: verdict.allowed,
+        requiresApproval: verdict.requiresApproval || verdict.tier === 'manual',
+        reason: verdict.reason,
+      };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.error(`[evaluateAutonomy] ${action.actionType}: ${message}`);
+      return { allowed: false, requiresApproval: true, reason: `Autonomy evaluation failed: ${message}` };
+    }
+  }
+
   requiresApproval(action: CortexActionResult): boolean {
+    // Static legacy fallback; callers should prefer evaluateAutonomy when a session is available.
     return HIGH_IMPACT_ACTIONS.includes(action.actionType);
   }
 
@@ -257,39 +309,65 @@ export class KeyCortexActionsService implements OnModuleInit {
         `Impact: ${action.estimatedImpact ?? 'unknown'}`,
     );
 
-    if (!this.approvalService) {
-      this.logger.error('[requestApproval] No approval service available');
-      return { approved: false };
-    }
+    const businessId = session?.businessId ?? 'unknown';
 
     try {
-      const request = await this.approvalService.createRequest({
-        businessId: session?.businessId ?? 'unknown',
-        requester: 'key_cortex',
-        requesterId: session?.userId,
-        actionType: action.actionType,
-        actionModule: 'key_cortex',
-        description: action.description,
-        rationale: `High-impact action requires approval: ${action.estimatedImpact ?? 'unknown impact'}`,
-        parameters: (action.result as Record<string, unknown>) ?? {},
-        estimatedImpact: { impact: action.estimatedImpact ?? 'unknown' },
-        contextSnapshot: { sessionId: session?.id },
-      });
+      const request = this.proposalService
+        ? await this.proposalService.create(
+            businessId,
+            {
+              sourceType: 'KEY_CORTEX',
+              sourceMode: 'key_cortex',
+              title: action.description || `Execute ${action.actionType}`,
+              summary: `High-impact action requires approval: ${action.estimatedImpact ?? 'unknown impact'}`,
+              actionType: 'EXECUTE_TOOL',
+              payload: {
+                toolName: this.actionTypeToToolName(action.actionType),
+                originalActionType: action.actionType,
+                parameters: (action.result as Record<string, unknown>) ?? {},
+                estimatedImpact: action.estimatedImpact ?? 'unknown',
+                sessionId: session?.id,
+              },
+            },
+            session?.userId,
+          )
+        : this.approvalService
+          ? await this.approvalService.createRequest({
+              businessId,
+              requester: 'key_cortex',
+              requesterId: session?.userId,
+              actionType: action.actionType,
+              actionModule: 'key_cortex',
+              description: action.description,
+              rationale: `High-impact action requires approval: ${action.estimatedImpact ?? 'unknown impact'}`,
+              parameters: (action.result as Record<string, unknown>) ?? {},
+              estimatedImpact: { impact: action.estimatedImpact ?? 'unknown' },
+              contextSnapshot: { sessionId: session?.id },
+            })
+          : null;
+
+      if (!request) {
+        this.logger.error('[requestApproval] No approval or proposal service available');
+        return { approved: false };
+      }
 
       this.logger.log(
-        `[requestApproval] Created ApprovalRequest ${request.id} for ${action.actionType}`,
+        `[requestApproval] Created proposal ${request.id} for ${action.actionType}`,
       );
 
       return { approved: false, approvalRequestId: request.id };
     } catch (err: any) {
       this.logger.error(
-        `[requestApproval] Failed to persist approval request: ${err instanceof Error ? err.message : String(err)}`,
+        `[requestApproval] Failed to persist approval proposal: ${err instanceof Error ? err.message : String(err)}`,
       );
       return { approved: false };
     }
   }
 
   async getPendingApprovals(businessId: string): Promise<any[]> {
+    if (this.proposalService) {
+      return this.proposalService.list(businessId, { status: 'PENDING' });
+    }
     if (this.approvalService) {
       return this.approvalService.getPendingRequests(businessId);
     }

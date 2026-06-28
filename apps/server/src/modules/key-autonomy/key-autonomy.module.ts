@@ -9,6 +9,7 @@ import { KeyGenomeModule } from '../business-genome/key-genome/key-genome.module
 import { KeyActionProposalController } from './key-action-proposal.controller';
 import { KeyActionProposalService } from './key-action-proposal.service';
 import { KeyActionExecutorService } from './key-action-executor.service';
+import { KeyActionExecutorRegistryService } from './key-action-executor-registry.service';
 import { KeyActionPolicyService } from './key-action-policy.service';
 import { KeyActionGenomePolicyService } from './key-action-genome-policy.service';
 import { KeyGenomeBridgeController } from './key-genome-bridge.controller';
@@ -35,6 +36,7 @@ import { ComplianceMapService } from './compliance-map.service';
   providers: [
     KeyActionProposalService,
     KeyActionExecutorService,
+    KeyActionExecutorRegistryService,
     KeyActionPolicyService,
     KeyActionGenomePolicyService,
     GenomeRecommendationActionBridgeService,
@@ -49,6 +51,7 @@ import { ComplianceMapService } from './compliance-map.service';
   exports: [
     KeyActionProposalService,
     KeyActionExecutorService,
+    KeyActionExecutorRegistryService,
     KeyActionPolicyService,
     KeyActionGenomePolicyService,
     GenomeRecommendationActionBridgeService,
