@@ -15,6 +15,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { KeyAutonomySafetyService } from '../key-autonomy/key-autonomy-safety.service';
+import { KeyIdempotencyService } from './key-idempotency.service';
+import { KeyCortexSagaService } from './key-cortex-saga.service';
 import { GatewayToolDefinition } from './key-cortex.types';
 
 export interface KeyCortexToolContext {
@@ -24,6 +26,13 @@ export interface KeyCortexToolContext {
   commandId?: string;
   autonomyLevel?: number;
   correlationId?: string;
+  idempotencyKey?: string;
+  sagaId?: string;
+}
+
+export interface KeyCortexToolCompensation {
+  action: string;
+  payload: Record<string, unknown>;
 }
 
 export interface KeyCortexToolResult<T = unknown> {
@@ -52,6 +61,8 @@ export interface KeyCortexToolDefinition {
   requiresApproval: boolean;
   /** Optional tags for grouping/role filtering */
   tags?: string[];
+  /** Optional compensation action for rollback */
+  compensation?: KeyCortexToolCompensation;
   /** Handler that performs the actual work */
   handler: (
     ctx: KeyCortexToolContext,
@@ -77,6 +88,8 @@ export class KeyCortexToolRegistryService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly safety: KeyAutonomySafetyService,
+    private readonly idempotency: KeyIdempotencyService,
+    private readonly saga: KeyCortexSagaService,
   ) {}
 
   // ========================================================================
@@ -144,6 +157,21 @@ export class KeyCortexToolRegistryService {
       return { success: false, error: `Tool "${name}" not found in canonical registry` };
     }
 
+    // Phase 0: idempotency gate — return cached outcome for duplicate keys.
+    if (ctx.idempotencyKey) {
+      const cached = await this.idempotency.check({
+        businessId: ctx.businessId,
+        idempotencyKey: ctx.idempotencyKey,
+        requestHash: this.hashRequest(name, input),
+      });
+      if (cached.status === 'completed') {
+        return { success: true, data: cached.response as any };
+      }
+      if (cached.status === 'failed') {
+        return { success: false, error: cached.error ?? 'Duplicate request failed previously' };
+      }
+    }
+
     // Phase 0: global autonomy kill switch and safety limits are the first gate.
     const safetyCheck = await this.safety.check({
       businessId: ctx.businessId,
@@ -168,9 +196,33 @@ export class KeyCortexToolRegistryService {
     }
 
     const startMs = Date.now();
+    let sagaStepIndex: number | undefined;
     try {
+      if (ctx.sagaId) {
+        sagaStepIndex = Date.now();
+        await this.saga.addStep(
+          ctx.sagaId,
+          sagaStepIndex,
+          name,
+          input,
+          tool.compensation
+            ? {
+                stepName: name,
+                action: tool.compensation.action,
+                payload: tool.compensation.payload,
+              }
+            : undefined,
+        );
+      }
+
       const result = await tool.handler(ctx, validation.parsed);
       const durationMs = Date.now() - startMs;
+
+      if (ctx.sagaId && sagaStepIndex !== undefined) {
+        await this.saga.completeStep(ctx.sagaId, sagaStepIndex, result as any).catch((err) => {
+          this.logger.warn(`Saga step completion failed: ${(err as Error).message}`);
+        });
+      }
 
       // Record successful autonomous execution against daily limits.
       if (safetyCheck.allowed) {
@@ -187,6 +239,13 @@ export class KeyCortexToolRegistryService {
           });
       }
 
+      if (ctx.idempotencyKey) {
+        await this.idempotency.complete(
+          { businessId: ctx.businessId, idempotencyKey: ctx.idempotencyKey },
+          result,
+        );
+      }
+
       await this.audit(ctx, name, input, result, durationMs).catch((err) => {
         this.logger.warn(`Tool audit failed: ${(err as Error).message}`);
       });
@@ -195,6 +254,25 @@ export class KeyCortexToolRegistryService {
       const err = error instanceof Error ? error : new Error(String(error));
       const durationMs = Date.now() - startMs;
       const result: KeyCortexToolResult = { success: false, error: err.message };
+
+      if (ctx.sagaId && sagaStepIndex !== undefined) {
+        await this.saga.failStep(ctx.sagaId, sagaStepIndex, err.message).catch((sagaErr) => {
+          this.logger.warn(`Saga step failure logging failed: ${(sagaErr as Error).message}`);
+        });
+        if (tool.compensation) {
+          await this.saga.compensate(ctx.sagaId).catch((compErr) => {
+            this.logger.warn(`Saga compensation failed: ${(compErr as Error).message}`);
+          });
+        }
+      }
+
+      if (ctx.idempotencyKey) {
+        await this.idempotency.fail(
+          { businessId: ctx.businessId, idempotencyKey: ctx.idempotencyKey },
+          err.message,
+        );
+      }
+
       await this.audit(ctx, name, input, result, durationMs).catch((auditErr) => {
         this.logger.warn(`Tool audit failed: ${(auditErr as Error).message}`);
       });
@@ -269,6 +347,21 @@ export class KeyCortexToolRegistryService {
       requiresApproval: tool.requiresApproval,
       tags: tool.tags,
     };
+  }
+
+  private hashRequest(name: string, input: Record<string, unknown>): string {
+    try {
+      const payload = JSON.stringify({ name, input });
+      let hash = 0;
+      for (let i = 0; i < payload.length; i++) {
+        const char = payload.charCodeAt(i);
+        hash = (hash << 5) - hash + char;
+        hash |= 0;
+      }
+      return hash.toString(16);
+    } catch {
+      return '0';
+    }
   }
 
   private validateInput(

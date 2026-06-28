@@ -46,6 +46,8 @@ import { KeyCortexLifecycleService } from './key-cortex-lifecycle.service';
 import { KeyCortexSafeDatabaseService } from './key-cortex-safe-database.service';
 import { KeyCortexAuditService } from './key-cortex-audit.service';
 import { KeyCortexApprovalOrchestratorService } from './key-cortex-approval-orchestrator.service';
+import { KeyIdempotencyService } from './key-idempotency.service';
+import { KeyCortexSagaService } from './key-cortex-saga.service';
 
 // -- Phase 2 Body: Organ Adapters --
 import { TemporalFlowAdapterService } from './organs/temporal-flow-adapter.service';
@@ -242,6 +244,9 @@ import { ActivityLogService } from '../activity/activity.service';
     // Single approval orchestrator that collapses KeyActionProposal,
     // AiApprovalItem, and ApprovalRequest into one canonical path.
     KeyCortexApprovalOrchestratorService,
+    // Idempotency and saga/rollback foundation.
+    KeyIdempotencyService,
+    KeyCortexSagaService,
 
     // Voice interface -- TTS / STT with personality voice mapping
     KeyCortexVoiceService,
@@ -432,6 +437,8 @@ import { ActivityLogService } from '../activity/activity.service';
     // -- Phase 0: Execution Foundation --
     KeyCortexAuditService,
     KeyCortexApprovalOrchestratorService,
+    KeyIdempotencyService,
+    KeyCortexSagaService,
   ],
 })
 export class KeyCortexModule {}

@@ -376,6 +376,8 @@ model Business {
   businessAutonomyProfile   BusinessAutonomyProfile?
   autonomyDailySpends       AutonomyDailySpend[]
   autonomyDailyActionCounts AutonomyDailyActionCount[]
+  idempotencyKeys           IdempotencyKey[]
+  sagaExecutions            SagaExecution[]
   agentTriggers             AgentTrigger[]
   journeyInstances    JourneyInstance[]
   conversationThreads ConversationThread[]
@@ -6968,6 +6970,71 @@ model AutonomyDailyActionCount {
   @@unique([businessId, date, actionType])
   @@index([businessId, date])
   @@map("autonomy_daily_action_counts")
+}
+
+// Phase 0: Idempotency key registry. Prevents duplicate autonomous actions
+// and allows safe retries with deterministic responses.
+model IdempotencyKey {
+  id             String   @id @default(cuid())
+  businessId     String   @map("business_id")
+  business       Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  idempotencyKey String   @map("idempotency_key")
+  status         String   // pending | completed | failed
+  requestHash    String?  @map("request_hash")
+  response       Json?
+  error          String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([businessId, idempotencyKey])
+  @@index([businessId, idempotencyKey])
+  @@map("idempotency_keys")
+}
+
+// Phase 0: Saga execution log for multi-step autonomous operations.
+model SagaExecution {
+  id            String    @id @default(cuid())
+  businessId    String    @map("business_id")
+  business      Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  sagaType      String    @map("saga_type")
+  status        String    // running | completed | failed | compensated
+  correlationId String?   @map("correlation_id")
+  commandId     String?   @map("command_id")
+  sessionId     String?   @map("session_id")
+
+  createdAt     DateTime  @default(now()) @map("created_at")
+  completedAt   DateTime? @map("completed_at")
+
+  steps SagaStep[]
+
+  @@index([businessId, status])
+  @@index([correlationId])
+  @@map("saga_executions")
+}
+
+// Phase 0: Individual step inside a saga, with optional compensation action.
+model SagaStep {
+  id              String        @id @default(cuid())
+  sagaId          String        @map("saga_id")
+  saga            SagaExecution @relation(fields: [sagaId], references: [id], onDelete: Cascade)
+
+  stepIndex       Int           @map("step_index")
+  stepName        String        @map("step_name")
+  status          String        // pending | completed | failed | compensated
+  input           Json?
+  output          Json?
+  error           String?
+  compensationAction Json?      @map("compensation_action")
+  compensationResult Json?      @map("compensation_result")
+
+  createdAt       DateTime      @default(now()) @map("created_at")
+  completedAt     DateTime?     @map("completed_at")
+
+  @@index([sagaId, stepIndex])
+  @@map("saga_steps")
 }
 
 // L4 Manager — delegated authority for tier-4 autopilot actions

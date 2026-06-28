@@ -22,16 +22,44 @@ function makePrisma() {
   };
 }
 
+function makeIdempotency(overrides?: Partial<any>) {
+  return {
+    check: vi.fn().mockResolvedValue({ status: 'new' }),
+    complete: vi.fn().mockResolvedValue(undefined),
+    fail: vi.fn().mockResolvedValue(undefined),
+    ...overrides,
+  };
+}
+
+function makeSaga(overrides?: Partial<any>) {
+  return {
+    addStep: vi.fn().mockResolvedValue(undefined),
+    completeStep: vi.fn().mockResolvedValue(undefined),
+    failStep: vi.fn().mockResolvedValue(undefined),
+    compensate: vi.fn().mockResolvedValue([]),
+    ...overrides,
+  };
+}
+
 describe('KeyCortexToolRegistryService — safety gate', () => {
   let registry: KeyCortexToolRegistryService;
   let safety: ReturnType<typeof makeSafety>;
   let prisma: ReturnType<typeof makePrisma>;
+  let idempotency: ReturnType<typeof makeIdempotency>;
+  let saga: ReturnType<typeof makeSaga>;
   let tool: KeyCortexToolDefinition;
 
   beforeEach(() => {
     safety = makeSafety();
     prisma = makePrisma();
-    registry = new KeyCortexToolRegistryService(prisma as any, safety as any);
+    idempotency = makeIdempotency();
+    saga = makeSaga();
+    registry = new KeyCortexToolRegistryService(
+      prisma as any,
+      safety as any,
+      idempotency as any,
+      saga as any,
+    );
     tool = {
       name: 'crm.create_contact',
       module: 'crm',
@@ -64,7 +92,12 @@ describe('KeyCortexToolRegistryService — safety gate', () => {
     safety = makeSafety({
       check: vi.fn().mockResolvedValue({ allowed: false, reason: 'Kill switch active' }),
     });
-    registry = new KeyCortexToolRegistryService(prisma as any, safety as any);
+    registry = new KeyCortexToolRegistryService(
+      prisma as any,
+      safety as any,
+      idempotency as any,
+      saga as any,
+    );
     registry.register(tool);
 
     const result = await registry.execute('crm.create_contact', {
