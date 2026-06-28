@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { TaskCategory } from '../ai/model-gateway.service';
 import { CortexQuery, CortexSession, CortexMessage } from './key-cortex.types';
+import type { ModuleName } from './key-cortex-connector.types';
 
 export type QueryComplexity = 'simple' | 'moderate' | 'complex';
 export type QueryDomain =
@@ -30,7 +31,9 @@ export interface RouteDecision {
   layers: ReasoningLayer[];
   promptVariant: PromptVariant;
   includeGenomeContext: boolean;
+  includeMemoryContext: boolean;
   includeActions: boolean;
+  moduleRoute?: ModuleName;
   temperatureOverride?: number;
   maxTokensOverride?: number;
   complexity: QueryComplexity;
@@ -76,8 +79,10 @@ export class AdaptiveRouterService {
     const layers = this.resolveLayers(dimensions, query);
     const promptVariant = this.resolvePromptVariant(dimensions);
     const includeGenomeContext = this.shouldIncludeGenomeContext(dimensions);
+    const includeMemoryContext = this.shouldIncludeMemoryContext(dimensions);
     const includeActions =
       query.enableActions === true && layers.includes('actions');
+    const moduleRoute = this.resolveModuleRoute(text, dimensions, taskCategory);
 
     const decision: RouteDecision = {
       ...dimensions,
@@ -85,7 +90,9 @@ export class AdaptiveRouterService {
       layers,
       promptVariant,
       includeGenomeContext,
+      includeMemoryContext,
       includeActions,
+      moduleRoute,
       temperatureOverride: this.resolveTemperature(dimensions, promptVariant),
       maxTokensOverride: this.resolveMaxTokens(dimensions, promptVariant),
     };
@@ -302,6 +309,46 @@ export class AdaptiveRouterService {
       dimensions.timeHorizon === 'strategic' ||
       dimensions.domain !== 'general'
     );
+  }
+
+  /**
+   * Decide whether the unified memory layer should contribute context.
+   * Memory is useful for almost everything except the simplest greetings.
+   */
+  private shouldIncludeMemoryContext(dimensions: QueryDimensions): boolean {
+    return !(
+      dimensions.complexity === 'simple' &&
+      dimensions.dataRequirement === 'none' &&
+      dimensions.domain === 'general'
+    );
+  }
+
+  /**
+   * Map a query to the most relevant KeyFlowOS module/organ.
+   */
+  resolveModuleRoute(
+    text: string,
+    _dimensions: QueryDimensions,
+    _taskCategory: TaskCategory,
+  ): ModuleName | undefined {
+    const lower = text.toLowerCase();
+
+    if (/\b(revenue|profit|margin|cash flow|expense|budget|invoice|invoices|payment|payments|pricing|cost|p&l|roi|financials)\b/.test(lower))
+      return 'commerce';
+    if (/\b(lead|leads|deal|deals|pipeline|crm|contact|contacts|client|clients|prospect|prospects|opportunity|opportunities)\b/.test(lower))
+      return 'crm';
+    if (/\b(calendar|booking|bookings|appointment|appointments|reservation|schedule|scheduled|availability)\b/.test(lower))
+      return 'bookings';
+    if (/\b(content|blog|post|posts|article|articles|campaign|campaigns|social|social media|seo|landing page|newsletter)\b/.test(lower))
+      return 'content';
+    if (/\b(email|sms|whatsapp|message|messages|communication|communications|notification|notifications|broadcast)\b/.test(lower))
+      return 'communications';
+    if (/\b(workflow|workflows|automation|automations|flow|flows|trigger|triggers)\b/.test(lower))
+      return 'flow';
+    if (/\b(task|tasks|project|projects|milestone|milestones|board|sprint|backlog)\b/.test(lower))
+      return 'projects';
+
+    return undefined;
   }
 
   private resolveTemperature(

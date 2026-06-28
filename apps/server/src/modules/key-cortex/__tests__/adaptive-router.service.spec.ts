@@ -126,4 +126,64 @@ describe('AdaptiveRouterService', () => {
     expect(dims.emotionalWeight).toBe('low');
     expect(dims.timeHorizon).toBe('tactical');
   });
+
+  describe('module routing', () => {
+    it('routes finance/revenue/invoices to commerce', () => {
+      const decision = router.route(query('What invoices are overdue?'));
+      expect(decision.moduleRoute).toBe('commerce');
+    });
+
+    it('routes leads/deals/contacts to crm', () => {
+      const decision = router.route(query('Show me my top deals'));
+      expect(decision.moduleRoute).toBe('crm');
+    });
+
+    it('routes calendar/bookings/appointments to bookings', () => {
+      const decision = router.route(query('What appointments do I have today?'));
+      expect(decision.moduleRoute).toBe('bookings');
+    });
+
+    it('routes content/campaigns/social to content', () => {
+      const decision = router.route(query('Draft a social media campaign'));
+      expect(decision.moduleRoute).toBe('content');
+    });
+
+    it('routes email/communications to communications', () => {
+      const decision = router.route(query('Send an email to the team'));
+      expect(decision.moduleRoute).toBe('communications');
+    });
+
+    it('routes workflows/automations to flow', () => {
+      const decision = router.route(query('Run the onboarding workflow'));
+      expect(decision.moduleRoute).toBe('flow');
+    });
+
+    it('routes tasks/projects to projects', () => {
+      const decision = router.route(query('List my project tasks'));
+      expect(decision.moduleRoute).toBe('projects');
+    });
+
+    it('leaves moduleRoute undefined for general queries', () => {
+      const decision = router.route(query('Hello'));
+      expect(decision.moduleRoute).toBeUndefined();
+    });
+
+    it('exposes resolveModuleRoute independently', () => {
+      expect(
+        router.resolveModuleRoute('How much revenue did we make?', {} as any, 'analysis'),
+      ).toBe('commerce');
+    });
+  });
+
+  describe('memory context gating', () => {
+    it('enables memory context for analytical finance queries', () => {
+      const decision = router.route(query('What is our profit margin this month?'));
+      expect(decision.includeMemoryContext).toBe(true);
+    });
+
+    it('disables memory context for simple greetings', () => {
+      const decision = router.route(query('Hello'));
+      expect(decision.includeMemoryContext).toBe(false);
+    });
+  });
 });

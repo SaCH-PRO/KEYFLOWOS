@@ -120,7 +120,20 @@ export class UnifiedMemoryRetrievalService {
     const whereBase: any = { businessId };
     if (since) whereBase.createdAt = { gte: since };
 
-    const [aiMemories, genomeEvents, temporalMemories, cognitionMemories, cognitiveEvents] = await Promise.all([
+    const includeEpisodic = options.includeEpisodic !== false;
+    const episodicSince = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+    const episodicWhere: any = { businessId, createdAt: { gte: episodicSince } };
+
+    const [
+      aiMemories,
+      genomeEvents,
+      temporalMemories,
+      cognitionMemories,
+      cognitiveEvents,
+      businessEvents,
+      aiExecutionLogs,
+      cortexActionLogs,
+    ] = await Promise.all([
       this.prisma.client.aiMemory.findMany({
         where: whereBase,
         orderBy: { createdAt: 'desc' },
@@ -189,9 +202,66 @@ export class UnifiedMemoryRetrievalService {
           createdAt: true,
         },
       }),
+      includeEpisodic
+        ? this.prisma.client.businessEvent.findMany({
+            where: episodicWhere,
+            orderBy: { createdAt: 'desc' },
+            take: 50,
+            select: {
+              id: true,
+              eventType: true,
+              subjectType: true,
+              subjectId: true,
+              actorType: true,
+              actorId: true,
+              action: true,
+              before: true,
+              after: true,
+              metadata: true,
+              createdAt: true,
+            },
+          })
+        : Promise.resolve([]),
+      includeEpisodic
+        ? this.prisma.client.aiExecutionLog.findMany({
+            where: episodicWhere,
+            orderBy: { createdAt: 'desc' },
+            take: 50,
+            select: {
+              id: true,
+              action: true,
+              toolName: true,
+              module: true,
+              success: true,
+              rationale: true,
+              inputSummary: true,
+              outputSummary: true,
+              errorMessage: true,
+              createdAt: true,
+            },
+          })
+        : Promise.resolve([]),
+      includeEpisodic
+        ? this.prisma.client.cortexActionLog.findMany({
+            where: episodicWhere,
+            orderBy: { createdAt: 'desc' },
+            take: 50,
+            select: {
+              id: true,
+              actionType: true,
+              status: true,
+              description: true,
+              result: true,
+              error: true,
+              requiresApproval: true,
+              estimatedImpact: true,
+              createdAt: true,
+            },
+          })
+        : Promise.resolve([]),
     ]).catch((err: any) => {
       this.logger.warn(`Structured memory load failed: ${err instanceof Error ? err.message : String(err)}`);
-      return [[], [], [], [], []];
+      return [[], [], [], [], [], [], [], []];
     });
 
     const rows: RawMemoryRow[] = [];
@@ -263,7 +333,60 @@ export class UnifiedMemoryRetrievalService {
       });
     }
 
+    for (const e of businessEvents as any[]) {
+      rows.push({
+        id: e.id,
+        sourceType: 'business_event',
+        entityType: e.subjectType,
+        entityId: e.subjectId,
+        eventType: e.eventType,
+        content: `${e.actorType} ${e.action} ${e.subjectType}${e.after ? ': ' + JSON.stringify(e.after) : ''}`,
+        confidence: 0.8,
+        createdAt: e.createdAt,
+        metadata: { before: e.before, after: e.after, source: e.source, metadata: e.metadata },
+      });
+    }
+
+    for (const l of aiExecutionLogs as any[]) {
+      rows.push({
+        id: l.id,
+        sourceType: 'ai_execution_log',
+        eventType: l.action,
+        content: `${l.action}${l.toolName ? ' (' + l.toolName + ')' : ''}${l.module ? ' [' + l.module + ']' : ''}: ${l.success ? 'success' : 'failure'} — ${l.rationale ?? JSON.stringify(l.outputSummary ?? l.inputSummary ?? {})}`,
+        confidence: l.success ? 0.85 : 0.6,
+        createdAt: l.createdAt,
+        metadata: { toolName: l.toolName, module: l.module, success: l.success, errorMessage: l.errorMessage } as Record<string, unknown>,
+      });
+    }
+
+    for (const l of cortexActionLogs as any[]) {
+      rows.push({
+        id: l.id,
+        sourceType: 'cortex_action_log',
+        eventType: l.actionType,
+        content: `${l.actionType}: ${l.status}${l.description ? ' — ' + l.description : ''}${l.result ? ' — ' + l.result : ''}`,
+        confidence: l.status === 'success' ? 0.9 : 0.6,
+        createdAt: l.createdAt,
+        metadata: { status: l.status, requiresApproval: l.requiresApproval, estimatedImpact: l.estimatedImpact },
+      });
+    }
+
     return rows;
+  }
+
+  /**
+   * Retrieve only episodic memory fragments (business events, AI execution logs,
+   * cortex action logs) from the last 90 days.
+   */
+  async retrieveEpisodicContext(
+    businessId: string,
+    options: Omit<MemoryRetrievalOptions, 'includeEpisodic'> = {},
+  ): Promise<MemoryFragment[]> {
+    return this.retrieveContext(businessId, {
+      ...options,
+      includeEpisodic: true,
+      sourceTypes: ['business_event', 'ai_execution_log', 'cortex_action_log'],
+    });
   }
 
   private async loadSemanticMemory(
@@ -313,6 +436,12 @@ export class UnifiedMemoryRetrievalService {
         return 0.75;
       case 'conversation':
         return 0.7;
+      case 'business_event':
+        return 0.8;
+      case 'ai_execution_log':
+        return 0.75;
+      case 'cortex_action_log':
+        return 0.85;
       default:
         return 0.5;
     }

@@ -145,6 +145,7 @@ function createPipeline(
     systemPromptService,
     structuredOutputService,
     moodDetectionService,
+    undefined, // memoryRetrieval
     undefined,
     undefined,
     undefined,
