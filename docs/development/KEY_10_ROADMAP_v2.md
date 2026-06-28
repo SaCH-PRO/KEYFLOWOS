@@ -1,8 +1,8 @@
 # KEY 10/10 Roadmap v2 — Renovation-First Integration Plan
 
-> **Status:** In execution  
-> **Current phase:** Phase D — Proactive Senses + BI + Learning (`feat/key-phase-d-proactive`)  
-> **Completed:** Phase 0, Phase A, Phase B, and Phase C merged to `main`.
+> **Status:** Completed  
+> **Current phase:** All roadmap phases merged to `main`.  
+> **Completed:** Phase 0, Phase A, Phase B, Phase C, and Phase D merged to `main`.
 > **Scope:** How to evolve KEYFLOWOS toward a 10/10 autonomous business employee by *renovating the existing house*, not building a parallel mansion.  
 > **Companion documents:**
 > - `docs/development/KEY_10_10_ROADMAP.md` — the original strategic/target-state roadmap.
