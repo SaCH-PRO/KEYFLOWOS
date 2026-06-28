@@ -44,6 +44,8 @@ import { KeyCortexActionExecutorPlugin } from './key-cortex-action-executor.plug
 import { KeyCortexOrganRegistrarService } from './key-cortex-organ-registrar.service';
 import { KeyCortexLifecycleService } from './key-cortex-lifecycle.service';
 import { KeyCortexSafeDatabaseService } from './key-cortex-safe-database.service';
+import { KeyCortexAuditService } from './key-cortex-audit.service';
+import { KeyCortexApprovalOrchestratorService } from './key-cortex-approval-orchestrator.service';
 
 // -- Phase 2 Body: Organ Adapters --
 import { TemporalFlowAdapterService } from './organs/temporal-flow-adapter.service';
@@ -121,6 +123,7 @@ import { BusinessGenomeModule } from '../business-genome/business-genome.module'
 import { KeyGenomeModule } from '../business-genome/key-genome/key-genome.module';
 import { BlueprintModule } from '../blueprint/blueprint.module';
 import { KeyAutonomyModule } from '../key-autonomy/key-autonomy.module';
+import { BusinessEventModule } from '../business-events/business-event.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { ProjectsModule } from '../projects/projects.module';
 import { KeystoreModule } from '../keystore/keystore.module';
@@ -176,6 +179,9 @@ import { ActivityLogService } from '../activity/activity.service';
     forwardRef(() => PortalModule),
     forwardRef(() => SiteModule),
     forwardRef(() => KeyConnectorModule),
+
+    // Business events for unified audit trail
+    BusinessEventModule,
   ],
 
   controllers: [
@@ -229,6 +235,13 @@ import { ActivityLogService } from '../activity/activity.service';
     KeyCortexLifecycleService,
     // Authority-granted safe database wrappers for QUERY_DATABASE / UPDATE_RECORD.
     KeyCortexSafeDatabaseService,
+
+    // -- Phase 0: Execution Foundation --
+    // Unified audit event writer with identity lineage.
+    KeyCortexAuditService,
+    // Single approval orchestrator that collapses KeyActionProposal,
+    // AiApprovalItem, and ApprovalRequest into one canonical path.
+    KeyCortexApprovalOrchestratorService,
 
     // Voice interface -- TTS / STT with personality voice mapping
     KeyCortexVoiceService,
@@ -415,6 +428,10 @@ import { ActivityLogService } from '../activity/activity.service';
     // -- Phase 3 Body: Skeleton --
     KeyCortexLifecycleService,
     KeyCortexSafeDatabaseService,
+
+    // -- Phase 0: Execution Foundation --
+    KeyCortexAuditService,
+    KeyCortexApprovalOrchestratorService,
   ],
 })
 export class KeyCortexModule {}

@@ -1561,8 +1561,25 @@ model KeyActionProposal {
   actionType String  @map("action_type")
   payload    Json    @default("{}")
 
+  // Phase 0: absorb AiApprovalItem / ApprovalRequest fields for unified governance
+  toolName         String?   @map("tool_name")
+  module           String?
+  description      String?
+  expectedBenefit  String?   @map("expected_benefit")
+  risks            String?
+  inputPayload     Json?     @map("input_payload")
+  affectedEntities Json?     @map("affected_entities")
+  resolvedByUserId String?   @map("resolved_by_user_id")
+  resolution       Json?
+  multiStepParentId String?  @map("multi_step_parent_id")
+
+  // Phase 3 Skeleton + Phase 0: full identity/audit lineage
   planId     String? @map("plan_id")
   planStepId String? @map("plan_step_id")
+  correlationId String? @map("correlation_id")
+  commandId     String? @map("command_id")
+  sessionId     String? @map("session_id")
+  businessEventId String? @map("business_event_id")
 
   riskLevel String @default("LOW") @map("risk_level")
   status    String @default("PENDING")
@@ -1586,8 +1603,12 @@ model KeyActionProposal {
   @@index([businessId, status])
   @@index([businessId, sourceType])
   @@index([businessId, actionType])
+  @@index([businessId, toolName])
+  @@index([businessId, correlationId])
+  @@index([businessId, commandId])
   @@index([planId])
   @@index([planStepId])
+  @@index([multiStepParentId])
   @@map("key_action_proposals")
 }
 
@@ -6848,10 +6869,14 @@ model AiApprovalItem {
   // Phase 3 Skeleton: identity thread
   correlationId String? @map("correlation_id")
 
+  // Phase 0: migration pointer to canonical KeyActionProposal
+  migratedToProposalId String? @map("migrated_to_proposal_id")
+
   @@index([businessId, status])
   @@index([businessId, createdAt])
   @@index([businessId, correlationId])
   @@index([planId])
+  @@index([migratedToProposalId])
   @@map("ai_approval_items")
 }
 
@@ -9640,9 +9665,13 @@ model ApprovalRequest {
 
   steps ApprovalStep[]
 
+  // Phase 0: migration pointer to canonical KeyActionProposal
+  migratedToProposalId String? @map("migrated_to_proposal_id")
+
   @@index([businessId, status])
   @@index([businessId, requestType])
   @@index([businessId, requesterId])
+  @@index([migratedToProposalId])
   @@map("approval_requests")
 }
 
@@ -11188,10 +11217,12 @@ model CortexActionLog {
   userId        String?  @map("user_id")
   commandId     String?  @map("command_id")
   correlationId String?  @map("correlation_id")
+  proposalId    String?  @map("proposal_id")
 
   @@index([sessionId, createdAt])
   @@index([businessId, createdAt])
   @@index([businessId, correlationId])
+  @@index([businessId, proposalId])
   @@map("cortex_action_logs")
 }
 

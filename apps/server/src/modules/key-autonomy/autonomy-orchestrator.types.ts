@@ -26,6 +26,8 @@ export interface AutonomyActionContext {
   affectedDomains?: string[];
   /** Optional user role for role-based filtering */
   role?: string;
+  /** Canonical KeyActionProposal id, when known */
+  proposalId?: string;
 }
 
 export interface AutonomyRuleTrace {
