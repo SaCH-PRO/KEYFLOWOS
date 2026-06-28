@@ -42,6 +42,20 @@ export interface RecentActivityInput {
   limit?: number;
 }
 
+export interface CreateActivityInput {
+  businessId: string;
+  module: string;
+  action: string;
+  entityType: string;
+  entityId?: string | null;
+  title: string;
+  detail?: string | null;
+  tone?: string | null;
+  contactId?: string | null;
+  actorType?: string | null;
+  actorId?: string | null;
+}
+
 @Injectable()
 export class ActivityLogService {
   private readonly logger = new Logger(ActivityLogService.name);
@@ -154,5 +168,28 @@ export class ActivityLogService {
 
   async getRecent(input: RecentActivityInput) {
     return this.getActivity(input.businessId, input.limit ?? 50);
+  }
+
+  /**
+   * Create a row in the legacy `Activity` table (not `ActivityLog`).
+   * Used by AI/KEY Cortex tools that need observable business activity.
+   */
+  async createActivity(input: CreateActivityInput) {
+    return this.prisma.client.activity.create({
+      data: {
+        businessId: input.businessId,
+        module: input.module,
+        action: input.action,
+        entityType: input.entityType,
+        entityId: input.entityId ?? null,
+        title: input.title,
+        detail: input.detail ?? null,
+        tone: input.tone ?? null,
+        contactId: input.contactId ?? null,
+        actorType: input.actorType ?? null,
+        actorId: input.actorId ?? null,
+        occurredAt: new Date(),
+      },
+    });
   }
 }

@@ -579,7 +579,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     businessId: string;
     contactId: string;
     serviceId: string;
-    staffId: string;
+    staffId?: string;
     startTime: Date;
     endTime: Date;
     notes?: string;

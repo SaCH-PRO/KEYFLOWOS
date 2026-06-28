@@ -1,7 +1,9 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ModelGatewayService } from './model-gateway.service';
+import { CrmService } from '../crm/crm.service';
 import { FlowOrchestratorService } from './flow-orchestrator.service';
 import { AiOversightService } from './ai-oversight.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
@@ -59,7 +61,12 @@ export class ConversationalAIService {
     @Inject(UnifiedInboxService) private readonly inbox: UnifiedInboxService,
     @Inject(RoleEngineService) private readonly roleEngine: RoleEngineService,
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
+    @Inject(ModuleRef) private readonly moduleRef: ModuleRef,
   ) {}
+
+  private getCrm() {
+    return this.moduleRef.get(CrmService, { strict: false });
+  }
 
   async handleInboundMessage(ctx: ConversationalContext): Promise<ConversationalResponse> {
     const startTime = Date.now();
@@ -311,22 +318,14 @@ Respond with JSON only:
 
     if (existing) return existing;
 
-    // Create new contact
-    const newContact = await this.prisma.client.contact.create({
-      data: {
-        businessId: ctx.businessId,
-        firstName: 'Unknown',
-        lastName: 'Contact',
-        phone: ctx.channel === 'whatsapp' || ctx.channel === 'sms' ? ctx.from : null,
-        email: ctx.channel === 'email' ? ctx.from : null,
-        status: 'LEAD',
-        source: ctx.channel,
-      },
-    });
-
-    this.events.emit('contact.created', {
+    // Create new contact through CRM domain service
+    const newContact = await this.getCrm().createContact({
       businessId: ctx.businessId,
-      contactId: newContact.id,
+      firstName: 'Unknown',
+      lastName: 'Contact',
+      phone: ctx.channel === 'whatsapp' || ctx.channel === 'sms' ? ctx.from : null,
+      email: ctx.channel === 'email' ? ctx.from : null,
+      status: 'LEAD',
       source: ctx.channel,
     });
 
