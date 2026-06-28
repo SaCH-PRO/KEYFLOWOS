@@ -61,13 +61,16 @@ import {
   CrmAdapterService,
   CommerceAdapterService,
   BookingsAdapterService,
+  ContentAdapterService,
+  CommunicationsAdapterService,
   FlowAdapterService,
   AutopilotAdapterService,
   TemporalAdapterService,
   InboxAdapterService,
   NotificationsAdapterService,
   ProjectsAdapterService,
-  CommunicationsAdapterService,
+  ActivityAdapterService,
+  KeyCortexBridgeAdapterService,
 } from './adapters';
 
 // -- Core (legacy) --
@@ -80,6 +83,8 @@ import { KeyCortexVoiceService } from './key-cortex-voice.service';
 
 // -- v2 Integration Layer --
 import { KeyCortexConnectorService } from './key-cortex-connector.service';
+import { KeyCortexCapabilityRegistryService } from './key-cortex-capability-registry.service';
+import { KeyCortexContextAssemblyService } from './key-cortex-context-assembly.service';
 import { KeyCortexCommandService } from './key-cortex-command.service';
 import { KeyCortexExecutorService } from './key-cortex-executor.service';
 import { KeyCortexContextV2Service } from './key-cortex-context-v2.service';
@@ -271,17 +276,26 @@ import { ActivityLogService } from '../activity/activity.service';
     // Universal connector -- knows how to talk to every KeyFlowOS module
     KeyCortexConnectorService,
 
+    // -- Phase 0.7: Decomposed connector services --
+    KeyCortexCapabilityRegistryService,
+    KeyCortexContextAssemblyService,
+
     // -- Phase 0.5: Typed module adapters (replaces as-any casts) --
     CrmAdapterService,
     CommerceAdapterService,
     BookingsAdapterService,
+    ContentAdapterService,
+    CommunicationsAdapterService,
     FlowAdapterService,
     AutopilotAdapterService,
     TemporalAdapterService,
     InboxAdapterService,
     NotificationsAdapterService,
     ProjectsAdapterService,
-    CommunicationsAdapterService,
+    ActivityAdapterService,
+
+    // -- Phase 0.7: Phase-2 bridge adapter --
+    KeyCortexBridgeAdapterService,
 
     // -- Phase 0.5: Typed domain services --
     // Content and Activity services are already typed to match the connector's
@@ -390,6 +404,8 @@ import { ActivityLogService } from '../activity/activity.service';
     // Connector + Executor form the "command API" surface.
     // ContextV2 + Insight provide the "query API" surface.
     KeyCortexConnectorService,
+    KeyCortexCapabilityRegistryService,
+    KeyCortexContextAssemblyService,
     KeyCortexExecutorService,
     KeyCortexContextV2Service,
     KeyCortexInsightService,
@@ -460,13 +476,18 @@ import { ActivityLogService } from '../activity/activity.service';
     CrmAdapterService,
     CommerceAdapterService,
     BookingsAdapterService,
+    ContentAdapterService,
+    CommunicationsAdapterService,
     FlowAdapterService,
     AutopilotAdapterService,
     TemporalAdapterService,
     InboxAdapterService,
     NotificationsAdapterService,
     ProjectsAdapterService,
-    CommunicationsAdapterService,
+    ActivityAdapterService,
+
+    // -- Phase 0.7: Phase-2 bridge adapter --
+    KeyCortexBridgeAdapterService,
 
     // -- Phase 2 Body: Organ Registrar --
     KeyCortexOrganRegistrarService,

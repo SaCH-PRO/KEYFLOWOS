@@ -1,4 +1,6 @@
 import { Injectable } from '@nestjs/common';
+import { ConnectorCommand, ConnectorResult } from '../key-cortex-connector.types';
+import { connectorOk, connectorFail } from '../key-cortex-connector.utils';
 import { ProjectsService } from '../../projects/projects.service';
 
 /**
@@ -133,5 +135,91 @@ export class ProjectsAdapterService {
       }
     }
     return tasks;
+  }
+
+  async execute(command: ConnectorCommand): Promise<ConnectorResult> {
+    const start = Date.now();
+    switch (command.action) {
+      case 'create_project': {
+        const project = await this.createProject({
+          businessId: command.businessId,
+          name: command.parameters.name as string,
+          description: command.parameters.description as string,
+          contactId: command.parameters.contactId as string,
+          dueDate: command.parameters.dueDate as string,
+          priority: (command.parameters.priority as string) || 'medium',
+          assigneeId: command.parameters.assigneeId as string,
+        });
+        return connectorOk(command, start, project);
+      }
+      case 'add_task': {
+        const task = await this.addTask({
+          businessId: command.businessId,
+          projectId: command.parameters.projectId as string,
+          title: command.parameters.title as string,
+          description: command.parameters.description as string,
+          assigneeId: command.parameters.assigneeId as string,
+          dueDate: command.parameters.dueDate as string,
+          priority: (command.parameters.priority as string) || 'medium',
+        });
+        return connectorOk(command, start, task);
+      }
+      case 'update_task': {
+        const updated = await this.updateTask({
+          businessId: command.businessId,
+          projectId: command.parameters.projectId as string,
+          taskId: command.parameters.taskId as string,
+          title: command.parameters.title as string,
+          status: command.parameters.status as string,
+          assigneeId: command.parameters.assigneeId as string,
+          dueDate: command.parameters.dueDate as string,
+        });
+        return connectorOk(command, start, updated);
+      }
+      case 'complete_task': {
+        const completed = await this.completeTask({
+          businessId: command.businessId,
+          projectId: command.parameters.projectId as string,
+          taskId: command.parameters.taskId as string,
+          notes: command.parameters.notes as string,
+        });
+        return connectorOk(command, start, completed);
+      }
+      case 'delete_project': {
+        await this.deleteProject({
+          businessId: command.businessId,
+          projectId: command.parameters.projectId as string,
+        });
+        return connectorOk(command, start, { deleted: true });
+      }
+      case 'add_milestone': {
+        const milestone = await this.addMilestone({
+          businessId: command.businessId,
+          projectId: command.parameters.projectId as string,
+          name: command.parameters.name as string,
+          dueDate: command.parameters.dueDate as string,
+          description: command.parameters.description as string,
+        });
+        return connectorOk(command, start, milestone);
+      }
+      case 'complete_milestone': {
+        const completed = await this.completeMilestone({
+          businessId: command.businessId,
+          projectId: command.parameters.projectId as string,
+          milestoneId: command.parameters.milestoneId as string,
+          notes: command.parameters.notes as string,
+        });
+        return connectorOk(command, start, completed);
+      }
+      case 'archive_project': {
+        const archived = await this.archiveProject({
+          businessId: command.businessId,
+          projectId: command.parameters.projectId as string,
+        });
+        return connectorOk(command, start, archived);
+      }
+      default:
+        return connectorFail(command, start, `Unknown projects action: ${command.action}`);
+    }
   }
 }

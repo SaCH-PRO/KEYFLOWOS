@@ -1,4 +1,6 @@
 import { Injectable } from '@nestjs/common';
+import { ConnectorCommand, ConnectorResult } from '../key-cortex-connector.types';
+import { connectorOk, connectorFail } from '../key-cortex-connector.utils';
 import { KeyInboxService } from '../../key-inbox/key-inbox.service';
 
 /**
@@ -123,5 +125,83 @@ export class InboxAdapterService {
       duplicateThreadId: input.duplicateThreadId,
       merged: true,
     };
+  }
+
+  async execute(command: ConnectorCommand): Promise<ConnectorResult> {
+    const start = Date.now();
+    switch (command.action) {
+      case 'get_threads': {
+        const threads = await this.getThreads({
+          businessId: command.businessId,
+          status: command.parameters.status as string,
+          priority: command.parameters.priority as string,
+          assignedTo: command.parameters.assignedTo as string,
+          limit: (command.parameters.limit as number) || 50,
+        });
+        return connectorOk(command, start, threads);
+      }
+      case 'send_reply': {
+        const reply = await this.sendReply({
+          businessId: command.businessId,
+          threadId: command.parameters.threadId as string,
+          body: command.parameters.body as string,
+          channel: command.parameters.channel as string,
+          attachments: command.parameters.attachments as string[],
+        });
+        return connectorOk(command, start, reply);
+      }
+      case 'classify_message': {
+        const classified = await this.classifyMessage({
+          businessId: command.businessId,
+          threadId: command.parameters.threadId as string,
+          intent: command.parameters.intent as string,
+          priority: command.parameters.priority as string,
+          assignTo: command.parameters.assignTo as string,
+        });
+        return connectorOk(command, start, classified);
+      }
+      case 'close_thread': {
+        const closed = await this.closeThread({
+          businessId: command.businessId,
+          threadId: command.parameters.threadId as string,
+          resolution: command.parameters.resolution as string,
+        });
+        return connectorOk(command, start, closed);
+      }
+      case 'snooze_thread': {
+        const snoozed = await this.snoozeThread({
+          businessId: command.businessId,
+          threadId: command.parameters.threadId as string,
+          until: command.parameters.until as string,
+          reason: command.parameters.reason as string,
+        });
+        return connectorOk(command, start, snoozed);
+      }
+      case 'assign_thread': {
+        const assigned = await this.assignThread({
+          businessId: command.businessId,
+          threadId: command.parameters.threadId as string,
+          userId: command.parameters.userId as string,
+        });
+        return connectorOk(command, start, assigned);
+      }
+      case 'get_intelligence_report': {
+        const report = await this.getIntelligenceReport({
+          businessId: command.businessId,
+          threadId: command.parameters.threadId as string,
+        });
+        return connectorOk(command, start, report);
+      }
+      case 'merge_threads': {
+        const merged = await this.mergeThreads({
+          businessId: command.businessId,
+          masterThreadId: command.parameters.masterThreadId as string,
+          duplicateThreadId: command.parameters.duplicateThreadId as string,
+        });
+        return connectorOk(command, start, merged);
+      }
+      default:
+        return connectorFail(command, start, `Unknown inbox action: ${command.action}`);
+    }
   }
 }

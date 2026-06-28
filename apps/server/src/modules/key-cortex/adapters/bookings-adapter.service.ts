@@ -1,4 +1,6 @@
 import { Injectable, NotImplementedException } from '@nestjs/common';
+import { ConnectorCommand, ConnectorResult } from '../key-cortex-connector.types';
+import { connectorOk, connectorFail } from '../key-cortex-connector.utils';
 import { PrismaService } from '../../../core/prisma/prisma.service';
 import { BookingsService } from '../../bookings/bookings.service';
 import { CatalogService } from '../../catalog/catalog.service';
@@ -184,5 +186,94 @@ export class BookingsAdapterService {
         staff: { select: { id: true, name: true } },
       },
     });
+  }
+
+  async execute(command: ConnectorCommand): Promise<ConnectorResult> {
+    const start = Date.now();
+    switch (command.action) {
+      case 'create_booking': {
+        const booking = await this.createBooking({
+          businessId: command.businessId,
+          contactId: command.parameters.contactId as string,
+          serviceId: command.parameters.serviceId as string,
+          startTime: command.parameters.startTime as string,
+          endTime: command.parameters.endTime as string,
+          staffId: command.parameters.staffId as string,
+          notes: command.parameters.notes as string,
+        });
+        return connectorOk(command, start, booking);
+      }
+      case 'cancel_booking': {
+        const cancelled = await this.cancelBooking({
+          businessId: command.businessId,
+          bookingId: command.parameters.bookingId as string,
+          reason: command.parameters.reason as string,
+          notifyClient: (command.parameters.notifyClient as boolean) ?? true,
+        });
+        return connectorOk(command, start, cancelled);
+      }
+      case 'reschedule_booking': {
+        const rescheduled = await this.rescheduleBooking({
+          businessId: command.businessId,
+          bookingId: command.parameters.bookingId as string,
+          newStartTime: command.parameters.newStartTime as string,
+          newEndTime: command.parameters.newEndTime as string,
+          notifyClient: (command.parameters.notifyClient as boolean) ?? true,
+        });
+        return connectorOk(command, start, rescheduled);
+      }
+      case 'confirm_booking': {
+        const confirmed = await this.confirmBooking({
+          businessId: command.businessId,
+          bookingId: command.parameters.bookingId as string,
+          sendConfirmation: (command.parameters.sendConfirmation as boolean) ?? true,
+        });
+        return connectorOk(command, start, confirmed);
+      }
+      case 'add_service': {
+        const service = await this.addService({
+          businessId: command.businessId,
+          name: command.parameters.name as string,
+          duration: command.parameters.duration as number,
+          price: command.parameters.price as number,
+          description: command.parameters.description as string,
+          buffer: (command.parameters.buffer as number) || 0,
+        });
+        return connectorOk(command, start, service);
+      }
+      case 'update_service': {
+        const updated = await this.updateService({
+          businessId: command.businessId,
+          serviceId: command.parameters.serviceId as string,
+          name: command.parameters.name as string,
+          duration: command.parameters.duration as number,
+          price: command.parameters.price as number,
+          active: command.parameters.active as boolean,
+        });
+        return connectorOk(command, start, updated);
+      }
+      case 'set_availability': {
+        const avail = await this.setAvailability({
+          businessId: command.businessId,
+          staffId: command.parameters.staffId as string,
+          dayOfWeek: command.parameters.dayOfWeek as string,
+          startTime: command.parameters.startTime as string,
+          endTime: command.parameters.endTime as string,
+        });
+        return connectorOk(command, start, avail);
+      }
+      case 'block_time': {
+        const blocked = await this.blockTime({
+          businessId: command.businessId,
+          staffId: command.parameters.staffId as string,
+          startTime: command.parameters.startTime as string,
+          endTime: command.parameters.endTime as string,
+          reason: command.parameters.reason as string,
+        });
+        return connectorOk(command, start, blocked);
+      }
+      default:
+        return connectorFail(command, start, `Unknown bookings action: ${command.action}`);
+    }
   }
 }

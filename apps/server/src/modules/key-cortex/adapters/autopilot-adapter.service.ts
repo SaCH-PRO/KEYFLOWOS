@@ -1,4 +1,6 @@
 import { Injectable, NotImplementedException } from '@nestjs/common';
+import { ConnectorCommand, ConnectorResult } from '../key-cortex-connector.types';
+import { connectorOk, connectorFail } from '../key-cortex-connector.utils';
 import { AutopilotService } from '../../autopilot/autopilot.service';
 import { DelegationLoopService } from '../../autopilot/delegation-loop.service';
 
@@ -100,5 +102,83 @@ export class AutopilotAdapterService {
     return input.active !== undefined
       ? loops.filter((loop: { enabled?: boolean }) => loop.enabled === input.active)
       : loops;
+  }
+
+  async execute(command: ConnectorCommand): Promise<ConnectorResult> {
+    const start = Date.now();
+    switch (command.action) {
+      case 'get_tasks': {
+        const tasks = await this.getTasks({
+          businessId: command.businessId,
+          status: command.parameters.status as string,
+          assignedTo: command.parameters.assignedTo as string,
+          limit: (command.parameters.limit as number) || 50,
+        });
+        return connectorOk(command, start, tasks);
+      }
+      case 'create_task': {
+        const task = await this.createTask({
+          businessId: command.businessId,
+          title: command.parameters.title as string,
+          description: command.parameters.description as string,
+          assignedTo: command.parameters.assignedTo as string,
+          priority: (command.parameters.priority as string) || 'medium',
+          dueDate: command.parameters.dueDate as string,
+          automationId: command.parameters.automationId as string,
+        });
+        return connectorOk(command, start, task);
+      }
+      case 'approve_task': {
+        const approved = await this.approveTask({
+          businessId: command.businessId,
+          taskId: command.parameters.taskId as string,
+          notes: command.parameters.notes as string,
+        });
+        return connectorOk(command, start, approved);
+      }
+      case 'reject_task': {
+        const rejected = await this.rejectTask({
+          businessId: command.businessId,
+          taskId: command.parameters.taskId as string,
+          reason: command.parameters.reason as string,
+        });
+        return connectorOk(command, start, rejected);
+      }
+      case 'enable_loop': {
+        const enabled = await this.enableLoop({
+          businessId: command.businessId,
+          loopId: command.parameters.loopId as string,
+        });
+        return connectorOk(command, start, enabled);
+      }
+      case 'disable_loop': {
+        const disabled = await this.disableLoop({
+          businessId: command.businessId,
+          loopId: command.parameters.loopId as string,
+        });
+        return connectorOk(command, start, disabled);
+      }
+      case 'complete_task': {
+        const completed = await this.completeTask({
+          businessId: command.businessId,
+          taskId: command.parameters.taskId as string,
+          outcome: command.parameters.outcome as string,
+        });
+        return connectorOk(command, start, completed);
+      }
+      case 'create_loop': {
+        const loop = await this.createLoop({
+          businessId: command.businessId,
+          name: command.parameters.name as string,
+          frequency: command.parameters.frequency as string,
+          taskTemplate: command.parameters.taskTemplate as Record<string, unknown>,
+          conditions: command.parameters.conditions as Array<Record<string, unknown>>,
+          active: (command.parameters.active as boolean) || false,
+        });
+        return connectorOk(command, start, loop);
+      }
+      default:
+        return connectorFail(command, start, `Unknown autopilot action: ${command.action}`);
+    }
   }
 }

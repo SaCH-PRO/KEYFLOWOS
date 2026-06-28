@@ -1,4 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConnectorCommand, ConnectorResult } from '../key-cortex-connector.types';
+import { connectorOk, connectorFail } from '../key-cortex-connector.utils';
 import { TemporalFlowMemoryService } from '../../temporal-flow/temporal-flow-memory.service';
 import type {
   TemporalFlowMemoryEntityType,
@@ -116,5 +118,63 @@ export class TemporalAdapterService {
 
   async getRecentMemories(input: { businessId: string; limit?: number }) {
     return this.temporal.findMany(input.businessId, { limit: input.limit ?? 10 });
+  }
+
+  async execute(command: ConnectorCommand): Promise<ConnectorResult> {
+    const start = Date.now();
+    switch (command.action) {
+      case 'store_memory': {
+        const memory = await this.storeMemory({
+          businessId: command.businessId,
+          key: command.parameters.key as string,
+          value: command.parameters.value as Record<string, unknown>,
+          ttlDays: (command.parameters.ttlDays as number) || 0,
+          tags: command.parameters.tags as string[],
+          importance: (command.parameters.importance as string) || 'medium',
+        });
+        return connectorOk(command, start, memory);
+      }
+      case 'recall_memory': {
+        const memory = await this.recallMemory({
+          businessId: command.businessId,
+          key: command.parameters.key as string,
+        });
+        return connectorOk(command, start, memory);
+      }
+      case 'delete_memory': {
+        await this.deleteMemory({
+          businessId: command.businessId,
+          memoryId: command.parameters.memoryId as string,
+        });
+        return connectorOk(command, start, { deleted: true });
+      }
+      case 'update_memory': {
+        const updated = await this.updateMemory({
+          businessId: command.businessId,
+          memoryId: command.parameters.memoryId as string,
+          value: command.parameters.value as Record<string, unknown>,
+          importance: command.parameters.importance as string,
+        });
+        return connectorOk(command, start, updated);
+      }
+      case 'tag_memory': {
+        const tagged = await this.tagMemory({
+          businessId: command.businessId,
+          memoryId: command.parameters.memoryId as string,
+          tags: command.parameters.tags as string[],
+        });
+        return connectorOk(command, start, tagged);
+      }
+      case 'consolidate_memories': {
+        const consolidated = await this.consolidateMemories({
+          businessId: command.businessId,
+          keys: command.parameters.keys as string[],
+          summaryKey: command.parameters.summaryKey as string,
+        });
+        return connectorOk(command, start, consolidated);
+      }
+      default:
+        return connectorFail(command, start, `Unknown temporal action: ${command.action}`);
+    }
   }
 }

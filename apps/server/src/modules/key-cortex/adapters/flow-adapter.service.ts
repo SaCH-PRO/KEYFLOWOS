@@ -1,4 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConnectorCommand, ConnectorResult } from '../key-cortex-connector.types';
+import { connectorOk, connectorFail } from '../key-cortex-connector.utils';
 import { PrismaService } from '../../../core/prisma/prisma.service';
 
 /**
@@ -137,5 +139,81 @@ export class FlowAdapterService {
       },
       orderBy: { createdAt: 'desc' },
     });
+  }
+
+  async execute(command: ConnectorCommand): Promise<ConnectorResult> {
+    const start = Date.now();
+    switch (command.action) {
+      case 'create_automation': {
+        const flow = await this.createAutomation({
+          businessId: command.businessId,
+          name: command.parameters.name as string,
+          trigger: command.parameters.trigger as string,
+          actions: command.parameters.actions as Array<Record<string, unknown>>,
+          conditions: command.parameters.conditions as Array<Record<string, unknown>>,
+          active: (command.parameters.active as boolean) || false,
+        });
+        return connectorOk(command, start, flow);
+      }
+      case 'enable_automation': {
+        const enabled = await this.enableAutomation({
+          businessId: command.businessId,
+          flowId: command.parameters.flowId as string,
+        });
+        return connectorOk(command, start, enabled);
+      }
+      case 'disable_automation': {
+        const disabled = await this.disableAutomation({
+          businessId: command.businessId,
+          flowId: command.parameters.flowId as string,
+        });
+        return connectorOk(command, start, disabled);
+      }
+      case 'trigger_flow': {
+        const triggered = await this.triggerFlow({
+          businessId: command.businessId,
+          flowId: command.parameters.flowId as string,
+          contactId: command.parameters.contactId as string,
+          payload: command.parameters.payload as Record<string, unknown>,
+        });
+        return connectorOk(command, start, triggered);
+      }
+      case 'delete_automation': {
+        await this.deleteAutomation({
+          businessId: command.businessId,
+          flowId: command.parameters.flowId as string,
+        });
+        return connectorOk(command, start, { deleted: true });
+      }
+      case 'update_automation': {
+        const updated = await this.updateAutomation({
+          businessId: command.businessId,
+          flowId: command.parameters.flowId as string,
+          name: command.parameters.name as string,
+          actions: command.parameters.actions as Array<Record<string, unknown>>,
+          conditions: command.parameters.conditions as Array<Record<string, unknown>>,
+          active: command.parameters.active as boolean,
+        });
+        return connectorOk(command, start, updated);
+      }
+      case 'clone_automation': {
+        const cloned = await this.cloneAutomation({
+          businessId: command.businessId,
+          flowId: command.parameters.flowId as string,
+          newName: command.parameters.newName as string,
+        });
+        return connectorOk(command, start, cloned);
+      }
+      case 'run_test': {
+        const testResult = await this.runTest({
+          businessId: command.businessId,
+          flowId: command.parameters.flowId as string,
+          contactId: command.parameters.contactId as string,
+        });
+        return connectorOk(command, start, testResult);
+      }
+      default:
+        return connectorFail(command, start, `Unknown flow action: ${command.action}`);
+    }
   }
 }

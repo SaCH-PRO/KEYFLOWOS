@@ -1,4 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConnectorCommand, ConnectorResult } from '../key-cortex-connector.types';
+import { connectorOk, connectorFail } from '../key-cortex-connector.utils';
 import { CommerceService } from '../../commerce/commerce.service';
 
 /**
@@ -223,5 +225,105 @@ export class CommerceAdapterService {
       from: from.toISOString(),
       to: to.toISOString(),
     };
+  }
+
+  async execute(command: ConnectorCommand): Promise<ConnectorResult> {
+    const start = Date.now();
+    switch (command.action) {
+      case 'create_invoice': {
+        const invoice = await this.createInvoice({
+          businessId: command.businessId,
+          contactId: command.parameters.contactId as string,
+          items: command.parameters.items as Array<Record<string, unknown>>,
+          dueDate: command.parameters.dueDate as string,
+          notes: command.parameters.notes as string,
+          sendImmediately: (command.parameters.sendImmediately as boolean) || false,
+          source: 'key_cortex',
+        });
+        return connectorOk(command, start, invoice);
+      }
+      case 'send_invoice': {
+        const sent = await this.sendInvoice({
+          businessId: command.businessId,
+          invoiceId: command.parameters.invoiceId as string,
+          message: command.parameters.message as string,
+        });
+        return connectorOk(command, start, sent);
+      }
+      case 'get_invoice': {
+        const invoice = await this.getInvoice({
+          businessId: command.businessId,
+          invoiceId: command.parameters.invoiceId as string,
+        });
+        return connectorOk(command, start, invoice);
+      }
+      case 'list_invoices': {
+        const invoices = await this.listInvoices({
+          businessId: command.businessId,
+          contactId: command.parameters.contactId as string,
+          status: command.parameters.status as string,
+          limit: (command.parameters.limit as number) || 50,
+        });
+        return connectorOk(command, start, invoices);
+      }
+      case 'create_product': {
+        const product = await this.createProduct({
+          businessId: command.businessId,
+          name: command.parameters.name as string,
+          description: command.parameters.description as string,
+          price: command.parameters.price as number,
+          sku: command.parameters.sku as string,
+          taxable: (command.parameters.taxable as boolean) ?? true,
+        });
+        return connectorOk(command, start, product);
+      }
+      case 'get_product': {
+        const product = await this.getProduct({
+          businessId: command.businessId,
+          productId: command.parameters.productId as string,
+          sku: command.parameters.sku as string,
+        });
+        return connectorOk(command, start, product);
+      }
+      case 'create_order': {
+        const order = await this.createOrder({
+          businessId: command.businessId,
+          contactId: command.parameters.contactId as string,
+          items: command.parameters.items as Array<Record<string, unknown>>,
+          notes: command.parameters.notes as string,
+        });
+        return connectorOk(command, start, order);
+      }
+      case 'process_payment': {
+        const payment = await this.processPayment({
+          businessId: command.businessId,
+          invoiceId: command.parameters.invoiceId as string,
+          amount: command.parameters.amount as number,
+          method: command.parameters.method as string,
+          reference: command.parameters.reference as string,
+        });
+        return connectorOk(command, start, payment);
+      }
+      case 'create_quote': {
+        const quote = await this.createQuote({
+          businessId: command.businessId,
+          contactId: command.parameters.contactId as string,
+          items: command.parameters.items as Array<Record<string, unknown>>,
+          validUntil: command.parameters.validUntil as string,
+          notes: command.parameters.notes as string,
+        });
+        return connectorOk(command, start, quote);
+      }
+      case 'send_quote': {
+        const sent = await this.sendQuote({
+          businessId: command.businessId,
+          quoteId: command.parameters.quoteId as string,
+          message: command.parameters.message as string,
+        });
+        return connectorOk(command, start, sent);
+      }
+      default:
+        return connectorFail(command, start, `Unknown commerce action: ${command.action}`);
+    }
   }
 }
