@@ -97,6 +97,12 @@ export interface CortexMessage {
     voiceUsed?: CortexVoice;
     isSummary?: boolean;
     originalMessageCount?: number;
+    // KEY 10/10: cognition metadata
+    role?: string;
+    confidence?: number;
+    taskCategory?: string;
+    fallbackUsed?: boolean;
+    fallbackProvider?: string;
   };
 }
 
@@ -111,6 +117,7 @@ export interface CortexSession {
   preferredProvider: CortexProvider;
   messages: CortexMessage[];
   contextSnapshot?: CortexContextSnapshot;
+  runningSummary?: string;
   createdAt: Date;
   updatedAt: Date;
   lastAccessedAt: Date;
@@ -161,6 +168,14 @@ export interface CortexResponse {
   suggestions?: string[];
   followUpQuestions?: string[];
   confidence: number;
+  // KEY 10/10: structured reasoning output
+  role?: string;
+  analysis?: string;
+  hiddenSignals?: string[];
+  risks?: string[];
+  successMetrics?: string[];
+  nextStep?: string;
+  frameworks?: string[];
 }
 
 export interface CortexActionResult {
@@ -171,6 +186,7 @@ export interface CortexActionResult {
   error?: string;
   requiresApproval?: boolean;
   estimatedImpact?: string;
+  approvalRequestId?: string;
 }
 
 export interface CortexPersonalityConfig {

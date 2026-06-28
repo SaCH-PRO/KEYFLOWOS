@@ -871,12 +871,13 @@ export class KeyCortexController {
         requiresApproval: false,
       };
 
-      const approved = await this.actions.requestApproval(action);
+      const approval = await this.actions.requestApproval(action);
 
       const result: CortexActionResult = {
         ...action,
-        status: approved ? 'success' : 'error',
-        result: { approved, actionId: dto.actionId, sessionId: dto.sessionId },
+        status: approval.approved ? 'success' : 'error',
+        result: { approved: approval.approved, actionId: dto.actionId, sessionId: dto.sessionId },
+        approvalRequestId: approval.approvalRequestId,
       };
 
       return { result };

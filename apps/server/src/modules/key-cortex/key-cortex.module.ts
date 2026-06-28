@@ -36,6 +36,7 @@ import { Module, forwardRef } from '@nestjs/common';
 import { HttpModule } from '@nestjs/axios';
 
 import { KeyCortexController } from './key-cortex.controller';
+import { AdaptiveRouterService } from './adaptive-router.service';
 
 // -- Core (legacy) --
 import { KeyCortexPersonalityService } from './key-cortex-personality.service';
@@ -88,6 +89,7 @@ import { AutopilotModule } from '../autopilot/autopilot.module';
 import { TemporalFlowModule } from '../temporal-flow/temporal-flow.module';
 import { KeyInboxModule } from '../key-inbox/key-inbox.module';
 import { BusinessGenomeModule } from '../business-genome/business-genome.module';
+import { KeyGenomeModule } from '../business-genome/key-genome/key-genome.module';
 import { BlueprintModule } from '../blueprint/blueprint.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { ProjectsModule } from '../projects/projects.module';
@@ -127,6 +129,7 @@ import { ActivityLogService } from '../activity/activity.service';
     forwardRef(() => TemporalFlowModule),
     forwardRef(() => KeyInboxModule),
     forwardRef(() => BusinessGenomeModule),
+    forwardRef(() => KeyGenomeModule),
     forwardRef(() => NotificationsModule),
     forwardRef(() => ProjectsModule),
 
@@ -151,6 +154,9 @@ import { ActivityLogService } from '../activity/activity.service';
 
     // Reasoning engine -- core brain, streaming, provider routing
     KeyCortexReasoningService,
+
+    // Adaptive router -- lightweight multi-dimensional query classifier
+    AdaptiveRouterService,
 
     // Conversation manager -- session lifecycle & message history
     KeyCortexConversationService,
@@ -236,6 +242,7 @@ import { ActivityLogService } from '../activity/activity.service';
     KeyCortexPersonalityService,
     KeyCortexContextService,
     KeyCortexReasoningService,
+    AdaptiveRouterService,
     KeyCortexConversationService,
     KeyCortexActionsService,
     KeyCortexVoiceService,

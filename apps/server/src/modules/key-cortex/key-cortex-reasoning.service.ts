@@ -10,7 +10,10 @@ import {
   GatewayMessage,
   GatewayToolDefinition,
   AiPreferences,
+  TaskCategory,
 } from '../ai/model-gateway.service';
+import { AiMemoryService } from '../ai/ai-memory.service';
+import { SemanticMemoryService } from '../ai/semantic-memory.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { RedisService } from '../../core/redis/redis.service';
 import {
@@ -18,6 +21,7 @@ import {
   CortexResponse,
   CortexStreamChunk,
   CortexMessage,
+  CortexSession,
   CortexContextSnapshot,
   CortexProvider,
   CortexMood,
@@ -30,6 +34,10 @@ import {
 import { KeyCortexPersonalityService } from './key-cortex-personality.service';
 import { KeyCortexContextService } from './key-cortex-context.service';
 import { KeyCortexActionsService } from './key-cortex-actions.service';
+import {
+  AdaptiveRouterService,
+  RouteDecision,
+} from './adaptive-router.service';
 
 // ── Integration Layer v2 (optional — services may not exist yet) ──
 import { KeyCortexConnectorService } from './key-cortex-connector.service';
@@ -199,6 +207,19 @@ export class KeyCortexReasoningService {
     private readonly contextService: KeyCortexContextService,
     private readonly actionsService: KeyCortexActionsService,
 
+    // ── Adaptive Router (Phase C) ──
+    @Optional()
+    @Inject(AdaptiveRouterService)
+    private readonly adaptiveRouter?: AdaptiveRouterService,
+
+    // ── Contextual Memory (Phase C) ──
+    @Optional()
+    @Inject(AiMemoryService)
+    private readonly aiMemoryService?: AiMemoryService,
+    @Optional()
+    @Inject(SemanticMemoryService)
+    private readonly semanticMemoryService?: SemanticMemoryService,
+
     // ── v2 Integration Layer (optional — graceful degradation) ──
     @Optional()
     @Inject(KeyCortexConnectorService)
@@ -319,9 +340,34 @@ export class KeyCortexReasoningService {
       // Get or create session
       const session = await this.getOrCreateSession(query);
 
+      // ── Step 1b: ADAPTIVE ROUTING (Phase C) ──
+      const routeDecision: RouteDecision = this.adaptiveRouter
+        ? this.adaptiveRouter.route(query, session, session.messages.slice(-10))
+        : {
+            taskCategory: this.classifyTaskCategory(query),
+            layers: ['reasoning', 'ethics'],
+            promptVariant: 'standard',
+            includeGenomeContext: true,
+            includeActions: query.enableActions ?? false,
+            complexity: 'moderate',
+            domain: 'general',
+            urgency: 'low',
+            emotionalWeight: 'low',
+            timeHorizon: 'tactical',
+            dataRequirement: 'none',
+          };
+
+      await this.logEvent(correlationId, 'STEP_1B_ADAPTIVE_ROUTE', {
+        taskCategory: routeDecision.taskCategory,
+        layers: routeDecision.layers,
+        promptVariant: routeDecision.promptVariant,
+        includeGenomeContext: routeDecision.includeGenomeContext,
+        includeActions: routeDecision.includeActions,
+      });
+
       // ── Step 2: GET GENOME INTELLIGENCE (v3) ──
       let genomeContext: GenomeEnrichedContext | null = null;
-      if (this.genomeV3Enabled && this.genomeBridgeService) {
+      if (routeDecision.includeGenomeContext && this.genomeV3Enabled && this.genomeBridgeService) {
         try {
           genomeContext = await this.getGenomeEnrichedContext(query.businessId);
           this.logger.log(
@@ -385,7 +431,7 @@ export class KeyCortexReasoningService {
         naturalLanguage: string;
       }> = [];
 
-      if (this.integrationV2Enabled && this.commandService && query.enableActions) {
+      if (routeDecision.includeActions && this.integrationV2Enabled && this.commandService && query.enableActions) {
         try {
           const capabilities =
             this.connectorService!.getAllCapabilities();
@@ -521,40 +567,67 @@ export class KeyCortexReasoningService {
       const detailLevel = this.getCalmModeDetailLevel(session);
       systemPrompt += `\nRespond with ${detailLevel} level of detail.`;
 
+      // Phase C: Apply prompt variant and reasoning layers
+      systemPrompt += `\nUse a ${routeDecision.promptVariant} reasoning style.`;
+      systemPrompt += `\nActive reasoning layers: ${routeDecision.layers.join(', ')}.`;
+
       await this.logEvent(correlationId, 'STEP_7_BUILD_PROMPT', {
         promptLength: systemPrompt.length,
         genomeEnriched: this.genomeV3Enabled && !!genomeContext,
         detailLevel,
       });
 
-      // ── Step 8: AI REASONING ──
-      const preferences: AiPreferences = {
-        preferredProvider: query.provider ?? personalityConfig.persona,
-        budgetMode: false,
-      } as any;
-      const { provider, model } = await this.selectProvider(query, preferences);
+      // ── Step 8: AI REASONING (KEY 10/10 LLM-first pipeline) ──
+      const taskCategory = routeDecision.taskCategory;
 
-      const messages = this.buildMessages(query, contextSnapshot, systemPrompt);
-      const completionResult = await (this.modelGateway as any).complete({
+      // Inject structured output instructions into the system prompt
+      const structuredInstructions = this.buildStructuredOutputInstructions();
+      const enrichedSystemPrompt = systemPrompt.includes('=== RESPONSE FORMAT ===')
+        ? systemPrompt
+        : `${systemPrompt}\n\n${structuredInstructions}`;
+
+      // Gather contextual memory for the prompt
+      const memoryContext = await this.buildMemoryContext(query.businessId, session);
+
+      const messages = this.buildMessages(
+        query,
+        contextSnapshot,
+        enrichedSystemPrompt,
+        session,
+        memoryContext,
+      );
+
+      const completionResult = await this.modelGateway.complete({
+        businessId: query.businessId,
+        taskCategory,
         messages,
-        model,
-        temperature: personalityConfig.temperature,
-        maxTokens: this.MAX_CONTEXT_TOKENS,
-        tools: await this.actionsService.buildToolDefinitions(query.businessId),
+        temperature:
+          routeDecision.temperatureOverride ?? personalityConfig.temperature,
+        maxTokens:
+          routeDecision.maxTokensOverride ?? this.MAX_CONTEXT_TOKENS,
+        tools: routeDecision.includeActions
+          ? ((await this.actionsService.buildToolDefinitions(query.businessId)) as unknown as GatewayToolDefinition[])
+          : undefined,
+        responseFormat: { type: 'text' },
       });
 
       const latencyMs = Date.now() - startTime;
+      const provider = completionResult.provider as CortexProvider;
+      const model = completionResult.model;
+
+      // Parse structured reasoning output
+      const structured = this.parseStructuredResponse(completionResult.content ?? '');
 
       const assistantMessage: CortexMessage = {
         id: this.generateId(),
         role: 'assistant',
-        content: completionResult.content,
+        content: structured.recommendation || completionResult.content || '',
         timestamp: new Date(),
         metadata: {
           provider,
           model,
           tokensUsed: completionResult.usage?.totalTokens ?? 0,
-          cost: this.estimateCost(
+          cost: completionResult.usage?.estimatedCost ?? this.estimateCost(
             provider,
             completionResult.usage?.promptTokens ?? 0,
             completionResult.usage?.completionTokens ?? 0,
@@ -563,15 +636,46 @@ export class KeyCortexReasoningService {
           mood: query.mood ?? (await this.detectMood(query.text)),
           correlationId,
           genomeEnriched: this.genomeV3Enabled && !!genomeContext,
+          role: structured.role,
+          confidence: structured.confidence,
+          taskCategory,
+          fallbackUsed: completionResult.fallbackUsed,
+          fallbackProvider: completionResult.fallbackProvider,
         } as any,
       };
 
       await this.logEvent(correlationId, 'STEP_8_AI_REASONING', {
         provider,
         model,
+        taskCategory,
         tokensUsed: completionResult.usage?.totalTokens ?? 0,
         latencyMs,
+        fallbackUsed: completionResult.fallbackUsed,
+        fallbackProvider: completionResult.fallbackProvider,
       });
+
+      // Persist cognition metadata on the session
+      await this.updateSessionCognitionMetadata(session.id, {
+        detectedRole: structured.role,
+        detectedFunction: taskCategory,
+        layersUsed: routeDecision.layers,
+        llmCallsMade: 1,
+        responseTimeMs: latencyMs,
+      });
+
+      // Phase C: Update running conversation summary
+      await this.updateRunningSummary(session.id, query.text, assistantMessage.content);
+
+      // Persist structured reasoning fields for the final response
+      const structuredResponseFields = {
+        role: structured.role,
+        analysis: structured.analysis,
+        hiddenSignals: structured.hiddenSignals,
+        risks: structured.risks,
+        successMetrics: structured.successMetrics,
+        nextStep: structured.nextStep,
+        frameworks: structured.frameworks,
+      };
 
       // ── Step 9: EXECUTE ACTIONS ──
       let executedActions: CortexActionResult[] = [];
@@ -630,7 +734,7 @@ export class KeyCortexReasoningService {
             );
             // Fallback to legacy action detection
             const detectedActions = await this.detectActions(
-              completionResult.content,
+              completionResult.content ?? '',
             );
             if (detectedActions.length > 0) {
               executedActions = await this.actionsService.executeActions(detectedActions, session as any);
@@ -640,7 +744,7 @@ export class KeyCortexReasoningService {
         } else {
           // Legacy: Detect actions in response + execute
           const detectedActions = query.enableActions
-            ? await this.detectActions(completionResult.content)
+            ? await this.detectActions(completionResult.content ?? '')
             : [];
 
           if (detectedActions.length > 0 && query.enableActions) {
@@ -808,10 +912,12 @@ export class KeyCortexReasoningService {
         contextUsed: contextSnapshot,
         suggestions,
         followUpQuestions: suggestions.slice(0, 3),
-        confidence: this.calculateConfidence(
+        confidence: assistantMessage.metadata?.confidence ?? this.calculateConfidence(
           assistantMessage.content,
           contextSnapshot,
         ),
+        // KEY 10/10: structured reasoning output
+        ...structuredResponseFields,
         // v4: Proactive suggestions from completion layer
         proactiveSuggestions: proactiveSuggestions.length > 0 ? proactiveSuggestions : undefined,
         // v4: Trust explanation for transparency
@@ -867,12 +973,29 @@ export class KeyCortexReasoningService {
     );
 
     try {
-      // Steps 1-3 — Session, genome context, full context
+      // Steps 1-3 — Session, adaptive route, genome context, full context
       const session = await this.getOrCreateSession(query);
+
+      // Phase C: Adaptive routing
+      const routeDecision: RouteDecision = this.adaptiveRouter
+        ? this.adaptiveRouter.route(query, session, session.messages.slice(-10))
+        : {
+            taskCategory: this.classifyTaskCategory(query),
+            layers: ['reasoning', 'ethics'],
+            promptVariant: 'standard',
+            includeGenomeContext: true,
+            includeActions: query.enableActions ?? false,
+            complexity: 'moderate',
+            domain: 'general',
+            urgency: 'low',
+            emotionalWeight: 'low',
+            timeHorizon: 'tactical',
+            dataRequirement: 'none',
+          };
 
       // v3: Get genome context for enrichment
       let genomeContext: GenomeEnrichedContext | null = null;
-      if (this.genomeV3Enabled && this.genomeBridgeService) {
+      if (routeDecision.includeGenomeContext && this.genomeV3Enabled && this.genomeBridgeService) {
         try {
           genomeContext = await this.getGenomeEnrichedContext(query.businessId);
         } catch {
@@ -931,12 +1054,24 @@ export class KeyCortexReasoningService {
         );
       }
 
-      const preferences: AiPreferences = {
-        preferredProvider: query.provider ?? personalityConfig.persona,
-        budgetMode: false,
-      } as any;
-      const { provider, model } = await this.selectProvider(query, preferences);
-      const messages = this.buildMessages(query, contextSnapshot, systemPrompt);
+      const taskCategory = routeDecision.taskCategory;
+      const structuredInstructions = this.buildStructuredOutputInstructions();
+      let enrichedSystemPrompt = systemPrompt.includes('=== RESPONSE FORMAT ===')
+        ? systemPrompt
+        : `${systemPrompt}\n\n${structuredInstructions}`;
+
+      // Phase C: Apply prompt variant and reasoning layers
+      enrichedSystemPrompt += `\nUse a ${routeDecision.promptVariant} reasoning style.`;
+      enrichedSystemPrompt += `\nActive reasoning layers: ${routeDecision.layers.join(', ')}.`;
+
+      const memoryContext = await this.buildMemoryContext(query.businessId, session);
+      const messages = this.buildMessages(
+        query,
+        contextSnapshot,
+        enrichedSystemPrompt,
+        session,
+        memoryContext,
+      );
 
       // Yield initial "thought" chunk
       yield {
@@ -946,17 +1081,32 @@ export class KeyCortexReasoningService {
           : `Analyzing context for ${contextSnapshot.genomeStage} stage business${this.integrationV2Enabled ? ' with full module awareness' : ''}...`,
       };
 
-      // Stream completion
+      // Stream completion via proper gateway API
       let accumulatedText = '';
-      const stream = (this.modelGateway as any).streamComplete({
+      let finalProvider: CortexProvider = query.provider ?? 'openai';
+      let finalModel = '';
+      let fallbackUsed = false;
+      let fallbackProvider: string | undefined;
+
+      const stream = this.modelGateway.streamComplete({
+        businessId: query.businessId,
+        taskCategory,
         messages,
-        model,
-        temperature: personalityConfig.temperature,
-        maxTokens: this.MAX_CONTEXT_TOKENS,
-        tools: await this.actionsService.buildToolDefinitions(query.businessId),
+        temperature:
+          routeDecision.temperatureOverride ?? personalityConfig.temperature,
+        maxTokens:
+          routeDecision.maxTokensOverride ?? this.MAX_CONTEXT_TOKENS,
+        tools: routeDecision.includeActions
+          ? ((await this.actionsService.buildToolDefinitions(query.businessId)) as unknown as GatewayToolDefinition[])
+          : undefined,
       });
 
       for await (const chunk of stream) {
+        if (chunk.provider) finalProvider = chunk.provider as CortexProvider;
+        if (chunk.model) finalModel = chunk.model;
+        if (chunk.fallbackUsed !== undefined) fallbackUsed = chunk.fallbackUsed;
+        if (chunk.fallbackProvider) fallbackProvider = chunk.fallbackProvider;
+
         if (chunk.content) {
           accumulatedText += chunk.content;
           yield {
@@ -965,12 +1115,20 @@ export class KeyCortexReasoningService {
           };
         }
 
-        if (chunk.toolCall) {
+        if (chunk.toolCall?.name) {
+          let params: Record<string, unknown> = {};
+          if ((chunk.toolCall as any).argumentsDelta) {
+            try {
+              params = JSON.parse((chunk.toolCall as any).argumentsDelta);
+            } catch {
+              params = { raw: (chunk.toolCall as any).argumentsDelta };
+            }
+          }
           yield {
             type: 'tool_call',
             toolCall: {
               name: chunk.toolCall.name,
-              params: chunk.toolCall.params,
+              params,
             },
           };
         }
@@ -1075,20 +1233,28 @@ export class KeyCortexReasoningService {
         }
       }
 
+      // Parse structured output from accumulated stream text
+      const structured = this.parseStructuredResponse(accumulatedText);
+
       // Save final message
       const latencyMs = Date.now() - startTime;
       const assistantMessage: CortexMessage = {
         id: this.generateId(),
         role: 'assistant',
-        content: accumulatedText,
+        content: structured.recommendation || accumulatedText,
         timestamp: new Date(),
         metadata: {
-          provider,
-          model,
+          provider: finalProvider,
+          model: finalModel,
           latencyMs,
           mood: query.mood ?? (await this.detectMood(query.text)),
           correlationId,
           genomeEnriched: this.genomeV3Enabled && !!genomeContext,
+          role: structured.role,
+          confidence: structured.confidence,
+          taskCategory,
+          fallbackUsed,
+          fallbackProvider,
         } as any,
       };
 
@@ -1099,17 +1265,29 @@ export class KeyCortexReasoningService {
       });
       await this.saveMessage(session.id, assistantMessage);
 
+      // Persist cognition metadata on the session
+      await this.updateSessionCognitionMetadata(session.id, {
+        detectedRole: structured.role,
+        detectedFunction: taskCategory,
+        layersUsed: ['emotion', 'reasoning', 'context', 'ethics'],
+        llmCallsMade: 1,
+        responseTimeMs: latencyMs,
+      });
+
       // v3: Log stream completion event
       await this.logEvent(correlationId, 'STREAM_QUERY_COMPLETE', {
         sessionId: session.id,
-        provider,
-        model,
+        provider: finalProvider,
+        model: finalModel,
+        taskCategory,
         latencyMs,
         tokens: accumulatedText.length / 4,
+        fallbackUsed,
+        fallbackProvider,
       });
 
       this.logger.log(
-        `[streamQuery][${correlationId}] Completed in ${latencyMs}ms | provider=${provider} model=${model}`,
+        `[streamQuery][${correlationId}] Completed in ${latencyMs}ms | provider=${finalProvider} model=${finalModel} taskCategory=${taskCategory}`,
       );
 
       yield { type: 'done' };
@@ -1681,12 +1859,19 @@ Rank by estimated revenue impact (highest first).
   // ==========================================================================
 
   /**
-   * Build the message array for the model gateway from query, context, and system prompt.
+   * Build the message array for the model gateway from query, context, system prompt,
+   * session history, and optional memory context.
    */
   buildMessages(
     query: CortexQuery,
     context: CortexContextSnapshot,
     systemPrompt: string,
+    session?: CortexSession,
+    memoryContext?: {
+      runningSummary?: string;
+      aiMemory?: string;
+      semanticMemory?: string;
+    },
   ): GatewayMessage[] {
     const messages: GatewayMessage[] = [];
 
@@ -1695,11 +1880,47 @@ Rank by estimated revenue impact (highest first).
       content: systemPrompt,
     });
 
+    // Phase C: Inject running conversation summary
+    const runningSummary = memoryContext?.runningSummary ?? session?.runningSummary;
+    if (runningSummary) {
+      messages.push({
+        role: 'system',
+        content: `=== CONVERSATION SUMMARY ===\n${runningSummary}\n===========================`,
+      });
+    }
+
+    // Phase C: Inject structured business memory
+    if (memoryContext?.aiMemory) {
+      messages.push({
+        role: 'system',
+        content: memoryContext.aiMemory,
+      });
+    }
+
+    // Phase C: Inject relevant past conversations / semantic memory
+    if (memoryContext?.semanticMemory) {
+      messages.push({
+        role: 'system',
+        content: memoryContext.semanticMemory,
+      });
+    }
+
     const contextSummary = this.contextService.formatContextForPrompt(context);
     messages.push({
       role: 'system',
       content: contextSummary,
     });
+
+    // Phase C: Include recent session messages for multi-turn coherence
+    if (session && session.messages.length > 0) {
+      const recentMessages = session.messages.slice(-10);
+      for (const msg of recentMessages) {
+        messages.push({
+          role: msg.role === 'action_result' ? 'system' : msg.role,
+          content: msg.content,
+        });
+      }
+    }
 
     messages.push({
       role: 'user',
@@ -1707,6 +1928,384 @@ Rank by estimated revenue impact (highest first).
     });
 
     return messages;
+  }
+
+  /**
+   * Build contextual memory block for the LLM prompt.
+   * Combines running summary, structured AiMemory, and semantic memory.
+   */
+  private async buildMemoryContext(
+    businessId: string,
+    session: CortexSession,
+  ): Promise<{
+    runningSummary?: string;
+    aiMemory?: string;
+    semanticMemory?: string;
+  }> {
+    const memoryContext: {
+      runningSummary?: string;
+      aiMemory?: string;
+      semanticMemory?: string;
+    } = {};
+
+    // Running summary from session
+    if (session.runningSummary) {
+      memoryContext.runningSummary = session.runningSummary;
+    }
+
+    // Structured business memory
+    if (this.aiMemoryService) {
+      try {
+        const aiCtx = await this.aiMemoryService.buildContextBlock(businessId);
+        memoryContext.aiMemory = this.aiMemoryService.buildPromptSection(aiCtx);
+      } catch (err: any) {
+        this.logger.warn(
+          `[buildMemoryContext] AiMemory load failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
+    // Semantic / vector memory: find relevant past conversations
+    if (this.semanticMemoryService) {
+      try {
+        const semanticHits = await this.semanticMemoryService.search({
+          businessId,
+          query: session.messages.length > 0
+            ? session.messages[session.messages.length - 1]?.content ?? ''
+            : '',
+          limit: 3,
+          minSimilarity: 0.75,
+        });
+        if (semanticHits.length > 0) {
+          memoryContext.semanticMemory =
+            '=== RELEVANT PAST CONTEXT ===\n' +
+            semanticHits
+              .map(
+                (h: any, i: number) =>
+                  `${i + 1}. [${h.sourceType}] ${h.content.slice(0, 250)}`,
+              )
+              .join('\n') +
+            '\n===========================';
+        }
+      } catch (err: any) {
+        this.logger.warn(
+          `[buildMemoryContext] Semantic memory search failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
+    return memoryContext;
+  }
+
+  /**
+   * Update the per-session running conversation summary after a turn.
+   * Uses a lightweight rule-based extraction to avoid an extra LLM call.
+   */
+  private async updateRunningSummary(
+    sessionId: string,
+    userText: string,
+    assistantText: string,
+  ): Promise<void> {
+    try {
+      const existing = await (this.prisma.client as any).cortexSession.findUnique({
+        where: { id: sessionId },
+        select: { runningSummary: true },
+      });
+
+      const currentSummary = (existing?.runningSummary as string) ?? '';
+      const updatedSummary = this.generateRunningSummary(
+        currentSummary,
+        userText,
+        assistantText,
+      );
+
+      await (this.prisma.client as any).cortexSession.update({
+        where: { id: sessionId },
+        data: {
+          runningSummary: updatedSummary,
+          updatedAt: new Date(),
+        },
+      });
+
+      // Update Redis cache if present
+      const cached = await this.redis.get(`cortex:session:${sessionId}`);
+      if (cached) {
+        try {
+          const session = JSON.parse(cached);
+          session.runningSummary = updatedSummary;
+          await this.redis.setex(
+            `cortex:session:${sessionId}`,
+            this.SESSION_TTL,
+            JSON.stringify(session),
+          );
+        } catch {
+          // Ignore cache update failures
+        }
+      }
+    } catch (err: any) {
+      this.logger.warn(
+        `[updateRunningSummary] Failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  /**
+   * Lightweight rule-based running summary generator.
+   * Keeps the most recent topic, intent, and any explicit action items.
+   */
+  private generateRunningSummary(
+    existingSummary: string,
+    userText: string,
+    assistantText: string,
+  ): string {
+    const topic = this.extractTopic(userText);
+    const userIntent = this.extractIntent(userText);
+    const actionItems = this.extractActionItems(assistantText);
+
+    const parts: string[] = [];
+    if (existingSummary) {
+      parts.push(existingSummary.slice(0, 400));
+    }
+    parts.push(`Latest turn: ${userIntent}`);
+    if (topic) parts.push(`Topic: ${topic}`);
+    if (actionItems.length > 0) {
+      parts.push(`Actions: ${actionItems.join('; ')}`);
+    }
+
+    const summary = parts.join(' | ');
+    return summary.length > 800 ? `...${summary.slice(-800)}` : summary;
+  }
+
+  private extractTopic(text: string): string {
+    // Simple keyword extraction: keep nouns after domain markers
+    const match = text.match(
+      /\b(revenue|profit|margin|sales|marketing|product|team|project|client|customer|invoice|task|campaign|strategy|budget|forecast|report)\b/i,
+    );
+    return match ? match[0].toLowerCase() : '';
+  }
+
+  private extractIntent(text: string): string {
+    const lower = text.toLowerCase();
+    if (/\b(how|what|why|when|who|where)\b/.test(lower)) return `question about "${text.slice(0, 60)}"`;
+    if (/\b(create|make|schedule|send|update|delete|run|execute|build|generate|draft)\b/.test(lower))
+      return `request to "${text.slice(0, 60)}"`;
+    if (/\b(analyze|evaluate|assess|compare|recommend|suggest|advise)\b/.test(lower))
+      return `analysis request: "${text.slice(0, 60)}"`;
+    return `message: "${text.slice(0, 60)}"`;
+  }
+
+  private extractActionItems(text: string): string[] {
+    const items: string[] = [];
+    const sentences = text.split(/[.!?\n]+/);
+    for (const sentence of sentences) {
+      const lower = sentence.toLowerCase();
+      if (
+        /\b(next step|action item|todo|task|follow up|schedule|create|send|update|reminder)\b/.test(
+          lower,
+        )
+      ) {
+        const cleaned = sentence.trim().slice(0, 120);
+        if (cleaned) items.push(cleaned);
+      }
+    }
+    return items.slice(0, 3);
+  }
+
+  // ==========================================================================
+  // KEY 10/10: Task Classification & Structured Output
+  // ==========================================================================
+
+  /**
+   * Classify a user query into a ModelGateway task category.
+   * This drives provider/model selection, fallback chains, and cost routing.
+   */
+  classifyTaskCategory(query: CortexQuery): TaskCategory {
+    const text = query.text.toLowerCase();
+
+    // Action-heavy queries → tool-calling
+    if (query.enableActions && /\b(create|add|schedule|send|update|delete|run|execute|make|book|invoice|task|email|reminder|workflow)\b/.test(text)) {
+      return 'tool-calling';
+    }
+
+    // Emotional / interpersonal / tone queries
+    if (/\b(feel|feeling|stressed|overwhelmed|frustrated|angry|worried|anxious|excited|happy|disappointed|conflict|team morale|burnout)\b/.test(text)) {
+      return 'emotion-analysis';
+    }
+
+    // Code / technical (check before creative because "write a function" is code)
+    if (/\b(code|script|function|api|bug|error|debug|typescript|javascript|python|sql|query|endpoint|integration)\b/.test(text)) {
+      return 'code';
+    }
+
+    // Creative / ideation / writing
+    if (/\b(idea|brainstorm|creative|write|draft|compose|design|campaign|slogan|content|story|pitch)\b/.test(text)) {
+      return 'creative';
+    }
+
+    // Forecasting / trends / prediction
+    if (/\b(forecast|predict|trend|projection|next month|next quarter|seasonality|runway|growth rate|churn forecast|revenue forecast)\b/.test(text)) {
+      return 'forecasting';
+    }
+
+    // Data extraction from text
+    if (/\b(extract|parse|pull out|find the|get the|what is the|lookup)\b/.test(text)) {
+      return 'extraction';
+    }
+
+    // Summarization
+    if (/\b(summarize|summary|tl;dr|recap|condense|brief|overview)\b/.test(text)) {
+      return 'summarization';
+    }
+
+    // Classification / routing
+    if (/\b(classify|categorize|which type|what kind|is this|route to|assign to)\b/.test(text)) {
+      return 'classification';
+    }
+
+    // Reasoning-heavy queries
+    if (/\b(analyze|reason|think|why|how does|explain|compare|evaluate|assess|strategy|recommend|should i|what if|pros and cons)\b/.test(text)) {
+      return 'reasoning';
+    }
+
+    // Analysis of existing data
+    if (/\b(analysis|metric|kpi|performance|report|number|data|roi|conversion|revenue|expense)\b/.test(text)) {
+      return 'analysis';
+    }
+
+    return 'general';
+  }
+
+  /**
+   * Instructions that force the LLM to return a structured business reasoning response.
+   */
+  private buildStructuredOutputInstructions(): string {
+    return `=== RESPONSE FORMAT ===
+You must respond using the following sections. Be concise but thorough.
+
+1. **Role Mode**: The business role you are thinking as (e.g., CFO, CMO, COO, Founder).
+2. **Analysis**: Your core reasoning using relevant frameworks and the provided context.
+3. **Hidden Signals**: What the user might be missing based on the business context.
+4. **Recommendation**: Specific, actionable advice in plain language.
+5. **Risk Check**: What could go wrong or what to watch out for.
+6. **Success Metrics**: How to measure if this recommendation works.
+7. **Next Step**: The single most important action to take now.
+8. **Confidence**: A number from 0-100 representing your confidence, and one sentence explaining why.
+
+If you don't know something, state it explicitly and recommend a human expert.
+========================`;
+  }
+
+  /**
+   * Parse a structured response into the KEY 10/10 output shape.
+   * Falls back gracefully if the LLM did not follow the format.
+   */
+  parseStructuredResponse(content: string): {
+    role?: string;
+    analysis?: string;
+    hiddenSignals: string[];
+    recommendation?: string;
+    risks: string[];
+    successMetrics: string[];
+    nextStep?: string;
+    confidence: number;
+    frameworks: string[];
+  } {
+    const empty = {
+      role: undefined,
+      analysis: undefined,
+      hiddenSignals: [] as string[],
+      recommendation: content || '',
+      risks: [] as string[],
+      successMetrics: [] as string[],
+      nextStep: undefined,
+      confidence: 70,
+      frameworks: [] as string[],
+    };
+
+    if (!content || !content.includes('**')) {
+      return empty;
+    }
+
+    const sectionLabels = [
+      'Role Mode',
+      'Analysis',
+      'Hidden Signals',
+      'Recommendation',
+      'Risk Check',
+      'Success Metrics',
+      'Next Step',
+      'Confidence',
+    ];
+
+    const normalized = content.replace(/\r\n/g, '\n');
+
+    const findSection = (label: string): { labelStart: number; contentStart: number } | undefined => {
+      const patterns = [
+        new RegExp(`\\*\\*${label}\\*\\*[\\s:]*`, 'i'),
+        new RegExp(`${label}:[\\s]*`, 'i'),
+      ];
+      for (const pattern of patterns) {
+        const match = normalized.match(pattern);
+        if (match?.index !== undefined) {
+          return { labelStart: match.index, contentStart: match.index + match[0].length };
+        }
+      }
+      return undefined;
+    };
+
+    const sections: Record<string, string> = {};
+    const positions: Array<{ label: string; labelStart: number; contentStart: number }> = [];
+
+    for (const label of sectionLabels) {
+      const pos = findSection(label);
+      if (pos) {
+        positions.push({ label, ...pos });
+      }
+    }
+
+    positions.sort((a, b) => a.contentStart - b.contentStart);
+
+    for (let i = 0; i < positions.length; i++) {
+      const current = positions[i];
+      const next = positions[i + 1];
+      const end = next ? next.labelStart : normalized.length;
+      sections[current.label] = normalized
+        .slice(current.contentStart, end)
+        .replace(/\n\s*\n/g, '\n')
+        .trim();
+    }
+
+    const parseList = (raw?: string): string[] => {
+      if (!raw) return [];
+      return raw
+        .split(/\n|•|-\s*|\d+\.\s*/)
+        .map(s => s.replace(/^[-•]\s*/, '').trim())
+        .filter(s => s.length > 0);
+    };
+
+    const role = sections['Role Mode'];
+    const frameworks: string[] = [];
+    if (role) frameworks.push(`Role: ${role}`);
+
+    return {
+      role,
+      analysis: sections['Analysis'],
+      hiddenSignals: parseList(sections['Hidden Signals']),
+      recommendation: sections['Recommendation'] || content,
+      risks: parseList(sections['Risk Check']),
+      successMetrics: parseList(sections['Success Metrics']),
+      nextStep: sections['Next Step'],
+      confidence: this.parseConfidence(sections['Confidence'] ?? ''),
+      frameworks,
+    };
+  }
+
+  private parseConfidence(raw: string): number {
+    if (!raw) return 70;
+    const match = raw.match(/(\d{1,3})/);
+    if (!match) return 70;
+    const value = parseInt(match[1], 10);
+    return Math.min(Math.max(value, 0), 100);
   }
 
   // ==========================================================================
@@ -2972,7 +3571,7 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
 
   private async getOrCreateSession(
     query: CortexQuery,
-  ): Promise<{ id: string; persona: CortexPersona; [key: string]: unknown }> {
+  ): Promise<CortexSession> {
     if (query.sessionId) {
       const cached = await this.redis.get(
         `cortex:session:${query.sessionId}`,
@@ -2984,7 +3583,7 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
           this.SESSION_TTL,
           cached,
         );
-        return session;
+        return session as CortexSession;
       }
 
       const dbSession = await (this.prisma.client as any).cortexSession.findUnique({
@@ -2996,10 +3595,7 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
           this.SESSION_TTL,
           JSON.stringify(dbSession),
         );
-        return dbSession as unknown as {
-          id: string;
-          persona: CortexPersona;
-        };
+        return dbSession as unknown as CortexSession;
       }
     }
 
@@ -3030,7 +3626,7 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
       `[getOrCreateSession] Created new session=${newSession.id}`,
     );
 
-    return newSession as unknown as { id: string; persona: CortexPersona };
+    return newSession as unknown as CortexSession;
   }
 
   private async saveMessage(
@@ -3066,6 +3662,48 @@ Write a 3-4 sentence explanation of this decision that a non-technical business 
         `cortex:session:${sessionId}`,
         this.SESSION_TTL,
         JSON.stringify(parsed),
+      );
+    }
+  }
+
+  /**
+   * Update the CortexSession row with KEY 10/0 cognition metadata.
+   */
+  private async updateSessionCognitionMetadata(
+    sessionId: string,
+    metadata: {
+      detectedRole?: string;
+      detectedFunction?: string;
+      layersUsed?: string[];
+      llmCallsMade?: number;
+      responseTimeMs?: number;
+    },
+  ): Promise<void> {
+    try {
+      await (this.prisma.client as any).cortexSession.update({
+        where: { id: sessionId },
+        data: {
+          ...metadata,
+          updatedAt: new Date(),
+          lastAccessedAt: new Date(),
+        },
+      });
+
+      const cached = await this.redis.get(`cortex:session:${sessionId}`);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        Object.assign(parsed, metadata);
+        parsed.updatedAt = new Date().toISOString();
+        parsed.lastAccessedAt = new Date().toISOString();
+        await (this.redis as any).setex(
+          `cortex:session:${sessionId}`,
+          this.SESSION_TTL,
+          JSON.stringify(parsed),
+        );
+      }
+    } catch (err: any) {
+      this.logger.warn(
+        `Failed to update session cognition metadata: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }

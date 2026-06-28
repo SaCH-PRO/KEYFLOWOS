@@ -437,6 +437,30 @@ export class KeyCortexConversationService {
     return session;
   }
 
+  /**
+   * Update the running conversation summary for a session.
+   */
+  async updateRunningSummary(
+    sessionId: string,
+    runningSummary: string,
+  ): Promise<CortexSession> {
+    const existing = await this.getSessionOrThrow(sessionId);
+
+    const updated = await (this.prisma.client as any).cortexSession.update({
+      where: { id: sessionId },
+      data: {
+        runningSummary,
+        updatedAt: new Date(),
+      },
+    });
+
+    const session = this.mapDbToCortexSession(updated);
+    await this.cacheSession(session);
+
+    this.logger.log(`[updateRunningSummary] session=${sessionId}`);
+    return session;
+  }
+
   // ---------------------------------------------------------------------------
   // 6. Session Deletion (Soft Delete)
   // ---------------------------------------------------------------------------
@@ -749,6 +773,7 @@ export class KeyCortexConversationService {
       updatedAt: new Date(dbSession.updatedAt as string | Date),
       lastAccessedAt: new Date(dbSession.lastAccessedAt as string | Date),
       title: (dbSession.title as string) ?? undefined,
+      runningSummary: (dbSession.runningSummary as string) ?? undefined,
     };
   }
 

@@ -290,6 +290,7 @@ model Business {
   genomeMemoryEvents           GenomeMemoryEvent[]
   genomeRecommendationOutcomes GenomeRecommendationOutcome[]
   genomeOutcomeLearningWindows GenomeOutcomeLearningWindow[]
+  cognitionMemories            CognitionMemory[]
 
   // Finance OS (FIN1)
   financialAccounts       FinancialAccount[]
@@ -10977,15 +10978,25 @@ model CortexSession {
   title             String?
   messages          Json     @default("[]")
   contextSnapshot   Json?    @map("context_snapshot")
+  runningSummary    String?  @db.Text @map("running_summary")
   lastAccessedAt    DateTime @default(now()) @map("last_accessed_at")
   createdAt         DateTime @default(now()) @map("created_at")
   updatedAt         DateTime @updatedAt @map("updated_at")
+
+  // Cognition metadata (KEY 10/10 upgrade)
+  detectedRole     String?  @map("detected_role")
+  detectedFunction String?  @map("detected_function")
+  layersUsed       String[] @default([]) @map("layers_used")
+  llmCallsMade     Int      @default(0) @map("llm_calls_made")
+  responseTimeMs   Int?     @map("response_time_ms")
+  userFeedback     String?  @map("user_feedback") // positive | negative | unhelpful | accepted | rejected
 
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
   @@index([businessId, status])
   @@index([businessId, lastAccessedAt])
   @@index([businessId, createdAt])
+  @@index([businessId, detectedRole])
   @@map("cortex_sessions")
 }
 
@@ -11172,6 +11183,50 @@ model AiApprovalRequest {
   @@index([correlationId])
   @@index([businessId, createdAt])
   @@map("ai_approval_requests")
+}
+
+// ── KEY 10/10: Prompt Registry & A/B Testing ──────────────────────────
+model PromptVersion {
+  id           String   @id @default(cuid())
+  promptId     String   @map("prompt_id")
+  version      Int
+  systemPrompt String   @map("system_prompt") @db.Text
+  template     String   @db.Text
+  isActive     Boolean  @default(false) @map("is_active")
+  winRate      Float?   @map("win_rate")
+  usageCount   Int      @default(0) @map("usage_count")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@unique([promptId, version])
+  @@index([promptId, isActive])
+  @@map("prompt_versions")
+}
+
+// ── KEY 10/10: Per-Query Persistent Learning ──────────────────────────
+model CognitionMemory {
+  id              String   @id @default(cuid())
+  businessId      String   @map("business_id")
+  userId          String?  @map("user_id")
+  roleId          String?  @map("role_id")
+  functionId      String?  @map("function_id")
+  sessionId       String?  @map("session_id")
+  query           String   @db.Text
+  recommendation  String   @db.Text
+  userResponse    String   @map("user_response") // accepted | rejected | modified | no_action
+  actualOutcome   String?  @map("actual_outcome") @db.Text
+  confidence      Float
+  lessonsLearned  String[] @default([]) @map("lessons_learned")
+  confidenceDelta Float    @default(0) @map("confidence_delta")
+  metadata        Json?    @default("{}")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, roleId])
+  @@index([businessId, functionId])
+  @@index([businessId, userResponse])
+  @@index([createdAt])
+  @@map("cognition_memories")
 }
 
 model ConnectorHealthLog {

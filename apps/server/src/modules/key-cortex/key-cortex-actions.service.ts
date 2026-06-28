@@ -7,6 +7,7 @@ import {
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { KeyToolRegistryService } from '../ai/key-tool-registry.service';
 import { KeyCommandService } from '../ai/key-command.service';
+import { KeyCortexApprovalService } from './key-cortex-approval.service';
 import {
   CortexActionResult,
   CortexActionType,
@@ -85,6 +86,7 @@ export class KeyCortexActionsService {
     private readonly prisma: PrismaService,
     private readonly toolRegistry: KeyToolRegistryService,
     private readonly commandService: KeyCommandService,
+    private readonly approvalService?: KeyCortexApprovalService,
   ) {}
 
   // ========================================================================
@@ -114,14 +116,15 @@ export class KeyCortexActionsService {
       try {
         // Check approval gate for high-impact actions
         if (this.requiresApproval(action)) {
-          const approved = await this.requestApproval(action);
-          if (!approved) {
+          const approval = await this.requestApproval(action, session);
+          if (!approval.approved) {
             results.push({
               ...action,
               status: 'pending_approval',
               description: `Action "${action.actionType}" awaiting user approval.`,
               requiresApproval: true,
               estimatedImpact: action.estimatedImpact ?? 'High-impact business action',
+              approvalRequestId: approval.approvalRequestId,
             });
             continue;
           }
@@ -228,22 +231,81 @@ export class KeyCortexActionsService {
 
   /**
    * Request user approval for a high-impact action.
-   * In production, this sends a notification/push and awaits response.
-   * For now, auto-approve in development; gate in production.
+   * Persists an AiApprovalRequest row and returns pending state.
+   * The action remains in pending_approval until a human approves.
    *
-   * @param action The action awaiting approval
-   * @returns      true if approved, false if denied
+   * @param action  The action awaiting approval
+   * @param session Current Cortex session for context
+   * @returns       Approval decision with request ID
    */
-  async requestApproval(action: CortexActionResult): Promise<boolean> {
+  async requestApproval(
+    action: CortexActionResult,
+    session?: CortexSession,
+  ): Promise<{ approved: boolean; approvalRequestId?: string }> {
     this.logger.warn(
       `Approval required for "${action.actionType}" — ` +
         `Impact: ${action.estimatedImpact ?? 'unknown'}`,
     );
 
-    // TODO: Integrate with real-time notification system (WebSocket/push)
-    // to request explicit user approval. For now, log and return false
-    // to keep actions in pending_approval state.
-    return false;
+    try {
+      const request = await (this.prisma.client as any).aiApprovalRequest.create({
+        data: {
+          businessId: session?.businessId ?? 'unknown',
+          userId: session?.userId ?? null,
+          correlationId: session?.id ?? 'unknown',
+          module: 'key_cortex',
+          action: action.actionType,
+          parameters: (action.result as Record<string, unknown>) ?? {},
+          commandJson: { ...action },
+          status: 'PENDING',
+          requestedAt: new Date(),
+        },
+      });
+
+      this.logger.log(
+        `[requestApproval] Created AiApprovalRequest ${request.id} for ${action.actionType}`,
+      );
+
+      // Optionally also create a general ApprovalRequest for dashboard visibility
+      if (this.approvalService) {
+        const approvalRequestPromise = this.approvalService.createRequest({
+          businessId: session?.businessId ?? 'unknown',
+          requester: 'key_cortex',
+          requesterId: session?.userId,
+          actionType: action.actionType,
+          actionModule: 'key_cortex',
+          description: action.description,
+          rationale: `High-impact action requires approval: ${action.estimatedImpact ?? 'unknown impact'}`,
+          parameters: (action.result as Record<string, unknown>) ?? {},
+          estimatedImpact: { impact: action.estimatedImpact ?? 'unknown' },
+          contextSnapshot: { sessionId: session?.id },
+        });
+        if (approvalRequestPromise && typeof approvalRequestPromise.catch === 'function') {
+          await approvalRequestPromise.catch((err: any) => {
+            this.logger.warn(
+              `[requestApproval] ApprovalRequest create failed: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          });
+        }
+      }
+
+      return { approved: false, approvalRequestId: request.id };
+    } catch (err: any) {
+      this.logger.error(
+        `[requestApproval] Failed to persist approval request: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return { approved: false };
+    }
+  }
+
+  /**
+   * Get pending AI approval requests for a business.
+   */
+  async getPendingApprovals(businessId: string): Promise<any[]> {
+    return (this.prisma.client as any).aiApprovalRequest.findMany({
+      where: { businessId, status: 'PENDING' },
+      orderBy: { requestedAt: 'desc' },
+    });
   }
 
   // ========================================================================
