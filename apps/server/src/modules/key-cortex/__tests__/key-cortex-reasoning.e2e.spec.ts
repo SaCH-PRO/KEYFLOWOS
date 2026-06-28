@@ -192,15 +192,16 @@ function createService(options: { learning?: boolean } = {}) {
     moodDetectionService,
     ...(options.learning
       ? [
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
-          undefined,
+          undefined, // memoryRetrieval
+          undefined, // adaptiveRouter
+          undefined, // connectorService
+          undefined, // commandService
+          undefined, // executorService
+          undefined, // contextV2Service
+          undefined, // genomeBridgeService
+          undefined, // eventService
+          undefined, // proactive
+          undefined, // trustExplanation
           mockLearningService as any,
         ]
       : []),

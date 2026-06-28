@@ -44,7 +44,7 @@ import { KeyCortexInsightService } from './key-cortex-insight.service';
 import { KeyCortexGenomeBridgeService, AutonomyCheck } from './key-cortex-genome-bridge.service';
 import { AutonomyOrchestratorService } from '../key-autonomy/autonomy-orchestrator.service';
 import type { AutonomyVerdict } from '../key-autonomy/autonomy-orchestrator.types';
-import { UnifiedMemoryRetrievalService } from './unified-memory-retrieval.service';
+import { KeyCortexMemoryRetrievalService } from './key-cortex-memory-retrieval.service';
 import { KeyCortexEventService } from './key-cortex-event.service';
 import { KeyProactiveEngineService } from './key-proactive-engine.service';
 import { TrustExplanationService } from './trust-explanation.service';
@@ -64,6 +64,7 @@ import {
   GenomeRecommendation,
   Suggestion,
 } from './key-cortex-reasoning.types';
+import type { MemoryFragment } from './unified-memory.types';
 
 /**
  * KeyCortexQueryPipelineService
@@ -95,6 +96,9 @@ export class KeyCortexQueryPipelineService {
     private readonly systemPromptService: KeyCortexSystemPromptService,
     private readonly structuredOutputService: KeyCortexStructuredOutputService,
     private readonly moodDetectionService: KeyCortexMoodDetectionService,
+    @Optional()
+    @Inject(KeyCortexMemoryRetrievalService)
+    private readonly memoryRetrieval?: KeyCortexMemoryRetrievalService,
     @Optional()
     @Inject(AdaptiveRouterService)
     private readonly adaptiveRouter?: AdaptiveRouterService,
@@ -206,6 +210,7 @@ export class KeyCortexQueryPipelineService {
             layers: ['reasoning', 'ethics'],
             promptVariant: 'standard',
             includeGenomeContext: true,
+            includeMemoryContext: true,
             includeActions: query.enableActions ?? false,
             complexity: 'moderate',
             domain: 'general',
@@ -248,6 +253,27 @@ export class KeyCortexQueryPipelineService {
         dnaScores: genomeContext?.dnaScores ?? null,
         recommendationCount: genomeContext?.recommendations.length ?? 0,
         signalCount: genomeContext?.signals.length ?? 0,
+      });
+
+      let memoryFragments: MemoryFragment[] = [];
+      if (routeDecision.includeMemoryContext && this.memoryRetrieval) {
+        try {
+          memoryFragments = await this.memoryRetrieval.retrieveContext(
+            query.businessId,
+            { query: query.text, limit: 10 },
+          );
+          this.logger.log(
+            `[processQuery][${correlationId}] Loaded ${memoryFragments.length} memory fragment(s)`,
+          );
+        } catch (err: any) {
+          this.logger.warn(
+            `[processQuery][${correlationId}] Memory retrieval failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+
+      await this.logEvent(correlationId, 'STEP_2B_MEMORY_CONTEXT', {
+        memoryFragments: memoryFragments.length,
       });
 
       let contextSnapshot: CortexContextSnapshot;
@@ -507,6 +533,10 @@ export class KeyCortexQueryPipelineService {
       systemPrompt += `\nActive reasoning layers: ${routeDecision.layers.join(', ')}.`;
       if (toneInfo.tone) {
         systemPrompt += `\nAdopt a ${toneInfo.tone} tone.`;
+      }
+
+      if (memoryFragments.length > 0) {
+        systemPrompt += `\n\n${this.formatMemoryContextBlock(memoryFragments)}`;
       }
 
       await this.logEvent(correlationId, 'STEP_7_BUILD_PROMPT', {
@@ -1042,6 +1072,7 @@ export class KeyCortexQueryPipelineService {
             layers: ['reasoning', 'ethics'],
             promptVariant: 'standard',
             includeGenomeContext: true,
+            includeMemoryContext: true,
             includeActions: query.enableActions ?? false,
             complexity: 'moderate',
             domain: 'general',
@@ -1157,6 +1188,22 @@ export class KeyCortexQueryPipelineService {
       enrichedSystemPrompt += `\nActive reasoning layers: ${routeDecision.layers.join(', ')}.`;
       if (toneInfo.tone) {
         enrichedSystemPrompt += `\nAdopt a ${toneInfo.tone} tone.`;
+      }
+
+      let streamMemoryFragments: MemoryFragment[] = [];
+      if (routeDecision.includeMemoryContext && this.memoryRetrieval) {
+        try {
+          streamMemoryFragments = await this.memoryRetrieval.retrieveContext(
+            query.businessId,
+            { query: query.text, limit: 10 },
+          );
+        } catch {
+          // Non-critical
+        }
+      }
+
+      if (streamMemoryFragments.length > 0) {
+        enrichedSystemPrompt += `\n\n${this.formatMemoryContextBlock(streamMemoryFragments)}`;
       }
 
       const baseTemperature =
@@ -1510,6 +1557,15 @@ export class KeyCortexQueryPipelineService {
       followUpQuestions: [],
       confidence: 0,
     } as CortexResponse;
+  }
+
+  private formatMemoryContextBlock(fragments: MemoryFragment[]): string {
+    const lines = ['=== RELEVANT MEMORY ==='];
+    for (const f of fragments.slice(0, 10)) {
+      const header = `[${f.sourceType}] ${f.title ?? 'Memory'}`;
+      lines.push(`${header}: ${f.content ?? ''}`.trim());
+    }
+    return lines.join('\n');
   }
 
   private calculateConfidence(

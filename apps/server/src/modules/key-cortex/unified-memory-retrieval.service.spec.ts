@@ -8,6 +8,9 @@ function makePrisma(overrides?: Partial<any>) {
     temporalFlowMemory: { findMany: vi.fn().mockResolvedValue([]) },
     cognitionMemory: { findMany: vi.fn().mockResolvedValue([]) },
     cognitiveEvent: { findMany: vi.fn().mockResolvedValue([]) },
+    businessEvent: { findMany: vi.fn().mockResolvedValue([]) },
+    aiExecutionLog: { findMany: vi.fn().mockResolvedValue([]) },
+    cortexActionLog: { findMany: vi.fn().mockResolvedValue([]) },
   };
   return {
     client: { ...defaults, ...overrides },
@@ -146,5 +149,114 @@ describe('UnifiedMemoryRetrievalService', () => {
     const fragments = await service.retrieveContext('biz_1', {});
 
     expect(fragments).toEqual([]);
+  });
+
+  it('includes episodic sources by default', async () => {
+    const now = new Date();
+    const prisma = makePrisma({
+      businessEvent: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: 'be_1',
+            eventType: 'invoice_paid',
+            subjectType: 'invoice',
+            subjectId: 'inv_1',
+            actorType: 'system',
+            actorId: 'key',
+            action: 'update',
+            before: null,
+            after: { status: 'paid' },
+            metadata: {},
+            createdAt: now,
+          },
+        ]),
+      },
+      aiExecutionLog: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: 'aex_1',
+            action: 'send_email',
+            toolName: 'email_sender',
+            module: 'communications',
+            success: true,
+            rationale: 'User requested update',
+            inputSummary: {},
+            outputSummary: {},
+            errorMessage: null,
+            metadata: {},
+            createdAt: now,
+          },
+        ]),
+      },
+      cortexActionLog: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: 'cal_1',
+            actionType: 'CREATE_TASK',
+            status: 'success',
+            description: 'Follow up with client',
+            result: 'Task created',
+            error: null,
+            requiresApproval: false,
+            estimatedImpact: 'medium',
+            createdAt: now,
+          },
+        ]),
+      },
+    });
+
+    service = new UnifiedMemoryRetrievalService(prisma as any, makeSemanticMemory() as any);
+    const fragments = await service.retrieveContext('biz_1', {});
+
+    const sourceTypes = fragments.map((f) => f.sourceType);
+    expect(sourceTypes).toContain('business_event');
+    expect(sourceTypes).toContain('ai_execution_log');
+    expect(sourceTypes).toContain('cortex_action_log');
+  });
+
+  it('excludes episodic sources when includeEpisodic is false', async () => {
+    const prisma = makePrisma({
+      businessEvent: {
+        findMany: vi.fn().mockResolvedValue([{ id: 'be_1', createdAt: new Date() }]),
+      },
+    });
+
+    service = new UnifiedMemoryRetrievalService(prisma as any, makeSemanticMemory() as any);
+    const fragments = await service.retrieveContext('biz_1', { includeEpisodic: false });
+
+    expect(fragments).toHaveLength(0);
+    expect(prisma.client.businessEvent.findMany).not.toHaveBeenCalled();
+  });
+
+  it('retrieveEpisodicContext returns only episodic fragments', async () => {
+    const now = new Date();
+    const prisma = makePrisma({
+      aiMemory: {
+        findMany: vi.fn().mockResolvedValue([
+          { id: 'am_1', category: 'pref', key: 'k1', value: 'v1', confidence: 1, createdAt: now },
+        ]),
+      },
+      cortexActionLog: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: 'cal_1',
+            actionType: 'CREATE_TASK',
+            status: 'success',
+            description: 'Follow up',
+            result: null,
+            error: null,
+            requiresApproval: false,
+            estimatedImpact: null,
+            createdAt: now,
+          },
+        ]),
+      },
+    });
+
+    service = new UnifiedMemoryRetrievalService(prisma as any, makeSemanticMemory() as any);
+    const fragments = await service.retrieveEpisodicContext('biz_1', {});
+
+    expect(fragments).toHaveLength(1);
+    expect(fragments[0].sourceType).toBe('cortex_action_log');
   });
 });

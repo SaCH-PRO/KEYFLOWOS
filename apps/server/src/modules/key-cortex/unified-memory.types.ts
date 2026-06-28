@@ -13,7 +13,10 @@ export type MemorySourceType =
   | 'temporal_flow_memory'
   | 'cognition_memory'
   | 'cognitive_event'
-  | 'conversation';
+  | 'conversation'
+  | 'business_event'
+  | 'ai_execution_log'
+  | 'cortex_action_log';
 
 export interface MemoryFragment {
   /** Unique ID of the underlying record */
@@ -57,4 +60,6 @@ export interface MemoryRetrievalOptions {
   minRankScore?: number;
   /** Optionally boost recent memories (default: true) */
   boostRecency?: boolean;
+  /** Include episodic sources: business events, AI execution logs, cortex action logs (default: true) */
+  includeEpisodic?: boolean;
 }
