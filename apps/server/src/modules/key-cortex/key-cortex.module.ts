@@ -129,6 +129,7 @@ import { KeyCortexRealtimeService } from './key-cortex-realtime.service';
 import { KeyBiEngineService } from './key-bi-engine.service';
 import { KeyCortexLearningService } from './key-cortex-learning.service';
 import { UnifiedMemoryRetrievalService } from './unified-memory-retrieval.service';
+import { UnifiedMemoryWriterService } from './unified-memory-writer.service';
 import { EvalHarnessService } from './eval-harness.service';
 import { CognitiveEventBusService } from './cognitive-event-bus.service';
 import { PlanEngineService } from './plan-engine.service';
@@ -359,6 +360,9 @@ import { ActivityLogService } from '../activity/activity.service';
     // Persistent multi-type KEY Cortex memory
     KeyCortexMemoryService,
 
+    // Canonical structured-memory writer (Phase 0.9 unification)
+    UnifiedMemoryWriterService,
+
     // Unified memory retrieval layer over all KEY memory stores
     UnifiedMemoryRetrievalService,
 
@@ -490,6 +494,9 @@ import { ActivityLogService } from '../activity/activity.service';
     KeyBiEngineService,
     KeyCortexLearningService,
     KeyCortexMemoryService,
+
+    // Canonical structured-memory writer (Phase 0.9 unification)
+    UnifiedMemoryWriterService,
 
     // Unified memory retrieval layer
     UnifiedMemoryRetrievalService,

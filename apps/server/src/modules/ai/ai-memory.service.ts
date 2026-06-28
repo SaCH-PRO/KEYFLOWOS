@@ -16,7 +16,18 @@ export type MemoryCategory =
   | 'preferences'
   | 'learned_corrections'
   | 'execution_patterns'
-  | 'role_activity';
+  | 'role_activity'
+  | 'user_preference'
+  | 'business_fact'
+  | 'past_decision'
+  | 'failed_attempt'
+  | 'successful_action'
+  | 'communication_style'
+  | 'risk_tolerance'
+  | 'common_workflow'
+  | 'current_goal'
+  | 'long_term_strategy'
+  | 'document_extraction';
 
 export type MemorySource = 'user' | 'inferred' | 'approval_signal' | 'pattern_analysis' | 'feedback_loop' | 'role_engine';
 

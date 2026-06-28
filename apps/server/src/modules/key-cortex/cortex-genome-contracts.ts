@@ -140,7 +140,8 @@ export type MemoryType =
   | 'risk_tolerance'
   | 'common_workflow'
   | 'current_goal'
-  | 'long_term_strategy';
+  | 'long_term_strategy'
+  | 'document_extraction';
 
 export interface CortexMemory {
   id: string;
