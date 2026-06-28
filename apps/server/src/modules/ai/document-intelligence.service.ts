@@ -1,10 +1,13 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ModelGatewayService } from './model-gateway.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
 import { AiOversightService } from './ai-oversight.service';
 import { AiUsageService } from './ai-usage.service';
+import { CrmService } from '../crm/crm.service';
+import { CommerceService } from '../commerce/commerce.service';
 
 export interface DocumentExtractionRequest {
   businessId: string;
@@ -88,7 +91,15 @@ export class DocumentIntelligenceService {
     @Inject(AiExecutionLogService) private readonly executionLog: AiExecutionLogService,
     @Inject(AiOversightService) private readonly governance: AiOversightService,
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
+    @Inject(ModuleRef) private readonly moduleRef: ModuleRef,
   ) {}
+
+  private getCrm() {
+    return this.moduleRef.get(CrmService, { strict: false });
+  }
+  private getCommerce() {
+    return this.moduleRef.get(CommerceService, { strict: false });
+  }
 
   async extractFromDocument(req: DocumentExtractionRequest): Promise<DocumentExtractionResult> {
     const startTime = Date.now();
@@ -248,16 +259,14 @@ Respond ONLY with valid JSON in this exact shape:
                 contactId = existing.id;
               } else if (result.invoiceData.contactName) {
                 const names = result.invoiceData.contactName.split(' ');
-                const newContact = await this.prisma.client.contact.create({
-                  data: {
-                    businessId,
-                    firstName: names[0] || null,
-                    lastName: names.slice(1).join(' ') || null,
-                    email: result.invoiceData.contactEmail ?? null,
-                    phone: result.invoiceData.contactPhone ?? null,
-                    status: 'LEAD',
-                    source: 'document_extraction',
-                  },
+                const newContact = await this.getCrm().createContact({
+                  businessId,
+                  firstName: names[0] || null,
+                  lastName: names.slice(1).join(' ') || null,
+                  email: result.invoiceData.contactEmail ?? null,
+                  phone: result.invoiceData.contactPhone ?? null,
+                  status: 'LEAD',
+                  source: 'document_extraction',
                 });
                 contactId = newContact.id;
               }
@@ -265,51 +274,38 @@ Respond ONLY with valid JSON in this exact shape:
 
             // Ensure we have a contactId (required field)
             if (!contactId) {
-              const fallbackContact = await this.prisma.client.contact.create({
-                data: {
-                  businessId,
-                  firstName: result.invoiceData.contactName?.split(' ')[0] ?? 'Unknown',
-                  lastName: result.invoiceData.contactName?.split(' ').slice(1).join(' ') ?? 'Customer',
-                  email: result.invoiceData.contactEmail ?? null,
-                  phone: result.invoiceData.contactPhone ?? null,
-                  status: 'LEAD',
-                  source: 'document_extraction',
-                },
+              const fallbackContact = await this.getCrm().createContact({
+                businessId,
+                firstName: result.invoiceData.contactName?.split(' ')[0] ?? 'Unknown',
+                lastName: result.invoiceData.contactName?.split(' ').slice(1).join(' ') ?? 'Customer',
+                email: result.invoiceData.contactEmail ?? null,
+                phone: result.invoiceData.contactPhone ?? null,
+                status: 'LEAD',
+                source: 'document_extraction',
               });
               contactId = fallbackContact.id;
             }
 
-            // Create invoice
-            const invoice = await this.prisma.client.invoice.create({
-              data: {
-                businessId,
-                contactId,
-                invoiceNumber: result.invoiceData.invoiceNumber ?? `AI-${Date.now()}`,
-                status: 'DRAFT',
-                currency: result.invoiceData.currency ?? businessCurrency,
-                subtotal: result.invoiceData.subtotal ?? result.invoiceData.total ?? 0,
-                taxRate: result.invoiceData.taxRate ?? 0,
-                taxAmount: result.invoiceData.taxAmount ?? 0,
-                total: result.invoiceData.total ?? 0,
-                notes: result.invoiceData.notes ?? null,
-                items: {
-                  create: result.invoiceData.lineItems.map((item) => ({
-                    description: item.description,
-                    quantity: item.quantity,
-                    unitPrice: item.unitPrice,
-                    total: item.total,
-                  })),
-                },
-              },
+            // Create invoice through commerce domain service
+            const invoice = await this.getCommerce().createInvoice({
+              businessId,
+              contactId,
+              items: result.invoiceData.lineItems.map((item) => ({
+                description: item.description,
+                quantity: item.quantity,
+                unitPrice: item.unitPrice,
+                total: item.total,
+              })),
+              currency: result.invoiceData.currency ?? businessCurrency,
+              notes: result.invoiceData.notes ?? undefined,
+              invoiceNumber: result.invoiceData.invoiceNumber ?? `AI-${Date.now()}`,
+              taxRate: result.invoiceData.taxRate ?? 0,
+              subtotal: result.invoiceData.subtotal ?? result.invoiceData.total ?? 0,
+              taxAmount: result.invoiceData.taxAmount ?? 0,
+              total: result.invoiceData.total ?? 0,
             });
 
             outcomes.push({ action: 'create_invoice', success: true, entityId: invoice.id });
-
-            this.events.emit('invoice.created', {
-              businessId,
-              invoiceId: invoice.id,
-              source: 'document_intelligence',
-            });
           } catch (err: any) {
             outcomes.push({ action: 'create_invoice', success: false, error: (err as Error).message });
           }
@@ -335,16 +331,14 @@ Respond ONLY with valid JSON in this exact shape:
           });
           if (!existing && result.creditNoteData.contactName) {
             const names = result.creditNoteData.contactName.split(' ');
-            await this.prisma.client.contact.create({
-              data: {
-                businessId,
-                firstName: names[0] || null,
-                lastName: names.slice(1).join(' ') || null,
-                email: result.creditNoteData.contactEmail ?? null,
-                phone: result.creditNoteData.contactPhone ?? null,
-                status: 'LEAD',
-                source: 'document_extraction',
-              },
+            await this.getCrm().createContact({
+              businessId,
+              firstName: names[0] || null,
+              lastName: names.slice(1).join(' ') || null,
+              email: result.creditNoteData.contactEmail ?? null,
+              phone: result.creditNoteData.contactPhone ?? null,
+              status: 'LEAD',
+              source: 'document_extraction',
             });
           }
           outcomes.push({ action: 'resolve_credit_note_contact', success: true });
@@ -371,28 +365,25 @@ Respond ONLY with valid JSON in this exact shape:
 
           if (existing) {
             // Update existing contact
-            await this.prisma.client.contact.update({
-              where: { id: existing.id },
-              data: {
-                firstName: result.contactData.firstName ?? undefined,
-                lastName: result.contactData.lastName ?? undefined,
-                phone: result.contactData.phone ?? null,
-                companyName: result.contactData.companyName ?? undefined,
-              },
+            await this.getCrm().updateContact({
+              businessId,
+              contactId: existing.id,
+              firstName: result.contactData.firstName ?? null,
+              lastName: result.contactData.lastName ?? null,
+              phone: result.contactData.phone ?? null,
+              companyName: result.contactData.companyName ?? null,
             });
             outcomes.push({ action: 'update_contact', success: true, entityId: existing.id });
           } else {
-            const contact = await this.prisma.client.contact.create({
-              data: {
-                businessId,
-                firstName: result.contactData.firstName ?? null,
-                lastName: result.contactData.lastName ?? null,
-                email: result.contactData.email ?? null,
-                phone: result.contactData.phone ?? null,
-                companyName: result.contactData.companyName ?? null,
-                status: 'LEAD',
-                source: 'document_extraction',
-              },
+            const contact = await this.getCrm().createContact({
+              businessId,
+              firstName: result.contactData.firstName ?? null,
+              lastName: result.contactData.lastName ?? null,
+              email: result.contactData.email ?? null,
+              phone: result.contactData.phone ?? null,
+              companyName: result.contactData.companyName ?? null,
+              status: 'LEAD',
+              source: 'document_extraction',
             });
             outcomes.push({ action: 'create_contact', success: true, entityId: contact.id });
           }

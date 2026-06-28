@@ -877,6 +877,47 @@ export class CrmService {
     return deleted;
   }
 
+  /**
+   * Undo an AI-created contact. If the contact has no related activity,
+   * soft-delete it; otherwise revert it to LEAD for human review.
+   */
+  async undoContact(input: { businessId: string; contactId: string }) {
+    const contact = await this.prisma.client.contact.findUnique({
+      where: { id: input.contactId },
+      include: {
+        _count: { select: { bookings: true, invoices: true, tasks: true } },
+      },
+    });
+    if (!contact || contact.businessId !== input.businessId) {
+      throw new NotFoundException('Contact not found');
+    }
+
+    const totalActivity =
+      (contact._count.bookings ?? 0) +
+      (contact._count.invoices ?? 0) +
+      (contact._count.tasks ?? 0);
+
+    if (totalActivity === 0) {
+      const deleted = await this.prisma.client.contact.update({
+        where: { id: input.contactId },
+        data: { deletedAt: new Date() },
+      });
+      this.events.emit('contact.deleted', { contact: deleted, businessId: input.businessId });
+      this.stats.invalidateCache(input.businessId);
+      this.flow.invalidateCache(input.businessId);
+      return { id: input.contactId, status: 'deleted' };
+    }
+
+    const updated = await this.prisma.client.contact.update({
+      where: { id: input.contactId },
+      data: { status: 'LEAD' },
+    });
+    this.events.emit('contact.updated', { contact: updated, businessId: input.businessId });
+    this.stats.invalidateCache(input.businessId);
+    this.flow.invalidateCache(input.businessId);
+    return { id: input.contactId, status: 'reverted_to_lead' };
+  }
+
   async bulkUpdateContacts(input: {
     businessId: string;
     contactIds: string[];

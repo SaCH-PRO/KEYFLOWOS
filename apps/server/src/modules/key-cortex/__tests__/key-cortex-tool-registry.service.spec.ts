@@ -12,8 +12,31 @@ const mockPrisma = {
   },
 };
 
+const mockSafety = {
+  check: vi.fn().mockResolvedValue({ allowed: true }),
+  recordExecution: vi.fn().mockResolvedValue(undefined),
+};
+
+const mockIdempotency = {
+  check: vi.fn().mockResolvedValue({ status: 'new' }),
+  complete: vi.fn().mockResolvedValue(undefined),
+  fail: vi.fn().mockResolvedValue(undefined),
+};
+
+const mockSaga = {
+  addStep: vi.fn().mockResolvedValue(undefined),
+  completeStep: vi.fn().mockResolvedValue(undefined),
+  failStep: vi.fn().mockResolvedValue(undefined),
+  compensate: vi.fn().mockResolvedValue([]),
+};
+
 function createRegistry(): KeyCortexToolRegistryService {
-  return new KeyCortexToolRegistryService(mockPrisma as any);
+  return new KeyCortexToolRegistryService(
+    mockPrisma as any,
+    mockSafety as any,
+    mockIdempotency as any,
+    mockSaga as any,
+  );
 }
 
 describe('KeyCortexToolRegistryService', () => {
@@ -21,6 +44,8 @@ describe('KeyCortexToolRegistryService', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockSafety.check.mockResolvedValue({ allowed: true });
+    mockIdempotency.check.mockResolvedValue({ status: 'new' });
     registry = createRegistry();
   });
 
@@ -150,4 +175,21 @@ describe('KeyCortexToolRegistryService', () => {
     expect(result.success).toBe(false);
     expect(result.error).toBe('Boom');
   });
+
+  it('returns cached result for duplicate idempotency key', async () => {
+    mockIdempotency.check.mockResolvedValue({ status: 'completed', response: { cached: true } });
+    registry.register(sampleTool);
+    const result = await registry.execute(
+      'test.greet',
+      { businessId: 'biz_1', autonomyLevel: 2, idempotencyKey: 'dup_1' },
+      { name: 'x' },
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ cached: true });
+    expect(mockIdempotency.check).toHaveBeenCalledWith(
+      expect.objectContaining({ businessId: 'biz_1', idempotencyKey: 'dup_1' }),
+    );
+  });
 });
+

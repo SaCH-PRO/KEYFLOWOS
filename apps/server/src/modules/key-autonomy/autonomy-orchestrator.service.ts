@@ -390,6 +390,7 @@ export class AutonomyOrchestratorService {
       reason: reasons.join(' | ') || (allowed ? 'All gates passed' : 'Blocked by autonomy gate'),
       ruleTrace: trace,
       createdAt: now,
+      proposalId: context.proposalId,
     };
 
     // Persist verdict asynchronously; failures must not block the caller.
@@ -409,7 +410,7 @@ export class AutonomyOrchestratorService {
     businessId: string,
     actionKey: string,
     parameters?: Record<string, unknown>,
-    opts?: { proposedBy?: string; affectedDomains?: string[]; role?: string },
+    opts?: { proposedBy?: string; affectedDomains?: string[]; role?: string; proposalId?: string },
   ): Promise<AutonomyVerdict> {
     const [module = 'unknown', action = actionKey] = actionKey.split('.');
     return this.evaluate({
@@ -421,6 +422,7 @@ export class AutonomyOrchestratorService {
       proposedBy: opts?.proposedBy,
       affectedDomains: opts?.affectedDomains,
       role: opts?.role,
+      proposalId: opts?.proposalId,
     });
   }
 
@@ -438,6 +440,7 @@ export class AutonomyOrchestratorService {
         confidence: verdict.confidence,
         reason: verdict.reason,
         ruleTrace: verdict.ruleTrace as any,
+        proposalId: context.proposalId ?? null,
         contextHash: this.hashContext(context),
       },
     });
@@ -452,6 +455,7 @@ export class AutonomyOrchestratorService {
         parameters: context.parameters,
         role: context.role,
         affectedDomains: context.affectedDomains,
+        proposalId: context.proposalId,
       });
       let hash = 0;
       for (let i = 0; i < json.length; i++) {

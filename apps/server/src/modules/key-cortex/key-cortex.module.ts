@@ -44,6 +44,10 @@ import { KeyCortexActionExecutorPlugin } from './key-cortex-action-executor.plug
 import { KeyCortexOrganRegistrarService } from './key-cortex-organ-registrar.service';
 import { KeyCortexLifecycleService } from './key-cortex-lifecycle.service';
 import { KeyCortexSafeDatabaseService } from './key-cortex-safe-database.service';
+import { KeyCortexAuditService } from './key-cortex-audit.service';
+import { KeyCortexApprovalOrchestratorService } from './key-cortex-approval-orchestrator.service';
+import { KeyIdempotencyService } from './key-idempotency.service';
+import { KeyCortexSagaService } from './key-cortex-saga.service';
 
 // -- Phase 2 Body: Organ Adapters --
 import { TemporalFlowAdapterService } from './organs/temporal-flow-adapter.service';
@@ -51,6 +55,23 @@ import { KeyInboxAdapterService } from './organs/key-inbox-adapter.service';
 import { KeyGenomeAdapterService } from './organs/key-genome-adapter.service';
 import { StorelinkAdapterService } from './organs/storelink-adapter.service';
 import { KeyConnectorAdapterService } from './organs/key-connector-adapter.service';
+
+// -- Phase 0.5: Typed Module Adapters for KeyCortexConnectorService --
+import {
+  CrmAdapterService,
+  CommerceAdapterService,
+  BookingsAdapterService,
+  ContentAdapterService,
+  CommunicationsAdapterService,
+  FlowAdapterService,
+  AutopilotAdapterService,
+  TemporalAdapterService,
+  InboxAdapterService,
+  NotificationsAdapterService,
+  ProjectsAdapterService,
+  ActivityAdapterService,
+  KeyCortexBridgeAdapterService,
+} from './adapters';
 
 // -- Core (legacy) --
 import { KeyCortexPersonalityService } from './key-cortex-personality.service';
@@ -62,11 +83,29 @@ import { KeyCortexVoiceService } from './key-cortex-voice.service';
 
 // -- v2 Integration Layer --
 import { KeyCortexConnectorService } from './key-cortex-connector.service';
+import { KeyCortexCapabilityRegistryService } from './key-cortex-capability-registry.service';
+import { KeyCortexContextAssemblyService } from './key-cortex-context-assembly.service';
 import { KeyCortexCommandService } from './key-cortex-command.service';
 import { KeyCortexExecutorService } from './key-cortex-executor.service';
 import { KeyCortexContextV2Service } from './key-cortex-context-v2.service';
 import { KeyCortexInsightService } from './key-cortex-insight.service';
 import { KeyCortexMonitorV2Service } from './key-cortex-monitor-v2.service';
+
+// -- Phase 0.7b: Decomposed reasoning services --
+import { KeyCortexSessionService } from './key-cortex-session.service';
+import { KeyCortexPromptContextService } from './key-cortex-prompt-context.service';
+import { KeyCortexToolLoopService } from './key-cortex-tool-loop.service';
+import { KeyCortexActionDetectionService } from './key-cortex-action-detection.service';
+import { KeyCortexLegacyInsightService } from './key-cortex-legacy-insight.service';
+import { KeyCortexProviderSelectionService } from './key-cortex-provider-selection.service';
+import { KeyCortexStructuredOutputService } from './key-cortex-structured-output.service';
+import { KeyCortexMoodDetectionService } from './key-cortex-mood-detection.service';
+import { KeyCortexSuggestionService } from './key-cortex-suggestion.service';
+import { KeyCortexGenomeContextService } from './key-cortex-genome-context.service';
+import { KeyCortexSystemPromptService } from './key-cortex-system-prompt.service';
+import { KeyCortexInteractionService } from './key-cortex-interaction.service';
+import { KeyCortexCommandExecutionService } from './key-cortex-command-execution.service';
+import { KeyCortexQueryPipelineService } from './key-cortex-query-pipeline.service';
 
 // -- v3 Phase 3 & 4 Services --
 import { KeyCortexSandboxService } from './key-cortex-sandbox.service';
@@ -90,6 +129,7 @@ import { KeyCortexRealtimeService } from './key-cortex-realtime.service';
 import { KeyBiEngineService } from './key-bi-engine.service';
 import { KeyCortexLearningService } from './key-cortex-learning.service';
 import { UnifiedMemoryRetrievalService } from './unified-memory-retrieval.service';
+import { UnifiedMemoryWriterService } from './unified-memory-writer.service';
 import { EvalHarnessService } from './eval-harness.service';
 import { CognitiveEventBusService } from './cognitive-event-bus.service';
 import { PlanEngineService } from './plan-engine.service';
@@ -111,6 +151,7 @@ import { AiModule } from '../ai/ai.module';
 // -- Domain modules (forwardRef to break circular deps) --
 import { CrmModule } from '../crm/crm.module';
 import { CommerceModule } from '../commerce/commerce.module';
+import { CatalogModule } from '../catalog/catalog.module';
 import { BookingsModule } from '../bookings/bookings.module';
 import { CommunicationsModule } from '../communications/communications.module';
 import { FlowModule } from '../flow/flow.module';
@@ -121,6 +162,7 @@ import { BusinessGenomeModule } from '../business-genome/business-genome.module'
 import { KeyGenomeModule } from '../business-genome/key-genome/key-genome.module';
 import { BlueprintModule } from '../blueprint/blueprint.module';
 import { KeyAutonomyModule } from '../key-autonomy/key-autonomy.module';
+import { BusinessEventModule } from '../business-events/business-event.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { ProjectsModule } from '../projects/projects.module';
 import { KeystoreModule } from '../keystore/keystore.module';
@@ -155,6 +197,7 @@ import { ActivityLogService } from '../activity/activity.service';
     // CrmModule).
     forwardRef(() => CrmModule),
     forwardRef(() => CommerceModule),
+    forwardRef(() => CatalogModule),
     forwardRef(() => BookingsModule),
     forwardRef(() => CommunicationsModule),
     forwardRef(() => FlowModule),
@@ -176,6 +219,9 @@ import { ActivityLogService } from '../activity/activity.service';
     forwardRef(() => PortalModule),
     forwardRef(() => SiteModule),
     forwardRef(() => KeyConnectorModule),
+
+    // Business events for unified audit trail
+    BusinessEventModule,
   ],
 
   controllers: [
@@ -195,6 +241,22 @@ import { ActivityLogService } from '../activity/activity.service';
 
     // Reasoning engine -- core brain, streaming, provider routing
     KeyCortexReasoningService,
+
+    // -- Phase 0.7b: Decomposed reasoning delegate services --
+    KeyCortexSessionService,
+    KeyCortexPromptContextService,
+    KeyCortexToolLoopService,
+    KeyCortexActionDetectionService,
+    KeyCortexLegacyInsightService,
+    KeyCortexProviderSelectionService,
+    KeyCortexStructuredOutputService,
+    KeyCortexMoodDetectionService,
+    KeyCortexSuggestionService,
+    KeyCortexGenomeContextService,
+    KeyCortexSystemPromptService,
+    KeyCortexInteractionService,
+    KeyCortexCommandExecutionService,
+    KeyCortexQueryPipelineService,
 
     // Adaptive router -- lightweight multi-dimensional query classifier
     AdaptiveRouterService,
@@ -230,6 +292,16 @@ import { ActivityLogService } from '../activity/activity.service';
     // Authority-granted safe database wrappers for QUERY_DATABASE / UPDATE_RECORD.
     KeyCortexSafeDatabaseService,
 
+    // -- Phase 0: Execution Foundation --
+    // Unified audit event writer with identity lineage.
+    KeyCortexAuditService,
+    // Single approval orchestrator that collapses KeyActionProposal,
+    // AiApprovalItem, and ApprovalRequest into one canonical path.
+    KeyCortexApprovalOrchestratorService,
+    // Idempotency and saga/rollback foundation.
+    KeyIdempotencyService,
+    KeyCortexSagaService,
+
     // Voice interface -- TTS / STT with personality voice mapping
     KeyCortexVoiceService,
 
@@ -237,8 +309,30 @@ import { ActivityLogService } from '../activity/activity.service';
     // Universal connector -- knows how to talk to every KeyFlowOS module
     KeyCortexConnectorService,
 
-    // Stub domain services used by the connector until full module integrations
-    // are hardened with typed adapters.
+    // -- Phase 0.7: Decomposed connector services --
+    KeyCortexCapabilityRegistryService,
+    KeyCortexContextAssemblyService,
+
+    // -- Phase 0.5: Typed module adapters (replaces as-any casts) --
+    CrmAdapterService,
+    CommerceAdapterService,
+    BookingsAdapterService,
+    ContentAdapterService,
+    CommunicationsAdapterService,
+    FlowAdapterService,
+    AutopilotAdapterService,
+    TemporalAdapterService,
+    InboxAdapterService,
+    NotificationsAdapterService,
+    ProjectsAdapterService,
+    ActivityAdapterService,
+
+    // -- Phase 0.7: Phase-2 bridge adapter --
+    KeyCortexBridgeAdapterService,
+
+    // -- Phase 0.5: Typed domain services --
+    // Content and Activity services are already typed to match the connector's
+    // expected API; the remaining modules route through the adapters above.
     ContentService,
     ActivityLogService,
 
@@ -265,6 +359,9 @@ import { ActivityLogService } from '../activity/activity.service';
 
     // Persistent multi-type KEY Cortex memory
     KeyCortexMemoryService,
+
+    // Canonical structured-memory writer (Phase 0.9 unification)
+    UnifiedMemoryWriterService,
 
     // Unified memory retrieval layer over all KEY memory stores
     UnifiedMemoryRetrievalService,
@@ -333,6 +430,20 @@ import { ActivityLogService } from '../activity/activity.service';
     KeyCortexPersonalityService,
     KeyCortexContextService,
     KeyCortexReasoningService,
+    KeyCortexSessionService,
+    KeyCortexPromptContextService,
+    KeyCortexToolLoopService,
+    KeyCortexActionDetectionService,
+    KeyCortexLegacyInsightService,
+    KeyCortexProviderSelectionService,
+    KeyCortexStructuredOutputService,
+    KeyCortexMoodDetectionService,
+    KeyCortexSuggestionService,
+    KeyCortexGenomeContextService,
+    KeyCortexSystemPromptService,
+    KeyCortexInteractionService,
+    KeyCortexCommandExecutionService,
+    KeyCortexQueryPipelineService,
     AdaptiveRouterService,
     KeyCortexConversationService,
     KeyCortexActionsService,
@@ -343,6 +454,8 @@ import { ActivityLogService } from '../activity/activity.service';
     // Connector + Executor form the "command API" surface.
     // ContextV2 + Insight provide the "query API" surface.
     KeyCortexConnectorService,
+    KeyCortexCapabilityRegistryService,
+    KeyCortexContextAssemblyService,
     KeyCortexExecutorService,
     KeyCortexContextV2Service,
     KeyCortexInsightService,
@@ -382,6 +495,9 @@ import { ActivityLogService } from '../activity/activity.service';
     KeyCortexLearningService,
     KeyCortexMemoryService,
 
+    // Canonical structured-memory writer (Phase 0.9 unification)
+    UnifiedMemoryWriterService,
+
     // Unified memory retrieval layer
     UnifiedMemoryRetrievalService,
 
@@ -409,12 +525,35 @@ import { ActivityLogService } from '../activity/activity.service';
     StorelinkAdapterService,
     KeyConnectorAdapterService,
 
+    // -- Phase 0.5: Typed module adapters --
+    CrmAdapterService,
+    CommerceAdapterService,
+    BookingsAdapterService,
+    ContentAdapterService,
+    CommunicationsAdapterService,
+    FlowAdapterService,
+    AutopilotAdapterService,
+    TemporalAdapterService,
+    InboxAdapterService,
+    NotificationsAdapterService,
+    ProjectsAdapterService,
+    ActivityAdapterService,
+
+    // -- Phase 0.7: Phase-2 bridge adapter --
+    KeyCortexBridgeAdapterService,
+
     // -- Phase 2 Body: Organ Registrar --
     KeyCortexOrganRegistrarService,
 
     // -- Phase 3 Body: Skeleton --
     KeyCortexLifecycleService,
     KeyCortexSafeDatabaseService,
+
+    // -- Phase 0: Execution Foundation --
+    KeyCortexAuditService,
+    KeyCortexApprovalOrchestratorService,
+    KeyIdempotencyService,
+    KeyCortexSagaService,
   ],
 })
 export class KeyCortexModule {}

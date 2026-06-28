@@ -31,7 +31,7 @@ DELETE FROM "cortex_action_logs" WHERE "business_id" IS NULL;
 ALTER TABLE "cortex_action_logs" DROP CONSTRAINT IF EXISTS "cortex_action_logs_business_id_fkey";
 ALTER TABLE "cortex_action_logs" ALTER COLUMN "business_id" SET NOT NULL;
 ALTER TABLE "cortex_action_logs" ADD CONSTRAINT "cortex_action_logs_business_id_fkey"
-  FOREIGN KEY ("business_id") REFERENCES "Business"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  FOREIGN KEY ("business_id") REFERENCES "businesses"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 CREATE INDEX IF NOT EXISTS "cortex_action_logs_business_id_created_at_idx" ON "cortex_action_logs"("business_id", "created_at");
 CREATE INDEX IF NOT EXISTS "cortex_action_logs_business_id_correlation_id_idx" ON "cortex_action_logs"("business_id", "correlation_id");

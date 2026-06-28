@@ -599,4 +599,43 @@ export class FlowService {
     }
     return 0;
   }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  Automation / playbook persistence (used by AI/KEY tool loop)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  async createAutomation(input: {
+    businessId: string;
+    name: string;
+    trigger: string;
+    condition?: string | null;
+  }) {
+    return this.prisma.client.automation.create({
+      data: {
+        businessId: input.businessId,
+        name: input.name,
+        trigger: input.trigger,
+        condition: input.condition ?? null,
+        actionData: [],
+        enabled: true,
+      },
+    });
+  }
+
+  async updateAutomation(
+    businessId: string,
+    automationId: string,
+    data: { name?: string; trigger?: string; condition?: string | null; enabled?: boolean },
+  ) {
+    const updateData: Record<string, unknown> = {};
+    if (data.name !== undefined) updateData.name = data.name;
+    if (data.trigger !== undefined) updateData.trigger = data.trigger;
+    if (data.condition !== undefined) updateData.condition = data.condition;
+    if (data.enabled !== undefined) updateData.enabled = data.enabled;
+
+    return this.prisma.client.automation.update({
+      where: { id: automationId, businessId },
+      data: updateData,
+    });
+  }
 }

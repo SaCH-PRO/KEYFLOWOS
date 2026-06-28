@@ -18,6 +18,11 @@ export interface CreateBusinessEventInput {
   riskScore?: number;
   source: EventSource;
   metadata?: Record<string, unknown>;
+
+  // Phase 0/3 identity thread
+  sessionId?: string;
+  commandId?: string;
+  correlationId?: string;
 }
 
 export interface AuditFilter {

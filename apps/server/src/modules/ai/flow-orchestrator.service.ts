@@ -1,6 +1,19 @@
 import { Injectable, Logger, Inject, forwardRef, NotFoundException, BadRequestException } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { CrmService } from '../crm/crm.service';
+import { CommerceService } from '../commerce/commerce.service';
+import { BookingsService } from '../bookings/bookings.service';
+import { ProjectsService } from '../projects/projects.service';
+import { ActivityLogService } from '../activity/activity.service';
+import { EmailMarketingService } from '../email-marketing/email-marketing.service';
+import { SocialService } from '../social/social.service';
+import { FlowService } from '../flow/flow.service';
+import { ExpensesService } from '../expenses/expenses.service';
+import { TimeEntryService } from '../time-tracking/time-entry.service';
+import { HelpdeskService } from '../helpdesk/helpdesk.service';
+import { CalendarQueryService } from '../calendar/calendar-query.service';
+import { KeyflowNotesService } from '../keyflow-command/keyflow-notes.service';
 import { AiAdvisorService } from './ai-advisor.service';
 import { AiUsageService } from './ai-usage.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
@@ -240,6 +253,45 @@ export class FlowOrchestratorService {
   }
   private getTaskAssignment() {
     return this.moduleRef.get(TaskAssignmentService, { strict: false });
+  }
+  private getCrm() {
+    return this.moduleRef.get(CrmService, { strict: false });
+  }
+  private getCommerce() {
+    return this.moduleRef.get(CommerceService, { strict: false });
+  }
+  private getBookings() {
+    return this.moduleRef.get(BookingsService, { strict: false });
+  }
+  private getProjects() {
+    return this.moduleRef.get(ProjectsService, { strict: false });
+  }
+  private getActivityLog() {
+    return this.moduleRef.get(ActivityLogService, { strict: false });
+  }
+  private getEmailMarketing() {
+    return this.moduleRef.get(EmailMarketingService, { strict: false });
+  }
+  private getSocial() {
+    return this.moduleRef.get(SocialService, { strict: false });
+  }
+  private getFlow() {
+    return this.moduleRef.get(FlowService, { strict: false });
+  }
+  private getExpenses() {
+    return this.moduleRef.get(ExpensesService, { strict: false });
+  }
+  private getTimeEntry() {
+    return this.moduleRef.get(TimeEntryService, { strict: false });
+  }
+  private getHelpdesk() {
+    return this.moduleRef.get(HelpdeskService, { strict: false });
+  }
+  private getCalendarQuery() {
+    return this.moduleRef.get(CalendarQueryService, { strict: false });
+  }
+  private getKeyflowNotes() {
+    return this.moduleRef.get(KeyflowNotesService, { strict: false });
   }
 
   /**
@@ -1081,85 +1133,67 @@ export class FlowOrchestratorService {
       }
 
       case 'crm_create_contact': {
-        const contact = await this.prisma.client.contact.create({
-          data: {
-            businessId,
-            firstName: args.firstName ?? null,
-            lastName: args.lastName ?? null,
-            email: args.email ?? null,
-            phone: args.phone ?? null,
-            companyName: args.companyName ?? null,
-            status: args.status ?? 'LEAD',
-          },
+        const contact = await this.getCrm().createContact({
+          businessId,
+          firstName: args.firstName ?? null,
+          lastName: args.lastName ?? null,
+          email: args.email ?? null,
+          phone: args.phone ?? null,
+          companyName: args.companyName ?? null,
+          status: args.status ?? 'LEAD',
         });
         return { contact, id: contact.id };
       }
 
       case 'crm_update_contact': {
-        const updateData: Record<string, any> = {};
-        if (args.firstName !== undefined) updateData.firstName = args.firstName;
-        if (args.lastName !== undefined) updateData.lastName = args.lastName;
-        if (args.email !== undefined) updateData.email = args.email;
-        if (args.phone !== undefined) updateData.phone = args.phone;
-        if (args.status !== undefined) updateData.status = args.status;
-        if (args.companyName !== undefined) updateData.companyName = args.companyName;
-        const contact = await this.prisma.client.contact.update({
-          where: { id: args.contactId, businessId },
-          data: updateData,
+        const contact = await this.getCrm().updateContact({
+          businessId,
+          contactId: args.contactId,
+          firstName: args.firstName,
+          lastName: args.lastName,
+          email: args.email,
+          phone: args.phone,
+          status: args.status,
+          companyName: args.companyName,
         });
         return { contact, id: contact.id };
       }
 
       case 'crm_add_note': {
-        const contact = await this.prisma.client.contact.findFirst({
-          where: { id: args.contactId, businessId },
-          select: { id: true },
+        const note = await this.getCrm().addNote({
+          businessId,
+          contactId: args.contactId,
+          body: args.body,
+          source: 'flow_ai',
         });
-        if (!contact) throw new Error('Contact not found');
-        const note = await this.prisma.client.contactNote.create({
-          data: {
-            contactId: args.contactId,
-            businessId,
-            body: args.body,
-            source: 'flow_ai',
-          },
-        });
-        return { note, id: note.id };
+        return { note, id: (note as { id: string }).id };
       }
 
       case 'crm_add_task': {
-        const contact = await this.prisma.client.contact.findFirst({
-          where: { id: args.contactId, businessId },
-          select: { id: true },
-        });
-        if (!contact) throw new Error('Contact not found');
-        const task = await this.prisma.client.contactTask.create({
-          data: {
-            contactId: args.contactId,
-            businessId,
-            title: args.title,
-            dueDate: args.dueDate ? new Date(args.dueDate) : null,
-            priority: args.priority ?? 'MEDIUM',
-            status: 'OPEN',
-            source: 'flow_ai',
-          },
+        const task = await this.getCrm().addTask({
+          businessId,
+          contactId: args.contactId,
+          title: args.title,
+          dueDate: args.dueDate ? new Date(args.dueDate).toISOString() : null,
+          priority: args.priority ?? 'MEDIUM',
+          source: 'flow_ai',
         });
         // Auto-assign KEY to tasks it creates
         await this.getTaskAssignment().assign({
           taskType: 'ContactTask',
-          taskId: task.id,
+          taskId: (task as { id: string }).id,
           assignableType: 'KEY',
           assignableId: 'key_ai',
           assignedBy: 'key_ai',
           reason: 'Auto-assigned by KEY Operator',
         }).catch(() => { /* ignore assignment errors */ });
-        return { task, id: task.id };
+        return { task, id: (task as { id: string }).id };
       }
 
       case 'crm_delete_contact': {
-        await this.prisma.client.contact.update({
-          where: { id: args.contactId, businessId },
-          data: { deletedAt: new Date() },
+        await this.getCrm().softDeleteContact({
+          businessId,
+          contactId: args.contactId,
         });
         return { success: true, deletedId: args.contactId };
       }
@@ -1176,32 +1210,26 @@ export class FlowOrchestratorService {
 
       case 'commerce_create_invoice': {
         const items = args.items ?? [];
-        const subtotal = items.reduce((sum: number, item: any) => sum + (item.quantity * item.unitPrice), 0);
         const invoiceCount = await this.prisma.client.invoice.count({ where: { businessId } });
         const invoiceNumber = `INV-${String(invoiceCount + 1).padStart(4, '0')}`;
-        const invoice = await this.prisma.client.invoice.create({
-          data: {
-            businessId,
-            contactId: args.contactId ?? null,
-            items: items,
-            invoiceNumber,
-            subtotal,
-            taxAmount: 0,
-            total: subtotal,
-            currency: args.currency ?? 'TTD',
-            dueDate: args.dueDate ? new Date(args.dueDate) : null,
-            notes: args.notes ?? null,
-            status: 'DRAFT',
-          },
+        const invoice = await this.getCommerce().createInvoice({
+          businessId,
+          contactId: args.contactId,
+          items: items.map((item: any) => ({
+            description: item.description,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+          })),
+          invoiceNumber,
+          currency: args.currency ?? 'TTD',
+          dueDate: args.dueDate ? new Date(args.dueDate) : undefined,
+          notes: args.notes ?? undefined,
         });
         return { invoice, id: invoice.id, invoiceNumber: invoice.invoiceNumber };
       }
 
       case 'commerce_mark_invoice_paid': {
-        const invoice = await this.prisma.client.invoice.update({
-          where: { id: args.invoiceId, businessId },
-          data: { status: 'PAID', paidAt: new Date() },
-        });
+        const invoice = await this.getCommerce().markInvoicePaid(args.invoiceId, 'key_ai');
         return { invoice, id: invoice.id };
       }
 
@@ -1220,31 +1248,25 @@ export class FlowOrchestratorService {
 
       case 'commerce_create_quote': {
         const items = args.items ?? [];
-        const subtotal = items.reduce((sum: number, item: any) => sum + (item.quantity * item.unitPrice), 0);
         const quoteCount = await this.prisma.client.quote.count({ where: { businessId } });
         const quoteNumber = `QT-${String(quoteCount + 1).padStart(4, '0')}`;
-        const quote = await this.prisma.client.quote.create({
-          data: {
-            businessId,
-            contactId: args.contactId,
-            items,
-            quoteNumber,
-            subtotal,
-            taxAmount: 0,
-            total: subtotal,
-            currency: args.currency ?? 'TTD',
-            expiryDate: args.expiryDate ? new Date(args.expiryDate) : null,
-            status: 'DRAFT',
-          },
+        const quote = await this.getCommerce().createQuote({
+          businessId,
+          contactId: args.contactId,
+          items: items.map((item: any) => ({
+            description: item.description,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+          })),
+          quoteNumber,
+          currency: args.currency ?? 'TTD',
+          expiryDate: args.expiryDate ? new Date(args.expiryDate) : undefined,
         });
         return { quote, id: quote.id, quoteNumber: quote.quoteNumber };
       }
 
       case 'commerce_delete_invoice': {
-        await this.prisma.client.invoice.update({
-          where: { id: args.invoiceId, businessId },
-          data: { deletedAt: new Date() },
-        });
+        await this.getCommerce().deleteInvoice(args.invoiceId, businessId);
         return { success: true, deletedId: args.invoiceId };
       }
 
@@ -1324,41 +1346,25 @@ export class FlowOrchestratorService {
           );
         }
 
-        const booking = await this.prisma.client.booking.create({
-          data: {
-            businessId,
-            contactId: args.contactId,
-            serviceId: args.serviceId ?? null,
-            staffId: args.staffId ?? null,
-            startTime,
-            endTime,
-            notes: args.notes ?? null,
-            status: 'CONFIRMED',
-          },
+        const booking = await this.getBookings().createBooking({
+          businessId,
+          contactId: args.contactId,
+          serviceId: args.serviceId,
+          staffId: args.staffId,
+          startTime,
+          endTime,
+          notes: args.notes ?? undefined,
         });
         return { booking, id: booking.id, contactName: contact.displayName || `${contact.firstName} ${contact.lastName}` };
       }
 
       case 'bookings_reschedule_booking': {
-        const booking = await this.prisma.client.booking.findFirst({
-          where: { id: args.bookingId, businessId },
-        });
-        if (!booking) throw new Error('Booking not found');
-        const duration = booking.endTime.getTime() - booking.startTime.getTime();
-        const newStart = new Date(args.startTime);
-        const newEnd = new Date(newStart.getTime() + duration);
-        const updated = await this.prisma.client.booking.update({
-          where: { id: args.bookingId },
-          data: { startTime: newStart, endTime: newEnd },
-        });
+        const updated = await this.getBookings().rescheduleBooking(businessId, args.bookingId, new Date(args.startTime));
         return { booking: updated, id: updated.id };
       }
 
       case 'bookings_cancel_booking': {
-        const updated = await this.prisma.client.booking.update({
-          where: { id: args.bookingId, businessId },
-          data: { status: 'CANCELLED' },
-        });
+        const updated = await this.getBookings().updateBookingStatus(businessId, args.bookingId, 'CANCELLED');
         return { booking: updated, id: updated.id };
       }
 
@@ -1373,28 +1379,18 @@ export class FlowOrchestratorService {
       }
 
       case 'marketing_create_campaign': {
-        const campaign = await this.prisma.client.emailCampaign.create({
-          data: {
-            businessId,
-            name: args.name,
-            subject: args.subject,
-            body: args.body,
-            status: 'DRAFT',
-            scheduledAt: args.scheduledAt ? new Date(args.scheduledAt) : null,
-          },
+        const campaign = await this.getEmailMarketing().createCampaign({
+          businessId,
+          name: args.name,
+          subject: args.subject,
+          body: args.body,
+          scheduledAt: args.scheduledAt ? new Date(args.scheduledAt).toISOString() : undefined,
         });
         return { campaign, id: campaign.id };
       }
 
       case 'marketing_send_campaign': {
-        const campaign = await this.prisma.client.emailCampaign.findFirst({
-          where: { id: args.campaignId, businessId },
-        });
-        if (!campaign) throw new Error('Campaign not found');
-        const updated = await this.prisma.client.emailCampaign.update({
-          where: { id: args.campaignId },
-          data: { status: 'SENT', sentAt: new Date() },
-        });
+        const updated = await this.getEmailMarketing().markCampaignSent(businessId, args.campaignId);
         return { campaign: updated, id: updated.id };
       }
 
@@ -1409,28 +1405,20 @@ export class FlowOrchestratorService {
       }
 
       case 'social_create_post': {
-        const post = await this.prisma.client.socialPost.create({
-          data: {
-            businessId,
-            content: args.content,
-            mediaUrls: [],
-            status: args.scheduledFor ? 'SCHEDULED' : 'DRAFT',
-            scheduledAt: args.scheduledFor ? new Date(args.scheduledFor) : null,
-            channelIds: [],
-          },
-        });
+        const post = await this.getSocial().createDraft(
+          businessId,
+          args.content,
+          [],
+          args.scheduledFor ? new Date(args.scheduledFor).toISOString() : undefined,
+          [],
+        );
         return { post, id: post.id };
       }
 
       case 'social_publish_post': {
-        const post = await this.prisma.client.socialPost.findFirst({
-          where: { id: args.postId, businessId },
-        });
-        if (!post) throw new Error('Post not found');
-        const updated = await this.prisma.client.socialPost.update({
-          where: { id: args.postId },
-          data: { status: 'PUBLISHED', postedAt: new Date() },
-        });
+        const result = await this.getSocial().publishPost(businessId, args.postId);
+        const updated = 'post' in result ? result.post : result;
+        if (!updated) throw new Error('Post publish failed');
         return { post: updated, id: updated.id };
       }
 
@@ -1444,24 +1432,17 @@ export class FlowOrchestratorService {
       }
 
       case 'automations_create_playbook': {
-        const playbook = await this.prisma.client.automation.create({
-          data: {
-            businessId,
-            name: args.name,
-            trigger: args.triggerEvent,
-            condition: args.condition ?? null,
-            actionData: [],
-            enabled: true,
-          },
+        const playbook = await this.getFlow().createAutomation({
+          businessId,
+          name: args.name,
+          trigger: args.triggerEvent,
+          condition: args.condition ?? null,
         });
         return { playbook, id: playbook.id };
       }
 
       case 'automations_toggle_playbook': {
-        const playbook = await this.prisma.client.automation.update({
-          where: { id: args.playbookId, businessId },
-          data: { enabled: args.enabled },
-        });
+        const playbook = await this.getFlow().updateAutomation(businessId, args.playbookId, { enabled: args.enabled });
         return { playbook, id: playbook.id, enabled: playbook.enabled };
       }
 
@@ -1946,32 +1927,24 @@ export class FlowOrchestratorService {
       // ========== ORGANIZE FAMILY ==========
 
       case 'create_task': {
-        const contact = await this.prisma.client.contact.findFirst({
-          where: { id: args.contactId, businessId, deletedAt: null },
-          select: { id: true },
-        });
-        if (!contact) throw new Error('Contact not found');
-        const task = await this.prisma.client.contactTask.create({
-          data: {
-            businessId,
-            contactId: args.contactId,
-            title: args.title,
-            dueDate: args.dueDate ? new Date(args.dueDate) : null,
-            priority: args.priority ?? 'MEDIUM',
-            status: 'OPEN',
-            source: 'flow_ai',
-          },
+        const task = await this.getCrm().addTask({
+          businessId,
+          contactId: args.contactId,
+          title: args.title,
+          dueDate: args.dueDate ? new Date(args.dueDate).toISOString() : null,
+          priority: args.priority ?? 'MEDIUM',
+          source: 'flow_ai',
         });
         // Auto-assign KEY to tasks it creates
         await this.getTaskAssignment().assign({
           taskType: 'ContactTask',
-          taskId: task.id,
+          taskId: (task as { id: string }).id,
           assignableType: 'KEY',
           assignableId: 'key_ai',
           assignedBy: 'key_ai',
           reason: 'Auto-assigned by KEY Operator',
         }).catch(() => { /* ignore assignment errors */ });
-        return { id: task.id, title: task.title, contactId: task.contactId };
+        return { id: (task as { id: string }).id, title: (task as { title: string }).title, contactId: args.contactId };
       }
 
       case 'create_followup_queue': {
@@ -1990,18 +1963,15 @@ export class FlowOrchestratorService {
         const createdTasks = [];
         for (const c of staleContacts) {
           const name = `${c.firstName ?? ''} ${c.lastName ?? ''}`.trim() || c.email || 'Contact';
-          const task = await this.prisma.client.contactTask.create({
-            data: {
-              businessId,
-              contactId: c.id,
-              title: titleTemplate.replace('{name}', name),
-              priority: 'HIGH',
-              status: 'OPEN',
-              source: 'flow_ai',
-              dueDate: new Date(Date.now() + 2 * 86400000),
-            },
+          const task = await this.getCrm().addTask({
+            businessId,
+            contactId: c.id,
+            title: titleTemplate.replace('{name}', name),
+            priority: 'HIGH',
+            source: 'flow_ai',
+            dueDate: new Date(Date.now() + 2 * 86400000).toISOString(),
           });
-          createdTasks.push({ taskId: task.id, contactId: c.id, contactName: name });
+          createdTasks.push({ taskId: (task as { id: string }).id, contactId: c.id, contactName: name });
         }
 
         return { created: createdTasks.length, contacts: createdTasks };
@@ -2018,13 +1988,13 @@ export class FlowOrchestratorService {
         const newTags = Array.isArray(args.tags) ? args.tags : [args.tags];
         const mergedTags = [...new Set([...existingTags, ...newTags])];
 
-        const updated = await this.prisma.client.contact.update({
-          where: { id: args.contactId },
-          data: { tags: mergedTags },
-          select: { id: true, firstName: true, lastName: true, tags: true },
+        await this.getCrm().updateContact({
+          businessId,
+          contactId: args.contactId,
+          tags: mergedTags,
         });
 
-        return { contactId: updated.id, tags: mergedTags };
+        return { contactId: contact.id, tags: mergedTags };
       }
 
       case 'segment_contacts': {
@@ -2062,22 +2032,20 @@ export class FlowOrchestratorService {
           try { parsedPayload = JSON.parse(args.payload); }
           catch { parsedPayload = { raw: args.payload }; }
         }
-        const scheduledAction = await this.prisma.client.activity.create({
-          data: {
-            businessId,
-            module: 'ai',
-            action: 'scheduled_action',
-            entityType: args.actionType,
-            entityId: args.targetId ?? null,
-            title: args.description,
-            detail: JSON.stringify({
-              actionType: args.actionType,
-              scheduledFor: args.scheduledFor,
-              payload: parsedPayload,
-              status: 'scheduled',
-            }),
-            tone: 'info',
-          },
+        const scheduledAction = await this.getActivityLog().createActivity({
+          businessId,
+          module: 'ai',
+          action: 'scheduled_action',
+          entityType: args.actionType,
+          entityId: args.targetId ?? null,
+          title: args.description,
+          detail: JSON.stringify({
+            actionType: args.actionType,
+            scheduledFor: args.scheduledFor,
+            payload: parsedPayload,
+            status: 'scheduled',
+          }),
+          tone: 'info',
         });
 
         return {
@@ -2092,20 +2060,11 @@ export class FlowOrchestratorService {
       // ========== EXECUTE FAMILY ==========
 
       case 'queue_campaign': {
-        const campaign = await this.prisma.client.emailCampaign.findFirst({
-          where: { id: args.campaignId, businessId },
-        });
-        if (!campaign) throw new Error('Campaign not found');
-        if (campaign.status !== 'DRAFT') throw new Error(`Campaign must be in DRAFT status to queue (current: ${campaign.status})`);
-
-        const sendDate = new Date(args.scheduledAt);
-        if (isNaN(sendDate.getTime())) throw new Error('Invalid scheduledAt date format');
-
-        const updated = await this.prisma.client.emailCampaign.update({
-          where: { id: args.campaignId },
-          data: { status: 'SCHEDULED', scheduledAt: sendDate },
-        });
-
+        const updated = await this.getEmailMarketing().queueCampaign(
+          businessId,
+          args.campaignId,
+          args.scheduledAt,
+        );
         return { id: updated.id, name: updated.name, status: updated.status, scheduledAt: updated.scheduledAt };
       }
 
@@ -2127,26 +2086,22 @@ export class FlowOrchestratorService {
         });
 
         // Store a note of what was sent
-        await this.prisma.client.contactNote.create({
-          data: {
-            contactId: args.contactId,
-            businessId,
-            body: `[${args.channel.toUpperCase()} Sent]\nSubject: ${args.subject ?? 'N/A'}\n\n${args.body}\n\nStatus: ${result.success ? 'Delivered' : 'Failed'}${result.messageId ? ` (ID: ${result.messageId})` : ''}${result.error ? `\nError: ${result.error}` : ''}`,
-            source: 'flow_ai',
-          },
+        await this.getCrm().addNote({
+          businessId,
+          contactId: args.contactId,
+          body: `[${args.channel.toUpperCase()} Sent]\nSubject: ${args.subject ?? 'N/A'}\n\n${args.body}\n\nStatus: ${result.success ? 'Delivered' : 'Failed'}${result.messageId ? ` (ID: ${result.messageId})` : ''}${result.error ? `\nError: ${result.error}` : ''}`,
+          source: 'flow_ai',
         });
 
-        await this.prisma.client.activity.create({
-          data: {
-            businessId,
-            module: 'ai',
-            action: result.success ? 'message_sent' : 'message_failed',
-            entityType: 'contact',
-            entityId: args.contactId,
-            title: `Message ${result.success ? 'sent' : 'failed'} to ${contact.firstName ?? ''} ${contact.lastName ?? ''} via ${args.channel}`,
-            detail: args.body.slice(0, 200),
-            tone: result.success ? 'success' : 'warning',
-          },
+        await this.getActivityLog().createActivity({
+          businessId,
+          module: 'ai',
+          action: result.success ? 'message_sent' : 'message_failed',
+          entityType: 'contact',
+          entityId: args.contactId,
+          title: `Message ${result.success ? 'sent' : 'failed'} to ${contact.firstName ?? ''} ${contact.lastName ?? ''} via ${args.channel}`,
+          detail: args.body.slice(0, 200),
+          tone: result.success ? 'success' : 'warning',
         });
 
         return {
@@ -2182,16 +2137,7 @@ export class FlowOrchestratorService {
       }
 
       case 'enable_flow_with_approval': {
-        const playbook = await this.prisma.client.automation.findFirst({
-          where: { id: args.playbookId, businessId, deletedAt: null },
-        });
-        if (!playbook) throw new Error('Playbook not found');
-
-        const updated = await this.prisma.client.automation.update({
-          where: { id: args.playbookId },
-          data: { enabled: true },
-        });
-
+        const updated = await this.getFlow().updateAutomation(businessId, args.playbookId, { enabled: true });
         return { id: updated.id, name: updated.name, status: updated.enabled ? 'ACTIVE' : 'INACTIVE' };
       }
 
@@ -2201,21 +2147,36 @@ export class FlowOrchestratorService {
         const newStatus = args.newStatus;
 
         if (entityType === 'contact') {
-          const result = await this.prisma.client.contact.updateMany({
-            where: { id: { in: ids }, businessId, deletedAt: null },
-            data: { status: newStatus },
+          const result = await this.getCrm().bulkUpdateContacts({
+            businessId,
+            contactIds: ids,
+            status: newStatus,
           });
-          return { entityType, updatedCount: result.count, newStatus };
+          return { entityType, updatedCount: result.updated, newStatus };
         }
 
         if (entityType === 'invoice') {
-          const updateData: any = { status: newStatus };
-          if (newStatus === 'PAID') updateData.paidAt = new Date();
-          const result = await this.prisma.client.invoice.updateMany({
-            where: { id: { in: ids }, businessId, deletedAt: null },
-            data: updateData,
-          });
-          return { entityType, updatedCount: result.count, newStatus };
+          let action: 'send' | 'void' | 'delete';
+          if (newStatus === 'SENT') action = 'send';
+          else if (newStatus === 'VOID') action = 'void';
+          else if (newStatus === 'PAID') {
+            // PAID bulk transition is not supported by bulkUpdateInvoices;
+            // fall back to individual mark-paid calls.
+            let updated = 0;
+            for (const id of ids) {
+              try {
+                await this.getCommerce().markInvoicePaid(id, 'key_ai');
+                updated++;
+              } catch (err: any) {
+                this.logger.warn(`bulk mark paid skipped for ${id}: ${(err as Error).message}`);
+              }
+            }
+            return { entityType, updatedCount: updated, newStatus };
+          } else {
+            throw new Error(`Unsupported invoice status transition: ${newStatus}`);
+          }
+          const result = await this.getCommerce().bulkUpdateInvoices(businessId, ids, action);
+          return { entityType, updatedCount: result.updated, newStatus };
         }
 
         throw new Error(`Unsupported entity type: ${entityType}`);
@@ -2260,41 +2221,17 @@ export class FlowOrchestratorService {
       }
 
       case 'projects_create_task': {
-        const project = await this.prisma.client.project.findFirst({
-          where: { id: args.projectId, businessId, deletedAt: null },
-          select: { id: true },
+        const task = await this.getProjects().addTask(businessId, args.projectId, {
+          title: args.title,
+          dueDate: args.dueDate ? new Date(args.dueDate).toISOString() : undefined,
+          priority: args.priority ?? 'NORMAL',
+          assigneeId: 'key_ai',
         });
-        if (!project) throw new Error('Project not found');
-        const task = await this.prisma.client.projectTask.create({
-          data: {
-            businessId,
-            projectId: args.projectId,
-            title: args.title,
-            dueDate: args.dueDate ? new Date(args.dueDate) : null,
-            priority: args.priority ?? 'NORMAL',
-          },
-        });
-        // Auto-assign KEY to tasks it creates
-        await this.getTaskAssignment().assign({
-          taskType: 'ProjectTask',
-          taskId: task.id,
-          assignableType: 'KEY',
-          assignableId: 'key_ai',
-          assignedBy: 'key_ai',
-          reason: 'Auto-assigned by KEY Operator',
-        }).catch(() => { /* ignore assignment errors */ });
         return { task };
       }
 
       case 'projects_complete_task': {
-        const existing = await this.prisma.client.projectTask.findFirst({
-          where: { id: args.taskId, businessId, deletedAt: null },
-        });
-        if (!existing) throw new Error('Task not found');
-        const task = await this.prisma.client.projectTask.update({
-          where: { id: args.taskId },
-          data: { isCompleted: true },
-        });
+        const task = await this.getProjects().updateTask(businessId, args.taskId, { isCompleted: true });
         return { task };
       }
 
@@ -2313,14 +2250,12 @@ export class FlowOrchestratorService {
       }
 
       case 'expenses_create': {
-        const expense = await this.prisma.client.expense.create({
-          data: {
-            businessId,
-            amount: args.amount,
-            description: args.description,
-            date: args.date ? new Date(args.date) : new Date(),
-            vendor: args.vendor ?? null,
-          } as any,
+        const expense = await this.getExpenses().createExpense({
+          businessId,
+          amount: args.amount,
+          description: args.description,
+          date: args.date ? new Date(args.date) : new Date(),
+          vendor: args.vendor,
         });
         return { expense };
       }
@@ -2431,16 +2366,13 @@ export class FlowOrchestratorService {
       //  KEYFLOW NOTES — universal note tool
       // ----------------------------------------------------------------
       case 'keyflow_create_note': {
-        const note = await this.prisma.client.keyflowNote.create({
-          data: {
-            businessId,
-            targetType: args.targetType,
-            targetId: args.targetId,
-            targetLabel: args.targetLabel ?? null,
-            body: args.body ?? '',
-            pinned: args.pinned ?? false,
-          },
-        });
+        const note = await this.getKeyflowNotes().create(businessId, {
+          targetType: args.targetType,
+          targetId: args.targetId,
+          targetLabel: args.targetLabel ?? null,
+          body: args.body ?? '',
+          pinned: args.pinned ?? false,
+        }, 'key_ai');
         return { note };
       }
 
@@ -2761,23 +2693,20 @@ export class FlowOrchestratorService {
         return { events, count: events.length };
       }
       case 'calendar_create_event': {
-        const event = await this.prisma.client.calendarEvent.create({
-          data: {
-            businessId,
+        const event = await this.getCalendarQuery().createManualEvent(
+          businessId,
+          'key_ai',
+          {
             title: args.title,
             description: args.description ?? null,
-            startAt: new Date(args.startAt),
-            endAt: args.endAt ? new Date(args.endAt) : null,
+            startAt: args.startAt,
+            endAt: args.endAt ?? null,
             allDay: args.allDay ?? false,
             type: args.type ?? 'OTHER',
-            module: 'GENERAL',
             priority: args.priority ?? 'NORMAL',
             color: args.color ?? null,
-            sourceType: 'MANUAL',
-            sourceId: businessId,
-            status: 'SCHEDULED',
           },
-        });
+        );
         return { id: event.id, title: event.title, startAt: event.startAt };
       }
       case 'calendar_check_conflicts': {
@@ -2798,53 +2727,36 @@ export class FlowOrchestratorService {
 
       // === TIME TRACKING ===
       case 'time_start_timer': {
-        const entry = await this.prisma.client.timeEntry.create({
-          data: {
-            businessId,
-            description: args.description,
-            startTime: new Date(),
-            projectId: args.projectId ?? null,
-            taskId: args.taskId ?? null,
-            hourlyRate: args.hourlyRate ?? null,
-            billable: true,
-            userId: 'key_ai',
-          },
+        const entry = await this.getTimeEntry().startTimer({
+          businessId,
+          userId: 'key_ai',
+          description: args.description,
+          projectId: args.projectId,
+          taskId: args.taskId,
+          hourlyRate: args.hourlyRate,
+          billable: true,
         });
         return { id: entry.id, startTime: entry.startTime };
       }
       case 'time_stop_timer': {
-        const entry = await this.prisma.client.timeEntry.findFirst({
-          where: { id: args.timeEntryId, businessId, endTime: null },
-        });
-        if (!entry) throw new Error('No running timer found for this time entry');
-        const now = new Date();
-        const durationMs = now.getTime() - entry.startTime.getTime();
-        const durationMinutes = Math.round(durationMs / 60000);
-        const updated = await this.prisma.client.timeEntry.update({
-          where: { id: args.timeEntryId },
-          data: { endTime: now, durationMinutes },
-        });
-        return { id: updated.id, durationMinutes };
+        const updated = await this.getTimeEntry().stopTimer(args.timeEntryId, businessId, 'key_ai');
+        return { id: updated.id, durationMinutes: updated.durationMinutes };
       }
       case 'time_log_entry': {
         const start = new Date(args.startTime);
         const end = new Date(args.endTime);
-        const durationMinutes = args.durationMinutes ?? Math.round((end.getTime() - start.getTime()) / 60000);
-        const entry = await this.prisma.client.timeEntry.create({
-          data: {
-            businessId,
-            description: args.description,
-            startTime: start,
-            endTime: end,
-            durationMinutes,
-            projectId: args.projectId ?? null,
-            taskId: args.taskId ?? null,
-            hourlyRate: args.hourlyRate ?? null,
-            billable: args.billable ?? true,
-            userId: 'key_ai',
-          },
+        const entry = await this.getTimeEntry().create({
+          businessId,
+          userId: 'key_ai',
+          description: args.description,
+          startTime: start,
+          endTime: end,
+          projectId: args.projectId,
+          taskId: args.taskId,
+          hourlyRate: args.hourlyRate,
+          billable: args.billable ?? true,
         });
-        return { id: entry.id, durationMinutes };
+        return { id: entry.id, durationMinutes: entry.durationMinutes };
       }
 
       // === HELPDESK ===
@@ -2861,27 +2773,19 @@ export class FlowOrchestratorService {
         return { tickets, count: tickets.length };
       }
       case 'helpdesk_create_ticket': {
-        const ticket = await this.prisma.client.supportTicket.create({
-          data: {
-            businessId,
-            title: args.title,
-            description: args.description ?? null,
-            contactId: args.contactId ?? null,
-            priority: args.priority ?? 'NORMAL',
-            source: args.source ?? 'MANUAL',
-            status: 'OPEN',
-          },
+        const ticket = await this.getHelpdesk().createTicket(businessId, {
+          title: args.title,
+          description: args.description ?? undefined,
+          contactId: args.contactId,
+          priority: args.priority ?? 'NORMAL',
         });
         return { id: ticket.id, title: ticket.title, status: ticket.status };
       }
       case 'helpdesk_update_ticket': {
-        const updateData: Record<string, any> = {};
-        if (args.status !== undefined) updateData.status = args.status;
-        if (args.priority !== undefined) updateData.priority = args.priority;
-        if (args.assignedToId !== undefined) updateData.assignedToId = args.assignedToId;
-        const ticket = await this.prisma.client.supportTicket.update({
-          where: { id: args.ticketId, businessId },
-          data: updateData,
+        const ticket = await this.getHelpdesk().updateTicket(businessId, args.ticketId, {
+          status: args.status,
+          priority: args.priority,
+          assignedToId: args.assignedToId,
         });
         return { id: ticket.id, status: ticket.status };
       }
@@ -2949,37 +2853,27 @@ export class FlowOrchestratorService {
 
       // === PROJECT UPDATES ===
       case 'projects_update_task': {
-        const updateData: Record<string, any> = {};
-        if (args.title !== undefined) updateData.title = args.title;
-        if (args.dueDate !== undefined) updateData.dueDate = new Date(args.dueDate);
-        if (args.priority !== undefined) updateData.priority = args.priority;
-        if (args.isCompleted !== undefined) updateData.isCompleted = args.isCompleted;
-        const task = await this.prisma.client.projectTask.update({
-          where: { id: args.taskId, businessId },
-          data: updateData,
+        const task = await this.getProjects().updateTask(businessId, args.taskId, {
+          title: args.title,
+          dueDate: args.dueDate ? new Date(args.dueDate).toISOString() : undefined,
+          priority: args.priority,
+          isCompleted: args.isCompleted,
         });
         return { id: task.id, title: task.title };
       }
       case 'projects_delete_task': {
-        await this.prisma.client.projectTask.update({
-          where: { id: args.taskId, businessId },
-          data: { deletedAt: new Date() },
-        });
+        await this.getProjects().deleteTask(businessId, args.taskId);
         return { success: true, deletedId: args.taskId };
       }
 
       // === COMMERCE UPDATES ===
       case 'commerce_update_invoice': {
-        const updateData: Record<string, any> = {};
-        if (args.status !== undefined) {
-          updateData.status = args.status;
-          if (args.status === 'PAID') updateData.paidAt = new Date();
-        }
-        if (args.dueDate !== undefined) updateData.dueDate = new Date(args.dueDate);
-        if (args.notes !== undefined) updateData.notes = args.notes;
-        const invoice = await this.prisma.client.invoice.update({
-          where: { id: args.invoiceId, businessId },
-          data: updateData,
+        const invoice = await this.getCommerce().updateInvoice({
+          invoiceId: args.invoiceId,
+          businessId,
+          status: args.status,
+          dueDate: args.dueDate ? new Date(args.dueDate) : undefined,
+          notes: args.notes ?? undefined,
         });
         return { id: invoice.id, status: invoice.status };
       }
@@ -3000,48 +2894,41 @@ export class FlowOrchestratorService {
         });
         if (!invoice) throw new Error('Invoice not found');
         if (!invoice.contact?.email) throw new Error('Contact has no email address');
-        const updated = await this.prisma.client.invoice.update({
-          where: { id: args.invoiceId },
-          data: { status: 'SENT', sentAt: new Date() },
+        const updated = await this.getCommerce().updateInvoiceStatus({
+          invoiceId: args.invoiceId,
+          status: 'SENT',
+          actorId: 'key_ai',
+          sentAt: new Date(),
         });
         // Log activity
-        await this.prisma.client.activity.create({
-          data: {
-            businessId,
-            module: 'commerce',
-            action: 'invoice_sent',
-            entityType: 'invoice',
-            entityId: invoice.id,
-            title: `Invoice ${invoice.invoiceNumber} sent to ${invoice.contact.firstName ?? ''} ${invoice.contact.lastName ?? ''}`,
-            tone: 'success',
-          },
+        await this.getActivityLog().createActivity({
+          businessId,
+          module: 'commerce',
+          action: 'invoice_sent',
+          entityType: 'invoice',
+          entityId: invoice.id,
+          title: `Invoice ${invoice.invoiceNumber} sent to ${invoice.contact.firstName ?? ''} ${invoice.contact.lastName ?? ''}`,
+          tone: 'success',
         });
         return { id: updated.id, status: updated.status };
       }
 
       // === MARKETING/SOCIAL UPDATES ===
       case 'marketing_update_campaign': {
-        const updateData: Record<string, any> = {};
-        if (args.name !== undefined) updateData.name = args.name;
-        if (args.subject !== undefined) updateData.subject = args.subject;
-        if (args.body !== undefined) updateData.body = args.body;
-        if (args.scheduledAt !== undefined) updateData.scheduledAt = new Date(args.scheduledAt);
-        const campaign = await this.prisma.client.emailCampaign.update({
-          where: { id: args.campaignId, businessId },
-          data: updateData,
+        const campaign = await this.getEmailMarketing().updateCampaign({
+          businessId,
+          id: args.campaignId,
+          name: args.name,
+          subject: args.subject,
+          body: args.body,
+          scheduledAt: args.scheduledAt ? new Date(args.scheduledAt).toISOString() : undefined,
         });
         return { id: campaign.id, name: campaign.name };
       }
       case 'social_update_post': {
-        const updateData: Record<string, any> = {};
-        if (args.content !== undefined) updateData.content = args.content;
-        if (args.scheduledFor !== undefined) {
-          updateData.scheduledAt = new Date(args.scheduledFor);
-          updateData.status = 'SCHEDULED';
-        }
-        const post = await this.prisma.client.socialPost.update({
-          where: { id: args.postId, businessId },
-          data: updateData,
+        const post = await this.getSocial().updatePost(businessId, args.postId, {
+          content: args.content,
+          scheduledAt: args.scheduledFor ? new Date(args.scheduledFor).toISOString() : undefined,
         });
         return { id: post.id, status: post.status };
       }

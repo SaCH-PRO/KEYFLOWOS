@@ -8,6 +8,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { RedisService } from '../../core/redis/redis.service';
 import { ModelGatewayService } from '../ai/model-gateway.service';
 import { AiUsageService } from '../ai/ai-usage.service';
+import { UnifiedMemoryWriterService } from './unified-memory-writer.service';
 import OpenAI from 'openai';
 
 // ---------------------------------------------------------------------------
@@ -120,6 +121,7 @@ export class KeyCortexDocumentService {
     private readonly redis: RedisService,
     private readonly gateway: ModelGatewayService,
     private readonly aiUsage: AiUsageService,
+    private readonly memoryWriter: UnifiedMemoryWriterService,
   ) {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
@@ -565,27 +567,13 @@ Respond in this exact shape:
       rawFields: extraction.rawFields ?? [],
     };
 
-    // Store extraction result
-    await (this.prisma.client as any).aiMemory.upsert({
-      where: {
-        businessId_category_key: {
-          businessId,
-          category: 'document_extraction',
-          key: documentId,
-        },
-      },
-      create: {
-        businessId,
-        category: 'document_extraction',
-        key: documentId,
-        value: JSON.stringify(result),
-        source: 'key_document_service',
-      },
-      update: {
-        value: JSON.stringify(result),
-        source: 'key_document_service',
-      },
-    });
+    // Store extraction result in the canonical memory store
+    await this.memoryWriter.storeDocumentExtraction(
+      businessId,
+      documentId,
+      JSON.stringify(result),
+      { source: 'key_document_service' },
+    );
 
     this.logger.debug(
       `Data extracted from ${documentId}: ${Object.keys(result.data).length} fields`,
@@ -745,14 +733,12 @@ Respond in this exact shape:
     // Delete all vector embeddings for this document
     await this.deleteVectorEmbeddings(documentId);
 
-    // Delete extraction results from aiMemory
-    await (this.prisma.client as any).aiMemory.deleteMany({
-      where: {
-        businessId,
-        category: 'document_extraction',
-        key: documentId,
-      },
-    });
+    // Delete extraction results from the canonical memory store
+    await this.memoryWriter.remove(
+      businessId,
+      'document_extraction',
+      documentId,
+    );
 
     // Delete the document record
     await (this.prisma.client as any).keyDocument.delete({

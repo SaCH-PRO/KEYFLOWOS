@@ -31,6 +31,10 @@ export const KEY_ACTION_SOURCE_TYPES: KeyActionSourceType[] = [
   'AI_PLAN',
   'KEY_CORTEX',
   'MANUAL',
+  'AI_LEGACY',
+  'HUMAN_WORKFLOW',
+  'PLAN_STEP',
+  'AUTONOMY_REVIEW',
 ];
 
 export type KeyActionSourceType =
@@ -40,7 +44,11 @@ export type KeyActionSourceType =
   | 'GENOME_EVOLUTION'
   | 'AI_PLAN'
   | 'KEY_CORTEX'
-  | 'MANUAL';
+  | 'MANUAL'
+  | 'AI_LEGACY'
+  | 'HUMAN_WORKFLOW'
+  | 'PLAN_STEP'
+  | 'AUTONOMY_REVIEW';
 
 export const KEY_EXECUTABLE_ACTION_TYPES: KeyExecutableActionType[] = [
   'OPEN_GENOME',
@@ -92,8 +100,27 @@ export interface KeyActionProposalData {
   evidence: string[];
   actionType: KeyExecutableActionType;
   payload: Record<string, unknown>;
+
+  // Phase 0 unified governance fields
+  toolName?: string | null;
+  module?: string | null;
+  description?: string | null;
+  expectedBenefit?: string | null;
+  risks?: string | null;
+  inputPayload?: Record<string, unknown> | null;
+  affectedEntities?: Record<string, unknown> | null;
+  resolvedByUserId?: string | null;
+  resolution?: Record<string, unknown> | null;
+  multiStepParentId?: string | null;
+
+  // Identity thread
   planId?: string | null;
   planStepId?: string | null;
+  correlationId?: string | null;
+  commandId?: string | null;
+  sessionId?: string | null;
+  businessEventId?: string | null;
+
   riskLevel: KeyActionRiskLevel;
   status: KeyActionProposalStatus;
   requiresApproval: boolean;
@@ -120,8 +147,26 @@ export interface CreateKeyActionProposalInput {
   evidence?: string[];
   actionType: KeyExecutableActionType;
   payload?: Record<string, unknown>;
+
+  // Phase 0 unified governance fields
+  toolName?: string;
+  module?: string;
+  description?: string;
+  expectedBenefit?: string;
+  risks?: string;
+  inputPayload?: Record<string, unknown>;
+  affectedEntities?: Record<string, unknown>;
+  resolvedByUserId?: string;
+  resolution?: Record<string, unknown>;
+  multiStepParentId?: string;
+
+  // Identity thread
   planId?: string;
   planStepId?: string;
+  correlationId?: string;
+  commandId?: string;
+  sessionId?: string;
+  businessEventId?: string;
 }
 
 export interface ListKeyActionProposalsQuery {

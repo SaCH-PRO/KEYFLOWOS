@@ -23,9 +23,11 @@ import { CommandModule } from '../command/command.module';
 import { CrmModule } from '../crm/crm.module';
 import { TaskAssignmentModule } from '../task-assignments/task-assignment.module';
 import { TimelineModule } from '../timeline/timeline.module';
+import { KeyInboxModule } from '../key-inbox/key-inbox.module';
+import { PrismaModule } from '../../core/prisma/prisma.module';
 
 @Module({
-  imports: [AiModule, CommandModule, CrmModule, TaskAssignmentModule, TimelineModule],
+  imports: [AiModule, CommandModule, CrmModule, TaskAssignmentModule, TimelineModule, KeyInboxModule, PrismaModule],
   controllers: [
     CommunicationsController,
     InboundCommunicationsController,

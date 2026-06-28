@@ -45,6 +45,7 @@ import { KeyCortexConnectorService } from './key-cortex-connector.service';
 import { GenomeAutonomyGateService } from '../business-genome/key-genome/genome-autonomy-gate.service';
 import { AutonomyOrchestratorService } from '../key-autonomy/autonomy-orchestrator.service';
 import { KeyActionProposalService } from '../key-autonomy/key-action-proposal.service';
+import { KeyCortexApprovalOrchestratorService } from './key-cortex-approval-orchestrator.service';
 
 // ─── Constants ──────────────────────────────────────────────────────────────────
 const EXECUTION_TIMEOUT_MS = 30000;
@@ -154,6 +155,8 @@ export class KeyCortexExecutorService {
     private readonly autonomyOrchestrator?: AutonomyOrchestratorService,
     @Optional()
     private readonly proposalService?: KeyActionProposalService,
+    @Optional()
+    private readonly approvalOrchestrator?: KeyCortexApprovalOrchestratorService,
   ) {
     // Start periodic cleanup of stale pending approvals (Fix 2)
     this.approvalCleanupInterval = setInterval(() => {
@@ -597,8 +600,36 @@ export class KeyCortexExecutorService {
 
     let proposalId = uuidv4();
 
-    // Persist as a canonical KeyActionProposal when available
-    if (this.proposalService) {
+    // Persist as a canonical KeyActionProposal via the unified orchestrator
+    if (this.approvalOrchestrator) {
+      try {
+        const proposal = await this.approvalOrchestrator.propose({
+          businessId: command.businessId,
+          userId: command.userId,
+          sourceType: 'KEY_CORTEX',
+          sourceId: command.correlationId,
+          actionType: 'EXECUTE_TOOL',
+          module: command.module,
+          toolName: command.action,
+          title: this.summarizeCommandForNotification(command),
+          summary: `Pending approval for ${command.module}.${command.action}`,
+          rationale: `Risk tier requires human approval`,
+          parameters: {
+            toolName: `${command.module}.${command.action}`,
+            parameters: command.parameters,
+            commandJson: command,
+          },
+          correlationId,
+        });
+        proposalId = proposal.id;
+      } catch (dbErr) {
+        this.logger.error(
+          `[executeWithApproval] Failed to persist approval proposal: ${(dbErr as Error).message}`,
+        );
+        // Continue with in-memory tracking
+      }
+    } else if (this.proposalService) {
+      // Legacy fallback until module wiring is updated
       try {
         const proposal = await this.proposalService.create(
           command.businessId,
@@ -1364,6 +1395,48 @@ export class KeyCortexExecutorService {
    * Gateway alias: execute the command attached to an already-approved request.
    */
   async executeApprovedAction(approvalId: string): Promise<ExecutionRecord> {
+    const start = Date.now();
+
+    if (this.approvalOrchestrator) {
+      try {
+        const before = await this.proposalService?.getById(approvalId);
+        const command = (before?.payload?.commandJson ?? {
+          businessId: before?.businessId,
+          userId: before?.userId,
+        }) as ConnectorCommand;
+
+        const executed = await this.approvalOrchestrator.executeApproved({
+          businessId: before?.businessId ?? command.businessId,
+          proposalId: approvalId,
+          userId: before?.approvedBy ?? undefined,
+        });
+
+        const success = executed.status === 'EXECUTED';
+        const finishedAt = new Date();
+        return {
+          id: approvalId,
+          command,
+          result: {
+            success,
+            data: success ? (executed.executionResult ?? {}) : undefined,
+            error: executed.failureReason ?? undefined,
+            executionTimeMs: finishedAt.getTime() - start,
+            command,
+          },
+          startedAt: new Date(start),
+          finishedAt,
+          durationMs: finishedAt.getTime() - start,
+          traceId: approvalId,
+          rolledBack: false,
+        };
+      } catch (err: unknown) {
+        this.logger.error(
+          `[executeApprovedAction] Failed to execute proposal ${approvalId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        throw err;
+      }
+    }
+
     if (this.proposalService) {
       try {
         const proposal = await this.proposalService.getById(approvalId);
@@ -1374,12 +1447,15 @@ export class KeyCortexExecutorService {
           proposal.businessId,
           approvalId,
           proposal.approvedBy ?? undefined,
+          true,
+          true,
         );
         const command = (proposal.payload?.commandJson ?? {
           businessId: proposal.businessId,
           userId: proposal.userId,
         }) as ConnectorCommand;
         const success = executed.status === 'EXECUTED';
+        const finishedAt = new Date();
         return {
           id: approvalId,
           command,
@@ -1387,12 +1463,12 @@ export class KeyCortexExecutorService {
             success,
             data: success ? (executed.executionResult ?? {}) : undefined,
             error: executed.failureReason ?? undefined,
-            executionTimeMs: 0,
+            executionTimeMs: finishedAt.getTime() - start,
             command,
           },
-          startedAt: new Date(),
-          finishedAt: new Date(),
-          durationMs: 0,
+          startedAt: new Date(start),
+          finishedAt,
+          durationMs: finishedAt.getTime() - start,
           traceId: approvalId,
           rolledBack: false,
         };
@@ -1400,6 +1476,7 @@ export class KeyCortexExecutorService {
         this.logger.error(
           `[executeApprovedAction] Failed to execute proposal ${approvalId}: ${err instanceof Error ? err.message : String(err)}`,
         );
+        throw err;
       }
     }
 

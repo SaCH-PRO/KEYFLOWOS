@@ -7,12 +7,16 @@ import {
   Post,
   Query,
   Req,
+  UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard } from '../../core/auth/module-scope.guard';
 import { KeyActionProposalService } from './key-action-proposal.service';
+import {
+  KeyCortexApprovalOrchestratorService,
+} from '../key-cortex/key-cortex-approval-orchestrator.service';
 import { CreateKeyActionProposalDto } from './dto/create-key-action-proposal.dto';
 import { RejectKeyActionProposalDto } from './dto/reject-key-action-proposal.dto';
 import { ExecuteKeyActionProposalDto } from './dto/execute-key-action-proposal.dto';
@@ -22,6 +26,7 @@ import { ExecuteKeyActionProposalDto } from './dto/execute-key-action-proposal.d
 export class KeyActionProposalController {
   constructor(
     @Inject(KeyActionProposalService) private readonly proposals: KeyActionProposalService,
+    @Inject(KeyCortexApprovalOrchestratorService) private readonly orchestrator: KeyCortexApprovalOrchestratorService,
   ) {}
 
   private userId(req: { user?: { id?: string } }): string | undefined {
@@ -44,7 +49,19 @@ export class KeyActionProposalController {
     @Body() body: CreateKeyActionProposalDto,
     @Req() req: { user?: { id?: string } },
   ) {
-    return this.proposals.create(businessId, body, this.userId(req));
+    return this.orchestrator.propose({
+      businessId,
+      userId: this.userId(req),
+      sourceType: body.sourceType,
+      sourceId: body.sourceId,
+      sourceMode: body.sourceMode,
+      actionType: body.actionType,
+      title: body.title,
+      summary: body.summary,
+      rationale: body.rationale,
+      evidence: body.evidence,
+      parameters: body.payload,
+    });
   }
 
   @Get('proposals/:proposalId')
@@ -61,7 +78,11 @@ export class KeyActionProposalController {
     @Param('proposalId') proposalId: string,
     @Req() req: { user?: { id?: string } },
   ) {
-    return this.proposals.approve(businessId, proposalId, this.userId(req));
+    const userId = this.userId(req);
+    if (!userId) {
+      throw new UnauthorizedException('Authenticated user required to approve proposals');
+    }
+    return this.orchestrator.approve({ businessId, proposalId, userId });
   }
 
   @Post('proposals/:proposalId/reject')
@@ -71,7 +92,11 @@ export class KeyActionProposalController {
     @Body() body: RejectKeyActionProposalDto,
     @Req() req: { user?: { id?: string } },
   ) {
-    return this.proposals.reject(businessId, proposalId, this.userId(req), body.reason);
+    const userId = this.userId(req);
+    if (!userId) {
+      throw new UnauthorizedException('Authenticated user required to reject proposals');
+    }
+    return this.orchestrator.reject({ businessId, proposalId, userId, reason: body.reason });
   }
 
   @Post('proposals/:proposalId/cancel')
@@ -86,15 +111,13 @@ export class KeyActionProposalController {
   execute(
     @Param('businessId') businessId: string,
     @Param('proposalId') proposalId: string,
-    @Body() body: ExecuteKeyActionProposalDto,
+    @Body() _body: ExecuteKeyActionProposalDto,
     @Req() req: { user?: { id?: string } },
   ) {
-    return this.proposals.execute(
+    return this.orchestrator.executeApproved({
       businessId,
       proposalId,
-      this.userId(req),
-      body.confirm,
-      body.confirmGenomeRisk,
-    );
+      userId: this.userId(req),
+    });
   }
 }

@@ -372,8 +372,13 @@ model Business {
   aiMemories          AiMemory[]
   aiMemoryEmbeddings  AiMemoryEmbedding[]
   aiPlans             AiPlan[]
-  autopilotSettings   AutopilotSettings?
-  agentTriggers       AgentTrigger[]
+  autopilotSettings         AutopilotSettings?
+  businessAutonomyProfile   BusinessAutonomyProfile?
+  autonomyDailySpends       AutonomyDailySpend[]
+  autonomyDailyActionCounts AutonomyDailyActionCount[]
+  idempotencyKeys           IdempotencyKey[]
+  sagaExecutions            SagaExecution[]
+  agentTriggers             AgentTrigger[]
   journeyInstances    JourneyInstance[]
   conversationThreads ConversationThread[]
   businessGoals       BusinessGoal[]
@@ -1561,8 +1566,25 @@ model KeyActionProposal {
   actionType String  @map("action_type")
   payload    Json    @default("{}")
 
+  // Phase 0: absorb AiApprovalItem / ApprovalRequest fields for unified governance
+  toolName         String?   @map("tool_name")
+  module           String?
+  description      String?
+  expectedBenefit  String?   @map("expected_benefit")
+  risks            String?
+  inputPayload     Json?     @map("input_payload")
+  affectedEntities Json?     @map("affected_entities")
+  resolvedByUserId String?   @map("resolved_by_user_id")
+  resolution       Json?
+  multiStepParentId String?  @map("multi_step_parent_id")
+
+  // Phase 3 Skeleton + Phase 0: full identity/audit lineage
   planId     String? @map("plan_id")
   planStepId String? @map("plan_step_id")
+  correlationId String? @map("correlation_id")
+  commandId     String? @map("command_id")
+  sessionId     String? @map("session_id")
+  businessEventId String? @map("business_event_id")
 
   riskLevel String @default("LOW") @map("risk_level")
   status    String @default("PENDING")
@@ -1586,8 +1608,12 @@ model KeyActionProposal {
   @@index([businessId, status])
   @@index([businessId, sourceType])
   @@index([businessId, actionType])
+  @@index([businessId, toolName])
+  @@index([businessId, correlationId])
+  @@index([businessId, commandId])
   @@index([planId])
   @@index([planStepId])
+  @@index([multiStepParentId])
   @@map("key_action_proposals")
 }
 
@@ -6848,10 +6874,14 @@ model AiApprovalItem {
   // Phase 3 Skeleton: identity thread
   correlationId String? @map("correlation_id")
 
+  // Phase 0: migration pointer to canonical KeyActionProposal
+  migratedToProposalId String? @map("migrated_to_proposal_id")
+
   @@index([businessId, status])
   @@index([businessId, createdAt])
   @@index([businessId, correlationId])
   @@index([planId])
+  @@index([migratedToProposalId])
   @@map("ai_approval_items")
 }
 
@@ -6879,6 +6909,132 @@ model AutopilotSettings {
 
   @@index([businessId])
   @@map("autopilot_settings")
+}
+
+// Phase 0: Global autonomy kill switch and safety limits.
+// BusinessAutonomyProfile is the canonical source for whether KEY may act
+// autonomously for a business and what daily boundaries apply.
+model BusinessAutonomyProfile {
+  id                    String   @id @default(cuid())
+  businessId            String   @unique @map("business_id")
+  business              Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  // Global kill switch — when true KEY refuses all autonomous tool execution.
+  globalKillSwitch      Boolean  @default(false) @map("global_kill_switch")
+
+  // Daily safety limits (all autonomous executions are counted against these).
+  maxDailyAutoActions   Int      @default(10) @map("max_daily_auto_actions")
+  maxDailySpendTtd      Float    @default(0) @map("max_daily_spend_ttd") // 0 = unlimited
+
+  // Notification / escalation
+  notifyOnBlock         Boolean  @default(true) @map("notify_on_block")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId])
+  @@map("business_autonomy_profiles")
+}
+
+// Daily spend accumulator tracked by the autonomy safety service.
+model AutonomyDailySpend {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  date       DateTime @db.Date @map("date")
+  amountTtd  Float    @default(0) @map("amount_ttd")
+  currency   String   @default("TTD") @map("currency")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([businessId, date, currency])
+  @@index([businessId, date])
+  @@map("autonomy_daily_spends")
+}
+
+// Daily action-count accumulator tracked by the autonomy safety service.
+model AutonomyDailyActionCount {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  date       DateTime @db.Date @map("date")
+  actionType String   @map("action_type") // e.g. 'auto', 'approved', or a specific tool category
+  count      Int      @default(0) @map("count")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([businessId, date, actionType])
+  @@index([businessId, date])
+  @@map("autonomy_daily_action_counts")
+}
+
+// Phase 0: Idempotency key registry. Prevents duplicate autonomous actions
+// and allows safe retries with deterministic responses.
+model IdempotencyKey {
+  id             String   @id @default(cuid())
+  businessId     String   @map("business_id")
+  business       Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  idempotencyKey String   @map("idempotency_key")
+  status         String   // pending | completed | failed
+  requestHash    String?  @map("request_hash")
+  response       Json?
+  error          String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([businessId, idempotencyKey])
+  @@index([businessId, idempotencyKey])
+  @@map("idempotency_keys")
+}
+
+// Phase 0: Saga execution log for multi-step autonomous operations.
+model SagaExecution {
+  id            String    @id @default(cuid())
+  businessId    String    @map("business_id")
+  business      Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  sagaType      String    @map("saga_type")
+  status        String    // running | completed | failed | compensated
+  correlationId String?   @map("correlation_id")
+  commandId     String?   @map("command_id")
+  sessionId     String?   @map("session_id")
+
+  createdAt     DateTime  @default(now()) @map("created_at")
+  completedAt   DateTime? @map("completed_at")
+
+  steps SagaStep[]
+
+  @@index([businessId, status])
+  @@index([correlationId])
+  @@map("saga_executions")
+}
+
+// Phase 0: Individual step inside a saga, with optional compensation action.
+model SagaStep {
+  id              String        @id @default(cuid())
+  sagaId          String        @map("saga_id")
+  saga            SagaExecution @relation(fields: [sagaId], references: [id], onDelete: Cascade)
+
+  stepIndex       Int           @map("step_index")
+  stepName        String        @map("step_name")
+  status          String        // pending | completed | failed | compensated
+  input           Json?
+  output          Json?
+  error           String?
+  compensationAction Json?      @map("compensation_action")
+  compensationResult Json?      @map("compensation_result")
+
+  createdAt       DateTime      @default(now()) @map("created_at")
+  completedAt     DateTime?     @map("completed_at")
+
+  @@index([sagaId, stepIndex])
+  @@map("saga_steps")
 }
 
 // L4 Manager — delegated authority for tier-4 autopilot actions
@@ -9640,9 +9796,13 @@ model ApprovalRequest {
 
   steps ApprovalStep[]
 
+  // Phase 0: migration pointer to canonical KeyActionProposal
+  migratedToProposalId String? @map("migrated_to_proposal_id")
+
   @@index([businessId, status])
   @@index([businessId, requestType])
   @@index([businessId, requesterId])
+  @@index([migratedToProposalId])
   @@map("approval_requests")
 }
 
@@ -11188,10 +11348,12 @@ model CortexActionLog {
   userId        String?  @map("user_id")
   commandId     String?  @map("command_id")
   correlationId String?  @map("correlation_id")
+  proposalId    String?  @map("proposal_id")
 
   @@index([sessionId, createdAt])
   @@index([businessId, createdAt])
   @@index([businessId, correlationId])
+  @@index([businessId, proposalId])
   @@map("cortex_action_logs")
 }
 

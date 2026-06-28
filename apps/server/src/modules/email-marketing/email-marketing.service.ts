@@ -497,6 +497,49 @@ export class EmailMarketingService {
     return result;
   }
 
+  /**
+   * Lightweight campaign scheduler used by AI tool loop. Mirrors the legacy
+   * direct-write semantics: validates the date and flips status to SCHEDULED.
+   */
+  async queueCampaign(businessId: string, id: string, scheduledAt: string) {
+    const campaign = await this.prisma.client.emailCampaign.findFirst({
+      where: { id, businessId },
+    });
+    if (!campaign) throw new Error('Campaign not found');
+    if (campaign.status !== 'DRAFT') throw new Error(`Campaign must be in DRAFT status to queue (current: ${campaign.status})`);
+
+    const scheduleDate = new Date(scheduledAt);
+    if (Number.isNaN(scheduleDate.getTime())) throw new Error('Invalid scheduledAt date format');
+
+    const result = await this.prisma.client.emailCampaign.update({
+      where: { id, businessId },
+      data: { status: 'SCHEDULED', scheduledAt: scheduleDate },
+    });
+    this.events.emit('email_campaign.scheduled', { campaign: result, businessId });
+    this.invalidateStatsCache(businessId);
+    return result;
+  }
+
+  /**
+   * Mark a campaign as sent without delivering emails. Used by AI tool loop
+   * where the original direct-write only flipped the status column.
+   */
+  async markCampaignSent(businessId: string, id: string) {
+    const campaign = await this.prisma.client.emailCampaign.findFirst({
+      where: { id, businessId, deletedAt: null },
+    });
+    if (!campaign) throw new Error('Campaign not found');
+    if (campaign.status === 'SENT') throw new Error('Campaign has already been sent');
+
+    const result = await this.prisma.client.emailCampaign.update({
+      where: { id, businessId },
+      data: { status: 'SENT', sentAt: new Date() },
+    });
+    this.events.emit('email_campaign.sent', { campaign: result, businessId, recipientCount: 0 });
+    this.invalidateStatsCache(businessId);
+    return result;
+  }
+
   async cancelSchedule(businessId: string, id: string) {
     const campaign = await this.prisma.client.emailCampaign.findFirst({
       where: { id, businessId, deletedAt: null, status: 'SCHEDULED' },

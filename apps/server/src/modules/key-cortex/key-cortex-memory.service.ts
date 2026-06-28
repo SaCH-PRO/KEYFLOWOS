@@ -1,15 +1,16 @@
 /**
- * KEY Cortex Memory Service — Phase 18C (Foundation)
+ * KEY Cortex Memory Service — Phase 0.9 (Memory Unification)
  * Persistent Memory + Personalization
  *
  * Stores and retrieves multi-level business memory: preferences, facts,
- * decisions, failures, successes. Prisma is the source of truth; Redis is
- * used only as a query cache.
+ * decisions, failures, successes. AiMemory is the canonical write path;
+ * Redis remains a query cache.
  */
 
 import { Injectable, Logger } from '@nestjs/common';
-import { PrismaService } from '../../core/prisma/prisma.service';
 import { RedisService } from '../../core/redis/redis.service';
+import { AiMemoryService, MemoryEntry } from '../ai/ai-memory.service';
+import { UnifiedMemoryWriterService } from './unified-memory-writer.service';
 import {
   CortexMemory,
   CortexMemoryQuery,
@@ -30,6 +31,7 @@ const ALL_MEMORY_TYPES: MemoryType[] = [
   'common_workflow',
   'current_goal',
   'long_term_strategy',
+  'document_extraction',
 ];
 
 @Injectable()
@@ -37,7 +39,8 @@ export class KeyCortexMemoryService {
   private readonly logger = new Logger(KeyCortexMemoryService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly aiMemory: AiMemoryService,
+    private readonly writer: UnifiedMemoryWriterService,
     private readonly redis: RedisService,
   ) {}
 
@@ -92,23 +95,10 @@ export class KeyCortexMemoryService {
     value: string,
     opts?: { userId?: string; confidence?: number; source?: CortexMemory['source'] },
   ): Promise<CortexMemory> {
-    const memory = await this.prisma.client.keyCortexMemory.create({
-      data: {
-        businessId,
-        userId: opts?.userId ?? null,
-        type,
-        key,
-        value,
-        source: opts?.source ?? 'inferred',
-        confidence: opts?.confidence ?? 0.8,
-        accessCount: 1,
-        lastAccessedAt: new Date(),
-      },
-    });
-
+    const memory = await this.writer.store(businessId, type, key, value, opts);
     await this.invalidateCache(businessId, opts?.userId);
     this.logger.debug(`[store] ${type}:${key} for business=${businessId}`);
-    return this.mapRecord(memory);
+    return memory;
   }
 
   async storePreference(
@@ -205,48 +195,25 @@ export class KeyCortexMemoryService {
         ? new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
         : undefined;
 
-    const records = await this.prisma.client.keyCortexMemory.findMany({
-      where: {
-        businessId: query.businessId,
-        ...(query.userId ? { userId: query.userId } : {}),
-        ...(query.memoryTypes && query.memoryTypes.length > 0
-          ? { type: { in: query.memoryTypes as string[] } }
-          : {}),
-        ...(since ? { createdAt: { gte: since } } : {}),
-      },
-      orderBy: { createdAt: 'desc' },
-      take: query.limit ?? 50,
-    });
+    const allRecords = await this.aiMemory.getAll(query.businessId);
 
-    return records.map((r) => this.mapRecord(r));
+    let records = allRecords;
+    if (query.memoryTypes && query.memoryTypes.length > 0) {
+      const allowed = new Set(query.memoryTypes as string[]);
+      records = records.filter((r) => allowed.has(r.category));
+    }
+    if (since) {
+      records = records.filter((r) => new Date(r.createdAt) >= since);
+    }
+
+    records.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    const limited = records.slice(0, query.limit ?? 50);
+
+    return limited.map((r) => this.mapRecord(query.businessId, r));
   }
 
-  private mapRecord(record: {
-    id: string;
-    businessId: string;
-    userId: string | null;
-    type: string;
-    key: string;
-    value: string;
-    source: string;
-    confidence: number;
-    accessCount: number;
-    lastAccessedAt: Date;
-    createdAt: Date;
-  }): CortexMemory {
-    return {
-      id: record.id,
-      businessId: record.businessId,
-      userId: record.userId ?? undefined,
-      type: record.type as MemoryType,
-      key: record.key,
-      value: record.value,
-      source: record.source as CortexMemory['source'],
-      confidence: record.confidence,
-      accessCount: record.accessCount,
-      lastAccessedAt: record.lastAccessedAt,
-      createdAt: record.createdAt,
-    };
+  private mapRecord(businessId: string, record: MemoryEntry): CortexMemory {
+    return this.writer.mapEntry(businessId, record);
   }
 
   private async getCached(cacheKey: string): Promise<CortexMemory[] | null> {

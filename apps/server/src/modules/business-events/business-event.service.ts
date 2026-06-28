@@ -39,6 +39,9 @@ export class BusinessEventService {
           riskScore: input.riskScore ?? null,
           source: input.source,
           metadata: input.metadata ?? undefined,
+          sessionId: input.sessionId ?? null,
+          commandId: input.commandId ?? null,
+          correlationId: input.correlationId ?? null,
         },
       });
     } catch (err: any) {
