@@ -18,18 +18,20 @@ import {
 } from './key-cortex-connector.types';
 
 // ── KeyFlowOS module services (12 injected adapters) ──────────────────────────
-import { CrmService } from '../crm/crm.service';
-import { CommerceService } from '../commerce/commerce.service';
-import { BookingsService } from '../bookings/bookings.service';
 import { ContentService } from '../content/content.service';
-import { CommunicationsService } from '../communications/communications.service';
-import { FlowService } from '../flow/flow.service';
-import { AutopilotService } from '../autopilot/autopilot.service';
-import { TemporalFlowMemoryService } from '../temporal-flow/temporal-flow-memory.service';
-import { KeyInboxService } from '../key-inbox/key-inbox.service';
-import { NotificationsService } from '../notifications/notifications.service';
-import { ProjectsService } from '../projects/projects.service';
 import { ActivityLogService } from '../activity/activity.service';
+import {
+  CrmAdapterService,
+  CommerceAdapterService,
+  BookingsAdapterService,
+  FlowAdapterService,
+  AutopilotAdapterService,
+  TemporalAdapterService,
+  InboxAdapterService,
+  NotificationsAdapterService,
+  ProjectsAdapterService,
+  CommunicationsAdapterService,
+} from './adapters';
 
 @Injectable()
 export class KeyCortexConnectorService {
@@ -40,17 +42,17 @@ export class KeyCortexConnectorService {
   // ═══════════════════════════════════════════════════════════════════════════
 
   constructor(
-    private readonly crm: CrmService,
-    private readonly commerce: CommerceService,
-    private readonly bookings: BookingsService,
+    private readonly crm: CrmAdapterService,
+    private readonly commerce: CommerceAdapterService,
+    private readonly bookings: BookingsAdapterService,
     private readonly content: ContentService,
-    private readonly communications: CommunicationsService,
-    private readonly flow: FlowService,
-    private readonly autopilot: AutopilotService,
-    private readonly temporal: TemporalFlowMemoryService,
-    private readonly inbox: KeyInboxService,
-    private readonly notifications: NotificationsService,
-    private readonly projects: ProjectsService,
+    private readonly communications: CommunicationsAdapterService,
+    private readonly flow: FlowAdapterService,
+    private readonly autopilot: AutopilotAdapterService,
+    private readonly temporal: TemporalAdapterService,
+    private readonly inbox: InboxAdapterService,
+    private readonly notifications: NotificationsAdapterService,
+    private readonly projects: ProjectsAdapterService,
     private readonly activity: ActivityLogService,
   ) {}
 
@@ -2595,7 +2597,7 @@ export class KeyCortexConnectorService {
     const start = Date.now();
     switch (command.action) {
       case 'create_contact': {
-        const contact = await (this.crm as any).createContact({
+        const contact = await this.crm.createContact({
           businessId: command.businessId,
           firstName: command.parameters.firstName as string,
           lastName: command.parameters.lastName as string,
@@ -2609,14 +2611,14 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, contact);
       }
       case 'get_contact': {
-        const result = await (this.crm as any).contactDetail({
+        const result = await this.crm.contactDetail({
           businessId: command.businessId,
           contactId: command.parameters.contactId as string,
         });
         return this.ok(command, start, result.contact);
       }
       case 'update_contact': {
-        const updated = await (this.crm as any).updateContact({
+        const updated = await this.crm.updateContact({
           businessId: command.businessId,
           contactId: command.parameters.contactId as string,
           firstName: command.parameters.firstName as string,
@@ -2629,14 +2631,14 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, updated);
       }
       case 'delete_contact': {
-        await (this.crm as any).deleteContact({
+        await this.crm.deleteContact({
           businessId: command.businessId,
           contactId: command.parameters.contactId as string,
         });
         return this.ok(command, start, { deleted: true });
       }
       case 'list_contacts': {
-        const contacts = await (this.crm as any).listContacts({
+        const contacts = await this.crm.listContacts({
           businessId: command.businessId,
           status: command.parameters.status as string,
           tag: command.parameters.tag as string,
@@ -2647,7 +2649,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, contacts);
       }
       case 'add_task': {
-        const task = await (this.crm as any).addTask({
+        const task = await this.crm.addTask({
           businessId: command.businessId,
           contactId: command.parameters.contactId as string,
           title: command.parameters.title as string,
@@ -2659,7 +2661,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, task);
       }
       case 'complete_task': {
-        const completed = await (this.crm as any).completeTask({
+        const completed = await this.crm.completeTask({
           businessId: command.businessId,
           taskId: command.parameters.taskId as string,
           contactId: command.parameters.contactId as string,
@@ -2668,7 +2670,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, completed);
       }
       case 'add_note': {
-        const note = await (this.crm as any).addNote({
+        const note = await this.crm.addNote({
           businessId: command.businessId,
           contactId: command.parameters.contactId as string,
           body: command.parameters.body as string,
@@ -2677,7 +2679,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, note);
       }
       case 'add_tag': {
-        const tagged = await (this.crm as any).addTag({
+        const tagged = await this.crm.addTag({
           businessId: command.businessId,
           contactId: command.parameters.contactId as string,
           tags: command.parameters.tags as string[],
@@ -2685,7 +2687,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, tagged);
       }
       case 'update_status': {
-        const statusUpdated = await (this.crm as any).updateContactStatus({
+        const statusUpdated = await this.crm.updateContactStatus({
           businessId: command.businessId,
           contactId: command.parameters.contactId as string,
           status: command.parameters.status as string,
@@ -2694,7 +2696,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, statusUpdated);
       }
       case 'log_event': {
-        const event = await (this.crm as any).logEvent({
+        const event = await this.crm.logEvent({
           businessId: command.businessId,
           contactId: command.parameters.contactId as string,
           eventType: command.parameters.eventType as string,
@@ -2703,7 +2705,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, event);
       }
       case 'merge_contacts': {
-        const merged = await (this.crm as any).mergeContacts({
+        const merged = await this.crm.mergeContacts({
           businessId: command.businessId,
           masterContactId: command.parameters.masterContactId as string,
           duplicateContactId: command.parameters.duplicateContactId as string,
@@ -2723,7 +2725,7 @@ export class KeyCortexConnectorService {
     const start = Date.now();
     switch (command.action) {
       case 'create_invoice': {
-        const invoice = await (this.commerce as any).createInvoice({
+        const invoice = await this.commerce.createInvoice({
           businessId: command.businessId,
           contactId: command.parameters.contactId as string,
           items: command.parameters.items as Array<Record<string, unknown>>,
@@ -2735,7 +2737,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, invoice);
       }
       case 'send_invoice': {
-        const sent = await (this.commerce as any).sendInvoice({
+        const sent = await this.commerce.sendInvoice({
           businessId: command.businessId,
           invoiceId: command.parameters.invoiceId as string,
           message: command.parameters.message as string,
@@ -2743,14 +2745,14 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, sent);
       }
       case 'get_invoice': {
-        const invoice = await (this.commerce as any).getInvoice({
+        const invoice = await this.commerce.getInvoice({
           businessId: command.businessId,
           invoiceId: command.parameters.invoiceId as string,
         });
         return this.ok(command, start, invoice);
       }
       case 'list_invoices': {
-        const invoices = await (this.commerce as any).listInvoices({
+        const invoices = await this.commerce.listInvoices({
           businessId: command.businessId,
           contactId: command.parameters.contactId as string,
           status: command.parameters.status as string,
@@ -2759,7 +2761,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, invoices);
       }
       case 'create_product': {
-        const product = await (this.commerce as any).createProduct({
+        const product = await this.commerce.createProduct({
           businessId: command.businessId,
           name: command.parameters.name as string,
           description: command.parameters.description as string,
@@ -2770,7 +2772,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, product);
       }
       case 'get_product': {
-        const product = await (this.commerce as any).getProduct({
+        const product = await this.commerce.getProduct({
           businessId: command.businessId,
           productId: command.parameters.productId as string,
           sku: command.parameters.sku as string,
@@ -2778,7 +2780,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, product);
       }
       case 'create_order': {
-        const order = await (this.commerce as any).createOrder({
+        const order = await this.commerce.createOrder({
           businessId: command.businessId,
           contactId: command.parameters.contactId as string,
           items: command.parameters.items as Array<Record<string, unknown>>,
@@ -2787,7 +2789,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, order);
       }
       case 'process_payment': {
-        const payment = await (this.commerce as any).processPayment({
+        const payment = await this.commerce.processPayment({
           businessId: command.businessId,
           invoiceId: command.parameters.invoiceId as string,
           amount: command.parameters.amount as number,
@@ -2797,7 +2799,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, payment);
       }
       case 'create_quote': {
-        const quote = await (this.commerce as any).createQuote({
+        const quote = await this.commerce.createQuote({
           businessId: command.businessId,
           contactId: command.parameters.contactId as string,
           items: command.parameters.items as Array<Record<string, unknown>>,
@@ -2807,7 +2809,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, quote);
       }
       case 'send_quote': {
-        const sent = await (this.commerce as any).sendQuote({
+        const sent = await this.commerce.sendQuote({
           businessId: command.businessId,
           quoteId: command.parameters.quoteId as string,
           message: command.parameters.message as string,
@@ -2827,7 +2829,7 @@ export class KeyCortexConnectorService {
     const start = Date.now();
     switch (command.action) {
       case 'create_booking': {
-        const booking = await (this.bookings as any).createBooking({
+        const booking = await this.bookings.createBooking({
           businessId: command.businessId,
           contactId: command.parameters.contactId as string,
           serviceId: command.parameters.serviceId as string,
@@ -2839,7 +2841,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, booking);
       }
       case 'cancel_booking': {
-        const cancelled = await (this.bookings as any).cancelBooking({
+        const cancelled = await this.bookings.cancelBooking({
           businessId: command.businessId,
           bookingId: command.parameters.bookingId as string,
           reason: command.parameters.reason as string,
@@ -2848,7 +2850,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, cancelled);
       }
       case 'reschedule_booking': {
-        const rescheduled = await (this.bookings as any).rescheduleBooking({
+        const rescheduled = await this.bookings.rescheduleBooking({
           businessId: command.businessId,
           bookingId: command.parameters.bookingId as string,
           newStartTime: command.parameters.newStartTime as string,
@@ -2858,7 +2860,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, rescheduled);
       }
       case 'confirm_booking': {
-        const confirmed = await (this.bookings as any).confirmBooking({
+        const confirmed = await this.bookings.confirmBooking({
           businessId: command.businessId,
           bookingId: command.parameters.bookingId as string,
           sendConfirmation: (command.parameters.sendConfirmation as boolean) ?? true,
@@ -2866,7 +2868,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, confirmed);
       }
       case 'add_service': {
-        const service = await (this.bookings as any).addService({
+        const service = await this.bookings.addService({
           businessId: command.businessId,
           name: command.parameters.name as string,
           duration: command.parameters.duration as number,
@@ -2877,7 +2879,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, service);
       }
       case 'update_service': {
-        const updated = await (this.bookings as any).updateService({
+        const updated = await this.bookings.updateService({
           businessId: command.businessId,
           serviceId: command.parameters.serviceId as string,
           name: command.parameters.name as string,
@@ -2888,7 +2890,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, updated);
       }
       case 'set_availability': {
-        const avail = await (this.bookings as any).setAvailability({
+        const avail = await this.bookings.setAvailability({
           businessId: command.businessId,
           staffId: command.parameters.staffId as string,
           dayOfWeek: command.parameters.dayOfWeek as string,
@@ -2898,7 +2900,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, avail);
       }
       case 'block_time': {
-        const blocked = await (this.bookings as any).blockTime({
+        const blocked = await this.bookings.blockTime({
           businessId: command.businessId,
           staffId: command.parameters.staffId as string,
           startTime: command.parameters.startTime as string,
@@ -3111,7 +3113,7 @@ export class KeyCortexConnectorService {
     const start = Date.now();
     switch (command.action) {
       case 'create_automation': {
-        const flow = await (this.flow as any).createAutomation({
+        const flow = await this.flow.createAutomation({
           businessId: command.businessId,
           name: command.parameters.name as string,
           trigger: command.parameters.trigger as string,
@@ -3122,21 +3124,21 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, flow);
       }
       case 'enable_automation': {
-        const enabled = await (this.flow as any).enableAutomation({
+        const enabled = await this.flow.enableAutomation({
           businessId: command.businessId,
           flowId: command.parameters.flowId as string,
         });
         return this.ok(command, start, enabled);
       }
       case 'disable_automation': {
-        const disabled = await (this.flow as any).disableAutomation({
+        const disabled = await this.flow.disableAutomation({
           businessId: command.businessId,
           flowId: command.parameters.flowId as string,
         });
         return this.ok(command, start, disabled);
       }
       case 'trigger_flow': {
-        const triggered = await (this.flow as any).triggerFlow({
+        const triggered = await this.flow.triggerFlow({
           businessId: command.businessId,
           flowId: command.parameters.flowId as string,
           contactId: command.parameters.contactId as string,
@@ -3145,14 +3147,14 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, triggered);
       }
       case 'delete_automation': {
-        await (this.flow as any).deleteAutomation({
+        await this.flow.deleteAutomation({
           businessId: command.businessId,
           flowId: command.parameters.flowId as string,
         });
         return this.ok(command, start, { deleted: true });
       }
       case 'update_automation': {
-        const updated = await (this.flow as any).updateAutomation({
+        const updated = await this.flow.updateAutomation({
           businessId: command.businessId,
           flowId: command.parameters.flowId as string,
           name: command.parameters.name as string,
@@ -3163,7 +3165,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, updated);
       }
       case 'clone_automation': {
-        const cloned = await (this.flow as any).cloneAutomation({
+        const cloned = await this.flow.cloneAutomation({
           businessId: command.businessId,
           flowId: command.parameters.flowId as string,
           newName: command.parameters.newName as string,
@@ -3171,7 +3173,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, cloned);
       }
       case 'run_test': {
-        const testResult = await (this.flow as any).runTest({
+        const testResult = await this.flow.runTest({
           businessId: command.businessId,
           flowId: command.parameters.flowId as string,
           contactId: command.parameters.contactId as string,
@@ -3191,7 +3193,7 @@ export class KeyCortexConnectorService {
     const start = Date.now();
     switch (command.action) {
       case 'get_tasks': {
-        const tasks = await (this.autopilot as any).getTasks({
+        const tasks = await this.autopilot.getTasks({
           businessId: command.businessId,
           status: command.parameters.status as string,
           assignedTo: command.parameters.assignedTo as string,
@@ -3200,7 +3202,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, tasks);
       }
       case 'create_task': {
-        const task = await (this.autopilot as any).createTask({
+        const task = await this.autopilot.createTask({
           businessId: command.businessId,
           title: command.parameters.title as string,
           description: command.parameters.description as string,
@@ -3212,7 +3214,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, task);
       }
       case 'approve_task': {
-        const approved = await (this.autopilot as any).approveTask({
+        const approved = await this.autopilot.approveTask({
           businessId: command.businessId,
           taskId: command.parameters.taskId as string,
           notes: command.parameters.notes as string,
@@ -3220,7 +3222,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, approved);
       }
       case 'reject_task': {
-        const rejected = await (this.autopilot as any).rejectTask({
+        const rejected = await this.autopilot.rejectTask({
           businessId: command.businessId,
           taskId: command.parameters.taskId as string,
           reason: command.parameters.reason as string,
@@ -3228,21 +3230,21 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, rejected);
       }
       case 'enable_loop': {
-        const enabled = await (this.autopilot as any).enableLoop({
+        const enabled = await this.autopilot.enableLoop({
           businessId: command.businessId,
           loopId: command.parameters.loopId as string,
         });
         return this.ok(command, start, enabled);
       }
       case 'disable_loop': {
-        const disabled = await (this.autopilot as any).disableLoop({
+        const disabled = await this.autopilot.disableLoop({
           businessId: command.businessId,
           loopId: command.parameters.loopId as string,
         });
         return this.ok(command, start, disabled);
       }
       case 'complete_task': {
-        const completed = await (this.autopilot as any).completeTask({
+        const completed = await this.autopilot.completeTask({
           businessId: command.businessId,
           taskId: command.parameters.taskId as string,
           outcome: command.parameters.outcome as string,
@@ -3250,7 +3252,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, completed);
       }
       case 'create_loop': {
-        const loop = await (this.autopilot as any).createLoop({
+        const loop = await this.autopilot.createLoop({
           businessId: command.businessId,
           name: command.parameters.name as string,
           frequency: command.parameters.frequency as string,
@@ -3273,7 +3275,7 @@ export class KeyCortexConnectorService {
     const start = Date.now();
     switch (command.action) {
       case 'store_memory': {
-        const memory = await (this.temporal as any).storeMemory({
+        const memory = await this.temporal.storeMemory({
           businessId: command.businessId,
           key: command.parameters.key as string,
           value: command.parameters.value as Record<string, unknown>,
@@ -3284,21 +3286,21 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, memory);
       }
       case 'recall_memory': {
-        const memory = await (this.temporal as any).recallMemory({
+        const memory = await this.temporal.recallMemory({
           businessId: command.businessId,
           key: command.parameters.key as string,
         });
         return this.ok(command, start, memory);
       }
       case 'delete_memory': {
-        await (this.temporal as any).deleteMemory({
+        await this.temporal.deleteMemory({
           businessId: command.businessId,
           memoryId: command.parameters.memoryId as string,
         });
         return this.ok(command, start, { deleted: true });
       }
       case 'update_memory': {
-        const updated = await (this.temporal as any).updateMemory({
+        const updated = await this.temporal.updateMemory({
           businessId: command.businessId,
           memoryId: command.parameters.memoryId as string,
           value: command.parameters.value as Record<string, unknown>,
@@ -3307,7 +3309,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, updated);
       }
       case 'tag_memory': {
-        const tagged = await (this.temporal as any).tagMemory({
+        const tagged = await this.temporal.tagMemory({
           businessId: command.businessId,
           memoryId: command.parameters.memoryId as string,
           tags: command.parameters.tags as string[],
@@ -3315,7 +3317,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, tagged);
       }
       case 'consolidate_memories': {
-        const consolidated = await (this.temporal as any).consolidateMemories({
+        const consolidated = await this.temporal.consolidateMemories({
           businessId: command.businessId,
           keys: command.parameters.keys as string[],
           summaryKey: command.parameters.summaryKey as string,
@@ -3335,7 +3337,7 @@ export class KeyCortexConnectorService {
     const start = Date.now();
     switch (command.action) {
       case 'get_threads': {
-        const threads = await (this.inbox as any).getThreads({
+        const threads = await this.inbox.getThreads({
           businessId: command.businessId,
           status: command.parameters.status as string,
           priority: command.parameters.priority as string,
@@ -3345,7 +3347,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, threads);
       }
       case 'send_reply': {
-        const reply = await (this.inbox as any).sendReply({
+        const reply = await this.inbox.sendReply({
           businessId: command.businessId,
           threadId: command.parameters.threadId as string,
           body: command.parameters.body as string,
@@ -3355,7 +3357,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, reply);
       }
       case 'classify_message': {
-        const classified = await (this.inbox as any).classifyMessage({
+        const classified = await this.inbox.classifyMessage({
           businessId: command.businessId,
           threadId: command.parameters.threadId as string,
           intent: command.parameters.intent as string,
@@ -3365,7 +3367,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, classified);
       }
       case 'close_thread': {
-        const closed = await (this.inbox as any).closeThread({
+        const closed = await this.inbox.closeThread({
           businessId: command.businessId,
           threadId: command.parameters.threadId as string,
           resolution: command.parameters.resolution as string,
@@ -3373,7 +3375,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, closed);
       }
       case 'snooze_thread': {
-        const snoozed = await (this.inbox as any).snoozeThread({
+        const snoozed = await this.inbox.snoozeThread({
           businessId: command.businessId,
           threadId: command.parameters.threadId as string,
           until: command.parameters.until as string,
@@ -3382,7 +3384,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, snoozed);
       }
       case 'assign_thread': {
-        const assigned = await (this.inbox as any).assignThread({
+        const assigned = await this.inbox.assignThread({
           businessId: command.businessId,
           threadId: command.parameters.threadId as string,
           userId: command.parameters.userId as string,
@@ -3390,14 +3392,14 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, assigned);
       }
       case 'get_intelligence_report': {
-        const report = await (this.inbox as any).getIntelligenceReport({
+        const report = await this.inbox.getIntelligenceReport({
           businessId: command.businessId,
           threadId: command.parameters.threadId as string,
         });
         return this.ok(command, start, report);
       }
       case 'merge_threads': {
-        const merged = await (this.inbox as any).mergeThreads({
+        const merged = await this.inbox.mergeThreads({
           businessId: command.businessId,
           masterThreadId: command.parameters.masterThreadId as string,
           duplicateThreadId: command.parameters.duplicateThreadId as string,
@@ -3500,7 +3502,7 @@ export class KeyCortexConnectorService {
     const start = Date.now();
     switch (command.action) {
       case 'send_notification': {
-        const notification = await (this.notifications as any).sendNotification({
+        const notification = await this.notifications.sendNotification({
           businessId: command.businessId,
           userId: command.parameters.userId as string,
           title: command.parameters.title as string,
@@ -3511,7 +3513,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, notification);
       }
       case 'create_alert': {
-        const alert = await (this.notifications as any).createAlert({
+        const alert = await this.notifications.createAlert({
           businessId: command.businessId,
           title: command.parameters.title as string,
           description: command.parameters.description as string,
@@ -3522,7 +3524,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, alert);
       }
       case 'dismiss_alert': {
-        const dismissed = await (this.notifications as any).dismissAlert({
+        const dismissed = await this.notifications.dismissAlert({
           businessId: command.businessId,
           alertId: command.parameters.alertId as string,
           notes: command.parameters.notes as string,
@@ -3530,7 +3532,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, dismissed);
       }
       case 'send_digest': {
-        const digest = await (this.notifications as any).sendDigest({
+        const digest = await this.notifications.sendDigest({
           businessId: command.businessId,
           userId: command.parameters.userId as string,
           period: command.parameters.period as string,
@@ -3539,7 +3541,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, digest);
       }
       case 'update_preferences': {
-        const prefs = await (this.notifications as any).updatePreferences({
+        const prefs = await this.notifications.updatePreferences({
           businessId: command.businessId,
           userId: command.parameters.userId as string,
           channel: command.parameters.channel as string,
@@ -3549,7 +3551,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, prefs);
       }
       case 'broadcast_alert': {
-        const broadcast = await (this.notifications as any).broadcastAlert({
+        const broadcast = await this.notifications.broadcastAlert({
           businessId: command.businessId,
           title: command.parameters.title as string,
           body: command.parameters.body as string,
@@ -3570,7 +3572,7 @@ export class KeyCortexConnectorService {
     const start = Date.now();
     switch (command.action) {
       case 'create_project': {
-        const project = await (this.projects as any).createProject({
+        const project = await this.projects.createProject({
           businessId: command.businessId,
           name: command.parameters.name as string,
           description: command.parameters.description as string,
@@ -3582,7 +3584,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, project);
       }
       case 'add_task': {
-        const task = await (this.projects as any).addTask({
+        const task = await this.projects.addTask({
           businessId: command.businessId,
           projectId: command.parameters.projectId as string,
           title: command.parameters.title as string,
@@ -3594,7 +3596,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, task);
       }
       case 'update_task': {
-        const updated = await (this.projects as any).updateTask({
+        const updated = await this.projects.updateTask({
           businessId: command.businessId,
           projectId: command.parameters.projectId as string,
           taskId: command.parameters.taskId as string,
@@ -3606,7 +3608,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, updated);
       }
       case 'complete_task': {
-        const completed = await (this.projects as any).completeTask({
+        const completed = await this.projects.completeTask({
           businessId: command.businessId,
           projectId: command.parameters.projectId as string,
           taskId: command.parameters.taskId as string,
@@ -3615,14 +3617,14 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, completed);
       }
       case 'delete_project': {
-        await (this.projects as any).deleteProject({
+        await this.projects.deleteProject({
           businessId: command.businessId,
           projectId: command.parameters.projectId as string,
         });
         return this.ok(command, start, { deleted: true });
       }
       case 'add_milestone': {
-        const milestone = await (this.projects as any).addMilestone({
+        const milestone = await this.projects.addMilestone({
           businessId: command.businessId,
           projectId: command.parameters.projectId as string,
           name: command.parameters.name as string,
@@ -3632,7 +3634,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, milestone);
       }
       case 'complete_milestone': {
-        const completed = await (this.projects as any).completeMilestone({
+        const completed = await this.projects.completeMilestone({
           businessId: command.businessId,
           projectId: command.parameters.projectId as string,
           milestoneId: command.parameters.milestoneId as string,
@@ -3641,7 +3643,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, completed);
       }
       case 'archive_project': {
-        const archived = await (this.projects as any).archiveProject({
+        const archived = await this.projects.archiveProject({
           businessId: command.businessId,
           projectId: command.parameters.projectId as string,
         });
@@ -3982,8 +3984,8 @@ export class KeyCortexConnectorService {
 
     // CRM context
     try {
-      const contacts = await (this.crm as any).listContacts({ businessId, limit: 5 });
-      const tasks = await (this.crm as any).getOpenTasks({ businessId });
+      const contacts = await this.crm.listContacts({ businessId, limit: 5 });
+      const tasks = await this.crm.getOpenTasks({ businessId });
       pendingTasks += tasks.length;
       modules.crm = {
         module: 'crm',
@@ -3998,8 +4000,8 @@ export class KeyCortexConnectorService {
 
     // Commerce context
     try {
-      const invoices = await (this.commerce as any).listInvoices({ businessId, status: 'overdue' });
-      const revenue = await (this.commerce as any).getRevenueSummary({ businessId, period: 'this_month' });
+      const invoices = await this.commerce.listInvoices({ businessId, status: 'overdue' });
+      const revenue = await this.commerce.getRevenueSummary({ businessId, period: 'this_month' });
       recentRevenue = revenue.total || 0;
       modules.commerce = {
         module: 'commerce',
@@ -4014,7 +4016,7 @@ export class KeyCortexConnectorService {
 
     // Bookings context
     try {
-      const todayBookings = await (this.bookings as any).getUpcomingBookings({ businessId, from: new Date().toISOString(), limit: 10 });
+      const todayBookings = await this.bookings.getUpcomingBookings({ businessId, from: new Date().toISOString(), limit: 10 });
       modules.bookings = {
         module: 'bookings',
         summary: `${todayBookings.length} upcoming bookings`,
@@ -4028,7 +4030,7 @@ export class KeyCortexConnectorService {
 
     // Communications context
     try {
-      const unreadConversations = await (this.communications as any).getUnreadConversations({ businessId });
+      const unreadConversations = await this.communications.getUnreadConversations({ businessId });
       openConversations = unreadConversations.length;
       modules.communications = {
         module: 'communications',
@@ -4058,7 +4060,7 @@ export class KeyCortexConnectorService {
 
     // Flow context
     try {
-      const activeFlows = await (this.flow as any).listAutomations({ businessId, active: true });
+      const activeFlows = await this.flow.listAutomations({ businessId, active: true });
       modules.flow = {
         module: 'flow',
         summary: `${activeFlows.length} active automations`,
@@ -4072,8 +4074,8 @@ export class KeyCortexConnectorService {
 
     // Autopilot context
     try {
-      const autopilotTasks = await (this.autopilot as any).getTasks({ businessId, status: 'pending' });
-      const loops = await (this.autopilot as any).listLoops({ businessId, active: true });
+      const autopilotTasks = await this.autopilot.getTasks({ businessId, status: 'pending' });
+      const loops = await this.autopilot.listLoops({ businessId, active: true });
       pendingTasks += autopilotTasks.length;
       modules.autopilot = {
         module: 'autopilot',
@@ -4088,7 +4090,7 @@ export class KeyCortexConnectorService {
 
     // Temporal / Memory context
     try {
-      const recentMemories = await (this.temporal as any).getRecentMemories({ businessId, limit: 10 });
+      const recentMemories = await this.temporal.getRecentMemories({ businessId, limit: 10 });
       modules.temporal = {
         module: 'temporal',
         summary: `${recentMemories.length} recent memories stored`,
@@ -4102,7 +4104,7 @@ export class KeyCortexConnectorService {
 
     // Inbox context
     try {
-      const inboxThreads = await (this.inbox as any).getThreads({ businessId, status: 'open', limit: 10 });
+      const inboxThreads = await this.inbox.getThreads({ businessId, status: 'open', limit: 10 });
       modules.inbox = {
         module: 'inbox',
         summary: `${inboxThreads.length} open inbox threads`,
@@ -4116,7 +4118,7 @@ export class KeyCortexConnectorService {
 
     // Notifications / Alerts
     try {
-      const alerts = await (this.notifications as any).getAlerts({ businessId, acknowledged: false });
+      const alerts = await this.notifications.getAlerts({ businessId, acknowledged: false });
       activeAlerts = alerts.length;
       modules.notifications = {
         module: 'notifications',
@@ -4131,8 +4133,8 @@ export class KeyCortexConnectorService {
 
     // Projects context
     try {
-      const activeProjects = await (this.projects as any).getProjects({ businessId, status: 'active' });
-      const overdueProjectTasks = await (this.projects as any).getOverdueTasks({ businessId });
+      const activeProjects = await this.projects.getProjects({ businessId, status: 'active' });
+      const overdueProjectTasks = await this.projects.getOverdueTasks({ businessId });
       modules.projects = {
         module: 'projects',
         summary: `${activeProjects.length} active projects, ${overdueProjectTasks.length} overdue tasks`,

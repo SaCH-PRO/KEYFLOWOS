@@ -56,6 +56,20 @@ import { KeyGenomeAdapterService } from './organs/key-genome-adapter.service';
 import { StorelinkAdapterService } from './organs/storelink-adapter.service';
 import { KeyConnectorAdapterService } from './organs/key-connector-adapter.service';
 
+// -- Phase 0.5: Typed Module Adapters for KeyCortexConnectorService --
+import {
+  CrmAdapterService,
+  CommerceAdapterService,
+  BookingsAdapterService,
+  FlowAdapterService,
+  AutopilotAdapterService,
+  TemporalAdapterService,
+  InboxAdapterService,
+  NotificationsAdapterService,
+  ProjectsAdapterService,
+  CommunicationsAdapterService,
+} from './adapters';
+
 // -- Core (legacy) --
 import { KeyCortexPersonalityService } from './key-cortex-personality.service';
 import { KeyCortexContextService } from './key-cortex-context.service';
@@ -115,6 +129,7 @@ import { AiModule } from '../ai/ai.module';
 // -- Domain modules (forwardRef to break circular deps) --
 import { CrmModule } from '../crm/crm.module';
 import { CommerceModule } from '../commerce/commerce.module';
+import { CatalogModule } from '../catalog/catalog.module';
 import { BookingsModule } from '../bookings/bookings.module';
 import { CommunicationsModule } from '../communications/communications.module';
 import { FlowModule } from '../flow/flow.module';
@@ -160,6 +175,7 @@ import { ActivityLogService } from '../activity/activity.service';
     // CrmModule).
     forwardRef(() => CrmModule),
     forwardRef(() => CommerceModule),
+    forwardRef(() => CatalogModule),
     forwardRef(() => BookingsModule),
     forwardRef(() => CommunicationsModule),
     forwardRef(() => FlowModule),
@@ -255,8 +271,21 @@ import { ActivityLogService } from '../activity/activity.service';
     // Universal connector -- knows how to talk to every KeyFlowOS module
     KeyCortexConnectorService,
 
-    // Stub domain services used by the connector until full module integrations
-    // are hardened with typed adapters.
+    // -- Phase 0.5: Typed module adapters (replaces as-any casts) --
+    CrmAdapterService,
+    CommerceAdapterService,
+    BookingsAdapterService,
+    FlowAdapterService,
+    AutopilotAdapterService,
+    TemporalAdapterService,
+    InboxAdapterService,
+    NotificationsAdapterService,
+    ProjectsAdapterService,
+    CommunicationsAdapterService,
+
+    // -- Phase 0.5: Typed domain services --
+    // Content and Activity services are already typed to match the connector's
+    // expected API; the remaining modules route through the adapters above.
     ContentService,
     ActivityLogService,
 
@@ -426,6 +455,18 @@ import { ActivityLogService } from '../activity/activity.service';
     KeyGenomeAdapterService,
     StorelinkAdapterService,
     KeyConnectorAdapterService,
+
+    // -- Phase 0.5: Typed module adapters --
+    CrmAdapterService,
+    CommerceAdapterService,
+    BookingsAdapterService,
+    FlowAdapterService,
+    AutopilotAdapterService,
+    TemporalAdapterService,
+    InboxAdapterService,
+    NotificationsAdapterService,
+    ProjectsAdapterService,
+    CommunicationsAdapterService,
 
     // -- Phase 2 Body: Organ Registrar --
     KeyCortexOrganRegistrarService,
