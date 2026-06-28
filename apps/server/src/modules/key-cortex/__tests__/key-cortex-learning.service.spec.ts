@@ -199,4 +199,65 @@ describe('KeyCortexLearningService', () => {
     expect(calibration.reliable).toBe(false);
     expect(calibration.calibrated).toBe(0.8);
   });
+
+  it('recordOutcome creates a cognition memory for tool execution', async () => {
+    const mockPrisma = createMockPrisma();
+    const service = createService(mockPrisma, false);
+
+    await service.recordOutcome({
+      businessId: 'biz_1',
+      sessionId: 'sess_tool_1',
+      toolName: 'crm.create_contact',
+      success: true,
+      durationMs: 120,
+      metadata: { autonomyLevel: 2 },
+    });
+
+    expect(mockPrisma.client.cognitionMemory.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          businessId: 'biz_1',
+          sessionId: 'sess_tool_1',
+          query: 'Tool execution: crm.create_contact',
+          userResponse: 'accepted',
+          confidence: 0.85,
+          metadata: expect.objectContaining({
+            category: 'execution_patterns',
+            toolName: 'crm.create_contact',
+            durationMs: 120,
+            success: true,
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('recordOutcome stores failure details in cognition memory', async () => {
+    const mockPrisma = createMockPrisma();
+    const service = createService(mockPrisma, false);
+
+    await service.recordOutcome({
+      businessId: 'biz_1',
+      sessionId: 'sess_tool_2',
+      toolName: 'crm.create_contact',
+      success: false,
+      error: 'Contact already exists',
+      durationMs: 45,
+    });
+
+    expect(mockPrisma.client.cognitionMemory.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          businessId: 'biz_1',
+          userResponse: 'rejected',
+          confidence: 0.4,
+          metadata: expect.objectContaining({
+            category: 'execution_patterns',
+            success: false,
+            error: 'Contact already exists',
+          }),
+        }),
+      }),
+    );
+  });
 });

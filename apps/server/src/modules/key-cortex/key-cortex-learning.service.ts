@@ -46,6 +46,16 @@ export interface RecordFeedbackInput {
   metadata?: Record<string, unknown>;
 }
 
+export interface RecordOutcomeInput {
+  businessId: string;
+  sessionId: string;
+  toolName: string;
+  success: boolean;
+  error?: string;
+  durationMs: number;
+  metadata?: Record<string, unknown>;
+}
+
 export interface AcceptanceRate {
   accepted: number;
   rejected: number;
@@ -94,6 +104,47 @@ export class KeyCortexLearningService {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.warn(`[recordObservation] Failed: ${msg}`);
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // D.4 — Tool execution outcome recording
+  // ═══════════════════════════════════════════════════════════
+
+  async recordOutcome(input: RecordOutcomeInput): Promise<void> {
+    try {
+      await (this.prisma.client as any).cognitionMemory.create({
+        data: {
+          businessId: input.businessId,
+          sessionId: input.sessionId,
+          query: `Tool execution: ${input.toolName}`,
+          recommendation: input.success ? 'Executed successfully' : `Failed: ${input.error ?? 'unknown error'}`,
+          userResponse: input.success ? 'accepted' : 'rejected',
+          actualOutcome: input.success
+            ? `Completed in ${input.durationMs}ms`
+            : `Failed in ${input.durationMs}ms: ${input.error ?? ''}`,
+          confidence: input.success ? 0.85 : 0.4,
+          confidenceDelta: 0,
+          lessonsLearned: input.success
+            ? [`Tool ${input.toolName} succeeded in ${input.durationMs}ms`]
+            : [`Tool ${input.toolName} failed: ${input.error ?? 'unknown error'}`],
+          metadata: {
+            ...(input.metadata ?? {}),
+            category: 'execution_patterns',
+            toolName: input.toolName,
+            durationMs: input.durationMs,
+            success: input.success,
+            error: input.error ?? null,
+          },
+        },
+      });
+
+      this.logger.debug(
+        `[recordOutcome] Recorded ${input.success ? 'success' : 'failure'} for ${input.toolName} (${input.sessionId})`,
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`[recordOutcome] Failed: ${msg}`);
     }
   }
 

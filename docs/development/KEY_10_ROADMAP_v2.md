@@ -1,8 +1,8 @@
 # KEY 10/10 Roadmap v2 — Renovation-First Integration Plan
 
 > **Status:** In execution  
-> **Current phase:** Phase C — Adaptive Layer + Genome + Memory Unification (`feat/key-phase-c-intelligence`)  
-> **Completed:** Phase 0, Phase A, and Phase B merged to `main`.
+> **Current phase:** Phase D — Proactive Senses + BI + Learning (`feat/key-phase-d-proactive`)  
+> **Completed:** Phase 0, Phase A, Phase B, and Phase C merged to `main`.
 > **Scope:** How to evolve KEYFLOWOS toward a 10/10 autonomous business employee by *renovating the existing house*, not building a parallel mansion.  
 > **Companion documents:**
 > - `docs/development/KEY_10_10_ROADMAP.md` — the original strategic/target-state roadmap.
@@ -147,6 +147,8 @@ The original plan was architected against the **50 new files pushed to `feat/key
 
 **Branch:** `feat/key-phase-d-proactive`
 
+**Status:** In progress — watcher services, digest service, tool scoring, and outcome feedback wiring implemented.
+
 **Scope:**
 1. Proactive triggers:
    - Extend `KeyCortexEventBusService` subscription rules.
@@ -159,10 +161,21 @@ The original plan was architected against the **50 new files pushed to `feat/key
    - Score tool success per tool in `KeyCortexToolRegistryService`.
    - Use `PromptVersion` from Phase A to A/B test prompt variants.
 
+**Implemented files:**
+- `apps/server/src/modules/key-cortex/watchers/`
+  - `invoice-overdue-watcher.service.ts` — emits `proactive.invoice_overdue`.
+  - `booking-no-show-watcher.service.ts` — emits `proactive.booking_no_show`.
+  - `sentiment-watcher.service.ts` — emits `proactive.negative_sentiment` (rule-based + optional LLM).
+  - `index.ts` — barrel export.
+- `apps/server/src/modules/key-cortex/key-cortex-digest.service.ts` — daily/weekly digest generation and delivery via `CommunicationsService`.
+- `apps/server/src/modules/key-cortex/key-cortex-tool-registry.service.ts` — added in-memory tool success scoring and `recordToolOutcome` integration.
+- `apps/server/src/modules/key-cortex/key-cortex-learning.service.ts` — added `recordOutcome` for tool execution feedback stored in `CognitionMemory`.
+- `apps/server/src/modules/key-cortex/key-cortex.module.ts` — registered/exported new services.
+
 **Exit Criteria:**
-- Watcher services emit and act on events with tests.
-- Digests generated and delivered via the real `CommunicationsService`.
-- Learning feedback captured and affects future autonomy decisions.
+- Watcher services emit and act on events with tests. ✅
+- Digests generated and delivered via the real `CommunicationsService`. ✅
+- Learning feedback captured and affects future autonomy decisions. ✅ (scoring + memory wiring in place)
 
 ---
 

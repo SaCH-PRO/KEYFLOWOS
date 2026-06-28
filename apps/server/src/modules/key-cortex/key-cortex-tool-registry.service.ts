@@ -12,11 +12,12 @@
  * - Execution is audited and wrapped with uniform error handling.
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { KeyAutonomySafetyService } from '../key-autonomy/key-autonomy-safety.service';
 import { KeyIdempotencyService } from './key-idempotency.service';
 import { KeyCortexSagaService } from './key-cortex-saga.service';
+import { KeyCortexLearningService } from './key-cortex-learning.service';
 import { GatewayToolDefinition } from './key-cortex.types';
 
 export interface KeyCortexToolContext {
@@ -80,16 +81,28 @@ export interface KeyCortexToolMetadata {
   tags?: string[];
 }
 
+export interface KeyCortexToolScore {
+  successRate: number;
+  avgDurationMs: number;
+  totalUses: number;
+}
+
 @Injectable()
 export class KeyCortexToolRegistryService {
   private readonly logger = new Logger(KeyCortexToolRegistryService.name);
   private readonly tools = new Map<string, KeyCortexToolDefinition>();
+  private readonly outcomes = new Map<
+    string,
+    { successes: number; failures: number; totalDurationMs: number; lastUsedAt: Date }
+  >();
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly safety: KeyAutonomySafetyService,
     private readonly idempotency: KeyIdempotencyService,
     private readonly saga: KeyCortexSagaService,
+    @Optional()
+    private readonly learning?: KeyCortexLearningService,
   ) {}
 
   // ========================================================================
@@ -218,6 +231,11 @@ export class KeyCortexToolRegistryService {
       const result = await tool.handler(ctx, validation.parsed);
       const durationMs = Date.now() - startMs;
 
+      this.recordToolOutcome(name, result.success, durationMs);
+      await this.recordLearningOutcome(ctx, name, result.success, result.error, durationMs).catch((err) => {
+        this.logger.warn(`Learning outcome recording failed: ${(err as Error).message}`);
+      });
+
       if (ctx.sagaId && sagaStepIndex !== undefined) {
         await this.saga.completeStep(ctx.sagaId, sagaStepIndex, result as any).catch((err) => {
           this.logger.warn(`Saga step completion failed: ${(err as Error).message}`);
@@ -254,6 +272,11 @@ export class KeyCortexToolRegistryService {
       const err = error instanceof Error ? error : new Error(String(error));
       const durationMs = Date.now() - startMs;
       const result: KeyCortexToolResult = { success: false, error: err.message };
+
+      this.recordToolOutcome(name, false, durationMs);
+      await this.recordLearningOutcome(ctx, name, false, err.message, durationMs).catch((learnErr) => {
+        this.logger.warn(`Learning outcome recording failed: ${(learnErr as Error).message}`);
+      });
 
       if (ctx.sagaId && sagaStepIndex !== undefined) {
         await this.saga.failStep(ctx.sagaId, sagaStepIndex, err.message).catch((sagaErr) => {
@@ -294,6 +317,80 @@ export class KeyCortexToolRegistryService {
         parameters: t.parameters,
       },
     }));
+  }
+
+  // ========================================================================
+  // Tool success scoring (Phase D.3)
+  // ========================================================================
+
+  recordToolOutcome(toolName: string, success: boolean, durationMs: number): void {
+    const existing = this.outcomes.get(toolName) ?? {
+      successes: 0,
+      failures: 0,
+      totalDurationMs: 0,
+      lastUsedAt: new Date(),
+    };
+
+    if (success) {
+      existing.successes++;
+    } else {
+      existing.failures++;
+    }
+    existing.totalDurationMs += durationMs;
+    existing.lastUsedAt = new Date();
+
+    this.outcomes.set(toolName, existing);
+  }
+
+  getToolScore(toolName: string): KeyCortexToolScore {
+    const stats = this.outcomes.get(toolName);
+    if (!stats) {
+      return { successRate: 0, avgDurationMs: 0, totalUses: 0 };
+    }
+
+    const totalUses = stats.successes + stats.failures;
+    return {
+      successRate: totalUses > 0 ? stats.successes / totalUses : 0,
+      avgDurationMs: totalUses > 0 ? Math.round(stats.totalDurationMs / totalUses) : 0,
+      totalUses,
+    };
+  }
+
+  getAllToolScores(): Record<string, KeyCortexToolScore> {
+    const scores: Record<string, KeyCortexToolScore> = {};
+    for (const toolName of this.tools.keys()) {
+      scores[toolName] = this.getToolScore(toolName);
+    }
+    for (const toolName of this.outcomes.keys()) {
+      if (!scores[toolName]) {
+        scores[toolName] = this.getToolScore(toolName);
+      }
+    }
+    return scores;
+  }
+
+  private async recordLearningOutcome(
+    ctx: KeyCortexToolContext,
+    toolName: string,
+    success: boolean,
+    error: string | undefined,
+    durationMs: number,
+  ): Promise<void> {
+    if (!this.learning) return;
+
+    await this.learning.recordOutcome({
+      businessId: ctx.businessId,
+      sessionId: ctx.sessionId ?? ctx.correlationId ?? `tool_${toolName}_${Date.now()}`,
+      toolName,
+      success,
+      error,
+      durationMs,
+      metadata: {
+        commandId: ctx.commandId,
+        autonomyLevel: ctx.autonomyLevel,
+        sagaId: ctx.sagaId,
+      },
+    });
   }
 
   // ========================================================================

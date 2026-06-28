@@ -128,6 +128,7 @@ import { KeyCortexRealtimeService } from './key-cortex-realtime.service';
 
 // -- Phase D: Data & Persistent Learning --
 import { KeyBiEngineService } from './key-bi-engine.service';
+import { KeyCortexDigestService } from './key-cortex-digest.service';
 import { KeyCortexLearningService } from './key-cortex-learning.service';
 import { UnifiedMemoryRetrievalService } from './unified-memory-retrieval.service';
 import { KeyCortexMemoryRetrievalService } from './key-cortex-memory-retrieval.service';
@@ -139,6 +140,11 @@ import { ValueLearningService } from './value-learning.service';
 import { KnowledgeIngestionService } from './knowledge-ingestion.service';
 import { MemoryConsolidationService } from './memory-consolidation.service';
 import { SelfAssessmentService } from './self-assessment.service';
+import {
+  InvoiceOverdueWatcherService,
+  BookingNoShowWatcherService,
+  SentimentWatcherService,
+} from './watchers';
 import { EscalationService } from './escalation.service';
 import { DigitalEmployeeAcceptanceService } from './digital-employee-acceptance.service';
 import { KeyCortexMemoryService } from './key-cortex-memory.service';
@@ -358,6 +364,12 @@ import { ActivityLogService } from '../activity/activity.service';
     // -- Phase D: Data & Persistent Learning --
     // Real-time business mental model with Redis caching and health snapshots
     KeyBiEngineService,
+    // Daily / weekly digest generation and delivery
+    KeyCortexDigestService,
+    // Proactive rule-based watchers
+    InvoiceOverdueWatcherService,
+    BookingNoShowWatcherService,
+    SentimentWatcherService,
     // Persistent learning loop + metacognition / confidence calibration
     KeyCortexLearningService,
 
@@ -500,7 +512,12 @@ import { ActivityLogService } from '../activity/activity.service';
 
     // -- Phase D: Data & Persistent Learning --
     KeyBiEngineService,
+    KeyCortexDigestService,
     KeyCortexLearningService,
+    // Proactive rule-based watchers
+    InvoiceOverdueWatcherService,
+    BookingNoShowWatcherService,
+    SentimentWatcherService,
     KeyCortexMemoryService,
 
     // -- Phase A: Cognition session context primitive --

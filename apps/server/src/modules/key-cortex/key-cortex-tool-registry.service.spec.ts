@@ -41,12 +41,20 @@ function makeSaga(overrides?: Partial<any>) {
   };
 }
 
+function makeLearning(overrides?: Partial<any>) {
+  return {
+    recordOutcome: vi.fn().mockResolvedValue(undefined),
+    ...overrides,
+  };
+}
+
 describe('KeyCortexToolRegistryService — safety gate', () => {
   let registry: KeyCortexToolRegistryService;
   let safety: ReturnType<typeof makeSafety>;
   let prisma: ReturnType<typeof makePrisma>;
   let idempotency: ReturnType<typeof makeIdempotency>;
   let saga: ReturnType<typeof makeSaga>;
+  let learning: ReturnType<typeof makeLearning>;
   let tool: KeyCortexToolDefinition;
 
   beforeEach(() => {
@@ -54,11 +62,13 @@ describe('KeyCortexToolRegistryService — safety gate', () => {
     prisma = makePrisma();
     idempotency = makeIdempotency();
     saga = makeSaga();
+    learning = makeLearning();
     registry = new KeyCortexToolRegistryService(
       prisma as any,
       safety as any,
       idempotency as any,
       saga as any,
+      learning as any,
     );
     tool = {
       name: 'crm.create_contact',
@@ -130,5 +140,111 @@ describe('KeyCortexToolRegistryService — safety gate', () => {
     await registry.execute('crm.create_contact', { businessId: 'biz_1', autonomyLevel: 1 }, { name: 'Alice' });
 
     expect(safety.check).toHaveBeenCalledWith(expect.objectContaining({ mode: 'manual' }));
+  });
+});
+
+describe('KeyCortexToolRegistryService — tool success scoring', () => {
+  let registry: KeyCortexToolRegistryService;
+  let safety: ReturnType<typeof makeSafety>;
+  let prisma: ReturnType<typeof makePrisma>;
+  let idempotency: ReturnType<typeof makeIdempotency>;
+  let saga: ReturnType<typeof makeSaga>;
+  let learning: ReturnType<typeof makeLearning>;
+
+  beforeEach(() => {
+    safety = makeSafety();
+    prisma = makePrisma();
+    idempotency = makeIdempotency();
+    saga = makeSaga();
+    learning = makeLearning();
+    registry = new KeyCortexToolRegistryService(
+      prisma as any,
+      safety as any,
+      idempotency as any,
+      saga as any,
+      learning as any,
+    );
+  });
+
+  it('records tool outcome after successful execution', async () => {
+    const tool: KeyCortexToolDefinition = {
+      name: 'crm.create_contact',
+      module: 'crm',
+      description: 'Create a contact',
+      parameters: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] },
+      riskTier: 1,
+      requiresApproval: false,
+      handler: vi.fn().mockResolvedValue({ success: true, data: { id: 'c1' } }),
+    };
+    registry.register(tool);
+
+    await registry.execute('crm.create_contact', { businessId: 'biz_1', autonomyLevel: 2 }, { name: 'Alice' });
+
+    const score = registry.getToolScore('crm.create_contact');
+    expect(score.totalUses).toBe(1);
+    expect(score.successRate).toBe(1);
+    expect(score.avgDurationMs).toBeGreaterThanOrEqual(0);
+    expect(learning.recordOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({ businessId: 'biz_1', toolName: 'crm.create_contact', success: true }),
+    );
+  });
+
+  it('records tool outcome after failed execution', async () => {
+    const tool: KeyCortexToolDefinition = {
+      name: 'crm.fail',
+      module: 'crm',
+      description: 'Fails',
+      parameters: { type: 'object', properties: {}, required: [] },
+      riskTier: 1,
+      requiresApproval: false,
+      handler: vi.fn().mockRejectedValue(new Error('Boom')),
+    };
+    registry.register(tool);
+
+    await registry.execute('crm.fail', { businessId: 'biz_1', autonomyLevel: 2 }, {});
+
+    const score = registry.getToolScore('crm.fail');
+    expect(score.totalUses).toBe(1);
+    expect(score.successRate).toBe(0);
+    expect(learning.recordOutcome).toHaveBeenCalledWith(
+      expect.objectContaining({ businessId: 'biz_1', toolName: 'crm.fail', success: false, error: 'Boom' }),
+    );
+  });
+
+  it('getAllToolScores returns scores for all registered tools', async () => {
+    registry.register({
+      name: 'tool.a',
+      module: 'test',
+      description: 'A',
+      parameters: { type: 'object', properties: {}, required: [] },
+      riskTier: 1,
+      requiresApproval: false,
+      handler: vi.fn().mockResolvedValue({ success: true }),
+    });
+    registry.register({
+      name: 'tool.b',
+      module: 'test',
+      description: 'B',
+      parameters: { type: 'object', properties: {}, required: [] },
+      riskTier: 1,
+      requiresApproval: false,
+      handler: vi.fn().mockResolvedValue({ success: true }),
+    });
+
+    registry.recordToolOutcome('tool.a', true, 100);
+    registry.recordToolOutcome('tool.a', false, 200);
+    registry.recordToolOutcome('tool.b', true, 50);
+
+    const scores = registry.getAllToolScores();
+    expect(scores['tool.a'].totalUses).toBe(2);
+    expect(scores['tool.a'].successRate).toBe(0.5);
+    expect(scores['tool.a'].avgDurationMs).toBe(150);
+    expect(scores['tool.b'].totalUses).toBe(1);
+    expect(scores['tool.b'].successRate).toBe(1);
+  });
+
+  it('getToolScore returns zeroed score for unknown tools', () => {
+    const score = registry.getToolScore('unknown.tool');
+    expect(score).toEqual({ successRate: 0, avgDurationMs: 0, totalUses: 0 });
   });
 });
