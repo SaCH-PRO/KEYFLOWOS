@@ -67,6 +67,9 @@ import { KeyCortexEvolutionService } from './key-cortex-evolution.service';
 import { KeyCortexPhoneService } from './key-cortex-phone.service';
 import { KeyCortexDocumentService } from './key-cortex-document.service';
 
+// -- Phase D: Learning & Metacognition --
+import { KeyCortexLearningService } from './key-cortex-learning.service';
+
 import {
   CortexQuery,
   CortexPersona,
@@ -159,6 +162,17 @@ class ApproveActionDto {
 class InsightsQueryDto {
   businessId: string;
   query: string;
+}
+
+class FeedbackDto {
+  sessionId: string;
+  businessId: string;
+  userId?: string;
+  userResponse: 'accepted' | 'rejected' | 'modified' | 'no_action';
+  actualOutcome?: string;
+  dismissalReason?: string;
+  recommendationId?: string;
+  metadata?: Record<string, unknown>;
 }
 
 class ProfitOpportunitiesQueryDto {
@@ -475,6 +489,9 @@ export class KeyCortexController {
     private readonly evolution: any,
     private readonly phone: any,
     private readonly document: any,
+
+    // -- Phase D: Learning & Metacognition --
+    private readonly learning: KeyCortexLearningService,
   ) {}
 
   /* ================================================================== */
@@ -647,6 +664,31 @@ export class KeyCortexController {
     })();
 
     return subject.asObservable();
+  }
+
+  /* ================================================================== */
+  /*  FEEDBACK & LEARNING                                               */
+  /* ================================================================== */
+
+  /**
+   * POST /api/v1/cortex/feedback
+   * Record user feedback on a recommendation so KEY can learn.
+   */
+  @Post('feedback')
+  @HttpCode(HttpStatus.OK)
+  async recordFeedback(@Body() dto: FeedbackDto): Promise<{ success: boolean }> {
+    if (!dto.sessionId) {
+      throw new BadRequestException('sessionId is required');
+    }
+    if (!dto.businessId) {
+      throw new BadRequestException('businessId is required');
+    }
+    if (!dto.userResponse) {
+      throw new BadRequestException('userResponse is required');
+    }
+
+    await this.learning.recordFeedback(dto);
+    return { success: true };
   }
 
   /* ================================================================== */

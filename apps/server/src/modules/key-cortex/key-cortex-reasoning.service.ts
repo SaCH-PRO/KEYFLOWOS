@@ -55,6 +55,11 @@ import { KeyProactiveEngineService } from './key-proactive-engine.service';
 import { TrustExplanationService } from './trust-explanation.service';
 import { isFeatureVisible, UserTier } from './calm-mode.config';
 
+// ── Phase D: Learning & Metacognition ──
+import {
+  KeyCortexLearningService,
+} from './key-cortex-learning.service';
+
 // ── v3 Types ──
 
 export interface GenomeEnrichedContext {
@@ -252,6 +257,11 @@ export class KeyCortexReasoningService {
     @Optional()
     @Inject(TrustExplanationService)
     private readonly trustExplanation?: TrustExplanationService,
+
+    // ── Phase D: Learning & Metacognition ──
+    @Optional()
+    @Inject(KeyCortexLearningService)
+    private readonly learningService?: KeyCortexLearningService,
   ) {
     this.MAX_CONTEXT_TOKENS =
       parseInt(process.env.KEY_CORTEX_MAX_CONTEXT_TOKENS ?? '8000', 10);
@@ -637,7 +647,7 @@ export class KeyCortexReasoningService {
           correlationId,
           genomeEnriched: this.genomeV3Enabled && !!genomeContext,
           role: structured.role,
-          confidence: structured.confidence,
+          confidence: Math.max(0, Math.min(1, (structured.confidence ?? 70) / 100)),
           taskCategory,
           fallbackUsed: completionResult.fallbackUsed,
           fallbackProvider: completionResult.fallbackProvider,
@@ -665,6 +675,32 @@ export class KeyCortexReasoningService {
 
       // Phase C: Update running conversation summary
       await this.updateRunningSummary(session.id, query.text, assistantMessage.content);
+
+      // Phase D: Record observation for learning loop
+      if (this.learningService) {
+        try {
+          await this.learningService.recordObservation({
+            sessionId: session.id,
+            businessId: query.businessId,
+            userId: query.userId,
+            roleId: session.detectedRole,
+            functionId: session.detectedFunction,
+            query: query.text,
+            recommendation: assistantMessage.content,
+            confidence: assistantMessage.metadata?.confidence ?? 0.7,
+            metadata: {
+              correlationId,
+              taskCategory,
+              provider,
+              model,
+            },
+          });
+        } catch (err: any) {
+          this.logger.warn(
+            `[processQuery] Learning observation failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
 
       // Persist structured reasoning fields for the final response
       const structuredResponseFields = {
@@ -901,6 +937,31 @@ export class KeyCortexReasoningService {
         hasExplanation: !!explanation,
       });
 
+      // Phase D: Calibrate stated confidence against historical acceptance
+      let calibratedConfidence = assistantMessage.metadata?.confidence ?? this.calculateConfidence(
+        assistantMessage.content,
+        contextSnapshot,
+      );
+      let knowledgeGap: string | undefined;
+      if (this.learningService) {
+        try {
+          const calibration = await this.learningService.calibrateConfidence(
+            calibratedConfidence,
+            query.businessId,
+            {
+              roleId: session.detectedRole,
+              functionId: session.detectedFunction,
+            },
+          );
+          calibratedConfidence = calibration.calibrated;
+          knowledgeGap = calibration.knowledgeGap;
+        } catch (err: any) {
+          this.logger.warn(
+            `[processQuery] Confidence calibration failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+
       // Final summary log
       this.logger.log(
         `[processQuery][${correlationId}] Completed in ${latencyMs}ms | provider=${provider} model=${model} tokens=${assistantMessage.metadata?.tokensUsed} commands=${parsedCommands.length} autonomyApproved=${autonomyCheckedCommands.length} executed=${executedActions.length} genome=${this.genomeV3Enabled && !!genomeContext}`,
@@ -912,16 +973,15 @@ export class KeyCortexReasoningService {
         contextUsed: contextSnapshot,
         suggestions,
         followUpQuestions: suggestions.slice(0, 3),
-        confidence: assistantMessage.metadata?.confidence ?? this.calculateConfidence(
-          assistantMessage.content,
-          contextSnapshot,
-        ),
+        confidence: calibratedConfidence,
         // KEY 10/10: structured reasoning output
         ...structuredResponseFields,
         // v4: Proactive suggestions from completion layer
         proactiveSuggestions: proactiveSuggestions.length > 0 ? proactiveSuggestions : undefined,
         // v4: Trust explanation for transparency
         explanation: explanation ?? undefined,
+        // Phase D: Explicit knowledge gap statement
+        knowledgeGap,
         // v3: Include genome enrichment in response
         genomeInsights: genomeContext
           ? {
@@ -1251,7 +1311,7 @@ export class KeyCortexReasoningService {
           correlationId,
           genomeEnriched: this.genomeV3Enabled && !!genomeContext,
           role: structured.role,
-          confidence: structured.confidence,
+          confidence: Math.max(0, Math.min(1, (structured.confidence ?? 70) / 100)),
           taskCategory,
           fallbackUsed,
           fallbackProvider,
@@ -1871,6 +1931,7 @@ Rank by estimated revenue impact (highest first).
       runningSummary?: string;
       aiMemory?: string;
       semanticMemory?: string;
+      lessons?: string;
     },
   ): GatewayMessage[] {
     const messages: GatewayMessage[] = [];
@@ -1902,6 +1963,14 @@ Rank by estimated revenue impact (highest first).
       messages.push({
         role: 'system',
         content: memoryContext.semanticMemory,
+      });
+    }
+
+    // Phase D: Inject learned lessons from past feedback
+    if (memoryContext?.lessons) {
+      messages.push({
+        role: 'system',
+        content: memoryContext.lessons,
       });
     }
 
@@ -1941,11 +2010,13 @@ Rank by estimated revenue impact (highest first).
     runningSummary?: string;
     aiMemory?: string;
     semanticMemory?: string;
+    lessons?: string;
   }> {
     const memoryContext: {
       runningSummary?: string;
       aiMemory?: string;
       semanticMemory?: string;
+      lessons?: string;
     } = {};
 
     // Running summary from session
@@ -1990,6 +2061,34 @@ Rank by estimated revenue impact (highest first).
       } catch (err: any) {
         this.logger.warn(
           `[buildMemoryContext] Semantic memory search failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
+    // Phase D: Retrieve relevant learned lessons from past feedback
+    if (this.learningService) {
+      try {
+        const currentQuery = session.messages.length > 0
+          ? session.messages[session.messages.length - 1]?.content ?? ''
+          : '';
+        const lessons = await this.learningService.retrieveLessons(
+          businessId,
+          currentQuery,
+          {
+            roleId: session.detectedRole,
+            functionId: session.detectedFunction,
+            limit: 3,
+          },
+        );
+        if (lessons.length > 0) {
+          memoryContext.lessons =
+            '=== LEARNED LESSONS ===\n' +
+            lessons.map((l: string, i: number) => `${i + 1}. ${l}`).join('\n') +
+            '\n========================';
+        }
+      } catch (err: any) {
+        this.logger.warn(
+          `[buildMemoryContext] Lesson retrieval failed: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
     }

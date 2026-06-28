@@ -72,6 +72,10 @@ import { KeyCortexApprovalService } from './key-cortex-approval.service';
 import { KeyCortexGateway } from './key-cortex.gateway';
 import { KeyCortexRealtimeService } from './key-cortex-realtime.service';
 
+// -- Phase D: Data & Persistent Learning --
+import { KeyBiEngineService } from './key-bi-engine.service';
+import { KeyCortexLearningService } from './key-cortex-learning.service';
+
 // -- Infrastructure --
 import { PrismaModule } from '../../core/prisma/prisma.module';
 import { RedisModule } from '../../core/redis/redis.module';
@@ -191,6 +195,12 @@ import { ActivityLogService } from '../activity/activity.service';
     // Background monitor integration -- autonomous loop management
     KeyCortexMonitorV2Service,
 
+    // -- Phase D: Data & Persistent Learning --
+    // Real-time business mental model with Redis caching and health snapshots
+    KeyBiEngineService,
+    // Persistent learning loop + metacognition / confidence calibration
+    KeyCortexLearningService,
+
     // -- v3: Phase 3 & 4 Services --
     // Sandbox -- AI-powered code generation & secure execution
     KeyCortexSandboxService,
@@ -285,6 +295,10 @@ import { ActivityLogService } from '../activity/activity.service';
     // Realtime service -- so other modules can emit domain events that
     // get forwarded to WebSocket clients automatically
     KeyCortexRealtimeService,
+
+    // -- Phase D: Data & Persistent Learning --
+    KeyBiEngineService,
+    KeyCortexLearningService,
   ],
 })
 export class KeyCortexModule {}

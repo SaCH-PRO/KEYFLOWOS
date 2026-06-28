@@ -118,6 +118,13 @@ export interface CortexSession {
   messages: CortexMessage[];
   contextSnapshot?: CortexContextSnapshot;
   runningSummary?: string;
+  // Phase A/D: cognition metadata
+  detectedRole?: string;
+  detectedFunction?: string;
+  layersUsed?: string[];
+  llmCallsMade?: number;
+  responseTimeMs?: number;
+  userFeedback?: string;
   createdAt: Date;
   updatedAt: Date;
   lastAccessedAt: Date;
@@ -176,6 +183,8 @@ export interface CortexResponse {
   successMetrics?: string[];
   nextStep?: string;
   frameworks?: string[];
+  // Phase D: explicit knowledge-gap statement when confidence is miscalibrated
+  knowledgeGap?: string;
 }
 
 export interface CortexActionResult {
