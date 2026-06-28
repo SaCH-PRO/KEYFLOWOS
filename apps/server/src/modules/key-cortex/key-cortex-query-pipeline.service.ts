@@ -9,6 +9,7 @@ import {
   ModelGatewayService,
   GatewayMessage,
   GatewayToolDefinition,
+  TaskCategory,
 } from '../ai/model-gateway.service';
 import { AiMemoryService } from '../ai/ai-memory.service';
 import { SemanticMemoryService } from '../ai/semantic-memory.service';
@@ -57,6 +58,7 @@ import { KeyCortexMoodDetectionService } from './key-cortex-mood-detection.servi
 import { KeyCortexSuggestionService } from './key-cortex-suggestion.service';
 import { KeyCortexGenomeContextService } from './key-cortex-genome-context.service';
 import { KeyCortexSystemPromptService } from './key-cortex-system-prompt.service';
+import { KeyCortexQualityService } from './key-cortex-quality.service';
 import {
   GenomeEnrichedContext,
   GenomeRecommendation,
@@ -132,6 +134,9 @@ export class KeyCortexQueryPipelineService {
     @Optional()
     @Inject(KeyCortexLifecycleService)
     private readonly lifecycle?: KeyCortexLifecycleService,
+    @Optional()
+    @Inject(KeyCortexQualityService)
+    private readonly qualityService?: KeyCortexQualityService,
   ) {
     this.MAX_CONTEXT_TOKENS = parseInt(
       process.env.KEY_CORTEX_MAX_CONTEXT_TOKENS ?? '8000',
@@ -157,6 +162,11 @@ export class KeyCortexQueryPipelineService {
       v2Enabled: flags.integrationV2Enabled,
       v3Enabled: flags.genomeV3Enabled,
     });
+
+    const safetyCheck = await this.runSafetyCheck(query.text, query.businessId, correlationId);
+    if (safetyCheck?.blocked) {
+      return this.buildBlockedResponse(correlationId, safetyCheck.reason);
+    }
 
     try {
       const session = await this.sessionService.getOrCreateSession(query);
@@ -419,10 +429,41 @@ export class KeyCortexQueryPipelineService {
         topCategories: rankedRecommendations.slice(0, 3).map((r: any) => r.category),
       });
 
+      let detectedPersona: CortexPersona | undefined;
+      if (!query.persona) {
+        try {
+          detectedPersona =
+            (await this.personalityService.classifyPersona(
+              query.text,
+              query.businessId,
+            )) ?? undefined;
+        } catch (err: any) {
+          this.logger.warn(
+            `[processQuery][${correlationId}] Persona classification failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+
       const persona: CortexPersona =
-        query.persona ?? session.persona ?? 'jarvis';
+        query.persona ?? detectedPersona ?? session.persona ?? 'jarvis';
       const personalityConfig =
         this.personalityService.getPersonalityConfig(persona);
+
+      let toneInfo: { tone: string; temperatureAdjustment: number } = {
+        tone: '',
+        temperatureAdjustment: 0,
+      };
+      try {
+        toneInfo = await this.personalityService.selectTone(
+          query.text,
+          persona,
+          query.mood,
+        );
+      } catch (err: any) {
+        this.logger.warn(
+          `[processQuery][${correlationId}] Tone selection failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
 
       let systemPrompt: string;
       if (flags.genomeV3Enabled && genomeContext) {
@@ -464,6 +505,9 @@ export class KeyCortexQueryPipelineService {
 
       systemPrompt += `\nUse a ${routeDecision.promptVariant} reasoning style.`;
       systemPrompt += `\nActive reasoning layers: ${routeDecision.layers.join(', ')}.`;
+      if (toneInfo.tone) {
+        systemPrompt += `\nAdopt a ${toneInfo.tone} tone.`;
+      }
 
       await this.logEvent(correlationId, 'STEP_7_BUILD_PROMPT', {
         promptLength: systemPrompt.length,
@@ -490,12 +534,18 @@ export class KeyCortexQueryPipelineService {
         memoryContext,
       );
 
+      const baseTemperature =
+        routeDecision.temperatureOverride ?? personalityConfig.temperature;
+      const effectiveTemperature = Math.max(
+        0,
+        Math.min(2, baseTemperature + toneInfo.temperatureAdjustment),
+      );
+
       const completionResult = await this.modelGateway.complete({
         businessId: query.businessId,
         taskCategory,
         messages,
-        temperature:
-          routeDecision.temperatureOverride ?? personalityConfig.temperature,
+        temperature: effectiveTemperature,
         maxTokens: routeDecision.maxTokensOverride ?? this.MAX_CONTEXT_TOKENS,
         tools: routeDecision.includeActions
           ? (this.toolRegistry?.buildGatewayDefinitions() ??
@@ -510,7 +560,10 @@ export class KeyCortexQueryPipelineService {
         completionResult,
         messages,
         query,
-        routeDecision,
+        {
+          ...routeDecision,
+          temperatureOverride: effectiveTemperature,
+        },
         personalityConfig,
         taskCategory,
         turnIdentity,
@@ -530,6 +583,24 @@ export class KeyCortexQueryPipelineService {
         structured.recommendation ??
         completionResult.content ??
         '';
+
+      if (this.qualityService) {
+        try {
+          const quality = await this.qualityService.checkQuality({
+            text: finalContent,
+            taskCategory,
+          });
+          if (!quality.acceptable) {
+            this.logger.warn(
+              `[processQuery][${correlationId}] Quality issues detected: ${quality.issues.join(', ')}`,
+            );
+          }
+        } catch (err: any) {
+          this.logger.warn(
+            `[processQuery][${correlationId}] Quality check failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
 
       const assistantMessage: CortexMessage = {
         id: this.sessionService.generateId(),
@@ -926,6 +997,13 @@ export class KeyCortexQueryPipelineService {
       `[streamQuery][${correlationId}] business=${query.businessId} user=${query.userId} stream=true v2=${flags.integrationV2Enabled} v3=${flags.genomeV3Enabled}`,
     );
 
+    const safetyCheck = await this.runSafetyCheck(query.text, query.businessId, correlationId);
+    if (safetyCheck?.blocked) {
+      yield { type: 'text_delta', content: this.buildBlockedMessage(safetyCheck.reason) };
+      yield { type: 'done' };
+      return;
+    }
+
     try {
       const session = await this.sessionService.getOrCreateSession(query);
 
@@ -1008,10 +1086,41 @@ export class KeyCortexQueryPipelineService {
         );
       }
 
+      let detectedPersona: CortexPersona | undefined;
+      if (!query.persona) {
+        try {
+          detectedPersona =
+            (await this.personalityService.classifyPersona(
+              query.text,
+              query.businessId,
+            )) ?? undefined;
+        } catch (err: any) {
+          this.logger.warn(
+            `[streamQuery][${correlationId}] Persona classification failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+
       const persona: CortexPersona =
-        query.persona ?? session.persona ?? 'jarvis';
+        query.persona ?? detectedPersona ?? session.persona ?? 'jarvis';
       const personalityConfig =
         this.personalityService.getPersonalityConfig(persona);
+
+      let toneInfo: { tone: string; temperatureAdjustment: number } = {
+        tone: '',
+        temperatureAdjustment: 0,
+      };
+      try {
+        toneInfo = await this.personalityService.selectTone(
+          query.text,
+          persona,
+          query.mood,
+        );
+      } catch (err: any) {
+        this.logger.warn(
+          `[streamQuery][${correlationId}] Tone selection failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
 
       let systemPrompt: string;
       if (flags.genomeV3Enabled && genomeContext) {
@@ -1046,6 +1155,16 @@ export class KeyCortexQueryPipelineService {
 
       enrichedSystemPrompt += `\nUse a ${routeDecision.promptVariant} reasoning style.`;
       enrichedSystemPrompt += `\nActive reasoning layers: ${routeDecision.layers.join(', ')}.`;
+      if (toneInfo.tone) {
+        enrichedSystemPrompt += `\nAdopt a ${toneInfo.tone} tone.`;
+      }
+
+      const baseTemperature =
+        routeDecision.temperatureOverride ?? personalityConfig.temperature;
+      const effectiveTemperature = Math.max(
+        0,
+        Math.min(2, baseTemperature + toneInfo.temperatureAdjustment),
+      );
 
       const memoryContext = await this.promptContextService.buildMemoryContext(
         query.businessId,
@@ -1076,8 +1195,7 @@ export class KeyCortexQueryPipelineService {
         businessId: query.businessId,
         taskCategory,
         messages,
-        temperature:
-          routeDecision.temperatureOverride ?? personalityConfig.temperature,
+        temperature: effectiveTemperature,
         maxTokens: routeDecision.maxTokensOverride ?? this.MAX_CONTEXT_TOKENS,
         tools: routeDecision.includeActions
           ? (this.toolRegistry?.buildGatewayDefinitions() ??
@@ -1124,6 +1242,24 @@ export class KeyCortexQueryPipelineService {
             type: 'error',
             error: chunk.error,
           };
+        }
+      }
+
+      if (this.qualityService && accumulatedText.length > 0) {
+        try {
+          const quality = await this.qualityService.checkQuality({
+            text: accumulatedText,
+            taskCategory,
+          });
+          if (!quality.acceptable) {
+            this.logger.warn(
+              `[streamQuery][${correlationId}] Quality issues detected: ${quality.issues.join(', ')}`,
+            );
+          }
+        } catch (err: any) {
+          this.logger.warn(
+            `[streamQuery][${correlationId}] Quality check failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
         }
       }
 
@@ -1317,6 +1453,63 @@ export class KeyCortexQueryPipelineService {
         // Non-critical
       }
     }
+  }
+
+  // ── Safety helpers ────────────────────────────────────────
+
+  private async runSafetyCheck(
+    text: string,
+    businessId: string,
+    correlationId: string,
+  ): Promise<{ blocked: true; reason?: string } | undefined> {
+    if (!this.qualityService) {
+      return undefined;
+    }
+    try {
+      const safety = await this.qualityService.checkSafety({
+        text,
+        businessId,
+      });
+      if (!safety.safe && safety.severity === 'high') {
+        this.logger.warn(
+          `[processQuery][${correlationId}] Safety blocked query: ${safety.reason}`,
+        );
+        await this.logEvent(correlationId, 'STEP_1A_SAFETY_BLOCKED', {
+          reason: safety.reason,
+          severity: safety.severity,
+        });
+        return { blocked: true, reason: safety.reason };
+      }
+    } catch (err: any) {
+      this.logger.warn(
+        `[processQuery][${correlationId}] Safety check failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    return undefined;
+  }
+
+  private buildBlockedMessage(reason?: string): string {
+    return `I'm unable to process that request. ${reason ?? 'It was blocked by our safety system.'}`;
+  }
+
+  private buildBlockedResponse(
+    correlationId: string,
+    reason?: string,
+  ): CortexResponse {
+    return {
+      message: {
+        id: this.sessionService.generateId(),
+        role: 'assistant',
+        content: this.buildBlockedMessage(reason),
+        timestamp: new Date(),
+        metadata: { correlationId, safetyBlocked: true },
+      },
+      actions: [],
+      contextUsed: undefined,
+      suggestions: [],
+      followUpQuestions: [],
+      confidence: 0,
+    } as CortexResponse;
   }
 
   private calculateConfidence(

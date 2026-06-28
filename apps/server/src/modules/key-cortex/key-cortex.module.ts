@@ -106,6 +106,7 @@ import { KeyCortexSystemPromptService } from './key-cortex-system-prompt.service
 import { KeyCortexInteractionService } from './key-cortex-interaction.service';
 import { KeyCortexCommandExecutionService } from './key-cortex-command-execution.service';
 import { KeyCortexQueryPipelineService } from './key-cortex-query-pipeline.service';
+import { KeyCortexQualityService } from './key-cortex-quality.service';
 
 // -- v3 Phase 3 & 4 Services --
 import { KeyCortexSandboxService } from './key-cortex-sandbox.service';
@@ -258,6 +259,7 @@ import { ActivityLogService } from '../activity/activity.service';
     KeyCortexInteractionService,
     KeyCortexCommandExecutionService,
     KeyCortexQueryPipelineService,
+    KeyCortexQualityService,
 
     // Adaptive router -- lightweight multi-dimensional query classifier
     AdaptiveRouterService,
@@ -445,6 +447,7 @@ import { ActivityLogService } from '../activity/activity.service';
     KeyCortexInteractionService,
     KeyCortexCommandExecutionService,
     KeyCortexQueryPipelineService,
+    KeyCortexQualityService,
     AdaptiveRouterService,
     KeyCortexConversationService,
     KeyCortexActionsService,

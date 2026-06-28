@@ -120,6 +120,8 @@ function createMocks() {
       buildSystemPrompt: vi.fn().mockReturnValue('You are KEY.'),
       getRoleSystemPrompt: vi.fn().mockReturnValue(''),
       buildValueBlock: vi.fn().mockResolvedValue(''),
+      classifyPersona: vi.fn().mockResolvedValue(undefined),
+      selectTone: vi.fn().mockResolvedValue({ tone: '', temperatureAdjustment: 0 }),
     },
     contextService: {
       buildContextSnapshot: vi.fn().mockResolvedValue(baseContextSnapshot),
