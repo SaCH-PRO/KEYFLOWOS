@@ -3008,10 +3008,10 @@ export class KeyCortexConnectorService {
     const start = Date.now();
     switch (command.action) {
       case 'send_message': {
-        const msg = await (this.communications as any).sendMessage({
+        const msg = await this.communications.sendMessage({
           businessId: command.businessId,
           contactId: command.parameters.contactId as string,
-          channel: command.parameters.channel as string,
+          channel: command.parameters.channel as 'email' | 'sms' | 'whatsapp',
           body: command.parameters.body as string,
           templateId: command.parameters.templateId as string,
           attachments: command.parameters.attachments as string[],
@@ -3020,7 +3020,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, msg);
       }
       case 'send_whatsapp': {
-        const wa = await (this.communications as any).sendWhatsapp({
+        const wa = await this.communications.sendWhatsapp({
           businessId: command.businessId,
           contactId: command.parameters.contactId as string,
           body: command.parameters.body as string,
@@ -3029,7 +3029,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, wa);
       }
       case 'send_email': {
-        const email = await (this.communications as any).sendEmail({
+        const email = await this.communications.sendEmail({
           businessId: command.businessId,
           contactId: command.parameters.contactId as string,
           subject: command.parameters.subject as string,
@@ -3039,7 +3039,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, email);
       }
       case 'create_template': {
-        const template = await (this.communications as any).createTemplate({
+        const template = await this.communications.createTemplate({
           businessId: command.businessId,
           name: command.parameters.name as string,
           channel: command.parameters.channel as string,
@@ -3050,40 +3050,40 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, template);
       }
       case 'get_conversation': {
-        const conv = await (this.communications as any).getConversation({
+        const conv = await this.communications.getConversation({
           businessId: command.businessId,
           contactId: command.parameters.contactId as string,
-          channel: (command.parameters.channel as string) || 'all',
+          channel: (command.parameters.channel as 'email' | 'sms' | 'whatsapp' | undefined) || 'all',
           limit: (command.parameters.limit as number) || 50,
         });
         return this.ok(command, start, conv);
       }
       case 'send_broadcast': {
-        const broadcast = await (this.communications as any).sendBroadcast({
+        const broadcast = await this.communications.sendBroadcast({
           businessId: command.businessId,
           segment: command.parameters.segment as string,
-          channel: command.parameters.channel as string,
+          channel: command.parameters.channel as 'email' | 'sms' | 'whatsapp',
           body: command.parameters.body as string,
           templateId: command.parameters.templateId as string,
         });
         return this.ok(command, start, broadcast);
       }
       case 'mark_read': {
-        const marked = await (this.communications as any).markRead({
+        const marked = await this.communications.markRead({
           businessId: command.businessId,
           conversationId: command.parameters.conversationId as string,
         });
         return this.ok(command, start, marked);
       }
       case 'archive_conversation': {
-        const archived = await (this.communications as any).archiveConversation({
+        const archived = await this.communications.archiveConversation({
           businessId: command.businessId,
           conversationId: command.parameters.conversationId as string,
         });
         return this.ok(command, start, archived);
       }
       case 'send_reply': {
-        const reply = await (this.communications as any).sendReply({
+        const reply = await this.communications.sendReply({
           businessId: command.businessId,
           conversationId: command.parameters.conversationId as string,
           body: command.parameters.body as string,
@@ -3092,7 +3092,7 @@ export class KeyCortexConnectorService {
         return this.ok(command, start, reply);
       }
       case 'delete_template': {
-        await (this.communications as any).deleteTemplate({
+        await this.communications.deleteTemplate({
           businessId: command.businessId,
           templateId: command.parameters.templateId as string,
         });
