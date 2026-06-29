@@ -3,17 +3,20 @@ import {
   Post,
   Get,
   Patch,
+  Delete,
   Body,
   Param,
   Query,
   UseGuards,
   Logger,
   BadRequestException,
+  NotFoundException,
 } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { KeyCortexPlannerService, CreateGoalInput } from './key-cortex-planner.service';
 import { KeyCortexTriggerService } from './key-cortex-trigger.service';
+import { PrismaService } from '../../core/prisma/prisma.service';
 
 class CreateGoalDto implements CreateGoalInput {
   title: string;
@@ -63,6 +66,7 @@ export class KeyCortexGoalsController {
   constructor(
     private readonly planner: KeyCortexPlannerService,
     private readonly triggerService: KeyCortexTriggerService,
+    private readonly prisma: PrismaService,
   ) {}
 
   @Post('goals')
@@ -126,6 +130,20 @@ export class KeyCortexGoalsController {
       traceId: options.traceId,
       skipApproval: options.skipApproval,
     });
+  }
+
+  @Delete('goals/:goalId')
+  async deleteGoal(
+    @Param('goalId') goalId: string,
+    @Query('businessId') businessId: string,
+  ) {
+    if (!businessId) throw new BadRequestException('businessId is required');
+    const goal = await this.prisma.client.aiGoal.findFirst({
+      where: { id: goalId, businessId },
+    });
+    if (!goal) throw new NotFoundException('Goal not found');
+    await this.prisma.client.aiGoal.delete({ where: { id: goalId } });
+    return { success: true };
   }
 
   // -- Phase 4: Trigger Rules --
