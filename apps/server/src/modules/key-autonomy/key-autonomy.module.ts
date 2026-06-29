@@ -27,7 +27,7 @@ import { KeyCortexModule } from '../key-cortex/key-cortex.module';
 @Module({
   imports: [
     PrismaModule,
-    AiModule,
+    forwardRef(() => AiModule),
     BlueprintModule,
     TemporalFlowModule,
     BusinessGenomeModule,

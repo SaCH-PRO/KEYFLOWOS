@@ -10699,6 +10699,7 @@ export async function saveVoicePreference(
     pitch?: number;
     personality?: string;
     isDefault?: boolean;
+    settings?: Record<string, unknown>;
   },
 ): Promise<ApiResult<VoicePreference>> {
   return apiPost<VoicePreference>({

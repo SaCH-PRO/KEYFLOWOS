@@ -10,7 +10,7 @@ import { MomentumModule } from '../momentum/momentum.module';
 import { CrmModule } from '../crm/crm.module';
 
 @Module({
-  imports: [PrismaModule, AiModule, NotificationsModule, forwardRef(() => MomentumModule), forwardRef(() => CrmModule)],
+  imports: [PrismaModule, forwardRef(() => AiModule), NotificationsModule, forwardRef(() => MomentumModule), forwardRef(() => CrmModule)],
   controllers: [AutopilotController],
   providers: [AutopilotService, AutopilotAiService, DelegationLoopService],
   exports: [AutopilotService, AutopilotAiService, DelegationLoopService],

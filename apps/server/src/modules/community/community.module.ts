@@ -1,5 +1,5 @@
 // @keyflow:dormant — UI surface gated by featureFlags (KEY-9 cleanup target).
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { CommunityController } from './community.controller';
 import { CommunityService } from './community.service';
 import { ReputationService } from './reputation.service';
@@ -12,7 +12,7 @@ import { AiModule } from '../ai/ai.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
-  imports: [AiModule, NotificationsModule],
+  imports: [forwardRef(() => AiModule), NotificationsModule],
   controllers: [CommunityController],
   providers: [
     CommunityService,

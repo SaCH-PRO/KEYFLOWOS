@@ -9,7 +9,22 @@ import { WorkspaceShell } from "@/components/ui/workspace-shell";
 import { SectionCard } from "@/components/ui/section-card";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { getBusinessCommandCenterSnapshot, type BusinessCommandCenterSnapshot } from "@/lib/api/business-command-center";
+import {
+  fetchCommandItems,
+  completeCommandItem,
+  approveCommandItem,
+  executeCommandItem,
+  assignCommandItem,
+  dismissCommandItem,
+  snoozeCommandItem,
+  reopenCommandItem,
+  type CommandItem,
+} from "@/lib/api/command";
+import { CommandQueue } from "@/components/command/command-queue";
 import { CommandHealthStrip } from "./components/command-health-strip";
+import { BusinessPulseCard } from "@/components/business-pulse-card";
+import { KeyBriefingCard } from "./components/key-briefing-card";
+import { GovernanceSummaryCard } from "./components/governance-summary-card";
 import { CommandItemCard } from "./components/command-item-card";
 import { CommandExecutiveModeGrid } from "./components/command-executive-mode-grid";
 import { CommandGenomeCard } from "./components/command-genome-card";
@@ -25,11 +40,15 @@ export default function CommandCenterPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [commandItems, setCommandItems] = useState<CommandItem[]>([]);
+  const [queueTotal, setQueueTotal] = useState(0);
+  const [queueLoading, setQueueLoading] = useState(false);
+
   useEffect(() => {
     setBusinessId(getStoredBusinessId() ?? null);
   }, []);
 
-  const load = async () => {
+  const loadSnapshot = async () => {
     if (!businessId) {
       setLoading(false);
       return;
@@ -46,10 +65,66 @@ export default function CommandCenterPage() {
     setLoading(false);
   };
 
+  const loadQueue = async () => {
+    if (!businessId) return;
+    setQueueLoading(true);
+    try {
+      const { data } = await fetchCommandItems(businessId, { status: "OPEN", limit: 50 });
+      setCommandItems(data?.items ?? []);
+      setQueueTotal(data?.total ?? 0);
+    } finally {
+      setQueueLoading(false);
+    }
+  };
+
   useEffect(() => {
-    void load();
+    void loadSnapshot();
+    void loadQueue();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [businessId]);
+
+  const handleComplete = async (id: string) => {
+    if (!businessId) return;
+    await completeCommandItem(businessId, id);
+    await loadQueue();
+  };
+
+  const handleApprove = async (id: string) => {
+    if (!businessId) return;
+    await approveCommandItem(businessId, id);
+    await loadQueue();
+  };
+
+  const handleExecute = async (id: string) => {
+    if (!businessId) return;
+    await executeCommandItem(businessId, id);
+    await loadQueue();
+  };
+
+  const handleAssign = async (id: string) => {
+    if (!businessId) return;
+    await assignCommandItem(businessId, id, "USER", "me");
+    await loadQueue();
+  };
+
+  const handleDismiss = async (id: string) => {
+    if (!businessId) return;
+    await dismissCommandItem(businessId, id);
+    await loadQueue();
+  };
+
+  const handleSnooze = async (id: string) => {
+    if (!businessId) return;
+    const until = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    await snoozeCommandItem(businessId, id, until);
+    await loadQueue();
+  };
+
+  const handleReopen = async (id: string) => {
+    if (!businessId) return;
+    await reopenCommandItem(businessId, id);
+    await loadQueue();
+  };
 
   if (loading) {
     return (
@@ -80,7 +155,7 @@ export default function CommandCenterPage() {
       subtitle="Your operating cockpit for priorities, risks, approvals, and KEY recommendations"
       actionLabel="Refresh"
       actionIcon={RefreshCw}
-      onAction={load}
+      onAction={() => { void loadSnapshot(); void loadQueue(); }}
     >
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
         <CommandHealthStrip health={snapshot.health} />
@@ -98,6 +173,33 @@ export default function CommandCenterPage() {
             <QuickLink href="/app/profile?tab=business-genome" icon={Target} label="Business Genome" />
           </div>
         </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <BusinessPulseCard
+            overallScore={snapshot.pulse.overallScore}
+            dimensions={snapshot.pulse.dimensions}
+          />
+          <KeyBriefingCard briefing={snapshot.briefing} />
+          <GovernanceSummaryCard governance={snapshot.governance} />
+        </div>
+
+        <SectionCard title={`Command Queue (${queueTotal})`} icon={LayoutDashboard} noPadding compact>
+          <div className="p-3">
+            <CommandQueue
+              items={commandItems}
+              total={queueTotal}
+              loading={queueLoading}
+              onRefresh={loadQueue}
+              onComplete={handleComplete}
+              onApprove={handleApprove}
+              onExecute={handleExecute}
+              onAssign={handleAssign}
+              onDismiss={handleDismiss}
+              onSnooze={handleSnooze}
+              onReopen={handleReopen}
+            />
+          </div>
+        </SectionCard>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
           <div className="lg:col-span-2 space-y-5">

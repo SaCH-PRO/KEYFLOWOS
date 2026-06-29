@@ -1,4 +1,5 @@
 import { Injectable, Inject, Logger, NotFoundException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { VisualClassifierService, VisualClassification } from './visual-classifier.service';
 import { CommandService } from '../command/command.service';
@@ -409,6 +410,7 @@ export class DeviceService {
       pitch?: number;
       personality?: string;
       isDefault?: boolean;
+      settings?: Record<string, unknown>;
     },
   ) {
     if (input.isDefault) {
@@ -431,6 +433,7 @@ export class DeviceService {
         pitch: input.pitch ?? 1.0,
         personality: input.personality ?? null,
         isDefault: input.isDefault ?? false,
+        settings: (input.settings ?? {}) as Prisma.InputJsonValue,
       },
     });
   }

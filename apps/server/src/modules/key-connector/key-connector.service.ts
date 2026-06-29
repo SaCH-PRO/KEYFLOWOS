@@ -69,7 +69,7 @@ export class KeyConnectorService {
     }>
   > {
     try {
-      let defs = category
+      const defs = category
         ? this.registry.getProvidersByCategory(category as never)
         : this.registry.getAllProviders();
 

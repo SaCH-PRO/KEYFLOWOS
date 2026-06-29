@@ -25,7 +25,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'node:crypto';
 
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { KeyCortexConnectorService } from './key-cortex-connector.service';
@@ -147,11 +147,11 @@ export class KeyCortexFlowStudioService {
     }
 
     // ── 1.4 Convert to proper FlowDefinition with IDs ──
-    const flowId = uuidv4();
+    const flowId = randomUUID();
     const nodeMap = new Map<number, string>();
 
     const nodes: FlowNode[] = generated.nodes.map((n, idx) => {
-      const id = `node_${uuidv4().replace(/-/g, '').substring(0, 12)}`;
+      const id = `node_${randomUUID().replace(/-/g, '').substring(0, 12)}`;
       nodeMap.set(idx, id);
       return {
         id,
@@ -172,7 +172,7 @@ export class KeyCortexFlowStudioService {
       sourceNode.outputs.push(targetId);
       targetNode.inputs.push(sourceId);
       return {
-        id: `edge_${uuidv4().replace(/-/g, '').substring(0, 12)}`,
+        id: `edge_${randomUUID().replace(/-/g, '').substring(0, 12)}`,
         source: sourceId,
         target: targetId,
         label: e.label,
@@ -255,7 +255,7 @@ export class KeyCortexFlowStudioService {
     if (!flow) throw new NotFoundException(`Flow not found: ${flowId}`);
 
     const execution: FlowExecution = {
-      id: `exec_${uuidv4().replace(/-/g, '').substring(0, 12)}`,
+      id: `exec_${randomUUID().replace(/-/g, '').substring(0, 12)}`,
       flowId,
       businessId: flow.businessId,
       status: 'running',
@@ -1272,7 +1272,7 @@ export class KeyCortexFlowStudioService {
 
     // Deep clone and customize nodes
     const nodes: FlowNode[] = template.nodes.map((n) => {
-      const id = `node_${uuidv4().replace(/-/g, '').substring(0, 12)}`;
+      const id = `node_${randomUUID().replace(/-/g, '').substring(0, 12)}`;
       const customizedData = { ...n.data };
 
       // Apply parameter overrides
@@ -1304,7 +1304,7 @@ export class KeyCortexFlowStudioService {
     });
 
     const edges: FlowEdge[] = template.edges.map((e) => ({
-      id: `edge_${uuidv4().replace(/-/g, '').substring(0, 12)}`,
+      id: `edge_${randomUUID().replace(/-/g, '').substring(0, 12)}`,
       source: oldIdToNewId.get(e.source) || e.source,
       target: oldIdToNewId.get(e.target) || e.target,
       label: e.label,
@@ -1324,7 +1324,7 @@ export class KeyCortexFlowStudioService {
     }
 
     const flow: FlowDefinition = {
-      id: uuidv4(),
+      id: randomUUID(),
       businessId,
       name: customizations.name || `${template.name} (Copy)`,
       description: customizations.description || template.description,

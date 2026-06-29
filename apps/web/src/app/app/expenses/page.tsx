@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
@@ -31,7 +31,7 @@ import {
 } from "@/lib/client";
 import { getAuthHeaders } from "@/lib/api";
 import { useExpensesData } from "./components/use-expenses-data";
-import { ExpenseFormSideSheet } from "./components/expense-form-sidesheet";
+import { ExpenseFormSideSheet, ExpensePrefill } from "./components/expense-form-sidesheet";
 import { formatCurrency, formatDate } from "./components/expense-utils";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
@@ -191,11 +191,13 @@ function MerchantAvatar({ vendor }: { vendor?: string }) {
    ─────────────────────────────────────────── */
 export default function ExpensesInboxPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const d = useExpensesData();
   const [activeTab, setActiveTab] = useState<ExpenseStatusTab>("inbox");
   const [searchQuery, setSearchQuery] = useState("");
   const [showAddDrawer, setShowAddDrawer] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
+  const [prefill, setPrefill] = useState<ExpensePrefill | null>(null);
   const [_detailExpense, _setDetailExpense] = useState<Expense | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
@@ -205,6 +207,35 @@ export default function ExpensesInboxPage() {
   useEffect(() => {
     d.setSearchQuery(searchQuery);
   }, [searchQuery]);
+
+  // Open add drawer when redirected from a device capture with prefill data
+  useEffect(() => {
+    const raw = searchParams.get("prefill");
+    if (!raw) return;
+    try {
+      const parsed = JSON.parse(decodeURIComponent(raw)) as unknown;
+      if (parsed && typeof parsed === "object") {
+        const data = parsed as ExpensePrefill;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- device-capture prefill hydration
+        setPrefill({
+          description: data.description,
+          amount: typeof data.amount === "number" ? data.amount : undefined,
+          date: data.date,
+          vendor: data.vendor,
+          receiptUrl: data.receiptUrl,
+        });
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- open side-sheet from query param
+        setShowAddDrawer(true);
+      }
+    } catch {
+      // ignore malformed prefill
+    }
+    // Strip the query param so a refresh does not reopen the drawer
+    const next = new URLSearchParams(searchParams.toString());
+    next.delete("prefill");
+    const url = next.toString() ? `?${next.toString()}` : window.location.pathname;
+    router.replace(url, { scroll: false });
+  }, [searchParams]);
 
   const filteredExpenses = useMemo(() => {
     let list = d.expenses.filter((e) => matchesTab(e, activeTab));
@@ -322,7 +353,7 @@ export default function ExpensesInboxPage() {
       });
   };
 
-  const openAdd = () => { setEditingExpense(null); setShowAddDrawer(true); };
+  const openAdd = () => { setEditingExpense(null); setPrefill(null); setShowAddDrawer(true); };
   const _openEdit = (exp: Expense) => { setEditingExpense(exp); setShowAddDrawer(true); };
 
   const totalPages = Math.max(1, Math.ceil(d.totalExpenses / d.pageSize));
@@ -647,9 +678,14 @@ export default function ExpensesInboxPage() {
           projects={d.projects}
           contacts={d.contacts}
           services={d.services}
-          onClose={() => setShowAddDrawer(false)}
+          prefill={prefill}
+          onClose={() => {
+            setShowAddDrawer(false);
+            setPrefill(null);
+          }}
           onSaved={() => {
             setShowAddDrawer(false);
+            setPrefill(null);
             void d.loadData();
           }}
         />

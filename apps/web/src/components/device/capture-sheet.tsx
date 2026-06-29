@@ -171,8 +171,11 @@ export function CaptureSheet({
           ? "audio"
           : "document";
 
+    const publicUrl = presigned.uploadURL.split("?")[0];
+
     const captureRes = await createCapture(businessId, {
       objectPath: presigned.objectPath,
+      publicUrl,
       fileName: file.name,
       contentType: file.type,
       sizeBytes: file.size,
@@ -378,8 +381,26 @@ function CaptureResultView({
 
     if (type === "create_expense") {
       const data = classification?.extractedData ?? {};
-      const prefill = encodeURIComponent(JSON.stringify(data));
-      router.push(`/app/expenses?prefill=${prefill}`);
+      const amount =
+        typeof data.total === "number"
+          ? data.total
+          : typeof data.amount === "number"
+            ? data.amount
+            : typeof data.totalAmount === "number"
+              ? data.totalAmount
+              : undefined;
+      const vendor = (data.vendor as string) || (data.merchant as string) || undefined;
+      const date =
+        (data.date as string) || (data.invoiceDate as string) || (data.dateIssued as string) || undefined;
+      const prefill = {
+        description: (data.description as string) || classification?.summary || "Captured receipt",
+        amount,
+        date,
+        vendor,
+        receiptUrl: asset.publicUrl,
+      };
+      const qs = encodeURIComponent(JSON.stringify(prefill));
+      router.push(`/app/expenses?prefill=${qs}`);
       return;
     }
 

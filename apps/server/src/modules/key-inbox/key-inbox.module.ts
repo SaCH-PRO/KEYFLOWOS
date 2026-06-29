@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { PrismaModule } from '../../core/prisma/prisma.module';
 import { AiModule } from '../ai/ai.module';
 import { BusinessEventModule } from '../business-events/business-event.module';
@@ -12,7 +12,7 @@ import { KeyInboxReplySenderService } from './key-inbox-reply-sender.service';
 import { KeyInboxIntelligenceService } from './key-inbox-intelligence.service';
 
 @Module({
-  imports: [PrismaModule, AiModule, BusinessEventModule],
+  imports: [PrismaModule, forwardRef(() => AiModule), BusinessEventModule],
   controllers: [KeyInboxController],
   providers: [
     KeyInboxService,

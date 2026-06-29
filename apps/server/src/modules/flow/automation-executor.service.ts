@@ -6,6 +6,7 @@ import { CrmService } from '../crm/crm.service';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
 import { AdapterRegistryService } from '../communications/adapters/adapter-registry.service';
 import { FlowRunnerService } from './flow-runner.service';
+import { mapTriggerTypeToEvent } from './trigger-event.mapper';
 import {
   BookingCreatedPayload,
   BookingConfirmedPayload,
@@ -187,7 +188,8 @@ export class AutomationExecutorService {
         const triggerNode = nodes.find((n) => n.type === 'trigger');
         if (!triggerNode) continue;
 
-        const nodeTriggerEvent = triggerNode.data?.triggerEvent as string | undefined;
+        const nodeTriggerEvent = (triggerNode.data?.triggerEvent as string | undefined)
+          || mapTriggerTypeToEvent(triggerNode.data?.triggerType as string | undefined);
         if (nodeTriggerEvent !== triggerEvent) continue;
 
         try {

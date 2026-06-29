@@ -124,6 +124,13 @@ export async function sendDraft(businessId: string, draftId: string) {
   });
 }
 
+export async function updateDraft(businessId: string, draftId: string, body: string) {
+  return apiPatch<DraftItem>(
+    `/api/communications/businesses/${businessId}/drafts/${draftId}`,
+    { body },
+  );
+}
+
 // ─── Consent ───
 
 export async function checkConsent(

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import {
   keyInterpretFlow,
   keyBuildFlow,
@@ -15,6 +15,7 @@ import {
   keyExecuteCalendar,
   keyTalkCalendar,
   synthesizeKeyflowSpeech,
+  fetchVoicePreferences,
 } from "@/lib/client";
 import {
   Mic,
@@ -165,6 +166,39 @@ export function KeyTalkPanel({ mode, businessId }: KeyTalkPanelProps) {
       return false;
     }
   });
+
+  // Overlay latest cloud voice preference onto localStorage
+  useEffect(() => {
+    if (!businessId) return;
+    let cancelled = false;
+    fetchVoicePreferences(businessId)
+      .then((res) => {
+        if (cancelled) return;
+        const prefs = res.data;
+        if (!prefs || prefs.length === 0) return;
+        const pref = prefs.find((p) => p.isDefault) ?? prefs[0];
+        const cloudSettings =
+          typeof pref.settings === "object" && pref.settings !== null
+            ? (pref.settings as Record<string, unknown>)
+            : {};
+        const voice = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"].includes(
+          pref.voiceKey,
+        )
+          ? pref.voiceKey
+          : undefined;
+        const speed = typeof pref.speakingRate === "number" ? pref.speakingRate : undefined;
+        const muted = typeof cloudSettings.muted === "boolean" ? cloudSettings.muted : undefined;
+        const current = JSON.parse(localStorage.getItem("kf_voice_settings") || "{}");
+        const next = { ...current, ...(voice && { voice }), ...(speed !== undefined && { speed }), ...(muted !== undefined && { muted }) };
+        localStorage.setItem("kf_voice_settings", JSON.stringify(next));
+        if (muted !== undefined) setTtsMuted(muted);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [businessId]);
+
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
 

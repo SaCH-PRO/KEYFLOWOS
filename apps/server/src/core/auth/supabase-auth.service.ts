@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { createClient, SupabaseClient, User } from '@supabase/supabase-js';
-import { jwtVerify, errors as JoseErrors } from 'jose';
+import type * as JoseModule from 'jose';
 
 interface JwtPayload {
   sub?: string;
@@ -40,15 +40,17 @@ export class SupabaseAuthService {
     const secret = this.getJwtSecret();
     if (!secret) return null;
     try {
-      const { payload } = await jwtVerify(token, secret, {
+      const jose = (await import('jose')) as typeof JoseModule;
+      const { payload } = await jose.jwtVerify(token, secret, {
         algorithms: ['HS256'],
         clockTolerance: 60,
       });
       return payload as JwtPayload;
     } catch (err: any) {
-      if (err instanceof JoseErrors.JWSSignatureVerificationFailed) {
+      const jose = (await import('jose')) as typeof JoseModule;
+      if (err instanceof jose.errors.JWSSignatureVerificationFailed) {
         this.logger.debug('Local JWT verification: signature invalid');
-      } else if (err instanceof JoseErrors.JWTExpired) {
+      } else if (err instanceof jose.errors.JWTExpired) {
         this.logger.debug('Local JWT verification: token expired');
       } else {
         this.logger.debug(`Local JWT verification failed: ${(err as Error).message}`);

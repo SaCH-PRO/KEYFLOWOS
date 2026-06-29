@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { getApiBase } from "@/lib/api-base";
+import { fetchVoicePreferences } from "@/lib/client";
 import {
   Mic,
   MicOff,
@@ -104,6 +105,37 @@ export function KeyVoiceButton({
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [interimTranscript, setInterimTranscript] = useState("");
+
+  // Overlay cloud voice preference onto localStorage so saved settings are honored
+  useEffect(() => {
+    if (!businessId) return;
+    let cancelled = false;
+    fetchVoicePreferences(businessId)
+      .then((res) => {
+        if (cancelled) return;
+        const prefs = res.data;
+        if (!prefs || prefs.length === 0) return;
+        const pref = prefs.find((p) => p.isDefault) ?? prefs[0];
+        const cloudSettings =
+          typeof pref.settings === "object" && pref.settings !== null
+            ? (pref.settings as Record<string, unknown>)
+            : {};
+        const voice = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"].includes(
+          pref.voiceKey,
+        )
+          ? pref.voiceKey
+          : undefined;
+        const speed = typeof pref.speakingRate === "number" ? pref.speakingRate : undefined;
+        const muted = typeof cloudSettings.muted === "boolean" ? cloudSettings.muted : undefined;
+        const current = JSON.parse(localStorage.getItem("kf_voice_settings") || "{}");
+        const next = { ...current, ...(voice && { voice }), ...(speed !== undefined && { speed }), ...(muted !== undefined && { muted }) };
+        localStorage.setItem("kf_voice_settings", JSON.stringify(next));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [businessId]);
 
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);

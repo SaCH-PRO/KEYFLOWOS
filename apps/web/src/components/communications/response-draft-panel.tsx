@@ -6,7 +6,7 @@ import { CheckCircle2, XCircle, Send, AlertCircle, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
-import { approveDraft, rejectDraft, sendDraft } from "@/lib/api/omnichannel";
+import { approveDraft, rejectDraft, sendDraft, updateDraft } from "@/lib/api/omnichannel";
 
 export interface DraftItem {
   id: string;
@@ -31,6 +31,7 @@ export function ResponseDraftPanel({ businessId, drafts, onMutate }: ResponseDra
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editBody, setEditBody] = useState("");
   const [loadingId, setLoadingId] = useState<string | null>(null);
+  const [savingId, setSavingId] = useState<string | null>(null);
 
   const handleApprove = async (draftId: string) => {
     setLoadingId(draftId);
@@ -72,6 +73,20 @@ export function ResponseDraftPanel({ businessId, drafts, onMutate }: ResponseDra
   const cancelEdit = () => {
     setEditingId(null);
     setEditBody("");
+  };
+
+  const handleSave = async (draftId: string) => {
+    if (!editBody.trim()) return;
+    setSavingId(draftId);
+    try {
+      await updateDraft(businessId, draftId, editBody.trim());
+      cancelEdit();
+      onMutate?.();
+    } catch (e) {
+      toast.error((e as Error)?.message ?? "Failed to save draft");
+    } finally {
+      setSavingId(null);
+    }
   };
 
   if (!drafts.length) {
@@ -190,7 +205,15 @@ export function ResponseDraftPanel({ businessId, drafts, onMutate }: ResponseDra
                 <Button size="sm" variant="ghost" onClick={cancelEdit}>
                   Cancel
                 </Button>
-                <Button size="sm" variant="default" onClick={cancelEdit}>
+                <Button
+                  size="sm"
+                  variant="default"
+                  onClick={() => handleSave(draft.id)}
+                  disabled={savingId === draft.id}
+                >
+                  {savingId === draft.id ? (
+                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                  ) : null}
                   Save Draft
                 </Button>
               </>

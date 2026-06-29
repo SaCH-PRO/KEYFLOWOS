@@ -402,7 +402,7 @@ export class KeyCortexQueryPipelineService {
       });
 
       let autonomyCheckedCommands = parsedCommands;
-      let autonomyResults: Record<string, AutonomyVerdict | AutonomyCheck> = {};
+      const autonomyResults: Record<string, AutonomyVerdict | AutonomyCheck> = {};
 
       if (parsedCommands.length > 0) {
         try {

@@ -192,6 +192,7 @@ export class DeviceController {
       pitch?: number;
       personality?: string;
       isDefault?: boolean;
+      settings?: Record<string, unknown>;
     },
   ) {
     const userId = req.user?.sub ?? null;

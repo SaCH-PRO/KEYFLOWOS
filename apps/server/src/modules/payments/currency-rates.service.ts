@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 
 /**
  * Hardcoded snapshot of TTD exchange rates used as the seed cache and as the
@@ -54,7 +54,7 @@ export class CurrencyRatesService {
   private lastAttemptAt = 0;
   private readonly fetchImpl: FetchFn;
 
-  constructor(fetchImpl?: FetchFn) {
+  constructor(@Optional() @Inject('CURRENCY_RATES_FETCH_IMPL') fetchImpl?: FetchFn) {
     this.fetchImpl =
       fetchImpl ??
       ((url, init) =>

@@ -14,6 +14,14 @@ interface FlowEdge {
   target: string;
 }
 
+interface FlowMetrics {
+  totalRuns?: number;
+  successRuns?: number;
+  failedRuns?: number;
+  lastRunAt?: string;
+  lastRunStatus?: string;
+}
+
 @Injectable()
 export class FlowRunnerService {
   private readonly logger = new Logger(FlowRunnerService.name);
@@ -87,6 +95,7 @@ export class FlowRunnerService {
         payload: { runId: run.id, flowId, status: 'COMPLETED' },
       });
       await this.writeTimeline(businessId, flowId, run.id, 'flow_completed', triggerPayload);
+      await this.updateFlowMetrics(flowId, 'COMPLETED');
       return updated;
     } catch (err: unknown) {
       const error = err instanceof Error ? err.message : String(err);
@@ -100,7 +109,81 @@ export class FlowRunnerService {
         payload: { runId: run.id, flowId, status: 'FAILED', error },
       });
       await this.writeTimeline(businessId, flowId, run.id, 'flow_failed', { ...triggerPayload, error });
+      await this.updateFlowMetrics(flowId, 'FAILED');
       return updated;
+    }
+  }
+
+  async runFlowTest(
+    businessId: string,
+    flowId: string,
+    triggerPayload: Record<string, unknown>,
+  ) {
+    const flow = await this.prisma.client.automationFlow.findFirst({
+      where: { id: flowId, businessId, deletedAt: null },
+    });
+    if (!flow) throw new Error('Flow not found');
+
+    const version = await this.prisma.client.flowVersion.findFirst({
+      where: { flowId },
+      orderBy: { version: 'desc' },
+    });
+    if (!version) throw new Error('No version found');
+
+    const nodes = (version.nodes as unknown as FlowNode[]) ?? [];
+    const edges = (version.edges as unknown as FlowEdge[]) ?? [];
+
+    const run = await this.prisma.client.flowRun.create({
+      data: {
+        businessId,
+        flowId,
+        flowVersionId: version.id,
+        sourceEventId: (triggerPayload.sourceEventId as string) || null,
+        contactId: (triggerPayload.contactId as string) || null,
+        status: 'TEST_RUNNING',
+        input: triggerPayload,
+        output: {},
+        idempotencyKey: null,
+      },
+    });
+
+    try {
+      await this.executeNodes(run.id, businessId, flowId, nodes, edges, triggerPayload, true);
+      const updated = await this.prisma.client.flowRun.update({
+        where: { id: run.id },
+        data: { status: 'TEST_COMPLETED', completedAt: new Date() },
+      });
+      return updated;
+    } catch (err: unknown) {
+      const error = err instanceof Error ? err.message : String(err);
+      const updated = await this.prisma.client.flowRun.update({
+        where: { id: run.id },
+        data: { status: 'TEST_FAILED', error, completedAt: new Date() },
+      });
+      return updated;
+    }
+  }
+
+  private async updateFlowMetrics(flowId: string, runStatus: 'COMPLETED' | 'FAILED') {
+    try {
+      const flow = await this.prisma.client.automationFlow.findUnique({
+        where: { id: flowId },
+        select: { metrics: true },
+      });
+      const current = (flow?.metrics as FlowMetrics) ?? {};
+      const next: FlowMetrics = {
+        totalRuns: (current.totalRuns ?? 0) + 1,
+        successRuns: (current.successRuns ?? 0) + (runStatus === 'COMPLETED' ? 1 : 0),
+        failedRuns: (current.failedRuns ?? 0) + (runStatus === 'FAILED' ? 1 : 0),
+        lastRunAt: new Date().toISOString(),
+        lastRunStatus: runStatus,
+      };
+      await this.prisma.client.automationFlow.update({
+        where: { id: flowId },
+        data: { metrics: next as any },
+      });
+    } catch (e: unknown) {
+      this.logger.error(`Failed to update flow metrics: ${(e as Error).message}`);
     }
   }
 
@@ -111,6 +194,7 @@ export class FlowRunnerService {
     nodes: FlowNode[],
     edges: FlowEdge[],
     triggerPayload: Record<string, unknown>,
+    test = false,
   ) {
     const triggerNode = nodes.find((n) => n.type === 'trigger');
     if (!triggerNode) throw new Error('No trigger node found');
@@ -153,7 +237,7 @@ export class FlowRunnerService {
         payload: { runId, nodeId, nodeType: node.type },
       });
 
-      const shouldContinue = await this.executeNode(runId, businessId, flowId, node, triggerPayload);
+      const shouldContinue = await this.executeNode(runId, businessId, flowId, node, triggerPayload, test);
       if (!shouldContinue) break;
 
       const nextIds = adjacency.get(nodeId) ?? [];
@@ -172,6 +256,7 @@ export class FlowRunnerService {
     flowId: string,
     node: FlowNode,
     triggerPayload: Record<string, unknown>,
+    test = false,
   ): Promise<boolean> {
     const step = await this.prisma.client.flowRunStep.create({
       data: {
@@ -226,6 +311,7 @@ export class FlowRunnerService {
           contactId: (triggerPayload.contactId as string) || null,
           userId: (triggerPayload.userId as string) || null,
           input: { nodeId: node.id, ...node.data },
+          test,
         };
         const output = await executor(ctx, node.data);
         await this.completeStep(step.id, output);

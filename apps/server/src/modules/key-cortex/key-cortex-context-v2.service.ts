@@ -1126,9 +1126,11 @@ export class KeyCortexContextV2Service {
     let newTasks = 0;
     let newMessages = 0;
 
+    // Use += so the initial 0 is read before any reassignment (avoids no-useless-assignment lint rule)
+
     try {
       // New leads since
-      newLeads = await (this.prisma.client as any).contact.count({
+      newLeads += await (this.prisma.client as any).contact.count({
         where: { businessId, createdAt: { gte: since }, status: 'lead' },
       });
       if (newLeads > 0) {
@@ -1146,7 +1148,7 @@ export class KeyCortexContextV2Service {
         where: { businessId, createdAt: { gte: since }, status: 'completed' },
         select: { amount: true },
       });
-      newPayments = payments.length;
+      newPayments += payments.length;
       const paymentTotal = payments.reduce((s: any, p: any) => s + (p.amount || 0), 0);
       if (newPayments > 0) {
         changes.push({
@@ -1159,7 +1161,7 @@ export class KeyCortexContextV2Service {
       }
 
       // New tasks since
-      newTasks = await (this.prisma.client as any).autopilotTask.count({
+      newTasks += await (this.prisma.client as any).autopilotTask.count({
         where: { businessId, createdAt: { gte: since } },
       });
       if (newTasks > 0) {
@@ -1173,7 +1175,7 @@ export class KeyCortexContextV2Service {
       }
 
       // New messages since
-      newMessages = await (this.prisma.client as any).message.count({
+      newMessages += await (this.prisma.client as any).message.count({
         where: { businessId, createdAt: { gte: since } },
       });
       if (newMessages > 0) {

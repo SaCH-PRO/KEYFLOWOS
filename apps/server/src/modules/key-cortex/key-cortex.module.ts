@@ -445,6 +445,9 @@ import { IntegrationHubModule } from '../integration-hub/integration-hub.module'
     EscalationService,
     DigitalEmployeeAcceptanceService,
 
+    // -- Phase A: Cognition session context primitive --
+    CognitionSessionService,
+
     // -- v3: Phase 3 & 4 Services --
     // Sandbox -- AI-powered code generation & secure execution
     KeyCortexSandboxService,

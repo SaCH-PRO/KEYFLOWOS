@@ -41,6 +41,7 @@ import {
   ServiceUnavailableException,
   UnauthorizedException,
   Logger,
+  Inject,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
@@ -495,14 +496,12 @@ export class KeyCortexController {
     private readonly monitorV2: KeyCortexMonitorV2Service,
 
     // -- v3 Phase 3 & 4 Services --
-    // TODO: replace `any` with real service types once controller/service
-    // method signatures are aligned in the integration hardening follow-up.
-    private readonly sandbox: any,
-    private readonly flowStudio: any,
-    private readonly externalConnector: any,
-    private readonly evolution: any,
-    private readonly phone: any,
-    private readonly document: any,
+    @Inject(KeyCortexSandboxService) private readonly sandbox: any,
+    @Inject(KeyCortexFlowStudioService) private readonly flowStudio: any,
+    @Inject(KeyCortexExternalConnectorService) private readonly externalConnector: any,
+    @Inject(KeyCortexEvolutionService) private readonly evolution: any,
+    @Inject(KeyCortexPhoneService) private readonly phone: any,
+    @Inject(KeyCortexDocumentService) private readonly document: any,
 
     // -- Phase D: Learning & Metacognition --
     private readonly learning: KeyCortexLearningService,
@@ -705,7 +704,7 @@ export class KeyCortexController {
       throw new BadRequestException('businessId query parameter is required');
     }
 
-    let session: CortexSession | null = null;
+    let session: CortexSession | null;
     if (sessionId) {
       session = await this.conversation.getSession(sessionId);
     } else {

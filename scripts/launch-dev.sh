@@ -44,8 +44,16 @@ if ! npx prisma db execute --schema packages/db/prisma/schema.prisma --stdin <<<
   echo "   Continuing anyway — NestJS will retry on its own."
 fi
 
+# ── workspace package build check ──────────────────────────────────────────────
+echo "🔨 Building workspace packages..."
+(
+  pnpm --filter @keyflow/shared build >/dev/null 2>&1 &&
+  pnpm --filter @keyflow/db build >/dev/null 2>&1 &&
+  pnpm --filter @keyflow/api build >/dev/null 2>&1
+) || { echo "❌ Workspace package build failed"; exit 1; }
+
 # ── server build check ─────────────────────────────────────────────────────────
-echo "🔨 Type-checking server..."
+echo "🔨 Type-checking and compiling server..."
 (
   cd apps/server
   pnpm build >/dev/null 2>&1
@@ -56,7 +64,9 @@ echo "🚀 Starting dev servers (API:3001 + Web:5000)..."
 echo "   Press Ctrl+C to stop both."
 
 cd apps/server
-pnpm dev &
+# Run the compiled server directly. tsx does not preserve emitDecoratorMetadata,
+# so NestJS type-injection fails under tsx; the compiled output is reliable.
+node dist/main.js &
 SERVER_PID=$!
 cd ../..
 

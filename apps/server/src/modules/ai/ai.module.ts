@@ -37,6 +37,7 @@ import { TimelineModule } from '../timeline/timeline.module';
 import { FinanceModule } from '../finance/finance.module';
 import { CommandModule } from '../command/command.module';
 import { GoogleDriveModule } from '../google-drive/google-drive.module';
+import { TaskAssignmentModule } from '../task-assignments/task-assignment.module';
 import { KeyAutonomyModule } from '../key-autonomy/key-autonomy.module';
 import { KeyCortexModule } from '../key-cortex/key-cortex.module';
 import { KeyCommandService } from './key-command.service';
@@ -77,7 +78,7 @@ import { AiIntelligenceController } from './ai-intelligence.controller';
 import { KeyAgentConfigService } from './key-agent-config.service';
 
 @Module({
-  imports: [PrismaModule, RedisModule, SubscriptionsModule, BlueprintModule, TimelineModule, forwardRef(() => FinanceModule), CommandModule, GoogleDriveModule, forwardRef(() => KeyAutonomyModule), forwardRef(() => KeyCortexModule)],
+  imports: [PrismaModule, RedisModule, SubscriptionsModule, forwardRef(() => BlueprintModule), TimelineModule, forwardRef(() => FinanceModule), CommandModule, GoogleDriveModule, TaskAssignmentModule, forwardRef(() => KeyAutonomyModule), forwardRef(() => KeyCortexModule)],
   controllers: [AiController, AiSettingsController, OutputTemplateController, AiFlowController, GraphActionsController, AiUsageAdminController, AiIntelligenceController, BlueprintOnboardingController],
   providers: [
     AiListener,

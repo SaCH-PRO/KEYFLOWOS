@@ -5,7 +5,7 @@ import { Settings, Volume2, VolumeX, Save, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 import { UnifiedPageShell } from "@/components/layout/unified-page-shell";
 import { getStoredBusinessId } from "@/lib/workspace";
-import { saveVoicePreference } from "@/lib/client";
+import { saveVoicePreference, fetchVoicePreferences } from "@/lib/client";
 
 const VOICE_OPTIONS = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"] as const;
 
@@ -37,12 +37,48 @@ function saveSettings(settings: LocalVoiceSettings) {
 export default function VoiceSettingsPage() {
   const businessId = getStoredBusinessId() ?? "";
   const [settings, setSettings] = useState<LocalVoiceSettings>(loadSettings);
+  const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
+  // Load cloud preferences on mount and overlay them on top of localStorage defaults
   useEffect(() => {
+    if (!businessId) return;
+    let cancelled = false;
+    fetchVoicePreferences(businessId)
+      .then((res) => {
+        if (cancelled) return;
+        const prefs = res.data;
+        if (!prefs || prefs.length === 0) {
+          setLoaded(true);
+          return;
+        }
+        const pref = prefs.find((p) => p.isDefault) ?? prefs[0];
+        const cloudSettings =
+          typeof pref.settings === "object" && pref.settings !== null
+            ? (pref.settings as Record<string, unknown>)
+            : {};
+        setSettings((prev) => ({
+          voice: VOICE_OPTIONS.includes(pref.voiceKey as (typeof VOICE_OPTIONS)[number])
+            ? (pref.voiceKey as (typeof VOICE_OPTIONS)[number])
+            : prev.voice,
+          speed: typeof pref.speakingRate === "number" ? pref.speakingRate : prev.speed,
+          muted: typeof cloudSettings.muted === "boolean" ? cloudSettings.muted : prev.muted,
+        }));
+        setLoaded(true);
+      })
+      .catch(() => {
+        if (!cancelled) setLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [businessId]);
+
+  useEffect(() => {
+    if (!loaded) return;
     saveSettings(settings);
-  }, [settings]);
+  }, [settings, loaded]);
 
   const handleSaveToBackend = useCallback(async () => {
     if (!businessId) {
@@ -55,6 +91,8 @@ export default function VoiceSettingsPage() {
       displayName: settings.voice.charAt(0).toUpperCase() + settings.voice.slice(1),
       provider: "openai",
       speakingRate: settings.speed,
+      isDefault: true,
+      settings: { muted: settings.muted, speed: settings.speed },
     });
     setSaving(false);
     if (res.error) {
