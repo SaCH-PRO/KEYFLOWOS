@@ -1777,6 +1777,18 @@ export class CrmService {
     return this.timeline.listContactTasks(input);
   }
 
+  getContactTimeline(businessId: string, contactId: string, limit?: number) {
+    return this.timeline.getContactTimeline(businessId, contactId, limit);
+  }
+
+  async countContacts(input: { businessId: string; status?: string; tag?: string }) {
+    const where = buildContactWhere(input.businessId, {
+      status: input.status,
+      tags: input.tag ? [input.tag] : undefined,
+    });
+    return this.prisma.client.contact.count({ where });
+  }
+
   dueTasks(input: { businessId: string; windowDays?: number }) {
     return this.timeline.dueTasks(input);
   }
