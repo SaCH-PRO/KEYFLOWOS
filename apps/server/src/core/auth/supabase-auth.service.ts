@@ -1,12 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { createHmac, timingSafeEqual } from 'crypto';
 import { createClient, SupabaseClient, User } from '@supabase/supabase-js';
-import type * as JoseModule from 'jose';
 
 interface JwtPayload {
   sub?: string;
   email?: string;
   role?: string;
   user_metadata?: Record<string, unknown>;
+  exp?: number;
+  iat?: number;
   [key: string]: unknown;
 }
 
@@ -30,31 +32,46 @@ export class SupabaseAuthService {
     return this.client;
   }
 
-  private getJwtSecret(): Uint8Array | null {
+  private getJwtSecret(): string | null {
     const secret = process.env.SUPABASE_JWT_SECRET;
     if (!secret) return null;
-    return new TextEncoder().encode(secret);
+    return secret;
   }
 
-  private async verifyLocal(token: string): Promise<JwtPayload | null> {
+  private verifyLocal(token: string): JwtPayload | null {
     const secret = this.getJwtSecret();
     if (!secret) return null;
+
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+
+    const [header, body, signature] = parts;
+
     try {
-      const jose = (await import('jose')) as typeof JoseModule;
-      const { payload } = await jose.jwtVerify(token, secret, {
-        algorithms: ['HS256'],
-        clockTolerance: 60,
-      });
-      return payload as JwtPayload;
-    } catch (err: any) {
-      const jose = (await import('jose')) as typeof JoseModule;
-      if (err instanceof jose.errors.JWSSignatureVerificationFailed) {
+      const expectedSignature = createHmac('sha256', secret)
+        .update(`${header}.${body}`)
+        .digest('base64url');
+
+      if (
+        !timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature))
+      ) {
         this.logger.debug('Local JWT verification: signature invalid');
-      } else if (err instanceof jose.errors.JWTExpired) {
-        this.logger.debug('Local JWT verification: token expired');
-      } else {
-        this.logger.debug(`Local JWT verification failed: ${(err as Error).message}`);
+        return null;
       }
+
+      const payload = JSON.parse(
+        Buffer.from(body, 'base64url').toString('utf8'),
+      ) as JwtPayload;
+
+      const nowSeconds = Math.floor(Date.now() / 1000);
+      if (typeof payload.exp === 'number' && payload.exp < nowSeconds) {
+        this.logger.debug('Local JWT verification: token expired');
+        return null;
+      }
+
+      return payload;
+    } catch (err: unknown) {
+      this.logger.debug(`Local JWT verification failed: ${(err as Error).message}`);
       return null;
     }
   }
@@ -85,7 +102,7 @@ export class SupabaseAuthService {
     if (!token) return null;
 
     // Primary path: local verification with SUPABASE_JWT_SECRET
-    const localPayload = await this.verifyLocal(token);
+    const localPayload = this.verifyLocal(token);
     if (localPayload?.sub) {
       return this.buildUserFromPayload(localPayload);
     }
