@@ -71,6 +71,10 @@ import {
   ProjectsAdapterService,
   ActivityAdapterService,
   SocialAdapterService,
+  FinanceAdapterService,
+  AnalyticsAdapterService,
+  IntelligenceAdapterService,
+  SettingsAdapterService,
   KeyCortexBridgeAdapterService,
 } from './adapters';
 
@@ -182,6 +186,15 @@ import { KeyConnectorModule } from '../key-connector/key-connector.module';
 import { ContentService } from '../content/content.service';
 import { SocialModule } from '../social/social.module';
 import { ActivityLogService } from '../activity/activity.service';
+import { FinanceModule } from '../finance/finance.module';
+import { ExpensesModule } from '../expenses/expenses.module';
+import { ReportsModule } from '../reports/reports.module';
+import { AnalyticsModule } from '../analytics/analytics.module';
+import { IntelligenceModule } from '../intelligence/intelligence.module';
+import { GrowthIntelligenceModule } from '../growth-intelligence/growth-intelligence.module';
+import { BusinessCommandCenterModule } from '../business-command-center/business-command-center.module';
+import { IdentityModule } from '../identity/identity.module';
+import { IntegrationHubModule } from '../integration-hub/integration-hub.module';
 
 @Module({
   imports: [
@@ -231,6 +244,17 @@ import { ActivityLogService } from '../activity/activity.service';
     forwardRef(() => SiteModule),
     forwardRef(() => KeyConnectorModule),
     forwardRef(() => SocialModule),
+
+    // -- Phase 2 Organs: Finance, Analytics, Intelligence, Settings --
+    forwardRef(() => FinanceModule),
+    forwardRef(() => ExpensesModule),
+    forwardRef(() => ReportsModule),
+    forwardRef(() => AnalyticsModule),
+    forwardRef(() => IntelligenceModule),
+    forwardRef(() => GrowthIntelligenceModule),
+    forwardRef(() => BusinessCommandCenterModule),
+    forwardRef(() => IdentityModule),
+    forwardRef(() => IntegrationHubModule),
 
     // Business events for unified audit trail
     BusinessEventModule,
@@ -340,6 +364,10 @@ import { ActivityLogService } from '../activity/activity.service';
     ProjectsAdapterService,
     ActivityAdapterService,
     SocialAdapterService,
+    FinanceAdapterService,
+    AnalyticsAdapterService,
+    IntelligenceAdapterService,
+    SettingsAdapterService,
 
     // -- Phase 0.7: Phase-2 bridge adapter --
     KeyCortexBridgeAdapterService,

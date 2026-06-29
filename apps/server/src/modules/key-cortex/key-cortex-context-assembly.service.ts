@@ -17,6 +17,10 @@ import {
   NotificationsAdapterService,
   ProjectsAdapterService,
   ActivityAdapterService,
+  FinanceAdapterService,
+  AnalyticsAdapterService,
+  IntelligenceAdapterService,
+  SettingsAdapterService,
 } from './adapters';
 
 /**
@@ -43,6 +47,10 @@ export class KeyCortexContextAssemblyService {
     private readonly notifications: NotificationsAdapterService,
     private readonly projects: ProjectsAdapterService,
     private readonly activity: ActivityAdapterService,
+    private readonly finance: FinanceAdapterService,
+    private readonly analytics: AnalyticsAdapterService,
+    private readonly intelligence: IntelligenceAdapterService,
+    private readonly settings: SettingsAdapterService,
   ) {}
 
   /**
@@ -233,6 +241,65 @@ export class KeyCortexContextAssemblyService {
       };
     } catch (e) {
       this.logger.warn(`Activity context failed: ${(e as Error).message}`);
+    }
+
+    // Finance context
+    try {
+      const financeOverview = await this.finance.getOverview(businessId);
+      const overview = financeOverview as unknown as Record<string, unknown>;
+      modules.finance = {
+        module: 'finance',
+        summary: `cash ${overview.cashBalance}, net profit ${overview.netProfitThisMonth}`,
+        recordCount: Number(overview.cashAccountCount ?? 0),
+        urgentItems: Number(overview.overdueInvoiceCount ?? 0) > 0
+          ? [`${overview.overdueInvoiceCount} overdue invoices`]
+          : [],
+        data: overview,
+      };
+    } catch (e) {
+      this.logger.warn(`Finance context failed: ${(e as Error).message}`);
+    }
+
+    // Analytics context
+    try {
+      const analyticsOverview = await this.analytics.getOverview(businessId);
+      modules.analytics = {
+        module: 'analytics',
+        summary: '30-day analytics overview',
+        recordCount: 0,
+        urgentItems: [],
+        data: analyticsOverview,
+      };
+    } catch (e) {
+      this.logger.warn(`Analytics context failed: ${(e as Error).message}`);
+    }
+
+    // Intelligence context
+    try {
+      const snapshot = await this.intelligence.getSnapshot(businessId);
+      modules.intelligence = {
+        module: 'intelligence',
+        summary: 'command-center snapshot',
+        recordCount: 0,
+        urgentItems: [],
+        data: snapshot as unknown as Record<string, unknown>,
+      };
+    } catch (e) {
+      this.logger.warn(`Intelligence context failed: ${(e as Error).message}`);
+    }
+
+    // Settings context
+    try {
+      const profile = await this.settings.getBusinessProfile(businessId);
+      modules.settings = {
+        module: 'settings',
+        summary: (profile as Record<string, unknown>).name ? `business: ${(profile as Record<string, unknown>).name}` : 'business settings',
+        recordCount: 0,
+        urgentItems: [],
+        data: profile,
+      };
+    } catch (e) {
+      this.logger.warn(`Settings context failed: ${(e as Error).message}`);
     }
 
     return {

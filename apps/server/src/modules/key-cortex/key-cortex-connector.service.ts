@@ -32,6 +32,10 @@ import {
   ProjectsAdapterService,
   ActivityAdapterService,
   SocialAdapterService,
+  FinanceAdapterService,
+  AnalyticsAdapterService,
+  IntelligenceAdapterService,
+  SettingsAdapterService,
   KeyCortexBridgeAdapterService,
 } from './adapters';
 
@@ -55,6 +59,10 @@ export class KeyCortexConnectorService {
     private readonly projects: ProjectsAdapterService,
     private readonly activity: ActivityAdapterService,
     private readonly social: SocialAdapterService,
+    private readonly finance: FinanceAdapterService,
+    private readonly analytics: AnalyticsAdapterService,
+    private readonly intelligence: IntelligenceAdapterService,
+    private readonly settings: SettingsAdapterService,
     private readonly bridge: KeyCortexBridgeAdapterService,
   ) {
     this.adapterMap = {
@@ -71,10 +79,10 @@ export class KeyCortexConnectorService {
       projects: this.projects,
       activity: this.activity,
       genome: this.bridge,
-      intelligence: this.bridge,
-      analytics: this.bridge,
-      finance: this.bridge,
-      settings: this.bridge,
+      intelligence: this.intelligence,
+      analytics: this.analytics,
+      finance: this.finance,
+      settings: this.settings,
       social: this.social,
       keystore: undefined,
     };

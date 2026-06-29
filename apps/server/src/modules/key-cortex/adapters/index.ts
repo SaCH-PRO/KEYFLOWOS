@@ -11,4 +11,8 @@ export * from './notifications-adapter.service';
 export * from './projects-adapter.service';
 export * from './activity-adapter.service';
 export * from './social-adapter.service';
+export * from './finance-adapter.service';
+export * from './analytics-adapter.service';
+export * from './intelligence-adapter.service';
+export * from './settings-adapter.service';
 export * from './bridge-adapter.service';
