@@ -297,7 +297,38 @@ export class AutonomyOrchestratorService {
       }
     }
 
-    // 5. Constitution / Blueprint value guard.
+    // 5. Tool outcome score guard.
+    // If a tool has a poor track record for this business, downgrade to supervised
+    // or block automatically regardless of other gates.
+    if (allowed) {
+      try {
+        const toolScore = await this.getToolOutcomeScore(context.businessId, context.actionKey);
+        if (toolScore.totalUses >= 3) {
+          trace.push({
+            source: 'ToolOutcomeScore',
+            rule: `tool-score-${context.actionKey}`,
+            result: toolScore.successRate < 0.5 ? 'supervised' : 'allow',
+            reason: `Tool ${context.actionKey} success rate is ${(toolScore.successRate * 100).toFixed(0)}% over ${toolScore.totalUses} uses`,
+            metadata: { successRate: toolScore.successRate, totalUses: toolScore.totalUses },
+          });
+
+          if (toolScore.successRate < 0.3 && toolScore.totalUses >= 5) {
+            allowed = false;
+            reasons.push(`Tool ${context.actionKey} success rate is below 30% — blocked`);
+          } else if (toolScore.successRate < 0.5) {
+            requiresApproval = true;
+            tier = 'supervised';
+            reasons.push(`Tool ${context.actionKey} success rate is below 50% — requires approval`);
+          }
+        }
+      } catch (err: any) {
+        this.logger.warn(
+          `[evaluate][${context.businessId}] Tool outcome score lookup failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
+    // 6. Constitution / Blueprint value guard.
     if (allowed) {
       try {
         const valueCheck = await this.constitutionValues.checkAction(
@@ -467,6 +498,23 @@ export class AutonomyOrchestratorService {
     } catch {
       return '0';
     }
+  }
+
+  private async getToolOutcomeScore(
+    businessId: string,
+    actionKey: string,
+  ): Promise<{ successRate: number; totalUses: number }> {
+    const row = await this.prisma.client.toolOutcomeScore.findUnique({
+      where: { businessId_toolName: { businessId, toolName: actionKey } },
+    });
+    if (!row) {
+      return { successRate: 0, totalUses: 0 };
+    }
+    const totalUses = row.successCount + row.failureCount;
+    return {
+      successRate: totalUses > 0 ? row.successCount / totalUses : 0,
+      totalUses,
+    };
   }
 
   private toExecutableActionType(actionKey: string): KeyExecutableActionType | null {

@@ -37,6 +37,7 @@ import { HttpModule } from '@nestjs/axios';
 
 import { KeyCortexController } from './key-cortex.controller';
 import { KeyCortexAuditController } from './key-cortex-audit.controller';
+import { KeyCortexGoalsController } from './key-cortex-goals.controller';
 import { AdaptiveRouterService } from './adaptive-router.service';
 import { KeyCortexEventBusService } from './key-cortex-event-bus.service';
 import { KeyCortexToolRegistryService } from './key-cortex-tool-registry.service';
@@ -48,6 +49,8 @@ import { KeyCortexAuditService } from './key-cortex-audit.service';
 import { KeyCortexApprovalOrchestratorService } from './key-cortex-approval-orchestrator.service';
 import { KeyIdempotencyService } from './key-idempotency.service';
 import { KeyCortexSagaService } from './key-cortex-saga.service';
+import { KeyCortexCompensationService } from './key-cortex-compensation.service';
+import { KeyCortexTriggerService } from './key-cortex-trigger.service';
 
 // -- Phase 2 Body: Organ Adapters --
 import { TemporalFlowAdapterService } from './organs/temporal-flow-adapter.service';
@@ -95,6 +98,7 @@ import { KeyCortexExecutorService } from './key-cortex-executor.service';
 import { KeyCortexContextV2Service } from './key-cortex-context-v2.service';
 import { KeyCortexInsightService } from './key-cortex-insight.service';
 import { KeyCortexMonitorV2Service } from './key-cortex-monitor-v2.service';
+import { KeyCortexPlannerService } from './key-cortex-planner.service';
 
 // -- Phase 0.7b: Decomposed reasoning services --
 import { KeyCortexSessionService } from './key-cortex-session.service';
@@ -134,6 +138,7 @@ import { KeyCortexRealtimeService } from './key-cortex-realtime.service';
 // -- Phase D: Data & Persistent Learning --
 import { KeyBiEngineService } from './key-bi-engine.service';
 import { KeyCortexDigestService } from './key-cortex-digest.service';
+import { KeyProactiveEngineService } from './key-proactive-engine.service';
 import { KeyCortexLearningService } from './key-cortex-learning.service';
 import { UnifiedMemoryRetrievalService } from './unified-memory-retrieval.service';
 import { KeyCortexMemoryRetrievalService } from './key-cortex-memory-retrieval.service';
@@ -265,6 +270,8 @@ import { IntegrationHubModule } from '../integration-hub/integration-hub.module'
     KeyCortexController,
     // Mind / Soul / Evolution audit + eval surface
     KeyCortexAuditController,
+    // Phase 3: Goals & Plans
+    KeyCortexGoalsController,
   ],
 
   providers: [
@@ -338,6 +345,7 @@ import { IntegrationHubModule } from '../integration-hub/integration-hub.module'
     // Idempotency and saga/rollback foundation.
     KeyIdempotencyService,
     KeyCortexSagaService,
+    KeyCortexCompensationService,
 
     // Voice interface -- TTS / STT with personality voice mapping
     KeyCortexVoiceService,
@@ -349,6 +357,13 @@ import { IntegrationHubModule } from '../integration-hub/integration-hub.module'
     // -- Phase 0.7: Decomposed connector services --
     KeyCortexCapabilityRegistryService,
     KeyCortexContextAssemblyService,
+
+    // -- Phase 3: Autonomy & Planning --
+    KeyCortexPlannerService,
+
+    // -- Phase 4: Proactive Senses --
+    KeyProactiveEngineService,
+    KeyCortexTriggerService,
 
     // -- Phase 0.5: Typed module adapters (replaces as-any casts) --
     CrmAdapterService,
@@ -542,8 +557,10 @@ import { IntegrationHubModule } from '../integration-hub/integration-hub.module'
     // get forwarded to WebSocket clients automatically
     KeyCortexRealtimeService,
 
-    // -- Phase D: Data & Persistent Learning --
+    // -- Phase D / Phase 4: Data, Persistent Learning & Proactive Senses --
     KeyBiEngineService,
+    KeyProactiveEngineService,
+    KeyCortexTriggerService,
     KeyCortexDigestService,
     KeyCortexLearningService,
     // Proactive rule-based watchers
@@ -617,6 +634,7 @@ import { IntegrationHubModule } from '../integration-hub/integration-hub.module'
     KeyCortexApprovalOrchestratorService,
     KeyIdempotencyService,
     KeyCortexSagaService,
+    KeyCortexCompensationService,
   ],
 })
 export class KeyCortexModule {}

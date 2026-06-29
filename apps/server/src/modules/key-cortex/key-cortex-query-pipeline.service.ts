@@ -204,7 +204,7 @@ export class KeyCortexQueryPipelineService {
       }
 
       const routeDecision: RouteDecision = this.adaptiveRouter
-        ? this.adaptiveRouter.route(query, session, session.messages.slice(-10))
+        ? await this.adaptiveRouter.route(query, session, session.messages.slice(-10))
         : {
             taskCategory: this.structuredOutputService.classifyTaskCategory(query),
             layers: ['reasoning', 'ethics'],
@@ -1066,7 +1066,7 @@ export class KeyCortexQueryPipelineService {
       }
 
       const routeDecision: RouteDecision = this.adaptiveRouter
-        ? this.adaptiveRouter.route(query, session, session.messages.slice(-10))
+        ? await this.adaptiveRouter.route(query, session, session.messages.slice(-10))
         : {
             taskCategory: this.structuredOutputService.classifyTaskCategory(query),
             layers: ['reasoning', 'ethics'],

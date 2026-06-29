@@ -369,11 +369,16 @@ model Business {
   flowSessions FlowSession[]
 
   // AI Business Office
-  aiExecutionLogs     AiExecutionLog[]
-  aiApprovalItems     AiApprovalItem[]
-  aiMemories          AiMemory[]
-  aiMemoryEmbeddings  AiMemoryEmbedding[]
-  aiPlans             AiPlan[]
+  aiExecutionLogs           AiExecutionLog[]
+  aiApprovalItems           AiApprovalItem[]
+  aiMemories                AiMemory[]
+  aiMemoryEmbeddings        AiMemoryEmbedding[]
+  aiPlans                   AiPlan[]
+  aiGoals                   AiGoal[]
+  aiPlanResults             AiPlanResult[]
+  keyCortexTriggerRules     KeyCortexTriggerRule[]
+  toolOutcomeScores         ToolOutcomeScore[]
+  promptVariants            PromptVariant[]
   autopilotSettings         AutopilotSettings?
   businessAutonomyProfile   BusinessAutonomyProfile?
   autonomyDailySpends       AutonomyDailySpend[]
@@ -381,10 +386,10 @@ model Business {
   idempotencyKeys           IdempotencyKey[]
   sagaExecutions            SagaExecution[]
   agentTriggers             AgentTrigger[]
-  journeyInstances    JourneyInstance[]
-  conversationThreads ConversationThread[]
-  businessGoals       BusinessGoal[]
-  projectPlans        ProjectPlan[]
+  journeyInstances          JourneyInstance[]
+  conversationThreads       ConversationThread[]
+  businessGoals             BusinessGoal[]
+  projectPlans              ProjectPlan[]
 
   // Keyflow Command notes (polymorphic notes attached to any module item)
   keyflowNotes KeyflowNote[]
@@ -1569,23 +1574,23 @@ model KeyActionProposal {
   payload    Json    @default("{}")
 
   // Phase 0: absorb AiApprovalItem / ApprovalRequest fields for unified governance
-  toolName         String?   @map("tool_name")
-  module           String?
-  description      String?
-  expectedBenefit  String?   @map("expected_benefit")
-  risks            String?
-  inputPayload     Json?     @map("input_payload")
-  affectedEntities Json?     @map("affected_entities")
-  resolvedByUserId String?   @map("resolved_by_user_id")
-  resolution       Json?
-  multiStepParentId String?  @map("multi_step_parent_id")
+  toolName          String? @map("tool_name")
+  module            String?
+  description       String?
+  expectedBenefit   String? @map("expected_benefit")
+  risks             String?
+  inputPayload      Json?   @map("input_payload")
+  affectedEntities  Json?   @map("affected_entities")
+  resolvedByUserId  String? @map("resolved_by_user_id")
+  resolution        Json?
+  multiStepParentId String? @map("multi_step_parent_id")
 
   // Phase 3 Skeleton + Phase 0: full identity/audit lineage
-  planId     String? @map("plan_id")
-  planStepId String? @map("plan_step_id")
-  correlationId String? @map("correlation_id")
-  commandId     String? @map("command_id")
-  sessionId     String? @map("session_id")
+  planId          String? @map("plan_id")
+  planStepId      String? @map("plan_step_id")
+  correlationId   String? @map("correlation_id")
+  commandId       String? @map("command_id")
+  sessionId       String? @map("session_id")
   businessEventId String? @map("business_event_id")
 
   riskLevel String @default("LOW") @map("risk_level")
@@ -6917,23 +6922,23 @@ model AutopilotSettings {
 // BusinessAutonomyProfile is the canonical source for whether KEY may act
 // autonomously for a business and what daily boundaries apply.
 model BusinessAutonomyProfile {
-  id                    String   @id @default(cuid())
-  businessId            String   @unique @map("business_id")
-  business              Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  id         String   @id @default(cuid())
+  businessId String   @unique @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
   // Global kill switch — when true KEY refuses all autonomous tool execution.
-  globalKillSwitch      Boolean  @default(false) @map("global_kill_switch")
+  globalKillSwitch Boolean @default(false) @map("global_kill_switch")
 
   // Daily safety limits (all autonomous executions are counted against these).
-  maxDailyAutoActions   Int      @default(10) @map("max_daily_auto_actions")
-  maxDailySpendTtd      Float    @default(0) @map("max_daily_spend_ttd") // 0 = unlimited
+  maxDailyAutoActions Int   @default(10) @map("max_daily_auto_actions")
+  maxDailySpendTtd    Float @default(0) @map("max_daily_spend_ttd") // 0 = unlimited
 
   // Tier enforcement: tools with riskTier > maxTierWithoutApproval always require
   // explicit human approval before autonomous execution.
-  maxTierWithoutApproval Int     @default(3) @map("max_tier_without_approval")
+  maxTierWithoutApproval Int @default(3) @map("max_tier_without_approval")
 
   // Notification / escalation
-  notifyOnBlock         Boolean  @default(true) @map("notify_on_block")
+  notifyOnBlock Boolean @default(true) @map("notify_on_block")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -6948,9 +6953,9 @@ model AutonomyDailySpend {
   businessId String   @map("business_id")
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
-  date       DateTime @db.Date @map("date")
-  amountTtd  Float    @default(0) @map("amount_ttd")
-  currency   String   @default("TTD") @map("currency")
+  date      DateTime @map("date") @db.Date
+  amountTtd Float    @default(0) @map("amount_ttd")
+  currency  String   @default("TTD") @map("currency")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -6966,7 +6971,7 @@ model AutonomyDailyActionCount {
   businessId String   @map("business_id")
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
-  date       DateTime @db.Date @map("date")
+  date       DateTime @map("date") @db.Date
   actionType String   @map("action_type") // e.g. 'auto', 'approved', or a specific tool category
   count      Int      @default(0) @map("count")
 
@@ -6981,13 +6986,13 @@ model AutonomyDailyActionCount {
 // Phase 0: Idempotency key registry. Prevents duplicate autonomous actions
 // and allows safe retries with deterministic responses.
 model IdempotencyKey {
-  id             String   @id @default(cuid())
-  businessId     String   @map("business_id")
-  business       Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
-  idempotencyKey String   @map("idempotency_key")
-  status         String   // pending | completed | failed
-  requestHash    String?  @map("request_hash")
+  idempotencyKey String  @map("idempotency_key")
+  status         String // pending | completed | failed
+  requestHash    String? @map("request_hash")
   response       Json?
   error          String?
 
@@ -7001,18 +7006,18 @@ model IdempotencyKey {
 
 // Phase 0: Saga execution log for multi-step autonomous operations.
 model SagaExecution {
-  id            String    @id @default(cuid())
-  businessId    String    @map("business_id")
-  business      Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
-  sagaType      String    @map("saga_type")
-  status        String    // running | completed | failed | compensated
-  correlationId String?   @map("correlation_id")
-  commandId     String?   @map("command_id")
-  sessionId     String?   @map("session_id")
+  sagaType      String  @map("saga_type")
+  status        String // running | completed | failed | compensated
+  correlationId String? @map("correlation_id")
+  commandId     String? @map("command_id")
+  sessionId     String? @map("session_id")
 
-  createdAt     DateTime  @default(now()) @map("created_at")
-  completedAt   DateTime? @map("completed_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  completedAt DateTime? @map("completed_at")
 
   steps SagaStep[]
 
@@ -7023,24 +7028,126 @@ model SagaExecution {
 
 // Phase 0: Individual step inside a saga, with optional compensation action.
 model SagaStep {
-  id              String        @id @default(cuid())
-  sagaId          String        @map("saga_id")
-  saga            SagaExecution @relation(fields: [sagaId], references: [id], onDelete: Cascade)
+  id     String        @id @default(cuid())
+  sagaId String        @map("saga_id")
+  saga   SagaExecution @relation(fields: [sagaId], references: [id], onDelete: Cascade)
 
-  stepIndex       Int           @map("step_index")
-  stepName        String        @map("step_name")
-  status          String        // pending | completed | failed | compensated
-  input           Json?
-  output          Json?
-  error           String?
-  compensationAction Json?      @map("compensation_action")
-  compensationResult Json?      @map("compensation_result")
+  stepIndex          Int     @map("step_index")
+  stepName           String  @map("step_name")
+  status             String // pending | completed | failed | compensated
+  input              Json?
+  output             Json?
+  error              String?
+  compensationAction Json?   @map("compensation_action")
+  compensationResult Json?   @map("compensation_result")
 
-  createdAt       DateTime      @default(now()) @map("created_at")
-  completedAt     DateTime?     @map("completed_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  completedAt DateTime? @map("completed_at")
 
   @@index([sagaId, stepIndex])
   @@map("saga_steps")
+}
+
+// Phase 3: Goals and plan outcomes for autonomous planning.
+model AiGoal {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  title        String
+  description  String?
+  status       String    @default("ACTIVE")
+  priority     Int       @default(0)
+  targetDate   DateTime? @map("target_date")
+  parentGoalId String?   @map("parent_goal_id")
+
+  plans AiPlan[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId, status])
+  @@index([businessId, priority])
+  @@map("ai_goals")
+}
+
+model AiPlanResult {
+  id     String @id @default(cuid())
+  planId String @unique @map("plan_id")
+  plan   AiPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  goalAchievementScore Int?    @map("goal_achievement_score")
+  userFeedback         String? @map("user_feedback")
+  businessImpactJson   Json?   @map("business_impact_json")
+
+  createdAt  DateTime  @default(now()) @map("created_at")
+  business   Business? @relation(fields: [businessId], references: [id])
+  businessId String?
+
+  @@index([planId])
+  @@map("ai_plan_results")
+}
+
+// Phase 4: Event-driven trigger rules for proactive senses.
+model KeyCortexTriggerRule {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  eventType       String  @map("event_type")
+  filterJson      Json?   @map("filter_json")
+  goalTemplateId  String? @map("goal_template_id")
+  cooldownMinutes Int     @default(60) @map("cooldown_minutes")
+  maxDailyFirings Int     @default(5) @map("max_daily_firings")
+  enabled         Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId, eventType])
+  @@index([businessId, enabled])
+  @@map("key_cortex_trigger_rules")
+}
+
+// Phase 5: Persistent per-tool outcome scoring.
+model ToolOutcomeScore {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  toolName       String @map("tool_name")
+  successCount   Int    @default(0) @map("success_count")
+  failureCount   Int    @default(0) @map("failure_count")
+  approvalCount  Int    @default(0) @map("approval_count")
+  avgExecutionMs Int?   @map("avg_execution_ms")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([businessId, toolName])
+  @@index([businessId, toolName])
+  @@map("tool_outcome_scores")
+}
+
+// Phase 5: Prompt variant A/B storage.
+model PromptVariant {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  variantKey     String  @map("variant_key")
+  promptTemplate String  @map("prompt_template")
+  selectionRate  Float   @default(0.5) @map("selection_rate")
+  wins           Int     @default(0)
+  losses         Int     @default(0)
+  enabled        Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([businessId, variantKey])
+  @@index([businessId, variantKey])
+  @@map("prompt_variants")
 }
 
 // L4 Manager — delegated authority for tier-4 autopilot actions
@@ -7467,10 +7574,13 @@ model AiPlan {
   maxRiskTier       Int      @default(1) @map("max_risk_tier")
   role              String?
   journeyInstanceId String?  @map("journey_instance_id")
+  goalId            String?  @map("goal_id")
+  goal              AiGoal?  @relation(fields: [goalId], references: [id], onDelete: SetNull)
 
   steps            AiPlanStep[]
   journeyInstances JourneyInstance[]
   projectPlan      ProjectPlan?
+  result           AiPlanResult?
 
   startedAt   DateTime? @map("started_at")
   completedAt DateTime? @map("completed_at")
@@ -11581,7 +11691,7 @@ model CognitionSession {
   userId          String?  @map("user_id")
   sessionId       String   @map("session_id") // external correlation id, e.g. CortexSession.id
   status          String   @default("active") // active | paused | completed | failed
-  contextSnapshot Json?    @map("context_snapshot") @default("{}")
+  contextSnapshot Json?    @default("{}") @map("context_snapshot")
   metadata        Json?    @default("{}")
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
@@ -11596,22 +11706,22 @@ model CognitionSession {
 
 // ── KEY 10/10: LLM Provider Cost Telemetry ───────────────────────────
 model LLMProviderCost {
-  id                String   @id @default(cuid())
-  businessId        String   @map("business_id")
-  sessionId         String?  @map("session_id")
-  provider          String
-  model             String
-  taskCategory      String   @map("task_category")
-  promptTokens      Int      @map("prompt_tokens")
-  completionTokens  Int      @map("completion_tokens")
-  totalTokens       Int      @map("total_tokens")
-  inputCost         Float    @map("input_cost")
-  outputCost        Float    @map("output_cost")
-  totalCost         Float    @map("total_cost")
-  latencyMs         Int      @map("latency_ms")
-  fallbackUsed      Boolean  @default(false) @map("fallback_used")
-  metadata          Json?    @default("{}")
-  createdAt         DateTime @default(now()) @map("created_at")
+  id               String   @id @default(cuid())
+  businessId       String   @map("business_id")
+  sessionId        String?  @map("session_id")
+  provider         String
+  model            String
+  taskCategory     String   @map("task_category")
+  promptTokens     Int      @map("prompt_tokens")
+  completionTokens Int      @map("completion_tokens")
+  totalTokens      Int      @map("total_tokens")
+  inputCost        Float    @map("input_cost")
+  outputCost       Float    @map("output_cost")
+  totalCost        Float    @map("total_cost")
+  latencyMs        Int      @map("latency_ms")
+  fallbackUsed     Boolean  @default(false) @map("fallback_used")
+  metadata         Json?    @default("{}")
+  createdAt        DateTime @default(now()) @map("created_at")
 
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 

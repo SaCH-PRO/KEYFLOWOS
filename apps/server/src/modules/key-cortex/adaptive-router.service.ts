@@ -1,7 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { TaskCategory } from '../ai/model-gateway.service';
 import { CortexQuery, CortexSession, CortexMessage } from './key-cortex.types';
 import type { ModuleName } from './key-cortex-connector.types';
+import { KeyCortexLearningService } from './key-cortex-learning.service';
 
 export type QueryComplexity = 'simple' | 'moderate' | 'complex';
 export type QueryDomain =
@@ -36,6 +37,7 @@ export interface RouteDecision {
   moduleRoute?: ModuleName;
   temperatureOverride?: number;
   maxTokensOverride?: number;
+  promptTemplate?: string;
   complexity: QueryComplexity;
   domain: QueryDomain;
   urgency: QueryUrgency;
@@ -64,20 +66,40 @@ export interface QueryDimensions {
 export class AdaptiveRouterService {
   private readonly logger = new Logger(AdaptiveRouterService.name);
 
+  constructor(
+    @Optional()
+    private readonly learning?: KeyCortexLearningService,
+  ) {}
+
   /**
    * Route a query to the appropriate reasoning configuration.
    */
-  route(
+  async route(
     query: CortexQuery,
     session?: CortexSession | null,
     recentMessages?: CortexMessage[],
-  ): RouteDecision {
+  ): Promise<RouteDecision> {
     const text = query.text;
     const lower = text.toLowerCase();
     const dimensions = this.classifyDimensions(lower, query, recentMessages);
     const taskCategory = this.resolveTaskCategory(lower, query, dimensions);
     const layers = this.resolveLayers(dimensions, query);
-    const promptVariant = this.resolvePromptVariant(dimensions);
+    let promptVariant = this.resolvePromptVariant(dimensions);
+    let promptTemplate: string | undefined;
+
+    if (this.learning && query.businessId) {
+      try {
+        const variant = await this.learning.selectVariant(query.businessId, promptVariant);
+        if (variant) {
+          promptVariant = variant.variantKey as PromptVariant;
+          promptTemplate = variant.promptTemplate;
+        }
+      } catch (err: unknown) {
+        this.logger.warn(
+          `[route] Variant selection failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
     const includeGenomeContext = this.shouldIncludeGenomeContext(dimensions);
     const includeMemoryContext = this.shouldIncludeMemoryContext(dimensions);
     const includeActions =
@@ -93,6 +115,7 @@ export class AdaptiveRouterService {
       includeMemoryContext,
       includeActions,
       moduleRoute,
+      promptTemplate,
       temperatureOverride: this.resolveTemperature(dimensions, promptVariant),
       maxTokensOverride: this.resolveMaxTokens(dimensions, promptVariant),
     };

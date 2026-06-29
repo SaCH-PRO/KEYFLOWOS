@@ -14118,6 +14118,29 @@ export async function updateStaffAiSettings(
   return apiPatch(`/ai/businesses/${encodeURIComponent(businessId)}/ai/settings/staff-workload-config/${encodeURIComponent(staffId)}`, data);
 }
 
+export interface AutonomyProfile {
+  id: string;
+  businessId: string;
+  globalKillSwitch: boolean;
+  maxDailyAutoActions: number;
+  maxDailySpendTtd: number;
+  maxTierWithoutApproval: number;
+  notifyOnBlock: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export async function fetchAutonomyProfile(businessId: string): Promise<ApiResult<AutonomyProfile>> {
+  return apiGet(`/api/v1/cortex/autonomy-profile?businessId=${encodeURIComponent(businessId)}`);
+}
+
+export async function updateAutonomyProfile(
+  businessId: string,
+  data: Partial<Omit<AutonomyProfile, "id" | "businessId" | "createdAt" | "updatedAt">>,
+): Promise<ApiResult<AutonomyProfile>> {
+  return apiPatch(`/api/v1/cortex/autonomy-profile`, { businessId, ...data });
+}
+
 export async function fetchSkills(businessId: string): Promise<ApiResult<Skill[]>> {
   return apiGet(`/ai/businesses/${encodeURIComponent(businessId)}/ai/settings/skills`, z.array(skillSchema), []);
 }

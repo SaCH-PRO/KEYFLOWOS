@@ -44,7 +44,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
-import { Observable, Subject } from 'rxjs';
+import { Observable, Subject, interval, map } from 'rxjs';
 
 import { KeyCortexReasoningService } from './key-cortex-reasoning.service';
 import { KeyCortexConversationService } from './key-cortex-conversation.service';
@@ -80,6 +80,7 @@ import {
   CortexStreamChunk,
   CortexResponse,
   CortexSession,
+  CortexMessage,
   CortexSessionStatus,
   CortexVoiceRequest,
   CortexSTTRequest,
@@ -99,6 +100,7 @@ import {
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { KeyCortexApprovalOrchestratorService } from './key-cortex-approval-orchestrator.service';
+import { KeyAutonomySafetyService } from '../key-autonomy/key-autonomy-safety.service';
 
 /* ------------------------------------------------------------------ */
 /*  DTOs  (Legacy)                                                     */
@@ -182,6 +184,14 @@ class FeedbackDto {
 class ProfitOpportunitiesQueryDto {
   businessId: string;
   category?: 'automation' | 'upsell' | 'cost_reduction' | 'new_revenue' | 'retention';
+}
+
+class UpdateAutonomyProfileDto {
+  globalKillSwitch?: boolean;
+  maxDailyAutoActions?: number;
+  maxDailySpendTtd?: number;
+  maxTierWithoutApproval?: number;
+  notifyOnBlock?: boolean;
 }
 
 /* ------------------------------------------------------------------ */
@@ -497,7 +507,8 @@ export class KeyCortexController {
     // -- Phase D: Learning & Metacognition --
     private readonly learning: KeyCortexLearningService,
 
-    // -- Phase 0.6: Unified approval orchestrator --
+    // -- Phase 0.6: Unified approval orchestrator / autonomy safety --
+    private readonly safety: KeyAutonomySafetyService,
     private readonly approvalOrchestrator: KeyCortexApprovalOrchestratorService,
   ) {}
 
@@ -671,6 +682,85 @@ export class KeyCortexController {
     })();
 
     return subject.asObservable();
+  }
+
+  /**
+   * GET /api/v1/cortex/messages
+   * Retrieve recent messages for a session.
+   */
+  @Get('messages')
+  async getMessages(
+    @Query('businessId') businessId: string,
+    @Query('sessionId') sessionId: string,
+    @Query('limit') limit?: string,
+  ): Promise<{ messages: CortexMessage[] }> {
+    if (!businessId) {
+      throw new BadRequestException('businessId query parameter is required');
+    }
+    if (!sessionId) {
+      throw new BadRequestException('sessionId query parameter is required');
+    }
+
+    const session = await this.conversation.getSession(sessionId);
+    if (!session || session.businessId !== businessId) {
+      throw new NotFoundException('Session not found');
+    }
+
+    const messages = session.messages ?? [];
+    const parsedLimit = limit ? parseInt(limit, 10) : 50;
+    return { messages: messages.slice(-parsedLimit) };
+  }
+
+  /**
+   * GET /api/v1/cortex/stream
+   * General SSE event stream for live Cortex updates.
+   */
+  @Sse('stream')
+  streamEvents(
+    @Query('businessId') businessId: string,
+  ): Observable<{ data: Record<string, unknown> }> {
+    if (!businessId) {
+      throw new BadRequestException('businessId query parameter is required');
+    }
+
+    return interval(15000).pipe(
+      map((tick) => ({
+        data: {
+          type: 'heartbeat',
+          businessId,
+          tick,
+          timestamp: new Date().toISOString(),
+        },
+      })),
+    );
+  }
+
+  /* ================================================================== */
+  /*  AUTONOMY PROFILE                                                  */
+  /* ================================================================== */
+
+  /**
+   * GET /api/v1/cortex/autonomy-profile
+   */
+  @Get('autonomy-profile')
+  async getAutonomyProfile(@Query('businessId') businessId: string) {
+    if (!businessId) {
+      throw new BadRequestException('businessId query parameter is required');
+    }
+    return this.safety.ensureProfile(businessId);
+  }
+
+  /**
+   * PATCH /api/v1/cortex/autonomy-profile
+   */
+  @Patch('autonomy-profile')
+  async updateAutonomyProfile(
+    @Body() dto: UpdateAutonomyProfileDto & { businessId: string },
+  ) {
+    if (!dto.businessId) {
+      throw new BadRequestException('businessId is required');
+    }
+    return this.safety.updateProfile(dto.businessId, dto);
   }
 
   /* ================================================================== */

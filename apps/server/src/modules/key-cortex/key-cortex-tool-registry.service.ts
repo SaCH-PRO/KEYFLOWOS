@@ -247,7 +247,7 @@ export class KeyCortexToolRegistryService {
       const result = await tool.handler(ctx, validation.parsed);
       const durationMs = Date.now() - startMs;
 
-      this.recordToolOutcome(name, result.success, durationMs);
+      this.recordToolOutcome(name, result.success, durationMs, ctx.businessId);
       await this.recordLearningOutcome(ctx, name, result.success, result.error, durationMs).catch((err) => {
         this.logger.warn(`Learning outcome recording failed: ${(err as Error).message}`);
       });
@@ -292,7 +292,7 @@ export class KeyCortexToolRegistryService {
       const durationMs = Date.now() - startMs;
       const result: KeyCortexToolResult = { success: false, error: err.message };
 
-      this.recordToolOutcome(name, false, durationMs);
+      this.recordToolOutcome(name, false, durationMs, ctx.businessId);
       await this.recordLearningOutcome(ctx, name, false, err.message, durationMs).catch((learnErr) => {
         this.logger.warn(`Learning outcome recording failed: ${(learnErr as Error).message}`);
       });
@@ -345,7 +345,7 @@ export class KeyCortexToolRegistryService {
   // Tool success scoring (Phase D.3)
   // ========================================================================
 
-  recordToolOutcome(toolName: string, success: boolean, durationMs: number): void {
+  recordToolOutcome(toolName: string, success: boolean, durationMs: number, businessId?: string): void {
     const existing = this.outcomes.get(toolName) ?? {
       successes: 0,
       failures: 0,
@@ -362,6 +362,65 @@ export class KeyCortexToolRegistryService {
     existing.lastUsedAt = new Date();
 
     this.outcomes.set(toolName, existing);
+
+    if (businessId) {
+      this.persistToolOutcomeScore(businessId, toolName, success, durationMs).catch((err) => {
+        this.logger.warn(`[recordToolOutcome] Persist failed: ${(err as Error).message}`);
+      });
+    }
+  }
+
+  async getToolScoreForBusiness(
+    businessId: string,
+    toolName: string,
+  ): Promise<KeyCortexToolScore> {
+    const row = await this.prisma.client.toolOutcomeScore.findUnique({
+      where: { businessId_toolName: { businessId, toolName } },
+    });
+    if (!row) {
+      return { successRate: 0, avgDurationMs: 0, totalUses: 0 };
+    }
+    const totalUses = row.successCount + row.failureCount;
+    return {
+      successRate: totalUses > 0 ? row.successCount / totalUses : 0,
+      avgDurationMs: row.avgExecutionMs ?? 0,
+      totalUses,
+    };
+  }
+
+  private async persistToolOutcomeScore(
+    businessId: string,
+    toolName: string,
+    success: boolean,
+    durationMs: number,
+  ): Promise<void> {
+    const existing = await this.prisma.client.toolOutcomeScore.findUnique({
+      where: { businessId_toolName: { businessId, toolName } },
+    });
+
+    const successCount = (existing?.successCount ?? 0) + (success ? 1 : 0);
+    const failureCount = (existing?.failureCount ?? 0) + (success ? 0 : 1);
+    const totalUses = successCount + failureCount;
+    const avgExecutionMs =
+      existing?.avgExecutionMs != null
+        ? Math.round((existing.avgExecutionMs * (totalUses - 1) + durationMs) / totalUses)
+        : durationMs;
+
+    await this.prisma.client.toolOutcomeScore.upsert({
+      where: { businessId_toolName: { businessId, toolName } },
+      create: {
+        businessId,
+        toolName,
+        successCount,
+        failureCount,
+        avgExecutionMs,
+      },
+      update: {
+        successCount,
+        failureCount,
+        avgExecutionMs,
+      },
+    });
   }
 
   getToolScore(toolName: string): KeyCortexToolScore {
