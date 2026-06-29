@@ -31,6 +31,7 @@ import {
   NotificationsAdapterService,
   ProjectsAdapterService,
   ActivityAdapterService,
+  SocialAdapterService,
   KeyCortexBridgeAdapterService,
 } from './adapters';
 
@@ -53,6 +54,7 @@ export class KeyCortexConnectorService {
     private readonly notifications: NotificationsAdapterService,
     private readonly projects: ProjectsAdapterService,
     private readonly activity: ActivityAdapterService,
+    private readonly social: SocialAdapterService,
     private readonly bridge: KeyCortexBridgeAdapterService,
   ) {
     this.adapterMap = {
@@ -73,7 +75,7 @@ export class KeyCortexConnectorService {
       analytics: this.bridge,
       finance: this.bridge,
       settings: this.bridge,
-      social: this.bridge,
+      social: this.social,
       keystore: undefined,
     };
   }

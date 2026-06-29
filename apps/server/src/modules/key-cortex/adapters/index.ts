@@ -10,4 +10,5 @@ export * from './inbox-adapter.service';
 export * from './notifications-adapter.service';
 export * from './projects-adapter.service';
 export * from './activity-adapter.service';
+export * from './social-adapter.service';
 export * from './bridge-adapter.service';

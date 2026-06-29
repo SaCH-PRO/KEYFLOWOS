@@ -70,6 +70,7 @@ import {
   NotificationsAdapterService,
   ProjectsAdapterService,
   ActivityAdapterService,
+  SocialAdapterService,
   KeyCortexBridgeAdapterService,
 } from './adapters';
 
@@ -179,6 +180,7 @@ import { PortalModule } from '../portal/portal.module';
 import { SiteModule } from '../site/site.module';
 import { KeyConnectorModule } from '../key-connector/key-connector.module';
 import { ContentService } from '../content/content.service';
+import { SocialModule } from '../social/social.module';
 import { ActivityLogService } from '../activity/activity.service';
 
 @Module({
@@ -228,6 +230,7 @@ import { ActivityLogService } from '../activity/activity.service';
     forwardRef(() => PortalModule),
     forwardRef(() => SiteModule),
     forwardRef(() => KeyConnectorModule),
+    forwardRef(() => SocialModule),
 
     // Business events for unified audit trail
     BusinessEventModule,
@@ -336,6 +339,7 @@ import { ActivityLogService } from '../activity/activity.service';
     NotificationsAdapterService,
     ProjectsAdapterService,
     ActivityAdapterService,
+    SocialAdapterService,
 
     // -- Phase 0.7: Phase-2 bridge adapter --
     KeyCortexBridgeAdapterService,

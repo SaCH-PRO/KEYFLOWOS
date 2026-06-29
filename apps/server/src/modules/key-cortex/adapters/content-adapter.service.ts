@@ -92,16 +92,64 @@ export class ContentAdapterService {
         });
         return connectorOk(command, start, { deleted: true });
       }
+      case 'get_content_calendar': {
+        const calendar = await this.getScheduledPosts({
+          businessId: command.businessId,
+          from: command.parameters.from as string,
+          to: command.parameters.to as string,
+          limit: (command.parameters.limit as number) || 50,
+        });
+        return connectorOk(command, start, calendar);
+      }
+      case 'get_campaign_performance': {
+        const performance = await this.getCampaignPerformance({
+          businessId: command.businessId,
+          campaignId: command.parameters.campaignId as string,
+        });
+        return connectorOk(command, start, performance);
+      }
+      case 'get_recent_posts': {
+        const recent = await this.getRecentPosts({
+          businessId: command.businessId,
+          platform: command.parameters.platform as string,
+          limit: (command.parameters.limit as number) || 20,
+        });
+        return connectorOk(command, start, recent);
+      }
+      case 'get_drafts': {
+        const drafts = await this.getDrafts({
+          businessId: command.businessId,
+          platform: command.parameters.platform as string,
+          limit: (command.parameters.limit as number) || 20,
+        });
+        return connectorOk(command, start, drafts);
+      }
       default:
         return connectorFail(command, start, `Unknown content action: ${command.action}`);
     }
   }
 
-  async getDrafts(input: { businessId: string; limit?: number }) {
-    return this.content.getDrafts(input);
+  async getDrafts(input: { businessId: string; limit?: number; platform?: string }) {
+    const drafts = await this.content.getDrafts({ businessId: input.businessId, limit: input.limit });
+    if (input.platform) {
+      return drafts.filter((d: any) => (d.platform ?? d.contentType) === input.platform);
+    }
+    return drafts;
   }
 
-  async getScheduledPosts(input: { businessId: string; from?: string; limit?: number }) {
-    return this.content.getScheduledPosts(input);
+  async getScheduledPosts(input: { businessId: string; from?: string; to?: string; limit?: number }) {
+    return this.content.getScheduledPosts({ businessId: input.businessId, from: input.from, limit: input.limit });
+  }
+
+  async getRecentPosts(input: { businessId: string; platform?: string; limit?: number }) {
+    const posts = await this.content.getPosts(input.businessId, input.limit ?? 20);
+    if (input.platform) {
+      return posts.filter((p: any) => (p.platform ?? p.contentType) === input.platform);
+    }
+    return posts;
+  }
+
+  async getCampaignPerformance(input: { businessId: string; campaignId: string }) {
+    return this.content.getCampaignPerformance(input.businessId, input.campaignId);
   }
 }
