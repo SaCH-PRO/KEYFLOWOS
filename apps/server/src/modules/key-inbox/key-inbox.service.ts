@@ -287,19 +287,26 @@ export class KeyInboxService {
   async updateThread(
     businessId: string,
     threadId: string,
-    patch: { subject?: string; status?: 'OPEN' | 'WAITING' | 'DONE' | 'ARCHIVED'; priority?: 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT' },
+    patch: {
+      subject?: string;
+      status?: 'OPEN' | 'WAITING' | 'DONE' | 'ARCHIVED';
+      priority?: 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT';
+      metadata?: Record<string, unknown>;
+    },
   ): Promise<KeyInboxThread> {
     const thread = await this.prisma.client.keyInboxThread.findFirst({
       where: { id: threadId, businessId },
     });
     if (!thread) throw new NotFoundException('Thread not found');
 
+    const existingMetadata = (thread.metadata as Record<string, unknown>) ?? {};
     return this.prisma.client.keyInboxThread.update({
       where: { id: threadId },
       data: {
         subject: patch.subject,
         status: patch.status,
         priority: patch.priority,
+        metadata: patch.metadata ? { ...existingMetadata, ...patch.metadata } : undefined,
       },
     });
   }
