@@ -5,12 +5,22 @@ function createMockPrisma() {
   const store = {
     approvalRequests: new Map<string, any>(),
     approvalSteps: new Map<string, any>(),
+    keyActionProposals: new Map<string, any>(),
   };
   let reqId = 0;
   let stepId = 0;
+  let proposalId = 0;
 
   return {
     client: {
+      keyActionProposal: {
+        create: vi.fn(async (args: any) => {
+          const id = `kap_${++proposalId}`;
+          const record = { id, ...args.data, createdAt: new Date(), updatedAt: new Date() };
+          store.keyActionProposals.set(id, record);
+          return record;
+        }),
+      },
       approvalRequest: {
         create: vi.fn(async (args: any) => {
           const id = `ar_${++reqId}`;
@@ -64,6 +74,9 @@ function createMockPrisma() {
         }),
         count: vi.fn(async () => store.approvalRequests.size),
       },
+      businessEvent: {
+        create: vi.fn(async (args: any) => ({ id: `be_${Date.now()}`, ...args.data })),
+      },
       approvalStep: {
         update: vi.fn(async (args: any) => {
           const existing = store.approvalSteps.get(args.where.id);
@@ -106,6 +119,16 @@ function createMockEmitter() {
   return { emit: vi.fn() };
 }
 
+function createMockOrchestrator() {
+  return {
+    propose: vi.fn().mockResolvedValue({
+      id: 'kap_shadow_1',
+      status: 'PENDING',
+      riskLevel: 'MEDIUM',
+    }),
+  };
+}
+
 describe('ApprovalRequestService', () => {
   it('creates a request with steps', async () => {
     const prisma = createMockPrisma();
@@ -124,6 +147,58 @@ describe('ApprovalRequestService', () => {
     expect(result.status).toBe('pending');
     expect(result.steps).toHaveLength(1);
     expect(emitter.emit).toHaveBeenCalledWith('approval.created', expect.any(Object));
+  });
+
+  it('shadow-migrates a pending request to a KeyActionProposal', async () => {
+    const prisma = createMockPrisma();
+    const emitter = createMockEmitter();
+    const orchestrator = createMockOrchestrator();
+    const svc = new ApprovalRequestService(prisma as any, emitter as any, orchestrator as any);
+
+    const result = await svc.createRequest({
+      businessId: 'biz_1',
+      requesterId: 'user_1',
+      requestType: 'expense',
+      title: 'Office supplies',
+      steps: [{ stepOrder: 0, approverId: 'manager_1' }],
+    });
+
+    expect(orchestrator.propose).toHaveBeenCalledWith(
+      expect.objectContaining({
+        businessId: 'biz_1',
+        userId: 'user_1',
+        sourceType: 'HUMAN_WORKFLOW',
+        sourceId: result.id,
+        actionType: 'REQUEST_APPROVAL',
+        title: 'Office supplies',
+      }),
+    );
+    expect(prisma.client.approvalRequest.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: result.id },
+        data: { migratedToProposalId: 'kap_shadow_1' },
+      }),
+    );
+    expect(result.migratedToProposalId).toBe('kap_shadow_1');
+  });
+
+  it('does not fail creation when shadow migration fails', async () => {
+    const prisma = createMockPrisma();
+    const emitter = createMockEmitter();
+    const orchestrator = createMockOrchestrator();
+    orchestrator.propose.mockRejectedValue(new Error('Proposal service unavailable'));
+    const svc = new ApprovalRequestService(prisma as any, emitter as any, orchestrator as any);
+
+    const result = await svc.createRequest({
+      businessId: 'biz_1',
+      requesterId: 'user_1',
+      requestType: 'expense',
+      title: 'Office supplies',
+      steps: [{ stepOrder: 0, approverId: 'manager_1' }],
+    });
+
+    expect(result.status).toBe('pending');
+    expect(result.migratedToProposalId).toBeUndefined();
   });
 
   it('auto-approves when under threshold', async () => {

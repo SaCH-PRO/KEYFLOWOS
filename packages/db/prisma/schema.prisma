@@ -6928,6 +6928,10 @@ model BusinessAutonomyProfile {
   maxDailyAutoActions   Int      @default(10) @map("max_daily_auto_actions")
   maxDailySpendTtd      Float    @default(0) @map("max_daily_spend_ttd") // 0 = unlimited
 
+  // Tier enforcement: tools with riskTier > maxTierWithoutApproval always require
+  // explicit human approval before autonomous execution.
+  maxTierWithoutApproval Int     @default(3) @map("max_tier_without_approval")
+
   // Notification / escalation
   notifyOnBlock         Boolean  @default(true) @map("notify_on_block")
 

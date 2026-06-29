@@ -48,6 +48,20 @@ function makeLearning(overrides?: Partial<any>) {
   };
 }
 
+function makeAudit(overrides?: Partial<any>) {
+  return {
+    emit: vi.fn().mockResolvedValue(undefined),
+    ...overrides,
+  };
+}
+
+function makeEventBus(overrides?: Partial<any>) {
+  return {
+    emit: vi.fn(),
+    ...overrides,
+  };
+}
+
 describe('KeyCortexToolRegistryService — safety gate', () => {
   let registry: KeyCortexToolRegistryService;
   let safety: ReturnType<typeof makeSafety>;
@@ -55,6 +69,8 @@ describe('KeyCortexToolRegistryService — safety gate', () => {
   let idempotency: ReturnType<typeof makeIdempotency>;
   let saga: ReturnType<typeof makeSaga>;
   let learning: ReturnType<typeof makeLearning>;
+  let audit: ReturnType<typeof makeAudit>;
+  let eventBus: ReturnType<typeof makeEventBus>;
   let tool: KeyCortexToolDefinition;
 
   beforeEach(() => {
@@ -63,12 +79,16 @@ describe('KeyCortexToolRegistryService — safety gate', () => {
     idempotency = makeIdempotency();
     saga = makeSaga();
     learning = makeLearning();
+    audit = makeAudit();
+    eventBus = makeEventBus();
     registry = new KeyCortexToolRegistryService(
       prisma as any,
       safety as any,
       idempotency as any,
       saga as any,
       learning as any,
+      audit as any,
+      eventBus as any,
     );
     tool = {
       name: 'crm.create_contact',
@@ -107,6 +127,9 @@ describe('KeyCortexToolRegistryService — safety gate', () => {
       safety as any,
       idempotency as any,
       saga as any,
+      learning as any,
+      audit as any,
+      eventBus as any,
     );
     registry.register(tool);
 
@@ -119,6 +142,37 @@ describe('KeyCortexToolRegistryService — safety gate', () => {
     expect(result.error).toContain('Kill switch active');
     expect(tool.handler).not.toHaveBeenCalled();
     expect(safety.recordExecution).not.toHaveBeenCalled();
+    expect(audit.emit).toHaveBeenCalled();
+  });
+
+  it('requires approval when safety tier is exceeded', async () => {
+    safety = makeSafety({
+      check: vi.fn().mockResolvedValue({
+        allowed: false,
+        requiresApproval: true,
+        reason: 'Tier 4 exceeds maxTierWithoutApproval',
+        profile: { maxTierWithoutApproval: 3 },
+      }),
+    });
+    registry = new KeyCortexToolRegistryService(
+      prisma as any,
+      safety as any,
+      idempotency as any,
+      saga as any,
+      learning as any,
+      audit as any,
+      eventBus as any,
+    );
+    registry.register(tool);
+
+    const result = await registry.execute('crm.create_contact', {
+      businessId: 'biz_1',
+      autonomyLevel: 2,
+    }, { name: 'Alice' });
+
+    expect(result.success).toBe(false);
+    expect(result.requiresApproval).toBe(true);
+    expect(tool.handler).not.toHaveBeenCalled();
   });
 
   it('does not record execution when the handler fails', async () => {
@@ -141,6 +195,78 @@ describe('KeyCortexToolRegistryService — safety gate', () => {
 
     expect(safety.check).toHaveBeenCalledWith(expect.objectContaining({ mode: 'manual' }));
   });
+
+  it('emits a BusinessEvent after successful tool execution', async () => {
+    registry.register(tool);
+    await registry.execute('crm.create_contact', {
+      businessId: 'biz_1',
+      autonomyLevel: 2,
+      sessionId: 'sess_1',
+      commandId: 'cmd_1',
+      correlationId: 'corr_1',
+    }, { name: 'Alice' });
+
+    expect(audit.emit).toHaveBeenCalledWith(
+      'ACTION_EXECUTED',
+      'crm.create_contact',
+      'tool_execution',
+      'cmd_1',
+      expect.objectContaining({
+        businessId: 'biz_1',
+        actorId: 'key_ai',
+        sessionId: 'sess_1',
+        commandId: 'cmd_1',
+        correlationId: 'corr_1',
+      }),
+      expect.any(Object),
+      expect.objectContaining({ status: 'success' }),
+    );
+  });
+
+  it('emits a BusinessEvent after failed tool execution', async () => {
+    const failingTool: KeyCortexToolDefinition = {
+      ...tool,
+      name: 'crm.fail',
+      handler: vi.fn().mockRejectedValue(new Error('Boom')),
+    };
+    registry.register(failingTool);
+
+    await registry.execute('crm.fail', { businessId: 'biz_1', autonomyLevel: 2 }, { name: 'Alice' });
+
+    expect(audit.emit).toHaveBeenCalledWith(
+      'ACTION_FAILED',
+      'crm.fail',
+      'tool_execution',
+      expect.any(String),
+      expect.objectContaining({ businessId: 'biz_1' }),
+      expect.any(Object),
+      expect.objectContaining({ status: 'error', error: 'Boom' }),
+    );
+  });
+
+  it('falls back to event bus when audit service is unavailable', async () => {
+    registry = new KeyCortexToolRegistryService(
+      prisma as any,
+      safety as any,
+      idempotency as any,
+      saga as any,
+      learning as any,
+      undefined as any,
+      eventBus as any,
+    );
+    registry.register(tool);
+
+    await registry.execute('crm.create_contact', { businessId: 'biz_1', autonomyLevel: 2 }, { name: 'Alice' });
+
+    expect(audit.emit).not.toHaveBeenCalled();
+    expect(eventBus.emit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: 'key_cortex_tool_registry',
+        type: 'tool.executed',
+        businessId: 'biz_1',
+      }),
+    );
+  });
 });
 
 describe('KeyCortexToolRegistryService — tool success scoring', () => {
@@ -150,6 +276,7 @@ describe('KeyCortexToolRegistryService — tool success scoring', () => {
   let idempotency: ReturnType<typeof makeIdempotency>;
   let saga: ReturnType<typeof makeSaga>;
   let learning: ReturnType<typeof makeLearning>;
+  let audit: ReturnType<typeof makeAudit>;
 
   beforeEach(() => {
     safety = makeSafety();
@@ -157,12 +284,14 @@ describe('KeyCortexToolRegistryService — tool success scoring', () => {
     idempotency = makeIdempotency();
     saga = makeSaga();
     learning = makeLearning();
+    audit = makeAudit();
     registry = new KeyCortexToolRegistryService(
       prisma as any,
       safety as any,
       idempotency as any,
       saga as any,
       learning as any,
+      audit as any,
     );
   });
 

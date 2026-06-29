@@ -1,7 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { ConnectorCommand, ConnectorResult } from '../key-cortex-connector.types';
 import { connectorOk, connectorFail } from '../key-cortex-connector.utils';
 import { ContentService } from '../../content/content.service';
+import { KeyCortexGenomeBridgeService } from '../key-cortex-genome-bridge.service';
 
 /**
  * Bridge adapter for Phase-2 modules that do not yet have dedicated domain
@@ -13,7 +14,12 @@ import { ContentService } from '../../content/content.service';
 export class KeyCortexBridgeAdapterService {
   private readonly logger = new Logger(KeyCortexBridgeAdapterService.name);
 
-  constructor(private readonly content: ContentService) {}
+  constructor(
+    private readonly content: ContentService,
+    @Optional()
+    @Inject(KeyCortexGenomeBridgeService)
+    private readonly genomeBridge?: KeyCortexGenomeBridgeService,
+  ) {}
 
   async execute(command: ConnectorCommand): Promise<ConnectorResult> {
     const start = Date.now();
@@ -74,7 +80,12 @@ export class KeyCortexBridgeAdapterService {
 
   private async getGenomeDna(businessId: string, recalculate: boolean): Promise<unknown> {
     this.logger.verbose(`getGenomeDna(${businessId}, recalculate=${recalculate})`);
-    return { businessId, status: 'placeholder', message: 'Genome service integration pending Phase 2' };
+    if (this.genomeBridge) {
+      const dna = await this.genomeBridge.getDnaScores(businessId);
+      return { businessId, ...dna, recalculate };
+    }
+    // Graceful fallback when genome bridge is not available.
+    return { businessId, status: 'unavailable', message: 'Genome bridge not available' };
   }
 
   private async getGenomeStage(businessId: string, detailed: boolean): Promise<unknown> {

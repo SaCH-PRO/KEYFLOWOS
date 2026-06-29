@@ -21,6 +21,7 @@ function createMockClient() {
           globalKillSwitch: data.globalKillSwitch ?? false,
           maxDailyAutoActions: data.maxDailyAutoActions ?? 10,
           maxDailySpendTtd: data.maxDailySpendTtd ?? 0,
+          maxTierWithoutApproval: data.maxTierWithoutApproval ?? 3,
           notifyOnBlock: data.notifyOnBlock ?? true,
           createdAt: new Date(),
           updatedAt: new Date(),
@@ -121,12 +122,14 @@ describe('KeyAutonomySafetyService', () => {
         globalKillSwitch: true,
         maxDailyAutoActions: 5,
         maxDailySpendTtd: 100,
+        maxTierWithoutApproval: 3,
         notifyOnBlock: true,
       });
       const profile = await service.ensureProfile('biz_1');
       expect(profile.globalKillSwitch).toBe(true);
       expect(client.businessAutonomyProfile.create).not.toHaveBeenCalled();
     });
+
   });
 
   describe('check', () => {
@@ -137,6 +140,7 @@ describe('KeyAutonomySafetyService', () => {
         globalKillSwitch: true,
         maxDailyAutoActions: 10,
         maxDailySpendTtd: 0,
+        maxTierWithoutApproval: 3,
         notifyOnBlock: true,
       });
       const result = await service.check({ businessId: 'biz_1', toolName: 'crm.create_contact' });
@@ -160,6 +164,7 @@ describe('KeyAutonomySafetyService', () => {
         globalKillSwitch: false,
         maxDailyAutoActions: 2,
         maxDailySpendTtd: 0,
+        maxTierWithoutApproval: 3,
         notifyOnBlock: true,
       });
       client.actionCounts.push({ businessId: 'biz_1', actionType: 'auto', count: 2 });
@@ -180,6 +185,7 @@ describe('KeyAutonomySafetyService', () => {
         globalKillSwitch: false,
         maxDailyAutoActions: 0,
         maxDailySpendTtd: 0,
+        maxTierWithoutApproval: 3,
         notifyOnBlock: true,
       });
 
@@ -205,6 +211,7 @@ describe('KeyAutonomySafetyService', () => {
         globalKillSwitch: false,
         maxDailyAutoActions: 100,
         maxDailySpendTtd: 100,
+        maxTierWithoutApproval: 3,
         notifyOnBlock: true,
       });
       client.spends.push({ businessId: 'biz_1', currency: 'TTD', amountTtd: 80 });
@@ -217,6 +224,49 @@ describe('KeyAutonomySafetyService', () => {
       });
       expect(result.allowed).toBe(false);
       expect(result.reason).toContain('spend limit');
+    });
+
+    it('requires approval when tool risk tier exceeds maxTierWithoutApproval', async () => {
+      client.profiles.push({
+        id: 'p1',
+        businessId: 'biz_1',
+        globalKillSwitch: false,
+        maxDailyAutoActions: 100,
+        maxDailySpendTtd: 0,
+        maxTierWithoutApproval: 2,
+        notifyOnBlock: true,
+      });
+
+      const result = await service.check({
+        businessId: 'biz_1',
+        toolName: 'finance.transfer_funds',
+        riskTier: 3,
+        mode: 'auto',
+      });
+      expect(result.allowed).toBe(false);
+      expect(result.requiresApproval).toBe(true);
+      expect(result.reason).toContain('maxTierWithoutApproval');
+    });
+
+    it('allows tools within maxTierWithoutApproval', async () => {
+      client.profiles.push({
+        id: 'p1',
+        businessId: 'biz_1',
+        globalKillSwitch: false,
+        maxDailyAutoActions: 100,
+        maxDailySpendTtd: 0,
+        maxTierWithoutApproval: 3,
+        notifyOnBlock: true,
+      });
+
+      const result = await service.check({
+        businessId: 'biz_1',
+        toolName: 'crm.create_contact',
+        riskTier: 2,
+        mode: 'auto',
+      });
+      expect(result.allowed).toBe(true);
+      expect(result.requiresApproval).toBeFalsy();
     });
   });
 

@@ -15,12 +15,14 @@ export interface AutonomySafetyCheck {
 export interface AutonomySafetyResult {
   allowed: boolean;
   reason?: string;
+  requiresApproval?: boolean;
   profile?: {
     id: string;
     businessId: string;
     globalKillSwitch: boolean;
     maxDailyAutoActions: number;
     maxDailySpendTtd: number;
+    maxTierWithoutApproval: number;
     notifyOnBlock: boolean;
   };
 }
@@ -32,6 +34,7 @@ export interface AutonomySafetyResult {
  *  - global kill switch (hard stop on all autonomous execution)
  *  - daily auto-action count cap
  *  - daily spend cap
+ *  - tier enforcement (tools above maxTierWithoutApproval require approval)
  *
  * The KeyCortexToolRegistryService calls this as the first gate before
  * invoking any tool handler. Counting happens after successful execution.
@@ -53,6 +56,20 @@ export class KeyAutonomySafetyService {
       return {
         allowed: false,
         reason: 'Global autonomy kill switch is active for this business',
+        profile,
+      };
+    }
+
+    // Tier enforcement: tools with riskTier greater than the business's
+    // configured maxTierWithoutApproval always require explicit approval.
+    if (
+      input.riskTier !== undefined &&
+      input.riskTier > profile.maxTierWithoutApproval
+    ) {
+      return {
+        allowed: false,
+        requiresApproval: true,
+        reason: `Tool "${input.toolName}" is tier ${input.riskTier} which exceeds maxTierWithoutApproval (${profile.maxTierWithoutApproval}); approval required`,
         profile,
       };
     }

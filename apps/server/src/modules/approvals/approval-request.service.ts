@@ -1,6 +1,7 @@
-import { Injectable, Inject, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException, BadRequestException, Logger, forwardRef } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { KeyCortexApprovalOrchestratorService } from '../key-cortex/key-cortex-approval-orchestrator.service';
 
 export interface CreateApprovalRequestInput {
   businessId: string;
@@ -34,6 +35,8 @@ export class ApprovalRequestService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly emitter: EventEmitter2,
+    @Inject(forwardRef(() => KeyCortexApprovalOrchestratorService))
+    private readonly proposalOrchestrator?: KeyCortexApprovalOrchestratorService,
   ) {}
 
   async createRequest(input: CreateApprovalRequestInput) {
@@ -98,6 +101,9 @@ export class ApprovalRequestService {
     });
 
     this.emitEvent(input.businessId, 'approval.created', request);
+
+    await this.shadowMigrateToProposal(request, input);
+
     return request;
   }
 
@@ -361,5 +367,43 @@ export class ApprovalRequestService {
       title: request.title,
       ...extra,
     });
+  }
+
+  /**
+   * Shadow-migrate a legacy ApprovalRequest into a canonical KeyActionProposal.
+   * This keeps the legacy table functional while ensuring every approval is
+   * visible in the unified governance ledger.
+   */
+  private async shadowMigrateToProposal(
+    request: any,
+    input: CreateApprovalRequestInput,
+  ): Promise<void> {
+    if (!this.proposalOrchestrator) return;
+
+    try {
+      const proposal = await this.proposalOrchestrator.propose({
+        businessId: input.businessId,
+        userId: input.requesterId,
+        sourceType: 'HUMAN_WORKFLOW',
+        sourceId: request.id,
+        actionType: 'REQUEST_APPROVAL',
+        title: input.title,
+        description: input.description,
+        summary: input.description,
+        parameters: input.payload,
+        affectedEntities: { requestType: input.requestType, steps: input.steps },
+      });
+
+      await this.prisma.client.approvalRequest.update({
+        where: { id: request.id },
+        data: { migratedToProposalId: proposal.id },
+      });
+
+      request.migratedToProposalId = proposal.id;
+    } catch (err: unknown) {
+      this.logger.warn(
+        `Shadow migration of ApprovalRequest ${request.id} to KeyActionProposal failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 }

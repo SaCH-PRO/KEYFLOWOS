@@ -18,6 +18,8 @@ import { KeyAutonomySafetyService } from '../key-autonomy/key-autonomy-safety.se
 import { KeyIdempotencyService } from './key-idempotency.service';
 import { KeyCortexSagaService } from './key-cortex-saga.service';
 import { KeyCortexLearningService } from './key-cortex-learning.service';
+import { KeyCortexAuditService } from './key-cortex-audit.service';
+import { KeyCortexEventBusService } from './key-cortex-event-bus.service';
 import { GatewayToolDefinition } from './key-cortex.types';
 
 export interface KeyCortexToolContext {
@@ -41,6 +43,7 @@ export interface KeyCortexToolResult<T = unknown> {
   data?: T;
   error?: string;
   costTtd?: number;
+  requiresApproval?: boolean;
 }
 
 export interface KeyCortexToolDefinition {
@@ -103,6 +106,10 @@ export class KeyCortexToolRegistryService {
     private readonly saga: KeyCortexSagaService,
     @Optional()
     private readonly learning?: KeyCortexLearningService,
+    @Optional()
+    private readonly auditService?: KeyCortexAuditService,
+    @Optional()
+    private readonly eventBus?: KeyCortexEventBusService,
   ) {}
 
   // ========================================================================
@@ -185,7 +192,8 @@ export class KeyCortexToolRegistryService {
       }
     }
 
-    // Phase 0: global autonomy kill switch and safety limits are the first gate.
+    // Phase 0: global autonomy kill switch, safety limits, and tier enforcement
+    // are the first gate.
     const safetyCheck = await this.safety.check({
       businessId: ctx.businessId,
       toolName: name,
@@ -195,7 +203,15 @@ export class KeyCortexToolRegistryService {
     });
     if (!safetyCheck.allowed) {
       this.logger.warn(`[execute][${ctx.businessId}] Safety gate blocked ${name}: ${safetyCheck.reason}`);
-      return { success: false, error: safetyCheck.reason ?? 'Blocked by autonomy safety gate' };
+      const blocked: KeyCortexToolResult = {
+        success: false,
+        error: safetyCheck.reason ?? 'Blocked by autonomy safety gate',
+        requiresApproval: safetyCheck.requiresApproval,
+      };
+      await this.emitBusinessEvent(ctx, name, input, blocked, 0).catch((err) => {
+        this.logger.warn(`Tool business-event emit failed: ${(err as Error).message}`);
+      });
+      return blocked;
     }
 
     const validation = this.validateInput(tool, input);
@@ -267,6 +283,9 @@ export class KeyCortexToolRegistryService {
       await this.audit(ctx, name, input, result, durationMs).catch((err) => {
         this.logger.warn(`Tool audit failed: ${(err as Error).message}`);
       });
+      await this.emitBusinessEvent(ctx, name, input, result, durationMs).catch((err) => {
+        this.logger.warn(`Tool business-event emit failed: ${(err as Error).message}`);
+      });
       return result;
     } catch (error: unknown) {
       const err = error instanceof Error ? error : new Error(String(error));
@@ -298,6 +317,9 @@ export class KeyCortexToolRegistryService {
 
       await this.audit(ctx, name, input, result, durationMs).catch((auditErr) => {
         this.logger.warn(`Tool audit failed: ${(auditErr as Error).message}`);
+      });
+      await this.emitBusinessEvent(ctx, name, input, result, durationMs).catch((err) => {
+        this.logger.warn(`Tool business-event emit failed: ${(err as Error).message}`);
       });
       return result;
     }
@@ -503,6 +525,81 @@ export class KeyCortexToolRegistryService {
       });
     } catch (err: unknown) {
       this.logger.error(`Failed to audit tool execution: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /**
+   * Emit a canonical BusinessEvent for every tool execution attempt.
+   * Prefers KeyCortexAuditService (unified audit ledger) and falls back to
+   * the KeyCortexEventBusService if the audit service is unavailable.
+   */
+  private async emitBusinessEvent(
+    ctx: KeyCortexToolContext,
+    toolName: string,
+    input: Record<string, unknown>,
+    result: KeyCortexToolResult,
+    durationMs: number,
+  ): Promise<void> {
+    const actorId = ctx.userId ?? 'key_ai';
+    const metadata: Record<string, unknown> = {
+      module: toolName.split('.')[0] ?? 'cortex',
+      input,
+      durationMs,
+      autonomyLevel: ctx.autonomyLevel,
+      riskTier: this.tools.get(toolName)?.riskTier,
+      requiresApproval: result.requiresApproval ?? false,
+    };
+
+    if (this.auditService) {
+      await this.auditService.emit(
+        result.success ? 'ACTION_EXECUTED' : 'ACTION_FAILED',
+        toolName,
+        'tool_execution',
+        ctx.commandId ?? ctx.correlationId ?? ctx.sessionId ?? toolName,
+        {
+          businessId: ctx.businessId,
+          actorType: ctx.userId ? 'human' : 'ai',
+          actorId,
+          source: 'ai',
+          sessionId: ctx.sessionId,
+          commandId: ctx.commandId,
+          correlationId: ctx.correlationId,
+          proposalId: (ctx as any).proposalId,
+          metadata,
+        },
+        { status: 'attempted' },
+        {
+          status: result.success ? 'success' : 'error',
+          result: result.data,
+          error: result.error,
+          durationMs,
+        },
+      );
+      return;
+    }
+
+    if (this.eventBus) {
+      this.eventBus.emit({
+        source: 'key_cortex_tool_registry',
+        type: result.success ? 'tool.executed' : 'tool.failed',
+        businessId: ctx.businessId,
+        userId: actorId,
+        payload: {
+          toolName,
+          success: result.success,
+          result: result.data,
+          error: result.error,
+          input,
+          durationMs,
+        },
+        metadata: {
+          correlationId: ctx.correlationId,
+          sessionId: ctx.sessionId,
+          commandId: ctx.commandId,
+          entityType: 'tool_execution',
+          entityId: ctx.commandId ?? ctx.correlationId ?? ctx.sessionId ?? toolName,
+        },
+      });
     }
   }
 }
