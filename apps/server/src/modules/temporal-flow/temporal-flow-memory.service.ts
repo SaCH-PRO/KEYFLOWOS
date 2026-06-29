@@ -116,6 +116,55 @@ export class TemporalFlowMemoryService {
     });
   }
 
+  async deleteMemory(businessId: string, memoryId: string): Promise<boolean> {
+    const existing = await this.prisma.client.temporalFlowMemory.findFirst({
+      where: { id: memoryId, businessId },
+    });
+    if (!existing) return false;
+    await this.prisma.client.temporalFlowMemory.delete({ where: { id: memoryId } });
+    return true;
+  }
+
+  async updateMemory(
+    memoryId: string,
+    patch: {
+      content?: string;
+      confidence?: number;
+      sourceEventIds?: string[];
+      metadata?: Record<string, unknown>;
+    },
+  ): Promise<TemporalFlowMemoryData> {
+    const existing = await this.prisma.client.temporalFlowMemory.findUnique({ where: { id: memoryId } });
+    if (!existing) throw new Error('Memory not found');
+    return this.prisma.client.temporalFlowMemory.update({
+      where: { id: memoryId },
+      data: {
+        content: patch.content,
+        confidence: patch.confidence,
+        sourceEventIds: patch.sourceEventIds,
+        metadata: patch.metadata,
+      },
+    });
+  }
+
+  async getStats(businessId: string) {
+    const [total, byType] = await Promise.all([
+      this.prisma.client.temporalFlowMemory.count({ where: { businessId } }),
+      this.prisma.client.temporalFlowMemory.groupBy({
+        by: ['type'],
+        where: { businessId },
+        _count: { id: true },
+      }),
+    ]);
+    return {
+      total,
+      byType: byType.reduce((acc: Record<string, number>, cur: { type: string; _count: { id: number } }) => {
+        acc[cur.type] = cur._count.id;
+        return acc;
+      }, {} as Record<string, number>),
+    };
+  }
+
   async summarizeThread(businessId: string, threadId: string): Promise<TemporalFlowMemoryData | null> {
     const events = await this.prisma.client.temporalFlowEvent.findMany({
       where: { businessId, threadId },
