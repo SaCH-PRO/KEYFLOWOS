@@ -7,6 +7,7 @@
   "types": "./dist/src/client.d.ts",
   "scripts": {
     "build": "tsc --project tsconfig.json",
+    "typecheck": "tsc --noEmit",
     "db:generate": "prisma generate --schema=./prisma/schema.prisma",
     "lint": "eslint src --ext .ts"
   },
