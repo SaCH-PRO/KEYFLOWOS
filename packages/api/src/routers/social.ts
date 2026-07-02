@@ -1,7 +1,8 @@
 import { protectedProcedure, router } from '../trpc';
+import type { AnyRouter } from '@trpc/server';
 import { z } from 'zod';
 
-export const socialRouter = router({
+export const socialRouter: AnyRouter = router({
   health: protectedProcedure.query(({ ctx }) => ({
     status: 'ok',
     module: 'social',

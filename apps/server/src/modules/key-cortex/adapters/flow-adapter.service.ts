@@ -141,6 +141,37 @@ export class FlowAdapterService {
     });
   }
 
+  async getFlowStatus(input: { businessId: string; flowId: string }) {
+    return this.prisma.client.automation.findFirst({
+      where: { id: input.flowId, businessId: input.businessId, deletedAt: null },
+    });
+  }
+
+  async getFlowRuns(input: { businessId: string; flowId: string; limit?: number }) {
+    const flow = await this.prisma.client.automation.findFirst({
+      where: { id: input.flowId, businessId: input.businessId },
+    });
+    return {
+      flowId: input.flowId,
+      lastRunAt: flow?.lastRunAt ?? null,
+      runCount: flow?.runCount ?? 0,
+      // Legacy Automation model does not store per-run history; this is a summary.
+      runs: [],
+    };
+  }
+
+  async getFlowAnalytics(input: { businessId: string; flowId?: string }) {
+    const where: any = { businessId: input.businessId, deletedAt: null };
+    if (input.flowId) where.id = input.flowId;
+    const flows = await this.prisma.client.automation.findMany({ where });
+    return {
+      total: flows.length,
+      active: flows.filter((f: { enabled: boolean }) => f.enabled).length,
+      inactive: flows.filter((f: { enabled: boolean }) => !f.enabled).length,
+      totalRuns: flows.reduce((sum: number, f: { runCount?: number }) => sum + (f.runCount ?? 0), 0),
+    };
+  }
+
   async execute(command: ConnectorCommand): Promise<ConnectorResult> {
     const start = Date.now();
     switch (command.action) {
@@ -211,6 +242,35 @@ export class FlowAdapterService {
           contactId: command.parameters.contactId as string,
         });
         return connectorOk(command, start, testResult);
+      }
+      case 'get_flow_status': {
+        const status = await this.getFlowStatus({
+          businessId: command.businessId,
+          flowId: command.parameters.flowId as string,
+        });
+        return connectorOk(command, start, status);
+      }
+      case 'list_automations': {
+        const automations = await this.listAutomations({
+          businessId: command.businessId,
+          active: command.parameters.active as boolean,
+        });
+        return connectorOk(command, start, automations);
+      }
+      case 'get_flow_runs': {
+        const runs = await this.getFlowRuns({
+          businessId: command.businessId,
+          flowId: command.parameters.flowId as string,
+          limit: (command.parameters.limit as number) || 20,
+        });
+        return connectorOk(command, start, runs);
+      }
+      case 'get_flow_analytics': {
+        const analytics = await this.getFlowAnalytics({
+          businessId: command.businessId,
+          flowId: command.parameters.flowId as string,
+        });
+        return connectorOk(command, start, analytics);
       }
       default:
         return connectorFail(command, start, `Unknown flow action: ${command.action}`);

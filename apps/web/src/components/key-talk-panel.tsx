@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import {
   keyInterpretFlow,
   keyBuildFlow,
@@ -14,8 +14,9 @@ import {
   keyBuildCalendar,
   keyExecuteCalendar,
   keyTalkCalendar,
-  synthesizeKeyflowSpeech,
+  fetchVoicePreferences,
 } from "@/lib/client";
+import { useTts } from "@/components/tts";
 import {
   Mic,
   MicOff,
@@ -158,24 +159,53 @@ export function KeyTalkPanel({ mode, businessId }: KeyTalkPanelProps) {
   const [builtEntity, setBuiltEntity] = useState<BuiltEntityData | null>(null);
   const [executionProof, setExecutionProof] = useState<ExecutionProofData | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [ttsMuted, setTtsMuted] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem("kf_voice_settings") || "{}").muted ?? false;
-    } catch {
-      return false;
-    }
-  });
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const { engine, state: ttsState } = useTts();
+
+  // Overlay latest cloud voice preference onto localStorage
+  useEffect(() => {
+    if (!businessId) return;
+    let cancelled = false;
+    fetchVoicePreferences(businessId)
+      .then((res) => {
+        if (cancelled) return;
+        const prefs = res.data;
+        if (!prefs || prefs.length === 0) return;
+        const pref = prefs.find((p) => p.isDefault) ?? prefs[0];
+        const cloudSettings =
+          typeof pref.settings === "object" && pref.settings !== null
+            ? (pref.settings as Record<string, unknown>)
+            : {};
+        const voice = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"].includes(
+          pref.voiceKey,
+        )
+          ? pref.voiceKey
+          : undefined;
+        const speed = typeof pref.speakingRate === "number" ? pref.speakingRate : undefined;
+        const muted = typeof cloudSettings.muted === "boolean" ? cloudSettings.muted : undefined;
+        const current = JSON.parse(localStorage.getItem("kf_voice_settings") || "{}");
+        const next = { ...current, ...(voice && { voice }), ...(speed !== undefined && { speed }), ...(muted !== undefined && { muted }) };
+        localStorage.setItem("kf_voice_settings", JSON.stringify(next));
+        if (voice) engine.setVoice(voice);
+        if (speed !== undefined) engine.setSpeed(speed);
+        if (muted !== undefined) engine.setMuted(muted);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [businessId, engine]);
+
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
 
   const reset = useCallback(() => {
+    engine.cancel();
     setStep("input");
     setIntent("");
     setInterpretation(null);
     setBuiltEntity(null);
     setExecutionProof(null);
     setError(null);
-  }, []);
+  }, [engine]);
 
   const startListening = useCallback(() => {
     if (!("webkitSpeechRecognition" in window) && !("SpeechRecognition" in window)) {
@@ -295,25 +325,13 @@ export function KeyTalkPanel({ mode, businessId }: KeyTalkPanelProps) {
     }
   }, [builtEntity, mode, businessId]);
 
-  const speak = useCallback(async (text: string) => {
-    if (ttsMuted || !businessId) return;
-    const settings = JSON.parse(localStorage.getItem("kf_voice_settings") || "{}");
-    const voice = settings.voice || "alloy";
-    const { blob, error } = await synthesizeKeyflowSpeech(businessId, text, voice);
-    if (error || !blob) {
-      if (error) console.error("TTS failed:", error);
-      return;
-    }
-    const url = URL.createObjectURL(blob);
-    if (audioRef.current) audioRef.current.pause();
-    const audio = new Audio(url);
-    audioRef.current = audio;
-    audio.playbackRate = settings.speed || 1;
-    audio.onended = () => URL.revokeObjectURL(url);
-    void audio.play().catch(() => {
-      // Browser blocked autoplay
-    });
-  }, [ttsMuted, businessId]);
+  const speak = useCallback(
+    (text: string) => {
+      if (ttsState.muted || !businessId || !ttsState.autoSpeak) return;
+      engine.speak(text, businessId);
+    },
+    [engine, ttsState.muted, ttsState.autoSpeak, businessId],
+  );
 
   const handleTalk = useCallback(async () => {
     if (!intent.trim()) return;
@@ -392,11 +410,11 @@ export function KeyTalkPanel({ mode, businessId }: KeyTalkPanelProps) {
         </div>
         <div className="flex items-center gap-1">
           <button
-            onClick={() => setTtsMuted((m: boolean) => !m)}
+            onClick={() => engine.toggleMuted()}
             className="p-1.5 rounded-lg hover:bg-white/[0.05] text-[hsl(30_10%_50%)] transition-colors"
-            title={ttsMuted ? "Unmute voice" : "Mute voice"}
+            title={ttsState.muted ? "Unmute voice" : "Mute voice"}
           >
-            {ttsMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+            {ttsState.muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
           </button>
           <button onClick={reset} className="p-1.5 rounded-lg hover:bg-white/[0.05] text-[hsl(30_10%_50%)] transition-colors" title="Reset">
             <RotateCcw className="w-4 h-4" />

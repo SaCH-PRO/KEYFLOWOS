@@ -27,7 +27,7 @@ function createInvoice(overrides: any = {}) {
     dueDate: new Date(Date.now() - 24 * 60 * 60 * 1000),
     total: 150,
     currency: 'TTD',
-    contact: { id: 'c1', name: 'Alice', email: 'alice@example.com' },
+    contact: { id: 'c1', firstName: 'Alice', lastName: 'Adams', email: 'alice@example.com' },
     ...overrides,
   };
 }

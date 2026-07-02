@@ -11,7 +11,9 @@ bash scripts/launch-dev.sh
 This handles port cleanup, stale-cache clearing, env guards, DB checks, build validation, and starts both servers.
 
 **Ports:** API runs on `3001`, Web runs on `5000`.
+**Workspace packages:** The launcher builds `@keyflow/shared`, `@keyflow/db`, and `@keyflow/api` before the server so the runtime resolves their compiled CJS exports instead of their TypeScript source.
 **Bundler:** The launcher starts the web app with `--webpack` to avoid a recurring Next.js 16 + Turbopack cold-start crash (missing `routes-manifest.json` / `middleware-manifest.json` and SST compaction errors after a full `.next` wipe).
+**Server runtime:** The launcher now builds the server with `tsc` and runs the compiled `apps/server/dist/main.js`. `tsx` cannot preserve `emitDecoratorMetadata`, so NestJS dependency injection fails under `tsx src/main.ts`.
 **If the script doesn't exist:** `pnpm dev` from repo root (but be aware of the gotchas below).
 
 ### Known Gotchas (already fixed — do not re-fix)
@@ -19,6 +21,7 @@ This handles port cleanup, stale-cache clearing, env guards, DB checks, build va
 - `KEYFLOW_DEV_AUTH_BYPASS=true` causes a fatal boot exit. The launcher unsets it.
 - Missing module providers (e.g. `CrmCacheService`) have been registered in their respective modules.
 - Circular module deps exist in the codebase but are handled via `forwardRef()`.
+- **Compiled server required for dev:** `pnpm dev` in `apps/server` now runs `node dist/main.js`. Always build the workspace packages (`@keyflow/shared`, `@keyflow/db`, `@keyflow/api`) and the server before starting dev.
 - **Business Genesis (Patch 1):** `BusinessBlueprint` now includes Genesis sections (legal, registration, tax, projections, risk, compliance, execution roadmap). `/app/onboarding` is the Genesis intake flow and feeds these sections into KEY's prompt context.
 
 ### Manual Recovery (if launcher fails)
@@ -47,8 +50,11 @@ cd apps/server && pnpm build && cd ../..
 
 # 5. Launch with webpack dev (avoids the Turbopack cold-start bug)
 cd apps/web && pnpm dev --webpack
-# In another terminal:
-cd apps/server && pnpm dev
+# In another terminal (build packages + server first):
+pnpm --filter @keyflow/shared build
+pnpm --filter @keyflow/db build
+pnpm --filter @keyflow/api build
+cd apps/server && pnpm build && pnpm dev
 ```
 
 ## Repository Hygiene

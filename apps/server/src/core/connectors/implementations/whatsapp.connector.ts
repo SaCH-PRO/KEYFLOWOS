@@ -2,7 +2,32 @@ import { Injectable, Inject, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EntityResolutionService } from '../entity-resolution.service';
-import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary, ConnectorSmokeResult } from '../connector.interface';
+import { createHmac, timingSafeEqual } from 'crypto';
+import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary, ConnectorSmokeResult, IngestionItemInput } from '../connector.interface';
+
+interface WhatsAppWebhookBody {
+  From?: string;
+  Body?: string;
+  WaId?: string;
+  ProfileName?: string;
+  SmsMessageSid?: string;
+  entry?: Array<{
+    changes?: Array<{
+      value?: {
+        messages?: Array<{
+          id?: string;
+          from?: string;
+          timestamp?: string;
+          text?: { body?: string };
+        }>;
+        contacts?: Array<{
+          profile?: { name?: string };
+          wa_id?: string;
+        }>;
+      };
+    }>;
+  }>;
+}
 
 @Injectable()
 export class WhatsAppConnector implements IConnector {
@@ -73,6 +98,77 @@ export class WhatsAppConnector implements IConnector {
       return { success: false, itemsSynced: 0, errors: ['WhatsApp not connected'], duration: Date.now() - start };
     }
     return { success: true, itemsSynced: 0, errors: [], duration: Date.now() - start };
+  }
+
+  parseInbound(payload: unknown, _businessId: string): IngestionItemInput[] {
+    const body = payload as WhatsAppWebhookBody;
+
+    // Twilio format
+    if (typeof body.From === 'string') {
+      return [
+        {
+          sourceType: 'whatsapp',
+          sourceConnectorType: 'whatsapp',
+          externalId: body.SmsMessageSid ?? body.From,
+          receivedAt: new Date(),
+          from: { id: body.From, name: body.ProfileName, phone: body.From },
+          subject: body.Body ?? 'WhatsApp message',
+          body: body.Body ?? '',
+          rawPayload: payload as Record<string, unknown>,
+        },
+      ];
+    }
+
+    // Meta Cloud API format
+    if (Array.isArray(body.entry) && body.entry.length > 0) {
+      const change = body.entry[0]?.changes?.[0];
+      const value = change?.value;
+      const message = value?.messages?.[0];
+      const contact = value?.contacts?.[0];
+
+      if (message && typeof message.from === 'string') {
+        const receivedAt = message.timestamp ? new Date(Number(message.timestamp) * 1000) : new Date();
+        return [
+          {
+            sourceType: 'whatsapp',
+            sourceConnectorType: 'whatsapp',
+            externalId: message.id ?? message.from,
+            receivedAt,
+            from: {
+              id: message.from,
+              name: contact?.profile?.name,
+              phone: message.from,
+            },
+            subject: message.text?.body ?? 'WhatsApp message',
+            body: message.text?.body ?? '',
+            rawPayload: payload as Record<string, unknown>,
+          },
+        ];
+      }
+    }
+
+    return [];
+  }
+
+  verifyWebhook(payload: unknown, signature: string | undefined, secret: string): boolean {
+    if (!signature || !signature.startsWith('sha256=')) {
+      return false;
+    }
+    let raw: Buffer;
+    if (Buffer.isBuffer(payload)) {
+      raw = payload;
+    } else if (typeof payload === 'string') {
+      raw = Buffer.from(payload, 'utf8');
+    } else {
+      return false;
+    }
+    const expected = createHmac('sha256', secret).update(raw).digest('hex');
+    const provided = signature.slice('sha256='.length);
+    try {
+      return timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(provided, 'hex'));
+    } catch {
+      return false;
+    }
   }
 
   async smokeTest(businessId: string): Promise<ConnectorSmokeResult> {

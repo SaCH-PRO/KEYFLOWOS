@@ -1,4 +1,5 @@
 import { router } from './trpc';
+import type { AnyRouter } from '@trpc/server';
 import { identityRouter } from './routers/identity';
 import { crmRouter } from './routers/crm';
 import { commerceRouter } from './routers/commerce';
@@ -10,7 +11,7 @@ import { adminRouter } from './routers/admin';
 import { diagnosticsRouter } from './routers/diagnostics';
 import { supplierRouter } from './routers/supplier';
 
-export const appRouter = router({
+export const appRouter: AnyRouter = router({
   identity: identityRouter,
   crm: crmRouter,
   commerce: commerceRouter,

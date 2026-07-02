@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { GenomeGateGuard } from '../../core/auth/genome-gate.guard';
 import { ConstitutionVersionService } from './constitution-version.service';
 import { GenerateConstitutionVersionDto } from './dto/generate-constitution-version.dto';
 
@@ -43,6 +44,7 @@ export class ConstitutionVersionController {
   }
 
   @Post('generate')
+  @UseGuards(GenomeGateGuard)
   generate(
     @Param('businessId') businessId: string,
     @Body() body: GenerateConstitutionVersionDto,

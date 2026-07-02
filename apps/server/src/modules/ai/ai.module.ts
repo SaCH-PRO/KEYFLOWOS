@@ -37,6 +37,7 @@ import { TimelineModule } from '../timeline/timeline.module';
 import { FinanceModule } from '../finance/finance.module';
 import { CommandModule } from '../command/command.module';
 import { GoogleDriveModule } from '../google-drive/google-drive.module';
+import { TaskAssignmentModule } from '../task-assignments/task-assignment.module';
 import { KeyAutonomyModule } from '../key-autonomy/key-autonomy.module';
 import { KeyCortexModule } from '../key-cortex/key-cortex.module';
 import { KeyCommandService } from './key-command.service';
@@ -75,10 +76,12 @@ import { ChaserService } from './chaser.service';
 import { CrossBusinessIntelligenceService } from './cross-business-intelligence.service';
 import { AiIntelligenceController } from './ai-intelligence.controller';
 import { KeyAgentConfigService } from './key-agent-config.service';
+import { AiApprovalsController } from './ai-approvals.controller';
+import { AiApprovalsService } from './ai-approvals.service';
 
 @Module({
-  imports: [PrismaModule, RedisModule, SubscriptionsModule, BlueprintModule, TimelineModule, forwardRef(() => FinanceModule), CommandModule, GoogleDriveModule, forwardRef(() => KeyAutonomyModule), forwardRef(() => KeyCortexModule)],
-  controllers: [AiController, AiSettingsController, OutputTemplateController, AiFlowController, GraphActionsController, AiUsageAdminController, AiIntelligenceController, BlueprintOnboardingController],
+  imports: [PrismaModule, RedisModule, SubscriptionsModule, forwardRef(() => BlueprintModule), TimelineModule, forwardRef(() => FinanceModule), CommandModule, GoogleDriveModule, TaskAssignmentModule, forwardRef(() => KeyAutonomyModule), forwardRef(() => KeyCortexModule)],
+  controllers: [AiController, AiSettingsController, OutputTemplateController, AiFlowController, GraphActionsController, AiUsageAdminController, AiIntelligenceController, BlueprintOnboardingController, AiApprovalsController],
   providers: [
     AiListener,
     ModelGatewayService,
@@ -90,6 +93,7 @@ import { KeyAgentConfigService } from './key-agent-config.service';
     FlowOrchestratorService,
     BusinessGraphService,
     AiOversightService,
+    AiApprovalsService,
     AiExecutionLogService,
     IntentParserService,
     PlannerService,

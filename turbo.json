@@ -1,6 +1,5 @@
 {
   "$schema": "https://turbo.build/schema.json",
-  "globalDependencies": [".env", ".env.local"],
   "globalEnv": [
     "NODE_ENV",
     "DATABASE_URL",
@@ -17,13 +16,36 @@
     "db:generate": {
       "inputs": ["prisma/schema.prisma", "prisma/migrations/**"]
     },
+    "typecheck": {
+      "dependsOn": ["^typecheck", "@keyflow/db#db:generate"],
+      "outputs": []
+    },
+    "lint": {
+      "dependsOn": ["^lint"],
+      "outputs": []
+    },
     "build": {
       "dependsOn": ["^build", "@keyflow/db#db:generate"],
-      "outputs": [
-        "dist/**",
-        ".next/**",
-        "!.next/cache/**"
-      ]
+      "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
+    },
+    "test:unit": {
+      "dependsOn": ["^build"],
+      "outputs": []
+    },
+    "test:smoke": {
+      "dependsOn": ["build"],
+      "cache": false,
+      "outputs": []
+    },
+    "test:integration": {
+      "dependsOn": ["build"],
+      "cache": false,
+      "outputs": []
+    },
+    "test:e2e": {
+      "dependsOn": ["build"],
+      "cache": false,
+      "outputs": []
     },
     "start": {
       "dependsOn": ["build"],
@@ -32,9 +54,6 @@
     },
     "dev": {
       "persistent": true,
-      "cache": false
-    },
-    "lint": {
       "cache": false
     }
   }

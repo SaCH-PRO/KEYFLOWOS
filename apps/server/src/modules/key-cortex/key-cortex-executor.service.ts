@@ -26,7 +26,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'node:crypto';
 
 // ─── Prisma ───────────────────────────────────────────────────────────────────
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -212,7 +212,7 @@ export class KeyCortexExecutorService {
       const reason = `Action "${command.action}" is disabled in this build for safety review.`;
       this.logger.warn(`[execute] Blocked ${command.module}.${command.action}: ${reason}`);
       return {
-        id: uuidv4(),
+        id: randomUUID(),
         command,
         result: {
           success: false,
@@ -242,7 +242,7 @@ export class KeyCortexExecutorService {
           const reason = verdict.reason || 'Blocked by autonomy orchestrator';
           this.logger.warn(`[execute] Autonomy orchestrator BLOCKED ${command.module}.${command.action}: ${reason}`);
           return {
-            id: uuidv4(),
+            id: randomUUID(),
             command,
             result: {
               success: false,
@@ -277,7 +277,7 @@ export class KeyCortexExecutorService {
             'Blocked by KEY Genome autonomy gate.';
           this.logger.warn(`[execute] Autonomy gate BLOCKED ${command.module}.${command.action}: ${reason}`);
           return {
-            id: uuidv4(),
+            id: randomUUID(),
             command,
             result: {
               success: false,
@@ -302,7 +302,7 @@ export class KeyCortexExecutorService {
         `[execute] Autonomy gate error for ${command.module}.${command.action}: ${(gateErr as Error).message}`,
       );
       return {
-        id: uuidv4(),
+        id: randomUUID(),
         command,
         result: {
           success: false,
@@ -406,7 +406,7 @@ export class KeyCortexExecutorService {
 
     // ── 4. Build record ──────────────────────────────────────────────────────
     const record: ExecutionRecord = {
-      id: uuidv4(),
+      id: randomUUID(),
       command,
       result,
       startedAt,
@@ -598,7 +598,7 @@ export class KeyCortexExecutorService {
     const correlationId =
       command.correlationId ?? this.generateTraceId('approval');
 
-    let proposalId = uuidv4();
+    let proposalId: string = randomUUID();
 
     // Persist as a canonical KeyActionProposal via the unified orchestrator
     if (this.approvalOrchestrator) {
@@ -1306,7 +1306,7 @@ export class KeyCortexExecutorService {
     try {
       await (this.prisma.client as any).aiExecutionLog.create({
         data: {
-          id: uuidv4(),
+          id: randomUUID(),
           businessId:
             batch.results[0]?.command.businessId ?? 'unknown',
           userId: batch.results[0]?.command.userId ?? 'unknown',
@@ -1480,24 +1480,6 @@ export class KeyCortexExecutorService {
       }
     }
 
-    // Legacy fallback (should no longer be used)
-    const request = await (this.prisma.client as any).approvalRequest.findUnique({
-      where: { id: approvalId },
-    });
-    if (!request) {
-      throw new Error(`Approval request ${approvalId} not found`);
-    }
-    const payload = (request.payload ?? {}) as Record<string, unknown>;
-    const command: ConnectorCommand = {
-      businessId: request.businessId,
-      userId: request.requesterId,
-      module: ((request as any).actionModule || 'system') as any,
-      action: request.actionType,
-      parameters: payload,
-      source: 'key_cortex',
-      timestamp: new Date(),
-      correlationId: approvalId,
-    };
-    return this.execute(command);
+    throw new Error(`Approval proposal ${approvalId} not found`);
   }
 }

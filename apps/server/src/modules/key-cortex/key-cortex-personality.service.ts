@@ -589,12 +589,11 @@ Signature phrases you may occasionally use: ${config.signaturePhrases.join(', ')
   private getExpertiseHintForGreeting(persona: CortexPersona): string {
     switch (persona) {
       case 'titan':
-        ' Monitoring commerce, analytics, and finance.';
-        return '';
+        return ' Monitoring commerce, analytics, and finance.';
       case 'nova':
-        ' Content and marketing intelligence active.';
+        return ' Content and marketing intelligence active.';
       case 'jarvis_dark':
-        ' Autopilot and monitoring systems online.';
+        return ' Autopilot and monitoring systems online.';
       default:
         return '';
     }

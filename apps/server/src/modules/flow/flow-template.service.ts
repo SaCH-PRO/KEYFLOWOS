@@ -187,6 +187,12 @@ export class FlowTemplateService implements OnModuleInit {
     });
   }
 
+  async count() {
+    return this.prisma.client.flowTemplate.count({
+      where: { isSystem: true },
+    });
+  }
+
   async createFromTemplate(businessId: string, templateId: string, createdBy: string) {
     const template = await this.prisma.client.flowTemplate.findUnique({ where: { id: templateId } });
     if (!template) throw new Error('Template not found');

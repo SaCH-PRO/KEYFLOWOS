@@ -1,8 +1,9 @@
 import { protectedProcedure, router } from '../trpc';
+import type { AnyRouter } from '@trpc/server';
 import { z } from 'zod';
 import { assertBusinessAccess } from '../lib/access';
 
-export const commerceRouter = router({
+export const commerceRouter: AnyRouter = router({
   health: protectedProcedure.query(({ ctx }) => ({
     status: 'ok',
     module: 'commerce',

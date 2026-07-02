@@ -7,7 +7,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { ModelGatewayService } from '../ai/model-gateway.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { KeyCortexVoiceService } from './key-cortex-voice.service';
-import Twilio from 'twilio';
+
 
 // ---------------------------------------------------------------------------
 // Types
@@ -121,7 +121,7 @@ export interface FollowUpTask {
 @Injectable()
 export class KeyCortexPhoneService {
   private readonly logger = new Logger(KeyCortexPhoneService.name);
-  private readonly twilio: any | null = null;
+  private twilioClient: any | null = null;
   private readonly twilioPhoneNumber: string | null = null;
   private readonly webhookBaseUrl: string;
 
@@ -140,14 +140,35 @@ export class KeyCortexPhoneService {
     this.webhookBaseUrl =
       process.env.TWILIO_WEBHOOK_BASE_URL ?? process.env.APP_URL ?? '';
 
-    if (accountSid && authToken) {
-      this.twilio = Twilio(accountSid, authToken);
-      this.logger.log('Twilio client initialized');
-    } else {
+    if (!accountSid || !authToken) {
       this.logger.warn(
         'TWILIO_ACCOUNT_SID or TWILIO_AUTH_TOKEN not set. Phone calls will be unavailable.',
       );
     }
+  }
+
+  private async getTwilioModule(): Promise<any | null> {
+    try {
+      const twilioMod = await import('twilio');
+      return twilioMod.default ?? twilioMod;
+    } catch (err) {
+      this.logger.warn(
+        `Failed to load Twilio SDK: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return null;
+    }
+  }
+
+  private async getTwilioClient(): Promise<any | null> {
+    if (this.twilioClient) return this.twilioClient;
+    const accountSid = process.env.TWILIO_ACCOUNT_SID;
+    const authToken = process.env.TWILIO_AUTH_TOKEN;
+    if (!accountSid || !authToken) return null;
+    const Twilio = await this.getTwilioModule();
+    if (!Twilio) return null;
+    this.twilioClient = Twilio(accountSid, authToken);
+    this.logger.log('Twilio client initialized');
+    return this.twilioClient;
   }
 
   // ========================================================================
@@ -170,7 +191,8 @@ export class KeyCortexPhoneService {
     script: string,
     businessId: string,
   ): Promise<CallSession> {
-    if (!this.twilio || !this.twilioPhoneNumber) {
+    const twilio = await this.getTwilioClient();
+    if (!twilio || !this.twilioPhoneNumber) {
       throw new ServiceUnavailableException(
         'Twilio is not configured. Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER.',
       );
@@ -197,10 +219,10 @@ export class KeyCortexPhoneService {
 
     try {
       // Initiate the call via Twilio
-      const call = await this.twilio.calls.create({
+      const call = await twilio.calls.create({
         to: phoneNumber,
         from: this.twilioPhoneNumber,
-        twiml: this.buildOutboundTwiml(sessionRecord.id, script),
+        twiml: await this.buildOutboundTwiml(sessionRecord.id, script),
         statusCallback: statusCallbackUrl,
         statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
         statusCallbackMethod: 'POST',
@@ -327,6 +349,10 @@ export class KeyCortexPhoneService {
     this.activeCalls.set(callSid, session);
 
     // Build TwiML: play greeting then connect to stream for real-time conversation
+    const Twilio = await this.getTwilioModule();
+    if (!Twilio) {
+      throw new ServiceUnavailableException('Twilio SDK is not available.');
+    }
     const twiml = new Twilio.twiml.VoiceResponse();
     twiml.play(audioUrl);
 
@@ -916,7 +942,11 @@ Respond ONLY with valid JSON in this exact shape:
   /**
    * Build TwiML for an outbound call.
    */
-  private buildOutboundTwiml(sessionId: string, _script: string): string {
+  private async buildOutboundTwiml(sessionId: string, _script: string): Promise<string> {
+    const Twilio = await this.getTwilioModule();
+    if (!Twilio) {
+      throw new ServiceUnavailableException('Twilio SDK is not available.');
+    }
     const twiml = new Twilio.twiml.VoiceResponse();
 
     // Connect to the media stream for real-time audio

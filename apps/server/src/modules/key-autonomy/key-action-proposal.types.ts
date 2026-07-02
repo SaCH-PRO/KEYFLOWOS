@@ -48,7 +48,8 @@ export type KeyActionSourceType =
   | 'AI_LEGACY'
   | 'HUMAN_WORKFLOW'
   | 'PLAN_STEP'
-  | 'AUTONOMY_REVIEW';
+  | 'AUTONOMY_REVIEW'
+  | 'PRO_AUTO';
 
 export const KEY_EXECUTABLE_ACTION_TYPES: KeyExecutableActionType[] = [
   'OPEN_GENOME',
@@ -173,4 +174,5 @@ export interface ListKeyActionProposalsQuery {
   status?: string;
   sourceType?: string;
   actionType?: string;
+  createdAfter?: Date;
 }

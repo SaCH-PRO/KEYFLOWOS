@@ -37,8 +37,11 @@ import { HttpModule } from '@nestjs/axios';
 
 import { KeyCortexController } from './key-cortex.controller';
 import { KeyCortexAuditController } from './key-cortex-audit.controller';
+import { KeyCortexGoalsController } from './key-cortex-goals.controller';
 import { AdaptiveRouterService } from './adaptive-router.service';
 import { KeyCortexEventBusService } from './key-cortex-event-bus.service';
+import { FlowSignalBridgeService } from './flow-signal-bridge.service';
+import { EventEmitterFlowBridgeService } from './event-emitter-flow-bridge.service';
 import { KeyCortexToolRegistryService } from './key-cortex-tool-registry.service';
 import { KeyCortexActionExecutorPlugin } from './key-cortex-action-executor.plugin';
 import { KeyCortexOrganRegistrarService } from './key-cortex-organ-registrar.service';
@@ -48,6 +51,9 @@ import { KeyCortexAuditService } from './key-cortex-audit.service';
 import { KeyCortexApprovalOrchestratorService } from './key-cortex-approval-orchestrator.service';
 import { KeyIdempotencyService } from './key-idempotency.service';
 import { KeyCortexSagaService } from './key-cortex-saga.service';
+import { KeyCortexCompensationService } from './key-cortex-compensation.service';
+import { KeyCortexSagaExecutorService } from './key-cortex-saga-executor.service';
+import { KeyCortexTriggerService } from './key-cortex-trigger.service';
 
 // -- Phase 2 Body: Organ Adapters --
 import { TemporalFlowAdapterService } from './organs/temporal-flow-adapter.service';
@@ -70,6 +76,11 @@ import {
   NotificationsAdapterService,
   ProjectsAdapterService,
   ActivityAdapterService,
+  SocialAdapterService,
+  FinanceAdapterService,
+  AnalyticsAdapterService,
+  IntelligenceAdapterService,
+  SettingsAdapterService,
   KeyCortexBridgeAdapterService,
 } from './adapters';
 
@@ -90,6 +101,7 @@ import { KeyCortexExecutorService } from './key-cortex-executor.service';
 import { KeyCortexContextV2Service } from './key-cortex-context-v2.service';
 import { KeyCortexInsightService } from './key-cortex-insight.service';
 import { KeyCortexMonitorV2Service } from './key-cortex-monitor-v2.service';
+import { KeyCortexPlannerService } from './key-cortex-planner.service';
 
 // -- Phase 0.7b: Decomposed reasoning services --
 import { KeyCortexSessionService } from './key-cortex-session.service';
@@ -129,13 +141,13 @@ import { KeyCortexRealtimeService } from './key-cortex-realtime.service';
 // -- Phase D: Data & Persistent Learning --
 import { KeyBiEngineService } from './key-bi-engine.service';
 import { KeyCortexDigestService } from './key-cortex-digest.service';
+import { KeyProactiveEngineService } from './key-proactive-engine.service';
 import { KeyCortexLearningService } from './key-cortex-learning.service';
 import { UnifiedMemoryRetrievalService } from './unified-memory-retrieval.service';
 import { KeyCortexMemoryRetrievalService } from './key-cortex-memory-retrieval.service';
 import { UnifiedMemoryWriterService } from './unified-memory-writer.service';
 import { EvalHarnessService } from './eval-harness.service';
 import { CognitiveEventBusService } from './cognitive-event-bus.service';
-import { PlanEngineService } from './plan-engine.service';
 import { ValueLearningService } from './value-learning.service';
 import { KnowledgeIngestionService } from './knowledge-ingestion.service';
 import { MemoryConsolidationService } from './memory-consolidation.service';
@@ -167,6 +179,7 @@ import { FlowModule } from '../flow/flow.module';
 import { AutopilotModule } from '../autopilot/autopilot.module';
 import { TemporalFlowModule } from '../temporal-flow/temporal-flow.module';
 import { KeyInboxModule } from '../key-inbox/key-inbox.module';
+import { FlowSignalModule } from '../flow-signal/flow-signal.module';
 import { BusinessGenomeModule } from '../business-genome/business-genome.module';
 import { KeyGenomeModule } from '../business-genome/key-genome/key-genome.module';
 import { BlueprintModule } from '../blueprint/blueprint.module';
@@ -179,7 +192,18 @@ import { PortalModule } from '../portal/portal.module';
 import { SiteModule } from '../site/site.module';
 import { KeyConnectorModule } from '../key-connector/key-connector.module';
 import { ContentService } from '../content/content.service';
+import { SocialModule } from '../social/social.module';
 import { ActivityLogService } from '../activity/activity.service';
+import { FinanceModule } from '../finance/finance.module';
+import { ExpensesModule } from '../expenses/expenses.module';
+import { ReportsModule } from '../reports/reports.module';
+import { AnalyticsModule } from '../analytics/analytics.module';
+import { IntelligenceModule } from '../intelligence/intelligence.module';
+import { GrowthIntelligenceModule } from '../growth-intelligence/growth-intelligence.module';
+import { BusinessCommandCenterModule } from '../business-command-center/business-command-center.module';
+import { IdentityModule } from '../identity/identity.module';
+import { CommandModule } from '../command/command.module';
+import { IntegrationHubModule } from '../integration-hub/integration-hub.module';
 
 @Module({
   imports: [
@@ -213,6 +237,7 @@ import { ActivityLogService } from '../activity/activity.service';
     forwardRef(() => AutopilotModule),
     forwardRef(() => TemporalFlowModule),
     forwardRef(() => KeyInboxModule),
+    forwardRef(() => FlowSignalModule),
     forwardRef(() => BusinessGenomeModule),
     forwardRef(() => KeyGenomeModule),
     forwardRef(() => KeyAutonomyModule),
@@ -228,6 +253,19 @@ import { ActivityLogService } from '../activity/activity.service';
     forwardRef(() => PortalModule),
     forwardRef(() => SiteModule),
     forwardRef(() => KeyConnectorModule),
+    forwardRef(() => SocialModule),
+
+    // -- Phase 2 Organs: Finance, Analytics, Intelligence, Settings --
+    forwardRef(() => FinanceModule),
+    forwardRef(() => ExpensesModule),
+    forwardRef(() => ReportsModule),
+    forwardRef(() => AnalyticsModule),
+    forwardRef(() => IntelligenceModule),
+    forwardRef(() => GrowthIntelligenceModule),
+    forwardRef(() => BusinessCommandCenterModule),
+    forwardRef(() => IdentityModule),
+    forwardRef(() => IntegrationHubModule),
+    forwardRef(() => CommandModule),
 
     // Business events for unified audit trail
     BusinessEventModule,
@@ -238,6 +276,8 @@ import { ActivityLogService } from '../activity/activity.service';
     KeyCortexController,
     // Mind / Soul / Evolution audit + eval surface
     KeyCortexAuditController,
+    // Phase 3: Goals & Plans
+    KeyCortexGoalsController,
   ],
 
   providers: [
@@ -280,6 +320,8 @@ import { ActivityLogService } from '../activity/activity.service';
     // -- Phase 1 Body: Peripheral Nervous System --
     // Unified event bus and canonical tool registry that all organs plug into.
     KeyCortexEventBusService,
+    FlowSignalBridgeService,
+    EventEmitterFlowBridgeService,
     KeyCortexToolRegistryService,
     KeyCortexActionExecutorPlugin,
 
@@ -311,6 +353,8 @@ import { ActivityLogService } from '../activity/activity.service';
     // Idempotency and saga/rollback foundation.
     KeyIdempotencyService,
     KeyCortexSagaService,
+    KeyCortexCompensationService,
+    KeyCortexSagaExecutorService,
 
     // Voice interface -- TTS / STT with personality voice mapping
     KeyCortexVoiceService,
@@ -322,6 +366,13 @@ import { ActivityLogService } from '../activity/activity.service';
     // -- Phase 0.7: Decomposed connector services --
     KeyCortexCapabilityRegistryService,
     KeyCortexContextAssemblyService,
+
+    // -- Phase 3: Autonomy & Planning --
+    KeyCortexPlannerService,
+
+    // -- Phase 4: Proactive Senses --
+    KeyProactiveEngineService,
+    KeyCortexTriggerService,
 
     // -- Phase 0.5: Typed module adapters (replaces as-any casts) --
     CrmAdapterService,
@@ -336,6 +387,11 @@ import { ActivityLogService } from '../activity/activity.service';
     NotificationsAdapterService,
     ProjectsAdapterService,
     ActivityAdapterService,
+    SocialAdapterService,
+    FinanceAdapterService,
+    AnalyticsAdapterService,
+    IntelligenceAdapterService,
+    SettingsAdapterService,
 
     // -- Phase 0.7: Phase-2 bridge adapter --
     KeyCortexBridgeAdapterService,
@@ -390,13 +446,15 @@ import { ActivityLogService } from '../activity/activity.service';
 
     // Mind / Soul / Evolution foundation services
     CognitiveEventBusService,
-    PlanEngineService,
     ValueLearningService,
     KnowledgeIngestionService,
     MemoryConsolidationService,
     SelfAssessmentService,
     EscalationService,
     DigitalEmployeeAcceptanceService,
+
+    // -- Phase A: Cognition session context primitive --
+    CognitionSessionService,
 
     // -- v3: Phase 3 & 4 Services --
     // Sandbox -- AI-powered code generation & secure execution
@@ -510,8 +568,10 @@ import { ActivityLogService } from '../activity/activity.service';
     // get forwarded to WebSocket clients automatically
     KeyCortexRealtimeService,
 
-    // -- Phase D: Data & Persistent Learning --
+    // -- Phase D / Phase 4: Data, Persistent Learning & Proactive Senses --
     KeyBiEngineService,
+    KeyProactiveEngineService,
+    KeyCortexTriggerService,
     KeyCortexDigestService,
     KeyCortexLearningService,
     // Proactive rule-based watchers
@@ -537,7 +597,6 @@ import { ActivityLogService } from '../activity/activity.service';
 
     // Mind / Soul / Evolution foundation services
     CognitiveEventBusService,
-    PlanEngineService,
     ValueLearningService,
     KnowledgeIngestionService,
     MemoryConsolidationService,
@@ -585,6 +644,8 @@ import { ActivityLogService } from '../activity/activity.service';
     KeyCortexApprovalOrchestratorService,
     KeyIdempotencyService,
     KeyCortexSagaService,
+    KeyCortexCompensationService,
+    KeyCortexSagaExecutorService,
   ],
 })
 export class KeyCortexModule {}

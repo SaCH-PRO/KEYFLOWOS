@@ -211,7 +211,7 @@ export class KeyCortexSandboxService {
     }
 
     const startTime = Date.now();
-    let executionTimeMs = 0;
+    let executionTimeMs: number;
 
     try {
       // Security audit before execution
@@ -385,7 +385,7 @@ export class KeyCortexSandboxService {
         name: 'Generate Weekly Report',
         description: 'Generate a summary report of key business metrics for the week.',
         language: 'javascript',
-        code: `const reportData = JSON.parse('{{reportData}}');\nconst { newCustomers, totalRevenue, newOrders, topProducts } = reportData;\n\nconst startDate = new Date();\nstartDate.setDate(startDate.getDate() - 7);\nconst endDate = new Date();\n\nconst report = {\n  period: { start: startDate.toISOString().split('T')[0], end: endDate.toISOString().split('T')[0] },\n  summary: {\n    newCustomers: newCustomers || 0,\n    totalRevenue: totalRevenue || 0,\n    newOrders: newOrders || 0,\n    avgOrderValue: newOrders > 0 ? (totalRevenue / newOrders).toFixed(2) : '0.00',\n  },\n  highlights: [\n    \`\${newCustomers || 0} new customers acquired\`,\n    \`\$\${(totalRevenue || 0).toFixed(2)} in total revenue\`,\n    \`\${newOrders || 0} orders placed\`,\n  ],\n  topProducts: (topProducts || []).slice(0, 5),\n  generatedAt: new Date().toISOString(),\n};\n\nconsole.log(JSON.stringify(report, null, 2));`,
+        code: `const reportData = JSON.parse('{{reportData}}');\nconst { newCustomers, totalRevenue, newOrders, topProducts } = reportData;\n\nconst startDate = new Date();\nstartDate.setDate(startDate.getDate() - 7);\nconst endDate = new Date();\n\nconst report = {\n  period: { start: startDate.toISOString().split('T')[0], end: endDate.toISOString().split('T')[0] },\n  summary: {\n    newCustomers: newCustomers || 0,\n    totalRevenue: totalRevenue || 0,\n    newOrders: newOrders || 0,\n    avgOrderValue: newOrders > 0 ? (totalRevenue / newOrders).toFixed(2) : '0.00',\n  },\n  highlights: [\n    \`\${newCustomers || 0} new customers acquired\`,\n    \`$\${(totalRevenue || 0).toFixed(2)} in total revenue\`,\n    \`\${newOrders || 0} orders placed\`,\n  ],\n  topProducts: (topProducts || []).slice(0, 5),\n  generatedAt: new Date().toISOString(),\n};\n\nconsole.log(JSON.stringify(report, null, 2));`,
         parameters: [
           { name: 'reportData', type: 'json', description: 'JSON object with newCustomers, totalRevenue, newOrders, topProducts', required: true },
         ],
@@ -505,7 +505,7 @@ export class KeyCortexSandboxService {
 
     // Clean up any remaining optional placeholders
     substitutedCode = substitutedCode.replace(
-      /\{\{\s*[#\/]?if\s+\w+\s*\}\}/g,
+      /\{\{\s*[#/]?if\s+\w+\s*\}\}/g,
       '',
     );
     substitutedCode = substitutedCode.replace(
@@ -1174,7 +1174,7 @@ export class KeyCortexSandboxService {
       case 'python': {
         // Basic Python: check indentation consistency
         const lines = code.split('\n');
-        let indentStack: number[] = [0];
+        const indentStack: number[] = [0];
         for (const line of lines) {
           if (!line.trim() || line.trim().startsWith('#')) continue;
           const leading = line.match(/^(\s*)/)?.[1].length ?? 0;

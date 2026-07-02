@@ -2,7 +2,7 @@ import { Injectable, Inject, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EntityResolutionService } from '../entity-resolution.service';
-import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary } from '../connector.interface';
+import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary, IngestionItemInput } from '../connector.interface';
 import { GmailIngestionService } from './gmail-ingestion.service';
 
 @Injectable()
@@ -92,6 +92,14 @@ export class GmailConnector implements IConnector {
     }
 
     return this.ingestion.syncInbox(businessId);
+  }
+
+  async syncToIngestion(businessId: string): Promise<IngestionItemInput[]> {
+    const connected = await this.isConnected(businessId);
+    if (!connected) {
+      return [];
+    }
+    return this.ingestion.collectInboxInputs(businessId);
   }
 
   async testConnection(businessId: string): Promise<{ success: boolean; error?: string; account?: string }> {

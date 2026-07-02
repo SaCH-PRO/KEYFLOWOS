@@ -43,6 +43,7 @@ import { KeyCortexContextV2Service } from './key-cortex-context-v2.service';
 import { KeyCortexInsightService } from './key-cortex-insight.service';
 import { KeyCortexGenomeBridgeService, AutonomyCheck } from './key-cortex-genome-bridge.service';
 import { AutonomyOrchestratorService } from '../key-autonomy/autonomy-orchestrator.service';
+import { KeyCortexPlannerService } from './key-cortex-planner.service';
 import type { AutonomyVerdict } from '../key-autonomy/autonomy-orchestrator.types';
 import { KeyCortexMemoryRetrievalService } from './key-cortex-memory-retrieval.service';
 import { KeyCortexEventService } from './key-cortex-event.service';
@@ -141,6 +142,9 @@ export class KeyCortexQueryPipelineService {
     @Optional()
     @Inject(KeyCortexQualityService)
     private readonly qualityService?: KeyCortexQualityService,
+    @Optional()
+    @Inject(KeyCortexPlannerService)
+    private readonly planner?: KeyCortexPlannerService,
   ) {
     this.MAX_CONTEXT_TOKENS = parseInt(
       process.env.KEY_CORTEX_MAX_CONTEXT_TOKENS ?? '8000',
@@ -175,6 +179,42 @@ export class KeyCortexQueryPipelineService {
     try {
       const session = await this.sessionService.getOrCreateSession(query);
 
+      // Phase 3: detect goal-oriented intents and delegate to the planner
+      const goalIntent = this.detectGoalIntent(query.text);
+      if (goalIntent && this.planner) {
+        try {
+          const goal = await this.planner.createGoal(query.businessId, {
+            title: goalIntent.title,
+            description: goalIntent.description,
+            priority: 1,
+          });
+          const plan = await this.planner.createPlanFromGoal(goal.id, query.userId);
+          if (!plan) {
+            throw new Error('Planner returned no plan');
+          }
+          await this.planner.executePlan(plan.id, { traceId: correlationId });
+
+          await this.sessionService.saveMessage(session.id, {
+            role: 'system',
+            content: `Created goal "${goal.title}" and executed a ${plan.steps.length}-step plan.`,
+            timestamp: new Date(),
+          });
+
+          return this.buildGoalResponse(
+            query,
+            session,
+            goal,
+            plan,
+            correlationId,
+            Date.now() - startTime,
+          );
+        } catch (err: any) {
+          this.logger.warn(
+            `[processQuery][${correlationId}] Goal delegation failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+
       let turnIdentity:
         | {
             correlationId: string;
@@ -204,7 +244,7 @@ export class KeyCortexQueryPipelineService {
       }
 
       const routeDecision: RouteDecision = this.adaptiveRouter
-        ? this.adaptiveRouter.route(query, session, session.messages.slice(-10))
+        ? await this.adaptiveRouter.route(query, session, session.messages.slice(-10))
         : {
             taskCategory: this.structuredOutputService.classifyTaskCategory(query),
             layers: ['reasoning', 'ethics'],
@@ -362,7 +402,7 @@ export class KeyCortexQueryPipelineService {
       });
 
       let autonomyCheckedCommands = parsedCommands;
-      let autonomyResults: Record<string, AutonomyVerdict | AutonomyCheck> = {};
+      const autonomyResults: Record<string, AutonomyVerdict | AutonomyCheck> = {};
 
       if (parsedCommands.length > 0) {
         try {
@@ -1066,7 +1106,7 @@ export class KeyCortexQueryPipelineService {
       }
 
       const routeDecision: RouteDecision = this.adaptiveRouter
-        ? this.adaptiveRouter.route(query, session, session.messages.slice(-10))
+        ? await this.adaptiveRouter.route(query, session, session.messages.slice(-10))
         : {
             taskCategory: this.structuredOutputService.classifyTaskCategory(query),
             layers: ['reasoning', 'ethics'],
@@ -1252,6 +1292,11 @@ export class KeyCortexQueryPipelineService {
           : undefined,
       });
 
+      const toolCallBuffers = new Map<
+        number,
+        { id?: string; name?: string; arguments: string }
+      >();
+
       for await (const chunk of stream) {
         if (chunk.provider) finalProvider = chunk.provider as CortexProvider;
         if (chunk.model) finalModel = chunk.model;
@@ -1266,22 +1311,32 @@ export class KeyCortexQueryPipelineService {
           };
         }
 
-        if (chunk.toolCall?.name) {
-          let params: Record<string, unknown> = {};
-          if ((chunk.toolCall as any).argumentsDelta) {
-            try {
-              params = JSON.parse((chunk.toolCall as any).argumentsDelta);
-            } catch {
-              params = { raw: (chunk.toolCall as any).argumentsDelta };
-            }
+        if (chunk.toolCall) {
+          const { index, id, name, argumentsDelta } = chunk.toolCall;
+          let entry = toolCallBuffers.get(index);
+          if (!entry) {
+            entry = { arguments: '' };
+            toolCallBuffers.set(index, entry);
           }
-          yield {
-            type: 'tool_call',
-            toolCall: {
-              name: chunk.toolCall.name,
-              params,
-            },
-          };
+          if (id) entry.id = id;
+          if (name) entry.name = name;
+          if (argumentsDelta) entry.arguments += argumentsDelta;
+
+          if (entry.name) {
+            let params: Record<string, unknown> = {};
+            try {
+              params = JSON.parse(entry.arguments);
+            } catch {
+              params = { raw: entry.arguments };
+            }
+            yield {
+              type: 'tool_call',
+              toolCall: {
+                name: entry.name,
+                params,
+              },
+            };
+          }
         }
 
         if (chunk.error) {
@@ -1289,6 +1344,60 @@ export class KeyCortexQueryPipelineService {
             type: 'error',
             error: chunk.error,
           };
+        }
+      }
+
+      // Execute any streamed tool calls through the same autonomy-checked helper
+      // used by the non-streaming path.
+      const collectedToolCalls = Array.from(toolCallBuffers.entries())
+        .filter(([, tc]) => tc.name)
+        .map(([index, tc]) => ({
+          id: tc.id ?? `tc_${index}`,
+          type: 'function' as const,
+          function: {
+            name: tc.name!,
+            arguments: tc.arguments,
+          },
+        }));
+
+      if (collectedToolCalls.length > 0 && this.toolLoopService) {
+        try {
+          const toolLoopResult = await this.toolLoopService.handleToolCalls(
+            { toolCalls: collectedToolCalls },
+            messages,
+            query,
+            {
+              ...routeDecision,
+              temperatureOverride: effectiveTemperature,
+            },
+            personalityConfig,
+            taskCategory,
+            turnIdentity,
+            this.MAX_CONTEXT_TOKENS,
+          );
+
+          if (toolLoopResult?.content) {
+            accumulatedText += `\n\n${toolLoopResult.content}`;
+            yield {
+              type: 'text_delta',
+              content: toolLoopResult.content,
+            };
+          }
+
+          for (const action of toolLoopResult?.actions ?? []) {
+            yield {
+              type: 'action_delta',
+              action: {
+                actionType: action.actionType,
+                description: action.description,
+                status: action.status,
+              },
+            };
+          }
+        } catch (err: any) {
+          this.logger.warn(
+            `[streamQuery][${correlationId}] Tool loop execution failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
         }
       }
 
@@ -1556,6 +1665,65 @@ export class KeyCortexQueryPipelineService {
       suggestions: [],
       followUpQuestions: [],
       confidence: 0,
+    } as CortexResponse;
+  }
+
+  private detectGoalIntent(text: string): { title: string; description?: string } | null {
+    const lower = text.toLowerCase();
+    const goalPatterns = [
+      /(?:set|create|add|define)\s+(?:a\s+)?goal\s+(?:to|for)?\s*(.+)/i,
+      /(?:my\s+)?goal\s+(?:is\s+)?(?:to\s+)?(.+)/i,
+      /(?:make\s+a\s+plan\s+(?:to|for)\s+)(.+)/i,
+      /(?:plan\s+(?:to|for)\s+)(.+)/i,
+      /(?:objective|target|aim)\s+(?:is\s+)?(?:to\s+)?(.+)/i,
+    ];
+
+    for (const pattern of goalPatterns) {
+      const match = lower.match(pattern);
+      if (match?.[1]?.trim()) {
+        const title = match[1].trim().replace(/[.!?]$/, '');
+        return { title: title.charAt(0).toUpperCase() + title.slice(1), description: text };
+      }
+    }
+
+    if (lower.includes('goal') && lower.length < 200) {
+      return { title: text, description: text };
+    }
+
+    return null;
+  }
+
+  private buildGoalResponse(
+    query: CortexQuery,
+    session: CortexSession,
+    goal: any,
+    plan: any,
+    correlationId: string,
+    latencyMs: number,
+  ): CortexResponse {
+    const message: CortexMessage = {
+      id: this.sessionService.generateId(),
+      role: 'assistant',
+      content: `I created the goal "${goal.title}" and built a ${plan.steps.length}-step plan. I'll start working on it for you.`,
+      timestamp: new Date(),
+      metadata: {
+        goalId: goal.id,
+        planId: plan.id,
+        latencyMs,
+      } as any,
+    };
+
+    return {
+      message,
+      actions: plan.steps.map((step: any, index: number) => ({
+        actionType: `${step.module ?? 'general'}.${step.action}`.toUpperCase().replace(/\s+/g, '_') as CortexActionType,
+        status: step.status ?? 'pending',
+        description: step.description ?? `Step ${index + 1}: ${step.action}`,
+      })),
+      contextUsed: undefined,
+      suggestions: ['Show me the plan details', 'Track goal progress'],
+      followUpQuestions: ['Show me the plan details', 'Track goal progress'],
+      confidence: 0.95,
     } as CortexResponse;
   }
 

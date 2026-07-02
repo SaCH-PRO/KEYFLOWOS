@@ -214,7 +214,7 @@ export class WhatsAppService {
     });
   }
 
-  async sendMessage(businessId: string, message: WhatsAppMessage): Promise<{ success: boolean; error?: string }> {
+  async sendMessage(businessId: string, message: WhatsAppMessage): Promise<{ success: boolean; error?: string; messageId?: string }> {
     const config = await this.getConfig(businessId);
     if (!config) {
       this.logger.warn(`No WhatsApp config for business ${businessId}`);
@@ -252,7 +252,7 @@ export class WhatsAppService {
     config: WhatsAppConfig,
     to: string,
     message: WhatsAppMessage,
-  ): Promise<{ success: boolean; error?: string }> {
+  ): Promise<{ success: boolean; error?: string; messageId?: string }> {
     const url = `https://api.twilio.com/2010-04-01/Accounts/${config.accountSid}/Messages.json`;
     const auth = Buffer.from(`${config.accountSid}:${config.authToken}`).toString('base64');
 
@@ -272,14 +272,15 @@ export class WhatsAppService {
       return { success: false, error: text };
     }
 
-    return { success: true };
+    const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    return { success: true, messageId: typeof data.sid === 'string' ? data.sid : undefined };
   }
 
   private async sendViaMeta(
     config: WhatsAppConfig,
     to: string,
     message: WhatsAppMessage,
-  ): Promise<{ success: boolean; error?: string }> {
+  ): Promise<{ success: boolean; error?: string; messageId?: string }> {
     const url = `https://graph.facebook.com/v18.0/${config.phoneNumberId}/messages`;
 
     const body: Record<string, unknown> = {
@@ -313,7 +314,8 @@ export class WhatsAppService {
       return { success: false, error: text };
     }
 
-    return { success: true };
+    const data = (await res.json().catch(() => ({}))) as { messages?: Array<{ id?: string }> };
+    return { success: true, messageId: data.messages?.[0]?.id };
   }
 
   private normalizePhone(phone: string): string | null {

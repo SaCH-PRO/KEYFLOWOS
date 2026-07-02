@@ -1,4 +1,4 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { TimelineService } from '../timeline/timeline.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -172,6 +172,9 @@ export class CommandService {
   }
 
   async snooze(businessId: string, id: string, until: Date) {
+    if (until.getTime() <= Date.now()) {
+      throw new BadRequestException('Snooze until date must be in the future');
+    }
     const existing = await this.findOne(businessId, id);
     const item = await this.prisma.client.commandItem.update({
       where: { id },

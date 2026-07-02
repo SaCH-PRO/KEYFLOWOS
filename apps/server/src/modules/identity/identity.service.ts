@@ -908,6 +908,8 @@ export class IdentityService {
         data: {
           name: businessName,
           ownerId: user.id,
+          onboardingStep: 'welcome',
+          onboardingStartedAt: new Date(),
         },
       }));
 
@@ -925,7 +927,7 @@ export class IdentityService {
       },
     });
 
-    return { user, business };
+    return { user, business, isNewBusiness: !existingBusiness };
   }
 
   async getTieredCompleteness(businessId: string) {

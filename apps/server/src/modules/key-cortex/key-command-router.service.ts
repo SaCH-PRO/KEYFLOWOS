@@ -171,11 +171,8 @@ export class KeyCommandRouterService {
     const readiness = context.executiveReadiness;
 
     // Determine autonomy tier based on readiness
-    let autonomyTier: GenomeJudgment['policy']['autonomyTier'] = 'assisted';
-    if (readiness >= 80) autonomyTier = 'full';
-    else if (readiness >= 50) autonomyTier = 'semi';
-    else if (readiness >= 20) autonomyTier = 'assisted';
-    else autonomyTier = 'none';
+    const autonomyTier: GenomeJudgment['policy']['autonomyTier'] =
+      readiness >= 80 ? 'full' : readiness >= 50 ? 'semi' : readiness >= 20 ? 'assisted' : 'none';
 
     // Determine if approval is needed
     const highRiskActions = ['CREATE_INVOICE', 'SEND_EMAIL', 'EXECUTE_FLOW', 'UPDATE_CRM'];

@@ -196,6 +196,29 @@ export class KeyAutonomySafetyService {
     });
   }
 
+  async updateProfile(
+    businessId: string,
+    updates: Partial<{
+      globalKillSwitch: boolean;
+      maxDailyAutoActions: number;
+      maxDailySpendTtd: number;
+      maxTierWithoutApproval: number;
+      notifyOnBlock: boolean;
+    }>,
+  ): Promise<AutonomySafetyResult['profile'] & { id: string }> {
+    await this.ensureProfile(businessId);
+    return this.prisma.client.businessAutonomyProfile.update({
+      where: { businessId },
+      data: {
+        globalKillSwitch: updates.globalKillSwitch,
+        maxDailyAutoActions: updates.maxDailyAutoActions,
+        maxDailySpendTtd: updates.maxDailySpendTtd,
+        maxTierWithoutApproval: updates.maxTierWithoutApproval,
+        notifyOnBlock: updates.notifyOnBlock,
+      },
+    });
+  }
+
   private today(): Date {
     const now = new Date();
     return new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));

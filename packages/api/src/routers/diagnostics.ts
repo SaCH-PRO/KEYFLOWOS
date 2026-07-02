@@ -1,7 +1,8 @@
 import { router, superAdminProcedure } from '../trpc';
+import type { AnyRouter } from '@trpc/server';
 import { z } from 'zod';
 
-export const diagnosticsRouter = router({
+export const diagnosticsRouter: AnyRouter = router({
   runFull: superAdminProcedure.mutation(async ({ ctx }) => {
     if (!ctx.diagnostics) {
       throw new Error('Diagnostics service not available');

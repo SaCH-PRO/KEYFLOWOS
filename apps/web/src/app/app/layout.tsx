@@ -28,6 +28,7 @@ import { KeyContextualSuggestions } from "@/components/functional/key-contextual
 import { KeyboardShortcutsHelp } from "@/components/functional/keyboard-shortcuts-help";
 import { MobileGestureProvider } from "@/components/functional/mobile-gesture-provider";
 import { ComposeFab } from "@/components/email/compose-fab";
+import { TtsProvider, TtsPlayer } from "@/components/tts";
 
 function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const layout = useAppLayout();
@@ -138,6 +139,7 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
 
       <PlanLimitDialog planLimit={layout.planLimitHit} onClose={layout.clearPlanLimit} />
       <KeyflowOSStoreDrawer open={layout.kfStoreOpen} onClose={() => layout.setKfStoreOpen(false)} />
+      <TtsPlayer />
       <KeyAgent currentModule={layout.copilotModule} />
       <KeyPresence />
       <KeyContextualSuggestions />
@@ -159,7 +161,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <NotesProvider>
               <GuideProvider>
                 <NotesQueryParamTrigger />
-                <AppLayoutInner>{children}</AppLayoutInner>
+                <TtsProvider>
+                  <AppLayoutInner>{children}</AppLayoutInner>
+                </TtsProvider>
                 <KeyflowNotesDrawer />
               </GuideProvider>
             </NotesProvider>

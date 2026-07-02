@@ -906,7 +906,7 @@ export class KeyCortexInsightService {
     score = Math.max(0, Math.min(100, score));
 
     // Generate narrative via AI
-    let narrative = '';
+    let narrative: string;
     try {
       const prompt = this.buildReportPrompt(scope, revenue, pipeline, cashFlow, churnRisks, opportunities, context);
       const aiResponse = await (this.modelGateway as any).complete(prompt, {

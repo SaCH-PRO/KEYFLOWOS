@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Inject, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../../../core/prisma/prisma.service';
 import { GenomeCrossDomainService } from './genome-cross-domain.service';
 import { GenomeOutcomeLearningService } from './genome-outcome-learning.service';
@@ -87,6 +87,7 @@ function toOutcomeData(row: {
 export class GenomeRecommendationOutcomeService {
   constructor(
     private readonly prisma: PrismaService,
+    @Inject(forwardRef(() => GenomeCrossDomainService))
     private readonly crossDomain: GenomeCrossDomainService,
     private readonly outcomeLearning: GenomeOutcomeLearningService,
   ) {}

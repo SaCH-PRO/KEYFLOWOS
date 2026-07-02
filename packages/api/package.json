@@ -2,17 +2,18 @@
   "name": "@keyflow/api",
   "version": "0.1.0",
   "private": true,
-  "main": "./src/root.ts",
-  "module": "./src/root.ts",
-  "types": "./src/root.ts",
+  "main": "./dist/src/root.js",
+  "module": "./dist/src/root.js",
+  "types": "./dist/src/root.d.ts",
   "exports": {
     ".": {
-      "types": "./src/root.ts",
-      "default": "./src/root.ts"
+      "types": "./dist/src/root.d.ts",
+      "default": "./dist/src/root.js"
     }
   },
   "scripts": {
     "build": "tsc --project tsconfig.json",
+    "typecheck": "tsc --noEmit",
     "lint": "eslint src --ext .ts"
   },
   "dependencies": {

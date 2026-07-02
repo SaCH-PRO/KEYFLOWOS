@@ -183,6 +183,31 @@ export class ResponseDraftService {
     });
   }
 
+  async updateDraftBody(draftId: string, body: string, updatedById?: string) {
+    const draft = await this.prisma.client.responseDraft.findUnique({
+      where: { id: draftId },
+    });
+    if (!draft) throw new Error('Draft not found');
+
+    const nextStatus = draft.status === 'APPROVED' ? 'PENDING_APPROVAL' : draft.status;
+
+    const updated = await this.prisma.client.responseDraft.update({
+      where: { id: draftId },
+      data: {
+        body,
+        status: nextStatus,
+        evidence: {
+          ...(draft.evidence as Record<string, unknown>),
+          lastEditedBy: updatedById ?? 'user',
+          lastEditedAt: new Date().toISOString(),
+        },
+      },
+    });
+
+    this.logger.log(`Draft ${draftId} body updated by ${updatedById ?? 'user'}`);
+    return updated;
+  }
+
   private riskTierToNumber(tier: string): number {
     const map: Record<string, number> = { LOW: 1, MEDIUM: 2, HIGH: 3, CRITICAL: 4 };
     return map[tier] ?? 2;

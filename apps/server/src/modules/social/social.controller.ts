@@ -1,5 +1,6 @@
-import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, UseGuards, BadRequestException } from '@nestjs/common';
-import { randomBytes, createHash } from 'crypto';
+import { Body, Controller, Delete, ForbiddenException, Get, HttpException, Inject, Logger, Param, Patch, Post, Query, Req, UseGuards, BadRequestException } from '@nestjs/common';
+import { randomBytes, createHash, createHmac, timingSafeEqual } from 'crypto';
+import type { Request } from 'express';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
@@ -8,16 +9,24 @@ import { SocialConnectionsService } from './social-connections.service';
 import { SocialAnalyticsService } from './social-analytics.service';
 import { MetaSocialIngestionService } from './meta-social-ingestion.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { WebhookIngressLoggerService } from '../../core/connectors/webhook-ingress-logger.service';
 import { oauthRedirect } from '../../core/config/runtime-urls';
+
+interface RawBodyRequest extends Request {
+  rawBody?: Buffer;
+}
 
 @Controller('social')
 export class SocialController {
+  private readonly logger = new Logger(SocialController.name);
+
   constructor(
     @Inject(SocialService) private readonly social: SocialService,
     @Inject(SocialConnectionsService) private readonly connections: SocialConnectionsService,
     @Inject(SocialAnalyticsService) private readonly analytics: SocialAnalyticsService,
     @Inject(MetaSocialIngestionService) private readonly ingestion: MetaSocialIngestionService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(WebhookIngressLoggerService) private readonly webhookLogger: WebhookIngressLoggerService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
   ) {}
 
@@ -58,6 +67,7 @@ export class SocialController {
     @Query('hub.mode') hubMode?: string,
     @Query('hub.verify_token') hubVerifyToken?: string,
     @Query('hub.challenge') hubChallenge?: string,
+    @Req() req?: RawBodyRequest,
   ) {
     // Meta sometimes verifies with a POST-shaped request.
     if (hubMode === 'subscribe' && hubVerifyToken) {
@@ -68,6 +78,8 @@ export class SocialController {
       return { error: 'Invalid verify token' };
     }
 
+    this.assertMetaSignature(req);
+
     const business = await this.prisma.client.business.findUnique({
       where: { id: businessId },
       select: { id: true },
@@ -76,12 +88,58 @@ export class SocialController {
       return { success: false, error: 'Business not found' };
     }
 
+    const headers = (req?.headers ?? {}) as Record<string, unknown>;
+
     try {
       const result = await this.ingestion.receiveInbound(businessId, body);
-      return { success: true, ...result };
+      const response = { success: true, ...result };
+      await this.webhookLogger.log({
+        businessId,
+        connectorType: 'meta_social',
+        payload: body,
+        headers,
+        statusCode: 200,
+        responseBody: JSON.stringify(response),
+      });
+      return response;
     } catch (err: any) {
       const message = err instanceof Error ? err.message : String(err);
+      const statusCode = err instanceof HttpException ? err.getStatus() : 500;
+      await this.webhookLogger.log({
+        businessId,
+        connectorType: 'meta_social',
+        payload: body,
+        headers,
+        statusCode,
+        errorMessage: message,
+      });
       return { success: false, error: message };
+    }
+  }
+
+  private assertMetaSignature(req?: RawBodyRequest) {
+    const secret = process.env.META_APP_SECRET;
+    if (!secret) {
+      this.logger.error('META_APP_SECRET not set; rejecting Meta webhook');
+      throw new ForbiddenException('Webhook secret not configured');
+    }
+
+    const header = req?.headers['x-hub-signature-256'] as string | undefined;
+    if (!header || !header.startsWith('sha256=')) {
+      throw new ForbiddenException('Missing Meta webhook signature');
+    }
+
+    const raw = req?.rawBody;
+    if (!raw || raw.length === 0) {
+      throw new ForbiddenException('Missing webhook body for signature verification');
+    }
+
+    const expected = createHmac('sha256', secret).update(raw).digest('hex');
+    const provided = header.slice('sha256='.length);
+    const expectedBuf = Buffer.from(expected, 'hex');
+    const providedBuf = Buffer.from(provided, 'hex');
+    if (expectedBuf.length !== providedBuf.length || !timingSafeEqual(expectedBuf, providedBuf)) {
+      throw new ForbiddenException('Invalid Meta webhook signature');
     }
   }
 

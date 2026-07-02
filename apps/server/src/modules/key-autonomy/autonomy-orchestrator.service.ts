@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { AiOversightService } from '../ai/ai-oversight.service';
 import { GenomeAutonomyGateService } from '../business-genome/key-genome/genome-autonomy-gate.service';
 import { KeyActionPolicyService } from './key-action-policy.service';
@@ -14,7 +15,8 @@ import type {
   AutonomyTier,
   AutonomyVerdict,
 } from './autonomy-orchestrator.types';
-import type { GenomeAutonomyGateDecision } from '../business-genome/key-genome/key-genome.types';
+import type { GenomeAutonomyGateDecision, GenomeCrossDomainDomainKey } from '../business-genome/key-genome/key-genome.types';
+import type { BusinessRole } from '../ai/role-engine.service';
 import type { KeyExecutableActionType } from './key-action-proposal.types';
 
 /**
@@ -138,7 +140,7 @@ export class AutonomyOrchestratorService {
           context.businessId,
           context.actionKey,
           undefined,
-          context.role as any,
+          this.normalizeRole(context.role),
         );
 
         trace.push({
@@ -193,7 +195,7 @@ export class AutonomyOrchestratorService {
         const gateInput = {
           businessId: context.businessId,
           actionType: context.actionKey,
-          affectedDomains: context.affectedDomains as any,
+          affectedDomains: this.normalizeDomains(context.affectedDomains),
           payload: context.parameters ?? {},
           proposedBy: context.proposedBy ?? null,
         };
@@ -255,7 +257,7 @@ export class AutonomyOrchestratorService {
         try {
           const policyDecision = await this.genomePolicy.evaluateExecution(context.businessId, {
             actionType: executableAction,
-          } as any);
+          });
 
           trace.push({
             source: 'KeyActionGenomePolicyService',
@@ -297,7 +299,38 @@ export class AutonomyOrchestratorService {
       }
     }
 
-    // 5. Constitution / Blueprint value guard.
+    // 5. Tool outcome score guard.
+    // If a tool has a poor track record for this business, downgrade to supervised
+    // or block automatically regardless of other gates.
+    if (allowed) {
+      try {
+        const toolScore = await this.getToolOutcomeScore(context.businessId, context.actionKey);
+        if (toolScore.totalUses >= 3) {
+          trace.push({
+            source: 'ToolOutcomeScore',
+            rule: `tool-score-${context.actionKey}`,
+            result: toolScore.successRate < 0.5 ? 'supervised' : 'allow',
+            reason: `Tool ${context.actionKey} success rate is ${(toolScore.successRate * 100).toFixed(0)}% over ${toolScore.totalUses} uses`,
+            metadata: { successRate: toolScore.successRate, totalUses: toolScore.totalUses },
+          });
+
+          if (toolScore.successRate < 0.3 && toolScore.totalUses >= 5) {
+            allowed = false;
+            reasons.push(`Tool ${context.actionKey} success rate is below 30% — blocked`);
+          } else if (toolScore.successRate < 0.5) {
+            requiresApproval = true;
+            tier = 'supervised';
+            reasons.push(`Tool ${context.actionKey} success rate is below 50% — requires approval`);
+          }
+        }
+      } catch (err: any) {
+        this.logger.warn(
+          `[evaluate][${context.businessId}] Tool outcome score lookup failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
+    // 6. Constitution / Blueprint value guard.
     if (allowed) {
       try {
         const valueCheck = await this.constitutionValues.checkAction(
@@ -439,7 +472,7 @@ export class AutonomyOrchestratorService {
         tier: verdict.tier,
         confidence: verdict.confidence,
         reason: verdict.reason,
-        ruleTrace: verdict.ruleTrace as any,
+        ruleTrace: verdict.ruleTrace as unknown as Prisma.InputJsonValue,
         proposalId: context.proposalId ?? null,
         contextHash: this.hashContext(context),
       },
@@ -467,6 +500,33 @@ export class AutonomyOrchestratorService {
     } catch {
       return '0';
     }
+  }
+
+  private normalizeRole(role?: string): BusinessRole | undefined {
+    const roles: BusinessRole[] = ['sales', 'finance', 'support', 'operations', 'marketing', 'general', 'operator'];
+    return roles.includes(role as BusinessRole) ? (role as BusinessRole) : undefined;
+  }
+
+  private normalizeDomains(domains?: string[]): GenomeCrossDomainDomainKey[] | undefined {
+    if (!Array.isArray(domains) || domains.length === 0) return undefined;
+    return domains.filter((d): d is GenomeCrossDomainDomainKey => typeof d === 'string') as GenomeCrossDomainDomainKey[];
+  }
+
+  private async getToolOutcomeScore(
+    businessId: string,
+    actionKey: string,
+  ): Promise<{ successRate: number; totalUses: number }> {
+    const row = await this.prisma.client.toolOutcomeScore.findUnique({
+      where: { businessId_toolName: { businessId, toolName: actionKey } },
+    });
+    if (!row) {
+      return { successRate: 0, totalUses: 0 };
+    }
+    const totalUses = row.successCount + row.failureCount;
+    return {
+      successRate: totalUses > 0 ? row.successCount / totalUses : 0,
+      totalUses,
+    };
   }
 
   private toExecutableActionType(actionKey: string): KeyExecutableActionType | null {

@@ -180,31 +180,41 @@ export class CommerceAdapterService {
     return this.commerce.bulkUpdateQuotes(input.businessId, [input.quoteId], 'send');
   }
 
-  async getRevenueSummary(input: { businessId: string; period?: string }) {
+  async getRevenueSummary(input: {
+    businessId: string;
+    from?: string;
+    to?: string;
+    period?: string;
+  }) {
     const now = new Date();
     let from: Date;
     let to: Date;
 
-    switch (input.period) {
-      case 'this_month':
-        from = new Date(now.getFullYear(), now.getMonth(), 1);
-        to = now;
-        break;
-      case 'last_month':
-        from = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-        to = new Date(now.getFullYear(), now.getMonth(), 0);
-        break;
-      case 'this_quarter':
-        from = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1);
-        to = now;
-        break;
-      case 'this_year':
-        from = new Date(now.getFullYear(), 0, 1);
-        to = now;
-        break;
-      default:
-        from = new Date(now.getFullYear(), now.getMonth(), 1);
-        to = now;
+    if (input.from && input.to) {
+      from = new Date(input.from);
+      to = new Date(input.to);
+    } else {
+      switch (input.period) {
+        case 'this_month':
+          from = new Date(now.getFullYear(), now.getMonth(), 1);
+          to = now;
+          break;
+        case 'last_month':
+          from = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+          to = new Date(now.getFullYear(), now.getMonth(), 0);
+          break;
+        case 'this_quarter':
+          from = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1);
+          to = now;
+          break;
+        case 'this_year':
+          from = new Date(now.getFullYear(), 0, 1);
+          to = now;
+          break;
+        default:
+          from = new Date(now.getFullYear(), now.getMonth(), 1);
+          to = now;
+      }
     }
 
     const invoices = await this.commerce.listInvoices(input.businessId, 1, 1000);
@@ -221,10 +231,68 @@ export class CommerceAdapterService {
       total,
       count: rows.length,
       currency: 'TTD',
-      period: input.period ?? 'this_month',
+      period: input.period ?? 'custom',
       from: from.toISOString(),
       to: to.toISOString(),
     };
+  }
+
+  async getOutstandingInvoices(input: {
+    businessId: string;
+    contactId?: string;
+    overdueOnly?: boolean;
+    limit?: number;
+  }) {
+    const result = await this.commerce.listInvoices(input.businessId, 1, input.limit ?? 200);
+    let rows = (result as { data?: Array<{ status?: string; contactId?: string; dueDate?: string | Date }> }).data ?? [];
+    rows = rows.filter((inv) =>
+      ['SENT', 'OVERDUE', 'PARTIALLY_PAID'].includes(inv.status ?? ''),
+    );
+    if (input.contactId) {
+      rows = rows.filter((inv) => inv.contactId === input.contactId);
+    }
+    if (input.overdueOnly) {
+      const now = new Date();
+      rows = rows.filter((inv) => inv.dueDate && new Date(inv.dueDate) < now);
+    }
+    return rows;
+  }
+
+  async getProductCatalog(input: { businessId: string; search?: string; limit?: number }) {
+    const result = await this.commerce.listProducts(input.businessId, 1, input.limit ?? 200);
+    let rows = (result as { data?: unknown[] }).data ?? [];
+    if (input.search) {
+      const q = input.search.toLowerCase();
+      rows = rows.filter((p) =>
+        String((p as { name?: string }).name ?? '').toLowerCase().includes(q) ||
+        String((p as { description?: string }).description ?? '').toLowerCase().includes(q),
+      );
+    }
+    return rows;
+  }
+
+  async getPaymentHistory(input: {
+    businessId: string;
+    contactId?: string;
+    invoiceId?: string;
+    limit?: number;
+  }) {
+    const payments = await this.commerce.listAllPayments(input.businessId, {
+      contactId: input.contactId,
+    });
+    let rows = payments as unknown[];
+    if (input.invoiceId) {
+      rows = rows.filter((p) => (p as { invoiceId?: string }).invoiceId === input.invoiceId);
+    }
+    return rows.slice(0, input.limit ?? 50);
+  }
+
+  async getQuoteStatus(input: { businessId: string; quoteId: string }) {
+    const quote = await this.commerce.getQuote(input.quoteId);
+    if (!quote) {
+      throw new NotFoundException('Quote not found');
+    }
+    return quote;
   }
 
   async execute(command: ConnectorCommand): Promise<ConnectorResult> {
@@ -321,6 +389,48 @@ export class CommerceAdapterService {
           message: command.parameters.message as string,
         });
         return connectorOk(command, start, sent);
+      }
+      case 'get_revenue_summary': {
+        const summary = await this.getRevenueSummary({
+          businessId: command.businessId,
+          from: command.parameters.from as string,
+          to: command.parameters.to as string,
+          period: command.parameters.period as string,
+        });
+        return connectorOk(command, start, summary);
+      }
+      case 'get_outstanding_invoices': {
+        const invoices = await this.getOutstandingInvoices({
+          businessId: command.businessId,
+          contactId: command.parameters.contactId as string,
+          overdueOnly: (command.parameters.overdueOnly as boolean) || false,
+          limit: (command.parameters.limit as number) || 200,
+        });
+        return connectorOk(command, start, invoices);
+      }
+      case 'get_product_catalog': {
+        const catalog = await this.getProductCatalog({
+          businessId: command.businessId,
+          search: command.parameters.search as string,
+          limit: (command.parameters.limit as number) || 200,
+        });
+        return connectorOk(command, start, catalog);
+      }
+      case 'get_payment_history': {
+        const payments = await this.getPaymentHistory({
+          businessId: command.businessId,
+          contactId: command.parameters.contactId as string,
+          invoiceId: command.parameters.invoiceId as string,
+          limit: (command.parameters.limit as number) || 50,
+        });
+        return connectorOk(command, start, payments);
+      }
+      case 'get_quote_status': {
+        const quote = await this.getQuoteStatus({
+          businessId: command.businessId,
+          quoteId: command.parameters.quoteId as string,
+        });
+        return connectorOk(command, start, quote);
       }
       default:
         return connectorFail(command, start, `Unknown commerce action: ${command.action}`);

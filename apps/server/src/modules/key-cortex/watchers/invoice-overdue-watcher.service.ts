@@ -3,8 +3,8 @@
  *
  * Scans a business for invoices that are past their due date and still
  * unpaid, then emits normalized proactive events on the KEY Cortex event
- * bus so subscribers can trigger reminders, escalation, or autonomous
- * collection workflows.
+ * bus. The FlowSignalBridge converts these events into canonical FlowSignal
+ * rows so every KEY role can subscribe.
  */
 
 import { Injectable, Logger } from '@nestjs/common';
@@ -34,7 +34,7 @@ export class InvoiceOverdueWatcherService {
         dueDate: { lt: now },
       },
       include: {
-        contact: { select: { id: true, name: true, email: true } },
+        contact: { select: { id: true, firstName: true, lastName: true, email: true } },
       },
       orderBy: { dueDate: 'asc' },
     });

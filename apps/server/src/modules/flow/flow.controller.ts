@@ -171,7 +171,11 @@ export class FlowController {
   @UseGuards(BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('automations', 'read')
   async listTemplates() {
-    return this.templates.findMany();
+    const [items, total] = await Promise.all([
+      this.templates.findMany(),
+      this.templates.count(),
+    ]);
+    return { items, total };
   }
 
   @Post('businesses/:businessId/templates/:templateId/clone')
@@ -269,7 +273,7 @@ export class FlowController {
     @Param('flowId') flowId: string,
     @Body() body: TestFlowDto,
   ) {
-    return this.runner.runFlow(businessId, flowId, {
+    return this.runner.runFlowTest(businessId, flowId, {
       ...(body.payload ?? {}),
       contactId: body.contactId ?? null,
       sourceEventId: body.sourceEventId ?? null,
@@ -301,7 +305,8 @@ export class FlowController {
     @Param('flowId') _flowId: string,
     @Param('runId') runId: string,
   ) {
-    return this.runner.findRunSteps(runId);
+    const items = await this.runner.findRunSteps(runId);
+    return { items, total: items.length };
   }
 
   @Delete('businesses/:businessId/flows/:flowId')

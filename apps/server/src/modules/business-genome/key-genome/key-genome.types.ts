@@ -269,6 +269,8 @@ export interface UpsertGenomeFactInput {
   sourceType: string;
   sourceEntityType?: string;
   sourceEntityId?: string;
+  verificationStatus?: VerificationStatus;
+  confidenceScore?: number;
 }
 
 export interface AttachGenomeEvidenceInput {

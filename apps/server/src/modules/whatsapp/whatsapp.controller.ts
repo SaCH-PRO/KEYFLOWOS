@@ -1,7 +1,14 @@
-import { Body, Controller, Get, Inject, Logger, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Get, HttpException, Inject, Logger, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import type { Request } from 'express';
+import { createHmac, timingSafeEqual } from 'crypto';
 import { WhatsAppService, type WhatsAppConfig } from './whatsapp.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { WebhookIngressLoggerService } from '../../core/connectors/webhook-ingress-logger.service';
+
+interface RawBodyRequest extends Request {
+  rawBody?: Buffer;
+}
 
 interface WhatsAppWebhookBody {
   From?: string;
@@ -43,6 +50,7 @@ export class WhatsAppController {
 
   constructor(
     @Inject(WhatsAppService) private readonly service: WhatsAppService,
+    @Inject(WebhookIngressLoggerService) private readonly webhookLogger: WebhookIngressLoggerService,
   ) {}
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -77,7 +85,7 @@ export class WhatsAppController {
     return { success: true, provider: config.provider };
   }
 
-  // ─── Public webhook for inbound messages (no auth — verified by provider signature in production) ───
+  // ─── Public webhook for inbound messages (verified by provider signature) ───
 
   @Post('webhook/:businessId')
   async webhook(
@@ -86,6 +94,7 @@ export class WhatsAppController {
     @Query('hub.mode') hubMode?: string,
     @Query('hub.verify_token') hubVerifyToken?: string,
     @Query('hub.challenge') hubChallenge?: string,
+    @Req() req?: RawBodyRequest,
   ) {
     // Meta webhook verification (GET-ish via query params on POST setup)
     if (hubMode === 'subscribe' && hubVerifyToken) {
@@ -105,17 +114,118 @@ export class WhatsAppController {
       return { success: false, error: 'Missing from' };
     }
 
-    const result = await this.service.receiveInbound(businessId, {
-      from: parsed.from,
-      body: parsed.body,
-      externalId: parsed.externalId,
-      senderName: parsed.senderName,
-      provider: parsed.provider,
-      rawPayload: body as unknown as Record<string, unknown>,
-      receivedAt: parsed.receivedAt,
-    });
+    if (parsed.provider === 'meta') {
+      this.assertMetaSignature(req);
+    } else if (parsed.provider === 'twilio') {
+      this.assertTwilioSignature(req, body as unknown as Record<string, unknown>);
+    }
 
-    return { success: true, contactId: result.contactId, isNew: result.isNew };
+    const headers = (req?.headers ?? {}) as Record<string, unknown>;
+
+    try {
+      const result = await this.service.receiveInbound(businessId, {
+        from: parsed.from,
+        body: parsed.body,
+        externalId: parsed.externalId,
+        senderName: parsed.senderName,
+        provider: parsed.provider,
+        rawPayload: body as unknown as Record<string, unknown>,
+        receivedAt: parsed.receivedAt,
+      });
+      const response = { success: true, contactId: result.contactId, isNew: result.isNew };
+      await this.webhookLogger.log({
+        businessId,
+        connectorType: 'whatsapp',
+        payload: body,
+        headers,
+        statusCode: 200,
+        responseBody: JSON.stringify(response),
+      });
+      return response;
+    } catch (err: any) {
+      const message = err instanceof Error ? err.message : String(err);
+      const statusCode = err instanceof HttpException ? err.getStatus() : 500;
+      await this.webhookLogger.log({
+        businessId,
+        connectorType: 'whatsapp',
+        payload: body,
+        headers,
+        statusCode,
+        errorMessage: message,
+      });
+      return { success: false, error: message };
+    }
+  }
+
+  private assertMetaSignature(req?: RawBodyRequest) {
+    const secret = process.env.WHATSAPP_APP_SECRET;
+    if (!secret) {
+      this.logger.error('WHATSAPP_APP_SECRET not set; rejecting Meta webhook');
+      throw new ForbiddenException('Webhook secret not configured');
+    }
+    const header = req?.headers['x-hub-signature-256'] as string | undefined;
+    if (!header || !header.startsWith('sha256=')) {
+      throw new ForbiddenException('Missing Meta webhook signature');
+    }
+    const raw = req?.rawBody;
+    if (!raw || raw.length === 0) {
+      throw new ForbiddenException('Missing webhook body for signature verification');
+    }
+    const expected = createHmac('sha256', secret).update(raw).digest('hex');
+    const provided = header.slice('sha256='.length);
+    const expectedBuf = Buffer.from(expected, 'hex');
+    const providedBuf = Buffer.from(provided, 'hex');
+    if (expectedBuf.length !== providedBuf.length || !timingSafeEqual(expectedBuf, providedBuf)) {
+      throw new ForbiddenException('Invalid Meta webhook signature');
+    }
+  }
+
+  private assertTwilioSignature(req?: RawBodyRequest, body?: Record<string, unknown>) {
+    const authToken = process.env.TWILIO_AUTH_TOKEN;
+    if (!authToken) {
+      this.logger.error('TWILIO_AUTH_TOKEN not set; rejecting Twilio webhook');
+      throw new ForbiddenException('Webhook secret not configured');
+    }
+    const signature = req?.headers['x-twilio-signature'] as string | undefined;
+    if (!signature) {
+      throw new ForbiddenException('Missing Twilio webhook signature');
+    }
+    const url = this.buildTwilioUrl(req);
+    const raw = req?.rawBody?.toString('utf8') ?? '';
+    const isValid = this.verifyTwilioSignature(url, raw, body ?? {}, signature, authToken);
+    if (!isValid) {
+      throw new ForbiddenException('Invalid Twilio webhook signature');
+    }
+  }
+
+  private buildTwilioUrl(req?: RawBodyRequest): string {
+    const protocol = (req?.headers['x-forwarded-proto'] as string) || req?.protocol || 'https';
+    const host = req?.headers.host || 'localhost';
+    const path = req?.originalUrl || req?.url || '';
+    return `${protocol}://${host}${path}`;
+  }
+
+  private verifyTwilioSignature(
+    url: string,
+    _rawBody: string,
+    body: Record<string, unknown>,
+    signature: string,
+    authToken: string,
+  ): boolean {
+    let payload = url;
+    const keys = Object.keys(body).sort();
+    for (const key of keys) {
+      const value = body[key];
+      if (typeof value === 'string') {
+        payload += key + value;
+      }
+    }
+    const expected = createHmac('sha256', authToken).update(payload).digest('base64');
+    try {
+      return timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
+    } catch {
+      return false;
+    }
   }
 
   private parseInboundPayload(body: WhatsAppWebhookBody): ParsedInbound | null {

@@ -111,7 +111,7 @@ export const operateSections: NavSection[] = [
       { label: "KEY Worker", href: "/app/key", icon: Bot },
       { label: "KEY Autonomy", href: "/app/key-autonomy", icon: CheckSquare },
       { label: "KEY Modes", href: "/app/key-modes", icon: BrainCircuit },
-      { label: "Key Inbox", href: "/app/key-inbox", icon: Inbox },
+      { label: "Data Inbox", href: "/app/data-inbox", icon: Inbox },
       { label: "Capture", href: "/app/capture", icon: Camera },
     ],
   },
@@ -186,6 +186,7 @@ export const operateSections: NavSection[] = [
     items: [
       { label: "Approvals", href: "/app/approvals", icon: CheckSquare },
       { label: "Compliance", href: "/app/evidence", icon: ShieldCheck },
+      { label: "Contracts", href: "/app/contracts", icon: FileText },
       { label: "Legal", href: "/app/legal", icon: Scale },
     ],
   },
@@ -296,7 +297,7 @@ export const mobileBottomNav = [
   { label: "Home", href: "/app/command-center", icon: Zap },
   { label: "Flows", href: "#flows", icon: Briefcase },
   { label: "AI", href: "#key", icon: Brain },
-  { label: "Inbox", href: "/app/key-inbox", icon: Inbox },
+  { label: "Inbox", href: "/app/data-inbox", icon: Inbox },
   { label: "Me", href: "#me", icon: User },
 ];
 

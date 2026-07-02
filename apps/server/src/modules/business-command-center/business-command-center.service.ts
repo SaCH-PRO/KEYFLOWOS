@@ -26,6 +26,7 @@ import type {
   CommandCenterKeyGenome,
   CommandCenterModuleReadiness,
   CommandCenterPriority,
+  BusinessPulse,
 } from './business-command-center.types';
 
 const MODES: KeyExecutiveMode[] = [
@@ -177,12 +178,18 @@ export class BusinessCommandCenterService {
       keyGenome,
       moduleReadiness,
     );
+    const pulse = this.buildPulse(health, keyGenome);
+    const briefing = this.buildBriefing(health, ranked, keyGenome);
+    const governance = this.buildGovernance(health);
 
     return {
       businessId,
       generatedAt: new Date().toISOString(),
       health,
       summary: this.buildSummary(health, executiveBrief.summary, keyGenome, moduleReadiness),
+      pulse,
+      briefing,
+      governance,
       topPriorities: ranked.slice(0, 7),
       pendingApprovals: approvalItems,
       approvedAwaitingExecution: approvedItems,
@@ -556,6 +563,59 @@ export class BusinessCommandCenterService {
       parts.push('Business Constitution is stale.');
     }
     return parts.join(' ');
+  }
+
+  private buildPulse(health: CommandCenterHealth, keyGenome: CommandCenterKeyGenome) {
+    const clamp = (n: number) => Math.max(0, Math.min(100, Math.round(n)));
+    const operationsScore = clamp(100 - health.blockedModuleCount * 15 - health.lowReadinessModuleCount * 5);
+    const riskScore = clamp(100 - health.criticalCount * 25 - health.highPriorityCount * 10);
+    const approvalScore = clamp(health.pendingApprovalCount === 0 ? 95 : 75 - health.pendingApprovalCount * 5);
+    const genomeScore = clamp(keyGenome.overall);
+    const readinessScore = clamp(keyGenome.readiness);
+
+    return {
+      overallScore: clamp(
+        (operationsScore + riskScore + approvalScore + genomeScore + readinessScore) / 5,
+      ),
+      dimensions: [
+        { label: 'Genome', score: genomeScore, trend: 'flat' as const, color: 'hsl(var(--kf-accent1))' },
+        { label: 'Readiness', score: readinessScore, trend: 'flat' as const, color: 'hsl(var(--kf-accent2))' },
+        { label: 'Operations', score: operationsScore, trend: health.blockedModuleCount > 0 ? ('down' as const) : ('flat' as const), color: 'hsl(var(--kf-success))' },
+        { label: 'Risk', score: riskScore, trend: health.criticalCount > 0 ? ('down' as const) : ('flat' as const), color: 'hsl(var(--kf-warning))' },
+        { label: 'Approvals', score: approvalScore, trend: health.pendingApprovalCount > 0 ? ('down' as const) : ('up' as const), color: 'hsl(var(--kf-violet-accent))' },
+      ],
+    } as BusinessPulse;
+  }
+
+  private buildBriefing(
+    health: CommandCenterHealth,
+    rankedItems: CommandCenterItem[],
+    keyGenome: CommandCenterKeyGenome,
+  ) {
+    const warnings: string[] = [];
+    if (health.criticalCount > 0) warnings.push(`${health.criticalCount} critical item(s) need immediate attention.`);
+    if (health.pendingApprovalCount > 0) warnings.push(`${health.pendingApprovalCount} KEY action(s) awaiting approval.`);
+    if (health.urgentTemporalCount > 0) warnings.push(`${health.urgentTemporalCount} urgent Temporal Flow item(s).`);
+    if (health.constitutionStale) warnings.push('Business Constitution is stale.');
+    if (health.blockedModuleCount > 0) warnings.push(`${health.blockedModuleCount} module(s) blocked by missing facts.`);
+
+    const bullets = rankedItems.slice(0, 3).map((item) => item.title);
+    if (bullets.length === 0) bullets.push('No urgent actions today.');
+
+    const headline = warnings.length > 0
+      ? `Attention needed: ${warnings[0]}`
+      : `Business is ${keyGenome.overall}% ready. Here is what to do next.`;
+
+    return { headline, bullets, warnings };
+  }
+
+  private buildGovernance(health: CommandCenterHealth) {
+    return {
+      autoReady: health.approvedAwaitingExecutionCount,
+      needsApproval: health.pendingApprovalCount,
+      dueToday: health.urgentTemporalCount,
+      urgentRisks: health.criticalCount + health.highPriorityCount,
+    };
   }
 
   private buildRecommendedActions(rankedItems: CommandCenterItem[]): CommandCenterAction[] {

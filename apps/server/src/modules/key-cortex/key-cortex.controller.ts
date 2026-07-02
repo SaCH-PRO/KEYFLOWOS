@@ -41,10 +41,11 @@ import {
   ServiceUnavailableException,
   UnauthorizedException,
   Logger,
+  Inject,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
-import { Observable, Subject } from 'rxjs';
+import { Observable, Subject, interval, map, from, of, catchError, concatWith } from 'rxjs';
 
 import { KeyCortexReasoningService } from './key-cortex-reasoning.service';
 import { KeyCortexConversationService } from './key-cortex-conversation.service';
@@ -80,6 +81,7 @@ import {
   CortexStreamChunk,
   CortexResponse,
   CortexSession,
+  CortexMessage,
   CortexSessionStatus,
   CortexVoiceRequest,
   CortexSTTRequest,
@@ -99,6 +101,7 @@ import {
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { KeyCortexApprovalOrchestratorService } from './key-cortex-approval-orchestrator.service';
+import { KeyAutonomySafetyService } from '../key-autonomy/key-autonomy-safety.service';
 
 /* ------------------------------------------------------------------ */
 /*  DTOs  (Legacy)                                                     */
@@ -182,6 +185,14 @@ class FeedbackDto {
 class ProfitOpportunitiesQueryDto {
   businessId: string;
   category?: 'automation' | 'upsell' | 'cost_reduction' | 'new_revenue' | 'retention';
+}
+
+class UpdateAutonomyProfileDto {
+  globalKillSwitch?: boolean;
+  maxDailyAutoActions?: number;
+  maxDailySpendTtd?: number;
+  maxTierWithoutApproval?: number;
+  notifyOnBlock?: boolean;
 }
 
 /* ------------------------------------------------------------------ */
@@ -485,19 +496,18 @@ export class KeyCortexController {
     private readonly monitorV2: KeyCortexMonitorV2Service,
 
     // -- v3 Phase 3 & 4 Services --
-    // TODO: replace `any` with real service types once controller/service
-    // method signatures are aligned in the integration hardening follow-up.
-    private readonly sandbox: any,
-    private readonly flowStudio: any,
-    private readonly externalConnector: any,
-    private readonly evolution: any,
-    private readonly phone: any,
-    private readonly document: any,
+    @Inject(KeyCortexSandboxService) private readonly sandbox: any,
+    @Inject(KeyCortexFlowStudioService) private readonly flowStudio: any,
+    @Inject(KeyCortexExternalConnectorService) private readonly externalConnector: any,
+    @Inject(KeyCortexEvolutionService) private readonly evolution: any,
+    @Inject(KeyCortexPhoneService) private readonly phone: any,
+    @Inject(KeyCortexDocumentService) private readonly document: any,
 
     // -- Phase D: Learning & Metacognition --
     private readonly learning: KeyCortexLearningService,
 
-    // -- Phase 0.6: Unified approval orchestrator --
+    // -- Phase 0.6: Unified approval orchestrator / autonomy safety --
+    private readonly safety: KeyAutonomySafetyService,
     private readonly approvalOrchestrator: KeyCortexApprovalOrchestratorService,
   ) {}
 
@@ -671,6 +681,158 @@ export class KeyCortexController {
     })();
 
     return subject.asObservable();
+  }
+
+  /**
+   * GET /api/v1/cortex/messages
+   * Retrieve recent messages for a business/session.
+   * If no sessionId is provided, the most recent session for the business is used.
+   */
+  @Get('messages')
+  async getMessages(
+    @Query('businessId') businessId: string,
+    @Query('sessionId') sessionId?: string,
+    @Query('limit') limit?: string,
+  ): Promise<{ messages: Array<{
+    id: string;
+    sender: 'user' | 'key' | 'system';
+    content: string;
+    timestamp: string;
+    metadata?: Record<string, unknown>;
+  }> }> {
+    if (!businessId) {
+      throw new BadRequestException('businessId query parameter is required');
+    }
+
+    let session: CortexSession | null;
+    if (sessionId) {
+      session = await this.conversation.getSession(sessionId);
+    } else {
+      const sessions = await this.conversation.listSessions(businessId);
+      session = sessions[0] ?? null;
+    }
+
+    if (!session) {
+      throw new NotFoundException('Session not found');
+    }
+
+    const parsedLimit = limit ? parseInt(limit, 10) : 50;
+    const rawMessages = (session.messages ?? []).slice(-parsedLimit);
+
+    const messages = rawMessages.map((msg) => ({
+      id: msg.id ?? `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+      sender: msg.role === 'assistant' ? 'key' : (msg.role as 'user' | 'key' | 'system'),
+      content: msg.content ?? '',
+      timestamp: msg.timestamp ? new Date(msg.timestamp).toISOString() : new Date().toISOString(),
+      metadata: (msg.metadata ?? {}) as Record<string, unknown>,
+    }));
+
+    return { messages };
+  }
+
+  /**
+   * GET /api/v1/cortex/stream
+   * General SSE event stream for live Cortex updates.
+   * When a `message` query param is supplied, streams the reasoning response;
+   * otherwise sends a periodic heartbeat.
+   */
+  @Sse('stream')
+  streamEvents(
+    @Query('businessId') businessId: string,
+    @Query('message') message?: string,
+    @Query('userId') userId?: string,
+    @Query('sessionId') sessionId?: string,
+    @Query('persona') persona?: string,
+  ): Observable<{ data: Record<string, unknown> }> {
+    if (!businessId) {
+      throw new BadRequestException('businessId query parameter is required');
+    }
+
+    if (!message) {
+      return interval(15000).pipe(
+        map((tick) => ({
+          data: {
+            type: 'heartbeat',
+            businessId,
+            tick,
+            timestamp: new Date().toISOString(),
+          },
+        })),
+      );
+    }
+
+    const messageId = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    const query: CortexQuery = {
+      businessId,
+      userId: userId ?? 'key_user',
+      text: message,
+      sessionId,
+      persona: persona as any,
+      enableActions: true,
+    };
+
+    return from(this.reasoning.streamQuery(query)).pipe(
+      map((chunk) => ({ data: this.mapStreamChunk(chunk, messageId) })),
+      catchError((err: Error) =>
+        of({
+          data: {
+            type: 'error',
+            messageId,
+            content: err.message || 'Stream failed',
+          },
+        }),
+      ),
+      concatWith(of({ data: { type: 'complete', messageId } })),
+    );
+  }
+
+  private mapStreamChunk(
+    chunk: CortexStreamChunk,
+    messageId: string,
+  ): Record<string, unknown> {
+    switch (chunk.type) {
+      case 'text_delta':
+        return { type: 'chunk', messageId, content: chunk.content ?? '' };
+      case 'thought':
+        return { type: 'status', messageId, status: 'thinking' };
+      case 'tool_call':
+      case 'action_delta':
+        return { type: 'status', messageId, status: 'executing' };
+      case 'error':
+        return { type: 'error', messageId, content: chunk.error ?? 'Stream error' };
+      case 'done':
+        return { type: 'complete', messageId };
+      default:
+        return { type: 'heartbeat', messageId };
+    }
+  }
+
+  /* ================================================================== */
+  /*  AUTONOMY PROFILE                                                  */
+  /* ================================================================== */
+
+  /**
+   * GET /api/v1/cortex/autonomy-profile
+   */
+  @Get('autonomy-profile')
+  async getAutonomyProfile(@Query('businessId') businessId: string) {
+    if (!businessId) {
+      throw new BadRequestException('businessId query parameter is required');
+    }
+    return this.safety.ensureProfile(businessId);
+  }
+
+  /**
+   * PATCH /api/v1/cortex/autonomy-profile
+   */
+  @Patch('autonomy-profile')
+  async updateAutonomyProfile(
+    @Body() dto: UpdateAutonomyProfileDto & { businessId: string },
+  ) {
+    if (!dto.businessId) {
+      throw new BadRequestException('businessId is required');
+    }
+    return this.safety.updateProfile(dto.businessId, dto);
   }
 
   /* ================================================================== */

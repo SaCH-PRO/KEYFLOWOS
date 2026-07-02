@@ -175,6 +175,49 @@ const nextConfig: NextConfig = {
         destination: "/app/money",
         permanent: true,
       },
+      // Navigation Overhaul Phase 1: legacy module URLs redirect to the new
+      // namespace. Stubs at the destinations render the current pages so old
+      // bookmarks keep working while the new nav is being adopted.
+      {
+        source: "/app/commerce",
+        destination: "/app/money/revenue",
+        permanent: true,
+      },
+      {
+        source: "/app/finance",
+        destination: "/app/money",
+        permanent: true,
+      },
+      {
+        source: "/app/accounting",
+        destination: "/app/money/books",
+        permanent: true,
+      },
+      {
+        source: "/app/expenses",
+        destination: "/app/money/expenses",
+        permanent: true,
+      },
+      {
+        source: "/app/crm",
+        destination: "/app/people",
+        permanent: true,
+      },
+      {
+        source: "/app/projects",
+        destination: "/app/work/projects",
+        permanent: true,
+      },
+      {
+        source: "/app/calendar",
+        destination: "/app/schedule/calendar",
+        permanent: true,
+      },
+      {
+        source: "/app/marketing",
+        destination: "/app/communicate/campaigns",
+        permanent: true,
+      },
       // Key Connect unification: every legacy connect surface now lives at
       // /app/key-connect. Permanent 308s for the old routes, 307s for pages
       // that carried a contextual tab so bookmarks keep working.

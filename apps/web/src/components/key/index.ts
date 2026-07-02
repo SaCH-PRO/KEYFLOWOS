@@ -16,7 +16,7 @@ export type { KeySuggestionCardsProps, KeySuggestion, SuggestionCategory } from 
 export { KeyBusinessHealth } from "./KeyBusinessHealth";
 export type { KeyBusinessHealthProps, HealthMetric, HealthAlert, BusinessContext } from "./KeyBusinessHealth";
 
-export { KeyVoiceButton, speakText } from "./KeyVoiceButton";
+export { KeyVoiceButton } from "./KeyVoiceButton";
 export type { KeyVoiceButtonProps, VoiceState } from "./KeyVoiceButton";
 
 // ── Flow Studio (Visual Automation Builder) ──────────────────────────

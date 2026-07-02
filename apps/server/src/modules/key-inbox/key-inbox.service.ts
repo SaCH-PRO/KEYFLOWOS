@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Inject, Injectable, Logger, NotFoundException, BadRequestException, Optional } from '@nestjs/common';
 import type { KeyInboxInsight, KeyInboxMessage, KeyInboxThread } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
@@ -6,6 +6,7 @@ import { KeyInboxActionService } from './key-inbox-action.service';
 import { KeyInboxAnalysisService } from './key-inbox-analysis.service';
 import { KeyInboxTemporalEmitterService } from './key-inbox-temporal-emitter.service';
 import { KeyInboxReplySenderService } from './key-inbox-reply-sender.service';
+import { GenomeSignalService } from '../business-genome/key-genome/genome-signal.service';
 import { KEY_INBOX_CHANNELS, normalizeKeyInboxChannel } from './key-inbox.constants';
 import type { CreateInboxMessageInput, CreateInboxThreadInput, InboxAnalysis } from './key-inbox.types';
 
@@ -20,6 +21,9 @@ export class KeyInboxService {
     @Inject(KeyInboxTemporalEmitterService) private readonly temporalEmitter: KeyInboxTemporalEmitterService,
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
     @Inject(KeyInboxReplySenderService) private readonly replySender: KeyInboxReplySenderService,
+    @Optional()
+    @Inject(GenomeSignalService)
+    private readonly genomeSignalService?: GenomeSignalService,
   ) {}
 
   async upsertThread(input: CreateInboxThreadInput): Promise<KeyInboxThread> {
@@ -138,11 +142,13 @@ export class KeyInboxService {
 
     await this.temporalEmitter.emitMessageReceived(input.businessId, message);
 
-    try {
-      await this.analyzeMessage(input.businessId, message.id);
-      await this.analyzeThread(input.businessId, thread.id);
-    } catch (err: any) {
-      this.logger.warn(`Background analysis failed for message ${message.id}: ${(err as Error).message}`);
+    if (!input.skipAnalysis) {
+      try {
+        await this.analyzeMessage(input.businessId, message.id);
+        await this.analyzeThread(input.businessId, thread.id);
+      } catch (err: any) {
+        this.logger.warn(`Background analysis failed for message ${message.id}: ${(err as Error).message}`);
+      }
     }
 
       return { thread: updatedThread, message };
@@ -233,6 +239,13 @@ export class KeyInboxService {
     await this.temporalEmitter.emitMessageAnalyzed(businessId, updated, analysis);
     await this.temporalEmitter.emitActionSuggested(businessId, updated, actions);
 
+    // Strong intent/urgency/sentiment becomes a genome signal for the business DNA.
+    if (this.genomeSignalService && this.isStrongSignal(analysis)) {
+      this.createInboxGenomeSignal(businessId, updated.id, analysis).catch((err: unknown) => {
+        this.logger.warn(`Inbox genome signal failed for thread ${threadId}: ${err instanceof Error ? err.message : String(err)}`);
+      });
+    }
+
     return updated;
   }
 
@@ -287,19 +300,26 @@ export class KeyInboxService {
   async updateThread(
     businessId: string,
     threadId: string,
-    patch: { subject?: string; status?: 'OPEN' | 'WAITING' | 'DONE' | 'ARCHIVED'; priority?: 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT' },
+    patch: {
+      subject?: string;
+      status?: 'OPEN' | 'WAITING' | 'DONE' | 'ARCHIVED';
+      priority?: 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT';
+      metadata?: Record<string, unknown>;
+    },
   ): Promise<KeyInboxThread> {
     const thread = await this.prisma.client.keyInboxThread.findFirst({
       where: { id: threadId, businessId },
     });
     if (!thread) throw new NotFoundException('Thread not found');
 
+    const existingMetadata = (thread.metadata as Record<string, unknown>) ?? {};
     return this.prisma.client.keyInboxThread.update({
       where: { id: threadId },
       data: {
         subject: patch.subject,
         status: patch.status,
         priority: patch.priority,
+        metadata: patch.metadata ? { ...existingMetadata, ...patch.metadata } : undefined,
       },
     });
   }
@@ -533,5 +553,71 @@ Return ONLY valid JSON:
   private truncate(text: string, maxLength: number): string {
     if (!text) return '';
     return text.length > maxLength ? `${text.slice(0, maxLength - 3)}...` : text;
+  }
+
+  private isStrongSignal(analysis: InboxAnalysis): boolean {
+    const strongIntents = ['complaint', 'refund', 'cancellation', 'urgent_request', 'escalation', 'booking_request'];
+    const strongUrgencies = ['urgent', 'high'];
+    const strongSentiments = ['angry', 'frustrated', 'negative'];
+
+    return (
+      strongIntents.includes(analysis.intent?.toLowerCase()) ||
+      strongUrgencies.includes(analysis.urgency?.toLowerCase()) ||
+      strongSentiments.includes(analysis.sentiment?.toLowerCase())
+    );
+  }
+
+  private async createInboxGenomeSignal(
+    businessId: string,
+    threadId: string,
+    analysis: InboxAnalysis,
+  ): Promise<void> {
+    if (!this.genomeSignalService) return;
+
+    const intent = analysis.intent?.toLowerCase() ?? 'general';
+    let section = 'operations';
+    let domain = 'inbox';
+    let field: string | undefined = 'strong_intent';
+    let signalType = 'CUSTOMER_PATTERN';
+
+    if (intent.includes('complaint') || intent.includes('refund')) {
+      section = 'risk';
+      domain = 'reputation';
+      field = 'complaint_intent';
+      signalType = 'RISK_PATTERN';
+    } else if (intent.includes('booking') || intent.includes('appointment')) {
+      section = 'operations';
+      domain = 'bookings';
+      field = 'booking_intent';
+      signalType = 'OPERATIONS_PATTERN';
+    } else if (intent.includes('invoice') || intent.includes('payment')) {
+      section = 'sales';
+      domain = 'requests';
+      field = 'invoice_request';
+      signalType = 'REVENUE_PATTERN';
+    }
+
+    await this.genomeSignalService.createSignal({
+      businessId,
+      sourceModule: 'key_inbox',
+      sourceEntityType: 'KeyInboxThread',
+      sourceEntityId: threadId,
+      signalType,
+      section,
+      domain,
+      field,
+      proposedValue: { intent: analysis.intent, urgency: analysis.urgency, sentiment: analysis.sentiment },
+      reason: `Inbox thread ${threadId} shows strong ${analysis.intent} intent (${analysis.urgency} urgency, ${analysis.sentiment} sentiment)`,
+      evidence: [
+        {
+          sourceModule: 'key_inbox',
+          sourceEntityType: 'KeyInboxThread',
+          sourceEntityId: threadId,
+          summary: `Intent: ${analysis.intent}, urgency: ${analysis.urgency}, sentiment: ${analysis.sentiment}`,
+          evidenceStrength: 0.8,
+        },
+      ],
+      confidence: 0.8,
+    });
   }
 }

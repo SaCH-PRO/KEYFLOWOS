@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Bot, User, Send, Loader2, Sparkles, CheckCircle2, X, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { getStoredBusinessId } from "@/lib/workspace";
+import { useTts, SpeakButton } from "@/components/tts";
 import { Textarea } from "@/components/ui/textarea";
 import {
   getGenomeMessages,
@@ -149,6 +150,7 @@ function ProposalEditor({
 
 export function GenomeChatPanel({ genome, onGenomeUpdate }: GenomeChatPanelProps) {
   const businessId = getStoredBusinessId();
+  const { engine, state: ttsState } = useTts();
   const [messages, setMessages] = useState<GenomeChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -190,6 +192,19 @@ export function GenomeChatPanel({ genome, onGenomeUpdate }: GenomeChatPanelProps
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
+
+  // Auto-speak the latest assistant message
+  useEffect(() => {
+    const last = messages[messages.length - 1];
+    if (last?.role === "assistant" && businessId && ttsState.autoSpeak) {
+      engine.speak(last.content, businessId);
+    }
+  }, [messages, businessId, engine, ttsState.autoSpeak]);
+
+  // Stop speaking when the panel unmounts
+  useEffect(() => {
+    return () => engine.cancel();
+  }, [engine]);
 
   const ignoreProposal = (messageId: string) => {
     setIgnoredProposalIds((prev) => new Set(prev).add(messageId));
@@ -335,7 +350,10 @@ export function GenomeChatPanel({ genome, onGenomeUpdate }: GenomeChatPanelProps
                       border: isUser ? undefined : "1px solid hsl(var(--kf-border) / 0.3)",
                     }}
                   >
-                    {msg.content}
+                    <div className="flex items-start justify-between gap-2">
+                      <span>{msg.content}</span>
+                      {!isUser && <SpeakButton text={msg.content} businessId={businessId} />}
+                    </div>
                   </div>
                   <span className={`text-[10px] text-muted-foreground mt-1 ${isUser ? "text-right" : ""}`}>
                     {formatTime(msg.createdAt)}

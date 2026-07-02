@@ -1,5 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { KeyCortexCompensationService } from './key-cortex-compensation.service';
 
 export interface SagaContext {
   businessId: string;
@@ -32,7 +33,11 @@ export interface SagaCompensation {
 export class KeyCortexSagaService {
   private readonly logger = new Logger(KeyCortexSagaService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Optional()
+    private readonly compensation?: KeyCortexCompensationService,
+  ) {}
 
   async start(ctx: SagaContext) {
     return this.prisma.client.sagaExecution.create({
@@ -118,8 +123,15 @@ export class KeyCortexSagaService {
       if (!action) continue;
 
       try {
-        // Foundation: log compensation and mark step compensated. Real
-        // compensation handlers can be dispatched by action name later.
+        let compensationResult: Record<string, unknown> = { success: true, logged: true };
+        if (this.compensation) {
+          const result = await this.compensation.compensate(action.action, {
+            businessId: (action.payload as Record<string, unknown>)?.businessId as string,
+            parameters: action.payload as Record<string, unknown>,
+            output: step.output as Record<string, unknown> | undefined,
+          });
+          compensationResult = result;
+        }
         this.logger.log(
           `[compensate][${sagaId}] ${step.stepName}: ${action.action} ${JSON.stringify(action.payload)}`,
         );
@@ -127,11 +139,11 @@ export class KeyCortexSagaService {
           where: { id: step.id },
           data: {
             status: 'compensated',
-            compensationResult: { success: true, logged: true } as any,
+            compensationResult: compensationResult as any,
             completedAt: new Date(),
           },
         });
-        results.push({ success: true, output: { step: step.stepName, action: action.action } });
+        results.push({ success: true, output: { step: step.stepName, action: action.action, result: compensationResult } });
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         this.logger.error(`[compensate][${sagaId}] ${step.stepName} failed: ${message}`);

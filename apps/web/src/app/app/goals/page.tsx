@@ -1,98 +1,74 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Target, Plus, Loader2, Trash2, RefreshCw, FolderKanban } from "lucide-react";
+import {
+  Target,
+  Plus,
+  Loader2,
+  Trash2,
+  ChevronDown,
+  ChevronUp,
+  Play,
+  Lightbulb,
+  FolderKanban,
+} from "lucide-react";
 import { toast } from "sonner";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { apiGet, apiPostSimple, apiDelete } from "@/lib/api";
-import { fetchProjects } from "@/lib/client";
 
-interface Goal {
+interface PlanStep {
+  id: string;
+  action: string;
+  module: string | null;
+  status: string;
+}
+
+interface Plan {
+  id: string;
+  objective: string;
+  status: string;
+  steps: PlanStep[];
+  createdAt: string;
+}
+
+interface AiGoal {
   id: string;
   title: string;
   description: string | null;
-  category: string;
-  targetValue: number | null;
-  currentValue: number | null;
-  unit: string | null;
-  deadline: string | null;
   status: string;
   priority: number;
-  role: string | null;
-  autoActions: boolean;
-  progress?: {
-    current: number;
-    target: number;
-    percent: number;
-    daysRemaining: number;
-    dailyTarget: number;
-    onTrack: boolean;
-  };
+  targetDate: string | null;
+  plans?: Plan[];
 }
 
-interface LinkedProject {
-  id: string;
-  name: string;
-  status: string;
-  tasks: Array<{ isCompleted: boolean }>;
-  goalId?: string;
-}
-
-const ROLE_COLORS: Record<string, string> = {
-  sales: "bg-rose-500/10 text-rose-400 border-rose-500/20",
-  finance: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
-  support: "bg-sky-500/10 text-sky-400 border-sky-500/20",
-  operations: "bg-amber-500/10 text-amber-400 border-amber-500/20",
-  marketing: "bg-violet-500/10 text-violet-400 border-violet-500/20",
-  general: "bg-slate-500/10 text-slate-400 border-slate-500/20",
-};
-
-const CATEGORY_LABELS: Record<string, string> = {
-  revenue: "Revenue",
-  leads: "Leads",
-  retention: "Retention",
-  efficiency: "Efficiency",
-  custom: "Custom",
+const STATUS_COLORS: Record<string, string> = {
+  ACTIVE: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
+  COMPLETED: "bg-sky-500/10 text-sky-400 border-sky-500/20",
+  ARCHIVED: "bg-slate-500/10 text-slate-400 border-slate-500/20",
+  draft: "bg-slate-500/10 text-slate-400 border-slate-500/20",
+  pending: "bg-amber-500/10 text-amber-400 border-amber-500/20",
+  running: "bg-amber-500/10 text-amber-400 border-amber-500/20",
+  completed: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
+  failed: "bg-rose-500/10 text-rose-400 border-rose-500/20",
+  waiting_approval: "bg-violet-500/10 text-violet-400 border-violet-500/20",
 };
 
 export default function GoalsPage() {
   const businessId = getStoredBusinessId();
-  const [goals, setGoals] = useState<Goal[]>([]);
-  const [projects, setProjects] = useState<LinkedProject[]>([]);
+  const [goals, setGoals] = useState<AiGoal[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
-  // Auto-map category to role so users don't have to choose
-  const categoryToRole = (cat: string): string => {
-    switch (cat) {
-      case "revenue": return "finance";
-      case "leads": return "sales";
-      case "retention": return "sales";
-      case "efficiency": return "operations";
-      default: return "general";
-    }
-  };
-
-  const [form, setForm] = useState({
-    title: "",
-    description: "",
-    category: "revenue",
-    targetValue: "",
-    unit: "dollars",
-    deadline: "",
-    role: "finance",
-    autoActions: true,
-  });
+  const [expandedGoalId, setExpandedGoalId] = useState<string | null>(null);
+  const [executingPlanId, setExecutingPlanId] = useState<string | null>(null);
+  const [generatingGoalId, setGeneratingGoalId] = useState<string | null>(null);
+  const [form, setForm] = useState({ title: "", description: "" });
 
   const load = useCallback(async () => {
     if (!businessId) return;
     setLoading(true);
     try {
-      const [goalsRes, projectsRes] = await Promise.all([
-        apiGet<Goal[]>(`/ai/businesses/${businessId}/goals`),
-        fetchProjects(businessId),
-      ]);
-      setGoals(Array.isArray(goalsRes.data) ? goalsRes.data : []);
-      setProjects(Array.isArray(projectsRes.data) ? projectsRes.data : []);
+      const res = await apiGet<AiGoal[]>(`/api/v1/cortex/goals?businessId=${businessId}`);
+      setGoals(Array.isArray(res.data) ? res.data : []);
     } catch {
       toast.error("Failed to load goals");
     } finally {
@@ -107,14 +83,16 @@ export default function GoalsPage() {
   const createGoal = async () => {
     if (!businessId || !form.title) return;
     try {
-      const res = await apiPostSimple(`/ai/businesses/${businessId}/goals`, {
-        ...form,
-        targetValue: form.targetValue ? parseFloat(form.targetValue) : undefined,
+      const res = await apiPostSimple(`/api/v1/cortex/goals`, {
+        businessId,
+        title: form.title,
+        description: form.description,
+        priority: 1,
       });
       if (!res.error) {
         toast.success("Goal created");
         setShowCreate(false);
-        setForm({ title: "", description: "", category: "revenue", targetValue: "", unit: "dollars", deadline: "", role: "finance", autoActions: true });
+        setForm({ title: "", description: "" });
         load();
       } else {
         toast.error("Failed to create goal");
@@ -127,7 +105,7 @@ export default function GoalsPage() {
   const deleteGoal = async (goalId: string) => {
     if (!businessId) return;
     try {
-      const res = await apiDelete(`/ai/businesses/${businessId}/goals/${goalId}`);
+      const res = await apiDelete(`/api/v1/cortex/goals/${goalId}?businessId=${businessId}`);
       if (!res.error) {
         toast.success("Goal deleted");
         load();
@@ -139,18 +117,59 @@ export default function GoalsPage() {
     }
   };
 
-  const updateProgress = async (goalId: string) => {
+  const generatePlan = async (goalId: string) => {
     if (!businessId) return;
+    setGeneratingGoalId(goalId);
     try {
-      const res = await apiPostSimple(`/ai/businesses/${businessId}/goals/${goalId}/progress`, {});
+      const res = await apiPostSimple(`/api/v1/cortex/goals/${goalId}/plans`, {});
       if (!res.error) {
-        toast.success("Progress updated");
-        load();
+        toast.success("Plan generated");
+        loadGoalDetails(goalId);
       } else {
-        toast.error("Failed to update progress");
+        toast.error("Failed to generate plan");
       }
     } catch {
-      toast.error("Failed to update progress");
+      toast.error("Failed to generate plan");
+    } finally {
+      setGeneratingGoalId(null);
+    }
+  };
+
+  const executePlan = async (planId: string, goalId: string) => {
+    if (!businessId) return;
+    setExecutingPlanId(planId);
+    try {
+      const res = await apiPostSimple(`/api/v1/cortex/plans/${planId}/execute`, {});
+      if (!res.error) {
+        toast.success("Plan execution started");
+        loadGoalDetails(goalId);
+      } else {
+        toast.error("Failed to execute plan");
+      }
+    } catch {
+      toast.error("Failed to execute plan");
+    } finally {
+      setExecutingPlanId(null);
+    }
+  };
+
+  const loadGoalDetails = async (goalId: string) => {
+    if (!businessId) return;
+    try {
+      const res = await apiGet<AiGoal>(`/api/v1/cortex/goals/${goalId}?businessId=${businessId}`);
+      if (res.data) {
+        setGoals((prev) => prev.map((g) => (g.id === goalId ? res.data! : g)));
+      }
+    } catch {
+      toast.error("Failed to load goal details");
+    }
+  };
+
+  const toggleExpand = (goalId: string) => {
+    const next = expandedGoalId === goalId ? null : goalId;
+    setExpandedGoalId(next);
+    if (next) {
+      loadGoalDetails(goalId);
     }
   };
 
@@ -175,7 +194,7 @@ export default function GoalsPage() {
           </div>
           <div>
             <h1 className="text-lg font-bold text-foreground/90">Goals</h1>
-            <p className="text-xs text-muted-foreground/60">Track outcomes and let Key work toward them</p>
+            <p className="text-xs text-muted-foreground/60">Set outcomes and let KEY build plans to reach them</p>
           </div>
         </div>
         <button
@@ -191,61 +210,21 @@ export default function GoalsPage() {
       {showCreate && (
         <div className="p-4 rounded-xl border border-border/20 bg-card/50 space-y-3">
           <h3 className="text-sm font-semibold text-foreground/80">Create New Goal</h3>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-3">
             <input
               type="text"
               placeholder="Goal title (e.g., $15K revenue this month)"
               value={form.title}
               onChange={(e) => setForm({ ...form, title: e.target.value })}
-              className="col-span-2 px-3 py-2 rounded-lg bg-muted/30 border border-border/20 text-sm text-foreground/80 placeholder:text-muted-foreground/40 focus:outline-none focus:border-[hsl(var(--kf-accent1))]/50"
+              className="w-full px-3 py-2 rounded-lg bg-muted/30 border border-border/20 text-sm text-foreground/80 placeholder:text-muted-foreground/40 focus:outline-none focus:border-[hsl(var(--kf-accent1))]/50"
             />
             <textarea
               placeholder="Description (optional)"
               value={form.description}
               onChange={(e) => setForm({ ...form, description: e.target.value })}
-              className="col-span-2 px-3 py-2 rounded-lg bg-muted/30 border border-border/20 text-sm text-foreground/80 placeholder:text-muted-foreground/40 focus:outline-none focus:border-[hsl(var(--kf-accent1))]/50"
+              className="w-full px-3 py-2 rounded-lg bg-muted/30 border border-border/20 text-sm text-foreground/80 placeholder:text-muted-foreground/40 focus:outline-none focus:border-[hsl(var(--kf-accent1))]/50"
               rows={2}
             />
-            <select
-              value={form.category}
-              onChange={(e) => {
-                const cat = e.target.value;
-                setForm({ ...form, category: cat, role: categoryToRole(cat) });
-              }}
-              className="px-3 py-2 rounded-lg bg-muted/30 border border-border/20 text-sm text-foreground/80"
-            >
-              <option value="revenue">Revenue</option>
-              <option value="leads">Leads</option>
-              <option value="retention">Retention</option>
-              <option value="efficiency">Efficiency</option>
-              <option value="custom">Custom</option>
-            </select>
-            <input
-              type="number"
-              placeholder="Target value"
-              value={form.targetValue}
-              onChange={(e) => setForm({ ...form, targetValue: e.target.value })}
-              className="px-3 py-2 rounded-lg bg-muted/30 border border-border/20 text-sm text-foreground/80 placeholder:text-muted-foreground/40 focus:outline-none focus:border-[hsl(var(--kf-accent1))]/50"
-            />
-            <input
-              type="text"
-              placeholder="Unit (dollars, count, percent)"
-              value={form.unit}
-              onChange={(e) => setForm({ ...form, unit: e.target.value })}
-              className="px-3 py-2 rounded-lg bg-muted/30 border border-border/20 text-sm text-foreground/80 placeholder:text-muted-foreground/40 focus:outline-none focus:border-[hsl(var(--kf-accent1))]/50"
-            />
-            <input
-              type="date"
-              value={form.deadline}
-              onChange={(e) => setForm({ ...form, deadline: e.target.value })}
-              className="px-3 py-2 rounded-lg bg-muted/30 border border-border/20 text-sm text-foreground/80"
-            />
-            <div className="px-3 py-2 rounded-lg bg-muted/20 border border-border/20 text-sm text-muted-foreground/60 flex items-center gap-2">
-              <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium border ${ROLE_COLORS[form.role] ?? ROLE_COLORS.general}`}>
-                {form.role}
-              </span>
-              <span className="text-xs">Auto-assigned from category</span>
-            </div>
           </div>
           <div className="flex items-center gap-3">
             <button
@@ -270,7 +249,7 @@ export default function GoalsPage() {
           <div className="text-center py-20">
             <Target className="w-12 h-12 text-muted-foreground/30 mx-auto mb-4" />
             <h2 className="text-lg font-semibold text-foreground/70">No goals yet</h2>
-            <p className="text-sm text-muted-foreground/50 mt-1">Set a goal and Key will track progress and suggest daily actions.</p>
+            <p className="text-sm text-muted-foreground/50 mt-1">Set a goal and KEY will generate a plan to achieve it.</p>
           </div>
         ) : (
           goals.map((goal) => (
@@ -280,94 +259,47 @@ export default function GoalsPage() {
             >
               <div className="flex items-start justify-between gap-4">
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-2">
+                  <div className="flex items-center gap-2 mb-2 flex-wrap">
                     <span
-                      className={`px-2 py-0.5 rounded-md text-[10px] font-semibold uppercase tracking-wider border ${ROLE_COLORS[goal.role ?? "general"] ?? ROLE_COLORS.general}`}
+                      className={`px-2 py-0.5 rounded-md text-[10px] font-semibold uppercase tracking-wider border ${
+                        STATUS_COLORS[goal.status] ?? STATUS_COLORS.ACTIVE
+                      }`}
                     >
-                      {goal.role ?? "general"}
+                      {goal.status}
                     </span>
-                    <span className="px-2 py-0.5 rounded-md text-[10px] font-medium bg-muted/30 text-muted-foreground/50">
-                      {CATEGORY_LABELS[goal.category] ?? goal.category}
-                    </span>
-                    {goal.status === "achieved" && (
-                      <span className="px-2 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                        Achieved
+                    {goal.priority > 0 && (
+                      <span className="px-2 py-0.5 rounded-md text-[10px] font-medium bg-muted/30 text-muted-foreground/50">
+                        Priority {goal.priority}
+                      </span>
+                    )}
+                    {goal.targetDate && (
+                      <span className="px-2 py-0.5 rounded-md text-[10px] font-medium bg-muted/30 text-muted-foreground/50">
+                        Due {new Date(goal.targetDate).toLocaleDateString()}
                       </span>
                     )}
                   </div>
                   <h3 className="text-sm font-semibold text-foreground/80">{goal.title}</h3>
                   {goal.description && <p className="text-xs text-muted-foreground/50 mt-0.5">{goal.description}</p>}
-
-                  {/* Linked Projects */}
-                  {(() => {
-                    const linked = projects.filter((p) => p.goalId === goal.id);
-                    if (linked.length === 0) return null;
-                    const totalTasks = linked.reduce((sum, p) => sum + p.tasks.length, 0);
-                    const completedTasks = linked.reduce((sum, p) => sum + p.tasks.filter((t) => t.isCompleted).length, 0);
-                    const pct = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
-                    return (
-                      <div className="mt-2 flex items-center gap-2">
-                        <FolderKanban className="w-3 h-3 text-muted-foreground/40" />
-                        <span className="text-[10px] text-muted-foreground/50">
-                          {linked.length} project{linked.length > 1 ? "s" : ""} · {completedTasks}/{totalTasks} tasks
-                        </span>
-                        <div className="w-16 h-1.5 rounded-full bg-muted/30 overflow-hidden">
-                          <div
-                            className="h-full rounded-full bg-emerald-400/60"
-                            style={{ width: `${pct}%` }}
-                          />
-                        </div>
-                      </div>
-                    );
-                  })()}
-
-                  {/* Create Project from Goal */}
-                  <div className="mt-2">
-                    <button
-                      onClick={() => window.location.href = `/app/projects?tab=plans`}
-                      className="text-[10px] text-[hsl(var(--kf-accent1))] hover:underline flex items-center gap-0.5"
-                    >
-                      <Plus className="w-3 h-3" /> Create project plan from this goal
-                    </button>
-                  </div>
-
-                  {/* Progress Bar */}
-                  {goal.progress && (
-                    <div className="mt-3">
-                      <div className="flex items-center justify-between text-xs mb-1">
-                        <span className="text-muted-foreground/50">
-                          {goal.progress.current.toLocaleString()} / {goal.progress.target.toLocaleString()} {goal.unit}
-                        </span>
-                        <span className={goal.progress.onTrack ? "text-emerald-400" : "text-amber-400"}>
-                          {goal.progress.percent}% — {goal.progress.onTrack ? "On Track" : "Behind"}
-                        </span>
-                      </div>
-                      <div className="h-2 rounded-full bg-muted/30 overflow-hidden">
-                        <div
-                          className="h-full rounded-full transition-all duration-500"
-                          style={{
-                            width: `${goal.progress.percent}%`,
-                            background: goal.progress.onTrack
-                              ? "linear-gradient(90deg, hsl(var(--kf-accent2)), hsl(var(--kf-accent1)))"
-                              : "linear-gradient(90deg, #f59e0b, #ef4444)",
-                          }}
-                        />
-                      </div>
-                      {goal.progress.daysRemaining > 0 && (
-                        <p className="text-[10px] text-muted-foreground/40 mt-1">
-                          {goal.progress.daysRemaining} days left · Need {goal.progress.dailyTarget.toLocaleString()} {goal.unit}/day
-                        </p>
-                      )}
-                    </div>
-                  )}
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1">
                   <button
-                    onClick={() => updateProgress(goal.id)}
-                    className="p-2 rounded-lg text-muted-foreground/40 hover:text-foreground/70 hover:bg-muted/30 transition-colors"
-                    title="Update progress"
+                    onClick={() => generatePlan(goal.id)}
+                    disabled={generatingGoalId === goal.id}
+                    className="p-2 rounded-lg text-muted-foreground/40 hover:text-[hsl(var(--kf-accent1))] hover:bg-muted/30 transition-colors disabled:opacity-50"
+                    title="Generate KEY plan"
                   >
-                    <RefreshCw className="w-4 h-4" />
+                    {generatingGoalId === goal.id ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Lightbulb className="w-4 h-4" />
+                    )}
+                  </button>
+                  <button
+                    onClick={() => toggleExpand(goal.id)}
+                    className="p-2 rounded-lg text-muted-foreground/40 hover:text-foreground/70 hover:bg-muted/30 transition-colors"
+                    title={expandedGoalId === goal.id ? "Hide plans" : "Show plans"}
+                  >
+                    {expandedGoalId === goal.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                   </button>
                   <button
                     onClick={() => deleteGoal(goal.id)}
@@ -378,6 +310,82 @@ export default function GoalsPage() {
                   </button>
                 </div>
               </div>
+
+              {/* Expanded Plans */}
+              {expandedGoalId === goal.id && (
+                <div className="mt-4 pt-4 border-t border-border/10">
+                  <h4 className="text-xs font-semibold text-foreground/70 mb-3 flex items-center gap-1.5">
+                    <FolderKanban className="w-3.5 h-3.5" />
+                    Generated Plans
+                  </h4>
+                  {!goal.plans || goal.plans.length === 0 ? (
+                    <p className="text-xs text-muted-foreground/50">No plans yet. Generate one to get started.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {goal.plans.map((plan) => (
+                        <div
+                          key={plan.id}
+                          className="p-3 rounded-lg bg-muted/20 border border-border/10"
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium text-foreground/80 truncate">{plan.objective}</p>
+                              <div className="flex items-center gap-2 mt-1 flex-wrap">
+                                <span
+                                  className={`px-1.5 py-0.5 rounded text-[10px] font-medium border ${
+                                    STATUS_COLORS[plan.status] ?? STATUS_COLORS.pending
+                                  }`}
+                                >
+                                  {plan.status}
+                                </span>
+                                <span className="text-[10px] text-muted-foreground/50">
+                                  {plan.steps.length} step{plan.steps.length === 1 ? "" : "s"}
+                                </span>
+                              </div>
+                              {plan.steps.length > 0 && (
+                                <ul className="mt-2 space-y-1">
+                                  {plan.steps.slice(0, 4).map((step) => (
+                                    <li key={step.id} className="flex items-center gap-2 text-[11px] text-muted-foreground/60">
+                                      <span
+                                        className={`w-1.5 h-1.5 rounded-full ${
+                                          step.status === "completed"
+                                            ? "bg-emerald-400"
+                                            : step.status === "failed"
+                                            ? "bg-rose-400"
+                                            : "bg-amber-400"
+                                        }`}
+                                      />
+                                      {step.module ? `${step.module}.` : ""}
+                                      {step.action}
+                                    </li>
+                                  ))}
+                                  {plan.steps.length > 4 && (
+                                    <li className="text-[10px] text-muted-foreground/40 pl-3">
+                                      +{plan.steps.length - 4} more
+                                    </li>
+                                  )}
+                                </ul>
+                              )}
+                            </div>
+                            <button
+                              onClick={() => executePlan(plan.id, goal.id)}
+                              disabled={executingPlanId === plan.id || ["running", "completed"].includes(plan.status)}
+                              className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))] hover:bg-[hsl(var(--kf-accent1))]/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                            >
+                              {executingPlanId === plan.id ? (
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                              ) : (
+                                <Play className="w-3 h-3" />
+                              )}
+                              {plan.status === "running" ? "Running" : plan.status === "completed" ? "Done" : "Run"}
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           ))
         )}

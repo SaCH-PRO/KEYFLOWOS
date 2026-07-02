@@ -183,6 +183,28 @@ export function clearStoredRefreshToken() {
   window.localStorage.removeItem(REFRESH_TOKEN_KEY);
 }
 
+const TOKEN_EXPIRY_KEY = "kf_token_expires_at";
+
+export function setStoredTokenExpiry(expiresAt: number | string | null | undefined) {
+  if (typeof window === "undefined") return;
+  if (!expiresAt) {
+    window.localStorage.removeItem(TOKEN_EXPIRY_KEY);
+    return;
+  }
+  const ms = typeof expiresAt === "number" ? expiresAt : Date.parse(expiresAt);
+  if (!Number.isNaN(ms)) {
+    window.localStorage.setItem(TOKEN_EXPIRY_KEY, String(ms));
+  }
+}
+
+export function getStoredTokenExpiry(): number | null {
+  if (typeof window === "undefined") return null;
+  const raw = window.localStorage.getItem(TOKEN_EXPIRY_KEY);
+  if (!raw) return null;
+  const ms = Number(raw);
+  return Number.isNaN(ms) ? null : ms;
+}
+
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 

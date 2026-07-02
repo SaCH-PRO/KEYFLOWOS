@@ -36,17 +36,12 @@ export class SemanticMemoryService {
   async store(input: StoreMemoryInput): Promise<string> {
     try {
       const embedding = await this.generateEmbedding(input.businessId, input.content);
+      const id = this.generateId();
+      const vectorLiteral = `[${embedding.join(',')}]`;
 
-      const record = await this.prisma.client.$executeRawUnsafe(
-        `INSERT INTO "ai_memory_embeddings" (id, business_id, content, source_type, source_id, embedding, metadata, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6::vector, $7, NOW())`,
-        this.generateId(),
-        input.businessId,
-        input.content,
-        input.sourceType,
-        input.sourceId,
-        `[${embedding.join(',')}]`,
-        JSON.stringify(input.metadata ?? {}),
+      await this.prisma.client.$executeRaw(
+        Prisma.sql`INSERT INTO "ai_memory_embeddings" (id, business_id, content, source_type, source_id, embedding, metadata, created_at)
+        VALUES (${id}, ${input.businessId}, ${input.content}, ${input.sourceType}, ${input.sourceId}, ${vectorLiteral}::vector, ${input.metadata ?? {}}, NOW())`,
       );
 
       this.events.emit('memory.stored', {
@@ -140,10 +135,8 @@ export class SemanticMemoryService {
   }
 
   async deleteForSource(sourceType: string, sourceId: string): Promise<void> {
-    await this.prisma.client.$executeRawUnsafe(
-      `DELETE FROM "ai_memory_embeddings" WHERE source_type = $1 AND source_id = $2`,
-      sourceType,
-      sourceId,
+    await this.prisma.client.$executeRaw(
+      Prisma.sql`DELETE FROM "ai_memory_embeddings" WHERE source_type = ${sourceType} AND source_id = ${sourceId}`,
     );
   }
 

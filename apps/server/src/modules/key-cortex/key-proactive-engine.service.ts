@@ -19,6 +19,12 @@ import {
 import { CortexContextSnapshot } from './key-cortex.types';
 import { GenomeSignalService } from '../business-genome/key-genome/genome-signal.service';
 import type { CreateGenomeSignalInput } from '../business-genome/key-genome/key-genome.types';
+import {
+  InvoiceOverdueWatcherService,
+  BookingNoShowWatcherService,
+  SentimentWatcherService,
+} from './watchers';
+import { KeyCortexDigestService } from './key-cortex-digest.service';
 
 interface SignalSummary {
   dnaTrend: 'improving' | 'stable' | 'declining';
@@ -39,6 +45,10 @@ export class KeyProactiveEngineService {
     private readonly prisma: PrismaService,
     private readonly context: KeyCortexContextService,
     @Optional() private readonly signalService?: GenomeSignalService,
+    @Optional() private readonly invoiceWatcher?: InvoiceOverdueWatcherService,
+    @Optional() private readonly bookingWatcher?: BookingNoShowWatcherService,
+    @Optional() private readonly sentimentWatcher?: SentimentWatcherService,
+    @Optional() private readonly digestService?: KeyCortexDigestService,
   ) {}
 
   // ═══════════════════════════════════════════════════════════
@@ -49,6 +59,14 @@ export class KeyProactiveEngineService {
   async generateMorningBriefs(): Promise<void> {
     this.logger.log('[morningBrief] Generating morning briefs...');
 
+    try {
+      await this.invoiceWatcher?.scanAll();
+      await this.sentimentWatcher?.scanAll();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`[morningBrief] watcher scan failed: ${msg}`);
+    }
+
     const activeBusinesses = await this.getActiveBusinesses();
     for (const businessId of activeBusinesses) {
       try {
@@ -58,9 +76,29 @@ export class KeyProactiveEngineService {
           'medium',
         );
         this.logger.debug(`[morningBrief] created for business=${businessId}`);
+        await this.digestService?.deliverDailyDigest(businessId, 'email');
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         this.logger.warn(`[morningBrief] failed for ${businessId}: ${msg}`);
+      }
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // Scheduled: Weekly Report (every Monday at 9 AM)
+  // ═══════════════════════════════════════════════════════════
+
+  @Cron('0 9 * * 1')
+  async generateWeeklyDigests(): Promise<void> {
+    this.logger.log('[weeklyDigest] Generating weekly digests...');
+
+    const activeBusinesses = await this.getActiveBusinesses();
+    for (const businessId of activeBusinesses) {
+      try {
+        await this.digestService?.deliverWeeklyDigest(businessId, 'email');
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`[weeklyDigest] failed for ${businessId}: ${msg}`);
       }
     }
   }
@@ -73,10 +111,18 @@ export class KeyProactiveEngineService {
   async generateEndOfDayReports(): Promise<void> {
     this.logger.log('[endOfDay] Generating EOD reports...');
 
+    try {
+      await this.bookingWatcher?.scanAll();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`[endOfDay] watcher scan failed: ${msg}`);
+    }
+
     const activeBusinesses = await this.getActiveBusinesses();
     for (const businessId of activeBusinesses) {
       try {
         await this.createTrigger(businessId, 'end_of_day_report', 'medium');
+        await this.digestService?.deliverDailyDigest(businessId, 'email');
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         this.logger.warn(`[endOfDay] failed for ${businessId}: ${msg}`);
@@ -108,6 +154,17 @@ export class KeyProactiveEngineService {
 
     if (allTriggers.length > 0) {
       this.logger.log(`[proactive] ${allTriggers.length} triggers created`);
+    }
+
+    try {
+      await Promise.all([
+        this.invoiceWatcher?.scanAll(),
+        this.sentimentWatcher?.scanAll(),
+        this.bookingWatcher?.scanAll(),
+      ]);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`[proactive] watcher scan failed: ${msg}`);
     }
 
     return allTriggers;

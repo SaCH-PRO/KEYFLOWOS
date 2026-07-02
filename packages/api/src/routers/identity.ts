@@ -1,7 +1,8 @@
 import { protectedProcedure, router } from '../trpc';
+import type { AnyRouter } from '@trpc/server';
 import { z } from 'zod';
 
-export const identityRouter = router({
+export const identityRouter: AnyRouter = router({
   health: protectedProcedure.query(({ ctx }) => ({
     status: 'ok',
     module: 'identity',

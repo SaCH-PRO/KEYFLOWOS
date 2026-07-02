@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { getApiBase } from "@/lib/api-base";
+import { fetchVoicePreferences } from "@/lib/client";
+import { useTts } from "@/components/tts";
 import {
   Mic,
   MicOff,
@@ -10,8 +11,6 @@ import {
   Volume2,
   AlertCircle,
 } from "lucide-react";
-
-const API_BASE = getApiBase();
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -101,12 +100,43 @@ export function KeyVoiceButton({
   className = "",
   disabled = false,
 }: KeyVoiceButtonProps) {
+  const { engine } = useTts();
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [interimTranscript, setInterimTranscript] = useState("");
 
+  // Overlay cloud voice preference onto localStorage so saved settings are honored
+  useEffect(() => {
+    if (!businessId) return;
+    let cancelled = false;
+    fetchVoicePreferences(businessId)
+      .then((res) => {
+        if (cancelled) return;
+        const prefs = res.data;
+        if (!prefs || prefs.length === 0) return;
+        const pref = prefs.find((p) => p.isDefault) ?? prefs[0];
+        const cloudSettings =
+          typeof pref.settings === "object" && pref.settings !== null
+            ? (pref.settings as Record<string, unknown>)
+            : {};
+        const voice = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"].includes(
+          pref.voiceKey,
+        )
+          ? pref.voiceKey
+          : undefined;
+        const speed = typeof pref.speakingRate === "number" ? pref.speakingRate : undefined;
+        const muted = typeof cloudSettings.muted === "boolean" ? cloudSettings.muted : undefined;
+        const current = JSON.parse(localStorage.getItem("kf_voice_settings") || "{}");
+        const next = { ...current, ...(voice && { voice }), ...(speed !== undefined && { speed }), ...(muted !== undefined && { muted }) };
+        localStorage.setItem("kf_voice_settings", JSON.stringify(next));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [businessId]);
+
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
   const finalTranscriptRef = useRef("");
   const stateRef = useRef(voiceState);
 
@@ -236,66 +266,23 @@ export function KeyVoiceButton({
   }, [voiceState, startListening, stopListening]);
 
   /* ---------------------------------------------------------------- */
-  /*  TTS: Speak text via KEY's TTS API                                 */
+  /*  TTS: Speak text via TTS engine                                     */
   /* ---------------------------------------------------------------- */
   const speak = useCallback(
-    async (text: string) => {
+    (text: string) => {
       if (!businessId) return;
       setVoiceState("speaking");
-
-      try {
-        const settings = JSON.parse(localStorage.getItem("kf_voice_settings") || "{}");
-        const voice = settings.voice || "alloy";
-
-        const res = await fetch(`${API_BASE}/api/v1/cortex/tts`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({ businessId, text, voice }),
-        });
-
-        if (!res.ok) throw new Error("TTS failed");
-
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-
-        if (audioRef.current) {
-          audioRef.current.pause();
-          audioRef.current = null;
+      engine.speak(text, businessId);
+      // Transition back to idle when engine stops speaking this text
+      const unsub = engine.subscribe(() => {
+        const state = engine.getState();
+        if (!state.playing || state.currentText !== text) {
+          setVoiceState("idle");
+          unsub();
         }
-
-        const audio = new Audio(url);
-        audio.playbackRate = settings.speed || 1;
-        audioRef.current = audio;
-
-        audio.onended = () => {
-          URL.revokeObjectURL(url);
-          setVoiceState("idle");
-        };
-
-        audio.onerror = () => {
-          URL.revokeObjectURL(url);
-          setVoiceState("idle");
-        };
-
-        void audio.play().catch(() => {
-          setVoiceState("idle");
-        });
-      } catch {
-        // Fallback: use browser's built-in TTS
-        if ("speechSynthesis" in window) {
-          const utterance = new SpeechSynthesisUtterance(text);
-          utterance.rate = 1;
-          utterance.pitch = 1;
-          utterance.onend = () => setVoiceState("idle");
-          utterance.onerror = () => setVoiceState("idle");
-          window.speechSynthesis.speak(utterance);
-        } else {
-          setVoiceState("idle");
-        }
-      }
+      });
     },
-    [businessId]
+    [businessId, engine]
   );
 
   /* ---------------------------------------------------------------- */
@@ -304,9 +291,9 @@ export function KeyVoiceButton({
   useEffect(() => {
     return () => {
       recognitionRef.current?.abort();
-      audioRef.current?.pause();
+      engine.cancel();
     };
-  }, []);
+  }, [engine]);
 
   /* ---------------------------------------------------------------- */
   /*  Render                                                            */
@@ -435,36 +422,4 @@ export function KeyVoiceButton({
   );
 }
 
-/* Re-export speak as a standalone utility */
-export async function speakText(
-  businessId: string,
-  text: string,
-  voice?: string
-): Promise<void> {
-  const settings = JSON.parse(localStorage.getItem("kf_voice_settings") || "{}");
-  const selectedVoice = voice || settings.voice || "alloy";
 
-  try {
-    const res = await fetch(`${API_BASE}/api/v1/cortex/tts`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ businessId, text, voice: selectedVoice }),
-    });
-
-    if (!res.ok) throw new Error("TTS failed");
-
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const audio = new Audio(url);
-    audio.playbackRate = settings.speed || 1;
-    audio.onended = () => URL.revokeObjectURL(url);
-    await audio.play();
-  } catch {
-    // Fallback to browser TTS
-    if ("speechSynthesis" in window) {
-      const utterance = new SpeechSynthesisUtterance(text);
-      window.speechSynthesis.speak(utterance);
-    }
-  }
-}

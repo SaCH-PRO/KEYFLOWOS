@@ -26,7 +26,7 @@ function createBooking(overrides: any = {}) {
     startTime: new Date(Date.now() - 2 * 60 * 60 * 1000),
     endTime: new Date(Date.now() - 60 * 60 * 1000),
     status: 'CONFIRMED',
-    contact: { id: 'c1', name: 'Bob', email: 'bob@example.com', phone: '555-0100' },
+    contact: { id: 'c1', firstName: 'Bob', lastName: 'Smith', email: 'bob@example.com', phone: '555-0100' },
     service: { id: 'svc_1', name: 'Consultation', duration: 60, price: 100 },
     staff: { id: 'stf_1', name: 'Dr. Smith' },
     notes: null,

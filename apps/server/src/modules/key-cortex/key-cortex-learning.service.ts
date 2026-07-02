@@ -18,6 +18,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ModelGatewayService } from '../ai/model-gateway.service';
+import type { PromptVariant } from '@prisma/client';
 
 export type UserResponse = 'accepted' | 'rejected' | 'modified' | 'no_action';
 
@@ -345,6 +346,75 @@ export class KeyCortexLearningService {
       reliable,
       knowledgeGap,
     };
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // Phase 5: Prompt variant A/B storage
+  // ═══════════════════════════════════════════════════════════
+
+  async recordVariantOutcome(
+    businessId: string,
+    variantKey: string,
+    success: boolean,
+  ): Promise<void> {
+    try {
+      const existing = await (this.prisma.client as any).promptVariant.findUnique({
+        where: { businessId_variantKey: { businessId, variantKey } },
+      });
+
+      if (!existing) {
+        this.logger.warn(`[recordVariantOutcome] Variant ${variantKey} not found for ${businessId}`);
+        return;
+      }
+
+      await (this.prisma.client as any).promptVariant.update({
+        where: { id: existing.id },
+        data: success
+          ? { wins: { increment: 1 } }
+          : { losses: { increment: 1 } },
+      });
+
+      this.logger.debug(
+        `[recordVariantOutcome] Recorded ${success ? 'win' : 'loss'} for ${variantKey} (${businessId})`,
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`[recordVariantOutcome] Failed: ${msg}`);
+    }
+  }
+
+  async selectVariant(
+    businessId: string,
+    variantKey: string,
+  ): Promise<PromptVariant | null> {
+    try {
+      const variants = await (this.prisma.client as any).promptVariant.findMany({
+        where: { businessId, variantKey, enabled: true },
+      });
+
+      if (variants.length === 0) return null;
+      if (variants.length === 1) return variants[0];
+
+      // Softmax over win rate with a small epsilon to avoid zero probabilities.
+      const epsilon = 0.01;
+      const scored = variants.map((v: PromptVariant) => {
+        const trials = v.wins + v.losses;
+        const winRate = trials > 0 ? v.wins / trials : 0.5;
+        return { variant: v, score: Math.exp(winRate / (trials + 1) + epsilon) };
+      });
+
+      const total = scored.reduce((sum: number, s: any) => sum + s.score, 0);
+      let random = Math.random() * total;
+      for (const item of scored) {
+        random -= item.score;
+        if (random <= 0) return item.variant;
+      }
+      return scored[scored.length - 1].variant;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`[selectVariant] Failed: ${msg}`);
+      return null;
+    }
   }
 
   // ═══════════════════════════════════════════════════════════

@@ -200,6 +200,80 @@ export class CrmAdapterService {
     });
   }
 
+  async getContactTimeline(input: {
+    businessId: string;
+    contactId: string;
+    limit?: number;
+  }) {
+    return this.crm.getContactTimeline(
+      input.businessId,
+      input.contactId,
+      input.limit ?? 50,
+    );
+  }
+
+  async countContacts(input: {
+    businessId: string;
+    status?: string;
+    tag?: string;
+  }) {
+    return this.crm.countContacts({
+      businessId: input.businessId,
+      status: input.status,
+      tag: input.tag,
+    });
+  }
+
+  async getTasks(input: {
+    businessId: string;
+    contactId?: string;
+    assignedTo?: string;
+    priority?: string;
+    status?: string;
+  }) {
+    // Map connector status values to the CRM task status schema.
+    const status = input.status === 'completed' ? 'COMPLETED' : input.status === 'overdue' ? 'OVERDUE' : 'OPEN';
+    return this.crm.listContactTasks({
+      businessId: input.businessId,
+      contactId: input.contactId,
+      status,
+    });
+  }
+
+  async getRecentContacts(input: {
+    businessId: string;
+    since?: string;
+    limit?: number;
+  }) {
+    const since = input.since ? new Date(input.since) : undefined;
+    const result = await this.crm.listContacts({
+      businessId: input.businessId,
+      sortBy: 'newest',
+      take: input.limit ?? 20,
+      cursor: undefined,
+    });
+    const contacts = (result as { contacts?: unknown[] }).contacts ?? [];
+    if (!since) return contacts;
+    return contacts.filter((contact) => {
+      const createdAt = (contact as { createdAt?: string | Date }).createdAt;
+      if (!createdAt) return false;
+      return new Date(createdAt).getTime() >= since.getTime();
+    });
+  }
+
+  async searchContacts(input: {
+    businessId: string;
+    query: string;
+    limit?: number;
+  }) {
+    const result = await this.crm.listContacts({
+      businessId: input.businessId,
+      search: input.query,
+      take: input.limit ?? 20,
+    });
+    return (result as { contacts?: unknown[] }).contacts ?? [];
+  }
+
   async execute(command: ConnectorCommand): Promise<ConnectorResult> {
     const start = Date.now();
     switch (command.action) {
@@ -318,6 +392,48 @@ export class CrmAdapterService {
           duplicateContactId: command.parameters.duplicateContactId as string,
         });
         return connectorOk(command, start, merged);
+      }
+      case 'get_contact_timeline': {
+        const timeline = await this.getContactTimeline({
+          businessId: command.businessId,
+          contactId: command.parameters.contactId as string,
+          limit: (command.parameters.limit as number) || 50,
+        });
+        return connectorOk(command, start, timeline);
+      }
+      case 'count_contacts': {
+        const count = await this.countContacts({
+          businessId: command.businessId,
+          status: command.parameters.status as string,
+          tag: command.parameters.tag as string,
+        });
+        return connectorOk(command, start, { count });
+      }
+      case 'get_tasks': {
+        const tasks = await this.getTasks({
+          businessId: command.businessId,
+          contactId: command.parameters.contactId as string,
+          assignedTo: command.parameters.assignedTo as string,
+          priority: command.parameters.priority as string,
+          status: (command.parameters.status as string) || 'open',
+        });
+        return connectorOk(command, start, tasks);
+      }
+      case 'get_recent_contacts': {
+        const recent = await this.getRecentContacts({
+          businessId: command.businessId,
+          since: command.parameters.since as string,
+          limit: (command.parameters.limit as number) || 20,
+        });
+        return connectorOk(command, start, recent);
+      }
+      case 'search_contacts': {
+        const found = await this.searchContacts({
+          businessId: command.businessId,
+          query: command.parameters.query as string,
+          limit: (command.parameters.limit as number) || 20,
+        });
+        return connectorOk(command, start, found);
       }
       default:
         return connectorFail(command, start, `Unknown CRM action: ${command.action}`);

@@ -1,19 +1,25 @@
-import { Injectable, Inject, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Inject, Logger, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { createHash } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { EntityResolutionService } from '../../core/connectors/entity-resolution.service';
 import { AiOversightService } from '../ai/ai-oversight.service';
-import { MessageIntakeOrchestrator } from '../communications/message-intake-orchestrator.service';
-import { DriveIntakeOrchestrator } from '../commerce/drive-intake-orchestrator.service';
+import { DriveIntakeOrchestrator, DriveIntakePlan } from '../commerce/drive-intake-orchestrator.service';
+import { KeyInboxService } from '../key-inbox/key-inbox.service';
+import { KeyInboxActionExecutorService, ActionExecutionResult } from '../key-inbox/key-inbox-action-executor.service';
+import { InboxSuggestedAction } from '../key-inbox/key-inbox.types';
+import { normalizeKeyInboxChannel } from '../key-inbox/key-inbox.constants';
 import { IngestionItemInput } from '../../core/connectors/connector.interface';
 
 /**
  * Phase 1 adapter strategy:
  * - IngestionOrchestrator is the canonical entry point and writes to IngestionItem.
- * - To reuse existing AI/plan logic without refactoring legacy orchestrators yet,
- *   we mirror the item into the legacy MessageIntake/DriveIntakeFile table,
- *   call the legacy orchestrator, then copy the plan back.
- * - Phase 2/3 will refactor legacy orchestrators into pure functions.
+ * - Message sources are normalized into KeyInboxThread / KeyInboxMessage and analysed
+ *   by the Key Inbox pipeline, so the IngestionItem plan reflects the same actions
+ *   the user sees in the Key Inbox UI.
+ * - Drive and generic sources continue to use the legacy DriveIntakeOrchestrator or
+ *   a generic fallback plan until they are fully migrated.
+ * - Legacy MessageIntake is no longer used for new ingestion events.
  */
 @Injectable()
 export class IngestionOrchestrator {
@@ -23,8 +29,9 @@ export class IngestionOrchestrator {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EntityResolutionService) private readonly entityResolution: EntityResolutionService,
     @Inject(AiOversightService) private readonly governance: AiOversightService,
-    @Inject(MessageIntakeOrchestrator) private readonly messageOrchestrator: MessageIntakeOrchestrator,
     @Inject(DriveIntakeOrchestrator) private readonly driveOrchestrator: DriveIntakeOrchestrator,
+    @Inject(KeyInboxService) private readonly keyInbox: KeyInboxService,
+    @Inject(KeyInboxActionExecutorService) private readonly keyInboxActionExecutor: KeyInboxActionExecutorService,
   ) {}
 
   async receive(input: IngestionItemInput, businessId: string) {
@@ -80,18 +87,43 @@ export class IngestionOrchestrator {
       },
     });
 
+    const connectorType = input.sourceConnectorType ?? input.sourceType;
+    const connectorStatus = await this.getConnectorStatus(businessId, connectorType);
+    if (!connectorStatus || !connectorStatus.intakeEnabled) {
+      return this.prisma.client.ingestionItem.update({
+        where: { id: item.id },
+        data: { status: 'rejected', errorMessage: 'Intake disabled for this connector' },
+      });
+    }
+
+    let current = item;
     try {
       await this.buildPlan(item.id);
+      current = (await this.prisma.client.ingestionItem.findUnique({ where: { id: item.id } })) ?? item;
     } catch (err: any) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.error(`buildPlan failed for ${item.id}: ${message}`);
-      await this.prisma.client.ingestionItem.update({
+      current = await this.prisma.client.ingestionItem.update({
         where: { id: item.id },
         data: { status: 'error', errorMessage: message },
       });
     }
 
-    return item;
+    if (
+      connectorStatus.autoApproveThreshold != null &&
+      current.status === 'reviewing' &&
+      current.confidence != null &&
+      current.confidence >= connectorStatus.autoApproveThreshold
+    ) {
+      try {
+        current = await this.execute(item.id, 'system');
+      } catch (err: any) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`Auto-execute failed for ${item.id}: ${message}`);
+      }
+    }
+
+    return current;
   }
 
   async buildPlan(itemId: string, attempt = 1): Promise<void> {
@@ -132,21 +164,30 @@ export class IngestionOrchestrator {
 
     try {
       let results: Record<string, unknown> = {};
-      if (this.isMessageSource(item.sourceType)) {
-        const legacy = await this.getOrCreateLegacyMessageIntake(item);
-        results = await this.messageOrchestrator.executePlan(item.businessId, legacy.id, userId) as any;
-      } else if (item.sourceType === 'google_drive') {
+      if (item.sourceType === 'google_drive') {
         const legacy = await this.getOrCreateLegacyDriveIntake(item);
-        results = await this.driveOrchestrator.executePlan(item.businessId, legacy.id, userId) as any;
+        results = await this.driveOrchestrator.executePlan(
+          item.businessId,
+          legacy.id,
+          userId,
+          item.proposedActions as unknown as DriveIntakePlan,
+        ) as any;
+      } else if (this.isMessageSource(item.sourceType)) {
+        results = {
+          handledBy: 'key_inbox',
+          results: await this.executeMessageActions(item, userId),
+        };
       } else {
         throw new BadRequestException(`Unsupported source type for execution: ${item.sourceType}`);
       }
 
-      return await this.prisma.client.ingestionItem.update({
-        where: { id: itemId, status: { in: ['reviewing', 'error'] } },
-        data: { status: 'approved', executedResults: results as any, errorMessage: null },
-      });
+      return await this.applyStatusLockedUpdate(
+        itemId,
+        ['reviewing', 'error'],
+        { status: 'approved', executedResults: results as any, errorMessage: null },
+      );
     } catch (err: any) {
+      if (err instanceof ConflictException) throw err;
       const message = err instanceof Error ? err.message : String(err);
       this.logger.error(`Execution failed for ${itemId}: ${message}`);
       return await this.prisma.client.ingestionItem.update({
@@ -163,16 +204,17 @@ export class IngestionOrchestrator {
       throw new BadRequestException(`Cannot reject item with status ${item.status}`);
     }
 
-    return this.prisma.client.ingestionItem.update({
-      where: { id: itemId, status: { in: ['reviewing', 'error', 'pending'] } },
-      data: {
+    return this.applyStatusLockedUpdate(
+      itemId,
+      ['reviewing', 'error', 'pending'],
+      {
         status: 'rejected',
         userFeedback: {
           action: 'rejected',
           reason: reason ?? null,
         } as any,
       },
-    });
+    );
   }
 
   async correct(itemId: string, correctedActions: Record<string, unknown>[], note?: string) {
@@ -182,9 +224,10 @@ export class IngestionOrchestrator {
       throw new BadRequestException(`Cannot correct item with status ${item.status}`);
     }
 
-    return this.prisma.client.ingestionItem.update({
-      where: { id: itemId, status: { in: ['reviewing', 'error'] } },
-      data: {
+    return this.applyStatusLockedUpdate(
+      itemId,
+      ['reviewing', 'error'],
+      {
         proposedActions: correctedActions as any,
         userFeedback: {
           action: 'corrected',
@@ -192,25 +235,74 @@ export class IngestionOrchestrator {
           correctedActions,
         } as any,
       },
-    });
+    );
   }
 
-  private async buildMessagePlan(item: { id: string; businessId: string; sourceType: string; sourceConnectorType: string; externalId: string | null; fromEmail: string | null; fromPhone: string | null; fromName: string | null; toDestination: string | null; subject: string | null; body: string | null; rawPayload: any; contactId: string | null }) {
-    const legacy = await this.getOrCreateLegacyMessageIntake(item);
-    await this.messageOrchestrator.buildPlan(legacy.id);
-    const updated = await this.prisma.client.messageIntake.findUnique({ where: { id: legacy.id } });
-    if (!updated) throw new Error('Legacy message intake disappeared');
+  private async buildMessagePlan(item: { id: string; businessId: string; sourceType: string; sourceConnectorType: string; externalId: string | null; fromEmail: string | null; fromPhone: string | null; fromName: string | null; fromExternalId: string | null; toDestination: string | null; subject: string | null; body: string | null; rawPayload: any; contactId: string | null; receivedAt: Date | null }) {
+    const channel = normalizeKeyInboxChannel(item.sourceType);
+    const threadExternalId = item.fromEmail || item.fromPhone || item.fromExternalId || item.externalId || `ingestion-${item.id}`;
 
-    const summary = this.buildSummaryFromLegacy(updated);
+    const thread = await this.keyInbox.upsertThread({
+      businessId: item.businessId,
+      channel,
+      externalThreadId: threadExternalId,
+      contactId: item.contactId ?? null,
+      subject: item.subject ?? this.truncate(item.body ?? 'New message', 100),
+      status: 'OPEN',
+      priority: 'NORMAL',
+      metadata: {
+        ingestionItemId: item.id,
+        sourceConnectorType: item.sourceConnectorType,
+        rawPayload: item.rawPayload,
+      },
+    });
+
+    const { message } = await this.keyInbox.addMessage({
+      businessId: item.businessId,
+      threadId: thread.id,
+      channel,
+      direction: 'INBOUND',
+      senderName: item.fromName ?? null,
+      senderEmail: item.fromEmail ?? null,
+      senderPhone: item.fromPhone ?? null,
+      senderHandle: item.fromEmail || item.fromPhone || null,
+      contentText: item.body ?? null,
+      externalMessageId: item.externalId ?? null,
+      receivedAt: item.receivedAt ?? new Date(),
+      metadata: {
+        ingestionItemId: item.id,
+        sourceConnectorType: item.sourceConnectorType,
+      },
+      skipAnalysis: true,
+    });
+
+    await this.keyInbox.analyzeMessage(item.businessId, message.id);
+    const analyzedThread = await this.keyInbox.analyzeThread(item.businessId, thread.id);
+    const analyzedMessage = await this.prisma.client.keyInboxMessage.findUnique({
+      where: { id: message.id },
+    });
+
+    const summary = analyzedThread.aiSummary || item.subject || this.truncate(item.body ?? 'New message', 100);
+    const intentType = analyzedThread.aiIntent || (analyzedMessage?.aiAnalysis as Record<string, string> | undefined)?.intent || 'unknown';
+    const confidence = analyzedThread.aiUrgency ? 0.9 : analyzedMessage?.aiConfidence ?? 0.5;
+    const extractedData = {
+      ...(analyzedMessage?.extractedEntities as Record<string, unknown> ?? {}),
+      _keyInboxThreadId: thread.id,
+      _keyInboxMessageId: message.id,
+    };
+    const proposedActions = (analyzedMessage?.suggestedActions as Record<string, unknown>[]) ?? [
+      { type: 'review', label: 'Review in Key Inbox', confidence: 1, payload: { threadId: thread.id } },
+    ];
+
     await this.prisma.client.ingestionItem.update({
       where: { id: item.id },
       data: {
         status: 'reviewing',
         summary,
-        intentType: updated.intentType,
-        confidence: updated.confidence,
-        extractedData: updated.extractedData as any,
-        proposedActions: updated.proposedActions as any,
+        intentType,
+        confidence,
+        extractedData: extractedData as any,
+        proposedActions: proposedActions as any,
       },
     });
 
@@ -254,52 +346,6 @@ export class IngestionOrchestrator {
     });
   }
 
-  private async getOrCreateLegacyMessageIntake(item: {
-    id: string;
-    businessId: string;
-    sourceType: string;
-    sourceConnectorType: string;
-    externalId: string | null;
-    fromEmail: string | null;
-    fromPhone: string | null;
-    fromName: string | null;
-    toDestination: string | null;
-    subject: string | null;
-    body: string | null;
-    rawPayload: any;
-    contactId: string | null;
-  }) {
-    if (item.externalId) {
-      const existing = await this.prisma.client.messageIntake.findUnique({
-        where: {
-          businessId_sourceChannel_externalId: {
-            businessId: item.businessId,
-            sourceChannel: item.sourceType,
-            externalId: item.externalId,
-          },
-        },
-      });
-      if (existing) return existing;
-    }
-
-    return this.prisma.client.messageIntake.create({
-      data: {
-        businessId: item.businessId,
-        connectorType: item.sourceConnectorType,
-        sourceChannel: item.sourceType,
-        externalId: item.externalId,
-        from: item.fromEmail ?? item.fromPhone ?? 'unknown',
-        fromName: item.fromName,
-        to: item.toDestination,
-        subject: item.subject,
-        body: item.body ?? '',
-        rawPayload: item.rawPayload,
-        contactId: item.contactId,
-        status: 'pending',
-      },
-    });
-  }
-
   private async getOrCreateLegacyDriveIntake(item: { id: string; businessId: string; rawPayload: any; summary?: string | null }) {
     const payload = item.rawPayload as Record<string, unknown>;
     const driveFileId = (payload.driveFileId as string) || (payload.id as string) || `ingestion-${item.id}`;
@@ -338,8 +384,56 @@ export class IngestionOrchestrator {
     });
   }
 
-  private buildSummaryFromLegacy(item: { subject?: string | null; body: string }): string {
-    return item.subject || item.body.slice(0, 120);
+  private async getConnectorStatus(businessId: string, connectorType: string) {
+    return this.prisma.client.connectorStatus.findUnique({
+      where: { businessId_connectorType: { businessId, connectorType } },
+    });
+  }
+
+  private async applyStatusLockedUpdate(
+    itemId: string,
+    allowedStatuses: string[],
+    data: Prisma.IngestionItemUpdateInput,
+  ) {
+    try {
+      return await this.prisma.client.ingestionItem.update({
+        where: { id: itemId, status: { in: allowedStatuses } },
+        data,
+      });
+    } catch (err: any) {
+      if (err?.code === 'P2025') {
+        const current = await this.prisma.client.ingestionItem.findUnique({ where: { id: itemId } });
+        throw new ConflictException({
+          message: 'Ingestion item was modified by another request',
+          current,
+        });
+      }
+      throw err;
+    }
+  }
+
+  private async executeMessageActions(
+    item: { businessId: string; extractedData: any; proposedActions: any },
+    userId: string,
+  ): Promise<ActionExecutionResult[]> {
+    const ref = (item.extractedData ?? {}) as Record<string, unknown>;
+    const threadId = typeof ref._keyInboxThreadId === 'string' ? ref._keyInboxThreadId : null;
+    if (!threadId) {
+      throw new BadRequestException('Missing Key Inbox thread reference for execution');
+    }
+    const messageId = typeof ref._keyInboxMessageId === 'string' ? ref._keyInboxMessageId : undefined;
+    const actions = (item.proposedActions ?? []) as InboxSuggestedAction[];
+    if (!actions.length) {
+      throw new BadRequestException('No actions to execute for this message source');
+    }
+
+    const results: ActionExecutionResult[] = [];
+    for (const action of actions) {
+      results.push(
+        await this.keyInboxActionExecutor.execute(item.businessId, threadId, action, { messageId, userId }),
+      );
+    }
+    return results;
   }
 
   private isMessageSource(sourceType: string): boolean {
@@ -351,6 +445,11 @@ export class IngestionOrchestrator {
     if (input.body) return input.body.slice(0, 120);
     if (input.attachments?.length) return `Attachment: ${input.attachments[0].name}`;
     return `New ${input.sourceType} item`;
+  }
+
+  private truncate(text: string, maxLength: number): string {
+    if (!text) return 'New message';
+    return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
   }
 
   private computeDedupeHash(input: IngestionItemInput, businessId: string): string {

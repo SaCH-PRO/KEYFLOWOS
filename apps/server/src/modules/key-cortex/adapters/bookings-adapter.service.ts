@@ -1,4 +1,4 @@
-import { Injectable, NotImplementedException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { ConnectorCommand, ConnectorResult } from '../key-cortex-connector.types';
 import { connectorOk, connectorFail } from '../key-cortex-connector.utils';
 import { PrismaService } from '../../../core/prisma/prisma.service';
@@ -148,14 +148,167 @@ export class BookingsAdapterService {
     });
   }
 
-  async blockTime(_input: {
+  async blockTime(input: {
     businessId: string;
     staffId: string;
     startTime: string;
     endTime: string;
     reason?: string;
   }) {
-    throw new NotImplementedException('blockTime is not implemented');
+    const startAt = new Date(input.startTime);
+    const endAt = new Date(input.endTime);
+    return this.prisma.client.calendarEvent.create({
+      data: {
+        businessId: input.businessId,
+        title: input.reason || 'Blocked time',
+        description: input.reason,
+        type: 'BLOCK',
+        module: 'BOOKINGS',
+        startAt,
+        endAt,
+        status: 'SCHEDULED',
+        sourceType: 'manual',
+        sourceId: `block-${input.staffId}-${startAt.toISOString()}`,
+        staffId: input.staffId,
+        meta: { reason: input.reason },
+      },
+    });
+  }
+
+  async getServices(input: { businessId: string; activeOnly?: boolean }) {
+    return this.catalog.listServices(input.businessId);
+  }
+
+  async getAvailability(input: {
+    businessId: string;
+    serviceId: string;
+    from: string;
+    to: string;
+    staffId?: string;
+  }) {
+    const service = await this.prisma.client.service.findFirst({
+      where: { id: input.serviceId, businessId: input.businessId, deletedAt: null },
+    });
+    if (!service) {
+      throw new Error(`Service ${input.serviceId} not found`);
+    }
+    const durationMins = service.duration ?? 60;
+    const from = new Date(input.from);
+    const to = new Date(input.to);
+
+    const staffWhere: any = {
+      businessId: input.businessId,
+      deletedAt: null,
+      ...(input.staffId ? { id: input.staffId } : {}),
+    };
+    const staff = await this.prisma.client.staffMember.findMany({
+      where: staffWhere,
+      include: { availabilities: true },
+    });
+
+    const slots: Array<{ startTime: string; endTime: string; staffId: string; staffName?: string | null }> = [];
+    for (const s of staff) {
+      const availability = ((s as { availabilities?: unknown[] }).availabilities ?? []) as Array<{
+        dayOfWeek: number;
+        startTime: string;
+        endTime: string;
+      }>;
+      for (let d = new Date(from); d <= to; d.setUTCDate(d.getUTCDate() + 1)) {
+        const dayIndex = d.getUTCDay();
+        const dayAvail = availability.filter((a: { dayOfWeek: number }) => a.dayOfWeek === dayIndex);
+        for (const avail of dayAvail) {
+          const [openH, openM] = (avail.startTime as string).split(':').map(Number);
+          const [closeH, closeM] = (avail.endTime as string).split(':').map(Number);
+          let slotStart = new Date(d);
+          slotStart.setUTCHours(openH, openM, 0, 0);
+          const dayEnd = new Date(d);
+          dayEnd.setUTCHours(closeH, closeM, 0, 0);
+
+          while (new Date(slotStart.getTime() + durationMins * 60000) <= dayEnd) {
+            const slotEnd = new Date(slotStart.getTime() + durationMins * 60000);
+            const conflicting = await this.prisma.client.booking.findFirst({
+              where: {
+                businessId: input.businessId,
+                staffId: s.id,
+                deletedAt: null,
+                status: { not: 'CANCELLED' },
+                OR: [
+                  { startTime: { lte: slotStart }, endTime: { gt: slotStart } },
+                  { startTime: { lt: slotEnd }, endTime: { gte: slotEnd } },
+                  { startTime: { gte: slotStart }, endTime: { lte: slotEnd } },
+                ],
+              },
+            });
+            const blocking = await this.prisma.client.calendarEvent.findFirst({
+              where: {
+                businessId: input.businessId,
+                staffId: s.id,
+                deletedAt: null,
+                type: 'BLOCK',
+                OR: [
+                  { startAt: { lte: slotStart }, endAt: { gt: slotStart } },
+                  { startAt: { lt: slotEnd }, endAt: { gte: slotEnd } },
+                  { startAt: { gte: slotStart }, endAt: { lte: slotEnd } },
+                ],
+              },
+            });
+            if (!conflicting && !blocking) {
+              slots.push({
+                startTime: slotStart.toISOString(),
+                endTime: slotEnd.toISOString(),
+                staffId: s.id,
+                staffName: s.name,
+              });
+            }
+            slotStart = slotEnd;
+          }
+        }
+      }
+    }
+    return slots;
+  }
+
+  async getStaffSchedule(input: { businessId: string; staffId: string; date: string }) {
+    const day = new Date(input.date);
+    const startOfDay = new Date(day);
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(day);
+    endOfDay.setHours(23, 59, 59, 999);
+
+    const [bookings, blocks, availability] = await Promise.all([
+      this.prisma.client.booking.findMany({
+        where: {
+          businessId: input.businessId,
+          staffId: input.staffId,
+          deletedAt: null,
+          status: { not: 'CANCELLED' },
+          startTime: { gte: startOfDay, lte: endOfDay },
+        },
+        orderBy: { startTime: 'asc' },
+        include: { contact: { select: { id: true, firstName: true, lastName: true } }, service: { select: { id: true, name: true } } },
+      }),
+      this.prisma.client.calendarEvent.findMany({
+        where: {
+          businessId: input.businessId,
+          staffId: input.staffId,
+          deletedAt: null,
+          type: 'BLOCK',
+          startAt: { gte: startOfDay, lte: endOfDay },
+        },
+        orderBy: { startAt: 'asc' },
+      }),
+      this.prisma.client.availability.findMany({
+        where: { staffId: input.staffId, dayOfWeek: day.getDay() },
+      }),
+    ]);
+
+    return {
+      date: day.toISOString(),
+      staffId: input.staffId,
+      availability,
+      bookings,
+      blocks,
+    };
   }
 
   async getUpcomingBookings(input: {
@@ -271,6 +424,42 @@ export class BookingsAdapterService {
           reason: command.parameters.reason as string,
         });
         return connectorOk(command, start, blocked);
+      }
+      case 'get_availability': {
+        const slots = await this.getAvailability({
+          businessId: command.businessId,
+          serviceId: command.parameters.serviceId as string,
+          from: command.parameters.from as string,
+          to: command.parameters.to as string,
+          staffId: command.parameters.staffId as string,
+        });
+        return connectorOk(command, start, slots);
+      }
+      case 'get_upcoming_bookings': {
+        const upcoming = await this.getUpcomingBookings({
+          businessId: command.businessId,
+          from: command.parameters.from as string,
+          to: command.parameters.to as string,
+          contactId: command.parameters.contactId as string,
+          staffId: command.parameters.staffId as string,
+          limit: (command.parameters.limit as number) || 50,
+        });
+        return connectorOk(command, start, upcoming);
+      }
+      case 'get_services': {
+        const services = await this.getServices({
+          businessId: command.businessId,
+          activeOnly: (command.parameters.activeOnly as boolean) ?? true,
+        });
+        return connectorOk(command, start, services);
+      }
+      case 'get_staff_schedule': {
+        const schedule = await this.getStaffSchedule({
+          businessId: command.businessId,
+          staffId: command.parameters.staffId as string,
+          date: command.parameters.date as string,
+        });
+        return connectorOk(command, start, schedule);
       }
       default:
         return connectorFail(command, start, `Unknown bookings action: ${command.action}`);

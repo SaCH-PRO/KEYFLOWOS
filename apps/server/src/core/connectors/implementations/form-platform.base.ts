@@ -3,7 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EntityResolutionService } from '../entity-resolution.service';
 import { ConnectorCredentialsService } from '../connector-credentials.service';
-import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary, ConnectorType, ConnectorSmokeResult } from '../connector.interface';
+import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary, ConnectorType, ConnectorSmokeResult, IngestionItemInput } from '../connector.interface';
 
 /**
  * Base for form/landing-page connectors. Credentials are stored encrypted in
@@ -83,6 +83,51 @@ export abstract class FormPlatformConnector implements IConnector {
 
   async disconnect(businessId: string): Promise<void> {
     await this.credentials.clearCredentials(businessId, this.connectorType);
+  }
+
+  parseInbound(payload: unknown, _businessId: string): IngestionItemInput[] {
+    const raw = (typeof payload === 'object' && payload !== null ? payload : {}) as Record<string, unknown>;
+    const fields = (raw.fields ?? raw.data ?? raw) as Record<string, unknown>;
+    const formId = (raw.formId as string | undefined) ?? (raw.form_id as string | undefined) ?? (raw.formID as string | undefined) ?? this.source;
+    const formName = (raw.formName as string | undefined) ?? (raw.formTitle as string | undefined);
+    const externalId = (raw.externalId as string | undefined) ?? (raw.submissionID as string | undefined) ?? (raw.id as string | undefined) ?? formId;
+    const email = (raw.email as string | undefined) ?? this.findFieldByPattern(fields, /email/i, /@/);
+    const phone = (raw.phone as string | undefined) ?? this.findFieldByPattern(fields, /phone|mobile/i);
+    const firstName = (raw.firstName as string | undefined) ?? this.findFieldByPattern(fields, /first|fname|name_first/i);
+    const lastName = (raw.lastName as string | undefined) ?? this.findFieldByPattern(fields, /last|lname|name_last/i);
+    const name = firstName || lastName ? `${firstName ?? ''} ${lastName ?? ''}`.trim() : undefined;
+
+    return [
+      {
+        sourceType: 'manual',
+        sourceConnectorType: this.connectorType,
+        externalId,
+        receivedAt: raw.submittedAt ? new Date(raw.submittedAt as string) : new Date(),
+        from: { id: externalId, name, email, phone },
+        subject: formName ? `Form submission: ${formName}` : `Form submission: ${formId}`,
+        body: typeof raw.message === 'string' ? raw.message : JSON.stringify(fields).slice(0, 2000),
+        rawPayload: raw as Record<string, unknown>,
+      },
+    ];
+  }
+
+  verifyWebhook(_payload: unknown, signature: string | undefined, secret: string): boolean {
+    if (!signature || !secret) return false;
+    try {
+      return signature === secret;
+    } catch {
+      return false;
+    }
+  }
+
+  private findFieldByPattern(fields: Record<string, unknown>, keyPattern: RegExp, valuePattern?: RegExp): string | undefined {
+    for (const [k, v] of Object.entries(fields)) {
+      if (!keyPattern.test(k)) continue;
+      const sv = typeof v === 'string' ? v : '';
+      if (!sv) continue;
+      if (!valuePattern || valuePattern.test(sv)) return sv;
+    }
+    return undefined;
   }
 
   async testConnection(businessId: string): Promise<{ success: boolean; error?: string; account?: string }> {

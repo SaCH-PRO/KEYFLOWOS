@@ -1,8 +1,11 @@
-import { Injectable, Logger, Inject, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, Inject, BadRequestException, Optional } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
 import { ModelGatewayService, type GatewayMessage } from '../ai/model-gateway.service';
 import type { DnaSectionKey, GenomeIntegrityResult } from '../blueprint/blueprint.types';
+import { GenomeFactService } from '../business-genome/key-genome/genome-fact.service';
+import { GenomeEvidenceService } from '../business-genome/key-genome/genome-evidence.service';
+import { DNA_TO_KEY_GENOME_SECTION } from '../business-genome/key-genome/key-genome.service';
 
 export interface GenomeChatMessage {
   id: string;
@@ -16,6 +19,15 @@ export interface ProposedGenomeUpdate {
   section: DnaSectionKey;
   data: Record<string, unknown>;
   summary: string;
+  messageId?: string;
+  confidence?: number;
+  source?: string;
+}
+
+export interface ApplyGenomeUpdateOptions {
+  messageId?: string;
+  confidence?: number;
+  source?: string;
 }
 
 export interface SendGenomeMessageResult {
@@ -39,6 +51,12 @@ export class GenomeChatService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(BlueprintService) private readonly blueprint: BlueprintService,
     @Inject(ModelGatewayService) private readonly gateway: ModelGatewayService,
+    @Optional()
+    @Inject(GenomeFactService)
+    private readonly genomeFactService?: GenomeFactService,
+    @Optional()
+    @Inject(GenomeEvidenceService)
+    private readonly genomeEvidenceService?: GenomeEvidenceService,
   ) {}
 
   async getMessages(
@@ -104,6 +122,10 @@ export class GenomeChatService {
       proposedUpdates ? { proposedUpdates } : undefined,
     );
 
+    if (proposedUpdates) {
+      proposedUpdates.messageId = message.id;
+    }
+
     return { message, proposedUpdates };
   }
 
@@ -112,6 +134,7 @@ export class GenomeChatService {
     userId: string,
     section: DnaSectionKey,
     data: Record<string, unknown>,
+    opts?: ApplyGenomeUpdateOptions,
   ): Promise<GenomeIntegrityResult> {
     await this.blueprint.updateDnaSection(businessId, section, data);
     const genome = await this.blueprint.calculateGenomeIntegrity(businessId);
@@ -124,7 +147,61 @@ export class GenomeChatService {
       { appliedSection: section, appliedData: data },
     );
 
+    await this.writeEvidenceBackedFacts(businessId, userId, section, data, opts);
+
     return genome;
+  }
+
+  private async writeEvidenceBackedFacts(
+    businessId: string,
+    userId: string,
+    section: DnaSectionKey,
+    data: Record<string, unknown>,
+    opts?: ApplyGenomeUpdateOptions,
+  ): Promise<void> {
+    if (!this.genomeFactService || !this.genomeEvidenceService) {
+      this.logger.debug(`Genome fact/evidence services unavailable; skipping chat fact sync`);
+      return;
+    }
+
+    const keyGenomeSection = DNA_TO_KEY_GENOME_SECTION[section];
+    if (!keyGenomeSection) {
+      this.logger.warn(`No KEY Genome section mapping for DNA section ${section}`);
+      return;
+    }
+
+    const confidence = opts?.confidence ?? 0.85;
+    const sourceEntityId = opts?.messageId ?? userId;
+
+    for (const [field, value] of Object.entries(data)) {
+      if (value === undefined) continue;
+
+      const fact = await this.genomeFactService.upsertFact({
+        businessId,
+        section: keyGenomeSection,
+        domain: section,
+        field,
+        value: { raw: value, type: 'JSON' },
+        sourceModule: 'genome_chat',
+        sourceType: 'GENOME_CHAT',
+        sourceEntityType: 'GenomeChatMessage',
+        sourceEntityId,
+        verificationStatus: 'USER_VERIFIED',
+        confidenceScore: confidence,
+      });
+
+      await this.genomeEvidenceService.attachEvidence({
+        businessId,
+        factId: fact.id,
+        sourceModule: 'genome_chat',
+        sourceEntityType: 'GenomeChatMessage',
+        sourceEntityId,
+        summary: opts?.source
+          ? `${opts.source} — ${section}.${field}: ${JSON.stringify(value).slice(0, 200)}`
+          : `Genome chat update for ${section}.${field}: ${JSON.stringify(value).slice(0, 200)}`,
+        evidenceStrength: confidence,
+      });
+    }
   }
 
   private async persistMessage(

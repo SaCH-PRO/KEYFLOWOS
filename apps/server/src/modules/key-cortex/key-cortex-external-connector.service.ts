@@ -1040,8 +1040,8 @@ export class KeyCortexExternalConnectorService {
     }
 
     const checkStartedAt = Date.now();
-    let status: ConnectorHealth['status'] = 'unhealthy';
-    let latencyMs = 0;
+    let status: ConnectorHealth['status'];
+    let latencyMs: number;
     let message: string | undefined;
 
     try {
@@ -1824,8 +1824,8 @@ export class KeyCortexExternalConnectorService {
     const definition = await this.getConnectorDefinition(instance.definitionId);
     const credentials = this.decryptCredentials(instance.config);
 
-    let status: ConnectorStatus = instance.status as ConnectorStatus;
-    let errorMessage: string | undefined = instance.errorMessage || undefined;
+    let status: ConnectorStatus;
+    let errorMessage: string | undefined;
 
     try {
       await this.testConnection(definition, credentials);

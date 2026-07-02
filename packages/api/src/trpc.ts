@@ -1,4 +1,4 @@
-import { initTRPC } from '@trpc/server';
+import { initTRPC, type ProcedureBuilder } from '@trpc/server';
 import type { db as DbClient } from '@keyflow/db';
 
 export type EventBus = {
@@ -31,14 +31,14 @@ export const router = t.router;
 export const publicProcedure = t.procedure;
 export const middleware = t.middleware;
 
-export const protectedProcedure = t.procedure.use(({ ctx, next }) => {
+export const protectedProcedure: ProcedureBuilder<any> = t.procedure.use(({ ctx, next }) => {
   if (!ctx.user) {
     throw new Error('Unauthorized');
   }
   return next({ ctx });
 });
 
-export const superAdminProcedure = t.procedure.use(({ ctx, next }) => {
+export const superAdminProcedure: ProcedureBuilder<any> = t.procedure.use(({ ctx, next }) => {
   if (!ctx.user || ctx.user.role !== 'SUPER_ADMIN') {
     throw new Error('Forbidden');
   }

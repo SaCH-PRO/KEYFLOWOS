@@ -64,8 +64,13 @@ export class IdentitySignupService {
     return canonical;
   }
 
-  buildVerifiedRedirect(siteUrl: string): string {
-    return `${siteUrl.replace(/\/+$/, '')}/auth/login?verified=1`;
+  buildVerifiedRedirect(siteUrl: string, referralCode?: string): string {
+    const url = new URL(`${siteUrl.replace(/\/+$/, '')}/auth/login`);
+    url.searchParams.set('verified', '1');
+    if (referralCode?.trim()) {
+      url.searchParams.set('ref', referralCode.trim());
+    }
+    return url.toString();
   }
 
   /**
@@ -109,7 +114,7 @@ export class IdentitySignupService {
 
     const requireVerification = isEmailVerificationRequired();
     const siteUrl = this.resolveSiteUrl(args.requestOrigin);
-    const redirectTo = this.buildVerifiedRedirect(siteUrl);
+    const redirectTo = this.buildVerifiedRedirect(siteUrl, args.referralCode);
 
     const userMetadata: Record<string, unknown> = {};
     if (args.firstName) userMetadata.first_name = args.firstName.trim();

@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { GenomeGateGuard } from '../../core/auth/genome-gate.guard';
 import { GenomeChatService } from './genome-chat.service';
 import type { DnaSectionKey } from '../blueprint/blueprint.types';
 
@@ -45,15 +46,27 @@ export class GenomeChatController {
   }
 
   @Post('apply-updates')
+  @UseGuards(GenomeGateGuard)
   async applyUpdates(
     @Param('businessId') businessId: string,
-    @Body() body: { section?: DnaSectionKey; data?: Record<string, unknown> },
+    @Body()
+    body: {
+      section?: DnaSectionKey;
+      data?: Record<string, unknown>;
+      messageId?: string;
+      confidence?: number;
+      source?: string;
+    },
     @Req() req: Request & { user?: { id?: string } },
   ) {
     if (!body.section || !body.data) {
       return { error: 'section and data are required' };
     }
     const userId = req.user?.id ?? 'unknown';
-    return this.chat.applyUpdates(businessId, userId, body.section, body.data);
+    return this.chat.applyUpdates(businessId, userId, body.section, body.data, {
+      messageId: body.messageId,
+      confidence: body.confidence,
+      source: body.source,
+    });
   }
 }

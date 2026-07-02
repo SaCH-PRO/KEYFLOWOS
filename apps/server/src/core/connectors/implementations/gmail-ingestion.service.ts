@@ -3,7 +3,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { EntityResolutionService } from '../entity-resolution.service';
 import { GoogleTokenHelper } from '../../../modules/connect/google-token.helper';
 import { KeyInboxService } from '../../../modules/key-inbox/key-inbox.service';
-import type { ConnectorSyncResult } from '../connector.interface';
+import type { ConnectorSyncResult, IngestionItemInput } from '../connector.interface';
 import type { CreateInboxMessageInput } from '../../../modules/key-inbox/key-inbox.types';
 import { KEY_INBOX_CHANNELS } from '../../../modules/key-inbox/key-inbox.constants';
 
@@ -238,6 +238,63 @@ export class GmailIngestionService {
         duration: Date.now() - start,
       };
     }
+  }
+
+  /**
+   * Fetch Gmail inbox messages and return them as normalized IngestionItemInputs.
+   * Used by the connector's syncToIngestion hook so the canonical ingestion
+   * pipeline can decide how to route/deduplicate them.
+   */
+  async collectInboxInputs(businessId: string): Promise<IngestionItemInput[]> {
+    const accessToken = await this.tokenHelper.getValidAccessToken(businessId, {
+      access: 'gmailAccessToken',
+      refresh: 'gmailRefreshToken',
+      expiry: 'gmailTokenExpiry',
+    }, 'Gmail');
+
+    const profile = await this.fetchProfile(accessToken);
+    const connectedAccount = profile.emailAddress?.toLowerCase() ?? null;
+
+    const status = await this.prisma.client.connectorStatus.findUnique({
+      where: { businessId_connectorType: { businessId, connectorType: 'gmail' } },
+    });
+    const metadata = (status?.metadata as Record<string, unknown> | null) ?? {};
+    const lastHistoryId = typeof metadata.lastHistoryId === 'string' ? metadata.lastHistoryId : undefined;
+
+    const { refs } = await this.resolveMessageRefs(accessToken, lastHistoryId);
+    const inputs: IngestionItemInput[] = [];
+
+    for (const ref of refs) {
+      try {
+        const message = await this.fetchMessage(accessToken, ref.id);
+        const parsed = this.parseMessage(message);
+
+        if (connectedAccount && parsed.fromEmail?.toLowerCase() === connectedAccount) {
+          continue;
+        }
+
+        inputs.push({
+          sourceType: 'email',
+          sourceConnectorType: 'gmail',
+          externalId: message.id,
+          receivedAt: parsed.receivedAt,
+          from: {
+            id: message.threadId,
+            name: parsed.fromName,
+            email: parsed.fromEmail,
+          },
+          subject: parsed.subject,
+          body: parsed.text,
+          rawPayload: { ...message, connectedAccount, gmailThreadId: message.threadId },
+          attachments: parsed.attachments as unknown as IngestionItemInput['attachments'],
+        });
+      } catch (err: any) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`Failed to parse Gmail message ${ref.id} for ingestion input: ${message}`);
+      }
+    }
+
+    return inputs;
   }
 
   private async resolveMessageRefs(

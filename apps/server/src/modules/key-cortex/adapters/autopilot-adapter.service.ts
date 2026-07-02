@@ -1,6 +1,7 @@
-import { Injectable, NotImplementedException } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { ConnectorCommand, ConnectorResult } from '../key-cortex-connector.types';
 import { connectorOk, connectorFail } from '../key-cortex-connector.utils';
+import { PrismaService } from '../../../core/prisma/prisma.service';
 import { AutopilotService } from '../../autopilot/autopilot.service';
 import { DelegationLoopService } from '../../autopilot/delegation-loop.service';
 
@@ -15,6 +16,7 @@ export class AutopilotAdapterService {
   constructor(
     private readonly autopilot: AutopilotService,
     private readonly loops: DelegationLoopService,
+    private readonly prisma: PrismaService,
   ) {}
 
   async getTasks(input: {
@@ -84,7 +86,7 @@ export class AutopilotAdapterService {
     );
   }
 
-  async createLoop(_input: {
+  async createLoop(input: {
     businessId: string;
     name: string;
     frequency?: string;
@@ -92,9 +94,63 @@ export class AutopilotAdapterService {
     conditions?: Array<Record<string, unknown>>;
     active?: boolean;
   }) {
-    // Delegation loops are seeded per business; this adapter creates a
-    // custom loop entry for AI-defined recurring checks.
-    throw new NotImplementedException('createLoop not implemented');
+    const intervalMin = this.parseFrequency(input.frequency);
+    const loopType = `custom_${Date.now()}`;
+    return this.prisma.client.delegationLoop.create({
+      data: {
+        businessId: input.businessId,
+        loopType,
+        name: input.name,
+        description: 'AI-created delegation loop',
+        enabled: input.active ?? false,
+        intervalMin,
+        config: {
+          taskTemplate: input.taskTemplate ?? {},
+          conditions: input.conditions ?? [],
+        },
+        nextRunAt: input.active ? new Date(Date.now() + 60_000) : null,
+      },
+    });
+  }
+
+  private parseFrequency(frequency?: string): number {
+    switch (frequency) {
+      case 'hourly':
+        return 60;
+      case 'daily':
+        return 1440;
+      case 'weekly':
+        return 10080;
+      case 'monthly':
+        return 43200;
+      default:
+        return 1440;
+    }
+  }
+
+  async getLoopStatus(input: { businessId: string; loopId: string }) {
+    return this.prisma.client.delegationLoop.findFirst({
+      where: { id: input.loopId, businessId: input.businessId },
+      include: { runs: { orderBy: { startedAt: 'desc' }, take: 5 } },
+    });
+  }
+
+  async getTaskHistory(input: { businessId: string; taskId?: string; limit?: number }) {
+    const where: any = { businessId: input.businessId };
+    if (input.taskId) where.id = input.taskId;
+    return this.prisma.client.autopilotTask.findMany({
+      where,
+      orderBy: { updatedAt: 'desc' },
+      take: input.limit ?? 50,
+    });
+  }
+
+  async getGovernanceReport(input: { businessId: string }) {
+    const [stats, alerts] = await Promise.all([
+      this.autopilot.getTaskStats(input.businessId),
+      this.autopilot.getCriticalAlerts(input.businessId),
+    ]);
+    return { stats, alerts };
   }
 
   async listLoops(input: { businessId: string; active?: boolean }) {
@@ -176,6 +232,32 @@ export class AutopilotAdapterService {
           active: (command.parameters.active as boolean) || false,
         });
         return connectorOk(command, start, loop);
+      }
+      case 'list_loops': {
+        const loops = await this.listLoops({
+          businessId: command.businessId,
+          active: command.parameters.active as boolean,
+        });
+        return connectorOk(command, start, loops);
+      }
+      case 'get_loop_status': {
+        const status = await this.getLoopStatus({
+          businessId: command.businessId,
+          loopId: command.parameters.loopId as string,
+        });
+        return connectorOk(command, start, status);
+      }
+      case 'get_task_history': {
+        const history = await this.getTaskHistory({
+          businessId: command.businessId,
+          taskId: command.parameters.taskId as string,
+          limit: (command.parameters.limit as number) || 50,
+        });
+        return connectorOk(command, start, history);
+      }
+      case 'get_governance_report': {
+        const report = await this.getGovernanceReport({ businessId: command.businessId });
+        return connectorOk(command, start, report);
       }
       default:
         return connectorFail(command, start, `Unknown autopilot action: ${command.action}`);

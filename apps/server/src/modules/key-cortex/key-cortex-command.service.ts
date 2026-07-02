@@ -19,7 +19,6 @@
 
 import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { v4 as uuidv4 } from 'uuid';
 
 // ─── Connector Types ──────────────────────────────────────────────────────────
 import {
@@ -714,7 +713,7 @@ Expected output: [
             /\b(tomorrow)\b/i,
             /\b(today)\b/i,
             /\b(next\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b/i,
-            /\b(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})\b/,
+            /\b(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\b/,
           ];
           for (const re of datePatterns) {
             const m = input.match(re);

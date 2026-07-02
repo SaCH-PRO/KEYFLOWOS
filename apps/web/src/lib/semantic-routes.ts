@@ -68,7 +68,8 @@ export type WorkspaceId =
   | "reports"
   | "inbox"
   | "connect"
-  | "team";
+  | "team"
+  | "governance";
 
 export type EntityType =
   | "contact"
@@ -489,6 +490,12 @@ export function getWorkspaceRelatedActions(workspace: WorkspaceId): Array<{ labe
       return [
         { label: "Ask KEY", href: "/app/key?mode=ask" },
         { label: "View approvals", href: "/app/key?tab=approvals" },
+      ];
+    case "governance":
+      return [
+        { label: "Approvals", href: "/app/approvals" },
+        { label: "Compliance", href: "/app/evidence" },
+        { label: "Contracts", href: "/app/contracts" },
       ];
     default:
       return [];

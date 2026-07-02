@@ -23,6 +23,7 @@ ALTER TABLE "cortex_action_logs" ADD COLUMN IF NOT EXISTS "duration_ms" INTEGER;
 ALTER TABLE "cortex_action_logs" ADD COLUMN IF NOT EXISTS "user_id" TEXT;
 ALTER TABLE "cortex_action_logs" ADD COLUMN IF NOT EXISTS "command_id" TEXT;
 ALTER TABLE "cortex_action_logs" ADD COLUMN IF NOT EXISTS "correlation_id" TEXT;
+ALTER TABLE "cortex_action_logs" ADD COLUMN IF NOT EXISTS "business_id" TEXT;
 
 -- Remove orphaned action logs that cannot be tied to a business before making business_id required.
 DELETE FROM "cortex_action_logs" WHERE "business_id" IS NULL;

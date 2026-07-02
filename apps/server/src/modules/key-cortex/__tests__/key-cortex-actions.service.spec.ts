@@ -42,6 +42,10 @@ const mockAutonomyOrchestrator = {
   evaluateAction: vi.fn(),
 };
 
+const mockAutonomyLevelService = {
+  resolve: vi.fn().mockResolvedValue({ level: 4, mode: 'pro_auto', maxAutoRiskTier: 4, label: 'test' }),
+};
+
 const mockApprovalService = {
   createRequest: vi.fn(),
 };
@@ -49,6 +53,7 @@ const mockApprovalService = {
 function createService(options: {
   includeProposalService?: boolean;
   includeAutonomy?: boolean;
+  includeAutonomyLevel?: boolean;
   includeApprovalService?: boolean;
 } = {}): KeyCortexActionsService {
   return new KeyCortexActionsService(
@@ -58,6 +63,7 @@ function createService(options: {
     mockKeyCortexToolRegistry as any,
     options.includeProposalService !== false ? (mockProposalService as any) : undefined,
     options.includeAutonomy !== false ? (mockAutonomyOrchestrator as any) : undefined,
+    options.includeAutonomyLevel !== false ? (mockAutonomyLevelService as any) : undefined,
     mockEventBus as any,
     options.includeApprovalService ? (mockApprovalService as any) : undefined,
   );

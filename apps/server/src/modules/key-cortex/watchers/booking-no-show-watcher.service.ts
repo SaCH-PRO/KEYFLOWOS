@@ -33,7 +33,7 @@ export class BookingNoShowWatcherService {
         startTime: { lt: now },
       },
       include: {
-        contact: { select: { id: true, name: true, email: true, phone: true } },
+        contact: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
         service: { select: { id: true, name: true, duration: true, price: true } },
         staff: { select: { id: true, name: true } },
       },

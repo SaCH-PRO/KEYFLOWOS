@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { ConnectorCommand, ConnectorResult } from '../key-cortex-connector.types';
 import { connectorOk, connectorFail } from '../key-cortex-connector.utils';
 import { TemporalFlowMemoryService } from '../../temporal-flow/temporal-flow-memory.service';
+import { TemporalFlowService } from '../../temporal-flow/temporal-flow.service';
 import type {
   TemporalFlowMemoryEntityType,
   TemporalFlowMemoryType,
@@ -14,7 +15,10 @@ import type {
  */
 @Injectable()
 export class TemporalAdapterService {
-  constructor(private readonly temporal: TemporalFlowMemoryService) {}
+  constructor(
+    private readonly temporal: TemporalFlowMemoryService,
+    private readonly flow: TemporalFlowService,
+  ) {}
 
   async storeMemory(input: {
     businessId: string;
@@ -47,8 +51,8 @@ export class TemporalAdapterService {
   }
 
   async deleteMemory(input: { businessId: string; memoryId: string }) {
-    // TemporalFlowMemoryService does not expose deletion; return a no-op shape.
-    return { deleted: false, memoryId: input.memoryId };
+    const deleted = await this.temporal.deleteMemory(input.businessId, input.memoryId);
+    return { deleted, memoryId: input.memoryId };
   }
 
   async updateMemory(input: {
@@ -57,21 +61,10 @@ export class TemporalAdapterService {
     value?: Record<string, unknown>;
     importance?: string;
   }) {
-    const memories = await this.temporal.findMany(input.businessId, { entityId: input.memoryId });
-    const existing = memories[0];
-    if (!existing) {
-      throw new NotFoundException('Memory not found');
-    }
-    return this.temporal.createMemory({
-      businessId: input.businessId,
-      entityType: existing.entityType as TemporalFlowMemoryEntityType,
-      entityId: existing.entityId ?? undefined,
-      type: existing.type as TemporalFlowMemoryType,
-      content: input.value ? JSON.stringify(input.value) : existing.content,
-      sourceModule: existing.sourceModule,
-      sourceEventIds: existing.sourceEventIds,
-      metadata: existing.metadata as Record<string, unknown> | undefined,
-      confidence: input.importance === 'high' ? 0.9 : input.importance === 'low' ? 0.3 : existing.confidence,
+    const confidence = input.importance === 'high' ? 0.9 : input.importance === 'low' ? 0.3 : undefined;
+    return this.temporal.updateMemory(input.memoryId, {
+      content: input.value ? JSON.stringify(input.value) : undefined,
+      confidence,
     });
   }
 
@@ -80,21 +73,18 @@ export class TemporalAdapterService {
     memoryId: string;
     tags: string[];
   }) {
-    const memories = await this.temporal.findMany(input.businessId, { entityId: input.memoryId });
-    const existing = memories[0];
+    const memory = await this.temporal.findMany(input.businessId, { entityId: input.memoryId });
+    const existing = memory[0];
     if (!existing) {
       throw new NotFoundException('Memory not found');
     }
-    return this.temporal.createMemory({
-      businessId: input.businessId,
-      entityType: existing.entityType as TemporalFlowMemoryEntityType,
-      entityId: existing.entityId ?? undefined,
-      type: existing.type as TemporalFlowMemoryType,
-      content: existing.content,
-      sourceModule: existing.sourceModule,
-      sourceEventIds: Array.from(new Set([...existing.sourceEventIds, ...input.tags])),
-      metadata: existing.metadata as Record<string, unknown> | undefined,
-      confidence: existing.confidence,
+    const existingTags = Array.isArray(existing.sourceEventIds) ? existing.sourceEventIds : [];
+    return this.temporal.updateMemory(input.memoryId, {
+      sourceEventIds: Array.from(new Set([...existingTags, ...input.tags])),
+      metadata: {
+        ...(existing.metadata as Record<string, unknown> | undefined),
+        tags: Array.from(new Set([...existingTags, ...input.tags])),
+      },
     });
   }
 
@@ -103,17 +93,37 @@ export class TemporalAdapterService {
     keys: string[];
     summaryKey: string;
   }) {
-    const all: Array<unknown> = [];
+    const contents: string[] = [];
     for (const key of input.keys) {
       const found = await this.recallMemory({ businessId: input.businessId, key });
-      if (found) all.push(found);
+      if (found && (found as { content?: string }).content) {
+        contents.push(String((found as { content: string }).content));
+      }
     }
+    const merged = contents.length
+      ? `Consolidated memories:\n${contents.map((c, i) => `${i + 1}. ${c}`).join('\n')}`
+      : 'No memories found to consolidate.';
     return this.storeMemory({
       businessId: input.businessId,
       key: input.summaryKey,
-      value: { consolidatedFrom: input.keys, count: all.length },
+      value: { consolidatedFrom: input.keys, count: contents.length, summary: merged },
       importance: 'medium',
     });
+  }
+
+  async searchMemories(input: { businessId: string; query: string; limit?: number }) {
+    return this.temporal.searchMemory(input.businessId, input.query, input.limit ?? 10);
+  }
+
+  async getTimeline(input: { businessId: string; from?: string; to?: string; limit?: number }) {
+    if (input.from && input.to) {
+      return this.flow.calendarRange(input.businessId, input.from, input.to);
+    }
+    return this.flow.list(input.businessId, { limit: input.limit ?? 50 });
+  }
+
+  async getMemoryStats(input: { businessId: string }) {
+    return this.temporal.getStats(input.businessId);
   }
 
   async getRecentMemories(input: { businessId: string; limit?: number }) {
@@ -142,11 +152,11 @@ export class TemporalAdapterService {
         return connectorOk(command, start, memory);
       }
       case 'delete_memory': {
-        await this.deleteMemory({
+        const deletion = await this.deleteMemory({
           businessId: command.businessId,
           memoryId: command.parameters.memoryId as string,
         });
-        return connectorOk(command, start, { deleted: true });
+        return connectorOk(command, start, deletion);
       }
       case 'update_memory': {
         const updated = await this.updateMemory({
@@ -172,6 +182,34 @@ export class TemporalAdapterService {
           summaryKey: command.parameters.summaryKey as string,
         });
         return connectorOk(command, start, consolidated);
+      }
+      case 'search_memories': {
+        const found = await this.searchMemories({
+          businessId: command.businessId,
+          query: command.parameters.query as string,
+          limit: (command.parameters.limit as number) || 10,
+        });
+        return connectorOk(command, start, found);
+      }
+      case 'get_timeline': {
+        const timeline = await this.getTimeline({
+          businessId: command.businessId,
+          from: command.parameters.from as string,
+          to: command.parameters.to as string,
+          limit: (command.parameters.limit as number) || 50,
+        });
+        return connectorOk(command, start, timeline);
+      }
+      case 'get_memory_stats': {
+        const stats = await this.getMemoryStats({ businessId: command.businessId });
+        return connectorOk(command, start, stats);
+      }
+      case 'get_recent_memories': {
+        const recent = await this.getRecentMemories({
+          businessId: command.businessId,
+          limit: (command.parameters.limit as number) || 10,
+        });
+        return connectorOk(command, start, recent);
       }
       default:
         return connectorFail(command, start, `Unknown temporal action: ${command.action}`);

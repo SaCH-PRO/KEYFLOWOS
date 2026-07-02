@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Sparkles, Send, RotateCcw, Loader2, CheckCircle2, Bot, User, ArrowRight } from "lucide-react";
 import { apiPostSimple as apiPost } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
+import { useTts, SpeakButton } from "@/components/tts";
 import { toast } from "sonner";
 import type { BlueprintData, BlueprintSectionKey } from "@/lib/blueprint-types";
 
@@ -17,6 +18,7 @@ export interface OnboardingChatResult {
   reply: string;
   blueprint: BlueprintData;
   completeness: number;
+  threePillarMinimumMet: boolean;
   confidenceScores: Record<string, number>;
   extracted: Array<{
     section: BlueprintSectionKey;
@@ -75,6 +77,7 @@ export function BlueprintOnboardingChat({
   className = "",
 }: BlueprintOnboardingChatProps) {
   const businessId = useBusinessId(propBusinessId);
+  const { engine, state: ttsState } = useTts();
   const [messages, setMessages] = useState<OnboardingMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(() => !!businessId);
@@ -87,6 +90,19 @@ export function BlueprintOnboardingChat({
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
+
+  // Auto-speak the latest assistant message
+  useEffect(() => {
+    const last = messages[messages.length - 1];
+    if (last?.role === "assistant" && businessId && ttsState.autoSpeak) {
+      engine.speak(last.content, businessId);
+    }
+  }, [messages, businessId, engine, ttsState.autoSpeak]);
+
+  // Stop speaking when the component unmounts
+  useEffect(() => {
+    return () => engine.cancel();
+  }, [engine]);
 
   useEffect(() => {
     if (!businessId) return;
@@ -137,7 +153,7 @@ export function BlueprintOnboardingChat({
     setCompleteness(data.completeness);
     setCurrentSection(data.nextSection);
 
-    if (data.completeness >= 80 && onComplete) {
+    if (data.threePillarMinimumMet && onComplete) {
       onComplete();
     }
   }, [businessId, input, loading, messages, onComplete]);
@@ -250,7 +266,10 @@ export function BlueprintOnboardingChat({
                     border: isUser ? undefined : "1px solid hsl(var(--kf-border) / 0.3)",
                   }}
                 >
-                  {msg.content}
+                  <div className="flex items-start justify-between gap-2">
+                    <span>{msg.content}</span>
+                    {!isUser && <SpeakButton text={msg.content} businessId={businessId} />}
+                  </div>
                 </div>
               </motion.div>
             );

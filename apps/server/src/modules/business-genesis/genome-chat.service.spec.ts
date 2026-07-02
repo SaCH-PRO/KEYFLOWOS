@@ -4,6 +4,8 @@ import type { PrismaService } from '../../core/prisma/prisma.service';
 import type { BlueprintService } from '../blueprint/blueprint.service';
 import type { ModelGatewayService } from '../ai/model-gateway.service';
 import type { GenomeIntegrityResult } from '../blueprint/blueprint.types';
+import type { GenomeFactService } from '../business-genome/key-genome/genome-fact.service';
+import type { GenomeEvidenceService } from '../business-genome/key-genome/genome-evidence.service';
 
 function makeService(responseContent: string) {
   const createdMessages: Array<{
@@ -85,8 +87,22 @@ function makeService(responseContent: string) {
     }),
   } as unknown as ModelGatewayService;
 
-  const service = new GenomeChatService(prisma, blueprint, gateway);
-  return { service, prisma, blueprint, gateway, createdMessages };
+  const genomeFact = {
+    upsertFact: vi.fn().mockImplementation((input) =>
+      Promise.resolve({
+        id: `fact_${input.section}_${input.field}`,
+        ...input,
+        score: {},
+      }),
+    ),
+  } as unknown as GenomeFactService;
+
+  const genomeEvidence = {
+    attachEvidence: vi.fn().mockResolvedValue({ id: 'ev_1' }),
+  } as unknown as GenomeEvidenceService;
+
+  const service = new GenomeChatService(prisma, blueprint, gateway, genomeFact, genomeEvidence);
+  return { service, prisma, blueprint, gateway, genomeFact, genomeEvidence, createdMessages };
 }
 
 describe('GenomeChatService', () => {
@@ -162,6 +178,34 @@ not valid json
       }),
     );
     expect(result.genomeIntegrity).toBe(42);
+  });
+
+  it('applyUpdates creates evidence-backed GenomeFacts for each field', async () => {
+    const { service, genomeFact, genomeEvidence } = makeService('');
+    await service.applyUpdates('biz_1', 'user_1', 'financial', {
+      monthlyFixedCosts: 3000,
+    });
+
+    expect(genomeFact.upsertFact).toHaveBeenCalledWith(
+      expect.objectContaining({
+        businessId: 'biz_1',
+        section: 'FINANCIAL',
+        domain: 'financial',
+        field: 'monthlyFixedCosts',
+        sourceModule: 'genome_chat',
+        sourceType: 'GENOME_CHAT',
+        sourceEntityType: 'GenomeChatMessage',
+        verificationStatus: 'USER_VERIFIED',
+      }),
+    );
+    expect(genomeEvidence.attachEvidence).toHaveBeenCalledWith(
+      expect.objectContaining({
+        businessId: 'biz_1',
+        sourceModule: 'genome_chat',
+        sourceEntityType: 'GenomeChatMessage',
+        evidenceStrength: 0.85,
+      }),
+    );
   });
 
   it('persists user and assistant messages', async () => {
