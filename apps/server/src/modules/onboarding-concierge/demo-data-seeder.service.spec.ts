@@ -6,16 +6,23 @@ function makeService(initial: {
   existingDemoContact?: { id: string } | null;
   existingInvoice?: { id: string; invoiceNumber: string } | null;
   latestInvoice?: { invoiceNumber: string } | null;
+  businessCurrency?: string;
 } = {}) {
   const createdContact = { id: 'contact_demo_1' };
   const createdInvoice = { id: 'invoice_demo_1', invoiceNumber: 'DEMO-001' };
 
   const tx = {
     contact: {
+      findFirst: vi.fn().mockResolvedValue(initial.existingDemoContact ?? null),
       create: vi.fn().mockResolvedValue(createdContact),
     },
+    business: {
+      findUnique: vi.fn().mockResolvedValue({ currency: initial.businessCurrency ?? 'TTD' }),
+    },
     invoice: {
-      findFirst: vi.fn().mockResolvedValue(initial.latestInvoice ?? null),
+      findFirst: vi.fn().mockImplementation(() =>
+        Promise.resolve(initial.existingInvoice ?? initial.latestInvoice ?? null),
+      ),
       create: vi.fn().mockResolvedValue(createdInvoice),
     },
   };
@@ -23,12 +30,6 @@ function makeService(initial: {
   const prisma = {
     client: {
       $transaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>) => cb(tx)),
-      contact: {
-        findFirst: vi.fn().mockResolvedValue(initial.existingDemoContact ?? null),
-      },
-      invoice: {
-        findFirst: vi.fn().mockResolvedValue(initial.existingInvoice ?? null),
-      },
     },
   } as unknown as PrismaService;
 
@@ -37,8 +38,8 @@ function makeService(initial: {
 }
 
 describe('DemoDataSeederService', () => {
-  it('creates a sample contact and invoice', async () => {
-    const { service, tx, createdContact, createdInvoice } = makeService();
+  it('creates a sample contact and DRAFT invoice in business currency', async () => {
+    const { service, tx, createdContact, createdInvoice } = makeService({ businessCurrency: 'USD' });
 
     const result = await service.seedDemoData('biz_1');
 
@@ -65,9 +66,20 @@ describe('DemoDataSeederService', () => {
           businessId: 'biz_1',
           contactId: createdContact.id,
           invoiceNumber: 'DEMO-001',
-          currency: 'TTD',
+          status: 'DRAFT',
+          currency: 'USD',
           total: 500,
         }),
+      }),
+    );
+  });
+
+  it('falls back to TTD when business currency is unavailable', async () => {
+    const { service, tx } = makeService({ businessCurrency: '' });
+    await service.seedDemoData('biz_1');
+    expect(tx.invoice.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ currency: 'TTD' }),
       }),
     );
   });
@@ -75,7 +87,7 @@ describe('DemoDataSeederService', () => {
   it('is idempotent and returns existing demo data', async () => {
     const existingContact = { id: 'contact_existing' };
     const existingInvoice = { id: 'invoice_existing', invoiceNumber: 'DEMO-007' };
-    const { service, tx, prisma } = makeService({
+    const { service, tx } = makeService({
       existingDemoContact: existingContact,
       existingInvoice,
     });
@@ -87,7 +99,7 @@ describe('DemoDataSeederService', () => {
       invoiceId: existingInvoice.id,
       invoiceNumber: existingInvoice.invoiceNumber,
     });
-    expect(prisma.client.contact.findFirst).toHaveBeenCalledWith({
+    expect(tx.contact.findFirst).toHaveBeenCalledWith({
       where: { businessId: 'biz_1', source: 'demo' },
       select: { id: true },
     });

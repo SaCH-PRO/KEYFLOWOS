@@ -74,8 +74,12 @@ describe('OnboardingConciergeController', () => {
     expect(result.step).toBe('template');
   });
 
-  it('POST onboarding-step rejects missing step', async () => {
-    await expect(controller.saveOnboardingStep('biz_1', { step: '' as any })).rejects.toThrow('step is required');
+  it('POST onboarding-step validates through DTO and delegates to state service', async () => {
+    // The controller now relies on the global ValidationPipe for shape validation.
+    // Unit-level validation behavior is exercised in onboarding-state.service.spec.ts.
+    const result = await controller.saveOnboardingStep('biz_1', { step: 'genesis' } as any);
+    expect(stateMock.saveStep).toHaveBeenCalledWith('biz_1', 'genesis');
+    expect(result.step).toBe('genesis');
   });
 
   it('POST seed-demo triggers demo data seeding', async () => {

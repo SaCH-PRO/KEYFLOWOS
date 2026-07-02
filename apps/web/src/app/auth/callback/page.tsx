@@ -11,6 +11,7 @@ import {
   getStoredBusinessId,
 } from "@/lib/workspace";
 import { apiPatch } from "@/lib/api";
+import { clearOAuthState, getOAuthState } from "@/lib/oauth-state";
 
 /**
  * Derive (firstName, lastName) from a Supabase OAuth user_metadata payload.
@@ -79,6 +80,13 @@ function AuthCallbackInner() {
         }
         if (providerError) {
           throw new Error(providerError);
+        }
+
+        const returnedState = searchParams.get("state");
+        const expectedState = getOAuthState();
+        clearOAuthState();
+        if (!returnedState || returnedState !== expectedState) {
+          throw new Error("Invalid or missing OAuth state. Please try signing in again.");
         }
 
         if (!accessToken) {

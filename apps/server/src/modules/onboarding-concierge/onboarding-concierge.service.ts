@@ -381,7 +381,10 @@ export class OnboardingConciergeService {
       setBusinessHours = true,
       setPaymentMethods = true,
       configureStorefront = true,
+      customBusinessName,
     } = options;
+
+    const normalizedBusinessName = customBusinessName?.trim();
 
     const results: Partial<AutoConfigureResult> = {};
 
@@ -441,6 +444,10 @@ export class OnboardingConciergeService {
       const businessUpdate: Prisma.BusinessUpdateInput = {
         metaData: metaUpdates as Prisma.InputJsonValue,
       };
+
+      if (normalizedBusinessName) {
+        businessUpdate.name = normalizedBusinessName;
+      }
 
       if (configureStorefront && !business?.storeEnabled) {
         businessUpdate.storeEnabled = true;

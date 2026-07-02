@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Filter, RefreshCw, Loader2 } from "lucide-react";
+import { Filter, RefreshCw, Loader2, Inbox } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
 import type { CommandItem } from "@/lib/api/command";
 import { CommandCard } from "./command-card";
 
@@ -82,12 +83,30 @@ export function CommandQueue({ items, total, loading, onRefresh, selectedIds, on
       </div>
 
       {filtered.length === 0 ? (
-        <div className="text-center py-8">
-          <p className="kf-text-body font-medium">No command items</p>
-          <p className="kf-text-caption mt-1" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
-            {filter === "ALL" ? "Your queue is clear. Great work!" : `No items in ${filter} category.`}
-          </p>
-        </div>
+        <EmptyState
+          icon={Inbox}
+          title="No command items"
+          description={
+            filter === "ALL" && statusFilter === "ALL"
+              ? "Your queue is clear. Great work!"
+              : `No items match the current filters.`
+          }
+          actionLabel={onRefresh ? "Refresh queue" : undefined}
+          actionIcon={RefreshCw}
+          onAction={onRefresh}
+          secondaryAction={
+            filter !== "ALL" || statusFilter !== "ALL"
+              ? {
+                  label: "Clear filters",
+                  onClick: () => {
+                    setFilter("ALL");
+                    setStatusFilter("ALL");
+                  },
+                }
+              : undefined
+          }
+          variant="inline"
+        />
       ) : (
         <div className="space-y-2">
           {filtered.map((item) => (

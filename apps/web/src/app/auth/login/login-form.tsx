@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { bootstrapIdentity, identityLogin, identityResendVerification } from "@/lib/client";
 import { setStoredToken, setStoredBusinessId, setStoredRefreshToken } from "@/lib/workspace";
+import { generateOAuthState, setOAuthState } from "@/lib/oauth-state";
 
 const SAFE_REDIRECT_PREFIX = "/app";
 
@@ -43,7 +44,9 @@ function signInWithGoogle() {
     ? window.location.origin
     : SITE_URL;
   const redirectTo = `${origin.replace(/\/$/, "")}/auth/callback`;
-  window.location.href = `${SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirectTo)}`;
+  const state = generateOAuthState();
+  setOAuthState(state);
+  window.location.href = `${SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirectTo)}&state=${encodeURIComponent(state)}`;
 }
 
 async function supabaseResetPassword(email: string) {

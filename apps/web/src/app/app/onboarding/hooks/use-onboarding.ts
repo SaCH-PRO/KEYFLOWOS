@@ -12,6 +12,7 @@ import { getStoredBusinessId } from "@/lib/workspace";
 const STEP_ORDER: OnboardingStep[] = [
   "welcome",
   "intake",
+  "genesis",
   "template",
   "configure",
   "genome",

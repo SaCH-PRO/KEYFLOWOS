@@ -23,7 +23,11 @@ import { LegalDisclaimerModal } from "./LegalDisclaimerModal";
 
 type Step = "idea" | "review" | "questions" | "dashboard";
 
-export function GenesisConversation() {
+interface GenesisConversationProps {
+  onComplete?: () => void;
+}
+
+export function GenesisConversation({ onComplete }: GenesisConversationProps) {
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [step, setStep] = useState<Step>("idea");
   const [loading, setLoading] = useState(false);
@@ -298,7 +302,16 @@ export function GenesisConversation() {
               actionPlan={actionPlan}
               loadingActionPlan={loadingActionPlan}
             />
-            <div className="flex justify-center mt-6">
+            <div className="flex flex-col items-center justify-center gap-3 mt-6">
+              {onComplete && (
+                <button
+                  onClick={onComplete}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium bg-[hsl(var(--kf-accent1))] text-[hsl(var(--kf-accent1-foreground))] hover:brightness-110 transition-all"
+                >
+                  Continue onboarding
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+              )}
               <button
                 onClick={handleRetake}
                 className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors"

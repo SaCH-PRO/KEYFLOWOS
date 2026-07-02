@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { bootstrapIdentity, identitySignup, identityResendVerification } from "@/lib/client";
 import { setStoredToken, setStoredRefreshToken, setStoredBusinessId } from "@/lib/workspace";
+import { generateOAuthState, setOAuthState } from "@/lib/oauth-state";
 
 const API_BASE = getApiBase();
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -47,7 +48,9 @@ function signUpWithGoogle() {
   if (ref && typeof window !== "undefined") {
     window.localStorage.setItem("kf_referral_code", ref);
   }
-  window.location.href = `${SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirectTo)}`;
+  const state = generateOAuthState();
+  setOAuthState(state);
+  window.location.href = `${SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirectTo)}&state=${encodeURIComponent(state)}`;
 }
 
 async function isUsernameAvailable(username: string): Promise<boolean> {

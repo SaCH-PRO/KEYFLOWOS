@@ -4,7 +4,9 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import type { LucideIcon } from "lucide-react";
-import { LayoutDashboard, Loader2, AlertTriangle, RefreshCw, Bot, BrainCircuit, Clock, Inbox, Target } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { LayoutDashboard, Loader2, AlertTriangle, RefreshCw, Bot, BrainCircuit, Clock, Inbox, Target, TrendingUp, ShieldCheck, Zap } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
 import { SectionCard } from "@/components/ui/section-card";
 import { getStoredBusinessId } from "@/lib/workspace";
@@ -33,8 +35,10 @@ import { CommandModuleReadinessPanel } from "./components/command-module-readine
 import { CommandConstitutionCard } from "./components/command-constitution-card";
 import { CrossDomainPanel } from "./components/cross-domain-panel";
 import { CommandGenomeOutcomesCard } from "./components/command-genome-outcomes-card";
+import { NudgesWidget } from "./components/nudges-widget";
 
 export default function CommandCenterPage() {
+  const router = useRouter();
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [snapshot, setSnapshot] = useState<BusinessCommandCenterSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
@@ -206,7 +210,15 @@ export default function CommandCenterPage() {
             <SectionCard title={`Top Priorities (${snapshot.topPriorities.length})`} icon={LayoutDashboard} noPadding compact>
               <div className="p-3 space-y-2">
                 {snapshot.topPriorities.length === 0 && (
-                  <p className="text-sm text-muted-foreground">No top priorities right now.</p>
+                  <EmptyState
+                    icon={Target}
+                    title="No top priorities right now"
+                    description="KEY hasn't surfaced anything urgent. Ask KEY to scan for priorities."
+                    actionLabel="Ask KEY for priorities"
+                    actionIcon={Bot}
+                    onAction={() => router.push("/app/key-modes")}
+                    variant="compact"
+                  />
                 )}
                 {snapshot.topPriorities.map((item, index) => (
                   <CommandItemCard key={item.id} item={item} index={index} />
@@ -217,7 +229,13 @@ export default function CommandCenterPage() {
             <SectionCard title={`Pending Approvals (${snapshot.pendingApprovals.length})`} icon={AlertTriangle} noPadding compact>
               <div className="p-3 space-y-2">
                 {snapshot.pendingApprovals.length === 0 && (
-                  <p className="text-sm text-muted-foreground">No pending approvals.</p>
+                  <EmptyState
+                    icon={Inbox}
+                    title="No pending approvals"
+                    description="You're all caught up. Approvals appear when KEY recommends actions that need your sign-off."
+                    variant="compact"
+                    tip="Check back after KEY runs its next business scan."
+                  />
                 )}
                 {snapshot.pendingApprovals.map((item, index) => (
                   <CommandItemCard key={item.id} item={item} index={index} compact />
@@ -228,7 +246,15 @@ export default function CommandCenterPage() {
             <SectionCard title={`Urgent Items (${snapshot.urgentItems.length})`} icon={AlertTriangle} noPadding compact>
               <div className="p-3 space-y-2">
                 {snapshot.urgentItems.length === 0 && (
-                  <p className="text-sm text-muted-foreground">No urgent Temporal Flow items.</p>
+                  <EmptyState
+                    icon={Clock}
+                    title="No urgent Temporal Flow items"
+                    description="Your calendar and deadlines look clear."
+                    actionLabel="Go to Temporal Flow"
+                    actionIcon={BrainCircuit}
+                    onAction={() => router.push("/app/temporal-flow")}
+                    variant="compact"
+                  />
                 )}
                 {snapshot.urgentItems.map((item, index) => (
                   <CommandItemCard key={item.id} item={item} index={index} compact />
@@ -238,9 +264,21 @@ export default function CommandCenterPage() {
           </div>
 
           <div className="space-y-5">
+            <NudgesWidget businessId={businessId} />
+
             <SectionCard title="Risks" icon={AlertTriangle} noPadding compact>
               <div className="p-3 space-y-2">
-                {snapshot.risks.length === 0 && <p className="text-sm text-muted-foreground">No active risks.</p>}
+                {snapshot.risks.length === 0 && (
+                  <EmptyState
+                    icon={AlertTriangle}
+                    title="No active risks"
+                    description="KEY isn't tracking any risks right now. Populate your Genome to surface them."
+                    actionLabel="Populate Genome"
+                    actionIcon={ShieldCheck}
+                    onAction={() => router.push("/app/profile?tab=business-genome")}
+                    variant="compact"
+                  />
+                )}
                 {snapshot.risks.slice(0, 5).map((item, index) => (
                   <CommandItemCard key={item.id} item={item} index={index} compact />
                 ))}
@@ -250,7 +288,15 @@ export default function CommandCenterPage() {
             <SectionCard title="Opportunities" icon={LayoutDashboard} noPadding compact>
               <div className="p-3 space-y-2">
                 {snapshot.opportunities.length === 0 && (
-                  <p className="text-sm text-muted-foreground">No opportunities detected.</p>
+                  <EmptyState
+                    icon={TrendingUp}
+                    title="No opportunities detected"
+                    description="KEY hasn't found growth opportunities yet. A quick scan can change that."
+                    actionLabel="Ask KEY for opportunities"
+                    actionIcon={Zap}
+                    onAction={() => router.push("/app/key-modes")}
+                    variant="compact"
+                  />
                 )}
                 {snapshot.opportunities.slice(0, 5).map((item, index) => (
                   <CommandItemCard key={item.id} item={item} index={index} compact />

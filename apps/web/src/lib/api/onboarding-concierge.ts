@@ -3,6 +3,7 @@ import { apiGet, apiPostSimple as apiPost } from "@/lib/api";
 export type OnboardingStep =
   | "welcome"
   | "intake"
+  | "genesis"
   | "template"
   | "configure"
   | "genome"
@@ -134,6 +135,32 @@ export function seedDemoData(businessId: string) {
   return apiPost<DemoSeedResult>(
     `/onboarding-concierge/businesses/${businessId}/seed-demo`,
     {},
+  );
+}
+
+export interface NudgeItem {
+  id: string;
+  type: string;
+  title: string;
+  body: string;
+  ctaLabel: string;
+  ctaHref: string;
+  snoozable: boolean;
+}
+
+export interface SnoozeNudgeResult {
+  snoozed: boolean;
+  until: string;
+}
+
+export function fetchConciergeNudges(businessId: string) {
+  return apiGet<NudgeItem[]>(`/onboarding-concierge/businesses/${businessId}/nudges`);
+}
+
+export function snoozeConciergeNudge(businessId: string, nudgeId: string, days?: number) {
+  return apiPost<SnoozeNudgeResult>(
+    `/onboarding-concierge/businesses/${businessId}/nudges/${nudgeId}/snooze`,
+    { days },
   );
 }
 

@@ -1,4 +1,5 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 export interface DemoSeedResult {
@@ -21,93 +22,105 @@ export class DemoDataSeederService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   async seedDemoData(businessId: string): Promise<DemoSeedResult> {
-    const existing = await this.findExistingDemoContact(businessId);
-    if (existing) {
-      this.logger.debug(`Demo data already seeded for business ${businessId}`);
-      return existing;
+    const maxAttempts = 3;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return await this.prisma.client.$transaction(async (tx) => {
+          const existing = await tx.contact.findFirst({
+            where: { businessId, source: 'demo' },
+            select: { id: true },
+          });
+
+          if (existing) {
+            const invoice = await tx.invoice.findFirst({
+              where: { businessId, contactId: existing.id },
+              orderBy: { createdAt: 'desc' },
+              select: { id: true, invoiceNumber: true },
+            });
+
+            return {
+              contactId: existing.id,
+              invoiceId: invoice?.id ?? '',
+              invoiceNumber: invoice?.invoiceNumber ?? 'DEMO-000',
+            };
+          }
+
+          const business = await tx.business.findUnique({
+            where: { id: businessId },
+            select: { currency: true },
+          });
+          const currency = business?.currency || 'TTD';
+
+          const contact = await tx.contact.create({
+            data: {
+              businessId,
+              firstName: 'Sample',
+              lastName: 'Client',
+              displayName: 'Sample Client (demo)',
+              email: 'sample-client@example.com',
+              emailNormalized: 'sample-client@example.com',
+              status: 'LEAD',
+              source: 'demo',
+              lifecycleStage: 'lead',
+              notesInternal: 'This is a sample contact created during onboarding. You can edit or delete it anytime.',
+            },
+          });
+
+          const invoiceNumber = await this.generateInvoiceNumber(tx, businessId);
+          const subtotal = 500;
+          const taxRate = 0;
+          const taxAmount = 0;
+          const total = subtotal + taxAmount;
+
+          const invoice = await tx.invoice.create({
+            data: {
+              businessId,
+              contactId: contact.id,
+              invoiceNumber,
+              status: 'DRAFT',
+              subtotal,
+              taxRate,
+              taxAmount,
+              total,
+              currency,
+              issueDate: new Date(),
+              notes: 'This is a sample invoice created during onboarding so you can see how invoicing looks. You can delete it anytime.',
+              items: {
+                create: [
+                  {
+                    description: 'Sample service / product',
+                    quantity: 1,
+                    unitPrice: subtotal,
+                    total: subtotal,
+                  },
+                ],
+              },
+            },
+          });
+
+          this.logger.log(`Seeded demo data for business ${businessId}: contact=${contact.id}, invoice=${invoice.id}`);
+
+          return {
+            contactId: contact.id,
+            invoiceId: invoice.id,
+            invoiceNumber,
+          };
+        });
+      } catch (err) {
+        if (this.isUniqueViolation(err) && attempt < maxAttempts) {
+          this.logger.warn(`Demo seed race detected for ${businessId}, retrying (${attempt}/${maxAttempts})`);
+          continue;
+        }
+        throw err;
+      }
     }
 
-    return this.prisma.client.$transaction(async (tx) => {
-      const contact = await tx.contact.create({
-        data: {
-          businessId,
-          firstName: 'Sample',
-          lastName: 'Client',
-          displayName: 'Sample Client (demo)',
-          email: 'sample-client@example.com',
-          emailNormalized: 'sample-client@example.com',
-          status: 'LEAD',
-          source: 'demo',
-          lifecycleStage: 'lead',
-          notesInternal: 'This is a sample contact created during onboarding. You can edit or delete it anytime.',
-        },
-      });
-
-      const dueDate = new Date();
-      dueDate.setDate(dueDate.getDate() + 14);
-
-      const invoiceNumber = await this.generateInvoiceNumber(tx, businessId);
-      const subtotal = 500;
-      const taxRate = 0;
-      const taxAmount = 0;
-      const total = subtotal + taxAmount;
-
-      const invoice = await tx.invoice.create({
-        data: {
-          businessId,
-          contactId: contact.id,
-          invoiceNumber,
-          status: 'SENT',
-          subtotal,
-          taxRate,
-          taxAmount,
-          total,
-          currency: 'TTD',
-          issueDate: new Date(),
-          dueDate,
-          sentAt: new Date(),
-          notes: 'This is a sample invoice created during onboarding so you can see how invoicing looks. You can delete it anytime.',
-          items: {
-            create: [
-              {
-                description: 'Sample service / product',
-                quantity: 1,
-                unitPrice: subtotal,
-                total: subtotal,
-              },
-            ],
-          },
-        },
-      });
-
-      this.logger.log(`Seeded demo data for business ${businessId}: contact=${contact.id}, invoice=${invoice.id}`);
-
-      return {
-        contactId: contact.id,
-        invoiceId: invoice.id,
-        invoiceNumber,
-      };
-    });
+    throw new Error(`Failed to seed demo data for business ${businessId} after ${maxAttempts} attempts`);
   }
 
-  private async findExistingDemoContact(businessId: string): Promise<DemoSeedResult | null> {
-    const contact = await this.prisma.client.contact.findFirst({
-      where: { businessId, source: 'demo' },
-      select: { id: true },
-    });
-    if (!contact) return null;
-
-    const invoice = await this.prisma.client.invoice.findFirst({
-      where: { businessId, contactId: contact.id },
-      select: { id: true, invoiceNumber: true },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    return {
-      contactId: contact.id,
-      invoiceId: invoice?.id ?? '',
-      invoiceNumber: invoice?.invoiceNumber ?? 'DEMO-000',
-    };
+  private isUniqueViolation(err: unknown): boolean {
+    return err instanceof Error && err.message.includes('Unique constraint failed');
   }
 
   private async generateInvoiceNumber(

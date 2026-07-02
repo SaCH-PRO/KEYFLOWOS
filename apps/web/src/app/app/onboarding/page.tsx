@@ -8,6 +8,7 @@ import { IntakeChatStep } from "./components/intake-chat-step";
 import { TemplatePickerStep } from "./components/template-picker-step";
 import { AutoConfigureReviewStep } from "./components/auto-configure-review-step";
 import { GenomeChatStep } from "./components/genome-chat-step";
+import { GenesisConversation } from "./components/GenesisConversation";
 import { CompletionStep } from "./components/completion-step";
 
 export default function OnboardingPage() {
@@ -43,7 +44,8 @@ export default function OnboardingPage() {
   return (
     <OnboardingShell step={step}>
       {step === "welcome" && <WelcomeStep onStart={() => goToStep("intake")} />}
-      {step === "intake" && <IntakeChatStep onComplete={() => goToStep("template")} />}
+      {step === "intake" && <IntakeChatStep onComplete={() => goToStep("genesis")} />}
+      {step === "genesis" && <GenesisConversation onComplete={() => goToStep("template")} />}
       {step === "template" && <TemplatePickerStep onComplete={() => goToStep("configure")} />}
       {step === "configure" && <AutoConfigureReviewStep onComplete={() => goToStep("genome")} />}
       {step === "genome" && <GenomeChatStep onComplete={() => goToStep("complete")} />}

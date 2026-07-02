@@ -5,6 +5,7 @@ import type { OnboardingStep } from "@/lib/api/onboarding-concierge";
 const STEPS: { id: OnboardingStep; label: string }[] = [
   { id: "welcome", label: "Start" },
   { id: "intake", label: "About you" },
+  { id: "genesis", label: "Genesis" },
   { id: "template", label: "Template" },
   { id: "configure", label: "Configure" },
   { id: "genome", label: "Genome" },
