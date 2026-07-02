@@ -24,6 +24,7 @@ export function TemplatePickerStep({ onComplete }: TemplatePickerStepProps) {
   const [preview, setPreview] = useState<TemplatePreview | null>(null);
   const [loading, setLoading] = useState(true);
   const [configuring, setConfiguring] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!businessId) return;
@@ -46,13 +47,28 @@ export function TemplatePickerStep({ onComplete }: TemplatePickerStepProps) {
   const handleConfirm = async () => {
     if (!businessId || !selected) return;
     setConfiguring(true);
-    await autoConfigureFromTemplate(businessId, selected, {
+    setError(null);
+
+    if (selected === "skip") {
+      setConfiguring(false);
+      onComplete();
+      return;
+    }
+
+    const { data, error: apiError } = await autoConfigureFromTemplate(businessId, selected, {
       createProducts: true,
       setBusinessHours: true,
       setPaymentMethods: true,
       configureStorefront: true,
     });
+
     setConfiguring(false);
+
+    if (apiError || !data) {
+      setError(apiError ?? "Template configuration failed. Please try again or skip the template.");
+      return;
+    }
+
     onComplete();
   };
 
@@ -108,6 +124,12 @@ export function TemplatePickerStep({ onComplete }: TemplatePickerStepProps) {
           </div>
         </button>
       </div>
+
+      {error && (
+        <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+          {error}
+        </div>
+      )}
 
       {preview && selected !== "skip" && (
         <div className="rounded-xl border border-border/40 bg-card/40 p-4 space-y-3">

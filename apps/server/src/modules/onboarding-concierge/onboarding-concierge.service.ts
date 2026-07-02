@@ -1,4 +1,4 @@
-import { Injectable, Inject, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Inject, Logger, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
@@ -8,6 +8,7 @@ import { DemoDataSeederService } from './demo-data-seeder.service';
 import type {
   BlueprintData,
   BlueprintRegistrationProfile,
+  DnaSectionKey,
 } from '../blueprint/blueprint.types';
 import { matchIndustryTemplate, getTemplateById, IndustryTemplate, INDUSTRY_TEMPLATES } from './industry-templates';
 
@@ -554,10 +555,12 @@ export class OnboardingConciergeService {
       });
 
       const parsed = this.parseAiResponse(result.content, setupStatus);
-      // Persist extracted intake answers in the background so the chat stays snappy.
-      this.persistIntakeAnswers(businessId, userMessage, parsed.extracted || {}, detection).catch((err) => {
+      // Persist extracted intake answers synchronously so nothing is lost.
+      try {
+        await this.persistIntakeAnswers(businessId, userMessage, parsed.extracted || {}, detection);
+      } catch (err) {
         this.logger.warn(`Intake persistence failed: ${(err as Error).message}`);
-      });
+      }
       return parsed;
     } catch (error: any) {
       this.logger.error(`Concierge AI error: ${(error as Error).message}`);
@@ -1044,6 +1047,18 @@ EXTRACTED: archetype=service_provider`;
   }
 
   async markOnboardingComplete(businessId: string) {
+    const integrity = await this.blueprint.calculateGenomeIntegrity(businessId);
+    if (!integrity.threePillarMinimumMet) {
+      const pillarKeys: DnaSectionKey[] = ['founder', 'business', 'market'];
+      const missingPillars = pillarKeys.filter((key) => integrity.genomeDnaScores[key] < 50);
+      throw new ForbiddenException({
+        code: 'GENOME_GATE_BLOCKED',
+        message: 'Three-Pillar Minimum not met. Complete Founder, Business, and Market DNA before finishing onboarding.',
+        genomeIntegrity: integrity.genomeIntegrity,
+        missingPillars,
+      });
+    }
+
     await this.prisma.client.$transaction(async (tx) => {
       await tx.business.update({
         where: { id: businessId },

@@ -261,7 +261,10 @@ Use null or omit fields when unknown. Keep the summary concrete and actionable.`
     // Compute a non-persistent compliance preview for T&T and other jurisdictions.
     const complianceInput = {
       entityType: previewBlueprint.legalProfile?.recommendedEntityType,
-      hasEmployees: previewBlueprint.registrationProfile?.nisEmployerStatus === 'NOT_STARTED',
+      hasEmployees: (() => {
+        const status = previewBlueprint.registrationProfile?.nisEmployerStatus;
+        return status !== undefined && status !== 'NOT_NEEDED';
+      })(),
       estimatedAnnualRevenue: previewBlueprint.taxProfile?.estimatedAnnualRevenue,
       industry: previewBlueprint.identity.industry,
       regulatedIndustry: previewBlueprint.legalProfile?.regulatedIndustry,
@@ -333,7 +336,10 @@ Use null or omit fields when unknown. Keep the summary concrete and actionable.`
     if (answersAffectCompliance(answers)) {
       const complianceInput = {
         entityType: afterOnboarding.legalProfile?.recommendedEntityType,
-        hasEmployees: afterOnboarding.registrationProfile?.nisEmployerStatus === 'NOT_STARTED',
+        hasEmployees: (() => {
+        const status = afterOnboarding.registrationProfile?.nisEmployerStatus;
+        return status !== undefined && status !== 'NOT_NEEDED';
+      })(),
         estimatedAnnualRevenue: afterOnboarding.taxProfile?.estimatedAnnualRevenue,
         industry: afterOnboarding.identity.industry,
         regulatedIndustry: afterOnboarding.legalProfile?.regulatedIndustry,
