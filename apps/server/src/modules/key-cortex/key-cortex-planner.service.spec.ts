@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { KeyCortexPlannerService } from './key-cortex-planner.service';
 import { PlannerService } from '../ai/planner.service';
+import { AiUsageService } from '../ai/ai-usage.service';
 import { KeyCortexExecutorService } from './key-cortex-executor.service';
 import { KeyCortexSagaService } from './key-cortex-saga.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -83,6 +84,7 @@ describe('KeyCortexPlannerService', () => {
   let planner: PlannerService;
   let executor: KeyCortexExecutorService;
   let saga: KeyCortexSagaService;
+  let aiUsage: AiUsageService;
 
   beforeEach(() => {
     prisma = mkPrisma();
@@ -101,8 +103,11 @@ describe('KeyCortexPlannerService', () => {
       completeSaga: vi.fn(),
       failSaga: vi.fn(),
     } as unknown as KeyCortexSagaService;
+    aiUsage = {
+      callAi: vi.fn(),
+    } as unknown as AiUsageService;
 
-    service = new KeyCortexPlannerService(prisma, planner, executor, saga);
+    service = new KeyCortexPlannerService(prisma, planner, executor, saga, aiUsage);
   });
 
   it('creates a goal', async () => {
@@ -117,6 +122,55 @@ describe('KeyCortexPlannerService', () => {
     const goals = await service.listGoals('biz_1');
     expect(goals).toHaveLength(1);
     expect(goals[0].title).toBe('A');
+  });
+
+  it('generates a plan with deterministic fallback decomposition', async () => {
+    const plan = await service.generatePlan('biz_1', { objective: 'send invoice to customer' });
+    expect(plan.steps.length).toBeGreaterThan(0);
+    expect(plan.simulationResult?.successProbability).toBeGreaterThan(0);
+    expect(plan.steps.some((s) => s.action.includes('invoice'))).toBe(true);
+  });
+
+  it('simulates a plan with score range based on risk', () => {
+    const simulation = service.simulatePlan(
+      [
+        { order: 1, action: 'low_risk', riskTier: 1 },
+        { order: 2, action: 'high_risk', riskTier: 3, dependsOn: [1] },
+      ],
+      { objective: 'test' },
+    );
+    expect(simulation.successProbability).toBeGreaterThanOrEqual(0);
+    expect(simulation.successProbability).toBeLessThanOrEqual(1);
+    expect(simulation.risks.length).toBe(1);
+  });
+
+  it('replanIfNeeded appends recovery steps for failed steps', async () => {
+    (prisma.client.aiPlan.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 'plan_1',
+      objective: 'test',
+      steps: [
+        { id: 's1', order: 1, status: 'failed', action: 'create_invoice', module: 'commerce', riskTier: 2, errorMessage: 'contact missing' },
+        { id: 's2', order: 2, status: 'completed', action: 'list_contacts', module: 'crm', riskTier: 1 },
+      ],
+    });
+
+    const result = await service.replanIfNeeded('plan_1');
+    expect(result).not.toBeNull();
+    expect(result!.steps.length).toBe(1);
+    expect(result!.steps[0].action).toBe('recover_create_invoice');
+    expect(prisma.client.aiPlanStep.create).toHaveBeenCalled();
+    expect(prisma.client.aiPlan.update).toHaveBeenCalledWith(expect.objectContaining({ data: { status: 'draft' } }));
+  });
+
+  it('replanIfNeeded returns null when no failed steps', async () => {
+    (prisma.client.aiPlan.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 'plan_1',
+      objective: 'test',
+      steps: [{ id: 's1', order: 1, status: 'completed', action: 'x', module: 'crm', riskTier: 1 }],
+    });
+
+    const result = await service.replanIfNeeded('plan_1');
+    expect(result).toBeNull();
   });
 
   it('creates a plan from a goal and links goalId', async () => {

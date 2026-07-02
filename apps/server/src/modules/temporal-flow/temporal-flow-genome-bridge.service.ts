@@ -1,4 +1,5 @@
-import { Injectable, Logger, Inject } from '@nestjs/common';
+import { Injectable, Logger, Inject, OnModuleInit } from '@nestjs/common';
+import { Interval } from '@nestjs/schedule';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { GenomeSignalService } from '../business-genome/key-genome/genome-signal.service';
 
@@ -51,16 +52,50 @@ const PATTERNS = [
       type.includes('complaint') || (payload && typeof payload === 'object' && (payload as any).intent === 'complaint'),
     threshold: 2,
   },
+  {
+    key: 'repeated_invoice_complaints',
+    section: 'risk',
+    domain: 'revenue',
+    field: 'invoice_complaint_pattern',
+    signalType: 'RISK_PATTERN',
+    sourceFilter: (_source: string, type: string, payload: unknown) =>
+      type.includes('invoice') && (type.includes('complaint') || (payload && typeof payload === 'object' && (payload as any).sentiment === 'negative')),
+    threshold: 2,
+  },
+  {
+    key: 'booking_request_spike',
+    section: 'operations',
+    domain: 'demand',
+    field: 'booking_request_volume',
+    signalType: 'OPERATIONS_PATTERN',
+    sourceFilter: (_source: string, type: string, payload: unknown) =>
+      type.includes('booking_request') || (payload && typeof payload === 'object' && (payload as any).intent === 'booking_request'),
+    threshold: 5,
+  },
+  {
+    key: 'late_payment_follow_ups',
+    section: 'sales',
+    domain: 'collections',
+    field: 'late_payment_pattern',
+    signalType: 'REVENUE_PATTERN',
+    sourceFilter: (_source: string, type: string, payload: unknown) =>
+      type.includes('overdue') || type.includes('late_payment') || (payload && typeof payload === 'object' && (payload as any).topic === 'collections'),
+    threshold: 3,
+  },
 ];
 
 @Injectable()
-export class TemporalFlowGenomeBridgeService {
+export class TemporalFlowGenomeBridgeService implements OnModuleInit {
   private readonly logger = new Logger(TemporalFlowGenomeBridgeService.name);
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(GenomeSignalService) private readonly genomeSignalService: GenomeSignalService,
   ) {}
+
+  onModuleInit() {
+    this.logger.log('TemporalFlowGenomeBridgeService initialized; pattern detection scheduled every 15 minutes');
+  }
 
   async detectPatterns(businessId: string): Promise<void> {
     const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
@@ -100,6 +135,34 @@ export class TemporalFlowGenomeBridgeService {
           this.logger.warn(`Failed to create genome signal ${pattern.key}: ${(err as Error).message}`);
         }
       }
+    }
+  }
+
+  /**
+   * Lightweight scheduled pattern sweep across all businesses with recent events.
+   * Runs every 15 minutes. Individual business jobs can still be enqueued via
+   * TemporalFlowMemoryQueueService for higher priority detection.
+   */
+  @Interval(15 * 60 * 1000)
+  async detectPatternsForAll(): Promise<void> {
+    try {
+      const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      const rows = await this.prisma.client.temporalFlowEvent.findMany({
+        where: { occurredAt: { gte: since } },
+        select: { businessId: true },
+        distinct: ['businessId'],
+        take: 1000,
+      });
+
+      for (const row of rows) {
+        try {
+          await this.detectPatterns(row.businessId);
+        } catch (err: unknown) {
+          this.logger.warn(`Pattern detection failed for ${row.businessId}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+    } catch (err: unknown) {
+      this.logger.error(`detectPatternsForAll failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 }

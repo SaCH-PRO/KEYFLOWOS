@@ -2,7 +2,7 @@ import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { AutonomyOrchestratorService } from '../key-autonomy/autonomy-orchestrator.service';
 import { ConstitutionValuesService } from '../key-autonomy/constitution-values.service';
 import { UnifiedMemoryRetrievalService } from './unified-memory-retrieval.service';
-import { PlanEngineService } from './plan-engine.service';
+import { KeyCortexPlannerService } from './key-cortex-planner.service';
 
 export interface EvalAssertion<T = unknown> {
   name: string;
@@ -49,7 +49,7 @@ export class EvalHarnessService {
     @Optional() @Inject(AutonomyOrchestratorService) private readonly autonomyOrchestrator?: AutonomyOrchestratorService,
     @Optional() @Inject(ConstitutionValuesService) private readonly constitutionValues?: ConstitutionValuesService,
     @Optional() @Inject(UnifiedMemoryRetrievalService) private readonly unifiedMemory?: UnifiedMemoryRetrievalService,
-    @Optional() @Inject(PlanEngineService) private readonly planEngine?: PlanEngineService,
+    @Optional() @Inject(KeyCortexPlannerService) private readonly planner?: KeyCortexPlannerService,
   ) {
     this.registerBuiltInSuites();
   }
@@ -233,13 +233,13 @@ export class EvalHarnessService {
     this.registerSuite({
       name: 'planning-correctness',
       description:
-        'Verifies that PlanEngineService decomposes a goal into one or more steps.',
+        'Verifies that KeyCortexPlannerService decomposes a goal into one or more steps.',
       assertions: [
         {
           name: 'goal decomposition produces at least one step',
           run: async () => {
-            if (!this.planEngine) return { hasSteps: true };
-            const plan = await this.planEngine.generatePlan('eval_biz', {
+            if (!this.planner) return { hasSteps: true };
+            const plan = await this.planner.generatePlan('eval_biz', {
               objective: 'send invoice to customer',
             });
             return { hasSteps: Array.isArray(plan.steps) && plan.steps.length > 0 };

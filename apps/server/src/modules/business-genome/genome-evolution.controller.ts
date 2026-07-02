@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { GenomeGateGuard } from '../../core/auth/genome-gate.guard';
 
 import { GenomeEvolutionService } from './genome-evolution.service';
 import { CreateGenomeEvolutionProposalDto } from './dto/create-genome-evolution-proposal.dto';
@@ -50,6 +51,7 @@ export class GenomeEvolutionController {
   }
 
   @Post('evolution-proposals/generate-from-temporal-flow')
+  @UseGuards(GenomeGateGuard)
   async generateFromTemporalFlow(
     @Param('businessId') businessId: string,
     @Req() req: { user?: { id?: string } },
@@ -58,6 +60,7 @@ export class GenomeEvolutionController {
   }
 
   @Post('evolution-proposals/:id/approve')
+  @UseGuards(GenomeGateGuard)
   async approve(
     @Param('businessId') businessId: string,
     @Param('id') proposalId: string,

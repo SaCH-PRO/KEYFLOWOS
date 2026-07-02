@@ -63,10 +63,13 @@ export class UnifiedMemoryWriterService {
 
     if (opts?.indexSemantic && this.semanticMemory) {
       try {
-        // Semantic indexing is opt-in and currently a best-effort no-op path.
-        // It can be wired to SemanticMemoryService.store once the integration
-        // contract is finalized.
-        this.logger.debug(`Semantic indexing skipped for ${type}:${key}`);
+        await this.semanticMemory.store({
+          businessId,
+          content: value,
+          sourceType: 'memory',
+          sourceId: entry.id,
+          metadata: { type, key, source: opts?.source ?? 'inferred' },
+        });
       } catch (err: any) {
         this.logger.warn(
           `Semantic indexing failed for ${type}:${key}: ${err instanceof Error ? err.message : String(err)}`,

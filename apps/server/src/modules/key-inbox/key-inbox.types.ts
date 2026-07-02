@@ -44,6 +44,8 @@ export interface CreateInboxMessageInput {
   sentByUserId?: string | null;
   sentVia?: string | null;
   metadata?: Record<string, unknown>;
+  /** Skip background AI analysis; caller will invoke analyzeMessage/analyzeThread explicitly. */
+  skipAnalysis?: boolean;
 }
 
 export interface CreateInboxThreadInput {

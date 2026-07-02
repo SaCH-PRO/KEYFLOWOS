@@ -1,9 +1,10 @@
-import { Body, Controller, ForbiddenException, Get, Inject, Logger, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Get, HttpException, Inject, Logger, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { WhatsAppService, type WhatsAppConfig } from './whatsapp.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { WebhookIngressLoggerService } from '../../core/connectors/webhook-ingress-logger.service';
 
 interface RawBodyRequest extends Request {
   rawBody?: Buffer;
@@ -49,6 +50,7 @@ export class WhatsAppController {
 
   constructor(
     @Inject(WhatsAppService) private readonly service: WhatsAppService,
+    @Inject(WebhookIngressLoggerService) private readonly webhookLogger: WebhookIngressLoggerService,
   ) {}
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -118,24 +120,48 @@ export class WhatsAppController {
       this.assertTwilioSignature(req, body as unknown as Record<string, unknown>);
     }
 
-    const result = await this.service.receiveInbound(businessId, {
-      from: parsed.from,
-      body: parsed.body,
-      externalId: parsed.externalId,
-      senderName: parsed.senderName,
-      provider: parsed.provider,
-      rawPayload: body as unknown as Record<string, unknown>,
-      receivedAt: parsed.receivedAt,
-    });
+    const headers = (req?.headers ?? {}) as Record<string, unknown>;
 
-    return { success: true, contactId: result.contactId, isNew: result.isNew };
+    try {
+      const result = await this.service.receiveInbound(businessId, {
+        from: parsed.from,
+        body: parsed.body,
+        externalId: parsed.externalId,
+        senderName: parsed.senderName,
+        provider: parsed.provider,
+        rawPayload: body as unknown as Record<string, unknown>,
+        receivedAt: parsed.receivedAt,
+      });
+      const response = { success: true, contactId: result.contactId, isNew: result.isNew };
+      await this.webhookLogger.log({
+        businessId,
+        connectorType: 'whatsapp',
+        payload: body,
+        headers,
+        statusCode: 200,
+        responseBody: JSON.stringify(response),
+      });
+      return response;
+    } catch (err: any) {
+      const message = err instanceof Error ? err.message : String(err);
+      const statusCode = err instanceof HttpException ? err.getStatus() : 500;
+      await this.webhookLogger.log({
+        businessId,
+        connectorType: 'whatsapp',
+        payload: body,
+        headers,
+        statusCode,
+        errorMessage: message,
+      });
+      return { success: false, error: message };
+    }
   }
 
   private assertMetaSignature(req?: RawBodyRequest) {
     const secret = process.env.WHATSAPP_APP_SECRET;
     if (!secret) {
-      this.logger.warn('WHATSAPP_APP_SECRET not set; skipping Meta signature verification');
-      return;
+      this.logger.error('WHATSAPP_APP_SECRET not set; rejecting Meta webhook');
+      throw new ForbiddenException('Webhook secret not configured');
     }
     const header = req?.headers['x-hub-signature-256'] as string | undefined;
     if (!header || !header.startsWith('sha256=')) {
@@ -157,8 +183,8 @@ export class WhatsAppController {
   private assertTwilioSignature(req?: RawBodyRequest, body?: Record<string, unknown>) {
     const authToken = process.env.TWILIO_AUTH_TOKEN;
     if (!authToken) {
-      this.logger.warn('TWILIO_AUTH_TOKEN not set; skipping Twilio signature verification');
-      return;
+      this.logger.error('TWILIO_AUTH_TOKEN not set; rejecting Twilio webhook');
+      throw new ForbiddenException('Webhook secret not configured');
     }
     const signature = req?.headers['x-twilio-signature'] as string | undefined;
     if (!signature) {

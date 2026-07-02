@@ -7,11 +7,11 @@ import { toast } from "sonner";
 import {
   sendFlowChat,
   transcribeKeyflowSpeech,
-  synthesizeKeyflowSpeech,
   createVoiceSession,
   endVoiceSession,
   fetchVoicePreferences,
 } from "@/lib/client";
+import { useTts } from "@/components/tts";
 import {
   VoiceOrb,
   PushToTalkButton,
@@ -64,6 +64,7 @@ function saveLocalVoice(voice: KeyVoiceKey, muted: boolean) {
 }
 
 export default function JarvisVoice({ businessId, pageContext }: Props) {
+  const { engine } = useTts();
   const [active, setActive] = useState(false);
   const [recording, setRecording] = useState(false);
   const [thinking, setThinking] = useState(false);
@@ -75,7 +76,6 @@ export default function JarvisVoice({ businessId, pageContext }: Props) {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animFrameRef = useRef<number>(0);
   const analyserRef = useRef<AnalyserNode | null>(null);
@@ -116,7 +116,9 @@ export default function JarvisVoice({ businessId, pageContext }: Props) {
   // Keep localStorage in sync when user changes voice/mute inside Jarvis
   useEffect(() => {
     saveLocalVoice(voice, muted);
-  }, [voice, muted]);
+    engine.setVoice(voice);
+    engine.setMuted(muted);
+  }, [voice, muted, engine]);
 
   // Voice session lifecycle: create on open, end on close
   useEffect(() => {
@@ -162,30 +164,16 @@ export default function JarvisVoice({ businessId, pageContext }: Props) {
   useEffect(() => {
     return () => {
       streamRef.current?.getTracks().forEach((t) => t.stop());
-      if (audioRef.current) audioRef.current.pause();
+      engine.cancel();
       if (sessionIdRef.current) {
         void endVoiceSession(businessId, sessionIdRef.current);
       }
     };
-  }, [businessId]);
+  }, [businessId, engine]);
 
-  const speak = async (text: string) => {
+  const speak = (text: string) => {
     if (muted) return;
-    const { blob, error } = await synthesizeKeyflowSpeech(businessId, text, voice);
-    if (error || !blob) {
-      if (error) toast.error(`Voice playback failed: ${error}`);
-      return;
-    }
-    const url = URL.createObjectURL(blob);
-    if (audioRef.current) {
-      audioRef.current.pause();
-    }
-    const audio = new Audio(url);
-    audioRef.current = audio;
-    audio.onended = () => URL.revokeObjectURL(url);
-    void audio.play().catch(() => {
-      // Browser blocked autoplay
-    });
+    engine.speak(text, businessId);
   };
 
   const sendToBrain = async (text: string) => {

@@ -40,6 +40,8 @@ import { KeyCortexAuditController } from './key-cortex-audit.controller';
 import { KeyCortexGoalsController } from './key-cortex-goals.controller';
 import { AdaptiveRouterService } from './adaptive-router.service';
 import { KeyCortexEventBusService } from './key-cortex-event-bus.service';
+import { FlowSignalBridgeService } from './flow-signal-bridge.service';
+import { EventEmitterFlowBridgeService } from './event-emitter-flow-bridge.service';
 import { KeyCortexToolRegistryService } from './key-cortex-tool-registry.service';
 import { KeyCortexActionExecutorPlugin } from './key-cortex-action-executor.plugin';
 import { KeyCortexOrganRegistrarService } from './key-cortex-organ-registrar.service';
@@ -50,6 +52,7 @@ import { KeyCortexApprovalOrchestratorService } from './key-cortex-approval-orch
 import { KeyIdempotencyService } from './key-idempotency.service';
 import { KeyCortexSagaService } from './key-cortex-saga.service';
 import { KeyCortexCompensationService } from './key-cortex-compensation.service';
+import { KeyCortexSagaExecutorService } from './key-cortex-saga-executor.service';
 import { KeyCortexTriggerService } from './key-cortex-trigger.service';
 
 // -- Phase 2 Body: Organ Adapters --
@@ -145,7 +148,6 @@ import { KeyCortexMemoryRetrievalService } from './key-cortex-memory-retrieval.s
 import { UnifiedMemoryWriterService } from './unified-memory-writer.service';
 import { EvalHarnessService } from './eval-harness.service';
 import { CognitiveEventBusService } from './cognitive-event-bus.service';
-import { PlanEngineService } from './plan-engine.service';
 import { ValueLearningService } from './value-learning.service';
 import { KnowledgeIngestionService } from './knowledge-ingestion.service';
 import { MemoryConsolidationService } from './memory-consolidation.service';
@@ -177,6 +179,7 @@ import { FlowModule } from '../flow/flow.module';
 import { AutopilotModule } from '../autopilot/autopilot.module';
 import { TemporalFlowModule } from '../temporal-flow/temporal-flow.module';
 import { KeyInboxModule } from '../key-inbox/key-inbox.module';
+import { FlowSignalModule } from '../flow-signal/flow-signal.module';
 import { BusinessGenomeModule } from '../business-genome/business-genome.module';
 import { KeyGenomeModule } from '../business-genome/key-genome/key-genome.module';
 import { BlueprintModule } from '../blueprint/blueprint.module';
@@ -199,6 +202,7 @@ import { IntelligenceModule } from '../intelligence/intelligence.module';
 import { GrowthIntelligenceModule } from '../growth-intelligence/growth-intelligence.module';
 import { BusinessCommandCenterModule } from '../business-command-center/business-command-center.module';
 import { IdentityModule } from '../identity/identity.module';
+import { CommandModule } from '../command/command.module';
 import { IntegrationHubModule } from '../integration-hub/integration-hub.module';
 
 @Module({
@@ -233,6 +237,7 @@ import { IntegrationHubModule } from '../integration-hub/integration-hub.module'
     forwardRef(() => AutopilotModule),
     forwardRef(() => TemporalFlowModule),
     forwardRef(() => KeyInboxModule),
+    forwardRef(() => FlowSignalModule),
     forwardRef(() => BusinessGenomeModule),
     forwardRef(() => KeyGenomeModule),
     forwardRef(() => KeyAutonomyModule),
@@ -260,6 +265,7 @@ import { IntegrationHubModule } from '../integration-hub/integration-hub.module'
     forwardRef(() => BusinessCommandCenterModule),
     forwardRef(() => IdentityModule),
     forwardRef(() => IntegrationHubModule),
+    forwardRef(() => CommandModule),
 
     // Business events for unified audit trail
     BusinessEventModule,
@@ -314,6 +320,8 @@ import { IntegrationHubModule } from '../integration-hub/integration-hub.module'
     // -- Phase 1 Body: Peripheral Nervous System --
     // Unified event bus and canonical tool registry that all organs plug into.
     KeyCortexEventBusService,
+    FlowSignalBridgeService,
+    EventEmitterFlowBridgeService,
     KeyCortexToolRegistryService,
     KeyCortexActionExecutorPlugin,
 
@@ -346,6 +354,7 @@ import { IntegrationHubModule } from '../integration-hub/integration-hub.module'
     KeyIdempotencyService,
     KeyCortexSagaService,
     KeyCortexCompensationService,
+    KeyCortexSagaExecutorService,
 
     // Voice interface -- TTS / STT with personality voice mapping
     KeyCortexVoiceService,
@@ -437,7 +446,6 @@ import { IntegrationHubModule } from '../integration-hub/integration-hub.module'
 
     // Mind / Soul / Evolution foundation services
     CognitiveEventBusService,
-    PlanEngineService,
     ValueLearningService,
     KnowledgeIngestionService,
     MemoryConsolidationService,
@@ -589,7 +597,6 @@ import { IntegrationHubModule } from '../integration-hub/integration-hub.module'
 
     // Mind / Soul / Evolution foundation services
     CognitiveEventBusService,
-    PlanEngineService,
     ValueLearningService,
     KnowledgeIngestionService,
     MemoryConsolidationService,
@@ -638,6 +645,7 @@ import { IntegrationHubModule } from '../integration-hub/integration-hub.module'
     KeyIdempotencyService,
     KeyCortexSagaService,
     KeyCortexCompensationService,
+    KeyCortexSagaExecutorService,
   ],
 })
 export class KeyCortexModule {}

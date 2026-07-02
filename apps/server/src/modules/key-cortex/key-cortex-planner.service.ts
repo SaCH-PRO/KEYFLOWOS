@@ -1,6 +1,7 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, Optional, Inject } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { PlannerService } from '../ai/planner.service';
+import { AiUsageService } from '../ai/ai-usage.service';
 import { ParsedIntent } from '../ai/intent-parser.service';
 import {
   KeyCortexExecutorService,
@@ -27,6 +28,36 @@ export interface CreatePlanFromCommandInput {
   userId?: string;
 }
 
+export interface PlanGoal {
+  objective: string;
+  constraints?: string[];
+  successCriteria?: string[];
+  horizon?: 'immediate' | 'tactical' | 'strategic';
+}
+
+export interface PlanStep {
+  order: number;
+  action: string;
+  module?: string;
+  parameters?: Record<string, unknown>;
+  dependsOn?: number[];
+  riskTier?: number;
+  expectedBenefit?: string;
+}
+
+export interface PlanSimulationResult {
+  successProbability: number;
+  risks: string[];
+  assumptions: string[];
+}
+
+export interface GeneratedPlan {
+  goal: PlanGoal;
+  steps: PlanStep[];
+  confidence: number;
+  simulationResult?: PlanSimulationResult;
+}
+
 @Injectable()
 export class KeyCortexPlannerService {
   private readonly logger = new Logger(KeyCortexPlannerService.name);
@@ -36,6 +67,9 @@ export class KeyCortexPlannerService {
     private readonly planner: PlannerService,
     private readonly executor: KeyCortexExecutorService,
     private readonly saga: KeyCortexSagaService,
+    @Optional()
+    @Inject(AiUsageService)
+    private readonly aiUsage?: AiUsageService,
   ) {}
 
   async createGoal(businessId: string, input: CreateGoalInput) {
@@ -73,18 +107,16 @@ export class KeyCortexPlannerService {
     });
     if (!goal) throw new NotFoundException('Goal not found');
 
-    const intent: ParsedIntent = {
+    const generated = await this.generatePlan(goal.businessId, {
       objective: `${goal.title}${goal.description ? ` - ${goal.description}` : ''}`,
-      urgency: 'normal',
-      scope: [],
-      modules: [],
-      missingInfo: [],
-      actionCandidates: [],
-      clarificationNeeded: false,
-      rawInput: goal.description || goal.title,
-    };
+      horizon: 'tactical',
+    });
 
-    const planResult = await this.planner.createPlan(goal.businessId, intent, userId);
+    const planResult = await this.planner.createPlan(
+      goal.businessId,
+      this.generatedPlanToIntent(generated),
+      userId,
+    );
 
     await this.prisma.client.aiPlan.update({
       where: { id: planResult.id },
@@ -102,18 +134,185 @@ export class KeyCortexPlannerService {
     input: CreatePlanFromCommandInput,
     userId?: string,
   ) {
-    const intent: ParsedIntent = {
+    const generated = await this.generatePlan(businessId, {
       objective: input.objective,
-      urgency: input.urgency ?? 'normal',
-      scope: input.scope ?? [],
-      modules: input.modules ?? [],
-      missingInfo: [],
-      actionCandidates: [],
-      clarificationNeeded: false,
-      rawInput: input.rawInput ?? input.objective,
-    };
+      constraints: input.scope,
+      horizon: 'immediate',
+    });
 
-    return this.planner.createPlan(businessId, intent, userId);
+    return this.planner.createPlan(
+      businessId,
+      this.generatedPlanToIntent(generated, input),
+      userId,
+    );
+  }
+
+  /**
+   * Generate a plan from a high-level goal.
+   *
+   * Uses an LLM when available; falls back to deterministic keyword
+   * decomposition. The resulting plan is persisted as an aiPlan row.
+   */
+  async generatePlan(businessId: string, goal: PlanGoal): Promise<GeneratedPlan> {
+    const steps = await this.decomposeGoal(businessId, goal);
+    const simulation = this.simulatePlan(steps, goal);
+
+    this.logger.log(`[generatePlan] Decomposed goal for ${businessId} into ${steps.length} step(s)`);
+
+    return {
+      goal,
+      steps,
+      confidence: simulation.successProbability,
+      simulationResult: simulation,
+    };
+  }
+
+  /**
+   * LLM-based goal decomposition with deterministic fallback.
+   */
+  async decomposeGoal(businessId: string, goal: PlanGoal): Promise<PlanStep[]> {
+    if (this.aiUsage) {
+      try {
+        const result = await this.aiUsage.callAi({
+          businessId,
+          feature: 'plan_decompose',
+          messages: [
+            {
+              role: 'system',
+              content: `You are KeyFlow's planning engine. Decompose the user's goal into ordered, concrete steps. Each step should use a canonical tool action (e.g. crm.list_contacts, commerce.create_invoice, autopilot.create_task). Respond with JSON only: { "steps": [ { "order": number, "action": "tool_name", "module": "crm|commerce|bookings|autopilot|workflow|key_inbox|key_genome", "parameters": {}, "dependsOn": [order numbers], "riskTier": 1-4, "expectedBenefit": "string" } ] }`,
+            },
+            {
+              role: 'user',
+              content: `Goal: ${goal.objective}\nConstraints: ${(goal.constraints ?? []).join(', ')}\nSuccess criteria: ${(goal.successCriteria ?? []).join(', ')}`,
+            },
+          ],
+          maxTokens: 1200,
+          temperature: 0.3,
+          responseMode: 'structured_json',
+        });
+
+        const parsed = JSON.parse(result.content);
+        const rawSteps = Array.isArray(parsed.steps) ? parsed.steps : [];
+        if (rawSteps.length > 0) {
+          return rawSteps.map((s: any, idx: number) => ({
+            order: s.order ?? idx + 1,
+            action: s.action ?? s.toolName ?? 'analyze',
+            module: s.module ?? 'general',
+            parameters: s.parameters ?? s.inputPayload ?? {},
+            dependsOn: Array.isArray(s.dependsOn) ? s.dependsOn : [],
+            riskTier: s.riskTier ?? 1,
+            expectedBenefit: s.expectedBenefit ?? '',
+          }));
+        }
+      } catch (err: unknown) {
+        this.logger.warn(`LLM decomposition failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    return this.fallbackDecomposeGoal(goal);
+  }
+
+  /**
+   * Deterministic fallback decomposition.
+   */
+  private fallbackDecomposeGoal(goal: PlanGoal): PlanStep[] {
+    const text = goal.objective.toLowerCase();
+    const steps: PlanStep[] = [];
+
+    if (text.includes('invoice') || text.includes('bill')) {
+      steps.push(
+        { order: 1, action: 'list_contacts', module: 'crm', riskTier: 1, expectedBenefit: 'Confirm customer exists and is billable' },
+        { order: 2, action: 'create_invoice', module: 'commerce', riskTier: 2, dependsOn: [1], expectedBenefit: 'Create invoice' },
+        { order: 3, action: 'send_invoice', module: 'commerce', riskTier: 2, dependsOn: [2], expectedBenefit: 'Deliver invoice to customer' },
+      );
+    } else if (text.includes('follow') || text.includes('task')) {
+      steps.push(
+        { order: 1, action: 'create_task', module: 'autopilot', riskTier: 1, expectedBenefit: 'Create follow-up task' },
+        { order: 2, action: 'send_message', module: 'communications', riskTier: 2, dependsOn: [1], expectedBenefit: 'Notify stakeholder' },
+      );
+    } else if (text.includes('booking') || text.includes('appointment')) {
+      steps.push(
+        { order: 1, action: 'list_contacts', module: 'crm', riskTier: 1, expectedBenefit: 'Confirm customer exists' },
+        { order: 2, action: 'get_services', module: 'bookings', riskTier: 1, dependsOn: [1], expectedBenefit: 'Find available service' },
+        { order: 3, action: 'create_booking', module: 'bookings', riskTier: 2, dependsOn: [2], expectedBenefit: 'Book appointment' },
+      );
+    } else {
+      steps.push(
+        { order: 1, action: 'analyze_request', module: 'ai', riskTier: 1, expectedBenefit: 'Understand request' },
+        { order: 2, action: 'draft_response', module: 'ai', riskTier: 1, dependsOn: [1], expectedBenefit: 'Prepare response' },
+      );
+    }
+
+    return steps;
+  }
+
+  /**
+   * Score a plan based on risk and complexity.
+   */
+  simulatePlan(steps: PlanStep[], _goal: PlanGoal): PlanSimulationResult {
+    const maxRisk = Math.max(1, ...steps.map((s) => s.riskTier ?? 1));
+    const dependencyPenalty = steps.reduce((acc, s) => acc + (s.dependsOn?.length ?? 0), 0) * 0.01;
+    const successProbability = Math.max(0.25, 1 - (maxRisk - 1) * 0.15 - steps.length * 0.02 - dependencyPenalty);
+    return {
+      successProbability: Math.round(successProbability * 100) / 100,
+      risks: steps.filter((s) => (s.riskTier ?? 1) >= 3).map((s) => `High-risk step: ${s.action}`),
+      assumptions: ['Business data is current', 'Required permissions are granted'],
+    };
+  }
+
+  /**
+   * Replan after failures by appending recovery steps.
+   */
+  async replanIfNeeded(planId: string): Promise<GeneratedPlan | null> {
+    const plan = await this.prisma.client.aiPlan.findUnique({
+      where: { id: planId },
+      include: { steps: true },
+    });
+    if (!plan) return null;
+
+    const failedSteps = plan.steps.filter((s: any) => s.status === 'failed');
+    if (failedSteps.length === 0) return null;
+
+    const maxOrder = Math.max(0, ...plan.steps.map((s: any) => s.order ?? 0));
+    const recoverySteps: PlanStep[] = failedSteps.map((s: any, i: number) => ({
+      order: maxOrder + i + 1,
+      action: `recover_${s.action}`,
+      module: s.module ?? 'general',
+      parameters: (s.inputPayload as Record<string, unknown>) ?? {},
+      dependsOn: [s.order ?? 1],
+      riskTier: Math.min(4, (s.riskTier ?? 1) + 1),
+      expectedBenefit: `Recover from failure: ${s.errorMessage ?? 'unknown'}`,
+    }));
+
+    for (const step of recoverySteps) {
+      await this.prisma.client.aiPlanStep.create({
+        data: {
+          planId,
+          order: step.order,
+          status: 'pending',
+          toolName: step.action,
+          action: step.action,
+          module: step.module ?? 'general',
+          description: step.expectedBenefit,
+          riskTier: step.riskTier ?? 1,
+          inputPayload: step.parameters as any,
+          expectedBenefit: step.expectedBenefit,
+        },
+      });
+    }
+
+    await this.prisma.client.aiPlan.update({
+      where: { id: planId },
+      data: { status: 'draft' },
+    });
+
+    const goal: PlanGoal = { objective: plan.objective };
+    return {
+      goal,
+      steps: recoverySteps,
+      confidence: 0.5,
+      simulationResult: this.simulatePlan(recoverySteps, goal),
+    };
   }
 
   async executePlan(planId: string, options: ExecuteOptions = {}) {
@@ -204,7 +403,7 @@ export class KeyCortexPlannerService {
     }
 
     const finalStatus = stopped
-      ? plan.steps.some((s) => s.status === 'waiting_approval')
+      ? plan.steps.some((s: any) => s.status === 'waiting_approval')
         ? 'waiting_approval'
         : 'failed'
       : 'completed';
@@ -233,6 +432,27 @@ export class KeyCortexPlannerService {
       where: { id: planId },
       include: { steps: true, result: true, goal: true },
     });
+  }
+
+  private generatedPlanToIntent(
+    generated: GeneratedPlan,
+    input?: CreatePlanFromCommandInput,
+  ): ParsedIntent {
+    return {
+      objective: generated.goal.objective,
+      urgency: input?.urgency ?? 'normal',
+      scope: generated.goal.successCriteria ?? input?.scope ?? [],
+      modules: generated.steps.map((s) => s.module).filter(Boolean) as string[],
+      missingInfo: [],
+      actionCandidates: generated.steps.map((s) => ({
+        toolName: `${s.module}.${s.action}`,
+        description: s.expectedBenefit ?? `${s.module}.${s.action}`,
+        confidence: 0.8,
+        riskTier: s.riskTier ?? 1,
+      })),
+      clarificationNeeded: false,
+      rawInput: input?.rawInput ?? generated.goal.objective,
+    };
   }
 
   private buildCommand(

@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { GenomeGateGuard } from '../../core/auth/genome-gate.guard';
 import { BusinessGenesisService } from './business-genesis.service';
 import { GenesisMarketStrategyService } from './genesis-market-strategy.service';
 
@@ -55,11 +56,13 @@ export class BusinessGenesisController {
   }
 
   @Post('generate-roadmap')
+  @UseGuards(GenomeGateGuard)
   async generateRoadmap(@Param('businessId') businessId: string) {
     return this.genesis.generateRoadmap(businessId);
   }
 
   @Post('generate-document-pack')
+  @UseGuards(GenomeGateGuard)
   async generateDocumentPack(@Param('businessId') businessId: string) {
     return this.genesis.generateDocumentPack(businessId);
   }
@@ -70,11 +73,13 @@ export class BusinessGenesisController {
   }
 
   @Post('generate-risk-register')
+  @UseGuards(GenomeGateGuard)
   async generateRiskRegister(@Param('businessId') businessId: string) {
     return this.genesis.generateRiskRegister(businessId);
   }
 
   @Post('generate-market-strategy')
+  @UseGuards(GenomeGateGuard)
   async generateMarketStrategy(@Param('businessId') businessId: string) {
     return this.marketStrategy.generateMarketStrategy(businessId);
   }

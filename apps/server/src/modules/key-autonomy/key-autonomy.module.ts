@@ -20,6 +20,7 @@ import { ConstitutionValuesService } from './constitution-values.service';
 import { AuthorityGrantRuleService } from './authority-grant-rule.service';
 import { AutonomyRuleDbService } from './autonomy-rule-db.service';
 import { SafetyShellService } from './safety-shell.service';
+import { ActionAuditService } from './action-audit.service';
 import { ComplianceMapService } from './compliance-map.service';
 import { KeyAutonomySafetyService } from './key-autonomy-safety.service';
 import { KeyCortexModule } from '../key-cortex/key-cortex.module';
@@ -49,6 +50,7 @@ import { KeyCortexModule } from '../key-cortex/key-cortex.module';
     AuthorityGrantRuleService,
     AutonomyRuleDbService,
     SafetyShellService,
+    ActionAuditService,
     ComplianceMapService,
     KeyAutonomySafetyService,
   ],
@@ -65,6 +67,7 @@ import { KeyCortexModule } from '../key-cortex/key-cortex.module';
     AuthorityGrantRuleService,
     AutonomyRuleDbService,
     SafetyShellService,
+    ActionAuditService,
     ComplianceMapService,
     KeyAutonomySafetyService,
   ],

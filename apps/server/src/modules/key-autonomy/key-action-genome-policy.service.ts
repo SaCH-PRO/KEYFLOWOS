@@ -38,7 +38,7 @@ export class KeyActionGenomePolicyService {
 
   async evaluateExecution(
     businessId: string,
-    proposal: KeyActionProposalData,
+    proposal: Pick<KeyActionProposalData, 'actionType'>,
   ): Promise<GenomeActionPolicyDecision> {
     const module = ACTION_MODULE_MAP[proposal.actionType];
 

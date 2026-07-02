@@ -18,6 +18,7 @@ export interface DocumentExtractionRequest {
   filename: string;
   externalId?: string;
   sourceConnector?: string;
+  sourceId?: string;
 }
 
 export interface ExtractedInvoiceData {
@@ -65,11 +66,57 @@ export interface ExtractedCreditNoteData {
   confidence: number;
 }
 
+export interface ExtractedContractParty {
+  role?: string;
+  name: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  notes?: string;
+  contactId?: string;
+}
+
+export interface ExtractedContractCustomTerm {
+  key: string;
+  value: string;
+  sourceText?: string;
+  confidence?: number;
+}
+
+export interface ExtractedContractData {
+  contractType?: string;
+  parties?: ExtractedContractParty[];
+  effectiveDate?: string;
+  expiryDate?: string;
+  renewalDate?: string;
+  renewalType?: string;
+  renewalNoticeDays?: number;
+  contractValue?: number;
+  currency?: string;
+  termLength?: string;
+  renewalClause?: string;
+  terminationClause?: string;
+  paymentTerms?: string;
+  liabilityCap?: string;
+  governingLaw?: string;
+  jurisdiction?: string;
+  keyClauses?: string[];
+  customTerms?: ExtractedContractCustomTerm[];
+  rawText?: string;
+  confidence: number;
+  sourceAssetId?: string;
+  sourceDocumentInstanceId?: string;
+  sourceDriveFileId?: string;
+}
+
 export interface DocumentExtractionResult {
   documentType: 'invoice' | 'receipt' | 'credit_note' | 'contact_card' | 'contract' | 'unknown';
+  sourceId?: string;
+  filename?: string;
   invoiceData?: ExtractedInvoiceData;
   creditNoteData?: ExtractedCreditNoteData;
   contactData?: ExtractedContactData;
+  contractData?: ExtractedContractData;
   rawText?: string;
   confidence: number;
   suggestedActions: Array<{
@@ -130,7 +177,17 @@ For CONTACT CARDS/BUSINESS CARDS, extract:
 - firstName, lastName, email, phone, companyName, address
 
 For CONTRACTS, extract:
-- parties involved, key dates, amounts, renewal terms
+- contractType: one of SERVICE_AGREEMENT, NDA, EMPLOYMENT, VENDOR, LEASE, LICENSE, RENTAL, SUBSCRIPTION, PARTNERSHIP, OTHER
+- parties: array of { role (client/vendor/supplier/employee/partner/other), name, email, phone, address }
+- effectiveDate, expiryDate, renewalDate (ISO 8601 strings)
+- renewalType: auto | manual | none
+- renewalNoticeDays (integer)
+- contractValue (number), currency (3-letter code)
+- termLength (human readable string)
+- renewalClause, terminationClause, paymentTerms, liabilityCap, governingLaw, jurisdiction
+- keyClauses: array of important clause summaries
+- customTerms: array of { key, value, sourceText? } for any other important terms
+- rawText: a concise extracted text summary
 
 Respond ONLY with valid JSON in this exact shape:
 {
@@ -139,9 +196,31 @@ Respond ONLY with valid JSON in this exact shape:
   "invoiceData": { ... } | null,
   "creditNoteData": { ... } | null,
   "contactData": { ... } | null,
+  "contractData": {
+    "contractType": "...",
+    "parties": [{ "role": "...", "name": "...", "email": "...", "phone": "...", "address": "..." }],
+    "effectiveDate": "YYYY-MM-DD",
+    "expiryDate": "YYYY-MM-DD",
+    "renewalDate": "YYYY-MM-DD",
+    "renewalType": "auto|manual|none",
+    "renewalNoticeDays": 30,
+    "contractValue": 0.0,
+    "currency": "TTD",
+    "termLength": "...",
+    "renewalClause": "...",
+    "terminationClause": "...",
+    "paymentTerms": "...",
+    "liabilityCap": "...",
+    "governingLaw": "...",
+    "jurisdiction": "...",
+    "keyClauses": ["..."],
+    "customTerms": [{ "key": "...", "value": "...", "sourceText": "..." }],
+    "rawText": "extracted text summary",
+    "confidence": 0.0-1.0
+  } | null,
   "rawText": "extracted text summary",
   "suggestedActions": [
-    { "action": "create_invoice", "toolName": "commerce_create_invoice", "description": "...", "payload": {} }
+    { "action": "create_contract", "toolName": "contracts_create", "description": "...", "payload": {} }
   ]
 }`;
 
@@ -187,6 +266,8 @@ Respond ONLY with valid JSON in this exact shape:
       }
 
       const result = JSON.parse(jsonMatch[0]) as DocumentExtractionResult;
+      result.sourceId = req.sourceId;
+      result.filename = req.filename;
       const durationMs = Date.now() - startTime;
 
       await this.executionLog.log({

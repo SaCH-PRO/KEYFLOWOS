@@ -5,6 +5,9 @@ import { KeyCortexToolRegistryService } from './key-cortex-tool-registry.service
 import { KeyCortexLifecycleService } from './key-cortex-lifecycle.service';
 import { RouteDecision } from './adaptive-router.service';
 import { CortexQuery, CortexActionResult, CortexActionType } from './key-cortex.types';
+import { AutonomyOrchestratorService } from '../key-autonomy/autonomy-orchestrator.service';
+import { KeyAutonomySafetyService } from '../key-autonomy/key-autonomy-safety.service';
+import { AutonomyLevelService } from '../key-autonomy/autonomy-level.service';
 
 /**
  * Executes the LLM ↔ tool-call loop.
@@ -26,6 +29,15 @@ export class KeyCortexToolLoopService {
     @Optional()
     @Inject(KeyCortexLifecycleService)
     private readonly lifecycle?: KeyCortexLifecycleService,
+    @Optional()
+    @Inject(AutonomyOrchestratorService)
+    private readonly autonomyOrchestrator?: AutonomyOrchestratorService,
+    @Optional()
+    @Inject(KeyAutonomySafetyService)
+    private readonly safety?: KeyAutonomySafetyService,
+    @Optional()
+    @Inject(AutonomyLevelService)
+    private readonly autonomyLevelService?: AutonomyLevelService,
   ) {}
 
   async handleToolCalls(
@@ -43,10 +55,11 @@ export class KeyCortexToolLoopService {
       return undefined;
     }
 
+    const autonomyLevel = await this.resolveAutonomyLevel(query.businessId);
     const ctx: any = {
       businessId: query.businessId,
       userId: query.userId ?? null,
-      autonomyLevel: await this.resolveAutonomyLevel(query.businessId),
+      autonomyLevel,
       commandId: turnIdentity?.commandId,
       sessionId: turnIdentity?.sessionId,
       correlationId: turnIdentity?.correlationId,
@@ -66,29 +79,86 @@ export class KeyCortexToolLoopService {
 
       const startedAt = Date.now();
       let result: any;
+
+      // 1. Global safety gate (kill switch, daily caps, tier ceiling)
+      const tool = this.toolRegistry.getTool(toolName);
+      const moduleAction = this.parseModuleAction(toolName);
+      if (this.safety && tool) {
+        const safetyCheck = await this.safety.check({
+          businessId: query.businessId,
+          toolName,
+          riskTier: tool.riskTier,
+          mode: autonomyLevel >= 2 ? 'auto' : 'manual',
+          estimatedCostTtd: 0,
+        });
+        if (!safetyCheck.allowed) {
+          result = {
+            success: false,
+            error: safetyCheck.reason ?? 'Blocked by autonomy safety gate',
+            requiresApproval: safetyCheck.requiresApproval ?? false,
+          };
+          executedActions.push(this.buildActionResult(toolName, result));
+          toolMessages.push(this.buildToolMessage(tc, result));
+          continue;
+        }
+      }
+
+      // 2. Canonical autonomy oracle (consolidated verdict)
+      if (this.autonomyOrchestrator && tool && moduleAction) {
+        const verdict = await this.autonomyOrchestrator.evaluate({
+          businessId: query.businessId,
+          module: moduleAction.module,
+          action: moduleAction.action,
+          actionKey: toolName,
+          parameters: args,
+          proposedBy: query.userId ?? null,
+        });
+        if (!verdict.allowed) {
+          result = {
+            success: false,
+            error: verdict.reason ?? 'Blocked by autonomy orchestrator',
+            requiresApproval: false,
+          };
+          executedActions.push(this.buildActionResult(toolName, result));
+          toolMessages.push(this.buildToolMessage(tc, result));
+          continue;
+        }
+        if (verdict.requiresApproval) {
+          result = {
+            success: false,
+            error: verdict.reason ?? 'Requires approval before execution',
+            requiresApproval: true,
+            proposalId: verdict.proposalId,
+          };
+          executedActions.push(this.buildActionResult(toolName, result));
+          toolMessages.push(this.buildToolMessage(tc, result));
+          continue;
+        }
+      }
+
       try {
         result = await this.toolRegistry.execute(toolName, ctx, args);
       } catch (err: any) {
         result = { success: false, error: err instanceof Error ? err.message : String(err) };
       }
 
-      executedActions.push({
-        actionType: (toolName?.toUpperCase()?.replace(/\./g, '_') ?? 'EXECUTE_TOOL') as CortexActionType,
-        status: result.success ? 'success' : 'error',
-        description: result.success
-          ? `Executed ${toolName}`
-          : `Failed: ${result.error ?? 'Unknown error'}`,
-        result: result.success ? (result.data as Record<string, unknown>) : undefined,
-        error: result.error,
-        requiresApproval: false,
-      });
+      // Record successful execution against daily limits.
+      if (this.safety && result.success && tool) {
+        await this.safety
+          .recordExecution({
+            businessId: query.businessId,
+            toolName,
+            riskTier: tool.riskTier,
+            mode: autonomyLevel >= 2 ? 'auto' : 'manual',
+            actualCostTtd: result.costTtd,
+          })
+          .catch((err) => {
+            this.logger.warn(`Safety record failed: ${(err as Error).message}`);
+          });
+      }
 
-      toolMessages.push({
-        role: 'tool',
-        tool_call_id: tc.id,
-        name: toolName,
-        content: JSON.stringify(result),
-      } as GatewayMessage);
+      executedActions.push(this.buildActionResult(toolName, result));
+      toolMessages.push(this.buildToolMessage(tc, result));
 
       // Best-effort lifecycle audit
       if (this.lifecycle) {
@@ -157,15 +227,55 @@ export class KeyCortexToolLoopService {
   }
 
   private async resolveAutonomyLevel(businessId: string): Promise<number> {
-    try {
-      const settings = await (this.prisma.client as any).businessSetting.findUnique({
-        where: { businessId },
-        select: { aiAutonomyLevel: true },
-      });
-      return settings?.aiAutonomyLevel ?? 0;
-    } catch {
-      return 0;
+    if (this.autonomyLevelService) {
+      try {
+        const level = await this.autonomyLevelService.resolve(businessId);
+        return level.level;
+      } catch (err) {
+        this.logger.warn(`resolveAutonomyLevel failed: ${(err as Error).message}`);
+      }
     }
+    return 0;
+  }
+
+  private parseModuleAction(toolName: string): { module: string; action: string } | undefined {
+    const idx = toolName.indexOf('.');
+    if (idx <= 0 || idx >= toolName.length - 1) return undefined;
+    return {
+      module: toolName.slice(0, idx),
+      action: toolName.slice(idx + 1),
+    };
+  }
+
+  private buildActionResult(
+    toolName: string,
+    result: any,
+  ): CortexActionResult {
+    const status = result.success
+      ? 'success'
+      : result.requiresApproval
+        ? 'pending_approval'
+        : 'error';
+    return {
+      actionType: (toolName?.toUpperCase()?.replace(/\./g, '_') ?? 'EXECUTE_TOOL') as CortexActionType,
+      status,
+      description: result.success
+        ? `Executed ${toolName}`
+        : `Failed: ${result.error ?? 'Unknown error'}`,
+      result: result.success ? (result.data as Record<string, unknown>) : undefined,
+      error: result.error,
+      requiresApproval: result.requiresApproval ?? false,
+      approvalRequestId: result.proposalId,
+    };
+  }
+
+  private buildToolMessage(tc: any, result: any): GatewayMessage {
+    return {
+      role: 'tool',
+      tool_call_id: tc.id,
+      name: tc.function?.name,
+      content: JSON.stringify(result),
+    } as GatewayMessage;
   }
 
   private generateCorrelationId(): string {

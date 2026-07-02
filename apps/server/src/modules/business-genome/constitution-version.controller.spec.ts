@@ -4,6 +4,7 @@ import { ConstitutionVersionController } from './constitution-version.controller
 import { ConstitutionVersionService } from './constitution-version.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { GenomeGateGuard } from '../../core/auth/genome-gate.guard';
 import type { ConstitutionVersionData } from './constitution-version.types';
 
 describe('ConstitutionVersionController', () => {
@@ -37,6 +38,7 @@ describe('ConstitutionVersionController', () => {
     })
       .overrideGuard(AuthGuard).useValue({ canActivate: vi.fn(() => true) })
       .overrideGuard(BusinessGuard).useValue({ canActivate: vi.fn(() => true) })
+      .overrideGuard(GenomeGateGuard).useValue({ canActivate: vi.fn(() => true) })
       .compile();
 
     const controller = moduleRef.get(ConstitutionVersionController);

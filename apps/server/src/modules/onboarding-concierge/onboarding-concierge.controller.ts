@@ -1,5 +1,6 @@
-import { Controller, Get, Post, Patch, Param, Body, UseGuards, Inject, Query } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Param, Body, UseGuards, Inject, Query, BadRequestException } from '@nestjs/common';
 import { OnboardingConciergeService, AutoConfigureResult } from './onboarding-concierge.service';
+import { OnboardingStateService, type OnboardingStep } from './onboarding-state.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 
@@ -9,6 +10,8 @@ export class OnboardingConciergeController {
   constructor(
     @Inject(OnboardingConciergeService)
     private readonly concierge: OnboardingConciergeService,
+    @Inject(OnboardingStateService)
+    private readonly state: OnboardingStateService,
   ) {}
 
   @Get('status')
@@ -19,6 +22,25 @@ export class OnboardingConciergeController {
   @Get('state')
   async getConciergeState(@Param('businessId') businessId: string) {
     return this.concierge.getConciergeState(businessId);
+  }
+
+  @Get('onboarding-state')
+  async getOnboardingState(@Param('businessId') businessId: string) {
+    return this.state.getState(businessId);
+  }
+
+  @Post('onboarding-step')
+  async saveOnboardingStep(
+    @Param('businessId') businessId: string,
+    @Body() body: { step: OnboardingStep },
+  ) {
+    if (!body.step) throw new BadRequestException('step is required');
+    return this.state.saveStep(businessId, body.step);
+  }
+
+  @Post('seed-demo')
+  async seedDemoData(@Param('businessId') businessId: string) {
+    return this.concierge.seedDemoData(businessId);
   }
 
   @Get('welcome')

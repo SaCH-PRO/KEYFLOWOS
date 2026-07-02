@@ -464,11 +464,9 @@ export class AiController {
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/ai/approvals')
   async getPendingApprovals(@Param('businessId') businessId: string) {
-    // Phase 0.6: legacy AiApprovalItem list is now served from the canonical
-    // KeyActionProposal table. Items migrated from the legacy table use the
-    // AI_LEGACY source type. Response shape is an array, but each element is
-    // now a KeyActionProposalData instead of an AiApprovalItem row.
-    return this.proposals.list(businessId, { status: 'PENDING', sourceType: 'AI_LEGACY' });
+    // Phase 0.6: all pending approvals are served from the canonical
+    // KeyActionProposal table (legacy AI items, PRO_AUTO insights, etc.).
+    return this.proposals.list(businessId, { status: 'PENDING' });
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -523,6 +521,34 @@ export class AiController {
     resolution: 'approved' | 'rejected' | 'deferred',
     userId: string,
   ) {
+    // Canonical path: resolve directly from KeyActionProposal.
+    let proposal: any;
+    try {
+      proposal = await this.proposals.get(businessId, approvalId);
+    } catch {
+      proposal = null;
+    }
+
+    if (proposal) {
+      await this.assertCanResolveApproval(businessId, proposal.riskTier ?? 2, userId);
+      if (resolution === 'deferred') {
+        // Defer by rejecting with a deferral reason; true deferral state is not in the proposal model.
+        return this.approvalOrchestrator.reject({
+          proposalId: approvalId,
+          businessId,
+          userId,
+          reason: 'Deferred by operator',
+        });
+      }
+      if (proposal.status !== 'PENDING') {
+        throw new BadRequestException(`Proposal ${approvalId} is already resolved (status: ${proposal.status})`);
+      }
+      return resolution === 'approved'
+        ? this.approvalOrchestrator.approve({ proposalId: approvalId, businessId, userId, autoExecute: false })
+        : this.approvalOrchestrator.reject({ proposalId: approvalId, businessId, userId });
+    }
+
+    // Compatibility fallback: legacy aiApprovalItem records are migrated once on resolution.
     const item = await this.prisma.client.aiApprovalItem.findFirst({
       where: { id: approvalId, businessId },
     });
@@ -530,7 +556,6 @@ export class AiController {
 
     await this.assertCanResolveApproval(businessId, item.riskTier, userId);
 
-    // Deferred resolutions are not part of the unified KeyActionProposal flow.
     if (resolution === 'deferred') {
       await this.prisma.client.aiApprovalItem.update({
         where: { id: approvalId },
@@ -539,7 +564,7 @@ export class AiController {
       return { deferred: true, approvalId };
     }
 
-    const proposal = await this.migrateAiApprovalItemToProposal(businessId, item);
+    proposal = await this.migrateAiApprovalItemToProposal(businessId, item);
     if (proposal.status !== 'PENDING') {
       throw new BadRequestException(`Proposal ${proposal.id} is already resolved (status: ${proposal.status})`);
     }

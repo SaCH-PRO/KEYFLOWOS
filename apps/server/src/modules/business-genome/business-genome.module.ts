@@ -7,12 +7,13 @@ import { GenomeEvolutionController } from './genome-evolution.controller';
 import { GenomeEvolutionService } from './genome-evolution.service';
 import { ConstitutionVersionController } from './constitution-version.controller';
 import { ConstitutionVersionService } from './constitution-version.service';
+import { GenomeIntegrityChangeListener } from './genome-integrity-change.listener';
 import { KeyGenomeController } from './key-genome/key-genome.controller';
 
 @Module({
   imports: [PrismaModule, BlueprintModule, TemporalFlowModule, KeyGenomeModule],
   controllers: [GenomeEvolutionController, ConstitutionVersionController, KeyGenomeController],
-  providers: [GenomeEvolutionService, ConstitutionVersionService],
+  providers: [GenomeEvolutionService, ConstitutionVersionService, GenomeIntegrityChangeListener],
   exports: [GenomeEvolutionService, ConstitutionVersionService],
 })
 export class BusinessGenomeModule {}

@@ -1,5 +1,5 @@
 import { Transform } from 'class-transformer';
-import { IsEmail, IsOptional, IsPhoneNumber, IsString, IsUrl, MaxLength } from 'class-validator';
+import { IsEmail, IsOptional, IsString, IsUrl, MaxLength } from 'class-validator';
 
 function emptyToUndefined(value: unknown): unknown {
   return typeof value === 'string' && value.trim() === '' ? undefined : value;
@@ -36,15 +36,14 @@ export class BootstrapDto {
   @Transform(({ value }) => emptyToUndefined(value))
   lastName?: string;
 
+  @IsString()
   @IsOptional()
-  @IsPhoneNumber(undefined, { message: 'phone must be a valid phone number' })
   @MaxLength(30)
   @Transform(({ value }) => emptyToUndefined(value))
   phone?: string;
 
   @IsUrl({}, { message: 'avatarUrl must be a valid URL' })
   @IsOptional()
-  @MaxLength(2048)
   @Transform(({ value }) => emptyToUndefined(value))
   avatarUrl?: string;
 

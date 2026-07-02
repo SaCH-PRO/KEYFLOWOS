@@ -4,6 +4,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
+import { DemoDataSeederService } from './demo-data-seeder.service';
 import type {
   BlueprintData,
   BlueprintRegistrationProfile,
@@ -56,6 +57,7 @@ export interface ConciergeMessage {
   quickReplies?: string[];
   actions?: ConciergeAction[];
   setupStatus?: SetupStatus;
+  extracted?: Record<string, string>;
 }
 
 export interface ConciergeAction {
@@ -113,6 +115,7 @@ export class OnboardingConciergeService {
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
     @Inject(CatalogService) private readonly catalog: CatalogService,
     @Inject(BlueprintService) private readonly blueprint: BlueprintService,
+    @Inject(DemoDataSeederService) private readonly demoSeeder: DemoDataSeederService,
   ) {}
 
   async getSetupStatus(businessId: string): Promise<SetupStatus> {
@@ -399,7 +402,7 @@ export class OnboardingConciergeService {
               duration: p.duration ?? null,
               description: p.description ?? null,
               isActive: true,
-            });
+            }, tx);
             createdCount++;
           }
           results.productsCreated = createdCount;
@@ -551,6 +554,10 @@ export class OnboardingConciergeService {
       });
 
       const parsed = this.parseAiResponse(result.content, setupStatus);
+      // Persist extracted intake answers in the background so the chat stays snappy.
+      this.persistIntakeAnswers(businessId, userMessage, parsed.extracted || {}, detection).catch((err) => {
+        this.logger.warn(`Intake persistence failed: ${(err as Error).message}`);
+      });
       return parsed;
     } catch (error: any) {
       this.logger.error(`Concierge AI error: ${(error as Error).message}`);
@@ -618,10 +625,13 @@ RESPONSE FORMAT:
 Reply with your message text. If you want to suggest quick reply options, add them on a new line starting with "QUICK_REPLIES:" followed by comma-separated options.
 If you want to suggest an action, add on a new line "ACTION:" followed by the action type and label, separated by pipe (|).
 For per-section actions, use "ACTION:confirm|Accept Products,ACTION:customize|Customize Products" etc.
+If the user reveals facts about their business, include EXTRACTED lines at the end in the form "EXTRACTED: key=value". Put one fact per line. Useful keys: businessName, businessIntent, industry, archetype, country, revenueModel, teamSize.
 Example:
 Great! I can set up your salon with popular services and TTD pricing. Want me to go ahead?
 QUICK_REPLIES:Yes, set it up!,Let me customize,Tell me more
-ACTION:confirm|Set Up Salon Defaults`;
+ACTION:confirm|Set Up Salon Defaults
+EXTRACTED: industry=Beauty & Personal Care
+EXTRACTED: archetype=service_provider`;
   }
 
   private parseAiResponse(content: string, setupStatus: SetupStatus): ConciergeMessage {
@@ -629,6 +639,7 @@ ACTION:confirm|Set Up Salon Defaults`;
     let messageText = '';
     const quickReplies: string[] = [];
     const actions: ConciergeAction[] = [];
+    const extracted: Record<string, string> = {};
 
     const VALID_ACTION_TYPES = new Set<ConciergeAction['type']>(['confirm', 'customize', 'skip', 'navigate']);
 
@@ -647,6 +658,12 @@ ACTION:confirm|Set Up Salon Defaults`;
               type: actionType,
             });
           }
+        }
+      } else if (line.startsWith('EXTRACTED:')) {
+        const kv = line.replace('EXTRACTED:', '').trim();
+        const eq = kv.indexOf('=');
+        if (eq > 0) {
+          extracted[kv.slice(0, eq).trim()] = kv.slice(eq + 1).trim();
         }
       } else {
         messageText += (messageText ? '\n' : '') + line;
@@ -675,7 +692,47 @@ ACTION:confirm|Set Up Salon Defaults`;
       quickReplies: quickReplies.length > 0 ? quickReplies : undefined,
       actions: actions.length > 0 ? actions : undefined,
       setupStatus,
+      extracted: Object.keys(extracted).length > 0 ? extracted : undefined,
     };
+  }
+
+  private async persistIntakeAnswers(
+    businessId: string,
+    userMessage: string,
+    extracted: Record<string, string>,
+    detection?: { template: { id: string; label: string } },
+  ): Promise<void> {
+    const answers: Record<string, unknown> = {
+      businessIntent: extracted.businessIntent || userMessage,
+    };
+    if (extracted.businessName) answers.businessName = extracted.businessName;
+    if (extracted.industry) answers.industry = extracted.industry;
+    if (extracted.archetype) answers.archetype = extracted.archetype;
+    if (extracted.country) answers.country = extracted.country;
+    if (extracted.revenueModel) answers.revenueModel = extracted.revenueModel;
+    if (extracted.teamSize) answers.teamSize = extracted.teamSize;
+
+    if (!answers.industry && detection?.template.label) {
+      answers.industry = detection.template.label;
+    }
+    if (!answers.archetype && detection?.template.id) {
+      answers.archetype = detection.template.id;
+    }
+
+    const businessUpdate: Prisma.BusinessUpdateInput = {};
+    if (typeof answers.businessIntent === 'string') businessUpdate.businessIntent = answers.businessIntent;
+    if (typeof answers.industry === 'string') businessUpdate.industry = answers.industry;
+    if (typeof answers.archetype === 'string') businessUpdate.archetype = answers.archetype;
+    if (typeof answers.country === 'string') businessUpdate.country = answers.country;
+
+    if (Object.keys(businessUpdate).length > 0) {
+      await this.prisma.client.business.update({
+        where: { id: businessId },
+        data: businessUpdate,
+      });
+    }
+
+    await this.blueprint.inferFromOnboarding(businessId, answers);
   }
 
   private getFallbackResponse(setupStatus: SetupStatus): ConciergeMessage {
@@ -982,15 +1039,26 @@ ACTION:confirm|Set Up Salon Defaults`;
     };
   }
 
+  async seedDemoData(businessId: string) {
+    return this.demoSeeder.seedDemoData(businessId);
+  }
+
   async markOnboardingComplete(businessId: string) {
-    await this.prisma.client.business.update({
-      where: { id: businessId },
-      data: { onboardingComplete: true },
+    await this.prisma.client.$transaction(async (tx) => {
+      await tx.business.update({
+        where: { id: businessId },
+        data: {
+          onboardingComplete: true,
+          onboardingCompletedAt: new Date(),
+          onboardingStep: 'complete',
+        },
+      });
     });
 
+    const demoData = await this.demoSeeder.seedDemoData(businessId);
     await this.awardSetupMilestone(businessId, 'onboardingComplete');
 
-    return { complete: true };
+    return { complete: true, demoData };
   }
 
   private async awardSetupMilestone(businessId: string, milestone: string) {

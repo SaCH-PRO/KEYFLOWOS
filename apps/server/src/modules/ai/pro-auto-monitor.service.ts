@@ -1,9 +1,11 @@
-import { Injectable, Logger, Inject, OnModuleInit, OnModuleDestroy, forwardRef } from '@nestjs/common';
+import { Injectable, Logger, Inject, OnModuleInit, OnModuleDestroy, forwardRef, Optional } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { BusinessGraphService, BusinessGraphSnapshot } from './business-graph.service';
 import { AiOversightService, type AutonomySettings } from './ai-oversight.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
 import { FlowOrchestratorService } from './flow-orchestrator.service';
+import { KeyCortexApprovalOrchestratorService } from '../key-cortex/key-cortex-approval-orchestrator.service';
+import { KeyActionProposalService } from '../key-autonomy/key-action-proposal.service';
 
 export type InsightSeverity = 'critical' | 'warning' | 'info' | 'opportunity';
 export type InsightCategory =
@@ -70,6 +72,12 @@ export class ProAutoMonitorService implements OnModuleInit, OnModuleDestroy {
     @Inject(AiOversightService) private readonly governance: AiOversightService,
     @Inject(AiExecutionLogService) private readonly executionLog: AiExecutionLogService,
     @Inject(forwardRef(() => FlowOrchestratorService)) private readonly orchestrator: FlowOrchestratorService,
+    @Optional()
+    @Inject(KeyCortexApprovalOrchestratorService)
+    private readonly approvalOrchestrator?: KeyCortexApprovalOrchestratorService,
+    @Optional()
+    @Inject(KeyActionProposalService)
+    private readonly proposalService?: KeyActionProposalService,
   ) {}
 
   onModuleInit() {
@@ -168,16 +176,14 @@ export class ProAutoMonitorService implements OnModuleInit, OnModuleDestroy {
 
     if (actionableInsights.length === 0) return;
 
-    const recentApprovals = await this.prisma.client.aiApprovalItem.findMany({
-      where: {
-        businessId,
-        status: 'pending',
-        module: 'monitoring',
-        createdAt: { gte: new Date(Date.now() - 4 * 60 * 60 * 1000) },
-      },
-      select: { toolName: true },
-    });
-    const existingTools = new Set(recentApprovals.map(a => a.toolName));
+    const recentProposals = this.proposalService
+      ? await this.proposalService.list(businessId, {
+          status: 'PENDING',
+          sourceType: 'PRO_AUTO',
+          createdAfter: new Date(Date.now() - 4 * 60 * 60 * 1000),
+        })
+      : [];
+    const existingTools = new Set(recentProposals.map(p => p.toolName).filter(Boolean));
 
     for (const insight of actionableInsights) {
       const toolKey = `monitoring_${insight.category}`;
@@ -225,19 +231,46 @@ export class ProAutoMonitorService implements OnModuleInit, OnModuleDestroy {
         }
       }
 
-      await this.prisma.client.aiApprovalItem.create({
-        data: {
+      if (this.approvalOrchestrator) {
+        await this.approvalOrchestrator.propose({
           businessId,
-          riskTier: insight.riskTier,
+          sourceType: 'PRO_AUTO',
+          sourceMode: 'monitoring',
           toolName: toolKey,
           module: 'monitoring',
           title: insight.title,
           description: insight.description,
+          summary: insight.description,
           rationale: insight.suggestedAction || 'Proactive monitoring detected an issue requiring attention',
-          expectedBenefit: insight.suggestedAction,
+          expectedBenefit: insight.suggestedAction ?? undefined,
           risks: insight.severity === 'critical' ? 'Inaction may lead to revenue loss or operational disruption' : undefined,
-        },
-      });
+          parameters: {
+            category: insight.category,
+            severity: insight.severity,
+            suggestedTool: insight.suggestedTool,
+            suggestedAction: insight.suggestedAction,
+          },
+        });
+      } else if (this.proposalService) {
+        await this.proposalService.create(businessId, {
+          sourceType: 'PRO_AUTO',
+          sourceMode: 'monitoring',
+          actionType: 'EXECUTE_TOOL',
+          toolName: toolKey,
+          module: 'monitoring',
+          title: insight.title,
+          summary: insight.description,
+          rationale: insight.suggestedAction || 'Proactive monitoring detected an issue requiring attention',
+          expectedBenefit: insight.suggestedAction ?? undefined,
+          risks: insight.severity === 'critical' ? 'Inaction may lead to revenue loss or operational disruption' : undefined,
+          payload: {
+            category: insight.category,
+            severity: insight.severity,
+            suggestedTool: insight.suggestedTool,
+            suggestedAction: insight.suggestedAction,
+          },
+        });
+      }
       existingTools.add(toolKey);
     }
   }

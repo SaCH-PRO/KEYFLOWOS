@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { AiOversightService } from '../ai/ai-oversight.service';
 import { GenomeAutonomyGateService } from '../business-genome/key-genome/genome-autonomy-gate.service';
 import { KeyActionPolicyService } from './key-action-policy.service';
@@ -14,7 +15,8 @@ import type {
   AutonomyTier,
   AutonomyVerdict,
 } from './autonomy-orchestrator.types';
-import type { GenomeAutonomyGateDecision } from '../business-genome/key-genome/key-genome.types';
+import type { GenomeAutonomyGateDecision, GenomeCrossDomainDomainKey } from '../business-genome/key-genome/key-genome.types';
+import type { BusinessRole } from '../ai/role-engine.service';
 import type { KeyExecutableActionType } from './key-action-proposal.types';
 
 /**
@@ -138,7 +140,7 @@ export class AutonomyOrchestratorService {
           context.businessId,
           context.actionKey,
           undefined,
-          context.role as any,
+          this.normalizeRole(context.role),
         );
 
         trace.push({
@@ -193,7 +195,7 @@ export class AutonomyOrchestratorService {
         const gateInput = {
           businessId: context.businessId,
           actionType: context.actionKey,
-          affectedDomains: context.affectedDomains as any,
+          affectedDomains: this.normalizeDomains(context.affectedDomains),
           payload: context.parameters ?? {},
           proposedBy: context.proposedBy ?? null,
         };
@@ -255,7 +257,7 @@ export class AutonomyOrchestratorService {
         try {
           const policyDecision = await this.genomePolicy.evaluateExecution(context.businessId, {
             actionType: executableAction,
-          } as any);
+          });
 
           trace.push({
             source: 'KeyActionGenomePolicyService',
@@ -470,7 +472,7 @@ export class AutonomyOrchestratorService {
         tier: verdict.tier,
         confidence: verdict.confidence,
         reason: verdict.reason,
-        ruleTrace: verdict.ruleTrace as any,
+        ruleTrace: verdict.ruleTrace as unknown as Prisma.InputJsonValue,
         proposalId: context.proposalId ?? null,
         contextHash: this.hashContext(context),
       },
@@ -498,6 +500,16 @@ export class AutonomyOrchestratorService {
     } catch {
       return '0';
     }
+  }
+
+  private normalizeRole(role?: string): BusinessRole | undefined {
+    const roles: BusinessRole[] = ['sales', 'finance', 'support', 'operations', 'marketing', 'general', 'operator'];
+    return roles.includes(role as BusinessRole) ? (role as BusinessRole) : undefined;
+  }
+
+  private normalizeDomains(domains?: string[]): GenomeCrossDomainDomainKey[] | undefined {
+    if (!Array.isArray(domains) || domains.length === 0) return undefined;
+    return domains.filter((d): d is GenomeCrossDomainDomainKey => typeof d === 'string') as GenomeCrossDomainDomainKey[];
   }
 
   private async getToolOutcomeScore(

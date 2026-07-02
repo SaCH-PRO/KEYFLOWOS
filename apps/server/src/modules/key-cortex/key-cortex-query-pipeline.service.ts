@@ -1292,6 +1292,11 @@ export class KeyCortexQueryPipelineService {
           : undefined,
       });
 
+      const toolCallBuffers = new Map<
+        number,
+        { id?: string; name?: string; arguments: string }
+      >();
+
       for await (const chunk of stream) {
         if (chunk.provider) finalProvider = chunk.provider as CortexProvider;
         if (chunk.model) finalModel = chunk.model;
@@ -1306,22 +1311,32 @@ export class KeyCortexQueryPipelineService {
           };
         }
 
-        if (chunk.toolCall?.name) {
-          let params: Record<string, unknown> = {};
-          if ((chunk.toolCall as any).argumentsDelta) {
-            try {
-              params = JSON.parse((chunk.toolCall as any).argumentsDelta);
-            } catch {
-              params = { raw: (chunk.toolCall as any).argumentsDelta };
-            }
+        if (chunk.toolCall) {
+          const { index, id, name, argumentsDelta } = chunk.toolCall;
+          let entry = toolCallBuffers.get(index);
+          if (!entry) {
+            entry = { arguments: '' };
+            toolCallBuffers.set(index, entry);
           }
-          yield {
-            type: 'tool_call',
-            toolCall: {
-              name: chunk.toolCall.name,
-              params,
-            },
-          };
+          if (id) entry.id = id;
+          if (name) entry.name = name;
+          if (argumentsDelta) entry.arguments += argumentsDelta;
+
+          if (entry.name) {
+            let params: Record<string, unknown> = {};
+            try {
+              params = JSON.parse(entry.arguments);
+            } catch {
+              params = { raw: entry.arguments };
+            }
+            yield {
+              type: 'tool_call',
+              toolCall: {
+                name: entry.name,
+                params,
+              },
+            };
+          }
         }
 
         if (chunk.error) {
@@ -1329,6 +1344,60 @@ export class KeyCortexQueryPipelineService {
             type: 'error',
             error: chunk.error,
           };
+        }
+      }
+
+      // Execute any streamed tool calls through the same autonomy-checked helper
+      // used by the non-streaming path.
+      const collectedToolCalls = Array.from(toolCallBuffers.entries())
+        .filter(([, tc]) => tc.name)
+        .map(([index, tc]) => ({
+          id: tc.id ?? `tc_${index}`,
+          type: 'function' as const,
+          function: {
+            name: tc.name!,
+            arguments: tc.arguments,
+          },
+        }));
+
+      if (collectedToolCalls.length > 0 && this.toolLoopService) {
+        try {
+          const toolLoopResult = await this.toolLoopService.handleToolCalls(
+            { toolCalls: collectedToolCalls },
+            messages,
+            query,
+            {
+              ...routeDecision,
+              temperatureOverride: effectiveTemperature,
+            },
+            personalityConfig,
+            taskCategory,
+            turnIdentity,
+            this.MAX_CONTEXT_TOKENS,
+          );
+
+          if (toolLoopResult?.content) {
+            accumulatedText += `\n\n${toolLoopResult.content}`;
+            yield {
+              type: 'text_delta',
+              content: toolLoopResult.content,
+            };
+          }
+
+          for (const action of toolLoopResult?.actions ?? []) {
+            yield {
+              type: 'action_delta',
+              action: {
+                actionType: action.actionType,
+                description: action.description,
+                status: action.status,
+              },
+            };
+          }
+        } catch (err: any) {
+          this.logger.warn(
+            `[streamQuery][${correlationId}] Tool loop execution failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
         }
       }
 

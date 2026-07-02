@@ -89,6 +89,7 @@ import { OsModule } from './modules/os/os.module';
 import { GovernanceModule } from './modules/governance/governance.module';
 import { TemporalModule } from './modules/temporal/temporal.module';
 import { TemporalFlowModule } from './modules/temporal-flow/temporal-flow.module';
+import { FlowSignalModule } from './modules/flow-signal/flow-signal.module';
 import { BusinessGenomeModule } from './modules/business-genome/business-genome.module';
 import { PeopleFlowModule } from './modules/people-flow/people-flow.module';
 import { SopModule } from './modules/sop/sop.module';
@@ -109,9 +110,11 @@ import { PushNotificationModule } from './modules/push-notifications/push-notifi
 import { SecurityAuditModule } from './modules/security-audit/security-audit.module';
 import { IngestionModule } from './modules/ingestion/ingestion.module';
 import { KeyInboxModule } from './modules/key-inbox/key-inbox.module';
+import { ContractsModule } from './modules/contracts/contracts.module';
 import { KeyCortexModule } from './modules/key-cortex/key-cortex.module';
 import { KeystoreModule } from './modules/keystore/keystore.module';
 import { KeyConnectorModule } from './modules/key-connector/key-connector.module';
+import { VoiceModule } from './modules/voice/voice.module';
 
 @Module({
   imports: [
@@ -202,6 +205,7 @@ import { KeyConnectorModule } from './modules/key-connector/key-connector.module
     IngestionModule,
     TemporalModule,
     TemporalFlowModule,
+    FlowSignalModule,
     BusinessGenomeModule,
     KeyInboxModule,
     PeopleFlowModule,
@@ -221,12 +225,16 @@ import { KeyConnectorModule } from './modules/key-connector/key-connector.module
     DeviceModule,
     RealtimeModule,
     SecurityAuditModule,
+    ContractsModule,
 
     // KeyStore Service Marketplace — Human-powered deliverables platform
     KeystoreModule,
 
     // KEY CONNECTOR — Unified Universal Connector (absorbs integration-hub, connect, cortex connector)
     KeyConnectorModule,
+
+    // Voice providers — Browser / OpenAI / ElevenLabs TTS
+    VoiceModule,
 
     // AI Intelligence Layer — JARVIS-like conversational engine
     KeyCortexModule,

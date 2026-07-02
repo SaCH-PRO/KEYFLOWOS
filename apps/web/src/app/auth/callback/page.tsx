@@ -3,7 +3,13 @@
 import { useRouter } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { bootstrapIdentity } from "@/lib/client";
-import { setStoredToken, setStoredBusinessId, getStoredBusinessId } from "@/lib/workspace";
+import {
+  setStoredToken,
+  setStoredRefreshToken,
+  setStoredTokenExpiry,
+  setStoredBusinessId,
+  getStoredBusinessId,
+} from "@/lib/workspace";
 import { apiPatch } from "@/lib/api";
 
 /**
@@ -58,6 +64,9 @@ function AuthCallbackInner() {
         const hash = window.location.hash.substring(1);
         const hashParams = new URLSearchParams(hash);
         const accessToken = hashParams.get("access_token");
+        const refreshToken = hashParams.get("refresh_token");
+        const expiresIn = hashParams.get("expires_in");
+        const expiresAt = hashParams.get("expires_at");
         const searchParams = new URLSearchParams(window.location.search);
         const errorDescription =
           searchParams.get("error_description") ??
@@ -77,6 +86,19 @@ function AuthCallbackInner() {
         }
 
         setStoredToken(accessToken);
+        if (refreshToken) {
+          setStoredRefreshToken(refreshToken);
+        }
+        if (expiresAt || expiresIn) {
+          const ms = expiresAt
+            ? Date.parse(expiresAt)
+            : Date.now() + Number(expiresIn) * 1000;
+          if (!Number.isNaN(ms)) setStoredTokenExpiry(ms);
+        }
+
+        const referralCode = typeof window !== "undefined"
+          ? window.localStorage.getItem("kf_referral_code") || undefined
+          : undefined;
 
         const userInfoRes = await fetch(
           `${process.env.NEXT_PUBLIC_SUPABASE_URL}/auth/v1/user`,
@@ -119,6 +141,7 @@ function AuthCallbackInner() {
           company: profileDraft.company,
           username: profileDraft.username,
           avatarUrl,
+          referralCode,
         });
         
         if (bootstrap.data?.business?.id) {
@@ -149,7 +172,7 @@ function AuthCallbackInner() {
           throw new Error("Could not create workspace. Please try again.");
         }
 
-        router.push("/app");
+        router.push(bootstrap.data.isNewBusiness ? "/app/onboarding" : "/app");
       } catch (err) {
         const message = err instanceof Error ? err.message : "Authentication failed";
         setErrorKind("generic");

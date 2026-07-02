@@ -7,12 +7,20 @@ export interface SafetyCheckResult {
   idempotencyKey?: string;
   rollbackActions?: unknown[];
   reason?: string;
+  /** Before-state snapshot captured at safety-check time. */
+  snapshot?: Record<string, unknown>;
+  /** Actor id associated with the safety check. */
+  actorId?: string;
 }
 
 export interface SafetyShellOptions {
   idempotencyKey?: string;
   preconditions?: Array<{ field: string; required: boolean }>;
   rollbackActions?: unknown[];
+  /** Optional before-state snapshot used for audit/undo. */
+  snapshot?: Record<string, unknown>;
+  /** Optional actor id to associate with the safety check. */
+  actorId?: string;
 }
 
 /**
@@ -59,6 +67,8 @@ export class SafetyShellService {
       preconditionsMet: true,
       idempotencyKey,
       rollbackActions: options.rollbackActions ?? [],
+      snapshot: options.snapshot,
+      actorId: options.actorId,
     };
   }
 

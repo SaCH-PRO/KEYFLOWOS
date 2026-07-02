@@ -1,9 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { BlueprintService } from './blueprint.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { GenomeScoringService } from '../business-genome/key-genome/genome-scoring.service';
+import { KeyGenomeService } from '../business-genome/key-genome/key-genome.service';
 import type { DnaSectionKey, GenomeStage } from './blueprint.types';
 
-function makeService(row?: Record<string, unknown>) {
+function makeService(row?: Record<string, unknown>, scoringOverrides?: Partial<GenomeScoringService>) {
   const prisma = {
     client: {
       businessBlueprint: {
@@ -14,6 +17,9 @@ function makeService(row?: Record<string, unknown>) {
       business: {
         findUnique: vi.fn().mockResolvedValue({ id: 'biz_1', name: 'Test Business', metaData: {} }),
       },
+      genomeFact: {
+        findMany: vi.fn().mockResolvedValue([]),
+      },
     },
   } as unknown as PrismaService;
 
@@ -21,7 +27,35 @@ function makeService(row?: Record<string, unknown>) {
     emit: vi.fn().mockResolvedValue({ id: 'tf_1' }),
   };
 
-  return new BlueprintService(prisma, temporal as any);
+  const genomeScoring = {
+    computeFactScores: vi.fn().mockResolvedValue([]),
+    computeBusinessScore: vi.fn().mockReturnValue({
+      businessId: 'biz_1',
+      overall: 0,
+      integrity: 0,
+      readiness: 0,
+      confidence: 0,
+      sections: [],
+      computedAt: new Date().toISOString(),
+    }),
+    ...scoringOverrides,
+  } as unknown as GenomeScoringService;
+
+  const moduleReadiness = {
+    computeReadiness: vi.fn().mockResolvedValue([]),
+    getReadiness: vi.fn().mockResolvedValue(null),
+  };
+
+  const keyGenome = new KeyGenomeService(prisma as any, genomeScoring, moduleReadiness as any);
+
+  return new BlueprintService(
+    prisma,
+    temporal as any,
+    genomeScoring,
+    keyGenome,
+    moduleReadiness as any,
+    new EventEmitter2(),
+  );
 }
 
 function emptyBlueprintRow(): Record<string, unknown> {
@@ -205,7 +239,7 @@ function partialThreePillarRow(): Record<string, unknown> {
 describe('BlueprintService genome integrity', () => {
   it('returns all zeros for an empty blueprint', () => {
     const service = makeService(emptyBlueprintRow());
-    const result = (service as any).buildGenomeIntegrityResult(emptyBlueprintRow());
+    const result = (service as any).buildGenomeIntegrityResult('biz_1', emptyBlueprintRow());
 
     expect(result.genomeIntegrity).toBe(0);
     expect(result.genomeStage).toBe('CONCEPT');
@@ -217,7 +251,7 @@ describe('BlueprintService genome integrity', () => {
 
   it('returns 100 integrity and ENTERPRISE_READY for a fully populated blueprint', () => {
     const service = makeService(fullBlueprintRow());
-    const result = (service as any).buildGenomeIntegrityResult(fullBlueprintRow());
+    const result = (service as any).buildGenomeIntegrityResult('biz_1', fullBlueprintRow());
 
     expect(result.genomeIntegrity).toBe(100);
     expect(result.genomeStage).toBe('ENTERPRISE_READY');
@@ -229,7 +263,7 @@ describe('BlueprintService genome integrity', () => {
 
   it('computes executive readiness from weighted DNA sections', () => {
     const service = makeService(fullBlueprintRow());
-    const result = (service as any).buildGenomeIntegrityResult(fullBlueprintRow());
+    const result = (service as any).buildGenomeIntegrityResult('biz_1', fullBlueprintRow());
 
     expect(result.executiveReadinessScore).toBe(100);
     expect(result.readinessBreakdown).toEqual({
@@ -245,14 +279,14 @@ describe('BlueprintService genome integrity', () => {
 
   it('returns 0 executive readiness for an empty blueprint', () => {
     const service = makeService(emptyBlueprintRow());
-    const result = (service as any).buildGenomeIntegrityResult(emptyBlueprintRow());
+    const result = (service as any).buildGenomeIntegrityResult('biz_1', emptyBlueprintRow());
 
     expect(result.executiveReadinessScore).toBe(0);
   });
 
   it('detects Three-Pillar Minimum met at exactly 50% per pillar', () => {
     const service = makeService(partialThreePillarRow());
-    const result = (service as any).buildGenomeIntegrityResult(partialThreePillarRow());
+    const result = (service as any).buildGenomeIntegrityResult('biz_1', partialThreePillarRow());
 
     expect(result.genomeDnaScores.founder).toBe(50);
     expect(result.genomeDnaScores.business).toBe(50);
@@ -271,7 +305,44 @@ describe('BlueprintService genome integrity', () => {
     };
     const service = makeService(row);
 
-    expect(() => (service as any).buildGenomeIntegrityResult(row)).not.toThrow();
+    expect(() => (service as any).buildGenomeIntegrityResult('biz_1', row)).not.toThrow();
+  });
+
+  it('uses fact-based KEY Genome scores when GenomeFact rows exist', () => {
+    const service = makeService(fullBlueprintRow(), {
+      computeBusinessScore: vi.fn().mockReturnValue({
+        businessId: 'biz_1',
+        overall: 0.42,
+        integrity: 0.5,
+        readiness: 0.3,
+        confidence: 0.6,
+        sections: [
+          {
+            section: 'VISION_IDENTITY',
+            weight: 6,
+            score: {
+              completeness: 1,
+              quality: 0.5,
+              confidence: 0.6,
+              freshness: 0.8,
+              operationalReadiness: 0.7,
+              riskPenalty: 0,
+              overall: 0.72,
+            },
+          },
+        ],
+        computedAt: new Date().toISOString(),
+      }),
+    });
+
+    const result = (service as any).buildGenomeIntegrityResult('biz_1', fullBlueprintRow(), [
+      { id: 'fact_1' } as any,
+    ]);
+
+    expect(result.genomeIntegrity).toBe(42);
+    const visionSection = result.dnaSections.find((s: any) => s.key === 'vision');
+    expect(visionSection.integrity).toBe(72);
+    expect(visionSection.confidence).toBe(60);
   });
 
   it('computes integrity via calculateGenomeIntegrity using the DB row', async () => {

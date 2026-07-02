@@ -25,6 +25,7 @@ import {
   ArrowUpRight,
 } from "lucide-react";
 import { KeyVoiceButton } from "./KeyVoiceButton";
+import { useTts } from "@/components/tts";
 
 const API_BASE = getApiBase();
 
@@ -119,15 +120,9 @@ export function KeyCommandCenter({
   const [isExpanded, setIsExpanded] = useState(false);
   const [messages, setMessages] = useState<KeyMessage[]>([]);
   const [inputValue, setInputValue] = useState("");
+  const { engine, state: ttsState } = useTts();
   const [keyStatus, setKeyStatus] = useState<KeyStatus>("idle");
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
-  const [ttsMuted, setTtsMuted] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem("kf_voice_settings") || "{}").muted ?? false;
-    } catch {
-      return false;
-    }
-  });
   const [showQuickActions, setShowQuickActions] = useState(true);
   const [unreadCount, setUnreadCount] = useState(0);
 
@@ -406,18 +401,8 @@ export function KeyCommandCenter({
   /*  Toggle mute                                                       */
   /* ---------------------------------------------------------------- */
   const toggleMute = useCallback(() => {
-    setTtsMuted((m: boolean) => {
-      const next = !m;
-      try {
-        const settings = JSON.parse(localStorage.getItem("kf_voice_settings") || "{}");
-        settings.muted = next;
-        localStorage.setItem("kf_voice_settings", JSON.stringify(settings));
-      } catch {
-        // ignore
-      }
-      return next;
-    });
-  }, []);
+    engine.toggleMuted();
+  }, [engine]);
 
   /* ---------------------------------------------------------------- */
   /*  Mark read on open                                                 */
@@ -489,9 +474,9 @@ export function KeyCommandCenter({
           <button
             onClick={toggleMute}
             className="p-1.5 rounded-lg hover:bg-white/[0.05] text-[hsl(30_10%_50%)] transition-colors"
-            title={ttsMuted ? "Unmute voice" : "Mute voice"}
+            title={ttsState.muted ? "Unmute voice" : "Mute voice"}
           >
-            {ttsMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+            {ttsState.muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
           </button>
           <button
             onClick={() => setIsExpanded((e) => !e)}

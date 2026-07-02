@@ -76,10 +76,12 @@ import { ChaserService } from './chaser.service';
 import { CrossBusinessIntelligenceService } from './cross-business-intelligence.service';
 import { AiIntelligenceController } from './ai-intelligence.controller';
 import { KeyAgentConfigService } from './key-agent-config.service';
+import { AiApprovalsController } from './ai-approvals.controller';
+import { AiApprovalsService } from './ai-approvals.service';
 
 @Module({
   imports: [PrismaModule, RedisModule, SubscriptionsModule, forwardRef(() => BlueprintModule), TimelineModule, forwardRef(() => FinanceModule), CommandModule, GoogleDriveModule, TaskAssignmentModule, forwardRef(() => KeyAutonomyModule), forwardRef(() => KeyCortexModule)],
-  controllers: [AiController, AiSettingsController, OutputTemplateController, AiFlowController, GraphActionsController, AiUsageAdminController, AiIntelligenceController, BlueprintOnboardingController],
+  controllers: [AiController, AiSettingsController, OutputTemplateController, AiFlowController, GraphActionsController, AiUsageAdminController, AiIntelligenceController, BlueprintOnboardingController, AiApprovalsController],
   providers: [
     AiListener,
     ModelGatewayService,
@@ -91,6 +93,7 @@ import { KeyAgentConfigService } from './key-agent-config.service';
     FlowOrchestratorService,
     BusinessGraphService,
     AiOversightService,
+    AiApprovalsService,
     AiExecutionLogService,
     IntentParserService,
     PlannerService,

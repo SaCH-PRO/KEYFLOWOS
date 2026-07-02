@@ -193,6 +193,30 @@ export interface GenomeContext {
   lastAssessment: Date;
 }
 
+export interface DeviceContext {
+  recentCaptures: Array<{
+    id: string;
+    mediaType: string;
+    detectedType: string | null;
+    status: string;
+    createdAt: Date;
+    publicUrl?: string | null;
+  }>;
+  pendingCaptures: number;
+  highConfidenceContacts: Array<{
+    id: string;
+    entityType: string;
+    proposedData: Record<string, unknown>;
+    matchConfidence: number | null;
+  }>;
+  linkedCommandItems: Array<{
+    id: string;
+    title: string;
+    category: string;
+    status: string;
+  }>;
+}
+
 export interface FullBusinessContext {
   businessId: string;
   timestamp: Date;
@@ -204,6 +228,7 @@ export interface FullBusinessContext {
   temporal: TemporalContext;
   inbox: InboxContext;
   genome: GenomeContext;
+  device: DeviceContext;
   summary: {
     totalRevenueOutstanding: number;
     totalActiveTasks: number;
@@ -275,6 +300,7 @@ export class KeyCortexContextV2Service {
       this.getTemporalContext(businessId),
       this.getInboxContext(businessId),
       this.getGenomeContext(businessId),
+      this.getDeviceContext(businessId),
     ]);
 
     const contexts = results.map((r: any) => r.status === 'fulfilled' ? r.value : null);
@@ -287,6 +313,7 @@ export class KeyCortexContextV2Service {
       temporalCtx,
       inboxCtx,
       genomeCtx,
+      deviceCtx,
     ] = contexts;
 
     const crm = (crmCtx ?? this.emptyCrmContext()) as CrmContext;
@@ -297,6 +324,7 @@ export class KeyCortexContextV2Service {
     const temporal = (temporalCtx ?? this.emptyTemporalContext()) as TemporalContext;
     const inbox = (inboxCtx ?? this.emptyInboxContext()) as InboxContext;
     const genome = (genomeCtx ?? this.emptyGenomeContext()) as GenomeContext;
+    const device = (deviceCtx ?? this.emptyDeviceContext()) as DeviceContext;
 
     const context: FullBusinessContext = {
       businessId,
@@ -309,6 +337,7 @@ export class KeyCortexContextV2Service {
       temporal,
       inbox,
       genome,
+      device,
       summary: {
         totalRevenueOutstanding: commerce.outstandingInvoices.total,
         totalActiveTasks: autopilot.activeTasks.length + autopilot.pendingApprovals,
@@ -994,6 +1023,75 @@ export class KeyCortexContextV2Service {
     }
   }
 
+  /* ─────── Device Context ─────── */
+
+  async getDeviceContext(businessId: string): Promise<DeviceContext> {
+    try {
+      const since = subDays(new Date(), 7);
+
+      const [assets, pendingCount, entities, commands] = await Promise.all([
+        (this.prisma.client as any).mediaAsset.findMany({
+          where: { businessId, createdAt: { gte: since } },
+          orderBy: { createdAt: 'desc' },
+          take: 10,
+          include: {
+            visualIntake: true,
+          },
+        }),
+        (this.prisma.client as any).visualIntake.count({
+          where: { businessId, status: { in: ['PENDING', 'PROCESSED'] } },
+        }),
+        (this.prisma.client as any).extractedEntity.findMany({
+          where: {
+            businessId,
+            entityType: { in: ['business_card', 'contact'] },
+            matchConfidence: { gte: 70 },
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 10,
+          include: { mediaAsset: { select: { id: true } } },
+        }),
+        (this.prisma.client as any).commandItem.findMany({
+          where: {
+            businessId,
+            sourceModule: 'DEVICE',
+            status: { in: ['OPEN', 'PENDING'] },
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 10,
+          select: { id: true, title: true, category: true, status: true },
+        }),
+      ]);
+
+      return {
+        recentCaptures: (assets || []).map((a: any) => ({
+          id: a.id,
+          mediaType: a.mediaType ?? 'unknown',
+          detectedType: a.visualIntake?.detectedType ?? null,
+          status: a.status ?? 'unknown',
+          createdAt: a.createdAt,
+          publicUrl: a.publicUrl ?? null,
+        })),
+        pendingCaptures: pendingCount ?? 0,
+        highConfidenceContacts: (entities || []).map((e: any) => ({
+          id: e.id,
+          entityType: e.entityType ?? 'unknown',
+          proposedData: (e.proposedData as Record<string, unknown>) ?? {},
+          matchConfidence: e.matchConfidence ?? null,
+        })),
+        linkedCommandItems: (commands || []).map((c: any) => ({
+          id: c.id,
+          title: c.title ?? 'Untitled',
+          category: c.category ?? 'WORK',
+          status: c.status ?? 'OPEN',
+        })),
+      };
+    } catch (error: any) {
+      this.logger.error(`[getDeviceContext] Error for ${businessId}: ${error.message}`);
+      return this.emptyDeviceContext();
+    }
+  }
+
   /* ─────── Format Context for AI Prompt ─────── */
 
   formatContextForPrompt(context: FullBusinessContext): string {
@@ -1089,6 +1187,17 @@ export class KeyCortexContextV2Service {
       context.genome.recommendations.slice(0, 3).forEach((r) => {
         sections.push(`  - ${r}`);
       });
+    }
+    sections.push('');
+
+    // ── Device captures ──
+    sections.push(`--- DEVICE CAPTURES ---`);
+    sections.push(`Recent captures: ${context.device.recentCaptures.length} | Pending review: ${context.device.pendingCaptures}`);
+    if (context.device.highConfidenceContacts.length) {
+      sections.push(`High-confidence extracted contacts: ${context.device.highConfidenceContacts.length}`);
+    }
+    if (context.device.linkedCommandItems.length) {
+      sections.push(`Linked command items: ${context.device.linkedCommandItems.map((c) => c.title).slice(0, 3).join(', ')}`);
     }
     sections.push('');
 
@@ -1433,6 +1542,15 @@ export class KeyCortexContextV2Service {
       growthTrajectory: '',
       recommendations: [],
       lastAssessment: new Date(),
+    };
+  }
+
+  private emptyDeviceContext(): DeviceContext {
+    return {
+      recentCaptures: [],
+      pendingCaptures: 0,
+      highConfidenceContacts: [],
+      linkedCommandItems: [],
     };
   }
 }

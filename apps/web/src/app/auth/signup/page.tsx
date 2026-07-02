@@ -3,7 +3,7 @@
 import { getApiBase } from "@/lib/api-base";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "../motion-shim";
 import {
@@ -28,7 +28,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { bootstrapIdentity, identitySignup, identityResendVerification } from "@/lib/client";
-import { setStoredToken, setStoredBusinessId } from "@/lib/workspace";
+import { setStoredToken, setStoredRefreshToken, setStoredBusinessId } from "@/lib/workspace";
 
 const API_BASE = getApiBase();
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -41,6 +41,12 @@ function signUpWithGoogle() {
     ? window.location.origin
     : SITE_URL;
   const redirectTo = `${origin.replace(/\/$/, "")}/auth/callback`;
+  const ref = typeof window !== "undefined"
+    ? window.localStorage.getItem("kf_referral_code") || new URLSearchParams(window.location.search).get("ref") || ""
+    : "";
+  if (ref && typeof window !== "undefined") {
+    window.localStorage.setItem("kf_referral_code", ref);
+  }
   window.location.href = `${SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirectTo)}`;
 }
 
@@ -70,6 +76,8 @@ const PW_RULES = [
 
 export default function AuthSignup() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const [referralCode, setReferralCode] = useState<string | undefined>(undefined);
   const [step, setStep] = useState(1);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -96,6 +104,17 @@ export default function AuthSignup() {
     const id = setTimeout(() => setResendCooldownSec((s) => Math.max(0, s - 1)), 1000);
     return () => clearTimeout(id);
   }, [resendCooldownSec]);
+
+  useEffect(() => {
+    // Capture referral code from URL or localStorage and keep it for bootstrap.
+    const ref = searchParams?.get("ref") || (typeof window !== "undefined" ? window.localStorage.getItem("kf_referral_code") || undefined : undefined);
+    if (ref) {
+      setReferralCode(ref);
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem("kf_referral_code", ref);
+      }
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     let cancelled = false;
@@ -142,6 +161,7 @@ export default function AuthSignup() {
         username: username.trim(),
         company: company.trim() || undefined,
         phone: phone.trim() || undefined,
+        referralCode,
       });
 
       if (result.error || !result.data) {
@@ -155,12 +175,13 @@ export default function AuthSignup() {
         // Auto-confirm path (dev / verification disabled): we received a session,
         // bootstrap the user and route into the app.
         setStoredToken(data.accessToken);
-        if (data.refreshToken) window.localStorage.setItem("kf_refresh_token", data.refreshToken);
+        if (data.refreshToken) setStoredRefreshToken(data.refreshToken);
         const bootstrap = await bootstrapIdentity({
           email: email.trim(), username: username.trim(),
           name: `${firstName.trim()} ${lastName.trim()}`.trim(),
           firstName: firstName.trim(), lastName: lastName.trim(),
           phone: phone.trim(), company: company.trim(),
+          referralCode,
         });
         if (bootstrap.data?.business?.id) {
           setStoredBusinessId(bootstrap.data.business.id);

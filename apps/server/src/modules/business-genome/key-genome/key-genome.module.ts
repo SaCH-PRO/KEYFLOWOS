@@ -30,6 +30,7 @@ import { GenomeOpportunityDetectorService } from './genome-opportunity-detector.
 import { GenomeAutonomyGateService } from './genome-autonomy-gate.service';
 import { GenomeRecommendationOutcomeService } from './genome-recommendation-outcome.service';
 import { GenomeOutcomeLearningService } from './genome-outcome-learning.service';
+import { KeyGenomeService } from './key-genome.service';
 
 @Module({
   imports: [PrismaModule],
@@ -64,6 +65,7 @@ import { GenomeOutcomeLearningService } from './genome-outcome-learning.service'
     GenomeAutonomyGateService,
     GenomeRecommendationOutcomeService,
     GenomeOutcomeLearningService,
+    KeyGenomeService,
   ],
   exports: [
     GenomeFactService,
@@ -96,6 +98,7 @@ import { GenomeOutcomeLearningService } from './genome-outcome-learning.service'
     GenomeAutonomyGateService,
     GenomeRecommendationOutcomeService,
     GenomeOutcomeLearningService,
+    KeyGenomeService,
   ],
 })
 export class KeyGenomeModule {}

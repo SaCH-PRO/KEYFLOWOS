@@ -1480,24 +1480,6 @@ export class KeyCortexExecutorService {
       }
     }
 
-    // Legacy fallback (should no longer be used)
-    const request = await (this.prisma.client as any).approvalRequest.findUnique({
-      where: { id: approvalId },
-    });
-    if (!request) {
-      throw new Error(`Approval request ${approvalId} not found`);
-    }
-    const payload = (request.payload ?? {}) as Record<string, unknown>;
-    const command: ConnectorCommand = {
-      businessId: request.businessId,
-      userId: request.requesterId,
-      module: ((request as any).actionModule || 'system') as any,
-      action: request.actionType,
-      parameters: payload,
-      source: 'key_cortex',
-      timestamp: new Date(),
-      correlationId: approvalId,
-    };
-    return this.execute(command);
+    throw new Error(`Approval proposal ${approvalId} not found`);
   }
 }

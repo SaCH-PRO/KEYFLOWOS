@@ -92,6 +92,7 @@ export class KeyActionProposalService {
         ...(query.status ? { status: query.status } : {}),
         ...(query.sourceType ? { sourceType: query.sourceType } : {}),
         ...(query.actionType ? { actionType: query.actionType } : {}),
+        ...(query.createdAfter ? { createdAt: { gte: query.createdAfter } } : {}),
       },
       orderBy: { createdAt: 'desc' },
     });

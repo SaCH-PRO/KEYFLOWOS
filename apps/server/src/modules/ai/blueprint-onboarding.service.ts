@@ -6,6 +6,7 @@ import {
   BlueprintData,
   BlueprintPatch,
   BlueprintSectionKey,
+  DnaSectionKey,
 } from '../blueprint/blueprint.types';
 
 export interface OnboardingMessage {
@@ -31,6 +32,7 @@ interface OnboardingChatResult {
   reply: string;
   blueprint: BlueprintData;
   completeness: number;
+  threePillarMinimumMet: boolean;
   confidenceScores: Record<string, number>;
   extracted: OnboardingExtraction[];
   nextSection: BlueprintSectionKey | null;
@@ -160,6 +162,9 @@ export class BlueprintOnboardingService {
         reply,
         blueprint: updatedBlueprint,
         completeness: updatedBlueprint.completeness,
+        threePillarMinimumMet: this.blueprint.checkThreePillarMinimum(
+          (updatedBlueprint.genomeDnaScores ?? {}) as Record<DnaSectionKey, number>,
+        ),
         confidenceScores: updatedBlueprint.confidenceScores as Record<string, number>,
         extracted: extractions,
         nextSection,
@@ -172,6 +177,9 @@ export class BlueprintOnboardingService {
         reply: fallback,
         blueprint,
         completeness: blueprint.completeness,
+        threePillarMinimumMet: this.blueprint.checkThreePillarMinimum(
+          (blueprint.genomeDnaScores ?? {}) as Record<DnaSectionKey, number>,
+        ),
         confidenceScores: blueprint.confidenceScores as Record<string, number>,
         extracted: [],
         nextSection: state.currentSection,

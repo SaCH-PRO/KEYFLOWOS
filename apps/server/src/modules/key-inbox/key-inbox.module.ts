@@ -2,6 +2,7 @@ import { Module, forwardRef } from '@nestjs/common';
 import { PrismaModule } from '../../core/prisma/prisma.module';
 import { AiModule } from '../ai/ai.module';
 import { BusinessEventModule } from '../business-events/business-event.module';
+import { KeyGenomeModule } from '../business-genome/key-genome/key-genome.module';
 import { KeyInboxActionService } from './key-inbox-action.service';
 import { KeyInboxAnalysisService } from './key-inbox-analysis.service';
 import { KeyInboxController } from './key-inbox.controller';
@@ -12,7 +13,7 @@ import { KeyInboxReplySenderService } from './key-inbox-reply-sender.service';
 import { KeyInboxIntelligenceService } from './key-inbox-intelligence.service';
 
 @Module({
-  imports: [PrismaModule, forwardRef(() => AiModule), BusinessEventModule],
+  imports: [PrismaModule, forwardRef(() => AiModule), BusinessEventModule, KeyGenomeModule],
   controllers: [KeyInboxController],
   providers: [
     KeyInboxService,

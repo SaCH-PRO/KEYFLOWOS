@@ -1,4 +1,4 @@
-import { Inject, Injectable, BadRequestException, Logger } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, Logger, Optional } from '@nestjs/common';
 import { BlueprintService } from '../blueprint/blueprint.service';
 import type {
   BlueprintData,
@@ -23,6 +23,9 @@ import { GenesisActionPlanBuilder } from './action-plan-builder.service';
 import { GenesisDocumentPackService } from './genesis-document-pack.service';
 import { GenesisRiskRegisterService } from './genesis-risk-register.service';
 import { inferCompliance } from './trinidad-compliance-rules';
+import { GenomeFactService } from '../business-genome/key-genome/genome-fact.service';
+import { GenomeEvidenceService } from '../business-genome/key-genome/genome-evidence.service';
+import type { BlueprintSectionKey } from '../blueprint/blueprint.types';
 
 function isPopulated(value: unknown): boolean {
   if (value === null || value === undefined) return false;
@@ -180,6 +183,12 @@ export class BusinessGenesisService {
     @Inject(GenesisActionPlanBuilder) private readonly actionPlanBuilder: GenesisActionPlanBuilder,
     @Inject(GenesisDocumentPackService) private readonly documentPack: GenesisDocumentPackService,
     @Inject(GenesisRiskRegisterService) private readonly riskRegister: GenesisRiskRegisterService,
+    @Optional()
+    @Inject(GenomeFactService)
+    private readonly genomeFactService?: GenomeFactService,
+    @Optional()
+    @Inject(GenomeEvidenceService)
+    private readonly genomeEvidenceService?: GenomeEvidenceService,
   ) {}
 
   async analyzeIdea(businessId: string, ideaText: string): Promise<GenesisIdeaAnalysis> {
@@ -354,6 +363,12 @@ Use null or omit fields when unknown. Keep the summary concrete and actionable.`
     const finalReadiness = this.readiness.calculate(blueprint);
     const nextQuestions = this.getNextQuestionsFromBlueprint(blueprint, 3);
 
+    // Close Genesis -> Genome fact loop: every answered field becomes a fact
+    // with evidence pointing back to the blueprint answer.
+    await this.syncAnswersToGenomeFacts(businessId, answers, blueprint).catch((err: unknown) => {
+      this.logger.warn(`Genome fact sync failed for ${businessId}: ${err instanceof Error ? err.message : String(err)}`);
+    });
+
     return {
       blueprint,
       readiness: finalReadiness,
@@ -391,5 +406,124 @@ Use null or omit fields when unknown. Keep the summary concrete and actionable.`
 
   async generateRiskRegister(businessId: string) {
     return this.riskRegister.generateRisks(businessId);
+  }
+
+  /**
+   * Sync Genesis answers into the Business Genome as facts with evidence.
+   *
+   * Each answered field becomes a GenomeFact with sourceType BUSINESS_GENESIS.
+   * Evidence is attached pointing back to the blueprint answer so the fact
+   * can be audited and reverted later if needed.
+   */
+  private async syncAnswersToGenomeFacts(
+    businessId: string,
+    answers: Record<string, unknown>,
+    blueprint: { id?: string; updatedAt?: string | Date },
+  ): Promise<void> {
+    if (!this.genomeFactService || !this.genomeEvidenceService) {
+      this.logger.debug(`Genome fact/evidence services unavailable; skipping Genesis fact sync`);
+      return;
+    }
+
+    for (const [key, rawValue] of Object.entries(answers)) {
+      if (!isPopulated(rawValue)) continue;
+
+      const mapping = this.inferGenomeFactTarget(key, rawValue);
+      if (!mapping) continue;
+
+      const { section, domain, field, value } = mapping;
+      const confidence = this.scoreAnswerConfidence(rawValue, answers);
+      const verified = rawValue && typeof rawValue === 'object' && (rawValue as Record<string, unknown>).confirmed === true;
+
+      const fact = await this.genomeFactService.upsertFact({
+        businessId,
+        section,
+        domain,
+        field,
+        value: { raw: value, type: 'JSON' },
+        sourceModule: 'business_genesis',
+        sourceType: 'BUSINESS_GENESIS',
+        sourceEntityType: 'BusinessBlueprint',
+        sourceEntityId: (blueprint as any)?.businessId ?? businessId,
+        verificationStatus: verified ? 'USER_VERIFIED' : 'INFERRED',
+        confidenceScore: confidence,
+      });
+
+      await this.genomeEvidenceService.attachEvidence({
+        businessId,
+        factId: fact.id,
+        sourceModule: 'business_genesis',
+        sourceEntityType: 'BusinessBlueprint',
+        sourceEntityId: (blueprint as any)?.businessId ?? businessId,
+        summary: `Genesis answer for ${section}.${field}: ${JSON.stringify(value).slice(0, 200)}`,
+        evidenceStrength: confidence,
+        occurredAt: typeof blueprint.updatedAt === 'string' ? blueprint.updatedAt : (blueprint.updatedAt as Date)?.toISOString(),
+      });
+    }
+  }
+
+  private inferGenomeFactTarget(
+    key: string,
+    value: unknown,
+  ): { section: string; domain: string; field: string; value: unknown } | null {
+    if (key.includes('.')) {
+      const [section, ...rest] = key.split('.');
+      const field = rest.join('.');
+      if (!field) return null;
+      return { section, domain: section, field, value };
+    }
+
+    // Map legacy flat onboarding keys to their inferred blueprint section.
+    const flatMap: Record<string, { section: BlueprintSectionKey; field: string }> = {
+      businessName: { section: 'identity', field: 'name' },
+      businessIntent: { section: 'identity', field: 'oneLiner' },
+      archetype: { section: 'identity', field: 'archetype' },
+      industry: { section: 'identity', field: 'industry' },
+      tagline: { section: 'identity', field: 'tagline' },
+      country: { section: 'identity', field: 'country' },
+      revenueModel: { section: 'operatingModel', field: 'revenueModel' },
+      deliveryMode: { section: 'operatingModel', field: 'deliveryMode' },
+      serviceArea: { section: 'operatingModel', field: 'serviceArea' },
+      teamSize: { section: 'operatingModel', field: 'teamSize' },
+      channels: { section: 'operatingModel', field: 'channels' },
+      budgetRange: { section: 'constraints', field: 'budgetRange' },
+      timeCommitment: { section: 'constraints', field: 'timeCommitment' },
+      riskTolerance: { section: 'constraints', field: 'riskTolerance' },
+      northStar: { section: 'goals', field: 'northStar' },
+      ninetyDayGoals: { section: 'goals', field: 'ninetyDayGoals' },
+      twelveMonthGoals: { section: 'goals', field: 'twelveMonthGoals' },
+      idealCustomer: { section: 'customerModel', field: 'idealCustomer' },
+      targetCustomer: { section: 'customerModel', field: 'idealCustomer' },
+      segments: { section: 'customerModel', field: 'segments' },
+      painPoints: { section: 'customerModel', field: 'painPoints' },
+      jobsToBeDone: { section: 'customerModel', field: 'jobsToBeDone' },
+      currency: { section: 'financials', field: 'currency' },
+      pricingModel: { section: 'financials', field: 'pricingModel' },
+      avgTicket: { section: 'financials', field: 'avgTicket' },
+      monthlyTarget: { section: 'financials', field: 'monthlyTarget' },
+    };
+
+    const mapped = flatMap[key];
+    if (!mapped) return null;
+    return { section: mapped.section, domain: mapped.section, field: mapped.field, value };
+  }
+
+  private scoreAnswerConfidence(value: unknown, _answers: Record<string, unknown>): number {
+    if (value && typeof value === 'object' && (value as Record<string, unknown>).confirmed === true) {
+      return 1;
+    }
+    if (typeof value === 'string') {
+      return value.trim().length > 0 ? 0.9 : 0.3;
+    }
+    if (typeof value === 'number') {
+      return Number.isFinite(value) ? 0.95 : 0.3;
+    }
+    if (typeof value === 'boolean') {
+      return 0.95;
+    }
+    if (Array.isArray(value)) {
+      return value.length > 0 ? 0.8 : 0.3;
+    }
+    return 0.5;
   }
 }

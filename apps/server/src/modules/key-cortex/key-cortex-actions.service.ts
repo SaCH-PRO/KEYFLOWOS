@@ -23,7 +23,7 @@ import { KeyToolRegistryService } from '../ai/key-tool-registry.service';
 import { KeyCommandService } from '../ai/key-command.service';
 import { KeyActionProposalService } from '../key-autonomy/key-action-proposal.service';
 import { AutonomyOrchestratorService } from '../key-autonomy/autonomy-orchestrator.service';
-import { KeyCortexApprovalService } from './key-cortex-approval.service';
+import { AutonomyLevelService } from '../key-autonomy/autonomy-level.service';
 import { KeyCortexSafeDatabaseService } from './key-cortex-safe-database.service';
 import {
   KeyCortexEventBusService,
@@ -95,8 +95,10 @@ export class KeyCortexActionsService implements OnModuleInit {
     @Optional()
     @Inject(AutonomyOrchestratorService)
     private readonly autonomyOrchestrator?: AutonomyOrchestratorService,
+    @Optional()
+    @Inject(AutonomyLevelService)
+    private readonly autonomyLevelService?: AutonomyLevelService,
     private readonly eventBus?: KeyCortexEventBusService,
-    private readonly approvalService?: KeyCortexApprovalService,
     @Optional()
     @Inject(KeyCortexSafeDatabaseService)
     private readonly safeDatabase?: KeyCortexSafeDatabaseService,
@@ -236,11 +238,12 @@ export class KeyCortexActionsService implements OnModuleInit {
     this.validateActionParams(actionType, params);
 
     const toolName = this.actionTypeToToolName(actionType);
+    const autonomyLevel = await this.resolveAutonomyLevel(businessId);
     const ctx: KeyCortexToolContext = {
       businessId,
       userId,
       sessionId,
-      autonomyLevel: 4,
+      autonomyLevel,
     };
 
     const toolResult = await this.keyCortexToolRegistry.execute(toolName, ctx, params as Record<string, unknown>);
@@ -258,6 +261,18 @@ export class KeyCortexActionsService implements OnModuleInit {
 
   private actionTypeToToolName(actionType: CortexActionType): string {
     return `cortex.${actionType.toLowerCase()}`;
+  }
+
+  private async resolveAutonomyLevel(businessId: string): Promise<number> {
+    if (this.autonomyLevelService) {
+      try {
+        const level = await this.autonomyLevelService.resolve(businessId);
+        return level.level;
+      } catch (err) {
+        this.logger.warn(`resolveAutonomyLevel failed: ${(err as Error).message}`);
+      }
+    }
+    return 0;
   }
 
   // ========================================================================
@@ -331,20 +346,7 @@ export class KeyCortexActionsService implements OnModuleInit {
             },
             session?.userId,
           )
-        : this.approvalService
-          ? await this.approvalService.createRequest({
-              businessId,
-              requester: 'key_cortex',
-              requesterId: session?.userId,
-              actionType: action.actionType,
-              actionModule: 'key_cortex',
-              description: action.description,
-              rationale: `High-impact action requires approval: ${action.estimatedImpact ?? 'unknown impact'}`,
-              parameters: (action.result as Record<string, unknown>) ?? {},
-              estimatedImpact: { impact: action.estimatedImpact ?? 'unknown' },
-              contextSnapshot: { sessionId: session?.id },
-            })
-          : null;
+        : null;
 
       if (!request) {
         this.logger.error('[requestApproval] No approval or proposal service available');
@@ -367,9 +369,6 @@ export class KeyCortexActionsService implements OnModuleInit {
   async getPendingApprovals(businessId: string): Promise<any[]> {
     if (this.proposalService) {
       return this.proposalService.list(businessId, { status: 'PENDING' });
-    }
-    if (this.approvalService) {
-      return this.approvalService.getPendingRequests(businessId);
     }
     return [];
   }

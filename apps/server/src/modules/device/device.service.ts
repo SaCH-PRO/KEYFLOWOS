@@ -1,9 +1,10 @@
-import { Injectable, Inject, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Inject, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { VisualClassifierService, VisualClassification } from './visual-classifier.service';
 import { CommandService } from '../command/command.service';
 import { DocumentIntelligenceService } from '../ai/document-intelligence.service';
+import { GenomeSignalService } from '../business-genome/key-genome/genome-signal.service';
 
 export interface CreateCaptureInput {
   objectPath: string;
@@ -48,6 +49,9 @@ export class DeviceService {
     @Inject(VisualClassifierService) private readonly classifier: VisualClassifierService,
     @Inject(CommandService) private readonly commands: CommandService,
     @Inject(DocumentIntelligenceService) private readonly docIntel: DocumentIntelligenceService,
+    @Optional()
+    @Inject(GenomeSignalService)
+    private readonly genomeSignalService?: GenomeSignalService,
   ) {}
 
   async createCapture(businessId: string, userId: string | null, input: CreateCaptureInput) {
@@ -123,7 +127,14 @@ export class DeviceService {
       });
     }
 
-    // 5. Create command item for high-value captures
+    // 5. Emit genome signal for high-confidence business-card/contact captures
+    if (classification?.detectedType === 'business_card' && (classification.confidenceScore ?? 0) >= 0.7) {
+      this.emitContactCaptureSignal(businessId, intake.id, classification.extractedData).catch((err: unknown) => {
+        this.logger.warn(`Genome signal emission failed for capture ${asset.id}: ${err instanceof Error ? err.message : String(err)}`);
+      });
+    }
+
+    // 6. Create command item for high-value captures
     if (classification && classification.detectedType !== 'unknown') {
       const categoryMap: Record<string, string> = {
         business_card: 'PEOPLE',
@@ -220,6 +231,18 @@ export class DeviceService {
     await this.prisma.client.visualIntake.update({
       where: { id: intake.id },
       data: { status: 'ACCEPTED' },
+    });
+
+    // Emit genome signal for the accepted contact
+    this.emitContactCaptureSignal(businessId, intake.id, {
+      name: input.name,
+      company: input.company,
+      title: input.title,
+      email: input.email,
+      phone: input.phone,
+      contactId: contact.id,
+    }).catch((err: unknown) => {
+      this.logger.warn(`Genome signal emission failed for contact ${contact.id}: ${err instanceof Error ? err.message : String(err)}`);
     });
 
     // Create follow-up command
@@ -435,6 +458,44 @@ export class DeviceService {
         isDefault: input.isDefault ?? false,
         settings: (input.settings ?? {}) as Prisma.InputJsonValue,
       },
+    });
+  }
+
+  private async emitContactCaptureSignal(
+    businessId: string,
+    visualIntakeId: string,
+    data: Record<string, unknown>,
+  ): Promise<void> {
+    if (!this.genomeSignalService) return;
+
+    const name = data.name ?? data.displayName ?? (data.proposedData as Record<string, unknown> ?? data).name;
+    const company = data.company ?? data.companyName ?? (data.proposedData as Record<string, unknown> ?? data).company;
+    const email = data.email ?? (data.proposedData as Record<string, unknown> ?? data).email;
+    const phone = data.phone ?? (data.proposedData as Record<string, unknown> ?? data).phone;
+
+    if (!name && !email && !phone) return;
+
+    await this.genomeSignalService.createSignal({
+      businessId,
+      sourceModule: 'device',
+      sourceEntityType: 'VisualIntake',
+      sourceEntityId: visualIntakeId,
+      signalType: 'NEW_FACT',
+      section: 'customerModel',
+      domain: 'contacts',
+      field: 'captured_contact',
+      proposedValue: { name, company, email, phone },
+      reason: `High-confidence business-card/contact capture${company ? ` from ${company}` : ''}`,
+      evidence: [
+        {
+          sourceModule: 'device',
+          sourceEntityType: 'VisualIntake',
+          sourceEntityId: visualIntakeId,
+          summary: `Captured contact: ${name} (${email || phone || 'no contact info'})`,
+          evidenceStrength: 0.85,
+        },
+      ],
+      confidence: 0.85,
     });
   }
 
