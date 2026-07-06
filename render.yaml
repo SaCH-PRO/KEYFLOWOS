@@ -5,7 +5,7 @@ services:
     region: ohio
     plan: standard
     branch: main
-    buildCommand: pnpm install
+    buildCommand: npm install -g pnpm@9.15.0 && pnpm install
     startCommand: bash scripts/start-prod.sh
     healthCheckPath: /auth/login
     envVars:
