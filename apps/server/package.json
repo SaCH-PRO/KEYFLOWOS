@@ -43,6 +43,7 @@
     "class-validator": "^0.14.3",
     "compression": "^1.8.1",
     "csv-parse": "^5.4.0",
+    "dotenv": "^16.5.0",
     "date-fns": "^4.1.0",
     "docx": "^9.7.1",
     "exceljs": "^4.4.0",
