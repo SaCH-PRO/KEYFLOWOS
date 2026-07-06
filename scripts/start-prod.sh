@@ -20,7 +20,7 @@ cd "$ROOT_DIR"
 LOG_PREFIX_API="[server]"
 LOG_PREFIX_WEB="[web]   "
 
-API_PORT="${PORT:-3001}"
+API_PORT="${API_PORT:-${PORT:-3001}}"
 WEB_PORT="${WEB_PORT:-5000}"
 
 # --- resolve the release version (git SHA) and export it to children ---------
