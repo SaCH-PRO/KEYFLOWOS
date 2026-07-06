@@ -247,6 +247,9 @@ importers:
       stripe:
         specifier: ^18.0.0
         version: 18.5.0(@types/node@25.9.3)
+      tsx:
+        specifier: ^4.20.6
+        version: 4.21.0
       undici:
         specifier: ^6.24.0
         version: 6.25.0
@@ -293,9 +296,6 @@ importers:
       supertest:
         specifier: ^7.0.0
         version: 7.2.2
-      tsx:
-        specifier: ^4.20.6
-        version: 4.21.0
       vitest:
         specifier: ^2.1.1
         version: 2.1.9(@edge-runtime/vm@3.2.0)(@types/node@25.9.3)(jsdom@29.1.1(@noble/hashes@1.8.0))(terser@5.47.1)
