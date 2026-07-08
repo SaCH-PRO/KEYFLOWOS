@@ -35,6 +35,7 @@ import {
   GraduationCap,
   Cog,
   Bot,
+  MessageSquare,
   Code,
   Plug,
   Mail,
@@ -109,6 +110,7 @@ export const operateSections: NavSection[] = [
     items: [
       { label: "Command Center", href: "/app/command-center", icon: LayoutDashboard },
       { label: "KEY Worker", href: "/app/key", icon: Bot },
+      { label: "KEY Chat", href: "/app/key/chat", icon: MessageSquare },
       { label: "KEY Autonomy", href: "/app/key-autonomy", icon: CheckSquare },
       { label: "KEY Modes", href: "/app/key-modes", icon: BrainCircuit },
       { label: "Data Inbox", href: "/app/data-inbox", icon: Inbox },

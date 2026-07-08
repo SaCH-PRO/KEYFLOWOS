@@ -8,9 +8,10 @@ import type { OnboardingStep } from "@/lib/api/onboarding-concierge";
 interface OnboardingShellProps {
   step: OnboardingStep;
   children: React.ReactNode;
+  onStepClick?: (step: OnboardingStep) => void;
 }
 
-export function OnboardingShell({ step, children }: OnboardingShellProps) {
+export function OnboardingShell({ step, children, onStepClick }: OnboardingShellProps) {
   return (
     <div className="min-h-dvh bg-background text-foreground flex flex-col">
       {/* Background gradient */}
@@ -28,7 +29,7 @@ export function OnboardingShell({ step, children }: OnboardingShellProps) {
             </div>
             <span className="text-lg font-bold tracking-tight">KeyFlowOS</span>
           </div>
-          <OnboardingProgress step={step} />
+          <OnboardingProgress step={step} onStepClick={onStepClick} />
         </div>
       </header>
 

@@ -1,7 +1,9 @@
-import { IsString, IsOptional, IsBoolean } from 'class-validator';
+import { IsString, IsOptional, IsBoolean, MinLength, MaxLength } from 'class-validator';
 
 export class AutoConfigureDto {
   @IsString()
+  @MinLength(1)
+  @MaxLength(64)
   templateId!: string;
 
   @IsOptional()
@@ -22,5 +24,6 @@ export class AutoConfigureDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(120)
   customBusinessName?: string;
 }

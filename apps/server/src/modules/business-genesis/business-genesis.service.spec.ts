@@ -9,6 +9,7 @@ import { GenesisDocumentPackService } from './genesis-document-pack.service';
 import { GenesisRiskRegisterService } from './genesis-risk-register.service';
 import { GenomeFactService } from '../business-genome/key-genome/genome-fact.service';
 import { GenomeEvidenceService } from '../business-genome/key-genome/genome-evidence.service';
+import { PrismaService } from '../../core/prisma/prisma.service';
 
 describe('BusinessGenesisService', () => {
   let service: BusinessGenesisService;
@@ -20,6 +21,7 @@ describe('BusinessGenesisService', () => {
   let genomeFact: { upsertFact: ReturnType<typeof vi.fn>; prisma?: any };
   let genomeEvidence: { attachEvidence: ReturnType<typeof vi.fn> };
   let readiness: { calculate: ReturnType<typeof vi.fn> };
+  let prisma: { client: { business: { update: ReturnType<typeof vi.fn> } } };
 
   beforeEach(() => {
     blueprint = {
@@ -33,9 +35,11 @@ describe('BusinessGenesisService', () => {
     };
     genomeEvidence = { attachEvidence: vi.fn() };
     readiness = { calculate: vi.fn() };
+    prisma = { client: { business: { update: vi.fn() } } };
 
     service = new BusinessGenesisService(
       blueprint as unknown as BlueprintService,
+      prisma as unknown as PrismaService,
       {} as ModelGatewayService,
       {} as GenesisProjectionService,
       readiness as unknown as GenesisReadinessScorer,

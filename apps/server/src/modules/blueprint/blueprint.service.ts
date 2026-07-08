@@ -58,6 +58,14 @@ import {
   SetupStep,
 } from './blueprint.types';
 
+import { normalizeRecommendedEntityType } from './entity-type.helpers';
+
+/**
+ * Prisma transaction client type used when callers want an operation to run
+ * inside an existing transaction.
+ */
+type PrismaTx = Parameters<Parameters<PrismaService['client']['$transaction']>[0]>[0];
+
 const SCHEMA_VERSION = 2;
 
 /**
@@ -181,13 +189,14 @@ export class BlueprintService {
    * existing Business profile + onboarding metaData) on first access. This
    * keeps the rest of the codebase able to assume a row always exists.
    */
-  async getBlueprint(businessId: string): Promise<BlueprintData> {
-    const existing = await this.prisma.client.businessBlueprint.findUnique({
+  async getBlueprint(businessId: string, tx?: PrismaTx): Promise<BlueprintData> {
+    const client = tx ?? this.prisma.client;
+    const existing = await client.businessBlueprint.findUnique({
       where: { businessId },
     });
     if (existing) return this.serialize(existing);
 
-    return this.serialize(await this.seedFromBusiness(businessId));
+    return this.serialize(await this.seedFromBusiness(businessId, tx));
   }
 
   /**
@@ -195,8 +204,13 @@ export class BlueprintService {
    * persist. Each section is shallow-merged so callers can update a single
    * field without clobbering the rest.
    */
-  async updateBlueprint(businessId: string, patch: BlueprintPatch): Promise<BlueprintData> {
-    const current = await this.getBlueprintRecord(businessId);
+  async updateBlueprint(
+    businessId: string,
+    patch: BlueprintPatch,
+    tx?: PrismaTx,
+  ): Promise<BlueprintData> {
+    const client = tx ?? this.prisma.client;
+    const current = await this.getBlueprintRecord(businessId, tx);
 
     const next: Record<BlueprintSectionKey, Record<string, unknown>> = {
       identity: readObject(current.identity),
@@ -283,7 +297,7 @@ export class BlueprintService {
       updateData.readinessScore = Math.max(0, Math.min(100, patch.readinessScore));
     }
 
-    const updated = await this.prisma.client.businessBlueprint.update({
+    const updated = await client.businessBlueprint.update({
       where: { businessId },
       data: updateData,
     });
@@ -675,6 +689,7 @@ export class BlueprintService {
   async inferFromOnboarding(
     businessId: string,
     answers: Record<string, unknown>,
+    tx?: PrismaTx,
   ): Promise<BlueprintData> {
     const patch: BlueprintPatch = {};
 
@@ -784,22 +799,18 @@ export class BlueprintService {
     if (typeof answers.regulatedIndustry === 'boolean') {
       legalProfile.regulatedIndustry = answers.regulatedIndustry;
     }
-    if (typeof answers.legalStructurePreference === 'string') {
-      const allowed: BlueprintRecommendedEntityType[] = [
-        'SOLE_TRADER',
-        'PARTNERSHIP',
-        'LIMITED_COMPANY',
-        'NONPROFIT',
-        'UNKNOWN',
-      ];
-      legalProfile.recommendedEntityType = allowed.includes(
-        answers.legalStructurePreference as BlueprintRecommendedEntityType,
-      )
-        ? (answers.legalStructurePreference as BlueprintRecommendedEntityType)
-        : 'UNKNOWN';
+    const rawEntityType =
+      answers.recommendedEntityType ??
+      answers.entityType ??
+      answers.legalStructurePreference;
+    if (typeof rawEntityType === 'string') {
+      legalProfile.recommendedEntityType = normalizeRecommendedEntityType(rawEntityType);
     }
     if (typeof answers.entityTypeReason === 'string') {
       legalProfile.entityTypeReason = answers.entityTypeReason;
+    }
+    if (typeof answers.disclaimerAcceptedAt === 'string') {
+      legalProfile.disclaimerAcceptedAt = answers.disclaimerAcceptedAt;
     }
     if (Array.isArray(answers.regulatedIndustryNotes)) {
       legalProfile.regulatedIndustryNotes = answers.regulatedIndustryNotes.filter(
@@ -814,6 +825,7 @@ export class BlueprintService {
       registrationProfile.businessNameStatus = answers.registrationStatus;
     }
     if (typeof answers.hasEmployees === 'boolean') {
+      registrationProfile.hasEmployees = answers.hasEmployees;
       registrationProfile.nisEmployerStatus = answers.hasEmployees ? 'NOT_STARTED' : 'NOT_NEEDED';
     }
     if (typeof answers.estimatedAnnualRevenue === 'number') {
@@ -1018,7 +1030,7 @@ export class BlueprintService {
     }
     if (Object.keys(executionRoadmap).length) patch.executionRoadmap = executionRoadmap;
 
-    return this.updateBlueprint(businessId, patch);
+    return this.updateBlueprint(businessId, patch, tx);
   }
 
   /**
@@ -1172,6 +1184,7 @@ export class BlueprintService {
     legalProfile?: BlueprintLegalProfile;
     registrationProfile?: BlueprintRegistrationProfile;
     taxProfile?: BlueprintTaxProfile;
+    ownershipProfile?: BlueprintOwnershipProfile;
     marketProfile?: BlueprintMarketProfile;
     offerArchitecture?: BlueprintOfferArchitecture;
     salesSystem?: BlueprintSalesSystem;
@@ -1207,6 +1220,7 @@ export class BlueprintService {
         legalProfile: bp.legalProfile,
         registrationProfile: bp.registrationProfile,
         taxProfile: bp.taxProfile,
+        ownershipProfile: bp.ownershipProfile,
         marketProfile: bp.marketProfile,
         offerArchitecture: bp.offerArchitecture,
         salesSystem: bp.salesSystem,
@@ -1402,20 +1416,22 @@ export class BlueprintService {
 
   // -- internals -----------------------------------------------------------
 
-  private async getBlueprintRecord(businessId: string) {
-    const existing = await this.prisma.client.businessBlueprint.findUnique({
+  private async getBlueprintRecord(businessId: string, tx?: PrismaTx) {
+    const client = tx ?? this.prisma.client;
+    const existing = await client.businessBlueprint.findUnique({
       where: { businessId },
     });
     if (existing) return existing;
-    return this.seedFromBusiness(businessId);
+    return this.seedFromBusiness(businessId, tx);
   }
 
   /**
    * Build a baseline blueprint by mining the existing Business row + meta.
    * Idempotent: only runs when no blueprint row exists.
    */
-  async seedFromBusiness(businessId: string) {
-    const business = await this.prisma.client.business.findUnique({
+  async seedFromBusiness(businessId: string, tx?: PrismaTx) {
+    const client = tx ?? this.prisma.client;
+    const business = await client.business.findUnique({
       where: { id: businessId },
     });
     if (!business) {
@@ -1514,7 +1530,7 @@ export class BlueprintService {
     const completeness = this.calculateCompleteness(seed as any);
     const confidenceScores = this.calculateConfidenceScores(seed as any);
 
-    return this.prisma.client.businessBlueprint.upsert({
+    return client.businessBlueprint.upsert({
       where: { businessId },
       create: {
         businessId,

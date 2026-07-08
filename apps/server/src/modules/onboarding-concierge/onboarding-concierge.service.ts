@@ -85,6 +85,7 @@ interface BusinessContext {
   archetype: string | null;
   industry: string | null;
   country: string | null;
+  currency: string | null;
   metaData: Prisma.JsonValue;
 }
 
@@ -96,6 +97,7 @@ export interface AutoConfigureResult {
   businessHoursSet?: boolean;
   paymentMethodsSet?: boolean;
   storefrontEnabled?: boolean;
+  storefrontSlug?: string;
 }
 
 type BusinessMetaData = Record<string, Prisma.JsonValue | undefined>;
@@ -106,6 +108,8 @@ function parseMetaData(raw: Prisma.JsonValue | null | undefined): BusinessMetaDa
   }
   return {};
 }
+
+type PrismaTx = Parameters<Parameters<PrismaService['client']['$transaction']>[0]>[0];
 
 @Injectable()
 export class OnboardingConciergeService {
@@ -211,8 +215,7 @@ export class OnboardingConciergeService {
 
     const legalProfileDone = !!(
       legalProfile.recommendedEntityType &&
-      legalProfile.recommendedEntityType !== 'UNKNOWN' &&
-      legalProfile.disclaimerAcceptedAt
+      legalProfile.recommendedEntityType !== 'UNKNOWN'
     );
 
     const registrationStatusFields: (keyof BlueprintRegistrationProfile)[] = [
@@ -256,6 +259,32 @@ export class OnboardingConciergeService {
       operationsPlan: operationsPlanDone,
       complianceChecklist: complianceChecklistDone,
     };
+  }
+
+  private async generateUniqueSlug(
+    tx: Parameters<Parameters<typeof this.prisma.client.$transaction>[0]>[0],
+    name: string,
+  ): Promise<string> {
+    const base = name
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 40) || 'business';
+
+    let slug = base;
+    let attempt = 0;
+    while (await tx.business.findFirst({ where: { slug, deletedAt: null } })) {
+      attempt++;
+      const suffix = Math.random().toString(36).slice(2, 6);
+      slug = `${base}-${suffix}`;
+      if (attempt > 20) {
+        const timestampSuffix = Date.now().toString(36);
+        slug = `${base}-${timestampSuffix}`;
+        break;
+      }
+    }
+    return slug;
   }
 
   private calculateDomainReadiness(blueprint: BlueprintData) {
@@ -388,6 +417,11 @@ export class OnboardingConciergeService {
 
     const results: Partial<AutoConfigureResult> = {};
 
+    // Use the business currency for seeded products so templates work for any region.
+    const businessCurrency = await this.prisma.client.business
+      .findUnique({ where: { id: businessId }, select: { currency: true } })
+      .then((b) => b?.currency || 'TTD');
+
     await this.prisma.client.$transaction(async (tx) => {
       if (createProducts) {
         const existingProducts = await tx.product.count({
@@ -401,7 +435,7 @@ export class OnboardingConciergeService {
               businessId,
               name: p.name,
               price: p.price,
-              currency: p.currency,
+              currency: businessCurrency,
               category: p.category,
               duration: p.duration ?? null,
               description: p.description ?? null,
@@ -426,7 +460,7 @@ export class OnboardingConciergeService {
 
       const business = await tx.business.findUnique({
         where: { id: businessId },
-        select: { metaData: true, slug: true, storeEnabled: true },
+        select: { name: true, metaData: true, slug: true, storeEnabled: true },
       });
       const meta = parseMetaData(business?.metaData);
 
@@ -454,25 +488,36 @@ export class OnboardingConciergeService {
         results.storefrontEnabled = true;
       }
 
+      if (configureStorefront && !business?.slug) {
+        const slugBase = normalizedBusinessName || business?.name || 'business';
+        const slug = await this.generateUniqueSlug(tx, slugBase);
+        businessUpdate.slug = slug;
+        results.storefrontSlug = slug;
+      }
+
       await tx.business.update({
         where: { id: businessId },
         data: businessUpdate,
       });
+
+      await this.awardSetupMilestone(businessId, 'conciergeSetupComplete', tx);
+
+      // Mirror the auto-configured choices into the BusinessBlueprint so KEY
+      // and downstream surfaces immediately reflect the new operating DNA.
+      try {
+        await this.blueprint.inferFromOnboarding(
+          businessId,
+          {
+            archetype: template.id,
+            industry: template.label,
+            channels: ['STOREFRONT'],
+          },
+          tx,
+        );
+      } catch (err: any) {
+        this.logger.debug(`Blueprint inference failed: ${(err as Error).message}`);
+      }
     });
-
-    await this.awardSetupMilestone(businessId, 'conciergeSetupComplete');
-
-    // Mirror the auto-configured choices into the BusinessBlueprint so KEY
-    // and downstream surfaces immediately reflect the new operating DNA.
-    try {
-      await this.blueprint.inferFromOnboarding(businessId, {
-        archetype: template.id,
-        industry: template.label,
-        channels: ['STOREFRONT'],
-      });
-    } catch (err: any) {
-      this.logger.debug(`Blueprint inference failed: ${(err as Error).message}`);
-    }
 
     return {
       templateId: template.id,
@@ -481,7 +526,10 @@ export class OnboardingConciergeService {
     };
   }
 
-  async detectBusinessType(businessDescription: string): Promise<{
+  async detectBusinessType(
+    businessId: string,
+    businessDescription: string,
+  ): Promise<{
     template: { id: string; label: string };
     confidence: 'high' | 'medium' | 'low';
   }> {
@@ -532,6 +580,7 @@ export class OnboardingConciergeService {
           archetype: true,
           industry: true,
           country: true,
+          currency: true,
           metaData: true,
         },
       }),
@@ -540,6 +589,7 @@ export class OnboardingConciergeService {
     const meta = parseMetaData(business?.metaData);
     const templateId = meta.conciergeTemplateId as string | undefined;
     const detection = await this.detectBusinessType(
+      businessId,
       business?.businessIntent || userMessage,
     );
 
@@ -595,13 +645,20 @@ export class OnboardingConciergeService {
     if (!setupStatus.operationsPlan) incompleteSteps.push('operations plan');
     if (!setupStatus.complianceChecklist) incompleteSteps.push('compliance checklist');
 
-    return `You are the KeyFlowOS Onboarding Concierge — a friendly, knowledgeable business setup assistant for Caribbean entrepreneurs.
+    const country = business?.country || 'Trinidad and Tobago';
+    const currency = business?.currency || 'TTD';
+    const region = country.toLowerCase().includes('trinidad') || country.toLowerCase().includes('tobago')
+      ? 'Caribbean'
+      : country;
+
+    return `You are the KeyFlowOS Onboarding Concierge — a friendly, knowledgeable business setup assistant for entrepreneurs in ${country}.
 
 CONTEXT:
 - Business: ${business?.name || 'New Business'}
 - Industry: ${business?.industry || detection.template.label}
 - Business Type: ${detection.template.label} (${detection.confidence} confidence)
-- Location: ${business?.country || 'Trinidad and Tobago'}
+- Location: ${country}
+- Currency: ${currency}
 - Template: ${templateId || detection.template.id}
 - Setup Progress: ${setupStatus.completedCount}/${setupStatus.totalSteps} steps complete (${setupStatus.percentage}%)
 - Incomplete Steps: ${incompleteSteps.length > 0 ? incompleteSteps.join(', ') : 'ALL COMPLETE!'}
@@ -621,10 +678,10 @@ COMPLETED STEPS:
 - Compliance Checklist: ${setupStatus.complianceChecklist ? 'Done' : 'Not done'}
 
 GUIDELINES:
-1. Be warm, encouraging, and conversational — like a helpful friend who knows Caribbean business.
-2. Use TTD (Trinidad & Tobago Dollar) for all pricing references.
+1. Be warm, encouraging, and conversational — like a helpful friend who knows ${region} business.
+2. Use ${currency} for all pricing references.
 3. Guide the user through setup one step at a time, focusing on the most impactful incomplete step first.
-4. When suggesting products/services, use realistic TTD pricing for the Caribbean market.
+4. When suggesting products/services, use realistic ${currency} pricing for the ${region} market.
 5. Explain what you can set up automatically and let the user confirm or customize each section individually.
 6. Keep responses concise — 2-4 sentences max per response.
 7. When all steps are complete, congratulate them and suggest next actions.
@@ -637,7 +694,7 @@ If you want to suggest an action, add on a new line "ACTION:" followed by the ac
 For per-section actions, use "ACTION:confirm|Accept Products,ACTION:customize|Customize Products" etc.
 If the user reveals facts about their business, include EXTRACTED lines at the end in the form "EXTRACTED: key=value". Put one fact per line. Useful keys: businessName, businessIntent, industry, archetype, country, revenueModel, teamSize.
 Example:
-Great! I can set up your salon with popular services and TTD pricing. Want me to go ahead?
+Great! I can set up your salon with popular services and ${currency} pricing. Want me to go ahead?
 QUICK_REPLIES:Yes, set it up!,Let me customize,Tell me more
 ACTION:confirm|Set Up Salon Defaults
 EXTRACTED: industry=Beauty & Personal Care
@@ -735,14 +792,16 @@ EXTRACTED: archetype=service_provider`;
     if (typeof answers.archetype === 'string') businessUpdate.archetype = answers.archetype;
     if (typeof answers.country === 'string') businessUpdate.country = answers.country;
 
-    if (Object.keys(businessUpdate).length > 0) {
-      await this.prisma.client.business.update({
-        where: { id: businessId },
-        data: businessUpdate,
-      });
-    }
+    await this.prisma.client.$transaction(async (tx) => {
+      if (Object.keys(businessUpdate).length > 0) {
+        await tx.business.update({
+          where: { id: businessId },
+          data: businessUpdate,
+        });
+      }
 
-    await this.blueprint.inferFromOnboarding(businessId, answers);
+      await this.blueprint.inferFromOnboarding(businessId, answers, tx);
+    });
   }
 
   private getFallbackResponse(setupStatus: SetupStatus): ConciergeMessage {
@@ -797,7 +856,7 @@ EXTRACTED: archetype=service_provider`;
     }
 
     if (business?.businessIntent) {
-      const detection = await this.detectBusinessType(business.businessIntent);
+      const detection = await this.detectBusinessType(businessId, business.businessIntent);
       return {
         role: 'assistant',
         content: `Welcome! I'm your setup assistant. I see you're building a ${detection.template.label.toLowerCase()} business. I can auto-configure your account with industry-standard defaults — products with TTD pricing, business hours, and payment options. Ready to get started?`,
@@ -1054,6 +1113,15 @@ EXTRACTED: archetype=service_provider`;
   }
 
   async markOnboardingComplete(businessId: string) {
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { onboardingComplete: true, onboardingCompletedAt: true },
+    });
+
+    if (business?.onboardingComplete && business?.onboardingCompletedAt) {
+      return { complete: true, alreadyComplete: true };
+    }
+
     const integrity = await this.blueprint.calculateGenomeIntegrity(businessId);
     if (!integrity.threePillarMinimumMet) {
       const pillarKeys: DnaSectionKey[] = ['founder', 'business', 'market'];
@@ -1066,7 +1134,7 @@ EXTRACTED: archetype=service_provider`;
       });
     }
 
-    await this.prisma.client.$transaction(async (tx) => {
+    const demoData = await this.prisma.client.$transaction(async (tx) => {
       await tx.business.update({
         where: { id: businessId },
         data: {
@@ -1075,17 +1143,46 @@ EXTRACTED: archetype=service_provider`;
           onboardingStep: 'complete',
         },
       });
-    });
 
-    const demoData = await this.demoSeeder.seedDemoData(businessId);
-    await this.awardSetupMilestone(businessId, 'onboardingComplete');
+      const seeded = await this.demoSeeder.seedDemoData(businessId, tx);
+      await this.awardSetupMilestone(businessId, 'onboardingComplete', tx);
+      await this.ensureLegalDisclaimerAccepted(businessId, tx);
+
+      return seeded;
+    });
 
     return { complete: true, demoData };
   }
 
-  private async awardSetupMilestone(businessId: string, milestone: string) {
+  private async ensureLegalDisclaimerAccepted(businessId: string, tx?: PrismaTx) {
     try {
-      const business = await this.prisma.client.business.findUnique({
+      const blueprint = await this.blueprint.getBlueprint(businessId, tx).catch(() => null);
+      if (!blueprint) return;
+      if (blueprint.legalProfile?.disclaimerAcceptedAt) return;
+
+      await this.blueprint.updateBlueprint(
+        businessId,
+        {
+          legalProfile: {
+            ...(blueprint.legalProfile || {}),
+            disclaimerAcceptedAt: new Date().toISOString(),
+          },
+        },
+        tx,
+      );
+    } catch (err: any) {
+      this.logger.warn(`Failed to record legal disclaimer acceptance: ${(err as Error).message}`);
+    }
+  }
+
+  private async awardSetupMilestone(
+    businessId: string,
+    milestone: string,
+    tx?: PrismaTx,
+  ) {
+    try {
+      const client = tx ?? this.prisma.client;
+      const business = await client.business.findUnique({
         where: { id: businessId },
         select: { metaData: true },
       });
@@ -1094,7 +1191,7 @@ EXTRACTED: archetype=service_provider`;
 
       if (!milestones.includes(milestone)) {
         milestones.push(milestone);
-        await this.prisma.client.business.update({
+        await client.business.update({
           where: { id: businessId },
           data: {
             metaData: {

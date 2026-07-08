@@ -11,6 +11,9 @@
     "db:generate": "prisma generate --schema=./prisma/schema.prisma",
     "lint": "eslint src --ext .ts"
   },
+  "prisma": {
+    "seed": "tsx --env-file ../../.env prisma/seed.ts"
+  },
   "exports": {
     ".": {
       "types": "./dist/src/client.d.ts",

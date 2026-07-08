@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { BusinessIntelligenceService } from '../intelligence/business-intelligence.service';
 import { KeyExecutiveModeService } from '../intelligence/key-executive-mode.service';
 import { KeyActionProposalService } from '../key-autonomy/key-action-proposal.service';
@@ -14,7 +14,11 @@ import { GenomeRecommendationService } from '../business-genome/key-genome/genom
 import { CommandCenterKeyGenomeBridgeService } from './command-center-key-genome-bridge.service';
 import type { BusinessAsset } from '@prisma/client';
 import type { KeyGenomeScore, ModuleReadinessData } from '../business-genome/key-genome/key-genome.types';
-import type { KeyExecutiveMode } from '../intelligence/key-executive-mode.types';
+import type { KeyExecutiveMode, KeyExecutiveModeBrief } from '../intelligence/key-executive-mode.types';
+import type { BusinessExecutiveBrief } from '../intelligence/business-intelligence.types';
+import type { TemporalFlowAnalysis } from '../temporal-flow/temporal-flow.types';
+import type { GenomeIntegrityResult } from '../blueprint/blueprint.types';
+import type { ConstitutionStaleness } from '../business-genome/constitution-version.types';
 import type {
   BusinessCommandCenterSnapshot,
   CommandCenterAction,
@@ -71,6 +75,8 @@ const TYPE_WEIGHT: Record<CommandCenterItem['type'], number> = {
 
 @Injectable()
 export class BusinessCommandCenterService {
+  private readonly logger = new Logger(BusinessCommandCenterService.name);
+
   constructor(
     @Inject(BusinessIntelligenceService)
     private readonly intelligence: BusinessIntelligenceService,
@@ -100,6 +106,24 @@ export class BusinessCommandCenterService {
     private readonly keyGenomeBridge: CommandCenterKeyGenomeBridgeService,
   ) {}
 
+  private async safeResolve<T>(label: string, businessId: string, fn: () => Promise<T>, fallback: T): Promise<T> {
+    try {
+      return await fn();
+    } catch (err: unknown) {
+      this.logger.warn(`snapshot ${label} failed for ${businessId}: ${err instanceof Error ? err.message : String(err)}`);
+      return fallback;
+    }
+  }
+
+  private safeResolveSync<T>(label: string, businessId: string, fn: () => T, fallback: T): T {
+    try {
+      return fn();
+    } catch (err: unknown) {
+      this.logger.warn(`snapshot ${label} failed for ${businessId}: ${err instanceof Error ? err.message : String(err)}`);
+      return fallback;
+    }
+  }
+
   async snapshot(businessId: string): Promise<BusinessCommandCenterSnapshot> {
     const [
       executiveBrief,
@@ -113,27 +137,32 @@ export class BusinessCommandCenterService {
       latestConstitution,
       constitutionStaleness,
     ] = await Promise.all([
-      this.intelligence.generateExecutiveBrief(businessId),
-      Promise.all(MODES.map((mode) => this.keyModes.generateModeBrief(businessId, mode))),
-      this.keyAutonomy.list(businessId, { status: 'PENDING' }),
-      this.keyAutonomy.list(businessId, { status: 'APPROVED' }),
-      this.temporal.analyze(businessId),
-      this.genomeEvolution.list(businessId, { status: 'PENDING' }),
-      this.blueprint.calculateGenomeIntegrity(businessId),
-      this.assets.list(businessId),
-      this.constitution.latest(businessId),
-      this.constitution.staleness(businessId),
+      this.safeResolve('executiveBrief', businessId, () => this.intelligence.generateExecutiveBrief(businessId), { summary: '', topPriorities: [], insights: [], genomeIntegrity: 0, executiveReadinessScore: 0, genomeStage: '', businessId, generatedAt: new Date().toISOString() } as BusinessExecutiveBrief),
+      this.safeResolve(
+        'modeBriefs',
+        businessId,
+        () => Promise.all(MODES.map((mode) => this.keyModes.generateModeBrief(businessId, mode))),
+        [] as KeyExecutiveModeBrief[],
+      ),
+      this.safeResolve('pendingApprovals', businessId, () => this.keyAutonomy.list(businessId, { status: 'PENDING' }), []),
+      this.safeResolve('approvedAwaitingExecution', businessId, () => this.keyAutonomy.list(businessId, { status: 'APPROVED' }), []),
+      this.safeResolve('temporalAnalysis', businessId, () => this.temporal.analyze(businessId), { summary: '', urgentItems: [], opportunities: [], risks: [], genomeProposalCandidates: [] } as TemporalFlowAnalysis),
+      this.safeResolve('genomeProposals', businessId, () => this.genomeEvolution.list(businessId, { status: 'PENDING' }), []),
+      this.safeResolve('genome', businessId, () => this.blueprint.calculateGenomeIntegrity(businessId), { genomeIntegrity: 0, threePillarMinimumMet: false, genomeDnaScores: {}, genomeDnaConfidence: {}, genomeStage: 'SEED', dnaSections: [], executiveReadinessScore: 0, readinessBreakdown: {} } as unknown as GenomeIntegrityResult),
+      this.safeResolve('rawAssets', businessId, () => this.assets.list(businessId), [] as BusinessAsset[]),
+      this.safeResolve('latestConstitution', businessId, () => this.constitution.latest(businessId), null),
+      this.safeResolve('constitutionStaleness', businessId, () => this.constitution.staleness(businessId), { stale: false, reason: '', currentGenomeIntegrity: 0, constitutionGenomeIntegrity: null } as ConstitutionStaleness),
     ]);
 
     const modeMap = new Map(modeBriefs.map((brief) => [brief.mode, brief]));
 
     // Compute KEY Genome scores and module readiness after the parallel block
     // so readiness uses freshly-scored facts rather than stale DB values.
-    const keyGenomeFacts = await this.genomeScoring.computeFactScores(businessId);
-    const keyGenomeScore = this.genomeScoring.computeBusinessScore(businessId, keyGenomeFacts);
-    const moduleReadiness = await this.genomeReadiness.computeReadiness(businessId, keyGenomeFacts);
+    const keyGenomeFacts = await this.safeResolve('keyGenomeFacts', businessId, () => this.genomeScoring.computeFactScores(businessId), []);
+    const keyGenomeScore = this.safeResolveSync('keyGenomeScore', businessId, () => this.genomeScoring.computeBusinessScore(businessId, keyGenomeFacts), { businessId, overall: 0, integrity: 0, readiness: 0, confidence: 0, sections: [], computedAt: new Date().toISOString() } as unknown as KeyGenomeScore);
+    const moduleReadiness = await this.safeResolve('moduleReadiness', businessId, () => this.genomeReadiness.computeReadiness(businessId, keyGenomeFacts), []);
     const keyGenome = this.buildKeyGenome(keyGenomeScore);
-    keyGenome.crossDomain = await this.keyGenomeBridge.buildCrossDomainBrief(businessId, moduleReadiness);
+    keyGenome.crossDomain = await this.safeResolve('crossDomainBrief', businessId, () => this.keyGenomeBridge.buildCrossDomainBrief(businessId, moduleReadiness), undefined);
 
     const approvalItems = this.mapPendingApprovals(pendingApprovals);
     const approvedItems = this.mapApprovedAwaitingExecution(approvedAwaitingExecution);

@@ -165,7 +165,7 @@ export function snoozeConciergeNudge(businessId: string, nudgeId: string, days?:
 }
 
 export function markOnboardingComplete(businessId: string) {
-  return apiPost<{ complete: boolean; demoData: DemoSeedResult }>(
+  return apiPost<{ complete: boolean; alreadyComplete?: boolean; demoData?: DemoSeedResult }>(
     `/onboarding-concierge/businesses/${businessId}/complete`,
     {},
   );

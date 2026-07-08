@@ -13,6 +13,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { ModelGatewayService } from '../ai/model-gateway.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { KeyCortexContextV2Service } from './key-cortex-context-v2.service';
+import { InvoiceStatus } from '@prisma/client';
 import { startOfMonth, startOfWeek, startOfDay, subDays, subMonths, subWeeks, format, differenceInDays } from 'date-fns';
 
 /* ─────────────────────────── Types ─────────────────────────── */
@@ -157,7 +158,7 @@ export class KeyCortexInsightService {
       const overdueInvoices = await (this.prisma.client as any).invoice.findMany({
         where: {
           businessId,
-          status: { in: ['sent', 'pending'] },
+          status: { in: [InvoiceStatus.SENT, InvoiceStatus.PENDING] },
           dueDate: { lt: new Date() },
         },
         include: {
@@ -507,7 +508,7 @@ export class KeyCortexInsightService {
           const outstanding = await (this.prisma.client as any).invoice.findMany({
             where: {
               contactId: customer.id,
-              status: { in: ['sent', 'pending', 'partial'] },
+              status: { in: [InvoiceStatus.SENT, InvoiceStatus.PENDING, InvoiceStatus.PARTIAL] },
             },
             select: { total: true, dueDate: true },
           });
@@ -769,7 +770,7 @@ export class KeyCortexInsightService {
       const outstandingInvoices = await (this.prisma.client as any).invoice.findMany({
         where: {
           businessId,
-          status: { in: ['sent', 'pending', 'partial'] },
+          status: { in: [InvoiceStatus.SENT, InvoiceStatus.PENDING, InvoiceStatus.PARTIAL] },
         },
         select: { total: true, dueDate: true, createdAt: true },
       });
@@ -791,7 +792,7 @@ export class KeyCortexInsightService {
       const upcomingDue = await (this.prisma.client as any).invoice.findMany({
         where: {
           businessId,
-          status: { in: ['sent', 'pending', 'partial'] },
+          status: { in: [InvoiceStatus.SENT, InvoiceStatus.PENDING, InvoiceStatus.PARTIAL] },
           dueDate: { gte: now, lte: subDays(now, -30) },
         },
         include: {

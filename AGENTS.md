@@ -23,6 +23,7 @@ This handles port cleanup, stale-cache clearing, env guards, DB checks, build va
 - Circular module deps exist in the codebase but are handled via `forwardRef()`.
 - **Compiled server required for dev:** `pnpm dev` in `apps/server` now runs `node dist/main.js`. Always build the workspace packages (`@keyflow/shared`, `@keyflow/db`, `@keyflow/api`) and the server before starting dev.
 - **Business Genesis (Patch 1):** `BusinessBlueprint` now includes Genesis sections (legal, registration, tax, projections, risk, compliance, execution roadmap). `/app/onboarding` is the Genesis intake flow and feeds these sections into KEY's prompt context.
+- **Onboarding redesign (Patch 2):** The `/app/onboarding` funnel is now a slim chat-driven experience: `welcome → intake (idea extraction) → template picker → configure (storefront/payments/contacts) → genome check (if needed) → complete`. Legacy step values `genesis` and `genome` are mapped to `intake` and `configure` respectively. The completion gate auto-redirects to `/app/command-center`, progress dots are clickable to go back, and `saveStep('complete')` is rejected — only `markOnboardingComplete` can finish onboarding. The embedded genome chat (`BlueprintOnboardingChat`) covers identity, founder profile, operating model, market profile, customer model, financials, and other core sections so users can satisfy the three-pillar Business Genome minimum inside onboarding.
 
 ### Manual Recovery (if launcher fails)
 ```bash

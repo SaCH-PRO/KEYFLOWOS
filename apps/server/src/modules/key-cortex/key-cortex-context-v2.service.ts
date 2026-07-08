@@ -16,6 +16,7 @@ import { BookingsService } from '../bookings/bookings.service';
 import { AutopilotService } from '../autopilot/autopilot.service';
 import { TemporalFlowMemoryService } from '../temporal-flow/temporal-flow-memory.service';
 import { KeyInboxIntelligenceService } from '../key-inbox/key-inbox-intelligence.service';
+import { InvoiceStatus } from '@prisma/client';
 import { subDays, subWeeks, subMonths, startOfMonth, startOfWeek, startOfDay, endOfDay, format } from 'date-fns';
 
 /* ─────────────────────────── Types ─────────────────────────── */
@@ -514,7 +515,7 @@ export class KeyCortexContextV2Service {
         (this.prisma.client as any).invoice.findMany({
           where: {
             businessId,
-            status: { in: ['sent', 'pending', 'partial'] },
+            status: { in: [InvoiceStatus.SENT, InvoiceStatus.PENDING, InvoiceStatus.PARTIAL] },
           },
           include: {
             contact: { select: { name: true } },
@@ -1302,7 +1303,7 @@ export class KeyCortexContextV2Service {
         where: {
           businessId,
           dueDate: { gte: since, lt: new Date() },
-          status: { in: ['sent', 'pending'] },
+          status: { in: [InvoiceStatus.SENT, InvoiceStatus.PENDING] },
         },
       });
       if (newlyOverdue > 0) {

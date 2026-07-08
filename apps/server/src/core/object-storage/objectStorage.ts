@@ -367,6 +367,24 @@ export class ObjectStorageService {
   }
 
   /**
+   * Read an object uploaded via the canonical `/objects/<id>` path into memory.
+   * Falls back to the public/presigned URL if the object is not found locally.
+   */
+  async getObjectEntityBuffer(objectPath: string): Promise<{
+    buffer: Buffer;
+    contentType?: string;
+    contentLength?: number;
+  }> {
+    const ref = await this.getObjectEntityFile(objectPath);
+    const { body, contentType, contentLength } = await ref.read();
+    const chunks: Buffer[] = [];
+    for await (const chunk of body) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    return { buffer: Buffer.concat(chunks), contentType, contentLength };
+  }
+
+  /**
    * Convert a presigned/public S3 URL (or already-canonical `/objects/...`
    * path) into the canonical `/objects/<id>` path used everywhere in the app.
    */

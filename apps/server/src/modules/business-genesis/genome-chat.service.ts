@@ -35,17 +35,10 @@ export interface SendGenomeMessageResult {
   proposedUpdates: ProposedGenomeUpdate | null;
 }
 
-interface RateLimitEntry {
-  count: number;
-  windowStart: number;
-}
-
 @Injectable()
 export class GenomeChatService {
   private readonly logger = new Logger(GenomeChatService.name);
   private readonly maxHistory = 20;
-  private readonly maxMessagesPerMinute = 30;
-  private readonly rateLimits = new Map<string, RateLimitEntry>();
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -87,8 +80,6 @@ export class GenomeChatService {
     userId: string,
     content: string,
   ): Promise<SendGenomeMessageResult> {
-    this.checkRateLimit(businessId);
-
     await this.persistMessage(businessId, 'user', content);
 
     const [history, genome] = await Promise.all([
@@ -348,19 +339,4 @@ Rules:
     return { displayContent: content, proposedUpdates: null };
   }
 
-  private checkRateLimit(businessId: string): void {
-    const now = Date.now();
-    const entry = this.rateLimits.get(businessId);
-
-    if (!entry || now - entry.windowStart > 60_000) {
-      this.rateLimits.set(businessId, { count: 1, windowStart: now });
-      return;
-    }
-
-    if (entry.count >= this.maxMessagesPerMinute) {
-      throw new BadRequestException('Rate limit exceeded. Please slow down.');
-    }
-
-    entry.count++;
-  }
 }

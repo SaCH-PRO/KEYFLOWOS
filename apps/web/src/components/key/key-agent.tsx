@@ -1,14 +1,14 @@
 "use client";
 
-import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Mic, MicOff } from "lucide-react";
 import { toast } from "sonner";
-import { CopilotPanel, type CopilotModule } from "@/components/ai/copilot-panel";
 import { CommandPalette } from "@/components/command-palette";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { transcribeKeyflowSpeech } from "@/lib/client";
 import { apiGet } from "@/lib/api";
+import { useKeyChat, KeyChatPanel, type CopilotModule } from "@/components/key/chat";
 import type { BlueprintData } from "@/lib/blueprint-types";
 
 export type KeyMode = "chat" | "voice" | "palette";
@@ -40,10 +40,8 @@ function isInputElement(el: EventTarget | null): boolean {
 }
 
 export function KeyAgent({ currentModule }: KeyAgentProps) {
-  const [mode, setMode] = useState<KeyMode | null>(null);
-  const [initialPrompt, setInitialPrompt] = useState<string | undefined>();
-  const [scopedModule, setScopedModule] = useState<CopilotModule | undefined>();
-  const [pageContext, setPageContext] = useState<Record<string, unknown> | undefined>();
+  const { setOpen, setInput, setCurrentModule, setPageContext } = useKeyChat();
+  const [paletteOpen, setPaletteOpen] = useState(false);
 
   // Push-to-talk state
   const [pttActive, setPttActive] = useState(false);
@@ -58,20 +56,26 @@ export function KeyAgent({ currentModule }: KeyAgentProps) {
 
   const businessId = getStoredBusinessId() ?? "";
 
-  const close = useCallback(() => setMode(null), []);
+  const close = useCallback(() => setOpen(false), [setOpen]);
 
+  // Handle global open-key events
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent<OpenKeyDetail>).detail || {};
-      setMode(detail.mode || "chat");
-      if (detail.prompt) setInitialPrompt(detail.prompt);
-      setScopedModule(detail.module);
-      setPageContext(detail.context);
+      if (detail.mode === "palette") {
+        setPaletteOpen(true);
+        return;
+      }
+      setOpen(true);
+      if (detail.prompt) setInput(detail.prompt);
+      setCurrentModule(detail.module ?? currentModule);
+      setPageContext(detail.context ? { ...detail.context } : undefined);
     };
     window.addEventListener(KEY_OPEN_EVENT, handler);
     return () => window.removeEventListener(KEY_OPEN_EVENT, handler);
-  }, []);
+  }, [currentModule, setCurrentModule, setInput, setOpen, setPageContext]);
 
+  // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (!e.key) return;
@@ -79,32 +83,31 @@ export function KeyAgent({ currentModule }: KeyAgentProps) {
       const k = e.key.toLowerCase();
       if (isMod && k === "k") {
         e.preventDefault();
-        setMode((m) => (m === "palette" ? null : "palette"));
+        setPaletteOpen((open) => !open);
       } else if (isMod && k === "j") {
         e.preventDefault();
-        setMode((m) => (m === "chat" ? null : "chat"));
+        setOpen((prev) => !prev);
       } else if (e.key === "Escape") {
-        setMode(null);
+        close();
+        setPaletteOpen(false);
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, []);
+  }, [close, setOpen]);
 
   // Legacy event names from existing code paths still open KEY
   useEffect(() => {
     const legacyOpenCopilot = (e: Event) => {
       const detail = (e as CustomEvent).detail;
-      if (detail?.prompt) setInitialPrompt(detail.prompt);
-      setScopedModule(undefined);
+      setOpen(true);
+      if (detail?.prompt) setInput(detail.prompt);
+      setCurrentModule(undefined);
       setPageContext(undefined);
-      setMode("chat");
     };
     window.addEventListener("kf:open-copilot", legacyOpenCopilot);
     return () => window.removeEventListener("kf:open-copilot", legacyOpenCopilot);
-  }, []);
-
-  const onPromptConsumed = useCallback(() => setInitialPrompt(undefined), []);
+  }, [setCurrentModule, setInput, setOpen, setPageContext]);
 
   // Auto-open KEY once per session when the Business Genome is incomplete
   useEffect(() => {
@@ -119,8 +122,8 @@ export function KeyAgent({ currentModule }: KeyAgentProps) {
           if (cancelled || !data) return;
           if (data.completeness < 100) {
             sessionStorage.setItem("kf:genome-auto-prompt", "1");
-            setMode("chat");
-            setInitialPrompt(
+            setOpen(true);
+            setInput(
               "Hi KEY! Can you help me complete my Business Genome? Tell me what's missing and ask me one question at a time.",
             );
           }
@@ -134,12 +137,7 @@ export function KeyAgent({ currentModule }: KeyAgentProps) {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [businessId]);
-
-  const effectiveModule = useMemo<CopilotModule | undefined>(
-    () => scopedModule ?? currentModule,
-    [scopedModule, currentModule],
-  );
+  }, [businessId, setInput, setOpen]);
 
   // Push-to-talk handlers
   const startPttRecording = useCallback(async () => {
@@ -173,8 +171,8 @@ export function KeyAgent({ currentModule }: KeyAgentProps) {
           toast.info("Didn't catch that. Try again.");
           return;
         }
-        setInitialPrompt(text);
-        setMode("chat");
+        setInput(text);
+        setOpen(true);
       };
       mediaRecorderRef.current = mr;
       mr.start();
@@ -184,7 +182,7 @@ export function KeyAgent({ currentModule }: KeyAgentProps) {
       setPttActive(false);
       pttActiveRef.current = false;
     }
-  }, [businessId]);
+  }, [businessId, setInput, setOpen]);
 
   const stopPttRecording = useCallback(() => {
     mediaRecorderRef.current?.stop();
@@ -228,7 +226,6 @@ export function KeyAgent({ currentModule }: KeyAgentProps) {
         setPttRecording(false);
         stopPttRecording();
       } else if (heldFor < 300) {
-        // Quick tap — ignore
         setPttActive(false);
       }
     };
@@ -250,15 +247,8 @@ export function KeyAgent({ currentModule }: KeyAgentProps) {
 
   return (
     <>
-      <CopilotPanel
-        open={mode === "chat" || mode === "voice"}
-        onClose={close}
-        currentModule={effectiveModule}
-        initialPrompt={initialPrompt}
-        onInitialPromptConsumed={onPromptConsumed}
-        pageContext={pageContext}
-      />
-      <CommandPalette open={mode === "palette"} onClose={close} />
+      <KeyChatPanel />
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
 
       {/* Push-to-talk overlay */}
       <AnimatePresence>
@@ -276,30 +266,30 @@ export function KeyAgent({ currentModule }: KeyAgentProps) {
               className="flex flex-col items-center gap-4"
             >
               <div
-                className={`w-20 h-20 rounded-full flex items-center justify-center transition-all ${
+                className={`flex h-20 w-20 items-center justify-center rounded-full transition-all ${
                   pttRecording
-                    ? "bg-red-500 animate-pulse"
+                    ? "animate-pulse bg-red-500"
                     : pttThinking
                     ? "bg-amber-500"
                     : "bg-gradient-to-br from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent2))]"
                 }`}
               >
                 {pttRecording ? (
-                  <MicOff className="w-8 h-8 text-white" />
+                  <MicOff className="h-8 w-8 text-white" />
                 ) : pttThinking ? (
-                  <span className="text-white text-2xl">⋯</span>
+                  <span className="text-2xl text-white">⋯</span>
                 ) : (
-                  <Mic className="w-8 h-8 text-white" />
+                  <Mic className="h-8 w-8 text-white" />
                 )}
               </div>
-              <p className="text-white text-lg font-medium">
+              <p className="text-lg font-medium text-white">
                 {pttRecording
                   ? "Listening..."
                   : pttThinking
                   ? "Thinking..."
                   : "Hold Space to speak"}
               </p>
-              <p className="text-white/60 text-xs">Release to send</p>
+              <p className="text-xs text-white/60">Release to send</p>
             </motion.div>
           </motion.div>
         )}

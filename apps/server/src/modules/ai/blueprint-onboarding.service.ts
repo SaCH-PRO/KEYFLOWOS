@@ -40,7 +40,9 @@ interface OnboardingChatResult {
 
 const SECTION_ORDER: BlueprintSectionKey[] = [
   'identity',
+  'founderProfile',
   'operatingModel',
+  'marketProfile',
   'constraints',
   'goals',
   'brand',
@@ -96,6 +98,16 @@ const SECTION_FOCUS: Partial<Record<BlueprintSectionKey, { label: string; goal: 
     label: 'AI Preferences',
     goal: 'how KEY should behave, communicate, and report back',
     fields: ['autonomyLevel', 'tone', 'outreachStyle', 'reportingCadence'],
+  },
+  founderProfile: {
+    label: 'Founder Profile',
+    goal: 'who is building the business, their background, skills, and availability',
+    fields: ['founderName', 'background', 'skills', 'weeklyAvailabilityHours', 'riskTolerance', 'visionStatement'],
+  },
+  marketProfile: {
+    label: 'Market Profile',
+    goal: 'where the business competes, the target market, and demand signals',
+    fields: ['targetGeography', 'marketCategory', 'marketStage', 'demandSignals', 'trends', 'barriersToEntry'],
   },
   intelligence: {
     label: 'Intelligence',

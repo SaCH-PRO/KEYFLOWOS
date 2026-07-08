@@ -1,5 +1,6 @@
 import { Injectable, Logger, Inject, forwardRef, NotFoundException, BadRequestException } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
+import { randomUUID } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmService } from '../crm/crm.service';
 import { CommerceService } from '../commerce/commerce.service';
@@ -23,10 +24,12 @@ import { PlannerService } from './planner.service';
 import { getOpenAiToolDefinitions, getToolByName, RiskLevel, ToolFamily, wrapToolResult, FlowTool } from './flow-tool-registry';
 import { AiMemoryService } from './ai-memory.service';
 import { ModelGatewayService, GatewayMessage, StreamChunk } from './model-gateway.service';
+import { DocumentIntelligenceService } from './document-intelligence.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
 import { AiMessageSenderService } from './ai-message-sender.service';
 import { SemanticMemoryService } from './semantic-memory.service';
+import { ObjectStorageService } from '../../core/object-storage';
 import { RoleEngineService, BusinessRole, RoleDetectionContext } from './role-engine.service';
 import { ContentRequestService } from '../content-ops/content-request.service';
 import { CallLogService } from '../call-tasks/call-log.service';
@@ -35,13 +38,27 @@ import { EvidenceService } from '../evidence/evidence.service';
 import { ApprovalRequestService } from '../approvals/approval-request.service';
 import { GoogleDriveService } from '../google-drive/google-drive.service';
 import { TaskAssignmentService } from '../task-assignments/task-assignment.service';
+import { OnboardingConciergeService } from '../onboarding-concierge/onboarding-concierge.service';
+import { OnboardingStateService, type OnboardingStep as ServerOnboardingStep } from '../onboarding-concierge/onboarding-state.service';
+import { BusinessGenesisService } from '../business-genesis/business-genesis.service';
 
+
+export interface FlowAttachment {
+  type: 'image' | 'document' | 'audio' | 'spreadsheet';
+  url: string;
+  name?: string;
+  mimeType?: string;
+  objectPath?: string;
+}
 
 export interface FlowMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
+  attachments?: FlowAttachment[];
   toolCalls?: FlowToolCall[];
   toolResults?: FlowToolResult[];
+  pendingConfirmations?: PendingConfirmation[];
+  requiresConfirmation?: boolean;
   timestamp?: Date;
 }
 
@@ -72,12 +89,39 @@ export interface PendingConfirmation {
   riskLevel: RiskLevel;
 }
 
+export type OnboardingCardType =
+  | 'welcome'
+  | 'genesis-idea'
+  | 'genesis-questions'
+  | 'readiness-dashboard'
+  | 'template-picker'
+  | 'genome-check'
+  | 'completion-gate'
+  | 'profile-identity'
+  | 'operating-model'
+  | 'brand-goals'
+  | 'financials'
+  | 'ownership-legal'
+  | 'operations'
+  | 'market-strategy'
+  | 'payments-storefront-contacts'
+  | 'risk-compliance-roadmap';
+
+export interface OnboardingCard {
+  type: OnboardingCardType;
+  title?: string;
+  step?: string;
+  data?: Record<string, any>;
+}
+
 export interface FlowResponse {
   reply: string;
   toolCalls?: FlowToolCall[];
   toolResults?: FlowToolResult[];
   pendingConfirmations?: PendingConfirmation[];
   requiresConfirmation?: boolean;
+  sessionId?: string;
+  card?: OnboardingCard;
   usage?: {
     promptTokens: number;
     completionTokens: number;
@@ -87,11 +131,13 @@ export interface FlowResponse {
 }
 
 export interface FlowStreamChunk {
-  type: 'content_delta' | 'tool_calls' | 'tool_results' | 'confirmation_required' | 'usage' | 'done' | 'error';
+  type: 'content_delta' | 'tool_calls' | 'tool_results' | 'confirmation_required' | 'usage' | 'done' | 'error' | 'card';
   content?: string;
   toolCalls?: FlowToolCall[];
   toolResults?: FlowToolResult[];
   pendingConfirmations?: PendingConfirmation[];
+  card?: OnboardingCard;
+  sessionId?: string;
   usage?: {
     promptTokens: number;
     completionTokens: number;
@@ -290,8 +336,20 @@ export class FlowOrchestratorService {
   private getCalendarQuery() {
     return this.moduleRef.get(CalendarQueryService, { strict: false });
   }
+  private getDocumentIntelligence() {
+    return this.moduleRef.get(DocumentIntelligenceService, { strict: false });
+  }
   private getKeyflowNotes() {
     return this.moduleRef.get(KeyflowNotesService, { strict: false });
+  }
+  private getOnboardingConcierge() {
+    return this.moduleRef.get(OnboardingConciergeService, { strict: false });
+  }
+  private getOnboardingState() {
+    return this.moduleRef.get(OnboardingStateService, { strict: false });
+  }
+  private getBusinessGenesis() {
+    return this.moduleRef.get(BusinessGenesisService, { strict: false });
   }
 
   /**
@@ -299,9 +357,38 @@ export class FlowOrchestratorService {
    * BusinessBlueprint so KEY's recommendations are grounded in the operator's
    * actual identity, goals, constraints, and brand voice.
    */
-  private async buildOnboardingDirective(businessId: string): Promise<string> {
+  private async buildOnboardingDirective(
+    businessId: string,
+    pageContext?: FlowPageContext,
+  ): Promise<string> {
     const ctx = await this.blueprint.getBlueprintContext(businessId);
-    if (!ctx || ctx.completeness >= 100) return '';
+    const isOnboardingRoute = pageContext?.route?.startsWith('/app/onboarding') ?? false;
+
+    if (!ctx || ctx.completeness >= 100) {
+      if (isOnboardingRoute) {
+        return (
+          '\n[PRIORITY DIRECTIVE — ONBOARDING MODE]\n' +
+          'The user is on the onboarding page. The Business Genome is already complete. ' +
+          'Guide them through template selection, auto-configuration, and the completion gate. ' +
+          'Use the present_onboarding_card tool to show the next relevant onboarding card. ' +
+          'Keep replies concise, warm, and action-oriented.\n'
+        );
+      }
+      return '';
+    }
+
+    if (isOnboardingRoute) {
+      return (
+        '\n[PRIORITY DIRECTIVE — ONBOARDING MODE]\n' +
+        `The Business Genome is ${ctx.completeness}% complete. You are in the dedicated onboarding chat. ` +
+        'When the user shares ANY concrete business fact (industry, revenue model, ideal customer, goals, constraints, brand voice, budget, time commitment, etc.), ' +
+        'STOP and call update_business_blueprint FIRST, BEFORE any other tool. ' +
+        'If they have not shared a fact, guide them with ONE concise question and then use the present_onboarding_card tool to show the appropriate structured card ' +
+        '(profile-identity, genesis-idea, operating-model, brand-goals, financials, ownership-legal, operations, market-strategy, risk-compliance-roadmap, readiness-dashboard, template-picker, payments-storefront-contacts, or completion-gate) based on their onboarding state. ' +
+        'Never ask for passwords, API keys, or bank details.\n'
+      );
+    }
+
     return (
       '\n[PRIORITY DIRECTIVE — BUSINESS GENOME ONBOARDING]\n' +
       `The Business Genome is only ${ctx.completeness}% complete. Until it reaches 100%, your FIRST priority in every turn is to collect missing business facts. ` +
@@ -310,6 +397,119 @@ export class FlowOrchestratorService {
       'If they have not shared a fact, ask ONE concise follow-up question to fill the next missing section in this order: identity, operatingModel, constraints, goals, brand, customerModel, financials, workflowModel, aiPreferences. ' +
       'Never ask for passwords, API keys, or bank details.\n'
     );
+  }
+
+  private async buildOnboardingCard(
+    businessId: string,
+    cardType: OnboardingCardType | 'next',
+    stepHint?: string,
+  ): Promise<OnboardingCard> {
+    const concierge = this.getOnboardingConcierge();
+    const genesis = this.getBusinessGenesis();
+
+    const [setupStatus, conciergeState, business, blueprintCtx, genomeIntegrity] = await Promise.all([
+      concierge.getSetupStatus(businessId),
+      concierge.getConciergeState(businessId),
+      this.prisma.client.business.findUnique({
+        where: { id: businessId },
+        select: { businessIntent: true, name: true, industry: true, archetype: true, phone: true, email: true, logoUrl: true, country: true, currency: true },
+      }),
+      this.blueprint.getBlueprintContext(businessId).catch(() => null),
+      this.blueprint.calculateGenomeIntegrity(businessId).catch(() => null),
+    ]);
+
+    if (cardType !== 'next') {
+      return {
+        type: cardType,
+        title: this.onboardingCardTitle(cardType),
+        data: { setupStatus, conciergeState, business, blueprintCtx, stepHint },
+      };
+    }
+
+    const baseData = { setupStatus, conciergeState, business, blueprintCtx, genomeIntegrity };
+
+    if (conciergeState.onboardingComplete || setupStatus.percentage === 100) {
+      return {
+        type: 'completion-gate',
+        title: this.onboardingCardTitle('completion-gate'),
+        data: baseData,
+      };
+    }
+
+    // Slim 5-step onboarding funnel:
+    // 1) Capture the idea so AI can extract the Business Genome snapshot.
+    const hasIdea = !!business?.businessIntent?.trim();
+    const hasName = !!business?.name?.trim();
+    const lowCompleteness = (blueprintCtx?.completeness ?? 0) < 25;
+    if (!hasIdea || !hasName || lowCompleteness) {
+      return {
+        type: 'genesis-idea',
+        title: this.onboardingCardTitle('genesis-idea'),
+        data: { setupStatus, business, blueprintCtx },
+      };
+    }
+
+    // 2) Pick and auto-configure the best concierge template.
+    if (!conciergeState.templateId) {
+      return {
+        type: 'template-picker',
+        title: this.onboardingCardTitle('template-picker'),
+        data: { setupStatus, conciergeState, business },
+      };
+    }
+
+    // 3) Confirm storefront, payments, and contact details.
+    if (!setupStatus.payments || !setupStatus.storefront || !setupStatus.contacts) {
+      return { type: 'payments-storefront-contacts', title: this.onboardingCardTitle('payments-storefront-contacts'), data: baseData };
+    }
+
+    // 4) Business Genome three-pillar minimum. If it isn't met yet, let the
+    // user fill the missing pillars before showing the completion gate.
+    if (!genomeIntegrity?.threePillarMinimumMet) {
+      return {
+        type: 'genome-check',
+        title: this.onboardingCardTitle('genome-check'),
+        data: baseData,
+      };
+    }
+
+    // 5) Done.
+    return {
+      type: 'completion-gate',
+      title: this.onboardingCardTitle('completion-gate'),
+      data: baseData,
+    };
+  }
+
+  private extractOnboardingCard(toolResults?: FlowToolResult[]): OnboardingCard | undefined {
+    if (!toolResults) return undefined;
+    const cardResult = toolResults.find((r) => r.name === 'present_onboarding_card' && r.success);
+    if (!cardResult) return undefined;
+    const card = cardResult.result as OnboardingCard | undefined;
+    if (card && typeof card.type === 'string') return card;
+    return undefined;
+  }
+
+  private onboardingCardTitle(cardType: OnboardingCardType): string {
+    switch (cardType) {
+      case 'welcome': return 'Welcome to KeyFlowOS';
+      case 'genesis-idea': return 'Tell me about your business idea';
+      case 'genesis-questions': return 'A few quick questions';
+      case 'readiness-dashboard': return 'Your readiness dashboard';
+      case 'template-picker': return 'Pick an industry template';
+      case 'genome-check': return 'Complete your Business Genome';
+      case 'completion-gate': return 'You’re ready to launch';
+      case 'profile-identity': return 'Your business profile';
+      case 'operating-model': return 'How you operate';
+      case 'brand-goals': return 'Brand & goals';
+      case 'financials': return 'Financial plan';
+      case 'ownership-legal': return 'Ownership & legal';
+      case 'operations': return 'Operations';
+      case 'market-strategy': return 'Market strategy';
+      case 'payments-storefront-contacts': return 'Payments, storefront & contacts';
+      case 'risk-compliance-roadmap': return 'Risk, compliance & roadmap';
+      default: return 'Next step';
+    }
   }
 
   private async buildBlueprintSection(businessId: string): Promise<string> {
@@ -394,6 +594,115 @@ export class FlowOrchestratorService {
     return this.roleEngine.detectRoleFromContext(detectionCtx);
   }
 
+  /**
+   * Build a text block describing uploaded attachments by running them through
+   * DocumentIntelligenceService. Images and documents are described/extracted
+   * so the orchestrator can act on invoices, receipts, screenshots, etc.
+   */
+  private async buildAttachmentContext(
+    businessId: string,
+    attachments?: FlowAttachment[],
+  ): Promise<string> {
+    if (!attachments?.length) return '';
+    const docIntel = this.getDocumentIntelligence();
+    const storage = new ObjectStorageService();
+    const parts: string[] = [];
+    for (const att of attachments) {
+      try {
+        const filename = att.name || 'attachment';
+        const mimeType = att.mimeType || 'application/octet-stream';
+        let extractionInput: Parameters<DocumentIntelligenceService['extractFromDocument']>[0] = {
+          businessId,
+          source: att.url,
+          url: att.url,
+          filename,
+          mimeType,
+        };
+
+        // Prefer reading from our own object storage; presigned PUT URLs are not
+        // always publicly readable.
+        if (att.objectPath?.startsWith('/objects/')) {
+          try {
+            const { buffer, contentType } = await storage.getObjectEntityBuffer(att.objectPath);
+            extractionInput = {
+              businessId,
+              source: att.objectPath,
+              base64Content: buffer.toString('base64'),
+              filename,
+              mimeType: contentType || mimeType,
+            };
+          } catch (storageErr: any) {
+            this.logger.warn(
+              `Could not read attachment from object storage (${att.objectPath}): ${storageErr?.message ?? 'unknown'}; falling back to URL.`,
+            );
+          }
+        }
+
+        const result = await docIntel.extractFromDocument(extractionInput);
+        const summary = result.rawText?.trim()
+          ? `${result.documentType?.toUpperCase() ?? 'DOCUMENT'}\n${result.rawText}`
+          : JSON.stringify(result);
+        parts.push(
+          `[Attachment: ${filename} (${att.type}, ${extractionInput.mimeType ?? mimeType})]\n${summary}`,
+        );
+      } catch (err: any) {
+        parts.push(
+          `[Attachment: ${att.name ?? 'unnamed'} (${att.type}) — could not extract: ${err?.message ?? 'unknown error'}]`,
+        );
+      }
+    }
+    if (!parts.length) return '';
+    return 'ATTACHMENT CONTEXT:\n' + parts.join('\n\n---\n\n');
+  }
+
+  private buildAttachmentContextSync(
+    content: string,
+    attachments?: FlowAttachment[],
+  ): string {
+    if (!attachments?.length) return content;
+    const fallbackParts = attachments.map(
+      (att) =>
+        `[Attachment: ${att.name ?? 'unnamed'} (${att.type}) — see previous extraction above]`,
+    );
+    return `${content}\n\nATTACHMENT CONTEXT:\n${fallbackParts.join('\n')}`;
+  }
+
+  private async *finalizeStreamSession(
+    businessId: string,
+    sessionId: string,
+    conversationHistory: FlowMessage[],
+    message: string,
+    enrichedMessage: string,
+    attachments: FlowAttachment[] | undefined,
+    assistantContent: string,
+    assistantToolCalls: FlowToolCall[] | undefined,
+    assistantToolResults: FlowToolResult[] | undefined,
+    assistantPendingConfirmations: PendingConfirmation[] | undefined,
+    usage: { promptTokens: number; completionTokens: number; totalTokens: number; creditsUsed: number },
+  ): AsyncGenerator<FlowStreamChunk> {
+    const sessionMessages: FlowMessage[] = [...conversationHistory];
+    if (message.trim() || attachments?.length) {
+      sessionMessages.push({
+        role: 'user',
+        content: enrichedMessage,
+        attachments,
+        timestamp: new Date(),
+      });
+    }
+    sessionMessages.push({
+      role: 'assistant',
+      content: assistantContent,
+      toolCalls: assistantToolCalls,
+      toolResults: assistantToolResults,
+      pendingConfirmations: assistantPendingConfirmations,
+      requiresConfirmation: assistantPendingConfirmations && assistantPendingConfirmations.length > 0,
+      timestamp: new Date(),
+    });
+    await this.saveConversationHistory(businessId, sessionId, sessionMessages);
+    yield { type: 'usage', usage };
+    yield { type: 'done', sessionId };
+  }
+
   async chat(
     businessId: string,
     message: string,
@@ -401,11 +710,20 @@ export class FlowOrchestratorService {
     pendingConfirmation?: { toolCallId: string; confirmed: boolean; toolName?: string; toolArgs?: Record<string, any> },
     pageContext?: FlowPageContext,
     role?: BusinessRole,
+    attachments?: FlowAttachment[],
+    sessionId?: string,
   ): Promise<FlowResponse> {
     this.aiUsage.checkRateLimit(businessId);
 
+    // Enrich message with any uploaded document/PDF/image context so role detection
+    // and the LLM prompt both see the attachment contents.
+    const effectiveSessionId = sessionId || randomUUID();
+    const attachmentContext = await this.buildAttachmentContext(businessId, attachments);
+    const enrichedMessage = attachmentContext ? `${message}\n\n${attachmentContext}` : message;
+
+    const result = await (async (): Promise<FlowResponse> => {
     // Auto-detect role if not explicitly provided
-    const detectedRole = role ?? await this.inferRole(businessId, message, conversationHistory, pageContext);
+    const detectedRole = role ?? await this.inferRole(businessId, enrichedMessage, conversationHistory, pageContext);
 
     const canProceed = await this.aiUsage.checkCredits(businessId, 2);
     if (!canProceed.allowed) {
@@ -439,7 +757,7 @@ export class FlowOrchestratorService {
 
     const pageContextSection = formatPageContextSection(pageContext);
     const blueprintSection = await this.buildBlueprintSection(businessId);
-    const onboardingDirective = await this.buildOnboardingDirective(businessId);
+    const onboardingDirective = await this.buildOnboardingDirective(businessId, pageContext);
 
     let systemPrompt: string;
     if (detectedRole && detectedRole !== 'general') {
@@ -459,7 +777,7 @@ export class FlowOrchestratorService {
 
     for (const msg of conversationHistory) {
       if (msg.role === 'user') {
-        messages.push({ role: 'user', content: msg.content });
+        messages.push({ role: 'user', content: this.buildAttachmentContextSync(msg.content, msg.attachments) });
       } else if (msg.role === 'assistant') {
         if (msg.toolCalls && msg.toolCalls.length > 0) {
           messages.push({
@@ -537,7 +855,7 @@ export class FlowOrchestratorService {
       }
     }
 
-    messages.push({ role: 'user', content: message });
+    messages.push({ role: 'user', content: enrichedMessage });
 
     try {
       const gatewayResponse = await this.aiUsage.trackAndComplete(
@@ -672,16 +990,45 @@ export class FlowOrchestratorService {
       const finalReply = followUpGateway.content
         || 'Done! The action was completed successfully.';
 
+      const onboardingCard = this.extractOnboardingCard(toolResults);
+
       return {
         reply: finalReply,
         toolCalls,
         toolResults,
+        card: onboardingCard,
         usage,
       };
     } catch (error: any) {
       this.logger.error(`Flow chat error: ${(error as Error).message}`);
       throw error;
     }
+    })();
+
+    // Persist the turn to the FlowSession so it can be resumed later.
+    const userMessage: FlowMessage = {
+      role: 'user',
+      content: enrichedMessage,
+      attachments,
+      timestamp: new Date(),
+    };
+    const assistantMessage: FlowMessage = {
+      role: 'assistant',
+      content: result.reply,
+      toolCalls: result.toolCalls,
+      toolResults: result.toolResults,
+      pendingConfirmations: result.pendingConfirmations,
+      requiresConfirmation: result.requiresConfirmation,
+      timestamp: new Date(),
+    };
+    const sessionMessages = [...conversationHistory];
+    if (message.trim() || attachments?.length) {
+      sessionMessages.push(userMessage);
+    }
+    sessionMessages.push(assistantMessage);
+    await this.saveConversationHistory(businessId, effectiveSessionId, sessionMessages);
+
+    return { ...result, sessionId: effectiveSessionId };
   }
 
   async *streamChat(
@@ -690,9 +1037,16 @@ export class FlowOrchestratorService {
     conversationHistory: FlowMessage[] = [],
     pageContext?: FlowPageContext,
     role?: BusinessRole,
+    attachments?: FlowAttachment[],
+    sessionId?: string,
   ): AsyncGenerator<FlowStreamChunk> {
+    // Enrich message with uploaded document/image context.
+    const effectiveSessionId = sessionId || randomUUID();
+    const attachmentContext = await this.buildAttachmentContext(businessId, attachments);
+    const enrichedMessage = attachmentContext ? `${message}\n\n${attachmentContext}` : message;
+
     // Auto-detect role if not explicitly provided
-    const detectedRole = role ?? await this.inferRole(businessId, message, conversationHistory, pageContext);
+    const detectedRole = role ?? await this.inferRole(businessId, enrichedMessage, conversationHistory, pageContext);
 
     try {
       this.aiUsage.checkRateLimit(businessId);
@@ -717,10 +1071,10 @@ export class FlowOrchestratorService {
 
     // Semantic memory search based on current message
     let semanticMemorySection = '';
-    if (message) {
+    if (enrichedMessage) {
       const relevant = await this.semanticMemory.search({
         businessId,
-        query: message,
+        query: enrichedMessage,
         limit: 5,
         minSimilarity: 0.65,
       });
@@ -732,7 +1086,7 @@ export class FlowOrchestratorService {
 
     const pageContextSection = formatPageContextSection(pageContext);
     const blueprintSection = await this.buildBlueprintSection(businessId);
-    const onboardingDirective = await this.buildOnboardingDirective(businessId);
+    const onboardingDirective = await this.buildOnboardingDirective(businessId, pageContext);
 
     let systemPrompt: string;
     if (detectedRole && detectedRole !== 'general') {
@@ -752,7 +1106,7 @@ export class FlowOrchestratorService {
 
     for (const msg of conversationHistory) {
       if (msg.role === 'user') {
-        messages.push({ role: 'user', content: msg.content });
+        messages.push({ role: 'user', content: this.buildAttachmentContextSync(msg.content, msg.attachments) });
       } else if (msg.role === 'assistant') {
         if (msg.toolCalls && msg.toolCalls.length > 0) {
           messages.push({
@@ -782,7 +1136,7 @@ export class FlowOrchestratorService {
       }
     }
 
-    messages.push({ role: 'user', content: message });
+    messages.push({ role: 'user', content: enrichedMessage });
 
     try {
       const stream = this.aiUsage.trackAndStream(
@@ -801,6 +1155,7 @@ export class FlowOrchestratorService {
       );
 
       let fullContent = '';
+      let followUpContent = '';
       const toolCallAccumulator = new Map<number, { id: string; name: string; arguments: string }>();
       let streamUsage: { promptTokens: number; completionTokens: number; totalTokens: number; estimatedCost: number } | undefined;
       let streamProvider = '';
@@ -846,8 +1201,19 @@ export class FlowOrchestratorService {
       };
 
       if (toolCallAccumulator.size === 0) {
-        yield { type: 'usage', usage };
-        yield { type: 'done' };
+        yield* this.finalizeStreamSession(
+          businessId,
+          effectiveSessionId,
+          conversationHistory,
+          message,
+          enrichedMessage,
+          attachments,
+          fullContent,
+          undefined,
+          undefined,
+          undefined,
+          usage,
+        );
         return;
       }
 
@@ -876,12 +1242,21 @@ export class FlowOrchestratorService {
       const needsFormalApproval = governanceChecks.filter(({ decision }) => decision.requiresFormalApproval);
 
       if (blocked.length > 0) {
-        yield {
-          type: 'content_delta',
-          content: `I can't execute that action right now: ${blocked.map(b => b.decision.reason).join('; ')}`,
-        };
-        yield { type: 'usage', usage };
-        yield { type: 'done' };
+        const blockMessage = `I can't execute that action right now: ${blocked.map(b => b.decision.reason).join('; ')}`;
+        yield { type: 'content_delta', content: blockMessage };
+        yield* this.finalizeStreamSession(
+          businessId,
+          effectiveSessionId,
+          conversationHistory,
+          message,
+          enrichedMessage,
+          attachments,
+          blockMessage,
+          toolCalls,
+          undefined,
+          undefined,
+          usage,
+        );
         return;
       }
 
@@ -902,12 +1277,21 @@ export class FlowOrchestratorService {
           `• ${this.describeToolCall(tc.name, tc.arguments)} (Tier ${decision.tier}${decision.requiresAdminApproval ? ', admin required' : ''})`
         ).join('\n');
 
-        yield {
-          type: 'content_delta',
-          content: `These actions require formal approval and have been added to your approval queue:\n${approvalMessages}`,
-        };
-        yield { type: 'usage', usage };
-        yield { type: 'done' };
+        const formalMessage = `These actions require formal approval and have been added to your approval queue:\n${approvalMessages}`;
+        yield { type: 'content_delta', content: formalMessage };
+        yield* this.finalizeStreamSession(
+          businessId,
+          effectiveSessionId,
+          conversationHistory,
+          message,
+          enrichedMessage,
+          attachments,
+          formalMessage,
+          toolCalls,
+          undefined,
+          undefined,
+          usage,
+        );
         return;
       }
 
@@ -925,8 +1309,19 @@ export class FlowOrchestratorService {
           pendingConfirmations,
           toolCalls,
         };
-        yield { type: 'usage', usage };
-        yield { type: 'done' };
+        yield* this.finalizeStreamSession(
+          businessId,
+          effectiveSessionId,
+          conversationHistory,
+          message,
+          enrichedMessage,
+          attachments,
+          fullContent,
+          toolCalls,
+          undefined,
+          pendingConfirmations,
+          usage,
+        );
         return;
       }
 
@@ -935,6 +1330,11 @@ export class FlowOrchestratorService {
       );
 
       yield { type: 'tool_results', toolResults };
+
+      const onboardingCard = this.extractOnboardingCard(toolResults);
+      if (onboardingCard) {
+        yield { type: 'card', card: onboardingCard };
+      }
 
       const followUpMessages: GatewayMessage[] = [
         ...messages,
@@ -967,12 +1367,24 @@ export class FlowOrchestratorService {
 
       for await (const chunk of followUpStream) {
         if (chunk.type === 'content_delta' && chunk.content) {
+          followUpContent += chunk.content;
           yield { type: 'content_delta', content: chunk.content };
         }
       }
 
-      yield { type: 'usage', usage };
-      yield { type: 'done' };
+      yield* this.finalizeStreamSession(
+        businessId,
+        effectiveSessionId,
+        conversationHistory,
+        message,
+        enrichedMessage,
+        attachments,
+        followUpContent,
+        toolCalls,
+        toolResults,
+        undefined,
+        usage,
+      );
     } catch (error: any) {
       this.logger.error(`Flow stream chat error: ${(error as Error).message}`);
       yield { type: 'error', error: (error as Error).message };
@@ -1098,6 +1510,16 @@ export class FlowOrchestratorService {
           confidenceScores: blueprint.confidenceScores,
           updatedSections: Object.keys(patch),
         };
+      }
+
+      case 'present_onboarding_card': {
+        return this.buildOnboardingCard(businessId, args.cardType as OnboardingCardType, args.step as string | undefined);
+      }
+
+      case 'save_onboarding_step': {
+        const step = args.step as ServerOnboardingStep;
+        await this.getOnboardingState().saveStep(businessId, step);
+        return { step, saved: true };
       }
 
       case 'crm_search_contacts': {
@@ -2012,9 +2434,12 @@ export class FlowOrchestratorService {
             by: ['contactId'],
             where: { businessId, deletedAt: null, status: 'PAID' },
             _sum: { total: true },
-            having: { total: { _sum: { gte: args.minSpend } } },
           });
-          const spenderIds = new Set(spenders.map(s => s.contactId));
+          const spenderIds = new Set(
+            spenders
+              .filter((s: any) => (s._sum.total ?? 0) >= args.minSpend)
+              .map((s: any) => s.contactId),
+          );
           contacts = contacts.filter(c => spenderIds.has(c.id));
         }
 

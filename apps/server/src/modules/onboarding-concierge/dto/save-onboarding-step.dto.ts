@@ -3,10 +3,8 @@ import { IsIn } from 'class-validator';
 const ONBOARDING_STEPS = [
   'welcome',
   'intake',
-  'genesis',
   'template',
   'configure',
-  'genome',
   'complete',
 ] as const;
 

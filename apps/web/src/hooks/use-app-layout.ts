@@ -36,7 +36,7 @@ import {
   type PrimaryNavItem,
   type DrawerSurface,
 } from "@/lib/nav-config";
-import type { CopilotModule } from "@/components/ai/copilot-panel";
+import type { CopilotModule } from "@/components/key/chat";
 
 export interface AppLayoutState {
   pathname: string;

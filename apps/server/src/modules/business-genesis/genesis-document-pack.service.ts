@@ -152,6 +152,8 @@ export class GenesisDocumentPackService {
   }
 
   private hasEmployees(blueprint: BlueprintData): boolean {
+    const explicit = blueprint.registrationProfile?.hasEmployees;
+    if (typeof explicit === 'boolean') return explicit;
     const status = blueprint.registrationProfile?.nisEmployerStatus;
     return status !== undefined && status !== 'NOT_NEEDED';
   }

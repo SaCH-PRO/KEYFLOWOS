@@ -86,9 +86,10 @@ export class OnboardingConciergeController {
 
   @Post('detect-type')
   async detectBusinessType(
+    @Param('businessId') businessId: string,
     @Body() body: DetectBusinessTypeDto,
   ) {
-    return this.concierge.detectBusinessType(body.description);
+    return this.concierge.detectBusinessType(businessId, body.description);
   }
 
   @Get('nudges')

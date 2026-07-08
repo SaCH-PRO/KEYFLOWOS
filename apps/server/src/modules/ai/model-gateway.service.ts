@@ -40,7 +40,14 @@ export interface GatewayToolDefinition {
 
 export interface GatewayMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
-  content: string | null;
+  content:
+    | string
+    | Array<{
+        type: string;
+        text?: string;
+        image_url?: { url: string; detail?: string };
+      }>
+    | null;
   tool_calls?: GatewayToolCall[];
   tool_call_id?: string;
 }
@@ -960,20 +967,20 @@ export class ModelGatewayService {
     if (!apiKey) throw new Error('Anthropic API key not configured');
 
     let systemPrompt = '';
-    const nonSystemMessages: Array<{ role: string; content: string }> = [];
+    const nonSystemMessages: Array<{ role: string; content: string | Array<Record<string, unknown>> }> = [];
 
     for (const msg of messages) {
       if (msg.role === 'system') {
-        systemPrompt += (systemPrompt ? '\n\n' : '') + (msg.content || '');
+        systemPrompt += (systemPrompt ? '\n\n' : '') + (typeof msg.content === 'string' ? msg.content : '');
       } else if (msg.role === 'tool') {
         nonSystemMessages.push({
           role: 'user',
-          content: `[Tool result for ${msg.tool_call_id}]: ${msg.content}`,
+          content: `[Tool result for ${msg.tool_call_id}]: ${typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)}`,
         });
       } else {
         nonSystemMessages.push({
           role: msg.role === 'assistant' ? 'assistant' : 'user',
-          content: msg.content || '',
+          content: this.toAnthropicContent(msg.content),
         });
       }
     }
@@ -982,14 +989,7 @@ export class ModelGatewayService {
       nonSystemMessages.push({ role: 'user', content: 'Please respond.' });
     }
 
-    const mergedMessages: Array<{ role: string; content: string }> = [];
-    for (const msg of nonSystemMessages) {
-      if (mergedMessages.length > 0 && mergedMessages[mergedMessages.length - 1].role === msg.role) {
-        mergedMessages[mergedMessages.length - 1].content += '\n\n' + msg.content;
-      } else {
-        mergedMessages.push({ ...msg });
-      }
-    }
+    const mergedMessages = this.mergeAnthropicMessages(nonSystemMessages);
 
     if (mergedMessages.length > 0 && mergedMessages[0].role !== 'user') {
       mergedMessages.unshift({ role: 'user', content: 'Continue.' });
@@ -1649,6 +1649,60 @@ export class ModelGatewayService {
     return messages;
   }
 
+  private toAnthropicContent(
+    content: GatewayMessage['content'],
+  ): string | Array<Record<string, unknown>> {
+    if (!content) return '';
+    if (typeof content === 'string') return content;
+    if (!Array.isArray(content)) return String(content);
+
+    const blocks: Array<Record<string, unknown>> = [];
+    for (const part of content) {
+      if (part.type === 'text' && typeof part.text === 'string') {
+        blocks.push({ type: 'text', text: part.text });
+      } else if (part.type === 'image_url' && part.image_url?.url) {
+        const url = part.image_url.url;
+        if (url.startsWith('data:')) {
+          const match = /^data:([^;]+);base64,(.+)$/.exec(url);
+          if (match) {
+            blocks.push({
+              type: 'image',
+              source: { type: 'base64', media_type: match[1], data: match[2] },
+            });
+          } else {
+            blocks.push({ type: 'text', text: '[Unsupported image data URL]' });
+          }
+        } else {
+          blocks.push({ type: 'image', source: { type: 'url', url } });
+        }
+      } else {
+        blocks.push({ type: 'text', text: JSON.stringify(part) });
+      }
+    }
+    return blocks;
+  }
+
+  private mergeAnthropicMessages(
+    messages: Array<{ role: string; content: string | Array<Record<string, unknown>> }>,
+  ): Array<{ role: string; content: string | Array<Record<string, unknown>> }> {
+    const merged: Array<{ role: string; content: string | Array<Record<string, unknown>> }> = [];
+    for (const msg of messages) {
+      const last = merged[merged.length - 1];
+      if (last && last.role === msg.role) {
+        if (typeof last.content === 'string' && typeof msg.content === 'string') {
+          last.content += '\n\n' + msg.content;
+        } else if (Array.isArray(last.content) && Array.isArray(msg.content)) {
+          last.content = [...last.content, ...msg.content];
+        } else {
+          merged.push({ ...msg });
+        }
+      } else {
+        merged.push({ ...msg });
+      }
+    }
+    return merged;
+  }
+
   private async callOpenAi(
     messages: GatewayMessage[],
     model: string,
@@ -1717,20 +1771,20 @@ export class ModelGatewayService {
     if (!apiKey) throw new Error('Anthropic API key not configured');
 
     let systemPrompt = '';
-    const nonSystemMessages: Array<{ role: string; content: string }> = [];
+    const nonSystemMessages: Array<{ role: string; content: string | Array<Record<string, unknown>> }> = [];
 
     for (const msg of messages) {
       if (msg.role === 'system') {
-        systemPrompt += (systemPrompt ? '\n\n' : '') + (msg.content || '');
+        systemPrompt += (systemPrompt ? '\n\n' : '') + (typeof msg.content === 'string' ? msg.content : '');
       } else if (msg.role === 'tool') {
         nonSystemMessages.push({
           role: 'user',
-          content: `[Tool result for ${msg.tool_call_id}]: ${msg.content}`,
+          content: `[Tool result for ${msg.tool_call_id}]: ${typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)}`,
         });
       } else {
         nonSystemMessages.push({
           role: msg.role === 'assistant' ? 'assistant' : 'user',
-          content: msg.content || '',
+          content: this.toAnthropicContent(msg.content),
         });
       }
     }
@@ -1739,14 +1793,7 @@ export class ModelGatewayService {
       nonSystemMessages.push({ role: 'user', content: 'Please respond.' });
     }
 
-    const mergedMessages: Array<{ role: string; content: string }> = [];
-    for (const msg of nonSystemMessages) {
-      if (mergedMessages.length > 0 && mergedMessages[mergedMessages.length - 1].role === msg.role) {
-        mergedMessages[mergedMessages.length - 1].content += '\n\n' + msg.content;
-      } else {
-        mergedMessages.push({ ...msg });
-      }
-    }
+    const mergedMessages = this.mergeAnthropicMessages(nonSystemMessages);
 
     if (mergedMessages.length > 0 && mergedMessages[0].role !== 'user') {
       mergedMessages.unshift({ role: 'user', content: 'Continue.' });

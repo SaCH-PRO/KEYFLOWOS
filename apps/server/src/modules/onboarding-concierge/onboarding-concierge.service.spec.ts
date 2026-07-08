@@ -69,6 +69,7 @@ function makeService(overrides: {
     },
     business: {
       findUnique: vi.fn().mockResolvedValue(overrides.business ?? {}),
+      findFirst: vi.fn().mockResolvedValue(null),
       update: vi.fn().mockResolvedValue({}),
     },
     contact: {
@@ -227,13 +228,13 @@ describe('OnboardingConciergeService', () => {
   describe('detectBusinessType', () => {
     it('returns high confidence when multiple keywords match', async () => {
       const { service } = makeService();
-      const result = await service.detectBusinessType('I run a consulting agency offering professional services');
+      const result = await service.detectBusinessType('biz_1', 'I run a consulting agency offering professional services');
       expect(result.confidence).toBe('high');
     });
 
     it('returns low confidence with no matches and falls back to consulting', async () => {
       const { service } = makeService();
-      const result = await service.detectBusinessType('xyz qwerty 12345');
+      const result = await service.detectBusinessType('biz_1', 'xyz qwerty 12345');
       expect(result.confidence).toBe('low');
       expect(result.template.id).toBe('consulting');
     });
@@ -291,7 +292,7 @@ describe('OnboardingConciergeService', () => {
       const result = await service.markOnboardingComplete('biz_1');
 
       expect(result.complete).toBe(true);
-      expect(demoSeeder.seedDemoData).toHaveBeenCalledWith('biz_1');
+      expect(demoSeeder.seedDemoData).toHaveBeenCalledWith('biz_1', expect.any(Object));
       expect(prisma.client.$transaction).toHaveBeenCalled();
     });
   });

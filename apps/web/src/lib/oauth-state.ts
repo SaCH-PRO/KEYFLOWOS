@@ -6,14 +6,35 @@ function isHttps(): boolean {
   return window.location.protocol === "https:";
 }
 
-export function generateOAuthState(): string {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
+function base64UrlEncode(buffer: Uint8Array): string {
+  let binary = "";
+  for (let i = 0; i < buffer.byteLength; i++) {
+    binary += String.fromCharCode(buffer[i]);
   }
-  // Fallback for very old environments
-  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
+/**
+ * Generate a high-entropy OAuth state parameter using the Web Crypto API.
+ * The output is URL-safe and unpredictable; there is no Math.random() fallback.
+ */
+export function generateOAuthState(): string {
+  const array = new Uint8Array(32);
+  if (typeof crypto !== "undefined" && "getRandomValues" in crypto) {
+    crypto.getRandomValues(array);
+  } else {
+    // crypto is required in all modern browsers and Node 20+ runtimes.
+    throw new Error("Web Crypto API is not available; cannot generate OAuth state securely.");
+  }
+  return base64UrlEncode(array);
+}
+
+/**
+ * Store the OAuth state in a short-lived cookie with SameSite protection.
+ * HttpOnly is intentionally not used because the client must read the cookie
+ * to validate the state returned by the OAuth provider. For server-side state
+ * validation, move this to a Route Handler that reads an HttpOnly cookie.
+ */
 export function setOAuthState(state: string): void {
   if (typeof document === "undefined") return;
   const secure = isHttps() ? "; Secure" : "";

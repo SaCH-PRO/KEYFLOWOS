@@ -6,6 +6,7 @@ import { Loader2, ArrowRight, RotateCcw, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import { apiGet, apiPost } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
+import { getGenome, type GenomeIntegrityResult } from "@/lib/api/business-genome";
 import type {
   GenesisReadinessScore,
   GenesisIdeaAnalysis,
@@ -55,14 +56,19 @@ export function GenesisConversation({ onComplete }: GenesisConversationProps) {
     }
     setBusinessId(bid);
 
-    apiGet<GenesisReadinessScore>(`/business-genesis/businesses/${bid}/readiness`)
-      .then(({ data, error: err }) => {
-        if (err || !data) {
-          setError(err || "Could not load readiness score.");
+    Promise.all([
+      apiGet<GenesisReadinessScore>(`/business-genesis/businesses/${bid}/readiness`),
+      getGenome(bid),
+    ])
+      .then(([{ data: readinessData, error: readinessErr }, { data: genomeData }]) => {
+        if (readinessErr || !readinessData) {
+          setError(readinessErr || "Could not load readiness score.");
           return;
         }
-        setReadiness(data);
-        if (data.overall >= 80) {
+        setReadiness(readinessData);
+        // Use the same gate the server uses for onboarding completion:
+        // the three-pillar minimum (founder, business, market each >= 50).
+        if (genomeData?.threePillarMinimumMet) {
           setStep("dashboard");
         }
       })

@@ -38,7 +38,7 @@ type FetchOptions = {
   init?: RequestInit;
 };
 
-type ApiResponse<T> = { data: T | null; error: string | null; planLimitReached?: PlanLimitError | null };
+type ApiResponse<T> = { data: T | null; error: string | null; planLimitReached?: PlanLimitError | null; rawError?: Record<string, unknown> | null };
 
 export interface PlanLimitError {
   resource: string;
@@ -135,9 +135,21 @@ function handleErrorResponse<T>(data: unknown, statusText: string, status?: numb
   const planLimit = parsePlanLimitError(parsed);
   if (planLimit) emitPlanLimitEvent(planLimit);
   if (status === 401) emitUnauthorizedEvent(path ?? "");
-  const message =
-    parsed && typeof parsed.message === "string" ? parsed.message : statusText || "Request failed";
-  return { data: null, error: message, planLimitReached: planLimit };
+  let message: string;
+  if (parsed) {
+    if (typeof parsed.message === "string") {
+      message = parsed.message;
+    } else if (Array.isArray(parsed.message) && parsed.message.length > 0) {
+      message = parsed.message.join("; ");
+    } else if (typeof parsed.error === "string") {
+      message = parsed.error;
+    } else {
+      message = statusText || "Request failed";
+    }
+  } else {
+    message = statusText || "Request failed";
+  }
+  return { data: null, error: message, planLimitReached: planLimit, rawError: parsed };
 }
 
 export async function apiPost<T>({ path, body, init }: FetchOptions): Promise<ApiResponse<T>> {

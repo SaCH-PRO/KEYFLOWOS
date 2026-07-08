@@ -9,8 +9,8 @@ const execFileAsync = promisify(execFile);
  * Resolve the git commit SHA the running container was built from.
  *
  * Lookup order:
- *   1. GIT_COMMIT / REPL_COMMIT_SHA / SOURCE_COMMIT environment variable
- *      (set by the platform, CI, or scripts/start-prod.sh)
+ *   1. GIT_COMMIT / SOURCE_COMMIT environment variable
+ *      (set by CI or scripts/start-prod.sh)
  *   2. .deploy-version file written at build time by the CI/build step,
  *      walking up from the current working directory until found
  *   3. live `git rev-parse HEAD` (works in dev when .git is present)
@@ -63,7 +63,6 @@ export async function getReleaseVersion(): Promise<{ full: string; short: string
     pending = (async () => {
       const fromEnv =
         process.env.GIT_COMMIT ||
-        process.env.REPL_COMMIT_SHA ||
         process.env.SOURCE_COMMIT ||
         "";
       const value = (

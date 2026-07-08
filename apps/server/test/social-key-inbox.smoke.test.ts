@@ -1,6 +1,7 @@
 import { Test } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
+import { createHmac } from 'crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SocialController } from '../src/modules/social/social.controller';
@@ -11,15 +12,23 @@ import { SocialAnalyticsService } from '../src/modules/social/social-analytics.s
 import { AuthGuard } from '../src/core/auth/auth.guard';
 import { BusinessGuard } from '../src/core/auth/business.guard';
 import { PrismaService } from '../src/core/prisma/prisma.service';
+import { WebhookIngressLoggerService } from '../src/core/connectors/webhook-ingress-logger.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+
+function metaSignature(body: string, secret: string): string {
+  const sig = createHmac('sha256', secret).update(body).digest('hex');
+  return `sha256=${sig}`;
+}
 
 describe('Social KEYInbox webhook smoke (B.6)', () => {
   let app: INestApplication;
   let receiveInbound: ReturnType<typeof vi.fn>;
   const originalVerifyToken = process.env.META_SOCIAL_VERIFY_TOKEN;
+  const originalAppSecret = process.env.META_APP_SECRET;
 
   beforeAll(async () => {
     process.env.META_SOCIAL_VERIFY_TOKEN = 'meta_verify_123';
+    process.env.META_APP_SECRET = 'meta_app_secret_smoke';
 
     receiveInbound = vi.fn().mockResolvedValue({
       contactId: 'contact_smoke',
@@ -63,10 +72,24 @@ describe('Social KEYInbox webhook smoke (B.6)', () => {
             },
           },
         },
+        {
+          provide: WebhookIngressLoggerService,
+          useValue: { log: vi.fn() },
+        },
       ],
     }).compile();
 
     app = moduleRef.createNestApplication();
+    app.use((req: any, _res: any, next: any) => {
+      const chunks: Buffer[] = [];
+      req.on('data', (chunk: Buffer) => chunks.push(chunk));
+      req.on('end', () => {
+        if (chunks.length > 0) {
+          req.rawBody = Buffer.concat(chunks);
+        }
+      });
+      next();
+    });
     app.use((req: any, _res: any, next: any) => {
       req.user = { id: 'user_smoke', role: 'USER' };
       next();
@@ -77,6 +100,7 @@ describe('Social KEYInbox webhook smoke (B.6)', () => {
 
   afterAll(async () => {
     process.env.META_SOCIAL_VERIFY_TOKEN = originalVerifyToken;
+    process.env.META_APP_SECRET = originalAppSecret;
     await app.close();
   });
 
@@ -94,25 +118,29 @@ describe('Social KEYInbox webhook smoke (B.6)', () => {
   });
 
   it('parses a Messenger DM payload', async () => {
+    const body = {
+      object: 'page',
+      entry: [
+        {
+          id: 'page_1',
+          time: 1458692752478,
+          messaging: [
+            {
+              sender: { id: 'user_123' },
+              recipient: { id: 'page_1' },
+              timestamp: 1458692752478,
+              message: { mid: 'mid.messenger.smoke', text: 'Messenger smoke message' },
+            },
+          ],
+        },
+      ],
+    };
+    const raw = JSON.stringify(body);
+    const sig = metaSignature(raw, process.env.META_APP_SECRET!);
     const res = await request(app.getHttpServer())
       .post('/social/webhook/biz_smoke')
-      .send({
-        object: 'page',
-        entry: [
-          {
-            id: 'page_1',
-            time: 1458692752478,
-            messaging: [
-              {
-                sender: { id: 'user_123' },
-                recipient: { id: 'page_1' },
-                timestamp: 1458692752478,
-                message: { mid: 'mid.messenger.smoke', text: 'Messenger smoke message' },
-              },
-            ],
-          },
-        ],
-      })
+      .set('x-hub-signature-256', sig)
+      .send(body)
       .expect(201);
 
     expect(res.body.success).toBe(true);
@@ -124,25 +152,29 @@ describe('Social KEYInbox webhook smoke (B.6)', () => {
   });
 
   it('parses an Instagram DM payload', async () => {
+    const body = {
+      object: 'instagram',
+      entry: [
+        {
+          id: 'ig_1',
+          time: 1458692752478,
+          messaging: [
+            {
+              sender: { id: 'ig_user_456' },
+              recipient: { id: 'ig_1' },
+              timestamp: 1458692752478,
+              message: { mid: 'mid.instagram.smoke', text: 'Instagram smoke message' },
+            },
+          ],
+        },
+      ],
+    };
+    const raw = JSON.stringify(body);
+    const sig = metaSignature(raw, process.env.META_APP_SECRET!);
     const res = await request(app.getHttpServer())
       .post('/social/webhook/biz_smoke')
-      .send({
-        object: 'instagram',
-        entry: [
-          {
-            id: 'ig_1',
-            time: 1458692752478,
-            messaging: [
-              {
-                sender: { id: 'ig_user_456' },
-                recipient: { id: 'ig_1' },
-                timestamp: 1458692752478,
-                message: { mid: 'mid.instagram.smoke', text: 'Instagram smoke message' },
-              },
-            ],
-          },
-        ],
-      })
+      .set('x-hub-signature-256', sig)
+      .send(body)
       .expect(201);
 
     expect(res.body.success).toBe(true);
@@ -155,9 +187,13 @@ describe('Social KEYInbox webhook smoke (B.6)', () => {
   it('returns error when ingestion fails', async () => {
     receiveInbound.mockRejectedValueOnce(new Error('Unrecognized Meta social webhook payload'));
 
+    const body = { unknown: 'payload' };
+    const raw = JSON.stringify(body);
+    const sig = metaSignature(raw, process.env.META_APP_SECRET!);
     const res = await request(app.getHttpServer())
       .post('/social/webhook/biz_smoke')
-      .send({ unknown: 'payload' })
+      .set('x-hub-signature-256', sig)
+      .send(body)
       .expect(201);
 
     expect(res.body.success).toBe(false);

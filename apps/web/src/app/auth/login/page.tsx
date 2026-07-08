@@ -3,7 +3,7 @@
 import { Suspense } from "react";
 import LoginForm from "./login-form";
 
-const isDev = process.env.NODE_ENV !== "production";
+const isDev = process.env.NODE_ENV === "development";
 
 function DevCredentialsBanner() {
   if (!isDev) return null;

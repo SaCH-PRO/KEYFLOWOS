@@ -5647,12 +5647,21 @@ export interface FlowPendingConfirmation {
   riskLevel: 'low' | 'medium' | 'high';
 }
 
+export interface OnboardingCardData {
+  type: "welcome" | "genesis-idea" | "genesis-questions" | "readiness-dashboard" | "template-picker" | "completion-gate";
+  title?: string;
+  step?: string;
+  data?: Record<string, unknown>;
+}
+
 export interface FlowChatResponse {
   reply: string;
   toolCalls?: FlowToolCall[];
   toolResults?: FlowToolResult[];
   pendingConfirmations?: FlowPendingConfirmation[];
   requiresConfirmation?: boolean;
+  sessionId?: string;
+  card?: OnboardingCardData;
   usage?: {
     promptTokens: number;
     completionTokens: number;
@@ -5672,10 +5681,12 @@ export async function sendFlowChat(
     toolArgs?: Record<string, unknown>;
   },
   pageContext?: Record<string, unknown>,
+  sessionId?: string | null,
+  attachments?: Array<{ type: string; url: string; name?: string; mimeType?: string }>,
 ): Promise<ApiResult<FlowChatResponse>> {
   return apiPost<FlowChatResponse>({
     path: `/ai/businesses/${encodeURIComponent(businessId)}/flow/chat`,
-    body: { message, history, pendingConfirmation, pageContext },
+    body: { message, history, pendingConfirmation, pageContext, sessionId, attachments },
   });
 }
 
@@ -5701,6 +5712,10 @@ export async function clearFlowSession(businessId: string, sessionId: string): P
     path: `/ai/businesses/${encodeURIComponent(businessId)}/flow/sessions/${encodeURIComponent(sessionId)}/clear`,
     body: {},
   });
+}
+
+export async function deleteFlowSession(businessId: string, sessionId: string): Promise<ApiResult<{ success: boolean }>> {
+  return apiDelete<{ success: boolean }>(`/ai/businesses/${encodeURIComponent(businessId)}/flow/sessions/${encodeURIComponent(sessionId)}`);
 }
 
 // ---

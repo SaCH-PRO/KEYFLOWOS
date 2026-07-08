@@ -9,7 +9,7 @@ import { LayoutDashboard, Loader2, AlertTriangle, RefreshCw, Bot, BrainCircuit, 
 import { EmptyState } from "@/components/ui/empty-state";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
 import { SectionCard } from "@/components/ui/section-card";
-import { getStoredBusinessId } from "@/lib/workspace";
+import { getStoredBusinessId, ensureWorkspace } from "@/lib/workspace";
 import { getBusinessCommandCenterSnapshot, type BusinessCommandCenterSnapshot } from "@/lib/api/business-command-center";
 import {
   fetchCommandItems,
@@ -49,7 +49,18 @@ export default function CommandCenterPage() {
   const [queueLoading, setQueueLoading] = useState(false);
 
   useEffect(() => {
-    setBusinessId(getStoredBusinessId() ?? null);
+    let cancelled = false;
+    const resolveBusinessId = async () => {
+      const stored = getStoredBusinessId() ?? null;
+      if (stored) {
+        if (!cancelled) setBusinessId(stored);
+        return;
+      }
+      const resolved = await ensureWorkspace();
+      if (!cancelled) setBusinessId(resolved);
+    };
+    void resolveBusinessId();
+    return () => { cancelled = true; };
   }, []);
 
   const loadSnapshot = async () => {
@@ -144,9 +155,18 @@ export default function CommandCenterPage() {
   if (error || !businessId || !snapshot) {
     return (
       <WorkspaceShell icon={LayoutDashboard} title="Business Command Center" subtitle="Your operating cockpit">
-        <div className="rounded-2xl border border-destructive/20 bg-destructive/5 p-8 text-center">
-          <AlertTriangle className="w-6 h-6 text-destructive mx-auto mb-2" />
+        <div className="rounded-2xl border border-destructive/20 bg-destructive/5 p-8 text-center flex flex-col items-center gap-3">
+          <AlertTriangle className="w-6 h-6 text-destructive" />
           <p className="text-sm text-destructive">{error || "No business selected"}</p>
+          {(error || businessId) && (
+            <button
+              type="button"
+              onClick={() => { void loadSnapshot(); void loadQueue(); }}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors"
+            >
+              <RefreshCw className="w-4 h-4" /> Retry
+            </button>
+          )}
         </div>
       </WorkspaceShell>
     );

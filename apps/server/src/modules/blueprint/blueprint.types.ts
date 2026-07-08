@@ -173,6 +173,7 @@ export interface BlueprintRegistrationProfile {
   companiesRegistryStatus?: string;
   birStatus?: string;
   nisEmployerStatus?: string;
+  hasEmployees?: boolean;
   vatStatus?: string;
   businessBankStatus?: string;
   requiredLicenses?: string[];

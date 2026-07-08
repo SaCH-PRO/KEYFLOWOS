@@ -198,14 +198,20 @@ export class SentimentWatcherService {
         (this.prisma.client as any).directMessage
           ? (this.prisma.client as any).directMessage.findMany({
               where: {
-                businessId,
+                conversation: {
+                  OR: [
+                    { participantAId: businessId },
+                    { participantBId: businessId },
+                  ],
+                },
+                senderBusinessId: { not: businessId },
                 createdAt: { gte: since },
               },
               select: {
                 id: true,
                 content: true,
                 createdAt: true,
-                senderId: true,
+                senderBusinessId: true,
               },
               orderBy: { createdAt: 'desc' },
               take: 100,

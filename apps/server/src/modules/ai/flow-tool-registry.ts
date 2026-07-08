@@ -2494,8 +2494,54 @@ export const FLOW_TOOLS: FlowTool[] = [
     outputSchema: { type: 'object', description: 'Updated post', fields: { id: { type: 'string', description: 'Post ID' }, status: { type: 'string', description: 'Post status' } } },
   },
   {
+    name: 'present_onboarding_card',
+    description: 'Use this tool when the user is on the onboarding page and you want to show a structured, interactive card instead of asking open-ended questions. Pick the card that matches the next onboarding milestone: welcome, profile-identity, genesis-idea, operating-model, brand-goals, financials, ownership-legal, operations, market-strategy, risk-compliance-roadmap, genesis-questions, readiness-dashboard, template-picker, payments-storefront-contacts, or completion-gate. If unsure, use cardType "next" and the system will choose based on the business setup state.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/onboarding',
+    changedEntities: [],
+    parameters: {
+      type: 'object',
+      properties: {
+        cardType: {
+          type: 'string',
+          description: 'Which onboarding card to present. Use "next" to let the backend decide.',
+          enum: ['next', 'welcome', 'profile-identity', 'genesis-idea', 'operating-model', 'brand-goals', 'financials', 'ownership-legal', 'operations', 'market-strategy', 'risk-compliance-roadmap', 'genesis-questions', 'readiness-dashboard', 'template-picker', 'payments-storefront-contacts', 'completion-gate'],
+        },
+        step: {
+          type: 'string',
+          description: 'Optional onboarding step hint (e.g. "intake", "genesis", "template", "configure", "complete").',
+        },
+      },
+      required: ['cardType'],
+    },
+    outputSchema: { type: 'object', description: 'Card payload for the frontend onboarding renderer', fields: { type: { type: 'string', description: 'Card type' }, title: { type: 'string', description: 'Card title' }, data: { type: 'object', description: 'Optional card data' } } },
+  },
+  {
+    name: 'save_onboarding_step',
+    description: 'Persist the current onboarding milestone step on the server. Use this when the user has completed the work for a milestone and should advance.',
+    family: 'organize',
+    riskLevel: 'low',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/onboarding',
+    changedEntities: ['business'],
+    parameters: {
+      type: 'object',
+      properties: {
+        step: {
+          type: 'string',
+          description: 'The onboarding step to save: welcome, intake, genesis, template, configure, genome, complete.',
+        },
+      },
+      required: ['step'],
+    },
+    outputSchema: { type: 'object', description: 'Saved onboarding state', fields: { step: { type: 'string', description: 'Saved step' }, onboardingComplete: { type: 'boolean', description: 'Whether onboarding is marked complete' } } },
+  },
+
+  {
     name: 'update_business_blueprint',
-    description: 'ALWAYS use this tool first when the user shares any business fact while the Business Genome is incomplete. Update the Business Blueprint (Business Genome) with structured facts learned during conversation. Wrap all section updates under a single "patch" key. Supported sections: identity (name, industry, archetype), operatingModel (revenueModel, deliveryMode), goals (northStar, ninetyDayGoals), constraints (budgetRange, timeCommitment), brand (voice, tone), customerModel (idealCustomer), financials (avgTicket), workflowModel, aiPreferences. Example call arguments: {"patch": {"identity": {"industry": "software"}, "operatingModel": {"revenueModel": "subscription"}}}.',
+    description: 'ALWAYS use this tool first when the user shares any business fact while the Business Genome is incomplete. Update the Business Blueprint (Business Genome) with structured facts learned during conversation. Wrap all section updates under a single "patch" key. Supported sections: identity (name, industry, archetype, country), operatingModel (revenueModel, deliveryMode, serviceArea, channels, teamSize, capacity), goals (northStar, ninetyDayGoals, twelveMonthGoals), constraints (budgetRange, timeCommitment, riskTolerance), brand (voice, tone, valueProps, doNotSay), customerModel (idealCustomer, segments, painPoints), financials (currency, pricingModel, avgTicket, monthlyTarget), projectionProfile (startupCapital, startupCosts, monthlyFixedCosts, variableCostPercent), legalProfile (country, recommendedEntityType, regulatedIndustry), registrationProfile (companiesRegistryStatus, birStatus, nisEmployerStatus, vatStatus, businessBankStatus), ownershipProfile (hasPartners, owners), marketProfile (targetGeography, marketCategory, marketStage, trends, barriersToEntry), offerArchitecture (coreOffer, offerLadder, pricingTiers, upsells), salesSystem (salesChannels, pipelineStages), marketingSystem (channels, contentPillars, launchPlan), operationsSystem (coreWorkflows, dailyChecklist, weeklyChecklist, fulfillmentProcess, customerSupportProcess, vendorProcess), riskProfile (financialRisks, legalRisks, marketRisks, operationalRisks, founderRisks, mitigationPlan), complianceProfile (complianceItems), executionRoadmap (today, sevenDayPlan, thirtyDayPlan), workflowModel, aiPreferences. Example call arguments: {"patch": {"identity": {"industry": "software"}, "operatingModel": {"revenueModel": "subscription"}}}.',
     family: 'crud',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,

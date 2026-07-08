@@ -1,16 +1,20 @@
-import { IsString, IsOptional, IsArray, ValidateNested } from 'class-validator';
+import { IsString, IsOptional, IsArray, ValidateNested, MinLength, MaxLength, IsIn } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class ChatHistoryMessageDto {
-  @IsString()
-  role!: string;
+  @IsIn(['user', 'assistant', 'system'])
+  role!: 'user' | 'assistant' | 'system';
 
   @IsString()
+  @MinLength(1)
+  @MaxLength(5000)
   content!: string;
 }
 
 export class ChatDto {
   @IsString()
+  @MinLength(1)
+  @MaxLength(5000)
   message!: string;
 
   @IsOptional()

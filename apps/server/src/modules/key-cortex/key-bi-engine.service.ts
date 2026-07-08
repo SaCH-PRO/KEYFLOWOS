@@ -17,7 +17,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { RedisService } from '../../core/redis/redis.service';
-import { InvoiceStatus } from '@prisma/client';
+import { InvoiceStatus, DealStatus } from '@prisma/client';
 import { subDays, startOfMonth, subMonths } from 'date-fns';
 
 export interface BusinessRiskItem {
@@ -231,13 +231,13 @@ export class KeyBiEngineService {
         (this.prisma.client as any).invoice.count({
           where: {
             businessId,
-            status: { in: ['sent', 'pending'] },
+            status: { in: [InvoiceStatus.SENT, InvoiceStatus.PENDING] },
           },
         }),
         (this.prisma.client as any).invoice.aggregate({
           where: {
             businessId,
-            status: { in: ['sent', 'pending'] },
+            status: { in: [InvoiceStatus.SENT, InvoiceStatus.PENDING] },
             dueDate: { lt: new Date() },
           },
           _sum: { total: true },
@@ -296,7 +296,7 @@ export class KeyBiEngineService {
       const result = await (this.prisma.client as any).deal.aggregate({
         where: {
           businessId,
-          status: { notIn: ['won', 'lost', 'closed'] },
+          status: { notIn: [DealStatus.WON, DealStatus.LOST] },
         },
         _sum: { value: true },
         _count: { id: true },

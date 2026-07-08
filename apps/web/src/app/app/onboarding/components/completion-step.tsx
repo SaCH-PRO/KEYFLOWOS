@@ -12,6 +12,8 @@ export function CompletionStep() {
   const [demoData, setDemoData] = useState<DemoSeedResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [missingPillars, setMissingPillars] = useState<string[] | null>(null);
+  const [alreadyComplete, setAlreadyComplete] = useState(false);
 
   const complete = useCallback(async () => {
     if (!businessId) {
@@ -21,13 +23,24 @@ export function CompletionStep() {
     }
     setLoading(true);
     setError(null);
-    const { data, error: err } = await markOnboardingComplete(businessId);
+    const { data, error: err, rawError } = await markOnboardingComplete(businessId);
     if (err) {
       setError(typeof err === "string" ? err : "Could not finish onboarding. Please try again.");
+      const rawMissingPillars =
+        (rawError?.details && (rawError.details as Record<string, unknown>).missingPillars) ||
+        rawError?.missingPillars;
+      if (rawError?.code === "GENOME_GATE_BLOCKED" && Array.isArray(rawMissingPillars)) {
+        setMissingPillars(rawMissingPillars as string[]);
+      }
       setLoading(false);
       return;
     }
-    if (data) setDemoData(data.demoData);
+    setMissingPillars(null);
+    if (data?.alreadyComplete) {
+      setAlreadyComplete(true);
+    } else if (data?.demoData) {
+      setDemoData(data.demoData);
+    }
     setLoading(false);
   }, [businessId]);
 
@@ -55,6 +68,21 @@ export function CompletionStep() {
             <div className="text-left">
               <p className="text-sm font-medium text-destructive">Something went wrong</p>
               <p className="text-xs text-muted-foreground mt-1">{error}</p>
+              {missingPillars && missingPillars.length > 0 && (
+                <div className="mt-3">
+                  <p className="text-xs font-medium text-destructive">Missing DNA pillars:</p>
+                  <ul className="mt-1.5 space-y-1">
+                    {missingPillars.map((pillar) => (
+                      <li key={pillar} className="text-xs text-muted-foreground capitalize">
+                        • {pillar.replace(/-/g, " ")}
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Go back and complete these sections before finishing onboarding.
+                  </p>
+                </div>
+              )}
               <button
                 onClick={complete}
                 className="mt-3 text-xs font-medium underline text-destructive hover:text-destructive/80"
@@ -68,6 +96,12 @@ export function CompletionStep() {
         <div className="flex items-center justify-center gap-2 text-muted-foreground">
           <Loader2 className="w-4 h-4 animate-spin" />
           <span className="text-sm">Adding a sample invoice and contact…</span>
+        </div>
+      ) : alreadyComplete ? (
+        <div className="rounded-xl border border-border/40 bg-card/40 p-4 max-w-md mx-auto">
+          <p className="text-sm text-muted-foreground">
+            Your workspace is already set up. Head to your Command Center to keep going.
+          </p>
         </div>
       ) : (
         <div className="rounded-xl border border-border/40 bg-card/40 p-4 max-w-md mx-auto">

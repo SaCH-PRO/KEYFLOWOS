@@ -81,6 +81,8 @@ const ROUTE_ROLE_MAP: Record<string, BusinessRole> = {
   '/app/tickets': 'support',
   '/app/inbox': 'support',
   '/app/inbox/unified': 'support',
+  // Onboarding
+  '/app/onboarding': 'general',
   // Goals & Briefing (cross-functional, use general with hints)
   '/app/goals': 'general',
   '/app/briefing': 'general',
@@ -237,7 +239,7 @@ const ROLE_DEFINITIONS: Record<BusinessRole, RoleDefinition> = {
     description: 'General-purpose assistant for queries, summaries, and cross-role coordination',
     tone: 'warm, helpful, and conversational — like a knowledgeable friend who is always happy to help',
     priorities: ['Answer questions accurately', 'Summarize business health', 'Coordinate between roles', 'Execute user requests'],
-    approvedTools: ['update_business_blueprint', 'fetch_*', 'crm_search_contacts', 'crm_list_contacts', 'projects_list', 'expenses_list', 'documents_list', 'keyflow_create_note', 'content_list_requests', 'content_get_request', 'call_list_tasks', 'evidence_list', 'approval_list', 'calendar_list_events', 'calendar_check_conflicts', 'helpdesk_list_tickets', 'finance_view_receivables', 'finance_customer_balance', 'finance_list_action_items'],
+    approvedTools: ['update_business_blueprint', 'present_onboarding_card', 'save_onboarding_step', 'fetch_*', 'crm_search_contacts', 'crm_list_contacts', 'projects_list', 'expenses_list', 'documents_list', 'keyflow_create_note', 'content_list_requests', 'content_get_request', 'call_list_tasks', 'evidence_list', 'approval_list', 'calendar_list_events', 'calendar_check_conflicts', 'helpdesk_list_tickets', 'finance_view_receivables', 'finance_customer_balance', 'finance_list_action_items'],
     blockedTools: ['commerce_delete_invoice', 'crm_delete_contact', 'bookings_cancel_booking', 'marketing_send_campaign', 'social_publish_post', 'content_create_request', 'content_assign_request', 'content_transition_status', 'call_create_task', 'approval_create_request', 'projects_delete_task', 'commerce_send_invoice'],
     maxRiskTier: 1,
     autonomyLevel: 1,

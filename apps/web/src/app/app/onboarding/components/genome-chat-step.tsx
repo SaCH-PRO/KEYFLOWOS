@@ -2,27 +2,37 @@
 
 import { useEffect, useState } from "react";
 import { Loader2, Dna } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { BlueprintOnboardingChat } from "@/app/app/profile/components/blueprint-onboarding-chat";
 import { getGenome, type GenomeIntegrityResult } from "@/lib/api/business-genome";
 import { getStoredBusinessId } from "@/lib/workspace";
 
 interface GenomeChatStepProps {
   onComplete: () => void;
+  className?: string;
 }
 
-export function GenomeChatStep({ onComplete }: GenomeChatStepProps) {
+export function GenomeChatStep({ onComplete, className }: GenomeChatStepProps) {
   const businessId = getStoredBusinessId();
   const [genome, setGenome] = useState<GenomeIntegrityResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!businessId) return;
-    getGenome(businessId).then(({ data }) => {
-      if (data) setGenome(data);
-    });
+    setError(null);
+    getGenome(businessId)
+      .then(({ data, error: apiError }) => {
+        if (apiError) {
+          setError(apiError);
+          return;
+        }
+        if (data) setGenome(data);
+      })
+      .catch(() => setError("Could not load genome progress."));
   }, [businessId]);
 
   return (
-    <div className="flex flex-col lg:flex-row gap-4 h-[70vh] lg:h-[calc(100vh-200px)] max-h-[800px]">
+    <div className={cn("flex flex-col lg:flex-row gap-4 h-[70vh] lg:h-[calc(100vh-200px)] max-h-[800px]", className)}>
       {/* Chat */}
       <div className="flex-1 min-h-0 rounded-2xl border border-border/40 bg-card/40 overflow-hidden">
         <BlueprintOnboardingChat
@@ -40,7 +50,20 @@ export function GenomeChatStep({ onComplete }: GenomeChatStepProps) {
           <h3 className="text-sm font-semibold">Business Genome</h3>
         </div>
 
-        {!genome ? (
+        {error ? (
+          <div className="rounded-xl border border-destructive/20 bg-destructive/5 p-3 text-xs text-destructive">
+            {error}
+            <button
+              onClick={() => {
+                setError(null);
+                setGenome(null);
+              }}
+              className="ml-2 underline"
+            >
+              Retry
+            </button>
+          </div>
+        ) : !genome ? (
           <div className="flex items-center gap-2 text-muted-foreground">
             <Loader2 className="w-4 h-4 animate-spin" />
             <span className="text-xs">Loading progress…</span>

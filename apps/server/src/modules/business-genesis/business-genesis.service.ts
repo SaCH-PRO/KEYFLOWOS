@@ -1,7 +1,9 @@
 import { Inject, Injectable, BadRequestException, Logger, Optional } from '@nestjs/common';
 import { BlueprintService } from '../blueprint/blueprint.service';
+import { PrismaService } from '../../core/prisma/prisma.service';
 import type {
   BlueprintData,
+  BlueprintLegalProfile,
   BlueprintPatch,
   BlueprintRecommendedEntityType,
   BlueprintRiskItem,
@@ -26,14 +28,26 @@ import { inferCompliance } from './trinidad-compliance-rules';
 import { GenomeFactService } from '../business-genome/key-genome/genome-fact.service';
 import { GenomeEvidenceService } from '../business-genome/key-genome/genome-evidence.service';
 import type { BlueprintSectionKey } from '../blueprint/blueprint.types';
+import { normalizeRecommendedEntityType } from '../blueprint/entity-type.helpers';
 
 function isPopulated(value: unknown): boolean {
   if (value === null || value === undefined) return false;
+  if (typeof value === 'boolean') return true;
   if (typeof value === 'string') return value.trim().length > 0;
   if (Array.isArray(value)) return value.length > 0;
   if (typeof value === 'number') return !Number.isNaN(value);
   if (typeof value === 'object') return Object.keys(value as object).length > 0;
   return Boolean(value);
+}
+
+function compactSection<T extends Record<string, unknown>>(obj: T): T {
+  const result = {} as T;
+  for (const [key, value] of Object.entries(obj)) {
+    if (value !== undefined) {
+      (result as Record<string, unknown>)[key] = value;
+    }
+  }
+  return result;
 }
 
 function mergeSections(blueprint: BlueprintData, patch: BlueprintPatch): BlueprintData {
@@ -101,71 +115,86 @@ function answersAffectProjection(answers: Record<string, unknown>): boolean {
 }
 
 function coerceEntityType(value: unknown): BlueprintRecommendedEntityType {
-  const allowed: BlueprintRecommendedEntityType[] = [
-    'SOLE_TRADER',
-    'PARTNERSHIP',
-    'LIMITED_COMPANY',
-    'NONPROFIT',
-    'UNKNOWN',
-  ];
-  if (typeof value === 'string' && allowed.includes(value as BlueprintRecommendedEntityType)) {
-    return value as BlueprintRecommendedEntityType;
-  }
-  return 'UNKNOWN';
+  return normalizeRecommendedEntityType(value);
 }
 
 function contractToBlueprintPatch(contract: GenesisIdeaExtractionContract): BlueprintPatch {
   const patch: BlueprintPatch = {};
 
   if (contract.identity && Object.keys(contract.identity).length) {
-    patch.identity = { ...contract.identity };
+    const compacted = compactSection({ ...contract.identity });
+    if (Object.keys(compacted).length) patch.identity = compacted;
   }
 
   if (contract.operatingModel && Object.keys(contract.operatingModel).length) {
-    patch.operatingModel = { ...contract.operatingModel };
+    const compacted = compactSection({ ...contract.operatingModel });
+    if (Object.keys(compacted).length) patch.operatingModel = compacted;
   }
 
   if (contract.customerModel && Object.keys(contract.customerModel).length) {
-    patch.customerModel = { ...contract.customerModel };
+    const compacted = compactSection({ ...contract.customerModel });
+    if (Object.keys(compacted).length) patch.customerModel = compacted;
+  }
+
+  if (contract.marketProfile && Object.keys(contract.marketProfile).length) {
+    const compacted = compactSection({ ...contract.marketProfile });
+    if (Object.keys(compacted).length) patch.marketProfile = compacted;
+  }
+
+  if (contract.founderProfile && Object.keys(contract.founderProfile).length) {
+    const compacted = compactSection({ ...contract.founderProfile });
+    if (Object.keys(compacted).length) patch.founderProfile = compacted;
+  }
+
+  if (contract.goals && Object.keys(contract.goals).length) {
+    const compacted = compactSection({ ...contract.goals });
+    if (Object.keys(compacted).length) patch.goals = compacted;
+  }
+
+  if (contract.constraints && Object.keys(contract.constraints).length) {
+    const compacted = compactSection({ ...contract.constraints });
+    if (Object.keys(compacted).length) patch.constraints = compacted;
   }
 
   if (contract.financials && Object.keys(contract.financials).length) {
-    patch.financials = { ...contract.financials };
+    const compacted = compactSection({ ...contract.financials });
+    if (Object.keys(compacted).length) patch.financials = compacted;
   }
 
   if (contract.legalProfile && Object.keys(contract.legalProfile).length) {
     const { recommendedEntityType, ...rest } = contract.legalProfile;
-    patch.legalProfile = {
-      ...rest,
-      recommendedEntityType: recommendedEntityType
-        ? coerceEntityType(recommendedEntityType)
-        : undefined,
-    };
+    const legalProfileInput: Record<string, unknown> = { ...rest };
+    if (recommendedEntityType !== undefined) {
+      legalProfileInput.recommendedEntityType = coerceEntityType(recommendedEntityType);
+    }
+    const compacted = compactSection(legalProfileInput);
+    if (Object.keys(compacted).length) patch.legalProfile = compacted as Partial<BlueprintLegalProfile>;
   }
 
   if (contract.projectionProfile && Object.keys(contract.projectionProfile).length) {
-    patch.projectionProfile = { ...contract.projectionProfile };
+    const compacted = compactSection({ ...contract.projectionProfile });
+    if (Object.keys(compacted).length) patch.projectionProfile = compacted;
   }
 
   if (contract.riskProfile && Object.keys(contract.riskProfile).length) {
     const { legalRiskFlags, marketRiskFlags, operationalRiskFlags } = contract.riskProfile;
-    patch.riskProfile = {
-      legalRisks: Array.isArray(legalRiskFlags)
-        ? legalRiskFlags.map(
-            (description): BlueprintRiskItem => ({ description, likelihood: 'MEDIUM', impact: 'MEDIUM' }),
-          )
-        : undefined,
-      marketRisks: Array.isArray(marketRiskFlags)
-        ? marketRiskFlags.map(
-            (description): BlueprintRiskItem => ({ description, likelihood: 'MEDIUM', impact: 'MEDIUM' }),
-          )
-        : undefined,
-      operationalRisks: Array.isArray(operationalRiskFlags)
-        ? operationalRiskFlags.map(
-            (description): BlueprintRiskItem => ({ description, likelihood: 'MEDIUM', impact: 'MEDIUM' }),
-          )
-        : undefined,
-    };
+    const compacted: typeof patch.riskProfile = {};
+    if (Array.isArray(legalRiskFlags)) {
+      compacted.legalRisks = legalRiskFlags
+        .filter((description): description is string => typeof description === 'string')
+        .map((description): BlueprintRiskItem => ({ description, likelihood: 'MEDIUM', impact: 'MEDIUM' }));
+    }
+    if (Array.isArray(marketRiskFlags)) {
+      compacted.marketRisks = marketRiskFlags
+        .filter((description): description is string => typeof description === 'string')
+        .map((description): BlueprintRiskItem => ({ description, likelihood: 'MEDIUM', impact: 'MEDIUM' }));
+    }
+    if (Array.isArray(operationalRiskFlags)) {
+      compacted.operationalRisks = operationalRiskFlags
+        .filter((description): description is string => typeof description === 'string')
+        .map((description): BlueprintRiskItem => ({ description, likelihood: 'MEDIUM', impact: 'MEDIUM' }));
+    }
+    if (Object.keys(compacted).length) patch.riskProfile = compacted;
   }
 
   return patch;
@@ -177,6 +206,7 @@ export class BusinessGenesisService {
 
   constructor(
     @Inject(BlueprintService) private readonly blueprint: BlueprintService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(ModelGatewayService) private readonly modelGateway: ModelGatewayService,
     @Inject(GenesisProjectionService) private readonly projection: GenesisProjectionService,
     @Inject(GenesisReadinessScorer) private readonly readiness: GenesisReadinessScorer,
@@ -211,11 +241,15 @@ Return ONLY a JSON object matching the genesis_idea_extraction contract:
 {
   "summary": "<2-3 sentence summary of the idea>",
   "identity": { "name?", "archetype?", "industry?", "oneLiner?", "country?" },
-  "operatingModel": { "revenueModel?", "deliveryMode?" },
+  "operatingModel": { "revenueModel?", "deliveryMode?", "serviceArea?", "teamSize?", "channels?": string[] },
   "legalProfile": { "recommendedEntityType?": "SOLE_TRADER" | "PARTNERSHIP" | "LIMITED_COMPANY" | "NONPROFIT" | "UNKNOWN", "entityTypeReason?", "regulatedIndustry?": boolean, "regulatedIndustryNotes?" },
-  "customerModel": { "idealCustomer?" },
+  "customerModel": { "idealCustomer?", "segments?": string[], "painPoints?": string[] },
+  "marketProfile": { "targetGeography?", "marketCategory?", "marketStage?", "demandSignals?": string[] },
   "financials": { "pricingModel?", "avgTicket?": number, "currency?" },
   "projectionProfile": { "startupCapital?": number, "startupCosts?": number, "monthlyFixedCosts?": number, "expectedMonthlyUnits?": number, "variableCostPercent?": number },
+  "founderProfile": { "founderName?", "background?", "skills?": string[], "weeklyAvailabilityHours?": number, "riskTolerance?": "low" | "medium" | "high" },
+  "goals": { "northStar?": string },
+  "constraints": { "budgetRange?": string, "timeCommitment?": string, "riskTolerance?": "low" | "medium" | "high" },
   "riskProfile": { "legalRiskFlags?": string[], "marketRiskFlags?": string[], "operationalRiskFlags?": string[] }
 }
 
@@ -262,6 +296,8 @@ Use null or omit fields when unknown. Keep the summary concrete and actionable.`
     const complianceInput = {
       entityType: previewBlueprint.legalProfile?.recommendedEntityType,
       hasEmployees: (() => {
+        const explicit = previewBlueprint.registrationProfile?.hasEmployees;
+        if (typeof explicit === 'boolean') return explicit;
         const status = previewBlueprint.registrationProfile?.nisEmployerStatus;
         return status !== undefined && status !== 'NOT_NEEDED';
       })(),
@@ -331,15 +367,31 @@ Use null or omit fields when unknown. Keep the summary concrete and actionable.`
     answers: Record<string, unknown>,
   ): Promise<GenesisProgress> {
     const afterOnboarding = await this.blueprint.inferFromOnboarding(businessId, answers);
+
+    // Sync top-level business fields so setup status and storefront work immediately.
+    const businessUpdate: Record<string, unknown> = {};
+    if (typeof answers.businessName === 'string') businessUpdate.name = answers.businessName.trim();
+    if (typeof answers.businessIntent === 'string') businessUpdate.businessIntent = answers.businessIntent.trim();
+    if (typeof answers.country === 'string') businessUpdate.country = answers.country.trim();
+    if (typeof answers.currency === 'string') businessUpdate.currency = answers.currency.trim();
+    if (Object.keys(businessUpdate).length) {
+      await this.prisma.client.business.update({
+        where: { id: businessId },
+        data: businessUpdate,
+      });
+    }
+
     const patch: BlueprintPatch = {};
 
     if (answersAffectCompliance(answers)) {
       const complianceInput = {
         entityType: afterOnboarding.legalProfile?.recommendedEntityType,
         hasEmployees: (() => {
-        const status = afterOnboarding.registrationProfile?.nisEmployerStatus;
-        return status !== undefined && status !== 'NOT_NEEDED';
-      })(),
+          const explicit = afterOnboarding.registrationProfile?.hasEmployees;
+          if (typeof explicit === 'boolean') return explicit;
+          const status = afterOnboarding.registrationProfile?.nisEmployerStatus;
+          return status !== undefined && status !== 'NOT_NEEDED';
+        })(),
         estimatedAnnualRevenue: afterOnboarding.taxProfile?.estimatedAnnualRevenue,
         industry: afterOnboarding.identity.industry,
         regulatedIndustry: afterOnboarding.legalProfile?.regulatedIndustry,

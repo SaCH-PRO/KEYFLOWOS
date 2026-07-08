@@ -15,7 +15,7 @@ import { CelebrationListener } from "@/components/ui/celebration-listener";
 import { GenomeIntegrityBanner } from "@/components/genome-integrity-banner";
 import { RequireAuth } from "@/components/require-auth";
 import { KeyAgent } from "@/components/key";
-import { KeyPresence } from "@/components/key/key-presence";
+import { KeyChatBubble, KeyChatProvider } from "@/components/key/chat";
 import { DesktopSidebar } from "@/components/layout/desktop-sidebar";
 import { AppHeader } from "@/components/layout/app-header";
 import { MobileDrawer } from "@/components/layout/mobile-drawer";
@@ -28,10 +28,11 @@ import { KeyContextualSuggestions } from "@/components/functional/key-contextual
 import { KeyboardShortcutsHelp } from "@/components/functional/keyboard-shortcuts-help";
 import { MobileGestureProvider } from "@/components/functional/mobile-gesture-provider";
 import { ComposeFab } from "@/components/email/compose-fab";
-import { TtsProvider, TtsPlayer } from "@/components/tts";
+import { TtsProvider } from "@/components/tts";
 
 function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const layout = useAppLayout();
+  const isOnboardingRoute = layout.pathname.startsWith("/app/onboarding");
   const genomeGate = useGenomeGate();
   useKeyboardShortcuts();
   useRouteKeyboardShortcuts();
@@ -139,10 +140,9 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
 
       <PlanLimitDialog planLimit={layout.planLimitHit} onClose={layout.clearPlanLimit} />
       <KeyflowOSStoreDrawer open={layout.kfStoreOpen} onClose={() => layout.setKfStoreOpen(false)} />
-      <TtsPlayer />
-      <KeyAgent currentModule={layout.copilotModule} />
-      <KeyPresence />
-      <KeyContextualSuggestions />
+      {!isOnboardingRoute && <KeyAgent currentModule={layout.copilotModule} />}
+      {!isOnboardingRoute && <KeyChatBubble />}
+      {!isOnboardingRoute && <KeyContextualSuggestions />}
       <KeyboardShortcutsHelp />
       <CelebrationListener />
       <ComposeFab />
@@ -162,7 +162,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               <GuideProvider>
                 <NotesQueryParamTrigger />
                 <TtsProvider>
-                  <AppLayoutInner>{children}</AppLayoutInner>
+                  <KeyChatProvider>
+                    <AppLayoutInner>{children}</AppLayoutInner>
+                  </KeyChatProvider>
                 </TtsProvider>
                 <KeyflowNotesDrawer />
               </GuideProvider>

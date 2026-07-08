@@ -73,6 +73,7 @@
     --kf-z-toast: 80;
     --kf-z-guide: 100;
     --kf-z-key-presence: 90;
+    --kf-z-key-panel: 95;
   }
 
   .dark {

@@ -34,7 +34,8 @@ describe('WhatsAppController webhook signatures', () => {
   const service: any = {
     receiveInbound: vi.fn(async () => ({ contactId: 'c1', isNew: false })),
   };
-  const controller = new WhatsAppController(service);
+  const webhookLogger: any = { log: vi.fn() };
+  const controller = new WhatsAppController(service, webhookLogger);
 
   beforeEach(() => {
     vi.clearAllMocks();

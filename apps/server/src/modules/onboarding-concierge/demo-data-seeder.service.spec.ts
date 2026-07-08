@@ -5,11 +5,10 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 function makeService(initial: {
   existingDemoContact?: { id: string } | null;
   existingInvoice?: { id: string; invoiceNumber: string } | null;
-  latestInvoice?: { invoiceNumber: string } | null;
   businessCurrency?: string;
 } = {}) {
   const createdContact = { id: 'contact_demo_1' };
-  const createdInvoice = { id: 'invoice_demo_1', invoiceNumber: 'DEMO-001' };
+  const createdInvoice = { id: 'invoice_demo_1', invoiceNumber: 'DEMO-A1B2C3' };
 
   const tx = {
     contact: {
@@ -21,7 +20,7 @@ function makeService(initial: {
     },
     invoice: {
       findFirst: vi.fn().mockImplementation(() =>
-        Promise.resolve(initial.existingInvoice ?? initial.latestInvoice ?? null),
+        Promise.resolve(initial.existingInvoice ?? null),
       ),
       create: vi.fn().mockResolvedValue(createdInvoice),
     },
@@ -45,7 +44,7 @@ describe('DemoDataSeederService', () => {
 
     expect(result.contactId).toBe(createdContact.id);
     expect(result.invoiceId).toBe(createdInvoice.id);
-    expect(result.invoiceNumber).toBe('DEMO-001');
+    expect(result.invoiceNumber).toMatch(/^DEMO-[0-9A-F]{6}$/);
 
     expect(tx.contact.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -65,7 +64,7 @@ describe('DemoDataSeederService', () => {
         data: expect.objectContaining({
           businessId: 'biz_1',
           contactId: createdContact.id,
-          invoiceNumber: 'DEMO-001',
+          invoiceNumber: expect.stringMatching(/^DEMO-[0-9A-F]{6}$/),
           status: 'DRAFT',
           currency: 'USD',
           total: 500,

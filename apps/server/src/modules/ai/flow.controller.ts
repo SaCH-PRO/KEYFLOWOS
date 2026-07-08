@@ -3,7 +3,7 @@ import { CrmRateLimit, CrmRateLimitGuard } from '../crm/guards/rate-limit.guard'
 import { Response } from 'express';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
-import { FlowOrchestratorService, FlowPageContext } from './flow-orchestrator.service';
+import { FlowOrchestratorService, FlowAttachment, FlowPageContext } from './flow-orchestrator.service';
 
 @Controller('ai')
 @UseGuards(CrmRateLimitGuard)
@@ -22,6 +22,7 @@ export class AiFlowController {
       history?: any[];
       sessionId?: string;
       pageContext?: FlowPageContext;
+      attachments?: FlowAttachment[];
       pendingConfirmation?: {
         toolCallId: string;
         confirmed: boolean;
@@ -37,6 +38,9 @@ export class AiFlowController {
       history,
       body.pendingConfirmation,
       body.pageContext,
+      undefined,
+      body.attachments,
+      body.sessionId,
     );
     return result;
   }
@@ -50,6 +54,8 @@ export class AiFlowController {
       message: string;
       history?: any[];
       pageContext?: FlowPageContext;
+      attachments?: FlowAttachment[];
+      sessionId?: string;
     },
     @Res() res: Response,
   ) {
@@ -62,7 +68,7 @@ export class AiFlowController {
     const history = body.history || [];
 
     try {
-      const stream = this.flow.streamChat(businessId, body.message, history, body.pageContext);
+      const stream = this.flow.streamChat(businessId, body.message, history, body.pageContext, undefined, body.attachments, body.sessionId);
 
       for await (const chunk of stream) {
         if (res.destroyed) break;

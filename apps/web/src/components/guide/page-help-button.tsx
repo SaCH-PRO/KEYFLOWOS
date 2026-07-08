@@ -3,7 +3,7 @@
 import { HelpCircle } from "lucide-react";
 import { motion } from "framer-motion";
 import { openKey } from "@/components/key/key-agent";
-import type { CopilotModule } from "@/components/ai/copilot-panel";
+import type { CopilotModule } from "@/components/key/chat";
 
 interface PageHelpButtonProps {
   /** Which module/workspace the user is in */

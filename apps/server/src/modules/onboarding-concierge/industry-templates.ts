@@ -172,12 +172,30 @@ export const INDUSTRY_TEMPLATES: IndustryTemplate[] = [
 
 export function matchIndustryTemplate(businessType: string): IndustryTemplate {
   const lower = businessType.toLowerCase();
+  const words = lower.split(/\s+/).filter(Boolean);
+
+  let best: IndustryTemplate | undefined;
+  let bestScore = -1;
+
   for (const template of INDUSTRY_TEMPLATES) {
-    if (template.keywords.some(kw => lower.includes(kw))) {
-      return template;
+    // Count keyword matches, with a small bonus for multi-word keyword matches.
+    const score = template.keywords.reduce((sum, kw) => {
+      if (lower.includes(kw)) return sum + 1 + kw.split(/\s+/).length * 0.1;
+      return sum;
+    }, 0);
+
+    if (score > bestScore) {
+      bestScore = score;
+      best = template;
     }
   }
-  return INDUSTRY_TEMPLATES.find(t => t.id === 'consulting')!;
+
+  // Fall back to the generic consulting template if nothing matched at all.
+  if (!best || bestScore === 0) {
+    return INDUSTRY_TEMPLATES.find(t => t.id === 'consulting')!;
+  }
+
+  return best;
 }
 
 export function getTemplateById(id: string): IndustryTemplate | undefined {
