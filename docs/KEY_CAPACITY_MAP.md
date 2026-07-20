@@ -13,11 +13,13 @@ This is a living document. When a gap below is closed, update its row rather tha
 
 ---
 
-## Cross-cutting structural finding
+## Cross-cutting structural finding — UPDATED 2026-07-20
 
-Before the per-department tables: **there is no `Employee`/`Staff` data model anywhere in the schema**, and `apps/web/src/app/app/people/page.tsx` literally re-exports the CRM page (`export { default } from "@/app/app/crm/page"`). The backend "people-flow" module (`people-overview.service.ts`, `relationship-health.service.ts`) operates on `Contact` records — customers/leads — not a business's own workforce.
+The original version of this section said there was no `Employee`/`Staff` data model anywhere and that HR/People-ops needed a greenfield schema. That was wrong — it existed, just undiscovered and completely disconnected. `apps/web/src/app/app/people/page.tsx` does re-export the CRM page, and the `people-flow` module does operate on `Contact` records (customers), not staff — but a **separate, real org-hierarchy system already existed** at `/app/structure`: `OrgUnit` (departments/branches, with their own hierarchy), `JobRole` (positions, with a hierarchy level and default approval tier), `OrgAssignment` (who holds which position, with a `reportsToId` manager chain), and `DelegationRule` (delegator → delegate, scoped by module and risk tier) — all with full backend CRUD and a working frontend UI. It just wasn't wired to KEY, and every position required a full login account.
 
-This means HR/People-ops isn't a tooling gap like the others below; it's a **data-model gap**. KeyflowOS currently has no way to represent that a business has a bookkeeper, a receptionist, or any other employee, independent of KEY. Building HR-role coverage has to start with an `Employee`/`Staff` schema, not a tool wrapper.
+**Closed 2026-07-20**: `OrgAssignment` now supports contact-only positions (name/phone/email, no login required — for front-desk/floor staff), and a `StaffChatBridgeService` routes inbound WhatsApp/SMS from a matched staff number straight into KEY's chat engine, replying on the same channel. See the progress log below.
+
+**Still open**: `DelegationRule` is still write-only — nothing in `ai-oversight.service.ts`/`approval-request.service.ts` reads it yet, so a delegation rule created in the UI has no effect on approval routing. KEY also has no tool coverage for the structure module itself (can't read the org chart to know who to delegate to), and tool/approval scope for staff chatting over WhatsApp/SMS still comes from the global autonomy mode, not the caller's specific JobRole. These are the next pieces, not done yet — don't assume "talk to KEY over WhatsApp" means the full delegation/approval loop is closed.
 
 ---
 
@@ -34,17 +36,18 @@ This means HR/People-ops isn't a tooling gap like the others below; it's a **dat
 | Procurement & Purchasing | 7 | 0 | 0 | 7 |
 | Time & Resource Mgmt | 2 | 2 | 3 | 7 |
 | Customer Support / Helpdesk | 4 | 3 | 0 | 7 |
-| HR / People Ops | 0 | 0 | 5 | 5 |
+| HR / People Ops | 3 | 0 | 2 | 5 |
 | Legal & Compliance | 0 | 7 | 0 | 7 |
 | Communications | 3 | 3 | 0 | 6 |
 | Front Office / Reception | 4 | 3 | 0 | 7 |
-| **Total** | **54** | **30** | **13** | **97** |
+| **Total** | **57** | **30** | **10** | **97** |
 
-**Read:** ~56% of surveyed staff tasks are fully AI-executable today (was 47% at the start of this build pass). ~31% have the hard part already built (backend service/endpoint exists) and just need a tool wrapper — this is the cheapest tier of work. ~13% require new backend logic or, in HR's case, a new data model, before any tool can exist.
+**Read:** ~59% of surveyed staff tasks are fully AI-executable today (was 47% at the start of this build pass). ~31% have the hard part already built (backend service/endpoint exists) and just need a tool wrapper — this is the cheapest tier of work. ~10% require genuinely new backend logic (payroll, voice/telephony, staff-performance tracking) before any tool can exist.
 
 **Progress log:**
 - **2026-07-20** — Procurement & Purchasing: 0/7 → 7/7 covered. Added 12 KEY tools (`procurement_*`) wrapping the existing `ProcurementService`, wired into the Operations Manager role. `procurement_issue_po` is tier 3 (commits real spend); the rest are tier 1-2. Approve/reject was deliberately left human-only — see the Procurement section below.
 - **2026-07-20** — Operations & Projects: task reassignment closed. `projects_update_task` now exposes `assigneeId` (was already fully supported server-side).
+- **2026-07-20** — HR / People Ops: discovered the org-hierarchy system was never actually missing (see "Cross-cutting structural finding" above), closed the "no login required" gap with contact-only `OrgAssignment`s, and built the WhatsApp/SMS-to-KEY chat bridge for delegation. Payroll and staff-performance tracking remain real gaps.
 
 ---
 
@@ -171,17 +174,18 @@ All 12 tools wired into the Operations Manager persona (`role-engine.service.ts`
 | Delete a stale/spam ticket | 🟡 | `deleteTicket()` exists, no tool |
 | See tickets from a specific channel (WhatsApp/email) | 🟡 | ticket `source` field exists, no cross-channel intake tool |
 
-## HR / People Operations (no real staff-management function exists)
+## HR / People Operations — data model found, see structural finding above
 
 | Task | Status | Evidence |
 |---|---|---|
-| Onboard a new employee record | ❌ | no `Employee`/`Staff` model anywhere |
-| View team roster / staff overview | ❌ | `people-overview.service.ts` returns contact/pipeline stats, not staff |
-| Track employee performance | ❌ | `relationship-health.service.ts` operates on `contactId` (customers) |
-| Segment staff by role/status | ❌ | segments contacts, not staff |
-| Payroll / time-off / timesheet approval | ❌ | no payroll module exists |
+| Onboard a new employee record | ✅ | `POST /structure/businesses/:id/assignments` (contact-only path added 2026-07-20, `/app/structure`) |
+| View team roster / org chart | ✅ | `GET /structure/businesses/:id/tree`, `/app/structure` (was always there, just not connected to "HR") |
+| Reach a staff member for delegated work | ✅ | `StaffChatBridgeService` — WhatsApp/SMS to a matched staff position routes to KEY chat (2026-07-20) |
+| Track employee performance | ❌ | still nothing — `relationship-health.service.ts` is customer-only, no staff-performance equivalent exists |
+| Segment staff by role/status | ✅ | `JobRole` + `OrgUnit` filtering via the structure endpoints |
+| Payroll / time-off / timesheet approval | ❌ | no payroll module exists — still a real greenfield gap |
 
-**This whole department needs a data model before it needs tools.** See "Cross-cutting structural finding" above.
+The `people-flow` module (CRM-aliased) is unrelated to this and still doesn't handle staff — the real system is `/app/structure`, described above.
 
 ## Legal & Compliance (Legal/Compliance Officer)
 
@@ -240,6 +244,6 @@ Every task here has *some* backend logic — this department is closer than HR, 
 staff availability/capacity tool, refund execution tool, waitlist management, booking staff-reassignment, SEO auto-remediation, paid-social/ads integration.
 
 **Tier 3 — greenfield, needed before tools can exist at all:**
-`Employee`/`Staff` data model + real HR module, payroll module, voice/telephony integration, job-level role personas in `RoleEngineService`, a generic/novel-task executor.
+~~`Employee`/`Staff` data model~~ (turned out to already exist as `OrgUnit`/`JobRole`/`OrgAssignment` — closed 2026-07-20, see structural finding above). Remaining: payroll module, staff-performance tracking, voice/telephony integration, wiring `DelegationRule` + `OrgAssignment` reporting chains into `ai-oversight.service.ts`'s actual approval routing (currently write-only), KEY tool coverage for the structure module itself, job-level role personas in `RoleEngineService` (still 7 department buckets, not per-position), a generic/novel-task executor.
 
 *Last assembled: 2026-07-20, against commit `2840eb2`. Update in place as coverage changes — don't fork a new audit file.*
