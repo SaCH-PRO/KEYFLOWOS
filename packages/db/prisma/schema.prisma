@@ -7182,11 +7182,19 @@ model AiApprovalItem {
   // Phase 0: migration pointer to canonical KeyActionProposal
   migratedToProposalId String? @map("migrated_to_proposal_id")
 
+  // Real approval routing — resolved by ApprovalRoutingService from the
+  // business's DelegationRule/OrgAssignment/JobRole data (see structure
+  // module). Not FK-enforced, matching the DelegationRule convention.
+  approverAssignmentId String?   @map("approver_assignment_id") // OrgAssignment id
+  approverMethod       String?   @map("approver_method") // 'delegation_rule' | 'job_role_match' | 'owner_fallback' | 'unresolved'
+  notifiedAt           DateTime? @map("notified_at")
+
   @@index([businessId, status])
   @@index([businessId, createdAt])
   @@index([businessId, correlationId])
   @@index([planId])
   @@index([migratedToProposalId])
+  @@index([businessId, approverAssignmentId])
   @@map("ai_approval_items")
 }
 

@@ -284,6 +284,41 @@ export class StructureService {
     return this.prisma.client.orgAssignment.delete({ where: { id } });
   }
 
+  /**
+   * Find who holds a position, works in an org unit, or matches a name —
+   * powers KEY's "who's the bookkeeper?" / "who does Maria report to?" queries.
+   */
+  async findPeople(businessId: string, filters: { jobRoleName?: string; orgUnitName?: string; personName?: string }) {
+    if (!filters.jobRoleName && !filters.orgUnitName && !filters.personName) {
+      throw new BadRequestException('Provide at least one of jobRoleName, orgUnitName, or personName');
+    }
+    return this.prisma.client.orgAssignment.findMany({
+      where: {
+        businessId,
+        endedAt: null,
+        ...(filters.jobRoleName ? { jobRole: { name: { contains: filters.jobRoleName, mode: 'insensitive' } } } : {}),
+        ...(filters.orgUnitName ? { orgUnit: { name: { contains: filters.orgUnitName, mode: 'insensitive' } } } : {}),
+        ...(filters.personName ? {
+          OR: [
+            { contactName: { contains: filters.personName, mode: 'insensitive' } },
+            { membership: { user: { OR: [
+              { name: { contains: filters.personName, mode: 'insensitive' } },
+              { firstName: { contains: filters.personName, mode: 'insensitive' } },
+              { lastName: { contains: filters.personName, mode: 'insensitive' } },
+            ] } } },
+          ],
+        } : {}),
+      },
+      include: {
+        orgUnit: true,
+        jobRole: true,
+        reportsTo: { include: { jobRole: true, membership: { include: { user: { select: { id: true, name: true, email: true } } } } } },
+        directReports: { include: { jobRole: true } },
+        membership: { include: { user: { select: { id: true, email: true, name: true, firstName: true, lastName: true, avatarUrl: true } } } },
+      },
+    });
+  }
+
   // ─── Delegation Rules ───
   async listDelegationRules(businessId: string) {
     return this.prisma.client.delegationRule.findMany({
@@ -292,7 +327,26 @@ export class StructureService {
     });
   }
 
+  /**
+   * DelegationRule.delegatorId/delegateId are opaque strings (not FK-enforced,
+   * matching the model's own comment). Now that KEY can call
+   * createDelegationRule/updateDelegationRule directly, a hallucinated or
+   * mistyped id would otherwise create a dangling, silently-ineffective rule —
+   * validate both ids resolve to active assignments in this business first.
+   */
+  private async assertActiveAssignment(businessId: string, id: string, label: string): Promise<void> {
+    const found = await this.prisma.client.orgAssignment.findFirst({
+      where: { id, businessId, endedAt: null },
+      select: { id: true },
+    });
+    if (!found) throw new BadRequestException(`${label} "${id}" is not an active position in this business`);
+  }
+
   async createDelegationRule(businessId: string, dto: CreateDelegationRuleDto) {
+    await Promise.all([
+      this.assertActiveAssignment(businessId, dto.delegatorId, 'delegatorId'),
+      this.assertActiveAssignment(businessId, dto.delegateId, 'delegateId'),
+    ]);
     return this.prisma.client.delegationRule.create({
       data: {
         businessId,
@@ -316,6 +370,10 @@ export class StructureService {
 
   async updateDelegationRule(businessId: string, id: string, dto: UpdateDelegationRuleDto) {
     await this.getDelegationRule(businessId, id);
+    await Promise.all([
+      dto.delegatorId ? this.assertActiveAssignment(businessId, dto.delegatorId, 'delegatorId') : Promise.resolve(),
+      dto.delegateId ? this.assertActiveAssignment(businessId, dto.delegateId, 'delegateId') : Promise.resolve(),
+    ]);
     return this.prisma.client.delegationRule.update({
       where: { id },
       data: {

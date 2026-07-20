@@ -2743,6 +2743,137 @@ export const FLOW_TOOLS: FlowTool[] = [
     outputSchema: { type: 'object', description: 'Updated request', fields: { id: { type: 'string', description: 'Request ID' }, status: { type: 'string', description: 'New status (INVOICED)' } } },
   },
 
+  // ================================================================
+  //  STRUCTURE FAMILY — L1 Read / L3 Execute (governance-sensitive writes)
+  //  Note: ending an assignment or deleting an org unit/job role is
+  //  intentionally NOT an AI tool in this round — those stay human-only
+  //  via /app/structure. Delegation rule create/update ARE exposed, but
+  //  gated at tier 3 since they grant one position authority to act on
+  //  another's behalf.
+  // ================================================================
+  {
+    name: 'structure_get_org_tree',
+    description: 'Get the full org chart tree — org units/departments/branches with their hierarchy and active staff assignments.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/structure',
+    parameters: { type: 'object', properties: {}, required: [] },
+    outputSchema: { type: 'object', description: 'Org chart tree', fields: { units: { type: 'array', description: 'All org units' }, rootUnits: { type: 'array', description: 'Top-level org units' } } },
+  },
+  {
+    name: 'structure_list_org_units',
+    description: 'List all org units (departments, branches, divisions, teams, warehouses) for the business.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/structure',
+    parameters: { type: 'object', properties: {}, required: [] },
+    outputSchema: { type: 'object', description: 'Org units', fields: { units: { type: 'array', description: 'Org unit rows' }, count: { type: 'number', description: 'Total count' } } },
+  },
+  {
+    name: 'structure_list_job_roles',
+    description: 'List all job roles/positions defined for the business, including their hierarchy level and default approval tier.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/structure',
+    parameters: { type: 'object', properties: {}, required: [] },
+    outputSchema: { type: 'object', description: 'Job roles', fields: { roles: { type: 'array', description: 'Job role rows' }, count: { type: 'number', description: 'Total count' } } },
+  },
+  {
+    name: 'structure_list_assignments',
+    description: 'List active staff assignments — who holds which position, in which org unit, and who they report to. Includes both full-account team members and contact-only staff.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/structure',
+    parameters: { type: 'object', properties: {}, required: [] },
+    outputSchema: { type: 'object', description: 'Staff assignments', fields: { assignments: { type: 'array', description: 'Assignment rows' }, count: { type: 'number', description: 'Total count' } } },
+  },
+  {
+    name: 'structure_find_person',
+    description: 'Find who holds a specific position, works in a specific org unit, or look up a person by name — e.g. "who\'s the bookkeeper?", "who works in Marketing?", "who does Maria report to?". Provide at least one filter.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/structure',
+    parameters: {
+      type: 'object',
+      properties: {
+        jobRoleName: { type: 'string', description: 'Job role/position name to search for, e.g. "bookkeeper"' },
+        orgUnitName: { type: 'string', description: 'Org unit/branch/department name to search within' },
+        personName: { type: 'string', description: 'Person\'s name to look up' },
+      },
+      required: [],
+    },
+    outputSchema: { type: 'object', description: 'Matching staff assignments', fields: { matches: { type: 'array', description: 'Matching assignment rows, with reporting chain' }, count: { type: 'number', description: 'Match count' } } },
+  },
+  {
+    name: 'structure_list_delegation_rules',
+    description: 'List active delegation rules — which positions have been granted authority to act/approve on behalf of another position.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/structure',
+    parameters: { type: 'object', properties: {}, required: [] },
+    outputSchema: { type: 'object', description: 'Delegation rules', fields: { rules: { type: 'array', description: 'Delegation rule rows' }, count: { type: 'number', description: 'Total count' } } },
+  },
+  {
+    name: 'structure_get_stats',
+    description: 'Get org-structure stats: counts of org units, job roles, active assignments, and active delegation rules.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/structure',
+    parameters: { type: 'object', properties: {}, required: [] },
+    outputSchema: { type: 'object', description: 'Structure stats', fields: { unitCount: { type: 'number', description: 'Org unit count' }, roleCount: { type: 'number', description: 'Job role count' }, assignmentCount: { type: 'number', description: 'Active assignment count' }, delegationCount: { type: 'number', description: 'Active delegation rule count' } } },
+  },
+  {
+    name: 'structure_create_delegation_rule',
+    description: 'Create a delegation rule granting one position (OrgAssignment) authority to approve/act on behalf of another for a scope of actions, up to a maximum risk tier. This is a governance-sensitive change and requires explicit human confirmation.',
+    family: 'crud',
+    riskLevel: 'high',
+    riskTier: 3 as RiskTier,
+    manualEquivalentRoute: '/app/structure',
+    changedEntities: ['delegationRule'],
+    parameters: {
+      type: 'object',
+      properties: {
+        delegatorId: { type: 'string', description: 'OrgAssignment ID of the position being delegated FROM' },
+        delegateId: { type: 'string', description: 'OrgAssignment ID of the position receiving authority' },
+        scope: { type: 'string', description: 'Module name (e.g. "procurement", "commerce") or "ALL"' },
+        maxTier: { type: 'number', description: 'Maximum risk tier (1-4) the delegate may act on' },
+        activeUntil: { type: 'string', description: 'Optional ISO date when the rule expires' },
+        reason: { type: 'string', description: 'Optional reason for the delegation' },
+      },
+      required: ['delegatorId', 'delegateId', 'scope', 'maxTier'],
+    },
+    outputSchema: { type: 'object', description: 'Created delegation rule', fields: { id: { type: 'string', description: 'Rule ID' }, rule: { type: 'object', description: 'Full rule record' } } },
+  },
+  {
+    name: 'structure_update_delegation_rule',
+    description: 'Update an existing delegation rule (scope, max tier, expiry, or active status). Governance-sensitive — requires explicit human confirmation.',
+    family: 'crud',
+    riskLevel: 'high',
+    riskTier: 3 as RiskTier,
+    manualEquivalentRoute: '/app/structure',
+    changedEntities: ['delegationRule'],
+    parameters: {
+      type: 'object',
+      properties: {
+        ruleId: { type: 'string', description: 'Delegation rule ID' },
+        scope: { type: 'string', description: 'New scope' },
+        maxTier: { type: 'number', description: 'New max tier' },
+        activeUntil: { type: 'string', description: 'New expiry date, ISO' },
+        reason: { type: 'string', description: 'New reason' },
+        isActive: { type: 'boolean', description: 'Whether the rule is active' },
+      },
+      required: ['ruleId'],
+    },
+    outputSchema: { type: 'object', description: 'Updated delegation rule', fields: { id: { type: 'string', description: 'Rule ID' }, rule: { type: 'object', description: 'Full rule record' } } },
+  },
+
 ];
 
 export function getOpenAiToolDefinitions() {

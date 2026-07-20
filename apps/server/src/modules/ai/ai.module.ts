@@ -15,6 +15,7 @@ import { AiFlowController } from './flow.controller';
 import { GraphActionsController } from './graph-actions.controller';
 import { BusinessGraphService } from './business-graph.service';
 import { AiOversightService } from './ai-oversight.service';
+import { ApprovalRoutingService } from './approval-routing.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
 import { IntentParserService } from './intent-parser.service';
 import { PlannerService } from './planner.service';
@@ -93,6 +94,7 @@ import { AiApprovalsService } from './ai-approvals.service';
     FlowOrchestratorService,
     BusinessGraphService,
     AiOversightService,
+    ApprovalRoutingService,
     AiApprovalsService,
     AiExecutionLogService,
     IntentParserService,
@@ -153,6 +155,7 @@ import { AiApprovalsService } from './ai-approvals.service';
     FlowOrchestratorService,
     BusinessGraphService,
     AiOversightService,
+    ApprovalRoutingService,
     AiExecutionLogService,
     IntentParserService,
     PlannerService,

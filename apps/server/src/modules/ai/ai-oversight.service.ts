@@ -4,6 +4,7 @@ import { AiExecutionLogService } from './ai-execution-log.service';
 import { AiMemoryService } from './ai-memory.service';
 import { getToolByName } from './flow-tool-registry';
 import { RoleEngineService, BusinessRole } from './role-engine.service';
+import { ApprovalRoutingService } from './approval-routing.service';
 
 export type RiskTier = 1 | 2 | 3 | 4;
 
@@ -46,6 +47,7 @@ export class AiOversightService {
     @Inject(forwardRef(() => AiExecutionLogService)) private readonly logService: AiExecutionLogService,
     @Inject(forwardRef(() => AiMemoryService)) private readonly memoryService: AiMemoryService,
     @Inject(RoleEngineService) private readonly roleEngine: RoleEngineService,
+    @Inject(ApprovalRoutingService) private readonly approvalRouting: ApprovalRoutingService,
   ) {}
 
   getToolTier(toolName: string): RiskTier {
@@ -271,12 +273,13 @@ export class AiOversightService {
     module?: string;
   }) {
     const tier = this.getToolTier(data.toolName);
-    return this.prisma.client.aiApprovalItem.create({
+    const module = data.module || this.inferModule(data.toolName);
+    const item = await this.prisma.client.aiApprovalItem.create({
       data: {
         businessId,
         riskTier: tier,
         toolName: data.toolName,
-        module: data.module || this.inferModule(data.toolName),
+        module,
         title: data.title,
         description: data.description,
         rationale: data.rationale,
@@ -288,6 +291,57 @@ export class AiOversightService {
         planStepId: data.planStepId,
       },
     });
+
+    this.routeAndNotify(businessId, item, tier, module).catch((e: unknown) => {
+      this.logger.error(`Approval routing failed for item ${item.id}: ${e instanceof Error ? e.message : String(e)}`);
+    });
+
+    return item;
+  }
+
+  /**
+   * Resolve who should approve this item from the business's org-hierarchy
+   * data (DelegationRule -> JobRole default tier -> business owner), record
+   * the resolution, and push a real-time notification. Fire-and-forget from
+   * createApprovalItem — an unresolved/failed route just means the item sits
+   * in the existing shared queue with no proactive ping, nothing is lost.
+   */
+  private async routeAndNotify(
+    businessId: string,
+    item: { id: string; title: string; description: string | null },
+    tier: RiskTier,
+    module: string | null,
+  ): Promise<void> {
+    const route = await this.approvalRouting.resolveApprover(businessId, { tier, module });
+    await this.prisma.client.aiApprovalItem.update({
+      where: { id: item.id },
+      data: { approverAssignmentId: route.approverAssignmentId, approverMethod: route.method },
+    });
+
+    if (route.method === 'unresolved') {
+      this.logger.warn(`Approval item ${item.id} (tier ${tier}) has no resolvable approver — sits in the shared queue.`);
+      return;
+    }
+
+    const notifyResult = await this.approvalRouting.notifyApprover(businessId, route, { id: item.id, title: item.title, description: item.description, riskTier: tier });
+    if (notifyResult.sent) {
+      await this.prisma.client.aiApprovalItem.update({ where: { id: item.id }, data: { notifiedAt: new Date() } });
+    } else if (notifyResult.error) {
+      this.logger.warn(`Failed to notify approver for item ${item.id}: ${notifyResult.error}`);
+    }
+
+    // Tier-4 (admin-level) actions always additionally notify the business
+    // owner as a safety net, even when a different position was correctly
+    // resolved — guards against a misconfigured JobRole.defaultApprovalTier.
+    if (tier === 4 && route.method !== 'owner_fallback') {
+      const ownerRoute = await this.approvalRouting.resolveOwner(businessId);
+      if (ownerRoute) {
+        const ownerNotify = await this.approvalRouting.notifyApprover(businessId, ownerRoute, { id: item.id, title: item.title, description: item.description, riskTier: tier });
+        if (!ownerNotify.sent && ownerNotify.error) {
+          this.logger.warn(`Failed to CC owner for tier-4 item ${item.id}: ${ownerNotify.error}`);
+        }
+      }
+    }
   }
 
   async resolveApproval(
@@ -324,6 +378,63 @@ export class AiOversightService {
       }
     }
 
+    return this.finalizeResolution(item, businessId, resolution, {
+      resolvedByUserId,
+      teamActivityUserId: resolvedByUserId,
+    });
+  }
+
+  /**
+   * Reply-based approval for a staff position resolved as the item's approver
+   * (see ApprovalRoutingService). Unlike resolveApproval, this does NOT
+   * require a Membership — contact-only positions (no login) authorize
+   * purely off their JobRole.defaultApprovalTier, gated on autoApprovalViaReply
+   * being explicitly on for that position.
+   */
+  async resolveApprovalByAssignment(
+    approvalId: string,
+    businessId: string,
+    assignmentId: string,
+    resolution: 'approved' | 'rejected' | 'deferred',
+  ) {
+    const item = await this.prisma.client.aiApprovalItem.findFirst({
+      where: { id: approvalId, businessId },
+    });
+    if (!item) throw new NotFoundException(`Approval item ${approvalId} not found for business ${businessId}`);
+    if (item.status !== 'pending') {
+      throw new BadRequestException(`Approval item is already resolved (status: "${item.status}") — cannot re-resolve`);
+    }
+    if (item.approverAssignmentId !== assignmentId) {
+      throw new ForbiddenException('This position is not the resolved approver for this item');
+    }
+
+    const assignment = await this.prisma.client.orgAssignment.findFirst({
+      where: { id: assignmentId, businessId, endedAt: null },
+      include: { jobRole: true },
+    });
+    if (!assignment) throw new NotFoundException('Approver assignment not found or ended');
+    if (!assignment.autoApprovalViaReply) {
+      throw new ForbiddenException('This position is not authorized for reply-based approval');
+    }
+
+    const effectiveTier = assignment.jobRole?.defaultApprovalTier ?? 0;
+    if (item.riskTier > effectiveTier) {
+      throw new ForbiddenException(`Tier ${item.riskTier} approvals require approval tier ${item.riskTier} or higher (position has tier ${effectiveTier})`);
+    }
+
+    return this.finalizeResolution(item, businessId, resolution, {
+      resolvedByUserId: assignment.userId ?? null,
+      teamActivityUserId: assignment.userId ?? undefined,
+    });
+  }
+
+  /** Shared tail for both resolveApproval() and resolveApprovalByAssignment(). */
+  private async finalizeResolution(
+    item: { id: string; toolName: string; riskTier: number; rationale: string | null; inputPayload: unknown; planStepId: string | null },
+    businessId: string,
+    resolution: 'approved' | 'rejected' | 'deferred',
+    opts: { resolvedByUserId: string | null; teamActivityUserId?: string },
+  ) {
     await this.logService.log({
       businessId,
       action: `approval:${resolution}`,
@@ -332,7 +443,7 @@ export class AiOversightService {
       riskTier: item.riskTier,
       mode: 'governance',
       actor: 'user',
-      rationale: `Approval ${approvalId} ${resolution} by user ${resolvedByUserId}`,
+      rationale: `Approval ${item.id} ${resolution} by ${opts.resolvedByUserId ?? 'delegated staff position'}`,
       success: true,
     });
 
@@ -343,29 +454,35 @@ export class AiOversightService {
       this.logger.error(`Failed to record approval signal: ${e instanceof Error ? e.message : String(e)}`);
     });
 
-    this.prisma.client.teamActivityLog.create({
-      data: {
-        businessId,
-        userId: resolvedByUserId,
-        module: 'ai',
-        action: `approval_${resolution}`,
-        entityType: 'aiApprovalItem',
-        entityId: approvalId,
-        title: `${resolution.charAt(0).toUpperCase() + resolution.slice(1)} AI approval: ${item.toolName} (tier ${item.riskTier})`,
-        detail: item.rationale ?? null,
-        meta: { toolName: item.toolName, riskTier: item.riskTier, resolution },
-      },
-    }).catch((e: unknown) => {
-      this.logger.warn(`Failed to log team activity for approval: ${e instanceof Error ? e.message : String(e)}`);
-    });
+    // TeamActivityLog.userId is non-nullable — a contact-only approver (no
+    // Membership/User) has no real user id to attach here, so skip the log
+    // rather than write a bogus value. The AiApprovalItem row + execution
+    // log above still give a full audit trail.
+    if (opts.teamActivityUserId) {
+      this.prisma.client.teamActivityLog.create({
+        data: {
+          businessId,
+          userId: opts.teamActivityUserId,
+          module: 'ai',
+          action: `approval_${resolution}`,
+          entityType: 'aiApprovalItem',
+          entityId: item.id,
+          title: `${resolution.charAt(0).toUpperCase() + resolution.slice(1)} AI approval: ${item.toolName} (tier ${item.riskTier})`,
+          detail: item.rationale ?? null,
+          meta: { toolName: item.toolName, riskTier: item.riskTier, resolution },
+        },
+      }).catch((e: unknown) => {
+        this.logger.warn(`Failed to log team activity for approval: ${e instanceof Error ? e.message : String(e)}`);
+      });
+    }
 
     const updated = await this.prisma.client.aiApprovalItem.update({
-      where: { id: approvalId },
+      where: { id: item.id },
       data: {
         status: resolution,
         resolvedAt: new Date(),
-        resolvedBy: resolvedByUserId,
-        resolvedByUserId,
+        resolvedBy: opts.resolvedByUserId ?? 'key_delegate',
+        resolvedByUserId: opts.resolvedByUserId,
         resolution,
       },
     });
@@ -495,6 +612,8 @@ export class AiOversightService {
     if (toolName.startsWith('social_')) return 'content';
     if (toolName.startsWith('automations_')) return 'automations';
     if (toolName.startsWith('delegation_')) return 'autopilot';
+    if (toolName.startsWith('structure_')) return 'structure';
+    if (toolName.startsWith('procurement_')) return 'procurement';
     if (toolName.startsWith('fetch_')) return 'intelligence';
     if (toolName.startsWith('draft_')) return 'drafts';
     if (toolName.startsWith('create_') || toolName.startsWith('tag_') || toolName.startsWith('segment_') || toolName.startsWith('schedule_')) return 'organize';

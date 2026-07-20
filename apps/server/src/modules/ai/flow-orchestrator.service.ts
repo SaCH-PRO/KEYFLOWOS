@@ -42,6 +42,7 @@ import { OnboardingConciergeService } from '../onboarding-concierge/onboarding-c
 import { OnboardingStateService, type OnboardingStep as ServerOnboardingStep } from '../onboarding-concierge/onboarding-state.service';
 import { BusinessGenesisService } from '../business-genesis/business-genesis.service';
 import { ProcurementService } from '../procurement/procurement.service';
+import { StructureService } from '../structure/structure.service';
 
 
 export interface FlowAttachment {
@@ -315,6 +316,9 @@ export class FlowOrchestratorService {
   }
   private getProcurement() {
     return this.moduleRef.get(ProcurementService, { strict: false });
+  }
+  private getStructure() {
+    return this.moduleRef.get(StructureService, { strict: false });
   }
   private getActivityLog() {
     return this.moduleRef.get(ActivityLogService, { strict: false });
@@ -3436,6 +3440,69 @@ export class FlowOrchestratorService {
         return { id: request.id, status: request.status };
       }
 
+      // ----------------------------------------------------------------
+      //  STRUCTURE (org chart / delegation)
+      // ----------------------------------------------------------------
+      case 'structure_get_org_tree': {
+        return this.getStructure().getOrgTree(businessId);
+      }
+
+      case 'structure_list_org_units': {
+        const units = await this.getStructure().listOrgUnits(businessId);
+        return { units, count: units.length };
+      }
+
+      case 'structure_list_job_roles': {
+        const roles = await this.getStructure().listJobRoles(businessId);
+        return { roles, count: roles.length };
+      }
+
+      case 'structure_list_assignments': {
+        const assignments = await this.getStructure().listAssignments(businessId);
+        return { assignments, count: assignments.length };
+      }
+
+      case 'structure_find_person': {
+        const matches = await this.getStructure().findPeople(businessId, {
+          jobRoleName: args.jobRoleName,
+          orgUnitName: args.orgUnitName,
+          personName: args.personName,
+        });
+        return { matches, count: matches.length };
+      }
+
+      case 'structure_list_delegation_rules': {
+        const rules = await this.getStructure().listDelegationRules(businessId);
+        return { rules, count: rules.length };
+      }
+
+      case 'structure_get_stats': {
+        return this.getStructure().getStats(businessId);
+      }
+
+      case 'structure_create_delegation_rule': {
+        const rule = await this.getStructure().createDelegationRule(businessId, {
+          delegatorId: args.delegatorId,
+          delegateId: args.delegateId,
+          scope: args.scope,
+          maxTier: args.maxTier,
+          activeUntil: args.activeUntil,
+          reason: args.reason,
+        });
+        return { id: rule.id, rule };
+      }
+
+      case 'structure_update_delegation_rule': {
+        const rule = await this.getStructure().updateDelegationRule(businessId, args.ruleId, {
+          scope: args.scope,
+          maxTier: args.maxTier,
+          activeUntil: args.activeUntil,
+          reason: args.reason,
+          isActive: args.isActive,
+        });
+        return { id: rule.id, rule };
+      }
+
       default:
         throw new Error(`Unknown tool: ${toolName}`);
     }
@@ -3533,6 +3600,10 @@ export class FlowOrchestratorService {
         return `Update campaign ${args.campaignId}`;
       case 'social_update_post':
         return `Update social post ${args.postId}`;
+      case 'structure_create_delegation_rule':
+        return `Create delegation rule: let position ${args.delegateId} act for ${args.delegatorId} on "${args.scope}" up to tier ${args.maxTier}`;
+      case 'structure_update_delegation_rule':
+        return `Update delegation rule ${args.ruleId}`;
       default:
         return `Execute ${toolName.replace(/_/g, ' ')}`;
     }
