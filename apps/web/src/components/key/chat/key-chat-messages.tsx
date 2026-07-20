@@ -15,7 +15,7 @@ interface KeyChatMessagesProps {
 }
 
 export function KeyChatMessages({ onConfirmAction, onCardAdvance }: KeyChatMessagesProps) {
-  const { messages, status } = useKeyChat();
+  const { messages, status, error, setError } = useKeyChat();
   useKeyChatTts();
   const containerRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
@@ -58,6 +58,19 @@ export function KeyChatMessages({ onConfirmAction, onCardAdvance }: KeyChatMessa
           </div>
         ) : (
           <div className="mx-auto flex max-w-3xl flex-col gap-5">
+            {error && (
+              <div className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                <span className="flex-1">{error}</span>
+                <button
+                  type="button"
+                  onClick={() => setError(undefined)}
+                  aria-label="Dismiss error"
+                  className="shrink-0 font-medium opacity-70 hover:opacity-100"
+                >
+                  ×
+                </button>
+              </div>
+            )}
             {messages.map((message, index) => (
               <div
                 key={message.id}

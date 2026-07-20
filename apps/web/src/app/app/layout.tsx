@@ -12,7 +12,6 @@ import { PlanLimitDialog } from "@/components/ui/upgrade-prompt";
 import { KeyflowOSStoreDrawer } from "@/components/keyflowos-store-drawer";
 
 import { CelebrationListener } from "@/components/ui/celebration-listener";
-import { GenomeIntegrityBanner } from "@/components/genome-integrity-banner";
 import { RequireAuth } from "@/components/require-auth";
 import { KeyAgent } from "@/components/key";
 import { KeyChatBubble, KeyChatProvider } from "@/components/key/chat";
@@ -21,10 +20,8 @@ import { AppHeader } from "@/components/layout/app-header";
 import { MobileDrawer } from "@/components/layout/mobile-drawer";
 import { MobileBottomNav } from "@/components/layout/mobile-bottom-nav";
 import { useAppLayout } from "@/hooks/use-app-layout";
-import { useGenomeGate } from "@/hooks/use-genome-gate";
 import { useKeyboardShortcuts, useRouteKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 import { PageTransition } from "@/components/transitions/page-transition";
-import { KeyContextualSuggestions } from "@/components/functional/key-contextual-suggestions";
 import { KeyboardShortcutsHelp } from "@/components/functional/keyboard-shortcuts-help";
 import { MobileGestureProvider } from "@/components/functional/mobile-gesture-provider";
 import { ComposeFab } from "@/components/email/compose-fab";
@@ -33,20 +30,8 @@ import { TtsProvider } from "@/components/tts";
 function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const layout = useAppLayout();
   const isOnboardingRoute = layout.pathname.startsWith("/app/onboarding");
-  const genomeGate = useGenomeGate();
   useKeyboardShortcuts();
   useRouteKeyboardShortcuts();
-
-  if (genomeGate.checking) {
-    return (
-      <div className="h-dvh flex items-center justify-center bg-background text-foreground">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 border-2 border-[hsl(var(--kf-accent1))] border-t-transparent rounded-full animate-spin" />
-          <p className="text-sm text-muted-foreground">Checking your Business Genome...</p>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <MobileGestureProvider>
@@ -100,7 +85,6 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
             userMenuRef={layout.userMenuRef}
             handleLogout={layout.handleLogout}
           />
-          <GenomeIntegrityBanner />
           <div className="px-3 md:px-6 pt-1">
             <OriginAwareBreadcrumbs />
           </div>
@@ -142,7 +126,6 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
       <KeyflowOSStoreDrawer open={layout.kfStoreOpen} onClose={() => layout.setKfStoreOpen(false)} />
       {!isOnboardingRoute && <KeyAgent currentModule={layout.copilotModule} />}
       {!isOnboardingRoute && <KeyChatBubble />}
-      {!isOnboardingRoute && <KeyContextualSuggestions />}
       <KeyboardShortcutsHelp />
       <CelebrationListener />
       <ComposeFab />

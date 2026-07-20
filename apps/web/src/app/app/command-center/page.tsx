@@ -5,6 +5,7 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 import type { LucideIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { openKey } from "@/components/key";
 import { LayoutDashboard, Loader2, AlertTriangle, RefreshCw, Bot, BrainCircuit, Clock, Inbox, Target, TrendingUp, ShieldCheck, Zap } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
@@ -295,7 +296,7 @@ export default function CommandCenterPage() {
                     description="KEY isn't tracking any risks right now. Populate your Genome to surface them."
                     actionLabel="Populate Genome"
                     actionIcon={ShieldCheck}
-                    onAction={() => router.push("/app/profile?tab=business-genome")}
+                    onAction={() => openKey({ mode: "onboarding" })}
                     variant="compact"
                   />
                 )}

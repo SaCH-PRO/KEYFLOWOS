@@ -19,7 +19,7 @@ export function OnboardingProgress({ step, onStepClick }: OnboardingProgressProp
   const currentIndex = STEPS.findIndex((s) => s.id === step);
 
   return (
-    <div className="hidden sm:flex items-center gap-1.5">
+    <div className="flex items-center gap-1.5">
       {STEPS.map((s, idx) => {
         const isActive = idx === currentIndex;
         const isCompleted = idx < currentIndex;

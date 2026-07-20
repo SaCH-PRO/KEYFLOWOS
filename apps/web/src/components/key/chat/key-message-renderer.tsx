@@ -106,7 +106,7 @@ export function KeyMessageRenderer({ message, isStreaming, onConfirm, onCardAdva
                           </div>
                           <SyntaxHighlighter
                             language={language}
-                            style={vscDarkPlus as any}
+                            style={vscDarkPlus as Record<string, CSSProperties>}
                             customStyle={{ margin: 0, padding: "1rem", fontSize: "0.8rem" } as CSSProperties}
                           >
                             {codeString}
@@ -153,7 +153,7 @@ export function KeyMessageRenderer({ message, isStreaming, onConfirm, onCardAdva
               riskLevel: pc.riskLevel,
               status: "pending" as const,
             })) ?? []).map((step) => (
-              <KeyPlanCard key={step.toolCallId} step={step} onConfirm={onConfirm} />
+              <KeyPlanCard key={step.toolCallId} step={step} onConfirm={onConfirm} isResolving={step.status === "executing"} />
             ))}
           </div>
         ) : null}

@@ -6,12 +6,13 @@ import { cn } from "@/lib/utils";
 import { useKeyChat } from "./key-chat-store";
 import { useUpload } from "@/hooks/use-upload";
 import { useVoiceInput } from "./use-voice-input";
+import { VoiceConversation } from "./voice-conversation";
 import { KeyAttachmentPreview } from "./key-attachment-preview";
 import { nanoid } from "./utils";
 import { toast } from "sonner";
 
 interface KeyChatInputProps {
-  onSend: () => void;
+  onSend: (text?: string) => void;
   onStop: () => void;
   disabled?: boolean;
 }
@@ -23,9 +24,17 @@ export function KeyChatInput({ onSend, onStop, disabled }: KeyChatInputProps) {
   const { uploadFile, isUploading } = useUpload();
   const { isRecording, isProcessing: isTranscribing, toggle: toggleVoice } = useVoiceInput({
     onTranscript: (text) => {
-      setInput((prev) => (prev ? `${prev} ${text}` : text));
-      setTimeout(() => textareaRef.current?.focus(), 50);
+      if (input.trim()) {
+        // User is mid-typing — append, don't hijack their message.
+        setInput((prev) => (prev ? `${prev} ${text}` : text));
+        setTimeout(() => textareaRef.current?.focus(), 50);
+        return;
+      }
+      // Voice-first: send immediately and keep the conversation loop alive.
+      VoiceConversation.start();
+      onSend(text);
     },
+    onNoSpeech: () => VoiceConversation.stop(),
   });
 
   const isLoading = status === "streaming" || status === "loading";
@@ -176,7 +185,7 @@ export function KeyChatInput({ onSend, onStop, disabled }: KeyChatInputProps) {
             <button
               type="button"
               disabled={!canSend}
-              onClick={onSend}
+              onClick={() => onSend()}
               className="flex h-8 w-8 items-center justify-center rounded-full bg-foreground text-background transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-30"
               aria-label="Send"
             >
@@ -186,7 +195,7 @@ export function KeyChatInput({ onSend, onStop, disabled }: KeyChatInputProps) {
         </div>
       </div>
       <p className="mt-2 text-center text-[10px] text-muted-foreground/60">
-        KEY can make mistakes. Confirm important actions before allowing them.
+        Hold Space to talk, or tap the mic — KEY answers back. KEY can make mistakes; confirm important actions.
       </p>
     </div>
   );

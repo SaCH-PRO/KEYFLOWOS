@@ -1,7 +1,7 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { Dna, ArrowRight } from "lucide-react";
+import { openKey } from "@/components/key";
 import type { CommandCenterGenome } from "@/lib/api/business-command-center";
 
 interface CommandGenomeCardProps {
@@ -9,8 +9,6 @@ interface CommandGenomeCardProps {
 }
 
 export function CommandGenomeCard({ genome }: CommandGenomeCardProps) {
-  const router = useRouter();
-
   return (
     <div className="rounded-2xl border border-border/30 bg-card/40 p-4 space-y-3">
       <div className="flex items-center gap-2">
@@ -43,7 +41,7 @@ export function CommandGenomeCard({ genome }: CommandGenomeCardProps) {
         </div>
       )}
       <button
-        onClick={() => router.push("/app/profile?tab=business-genome")}
+        onClick={() => openKey({ mode: "onboarding" })}
         className="inline-flex items-center gap-1 text-[10px] font-medium text-[hsl(var(--kf-accent1))] hover:text-[hsl(var(--kf-accent1))]/80 transition-colors"
       >
         Open Genome <ArrowRight className="w-3 h-3" />

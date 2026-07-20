@@ -16,6 +16,7 @@ export function GenomeChatStep({ onComplete, className }: GenomeChatStepProps) {
   const businessId = getStoredBusinessId();
   const [genome, setGenome] = useState<GenomeIntegrityResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     if (!businessId) return;
@@ -29,7 +30,7 @@ export function GenomeChatStep({ onComplete, className }: GenomeChatStepProps) {
         if (data) setGenome(data);
       })
       .catch(() => setError("Could not load genome progress."));
-  }, [businessId]);
+  }, [businessId, reloadKey]);
 
   return (
     <div className={cn("flex flex-col lg:flex-row gap-4 h-[70vh] lg:h-[calc(100vh-200px)] max-h-[800px]", className)}>
@@ -56,7 +57,7 @@ export function GenomeChatStep({ onComplete, className }: GenomeChatStepProps) {
             <button
               onClick={() => {
                 setError(null);
-                setGenome(null);
+                setReloadKey((k) => k + 1);
               }}
               className="ml-2 underline"
             >

@@ -91,6 +91,19 @@ export function useKeyChatActions() {
         });
       }
 
+      if (chunk.type === "tool_calls" && chunk.toolCalls) {
+        chat.updateLastAssistantMessage({
+          plan: chunk.toolCalls.map((tc) => ({
+            toolCallId: tc.id,
+            name: tc.name,
+            description: tc.description ?? tc.name.replace(/_/g, " "),
+            arguments: tc.arguments,
+            riskLevel: tc.riskLevel ?? "low",
+            status: "executing" as const,
+          })),
+        });
+      }
+
       if (chunk.type === "tool_results" && chunk.toolResults) {
         const lastAssistant = [...chat.messages].reverse().find((m) => m.role === "assistant");
         const updatedPlan = lastAssistant?.plan?.map((step) => {
@@ -122,7 +135,7 @@ export function useKeyChatActions() {
   );
 
   const sendMessage = useCallback(
-    async (text?: string, opts?: { pendingConfirmation?: { toolCallId: string; confirmed: boolean; toolName?: string; toolArgs?: Record<string, unknown> } }) => {
+    async (text?: string, opts?: { pendingConfirmation?: { toolCallId: string; confirmed: boolean; toolName?: string; toolArgs?: Record<string, unknown> }; silent?: boolean }) => {
       const businessId = getStoredBusinessId();
       if (!businessId) {
         chat.setError("No business selected");
@@ -140,8 +153,9 @@ export function useKeyChatActions() {
 
       chat.setError(undefined);
 
-      // For a confirmation turn, do not add a new user message.
-      if (!opts?.pendingConfirmation) {
+      // For a confirmation turn (or a silent system-driven advance), do not
+      // add a new user message to the visible transcript.
+      if (!opts?.pendingConfirmation && !opts?.silent) {
         const userMsg: KeyChatMessage = {
           id: nanoid(),
           role: "user",
@@ -286,11 +300,67 @@ export function useKeyChatActions() {
 
   const confirmAction = useCallback(
     async (toolCallId: string, confirmed: boolean, toolName: string, toolArgs: Record<string, unknown>) => {
-      await sendMessage("", {
-        pendingConfirmation: { toolCallId, confirmed, toolName, toolArgs },
-      });
+      const businessId = getStoredBusinessId();
+      if (!businessId) {
+        chat.setError("No business selected");
+        return;
+      }
+      if (processingRef.current) return;
+      processingRef.current = true;
+
+      chat.setError(undefined);
+      chat.setStatus("streaming");
+      window.dispatchEvent(new CustomEvent("kf:key-state", { detail: { state: "processing" } }));
+
+      // Mark the step as resolving on the message that owns the plan.
+      const planOwner = [...chat.messages].reverse().find((m) => m.role === "assistant" && m.plan?.length);
+      if (planOwner) {
+        chat.updateMessage(planOwner.id, {
+          plan: planOwner.plan!.map((s) =>
+            s.toolCallId === toolCallId ? { ...s, status: "executing" as const } : s,
+          ),
+        });
+      }
+
+      try {
+        const res = await confirmFlowAction(businessId, toolCallId, toolName, toolArgs, confirmed);
+        if (res.data) {
+          if (res.data.sessionId) chat.setActiveSessionId(res.data.sessionId);
+
+          // Sync the outcome back onto the plan step.
+          const outcome = res.data.toolResults?.find((r) => r.toolCallId === toolCallId);
+          const current = [...chat.messages].reverse().find((m) => m.role === "assistant" && m.plan?.length);
+          if (current) {
+            chat.updateMessage(current.id, {
+              plan: current.plan!.map((s) =>
+                s.toolCallId === toolCallId
+                  ? {
+                      ...s,
+                      status: !confirmed ? ("rejected" as const) : outcome?.success === false ? ("failed" as const) : ("completed" as const),
+                      result: outcome?.result,
+                      error: outcome?.error,
+                    }
+                  : s,
+              ),
+              requiresConfirmation: false,
+            });
+          }
+
+          appendAssistantFromResponse(res.data);
+        } else {
+          chat.setError(res.error ?? "Failed to confirm the action. Please try again.");
+          chat.setStatus("error");
+        }
+      } catch (err) {
+        chat.setError((err as Error).message || "Failed to confirm the action.");
+        chat.setStatus("error");
+      } finally {
+        chat.setStatus("idle");
+        processingRef.current = false;
+        window.dispatchEvent(new CustomEvent("kf:key-state", { detail: { state: "idle" } }));
+      }
     },
-    [sendMessage]
+    [chat, appendAssistantFromResponse]
   );
 
   const stop = useCallback(() => {
