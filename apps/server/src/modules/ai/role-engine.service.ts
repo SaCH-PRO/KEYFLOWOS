@@ -77,6 +77,7 @@ const ROUTE_ROLE_MAP: Record<string, BusinessRole> = {
   '/app/evidence': 'operations',
   '/app/approvals': 'operations',
   '/app/assets': 'operations',
+  '/app/procurement': 'operations',
   // Support
   '/app/tickets': 'support',
   '/app/inbox': 'support',
@@ -113,6 +114,7 @@ const ITEM_TYPE_ROLE_MAP: Record<string, BusinessRole> = {
   evidence: 'operations',
   approvalRequest: 'operations',
   asset: 'operations',
+  procurementRequest: 'operations',
   ticket: 'support',
   thread: 'support',
 };
@@ -122,7 +124,7 @@ const ROLE_SWITCH_KEYWORDS: Record<BusinessRole, RegExp> = {
   sales: /\b(lead|deal|pipeline|proposal|follow.up|convert|opportunity|prospect|quote me|price for|how much for|interested in buying)\b/i,
   finance: /\b(invoice|payment|overdue|bill|revenue|expense|cash|pricing|cost|refund|pay|owed|balance|send me an invoice)\b/i,
   support: /\b(complaint|help|ticket|issue|problem|refund|return|warranty|not working|broken|dissatisfied|unhappy)\b/i,
-  operations: /\b(book|schedule|appointment|calendar|slot|reschedule|no.show|availability|staff|task|project|milestone|deadline|when can i come)\b/i,
+  operations: /\b(book|schedule|appointment|calendar|slot|reschedule|no.show|availability|staff|task|project|milestone|deadline|when can i come|purchase order|procurement|vendor|supplier|buy new|order supplies|need to order)\b/i,
   marketing: /\b(campaign|email blast|newsletter|social|seo|content|ad|promotion|post|review|instagram|facebook)\b/i,
   general: /\b(overview|summary|status|how is everything|what's happening|business health|dashboard)\b/i,
   operator: /\b(execute|run|do it|process|handle|complete|finish|work on|take care of|operate)\b/i,
@@ -197,7 +199,7 @@ const ROLE_DEFINITIONS: Record<BusinessRole, RoleDefinition> = {
     description: 'Manages scheduling, inventory, staff, tasks, ensures business runs smoothly day-to-day',
     tone: 'efficient, organized, direct, action-oriented',
     priorities: ['Fill calendar gaps', 'Manage staff schedules', 'Track inventory levels', 'Complete tasks on time', 'Optimize workflows'],
-    approvedTools: ['update_business_blueprint', 'bookings_*', 'projects_*', 'create_task', 'schedule_action', 'tag_contact', 'fetch_schedule_health', 'fetch_project_status', 'content_*', 'call_*', 'evidence_*', 'approval_*', 'drive_*', 'calendar_*', 'time_*', 'helpdesk_*', 'finance_list_action_items'],
+    approvedTools: ['update_business_blueprint', 'bookings_*', 'projects_*', 'create_task', 'schedule_action', 'tag_contact', 'fetch_schedule_health', 'fetch_project_status', 'content_*', 'call_*', 'evidence_*', 'approval_*', 'drive_*', 'calendar_*', 'time_*', 'helpdesk_*', 'finance_list_action_items', 'procurement_*'],
     blockedTools: ['commerce_delete_invoice', 'crm_delete_contact', 'content_upload_deliverables', 'content_deliver_request', 'approval_decide_step'],
     maxRiskTier: 2,
     autonomyLevel: 3,

@@ -41,6 +41,7 @@ import { TaskAssignmentService } from '../task-assignments/task-assignment.servi
 import { OnboardingConciergeService } from '../onboarding-concierge/onboarding-concierge.service';
 import { OnboardingStateService, type OnboardingStep as ServerOnboardingStep } from '../onboarding-concierge/onboarding-state.service';
 import { BusinessGenesisService } from '../business-genesis/business-genesis.service';
+import { ProcurementService } from '../procurement/procurement.service';
 
 
 export interface FlowAttachment {
@@ -311,6 +312,9 @@ export class FlowOrchestratorService {
   }
   private getProjects() {
     return this.moduleRef.get(ProjectsService, { strict: false });
+  }
+  private getProcurement() {
+    return this.moduleRef.get(ProcurementService, { strict: false });
   }
   private getActivityLog() {
     return this.moduleRef.get(ActivityLogService, { strict: false });
@@ -3356,6 +3360,79 @@ export class FlowOrchestratorService {
           scheduledAt: args.scheduledFor ? new Date(args.scheduledFor).toISOString() : undefined,
         });
         return { id: post.id, status: post.status };
+      }
+
+      // ----------------------------------------------------------------
+      //  PROCUREMENT
+      // ----------------------------------------------------------------
+      case 'procurement_list_requests': {
+        const requests = await this.getProcurement().list(businessId);
+        return { requests, count: requests.length };
+      }
+
+      case 'procurement_get_request': {
+        const request = await this.getProcurement().get(businessId, args.requestId);
+        return { request };
+      }
+
+      case 'procurement_list_suppliers': {
+        const suppliers = await this.getProcurement().listSuppliers(businessId);
+        return { suppliers };
+      }
+
+      case 'procurement_get_stats': {
+        return this.getProcurement().getStats(businessId);
+      }
+
+      case 'procurement_create_request': {
+        const request = await this.getProcurement().create(
+          businessId,
+          {
+            userPrompt: args.userPrompt,
+            priority: args.priority,
+            estimatedBudget: args.estimatedBudget,
+          },
+          'key_ai',
+        );
+        return { id: request.id, request };
+      }
+
+      case 'procurement_update_request': {
+        const request = await this.getProcurement().update(businessId, args.requestId, {
+          priority: args.priority,
+          internalNotes: args.internalNotes,
+        });
+        return { id: request.id };
+      }
+
+      case 'procurement_submit_for_review': {
+        const request = await this.getProcurement().submitForReview(businessId, args.requestId);
+        return { id: request.id, status: request.status };
+      }
+
+      case 'procurement_select_vendor': {
+        const request = await this.getProcurement().selectVendor(businessId, args.requestId, args.supplierConnectionId);
+        return { id: request.id, supplierConnectionId: request.supplierConnectionId };
+      }
+
+      case 'procurement_issue_po': {
+        const result = await this.getProcurement().issuePO(businessId, args.requestId, 'key_ai');
+        return { id: result.id, purchaseOrder: result.purchaseOrder };
+      }
+
+      case 'procurement_acknowledge_vendor': {
+        const request = await this.getProcurement().acknowledgeVendor(businessId, args.requestId);
+        return { id: request.id, status: request.status };
+      }
+
+      case 'procurement_mark_fulfilled': {
+        const request = await this.getProcurement().markFulfilled(businessId, args.requestId);
+        return { id: request.id, status: request.status };
+      }
+
+      case 'procurement_mark_invoiced': {
+        const request = await this.getProcurement().markInvoiced(businessId, args.requestId);
+        return { id: request.id, status: request.status };
       }
 
       default:
