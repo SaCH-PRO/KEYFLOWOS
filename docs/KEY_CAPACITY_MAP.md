@@ -19,7 +19,9 @@ The original version of this section said there was no `Employee`/`Staff` data m
 
 **Closed 2026-07-20**: `OrgAssignment` now supports contact-only positions (name/phone/email, no login required — for front-desk/floor staff), and a `StaffChatBridgeService` routes inbound WhatsApp/SMS from a matched staff number straight into KEY's chat engine, replying on the same channel. See the progress log below.
 
-**Still open**: `DelegationRule` is still write-only — nothing in `ai-oversight.service.ts`/`approval-request.service.ts` reads it yet, so a delegation rule created in the UI has no effect on approval routing. KEY also has no tool coverage for the structure module itself (can't read the org chart to know who to delegate to), and tool/approval scope for staff chatting over WhatsApp/SMS still comes from the global autonomy mode, not the caller's specific JobRole. These are the next pieces, not done yet — don't assume "talk to KEY over WhatsApp" means the full delegation/approval loop is closed.
+**Closed 2026-07-20 (later same day)**: KEY now has 9 `structure_*` tools (org tree, units, job roles, assignments, delegation rules, stats, and a `structure_find_person` lookup — "who's the bookkeeper?"). `DelegationRule` is no longer write-only: a new `ApprovalRoutingService` resolves who should approve a KEY action (delegation rule → `JobRole.defaultApprovalTier` → business owner fallback), pushes a real-time WhatsApp/SMS/email notification, and records `approverAssignmentId`/`approverMethod` on the `AiApprovalItem`. Contact-only positions can now actually exercise `autoApprovalViaReply` (resolved via `JobRole.defaultApprovalTier`, no `Membership` required) — `StaffChatBridgeService` checks for a pending approval before general chat and resolves a clear yes/no reply directly. Tier-4 approvals always additionally notify the business owner as a safety net.
+
+**Still open**: tool/approval scope for staff chatting over WhatsApp/SMS still comes from the global autonomy mode and text-based role detection, not the caller's specific `JobRole` — a staff position's `JobRole.permissions` aren't yet used to scope which tools KEY will use *for them* mid-conversation (only their approval authority is wired). That's the next piece for true position-specific governance.
 
 ---
 
@@ -48,6 +50,7 @@ The original version of this section said there was no `Employee`/`Staff` data m
 - **2026-07-20** — Procurement & Purchasing: 0/7 → 7/7 covered. Added 12 KEY tools (`procurement_*`) wrapping the existing `ProcurementService`, wired into the Operations Manager role. `procurement_issue_po` is tier 3 (commits real spend); the rest are tier 1-2. Approve/reject was deliberately left human-only — see the Procurement section below.
 - **2026-07-20** — Operations & Projects: task reassignment closed. `projects_update_task` now exposes `assigneeId` (was already fully supported server-side).
 - **2026-07-20** — HR / People Ops: discovered the org-hierarchy system was never actually missing (see "Cross-cutting structural finding" above), closed the "no login required" gap with contact-only `OrgAssignment`s, and built the WhatsApp/SMS-to-KEY chat bridge for delegation. Payroll and staff-performance tracking remain real gaps.
+- **2026-07-20** (later same day) — Cross-cutting: gave KEY 9 `structure_*` tools (org chart read access + tier-3 delegation-rule writes) and built real approval routing (`ApprovalRoutingService`) so `DelegationRule`/`JobRole.defaultApprovalTier` actually determine who gets notified and can approve a KEY action, instead of sitting unused. This is infrastructure spanning every department's tier-3/4 approvals, not one row in the tables below — see the structural finding above for the full writeup.
 
 ---
 
