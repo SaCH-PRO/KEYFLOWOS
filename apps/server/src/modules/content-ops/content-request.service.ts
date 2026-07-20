@@ -1,4 +1,4 @@
-import { Injectable, Inject, NotFoundException, BadRequestException, Logger, Optional } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException, BadRequestException, Logger, Optional, forwardRef } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ApprovalRequestService } from '../approvals/approval-request.service';
@@ -43,7 +43,7 @@ export class ContentRequestService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly emitter: EventEmitter2,
-    @Inject(ApprovalRequestService) private readonly approvals: ApprovalRequestService,
+    @Inject(forwardRef(() => ApprovalRequestService)) private readonly approvals: ApprovalRequestService,
     @Optional() @Inject(ContentInvoiceService) private readonly contentInvoice?: ContentInvoiceService,
   ) {}
 

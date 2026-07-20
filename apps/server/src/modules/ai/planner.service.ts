@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Injectable, Logger, Inject, NotFoundException, BadRequestException, ForbiddenException, forwardRef } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from './ai-usage.service';
@@ -73,7 +73,7 @@ export class PlannerService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
     @Inject(BusinessGraphService) private readonly businessGraph: BusinessGraphService,
-    @Inject(AiOversightService) private readonly governance: AiOversightService,
+    @Inject(forwardRef(() => AiOversightService)) private readonly governance: AiOversightService,
     @Inject(AiMemoryService) private readonly memory: AiMemoryService,
     @Inject(BlueprintService) private readonly blueprint: BlueprintService,
   ) {}

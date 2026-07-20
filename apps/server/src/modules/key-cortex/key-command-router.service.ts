@@ -6,7 +6,7 @@
  * Every action goes through Genome judgment first, then Autonomy routing.
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { KeyCortexReasoningService } from './key-cortex-reasoning.service';
 import { KeyCortexContextService } from './key-cortex-context.service';
 import { KeyCortexActionsService } from './key-cortex-actions.service';
@@ -29,7 +29,7 @@ export class KeyCommandRouterService {
   private readonly logger = new Logger(KeyCommandRouterService.name);
 
   constructor(
-    private readonly reasoning: KeyCortexReasoningService,
+    @Inject(forwardRef(() => KeyCortexReasoningService)) private readonly reasoning: KeyCortexReasoningService,
     private readonly context: KeyCortexContextService,
     private readonly actions: KeyCortexActionsService,
   ) {}

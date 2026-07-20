@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -136,7 +136,7 @@ export class DocumentIntelligenceService {
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Inject(ModelGatewayService) private readonly gateway: ModelGatewayService,
     @Inject(AiExecutionLogService) private readonly executionLog: AiExecutionLogService,
-    @Inject(AiOversightService) private readonly governance: AiOversightService,
+    @Inject(forwardRef(() => AiOversightService)) private readonly governance: AiOversightService,
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
     @Inject(ModuleRef) private readonly moduleRef: ModuleRef,
   ) {}
