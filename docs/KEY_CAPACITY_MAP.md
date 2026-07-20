@@ -30,7 +30,7 @@ This means HR/People-ops isn't a tooling gap like the others below; it's a **dat
 | Bookings & Scheduling | 5 | 1 | 2 | 8 |
 | Commerce & Store | 7 | 1 | 0 | 8 |
 | Finance & Accounting | 6 | 4 | 1 | 11 |
-| Operations & Projects | 4 | 4 | 0 | 8 |
+| Operations & Projects | 5 | 3 | 0 | 8 |
 | Procurement & Purchasing | 7 | 0 | 0 | 7 |
 | Time & Resource Mgmt | 2 | 2 | 3 | 7 |
 | Customer Support / Helpdesk | 4 | 3 | 0 | 7 |
@@ -38,12 +38,13 @@ This means HR/People-ops isn't a tooling gap like the others below; it's a **dat
 | Legal & Compliance | 0 | 7 | 0 | 7 |
 | Communications | 3 | 3 | 0 | 6 |
 | Front Office / Reception | 4 | 3 | 0 | 7 |
-| **Total** | **53** | **31** | **13** | **97** |
+| **Total** | **54** | **30** | **13** | **97** |
 
-**Read:** ~55% of surveyed staff tasks are fully AI-executable today (was 47% before the Procurement pass — see below). ~32% have the hard part already built (backend service/endpoint exists) and just need a tool wrapper — this is the cheapest tier of work. ~13% require new backend logic or, in HR's case, a new data model, before any tool can exist.
+**Read:** ~56% of surveyed staff tasks are fully AI-executable today (was 47% at the start of this build pass). ~31% have the hard part already built (backend service/endpoint exists) and just need a tool wrapper — this is the cheapest tier of work. ~13% require new backend logic or, in HR's case, a new data model, before any tool can exist.
 
 **Progress log:**
 - **2026-07-20** — Procurement & Purchasing: 0/7 → 7/7 covered. Added 12 KEY tools (`procurement_*`) wrapping the existing `ProcurementService`, wired into the Operations Manager role. `procurement_issue_po` is tier 3 (commits real spend); the rest are tier 1-2. Approve/reject was deliberately left human-only — see the Procurement section below.
+- **2026-07-20** — Operations & Projects: task reassignment closed. `projects_update_task` now exposes `assigneeId` (was already fully supported server-side).
 
 ---
 
@@ -122,7 +123,7 @@ This means HR/People-ops isn't a tooling gap like the others below; it's a **dat
 | List active projects / check health | ✅ | `projects_list` |
 | List/create tasks | ✅ | `projects_list_tasks`, `projects_create_task` |
 | Mark task complete / update title, due date, priority | ✅ | `projects_complete_task`, `projects_update_task` |
-| **Reassign a task when someone's overloaded** | 🟡 | backend fully supports `assigneeId` reassignment with history; the AI tool schema doesn't expose that field |
+| **Reassign a task when someone's overloaded** | ✅ | `projects_update_task` now exposes `assigneeId` (2026-07-20) |
 | Delete a stale/duplicate task | ✅ | `projects_delete_task` |
 | Check project budget vs. actuals | 🟡 | `getProjectBudget` + dedicated UI exist, no tool |
 | Review project timeline/milestones | 🟡 | `getProjectTimeline`, `createMilestone`/`updateMilestone` exist, no tool |
@@ -233,7 +234,7 @@ Every task here has *some* backend logic — this department is closer than HR, 
 ## Suggested build order
 
 **Tier 1 — cheapest, wrap what already exists (no new backend logic):**
-~~procurement's full 11-endpoint wrap~~ (done 2026-07-20). Remaining: bank reconciliation, chart-of-accounts, AP/bills, journal entries, task reassignment (add `assigneeId` param to `projects_update_task`), project budget/timeline tools, contract CRUD + term-extraction, ticket reply, broadcast messaging, key-inbox thread reply/escalate, deal/pipeline-stage tools, duplicate-contact merge, social analytics, no-show handling.
+~~procurement's full 11-endpoint wrap~~ ~~task reassignment~~ (done 2026-07-20). Remaining: bank reconciliation, chart-of-accounts, AP/bills, journal entries, project budget/timeline tools, contract CRUD + term-extraction, ticket reply, broadcast messaging, key-inbox thread reply/escalate, deal/pipeline-stage tools, duplicate-contact merge, social analytics, no-show handling.
 
 **Tier 2 — needs some new logic:**
 staff availability/capacity tool, refund execution tool, waitlist management, booking staff-reassignment, SEO auto-remediation, paid-social/ads integration.
