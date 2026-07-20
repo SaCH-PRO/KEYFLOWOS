@@ -31,16 +31,19 @@ This means HR/People-ops isn't a tooling gap like the others below; it's a **dat
 | Commerce & Store | 7 | 1 | 0 | 8 |
 | Finance & Accounting | 6 | 4 | 1 | 11 |
 | Operations & Projects | 4 | 4 | 0 | 8 |
-| Procurement & Purchasing | 0 | 0 | 7 | 7 |
+| Procurement & Purchasing | 7 | 0 | 0 | 7 |
 | Time & Resource Mgmt | 2 | 2 | 3 | 7 |
 | Customer Support / Helpdesk | 4 | 3 | 0 | 7 |
 | HR / People Ops | 0 | 0 | 5 | 5 |
 | Legal & Compliance | 0 | 7 | 0 | 7 |
 | Communications | 3 | 3 | 0 | 6 |
 | Front Office / Reception | 4 | 3 | 0 | 7 |
-| **Total** | **46** | **31** | **20** | **97** |
+| **Total** | **53** | **31** | **13** | **97** |
 
-**Read:** ~47% of surveyed staff tasks are fully AI-executable today. ~32% have the hard part already built (backend service/endpoint exists) and just need a tool wrapper — this is the cheapest tier of work. ~21% require new backend logic or, in HR's case, a new data model, before any tool can exist.
+**Read:** ~55% of surveyed staff tasks are fully AI-executable today (was 47% before the Procurement pass — see below). ~32% have the hard part already built (backend service/endpoint exists) and just need a tool wrapper — this is the cheapest tier of work. ~13% require new backend logic or, in HR's case, a new data model, before any tool can exist.
+
+**Progress log:**
+- **2026-07-20** — Procurement & Purchasing: 0/7 → 7/7 covered. Added 12 KEY tools (`procurement_*`) wrapping the existing `ProcurementService`, wired into the Operations Manager role. `procurement_issue_po` is tier 3 (commits real spend); the rest are tier 1-2. Approve/reject was deliberately left human-only — see the Procurement section below.
 
 ---
 
@@ -125,19 +128,23 @@ This means HR/People-ops isn't a tooling gap like the others below; it's a **dat
 | Review project timeline/milestones | 🟡 | `getProjectTimeline`, `createMilestone`/`updateMilestone` exist, no tool |
 | Generate/approve a project plan | 🟡 | `project-planner.service.ts` + approval endpoint exist, UI-only |
 
-## Procurement & Purchasing (Procurement Clerk / Buyer)
+## Procurement & Purchasing (Procurement Clerk / Buyer) — ✅ closed 2026-07-20
 
 | Task | Status | Evidence |
 |---|---|---|
-| Create a purchase/procurement request | ❌ | `procurement.service.ts: create()`, no tool |
-| Submit request for approval | ❌ | `submitForReview()`, no tool |
-| Select a vendor/supplier | ❌ | `selectVendor()`, no tool |
-| Issue a purchase order | ❌ | `issuePO()`, no tool |
-| Acknowledge vendor confirmation | ❌ | `acknowledgeVendor()`, no tool |
-| Mark order fulfilled / invoiced | ❌ | `markFulfilled()`, `markInvoiced()`, no tool |
-| Check procurement stats/spend | ❌ | `getStats()`, no tool |
+| Create a purchase/procurement request | ✅ | `procurement_create_request` (flow-tool-registry.ts, tier 2) |
+| Submit request for approval | ✅ | `procurement_submit_for_review` (tier 2) |
+| Select a vendor/supplier | ✅ | `procurement_select_vendor` (tier 2) |
+| Issue a purchase order | ✅ | `procurement_issue_po` (tier 3 — commits real spend, requires selected vendor) |
+| Acknowledge vendor confirmation | ✅ | `procurement_acknowledge_vendor` (tier 2) |
+| Mark order fulfilled / invoiced | ✅ | `procurement_mark_fulfilled`, `procurement_mark_invoiced` (tier 2) |
+| Check procurement stats/spend | ✅ | `procurement_get_stats` (tier 1) |
 
-Entire department: full backend (`procurement.controller.ts`, 11 endpoints), **zero** AI tool coverage. Cheapest full-department win available — the CRUD logic already exists, it just needs wrapping.
+Plus `procurement_list_requests`, `procurement_get_request`, `procurement_list_suppliers` (read, tier 1) for context-gathering.
+
+**Deliberate exception — approve/reject stays human-only.** `updateStatus(businessId, id, 'APPROVED'|'REJECTED', ...)` is intentionally not exposed as a tool: a business shouldn't let KEY approve its own spend requests. That decision stays on the human approver via the existing `/app/procurement` UI (`POST .../approve`, `.../reject`), same as before. Every other tool declares a `manualEquivalentRoute` back to `/app/procurement`, so manual and AI-driven execution both go through `ProcurementService` — nothing forked.
+
+All 12 tools wired into the Operations Manager persona (`role-engine.service.ts`: `procurement_*` in `approvedTools`, plus route/entity/keyword role-detection). Operations' `maxRiskTier` is 2, so `procurement_issue_po` (tier 3) is reachable but requires confirmation/approval rather than auto-executing — consistent with how `bookings_cancel_booking` and `commerce_delete_invoice` are already handled for this role.
 
 ## Time & Resource Management (Scheduler / Resource Manager)
 
@@ -226,7 +233,7 @@ Every task here has *some* backend logic — this department is closer than HR, 
 ## Suggested build order
 
 **Tier 1 — cheapest, wrap what already exists (no new backend logic):**
-bank reconciliation, chart-of-accounts, AP/bills, journal entries, task reassignment (add `assigneeId` param to `projects_update_task`), project budget/timeline tools, contract CRUD + term-extraction, ticket reply, broadcast messaging, key-inbox thread reply/escalate, deal/pipeline-stage tools, duplicate-contact merge, social analytics, no-show handling, procurement's full 11-endpoint wrap.
+~~procurement's full 11-endpoint wrap~~ (done 2026-07-20). Remaining: bank reconciliation, chart-of-accounts, AP/bills, journal entries, task reassignment (add `assigneeId` param to `projects_update_task`), project budget/timeline tools, contract CRUD + term-extraction, ticket reply, broadcast messaging, key-inbox thread reply/escalate, deal/pipeline-stage tools, duplicate-contact merge, social analytics, no-show handling.
 
 **Tier 2 — needs some new logic:**
 staff availability/capacity tool, refund execution tool, waitlist management, booking staff-reassignment, SEO auto-remediation, paid-social/ads integration.
