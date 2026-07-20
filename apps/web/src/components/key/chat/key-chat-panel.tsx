@@ -19,6 +19,14 @@ export function KeyChatPanel({ className }: KeyChatPanelProps) {
   const { open, setOpen, showHistory, setShowHistory } = useKeyChat();
   const { sendMessage, stop, confirmAction } = useKeyChatActions();
 
+  // Card advances outside /app/onboarding drive the flow conversationally.
+  const handleCardAdvance = (step: string) => {
+    void sendMessage(
+      `The user finished the "${step}" onboarding step. Present the next step's card.`,
+      { silent: true },
+    );
+  };
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape" && open) {
@@ -89,7 +97,7 @@ export function KeyChatPanel({ className }: KeyChatPanelProps) {
                   </div>
                 )}
                 <div className="flex min-w-0 flex-1 flex-col">
-                  <KeyChatMessages onConfirmAction={confirmAction} />
+                  <KeyChatMessages onConfirmAction={confirmAction} onCardAdvance={handleCardAdvance} />
                   <KeyChatVoiceBar />
                   <KeyChatInput onSend={sendMessage} onStop={stop} />
                 </div>

@@ -98,6 +98,17 @@ export function KeyFullChatShell() {
     setShowModeMenu(false);
   }, [setChatMode]);
 
+  // Card advances outside /app/onboarding drive the flow conversationally.
+  const handleCardAdvance = useCallback(
+    (step: string) => {
+      void sendMessage(
+        `The user finished the "${step}" onboarding step. Present the next step's card.`,
+        { silent: true },
+      );
+    },
+    [sendMessage],
+  );
+
   const isLoading = status === "streaming" || status === "loading";
 
   return (
@@ -185,7 +196,7 @@ export function KeyFullChatShell() {
 
         {/* Messages */}
         <div className="flex-1 min-h-0">
-          <KeyChatMessages onConfirmAction={confirmAction} />
+          <KeyChatMessages onConfirmAction={confirmAction} onCardAdvance={handleCardAdvance} />
         </div>
 
         {/* Voice Bar */}

@@ -5,9 +5,10 @@ import { Plus, Trash2, MessageSquare, Loader2, Dna, CheckCircle2 } from "lucide-
 import { cn } from "@/lib/utils";
 import { useKeyChat } from "./key-chat-store";
 import { useKeyChatActions } from "./use-key-chat-actions";
-import { formatTime } from "./utils";
+import { formatTime, nanoid } from "./utils";
 import { getGenome, type GenomeIntegrityResult } from "@/lib/api/business-genome";
 import { getStoredBusinessId } from "@/lib/workspace";
+import { fetchFlowSessions } from "@/lib/client";
 
 const GENOME_SESSION_ID = "onboarding";
 
@@ -29,7 +30,7 @@ function GenomePillarBar({ label, score }: { label: string; score: number }) {
 }
 
 export function KeyChatHistory() {
-  const { sessions, activeSessionId, status, setCurrentModule, setPageContext } = useKeyChat();
+  const { sessions, activeSessionId, status, setCurrentModule, setPageContext, appendMessage } = useKeyChat();
   const { loadSessions, selectSession, createNewSession, deleteSession } = useKeyChatActions();
   const [genome, setGenome] = useState<GenomeIntegrityResult | null>(null);
 
@@ -49,7 +50,7 @@ export function KeyChatHistory() {
       });
   }, []);
 
-  const openGenomeChat = () => {
+  const openGenomeChat = async () => {
     setCurrentModule("onboarding");
     setPageContext({
       route: window.location.pathname,
@@ -57,7 +58,38 @@ export function KeyChatHistory() {
       mode: "onboarding",
       hints: ["business genome completion"],
     });
-    void selectSession(GENOME_SESSION_ID);
+
+    // Restore the saved genome conversation if one exists — otherwise seed
+    // the built-in one so the user lands IN the chat, not on an empty thread.
+    const businessId = getStoredBusinessId();
+    let hasSavedConversation = false;
+    if (businessId) {
+      const res = await fetchFlowSessions(businessId);
+      hasSavedConversation = Boolean(
+        (res.data as Array<Record<string, unknown>> | null)?.find(
+          (s) =>
+            s.id === GENOME_SESSION_ID &&
+            Array.isArray(s.messages) &&
+            (s.messages as unknown[]).length > 0,
+        ),
+      );
+    }
+
+    await selectSession(GENOME_SESSION_ID);
+
+    if (!hasSavedConversation) {
+      appendMessage({
+        id: nanoid(),
+        role: "assistant",
+        content:
+          "Hi! I’m KEY. Let’s finish setting up your Business Genome — tell me what you’re building and I’ll fill in the rest. A few sentences is enough to start.",
+        timestamp: Date.now(),
+        card: {
+          type: "welcome",
+          title: "Complete your Business Genome",
+        },
+      });
+    }
   };
 
   const genomeActive = activeSessionId === GENOME_SESSION_ID;
