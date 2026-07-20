@@ -101,7 +101,10 @@ export class KeyGenomeBackfillService {
     private readonly evidenceService: GenomeEvidenceService,
   ) {}
 
-  async backfill(businessId: string): Promise<{ factsUpserted: number; evidenceAttached: number }> {
+  async backfill(
+    businessId: string,
+    columns?: string[],
+  ): Promise<{ factsUpserted: number; evidenceAttached: number }> {
     const blueprint = await this.prisma.client.businessBlueprint.findUnique({
       where: { businessId },
     });
@@ -114,6 +117,8 @@ export class KeyGenomeBackfillService {
     let evidenceAttached = 0;
 
     for (const [column, section] of Object.entries(BLUEPRINT_SECTION_MAP)) {
+      // When scoped, only reconcile the columns that actually changed.
+      if (columns && !columns.includes(column)) continue;
       const data = (blueprint as Record<string, unknown>)[column];
       if (!data || !isPlainObject(data)) continue;
 

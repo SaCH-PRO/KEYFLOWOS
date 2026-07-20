@@ -19,6 +19,7 @@ import { AiAdvisorService } from './ai-advisor.service';
 import { AiUsageService } from './ai-usage.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
 import { AiOversightService } from './ai-oversight.service';
+import { GenomeFactService } from '../business-genome/key-genome/genome-fact.service';
 import { BusinessGraphService } from './business-graph.service';
 import { PlannerService } from './planner.service';
 import { getOpenAiToolDefinitions, getToolByName, RiskLevel, ToolFamily, wrapToolResult, FlowTool } from './flow-tool-registry';
@@ -69,6 +70,7 @@ export interface FlowToolCall {
   name: string;
   arguments: Record<string, any>;
   riskLevel: RiskLevel;
+  description?: string;
 }
 
 export interface FlowToolResult {
@@ -267,13 +269,14 @@ export class FlowOrchestratorService {
     @Inject(AiAdvisorService) private readonly advisor: AiAdvisorService,
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
     @Inject(AiExecutionLogService) private readonly executionLog: AiExecutionLogService,
-    @Inject(AiOversightService) private readonly governance: AiOversightService,
+    @Inject(forwardRef(() => AiOversightService)) private readonly governance: AiOversightService,
     @Inject(BusinessGraphService) private readonly businessGraph: BusinessGraphService,
     @Inject(forwardRef(() => PlannerService)) private readonly planner: PlannerService,
     @Inject(AiMemoryService) private readonly memory: AiMemoryService,
     @Inject(ModelGatewayService) private readonly gateway: ModelGatewayService,
     @Inject(CatalogService) private readonly catalog: CatalogService,
     @Inject(BlueprintService) private readonly blueprint: BlueprintService,
+    @Inject(GenomeFactService) private readonly genomeFacts: GenomeFactService,
     @Inject(AiMessageSenderService) private readonly messageSender: AiMessageSenderService,
     @Inject(SemanticMemoryService) private readonly semanticMemory: SemanticMemoryService,
     @Inject(RoleEngineService) private readonly roleEngine: RoleEngineService,
@@ -554,6 +557,27 @@ export class FlowOrchestratorService {
     }
     if (ctx.complianceProfile?.complianceScore !== undefined) {
       lines.push(`- Compliance score: ${ctx.complianceProfile.complianceScore}%`);
+    }
+
+    // Genome facts — KEY's working knowledge about the business, synced from
+    // every blueprint write. Additive only: never block the prompt on them.
+    try {
+      const facts = await this.genomeFacts.listTopFacts(businessId, 30);
+      if (facts.length > 0) {
+        const factLines = facts.map((f) => {
+          const raw = typeof f.value?.raw === 'string' ? f.value.raw : JSON.stringify(f.value?.raw ?? '');
+          const value = raw.length > 80 ? `${raw.slice(0, 77)}…` : raw;
+          const statusLabel = String(f.verificationStatus) === 'USER_VERIFIED'
+            ? 'verified'
+            : String(f.verificationStatus) === 'STALE'
+              ? 'stale'
+              : 'unverified';
+          return `- [${f.section}] ${f.domain}.${f.field}: ${value} (${statusLabel})`;
+        });
+        return '\n' + lines.join('\n') + '\n\nBusiness Genome facts (working knowledge):\n' + factLines.join('\n');
+      }
+    } catch {
+      // facts are additive; the blueprint summary above is the baseline
     }
     return '\n' + lines.join('\n');
   }
@@ -1175,7 +1199,9 @@ export class FlowOrchestratorService {
 
         if (chunk.type === 'content_delta' && chunk.content) {
           fullContent += chunk.content;
-          yield { type: 'content_delta', content: chunk.content };
+          // Yield cumulative content so clients can render with replace
+          // semantics (raw provider deltas are fragments).
+          yield { type: 'content_delta', content: fullContent };
         }
 
         if (chunk.type === 'tool_call_delta' && chunk.toolCall) {
@@ -1233,6 +1259,7 @@ export class FlowOrchestratorService {
           name: acc.name,
           arguments: JSON.parse(acc.arguments || '{}'),
           riskLevel: tool?.riskLevel ?? 'low',
+          description: this.describeToolCall(acc.name, JSON.parse(acc.arguments || '{}')),
         });
       }
 
@@ -1376,7 +1403,10 @@ export class FlowOrchestratorService {
       for await (const chunk of followUpStream) {
         if (chunk.type === 'content_delta' && chunk.content) {
           followUpContent += chunk.content;
-          yield { type: 'content_delta', content: chunk.content };
+          // Cumulative, continuing from the pre-tool text so the client
+          // can keep rendering with replace semantics.
+          const combined = fullContent ? `${fullContent}\n\n${followUpContent}` : followUpContent;
+          yield { type: 'content_delta', content: combined };
         }
       }
 
