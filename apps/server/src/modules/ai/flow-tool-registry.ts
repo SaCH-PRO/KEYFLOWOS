@@ -2349,12 +2349,12 @@ export const FLOW_TOOLS: FlowTool[] = [
   // ================================================================
   {
     name: 'projects_update_task',
-    description: 'Update a project task title, due date, priority, or completion status.',
+    description: 'Update a project task title, due date, priority, completion status, or reassign it to a different user or staff member (e.g. to rebalance workload when someone is overloaded).',
     family: 'crud',
     riskLevel: 'medium',
     riskTier: 2 as RiskTier,
     manualEquivalentRoute: '/app/projects',
-    changedEntities: ['projectTask'],
+    changedEntities: ['projectTask', 'taskAssignment'],
     parameters: {
       type: 'object',
       properties: {
@@ -2363,10 +2363,11 @@ export const FLOW_TOOLS: FlowTool[] = [
         dueDate: { type: 'string', description: 'New due date (ISO)' },
         priority: { type: 'string', description: 'Priority: LOW, NORMAL, HIGH, URGENT' },
         isCompleted: { type: 'boolean', description: 'Mark as completed' },
+        assigneeId: { type: 'string', description: 'User or StaffMember ID to reassign the task to. Pass an empty string to unassign.' },
       },
       required: ['taskId'],
     },
-    outputSchema: { type: 'object', description: 'Updated task', fields: { id: { type: 'string', description: 'Task ID' }, title: { type: 'string', description: 'Task title' } } },
+    outputSchema: { type: 'object', description: 'Updated task', fields: { id: { type: 'string', description: 'Task ID' }, title: { type: 'string', description: 'Task title' }, assigneeId: { type: 'string', description: 'New assignee ID' } } },
   },
   {
     name: 'projects_delete_task',

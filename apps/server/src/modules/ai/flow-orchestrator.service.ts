@@ -3287,8 +3287,9 @@ export class FlowOrchestratorService {
           dueDate: args.dueDate ? new Date(args.dueDate).toISOString() : undefined,
           priority: args.priority,
           isCompleted: args.isCompleted,
+          assigneeId: args.assigneeId,
         });
-        return { id: task.id, title: task.title };
+        return { id: task.id, title: task.title, assigneeId: (task as any).assigneeId ?? args.assigneeId };
       }
       case 'projects_delete_task': {
         await this.getProjects().deleteTask(businessId, args.taskId);
@@ -3517,7 +3518,9 @@ export class FlowOrchestratorService {
       case 'finance_list_action_items':
         return 'List finance action items';
       case 'projects_update_task':
-        return `Update project task ${args.taskId}`;
+        return args.assigneeId !== undefined
+          ? `Reassign project task ${args.taskId} to ${args.assigneeId || 'unassigned'}`
+          : `Update project task ${args.taskId}`;
       case 'projects_delete_task':
         return `Delete project task ${args.taskId}`;
       case 'commerce_update_invoice':
