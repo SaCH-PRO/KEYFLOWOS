@@ -1,3 +1,5 @@
+> **Archived 2026-07-20.** Mid-May snapshot of KEY's capabilities, superseded by the later phases documented in `KEY_10_ROADMAP_v2.md` (Phases A–E, including the genome-bridge and approval-gate work this doc flagged as gaps). Kept for historical record only.
+
 # KEY AI Capability Assessment
 ## From CEO to Floor: Evaluating KEY as a "Super Employee"
 

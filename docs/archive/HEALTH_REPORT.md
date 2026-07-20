@@ -1,3 +1,5 @@
+> **Archived 2026-07-20.** Frozen point-in-time snapshot from 2026-05-02; build/lint/CVE counts described here are stale. See `SECURITY.md` for the current audit log and run the actual lint/typecheck scripts for current numbers. Kept for historical record only.
+
 # KeyflowOS Codebase Health Report
 
 **Date:** 2026-05-02

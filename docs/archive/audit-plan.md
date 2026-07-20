@@ -1,3 +1,5 @@
+> **Archived 2026-07-20 — factually stale.** Describes a `GovernanceService`/`KeyToolRegistry` that no longer exist in the codebase; the real equivalents are `AiOversightService` (`apps/server/src/modules/ai/ai-oversight.service.ts`) and `flow-tool-registry.ts`, both fully implemented. See `KEY_10_ROADMAP_v2.md` for the current, accurate state of the KEY AI system. Kept for historical record only.
+
 # KEYFLOWOS Module Audit & Next-Phase Plan
 
 ## Audit Findings Summary

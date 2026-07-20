@@ -1,3 +1,5 @@
+> **Archived 2026-07-20.** One-time Task #240 cleanup, already executed — repo currently has only `main` and active working branches, no stale branch clutter. Kept for historical record only.
+
 # Branch Cleanup Report
 
 **Task:** #240 — Branch cleanup, develop retirement, and divergence guardrails

@@ -1,3 +1,5 @@
+> **Archived 2026-07-20.** Point-in-time snapshot of a one-off Task #174 migration pass. Superseded by `MIGRATION.md` and `DEPLOYMENT.md` for current deployment reality. Kept for historical record only.
+
 # KEYFLOWOS — Reality Audit & Replit-Independence Pass
 
 **Task:** #174
