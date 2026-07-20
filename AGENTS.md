@@ -40,8 +40,12 @@ rm -rf .turbo/cache \
 mkdir -p apps/web/.next/cache/webpack
 
 # 3. Ensure DB is up
-#    If `migrate dev` fails with "type \"vector\" does not exist", pgvector is
-#    not available in the ephemeral shadow DB. Enable it in template1 first:
+#    The docker-compose `db` service uses `pgvector/pgvector:pg16`, so the
+#    `vector` extension is available (enable once per database:
+#      docker compose exec db psql -U keyflow -d keyflowos -c "CREATE EXTENSION IF NOT EXISTS vector;"
+#    and in template1 for the ephemeral shadow DB used by `migrate dev`).
+#    On an external/plain Postgres instead, `migrate dev` fails with
+#    "type \"vector\" does not exist" — enable it in template1 first:
 #      psql -h localhost -U keyflow -d template1 -c "CREATE EXTENSION IF NOT EXISTS vector;"
 #    See docs/development/prisma-migration-repair.md for the full repair history.
 npx prisma migrate dev --schema packages/db/prisma/schema.prisma
