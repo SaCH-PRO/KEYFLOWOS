@@ -92,6 +92,7 @@ export interface PrimaryNavItem {
 
 export const primaryNav: PrimaryNavItem[] = [
   { id: "cockpit", label: "Cockpit", icon: Zap, href: "/app/command-center" },
+  { id: "key-chat", label: "KEY", icon: Bot, href: "/app/key/chat" },
   { id: "operate", label: "Operate", icon: Briefcase },
   { id: "build", label: "Build", icon: Wrench },
   { id: "me", label: "Me", icon: User },

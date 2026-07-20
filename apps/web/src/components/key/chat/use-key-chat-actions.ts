@@ -394,6 +394,8 @@ export function useKeyChatActions() {
         createdAt: String(s.createdAt),
       };
     });
+    // The pinned genome conversation always sorts first.
+    sessions.sort((a, b) => (a.id === "onboarding" ? -1 : b.id === "onboarding" ? 1 : 0));
     chat.setSessions(sessions);
   }, [chat, chatMode]);
 

@@ -2,12 +2,15 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type React from "react";
-import { useKeyChat, useKeyChatActions, KeyChatMessages, KeyChatInput, KeyChatVoiceBar } from "@/components/key/chat";
-import { PanelLeft, Plus, MessageSquare, Bot, LayoutGrid, Dna, Shield, TrendingUp, Users, Settings, ChevronDown, X } from "lucide-react";
+import Link from "next/link";
+import { useKeyChat, useKeyChatActions, KeyChatMessages, KeyChatInput, KeyChatVoiceBar, KeyChatHistory } from "@/components/key/chat";
+import { PanelLeft, Bot, LayoutGrid, Dna, Shield, TrendingUp, Users, Settings, ChevronDown, ArrowRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { KeyActionChips } from "./key-action-chips";
 import { KeyGenomePreview } from "./key-genome-preview";
+import { fetchAiApprovals, type AiApprovalItem } from "@/lib/api/ai-approvals";
+import { getStoredBusinessId } from "@/lib/workspace";
 
 type ChatMode = "general" | "genome_onboarding" | "executive" | "finance" | "sales" | "operations";
 
@@ -20,26 +23,58 @@ const MODES: { id: ChatMode; label: string; icon: React.ReactNode; description: 
   { id: "operations", label: "Operations", icon: <Settings className="h-3.5 w-3.5" />, description: "Operations" },
 ];
 
+function ApprovalsRail() {
+  const [items, setItems] = useState<AiApprovalItem[] | null>(null);
+
+  useEffect(() => {
+    const businessId = getStoredBusinessId();
+    if (!businessId) return;
+    fetchAiApprovals(businessId, { status: "pending", limit: 3 })
+      .then(({ data }) => setItems(data?.items ?? []))
+      .catch(() => setItems([]));
+  }, []);
+
+  return (
+    <div className="p-4 flex-1">
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          Pending Approvals
+        </h3>
+        <Link href="/app/approvals" className="flex items-center gap-1 text-[10px] text-[hsl(var(--kf-accent1))] hover:underline">
+          Review <ArrowRight className="h-3 w-3" />
+        </Link>
+      </div>
+      {items === null ? (
+        <div className="text-xs text-muted-foreground">Loading…</div>
+      ) : items.length === 0 ? (
+        <div className="text-xs text-muted-foreground">No pending approvals</div>
+      ) : (
+        <div className="space-y-2">
+          {items.map((item) => (
+            <Link
+              key={item.id}
+              href="/app/approvals"
+              className="block rounded-lg border border-border/50 bg-card/60 p-2.5 transition-colors hover:bg-card"
+            >
+              <p className="truncate text-xs font-medium text-foreground">{item.title}</p>
+              <p className="text-[10px] text-muted-foreground">
+                Tier {item.riskTier} · {item.toolName.replace(/_/g, " ")}
+              </p>
+            </Link>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function KeyFullChatShell() {
-  const { status, showHistory, setShowHistory, activeSessionId, sessions, chatMode, setChatMode, messages, setMessages, setActiveSessionId, setInput, setStatus, setError } = useKeyChat();
-  const { sendMessage, stop, confirmAction, loadSessions, createNewSession, selectSession } = useKeyChatActions();
-  const [mode, setMode] = useState<ChatMode>(chatMode ?? "general");
+  const { status, showHistory, setShowHistory, chatMode, setChatMode } = useKeyChat();
+  const { sendMessage, stop, confirmAction, loadSessions } = useKeyChatActions();
+  // Mode lives in the chat store (sendMessage branches on it); no local copy.
+  const mode = (chatMode as ChatMode) ?? "general";
   const [showModeMenu, setShowModeMenu] = useState(false);
   const modeMenuRef = useRef<HTMLDivElement>(null);
-
-  // Sync local mode state with store
-  useEffect(() => {
-    if (mode !== chatMode) {
-      setChatMode(mode);
-    }
-  }, [mode, chatMode, setChatMode]);
-
-  // Sync store mode to local when it changes externally
-  useEffect(() => {
-    if (chatMode && chatMode !== mode) {
-      setMode(chatMode as ChatMode);
-    }
-  }, [chatMode, mode]);
 
   useEffect(() => {
     void loadSessions();
@@ -57,17 +92,11 @@ export function KeyFullChatShell() {
     return () => document.removeEventListener("mousedown", handleClick);
   }, [showModeMenu]);
 
-  // Reset chat state when mode changes (clear messages, start fresh)
+  // Mode is a hint for subsequent messages — never wipes the conversation.
   const handleModeChange = useCallback((newMode: ChatMode) => {
-    setMode(newMode);
+    setChatMode(newMode);
     setShowModeMenu(false);
-    // Reset chat state for the new mode
-    setMessages([]);
-    setActiveSessionId(null);
-    setInput("");
-    setStatus("idle");
-    setError(undefined);
-  }, [setMessages, setActiveSessionId, setInput, setStatus, setError]);
+  }, [setChatMode]);
 
   const isLoading = status === "streaming" || status === "loading";
 
@@ -91,7 +120,7 @@ export function KeyFullChatShell() {
               <span className="flex-1">{MODES.find(m => m.id === mode)?.label}</span>
               <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
             </button>
-            
+
             {showModeMenu && (
               <div className="absolute top-full left-0 right-0 mt-1 z-50 rounded-lg border border-border/50 bg-card shadow-lg p-1">
                 {MODES.map((m) => (
@@ -115,47 +144,9 @@ export function KeyFullChatShell() {
           </div>
         </div>
 
-        {/* New Chat Button */}
-        <div className="p-3">
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full text-xs"
-            onClick={createNewSession}
-          >
-            <Plus className="h-3.5 w-3.5 mr-1" />
-            New Chat
-          </Button>
-        </div>
-
-        {/* Session List */}
-        <div className="flex-1 overflow-y-auto px-2">
-          <div className="mb-2 px-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-            Recent
-          </div>
-          {sessions.length === 0 ? (
-            <div className="px-2 py-4 text-center text-xs text-muted-foreground">
-              No conversations yet
-            </div>
-          ) : (
-            <div className="flex flex-col gap-0.5">
-              {sessions.map((session) => (
-                <button
-                  key={session.id}
-                  onClick={() => selectSession(session.id)}
-                  className={cn(
-                    "flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs transition-colors",
-                    activeSessionId === session.id
-                      ? "bg-muted text-foreground"
-                      : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
-                  )}
-                >
-                  <MessageSquare className="h-3.5 w-3.5 shrink-0 opacity-60" />
-                  <span className="flex-1 truncate">{session.title}</span>
-                </button>
-              ))}
-            </div>
-          )}
+        {/* Shared history: pinned genome chat + sessions */}
+        <div className="flex-1 min-h-0">
+          <KeyChatHistory />
         </div>
       </div>
 
@@ -225,14 +216,7 @@ export function KeyFullChatShell() {
         </div>
 
         {/* Approvals Queue */}
-        <div className="p-4 flex-1">
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-            Pending Approvals
-          </h3>
-          <div className="text-xs text-muted-foreground">
-            No pending approvals
-          </div>
-        </div>
+        <ApprovalsRail />
       </div>
     </div>
   );

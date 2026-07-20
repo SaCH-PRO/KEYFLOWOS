@@ -1,4 +1,3 @@
-export { KeyChatShell } from "./key-chat-shell";
 export * from "./types";
 export * from "./constants";
 export { KeyChatProvider, useKeyChat } from "./key-chat-store";

@@ -42,6 +42,7 @@ import { TaskAssignmentModule } from '../task-assignments/task-assignment.module
 import { KeyAutonomyModule } from '../key-autonomy/key-autonomy.module';
 import { KeyCortexModule } from '../key-cortex/key-cortex.module';
 import { KeyGenomeModule } from '../business-genome/key-genome/key-genome.module';
+import { ConversationGenomeExtractorService } from './conversation-genome-extractor.service';
 import { KeyCommandService } from './key-command.service';
 import { KeyToolRegistryService } from './key-tool-registry.service';
 import { AutopilotRulesService } from './autopilot-rules.service';
@@ -93,6 +94,7 @@ import { AiApprovalsService } from './ai-approvals.service';
     AiUsageAlertSchedulerService,
     OutputTemplateService,
     FlowOrchestratorService,
+    ConversationGenomeExtractorService,
     BusinessGraphService,
     AiOversightService,
     ApprovalRoutingService,

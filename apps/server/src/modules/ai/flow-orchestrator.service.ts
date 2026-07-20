@@ -19,6 +19,7 @@ import { AiAdvisorService } from './ai-advisor.service';
 import { AiUsageService } from './ai-usage.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
 import { AiOversightService } from './ai-oversight.service';
+import { ConversationGenomeExtractorService } from './conversation-genome-extractor.service';
 import { GenomeFactService } from '../business-genome/key-genome/genome-fact.service';
 import { BusinessGraphService } from './business-graph.service';
 import { PlannerService } from './planner.service';
@@ -277,6 +278,7 @@ export class FlowOrchestratorService {
     @Inject(CatalogService) private readonly catalog: CatalogService,
     @Inject(BlueprintService) private readonly blueprint: BlueprintService,
     @Inject(GenomeFactService) private readonly genomeFacts: GenomeFactService,
+    @Inject(ConversationGenomeExtractorService) private readonly genomeExtractor: ConversationGenomeExtractorService,
     @Inject(AiMessageSenderService) private readonly messageSender: AiMessageSenderService,
     @Inject(SemanticMemoryService) private readonly semanticMemory: SemanticMemoryService,
     @Inject(RoleEngineService) private readonly roleEngine: RoleEngineService,
@@ -3759,6 +3761,19 @@ export class FlowOrchestratorService {
       create: { id: sessionId, businessId, messages: messages as any },
       update: { messages: messages as any, updatedAt: new Date() },
     });
+
+    // Every conversation feeds the genome: extract durable business facts
+    // from the fresh turn into pending genome signals. Fire-and-forget —
+    // extraction must never block or break a turn.
+    const lastUser = [...messages].reverse().find((m) => m.role === 'user');
+    const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
+    if (lastUser?.content && lastAssistant?.content) {
+      this.genomeExtractor
+        .extractFromTurn(businessId, lastUser.content, lastAssistant.content)
+        .catch((err: unknown) => {
+          this.logger.warn(`Genome extraction failed for ${businessId}: ${err instanceof Error ? err.message : String(err)}`);
+        });
+    }
   }
 
   async listSessions(businessId: string) {
