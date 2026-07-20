@@ -25,9 +25,11 @@ import { TaskAssignmentModule } from '../task-assignments/task-assignment.module
 import { TimelineModule } from '../timeline/timeline.module';
 import { KeyInboxModule } from '../key-inbox/key-inbox.module';
 import { PrismaModule } from '../../core/prisma/prisma.module';
+import { StructureModule } from '../structure/structure.module';
+import { WhatsAppModule } from '../whatsapp/whatsapp.module';
 
 @Module({
-  imports: [AiModule, CommandModule, CrmModule, TaskAssignmentModule, TimelineModule, KeyInboxModule, PrismaModule],
+  imports: [AiModule, CommandModule, CrmModule, TaskAssignmentModule, TimelineModule, KeyInboxModule, PrismaModule, StructureModule, WhatsAppModule],
   controllers: [
     CommunicationsController,
     InboundCommunicationsController,

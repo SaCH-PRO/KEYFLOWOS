@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsBoolean } from 'class-validator';
+import { IsString, IsOptional, IsBoolean, IsIn, IsEmail } from 'class-validator';
 
 export class UpdateAssignmentDto {
   @IsOptional()
@@ -19,4 +19,24 @@ export class UpdateAssignmentDto {
 
   @IsOptional()
   endedAt?: string;
+
+  @IsOptional()
+  @IsString()
+  contactName?: string;
+
+  @IsOptional()
+  @IsEmail()
+  contactEmail?: string;
+
+  @IsOptional()
+  @IsString()
+  contactPhone?: string;
+
+  @IsOptional()
+  @IsIn(['whatsapp', 'sms', 'email', 'none'])
+  preferredChannel?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  autoApprovalViaReply?: boolean;
 }

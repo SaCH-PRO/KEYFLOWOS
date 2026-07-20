@@ -5,9 +5,10 @@ import { WhatsAppNotificationsListener } from './whatsapp-notifications.listener
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { EntityResolutionService } from '../../core/connectors/entity-resolution.service';
 import { KeyInboxModule } from '../key-inbox/key-inbox.module';
+import { StructureModule } from '../structure/structure.module';
 
 @Module({
-  imports: [KeyInboxModule],
+  imports: [KeyInboxModule, StructureModule],
   providers: [WhatsAppService, WhatsAppNotificationsListener, PrismaService, EntityResolutionService],
   controllers: [WhatsAppController],
   exports: [WhatsAppService],

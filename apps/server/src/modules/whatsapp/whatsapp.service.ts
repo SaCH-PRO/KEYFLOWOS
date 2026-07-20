@@ -6,6 +6,7 @@ import { encryptToken, decryptToken } from '../../core/crypto/token-crypto';
 import { KeyInboxService } from '../key-inbox/key-inbox.service';
 import { KEY_INBOX_CHANNELS } from '../key-inbox/key-inbox.constants';
 import type { ResolvedEntity } from '../../core/connectors/entity-resolution.service';
+import { StaffChatBridgeService } from '../structure/staff-chat-bridge.service';
 
 export interface WhatsAppMessage {
   to: string;
@@ -67,9 +68,22 @@ export class WhatsAppService {
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Inject(EntityResolutionService) private readonly entityResolution: EntityResolutionService,
     @Inject(KeyInboxService) private readonly keyInbox: KeyInboxService,
+    @Inject(StaffChatBridgeService) private readonly staffChat: StaffChatBridgeService,
   ) {}
 
   async receiveInbound(businessId: string, payload: WhatsAppInboundPayload) {
+    // Staff members (full account or contact-only) can talk to KEY directly
+    // over WhatsApp — check that before treating this as a customer inquiry.
+    if (payload.body?.trim()) {
+      const staffResult = await this.staffChat.routeInboundMessage(businessId, payload.from, payload.body, 'whatsapp');
+      if (staffResult.handled) {
+        if (staffResult.reply) {
+          await this.sendMessage(businessId, { to: payload.from, body: staffResult.reply });
+        }
+        return { contactId: null, matchedOn: 'staff_position' as const, isNew: false, merged: false };
+      }
+    }
+
     const resolved = await this.entityResolution.resolveContact(businessId, {
       source: 'whatsapp',
       phone: payload.from,

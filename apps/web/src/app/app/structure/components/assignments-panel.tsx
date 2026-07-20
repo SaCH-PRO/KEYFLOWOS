@@ -49,6 +49,12 @@ export function AssignmentsPanel() {
     jobRoleId: "",
     reportsToId: "",
     isPrimary: true,
+    isContactOnly: false,
+    contactName: "",
+    contactEmail: "",
+    contactPhone: "",
+    preferredChannel: "whatsapp",
+    autoApprovalViaReply: false,
   });
 
   const load = async () => {
@@ -95,18 +101,31 @@ export function AssignmentsPanel() {
   const assignmentName = (id: string) => {
     const a = assignments.find((x) => x.id === id);
     if (!a) return id.slice(0, 8);
+    if (a.isContactOnly) return a.contactName || a.contactPhone || id.slice(0, 8);
     const u = a.membership?.user;
-    return u?.name || `${u?.firstName || ""} ${u?.lastName || ""}`.trim() || u?.email || a.userId;
+    return u?.name || `${u?.firstName || ""} ${u?.lastName || ""}`.trim() || u?.email || a.userId || id.slice(0, 8);
   };
 
   const resetForm = () => {
-    setForm({ membershipId: "", userId: "", orgUnitId: "", jobRoleId: "", reportsToId: "", isPrimary: true });
+    setForm({
+      membershipId: "", userId: "", orgUnitId: "", jobRoleId: "", reportsToId: "", isPrimary: true,
+      isContactOnly: false, contactName: "", contactEmail: "", contactPhone: "", preferredChannel: "whatsapp", autoApprovalViaReply: false,
+    });
     setShowForm(false);
   };
 
   const handleSubmit = async () => {
-    if (!businessId || !form.membershipId || !form.orgUnitId) {
-      toast.error("Select a staff member and org unit");
+    if (!businessId || !form.orgUnitId) {
+      toast.error("Select an org unit");
+      return;
+    }
+    if (form.isContactOnly) {
+      if (!form.contactName.trim() || !form.contactPhone.trim()) {
+        toast.error("Contact-only staff need a name and phone number");
+        return;
+      }
+    } else if (!form.membershipId) {
+      toast.error("Select a staff member, or switch to \"Contact only\"");
       return;
     }
     const res = await createAssignment(businessId, form);
@@ -153,25 +172,95 @@ export function AssignmentsPanel() {
 
       {showForm && (
         <div className="rounded-xl border border-border/60 bg-card/60 p-4 space-y-3">
+          <div className="flex items-center gap-1 rounded-md border border-border/60 bg-background p-0.5 w-fit">
+            <button
+              type="button"
+              onClick={() => setForm((f) => ({ ...f, isContactOnly: false }))}
+              className="h-7 px-3 rounded text-xs font-medium transition-colors"
+              style={!form.isContactOnly ? { background: "hsl(var(--kf-accent1))", color: "hsl(var(--kf-primary-foreground))" } : undefined}
+            >
+              Existing team member
+            </button>
+            <button
+              type="button"
+              onClick={() => setForm((f) => ({ ...f, isContactOnly: true }))}
+              className="h-7 px-3 rounded text-xs font-medium transition-colors"
+              style={form.isContactOnly ? { background: "hsl(var(--kf-accent1))", color: "hsl(var(--kf-primary-foreground))" } : undefined}
+            >
+              Contact only (no login)
+            </button>
+          </div>
+          {form.isContactOnly && (
+            <p className="text-[11px] text-muted-foreground">
+              For staff who won&apos;t use KeyflowOS directly but still need to receive delegated work and approvals — e.g. front-desk or floor staff. They&apos;ll be reachable over WhatsApp/SMS/email.
+            </p>
+          )}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div>
-              <label className="text-[11px] font-medium text-muted-foreground mb-1 block">Staff Member</label>
-              <select
-                value={form.membershipId}
-                onChange={(e) => {
-                  const m = members.find((x) => x.id === e.target.value);
-                  setForm((f) => ({ ...f, membershipId: e.target.value, userId: m?.userId ?? "" }));
-                }}
-                className="w-full h-9 px-2.5 rounded-md border border-border bg-background text-sm"
-              >
-                <option value="">Select member</option>
-                {members.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.user.name || `${m.user.firstName || ""} ${m.user.lastName || ""}`.trim() || m.user.email}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {form.isContactOnly ? (
+              <>
+                <div>
+                  <label className="text-[11px] font-medium text-muted-foreground mb-1 block">Name</label>
+                  <input
+                    type="text"
+                    value={form.contactName}
+                    onChange={(e) => setForm((f) => ({ ...f, contactName: e.target.value }))}
+                    placeholder="e.g. Maria Alexander"
+                    className="w-full h-9 px-2.5 rounded-md border border-border bg-background text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-medium text-muted-foreground mb-1 block">Phone (WhatsApp/SMS)</label>
+                  <input
+                    type="tel"
+                    value={form.contactPhone}
+                    onChange={(e) => setForm((f) => ({ ...f, contactPhone: e.target.value }))}
+                    placeholder="+1868..."
+                    className="w-full h-9 px-2.5 rounded-md border border-border bg-background text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-medium text-muted-foreground mb-1 block">Email (optional)</label>
+                  <input
+                    type="email"
+                    value={form.contactEmail}
+                    onChange={(e) => setForm((f) => ({ ...f, contactEmail: e.target.value }))}
+                    className="w-full h-9 px-2.5 rounded-md border border-border bg-background text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-medium text-muted-foreground mb-1 block">Preferred channel</label>
+                  <select
+                    value={form.preferredChannel}
+                    onChange={(e) => setForm((f) => ({ ...f, preferredChannel: e.target.value }))}
+                    className="w-full h-9 px-2.5 rounded-md border border-border bg-background text-sm"
+                  >
+                    <option value="whatsapp">WhatsApp</option>
+                    <option value="sms">SMS</option>
+                    <option value="email">Email</option>
+                    <option value="none">None (in-app only)</option>
+                  </select>
+                </div>
+              </>
+            ) : (
+              <div>
+                <label className="text-[11px] font-medium text-muted-foreground mb-1 block">Staff Member</label>
+                <select
+                  value={form.membershipId}
+                  onChange={(e) => {
+                    const m = members.find((x) => x.id === e.target.value);
+                    setForm((f) => ({ ...f, membershipId: e.target.value, userId: m?.userId ?? "" }));
+                  }}
+                  className="w-full h-9 px-2.5 rounded-md border border-border bg-background text-sm"
+                >
+                  <option value="">Select member</option>
+                  {members.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.user.name || `${m.user.firstName || ""} ${m.user.lastName || ""}`.trim() || m.user.email}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div>
               <label className="text-[11px] font-medium text-muted-foreground mb-1 block">Org Unit</label>
               <select
@@ -223,6 +312,19 @@ export function AssignmentsPanel() {
               className="rounded border-border"
             />
             <label htmlFor="isPrimary" className="text-xs text-muted-foreground">Primary assignment</label>
+          </div>
+          <div className="flex items-start gap-2">
+            <input
+              type="checkbox"
+              id="autoApprovalViaReply"
+              checked={form.autoApprovalViaReply}
+              onChange={(e) => setForm((f) => ({ ...f, autoApprovalViaReply: e.target.checked }))}
+              className="rounded border-border mt-0.5"
+            />
+            <label htmlFor="autoApprovalViaReply" className="text-xs text-muted-foreground">
+              Let a reply on their preferred channel auto-approve/reject a pending approval, instead of just notifying them to open the app.
+              <span className="block text-[10px] text-amber-500/80 mt-0.5">Off by default — turning this on grants real authority to a text reply.</span>
+            </label>
           </div>
           <div className="flex justify-end gap-2">
             <button onClick={resetForm} className="h-8 px-3 rounded-md border border-border text-xs font-medium text-muted-foreground hover:text-foreground">
@@ -283,6 +385,16 @@ export function AssignmentsPanel() {
                       )}
                       {a.isPrimary && (
                         <span className="text-[10px] text-emerald-400">Primary</span>
+                      )}
+                      {a.isContactOnly && (
+                        <span className="px-1.5 py-0.5 rounded bg-muted border border-border/40" title={a.contactPhone ?? undefined}>
+                          Contact only · {a.preferredChannel ?? "whatsapp"}
+                        </span>
+                      )}
+                      {a.autoApprovalViaReply && (
+                        <span className="px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/30 text-amber-500">
+                          Auto-approve via reply
+                        </span>
                       )}
                     </div>
                   </div>

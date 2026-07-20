@@ -2172,9 +2172,31 @@ model OrgAssignment {
   businessId String   @map("business_id")
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
-  membershipId  String          @map("membership_id")
-  membership    Membership      @relation(fields: [membershipId], references: [id], onDelete: Cascade)
-  userId        String          @map("user_id") // denormalized for quick lookups
+  // A position is filled by EITHER a full logged-in team member (membershipId/userId)
+  // OR a contact-only staff record (contactName/contactPhone/contactEmail) for people
+  // who won't use the app but still need to receive delegated work and approvals —
+  // e.g. front-desk or floor staff reached over WhatsApp/SMS. Exactly one path must
+  // be populated; enforced in StructureService, not at the DB level.
+  membershipId String?     @map("membership_id")
+  membership   Membership? @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  userId       String?     @map("user_id") // denormalized for quick lookups, membership path only
+
+  isContactOnly Boolean @default(false) @map("is_contact_only")
+  contactName   String? @map("contact_name")
+  contactEmail  String? @map("contact_email")
+  contactPhone  String? @map("contact_phone") // normalized E.164, used for inbound WhatsApp/SMS routing
+
+  // Which channel to reach this position on for real-time delegation/approval pings.
+  preferredChannel String @default("whatsapp") @map("preferred_channel") // whatsapp | sms | email | none
+  // Business-granted permission: if true, a reply on preferredChannel to a pending
+  // approval is auto-parsed as approve/reject instead of just notifying. Defaults to
+  // off — approval still requires opening the app until a business owner opts a
+  // position in via /app/structure.
+  autoApprovalViaReply Boolean @default(false) @map("auto_approval_via_reply")
+  // Persists the KEY chat session id for this position's WhatsApp/SMS conversation
+  // so multi-message exchanges keep context, same as a browser tab would.
+  activeFlowSessionId String? @map("active_flow_session_id")
+
   orgUnitId     String          @map("org_unit_id")
   orgUnit       OrgUnit         @relation(fields: [orgUnitId], references: [id], onDelete: Cascade)
   jobRoleId     String?         @map("job_role_id")
@@ -2193,6 +2215,7 @@ model OrgAssignment {
   @@index([businessId, membershipId])
   @@index([businessId, orgUnitId])
   @@index([businessId, userId])
+  @@index([businessId, contactPhone])
   @@map("org_assignments")
 }
 
