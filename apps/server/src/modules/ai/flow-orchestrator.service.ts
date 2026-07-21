@@ -1659,6 +1659,18 @@ export class FlowOrchestratorService {
     }
   }
 
+  /**
+   * Public tool-execution entry point for non-chat surfaces (voice bridge,
+   * webhooks). Wraps the same executor + envelope the chat path uses.
+   */
+  async executeToolByName(
+    businessId: string,
+    toolName: string,
+    args: Record<string, any>,
+  ): Promise<unknown> {
+    return this.executeToolAction(businessId, toolName, args);
+  }
+
   private async executeToolAction(businessId: string, toolName: string, args: Record<string, any>): Promise<any> {
     // Bridged MCP tools route to the allowlisted remote server.
     if (isMcpToolName(toolName)) {

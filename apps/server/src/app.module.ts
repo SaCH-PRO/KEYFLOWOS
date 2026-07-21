@@ -114,6 +114,7 @@ import { ContractsModule } from './modules/contracts/contracts.module';
 import { KeyCortexModule } from './modules/key-cortex/key-cortex.module';
 import { KeystoreModule } from './modules/keystore/keystore.module';
 import { KeyConnectorModule } from './modules/key-connector/key-connector.module';
+import { PhoneVoiceModule } from './modules/phone-voice/phone-voice.module';
 import { VoiceModule } from './modules/voice/voice.module';
 
 @Module({
@@ -146,6 +147,7 @@ import { VoiceModule } from './modules/voice/voice.module';
     AiModule,
     FlowModule,
     TimelineModule,
+    PhoneVoiceModule,
     WebhooksModule,
     ApiKeysModule,
     ActionsModule,
