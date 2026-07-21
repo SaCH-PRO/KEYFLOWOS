@@ -24,7 +24,6 @@ import { useKeyboardShortcuts, useRouteKeyboardShortcuts } from "@/hooks/use-key
 import { PageTransition } from "@/components/transitions/page-transition";
 import { KeyboardShortcutsHelp } from "@/components/functional/keyboard-shortcuts-help";
 import { MobileGestureProvider } from "@/components/functional/mobile-gesture-provider";
-import { ComposeFab } from "@/components/email/compose-fab";
 import { TtsProvider } from "@/components/tts";
 
 function AppLayoutInner({ children }: { children: React.ReactNode }) {
@@ -128,7 +127,6 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
       {!isOnboardingRoute && <KeyChatBubble />}
       <KeyboardShortcutsHelp />
       <CelebrationListener />
-      <ComposeFab />
 
     </div>
     </MobileGestureProvider>
