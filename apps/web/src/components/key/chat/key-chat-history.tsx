@@ -31,7 +31,7 @@ function GenomePillarBar({ label, score }: { label: string; score: number }) {
 
 export function KeyChatHistory() {
   const { sessions, activeSessionId, status, setCurrentModule, setPageContext, appendMessage } = useKeyChat();
-  const { loadSessions, selectSession, createNewSession, deleteSession } = useKeyChatActions();
+  const { loadSessions, selectSession, createNewSession, deleteSession, sendMessage } = useKeyChatActions();
   const [genome, setGenome] = useState<GenomeIntegrityResult | null>(null);
 
   useEffect(() => {
@@ -78,17 +78,19 @@ export function KeyChatHistory() {
     await selectSession(GENOME_SESSION_ID);
 
     if (!hasSavedConversation) {
+      // Straight into the work: a brief hello, then KEY opens the genome
+      // intake herself — no cards, no buttons, no leaving this chat.
       appendMessage({
         id: nanoid(),
         role: "assistant",
         content:
-          "Hi! I’m KEY. Let’s finish setting up your Business Genome — tell me what you’re building and I’ll fill in the rest. A few sentences is enough to start.",
+          "Hi! I’m KEY. Let’s finish your Business Genome — I’ll ask a few quick questions one at a time and fill in the rest.",
         timestamp: Date.now(),
-        card: {
-          type: "welcome",
-          title: "Complete your Business Genome",
-        },
       });
+      void sendMessage(
+        "Let's complete my Business Genome. Ask me the first question, one at a time.",
+        { silent: true },
+      );
     }
   };
 
@@ -157,12 +159,19 @@ export function KeyChatHistory() {
         ) : (
           <div className="flex flex-col gap-1">
             {sessions.map((session) => (
-              <button
+              <div
                 key={session.id}
-                type="button"
+                role="button"
+                tabIndex={0}
                 onClick={() => selectSession(session.id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    void selectSession(session.id);
+                  }
+                }}
                 className={cn(
-                  "group flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs transition-colors",
+                  "group flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-left text-xs transition-colors",
                   activeSessionId === session.id
                     ? "bg-muted text-foreground"
                     : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
@@ -184,7 +193,7 @@ export function KeyChatHistory() {
                 >
                   <Trash2 className="h-3 w-3 text-muted-foreground hover:text-destructive" />
                 </button>
-              </button>
+              </div>
             ))}
           </div>
         )}

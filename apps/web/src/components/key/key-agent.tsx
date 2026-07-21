@@ -65,8 +65,8 @@ export function KeyAgent({ currentModule }: KeyAgentProps) {
   const close = useCallback(() => setOpen(false), [setOpen]);
 
   // Open the built-in Business Genome onboarding conversation inside the
-  // native chat panel. Seeds the same pinned session + welcome card the
-  // full-page /app/onboarding chat uses, but only when the chat is empty.
+  // native chat panel: a brief hello, then KEY opens the intake herself —
+  // no cards, no buttons, no leaving the chat.
   const openGenomeOnboardingConversation = useCallback(() => {
     setCurrentModule("onboarding");
     setPageContext({
@@ -81,16 +81,16 @@ export function KeyAgent({ currentModule }: KeyAgentProps) {
         id: nanoid(),
         role: "assistant",
         content:
-          "Hi! I'm KEY. Let's finish setting up your Business Genome — tell me what you're building and I'll fill in the rest. A few sentences is enough to start.",
+          "Hi! I’m KEY. Let’s finish your Business Genome — I’ll ask a few quick questions one at a time and fill in the rest.",
         timestamp: Date.now(),
-        card: {
-          type: "welcome",
-          title: "Complete your Business Genome",
-        },
       });
+      void sendMessage(
+        "Let's complete my Business Genome. Ask me the first question, one at a time.",
+        { silent: true },
+      );
     }
     setOpen(true);
-  }, [appendMessage, messages.length, setActiveSessionId, setCurrentModule, setOpen, setPageContext]);
+  }, [appendMessage, messages.length, sendMessage, setActiveSessionId, setCurrentModule, setOpen, setPageContext]);
 
   // Handle global open-key events
   useEffect(() => {

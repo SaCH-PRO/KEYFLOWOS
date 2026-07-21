@@ -40,15 +40,29 @@ const MIN_USER_MESSAGE_LENGTH = 15;
 @Injectable()
 export class ConversationGenomeExtractorService {
   private readonly logger = new Logger(ConversationGenomeExtractorService.name);
+  // Background extraction must never crowd out user-facing turns.
+  private readonly EXTRACTION_LIMIT_PER_MINUTE = 6;
+  private readonly extractionLimitMap = new Map<string, number[]>();
 
   constructor(
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
     @Inject(GenomeSignalService) private readonly signals: GenomeSignalService,
   ) {}
 
+  private allowExtraction(businessId: string): boolean {
+    const now = Date.now();
+    const cutoff = now - 60_000;
+    const recent = (this.extractionLimitMap.get(businessId) ?? []).filter((t) => t > cutoff);
+    if (recent.length >= this.EXTRACTION_LIMIT_PER_MINUTE) return false;
+    recent.push(now);
+    this.extractionLimitMap.set(businessId, recent);
+    return true;
+  }
+
   async extractFromTurn(businessId: string, userMessage: string, assistantReply: string): Promise<void> {
     const userText = (userMessage ?? '').trim();
     if (userText.length < MIN_USER_MESSAGE_LENGTH) return;
+    if (!this.allowExtraction(businessId)) return;
 
     let candidates: FactCandidate[];
     try {

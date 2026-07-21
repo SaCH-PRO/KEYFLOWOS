@@ -127,7 +127,10 @@ const FEATURE_TASK_MAP: Record<string, TaskCategory> = {
 export class AiUsageService {
   private readonly logger = new Logger(AiUsageService.name);
 
-  private readonly RATE_LIMIT_PER_MINUTE = 30;
+  // Per-business AI-call ceiling per minute. Chat is the product's main
+  // interface and each turn can involve several AI calls (reply, tools,
+  // background extraction), so the ceiling needs conversational headroom.
+  private readonly RATE_LIMIT_PER_MINUTE = 120;
   private readonly rateLimitMap = new Map<string, number[]>();
   private rateLimitCleanupTimer: ReturnType<typeof setInterval>;
 

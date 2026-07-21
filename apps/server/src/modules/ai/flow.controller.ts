@@ -13,7 +13,7 @@ export class AiFlowController {
   ) {}
 
   @UseGuards(AuthGuard, BusinessGuard)
-  @CrmRateLimit(30, 60_000)
+  @CrmRateLimit(120, 60_000)
   @Post('businesses/:businessId/flow/chat')
   async flowChat(
     @Param('businessId') businessId: string,
@@ -46,7 +46,7 @@ export class AiFlowController {
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
-  @CrmRateLimit(30, 60_000)
+  @CrmRateLimit(120, 60_000)
   @Post('businesses/:businessId/flow/chat/stream')
   async flowChatStream(
     @Param('businessId') businessId: string,
