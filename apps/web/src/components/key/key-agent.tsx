@@ -13,6 +13,7 @@ import { nanoid } from "@/components/key/chat/utils";
 import { useTts } from "@/components/tts";
 import { pickRecorderMimeType, createSilenceMonitor } from "@/components/key/chat/voice-utils";
 import { VoiceConversation } from "@/components/key/chat/voice-conversation";
+import { openGenomeConversation } from "@/components/key/chat/open-genome-conversation";
 
 export type KeyMode = "chat" | "voice" | "palette" | "onboarding";
 
@@ -65,32 +66,15 @@ export function KeyAgent({ currentModule }: KeyAgentProps) {
   const close = useCallback(() => setOpen(false), [setOpen]);
 
   // Open the built-in Business Genome onboarding conversation inside the
-  // native chat panel: a brief hello, then KEY opens the intake herself —
-  // no cards, no buttons, no leaving the chat.
+  // native chat panel — the one continuous genome thread, shared with every
+  // other surface via openGenomeConversation.
   const openGenomeOnboardingConversation = useCallback(() => {
-    setCurrentModule("onboarding");
-    setPageContext({
-      route: window.location.pathname,
-      surface: "drawer",
-      mode: "onboarding",
-      hints: ["business genome completion"],
-    });
-    setActiveSessionId("onboarding");
-    if (messages.length === 0) {
-      appendMessage({
-        id: nanoid(),
-        role: "assistant",
-        content:
-          "Hi! I’m KEY. Let’s finish your Business Genome — I’ll ask a few quick questions one at a time and fill in the rest.",
-        timestamp: Date.now(),
-      });
-      void sendMessage(
-        "Let's complete my Business Genome. Ask me the first question, one at a time.",
-        { silent: true },
-      );
-    }
-    setOpen(true);
-  }, [appendMessage, messages.length, sendMessage, setActiveSessionId, setCurrentModule, setOpen, setPageContext]);
+    openGenomeConversation(
+      { messages, setCurrentModule, setPageContext, setActiveSessionId, appendMessage, setOpen },
+      sendMessage,
+      { surface: "drawer" },
+    );
+  }, [appendMessage, messages, sendMessage, setActiveSessionId, setCurrentModule, setOpen, setPageContext]);
 
   // Handle global open-key events
   useEffect(() => {

@@ -5,12 +5,10 @@ import { Plus, Trash2, MessageSquare, Loader2, Dna, CheckCircle2 } from "lucide-
 import { cn } from "@/lib/utils";
 import { useKeyChat } from "./key-chat-store";
 import { useKeyChatActions } from "./use-key-chat-actions";
-import { formatTime, nanoid } from "./utils";
+import { formatTime } from "./utils";
 import { getGenome, type GenomeIntegrityResult } from "@/lib/api/business-genome";
 import { getStoredBusinessId } from "@/lib/workspace";
-import { fetchFlowSessions } from "@/lib/client";
-
-const GENOME_SESSION_ID = "onboarding";
+import { openGenomeConversation, GENOME_SESSION_ID } from "./open-genome-conversation";
 
 function GenomePillarBar({ label, score }: { label: string; score: number }) {
   return (
@@ -30,7 +28,8 @@ function GenomePillarBar({ label, score }: { label: string; score: number }) {
 }
 
 export function KeyChatHistory() {
-  const { sessions, activeSessionId, status, setCurrentModule, setPageContext, appendMessage } = useKeyChat();
+  const chat = useKeyChat();
+  const { sessions, activeSessionId, status } = chat;
   const { loadSessions, selectSession, createNewSession, deleteSession, sendMessage } = useKeyChatActions();
   const [genome, setGenome] = useState<GenomeIntegrityResult | null>(null);
 
@@ -51,47 +50,13 @@ export function KeyChatHistory() {
   }, []);
 
   const openGenomeChat = async () => {
-    setCurrentModule("onboarding");
-    setPageContext({
-      route: window.location.pathname,
-      surface: "drawer",
-      mode: "onboarding",
-      hints: ["business genome completion"],
-    });
-
-    // Restore the saved genome conversation if one exists — otherwise seed
-    // the built-in one so the user lands IN the chat, not on an empty thread.
+    // Restore the saved genome conversation if one exists — otherwise the
+    // helper seeds the built-in one so the user lands IN the chat.
     const businessId = getStoredBusinessId();
-    let hasSavedConversation = false;
     if (businessId) {
-      const res = await fetchFlowSessions(businessId);
-      hasSavedConversation = Boolean(
-        (res.data as Array<Record<string, unknown>> | null)?.find(
-          (s) =>
-            s.id === GENOME_SESSION_ID &&
-            Array.isArray(s.messages) &&
-            (s.messages as unknown[]).length > 0,
-        ),
-      );
+      await selectSession(GENOME_SESSION_ID);
     }
-
-    await selectSession(GENOME_SESSION_ID);
-
-    if (!hasSavedConversation) {
-      // Straight into the work: a brief hello, then KEY opens the genome
-      // intake herself — no cards, no buttons, no leaving this chat.
-      appendMessage({
-        id: nanoid(),
-        role: "assistant",
-        content:
-          "Hi! I’m KEY. Let’s finish your Business Genome — I’ll ask a few quick questions one at a time and fill in the rest.",
-        timestamp: Date.now(),
-      });
-      void sendMessage(
-        "Let's complete my Business Genome. Ask me the first question, one at a time.",
-        { silent: true },
-      );
-    }
+    openGenomeConversation(chat, sendMessage, { surface: "drawer" });
   };
 
   const genomeActive = activeSessionId === GENOME_SESSION_ID;

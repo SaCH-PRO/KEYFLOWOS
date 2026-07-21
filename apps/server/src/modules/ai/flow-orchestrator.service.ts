@@ -403,11 +403,11 @@ export class FlowOrchestratorService {
     }
 
     return (
-      '\n[PRIORITY DIRECTIVE — BUSINESS GENOME ONBOARDING]\n' +
-      `The Business Genome is only ${ctx.completeness}% complete. Until it reaches 100%, your FIRST priority in every turn is to collect missing business facts. ` +
-      'When the user shares ANY concrete business fact (industry, revenue model, ideal customer, goals, constraints, brand voice, budget, time commitment, etc.), ' +
-      'STOP and call the update_business_blueprint tool with a patch containing that fact BEFORE doing anything else. Do NOT use commerce, CRM, marketing, or finance tools when a blueprint fact is present. ' +
-      'If they have not shared a fact, ask ONE concise follow-up question to fill the next missing section in this order: identity, operatingModel, constraints, goals, brand, customerModel, financials, workflowModel, aiPreferences. ' +
+      '\n[PRIORITY DIRECTIVE — BUSINESS GENOME CONVERSATION]\n' +
+      `The Business Genome is ${ctx.completeness}% complete. This is one continuous conversation that keeps building the genome — never restart it, never re-ask.\n` +
+      'HOW TO TALK: You are a sharp, warm co-founder, not an intake form. Acknowledge what the user just said with something specific (a number, a name, why it matters), connect it to what you already know, then ask the ONE next most valuable question in natural language. No rigid field order, no interrogation cadence, no "please tell me X" boilerplate. Vary your phrasing.\n' +
+      'WHAT YOU KNOW: The Business Genome facts section below lists everything you already know. NEVER ask about facts that are already there — build on them. If the user corrects an existing fact, update it.\n' +
+      'WHEN THE USER SHARES ANY concrete business fact (industry, revenue model, pricing, ideal customer, goals, constraints, brand voice, budget, time commitment, team, etc.), STOP and call the update_business_blueprint tool with a patch containing that fact BEFORE doing anything else. Do NOT use commerce, CRM, marketing, or finance tools when a blueprint fact is present.\n' +
       'Never ask for passwords, API keys, or bank details.\n'
     );
   }
@@ -528,6 +528,13 @@ export class FlowOrchestratorService {
   private async buildBlueprintSection(businessId: string): Promise<string> {
     const ctx = await this.blueprint.getBlueprintContext(businessId);
     if (!ctx) return '';
+    // LLM-written blueprint patches don't always preserve array shapes —
+    // never let a malformed list field kill the whole turn.
+    const asStringList = (v: unknown): string | null => {
+      if (Array.isArray(v) && v.length > 0) return v.map(String).join('; ');
+      if (typeof v === 'string' && v.trim()) return v;
+      return null;
+    };
     const lines: string[] = ['', 'Business Blueprint (operating DNA):'];
     lines.push(`- Completeness: ${ctx.completeness}%`);
     if (ctx.summary) lines.push(`- Summary: ${ctx.summary}`);
@@ -536,7 +543,8 @@ export class FlowOrchestratorService {
     if (ctx.operatingModel.revenueModel) lines.push(`- Revenue model: ${ctx.operatingModel.revenueModel}`);
     if (ctx.operatingModel.deliveryMode) lines.push(`- Delivery mode: ${ctx.operatingModel.deliveryMode}`);
     if (ctx.goals.northStar) lines.push(`- North star: ${ctx.goals.northStar}`);
-    if (ctx.goals.ninetyDayGoals?.length) lines.push(`- 90-day goals: ${ctx.goals.ninetyDayGoals.join('; ')}`);
+    const ninetyDayGoals = asStringList(ctx.goals.ninetyDayGoals);
+    if (ninetyDayGoals) lines.push(`- 90-day goals: ${ninetyDayGoals}`);
     if (ctx.constraints.budgetRange) lines.push(`- Budget: ${ctx.constraints.budgetRange}`);
     if (ctx.constraints.timeCommitment) lines.push(`- Time commitment: ${ctx.constraints.timeCommitment}`);
     if (ctx.brand.voice) lines.push(`- Brand voice: ${ctx.brand.voice}`);
@@ -545,8 +553,9 @@ export class FlowOrchestratorService {
     if (ctx.legalProfile?.recommendedEntityType) {
       lines.push(`- Recommended entity type: ${ctx.legalProfile.recommendedEntityType}`);
     }
-    if (ctx.registrationProfile?.missingRegistrationSteps?.length) {
-      lines.push(`- Missing registration steps: ${ctx.registrationProfile.missingRegistrationSteps.join('; ')}`);
+    const missingSteps = asStringList(ctx.registrationProfile?.missingRegistrationSteps);
+    if (missingSteps) {
+      lines.push(`- Missing registration steps: ${missingSteps}`);
     }
     if (ctx.projectionProfile?.runwayMonths) {
       lines.push(`- Cash runway: ${ctx.projectionProfile.runwayMonths} months`);
@@ -554,8 +563,9 @@ export class FlowOrchestratorService {
     if (ctx.riskProfile?.riskScore) {
       lines.push(`- Business risk score: ${ctx.riskProfile.riskScore}/100`);
     }
-    if (ctx.executionRoadmap?.today?.length) {
-      lines.push(`- Today's priorities: ${ctx.executionRoadmap.today.join('; ')}`);
+    const today = asStringList(ctx.executionRoadmap?.today);
+    if (today) {
+      lines.push(`- Today's priorities: ${today}`);
     }
     if (ctx.complianceProfile?.complianceScore !== undefined) {
       lines.push(`- Compliance score: ${ctx.complianceProfile.complianceScore}%`);

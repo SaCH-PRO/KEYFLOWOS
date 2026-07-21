@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { KeyActionChips } from "./key-action-chips";
 import { KeyGenomePreview } from "./key-genome-preview";
+import { openGenomeConversation, GENOME_SESSION_ID } from "./open-genome-conversation";
 import { fetchAiApprovals, type AiApprovalItem } from "@/lib/api/ai-approvals";
 import { getStoredBusinessId } from "@/lib/workspace";
 
@@ -69,10 +70,12 @@ function ApprovalsRail() {
 }
 
 export function KeyFullChatShell() {
-  const { status, showHistory, setShowHistory, chatMode, setChatMode } = useKeyChat();
-  const { sendMessage, stop, confirmAction, loadSessions } = useKeyChatActions();
+  const chat = useKeyChat();
+  const { status, showHistory, setShowHistory, chatMode, setChatMode, activeSessionId, messages, setCurrentModule, setPageContext, setActiveSessionId, appendMessage, setOpen } = chat;
+  const { sendMessage, stop, confirmAction, loadSessions, selectSession } = useKeyChatActions();
   // Mode lives in the chat store (sendMessage branches on it); no local copy.
   const mode = (chatMode as ChatMode) ?? "general";
+  const inGenomeThread = activeSessionId === GENOME_SESSION_ID;
   const [showModeMenu, setShowModeMenu] = useState(false);
   const modeMenuRef = useRef<HTMLDivElement>(null);
 
@@ -93,10 +96,25 @@ export function KeyFullChatShell() {
   }, [showModeMenu]);
 
   // Mode is a hint for subsequent messages — never wipes the conversation.
-  const handleModeChange = useCallback((newMode: ChatMode) => {
-    setChatMode(newMode);
-    setShowModeMenu(false);
-  }, [setChatMode]);
+  // "Genome" is not a backend mode: it opens the ONE pinned genome thread
+  // (same conversation as the sidebar pinned card and the auto-nudge).
+  const handleModeChange = useCallback(
+    (newMode: ChatMode) => {
+      if (newMode === "genome_onboarding") {
+        void selectSession(GENOME_SESSION_ID).then(() =>
+          openGenomeConversation(
+            { messages, setCurrentModule, setPageContext, setActiveSessionId, appendMessage, setOpen },
+            sendMessage,
+            { surface: "page" },
+          ),
+        );
+      } else {
+        setChatMode(newMode);
+      }
+      setShowModeMenu(false);
+    },
+    [appendMessage, messages, selectSession, sendMessage, setActiveSessionId, setChatMode, setCurrentModule, setOpen, setPageContext],
+  );
 
   // Card advances outside /app/onboarding drive the flow conversationally.
   const handleCardAdvance = useCallback(
@@ -189,7 +207,7 @@ export function KeyFullChatShell() {
           </div>
           <div className="flex items-center gap-2">
             <span className="text-xs text-muted-foreground px-2 py-1 rounded-full bg-muted">
-              {mode === "general" ? "General" : MODES.find(m => m.id === mode)?.label}
+              {inGenomeThread ? "Genome" : mode === "general" ? "General" : MODES.find(m => m.id === mode)?.label}
             </span>
           </div>
         </div>
@@ -208,8 +226,8 @@ export function KeyFullChatShell() {
 
       {/* Right Context Rail */}
       <div className="w-72 shrink-0 border-l border-border/50 bg-muted/20 flex flex-col">
-        {/* Genome Preview - only in genome mode */}
-        {mode === "genome_onboarding" && (
+        {/* Genome Preview - shown inside the genome thread */}
+        {inGenomeThread && (
           <div className="p-4 border-b border-border/50">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
               Genome Preview
