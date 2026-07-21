@@ -12420,10 +12420,28 @@ model HelpdeskTicket {
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
 
-  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  business Business               @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  messages SupportTicketMessage[]
 
   @@index([businessId, status])
   @@index([businessId, priority])
   @@index([businessId, createdAt])
   @@map("helpdesk_tickets")
+}
+
+model SupportTicketMessage {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  ticketId   String   @map("ticket_id")
+  direction  String   @default("OUTBOUND") @map("direction")
+  channel    String   @default("internal") @map("channel")
+  body       String   @db.Text
+  authorId   String?  @map("author_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  ticket HelpdeskTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId, createdAt])
+  @@index([businessId])
+  @@map("support_ticket_messages")
 }

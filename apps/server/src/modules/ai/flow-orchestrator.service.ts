@@ -25,6 +25,8 @@ import { BankMatchingService } from '../finance/bank-matching.service';
 import { FinanceCoaService } from '../finance/finance-coa.service';
 import { PostingService } from '../finance/posting.service';
 import { ContractsService } from '../contracts/contracts.service';
+import { CommunicationsService } from '../communications/communications.service';
+import { KeyInboxService } from '../key-inbox/key-inbox.service';
 import { GenomeFactService } from '../business-genome/key-genome/genome-fact.service';
 import { BusinessGraphService } from './business-graph.service';
 import { PlannerService } from './planner.service';
@@ -320,6 +322,15 @@ export class FlowOrchestratorService {
   }
   private getContracts() {
     return this.moduleRef.get(ContractsService, { strict: false });
+  }
+  private getHelpdeskService() {
+    return this.moduleRef.get(HelpdeskService, { strict: false });
+  }
+  private getCommunications() {
+    return this.moduleRef.get(CommunicationsService, { strict: false });
+  }
+  private getKeyInbox() {
+    return this.moduleRef.get(KeyInboxService, { strict: false });
   }
   private getDrive() {
     return this.moduleRef.get(GoogleDriveService, { strict: false });
@@ -3478,6 +3489,36 @@ export class FlowOrchestratorService {
       case 'contract_create_tag': {
         const tag = await this.getContracts().createTag(businessId, args.name, args.color);
         return { id: tag.id, name: tag.name };
+      }
+      // === SUPPORT & COMMS ===
+      case 'helpdesk_reply_to_ticket': {
+        const message = await this.getHelpdeskService().replyToTicket(businessId, args.ticketId, args.body, {
+          channel: args.channel,
+        });
+        return { id: message.id, ticketId: args.ticketId };
+      }
+      case 'comms_send_broadcast': {
+        const result = await this.getCommunications().sendBroadcast({
+          businessId,
+          segment: args.segment,
+          channel: args.channel,
+          body: args.body,
+          templateId: args.templateId,
+        });
+        return result;
+      }
+      case 'inbox_reply_thread': {
+        const result = await this.getKeyInbox().addReply(businessId, args.threadId, args.body, undefined, {
+          mode: 'send',
+        });
+        return { sent: result.sendResult?.success ?? true, messageId: result.message?.id };
+      }
+      case 'inbox_update_thread_status': {
+        const thread = await this.getKeyInbox().updateThread(businessId, args.threadId, {
+          status: args.status,
+          priority: args.priority,
+        });
+        return { id: thread.id, status: thread.status };
       }
       case 'finance_customer_balance': {
         const [invoicedAgg, paidAgg, invoices] = await Promise.all([

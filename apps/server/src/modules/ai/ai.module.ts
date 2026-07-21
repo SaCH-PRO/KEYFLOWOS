@@ -45,6 +45,9 @@ import { KeyGenomeModule } from '../business-genome/key-genome/key-genome.module
 import { ConversationGenomeExtractorService } from './conversation-genome-extractor.service';
 import { ExpensesModule } from '../expenses/expenses.module';
 import { ContractsModule } from '../contracts/contracts.module';
+import { HelpdeskModule } from '../helpdesk/helpdesk.module';
+import { KeyInboxModule } from '../key-inbox/key-inbox.module';
+import { CommunicationsModule } from '../communications/communications.module';
 import { KeyCommandService } from './key-command.service';
 import { KeyToolRegistryService } from './key-tool-registry.service';
 import { AutopilotRulesService } from './autopilot-rules.service';
@@ -85,7 +88,7 @@ import { AiApprovalsController } from './ai-approvals.controller';
 import { AiApprovalsService } from './ai-approvals.service';
 
 @Module({
-  imports: [PrismaModule, RedisModule, SubscriptionsModule, forwardRef(() => BlueprintModule), TimelineModule, forwardRef(() => FinanceModule), CommandModule, GoogleDriveModule, TaskAssignmentModule, forwardRef(() => KeyAutonomyModule), forwardRef(() => KeyCortexModule), forwardRef(() => ExpensesModule), forwardRef(() => ContractsModule), KeyGenomeModule],
+  imports: [PrismaModule, RedisModule, SubscriptionsModule, forwardRef(() => BlueprintModule), TimelineModule, forwardRef(() => FinanceModule), CommandModule, GoogleDriveModule, TaskAssignmentModule, forwardRef(() => KeyAutonomyModule), forwardRef(() => KeyCortexModule), forwardRef(() => ExpensesModule), forwardRef(() => ContractsModule), HelpdeskModule, forwardRef(() => KeyInboxModule), forwardRef(() => CommunicationsModule), KeyGenomeModule],
   controllers: [AiController, AiSettingsController, OutputTemplateController, AiFlowController, GraphActionsController, AiUsageAdminController, AiIntelligenceController, BlueprintOnboardingController, AiApprovalsController],
   providers: [
     AiListener,

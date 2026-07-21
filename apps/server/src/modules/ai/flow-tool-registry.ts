@@ -2654,6 +2654,86 @@ export const FLOW_TOOLS: FlowTool[] = [
   },
 
   // ================================================================
+  //  SUPPORT & COMMS — L2 Organize / L3 Execute
+  // ================================================================
+  {
+    name: 'helpdesk_reply_to_ticket',
+    description: 'Reply to a customer on a support ticket (records the outbound message on the ticket thread).',
+    family: 'organize',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/helpdesk',
+    changedEntities: ['supportTicketMessage', 'supportTicket'],
+    parameters: {
+      type: 'object',
+      properties: {
+        ticketId: { type: 'string', description: 'Ticket ID' },
+        body: { type: 'string', description: 'Reply text to send the customer' },
+        channel: { type: 'string', description: 'Channel: internal, email, whatsapp (default internal)' },
+      },
+      required: ['ticketId', 'body'],
+    },
+    outputSchema: { type: 'object', description: 'Recorded reply', fields: { id: { type: 'string', description: 'Message ID' }, ticketId: { type: 'string', description: 'Ticket ID' } } },
+  },
+  {
+    name: 'comms_send_broadcast',
+    description: 'Broadcast a message to a customer segment over email, WhatsApp, or SMS.',
+    family: 'execute',
+    riskLevel: 'high',
+    riskTier: 3 as RiskTier,
+    manualEquivalentRoute: '/app/communications',
+    changedEntities: ['message'],
+    parameters: {
+      type: 'object',
+      properties: {
+        segment: { type: 'string', description: 'Segment identifier (e.g. all, active_customers, overdue)' },
+        channel: { type: 'string', description: 'Channel: email, whatsapp, sms' },
+        body: { type: 'string', description: 'Message body' },
+        templateId: { type: 'string', description: 'Optional template ID' },
+      },
+      required: ['segment', 'channel', 'body'],
+    },
+    outputSchema: { type: 'object', description: 'Broadcast result', fields: { sent: { type: 'number', description: 'Messages sent' }, failed: { type: 'number', description: 'Failures' } } },
+  },
+  {
+    name: 'inbox_reply_thread',
+    description: 'Send a reply inside an omnichannel inbox thread (WhatsApp/email/SMS) to the customer.',
+    family: 'execute',
+    riskLevel: 'high',
+    riskTier: 3 as RiskTier,
+    manualEquivalentRoute: '/app/key-inbox',
+    changedEntities: ['keyInboxMessage'],
+    parameters: {
+      type: 'object',
+      properties: {
+        threadId: { type: 'string', description: 'Inbox thread ID' },
+        body: { type: 'string', description: 'Reply text' },
+      },
+      required: ['threadId', 'body'],
+    },
+    outputSchema: { type: 'object', description: 'Reply result', fields: { sent: { type: 'boolean', description: 'Whether the reply was delivered' }, messageId: { type: 'string', description: 'Message ID' } } },
+  },
+  {
+    name: 'inbox_update_thread_status',
+    description: 'Update an inbox thread status or priority (triage, escalate, close).',
+    family: 'organize',
+    riskLevel: 'low',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/key-inbox',
+    changedEntities: ['keyInboxThread'],
+    parameters: {
+      type: 'object',
+      properties: {
+        threadId: { type: 'string', description: 'Inbox thread ID' },
+        status: { type: 'string', description: 'Status: OPEN, WAITING, DONE, ARCHIVED' },
+        priority: { type: 'string', description: 'Priority: LOW, NORMAL, HIGH, URGENT' },
+      },
+      required: ['threadId'],
+    },
+    outputSchema: { type: 'object', description: 'Updated thread', fields: { id: { type: 'string', description: 'Thread ID' }, status: { type: 'string', description: 'New status' } } },
+  },
+
+  // ================================================================
   //  PROJECT UPDATE/DELETE — L2 Organize / L3 Execute
   // ================================================================
   {

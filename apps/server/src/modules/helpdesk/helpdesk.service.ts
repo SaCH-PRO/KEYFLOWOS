@@ -113,4 +113,48 @@ export class HelpdeskService {
     });
     return { success: true };
   }
+
+  async replyToTicket(
+    businessId: string,
+    ticketId: string,
+    body: string,
+    opts?: { channel?: string; authorId?: string | null },
+  ) {
+    const ticket = await this.prisma.client.supportTicket.findFirst({
+      where: { id: ticketId, businessId, deletedAt: null },
+    });
+    if (!ticket) throw new NotFoundException('Ticket not found');
+
+    const message = await this.prisma.client.supportTicketMessage.create({
+      data: {
+        businessId,
+        ticketId,
+        body,
+        direction: 'OUTBOUND',
+        channel: opts?.channel ?? 'internal',
+        authorId: opts?.authorId ?? null,
+      },
+    });
+
+    // A reply reopens an open/resolved conversation unless explicitly closed.
+    if (ticket.status === 'resolved' || ticket.status === 'closed') {
+      await this.prisma.client.supportTicket.update({
+        where: { id: ticketId },
+        data: { status: 'open' },
+      });
+    }
+
+    return message;
+  }
+
+  async listTicketMessages(businessId: string, ticketId: string) {
+    const ticket = await this.prisma.client.supportTicket.findFirst({
+      where: { id: ticketId, businessId, deletedAt: null },
+    });
+    if (!ticket) throw new NotFoundException('Ticket not found');
+    return this.prisma.client.supportTicketMessage.findMany({
+      where: { ticketId },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
 }
