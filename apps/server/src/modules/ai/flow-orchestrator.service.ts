@@ -27,6 +27,8 @@ import { PostingService } from '../finance/posting.service';
 import { ContractsService } from '../contracts/contracts.service';
 import { CommunicationsService } from '../communications/communications.service';
 import { KeyInboxService } from '../key-inbox/key-inbox.service';
+import { McpClientManagerService } from '../mcp/mcp-client-manager.service';
+import { isMcpToolName } from '../mcp/mcp.types';
 import { CrmDealsService } from '../crm/crm-deals.service';
 import { CrmDuplicateDetectionService } from '../crm/crm-duplicate-detection.service';
 import { SocialAnalyticsService } from '../social/social-analytics.service';
@@ -334,6 +336,9 @@ export class FlowOrchestratorService {
   }
   private getKeyInbox() {
     return this.moduleRef.get(KeyInboxService, { strict: false });
+  }
+  private getMcp() {
+    return this.moduleRef.get(McpClientManagerService, { strict: false });
   }
   private getCrmDeals() {
     return this.moduleRef.get(CrmDealsService, { strict: false });
@@ -644,15 +649,35 @@ export class FlowOrchestratorService {
    * request (message + page context) and keep the top 128 — a general
    * conversation keeps its most plausible tools instead of 400ing.
    */
-  private selectToolsForRequest(
+  private async selectToolsForRequest(
+    businessId: string,
     detectedRole: BusinessRole | undefined,
     contextText: string,
-  ): ReturnType<typeof getOpenAiToolDefinitions> {
+  ): Promise<ReturnType<typeof getOpenAiToolDefinitions>> {
     const all = getOpenAiToolDefinitions();
-    const candidates =
+    let candidates: ReturnType<typeof getOpenAiToolDefinitions> =
       detectedRole && detectedRole !== 'general'
         ? all.filter((t) => this.roleEngine.isToolAllowed(detectedRole, t.function.name))
         : all;
+
+    // Append bridged MCP tools (allowlisted remote servers) for this business
+    // when the role is permitted to use them.
+    try {
+      if (this.getMcp().isConfigured() && (!detectedRole || this.roleEngine.isToolAllowed(detectedRole, 'mcp__x'))) {
+        const bridged = await this.getMcp().listBridgedTools(businessId);
+        const mcpDefs = bridged.map((t) => ({
+          type: 'function' as const,
+          function: {
+            name: t.bridgedName,
+            description: `[${t.serverName}] ${t.description}`,
+            parameters: t.inputSchema,
+          },
+        }));
+        candidates = [...candidates, ...mcpDefs] as ReturnType<typeof getOpenAiToolDefinitions>;
+      }
+    } catch (err) {
+      this.logger.warn(`MCP tool listing failed (non-fatal): ${(err as Error).message}`);
+    }
 
     const MAX_TOOLS = 128;
     if (candidates.length <= MAX_TOOLS) return candidates;
@@ -988,7 +1013,8 @@ export class FlowOrchestratorService {
         'flow_chat',
         {
           messages: messages as GatewayMessage[],
-          tools: this.selectToolsForRequest(
+          tools: await this.selectToolsForRequest(
+            businessId,
             detectedRole,
             [enrichedMessage, pageContext?.route, ...(pageContext?.hints ?? [])].filter(Boolean).join(' '),
           ),
@@ -1270,7 +1296,8 @@ export class FlowOrchestratorService {
         'flow_chat_stream',
         {
           messages,
-          tools: this.selectToolsForRequest(
+          tools: await this.selectToolsForRequest(
+            businessId,
             detectedRole,
             [enrichedMessage, pageContext?.route, ...(pageContext?.hints ?? [])].filter(Boolean).join(' '),
           ),
@@ -1633,6 +1660,10 @@ export class FlowOrchestratorService {
   }
 
   private async executeToolAction(businessId: string, toolName: string, args: Record<string, any>): Promise<any> {
+    // Bridged MCP tools route to the allowlisted remote server.
+    if (isMcpToolName(toolName)) {
+      return this.getMcp().callTool(toolName, args);
+    }
     switch (toolName) {
       case 'update_business_blueprint': {
         const patch = args.patch as Record<string, Record<string, unknown>>;
