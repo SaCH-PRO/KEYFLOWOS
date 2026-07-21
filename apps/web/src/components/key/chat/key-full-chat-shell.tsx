@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { KeyActionChips } from "./key-action-chips";
 import { KeyGenomePreview } from "./key-genome-preview";
+import { KeyGenomeChip } from "./key-genome-chip";
 import { openGenomeConversation, GENOME_SESSION_ID } from "./open-genome-conversation";
 import { fetchAiApprovals, type AiApprovalItem } from "@/lib/api/ai-approvals";
 import { getStoredBusinessId } from "@/lib/workspace";
@@ -206,6 +207,7 @@ export function KeyFullChatShell() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <KeyGenomeChip surface="page" />
             <span className="text-xs text-muted-foreground px-2 py-1 rounded-full bg-muted">
               {inGenomeThread ? "Genome" : mode === "general" ? "General" : MODES.find(m => m.id === mode)?.label}
             </span>

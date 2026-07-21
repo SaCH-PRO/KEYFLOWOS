@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, PanelLeft } from "lucide-react";
+import { X, PanelLeft, Maximize2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useKeyChat } from "./key-chat-store";
 import { useKeyChatActions } from "./use-key-chat-actions";
@@ -10,12 +11,14 @@ import { KeyChatMessages } from "./key-chat-messages";
 import { KeyChatInput } from "./key-chat-input";
 import { KeyChatHistory } from "./key-chat-history";
 import { KeyChatVoiceBar } from "./key-chat-voice-bar";
+import { KeyGenomeChip } from "./key-genome-chip";
 
 interface KeyChatPanelProps {
   className?: string;
 }
 
 export function KeyChatPanel({ className }: KeyChatPanelProps) {
+  const router = useRouter();
   const { open, setOpen, showHistory, setShowHistory } = useKeyChat();
   const { sendMessage, stop, confirmAction } = useKeyChatActions();
 
@@ -25,6 +28,11 @@ export function KeyChatPanel({ className }: KeyChatPanelProps) {
       `The user finished the "${step}" onboarding step. Present the next step's card.`,
       { silent: true },
     );
+  };
+
+  const openFullPage = () => {
+    setOpen(false);
+    router.push("/app/key/chat");
   };
 
   useEffect(() => {
@@ -79,15 +87,27 @@ export function KeyChatPanel({ className }: KeyChatPanelProps) {
                     <h2 className="text-sm font-semibold">KEY</h2>
                     <p className="text-[10px] text-muted-foreground">Your AI business assistant</p>
                   </div>
+                  <KeyGenomeChip surface="drawer" />
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setOpen(false)}
-                  className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                  aria-label="Close chat"
-                >
-                  <X className="h-4 w-4" />
-                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={openFullPage}
+                    className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    aria-label="Open in full page"
+                    title="Open in full page"
+                  >
+                    <Maximize2 className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setOpen(false)}
+                    className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                    aria-label="Close chat"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
               </header>
 
               <div className="flex min-h-0 flex-1">
