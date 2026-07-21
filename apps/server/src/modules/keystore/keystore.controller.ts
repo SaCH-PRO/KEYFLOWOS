@@ -3,6 +3,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -10,14 +11,23 @@ import {
   Post,
   Query,
   Request,
+  UseGuards,
 } from '@nestjs/common';
 import { KeystoreService } from './keystore.service';
+import { AuthGuard } from '../../core/auth/auth.guard';
 import {
   CreateOrderDto,
   SendMessageDto,
   AcceptQuoteDto,
   RateOrderDto,
 } from './dto';
+
+function requireBusinessId(businessId?: string): string {
+  if (!businessId) {
+    throw new BadRequestException('businessId query parameter is required');
+  }
+  return businessId;
+}
 
 @Controller('keystore')
 export class KeystoreController {
@@ -26,103 +36,119 @@ export class KeystoreController {
   // ── Categories ──────────────────────────────────────────────────────────
 
   @Get('categories')
-  async getCategories(@Request() req: { businessId: string }) {
-    return this.keystoreService.getCategories(req.businessId);
+  async getCategories(@Query('businessId') businessId?: string) {
+    return this.keystoreService.getCategories(requireBusinessId(businessId));
   }
 
   // ── Listings ────────────────────────────────────────────────────────────
 
   @Get('listings')
   async getListings(
-    @Request() req: { businessId: string },
+    @Query('businessId') businessId?: string,
     @Query('categoryId') categoryId?: string,
   ) {
-    return this.keystoreService.getListings(req.businessId, categoryId);
+    return this.keystoreService.getListings(requireBusinessId(businessId), categoryId);
   }
 
   @Get('listings/:slug')
   async getListingBySlug(
-    @Request() req: { businessId: string },
     @Param('slug') slug: string,
+    @Query('businessId') businessId?: string,
   ) {
-    return this.keystoreService.getListingBySlug(req.businessId, slug);
+    return this.keystoreService.getListingBySlug(requireBusinessId(businessId), slug);
   }
 
   // ── Orders ──────────────────────────────────────────────────────────────
 
   @Post('orders')
+  @UseGuards(AuthGuard)
   async createOrder(
-    @Request() req: { businessId: string; userId: string },
+    @Request() req: { user: { id: string } },
     @Body() dto: CreateOrderDto,
+    @Query('businessId') businessId?: string,
   ) {
-    return this.keystoreService.createOrder(req.businessId, req.userId, dto);
+    return this.keystoreService.createOrder(requireBusinessId(businessId), req.user.id, dto);
   }
 
   @Get('orders')
-  async getMyOrders(@Request() req: { businessId: string; userId: string }) {
-    return this.keystoreService.getUserOrders(req.businessId, req.userId);
+  @UseGuards(AuthGuard)
+  async getMyOrders(
+    @Request() req: { user: { id: string } },
+    @Query('businessId') businessId?: string,
+  ) {
+    return this.keystoreService.getUserOrders(requireBusinessId(businessId), req.user.id);
   }
 
   @Get('orders/:id')
+  @UseGuards(AuthGuard)
   async getOrder(
-    @Request() req: { businessId: string; userId: string },
+    @Request() req: { user: { id: string } },
     @Param('id') id: string,
+    @Query('businessId') businessId?: string,
   ) {
-    return this.keystoreService.getOrder(req.businessId, id, req.userId);
+    return this.keystoreService.getOrder(requireBusinessId(businessId), id, req.user.id);
   }
 
   @Post('orders/:id/messages')
+  @UseGuards(AuthGuard)
   async sendMessage(
-    @Request() req: { businessId: string; userId: string },
+    @Request() req: { user: { id: string } },
     @Param('id') id: string,
     @Body() dto: SendMessageDto,
+    @Query('businessId') businessId?: string,
   ) {
     return this.keystoreService.sendMessage(
-      req.businessId,
+      requireBusinessId(businessId),
       id,
-      req.userId,
+      req.user.id,
       dto,
     );
   }
 
   @Post('orders/:id/accept-quote')
+  @UseGuards(AuthGuard)
   async acceptQuote(
-    @Request() req: { businessId: string; userId: string },
+    @Request() req: { user: { id: string } },
     @Param('id') id: string,
     @Body() dto: AcceptQuoteDto,
+    @Query('businessId') businessId?: string,
   ) {
     return this.keystoreService.acceptQuote(
-      req.businessId,
+      requireBusinessId(businessId),
       id,
-      req.userId,
+      req.user.id,
       dto,
     );
   }
 
   @Post('orders/:id/cancel')
+  @UseGuards(AuthGuard)
   async cancelOrder(
-    @Request() req: { businessId: string; userId: string },
+    @Request() req: { user: { id: string } },
     @Param('id') id: string,
     @Body('reason') reason?: string,
+    @Query('businessId') businessId?: string,
   ) {
     return this.keystoreService.cancelOrder(
-      req.businessId,
+      requireBusinessId(businessId),
       id,
-      req.userId,
+      req.user.id,
       reason,
     );
   }
 
   @Post('orders/:id/rate')
+  @UseGuards(AuthGuard)
   async rateOrder(
-    @Request() req: { businessId: string; userId: string },
+    @Request() req: { user: { id: string } },
     @Param('id') id: string,
     @Body() dto: RateOrderDto,
+    @Query('businessId') businessId?: string,
   ) {
     return this.keystoreService.rateOrder(
-      req.businessId,
+      requireBusinessId(businessId),
       id,
-      req.userId,
+      req.user.id,
       dto,
     );
   }

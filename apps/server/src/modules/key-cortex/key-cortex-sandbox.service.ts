@@ -718,44 +718,52 @@ export class KeyCortexSandboxService {
       };
     }
 
-    // Validate the SQL is read-only (SELECT or CTE). INSERT/UPDATE/DELETE are
-    // disabled in this build until we have a real query parser, allowlisted
-    // tables, and row-level policy enforcement.
-    const trimmed = code.trim().toUpperCase();
-    const isReadOnlyQuery =
-      trimmed.startsWith('SELECT') || trimmed.startsWith('WITH');
+    // Read-only, tenant-scoped execution. The old regex "whitelist" only
+    // inspected the first FROM table — UNION and multi-statement bypasses
+    // made every tenant's rows readable. Now: single SELECT statement only,
+    // no comments/unions/writes, allowlisted tables, and the user query is
+    // wrapped so the business_id filter is structurally mandatory.
+    const trimmed = code.trim().replace(/;\s*$/, '');
+    const upper = trimmed.toUpperCase();
 
-    if (!isReadOnlyQuery) {
+    const startsReadOnly = upper.startsWith('SELECT') || upper.startsWith('WITH');
+    const bannedPatterns = [
+      ';', '--', '/*', '*/',
+      'UNION', 'EXCEPT', 'INTERSECT', 'INTO', 'FOR UPDATE', 'FOR SHARE',
+      'INSERT', 'UPDATE', 'DELETE', 'DROP', 'ALTER', 'CREATE', 'TRUNCATE',
+      'ATTACH', 'PRAGMA', 'GRANT', 'REVOKE', 'EXEC', 'EXECUTE', 'CALL',
+    ];
+    const hasBanned = bannedPatterns.some((p) =>
+      p.length <= 2 ? upper.includes(p) : new RegExp(`\\b${p}\\b`).test(upper),
+    );
+
+    if (!startsReadOnly || hasBanned) {
       return {
         success: false,
-        error: 'Only read-only SELECT / WITH queries are allowed in the sandbox',
+        error: 'Only single-statement read-only SELECT/WITH queries are allowed in the sandbox',
         errorType: 'security',
       };
     }
 
-    // Ensure business_id filter is present for INSERT/UPDATE
-    if (trimmed.startsWith('INSERT') || trimmed.startsWith('UPDATE')) {
-      const hasBusinessFilter = code.toLowerCase().includes('business_id');
-      if (!hasBusinessFilter) {
-        return {
-          success: false,
-          error: 'INSERT/UPDATE queries must include a business_id filter for row-level security',
-          errorType: 'security',
-        };
-      }
+    const ALLOWED_TABLES = ['invoices', 'contacts', 'bookings', 'products', 'tasks', 'campaigns'];
+    const tableRefs = [...trimmed.matchAll(/(?:FROM|JOIN)\s+"?(\w+)"?/gi)].map((m) => m[1]);
+    const disallowed = tableRefs.filter((t) => !ALLOWED_TABLES.includes(t));
+    if (tableRefs.length === 0 || disallowed.length > 0) {
+      return {
+        success: false,
+        error: `Queries are limited to these tables: ${ALLOWED_TABLES.join(', ')}`,
+        errorType: 'security',
+      };
     }
 
-    // Whitelist validation for SQL injection prevention
-    const ALLOWED_TABLES = ['Invoice', 'Contact', 'Booking', 'Product', 'Order', 'Task', 'Campaign'];
-    const isSafe = /^(\s*SELECT\s+.*\s+FROM\s*"?(\w+)"?.*)$/i.test(code);
-    if (!isSafe) throw new Error('Only SELECT queries are allowed');
-    const tableMatch = code.match(/FROM\s*"?(\w+)"?/i);
-    const table = tableMatch?.[1];
-    if (table && !ALLOWED_TABLES.includes(table)) throw new Error(`Table ${table} not in whitelist`);
-    // Execute via Prisma with timeout
     try {
+      // The user's SELECT runs as a subquery; the outer WHERE forces the
+      // tenant filter. If the inner query doesn't project business_id the
+      // query errors out instead of leaking other tenants' rows.
       const result = await Promise.race([
-        (this.prisma.client as any).$queryRawUnsafe(code),
+        (this.prisma.client as any).$queryRawUnsafe(
+          `SELECT * FROM (${trimmed}) AS _tenant_scope WHERE business_id = '${businessId.replace(/'/g, '')}'`,
+        ),
         new Promise<never>((_, reject) =>
           setTimeout(() => reject(new Error('SQL execution timeout')), timeoutMs),
         ),

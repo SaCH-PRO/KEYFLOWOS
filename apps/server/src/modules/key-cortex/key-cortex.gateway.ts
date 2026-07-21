@@ -31,6 +31,9 @@ import { KeyCortexReasoningService } from './key-cortex-reasoning.service';
 import { KeyCortexApprovalService } from './key-cortex-approval.service';
 import { KeyCortexEventService } from './key-cortex-event.service';
 import { KeyCortexExecutorService } from './key-cortex-executor.service';
+import { SupabaseAuthService } from '../../core/auth/supabase-auth.service';
+import { PrismaService } from '../../core/prisma/prisma.service';
+import { allowedCorsOrigins } from '../../core/config/runtime-urls';
 
 // ------------------------------------------------------------------
 // Types
@@ -101,7 +104,13 @@ interface HealthPayload {
 
 @WebSocketGateway({
   namespace: 'key-cortex',
-  cors: { origin: '*' }, // TODO: Restrict to KEYFLOWOS_FRONTEND_URL in production
+  cors: {
+    origin:
+      process.env.NODE_ENV === 'production'
+        ? allowedCorsOrigins()
+        : true,
+    credentials: true,
+  },
 })
 export class KeyCortexGateway
   implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
@@ -117,6 +126,8 @@ export class KeyCortexGateway
     private readonly approvalService: KeyCortexApprovalService,
     private readonly eventService: KeyCortexEventService,
     private readonly executorService: KeyCortexExecutorService,
+    private readonly supabaseAuth: SupabaseAuthService,
+    private readonly prisma: PrismaService,
   ) {}
 
   // ================================================================
@@ -127,18 +138,46 @@ export class KeyCortexGateway
     this.logger.log('KEY Cortex WebSocket initialized on namespace /key-cortex');
   }
 
-  handleConnection(client: Socket) {
-    // Clients must connect with ?userId=xxx&businessId=xxx
-    const { userId, businessId } = client.handshake.query as {
-      userId?: string;
-      businessId?: string;
-    };
+  async handleConnection(client: Socket) {
+    // Authentication: the client must present a valid access token (auth
+    // payload, query param, or Authorization header). The previously accepted
+    // self-asserted ?userId=&businessId= params let anyone join any business
+    // room and approve gated actions — now verified server-side.
+    const token =
+      (client.handshake.auth?.token as string | undefined) ??
+      (client.handshake.query?.token as string | undefined) ??
+      (client.handshake.headers?.authorization?.startsWith('Bearer ')
+        ? client.handshake.headers.authorization.slice(7)
+        : undefined);
 
-    if (!userId || !businessId) {
-      this.logger.warn(`Connection rejected: missing userId or businessId (socket ${client.id})`);
+    const user = token ? await this.supabaseAuth.getUserFromToken(token).catch(() => null) : null;
+    if (!user) {
+      this.logger.warn(`Connection rejected: invalid or missing token (socket ${client.id})`);
       client.disconnect(true);
       return;
     }
+
+    // The client asserts a business; verify the authenticated user belongs to it.
+    const claimedBusinessId = client.handshake.query?.businessId as string | undefined;
+    const membership = claimedBusinessId
+      ? await this.prisma.client.membership.findFirst({
+          where: { userId: user.id, businessId: claimedBusinessId },
+        })
+      : await this.prisma.client.membership.findFirst({
+          where: { userId: user.id },
+          orderBy: { createdAt: 'asc' },
+        });
+
+    if (!membership) {
+      this.logger.warn(
+        `Connection rejected: user ${user.id} has no membership in business ${claimedBusinessId ?? '(none claimed)'}`,
+      );
+      client.disconnect(true);
+      return;
+    }
+
+    const userId = user.id;
+    const businessId = membership.businessId;
 
     const info: ClientInfo = { userId, businessId, rooms: [] };
     this.clients.set(client.id, info);

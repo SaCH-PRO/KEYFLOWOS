@@ -12,8 +12,10 @@ import {
   Post,
   Query,
   Request,
+  UseGuards,
 } from '@nestjs/common';
 import { KeystoreService } from './keystore.service';
+import { AuthGuard } from '../../core/auth/auth.guard';
 import {
   CreateListingDto,
   DeliverFilesDto,
@@ -23,26 +25,29 @@ import {
 } from './dto';
 
 @Controller('keystore/admin')
+@UseGuards(AuthGuard)
 export class KeystoreAdminController {
   constructor(private readonly keystoreService: KeystoreService) {}
 
   // ── Dashboard Stats ─────────────────────────────────────────────────────
 
   @Get('stats')
-  async getStats(@Request() req: { businessId: string }) {
-    return this.keystoreService.getOrderStats(req.businessId);
+  async getStats(@Request() req: { user: { id: string } }) {
+    const businessId = await this.keystoreService.businessIdForUser(req.user.id);
+    return this.keystoreService.getOrderStats(businessId);
   }
 
   // ── Order Management ────────────────────────────────────────────────────
 
   @Get('orders')
   async getAllOrders(
-    @Request() req: { businessId: string },
+    @Request() req: { user: { id: string } },
     @Query('status') status?: string,
     @Query('userId') userId?: string,
     @Query('listingId') listingId?: string,
   ) {
-    return this.keystoreService.getAllOrders(req.businessId, {
+    const businessId = await this.keystoreService.businessIdForUser(req.user.id);
+    return this.keystoreService.getAllOrders(businessId, {
       status,
       userId,
       listingId,
@@ -51,50 +56,54 @@ export class KeystoreAdminController {
 
   @Get('orders/:id')
   async getOrder(
-    @Request() req: { businessId: string },
+    @Request() req: { user: { id: string } },
     @Param('id') id: string,
   ) {
-    return this.keystoreService.getOrder(req.businessId, id);
+    const businessId = await this.keystoreService.businessIdForUser(req.user.id);
+    return this.keystoreService.getOrder(businessId, id);
   }
 
   @Patch('orders/:id/status')
   async updateOrderStatus(
-    @Request() req: { businessId: string; userId: string },
+    @Request() req: { user: { id: string } },
     @Param('id') id: string,
     @Body() dto: UpdateOrderStatusDto,
   ) {
+    const businessId = await this.keystoreService.businessIdForUser(req.user.id);
     return this.keystoreService.adminUpdateOrderStatus(
-      req.businessId,
+      businessId,
       id,
       dto,
-      req.userId,
+      req.user.id,
     );
   }
 
   @Post('orders/:id/messages')
   async sendMessage(
-    @Request() req: { businessId: string; userId: string },
+    @Request() req: { user: { id: string } },
     @Param('id') id: string,
     @Body() dto: SendMessageDto,
   ) {
+    const businessId = await this.keystoreService.businessIdForUser(req.user.id);
     return this.keystoreService.adminSendMessage(
-      req.businessId,
+      businessId,
       id,
-      req.userId,
+      req.user.id,
       dto,
     );
   }
 
   @Post('orders/:id/deliver')
   async deliverFiles(
-    @Request() req: { businessId: string; userId: string },
+    @Request() req: { user: { id: string } },
     @Param('id') id: string,
     @Body() dto: DeliverFilesDto,
   ) {
+    const businessId = await this.keystoreService.businessIdForUser(req.user.id);
     return this.keystoreService.deliverFiles(
-      req.businessId,
+      businessId,
       id,
-      req.userId,
+      req.user.id,
       dto,
     );
   }
@@ -103,42 +112,47 @@ export class KeystoreAdminController {
 
   @Post('listings')
   async createListing(
-    @Request() req: { businessId: string },
+    @Request() req: { user: { id: string } },
     @Body() dto: CreateListingDto,
   ) {
-    return this.keystoreService.createListing(req.businessId, dto);
+    const businessId = await this.keystoreService.businessIdForUser(req.user.id);
+    return this.keystoreService.createListing(businessId, dto);
   }
 
   @Patch('listings/:id')
   async updateListing(
-    @Request() req: { businessId: string },
+    @Request() req: { user: { id: string } },
     @Param('id') id: string,
     @Body() dto: UpdateListingDto,
   ) {
-    return this.keystoreService.updateListing(req.businessId, id, dto);
+    const businessId = await this.keystoreService.businessIdForUser(req.user.id);
+    return this.keystoreService.updateListing(businessId, id, dto);
   }
 
   @Delete('listings/:id/archive')
   async archiveListing(
-    @Request() req: { businessId: string },
+    @Request() req: { user: { id: string } },
     @Param('id') id: string,
   ) {
-    return this.keystoreService.archiveListing(req.businessId, id);
+    const businessId = await this.keystoreService.businessIdForUser(req.user.id);
+    return this.keystoreService.archiveListing(businessId, id);
   }
 
   @Post('listings/:id/pause')
   async pauseListing(
-    @Request() req: { businessId: string },
+    @Request() req: { user: { id: string } },
     @Param('id') id: string,
   ) {
-    return this.keystoreService.pauseListing(req.businessId, id);
+    const businessId = await this.keystoreService.businessIdForUser(req.user.id);
+    return this.keystoreService.pauseListing(businessId, id);
   }
 
   @Post('listings/:id/activate')
   async activateListing(
-    @Request() req: { businessId: string },
+    @Request() req: { user: { id: string } },
     @Param('id') id: string,
   ) {
-    return this.keystoreService.activateListing(req.businessId, id);
+    const businessId = await this.keystoreService.businessIdForUser(req.user.id);
+    return this.keystoreService.activateListing(businessId, id);
   }
 }

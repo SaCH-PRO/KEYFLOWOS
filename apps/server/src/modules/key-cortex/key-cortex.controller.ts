@@ -44,6 +44,7 @@ import {
   Inject,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { IsBoolean, IsIn, IsInt, IsObject, IsOptional, IsString } from 'class-validator';
 import { Response } from 'express';
 import { Observable, Subject, interval, map, from, of, catchError, concatWith } from 'rxjs';
 
@@ -300,18 +301,42 @@ class SandboxGenerateDto {
 }
 
 class SandboxExecuteDto {
+  @IsString()
   code: string;
+
+  @IsOptional()
+  @IsIn(['typescript', 'javascript', 'python', 'json', 'sql'])
   language?: 'typescript' | 'javascript' | 'python' | 'json' | 'sql';
+
+  @IsString()
   businessId: string;
+
+  @IsOptional()
+  @IsInt()
   timeoutMs?: number;
+
+  @IsOptional()
+  @IsObject()
   inputs?: Record<string, unknown>;
 }
 
 class SandboxAutoDto {
+  @IsString()
   description: string;
+
+  @IsOptional()
+  @IsIn(['typescript', 'javascript', 'python', 'json', 'sql'])
   language?: 'typescript' | 'javascript' | 'python' | 'json' | 'sql';
+
+  @IsString()
   businessId: string;
+
+  @IsOptional()
+  @IsBoolean()
   execute?: boolean;
+
+  @IsOptional()
+  @IsObject()
   inputs?: Record<string, unknown>;
 }
 

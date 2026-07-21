@@ -26,6 +26,7 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { randomUUID } from 'node:crypto';
+import { evaluateCondition } from './safe-expression';
 
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { KeyCortexConnectorService } from './key-cortex-connector.service';
@@ -2188,16 +2189,24 @@ export class KeyCortexFlowStudioService {
       result[targetKey] = this.resolveValue(sourcePath, context);
     }
 
-    // If a transform script is provided, execute it (sandboxed)
+    // Transform scripts are DISABLED by default: they previously ran through
+    // `new Function` with full Node access (RCE via any authenticated tenant
+    // user). Re-enable only for trusted deployments via env flag.
     if (data.transformScript) {
-      try {
-        const fn = new Function('context', 'input', data.transformScript);
-        const scriptResult = fn(context, result);
-        return { ...result, ...scriptResult };
-      } catch (err: any) {
-        this.logger.warn(`[Transform] Script error: ${(err as Error).message}`);
-        return result;
+      if (process.env.KEYFLOW_FLOW_SCRIPTS_ENABLED === 'true') {
+        try {
+          const fn = new Function('context', 'input', data.transformScript);
+          const scriptResult = fn(context, result);
+          return { ...result, ...scriptResult };
+        } catch (err: any) {
+          this.logger.warn(`[Transform] Script error: ${(err as Error).message}`);
+          return result;
+        }
       }
+      this.logger.warn(
+        '[Transform] transformScript ignored — script execution is disabled (KEYFLOW_FLOW_SCRIPTS_ENABLED not set)',
+      );
+      return result;
     }
 
     return result;
@@ -2310,16 +2319,8 @@ export class KeyCortexFlowStudioService {
     expression: string,
     context: Record<string, unknown>,
   ): boolean {
-    try {
-      // Simple expression evaluator with context variables
-      const fn = new Function(
-        'context',
-        `with(context) { return !!(${expression}); }`,
-      );
-      return fn(context);
-    } catch {
-      return false;
-    }
+    // Bounded evaluator only — tenant expressions must never reach `new Function`.
+    return evaluateCondition(expression, context);
   }
 
   // ── 10.14 Cycle Detection ──
