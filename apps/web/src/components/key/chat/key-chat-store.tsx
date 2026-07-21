@@ -77,7 +77,7 @@ export function KeyChatProvider({ children }: { children: ReactNode }) {
   const [pageContext, setPageContext] = useState<KeyChatPageContext | undefined>(undefined);
   const [chatMode, setChatMode] = useState<KeyChatMode | undefined>("general");
   const [error, setErrorState] = useState<string | undefined>(undefined);
-  const [showHistory, setShowHistoryState] = useState(false);
+  const [showHistory, setShowHistoryState] = useState(true);
 
   const setOpen = useCallback((value: boolean | ((prev: boolean) => boolean)) => {
     if (typeof value === "function") {
