@@ -29,28 +29,29 @@ The original version of this section said there was no `Employee`/`Staff` data m
 
 | Cluster | ✅ Covered | 🟡 Partial | ❌ Missing | Tasks surveyed |
 |---|---|---|---|---|
-| Sales & CRM | 6 | 1 | 1 | 8 |
-| Marketing & Content | 5 | 2 | 1 | 8 |
-| Bookings & Scheduling | 5 | 1 | 2 | 8 |
+| Sales & CRM | 7 | 1 | 0 | 8 |
+| Marketing & Content | 6 | 1 | 1 | 8 |
+| Bookings & Scheduling | 6 | 1 | 1 | 8 |
 | Commerce & Store | 7 | 1 | 0 | 8 |
-| Finance & Accounting | 6 | 4 | 1 | 11 |
-| Operations & Projects | 5 | 3 | 0 | 8 |
+| Finance & Accounting | 11 | 0 | 0 | 11 |
+| Operations & Projects | 7 | 1 | 0 | 8 |
 | Procurement & Purchasing | 7 | 0 | 0 | 7 |
-| Time & Resource Mgmt | 2 | 2 | 3 | 7 |
-| Customer Support / Helpdesk | 4 | 3 | 0 | 7 |
+| Time & Resource Mgmt | 4 | 0 | 3 | 7 |
+| Customer Support / Helpdesk | 5 | 2 | 0 | 7 |
 | HR / People Ops | 3 | 0 | 2 | 5 |
-| Legal & Compliance | 0 | 7 | 0 | 7 |
-| Communications | 3 | 3 | 0 | 6 |
+| Legal & Compliance | 5 | 2 | 0 | 7 |
+| Communications | 5 | 1 | 0 | 6 |
 | Front Office / Reception | 4 | 3 | 0 | 7 |
-| **Total** | **57** | **30** | **10** | **97** |
+| **Total** | **77** | **13** | **7** | **97** |
 
-**Read:** ~59% of surveyed staff tasks are fully AI-executable today (was 47% at the start of this build pass). ~31% have the hard part already built (backend service/endpoint exists) and just need a tool wrapper — this is the cheapest tier of work. ~10% require genuinely new backend logic (payroll, voice/telephony, staff-performance tracking) before any tool can exist.
+**Read:** ~79% of surveyed staff tasks are fully AI-executable (was 59% at 2026-07-20, 47% at the start of the capacity-map build pass). ~13% have backend logic built with no tool wrapper (cheap wins remaining: actual merge-execute for duplicate contacts, ticket delete/channel intake, response drafts, project plan approval, SEO remediation, front-office proactive reminders, refund execution). ~7% require genuinely new backend logic (payroll, staff-performance tracking, staff availability/capacity, booking waitlist + staff reassignment, paid-social/ads, voice/telephony execution).
 
 **Progress log:**
 - **2026-07-20** — Procurement & Purchasing: 0/7 → 7/7 covered. Added 12 KEY tools (`procurement_*`) wrapping the existing `ProcurementService`, wired into the Operations Manager role. `procurement_issue_po` is tier 3 (commits real spend); the rest are tier 1-2. Approve/reject was deliberately left human-only — see the Procurement section below.
 - **2026-07-20** — Operations & Projects: task reassignment closed. `projects_update_task` now exposes `assigneeId` (was already fully supported server-side).
 - **2026-07-20** — HR / People Ops: discovered the org-hierarchy system was never actually missing (see "Cross-cutting structural finding" above), closed the "no login required" gap with contact-only `OrgAssignment`s, and built the WhatsApp/SMS-to-KEY chat bridge for delegation. Payroll and staff-performance tracking remain real gaps.
 - **2026-07-20** (later same day) — Cross-cutting: gave KEY 9 `structure_*` tools (org chart read access + tier-3 delegation-rule writes) and built real approval routing (`ApprovalRoutingService`) so `DelegationRule`/`JobRole.defaultApprovalTier` actually determine who gets notified and can approve a KEY action, instead of sitting unused. This is infrastructure spanning every department's tier-3/4 approvals, not one row in the tables below — see the structural finding above for the full writeup.
+- **2026-07-21** — Wrapper blitz (Phase 1 of the staff-replacement program): 34 new tools across five batches. Finance 11/11 (bank accounts + auto-match, COA, vendor bills + pay, payables aging, double-entry journal posting). Legal 5/7 (contract list/get/create/update, AI term extraction, stats, alerts, tags — compliance checklist + risk register still onboarding-only). Support: `helpdesk_reply_to_ticket` backed by a new `SupportTicketMessage` model. Comms: `comms_send_broadcast`, `inbox_reply_thread`, `inbox_update_thread_status`. Sales/CRM: deal pipeline (list/update/move stage), duplicate find + merge preview, social analytics. Ops: project budget/timeline, booking no-show, time entry edit + mark billed, quote→invoice conversion. Also fixed the systemic general-role deadlock (default role was maxRiskTier 1 — nearly every write was governance-blocked; now tier 2 with quick-confirm) and closed the four Phase-0 autonomy-critical security holes (flow-script RCE, cross-tenant SQL sandbox, unauthenticated WS gateway, unguarded keystore).
 
 ---
 
