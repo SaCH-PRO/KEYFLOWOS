@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { ExpensesController } from './expenses.controller';
 import { ExpensesService } from './expenses.service';
 import { BillsController } from './bills.controller';
@@ -9,7 +9,7 @@ import { TimelineModule } from '../timeline/timeline.module';
 import { AiModule } from '../ai/ai.module';
 
 @Module({
-  imports: [FinanceModule, TimelineModule, AiModule],
+  imports: [FinanceModule, TimelineModule, forwardRef(() => AiModule)],
   controllers: [ExpensesController, BillsController, RecurringExpensesController],
   providers: [ExpensesService, RecurringExpenseService],
   exports: [ExpensesService, RecurringExpenseService],

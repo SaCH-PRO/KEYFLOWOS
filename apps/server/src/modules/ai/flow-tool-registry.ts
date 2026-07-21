@@ -2345,6 +2345,157 @@ export const FLOW_TOOLS: FlowTool[] = [
   },
 
   // ================================================================
+  //  FINANCE — BOOKKEEPING WRAPPERS (bank, COA, AP/bills, journal)
+  // ================================================================
+  {
+    name: 'finance_list_bank_accounts',
+    description: 'List connected financial/bank accounts with balances.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/finance',
+    parameters: { type: 'object', properties: {}, required: [] },
+    outputSchema: { type: 'object', description: 'Bank accounts', fields: { accounts: { type: 'array', description: 'Account rows with balance info' } } },
+  },
+  {
+    name: 'finance_auto_match_bank',
+    description: 'Auto-match unmatched bank transactions against ledger entries (receipts/payments) for a bank account.',
+    family: 'organize',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/finance',
+    changedEntities: ['bankTransaction'],
+    parameters: {
+      type: 'object',
+      properties: {
+        accountId: { type: 'string', description: 'Financial account ID to match transactions for' },
+      },
+      required: ['accountId'],
+    },
+    outputSchema: { type: 'object', description: 'Match summary', fields: { matched: { type: 'number', description: 'Transactions matched' }, reviewed: { type: 'number', description: 'Transactions needing review' } } },
+  },
+  {
+    name: 'finance_list_coa',
+    description: 'List the chart of accounts for the business.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/finance',
+    parameters: { type: 'object', properties: {}, required: [] },
+    outputSchema: { type: 'object', description: 'Chart of accounts', fields: { accounts: { type: 'array', description: 'COA rows (code, name, type)' } } },
+  },
+  {
+    name: 'finance_create_coa_account',
+    description: 'Create a new account in the chart of accounts.',
+    family: 'organize',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/finance',
+    changedEntities: ['chartOfAccount'],
+    parameters: {
+      type: 'object',
+      properties: {
+        code: { type: 'string', description: 'Account code (e.g. 4000)' },
+        name: { type: 'string', description: 'Account name' },
+        type: { type: 'string', description: 'Account type: ASSET, LIABILITY, EQUITY, REVENUE, EXPENSE' },
+        parentId: { type: 'string', description: 'Optional parent account ID' },
+      },
+      required: ['code', 'name', 'type'],
+    },
+    outputSchema: { type: 'object', description: 'Created account', fields: { id: { type: 'string', description: 'Account ID' }, code: { type: 'string', description: 'Account code' } } },
+  },
+  {
+    name: 'finance_list_bills',
+    description: 'List vendor bills (accounts payable) with status.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/finance',
+    parameters: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: 'Max results (default 50)' },
+      },
+      required: [],
+    },
+    outputSchema: { type: 'object', description: 'Bills list', fields: { bills: { type: 'array', description: 'Bill rows (vendor, amount, due date, status)' } } },
+  },
+  {
+    name: 'finance_create_bill',
+    description: 'Record a vendor bill (an expense to pay later).',
+    family: 'organize',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/finance',
+    changedEntities: ['expense'],
+    parameters: {
+      type: 'object',
+      properties: {
+        description: { type: 'string', description: 'What the bill is for' },
+        amount: { type: 'number', description: 'Bill amount' },
+        currency: { type: 'string', description: 'Currency code (default business currency)' },
+        dueDate: { type: 'string', description: 'Due date (ISO)' },
+        vendor: { type: 'string', description: 'Vendor name' },
+        notes: { type: 'string', description: 'Optional notes' },
+        contactId: { type: 'string', description: 'Optional contact ID of the vendor' },
+      },
+      required: ['description', 'amount'],
+    },
+    outputSchema: { type: 'object', description: 'Created bill', fields: { id: { type: 'string', description: 'Bill ID' }, status: { type: 'string', description: 'Bill status' } } },
+  },
+  {
+    name: 'finance_pay_bill',
+    description: 'Mark a vendor bill as paid (records the payment).',
+    family: 'execute',
+    riskLevel: 'high',
+    riskTier: 3 as RiskTier,
+    manualEquivalentRoute: '/app/finance',
+    changedEntities: ['expense', 'payment'],
+    parameters: {
+      type: 'object',
+      properties: {
+        billId: { type: 'string', description: 'Bill (expense) ID to pay' },
+        paymentMethod: { type: 'string', description: 'Payment method note (e.g. bank transfer)' },
+        paidAt: { type: 'string', description: 'Payment date (ISO, default now)' },
+      },
+      required: ['billId'],
+    },
+    outputSchema: { type: 'object', description: 'Paid bill', fields: { id: { type: 'string', description: 'Bill ID' }, status: { type: 'string', description: 'New status' } } },
+  },
+  {
+    name: 'finance_view_payables',
+    description: 'View accounts payable aging — outstanding bills grouped by overdue buckets, plus vendor balances.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/finance',
+    parameters: { type: 'object', properties: {}, required: [] },
+    outputSchema: { type: 'object', description: 'AP aging + vendor balances', fields: { aging: { type: 'object', description: 'Aging buckets' }, vendors: { type: 'array', description: 'Vendor balance rows' } } },
+  },
+  {
+    name: 'finance_post_journal_entry',
+    description: 'Post a balanced double-entry journal entry (debits and credits must sum to the entry amount).',
+    family: 'organize',
+    riskLevel: 'high',
+    riskTier: 3 as RiskTier,
+    manualEquivalentRoute: '/app/finance',
+    changedEntities: ['journalEntry', 'ledgerEntry'],
+    parameters: {
+      type: 'object',
+      properties: {
+        type: { type: 'string', description: 'Entry type: INCOME, EXPENSE, TRANSFER, REFUND, TAX, ADJUSTMENT, OPENING_BALANCE' },
+        date: { type: 'string', description: 'Posting date (ISO)' },
+        amount: { type: 'number', description: 'Total entry amount (each side)' },
+        currency: { type: 'string', description: 'Currency code (optional)' },
+        description: { type: 'string', description: 'Narration/memo' },
+        entries: { type: 'array', description: 'Lines: [{ accountId, debit?, credit?, memo? }] — debits must equal credits' },
+      },
+      required: ['type', 'date', 'amount', 'entries'],
+    },
+    outputSchema: { type: 'object', description: 'Posted journal entry', fields: { id: { type: 'string', description: 'Journal entry ID' }, status: { type: 'string', description: 'Posting status' } } },
+  },
+
+  // ================================================================
   //  PROJECT UPDATE/DELETE — L2 Organize / L3 Execute
   // ================================================================
   {

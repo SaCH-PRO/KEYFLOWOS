@@ -20,6 +20,10 @@ import { AiUsageService } from './ai-usage.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
 import { AiOversightService } from './ai-oversight.service';
 import { ConversationGenomeExtractorService } from './conversation-genome-extractor.service';
+import { FinanceAccountsService } from '../finance/finance-accounts.service';
+import { BankMatchingService } from '../finance/bank-matching.service';
+import { FinanceCoaService } from '../finance/finance-coa.service';
+import { PostingService } from '../finance/posting.service';
 import { GenomeFactService } from '../business-genome/key-genome/genome-fact.service';
 import { BusinessGraphService } from './business-graph.service';
 import { PlannerService } from './planner.service';
@@ -300,6 +304,18 @@ export class FlowOrchestratorService {
   }
   private getApprovalRequest() {
     return this.moduleRef.get(ApprovalRequestService, { strict: false });
+  }
+  private getFinanceAccounts() {
+    return this.moduleRef.get(FinanceAccountsService, { strict: false });
+  }
+  private getBankMatching() {
+    return this.moduleRef.get(BankMatchingService, { strict: false });
+  }
+  private getFinanceCoa() {
+    return this.moduleRef.get(FinanceCoaService, { strict: false });
+  }
+  private getPosting() {
+    return this.moduleRef.get(PostingService, { strict: false });
   }
   private getDrive() {
     return this.moduleRef.get(GoogleDriveService, { strict: false });
@@ -3324,6 +3340,81 @@ export class FlowOrchestratorService {
         }
         const totalOutstanding = outstanding.reduce((sum, inv) => sum + Number(inv.total), 0);
         return { totalOutstanding, ...buckets, invoices: outstanding.map(i => ({ id: i.id, number: i.invoiceNumber, total: Number(i.total), contact: i.contact })) };
+      }
+      case 'finance_list_bank_accounts': {
+        const accounts = await this.getFinanceAccounts().list(businessId);
+        return { accounts };
+      }
+      case 'finance_auto_match_bank': {
+        const result = await this.getBankMatching().autoMatch(businessId, args.accountId, {
+          sinceDate: args.sinceDate ? new Date(args.sinceDate) : null,
+          untilDate: args.untilDate ? new Date(args.untilDate) : null,
+        });
+        return result;
+      }
+      case 'finance_list_coa': {
+        const accounts = await this.getFinanceCoa().list(businessId);
+        return { accounts };
+      }
+      case 'finance_create_coa_account': {
+        const account = await this.getFinanceCoa().create(businessId, {
+          code: args.code,
+          name: args.name,
+          type: args.type,
+          parentId: args.parentId ?? null,
+        });
+        return { id: account.id, code: (account as { code?: string }).code };
+      }
+      case 'finance_list_bills': {
+        const bills = await this.getExpenses().listExpenses(businessId, {
+          status: 'BILL',
+          limit: args.limit ?? 50,
+        });
+        return { bills };
+      }
+      case 'finance_create_bill': {
+        const bill = await this.getExpenses().createExpense({
+          businessId,
+          description: args.description,
+          amount: args.amount,
+          currency: args.currency,
+          dueDate: args.dueDate,
+          vendor: args.vendor,
+          notes: args.notes,
+          contactId: args.contactId,
+          status: 'BILL',
+        });
+        return { id: bill.id, status: bill.status };
+      }
+      case 'finance_pay_bill': {
+        const bill = await this.getExpenses().markBillPaid({
+          businessId,
+          expenseId: args.billId,
+          paymentMethod: args.paymentMethod,
+          paidAt: args.paidAt,
+        });
+        return { id: bill.id, status: bill.status };
+      }
+      case 'finance_view_payables': {
+        const [aging, vendors] = await Promise.all([
+          this.getExpenses().getPayablesAging(businessId),
+          this.getExpenses().getVendorBalances(businessId),
+        ]);
+        return { aging, vendors };
+      }
+      case 'finance_post_journal_entry': {
+        const result = await this.getPosting().post({
+          businessId,
+          type: args.type,
+          date: new Date(args.date),
+          amount: args.amount,
+          currency: args.currency,
+          description: args.description,
+          entries: (args.entries as Array<{ accountId: string; debit?: number; credit?: number; memo?: string }>).map(
+            (e) => ({ accountId: e.accountId, debit: e.debit, credit: e.credit, memo: e.memo }),
+          ),
+        });
+        return result;
       }
       case 'finance_customer_balance': {
         const [invoicedAgg, paidAgg, invoices] = await Promise.all([
