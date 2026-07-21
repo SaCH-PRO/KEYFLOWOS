@@ -2734,6 +2734,215 @@ export const FLOW_TOOLS: FlowTool[] = [
   },
 
   // ================================================================
+  //  CRM / SALES & MISC — L1 Read / L2 Organize
+  // ================================================================
+  {
+    name: 'crm_list_deals',
+    description: 'List pipeline deals with stage and value.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/crm/pipeline',
+    parameters: {
+      type: 'object',
+      properties: {
+        stageId: { type: 'string', description: 'Filter by pipeline stage ID' },
+        limit: { type: 'number', description: 'Max results (default 25)' },
+      },
+      required: [],
+    },
+    outputSchema: { type: 'object', description: 'Deals list', fields: { deals: { type: 'array', description: 'Deal rows' } } },
+  },
+  {
+    name: 'crm_update_deal',
+    description: 'Update a deal (title, value, company, owner, description).',
+    family: 'crud',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/crm/pipeline',
+    changedEntities: ['deal'],
+    parameters: {
+      type: 'object',
+      properties: {
+        dealId: { type: 'string', description: 'Deal ID' },
+        title: { type: 'string', description: 'New title' },
+        value: { type: 'number', description: 'Deal value' },
+        companyName: { type: 'string', description: 'Company name' },
+        ownerUserId: { type: 'string', description: 'Owner user ID' },
+        description: { type: 'string', description: 'Description' },
+      },
+      required: ['dealId'],
+    },
+    outputSchema: { type: 'object', description: 'Updated deal', fields: { id: { type: 'string', description: 'Deal ID' }, title: { type: 'string', description: 'Deal title' } } },
+  },
+  {
+    name: 'crm_move_deal_stage',
+    description: 'Move a deal to a different pipeline stage.',
+    family: 'organize',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/crm/pipeline',
+    changedEntities: ['deal'],
+    parameters: {
+      type: 'object',
+      properties: {
+        dealId: { type: 'string', description: 'Deal ID' },
+        stageId: { type: 'string', description: 'Target stage ID' },
+      },
+      required: ['dealId', 'stageId'],
+    },
+    outputSchema: { type: 'object', description: 'Moved deal', fields: { id: { type: 'string', description: 'Deal ID' }, stageId: { type: 'string', description: 'New stage ID' } } },
+  },
+  {
+    name: 'crm_find_duplicates',
+    description: 'Find duplicate contact candidates in the CRM.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/crm',
+    parameters: {
+      type: 'object',
+      properties: {
+        minConfidence: { type: 'number', description: 'Minimum confidence 0-1 (default 0.6)' },
+        limit: { type: 'number', description: 'Max pairs (default 20)' },
+      },
+      required: [],
+    },
+    outputSchema: { type: 'object', description: 'Duplicate pairs', fields: { pairs: { type: 'array', description: 'Duplicate candidate pairs' }, total: { type: 'number', description: 'Total found' } } },
+  },
+  {
+    name: 'crm_merge_preview',
+    description: 'Preview what merging a duplicate contact into a primary contact would move (before executing).',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/crm',
+    parameters: {
+      type: 'object',
+      properties: {
+        primaryId: { type: 'string', description: 'Primary (surviving) contact ID' },
+        duplicateId: { type: 'string', description: 'Duplicate contact ID' },
+      },
+      required: ['primaryId', 'duplicateId'],
+    },
+    outputSchema: { type: 'object', description: 'Merge preview', fields: { preview: { type: 'object', description: 'What the merge would affect' } } },
+  },
+  {
+    name: 'social_get_analytics',
+    description: 'Social media analytics overview: followers, engagement, and post performance across connected platforms.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/marketing',
+    parameters: { type: 'object', properties: {}, required: [] },
+    outputSchema: { type: 'object', description: 'Social analytics overview', fields: { overview: { type: 'object', description: 'Aggregated metrics' } } },
+  },
+  {
+    name: 'bookings_mark_no_show',
+    description: 'Mark a booking as a no-show (customer did not arrive).',
+    family: 'organize',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/bookings',
+    changedEntities: ['booking'],
+    parameters: {
+      type: 'object',
+      properties: {
+        bookingId: { type: 'string', description: 'Booking ID' },
+      },
+      required: ['bookingId'],
+    },
+    outputSchema: { type: 'object', description: 'No-show booking', fields: { id: { type: 'string', description: 'Booking ID' }, status: { type: 'string', description: 'New status' } } },
+  },
+  {
+    name: 'projects_get_budget',
+    description: 'Get a project budget vs actuals breakdown.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/projects',
+    parameters: {
+      type: 'object',
+      properties: {
+        projectId: { type: 'string', description: 'Project ID' },
+      },
+      required: ['projectId'],
+    },
+    outputSchema: { type: 'object', description: 'Project budget', fields: { budget: { type: 'object', description: 'Budget vs actuals' } } },
+  },
+  {
+    name: 'projects_get_timeline',
+    description: 'Get a project timeline with milestones.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/projects',
+    parameters: {
+      type: 'object',
+      properties: {
+        projectId: { type: 'string', description: 'Project ID' },
+      },
+      required: ['projectId'],
+    },
+    outputSchema: { type: 'object', description: 'Project timeline', fields: { timeline: { type: 'object', description: 'Timeline and milestones' } } },
+  },
+  {
+    name: 'time_update_entry',
+    description: 'Edit a logged time entry (duration, notes, billable).',
+    family: 'crud',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/time',
+    changedEntities: ['timeEntry'],
+    parameters: {
+      type: 'object',
+      properties: {
+        entryId: { type: 'string', description: 'Time entry ID' },
+        durationMinutes: { type: 'number', description: 'New duration in minutes' },
+        notes: { type: 'string', description: 'New notes' },
+        billable: { type: 'boolean', description: 'Mark billable or not' },
+      },
+      required: ['entryId'],
+    },
+    outputSchema: { type: 'object', description: 'Updated time entry', fields: { id: { type: 'string', description: 'Entry ID' } } },
+  },
+  {
+    name: 'time_mark_billed',
+    description: 'Mark time entries as billed (linked to an invoice).',
+    family: 'organize',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/time',
+    changedEntities: ['timeEntry'],
+    parameters: {
+      type: 'object',
+      properties: {
+        entryIds: { type: 'array', description: 'Time entry IDs to mark billed' },
+        invoiceId: { type: 'string', description: 'Invoice ID to link' },
+      },
+      required: ['entryIds', 'invoiceId'],
+    },
+    outputSchema: { type: 'object', description: 'Billed entries', fields: { updated: { type: 'number', description: 'Entries updated' } } },
+  },
+  {
+    name: 'commerce_convert_quote',
+    description: 'Convert an accepted quote into an invoice.',
+    family: 'organize',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/commerce',
+    changedEntities: ['quote', 'invoice'],
+    parameters: {
+      type: 'object',
+      properties: {
+        quoteId: { type: 'string', description: 'Quote ID to convert' },
+      },
+      required: ['quoteId'],
+    },
+    outputSchema: { type: 'object', description: 'Created invoice', fields: { invoiceId: { type: 'string', description: 'New invoice ID' } } },
+  },
+
+  // ================================================================
   //  PROJECT UPDATE/DELETE — L2 Organize / L3 Execute
   // ================================================================
   {

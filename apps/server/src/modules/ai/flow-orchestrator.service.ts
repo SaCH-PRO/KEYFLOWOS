@@ -27,6 +27,9 @@ import { PostingService } from '../finance/posting.service';
 import { ContractsService } from '../contracts/contracts.service';
 import { CommunicationsService } from '../communications/communications.service';
 import { KeyInboxService } from '../key-inbox/key-inbox.service';
+import { CrmDealsService } from '../crm/crm-deals.service';
+import { CrmDuplicateDetectionService } from '../crm/crm-duplicate-detection.service';
+import { SocialAnalyticsService } from '../social/social-analytics.service';
 import { GenomeFactService } from '../business-genome/key-genome/genome-fact.service';
 import { BusinessGraphService } from './business-graph.service';
 import { PlannerService } from './planner.service';
@@ -331,6 +334,15 @@ export class FlowOrchestratorService {
   }
   private getKeyInbox() {
     return this.moduleRef.get(KeyInboxService, { strict: false });
+  }
+  private getCrmDeals() {
+    return this.moduleRef.get(CrmDealsService, { strict: false });
+  }
+  private getCrmDuplicates() {
+    return this.moduleRef.get(CrmDuplicateDetectionService, { strict: false });
+  }
+  private getSocialAnalytics() {
+    return this.moduleRef.get(SocialAnalyticsService, { strict: false });
   }
   private getDrive() {
     return this.moduleRef.get(GoogleDriveService, { strict: false });
@@ -3519,6 +3531,85 @@ export class FlowOrchestratorService {
           priority: args.priority,
         });
         return { id: thread.id, status: thread.status };
+      }
+      // === CRM / SALES & MISC ===
+      case 'crm_list_deals': {
+        const deals = await this.prisma.client.deal.findMany({
+          where: { businessId, ...(args.stageId ? { stageId: args.stageId } : {}) },
+          take: args.limit ?? 25,
+          orderBy: { updatedAt: 'desc' },
+        });
+        return { deals };
+      }
+      case 'crm_update_deal': {
+        const deal = await this.getCrmDeals().updateDeal({
+          businessId,
+          dealId: args.dealId,
+          title: args.title,
+          value: args.value ?? undefined,
+          companyName: args.companyName,
+          ownerUserId: args.ownerUserId,
+          description: args.description,
+        });
+        return { id: deal.id, title: deal.title };
+      }
+      case 'crm_move_deal_stage': {
+        const deal = await this.getCrmDeals().moveStage({
+          businessId,
+          dealId: args.dealId,
+          stageId: args.stageId,
+        });
+        return { id: deal.id, stageId: deal.stageId };
+      }
+      case 'crm_find_duplicates': {
+        return this.getCrmDuplicates().findCandidatesScoped({
+          businessId,
+          minConfidence: args.minConfidence ?? 0.6,
+          limit: args.limit ?? 20,
+        });
+      }
+      case 'crm_merge_preview': {
+        const preview = await this.getCrmDuplicates().preview({
+          businessId,
+          primaryId: args.primaryId,
+          duplicateId: args.duplicateId,
+        });
+        return { preview };
+      }
+      case 'social_get_analytics': {
+        const overview = await this.getSocialAnalytics().getAnalyticsOverview(businessId);
+        return { overview };
+      }
+      case 'bookings_mark_no_show': {
+        const booking = await this.getBookings().updateBookingStatus(businessId, args.bookingId, 'NO_SHOW');
+        return { id: booking.id, status: booking.status };
+      }
+      case 'projects_get_budget': {
+        const budget = await this.getProjects().getProjectBudget(args.projectId, businessId);
+        return { budget };
+      }
+      case 'projects_get_timeline': {
+        const timeline = await this.getProjects().getProjectTimeline(args.projectId, businessId);
+        return { timeline };
+      }
+      case 'time_update_entry': {
+        const entry = await this.getTimeEntry().update(args.entryId, businessId, {
+          durationMinutes: args.durationMinutes,
+          description: args.notes,
+          billable: args.billable,
+        });
+        return { id: entry.id };
+      }
+      case 'time_mark_billed': {
+        const result = await this.getTimeEntry().markAsBilled(args.entryIds, businessId, args.invoiceId);
+        return { updated: (result as { count?: number }).count ?? (Array.isArray(result) ? result.length : 0) };
+      }
+      case 'commerce_convert_quote': {
+        const invoice = await this.getCommerce().convertQuoteToInvoice({
+          quoteId: args.quoteId,
+          businessId,
+        });
+        return { invoiceId: (invoice as { id: string }).id };
       }
       case 'finance_customer_balance': {
         const [invoicedAgg, paidAgg, invoices] = await Promise.all([
