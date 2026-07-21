@@ -2943,6 +2943,28 @@ export const FLOW_TOOLS: FlowTool[] = [
   },
 
   // ================================================================
+  //  FALLBACK EXECUTOR — L3 Execute (approval-gated)
+  // ================================================================
+  {
+    name: 'execute_custom_logic',
+    description: 'Write and run a small JavaScript snippet to accomplish a task no dedicated tool covers (calculations, multi-step data transforms, one-off reports). The snippet runs in a sandbox with an `api` object: `await api.callTool(name, args)` calls any tier 1-2 KEY tool, `api.log(...)` prints output. Return the final answer as the snippet value. Max 10 tool calls, 15s limit.',
+    family: 'execute',
+    riskLevel: 'high',
+    riskTier: 3 as RiskTier,
+    manualEquivalentRoute: '/app/key/chat',
+    changedEntities: [],
+    parameters: {
+      type: 'object',
+      properties: {
+        code: { type: 'string', description: 'JavaScript snippet body (async). Has `api.callTool` and `api.log`. Max 8000 chars.' },
+        inputs: { type: 'object', description: 'Optional small input values for the snippet' },
+      },
+      required: ['code'],
+    },
+    outputSchema: { type: 'object', description: 'Execution result', fields: { ok: { type: 'boolean', description: 'Whether it ran' }, value: { type: 'string', description: 'Returned value' }, error: { type: 'string', description: 'Error if failed' }, logs: { type: 'array', description: 'Log lines' }, toolCalls: { type: 'number', description: 'Tool calls made' } } },
+  },
+
+  // ================================================================
   //  PROJECT UPDATE/DELETE — L2 Organize / L3 Execute
   // ================================================================
   {

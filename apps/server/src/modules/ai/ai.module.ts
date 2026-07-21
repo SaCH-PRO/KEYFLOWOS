@@ -43,6 +43,7 @@ import { KeyAutonomyModule } from '../key-autonomy/key-autonomy.module';
 import { KeyCortexModule } from '../key-cortex/key-cortex.module';
 import { KeyGenomeModule } from '../business-genome/key-genome/key-genome.module';
 import { ConversationGenomeExtractorService } from './conversation-genome-extractor.service';
+import { CodeExecutorService } from './code-executor.service';
 import { ExpensesModule } from '../expenses/expenses.module';
 import { ContractsModule } from '../contracts/contracts.module';
 import { HelpdeskModule } from '../helpdesk/helpdesk.module';
@@ -101,6 +102,7 @@ import { AiApprovalsService } from './ai-approvals.service';
     OutputTemplateService,
     FlowOrchestratorService,
     ConversationGenomeExtractorService,
+    CodeExecutorService,
     BusinessGraphService,
     AiOversightService,
     ApprovalRoutingService,

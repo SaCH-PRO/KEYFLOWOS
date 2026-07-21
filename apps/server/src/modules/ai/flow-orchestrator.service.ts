@@ -29,6 +29,7 @@ import { CommunicationsService } from '../communications/communications.service'
 import { KeyInboxService } from '../key-inbox/key-inbox.service';
 import { McpClientManagerService } from '../mcp/mcp-client-manager.service';
 import { isMcpToolName } from '../mcp/mcp.types';
+import { CodeExecutorService } from './code-executor.service';
 import { CrmDealsService } from '../crm/crm-deals.service';
 import { CrmDuplicateDetectionService } from '../crm/crm-duplicate-detection.service';
 import { SocialAnalyticsService } from '../social/social-analytics.service';
@@ -339,6 +340,9 @@ export class FlowOrchestratorService {
   }
   private getMcp() {
     return this.moduleRef.get(McpClientManagerService, { strict: false });
+  }
+  private getCodeExecutor() {
+    return this.moduleRef.get(CodeExecutorService, { strict: false });
   }
   private getCrmDeals() {
     return this.moduleRef.get(CrmDealsService, { strict: false });
@@ -3653,6 +3657,15 @@ export class FlowOrchestratorService {
           businessId,
         });
         return { invoiceId: (invoice as { id: string }).id };
+      }
+      case 'execute_custom_logic': {
+        const result = await this.getCodeExecutor().execute({
+          businessId,
+          code: args.code,
+          inputs: args.inputs,
+          innerToolExecutor: (bizId, name, toolArgs) => this.executeToolByName(bizId, name, toolArgs),
+        });
+        return result;
       }
       case 'finance_customer_balance': {
         const [invoicedAgg, paidAgg, invoices] = await Promise.all([
