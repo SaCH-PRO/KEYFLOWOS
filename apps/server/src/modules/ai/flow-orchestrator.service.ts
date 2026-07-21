@@ -585,6 +585,43 @@ export class FlowOrchestratorService {
   }
 
   /**
+   * Selects tool definitions for a chat request. Providers cap the tools
+   * array (OpenAI: 128) and the registry has outgrown it, so when the
+   * candidate set is too large we rank tools by relevance to the current
+   * request (message + page context) and keep the top 128 — a general
+   * conversation keeps its most plausible tools instead of 400ing.
+   */
+  private selectToolsForRequest(
+    detectedRole: BusinessRole | undefined,
+    contextText: string,
+  ): ReturnType<typeof getOpenAiToolDefinitions> {
+    const all = getOpenAiToolDefinitions();
+    const candidates =
+      detectedRole && detectedRole !== 'general'
+        ? all.filter((t) => this.roleEngine.isToolAllowed(detectedRole, t.function.name))
+        : all;
+
+    const MAX_TOOLS = 128;
+    if (candidates.length <= MAX_TOOLS) return candidates;
+
+    const tokens = new Set(
+      contextText
+        .toLowerCase()
+        .split(/[^a-z0-9]+/)
+        .filter((w) => w.length > 2),
+    );
+    const scored = candidates.map((t, index) => {
+      let score = 0;
+      for (const part of t.function.name.split('_')) {
+        if (part.length > 2 && tokens.has(part)) score += 1;
+      }
+      return { t, score, index };
+    });
+    scored.sort((a, b) => (b.score - a.score) || (a.index - b.index));
+    return scored.slice(0, MAX_TOOLS).map((s) => s.t);
+  }
+
+  /**
    * Infer the business role from conversation context.
    * Uses page route, focused item, message content, and conversation history
    * to determine which role Key should adopt. This makes Key feel like one
@@ -898,9 +935,10 @@ export class FlowOrchestratorService {
         'flow_chat',
         {
           messages: messages as GatewayMessage[],
-          tools: detectedRole && detectedRole !== 'general'
-            ? getOpenAiToolDefinitions().filter((t) => this.roleEngine.isToolAllowed(detectedRole, t.function.name))
-            : getOpenAiToolDefinitions(),
+          tools: this.selectToolsForRequest(
+            detectedRole,
+            [enrichedMessage, pageContext?.route, ...(pageContext?.hints ?? [])].filter(Boolean).join(' '),
+          ),
           toolChoice: 'auto',
           maxTokens: 1000,
           temperature: 0.7,
@@ -1179,9 +1217,10 @@ export class FlowOrchestratorService {
         'flow_chat_stream',
         {
           messages,
-          tools: detectedRole && detectedRole !== 'general'
-            ? getOpenAiToolDefinitions().filter((t) => this.roleEngine.isToolAllowed(detectedRole, t.function.name))
-            : getOpenAiToolDefinitions(),
+          tools: this.selectToolsForRequest(
+            detectedRole,
+            [enrichedMessage, pageContext?.route, ...(pageContext?.hints ?? [])].filter(Boolean).join(' '),
+          ),
           toolChoice: 'auto',
           maxTokens: 1000,
           temperature: 0.7,
