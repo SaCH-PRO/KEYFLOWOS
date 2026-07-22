@@ -34,6 +34,7 @@ import type { JobRoleEnvelope } from '../structure/job-role-policy.service';
 import { JobRolePolicyService } from '../structure/job-role-policy.service';
 import { PayrollService } from '../payroll/payroll.service';
 import { StaffPerformanceService } from '../staff-performance/staff-performance.service';
+import { CrmSequenceService } from '../crm/crm-sequence.service';
 import { CrmDealsService } from '../crm/crm-deals.service';
 import { CrmDuplicateDetectionService } from '../crm/crm-duplicate-detection.service';
 import { SocialAnalyticsService } from '../social/social-analytics.service';
@@ -358,6 +359,9 @@ export class FlowOrchestratorService {
   }
   private getStaffPerformance() {
     return this.moduleRef.get(StaffPerformanceService, { strict: false });
+  }
+  private getCrmSequences() {
+    return this.moduleRef.get(CrmSequenceService, { strict: false });
   }
   private getCrmDeals() {
     return this.moduleRef.get(CrmDealsService, { strict: false });
@@ -3760,6 +3764,41 @@ export class FlowOrchestratorService {
       case 'performance_trend': {
         const trend = await this.getStaffPerformance().trend(businessId, args.assignmentId, args.limit);
         return { trend };
+      }
+      // === SEQUENCES / DUNNING ===
+      case 'sequence_list': {
+        const sequences = await this.getCrmSequences().listSequences(businessId);
+        return { sequences };
+      }
+      case 'sequence_create': {
+        const sequence = await this.getCrmSequences().createSequence(businessId, {
+          name: args.name,
+          description: args.description,
+          status: args.status,
+          steps: args.steps,
+        });
+        return { id: sequence.id, name: sequence.name };
+      }
+      case 'sequence_enroll': {
+        const result = await this.getCrmSequences().enrollContacts(businessId, args.sequenceId, args.contactIds);
+        return result;
+      }
+      case 'sequence_enroll_overdue': {
+        const result = await this.getCrmSequences().enrollOverdueContacts(businessId, args.sequenceId, {
+          minDaysOverdue: args.minDaysOverdue,
+          limit: args.limit,
+        });
+        return result;
+      }
+      case 'sequence_unenroll': {
+        const result = await this.getCrmSequences().unenrollContact(businessId, args.enrollmentId);
+        return { id: args.enrollmentId, ...(typeof result === 'object' ? result : {}) };
+      }
+      case 'sequence_pause_resume': {
+        const sequence = await this.getCrmSequences().updateSequence(businessId, args.sequenceId, {
+          status: args.status,
+        });
+        return { id: sequence.id, status: sequence.status };
       }
       case 'finance_customer_balance': {
         const [invoicedAgg, paidAgg, invoices] = await Promise.all([

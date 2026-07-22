@@ -3160,6 +3160,112 @@ export const FLOW_TOOLS: FlowTool[] = [
   },
 
   // ================================================================
+  //  SEQUENCES / DUNNING — L1 Read / L2 Organize / L3 Execute
+  // ================================================================
+  {
+    name: 'sequence_list',
+    description: 'List outreach sequences (cadences) with enrollment counts.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/crm/sequences',
+    parameters: { type: 'object', properties: {}, required: [] },
+    outputSchema: { type: 'object', description: 'Sequences list', fields: { sequences: { type: 'array', description: 'Sequence rows' } } },
+  },
+  {
+    name: 'sequence_create',
+    description: 'Create an outreach sequence (a cadence of timed steps: email, whatsapp, sms, call, or wait).',
+    family: 'organize',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/crm/sequences',
+    changedEntities: ['crmSequence'],
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Sequence name' },
+        description: { type: 'string', description: 'What this cadence is for' },
+        status: { type: 'string', description: 'draft, active, or paused (default draft)' },
+        steps: { type: 'array', description: 'Steps: [{stepNumber, type: email|whatsapp|sms|call|wait, delayDays, subject?, body?}]' },
+      },
+      required: ['name', 'steps'],
+    },
+    outputSchema: { type: 'object', description: 'Created sequence', fields: { id: { type: 'string', description: 'Sequence ID' }, name: { type: 'string', description: 'Sequence name' } } },
+  },
+  {
+    name: 'sequence_enroll',
+    description: 'Enroll contacts into a sequence (starts the cadence for them).',
+    family: 'execute',
+    riskLevel: 'high',
+    riskTier: 3 as RiskTier,
+    manualEquivalentRoute: '/app/crm/sequences',
+    changedEntities: ['crmSequenceEnrollment'],
+    parameters: {
+      type: 'object',
+      properties: {
+        sequenceId: { type: 'string', description: 'Sequence ID' },
+        contactIds: { type: 'array', description: 'Contact IDs to enroll' },
+      },
+      required: ['sequenceId', 'contactIds'],
+    },
+    outputSchema: { type: 'object', description: 'Enrollment result', fields: { enrolled: { type: 'number', description: 'Contacts enrolled' }, skipped: { type: 'number', description: 'Already enrolled' } } },
+  },
+  {
+    name: 'sequence_enroll_overdue',
+    description: 'Collections dunning: enroll every contact with an overdue invoice into a sequence.',
+    family: 'execute',
+    riskLevel: 'high',
+    riskTier: 3 as RiskTier,
+    manualEquivalentRoute: '/app/crm/sequences',
+    changedEntities: ['crmSequenceEnrollment'],
+    parameters: {
+      type: 'object',
+      properties: {
+        sequenceId: { type: 'string', description: 'Dunning sequence ID' },
+        minDaysOverdue: { type: 'number', description: 'Minimum days overdue (default 1)' },
+        limit: { type: 'number', description: 'Max contacts (default 50)' },
+      },
+      required: ['sequenceId'],
+    },
+    outputSchema: { type: 'object', description: 'Dunning enrollment result', fields: { enrolled: { type: 'number', description: 'Contacts enrolled' } } },
+  },
+  {
+    name: 'sequence_unenroll',
+    description: 'Remove a contact from a sequence (stops their cadence).',
+    family: 'organize',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/crm/sequences',
+    changedEntities: ['crmSequenceEnrollment'],
+    parameters: {
+      type: 'object',
+      properties: {
+        enrollmentId: { type: 'string', description: 'Enrollment ID to stop' },
+      },
+      required: ['enrollmentId'],
+    },
+    outputSchema: { type: 'object', description: 'Stopped enrollment', fields: { id: { type: 'string', description: 'Enrollment ID' } } },
+  },
+  {
+    name: 'sequence_pause_resume',
+    description: 'Pause or resume a sequence.',
+    family: 'organize',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/crm/sequences',
+    changedEntities: ['crmSequence'],
+    parameters: {
+      type: 'object',
+      properties: {
+        sequenceId: { type: 'string', description: 'Sequence ID' },
+        status: { type: 'string', description: 'active or paused' },
+      },
+      required: ['sequenceId', 'status'],
+    },
+    outputSchema: { type: 'object', description: 'Updated sequence', fields: { id: { type: 'string', description: 'Sequence ID' }, status: { type: 'string', description: 'New status' } } },
+  },
+
+  // ================================================================
   //  PROJECT UPDATE/DELETE — L2 Organize / L3 Execute
   // ================================================================
   {
