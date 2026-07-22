@@ -8,9 +8,10 @@
 #   pnpm dev                   # from repo root
 #
 # Brings up:
-#   db     — PostgreSQL 16
-#   redis  — Redis 7 (BullMQ job queues)
-#   minio  — S3-compatible object storage
+#   db      — PostgreSQL 16 (pgvector-enabled)
+#   redis   — Redis 7 (BullMQ job queues)
+#   minio   — S3-compatible object storage
+#   docling — document parse layer for the ingestion pipeline (AP/contracts)
 #
 # Production-grade deploys should swap these for managed services.
 # See DEPLOYMENT.md for platform-specific guides.
@@ -64,6 +65,23 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # Document parse layer for the ingestion pipeline (AP invoices, receipts,
+  # contracts). CPU-only; the server talks to it over DOCLING_URL.
+  docling:
+    image: quay.io/docling-project/docling-serve:latest
+    restart: unless-stopped
+    environment:
+      DOCLING_SERVE_ENABLE_UI: "false"
+      DOCLING_SERVE_MAX_SYNC_WAIT: "120"
+    ports:
+      - "5001:5001"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5001/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
 
 volumes:
   keyflow_db:
