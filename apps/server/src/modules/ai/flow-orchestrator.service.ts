@@ -30,6 +30,8 @@ import { KeyInboxService } from '../key-inbox/key-inbox.service';
 import { McpClientManagerService } from '../mcp/mcp-client-manager.service';
 import { isMcpToolName } from '../mcp/mcp.types';
 import { CodeExecutorService } from './code-executor.service';
+import type { JobRoleEnvelope } from '../structure/job-role-policy.service';
+import { JobRolePolicyService } from '../structure/job-role-policy.service';
 import { CrmDealsService } from '../crm/crm-deals.service';
 import { CrmDuplicateDetectionService } from '../crm/crm-duplicate-detection.service';
 import { SocialAnalyticsService } from '../social/social-analytics.service';
@@ -183,6 +185,8 @@ export interface FlowPageContext {
   recent?: Array<{ label: string; href?: string; at?: string }>;
   notes?: Array<{ title?: string; body: string }>;
   hints?: string[];
+  /** Position-scoped governance envelope (staff positions talking to KEY). */
+  jobRoleEnvelope?: JobRoleEnvelope;
 }
 
 function formatPageContextSection(ctx?: FlowPageContext): string {
@@ -343,6 +347,9 @@ export class FlowOrchestratorService {
   }
   private getCodeExecutor() {
     return this.moduleRef.get(CodeExecutorService, { strict: false });
+  }
+  private getJobRolePolicy() {
+    return this.moduleRef.get(JobRolePolicyService, { strict: false });
   }
   private getCrmDeals() {
     return this.moduleRef.get(CrmDealsService, { strict: false });
@@ -657,12 +664,20 @@ export class FlowOrchestratorService {
     businessId: string,
     detectedRole: BusinessRole | undefined,
     contextText: string,
+    envelope?: JobRoleEnvelope,
   ): Promise<ReturnType<typeof getOpenAiToolDefinitions>> {
     const all = getOpenAiToolDefinitions();
-    let candidates: ReturnType<typeof getOpenAiToolDefinitions> =
-      detectedRole && detectedRole !== 'general'
-        ? all.filter((t) => this.roleEngine.isToolAllowed(detectedRole, t.function.name))
-        : all;
+    let candidates: ReturnType<typeof getOpenAiToolDefinitions>;
+    if (envelope) {
+      // Position-scoped: the envelope's patterns decide, not department roles.
+      const policy = this.getJobRolePolicy();
+      candidates = all.filter((t) => policy.isToolAllowed(envelope, t.function.name));
+    } else {
+      candidates =
+        detectedRole && detectedRole !== 'general'
+          ? all.filter((t) => this.roleEngine.isToolAllowed(detectedRole, t.function.name))
+          : all;
+    }
 
     // Append bridged MCP tools (allowlisted remote servers) for this business
     // when the role is permitted to use them.
@@ -965,7 +980,7 @@ export class FlowOrchestratorService {
         return { reply: 'Got it — I cancelled that action. Let me know if there\'s anything else you\'d like to do.' };
       }
       if (pendingConfirmation.toolName && pendingConfirmation.toolArgs) {
-        const confirmDecision = await this.governance.evaluate(businessId, pendingConfirmation.toolName, undefined, detectedRole);
+        const confirmDecision = await this.governance.evaluate(businessId, pendingConfirmation.toolName, undefined, detectedRole, pageContext?.jobRoleEnvelope);
         if (!confirmDecision.allowed) {
           return {
             reply: `This action is blocked: ${confirmDecision.reason}`,
@@ -1021,6 +1036,7 @@ export class FlowOrchestratorService {
             businessId,
             detectedRole,
             [enrichedMessage, pageContext?.route, ...(pageContext?.hints ?? [])].filter(Boolean).join(' '),
+            pageContext?.jobRoleEnvelope,
           ),
           toolChoice: 'auto',
           maxTokens: 1000,
@@ -1056,7 +1072,7 @@ export class FlowOrchestratorService {
 
       const governanceChecks = await Promise.all(
         toolCalls.map(async (tc) => {
-          const decision = await this.governance.evaluate(businessId, tc.name, undefined, detectedRole);
+          const decision = await this.governance.evaluate(businessId, tc.name, undefined, detectedRole, pageContext?.jobRoleEnvelope);
           return { tc, decision };
         }),
       );
@@ -1304,6 +1320,7 @@ export class FlowOrchestratorService {
             businessId,
             detectedRole,
             [enrichedMessage, pageContext?.route, ...(pageContext?.hints ?? [])].filter(Boolean).join(' '),
+            pageContext?.jobRoleEnvelope,
           ),
           toolChoice: 'auto',
           maxTokens: 1000,
@@ -1392,7 +1409,7 @@ export class FlowOrchestratorService {
 
       const governanceChecks = await Promise.all(
         toolCalls.map(async (tc) => {
-          const decision = await this.governance.evaluate(businessId, tc.name, undefined, detectedRole);
+          const decision = await this.governance.evaluate(businessId, tc.name, undefined, detectedRole, pageContext?.jobRoleEnvelope);
           return { tc, decision };
         }),
       );

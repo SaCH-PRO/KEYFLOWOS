@@ -4,6 +4,7 @@ import { StructureService } from './structure.service';
 import { FlowOrchestratorService } from '../ai/flow-orchestrator.service';
 import { AiOversightService } from '../ai/ai-oversight.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { JobRolePolicyService } from './job-role-policy.service';
 
 export interface StaffChatBridgeResult {
   handled: boolean;
@@ -39,6 +40,10 @@ export class StaffChatBridgeService {
 
   private getFlowOrchestrator() {
     return this.moduleRef.get(FlowOrchestratorService, { strict: false });
+  }
+
+  private getJobRolePolicy() {
+    return this.moduleRef.get(JobRolePolicyService, { strict: false });
   }
 
   private getOversight() {
@@ -94,9 +99,20 @@ export class StaffChatBridgeService {
     const sessionId: string | undefined = assignment.activeFlowSessionId ?? undefined;
     const history = sessionId ? await orchestrator.getConversationHistory(businessId, sessionId) : [];
 
+    // Position-scoped governance: the staff position's JobRole.permissions
+    // decide which tools KEY may use in this conversation.
+    const envelope = assignment.jobRole
+      ? this.getJobRolePolicy().envelopeForJobRole(assignment.jobRole)
+      : undefined;
+
     const hints = [
       `You are talking to ${displayName}, a staff member${assignment.jobRole ? ` (position: ${assignment.jobRole.name})` : ''} over ${channel === 'whatsapp' ? 'WhatsApp' : 'SMS'}, not the in-app chat. Keep replies short and text-message appropriate.`,
     ];
+    if (envelope) {
+      hints.push(
+        `${displayName}'s position is ${envelope.jobRoleName}. Only use tools within that position's scope; politely decline requests outside it and suggest they ask a manager.`,
+      );
+    }
     if (pendingApprovalHint) hints.push(pendingApprovalHint);
 
     const result = await orchestrator.chat(
@@ -108,6 +124,7 @@ export class StaffChatBridgeService {
         surface: `staff_${channel}`,
         route: `/channel/${channel}`,
         hints,
+        jobRoleEnvelope: envelope,
       },
       undefined,
       undefined,

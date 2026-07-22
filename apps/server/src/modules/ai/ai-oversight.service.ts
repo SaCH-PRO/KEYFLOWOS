@@ -5,6 +5,7 @@ import { AiMemoryService } from './ai-memory.service';
 import { getToolByName } from './flow-tool-registry';
 import { RoleEngineService, BusinessRole } from './role-engine.service';
 import { ApprovalRoutingService } from './approval-routing.service';
+import { JobRolePolicyService, JobRoleEnvelope } from '../structure/job-role-policy.service';
 
 export type RiskTier = 1 | 2 | 3 | 4;
 
@@ -48,6 +49,7 @@ export class AiOversightService {
     @Inject(forwardRef(() => AiMemoryService)) private readonly memoryService: AiMemoryService,
     @Inject(RoleEngineService) private readonly roleEngine: RoleEngineService,
     @Inject(ApprovalRoutingService) private readonly approvalRouting: ApprovalRoutingService,
+    @Inject(JobRolePolicyService) private readonly jobRolePolicy: JobRolePolicyService,
   ) {}
 
   getToolTier(toolName: string): RiskTier {
@@ -70,14 +72,22 @@ export class AiOversightService {
     toolName: string,
     mode?: string,
     role?: BusinessRole,
+    envelope?: JobRoleEnvelope,
   ): Promise<GovernanceDecision> {
     const tier = this.getToolTier(toolName);
     const settings = await this.getAutonomySettings(businessId);
 
     const blocked = { allowed: false, requiresQuickConfirm: false, requiresFormalApproval: false, requiresAdminApproval: false, tier };
 
-    // Role-based tool filtering
-    if (role && !this.roleEngine.isToolAllowed(role, toolName)) {
+    // Position-scoped governance wins over department roles when present.
+    if (envelope) {
+      if (!this.jobRolePolicy.isToolAllowed(envelope, toolName)) {
+        return { ...blocked, reason: `Tool "${toolName}" is outside the ${envelope.jobRoleName} position's scope` };
+      }
+      if (tier > envelope.maxRiskTier) {
+        return { ...blocked, reason: `Tool "${toolName}" (tier ${tier}) exceeds the ${envelope.jobRoleName} position's tier (${envelope.maxRiskTier})` };
+      }
+    } else if (role && !this.roleEngine.isToolAllowed(role, toolName)) {
       return { ...blocked, reason: `Tool "${toolName}" is not available to the ${role} role` };
     }
 
