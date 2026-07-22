@@ -152,6 +152,8 @@ export const operateSections: NavSection[] = [
       { label: "Sequences", href: "/app/crm/sequences", icon: Send },
       { label: "Intelligence", href: "/app/crm/intelligence", icon: Brain },
       { label: "Service", href: "/app/helpdesk", icon: Headset },
+      { label: "Payroll", href: "/app/payroll", icon: Banknote },
+      { label: "Performance", href: "/app/performance", icon: Activity },
     ],
   },
   {
