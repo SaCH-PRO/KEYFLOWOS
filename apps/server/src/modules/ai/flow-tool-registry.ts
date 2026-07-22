@@ -3265,6 +3265,25 @@ export const FLOW_TOOLS: FlowTool[] = [
     outputSchema: { type: 'object', description: 'Updated sequence', fields: { id: { type: 'string', description: 'Sequence ID' }, status: { type: 'string', description: 'New status' } } },
   },
 
+  {
+    name: 'contract_extract_clauses',
+    description: 'Run a 41-label CUAD clause analysis on a contract\'s source document: which standard clauses are present (with summaries + source snippets) and which critical ones are missing.',
+    family: 'read',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/contracts',
+    changedEntities: ['contract'],
+    parameters: {
+      type: 'object',
+      properties: {
+        contractId: { type: 'string', description: 'Contract ID' },
+        url: { type: 'string', description: 'Optional document URL to analyze instead of the linked source' },
+      },
+      required: ['contractId'],
+    },
+    outputSchema: { type: 'object', description: 'Clause analysis', fields: { total: { type: 'number', description: 'Labels analyzed' }, present: { type: 'array', description: 'Present clauses' }, notableAbsent: { type: 'array', description: 'Critical missing clauses' } } },
+  },
+
   // ================================================================
   //  PROJECT UPDATE/DELETE — L2 Organize / L3 Execute
   // ================================================================

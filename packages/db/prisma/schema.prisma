@@ -851,6 +851,9 @@ model Contract {
   retentionPolicy String?   @map("retention_policy")
   retentionUntil  DateTime? @map("retention_until")
 
+  /** CUAD-style clause analysis output (labels, presence, summaries, source anchors). */
+  clauseAnalysis Json? @map("clause_analysis")
+
   notes String?
 
   sourceAssetId            String? @map("source_asset_id")

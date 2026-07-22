@@ -25,6 +25,7 @@ import { BankMatchingService } from '../finance/bank-matching.service';
 import { FinanceCoaService } from '../finance/finance-coa.service';
 import { PostingService } from '../finance/posting.service';
 import { ContractsService } from '../contracts/contracts.service';
+import { ContractClauseService } from '../contracts/contract-clause.service';
 import { CommunicationsService } from '../communications/communications.service';
 import { KeyInboxService } from '../key-inbox/key-inbox.service';
 import { McpClientManagerService } from '../mcp/mcp-client-manager.service';
@@ -335,6 +336,9 @@ export class FlowOrchestratorService {
   }
   private getContracts() {
     return this.moduleRef.get(ContractsService, { strict: false });
+  }
+  private getContractClauses() {
+    return this.moduleRef.get(ContractClauseService, { strict: false });
   }
   private getHelpdeskService() {
     return this.moduleRef.get(HelpdeskService, { strict: false });
@@ -3577,6 +3581,12 @@ export class FlowOrchestratorService {
       case 'contract_create_tag': {
         const tag = await this.getContracts().createTag(businessId, args.name, args.color);
         return { id: tag.id, name: tag.name };
+      }
+      case 'contract_extract_clauses': {
+        const result = await this.getContractClauses().extractClauses(businessId, args.contractId, {
+          url: args.url,
+        });
+        return result;
       }
       // === SUPPORT & COMMS ===
       case 'helpdesk_reply_to_ticket': {
