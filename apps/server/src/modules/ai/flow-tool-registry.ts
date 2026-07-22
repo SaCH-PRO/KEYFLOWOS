@@ -3085,6 +3085,81 @@ export const FLOW_TOOLS: FlowTool[] = [
   },
 
   // ================================================================
+  //  STAFF PERFORMANCE — L1 Read / L2 Organize
+  // ================================================================
+  {
+    name: 'performance_scorecard',
+    description: 'Compute a staff member\'s performance scorecard for a period: on-time task completion, hours utilization, approval responsiveness, and an overall score (0-100).',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/structure',
+    parameters: {
+      type: 'object',
+      properties: {
+        assignmentId: { type: 'string', description: 'OrgAssignment (staff position) ID' },
+        periodStart: { type: 'string', description: 'Period start (ISO)' },
+        periodEnd: { type: 'string', description: 'Period end (ISO)' },
+      },
+      required: ['assignmentId', 'periodStart', 'periodEnd'],
+    },
+    outputSchema: { type: 'object', description: 'Performance scorecard', fields: { overallScore: { type: 'number', description: 'Overall score 0-100' }, utilizationPct: { type: 'number', description: 'Hours utilization %' } } },
+  },
+  {
+    name: 'performance_team_summary',
+    description: 'Performance scorecards for every active staff position over a period, ranked by overall score.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/structure',
+    parameters: {
+      type: 'object',
+      properties: {
+        periodStart: { type: 'string', description: 'Period start (ISO)' },
+        periodEnd: { type: 'string', description: 'Period end (ISO)' },
+      },
+      required: ['periodStart', 'periodEnd'],
+    },
+    outputSchema: { type: 'object', description: 'Team performance summary', fields: { cards: { type: 'array', description: 'Scorecards ranked by score' } } },
+  },
+  {
+    name: 'performance_take_snapshot',
+    description: 'Persist a performance snapshot for a staff member over a period (enables trend history).',
+    family: 'organize',
+    riskLevel: 'low',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/structure',
+    changedEntities: ['staffPerformanceSnapshot'],
+    parameters: {
+      type: 'object',
+      properties: {
+        assignmentId: { type: 'string', description: 'OrgAssignment (staff position) ID' },
+        periodStart: { type: 'string', description: 'Period start (ISO)' },
+        periodEnd: { type: 'string', description: 'Period end (ISO)' },
+      },
+      required: ['assignmentId', 'periodStart', 'periodEnd'],
+    },
+    outputSchema: { type: 'object', description: 'Saved snapshot', fields: { id: { type: 'string', description: 'Snapshot ID' }, overallScore: { type: 'number', description: 'Overall score' } } },
+  },
+  {
+    name: 'performance_trend',
+    description: 'Get a staff member\'s performance trend from saved snapshots (recent periods first).',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/structure',
+    parameters: {
+      type: 'object',
+      properties: {
+        assignmentId: { type: 'string', description: 'OrgAssignment (staff position) ID' },
+        limit: { type: 'number', description: 'Max periods (default 8)' },
+      },
+      required: ['assignmentId'],
+    },
+    outputSchema: { type: 'object', description: 'Performance trend', fields: { trend: { type: 'array', description: 'Period score rows' } } },
+  },
+
+  // ================================================================
   //  PROJECT UPDATE/DELETE — L2 Organize / L3 Execute
   // ================================================================
   {

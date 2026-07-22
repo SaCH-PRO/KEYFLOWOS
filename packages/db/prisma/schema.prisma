@@ -305,6 +305,7 @@ model Business {
   payRates                     PayRate[]
   payrollRuns                  PayrollRun[]
   payrollItems                 PayrollItem[]
+  staffPerformanceSnapshots    StaffPerformanceSnapshot[]
   businessRules                BusinessRule[]
   businessSignals              BusinessSignal[]
   healthSnapshots              BusinessHealthSnapshot[]
@@ -2304,6 +2305,7 @@ model OrgAssignment {
 
   payRates     PayRate[]
   payrollItems PayrollItem[]
+  staffPerformanceSnapshots StaffPerformanceSnapshot[]
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -2380,6 +2382,33 @@ model PayrollItem {
   @@index([runId])
   @@index([businessId])
   @@map("payroll_items")
+}
+
+model StaffPerformanceSnapshot {
+  id           String        @id @default(cuid())
+  businessId   String        @map("business_id")
+  business     Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  assignmentId String        @map("assignment_id")
+  assignment   OrgAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+
+  periodStart DateTime @map("period_start")
+  periodEnd   DateTime @map("period_end")
+
+  tasksAssigned            Int      @default(0) @map("tasks_assigned")
+  tasksCompleted           Int      @default(0) @map("tasks_completed")
+  tasksOnTime              Int      @default(0) @map("tasks_on_time")
+  tasksOverdueOpen         Int      @default(0) @map("tasks_overdue_open")
+  hoursWorked              Decimal  @default(0) @db.Decimal(8, 2) @map("hours_worked")
+  expectedHours            Decimal  @default(0) @db.Decimal(8, 2) @map("expected_hours")
+  approvalsHandled         Int      @default(0) @map("approvals_handled")
+  avgApprovalResponseHours Decimal? @db.Decimal(8, 2) @map("avg_approval_response_hours")
+  overallScore             Int      @default(0) @map("overall_score")
+
+  computedAt DateTime @default(now()) @map("computed_at")
+
+  @@unique([businessId, assignmentId, periodStart, periodEnd])
+  @@index([businessId])
+  @@map("staff_performance_snapshots")
 }
 
 model DelegationRule {

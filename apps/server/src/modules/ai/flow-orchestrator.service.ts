@@ -33,6 +33,7 @@ import { CodeExecutorService } from './code-executor.service';
 import type { JobRoleEnvelope } from '../structure/job-role-policy.service';
 import { JobRolePolicyService } from '../structure/job-role-policy.service';
 import { PayrollService } from '../payroll/payroll.service';
+import { StaffPerformanceService } from '../staff-performance/staff-performance.service';
 import { CrmDealsService } from '../crm/crm-deals.service';
 import { CrmDuplicateDetectionService } from '../crm/crm-duplicate-detection.service';
 import { SocialAnalyticsService } from '../social/social-analytics.service';
@@ -354,6 +355,9 @@ export class FlowOrchestratorService {
   }
   private getPayroll() {
     return this.moduleRef.get(PayrollService, { strict: false });
+  }
+  private getStaffPerformance() {
+    return this.moduleRef.get(StaffPerformanceService, { strict: false });
   }
   private getCrmDeals() {
     return this.moduleRef.get(CrmDealsService, { strict: false });
@@ -3726,6 +3730,36 @@ export class FlowOrchestratorService {
       case 'payroll_mark_paid': {
         const run = await this.getPayroll().markRunPaid(businessId, args.runId);
         return { id: run.id, status: run.status };
+      }
+      // === STAFF PERFORMANCE ===
+      case 'performance_scorecard': {
+        return this.getStaffPerformance().computeScorecard(
+          businessId,
+          args.assignmentId,
+          new Date(args.periodStart),
+          new Date(args.periodEnd),
+        );
+      }
+      case 'performance_team_summary': {
+        const cards = await this.getStaffPerformance().teamSummary(
+          businessId,
+          new Date(args.periodStart),
+          new Date(args.periodEnd),
+        );
+        return { cards };
+      }
+      case 'performance_take_snapshot': {
+        const snap = await this.getStaffPerformance().takeSnapshot(
+          businessId,
+          args.assignmentId,
+          new Date(args.periodStart),
+          new Date(args.periodEnd),
+        );
+        return { id: snap.id, overallScore: snap.overallScore };
+      }
+      case 'performance_trend': {
+        const trend = await this.getStaffPerformance().trend(businessId, args.assignmentId, args.limit);
+        return { trend };
       }
       case 'finance_customer_balance': {
         const [invoicedAgg, paidAgg, invoices] = await Promise.all([
