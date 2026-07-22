@@ -51,6 +51,7 @@ import { KeyInboxModule } from '../key-inbox/key-inbox.module';
 import { CommunicationsModule } from '../communications/communications.module';
 import { McpModule } from '../mcp/mcp.module';
 import { StructureModule } from '../structure/structure.module';
+import { PayrollModule } from '../payroll/payroll.module';
 import { KeyCommandService } from './key-command.service';
 import { KeyToolRegistryService } from './key-tool-registry.service';
 import { AutopilotRulesService } from './autopilot-rules.service';
@@ -91,7 +92,7 @@ import { AiApprovalsController } from './ai-approvals.controller';
 import { AiApprovalsService } from './ai-approvals.service';
 
 @Module({
-  imports: [PrismaModule, RedisModule, SubscriptionsModule, forwardRef(() => BlueprintModule), TimelineModule, forwardRef(() => FinanceModule), CommandModule, GoogleDriveModule, TaskAssignmentModule, forwardRef(() => KeyAutonomyModule), forwardRef(() => KeyCortexModule), forwardRef(() => ExpensesModule), forwardRef(() => ContractsModule), HelpdeskModule, forwardRef(() => KeyInboxModule), forwardRef(() => CommunicationsModule), McpModule, StructureModule, KeyGenomeModule],
+  imports: [PrismaModule, RedisModule, SubscriptionsModule, forwardRef(() => BlueprintModule), TimelineModule, forwardRef(() => FinanceModule), CommandModule, GoogleDriveModule, TaskAssignmentModule, forwardRef(() => KeyAutonomyModule), forwardRef(() => KeyCortexModule), forwardRef(() => ExpensesModule), forwardRef(() => ContractsModule), HelpdeskModule, forwardRef(() => KeyInboxModule), forwardRef(() => CommunicationsModule), McpModule, StructureModule, PayrollModule, KeyGenomeModule],
   controllers: [AiController, AiSettingsController, OutputTemplateController, AiFlowController, GraphActionsController, AiUsageAdminController, AiIntelligenceController, BlueprintOnboardingController, AiApprovalsController],
   providers: [
     AiListener,

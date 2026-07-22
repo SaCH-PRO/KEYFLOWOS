@@ -291,6 +291,7 @@ model Business {
   crossModuleWorkflows         CrossModuleWorkflow[]
   scheduledAgentJobs           ScheduledAgentJob[]
   customerNotificationLogs     CustomerNotificationLog[]
+  events                       Event[]
   apiKeys                      ApiKey[]
   guidanceProfile              BusinessGuidanceProfile?
   guidanceAssessments          GuidanceAssessment[]
@@ -301,6 +302,9 @@ model Business {
   jobRoles                     JobRole[]
   orgAssignments               OrgAssignment[]
   delegationRules              DelegationRule[]
+  payRates                     PayRate[]
+  payrollRuns                  PayrollRun[]
+  payrollItems                 PayrollItem[]
   businessRules                BusinessRule[]
   businessSignals              BusinessSignal[]
   healthSnapshots              BusinessHealthSnapshot[]
@@ -706,6 +710,95 @@ model Business {
   deletedAt DateTime? @map("deleted_at")
 
   @@map("businesses")
+}
+
+// Events & Ticketing
+model Event {
+  id            String   @id @default(cuid())
+  businessId    String   @map("business_id")
+  name          String
+  description   String?  @db.Text
+  startsAt      DateTime @map("starts_at")
+  endsAt        DateTime? @map("ends_at")
+  timezone      String   @default("UTC")
+  location      String?
+  isPublished   Boolean  @default(false) @map("is_published")
+  coverImageUrl String?  @map("cover_image_url")
+  status        String   @default("DRAFT") // DRAFT, PUBLISHED, CANCELLED, COMPLETED
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  business    Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  ticketTypes EventTicketType[]
+  attendees   EventAttendee[]
+  checkIns    EventCheckIn[]
+
+  @@index([businessId])
+  @@index([status])
+  @@index([startsAt])
+  @@map("events")
+}
+
+model EventTicketType {
+  id           String    @id @default(cuid())
+  eventId      String    @map("event_id")
+  name         String
+  description  String?   @db.Text
+  price        Decimal   @default(0) @db.Decimal(12, 2)
+  currency     String    @default("USD")
+  quantity     Int?
+  quantitySold Int       @default(0) @map("quantity_sold")
+  salesStartAt DateTime? @map("sales_start_at")
+  salesEndAt   DateTime? @map("sales_end_at")
+  isActive     Boolean   @default(true) @map("is_active")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  event     Event           @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  attendees EventAttendee[]
+
+  @@index([eventId])
+  @@map("event_ticket_types")
+}
+
+model EventAttendee {
+  id           String   @id @default(cuid())
+  eventId      String   @map("event_id")
+  ticketTypeId String?  @map("ticket_type_id")
+  businessId   String   @map("business_id")
+  email        String
+  name         String?
+  phone        String?
+  status       String   @default("REGISTERED") // REGISTERED, CANCELLED, CHECKED_IN, REFUNDED
+  paymentId    String?  @map("payment_id")
+  checkedInAt  DateTime? @map("checked_in_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  event      Event            @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  ticketType EventTicketType? @relation(fields: [ticketTypeId], references: [id], onDelete: SetNull)
+  checkIns   EventCheckIn[]
+
+  @@unique([eventId, email])
+  @@index([businessId])
+  @@index([status])
+  @@map("event_attendees")
+}
+
+model EventCheckIn {
+  id          String   @id @default(cuid())
+  eventId     String   @map("event_id")
+  attendeeId  String   @map("attendee_id")
+  checkedInAt DateTime @default(now()) @map("checked_in_at")
+  checkedInBy String?  @map("checked_in_by")
+  notes       String?  @db.Text
+
+  event    Event         @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  attendee EventAttendee @relation(fields: [attendeeId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, attendeeId])
+  @@index([eventId])
+  @@map("event_check_ins")
 }
 
 // Phase 7: Business Genome — Business Asset Registry
@@ -2209,6 +2302,9 @@ model OrgAssignment {
   startedAt DateTime  @default(now()) @map("started_at")
   endedAt   DateTime? @map("ended_at")
 
+  payRates     PayRate[]
+  payrollItems PayrollItem[]
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -2217,6 +2313,73 @@ model OrgAssignment {
   @@index([businessId, userId])
   @@index([businessId, contactPhone])
   @@map("org_assignments")
+}
+
+model PayRate {
+  id           String        @id @default(cuid())
+  businessId   String        @map("business_id")
+  business     Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  assignmentId String        @map("assignment_id")
+  assignment   OrgAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+
+  amount        Decimal  @db.Decimal(12, 2)
+  currency      String   @default("TTD")
+  periodType    String   @default("hourly") @map("period_type") // hourly | monthly
+  effectiveFrom DateTime @default(now()) @map("effective_from")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([businessId, assignmentId, effectiveFrom])
+  @@index([businessId])
+  @@map("pay_rates")
+}
+
+model PayrollRun {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  periodStart DateTime @map("period_start")
+  periodEnd   DateTime @map("period_end")
+
+  status       String    @default("DRAFT") // DRAFT | APPROVED | PAID | VOID
+  totalGross   Decimal   @default(0) @db.Decimal(14, 2)
+  currency     String    @default("TTD")
+  itemCount    Int       @default(0) @map("item_count")
+  approvedAt   DateTime? @map("approved_at")
+  approvedById String?   @map("approved_by_id")
+  paidAt       DateTime? @map("paid_at")
+  notes        String?
+
+  items PayrollItem[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId, status])
+  @@map("payroll_runs")
+}
+
+model PayrollItem {
+  id           String        @id @default(cuid())
+  runId        String        @map("run_id")
+  run          PayrollRun    @relation(fields: [runId], references: [id], onDelete: Cascade)
+  businessId   String        @map("business_id")
+  business     Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  assignmentId String        @map("assignment_id")
+  assignment   OrgAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+
+  hoursWorked Decimal? @db.Decimal(8, 2) @map("hours_worked")
+  grossPay    Decimal  @db.Decimal(12, 2) @map("gross_pay")
+  currency    String   @default("TTD")
+  notes       String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([runId])
+  @@index([businessId])
+  @@map("payroll_items")
 }
 
 model DelegationRule {

@@ -32,6 +32,7 @@ import { isMcpToolName } from '../mcp/mcp.types';
 import { CodeExecutorService } from './code-executor.service';
 import type { JobRoleEnvelope } from '../structure/job-role-policy.service';
 import { JobRolePolicyService } from '../structure/job-role-policy.service';
+import { PayrollService } from '../payroll/payroll.service';
 import { CrmDealsService } from '../crm/crm-deals.service';
 import { CrmDuplicateDetectionService } from '../crm/crm-duplicate-detection.service';
 import { SocialAnalyticsService } from '../social/social-analytics.service';
@@ -350,6 +351,9 @@ export class FlowOrchestratorService {
   }
   private getJobRolePolicy() {
     return this.moduleRef.get(JobRolePolicyService, { strict: false });
+  }
+  private getPayroll() {
+    return this.moduleRef.get(PayrollService, { strict: false });
   }
   private getCrmDeals() {
     return this.moduleRef.get(CrmDealsService, { strict: false });
@@ -3683,6 +3687,45 @@ export class FlowOrchestratorService {
           innerToolExecutor: (bizId, name, toolArgs) => this.executeToolByName(bizId, name, toolArgs),
         });
         return result;
+      }
+      // === PAYROLL ===
+      case 'payroll_list_rates': {
+        const rates = await this.getPayroll().listRates(businessId);
+        return { rates };
+      }
+      case 'payroll_set_rate': {
+        const rate = await this.getPayroll().setRate(businessId, {
+          assignmentId: args.assignmentId,
+          amount: args.amount,
+          currency: args.currency,
+          periodType: args.periodType,
+        });
+        return { id: rate.id, amount: Number(rate.amount) };
+      }
+      case 'payroll_generate_run': {
+        const run = await this.getPayroll().generateRun(
+          businessId,
+          new Date(args.periodStart),
+          new Date(args.periodEnd),
+          { notes: args.notes },
+        );
+        return { id: run.id, totalGross: Number(run.totalGross), itemCount: run.itemCount };
+      }
+      case 'payroll_list_runs': {
+        const runs = await this.getPayroll().listRuns(businessId, { status: args.status, limit: args.limit });
+        return { runs };
+      }
+      case 'payroll_get_run': {
+        const run = await this.getPayroll().getRun(businessId, args.runId);
+        return { run };
+      }
+      case 'payroll_approve_run': {
+        const run = await this.getPayroll().approveRun(businessId, args.runId);
+        return { id: run.id, status: run.status };
+      }
+      case 'payroll_mark_paid': {
+        const run = await this.getPayroll().markRunPaid(businessId, args.runId);
+        return { id: run.id, status: run.status };
       }
       case 'finance_customer_balance': {
         const [invoicedAgg, paidAgg, invoices] = await Promise.all([

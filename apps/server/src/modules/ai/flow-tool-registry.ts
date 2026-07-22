@@ -2965,6 +2965,126 @@ export const FLOW_TOOLS: FlowTool[] = [
   },
 
   // ================================================================
+  //  PAYROLL — L1 Read / L2 Organize / L3 Execute
+  // ================================================================
+  {
+    name: 'payroll_list_rates',
+    description: 'List current pay rates per staff position (latest effective rate per assignment).',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/structure',
+    parameters: { type: 'object', properties: {}, required: [] },
+    outputSchema: { type: 'object', description: 'Pay rates', fields: { rates: { type: 'array', description: 'Rate rows (staff, amount, currency, period type)' } } },
+  },
+  {
+    name: 'payroll_set_rate',
+    description: 'Set a staff member\'s pay rate (hourly or monthly salary).',
+    family: 'organize',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/structure',
+    changedEntities: ['payRate'],
+    parameters: {
+      type: 'object',
+      properties: {
+        assignmentId: { type: 'string', description: 'OrgAssignment (staff position) ID' },
+        amount: { type: 'number', description: 'Rate amount (per hour if hourly, per month if monthly)' },
+        currency: { type: 'string', description: 'Currency code (default business currency)' },
+        periodType: { type: 'string', description: 'hourly or monthly (default hourly)' },
+      },
+      required: ['assignmentId', 'amount'],
+    },
+    outputSchema: { type: 'object', description: 'Created rate', fields: { id: { type: 'string', description: 'Rate ID' }, amount: { type: 'number', description: 'Rate amount' } } },
+  },
+  {
+    name: 'payroll_generate_run',
+    description: 'Generate a draft payroll run for a period: hourly staff get logged billable hours × rate, salaried staff get their monthly rate.',
+    family: 'execute',
+    riskLevel: 'high',
+    riskTier: 3 as RiskTier,
+    manualEquivalentRoute: '/app/finance',
+    changedEntities: ['payrollRun', 'payrollItem'],
+    parameters: {
+      type: 'object',
+      properties: {
+        periodStart: { type: 'string', description: 'Period start (ISO date)' },
+        periodEnd: { type: 'string', description: 'Period end (ISO date)' },
+        notes: { type: 'string', description: 'Optional notes for the run' },
+      },
+      required: ['periodStart', 'periodEnd'],
+    },
+    outputSchema: { type: 'object', description: 'Generated run', fields: { id: { type: 'string', description: 'Run ID' }, totalGross: { type: 'number', description: 'Total gross pay' }, itemCount: { type: 'number', description: 'Staff items' } } },
+  },
+  {
+    name: 'payroll_list_runs',
+    description: 'List payroll runs with status and totals.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/finance',
+    parameters: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', description: 'Filter: DRAFT, APPROVED, PAID, VOID' },
+        limit: { type: 'number', description: 'Max results (default 20)' },
+      },
+      required: [],
+    },
+    outputSchema: { type: 'object', description: 'Payroll runs', fields: { runs: { type: 'array', description: 'Run rows' } } },
+  },
+  {
+    name: 'payroll_get_run',
+    description: 'Get a payroll run with per-staff line items (hours worked, gross pay).',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/finance',
+    parameters: {
+      type: 'object',
+      properties: {
+        runId: { type: 'string', description: 'Payroll run ID' },
+      },
+      required: ['runId'],
+    },
+    outputSchema: { type: 'object', description: 'Run detail', fields: { run: { type: 'object', description: 'Run with items' } } },
+  },
+  {
+    name: 'payroll_approve_run',
+    description: 'Approve a draft payroll run (locks it for payment).',
+    family: 'execute',
+    riskLevel: 'high',
+    riskTier: 3 as RiskTier,
+    manualEquivalentRoute: '/app/finance',
+    changedEntities: ['payrollRun'],
+    parameters: {
+      type: 'object',
+      properties: {
+        runId: { type: 'string', description: 'Payroll run ID' },
+      },
+      required: ['runId'],
+    },
+    outputSchema: { type: 'object', description: 'Approved run', fields: { id: { type: 'string', description: 'Run ID' }, status: { type: 'string', description: 'New status' } } },
+  },
+  {
+    name: 'payroll_mark_paid',
+    description: 'Mark an approved payroll run as paid.',
+    family: 'execute',
+    riskLevel: 'high',
+    riskTier: 3 as RiskTier,
+    manualEquivalentRoute: '/app/finance',
+    changedEntities: ['payrollRun'],
+    parameters: {
+      type: 'object',
+      properties: {
+        runId: { type: 'string', description: 'Payroll run ID' },
+      },
+      required: ['runId'],
+    },
+    outputSchema: { type: 'object', description: 'Paid run', fields: { id: { type: 'string', description: 'Run ID' }, status: { type: 'string', description: 'New status' } } },
+  },
+
+  // ================================================================
   //  PROJECT UPDATE/DELETE — L2 Organize / L3 Execute
   // ================================================================
   {
