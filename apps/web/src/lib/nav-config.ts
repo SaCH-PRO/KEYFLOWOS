@@ -49,6 +49,7 @@ import {
   TrendingUp,
   Camera,
   Inbox,
+  CreditCard,
 } from "lucide-react";
 import type { DormantFeatureFlagKey } from "./feature-flags";
 
@@ -100,79 +101,80 @@ export const primaryNav: PrimaryNavItem[] = [
 
 // ============================================================================
 // OPERATE — Where you do your work
-// All hrefs point to existing working pages (content migration happens later)
+// Grouped by utility & frequency (see docs/UI_MODULE_MAP_AND_IA_REVIEW.md):
+// daily-use surfaces first, dormant/placeholder surfaces stay out.
 // ============================================================================
 
 export const operateSections: NavSection[] = [
   {
-    id: "os-core",
-    label: "Operating System",
-    icon: Zap,
+    id: "today",
+    label: "Today",
+    icon: CalendarDays,
     items: [
       { label: "Command Center", href: "/app/command-center", icon: LayoutDashboard },
-      { label: "KEY Worker", href: "/app/key", icon: Bot },
-      { label: "KEY Chat", href: "/app/key/chat", icon: MessageSquare },
-      { label: "KEY Autonomy", href: "/app/key-autonomy", icon: CheckSquare },
-      { label: "KEY Modes", href: "/app/key-modes", icon: BrainCircuit },
+      { label: "Briefing", href: "/app/briefing", icon: Zap },
       { label: "Data Inbox", href: "/app/data-inbox", icon: Inbox },
+      { label: "Calendar", href: "/app/calendar", icon: CalendarDays },
+      { label: "Tasks", href: "/app/call-tasks", icon: CheckSquare },
+      { label: "Bookings", href: "/app/bookings", icon: Calendar },
+      { label: "Notifications", href: "/app/notifications", icon: Bell },
       { label: "Capture", href: "/app/capture", icon: Camera },
     ],
   },
   {
-    id: "financial-flow",
-    label: "Financial Flow",
+    id: "key-system",
+    label: "KEY",
+    icon: Bot,
+    items: [
+      { label: "KEY Chat", href: "/app/key/chat", icon: MessageSquare },
+      { label: "KEY Worker", href: "/app/key", icon: Bot },
+      { label: "KEY Autonomy", href: "/app/key-autonomy", icon: CheckSquare },
+      { label: "KEY Modes", href: "/app/key-modes", icon: BrainCircuit },
+    ],
+  },
+  {
+    id: "money",
+    label: "Money",
     icon: Banknote,
     items: [
       { label: "Financial Flow", href: "/app/financial-flow", icon: Banknote },
-      { label: "Revenue", href: "/app/commerce", icon: TrendingUp },
+      { label: "Money", href: "/app/money", icon: TrendingUp },
+      { label: "Commerce", href: "/app/commerce", icon: Receipt },
+      { label: "Payment Gateway", href: "/app/commerce/gateway", icon: CreditCard },
       { label: "Expenses", href: "/app/expenses", icon: Receipt },
       { label: "Budgeting", href: "/app/budgeting", icon: Target },
+      { label: "Payroll", href: "/app/payroll", icon: CreditCard },
       { label: "Reports", href: "/app/finance", icon: BarChart3 },
     ],
   },
   {
-    id: "temporal-flow",
-    label: "Temporal Flow",
-    icon: Clock,
-    items: [
-      { label: "Temporal Flow", href: "/app/temporal-flow", icon: Clock },
-      { label: "Calendar", href: "/app/calendar", icon: CalendarDays },
-      { label: "Bookings", href: "/app/bookings", icon: Calendar },
-      { label: "Projects", href: "/app/projects", icon: FolderKanban },
-      { label: "Tasks", href: "/app/approvals", icon: CheckSquare },
-    ],
-  },
-  {
-    id: "people-flow",
-    label: "People Flow",
+    id: "customers",
+    label: "Customers",
     icon: Users,
     items: [
       { label: "People Flow", href: "/app/people-flow", icon: Users },
       { label: "Contacts", href: "/app/crm/contacts", icon: Contact },
       { label: "Sequences", href: "/app/crm/sequences", icon: Send },
       { label: "Intelligence", href: "/app/crm/intelligence", icon: Brain },
-      { label: "Service", href: "/app/helpdesk", icon: Headset },
-      { label: "Payroll", href: "/app/payroll", icon: Banknote },
+      { label: "Helpdesk", href: "/app/helpdesk", icon: Headset },
+      { label: "WhatsApp", href: "/app/whatsapp", icon: MessageSquare },
+      { label: "Sales Team", href: "/app/sales-team", icon: Users },
       { label: "Performance", href: "/app/performance", icon: Activity },
     ],
   },
   {
-    id: "sales",
-    label: "Sales",
+    id: "growth",
+    label: "Growth",
     icon: TrendingUp,
     items: [
-      { label: "Commerce", href: "/app/commerce", icon: Receipt },
-      { label: "Deals", href: "/app/crm/contacts", icon: Contact },
-    ],
-  },
-  {
-    id: "marketing",
-    label: "Marketing",
-    icon: Megaphone,
-    items: [
+      { label: "Marketing Flow", href: "/app/marketing-flow", icon: Megaphone },
       { label: "Campaigns", href: "/app/marketing", icon: Mail },
       { label: "Content", href: "/app/content-ops", icon: PenTool },
       { label: "Social", href: "/app/social", icon: Share2 },
+      { label: "SEO", href: "/app/seo", icon: Globe },
+      { label: "Storefront", href: "/app/store", icon: Store },
+      { label: "Presence", href: "/app/presence", icon: Globe },
+      { label: "Events & Ticketing", href: "/app/events", icon: Calendar },
     ],
   },
   {
@@ -180,19 +182,16 @@ export const operateSections: NavSection[] = [
     label: "Operations",
     icon: BriefcaseBusiness,
     items: [
-      { label: "Projects", href: "/app/projects", icon: FolderKanban },
-      { label: "Tasks", href: "/app/approvals", icon: CheckSquare },
-    ],
-  },
-  {
-    id: "governance",
-    label: "Governance",
-    icon: ShieldCheck,
-    items: [
-      { label: "Approvals", href: "/app/approvals", icon: CheckSquare },
-      { label: "Compliance", href: "/app/evidence", icon: ShieldCheck },
+      { label: "Operations Flow", href: "/app/operations-flow", icon: BriefcaseBusiness },
+      { label: "Projects", href: "/app/work/projects", icon: FolderKanban },
+      { label: "Documents", href: "/app/documents", icon: FileText },
+      { label: "Document Intelligence", href: "/app/document-intelligence", icon: BrainCircuit },
       { label: "Contracts", href: "/app/contracts", icon: FileText },
+      { label: "Approvals", href: "/app/approvals", icon: CheckSquare },
+      { label: "Evidence", href: "/app/evidence", icon: ShieldCheck },
       { label: "Legal", href: "/app/legal", icon: Scale },
+      { label: "Time Tracking", href: "/app/time-tracking", icon: Clock },
+      { label: "Procurement", href: "/app/procurement", icon: Truck },
     ],
   },
   {
@@ -202,18 +201,9 @@ export const operateSections: NavSection[] = [
     items: [
       { label: "Executive Intelligence", href: "/app/intelligence", icon: LayoutDashboard },
       { label: "Growth", href: "/app/growth", icon: TrendingUp },
-      { label: "Storefront", href: "/app/storefront-intelligence", icon: Store },
-      { label: "Documents", href: "/app/document-intelligence", icon: FileText },
-    ],
-  },
-  {
-    id: "strategy",
-    label: "Strategy",
-    icon: Target,
-    items: [
       { label: "Market Strategy", href: "/app/market", icon: Target },
       { label: "Goals", href: "/app/goals", icon: Target },
-      { label: "Business Genome", href: "/app/profile?tab=business-genome", icon: FileText },
+      { label: "Business Genome", href: "/app/profile?tab=business-genome", icon: BrainCircuit },
     ],
   },
 ];
@@ -223,7 +213,6 @@ export const operateNav: NavItem[] = operateSections.flatMap((s) => s.items);
 
 // ============================================================================
 // BUILD — Where you configure your business
-// All hrefs point to existing working pages
 // ============================================================================
 
 export const buildSections: NavSection[] = [
@@ -234,6 +223,7 @@ export const buildSections: NavSection[] = [
     items: [
       { label: "Business Genome", href: "/app/profile?tab=business-genome", icon: BrainCircuit },
       { label: "Storefront", href: "/app/commerce", icon: Store },
+      { label: "Events", href: "/app/events", icon: Calendar },
       { label: "Presence", href: "/app/presence", icon: Globe },
       { label: "Templates", href: "/app/templates", icon: GraduationCap },
     ],
@@ -250,6 +240,7 @@ export const buildSections: NavSection[] = [
       { label: "AI", href: "/app/settings/ai", icon: Bot },
       { label: "Compliance", href: "/app/settings/compliance", icon: ShieldCheck },
       { label: "Developers", href: "/app/settings/developers", icon: Code },
+      { label: "Trash", href: "/app/trash", icon: FileText },
     ],
   },
   {
@@ -267,6 +258,7 @@ export const buildSections: NavSection[] = [
     items: [
       { label: "Flows", href: "/app/flows", icon: RefreshCw },
       { label: "Workflows", href: "/app/workflows", icon: Layers },
+      { label: "Automations", href: "/app/automations", icon: Zap },
     ],
   },
 ];

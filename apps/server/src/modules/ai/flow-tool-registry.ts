@@ -1561,7 +1561,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'read',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
-    manualEquivalentRoute: '/app/marketing/seo',
+    manualEquivalentRoute: '/app/seo',
     parameters: { type: 'object', properties: { businessId: { type: 'string', description: 'The business ID' } }, required: ['businessId'] },
     outputSchema: {
       type: 'object',
@@ -1581,7 +1581,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'read',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
-    manualEquivalentRoute: '/app/marketing/seo',
+    manualEquivalentRoute: '/app/seo',
     parameters: {
       type: 'object',
       properties: {
@@ -1598,7 +1598,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'read',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
-    manualEquivalentRoute: '/app/marketing/seo',
+    manualEquivalentRoute: '/app/seo',
     parameters: {
       type: 'object',
       properties: {
@@ -1615,7 +1615,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'read',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
-    manualEquivalentRoute: '/app/marketing/seo',
+    manualEquivalentRoute: '/app/seo',
     parameters: { type: 'object', properties: { businessId: { type: 'string', description: 'The business ID' } }, required: ['businessId'] },
     outputSchema: { type: 'object', description: 'Content gap analysis', fields: { gaps: { type: 'array', description: 'Ranked content opportunities' } } },
   },
@@ -1625,7 +1625,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'read',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
-    manualEquivalentRoute: '/app/marketing/seo',
+    manualEquivalentRoute: '/app/seo',
     parameters: { type: 'object', properties: { businessId: { type: 'string', description: 'The business ID' } }, required: ['businessId'] },
     outputSchema: {
       type: 'object',
@@ -1643,7 +1643,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'organize',
     riskLevel: 'low',
     riskTier: 2 as RiskTier,
-    manualEquivalentRoute: '/app/marketing/seo',
+    manualEquivalentRoute: '/app/seo',
     changedEntities: ['seoPage', 'seoIssue'],
     parameters: { type: 'object', properties: { businessId: { type: 'string', description: 'The business ID' } }, required: ['businessId'] },
     outputSchema: { type: 'object', description: 'Sync result', fields: { synced: { type: 'number', description: 'Pages synced' } } },
@@ -1654,7 +1654,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'organize',
     riskLevel: 'medium',
     riskTier: 2 as RiskTier,
-    manualEquivalentRoute: '/app/marketing/seo',
+    manualEquivalentRoute: '/app/seo',
     changedEntities: ['seoPage', 'seoIssue'],
     parameters: {
       type: 'object',
@@ -1675,7 +1675,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'draft',
     riskLevel: 'medium',
     riskTier: 2 as RiskTier,
-    manualEquivalentRoute: '/app/marketing/seo',
+    manualEquivalentRoute: '/app/seo',
     changedEntities: ['contentBrief'],
     followOnSuggestions: ['fetch_content_briefs'],
     parameters: {
