@@ -87,6 +87,28 @@ export class WhatsAppController {
 
   // ─── Public webhook for inbound messages (verified by provider signature) ───
 
+  /**
+   * Meta webhook verification handshake. Meta issues a GET with hub.mode,
+   * hub.verify_token and hub.challenge before delivering any messages.
+   * Fails closed when WHATSAPP_VERIFY_TOKEN is not configured.
+   */
+  @Get('webhook/:businessId')
+  verifyWebhook(
+    @Param('businessId') businessId: string,
+    @Query('hub.mode') hubMode?: string,
+    @Query('hub.verify_token') hubVerifyToken?: string,
+    @Query('hub.challenge') hubChallenge?: string,
+  ) {
+    const expectedToken = process.env.WHATSAPP_VERIFY_TOKEN;
+    if (!expectedToken) {
+      throw new ForbiddenException('Webhook verify token not configured');
+    }
+    if (hubMode === 'subscribe' && hubVerifyToken === expectedToken) {
+      return hubChallenge;
+    }
+    throw new ForbiddenException('Invalid verify token');
+  }
+
   @Post('webhook/:businessId')
   async webhook(
     @Param('businessId') businessId: string,
