@@ -116,6 +116,7 @@ import { KeystoreModule } from './modules/keystore/keystore.module';
 import { KeyConnectorModule } from './modules/key-connector/key-connector.module';
 import { PhoneVoiceModule } from './modules/phone-voice/phone-voice.module';
 import { VoiceModule } from './modules/voice/voice.module';
+import { LivekitModule } from './modules/livekit/livekit.module';
 
 @Module({
   imports: [
@@ -237,6 +238,9 @@ import { VoiceModule } from './modules/voice/voice.module';
 
     // Voice providers — Browser / OpenAI / ElevenLabs TTS
     VoiceModule,
+
+    // In-app full-duplex KEY voice (rooms, tokens, webhooks)
+    LivekitModule,
 
     // AI Intelligence Layer — JARVIS-like conversational engine
     KeyCortexModule,

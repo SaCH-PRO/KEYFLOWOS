@@ -83,6 +83,26 @@ services:
       retries: 20
       start_period: 60s
 
+  # Real-time audio/video for KEY voice (in-app full-duplex voice chat,
+  # concurrent rooms, human handoff). Dev keys only — production deploys
+  # should use LiveKit Cloud or a properly secured self-hosted server.
+  livekit:
+    image: livekit/livekit-server:v1.9.12
+    restart: unless-stopped
+    command: --config /etc/livekit.yaml
+    volumes:
+      - ./infrastructure/livekit.yaml:/etc/livekit.yaml:ro
+    ports:
+      - "7880:7880"     # HTTP API + WebSocket signalling
+      - "7881:7881"     # RTC over TCP (fallback)
+      - "7882:7882/udp" # RTC over UDP
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:7880/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
 volumes:
   keyflow_db:
   keyflow_redis:
