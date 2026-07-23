@@ -3128,6 +3128,62 @@ export class FlowOrchestratorService {
         return { synced: 1, message: 'Storefront page synced. Use the SEO workspace for full inventory sync.' };
       }
 
+      case 'seo_apply_remediation': {
+        const issue = await this.prisma.client.seoIssue.findFirst({
+          where: { id: args.issueId, businessId },
+        });
+        if (!issue) throw new Error('SEO issue not found');
+        const resolution = args.resolution ?? 'fixed';
+
+        let pageUpdated = false;
+        const applied: Record<string, string> = {};
+
+        if (resolution === 'fixed' && issue.pageUrl) {
+          const page = await this.prisma.client.seoPage.findFirst({
+            where: { businessId, OR: [{ url: issue.pageUrl }, { path: issue.pageUrl }] },
+          });
+          if (page) {
+            let { metaTitle, metaDescription, h1 } = args as { metaTitle?: string; metaDescription?: string; h1?: string };
+            // LLM-draft missing meta when the issue is meta-related and nothing explicit was supplied
+            const isMetaIssue = /meta|title|description|h1|heading/i.test(`${issue.issueType} ${issue.category} ${issue.title}`);
+            if (isMetaIssue && !metaTitle && !metaDescription && !h1) {
+              const draft = await this.aiUsage.callAi({
+                businessId,
+                feature: 'flow_seo_remediation',
+                messages: [
+                  { role: 'system', content: `You are an SEO specialist. A page has this issue: "${issue.title}" (${issue.description ?? issue.category}).\nPage path: ${page.path}\nCurrent title: ${page.metaTitle ?? page.title ?? 'none'}\nCurrent meta description: ${page.metaDescription ?? 'none'}\nCurrent H1: ${page.h1 ?? 'none'}\nTarget keyword: ${issue.keyword ?? 'n/a'}\nRecommendation: ${issue.recommendation ?? 'n/a'}\n\nRespond ONLY with valid JSON: {"metaTitle":"... (max 60 chars)","metaDescription":"... (max 155 chars)","h1":"..."}. Omit keys that are already fine.` },
+                  { role: 'user', content: 'Draft the corrected meta tags.' },
+                ],
+                maxTokens: 400,
+                temperature: 0.4,
+                outputCategory: 'marketing',
+              });
+              try {
+                const jsonMatch = draft.content.match(/\{[\s\S]*\}/);
+                const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
+                metaTitle = parsed.metaTitle ?? undefined;
+                metaDescription = parsed.metaDescription ?? undefined;
+                h1 = parsed.h1 ?? undefined;
+              } catch { /* fall through with no meta changes */ }
+            }
+            const data: Record<string, string> = {};
+            if (metaTitle) { data.metaTitle = metaTitle; applied.metaTitle = metaTitle; }
+            if (metaDescription) { data.metaDescription = metaDescription; applied.metaDescription = metaDescription; }
+            if (h1) { data.h1 = h1; applied.h1 = h1; }
+            if (Object.keys(data).length > 0) {
+              await this.prisma.client.seoPage.update({ where: { id: page.id }, data });
+              pageUpdated = true;
+            }
+          }
+        }
+
+        const updated = await this.prisma.client.seoIssue.update({
+          where: { id: issue.id },
+          data: { status: resolution === 'dismissed' ? 'dismissed' : 'resolved', resolvedAt: new Date() },
+        });
+        return { issueId: issue.id, status: updated.status, pageUpdated, applied };
+      }
+
       case 'generate_content_brief': {
         const brief = await this.prisma.client.contentBrief.create({
           data: {
@@ -3595,6 +3651,38 @@ export class FlowOrchestratorService {
         });
         return { id: message.id, ticketId: args.ticketId };
       }
+      case 'helpdesk_draft_reply': {
+        const ticket = await this.prisma.client.supportTicket.findFirst({
+          where: { id: args.ticketId, businessId, deletedAt: null },
+          include: { contact: { select: { firstName: true, lastName: true, companyName: true } } },
+        });
+        if (!ticket) throw new Error('Ticket not found');
+        const thread = await this.getHelpdeskService().listTicketMessages(businessId, args.ticketId);
+        const threadCtx = thread
+          .slice(-10)
+          .map((m: any) => `[${m.direction ?? m.authorType ?? 'msg'}] ${m.body}`)
+          .join('\n') || 'No messages yet.';
+        const customerName = ticket.contact
+          ? `${ticket.contact.firstName ?? ''} ${ticket.contact.lastName ?? ''}`.trim() || 'the customer'
+          : 'the customer';
+        const tone = args.tone ?? 'professional';
+        const result = await this.aiUsage.callAi({
+          businessId,
+          feature: 'flow_draft_ticket_reply',
+          messages: [
+            { role: 'system', content: `You are a support agent. Draft a ${tone} reply to ${customerName} for this ticket.\nTitle: ${ticket.title}\nDescription: ${ticket.description ?? 'N/A'}\nPriority: ${ticket.priority}\nThread:\n${threadCtx}\n\nRespond ONLY with the reply body text — no subject line, no placeholders like [Your Name], sign off as the support team.` },
+            { role: 'user', content: `Draft the ${tone} reply.` },
+          ],
+          maxTokens: 600,
+          temperature: 0.5,
+          outputCategory: 'messages',
+        });
+        return { body: result.content.trim(), ticketTitle: ticket.title, ticketId: args.ticketId };
+      }
+      case 'helpdesk_delete_ticket': {
+        await this.getHelpdeskService().deleteTicket(businessId, args.ticketId);
+        return { id: args.ticketId, deleted: true };
+      }
       case 'comms_send_broadcast': {
         const result = await this.getCommunications().sendBroadcast({
           businessId,
@@ -3661,6 +3749,16 @@ export class FlowOrchestratorService {
           duplicateId: args.duplicateId,
         });
         return { preview };
+      }
+      case 'crm_merge_execute': {
+        const result = await this.getCrm().mergeContacts({
+          businessId,
+          primaryId: args.primaryId,
+          duplicateId: args.duplicateId,
+          fieldOverrides: args.fieldOverrides,
+          actorType: 'key',
+        });
+        return { result };
       }
       case 'social_get_analytics': {
         const overview = await this.getSocialAnalytics().getAnalyticsOverview(businessId);
