@@ -12,9 +12,6 @@ const LOGIN_PATH = "/auth/login";
 const REDIRECTS: Record<string, string> = {
   // Settings reorganized into Build > System
   "/app/settings": "/app/build/system/workspace",
-  // Money hub consolidation — finance merged into /app/money
-  "/app/finance": "/app/money",
-  "/app/finance/cashflow": "/app/money",
   "/app/accounting": "/app/money/books",
 };
 

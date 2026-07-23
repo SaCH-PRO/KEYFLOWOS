@@ -333,6 +333,7 @@ export function useAppLayout(): AppLayoutState {
     fetchNotifications();
     fetchConnectorAlerts();
     const interval = setInterval(() => {
+      if (document.hidden) return; // skip background-tab work
       fetchNotifications();
       fetchConnectorAlerts();
     }, 30000);
