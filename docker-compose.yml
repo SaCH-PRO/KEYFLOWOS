@@ -103,7 +103,55 @@ services:
       retries: 12
       start_period: 20s
 
+  # Customer support desk — KEY is the L1 agent via an agent-bot webhook
+  # (apps/server chatwoot module). Shares our Postgres (own database) and
+  # Redis (db index 5). First-time setup:
+  #   docker compose run --rm chatwoot bundle exec rails db:chatwoot_prepare
+  #   bash scripts/chatwoot-setup.sh
+  chatwoot: &chatwoot
+    image: chatwoot/chatwoot:latest
+    restart: unless-stopped
+    # rm stale puma pidfile first — an unclean stop (docker restart, WSL
+    # shutdown) otherwise deadlocks Rails boot with "A server is already
+    # running (pid: 1 ...)".
+    command: sh -c "rm -f /app/tmp/pids/server.pid && bundle exec rails s -p 3000 -b 0.0.0.0"
+    environment:
+      RAILS_ENV: production
+      NODE_ENV: production
+      SECRET_KEY_BASE: keyflow_dev_chatwoot_secret_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      FRONTEND_URL: http://localhost:3100
+      FORCE_SSL: "false"
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      POSTGRES_USERNAME: keyflow
+      POSTGRES_PASSWORD: keyflow
+      POSTGRES_DATABASE: chatwoot
+      REDIS_URL: redis://redis:6379/5
+      RAILS_MAX_THREADS: "5"
+      RAILS_LOG_TO_STDOUT: "true"
+      # Allow webhooks to private hosts (our API on host.docker.internal) —
+      # Chatwoot's SSRF guard (SafeFetch) rejects them by default in production.
+      SAFE_FETCH_ALLOW_PRIVATE_NETWORK: "true"
+    ports:
+      - "3100:3000"
+    volumes:
+      - keyflow_chatwoot:/app/storage
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  chatwoot-worker:
+    <<: *chatwoot
+    command: bundle exec sidekiq -C config/sidekiq.yml
+    ports: []
+    depends_on:
+      chatwoot:
+        condition: service_started
+
 volumes:
   keyflow_db:
   keyflow_redis:
   keyflow_minio:
+  keyflow_chatwoot:

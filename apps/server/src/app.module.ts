@@ -117,6 +117,7 @@ import { KeyConnectorModule } from './modules/key-connector/key-connector.module
 import { PhoneVoiceModule } from './modules/phone-voice/phone-voice.module';
 import { VoiceModule } from './modules/voice/voice.module';
 import { LivekitModule } from './modules/livekit/livekit.module';
+import { ChatwootModule } from './modules/chatwoot/chatwoot.module';
 
 @Module({
   imports: [
@@ -241,6 +242,9 @@ import { LivekitModule } from './modules/livekit/livekit.module';
 
     // In-app full-duplex KEY voice (rooms, tokens, webhooks)
     LivekitModule,
+
+    // Chatwoot L1 support desk (agent-bot webhook → KEY replies)
+    ChatwootModule,
 
     // AI Intelligence Layer — JARVIS-like conversational engine
     KeyCortexModule,
