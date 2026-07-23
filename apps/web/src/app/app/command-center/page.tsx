@@ -1,15 +1,34 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { motion } from "framer-motion";
-import type { LucideIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { openKey } from "@/components/key";
-import { LayoutDashboard, Loader2, AlertTriangle, RefreshCw, Bot, BrainCircuit, Clock, Inbox, Target, TrendingUp, ShieldCheck, Zap } from "lucide-react";
+import {
+  LayoutDashboard,
+  Loader2,
+  AlertTriangle,
+  RefreshCw,
+  Bot,
+  BrainCircuit,
+  Clock,
+  Inbox,
+  Target,
+  TrendingUp,
+  ShieldCheck,
+  Zap,
+  LayoutGrid,
+  Banknote,
+  Users,
+  Megaphone,
+  BriefcaseBusiness,
+  MessageSquare,
+  Store,
+  Calendar,
+  Settings,
+} from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
-import { SectionCard } from "@/components/ui/section-card";
 import { getStoredBusinessId, ensureWorkspace } from "@/lib/workspace";
 import { getBusinessCommandCenterSnapshot, type BusinessCommandCenterSnapshot } from "@/lib/api/business-command-center";
 import {
@@ -23,20 +42,86 @@ import {
   reopenCommandItem,
   type CommandItem,
 } from "@/lib/api/command";
-import { CommandQueue } from "@/components/command/command-queue";
-import { CommandHealthStrip } from "./components/command-health-strip";
-import { BusinessPulseCard } from "@/components/business-pulse-card";
-import { KeyBriefingCard } from "./components/key-briefing-card";
-import { GovernanceSummaryCard } from "./components/governance-summary-card";
-import { CommandItemCard } from "./components/command-item-card";
-import { CommandExecutiveModeGrid } from "./components/command-executive-mode-grid";
-import { CommandGenomeCard } from "./components/command-genome-card";
-import { CommandKeyGenomeCard } from "./components/command-key-genome-card";
-import { CommandModuleReadinessPanel } from "./components/command-module-readiness-panel";
-import { CommandConstitutionCard } from "./components/command-constitution-card";
-import { CrossDomainPanel } from "./components/cross-domain-panel";
-import { CommandGenomeOutcomesCard } from "./components/command-genome-outcomes-card";
-import { NudgesWidget } from "./components/nudges-widget";
+import { CommandQueueV2 } from "@/components/command/command-queue-v2";
+import { CommandHealthStripV2 } from "./components-v2/command-health-strip-v2";
+import { CommandSummaryCardV2 } from "./components-v2/command-summary-card-v2";
+import { BusinessPulseCardV2 } from "./components-v2/business-pulse-card-v2";
+import { KeyBriefingCardV2 } from "./components-v2/key-briefing-card-v2";
+import { GovernanceSummaryCardV2 } from "./components-v2/governance-summary-card-v2";
+import { CommandItemCardV2 } from "./components-v2/command-item-card-v2";
+import { CommandExecutiveModeGridV2 } from "./components-v2/command-executive-mode-grid-v2";
+import { CommandGenomeOrbCard } from "./components/command-genome-orb-card";
+import { CommandKeyGenomeCardV2 } from "./components-v2/command-key-genome-card-v2";
+import { CommandModuleReadinessGrid } from "./components-v2/command-module-readiness-grid";
+import { CommandConstitutionCardV2 } from "./components-v2/command-constitution-card-v2";
+import { CrossDomainPanelV2 } from "./components-v2/cross-domain-panel-v2";
+import { CommandGenomeOutcomesCardV2 } from "./components-v2/command-genome-outcomes-card-v2";
+import { NudgesWidgetV2 } from "./components-v2/nudges-widget-v2";
+import { MissionControlHero } from "./components-v2/mission-control-hero";
+import { CommandSection } from "./components/command-section";
+import {
+  ModuleLauncherSheet,
+  type ModuleLauncherSection,
+} from "@/components/ui/module-launcher-sheet";
+
+function CommandQuickLauncher() {
+  const [open, setOpen] = useState(false);
+
+  const sections: ModuleLauncherSection[] = [
+    {
+      id: "flows",
+      label: "Flows",
+      items: [
+        { id: "financial", label: "Money", icon: Banknote, href: "/app/financial-flow", tone: "gold" },
+        { id: "temporal", label: "Time", icon: Clock, href: "/app/temporal-flow", tone: "sky" },
+        { id: "people", label: "People", icon: Users, href: "/app/people-flow", tone: "violet" },
+        { id: "marketing", label: "Marketing", icon: Megaphone, href: "/app/marketing-flow", tone: "rose" },
+        { id: "operations", label: "Ops", icon: BriefcaseBusiness, href: "/app/operations-flow", tone: "mint" },
+        { id: "governance", label: "Gov", icon: ShieldCheck, href: "/app/governance-flow", tone: "default" },
+      ],
+    },
+    {
+      id: "core",
+      label: "Core",
+      items: [
+        { id: "key-chat", label: "KEY Chat", icon: MessageSquare, href: "/app/key/chat", tone: "primary" },
+        { id: "commerce", label: "Commerce", icon: TrendingUp, href: "/app/commerce", tone: "orange" },
+        { id: "events", label: "Events", icon: Calendar, href: "/app/events", tone: "teal" },
+        { id: "storefront", label: "Storefront", icon: Store, href: "/app/commerce", tone: "violet" },
+        { id: "inbox", label: "Inbox", icon: Inbox, href: "/app/data-inbox", tone: "default" },
+      ],
+    },
+    {
+      id: "build",
+      label: "Build",
+      items: [
+        { id: "genome", label: "Genome", icon: LayoutGrid, href: "/app/genome", tone: "teal" },
+        { id: "settings", label: "Settings", icon: Settings, href: "/app/settings", tone: "default" },
+      ],
+    },
+  ];
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        aria-label="Open module launcher"
+        className="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium border border-border/60 bg-card/60 hover:bg-card hover:border-primary/20 transition-all active:scale-95 focus-ring"
+      >
+        <LayoutGrid className="w-3.5 h-3.5 text-muted-foreground" />
+        <span>Launch</span>
+      </button>
+      <ModuleLauncherSheet
+        open={open}
+        onClose={() => setOpen(false)}
+        title="Launch Pad"
+        subtitle="Quick access to flows and modules"
+        sections={sections}
+      />
+    </>
+  );
+}
 
 export default function CommandCenterPage() {
   const router = useRouter();
@@ -61,7 +146,9 @@ export default function CommandCenterPage() {
       if (!cancelled) setBusinessId(resolved);
     };
     void resolveBusinessId();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const loadSnapshot = async () => {
@@ -162,7 +249,10 @@ export default function CommandCenterPage() {
           {(error || businessId) && (
             <button
               type="button"
-              onClick={() => { void loadSnapshot(); void loadQueue(); }}
+              onClick={() => {
+                void loadSnapshot();
+                void loadQueue();
+              }}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors"
             >
               <RefreshCw className="w-4 h-4" /> Retry
@@ -180,56 +270,48 @@ export default function CommandCenterPage() {
       subtitle="Your operating cockpit for priorities, risks, approvals, and KEY recommendations"
       actionLabel="Refresh"
       actionIcon={RefreshCw}
-      onAction={() => { void loadSnapshot(); void loadQueue(); }}
+      onAction={() => {
+        void loadSnapshot();
+        void loadQueue();
+      }}
+      headerRight={<CommandQuickLauncher />}
     >
       <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-5">
-        <CommandHealthStrip health={snapshot.health} />
+        <MissionControlHero businessId={businessId} hullScore={snapshot.keyGenome.overall} />
 
-        <div className="rounded-2xl p-4 border border-border/30 bg-card/40 space-y-3">
-          <div>
-            <h2 className="text-sm font-semibold text-foreground">Today&apos;s KEY Summary</h2>
-            <p className="text-xs text-muted-foreground leading-relaxed mt-1">{snapshot.summary}</p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <QuickLink href="/app/key-autonomy" icon={Bot} label="KEY Autonomy" />
-            <QuickLink href="/app/key-modes" icon={BrainCircuit} label="KEY Modes" />
-            <QuickLink href="/app/temporal-flow" icon={Clock} label="Temporal Flow" />
-            <QuickLink href="/app/key-inbox" icon={Inbox} label="Key Inbox" />
-            <QuickLink href="/app/profile?tab=business-genome" icon={Target} label="Business Genome" />
-          </div>
-        </div>
+        <CommandHealthStripV2 health={snapshot.health} />
+
+        <CommandSummaryCardV2 summary={snapshot.summary} />
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <BusinessPulseCard
+          <BusinessPulseCardV2
             overallScore={snapshot.pulse.overallScore}
             dimensions={snapshot.pulse.dimensions}
           />
-          <KeyBriefingCard briefing={snapshot.briefing} />
-          <GovernanceSummaryCard governance={snapshot.governance} />
+          <KeyBriefingCardV2 briefing={snapshot.briefing} />
+          <GovernanceSummaryCardV2 governance={snapshot.governance} />
         </div>
 
-        <SectionCard title={`Command Queue (${queueTotal})`} icon={LayoutDashboard} noPadding compact>
-          <div className="p-3">
-            <CommandQueue
-              items={commandItems}
-              total={queueTotal}
-              loading={queueLoading}
-              onRefresh={loadQueue}
-              onComplete={handleComplete}
-              onApprove={handleApprove}
-              onExecute={handleExecute}
-              onAssign={handleAssign}
-              onDismiss={handleDismiss}
-              onSnooze={handleSnooze}
-              onReopen={handleReopen}
-            />
-          </div>
-        </SectionCard>
+        <CommandSection icon={LayoutDashboard} title={`Command Queue (${queueTotal})`}>
+          <CommandQueueV2
+            items={commandItems}
+            total={queueTotal}
+            loading={queueLoading}
+            onRefresh={loadQueue}
+            onComplete={handleComplete}
+            onApprove={handleApprove}
+            onExecute={handleExecute}
+            onAssign={handleAssign}
+            onDismiss={handleDismiss}
+            onSnooze={handleSnooze}
+            onReopen={handleReopen}
+          />
+        </CommandSection>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
           <div className="lg:col-span-2 space-y-5">
-            <SectionCard title={`Top Priorities (${snapshot.topPriorities.length})`} icon={LayoutDashboard} noPadding compact>
-              <div className="p-3 space-y-2">
+            <CommandSection icon={LayoutDashboard} title={`Top Priorities (${snapshot.topPriorities.length})`}>
+              <div className="space-y-2">
                 {snapshot.topPriorities.length === 0 && (
                   <EmptyState
                     icon={Target}
@@ -242,13 +324,13 @@ export default function CommandCenterPage() {
                   />
                 )}
                 {snapshot.topPriorities.map((item, index) => (
-                  <CommandItemCard key={item.id} item={item} index={index} />
+                  <CommandItemCardV2 key={item.id} item={item} index={index} />
                 ))}
               </div>
-            </SectionCard>
+            </CommandSection>
 
-            <SectionCard title={`Pending Approvals (${snapshot.pendingApprovals.length})`} icon={AlertTriangle} noPadding compact>
-              <div className="p-3 space-y-2">
+            <CommandSection icon={Inbox} title={`Pending Approvals (${snapshot.pendingApprovals.length})`}>
+              <div className="space-y-2">
                 {snapshot.pendingApprovals.length === 0 && (
                   <EmptyState
                     icon={Inbox}
@@ -259,13 +341,13 @@ export default function CommandCenterPage() {
                   />
                 )}
                 {snapshot.pendingApprovals.map((item, index) => (
-                  <CommandItemCard key={item.id} item={item} index={index} compact />
+                  <CommandItemCardV2 key={item.id} item={item} index={index} compact />
                 ))}
               </div>
-            </SectionCard>
+            </CommandSection>
 
-            <SectionCard title={`Urgent Items (${snapshot.urgentItems.length})`} icon={AlertTriangle} noPadding compact>
-              <div className="p-3 space-y-2">
+            <CommandSection icon={Clock} title={`Urgent Items (${snapshot.urgentItems.length})`}>
+              <div className="space-y-2">
                 {snapshot.urgentItems.length === 0 && (
                   <EmptyState
                     icon={Clock}
@@ -278,17 +360,17 @@ export default function CommandCenterPage() {
                   />
                 )}
                 {snapshot.urgentItems.map((item, index) => (
-                  <CommandItemCard key={item.id} item={item} index={index} compact />
+                  <CommandItemCardV2 key={item.id} item={item} index={index} compact />
                 ))}
               </div>
-            </SectionCard>
+            </CommandSection>
           </div>
 
           <div className="space-y-5">
-            <NudgesWidget businessId={businessId} />
+            <NudgesWidgetV2 businessId={businessId} />
 
-            <SectionCard title="Risks" icon={AlertTriangle} noPadding compact>
-              <div className="p-3 space-y-2">
+            <CommandSection icon={AlertTriangle} title="Risks">
+              <div className="space-y-2">
                 {snapshot.risks.length === 0 && (
                   <EmptyState
                     icon={AlertTriangle}
@@ -301,13 +383,13 @@ export default function CommandCenterPage() {
                   />
                 )}
                 {snapshot.risks.slice(0, 5).map((item, index) => (
-                  <CommandItemCard key={item.id} item={item} index={index} compact />
+                  <CommandItemCardV2 key={item.id} item={item} index={index} compact />
                 ))}
               </div>
-            </SectionCard>
+            </CommandSection>
 
-            <SectionCard title="Opportunities" icon={LayoutDashboard} noPadding compact>
-              <div className="p-3 space-y-2">
+            <CommandSection icon={TrendingUp} title="Opportunities">
+              <div className="space-y-2">
                 {snapshot.opportunities.length === 0 && (
                   <EmptyState
                     icon={TrendingUp}
@@ -320,40 +402,29 @@ export default function CommandCenterPage() {
                   />
                 )}
                 {snapshot.opportunities.slice(0, 5).map((item, index) => (
-                  <CommandItemCard key={item.id} item={item} index={index} compact />
+                  <CommandItemCardV2 key={item.id} item={item} index={index} compact />
                 ))}
               </div>
-            </SectionCard>
+            </CommandSection>
 
-            <CommandKeyGenomeCard keyGenome={snapshot.keyGenome} />
-            <CommandModuleReadinessPanel modules={snapshot.moduleReadiness} />
-            <CommandGenomeCard genome={snapshot.genome} />
-            <CommandConstitutionCard constitution={snapshot.constitution} />
+            <CommandKeyGenomeCardV2 keyGenome={snapshot.keyGenome} />
+            <CommandModuleReadinessGrid
+              modules={snapshot.moduleReadiness}
+              onReview={() => openKey({ mode: "onboarding" })}
+            />
+            <CommandGenomeOrbCard />
+            <CommandConstitutionCardV2 constitution={snapshot.constitution} />
 
-            <SectionCard title="Executive Modes" icon={LayoutDashboard} noPadding compact>
-              <div className="p-3">
-                <CommandExecutiveModeGrid modes={snapshot.executiveModes} />
-              </div>
-            </SectionCard>
+            <CommandSection icon={LayoutDashboard} title="Executive Modes">
+              <CommandExecutiveModeGridV2 modes={snapshot.executiveModes} />
+            </CommandSection>
           </div>
         </div>
 
-        <CommandGenomeOutcomesCard key={businessId} businessId={businessId} />
+        <CommandGenomeOutcomesCardV2 key={businessId} businessId={businessId} />
 
-        <CrossDomainPanel businessId={businessId} />
+        <CrossDomainPanelV2 businessId={businessId} />
       </motion.div>
     </WorkspaceShell>
-  );
-}
-
-function QuickLink({ href, icon: Icon, label }: { href: string; icon: LucideIcon; label: string }) {
-  return (
-    <Link
-      href={href}
-      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-muted/50 hover:bg-muted/80 text-xs font-medium text-foreground transition-colors"
-    >
-      <Icon className="w-3.5 h-3.5 text-muted-foreground" />
-      {label}
-    </Link>
   );
 }
