@@ -135,10 +135,13 @@ export function KeyAgent({ currentModule }: KeyAgentProps) {
   // Single post-sign-in genome nudge: once per session, if the Business
   // Genome still needs work, open the native chat panel with the built-in
   // onboarding conversation. Never redirects; fails open on fetch errors.
+  // HOME ONLY — auto-opening the panel over working pages (Key Connect,
+  // finance, CRM) covers the UI the user came for.
   useEffect(() => {
     if (!businessId) return;
     const alreadyPrompted = sessionStorage.getItem("kf:genome-auto-prompt");
     if (alreadyPrompted === "1") return;
+    if (typeof window !== "undefined" && window.location.pathname !== "/app/command-center") return;
 
     let cancelled = false;
     const timer = setTimeout(() => {

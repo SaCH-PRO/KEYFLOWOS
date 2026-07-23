@@ -39,6 +39,7 @@ import { Switch } from "@/components/ui/switch";
 import { ConnectorCredentialDialog } from "./components/connector-credential-dialog";
 import { BankingSection } from "./components/banking-section";
 import { ConnectorHealthSection } from "./components/connector-health-section";
+import { CoreChannelsSection } from "./components/core-channels-section";
 import { ManageDrawer } from "./components/manage-drawer";
 import { DriveIntakeQueue } from "./components/drive/drive-intake-queue";
 import { ContactSyncSettings } from "./components/contact-sync-settings";
@@ -316,6 +317,7 @@ export default function KeyConnectPage() {
   const [configs, setConfigs] = useState<Record<string, ConnectorInboxConfig>>({});
   const [credentialDialog, setCredentialDialog] = useState<string | null>(null);
   const [manageType, setManageType] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
 
   const setBusyFor = (type: string, action: string, value: boolean) => {
     setBusy((prev) => ({ ...prev, [type]: { ...prev[type], [action]: value } }));
@@ -959,17 +961,44 @@ export default function KeyConnectPage() {
     <div className="space-y-6 max-w-5xl mx-auto p-4">
       {pageHeader}
 
-      {priorityEntries.length > 0 && renderGroupSection("priority", priorityEntries)}
+      <CoreChannelsSection
+        businessId={businessId ?? ""}
+        entries={entries}
+        onConnectMeta={(type) => {
+          const entry = PLACEHOLDER_ENTRIES.find((e) => e.meta.type === type);
+          if (entry) void handleConnect(entry);
+        }}
+        onManageWhatsApp={() => setManageType("whatsapp")}
+        onManageEntry={(type) => setManageType(type)}
+      />
 
-      {GROUP_ORDER.map((group) => {
-        if (group === "priority") return null;
-        const items = grouped[group] ?? [];
-        if (!items.length) return null;
-        return renderGroupSection(group, items);
-      })}
+      <div className="flex items-center gap-3 pt-2">
+        <div className="h-px flex-1 bg-border/40" />
+        <button
+          type="button"
+          onClick={() => setShowAll((s) => !s)}
+          className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+        >
+          {showAll ? "Hide full integration directory ▲" : `Show all integrations (${entries.length}) ▼`}
+        </button>
+        <div className="h-px flex-1 bg-border/40" />
+      </div>
 
-      <BankingSection businessId={businessId} />
-      <ConnectorHealthSection businessId={businessId} />
+      {showAll && (
+        <div className="space-y-6">
+          {priorityEntries.length > 0 && renderGroupSection("priority", priorityEntries)}
+
+          {GROUP_ORDER.map((group) => {
+            if (group === "priority") return null;
+            const items = grouped[group] ?? [];
+            if (!items.length) return null;
+            return renderGroupSection(group, items);
+          })}
+
+          <BankingSection businessId={businessId} />
+          <ConnectorHealthSection businessId={businessId} />
+        </div>
+      )}
 
       {manageType && (
         <ManageDrawer
