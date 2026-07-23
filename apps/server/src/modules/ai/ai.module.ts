@@ -44,6 +44,7 @@ import { KeyCortexModule } from '../key-cortex/key-cortex.module';
 import { KeyGenomeModule } from '../business-genome/key-genome/key-genome.module';
 import { ConversationGenomeExtractorService } from './conversation-genome-extractor.service';
 import { CodeExecutorService } from './code-executor.service';
+import { CodeExecutorController } from './code-executor.controller';
 import { ExpensesModule } from '../expenses/expenses.module';
 import { ContractsModule } from '../contracts/contracts.module';
 import { HelpdeskModule } from '../helpdesk/helpdesk.module';
@@ -94,7 +95,7 @@ import { AiApprovalsService } from './ai-approvals.service';
 
 @Module({
   imports: [PrismaModule, RedisModule, SubscriptionsModule, forwardRef(() => BlueprintModule), TimelineModule, forwardRef(() => FinanceModule), CommandModule, GoogleDriveModule, TaskAssignmentModule, forwardRef(() => KeyAutonomyModule), forwardRef(() => KeyCortexModule), forwardRef(() => ExpensesModule), forwardRef(() => ContractsModule), HelpdeskModule, forwardRef(() => KeyInboxModule), forwardRef(() => CommunicationsModule), McpModule, StructureModule, PayrollModule, StaffPerformanceModule, KeyGenomeModule],
-  controllers: [AiController, AiSettingsController, OutputTemplateController, AiFlowController, GraphActionsController, AiUsageAdminController, AiIntelligenceController, BlueprintOnboardingController, AiApprovalsController],
+  controllers: [AiController, AiSettingsController, OutputTemplateController, AiFlowController, GraphActionsController, AiUsageAdminController, AiIntelligenceController, BlueprintOnboardingController, AiApprovalsController, CodeExecutorController],
   providers: [
     AiListener,
     ModelGatewayService,

@@ -18,6 +18,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1041.0",
     "@aws-sdk/s3-request-presigner": "^3.1041.0",
+    "@e2b/code-interpreter": "^2.6.1",
     "@keyflow/api": "workspace:*",
     "@keyflow/db": "workspace:*",
     "@keyflow/shared": "workspace:*",
