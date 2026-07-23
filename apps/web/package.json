@@ -35,6 +35,7 @@
     "isomorphic-dompurify": "^3.12.0",
     "jspdf": "^2.5.2",
     "jspdf-autotable": "^5.0.7",
+    "livekit-client": "^2.20.2",
     "lucide-react": "^0.453.0",
     "next": "^16.2.4",
     "next-themes": "^0.4.6",
