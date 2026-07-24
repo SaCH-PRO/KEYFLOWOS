@@ -148,6 +148,8 @@ RUN pnpm install --frozen-lockfile --prod --filter web... --ignore-scripts
 COPY --from=builder /app/apps/web/.next ./apps/web/.next
 COPY --from=builder /app/apps/web/public ./apps/web/public
 COPY --from=builder /app/apps/web/next.config.ts ./apps/web/
+# next.config.ts imports ./src/lib/env at load time
+COPY --from=builder /app/apps/web/src/lib/env.ts ./apps/web/src/lib/env.ts
 COPY --from=builder /app/packages/ui/src ./packages/ui/src
 EXPOSE 5000
 ENTRYPOINT ["/sbin/tini", "--"]

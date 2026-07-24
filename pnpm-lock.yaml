@@ -339,6 +339,13 @@ importers:
       zod:
         specifier: ^3.25.0
         version: 3.25.76
+    optionalDependencies:
+      '@livekit/rtc-ffi-bindings-linux-x64-gnu':
+        specifier: ^0.12.60
+        version: 0.12.60
+      '@livekit/rtc-ffi-bindings-win32-x64-msvc':
+        specifier: ^0.12.60
+        version: 0.12.60
     devDependencies:
       '@types/node':
         specifier: ^20.19.31
