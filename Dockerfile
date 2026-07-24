@@ -103,7 +103,7 @@ RUN pnpm install --frozen-lockfile --prod --filter server... --ignore-scripts
 COPY --from=builder /app/apps/server/dist        ./apps/server/dist
 COPY --from=builder /app/packages/db/dist        ./packages/db/dist
 COPY --from=builder /app/packages/db/prisma      ./packages/db/prisma
-COPY --from=builder /app/packages/db/node_modules/.prisma ./packages/db/node_modules/.prisma
+COPY --from=builder /app/node_modules/.prisma    ./node_modules/.prisma
 COPY --from=builder /app/packages/api/dist       ./packages/api/dist
 COPY --from=builder /app/packages/shared/dist    ./packages/shared/dist
 EXPOSE 3001
@@ -124,7 +124,7 @@ RUN pnpm install --frozen-lockfile --prod --filter @keyflow/voice-agent... --ign
 COPY --from=builder /app/apps/voice-agent/dist ./apps/voice-agent/dist
 COPY --from=builder /app/packages/db/dist      ./packages/db/dist
 COPY --from=builder /app/packages/db/prisma    ./packages/db/prisma
-COPY --from=builder /app/packages/db/node_modules/.prisma ./packages/db/node_modules/.prisma
+COPY --from=builder /app/node_modules/.prisma  ./node_modules/.prisma
 # LiveKit agents CLI: `node dist/main.js start` runs the worker in production mode
 ENTRYPOINT ["/sbin/tini", "--"]
 CMD ["node", "apps/voice-agent/dist/main.js", "start"]
