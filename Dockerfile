@@ -72,12 +72,11 @@ ENV NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
 ENV NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
 ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
 ENV NEXT_PUBLIC_LIVEKIT_URL=${NEXT_PUBLIC_LIVEKIT_URL}
-RUN pnpm --filter web build
-
-# Compile workspace packages, server, and voice agent for the runtimes below.
+# Workspace packages first — web imports @keyflow/shared's compiled output.
 RUN pnpm --filter @keyflow/shared build
 RUN pnpm --filter @keyflow/api build
 RUN pnpm --filter @keyflow/db build
+RUN pnpm --filter web build
 RUN pnpm --filter server build
 RUN pnpm --filter @keyflow/voice-agent build
 
