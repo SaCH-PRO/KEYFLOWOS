@@ -43,6 +43,9 @@ services:
         NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
         NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
         NEXT_PUBLIC_LIVEKIT_URL: ${PUBLIC_LIVEKIT_WS_URL}
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     restart: unless-stopped
     env_file: .env.production
     environment:
@@ -68,6 +71,11 @@ services:
         NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
         NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
         NEXT_PUBLIC_LIVEKIT_URL: ${PUBLIC_LIVEKIT_WS_URL}
+    # systemd-resolved on the host intermittently SERVFAILs long hostnames
+    # (supabase.co) via docker's embedded DNS — pin public resolvers instead.
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     restart: unless-stopped
     env_file: .env.production
     environment:
@@ -101,6 +109,9 @@ services:
         NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
         NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
         NEXT_PUBLIC_LIVEKIT_URL: ${PUBLIC_LIVEKIT_WS_URL}
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     restart: unless-stopped
     env_file: .env.production
     environment:
