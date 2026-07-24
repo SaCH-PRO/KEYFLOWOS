@@ -97,6 +97,7 @@ COPY --from=builder /app/apps/server/package.json ./apps/server/
 COPY --from=builder /app/packages/api/package.json ./packages/api/
 COPY --from=builder /app/packages/db/package.json  ./packages/db/
 COPY --from=builder /app/packages/shared/package.json ./packages/shared/
+COPY --from=builder /app/patches ./patches
 RUN pnpm install --frozen-lockfile --prod --filter server... --ignore-scripts
 # Compiled output from the builder stage
 COPY --from=builder /app/apps/server/dist        ./apps/server/dist
@@ -117,6 +118,7 @@ ENV NODE_ENV=production
 COPY --from=builder /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.yaml ./
 COPY --from=builder /app/apps/voice-agent/package.json ./apps/voice-agent/
 COPY --from=builder /app/packages/db/package.json ./packages/db/
+COPY --from=builder /app/patches ./patches
 RUN pnpm install --frozen-lockfile --prod --filter @keyflow/voice-agent... --ignore-scripts
 COPY --from=builder /app/apps/voice-agent/dist ./apps/voice-agent/dist
 COPY --from=builder /app/packages/db/dist      ./packages/db/dist
@@ -136,6 +138,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=builder /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.yaml ./
 COPY --from=builder /app/apps/web/package.json ./apps/web/
 COPY --from=builder /app/packages/ui/package.json ./packages/ui/
+COPY --from=builder /app/patches ./patches
 RUN pnpm install --frozen-lockfile --prod --filter web... --ignore-scripts
 COPY --from=builder /app/apps/web/.next ./apps/web/.next
 COPY --from=builder /app/apps/web/public ./apps/web/public
