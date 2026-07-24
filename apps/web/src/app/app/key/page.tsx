@@ -248,6 +248,7 @@ export default function KeyWorkerPage() {
                   : "bg-muted text-foreground hover:bg-muted/80"
               }`}
               title="Voice mode"
+              aria-label={showVoice ? "Hide voice panel" : "Open voice panel"}
             >
               <Mic className="w-4 h-4" />
             </button>
@@ -354,12 +355,16 @@ export default function KeyWorkerPage() {
                       <button
                         onClick={() => handleApproval(app.id, "approved")}
                         className="p-1.5 rounded-md text-emerald-600 hover:bg-emerald-500/10 transition-colors"
+                        aria-label="Approve"
+                        title="Approve"
                       >
                         <CheckCircle2 className="w-4 h-4" />
                       </button>
                       <button
                         onClick={() => handleApproval(app.id, "rejected")}
                         className="p-1.5 rounded-md text-destructive hover:bg-destructive/10 transition-colors"
+                        aria-label="Reject"
+                        title="Reject"
                       >
                         <XCircle className="w-4 h-4" />
                       </button>
@@ -380,6 +385,7 @@ export default function KeyWorkerPage() {
                   value={logSearch}
                   onChange={(e) => setLogSearch(e.target.value)}
                   placeholder="Search logs..."
+                  aria-label="Search logs"
                   className="w-full pl-8 pr-3 py-1.5 rounded-lg border text-xs bg-background focus:outline-none focus:ring-1 focus:ring-primary"
                   style={{ borderColor: "hsl(var(--kf-border))" }}
                 />

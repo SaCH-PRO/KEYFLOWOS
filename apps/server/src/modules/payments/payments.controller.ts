@@ -74,6 +74,22 @@ export class PaymentsController {
     return this.payments.createStripeCheckout(invoiceId, body.successUrl, body.cancelUrl);
   }
 
+  @PublicRateLimit(5, 60_000)
+  @Post('create-checkout')
+  async createCheckout(
+    @Body()
+    body: {
+      payableType: 'invoice' | 'storefront_order' | 'event_ticket' | 'mass_comm';
+      payableId: string;
+      gateway: 'stripe' | 'paypal' | 'wipay';
+      returnUrl?: string;
+      successUrl?: string;
+      cancelUrl?: string;
+    },
+  ) {
+    return this.payments.createGenericCheckout(body);
+  }
+
   @PublicRateLimit(60, 60_000)
   @Post('stripe/webhook')
   async handleStripeWebhook(

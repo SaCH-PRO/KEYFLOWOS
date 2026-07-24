@@ -216,6 +216,131 @@ export class PaymentsOpsService {
     if (/^[A-Z0-9]{17}$/.test(id)) return 'paypal';
     return null;
   }
+
+  async listOpenPayables(businessId: string) {
+    const [invoices, orders, ticketHolders] = await Promise.all([
+      this.prisma.client.invoice.findMany({
+        where: {
+          businessId,
+          status: { in: ['SENT', 'PENDING', 'OVERDUE', 'PARTIALLY_PAID', 'PARTIAL'] },
+        },
+        include: {
+          contact: {
+            select: {
+              firstName: true,
+              lastName: true,
+              displayName: true,
+              companyName: true,
+              email: true,
+            },
+          },
+          payments: { select: { amount: true } },
+        },
+        orderBy: { dueDate: 'asc' },
+        take: 100,
+      }),
+      this.prisma.client.marketplaceOrder.findMany({
+        where: {
+          businessId,
+          paymentStatus: { notIn: ['PAID', 'REFUNDED', 'COMPLETED'] },
+          status: { not: 'CANCELLED' },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+      }),
+      this.prisma.client.eventAttendee.findMany({
+        where: {
+          businessId,
+          paymentId: null,
+          status: { not: 'CANCELLED' },
+        },
+        include: {
+          event: { select: { name: true, startsAt: true } },
+          ticketType: { select: { name: true, price: true, currency: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+      }),
+    ]);
+
+    const regularInvoices: typeof invoices = [];
+    const campaignInvoices: typeof invoices = [];
+    for (const inv of invoices) {
+      if (inv.campaignId) {
+        campaignInvoices.push(inv);
+      } else {
+        regularInvoices.push(inv);
+      }
+    }
+
+    const buildInvoicePayable = <T extends 'invoice' | 'mass_comm'>(inv: (typeof invoices)[number], type: T) => {
+      const paid = inv.payments.reduce((sum, p) => sum + (p.amount ?? 0), 0);
+      const contact = inv.contact;
+      const customerName =
+        contact?.displayName ??
+        (contact?.firstName || contact?.lastName
+          ? [contact.firstName, contact.lastName].filter(Boolean).join(' ')
+          : undefined) ??
+        contact?.companyName ??
+        contact?.email ??
+        'Unknown';
+      return {
+        type,
+        id: inv.id,
+        title: type === 'mass_comm' ? `Campaign — ${inv.invoiceNumber}` : `Invoice ${inv.invoiceNumber}`,
+        customer: customerName,
+        amount: Math.max(0, inv.total - paid),
+        currency: inv.currency,
+        status: inv.status,
+        dueAt: inv.dueDate?.toISOString() ?? null,
+        createdAt: inv.createdAt.toISOString(),
+        href: `/app/commerce/invoices/${inv.id}`,
+      };
+    };
+
+    const invoicePayables = regularInvoices.map((inv) => buildInvoicePayable(inv, 'invoice'));
+    const massCommPayables = campaignInvoices.map((inv) => buildInvoicePayable(inv, 'mass_comm'));
+
+    const orderPayables = orders.map((order) => ({
+      type: 'storefront_order' as const,
+      id: order.id,
+      title: `Order ${order.orderNumber}`,
+      customer: order.customerName ?? order.customerEmail ?? 'Unknown',
+      amount: order.total,
+      currency: order.currency,
+      status: order.paymentStatus,
+      dueAt: null,
+      createdAt: order.createdAt.toISOString(),
+      href: `/app/store`,
+    }));
+
+    const ticketPayables = ticketHolders
+      .filter((a) => a.ticketType && Number(a.ticketType.price) > 0)
+      .map((a) => ({
+        type: 'event_ticket' as const,
+        id: a.id,
+        title: `${a.event.name} — ${a.ticketType!.name}`,
+        customer: a.name ?? a.email,
+        amount: Number(a.ticketType!.price),
+        currency: a.ticketType!.currency ?? 'TTD',
+        status: 'PENDING' as const,
+        dueAt: a.event.startsAt?.toISOString() ?? null,
+        createdAt: a.createdAt.toISOString(),
+        href: `/app/events/${a.eventId}`,
+      }));
+
+    return {
+      payables: [...invoicePayables, ...massCommPayables, ...orderPayables, ...ticketPayables].sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      ),
+      counts: {
+        invoices: invoicePayables.length,
+        massComms: massCommPayables.length,
+        storefrontOrders: orderPayables.length,
+        eventTickets: ticketPayables.length,
+      },
+    };
+  }
 }
 
 function buildProviderUrl(provider: string, id: string): string | null {

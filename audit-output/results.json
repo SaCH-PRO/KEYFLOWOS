@@ -1,0 +1,110 @@
+[
+  {
+    "step": "login",
+    "status": "success",
+    "viewport": "desktop",
+    "url": "http://localhost:5000/app/command-center"
+  },
+  {
+    "route": "/app/command-center",
+    "viewport": "desktop",
+    "started_at": "2026-07-23T15:02:51.408628",
+    "status": "success",
+    "title": "KEYFLOWOS",
+    "url": "http://localhost:5000/app/command-center",
+    "errors": [],
+    "screenshot": "audit-output\\app_command-center-desktop.png"
+  },
+  {
+    "route": "/app/key/chat",
+    "viewport": "desktop",
+    "started_at": "2026-07-23T15:03:00.336304",
+    "status": "success",
+    "title": "KEY Chat \u2014 AI Command Center",
+    "url": "http://localhost:5000/app/key/chat",
+    "errors": [],
+    "screenshot": "audit-output\\app_key_chat-desktop.png"
+  },
+  {
+    "route": "/app/commerce",
+    "viewport": "desktop",
+    "started_at": "2026-07-23T15:03:08.249278",
+    "status": "success",
+    "title": "KEYFLOWOS",
+    "url": "http://localhost:5000/app/money/revenue",
+    "errors": [],
+    "screenshot": "audit-output\\app_commerce-desktop.png"
+  },
+  {
+    "route": "/app/temporal-flow",
+    "viewport": "desktop",
+    "started_at": "2026-07-23T15:03:29.411597",
+    "status": "success",
+    "title": "KEYFLOWOS",
+    "url": "http://localhost:5000/app/temporal-flow",
+    "errors": [],
+    "screenshot": "audit-output\\app_temporal-flow-desktop.png"
+  },
+  {
+    "route": "/app/genome",
+    "viewport": "desktop",
+    "started_at": "2026-07-23T15:03:50.796863",
+    "status": "success",
+    "title": "Business Genome \u2014 KEYFLOWOS",
+    "url": "http://localhost:5000/app/genome",
+    "errors": [],
+    "screenshot": "audit-output\\app_genome-desktop.png"
+  },
+  {
+    "route": "/app/crm",
+    "viewport": "desktop",
+    "started_at": "2026-07-23T15:04:06.149841",
+    "status": "success",
+    "title": "KEYFLOWOS",
+    "url": "http://localhost:5000/app/people",
+    "errors": [],
+    "screenshot": "audit-output\\app_crm-desktop.png"
+  },
+  {
+    "route": "/app/finance",
+    "viewport": "desktop",
+    "started_at": "2026-07-23T15:04:20.968288",
+    "status": "failed",
+    "error": "Page.goto: Timeout 30000ms exceeded.\nCall log:\n  - navigating to \"http://localhost:5000/app/finance\", waiting until \"load\"\n",
+    "url": "http://localhost:5000/app/people",
+    "errors": [],
+    "screenshot": null
+  },
+  {
+    "route": "/app/schedule/calendar",
+    "viewport": "desktop",
+    "started_at": "2026-07-23T15:05:23.020938",
+    "status": "failed",
+    "error": "Page.goto: Navigation to \"http://localhost:5000/app/schedule/calendar\" is interrupted by another navigation to \"http://localhost:5000/app/money\"\nCall log:\n  - navigating to \"http://localhost:5000/app/schedule/calendar\", waiting until \"load\"\n",
+    "url": "http://localhost:5000/app/schedule/calendar",
+    "errors": [],
+    "screenshot": "audit-output\\app_schedule_calendar-desktop-timeout.png"
+  },
+  {
+    "route": "/app/settings",
+    "viewport": "desktop",
+    "started_at": "2026-07-23T15:05:45.910577",
+    "status": "success",
+    "title": "KEYFLOWOS",
+    "url": "http://localhost:5000/app/build/system/workspace",
+    "errors": [
+      {
+        "type": "error",
+        "text": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)",
+        "location": "{'url': 'http://localhost:3001/temporal/businesses/cmrtnh5fv00h29zd4r4j3trte/overview?_t=1784819147409', 'line': 0, 'column': 0, 'lineNumber': 0, 'columnNumber': 0}"
+      }
+    ],
+    "screenshot": "audit-output\\app_settings-desktop.png"
+  },
+  {
+    "step": "login",
+    "status": "failed",
+    "viewport": "mobile",
+    "error": "Login did not redirect to /app/. URL=http://localhost:5000/app, error="
+  }
+]

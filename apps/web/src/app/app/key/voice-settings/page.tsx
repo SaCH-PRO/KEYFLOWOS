@@ -263,6 +263,8 @@ export default function VoiceSettingsPage() {
             className={`relative w-11 h-6 rounded-full transition-colors ${
               settings.autoSpeak ? "bg-emerald-500" : "bg-destructive"
             }`}
+            aria-label="Auto-speak KEY replies"
+            aria-pressed={settings.autoSpeak}
           >
             <span
               className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${
@@ -292,6 +294,8 @@ export default function VoiceSettingsPage() {
             className={`relative w-11 h-6 rounded-full transition-colors ${
               settings.muted ? "bg-destructive" : "bg-emerald-500"
             }`}
+            aria-label="Mute TTS"
+            aria-pressed={settings.muted}
           >
             <span
               className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${

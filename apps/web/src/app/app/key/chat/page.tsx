@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { KeyFullChatShell } from "@/components/key/chat/key-full-chat-shell";
+import { KeyFullChatShellV2 } from "@/components/key/chat/key-full-chat-shell-v2";
 
 export const metadata: Metadata = {
   title: "KEY Chat — AI Command Center",
@@ -7,5 +7,5 @@ export const metadata: Metadata = {
 };
 
 export default function KeyChatPage() {
-  return <KeyFullChatShell />;
+  return <KeyFullChatShellV2 />;
 }

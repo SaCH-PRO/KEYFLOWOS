@@ -8,6 +8,7 @@ import { useKeyChatActions } from "./use-key-chat-actions";
 import { openGenomeConversation, GENOME_SESSION_ID } from "./open-genome-conversation";
 import { getGenome, type GenomeIntegrityResult } from "@/lib/api/business-genome";
 import { getStoredBusinessId } from "@/lib/workspace";
+import { Badge } from "@/components/ui-v2/badge";
 
 interface KeyGenomeChipProps {
   surface: "page" | "drawer";
@@ -41,23 +42,27 @@ export function KeyGenomeChip({ surface }: KeyGenomeChipProps) {
       type="button"
       onClick={() => openGenomeConversation(chat, sendMessage, { surface })}
       title={ready ? "Business Genome ready — open the genome chat" : "Continue building your Business Genome"}
-      className={cn(
-        "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-medium transition-colors",
-        active
-          ? "border-[hsl(var(--kf-accent1))]/40 bg-[hsl(var(--kf-accent1))]/10 text-[hsl(var(--kf-accent1))]"
-          : "border-border/60 text-muted-foreground hover:bg-muted hover:text-foreground"
-      )}
+      aria-label={ready ? "Business Genome ready — open the genome chat" : "Continue building your Business Genome"}
+      className="focus-ring rounded-full"
     >
-      <Dna className="h-3 w-3" />
-      {ready ? (
-        <span className="flex items-center gap-1">
-          Genome <CheckCircle2 className="h-3 w-3 text-emerald-500" />
-        </span>
-      ) : integrity !== null ? (
-        <span>Genome {integrity}%</span>
-      ) : (
-        <span>Genome</span>
-      )}
+      <Badge
+        color={active ? "violet" : ready ? "mint" : "muted"}
+        className={cn(
+          "cursor-pointer transition-colors",
+          !active && !ready && "hover:bg-muted"
+        )}
+      >
+        <Dna className="h-3 w-3" />
+        {ready ? (
+          <span className="flex items-center gap-1">
+            Genome <CheckCircle2 className="h-3 w-3" />
+          </span>
+        ) : integrity !== null ? (
+          <span>Genome {integrity}%</span>
+        ) : (
+          <span>Genome</span>
+        )}
+      </Badge>
     </button>
   );
 }

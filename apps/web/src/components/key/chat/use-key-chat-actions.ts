@@ -8,14 +8,8 @@ import {
   fetchFlowSessions,
   deleteFlowSession,
   type FlowChatResponse,
-  type FlowPendingConfirmation,
 } from "@/lib/client";
-import {
-  sendGenomeMessage,
-  getGenomeMessages,
-  type GenomeChatMessage,
-  type ProposedGenomeUpdate,
-} from "@/lib/api/business-genome";
+import { sendGenomeMessage } from "@/lib/api/business-genome";
 import { useKeyChat } from "./key-chat-store";
 import { useKeyStream, type FlowStreamChunk, getAttachmentType } from "./use-key-stream";
 import type { KeyChatAttachment, KeyChatMessage, KeyChatPlanStep, KeyChatSession } from "./types";
@@ -133,6 +127,35 @@ export function useKeyChatActions() {
     },
     [chat]
   );
+
+  const loadSessions = useCallback(async () => {
+    const businessId = getStoredBusinessId();
+    if (!businessId) return;
+
+    // Genome mode doesn't use flow sessions
+    if (chatMode === "genome_onboarding") {
+      chat.setSessions([]);
+      return;
+    }
+
+    const res = await fetchFlowSessions(businessId);
+    if (!res.data || !Array.isArray(res.data)) return;
+
+    const sessions: KeyChatSession[] = (res.data as Array<Record<string, unknown>>).map((s) => {
+      const messages = ((s.messages as KeyChatMessage[]) ?? []);
+      const firstUser = messages.find((m) => m.role === "user");
+      const title = firstUser?.content?.slice(0, 60) || "New chat";
+      return {
+        id: String(s.id),
+        title: title + (firstUser && firstUser.content.length > 60 ? "…" : ""),
+        updatedAt: String(s.updatedAt),
+        createdAt: String(s.createdAt),
+      };
+    });
+    // The pinned genome conversation always sorts first.
+    sessions.sort((a, b) => (a.id === "onboarding" ? -1 : b.id === "onboarding" ? 1 : 0));
+    chat.setSessions(sessions);
+  }, [chat, chatMode]);
 
   const sendMessage = useCallback(
     async (text?: string, opts?: { pendingConfirmation?: { toolCallId: string; confirmed: boolean; toolName?: string; toolArgs?: Record<string, unknown> }; silent?: boolean }) => {
@@ -258,7 +281,7 @@ export function useKeyChatActions() {
             chat.setStatus("error");
             chat.setError(res.error ?? undefined);
           }
-        } catch (err) {
+        } catch {
           chat.updateMessage(assistantId, {
             content: "Sorry, I encountered an error. Please try again.",
           });
@@ -285,7 +308,7 @@ export function useKeyChatActions() {
             window.dispatchEvent(new CustomEvent("kf:key-state", { detail: { state: "idle" } }));
             void loadSessions();
           },
-          onError: async (error) => {
+          onError: async () => {
             // Fall back to the non-streaming endpoint before giving up.
             await fallbackToRest();
             chat.setStatus("idle");
@@ -295,7 +318,7 @@ export function useKeyChatActions() {
         }
       );
     },
-    [chat, buildHistory, appendAssistantFromResponse, processStreamChunk, startStream, chatMode]
+    [chat, buildHistory, appendAssistantFromResponse, processStreamChunk, startStream, chatMode, loadSessions]
   );
 
   const confirmAction = useCallback(
@@ -369,35 +392,6 @@ export function useKeyChatActions() {
     processingRef.current = false;
     window.dispatchEvent(new CustomEvent("kf:key-state", { detail: { state: "idle" } }));
   }, [stopStream, chat]);
-
-  const loadSessions = useCallback(async () => {
-    const businessId = getStoredBusinessId();
-    if (!businessId) return;
-
-    // Genome mode doesn't use flow sessions
-    if (chatMode === "genome_onboarding") {
-      chat.setSessions([]);
-      return;
-    }
-
-    const res = await fetchFlowSessions(businessId);
-    if (!res.data || !Array.isArray(res.data)) return;
-
-    const sessions: KeyChatSession[] = (res.data as Array<Record<string, unknown>>).map((s) => {
-      const messages = ((s.messages as KeyChatMessage[]) ?? []);
-      const firstUser = messages.find((m) => m.role === "user");
-      const title = firstUser?.content?.slice(0, 60) || "New chat";
-      return {
-        id: String(s.id),
-        title: title + (firstUser && firstUser.content.length > 60 ? "…" : ""),
-        updatedAt: String(s.updatedAt),
-        createdAt: String(s.createdAt),
-      };
-    });
-    // The pinned genome conversation always sorts first.
-    sessions.sort((a, b) => (a.id === "onboarding" ? -1 : b.id === "onboarding" ? 1 : 0));
-    chat.setSessions(sessions);
-  }, [chat, chatMode]);
 
   const selectSession = useCallback(
     async (sessionId: string) => {

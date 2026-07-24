@@ -48,7 +48,8 @@ export function MobileGestureProvider({ children }: { children: React.ReactNode 
       if (!touchStart.current) return;
       const endX = e.changedTouches[0].clientX;
       const endY = e.changedTouches[0].clientY;
-      const swipe = detectSwipe(touchStart.current.x, touchStart.current.y, endX, endY);
+      const startY = touchStart.current.y;
+      const swipe = detectSwipe(touchStart.current.x, startY, endX, endY);
       touchStart.current = null;
 
       if (!swipe) return;
@@ -61,6 +62,11 @@ export function MobileGestureProvider({ children }: { children: React.ReactNode 
       // Edge swipe from right = close mobile drawer or panels
       if (swipe.direction === "left" && window.innerWidth - endX < 100) {
         window.dispatchEvent(new CustomEvent("kf:escape"));
+      }
+
+      // Bottom-edge swipe up = open module launcher
+      if (swipe.direction === "up" && window.innerHeight - startY < 40) {
+        window.dispatchEvent(new CustomEvent("kf:open-module-launcher"));
       }
     };
 

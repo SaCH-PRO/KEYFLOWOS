@@ -21,7 +21,6 @@ export function NudgesWidget({ businessId }: NudgesWidgetProps) {
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
     fetchConciergeNudges(businessId).then(({ data }) => {
       if (cancelled) return;
       setNudges(data ?? []);

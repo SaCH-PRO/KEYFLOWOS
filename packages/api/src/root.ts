@@ -10,12 +10,14 @@ import { siteRouter } from './routers/site';
 import { adminRouter } from './routers/admin';
 import { diagnosticsRouter } from './routers/diagnostics';
 import { supplierRouter } from './routers/supplier';
+import { eventsRouter } from './routers/events';
 
 export const appRouter: AnyRouter = router({
   identity: identityRouter,
   crm: crmRouter,
   commerce: commerceRouter,
   bookings: bookingsRouter,
+  events: eventsRouter,
   social: socialRouter,
   automation: automationRouter,
   site: siteRouter,

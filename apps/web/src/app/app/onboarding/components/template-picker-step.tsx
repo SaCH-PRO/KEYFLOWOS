@@ -35,14 +35,11 @@ export function TemplatePickerStep({ onComplete }: TemplatePickerStepProps) {
   }, [businessId]);
 
   useEffect(() => {
-    if (!businessId || !selected) {
-      setPreview(null);
-      return;
-    }
+    if (!businessId || !selected) return;
     fetchConciergeTemplatePreview(businessId, selected).then(({ data }) => {
       if (data) setPreview(data);
     });
-  }, [selected]);
+  }, [businessId, selected]);
 
   const handleConfirm = async () => {
     if (!businessId || !selected) return;

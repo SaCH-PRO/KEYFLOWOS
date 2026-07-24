@@ -136,5 +136,7 @@ echo "    Voice → KEY voice agent worker (LiveKit :7880)"
 echo "═══════════════════════════════════════════════════════════════"
 echo ""
 
-# Keep the script alive until one of the servers exits or the user hits Ctrl+C.
-wait -n "$SERVER_PID" "$WEB_PID" $VOICE_PID
+# Keep the script alive until API or Web exits. Voice is optional — monitor it
+# in a background subshell so a voice crash does not tear down the whole stack.
+[ -n "$VOICE_PID" ] && ( wait "$VOICE_PID" 2>/dev/null || true ) &
+wait -n "$SERVER_PID" "$WEB_PID"

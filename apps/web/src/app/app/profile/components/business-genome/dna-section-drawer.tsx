@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Loader2, Save } from "lucide-react";
 import { apiGet } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
@@ -210,7 +210,7 @@ export function DnaSectionDrawer({ section, onClose, onUpdate }: DnaSectionDrawe
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<Record<string, string>>({});
 
-  const fields = SECTION_FIELDS[section.key] || [];
+  const fields = useMemo(() => SECTION_FIELDS[section.key] || [], [section.key]);
 
   useEffect(() => {
     if (!businessId) return;

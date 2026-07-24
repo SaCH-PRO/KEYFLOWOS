@@ -37,6 +37,44 @@ function computeStats(invoices: Invoice[], quotes: Quote[]) {
   };
 }
 
+interface KpiMetricProps {
+  icon: React.ElementType;
+  label: string;
+  value: string;
+  color: string;
+  score?: number;
+}
+
+function KpiMetric({ icon: Icon, label, value, color, score }: KpiMetricProps) {
+  return (
+    <div
+      className="rounded-xl p-2.5 border transition-colors"
+      style={{ background: `${color}08`, borderColor: `${color}25` }}
+    >
+      <div className="flex items-center gap-2 mb-1.5">
+        <div
+          className="flex h-6 w-6 items-center justify-center rounded-lg flex-shrink-0"
+          style={{ background: `${color}18` }}
+        >
+          <Icon className="h-3 w-3" style={{ color }} />
+        </div>
+        <span className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</span>
+      </div>
+      <div className="text-sm font-display font-bold" style={{ color }}>
+        {value}
+      </div>
+      {score !== undefined && (
+        <div className="mt-1.5 h-1 rounded-full bg-muted/50 overflow-hidden">
+          <div
+            className="h-full rounded-full transition-all duration-1000"
+            style={{ width: `${Math.min(score, 100)}%`, background: color }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function CommerceKpiStrip({ businessId, invoices, quotes, products, currency = "TTD" }: CommerceKpiStripProps) {
   const [serverStats, setServerStats] = useState<CommerceStats | null>(null);
 
@@ -64,44 +102,38 @@ export function CommerceKpiStrip({ businessId, invoices, quotes, products, curre
     return clientStats;
   }, [serverStats, clientStats]);
 
-  const chips = [
+  const metrics = [
     {
       icon: DollarSign,
       label: "Revenue",
       value: formatCurrencyCompact(stats.totalRevenue, currency),
-      color: "#10b981",
+      color: "hsl(var(--kf-success, 160 70% 45%))",
     },
     {
       icon: Clock,
       label: "Owed",
       value: formatCurrencyCompact(stats.outstanding, currency),
-      color: "#f59e0b",
+      color: "hsl(var(--kf-warning, 30 90% 55%))",
     },
     {
       icon: AlertTriangle,
       label: "Overdue",
       value: stats.overdueCount > 0 ? formatCurrencyCompact(stats.overdueAmount, currency) : "—",
-      color: stats.overdueCount > 0 ? "#ef4444" : "#6b7280",
+      color: stats.overdueCount > 0 ? "hsl(var(--kf-error, 0 80% 60%))" : "hsl(var(--kf-muted-foreground))",
     },
     {
       icon: TrendingUp,
       label: "Conversion",
       value: `${stats.conversionRate}%`,
-      color: "hsl(142 76% 36%)",
+      color: "hsl(var(--kf-accent1))",
+      score: stats.conversionRate,
     },
   ];
 
   return (
-    <div className="flex flex-wrap gap-1.5 sm:gap-2">
-      {chips.map((chip) => (
-        <div
-          key={chip.label}
-          className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1 sm:py-1.5 rounded-lg border border-border/50 bg-white/[0.03] text-sm"
-        >
-          <chip.icon className="w-3 h-3 sm:w-3.5 sm:h-3.5 shrink-0" style={{ color: chip.color }} />
-          <span className="font-semibold text-[11px] sm:text-xs">{chip.value}</span>
-          <span className="text-[10px] sm:text-[11px] text-muted-foreground/50 hidden sm:inline">{chip.label}</span>
-        </div>
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+      {metrics.map((metric) => (
+        <KpiMetric key={metric.label} {...metric} />
       ))}
     </div>
   );

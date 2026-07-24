@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, PanelLeft, Maximize2 } from "lucide-react";
@@ -11,7 +11,10 @@ import { KeyChatMessages } from "./key-chat-messages";
 import { KeyChatInput } from "./key-chat-input";
 import { KeyChatHistory } from "./key-chat-history";
 import { KeyChatVoiceBar } from "./key-chat-voice-bar";
+import { KeyChatModeTabs } from "./key-chat-mode-tabs";
 import { KeyGenomeChip } from "./key-genome-chip";
+import { openGenomeConversation } from "./open-genome-conversation";
+import type { KeyChatMode } from "./types";
 
 interface KeyChatPanelProps {
   className?: string;
@@ -19,7 +22,8 @@ interface KeyChatPanelProps {
 
 export function KeyChatPanel({ className }: KeyChatPanelProps) {
   const router = useRouter();
-  const { open, setOpen, showHistory, setShowHistory } = useKeyChat();
+  const chat = useKeyChat();
+  const { open, setOpen, showHistory, setShowHistory, chatMode, setChatMode, messages, setCurrentModule, setPageContext, setActiveSessionId, appendMessage } = chat;
   const { sendMessage, stop, confirmAction } = useKeyChatActions();
 
   // Card advances outside /app/onboarding drive the flow conversationally.
@@ -35,6 +39,18 @@ export function KeyChatPanel({ className }: KeyChatPanelProps) {
     router.push("/app/key/chat");
   };
 
+  const handleModeChange = (newMode: KeyChatMode) => {
+    if (newMode === "genome_onboarding") {
+      void openGenomeConversation(
+        { messages, setCurrentModule, setPageContext, setActiveSessionId, appendMessage, setOpen },
+        sendMessage,
+        { surface: "drawer" },
+      );
+    } else {
+      setChatMode(newMode);
+    }
+  };
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape" && open) {
@@ -44,6 +60,23 @@ export function KeyChatPanel({ className }: KeyChatPanelProps) {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [open, setOpen]);
+
+  // Swipe-down-to-close on mobile (only when panel is full-screen).
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const handleTouchStart = (e: React.TouchEvent) => {
+    const touch = e.touches[0];
+    touchStartRef.current = { x: touch.clientX, y: touch.clientY };
+  };
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (!touchStartRef.current) return;
+    const touch = e.changedTouches[0];
+    const dy = touch.clientY - touchStartRef.current.y;
+    const dx = touch.clientX - touchStartRef.current.x;
+    touchStartRef.current = null;
+    if (dy > 80 && Math.abs(dy) > Math.abs(dx) * 1.5) {
+      setOpen(false);
+    }
+  };
 
   return (
     <AnimatePresence>
@@ -68,7 +101,11 @@ export function KeyChatPanel({ className }: KeyChatPanelProps) {
             )}
           >
             <div className="flex h-full flex-col">
-              <header className="flex items-center justify-between border-b border-border/50 px-4 py-3">
+              <header
+                className="flex items-center justify-between border-b border-border/50 px-4 py-3 touch-pan-y"
+                onTouchStart={handleTouchStart}
+                onTouchEnd={handleTouchEnd}
+              >
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
@@ -110,6 +147,10 @@ export function KeyChatPanel({ className }: KeyChatPanelProps) {
                 </div>
               </header>
 
+              <div className="border-b border-border/50 bg-background/95 px-3 py-2">
+                <KeyChatModeTabs mode={chatMode ?? "general"} onChange={handleModeChange} />
+              </div>
+
               <div className="flex min-h-0 flex-1">
                 {showHistory && (
                   <div className="hidden w-56 shrink-0 sm:block">
@@ -119,7 +160,7 @@ export function KeyChatPanel({ className }: KeyChatPanelProps) {
                 <div className="flex min-w-0 flex-1 flex-col">
                   <KeyChatMessages onConfirmAction={confirmAction} onCardAdvance={handleCardAdvance} />
                   <KeyChatVoiceBar />
-                  <KeyChatInput onSend={sendMessage} onStop={stop} />
+                  <KeyChatInput onSend={sendMessage} onStop={stop} showModeBadge={false} />
                 </div>
               </div>
             </div>

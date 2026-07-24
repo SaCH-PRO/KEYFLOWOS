@@ -52,16 +52,45 @@ export default function PayWidgetPage() {
 
   const pay = async () => {
     setStep('processing');
-    const { data, error } = await apiPost<{ redirectUrl?: string; paymentId?: string }>({
+    const { data, error } = await apiPost<{
+      type: 'redirect' | 'paypal_order';
+      redirectUrl?: string;
+      orderId?: string;
+    }>({
       path: `/payments/create-checkout`,
-      body: { invoiceId, method: paymentMethod.toUpperCase(), returnUrl: window.location.href },
+      body: {
+        payableType: 'invoice',
+        payableId: invoiceId,
+        gateway: paymentMethod,
+        returnUrl: window.location.href,
+        successUrl: window.location.href,
+        cancelUrl: window.location.href,
+      },
     });
-    if (error || !data?.redirectUrl) {
+    if (error || !data) {
       setStep('error');
       setErrorMsg(error || 'Payment initialization failed.');
-    } else {
-      window.location.href = data.redirectUrl;
+      return;
     }
+    if (data.type === 'paypal_order' && data.orderId) {
+      const { data: captureData, error: captureError } = await apiPost<{ redirectUrl?: string }>({
+        path: `/payments/paypal/capture/${encodeURIComponent(data.orderId)}`,
+        body: { invoiceId },
+      });
+      if (captureError || !captureData?.redirectUrl) {
+        setStep('error');
+        setErrorMsg(captureError || 'PayPal capture failed.');
+        return;
+      }
+      window.location.href = captureData.redirectUrl;
+      return;
+    }
+    if (data.redirectUrl) {
+      window.location.href = data.redirectUrl;
+      return;
+    }
+    setStep('error');
+    setErrorMsg('Payment initialization failed.');
   };
 
   const _notifyParent = (eventName: string, payload: Record<string, unknown>) => {
@@ -143,6 +172,8 @@ export default function PayWidgetPage() {
                     key={m}
                     type="button"
                     onClick={() => setPaymentMethod(m)}
+                    aria-label={`Pay with ${m}`}
+                    aria-pressed={paymentMethod === m}
                     className={`rounded-lg border px-2 py-2 text-xs font-medium capitalize transition-colors ${
                       paymentMethod === m
                         ? 'text-white border-transparent'
@@ -160,6 +191,7 @@ export default function PayWidgetPage() {
 
             <button
               onClick={pay}
+              aria-label={`Pay ${invoice.currency} ${invoice.total.toFixed(2)} with ${paymentMethod}`}
               className="w-full rounded-lg py-2.5 text-sm font-medium text-white transition-opacity hover:opacity-90"
               style={{ backgroundColor: primary }}
             >

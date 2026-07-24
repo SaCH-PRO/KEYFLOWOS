@@ -45,8 +45,32 @@ export function CompletionStep() {
   }, [businessId]);
 
   useEffect(() => {
-    complete();
-  }, [complete]);
+    if (!businessId) return;
+    let active = true;
+    markOnboardingComplete(businessId).then(({ data, error: err, rawError }) => {
+      if (!active) return;
+      if (err) {
+        setError(typeof err === "string" ? err : "Could not finish onboarding. Please try again.");
+        const rawMissingPillars =
+          (rawError?.details && (rawError.details as Record<string, unknown>).missingPillars) ||
+          rawError?.missingPillars;
+        if (rawError?.code === "GENOME_GATE_BLOCKED" && Array.isArray(rawMissingPillars)) {
+          setMissingPillars(rawMissingPillars as string[]);
+        }
+      } else {
+        setMissingPillars(null);
+        if (data?.alreadyComplete) {
+          setAlreadyComplete(true);
+        } else if (data?.demoData) {
+          setDemoData(data.demoData);
+        }
+      }
+      setLoading(false);
+    });
+    return () => {
+      active = false;
+    };
+  }, [businessId]);
 
   return (
     <div className="space-y-6 text-center">

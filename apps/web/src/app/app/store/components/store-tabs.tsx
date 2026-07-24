@@ -1,6 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
+import { Surface } from "@/components/ui-v2/surface";
 import { VIEW_TABS, type TabKey } from "./store-types";
 
 interface StoreTabsProps {
@@ -10,41 +11,48 @@ interface StoreTabsProps {
 
 export function StoreTabs({ activeView, onViewChange }: StoreTabsProps) {
   return (
-    <div className="flex gap-2 overflow-x-auto pb-1">
-      {VIEW_TABS.map((t) => {
-        const Icon = t.icon;
-        return (
-          <button
-            key={t.key}
-            onClick={() => onViewChange(t.key)}
-            className={`relative px-5 py-2.5 text-sm font-medium rounded-xl transition-all flex items-center gap-2 whitespace-nowrap ${
-              activeView === t.key
-                ? ""
-                : "text-muted-foreground hover:text-foreground hover:bg-[hsl(var(--kf-muted)/0.5)]"
-            }`}
-          >
-            {activeView === t.key && (
-              <motion.div
-                layoutId="store-tab-pill"
-                className="absolute inset-0 rounded-xl"
-                style={{
-                  background: "linear-gradient(135deg, hsl(var(--kf-accent1) / 0.15), hsl(var(--kf-accent2) / 0.1))",
-                  border: "1px solid hsl(var(--kf-accent1) / 0.25)",
-                  boxShadow: "0 2px 12px hsl(var(--kf-accent1) / 0.1)",
-                }}
-                transition={{ type: "spring", bounce: 0.2, duration: 0.5 }}
-              />
-            )}
-            <span
-              className="relative z-10 flex items-center gap-2"
-              style={activeView === t.key ? { color: "hsl(var(--kf-accent1))" } : {}}
+    <Surface variant="default" className="p-1 bg-muted/50">
+      <div className="flex items-center overflow-x-auto scrollbar-none gap-1">
+        {VIEW_TABS.map((t) => {
+          const Icon = t.icon;
+          const isActive = activeView === t.key;
+          return (
+            <button
+              key={t.key}
+              onClick={() => onViewChange(t.key)}
+              className="relative flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all whitespace-nowrap min-h-[40px] flex-shrink-0 focus-ring"
+              aria-selected={isActive}
+              role="tab"
             >
-              <Icon className="w-4 h-4" />
-              {t.label}
-            </span>
-          </button>
-        );
-      })}
-    </div>
+              {isActive && (
+                <motion.div
+                  layoutId="store-tab-pill"
+                  className="absolute inset-0 rounded-xl bg-card shadow-md border border-border/60"
+                  transition={{ type: "spring", bounce: 0.2, duration: 0.5 }}
+                />
+              )}
+              <Icon
+                className={`w-3.5 h-3.5 relative z-10 flex-shrink-0 ${
+                  isActive ? "text-primary" : "text-muted-foreground"
+                }`}
+              />
+              <span
+                className={`relative z-10 ${
+                  isActive ? "text-foreground" : "text-muted-foreground"
+                }`}
+              >
+                {t.label}
+              </span>
+              {isActive && (
+                <motion.div
+                  layoutId="store-tab-dot"
+                  className="absolute bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-primary z-10"
+                />
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </Surface>
   );
 }

@@ -1,10 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { BriefcaseBusiness, FolderKanban, CheckSquare, FileText, Layers, ArrowRight, Plus, Loader2, Trash2 } from "lucide-react";
+import { BriefcaseBusiness, FolderKanban, CheckSquare, FileText, Layers, ArrowRight, Plus, Loader2, Trash2, Settings } from "lucide-react";
+import { motion } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { FlowShell } from "@/components/layout/flow-shell";
+import { FlowQuickLauncher } from "@/components/layout/flow-quick-launcher";
+import type { ModuleLauncherSection } from "@/components/ui/module-launcher-sheet";
 import { fetchSops, createSop, deleteSop, type SopDocument } from "@/lib/api/sop";
 
 export default function OperationsFlowPage() {
@@ -59,16 +62,56 @@ export default function OperationsFlowPage() {
     { label: "Workflows", href: "/app/workflows", icon: Layers, desc: "Automated workflows" },
   ];
 
+  const launcherSections: ModuleLauncherSection[] = [
+    {
+      id: "work",
+      label: "Work",
+      items: [
+        { id: "projects", label: "Projects", icon: FolderKanban, href: "/app/projects", tone: "violet" },
+        { id: "tasks", label: "Tasks", icon: CheckSquare, href: "/app/approvals", tone: "orange" },
+        { id: "workflows", label: "Workflows", icon: Layers, href: "/app/workflows", tone: "teal" },
+      ],
+    },
+    {
+      id: "system",
+      label: "System",
+      items: [
+        { id: "automations", label: "Automations", icon: Layers, href: "/app/flows", tone: "mint" },
+        { id: "structure", label: "Structure", icon: BriefcaseBusiness, href: "/app/structure", tone: "sky" },
+        { id: "settings", label: "Settings", icon: Settings, href: "/app/settings", tone: "default" },
+      ],
+    },
+  ];
+
   return (
     <FlowShell
       title="Operations Flow"
       subtitle="Run the business. Processes, projects, and workflows."
       icon={BriefcaseBusiness}
       activeFlowId="operations"
+      headerActions={
+        <FlowQuickLauncher
+          title="Operations Modules"
+          subtitle="Work and system tools"
+          sections={launcherSections}
+        />
+      }
     >
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {sections.map((s) => (
-          <button key={s.label} onClick={() => router.push(s.href)} className="kf-card kf-radius-lg p-4 text-left hover:shadow-md transition-all group">
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.35, ease: "easeOut" }}
+        className="grid grid-cols-1 md:grid-cols-2 gap-3"
+      >
+        {sections.map((s, idx) => (
+          <motion.button
+            key={s.label}
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: idx * 0.05, duration: 0.25 }}
+            onClick={() => router.push(s.href)}
+            className="kf-card kf-radius-lg p-4 text-left hover:shadow-md transition-all group"
+          >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 kf-radius-lg flex items-center justify-center" style={{ background: "hsl(var(--kf-accent1) / 0.1)" }}>
@@ -81,9 +124,9 @@ export default function OperationsFlowPage() {
               </div>
               <ArrowRight className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors" />
             </div>
-          </button>
+          </motion.button>
         ))}
-      </div>
+      </motion.div>
 
       {/* SOPs */}
       <div className="space-y-2 pt-2">

@@ -202,7 +202,7 @@ export function ProposalCard({ businessId, proposal, onUpdated }: ProposalCardPr
                   <Target className="w-3 h-3" /> Open Command Center
                 </Link>
                 <Link
-                  href="/app/profile?tab=business-genome"
+                  href="/app/genome"
                   className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-muted/50 text-[10px] font-medium text-foreground hover:bg-muted/80 transition-colors"
                 >
                   Update Business Genome

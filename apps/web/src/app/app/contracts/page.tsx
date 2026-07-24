@@ -42,6 +42,7 @@ import {
   type ContractListItem,
   type ContractStats,
   type ContractTag,
+  type ExtractContractTermsInput,
 } from "@/lib/api/contracts";
 
 const STATUS_OPTIONS = [
@@ -110,6 +111,34 @@ function SelectNative({
       ))}
     </select>
   );
+}
+
+interface ContractFormParty {
+  role: string;
+  name: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  notes?: string;
+  contactId?: string;
+}
+
+interface ContractFormData {
+  title: string;
+  contractType: string;
+  status: string;
+  effectiveDate: string;
+  expiryDate: string;
+  renewalDate: string;
+  renewalType: string;
+  renewalNoticeDays: string;
+  contractValue: string;
+  currency: string;
+  jurisdiction: string;
+  retentionPolicy: string;
+  notes: string;
+  parties: ContractFormParty[];
+  tagIds: string[];
 }
 
 function MetricPill({
@@ -232,11 +261,17 @@ export default function ContractsPage() {
     setSelectedContract(null);
   };
 
-  const handleSave = async (input: any) => {
+  const handleSave = async (input: ContractFormData) => {
     if (!businessId) return;
     setActionLoading("save");
+    const saveInput = {
+      ...input,
+      contractValue: input.contractValue ? Number(input.contractValue) : undefined,
+      renewalNoticeDays: input.renewalNoticeDays ? Number(input.renewalNoticeDays) : undefined,
+      parties: input.parties.filter((p) => p.name.trim()),
+    };
     if (sheetMode === "create") {
-      const { data, error } = await createContract(businessId, input);
+      const { data, error } = await createContract(businessId, saveInput);
       if (error || !data) toast.error(error ?? "Failed to create contract");
       else {
         toast.success("Contract created");
@@ -245,7 +280,7 @@ export default function ContractsPage() {
         loadStats();
       }
     } else if (selectedContract) {
-      const { data, error } = await updateContract(businessId, selectedContract.id, input);
+      const { data, error } = await updateContract(businessId, selectedContract.id, saveInput);
       if (error || !data) toast.error(error ?? "Failed to update contract");
       else {
         toast.success("Contract updated");
@@ -272,7 +307,7 @@ export default function ContractsPage() {
     setActionLoading(null);
   };
 
-  const handleExtract = async (source: any) => {
+  const handleExtract = async (source: ExtractContractTermsInput) => {
     if (!businessId || !selectedContract) return;
     setActionLoading("extract");
     const { data, error } = await extractContractTerms(businessId, selectedContract.id, source);
@@ -503,7 +538,7 @@ function ContractForm({
 }: {
   contract: Contract | null;
   tags: ContractTag[];
-  onSubmit: (input: any) => void;
+  onSubmit: (input: ContractFormData) => void;
   onCancel: () => void;
   loading: boolean;
 }) {
@@ -513,34 +548,30 @@ function ContractForm({
     setForm(initializeForm(contract));
   }, [contract]);
 
-  const update = (key: string, value: any) => setForm((f: any) => ({ ...f, [key]: value }));
+  const update = (key: keyof ContractFormData, value: string) =>
+    setForm((f: ContractFormData) => ({ ...f, [key]: value }));
 
   const updateParty = (idx: number, key: string, value: string) => {
-    setForm((f: any) => ({
+    setForm((f: ContractFormData) => ({
       ...f,
-      parties: f.parties.map((p: any, i: number) => (i === idx ? { ...p, [key]: value } : p)),
+      parties: f.parties.map((p, i) => (i === idx ? { ...p, [key]: value } : p)),
     }));
   };
 
-  const addParty = () => setForm((f: any) => ({ ...f, parties: [...f.parties, { role: "client", name: "" }] }));
+  const addParty = () =>
+    setForm((f: ContractFormData) => ({ ...f, parties: [...f.parties, { role: "client", name: "" }] }));
   const removeParty = (idx: number) =>
-    setForm((f: any) => ({ ...f, parties: f.parties.filter((_: any, i: number) => i !== idx) }));
+    setForm((f: ContractFormData) => ({ ...f, parties: f.parties.filter((_, i) => i !== idx) }));
 
   const toggleTag = (tagId: string) => {
-    setForm((f: any) => ({
+    setForm((f: ContractFormData) => ({
       ...f,
-      tagIds: f.tagIds.includes(tagId) ? f.tagIds.filter((id: string) => id !== tagId) : [...f.tagIds, tagId],
+      tagIds: f.tagIds.includes(tagId) ? f.tagIds.filter((id) => id !== tagId) : [...f.tagIds, tagId],
     }));
   };
 
   const submit = () => {
-    const input = {
-      ...form,
-      contractValue: form.contractValue ? Number(form.contractValue) : undefined,
-      renewalNoticeDays: form.renewalNoticeDays ? Number(form.renewalNoticeDays) : undefined,
-      parties: form.parties.filter((p: any) => p.name.trim()),
-    };
-    onSubmit(input);
+    onSubmit(form);
   };
 
   return (
@@ -615,7 +646,7 @@ function ContractForm({
           </Button>
         </div>
         <div className="space-y-2">
-          {form.parties.map((party: any, idx: number) => (
+          {form.parties.map((party, idx) => (
             <div key={idx} className="grid grid-cols-12 gap-2 items-center">
               <Input
                 className="col-span-3"
@@ -674,7 +705,7 @@ function ContractForm({
   );
 }
 
-function initializeForm(contract: Contract | null) {
+function initializeForm(contract: Contract | null): ContractFormData {
   return {
     title: contract?.title ?? "",
     contractType: contract?.contractType ?? "",
@@ -683,8 +714,8 @@ function initializeForm(contract: Contract | null) {
     expiryDate: contract?.expiryDate ? contract.expiryDate.slice(0, 10) : "",
     renewalDate: contract?.renewalDate ? contract.renewalDate.slice(0, 10) : "",
     renewalType: contract?.renewalType ?? "",
-    renewalNoticeDays: contract?.renewalNoticeDays ?? "",
-    contractValue: contract?.contractValue ?? "",
+    renewalNoticeDays: contract?.renewalNoticeDays != null ? String(contract.renewalNoticeDays) : "",
+    contractValue: contract?.contractValue != null ? String(contract.contractValue) : "",
     currency: contract?.currency ?? "",
     jurisdiction: contract?.jurisdiction ?? "",
     retentionPolicy: contract?.retentionPolicy ?? "",
@@ -704,14 +735,14 @@ function initializeForm(contract: Contract | null) {
 
 function ContractDetail({
   contract,
-  tags,
+  tags: _tags,
   onExtract,
   onAcknowledgeAlert,
   loading,
 }: {
   contract: Contract;
   tags: ContractTag[];
-  onExtract: (source: any) => void;
+  onExtract: (source: ExtractContractTermsInput) => void;
   onAcknowledgeAlert: (id: string) => void;
   loading: string | null;
 }) {

@@ -78,8 +78,9 @@ const SOURCE_ICONS: Record<string, React.ComponentType<{ className?: string }>> 
   manual: FileText,
 };
 
-function getSourceIcon(sourceType: string) {
-  return SOURCE_ICONS[sourceType] ?? FileText;
+function getSourceIcon(sourceType: string, className?: string) {
+  const Icon = SOURCE_ICONS[sourceType] ?? FileText;
+  return <Icon className={className} />;
 }
 
 function getSourceLabel(sourceType: string) {
@@ -359,10 +360,7 @@ export default function DataInboxPage() {
           <div className="relative w-full sm:max-w-3xl sm:max-h-[85vh] bg-[hsl(var(--kf-background))] rounded-t-2xl sm:rounded-2xl border shadow-xl flex flex-col max-h-[90vh]">
             <div className="flex items-center justify-between px-4 py-3 border-b">
               <div className="flex items-center gap-2 min-w-0">
-                {(() => {
-                  const Icon = getSourceIcon(selectedItem.sourceType);
-                  return <Icon className="w-5 h-5 text-[hsl(var(--kf-muted-foreground))] flex-shrink-0" />;
-                })()}
+                {getSourceIcon(selectedItem.sourceType, "w-5 h-5 text-[hsl(var(--kf-muted-foreground))] flex-shrink-0")}
                 <h2 className="font-semibold truncate">{selectedItem.summary ?? "Ingestion item"}</h2>
               </div>
               <button onClick={closeDetail} className="p-1 rounded-md hover:bg-muted">
@@ -527,7 +525,6 @@ function IngestionItemCard({
   selected: boolean;
   onClick: () => void;
 }) {
-  const Icon = getSourceIcon(item.sourceType);
   return (
     <button
       onClick={onClick}
@@ -537,7 +534,7 @@ function IngestionItemCard({
     >
       <div className="flex items-start gap-3">
         <div className="w-9 h-9 rounded-lg bg-muted flex items-center justify-center flex-shrink-0">
-          <Icon className="w-5 h-5 text-[hsl(var(--kf-muted-foreground))]" />
+          {getSourceIcon(item.sourceType, "w-5 h-5 text-[hsl(var(--kf-muted-foreground))]")}
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">

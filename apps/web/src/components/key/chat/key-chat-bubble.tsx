@@ -25,11 +25,13 @@ export function KeyChatBubble() {
   const [showSuggestions, setShowSuggestions] = useState(false);
 
   useEffect(() => {
-    if (apiState === "suggestion" && !isExpanded) {
-      setShowSuggestions(true);
-      const timer = setTimeout(() => setShowSuggestions(false), 8000);
-      return () => clearTimeout(timer);
-    }
+    if (apiState !== "suggestion" || isExpanded) return;
+    const showTimer = setTimeout(() => setShowSuggestions(true), 0);
+    const hideTimer = setTimeout(() => setShowSuggestions(false), 8000);
+    return () => {
+      clearTimeout(showTimer);
+      clearTimeout(hideTimer);
+    };
   }, [apiState, isExpanded]);
 
   const handleClick = useCallback(() => {

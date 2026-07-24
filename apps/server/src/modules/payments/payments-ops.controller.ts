@@ -25,6 +25,12 @@ export class PaymentsOpsController {
   }
 
   @RequireModuleScope('revenue', 'read')
+  @Get('gateways/payables')
+  listOpenPayables(@Param('businessId') businessId: string) {
+    return this.ops.listOpenPayables(businessId);
+  }
+
+  @RequireModuleScope('revenue', 'read')
   @Get('transactions')
   listTransactions(
     @Param('businessId') businessId: string,

@@ -723,7 +723,6 @@ function TemplatePickerCard({
 
   useEffect(() => {
     if (!businessId) return;
-    setError(null);
     fetchConciergeTemplates(businessId)
       .then(({ data, error: apiError }) => {
         if (apiError) {
@@ -736,12 +735,7 @@ function TemplatePickerCard({
   }, [businessId]);
 
   useEffect(() => {
-    if (!businessId || !selected) {
-      setPreview(null);
-      return;
-    }
-    setLoading(true);
-    setError(null);
+    if (!businessId || !selected) return;
     fetchConciergeTemplatePreview(businessId, selected)
       .then(({ data, error: apiError }) => {
         setLoading(false);
@@ -756,6 +750,13 @@ function TemplatePickerCard({
         setError("Could not load template preview.");
       });
   }, [businessId, selected]);
+
+  const handleSelect = (id: string) => {
+    setSelected(id);
+    setLoading(true);
+    setError(null);
+    setPreview(null);
+  };
 
   const handleConfirm = async () => {
     if (!businessId || !selected) return;
@@ -783,7 +784,7 @@ function TemplatePickerCard({
             <button
               key={t.id}
               type="button"
-              onClick={() => setSelected(t.id)}
+              onClick={() => handleSelect(t.id)}
               className={cn(
                 "rounded-xl border px-3 py-2 text-sm transition-colors",
                 selected === t.id

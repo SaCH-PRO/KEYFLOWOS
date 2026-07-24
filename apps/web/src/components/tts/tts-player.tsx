@@ -12,6 +12,7 @@ import {
   Gauge,
 } from "lucide-react";
 import { useTts } from "./tts-context";
+import type { TtsProviderName } from "./tts-engine";
 import { getStoredBusinessId } from "@/lib/workspace";
 
 export function TtsPlayer() {
@@ -98,7 +99,7 @@ export function TtsPlayer() {
 
       <select
         value={state.provider}
-        onChange={(e) => engine.setProvider(e.target.value as any)}
+        onChange={(e) => engine.setProvider(e.target.value as TtsProviderName)}
         className="text-[11px] bg-white/[0.06] border border-white/[0.08] rounded-lg px-2 py-1.5 text-foreground outline-none focus:ring-1 focus:ring-[hsl(var(--kf-accent1))]"
       >
         {providerOptions.map((p) => (

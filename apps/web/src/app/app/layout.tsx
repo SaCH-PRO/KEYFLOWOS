@@ -8,17 +8,19 @@ import { NotesProvider } from "@/components/keyflow/notes-context";
 import { KeyflowNotesDrawer } from "@/components/keyflow/keyflow-notes-drawer";
 import { NotesQueryParamTrigger } from "@/components/keyflow/notes-query-param-trigger";
 import { GuideProvider } from "@/contexts/guide-context";
+import { GenomeProvider } from "@/contexts/genome-context";
 import { PlanLimitDialog } from "@/components/ui/upgrade-prompt";
 import { KeyflowOSStoreDrawer } from "@/components/keyflowos-store-drawer";
 
 import { CelebrationListener } from "@/components/ui/celebration-listener";
 import { RequireAuth } from "@/components/require-auth";
 import { KeyAgent } from "@/components/key";
-import { KeyChatBubble, KeyChatProvider } from "@/components/key/chat";
+import { KeyChatProvider } from "@/components/key/chat";
+import { KeyChatBubbleV2 } from "@/components/key/chat/key-chat-bubble-v2";
 import { DesktopSidebar } from "@/components/layout/desktop-sidebar";
 import { AppHeader } from "@/components/layout/app-header";
 import { MobileDrawer } from "@/components/layout/mobile-drawer";
-import { MobileBottomNav } from "@/components/layout/mobile-bottom-nav";
+import { MobileBottomNavV2 } from "@/components/layout/mobile-bottom-nav-v2";
 import { useAppLayout } from "@/hooks/use-app-layout";
 import { useKeyboardShortcuts, useRouteKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 import { PageTransition } from "@/components/transitions/page-transition";
@@ -112,19 +114,22 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
         handleLogout={layout.handleLogout}
       />
 
-      <MobileBottomNav
+      <MobileBottomNavV2
         pathname={layout.pathname}
         mobileDrawerOpen={layout.mobileDrawerOpen}
         setMobileDrawerOpen={layout.setMobileDrawerOpen}
         notifOpen={layout.notifOpen}
         setNotifOpen={layout.setNotifOpen}
         unreadCount={layout.unreadCount}
+        visibleOperateSections={layout.visibleOperateSections}
+        visibleBuildSections={layout.visibleBuildSections}
+        visibleMoreNav={layout.visibleMoreNav}
       />
 
       <PlanLimitDialog planLimit={layout.planLimitHit} onClose={layout.clearPlanLimit} />
       <KeyflowOSStoreDrawer open={layout.kfStoreOpen} onClose={() => layout.setKfStoreOpen(false)} />
       {!isOnboardingRoute && <KeyAgent currentModule={layout.copilotModule} />}
-      {!isOnboardingRoute && <KeyChatBubble />}
+      {!isOnboardingRoute && <KeyChatBubbleV2 />}
       <KeyboardShortcutsHelp />
       <CelebrationListener />
 
@@ -144,7 +149,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 <NotesQueryParamTrigger />
                 <TtsProvider>
                   <KeyChatProvider>
-                    <AppLayoutInner>{children}</AppLayoutInner>
+                    <GenomeProvider>
+                      <AppLayoutInner>{children}</AppLayoutInner>
+                    </GenomeProvider>
                   </KeyChatProvider>
                 </TtsProvider>
                 <KeyflowNotesDrawer />

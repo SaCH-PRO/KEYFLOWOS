@@ -6,6 +6,8 @@ import { motion } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { FlowShell } from "@/components/layout/flow-shell";
+import { FlowQuickLauncher } from "@/components/layout/flow-quick-launcher";
+import type { ModuleLauncherSection } from "@/components/ui/module-launcher-sheet";
 import { MetricCard } from "@/components/ui/metric-card";
 import { SectionCard } from "@/components/ui/section-card";
 import { apiGet } from "@/lib/api";
@@ -73,12 +75,41 @@ export default function PeopleFlowPage() {
     { label: "Follow-ups", href: "/app/crm/sequences", icon: Send, desc: "Sequences and outreach" },
   ];
 
+  const launcherSections: ModuleLauncherSection[] = [
+    {
+      id: "network",
+      label: "Network",
+      items: [
+        { id: "contacts", label: "Contacts", icon: Contact, href: "/app/crm/contacts", tone: "violet" },
+        { id: "leads", label: "Leads", icon: UserCheck, href: "/app/crm/contacts?status=LEAD", tone: "orange" },
+        { id: "customers", label: "Customers", icon: Heart, href: "/app/crm/contacts?status=CLIENT", tone: "rose" },
+        { id: "sequences", label: "Sequences", icon: Send, href: "/app/crm/sequences", tone: "teal" },
+      ],
+    },
+    {
+      id: "service",
+      label: "Service",
+      items: [
+        { id: "helpdesk", label: "Helpdesk", icon: ShieldAlert, href: "/app/helpdesk", tone: "sky" },
+        { id: "deals", label: "Deals", icon: TrendingUp, href: "/app/crm/deals", tone: "mint" },
+        { id: "intelligence", label: "Intelligence", icon: UsersRound, href: "/app/crm/intelligence", tone: "gold" },
+      ],
+    },
+  ];
+
   return (
     <FlowShell
       title="People Flow"
       subtitle="Leverage relationships. Know who matters and what to do next."
       icon={Users}
       activeFlowId="people"
+      headerActions={
+        <FlowQuickLauncher
+          title="People Modules"
+          subtitle="Network, service, and relationships"
+          sections={launcherSections}
+        />
+      }
     >
       {/* Metrics */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">

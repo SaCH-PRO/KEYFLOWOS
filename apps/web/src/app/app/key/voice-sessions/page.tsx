@@ -134,6 +134,8 @@ export default function VoiceSessionsPage() {
                 <button
                   onClick={() => setSelected(null)}
                   className="p-2 rounded-lg hover:bg-muted transition-colors"
+                  aria-label="Back to sessions"
+                  title="Back"
                 >
                   <ArrowLeft className="w-4 h-4" />
                 </button>

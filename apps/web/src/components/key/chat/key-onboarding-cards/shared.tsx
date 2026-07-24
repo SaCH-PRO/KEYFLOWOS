@@ -1,15 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Loader2, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getStoredBusinessId } from "@/lib/workspace";
 
 export function useBusinessId() {
-  const [businessId, setBusinessId] = useState<string | null>(null);
-  useEffect(() => {
-    setBusinessId(getStoredBusinessId());
-  }, []);
+  const [businessId] = useState<string | null>(() => getStoredBusinessId());
   return businessId;
 }
 
@@ -201,14 +198,14 @@ export function SelectInput({
   );
 }
 
-export function ToggleButton({
+export function ToggleButton<T extends string | boolean>({
   value,
   onChange,
   options,
 }: {
-  value: string | boolean;
-  onChange: (value: any) => void;
-  options: { value: any; label: string }[];
+  value: T;
+  onChange: (value: T) => void;
+  options: { value: T; label: string }[];
 }) {
   return (
     <div className="flex flex-wrap gap-2">

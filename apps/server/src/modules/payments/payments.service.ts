@@ -1519,4 +1519,119 @@ export class PaymentsService {
       throw new Error('Failed to capture PayPal order', { cause: error });
     }
   }
+
+  private async createInvoiceCheckout(
+    invoiceId: string,
+    gateway: 'stripe' | 'paypal' | 'wipay',
+    returnUrl?: string,
+    successUrl?: string,
+    cancelUrl?: string,
+  ): Promise<{ type: 'redirect'; redirectUrl: string } | { type: 'paypal_order'; orderId: string }> {
+    if (gateway === 'stripe') {
+      if (!successUrl || !cancelUrl) {
+        throw new BadRequestException('Stripe checkout requires successUrl and cancelUrl');
+      }
+      const { redirectUrl } = await this.createStripeCheckout(invoiceId, successUrl, cancelUrl);
+      return { type: 'redirect', redirectUrl };
+    }
+    if (gateway === 'wipay') {
+      if (!returnUrl) {
+        throw new BadRequestException('WiPay checkout requires returnUrl');
+      }
+      const { redirectUrl } = await this.createWipayCheckout(invoiceId, returnUrl);
+      return { type: 'redirect', redirectUrl };
+    }
+    if (gateway === 'paypal') {
+      const { orderId } = await this.createPaypalOrder(invoiceId);
+      return { type: 'paypal_order', orderId };
+    }
+    throw new BadRequestException(`Unsupported gateway: ${gateway}`);
+  }
+
+  private async resolveMassCommInvoiceId(invoiceId: string): Promise<string> {
+    const invoice = await this.prisma.client.invoice.findUnique({
+      where: { id: invoiceId },
+      select: { status: true, campaignId: true },
+    });
+    if (!invoice) throw new BadRequestException('Mass-communication invoice not found');
+    if (!invoice.campaignId) {
+      throw new BadRequestException('Invoice is not linked to a mass-communication campaign');
+    }
+    this.assertInvoicePayable(invoice.status, invoiceId);
+    return invoiceId;
+  }
+
+  /**
+   * Unified checkout entry-point for any supported payable.
+   * Supports invoices, storefront orders, event tickets (via their linked
+   * invoice), and mass-communication campaign invoices.
+   */
+  async createGenericCheckout(input: {
+    payableType: 'invoice' | 'storefront_order' | 'event_ticket' | 'mass_comm';
+    payableId: string;
+    gateway: 'stripe' | 'paypal' | 'wipay';
+    returnUrl?: string;
+    successUrl?: string;
+    cancelUrl?: string;
+  }): Promise<{ type: 'redirect'; redirectUrl: string } | { type: 'paypal_order'; orderId: string }> {
+    if (input.payableType === 'invoice' || input.payableType === 'mass_comm') {
+      const invoiceId =
+        input.payableType === 'mass_comm'
+          ? await this.resolveMassCommInvoiceId(input.payableId)
+          : input.payableId;
+      return this.createInvoiceCheckout(
+        invoiceId,
+        input.gateway,
+        input.returnUrl,
+        input.successUrl,
+        input.cancelUrl,
+      );
+    }
+
+    if (input.payableType === 'storefront_order') {
+      const order = await this.prisma.client.marketplaceOrder.findUnique({
+        where: { id: input.payableId },
+        select: { id: true, businessId: true, total: true, currency: true, paymentStatus: true, status: true },
+      });
+      if (!order) throw new BadRequestException('Storefront order not found');
+      if (order.paymentStatus === 'PAID' || order.status === 'CANCELLED') {
+        throw new BadRequestException('Storefront order is already paid or cancelled');
+      }
+      const result = await this.createStorePayment({
+        orderId: order.id,
+        amount: order.total,
+        currency: order.currency,
+        method: input.gateway.toUpperCase(),
+        businessId: order.businessId,
+        returnUrl: input.returnUrl || input.successUrl,
+      });
+      if (result.redirectUrl) {
+        return { type: 'redirect', redirectUrl: result.redirectUrl };
+      }
+      if (input.gateway === 'paypal' && result.paymentId) {
+        return { type: 'paypal_order', orderId: result.paymentId };
+      }
+      throw new BadRequestException('Unable to create storefront checkout');
+    }
+
+    if (input.payableType === 'event_ticket') {
+      const attendee = await this.prisma.client.eventAttendee.findUnique({
+        where: { id: input.payableId },
+        include: { ticketType: true },
+      });
+      if (!attendee) throw new BadRequestException('Event attendee not found');
+      if (!attendee.paymentId) {
+        throw new BadRequestException('Attendee does not have a payable invoice');
+      }
+      return this.createInvoiceCheckout(
+        attendee.paymentId,
+        input.gateway,
+        input.returnUrl,
+        input.successUrl,
+        input.cancelUrl,
+      );
+    }
+
+    throw new BadRequestException(`Unsupported payable type: ${input.payableType}`);
+  }
 }

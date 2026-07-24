@@ -21,6 +21,7 @@ import { CrmModule } from './modules/crm/crm.module';
 import { CatalogModule } from './modules/catalog/catalog.module';
 import { CommerceModule } from './modules/commerce/commerce.module';
 import { BookingsModule } from './modules/bookings/bookings.module';
+import { EventsModule } from './modules/events/events.module';
 import { SocialModule } from './modules/social/social.module';
 import { AutomationModule } from './modules/automation/automation.module';
 import { SiteModule } from './modules/site/site.module';
@@ -143,6 +144,7 @@ import { ChatwootModule } from './modules/chatwoot/chatwoot.module';
     CatalogModule,
     CommerceModule,
     BookingsModule,
+    EventsModule,
     SocialModule,
     AutomationModule,
     SiteModule,

@@ -34,6 +34,18 @@ export interface KeyChatPlanStep {
   error?: string;
 }
 
+export type KeyInlinePreviewType = "genome" | "commerce" | "temporal" | "approval" | "task" | "email";
+
+export interface KeyInlinePreviewData {
+  type: KeyInlinePreviewType;
+  title?: string;
+  description?: string;
+  status?: "pending" | "success" | "warning" | "error";
+  meta?: Record<string, string | number | boolean | null | undefined>;
+  actions?: { label: string; value: string; variant?: "primary" | "secondary" | "danger" }[];
+  url?: string;
+}
+
 export interface KeyChatMessage {
   id: string;
   role: "user" | "assistant" | "system";
@@ -44,6 +56,7 @@ export interface KeyChatMessage {
   plan?: KeyChatPlanStep[];
   toolResults?: FlowToolResult[];
   card?: OnboardingCardData;
+  preview?: KeyInlinePreviewData;
   requiresConfirmation?: boolean;
   usage?: {
     promptTokens: number;

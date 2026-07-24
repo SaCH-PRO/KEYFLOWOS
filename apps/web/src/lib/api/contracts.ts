@@ -140,7 +140,7 @@ export interface CreateContractInput {
   tagIds?: string[];
 }
 
-export interface UpdateContractInput extends Partial<CreateContractInput> {}
+export type UpdateContractInput = Partial<CreateContractInput>;
 
 function buildQueryString(filters?: ContractFilters): string {
   const params = new URLSearchParams();
@@ -209,18 +209,20 @@ export async function deleteContract(
   );
 }
 
+export interface ExtractContractTermsInput {
+  sourceAssetId?: string;
+  sourceDocumentInstanceId?: string;
+  sourceDriveFileId?: string;
+  url?: string;
+  base64Content?: string;
+  filename?: string;
+  mimeType?: string;
+}
+
 export async function extractContractTerms(
   businessId: string,
   contractId: string,
-  input: {
-    sourceAssetId?: string;
-    sourceDocumentInstanceId?: string;
-    sourceDriveFileId?: string;
-    url?: string;
-    base64Content?: string;
-    filename?: string;
-    mimeType?: string;
-  },
+  input: ExtractContractTermsInput,
 ): Promise<{ data: Contract | null; error: string | null }> {
   return apiPost<Contract>({
     path: `/contracts/businesses/${encodeURIComponent(businessId)}/${encodeURIComponent(contractId)}/extract`,

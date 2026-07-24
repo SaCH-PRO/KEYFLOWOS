@@ -113,8 +113,11 @@ export function AiApprovalsPanel() {
   );
 
   useEffect(() => {
-    loadStats();
-    loadItems();
+    const t = setTimeout(() => {
+      loadStats();
+      loadItems();
+    }, 0);
+    return () => clearTimeout(t);
   }, [loadStats, loadItems]);
 
   const moduleOptions = useMemo(() => {
