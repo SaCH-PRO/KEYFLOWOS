@@ -90,8 +90,6 @@ RUN pnpm --filter @keyflow/voice-agent build
 # the builder stage above compiles workspace packages + server with tsc.
 # -----------------------------------------------------------------------------
 FROM base AS server
-ENV NODE_ENV=production
-ENV PORT=3001
 COPY --from=builder /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.yaml ./
 COPY --from=builder /app/apps/server/package.json ./apps/server/
 COPY --from=builder /app/packages/api/package.json ./packages/api/
@@ -99,9 +97,12 @@ COPY --from=builder /app/packages/db/package.json  ./packages/db/
 COPY --from=builder /app/packages/shared/package.json ./packages/shared/
 COPY --from=builder /app/patches ./patches
 # Full workspace install: filtered installs skip workspace deps' devDeps
-# (including the prisma CLI needed for client generation).
+# (including the prisma CLI needed for client generation). NODE_ENV is set
+# only after generate so pnpm does not skip devDependencies.
 RUN pnpm install --frozen-lockfile --ignore-scripts
 RUN pnpm --filter @keyflow/db run db:generate
+ENV NODE_ENV=production
+ENV PORT=3001
 # Compiled output from the builder stage
 COPY --from=builder /app/apps/server/dist        ./apps/server/dist
 COPY --from=builder /app/packages/db/dist        ./packages/db/dist
@@ -117,13 +118,13 @@ CMD ["node", "apps/server/dist/main.js"]
 # Voice agent runtime — KEY's LiveKit voice worker (compiled dist).
 # -----------------------------------------------------------------------------
 FROM base AS voice-agent
-ENV NODE_ENV=production
 COPY --from=builder /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.yaml ./
 COPY --from=builder /app/apps/voice-agent/package.json ./apps/voice-agent/
 COPY --from=builder /app/packages/db/package.json ./packages/db/
 COPY --from=builder /app/patches ./patches
 RUN pnpm install --frozen-lockfile --ignore-scripts
 RUN pnpm --filter @keyflow/db run db:generate
+ENV NODE_ENV=production
 COPY --from=builder /app/apps/voice-agent/dist ./apps/voice-agent/dist
 COPY --from=builder /app/packages/db/dist      ./packages/db/dist
 COPY --from=builder /app/packages/db/prisma    ./packages/db/prisma
