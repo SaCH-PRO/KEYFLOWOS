@@ -542,22 +542,22 @@ importers:
 
   packages/db:
     dependencies:
-      '@prisma/client':
-        specifier: ^6.19.0
-        version: 6.19.2(prisma@6.19.2(typescript@5.9.3))(typescript@5.9.3)
-    devDependencies:
       '@prisma/adapter-pg':
         specifier: ^7.3.0
         version: 7.3.0
+      '@prisma/client':
+        specifier: ^6.19.0
+        version: 6.19.2(prisma@6.19.2(typescript@5.9.3))(typescript@5.9.3)
+      pg:
+        specifier: ^8.18.0
+        version: 8.18.0
+    devDependencies:
       '@types/pg':
         specifier: ^8.20.0
         version: 8.20.0
       dotenv:
         specifier: ^16.5.0
         version: 16.6.1
-      pg:
-        specifier: ^8.18.0
-        version: 8.18.0
       prisma:
         specifier: ^6.19.0
         version: 6.19.2(typescript@5.9.3)
@@ -5304,10 +5304,6 @@ packages:
   chalk@4.1.2:
     resolution: {integrity: sha512-oKnbhFyRIXpUuez8iBMmyEa4nbj4IOQyuhc/wy9kY7/WVPcwIO9VA668Pu8RkO7+0G76SLROeyw9CpQ061i4mA==}
     engines: {node: '>=10'}
-
-  chalk@5.6.2:
-    resolution: {integrity: sha512-7NzBL0rN6fMUW+f7A6Io4h40qQlG+xGmtMxfbnH/K7TAtt8JQWVQK+6g0UXKMeVJoyV5EkkNsErQ8pVD3bLHbA==}
-    engines: {node: ^12.17.0 || ^14.13 || >=16.0.0}
 
   char-regex@1.0.2:
     resolution: {integrity: sha512-kWWXztvZ5SBQV+eRgKFeh8q5sLuZY2+8WUIzlxWVTg+oGwY14qylx1KbKzHd8P6ZYkAg0xyIDU9JMHhyJMZ1jw==}
@@ -15687,8 +15683,6 @@ snapshots:
       ansi-styles: 4.3.0
       supports-color: 7.2.0
 
-  chalk@5.6.2: {}
-
   char-regex@1.0.2: {}
 
   character-entities-html4@2.1.0: {}
@@ -18250,7 +18244,7 @@ snapshots:
   jest-watch-typeahead@3.0.1(jest@30.2.0(@types/node@20.19.31)(esbuild-register@3.6.0(esbuild@0.25.12))(ts-node@10.9.2(@swc/core@1.15.11(@swc/helpers@0.5.18))(@types/node@20.19.31)(typescript@5.9.3))):
     dependencies:
       ansi-escapes: 7.2.0
-      chalk: 5.6.2
+      chalk: 4.1.2
       jest: 30.2.0(@types/node@20.19.31)(esbuild-register@3.6.0(esbuild@0.25.12))(ts-node@10.9.2(@swc/core@1.15.11(@swc/helpers@0.5.18))(@types/node@20.19.31)(typescript@5.9.3))
       jest-regex-util: 30.0.1
       jest-watcher: 30.2.0
