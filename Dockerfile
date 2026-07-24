@@ -95,6 +95,7 @@ COPY --from=builder /app/apps/server/package.json ./apps/server/
 COPY --from=builder /app/packages/api/package.json ./packages/api/
 COPY --from=builder /app/packages/db/package.json  ./packages/db/
 COPY --from=builder /app/packages/shared/package.json ./packages/shared/
+COPY --from=builder /app/packages/db/prisma      ./packages/db/prisma
 COPY --from=builder /app/patches ./patches
 # Full workspace install: filtered installs skip workspace deps' devDeps
 # (including the prisma CLI needed for client generation). NODE_ENV is set
@@ -106,7 +107,6 @@ ENV PORT=3001
 # Compiled output from the builder stage
 COPY --from=builder /app/apps/server/dist        ./apps/server/dist
 COPY --from=builder /app/packages/db/dist        ./packages/db/dist
-COPY --from=builder /app/packages/db/prisma      ./packages/db/prisma
 COPY --from=builder /app/packages/api/dist       ./packages/api/dist
 COPY --from=builder /app/packages/shared/dist    ./packages/shared/dist
 EXPOSE 3001
@@ -121,13 +121,13 @@ FROM base AS voice-agent
 COPY --from=builder /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.yaml ./
 COPY --from=builder /app/apps/voice-agent/package.json ./apps/voice-agent/
 COPY --from=builder /app/packages/db/package.json ./packages/db/
+COPY --from=builder /app/packages/db/prisma    ./packages/db/prisma
 COPY --from=builder /app/patches ./patches
 RUN pnpm install --frozen-lockfile --ignore-scripts
 RUN pnpm --filter @keyflow/db run db:generate
 ENV NODE_ENV=production
 COPY --from=builder /app/apps/voice-agent/dist ./apps/voice-agent/dist
 COPY --from=builder /app/packages/db/dist      ./packages/db/dist
-COPY --from=builder /app/packages/db/prisma    ./packages/db/prisma
 # LiveKit agents CLI: `node dist/main.js start` runs the worker in production mode
 ENTRYPOINT ["/sbin/tini", "--"]
 CMD ["node", "apps/voice-agent/dist/main.js", "start"]
