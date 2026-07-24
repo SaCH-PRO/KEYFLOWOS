@@ -116,23 +116,29 @@ CMD ["node", "apps/server/dist/main.js"]
 
 # -----------------------------------------------------------------------------
 # Voice agent runtime — KEY's LiveKit voice worker (compiled dist).
+# LiveKit's rtc native bindings have NO musl builds — this stage must run on
+# glibc (Debian), not Alpine.
 # -----------------------------------------------------------------------------
-FROM base AS voice-agent
+FROM node:${NODE_VERSION}-bookworm-slim AS base-glibc
+RUN apt-get update && apt-get install -y --no-install-recommends tini openssl ca-certificates && rm -rf /var/lib/apt/lists/*
+ENV PNPM_HOME=/pnpm
+ENV PATH=$PNPM_HOME:$PATH
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+WORKDIR /app
+
+FROM base-glibc AS voice-agent
 COPY --from=builder /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.yaml ./
 COPY --from=builder /app/apps/voice-agent/package.json ./apps/voice-agent/
 COPY --from=builder /app/packages/db/package.json ./packages/db/
 COPY --from=builder /app/packages/db/prisma    ./packages/db/prisma
 COPY --from=builder /app/patches ./patches
 RUN pnpm install --frozen-lockfile --ignore-scripts
-# The musl native binding is an optional dep that pnpm's platform filter
-# misses under --ignore-scripts; install it explicitly on the target platform.
-RUN cd apps/voice-agent && pnpm add @livekit/rtc-ffi-bindings-linux-x64-musl@^0.12.60 --ignore-scripts
 RUN pnpm --filter @keyflow/db run db:generate
 ENV NODE_ENV=production
 COPY --from=builder /app/apps/voice-agent/dist ./apps/voice-agent/dist
 COPY --from=builder /app/packages/db/dist      ./packages/db/dist
 # LiveKit agents CLI: `node dist/main.js start` runs the worker in production mode
-ENTRYPOINT ["/sbin/tini", "--"]
+ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["node", "apps/voice-agent/dist/main.js", "start"]
 
 
