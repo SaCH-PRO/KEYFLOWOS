@@ -16,11 +16,6 @@
     "dotenv": "^16.5.0",
     "zod": "^3.25.0"
   },
-  "optionalDependencies": {
-    "@livekit/rtc-ffi-bindings-linux-x64-musl": "^0.12.60",
-    "@livekit/rtc-ffi-bindings-linux-x64-gnu": "^0.12.60",
-    "@livekit/rtc-ffi-bindings-win32-x64-msvc": "^0.12.60"
-  },
   "devDependencies": {
     "@types/node": "^20.19.31",
     "tsx": "^4.20.6",

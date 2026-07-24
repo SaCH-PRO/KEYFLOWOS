@@ -123,9 +123,10 @@ COPY --from=builder /app/apps/voice-agent/package.json ./apps/voice-agent/
 COPY --from=builder /app/packages/db/package.json ./packages/db/
 COPY --from=builder /app/packages/db/prisma    ./packages/db/prisma
 COPY --from=builder /app/patches ./patches
-# Unfrozen here: the lockfile is generated on Windows and cannot record the
-# linux-musl native rtc binding; resolving on the target platform fixes it.
-RUN pnpm install --no-frozen-lockfile --ignore-scripts
+RUN pnpm install --frozen-lockfile --ignore-scripts
+# The musl native binding is an optional dep that pnpm's platform filter
+# misses under --ignore-scripts; install it explicitly on the target platform.
+RUN cd apps/voice-agent && pnpm add @livekit/rtc-ffi-bindings-linux-x64-musl@^0.12.60 --ignore-scripts
 RUN pnpm --filter @keyflow/db run db:generate
 ENV NODE_ENV=production
 COPY --from=builder /app/apps/voice-agent/dist ./apps/voice-agent/dist
