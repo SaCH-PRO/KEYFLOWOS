@@ -312,11 +312,22 @@ export class IdentitySignupService {
         message: 'Account created, but automatic sign-in is unavailable. Please sign in.',
       });
     }
-    const res = await fetch(`${url}/auth/v1/token?grant_type=password`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', apikey: anon },
-      body: JSON.stringify({ email, password }),
-    });
+    let res: Response;
+    try {
+      res = await fetch(`${url}/auth/v1/token?grant_type=password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: anon },
+        body: JSON.stringify({ email, password }),
+        signal: AbortSignal.timeout(10_000),
+      });
+    } catch (err: any) {
+      // Network/DNS/VPN failure reaching Supabase — surface a readable,
+      // retryable error instead of a bare 500 "fetch failed".
+      throw new BadRequestException({
+        code: 'signin_unreachable',
+        message: 'Sign-in service is unreachable right now — check your network/VPN and try again.',
+      });
+    }
     const json = (await res.json().catch(() => null)) as
       | {
           access_token?: string;
