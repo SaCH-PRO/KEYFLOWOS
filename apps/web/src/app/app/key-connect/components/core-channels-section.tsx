@@ -121,19 +121,17 @@ function ChannelCard({
 export function CoreChannelsSection({
   businessId,
   entries,
-  onConnectMeta,
   onManageWhatsApp,
   onManageEntry,
 }: {
   businessId: string;
   entries: DashboardEntryLike[];
-  /** Called with "facebook_page" | "instagram" | "meta_messenger" — runs the page's OAuth handler. */
-  onConnectMeta: (type: string) => void;
   onManageWhatsApp: () => void;
   /** Open the page's manage/credential UI for any connected entry type. */
   onManageEntry: (type: string) => void;
 }) {
   const [googleBusy, setGoogleBusy] = useState(false);
+  const [metaBusy, setMetaBusy] = useState<string | null>(null);
 
   const statusOf = (type: string) => entries.find((e) => e.meta.type === type)?.health;
   const isConnected = (type: string) => statusOf(type)?.status === "connected";
@@ -153,7 +151,28 @@ export function CoreChannelsSection({
     }
   };
 
-  const metaCard = (type: string, title: string, subtitle: string, Icon: typeof Facebook) => (
+  // Meta OAuth is a POST that returns the facebook.com dialog URL as JSON.
+  const startMetaOAuth = async (platform: "FACEBOOK" | "INSTAGRAM") => {
+    setMetaBusy(platform);
+    const res = await apiPost<{ authUrl?: string }>({
+      path: `/social/businesses/${encodeURIComponent(businessId)}/connections/${platform}/oauth/start`,
+      body: {},
+    });
+    setMetaBusy(null);
+    if (res.data?.authUrl) {
+      window.location.href = res.data.authUrl;
+    } else {
+      toast.error(res.error || "Could not start Meta sign-in");
+    }
+  };
+
+  const metaCard = (
+    type: string,
+    title: string,
+    subtitle: string,
+    Icon: typeof Facebook,
+    platform: "FACEBOOK" | "INSTAGRAM",
+  ) => (
     <ChannelCard
       key={type}
       icon={Icon}
@@ -162,7 +181,8 @@ export function CoreChannelsSection({
       connected={isConnected(type) || isConnected("meta_social")}
       account={statusOf(type)?.connectedAccount ?? statusOf("meta_social")?.connectedAccount}
       actionLabel="Connect with Meta"
-      onAction={() => (isConnected(type) || isConnected("meta_social") ? onManageEntry(type) : onConnectMeta(type))}
+      busy={metaBusy === platform}
+      onAction={() => (isConnected(type) || isConnected("meta_social") ? onManageEntry(type) : void startMetaOAuth(platform))}
     />
   );
 
@@ -202,9 +222,9 @@ export function CoreChannelsSection({
           </div>
         </ChannelCard>
 
-        {metaCard("facebook_page", "Facebook Page", "Messages, reviews & leads", Facebook)}
-        {metaCard("instagram", "Instagram", "DMs, comments & mentions", Instagram)}
-        {metaCard("meta_messenger", "Messenger", "Facebook Messenger inbox", MessageCircle)}
+        {metaCard("facebook_page", "Facebook Page", "Messages, reviews & leads", Facebook, "FACEBOOK")}
+        {metaCard("instagram", "Instagram", "DMs, comments & mentions", Instagram, "INSTAGRAM")}
+        {metaCard("meta_messenger", "Messenger", "Facebook Messenger inbox", MessageCircle, "FACEBOOK")}
 
         <ChannelCard
           icon={Phone}

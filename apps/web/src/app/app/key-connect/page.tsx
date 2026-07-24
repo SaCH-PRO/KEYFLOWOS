@@ -33,7 +33,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@keyflow/ui";
-import { apiGet } from "@/lib/api";
+import { apiGet, apiPost } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { Switch } from "@/components/ui/switch";
 import { ConnectorCredentialDialog } from "./components/connector-credential-dialog";
@@ -458,7 +458,8 @@ export default function KeyConnectPage() {
     }
 
     if (authUrl.endsWith("/oauth/start")) {
-      const start = await apiGet<{ authUrl?: string }>(authUrl);
+      // oauth/start is a POST endpoint that returns the provider dialog URL as JSON
+      const start = await apiPost<{ authUrl?: string }>({ path: authUrl, body: {} });
       if (start.data?.authUrl) {
         // eslint-disable-next-line react-hooks/immutability -- continue external OAuth redirect
         window.location.href = start.data.authUrl;
@@ -964,10 +965,6 @@ export default function KeyConnectPage() {
       <CoreChannelsSection
         businessId={businessId ?? ""}
         entries={entries}
-        onConnectMeta={(type) => {
-          const entry = PLACEHOLDER_ENTRIES.find((e) => e.meta.type === type);
-          if (entry) void handleConnect(entry);
-        }}
         onManageWhatsApp={() => setManageType("whatsapp")}
         onManageEntry={(type) => setManageType(type)}
       />
