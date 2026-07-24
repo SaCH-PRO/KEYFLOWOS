@@ -34,6 +34,7 @@ FROM base AS deps
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/server/package.json apps/server/
 COPY apps/web/package.json    apps/web/
+COPY apps/voice-agent/package.json apps/voice-agent/
 COPY packages/api/package.json packages/api/
 COPY packages/db/package.json  packages/db/
 COPY packages/shared/package.json packages/shared/
@@ -55,18 +56,18 @@ COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN pnpm --filter web build
 
-# Compile workspace packages and server for CI validation / future migration.
-# The runtime stage below still uses tsx for maximum compatibility.
+# Compile workspace packages, server, and voice agent for the runtimes below.
 RUN pnpm --filter @keyflow/shared build
 RUN pnpm --filter @keyflow/api build
 RUN pnpm --filter @keyflow/db build
 RUN pnpm --filter server build
+RUN pnpm --filter @keyflow/voice-agent build
 
 
 # -----------------------------------------------------------------------------
-# Server runtime — runs TypeScript directly via tsx.
-# NOTE: Compiled dist/ is built above and ready for a future switch to
-# `node apps/server/dist/src/main.js` once ESM/CJS interop is fully validated.
+# Server runtime — runs the COMPILED server (node dist/main.js).
+# tsx cannot preserve emitDecoratorMetadata, so NestJS DI fails under it;
+# the builder stage above compiles workspace packages + server with tsc.
 # -----------------------------------------------------------------------------
 FROM base AS server
 ENV NODE_ENV=production
@@ -75,21 +76,34 @@ COPY --from=builder /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.ya
 COPY --from=builder /app/apps/server/package.json ./apps/server/
 COPY --from=builder /app/packages/api/package.json ./packages/api/
 COPY --from=builder /app/packages/db/package.json  ./packages/db/
-# NOTE: we intentionally do NOT pass --prod here. The server runs from
-# TypeScript source via `tsx` (no compiled dist/), and `prisma` (the CLI
-# used by the db:generate step below) is a devDependency of @keyflow/db.
-RUN pnpm install --frozen-lockfile --filter server... --ignore-scripts
-COPY --from=builder /app/apps/server/src       ./apps/server/src
-COPY --from=builder /app/apps/server/tsconfig.json ./apps/server/
-COPY --from=builder /app/tsconfig.base.json    ./
-COPY --from=builder /app/packages/db/prisma    ./packages/db/prisma
-COPY --from=builder /app/packages/db/src       ./packages/db/src
-COPY --from=builder /app/packages/api/src      ./packages/api/src
-# Re-generate the Prisma client against the prod node_modules layer.
-RUN pnpm --filter @keyflow/db run db:generate
+COPY --from=builder /app/packages/shared/package.json ./packages/shared/
+RUN pnpm install --frozen-lockfile --prod --filter server... --ignore-scripts
+# Compiled output from the builder stage
+COPY --from=builder /app/apps/server/dist        ./apps/server/dist
+COPY --from=builder /app/packages/db/dist        ./packages/db/dist
+COPY --from=builder /app/packages/db/prisma      ./packages/db/prisma
+COPY --from=builder /app/packages/api/dist       ./packages/api/dist
+COPY --from=builder /app/packages/shared/dist    ./packages/shared/dist
 EXPOSE 3001
 ENTRYPOINT ["/sbin/tini", "--"]
-CMD ["pnpm", "--filter", "server", "start"]
+CMD ["node", "apps/server/dist/main.js"]
+
+
+# -----------------------------------------------------------------------------
+# Voice agent runtime — KEY's LiveKit voice worker (compiled dist).
+# -----------------------------------------------------------------------------
+FROM base AS voice-agent
+ENV NODE_ENV=production
+COPY --from=builder /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.yaml ./
+COPY --from=builder /app/apps/voice-agent/package.json ./apps/voice-agent/
+COPY --from=builder /app/packages/db/package.json ./packages/db/
+RUN pnpm install --frozen-lockfile --prod --filter @keyflow/voice-agent... --ignore-scripts
+COPY --from=builder /app/apps/voice-agent/dist ./apps/voice-agent/dist
+COPY --from=builder /app/packages/db/dist      ./packages/db/dist
+COPY --from=builder /app/packages/db/prisma    ./packages/db/prisma
+# LiveKit agents CLI: `node dist/main.js start` runs the worker in production mode
+ENTRYPOINT ["/sbin/tini", "--"]
+CMD ["node", "apps/voice-agent/dist/main.js", "start"]
 
 
 # -----------------------------------------------------------------------------

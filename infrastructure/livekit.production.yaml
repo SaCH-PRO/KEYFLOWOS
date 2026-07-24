@@ -1,0 +1,16 @@
+# LiveKit production config (docker-compose.production `livekit` service).
+# Generate strong keys and put them in .env.production (LIVEKIT_API_KEY/SECRET).
+port: 7880
+bind_addresses:
+  - "0.0.0.0"
+rtc:
+  tcp_port: 7881
+  udp_port: 7882
+  use_external_ip: true
+redis:
+  address: redis:6379
+keys:
+  ${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}
+log_level: info
+turn:
+  enabled: false

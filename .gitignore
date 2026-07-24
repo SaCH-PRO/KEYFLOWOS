@@ -34,3 +34,4 @@ packages/db/src/generated/client/
 controllers_audit.txt
 controllers_chunk_*
 screenshot-home.png
+.env.production

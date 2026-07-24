@@ -1,0 +1,205 @@
+###############################################################################
+# KEYFLOWOS — production stack (single VPS).
+#
+# Usage:
+#   cp .env.production.example .env.production   # fill it in
+#   docker compose --env-file .env.production -f docker-compose.production.yml up -d --build
+#
+# Layout:
+#   caddy  — edge proxy + automatic HTTPS for web, api, livekit
+#   web    — Next.js production server (internal :5000)
+#   api    — NestJS compiled server (internal :3001)
+#   voice-agent — KEY LiveKit voice worker
+#   db / redis / minio / docling / livekit(optional) / chatwoot(optional)
+###############################################################################
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - web
+      - api
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infrastructure/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      DOMAIN: ${DOMAIN}
+      API_DOMAIN: ${API_DOMAIN}
+      LIVEKIT_DOMAIN: ${LIVEKIT_DOMAIN:-}
+
+  web:
+    build:
+      context: .
+      target: web
+    restart: unless-stopped
+    env_file: .env.production
+    environment:
+      NODE_ENV: production
+      PORT: "5000"
+      NEXT_PUBLIC_API_BASE_URL: ${PUBLIC_API_URL}
+      NEXT_PUBLIC_APP_URL: ${APP_URL}
+      NEXT_PUBLIC_SITE_URL: ${APP_URL}
+      NEXT_PUBLIC_LIVEKIT_URL: ${PUBLIC_LIVEKIT_WS_URL}
+      NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+    depends_on:
+      - api
+
+  api:
+    build:
+      context: .
+      target: server
+    restart: unless-stopped
+    env_file: .env.production
+    environment:
+      NODE_ENV: production
+      PORT: "3001"
+      DATABASE_URL: postgresql://keyflow:${POSTGRES_PASSWORD}@db:5432/keyflow?schema=public
+      REDIS_URL: redis://redis:6379
+      APP_URL: ${APP_URL}
+      PUBLIC_API_URL: ${PUBLIC_API_URL}
+      DOCLING_URL: http://docling:5001
+      LIVEKIT_URL: http://livekit:7880
+      LIVEKIT_WS_URL: ${PUBLIC_LIVEKIT_WS_URL}
+      CHATWOOT_URL: http://chatwoot:3000
+      CHATWOOT_API_PUBLIC_URL: ${PUBLIC_API_URL}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      livekit:
+        condition: service_started
+
+  voice-agent:
+    build:
+      context: .
+      target: voice-agent
+    restart: unless-stopped
+    env_file: .env.production
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://keyflow:${POSTGRES_PASSWORD}@db:5432/keyflow?schema=public
+      LIVEKIT_URL: ${PUBLIC_LIVEKIT_WS_URL}
+      LIVEKIT_WS_URL: ${PUBLIC_LIVEKIT_WS_URL}
+      OPENAI_API_KEY: ${AI_INTEGRATIONS_OPENAI_API_KEY}
+    depends_on:
+      - livekit
+
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: keyflow
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: keyflow
+    volumes:
+      - prod_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keyflow -d keyflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - prod_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - prod_minio:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  docling:
+    image: quay.io/docling-project/docling-serve:latest
+    restart: unless-stopped
+    environment:
+      DOCLING_SERVE_ENABLE_UI: "false"
+      DOCLING_SERVE_MAX_SYNC_WAIT: "120"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5001/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+
+  livekit:
+    image: livekit/livekit-server:v1.9.12
+    restart: unless-stopped
+    command: --config /etc/livekit.yaml
+    volumes:
+      - ./infrastructure/livekit.production.yaml:/etc/livekit.yaml:ro
+    ports:
+      - "7881:7881"     # RTC over TCP
+      - "7882:7882/udp" # RTC over UDP
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:7880/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  chatwoot: &chatwoot
+    image: chatwoot/chatwoot:latest
+    restart: unless-stopped
+    profiles: ["chatwoot"]
+    command: sh -c "rm -f /app/tmp/pids/server.pid && bundle exec rails s -p 3000 -b 0.0.0.0"
+    environment:
+      RAILS_ENV: production
+      NODE_ENV: production
+      SECRET_KEY_BASE: ${CHATWOOT_SECRET_KEY_BASE}
+      FRONTEND_URL: ${CHATWOOT_URL}
+      FORCE_SSL: "true"
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      POSTGRES_USERNAME: keyflow
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DATABASE: chatwoot
+      REDIS_URL: redis://redis:6379/5
+      RAILS_MAX_THREADS: "5"
+      RAILS_LOG_TO_STDOUT: "true"
+      SAFE_FETCH_ALLOW_PRIVATE_NETWORK: "true"
+    volumes:
+      - prod_chatwoot:/app/storage
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  chatwoot-worker:
+    <<: *chatwoot
+    command: bundle exec sidekiq -C config/sidekiq.yml
+    depends_on:
+      chatwoot:
+        condition: service_started
+
+volumes:
+  prod_db:
+  prod_redis:
+  prod_minio:
+  prod_chatwoot:
+  caddy_data:
+  caddy_config:
