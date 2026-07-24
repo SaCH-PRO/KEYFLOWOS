@@ -72,6 +72,8 @@ ENV NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
 ENV NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
 ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
 ENV NEXT_PUBLIC_LIVEKIT_URL=${NEXT_PUBLIC_LIVEKIT_URL}
+# The server codebase is large; tsc exceeds Node's ~2GB default heap.
+ENV NODE_OPTIONS=--max-old-space-size=4096
 # Workspace packages first — web imports @keyflow/shared's compiled output,
 # and @keyflow/api imports @keyflow/db's declarations.
 RUN pnpm --filter @keyflow/shared build
