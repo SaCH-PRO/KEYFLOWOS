@@ -98,9 +98,9 @@ COPY --from=builder /app/packages/api/package.json ./packages/api/
 COPY --from=builder /app/packages/db/package.json  ./packages/db/
 COPY --from=builder /app/packages/shared/package.json ./packages/shared/
 COPY --from=builder /app/patches ./patches
-# Full (non-prod) install: @prisma/client generation needs the prisma CLI,
-# which is a devDependency of @keyflow/db.
-RUN pnpm install --frozen-lockfile --filter server... --ignore-scripts
+# Full workspace install: filtered installs skip workspace deps' devDeps
+# (including the prisma CLI needed for client generation).
+RUN pnpm install --frozen-lockfile --ignore-scripts
 RUN pnpm --filter @keyflow/db run db:generate
 # Compiled output from the builder stage
 COPY --from=builder /app/apps/server/dist        ./apps/server/dist
@@ -122,7 +122,7 @@ COPY --from=builder /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.ya
 COPY --from=builder /app/apps/voice-agent/package.json ./apps/voice-agent/
 COPY --from=builder /app/packages/db/package.json ./packages/db/
 COPY --from=builder /app/patches ./patches
-RUN pnpm install --frozen-lockfile --filter @keyflow/voice-agent... --ignore-scripts
+RUN pnpm install --frozen-lockfile --ignore-scripts
 RUN pnpm --filter @keyflow/db run db:generate
 COPY --from=builder /app/apps/voice-agent/dist ./apps/voice-agent/dist
 COPY --from=builder /app/packages/db/dist      ./packages/db/dist
