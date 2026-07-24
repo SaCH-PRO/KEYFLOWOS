@@ -32,6 +32,9 @@ WORKDIR /app
 # -----------------------------------------------------------------------------
 FROM base AS deps
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+# pnpm.patchedDependencies (next@16.2.4) is applied during install — the patch
+# file must exist before `pnpm install` runs.
+COPY patches ./patches
 COPY apps/server/package.json apps/server/
 COPY apps/web/package.json    apps/web/
 COPY apps/voice-agent/package.json apps/voice-agent/
