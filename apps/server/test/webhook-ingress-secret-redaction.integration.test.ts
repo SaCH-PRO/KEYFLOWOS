@@ -60,4 +60,27 @@ describe('WebhookIngressLogger redacts sensitive headers before persisting', () 
     const row = await db.webhookDeliveryLog.findFirst({ where: { businessId: `${P}bizA` }, orderBy: { createdAt: 'desc' } });
     expect(JSON.stringify(row).includes(SECRET)).toBe(false);
   });
+
+  it('redacts the full inbound header set (social.controller pattern), case-insensitively', async () => {
+    // social.controller logs the entire req.headers; Meta signs with X-Hub-Signature-256.
+    await logger.log({
+      businessId: `${P}bizB`,
+      connectorType: 'meta_social',
+      payload: { entry: [] },
+      headers: {
+        'X-Hub-Signature-256': `sha256=${SECRET}`,
+        'authorization': `Bearer ${SECRET}`,
+        'cookie': `session=${SECRET}`,
+        'user-agent': 'facebookexternalua',
+      },
+      statusCode: 200,
+    });
+    const row = await db.webhookDeliveryLog.findFirst({ where: { businessId: `${P}bizB` }, orderBy: { createdAt: 'desc' } });
+    const headers = row.headers as Record<string, unknown>;
+    expect(headers['X-Hub-Signature-256']).toBe('[REDACTED]');
+    expect(headers['authorization']).toBe('[REDACTED]');
+    expect(headers['cookie']).toBe('[REDACTED]');
+    expect(headers['user-agent']).toBe('facebookexternalua'); // non-sensitive preserved
+    expect(JSON.stringify(row).includes(SECRET)).toBe(false);
+  });
 });

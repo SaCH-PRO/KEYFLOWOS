@@ -26,10 +26,15 @@ export interface WebhookIngressLogEntry {
 const SENSITIVE_HEADER_KEYS = new Set([
   'x-keyflow-signature',
   'authorization',
+  'proxy-authorization',
+  'cookie',
+  'set-cookie',
   'x-api-key',
   'x-hub-signature',
   'x-hub-signature-256',
   'stripe-signature',
+  'x-webhook-signature',
+  'x-signature',
 ]);
 
 @Injectable()
