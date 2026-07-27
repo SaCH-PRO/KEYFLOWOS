@@ -107,6 +107,8 @@ model User {
   phone            String?
   avatarUrl        String? @map("avatar_url")
   role             String  @default("USER") // USER | SUPER_ADMIN
+  /// Free-form user-level settings / security flags.
+  metaData         Json?   @default("{}") @map("meta_data")
   referralCode     String? @unique @map("referral_code")
   referredByUserId String? @map("referred_by_user_id")
   referredBy       User?   @relation("UserReferrals", fields: [referredByUserId], references: [id])
@@ -114,6 +116,7 @@ model User {
 
   businesses Membership[]
   sessions   Session[]
+  identities UserIdentity[]
 
   aiExecutionLogs       AiExecutionLog[]   @relation("UserAiExecutionLogs")
   aiApprovalItems       AiApprovalItem[]   @relation("UserAiApprovalItems")
@@ -124,6 +127,25 @@ model User {
   pushSubscriptions     PushSubscription[]
 
   @@map("users")
+}
+
+/// External identity-provider links for a user. Primarily used to map
+/// Google Account IDs (`sub`) to local users for Cross-Account Protection
+/// (RISC) security event handling.
+model UserIdentity {
+  id               String   @id @default(cuid())
+  userId           String   @map("user_id")
+  provider         String // e.g. google
+  providerSubject  String   @map("provider_subject") // the IdP's stable user id (Google sub)
+  email            String?
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerSubject])
+  @@index([userId])
+  @@map("user_identities")
 }
 
 model Business {
@@ -9196,6 +9218,29 @@ model AuthAuditLog {
   @@index([userId, createdAt])
   @@index([ip, createdAt])
   @@map("auth_audit_logs")
+}
+
+/// Cross-Account Protection (RISC) security event token receipt log.
+/// One row per unique `jti`. Used for deduplication, audit, and debugging.
+model RiscEvent {
+  id              String   @id @default(cuid())
+  /// Unique event identifier from the RISC JWT.
+  jti             String   @unique
+  /// RISC event type URI, e.g. https://schemas.openid.net/secevent/risc/event-type/sessions-revoked
+  eventType       String   @map("event_type")
+  /// Google Account identifier (the `sub` claim in the event subject).
+  providerSubject String   @map("provider_subject")
+  userId          String?  @map("user_id")
+  /// Normalized action summary, e.g. sessions_terminated | account_flagged | logged_only
+  actionTaken     String   @map("action_taken")
+  /// Minimal debugging payload (event type, reason if present). NOT a full PII cache.
+  payload         Json?
+  receivedAt      DateTime @default(now()) @map("received_at")
+  processedAt     DateTime @map("processed_at")
+
+  @@index([receivedAt])
+  @@index([providerSubject])
+  @@map("risc_events")
 }
 
 // ---

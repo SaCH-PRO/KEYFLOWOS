@@ -30,6 +30,7 @@ overrides:
   file-type@>=13.0.0 <21.3.2: ^21.3.2
   uuid@<9.0.0: ^9.0.1
   chalk@^5.3.0: ^4.1.2
+  jose: ^5.10.0
 
 patchedDependencies:
   next@16.2.4:
@@ -222,8 +223,8 @@ importers:
         specifier: ^5.10.1
         version: 5.10.1
       jose:
-        specifier: ^6.2.3
-        version: 6.2.3
+        specifier: ^5.10.0
+        version: 5.10.0
       livekit-server-sdk:
         specifier: ^2.17.0
         version: 2.17.0
@@ -7310,9 +7311,6 @@ packages:
   jose@5.10.0:
     resolution: {integrity: sha512-s+3Al/p9g32Iq+oqXxkW//7jk2Vig6FF1CFqzVXoTUXt2qz89YWbL+OwS17NFYEvxC35n0FKeGO2LGYSxeM2Gg==}
 
-  jose@6.2.3:
-    resolution: {integrity: sha512-YYVDInQKFJfR/xa3ojUTl8c2KoTwiL1R5Wg9YCydwH0x0B9grbzlg5HC7mMjCtUJjbQ/YnGEZIhI5tCgfTb4Hw==}
-
   joycon@3.1.1:
     resolution: {integrity: sha512-34wB/Y7MW7bzjKRjUKTa46I2Z7eV62Rkhva+KkopW7Qvv/OSWBqvkSY7vusOPrNuZcUG3tApvdVgNB8POj3SPw==}
     engines: {node: '>=10'}
@@ -12142,7 +12140,7 @@ snapshots:
       express: 5.2.1
       express-rate-limit: 8.4.1(express@5.2.1)
       hono: 4.12.31
-      jose: 6.2.3
+      jose: 5.10.0
       json-schema-typed: 8.0.2
       pkce-challenge: 5.0.1
       raw-body: 3.0.2
@@ -18304,8 +18302,6 @@ snapshots:
 
   jose@5.10.0: {}
 
-  jose@6.2.3: {}
-
   joycon@3.1.1: {}
 
   js-md5@0.8.3: {}
@@ -18526,7 +18522,7 @@ snapshots:
       '@livekit/protocol': 1.46.6
       '@types/dom-mediacapture-record': 1.0.22
       events: 3.3.0
-      jose: 6.2.3
+      jose: 5.10.0
       loglevel: 1.9.2
       sdp-transform: 2.15.0
       tslib: 2.8.1

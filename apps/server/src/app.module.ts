@@ -119,6 +119,8 @@ import { PhoneVoiceModule } from './modules/phone-voice/phone-voice.module';
 import { VoiceModule } from './modules/voice/voice.module';
 import { LivekitModule } from './modules/livekit/livekit.module';
 import { ChatwootModule } from './modules/chatwoot/chatwoot.module';
+import { CapabilitiesModule } from './modules/capabilities/capabilities.module';
+import { RiscModule } from './modules/risc/risc.module';
 
 @Module({
   imports: [
@@ -231,6 +233,7 @@ import { ChatwootModule } from './modules/chatwoot/chatwoot.module';
     DeviceModule,
     RealtimeModule,
     SecurityAuditModule,
+    RiscModule,
     ContractsModule,
 
     // KeyStore Service Marketplace — Human-powered deliverables platform
@@ -247,6 +250,9 @@ import { ChatwootModule } from './modules/chatwoot/chatwoot.module';
 
     // Chatwoot L1 support desk (agent-bot webhook → KEY replies)
     ChatwootModule,
+
+    // Platform capability contract + discovery API (Stage 3)
+    CapabilitiesModule,
 
     // AI Intelligence Layer — JARVIS-like conversational engine
     KeyCortexModule,

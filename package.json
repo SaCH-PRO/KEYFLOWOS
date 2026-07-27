@@ -23,6 +23,7 @@
     "db:seed": "pnpm --filter db exec tsx --env-file ../../.env prisma/seed.ts",
     "db:reset": "pnpm --filter db exec prisma migrate reset --force --skip-generate",
     "db:studio": "pnpm --filter db exec prisma studio",
+    "configure:risc": "tsx --env-file .env scripts/configure-risc.ts",
     "ui:dev": "pnpm --filter ui exec storybook dev -p 6006",
     "test:db:soft-delete": "pnpm --filter db exec tsx --env-file .env src/test-soft-delete.ts",
     "verify:up": "bash scripts/verify-up.sh",

@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Inject, Inj
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
 import { computeProfileCompleteness, computeTieredCompleteness, COMPLETENESS_TIERS, PROGRESSIVE_DEEPENING_PROMPTS } from './profile-completeness.constants';
+import type { UserIdentityDataDto } from './dto/bootstrap.dto';
 
 /**
  * Map a Business profile field to the onboarding-answer key that
@@ -794,6 +795,7 @@ export class IdentityService {
     avatarUrl?: string;
     company?: string;
     referralCode?: string;
+    identities?: UserIdentityDataDto[];
   }) {
     if (input.username) {
       const usernameInUse = await this.prisma.client.user.findFirst({
@@ -895,6 +897,10 @@ export class IdentityService {
       }
     }
 
+    // Persist external identity-provider links (Google sub, etc.) so that
+    // Cross-Account Protection (RISC) events can be mapped back to this user.
+    await this.persistUserIdentities(user.id, input.identities);
+
     const existingBusiness = await this.prisma.client.business.findFirst({
       where: { ownerId: user.id, deletedAt: null },
       orderBy: { createdAt: 'asc' },
@@ -928,6 +934,46 @@ export class IdentityService {
     });
 
     return { user, business, isNewBusiness: !existingBusiness };
+  }
+
+  /**
+   * Upsert external identity-provider links for a user.
+   *
+   * Only `provider` + `providerSubject` (the IdP's stable user id, e.g.
+   * Google's `sub`) are required. This mapping is what lets Cross-Account
+   * Protection (RISC) security events resolve to a KeyFlowOS account.
+   */
+  private async persistUserIdentities(
+    userId: string,
+    identities: UserIdentityDataDto[] | undefined,
+  ): Promise<void> {
+    if (!identities || identities.length === 0) return;
+
+    for (const identity of identities) {
+      const provider = identity.provider?.trim().toLowerCase();
+      const providerSubject =
+        identity.id?.trim() ||
+        (typeof identity.identity_data?.sub === 'string' ? identity.identity_data.sub.trim() : '');
+      if (!provider || !providerSubject) continue;
+
+      const email =
+        typeof identity.identity_data?.email === 'string'
+          ? identity.identity_data.email.trim().toLowerCase() || null
+          : null;
+
+      try {
+        await this.prisma.client.userIdentity.upsert({
+          where: { provider_providerSubject: { provider, providerSubject } },
+          update: { userId, email },
+          create: { userId, provider, providerSubject, email },
+        });
+      } catch (err: any) {
+        // Identity mapping is best-effort; don't fail bootstrap because of it.
+        this.logger.warn(
+          `Failed to persist ${provider} identity for user ${userId}: ${err instanceof Error ? err.message : err}`,
+        );
+      }
+    }
   }
 
   async getTieredCompleteness(businessId: string) {

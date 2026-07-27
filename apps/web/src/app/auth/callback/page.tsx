@@ -167,7 +167,8 @@ function AuthCallbackInner() {
         const email = userInfo.email;
         const avatarUrl = userInfo.user_metadata?.avatar_url || userInfo.user_metadata?.picture || "";
         const { firstName, lastName, fullName } = deriveOAuthName(userInfo.user_metadata);
-        
+        const identities = Array.isArray(userInfo.identities) ? userInfo.identities : [];
+
         if (email) {
           window.localStorage.setItem("kf_email", email);
         }
@@ -191,6 +192,7 @@ function AuthCallbackInner() {
           username: profileDraft.username,
           avatarUrl,
           referralCode,
+          identities,
         });
         
         if (bootstrap.data?.business?.id) {
