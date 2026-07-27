@@ -1,0 +1,20 @@
+{
+  "recommendations": [
+    "dbaeumer.vscode-eslint",
+    "esbenp.prettier-vscode",
+    "prisma.prisma",
+    "bradlc.vscode-tailwindcss",
+    "ms-azuretools.vscode-docker",
+    "github.vscode-pull-request-github",
+    "eamodio.gitlens",
+    "usernamehw.errorlens",
+    "ms-playwright.playwright",
+    "redhat.vscode-yaml",
+    "anthropic.claude-code"
+  ],
+  "unwantedRecommendations": [
+    "tabnine.tabnine-vscode",
+    "codeium.codeium",
+    "continue.continue"
+  ]
+}
