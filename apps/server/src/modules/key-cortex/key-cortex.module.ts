@@ -136,6 +136,7 @@ import { KeyCortexApprovalService } from './key-cortex-approval.service';
 
 // -- v5 Real-time WebSocket Layer --
 import { KeyCortexGateway } from './key-cortex.gateway';
+import { KeyCortexWsAuthService } from './key-cortex-ws-auth.service';
 import { KeyCortexRealtimeService } from './key-cortex-realtime.service';
 
 // -- Phase D: Data & Persistent Learning --
@@ -490,6 +491,9 @@ import { IntegrationHubModule } from '../integration-hub/integration-hub.module'
     KeyCortexApprovalService,
 
     // -- v5: Real-time WebSocket Layer --
+    // WebSocket handshake auth/authorization (JWT + business membership).
+    KeyCortexWsAuthService,
+
     // WebSocket gateway -- live bidirectional streaming (chat, approvals,
     // alerts, insights, suggestions, health). Runs on /key-cortex namespace.
     KeyCortexGateway,
