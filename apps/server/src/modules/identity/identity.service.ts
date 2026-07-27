@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
+import { sanitizeBusiness } from '../../core/security/sanitize-business';
 import { computeProfileCompleteness, computeTieredCompleteness, COMPLETENESS_TIERS, PROGRESSIVE_DEEPENING_PROMPTS } from './profile-completeness.constants';
 
 /**
@@ -30,11 +31,12 @@ export class IdentityService {
     @Inject(BlueprintService) private readonly blueprint: BlueprintService,
   ) {}
 
-  listBusinesses(userId: string) {
+  async listBusinesses(userId: string) {
     if (!userId) throw new UnauthorizedException('User ID is required to list businesses');
-    return this.prisma.client.business.findMany({
+    const items = await this.prisma.client.business.findMany({
       where: { ownerId: userId, deletedAt: null },
     });
+    return items.map((b) => sanitizeBusiness(b));
   }
 
   async getBusiness(businessId: string) {
@@ -42,7 +44,7 @@ export class IdentityService {
       where: { id: businessId },
     });
     if (!business) throw new NotFoundException('Business not found');
-    return business;
+    return sanitizeBusiness(business);
   }
 
   private static readonly PUBLIC_BUSINESS_FIELDS = {
@@ -81,7 +83,7 @@ export class IdentityService {
       where: { slug, deletedAt: null },
     });
     if (!business) throw new NotFoundException('Business not found');
-    return business;
+    return sanitizeBusiness(business);
   }
 
   async getPublicBusiness(slug: string) {
