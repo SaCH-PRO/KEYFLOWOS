@@ -5,7 +5,9 @@
 #
 # Default thresholds (when no override matches) come from the workflow
 # inputs / Rule 5 of docs/branch-hygiene-policy.md:
-#   max_commits: 50   max_files: 100
+#   max_commits: 25   max_files: 50   max_lines: 0 (disabled)
+# These mirror DEFAULT_MAX_COMMITS / DEFAULT_MAX_FILES / DEFAULT_MAX_LINES in
+# .github/workflows/branch-divergence.yml — keep the two in sync.
 #
 # When to add an override:
 #   - Legitimate large refactor that will be merged or archived by a known
@@ -40,6 +42,12 @@
 #     expires: 2026-12-31
 
 overrides:
+  - branch: chore/repo-vscode-setup
+    max_files: 100
+    reason: "Tenant-isolation hardening + connector certification (PR #46). 21 commits is within the commit threshold; only the file count (75 > 50) trips Rule 5, because the secret-redaction and silent-success sync() fixes are each small edits spread across many connector implementations. Merges to main in one shot per Rule 2. NOTE: the guardrail correctly flagged that this branch bundles two workstreams under a chore/ name — future security work should land as its own scoped branch."
+    owner: SaCH-PRO
+    expires: 2026-08-31
+
   - branch: archive/develop-2026-06-13
     max_commits: 10000
     max_files: 10000
