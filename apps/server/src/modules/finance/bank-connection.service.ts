@@ -20,12 +20,24 @@ export interface UpdateBankConnectionInput {
 export class BankConnectionService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
+  /**
+   * Remove the stored provider `accessToken` before a record leaves the service
+   * boundary. The token is only needed server-side; it must never be serialized
+   * into API responses. Storage is unaffected.
+   */
+  private strip<T extends { accessToken?: string | null }>(conn: T): Omit<T, 'accessToken'> {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- omit secret via rest
+    const { accessToken, ...safe } = conn;
+    return safe;
+  }
+
   async list(businessId: string) {
-    return this.prisma.client.bankConnection.findMany({
+    const items = await this.prisma.client.bankConnection.findMany({
       where: { businessId },
       orderBy: { createdAt: 'desc' },
       include: { financialAccount: { select: { id: true, name: true, type: true } } },
     });
+    return items.map((c) => this.strip(c));
   }
 
   async get(businessId: string, id: string) {
@@ -34,7 +46,7 @@ export class BankConnectionService {
       include: { financialAccount: { select: { id: true, name: true, type: true } } },
     });
     if (!conn) throw new NotFoundException('Bank connection not found');
-    return conn;
+    return this.strip(conn);
   }
 
   async create(businessId: string, input: CreateBankConnectionInput) {
@@ -48,7 +60,7 @@ export class BankConnectionService {
     });
     if (existing) throw new BadRequestException('An active connection already exists for this account');
 
-    return this.prisma.client.bankConnection.create({
+    const created = await this.prisma.client.bankConnection.create({
       data: {
         businessId,
         financialAccountId: input.financialAccountId,
@@ -58,11 +70,12 @@ export class BankConnectionService {
       },
       include: { financialAccount: { select: { id: true, name: true } } },
     });
+    return this.strip(created);
   }
 
   async update(businessId: string, id: string, input: UpdateBankConnectionInput) {
     await this.get(businessId, id);
-    return this.prisma.client.bankConnection.update({
+    const updated = await this.prisma.client.bankConnection.update({
       where: { id },
       data: {
         ...(input.providerItemId !== undefined && { providerItemId: input.providerItemId }),
@@ -73,11 +86,12 @@ export class BankConnectionService {
         ...(input.status === 'ACTIVE' && { errorMessage: null }),
       },
     });
+    return this.strip(updated);
   }
 
   async recordSync(businessId: string, id: string, cursor?: string) {
     await this.get(businessId, id);
-    return this.prisma.client.bankConnection.update({
+    const synced = await this.prisma.client.bankConnection.update({
       where: { id },
       data: {
         lastSyncAt: new Date(),
@@ -86,10 +100,12 @@ export class BankConnectionService {
         errorMessage: null,
       },
     });
+    return this.strip(synced);
   }
 
   async remove(businessId: string, id: string) {
     await this.get(businessId, id);
-    return this.prisma.client.bankConnection.delete({ where: { id } });
+    const deleted = await this.prisma.client.bankConnection.delete({ where: { id } });
+    return this.strip(deleted);
   }
 }

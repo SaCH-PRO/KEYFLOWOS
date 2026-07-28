@@ -1,4 +1,5 @@
 import { Injectable, BadRequestException, Logger, Inject, Optional } from '@nestjs/common';
+import { timingSafeStringEqual } from '../../core/security/timing-safe-equal';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { createHmac } from 'crypto';
 import * as mammoth from 'mammoth';
@@ -124,7 +125,7 @@ export class GoogleDriveService {
       const signature = decoded.substring(lastDotIndex + 1);
 
       const expectedSignature = createHmac('sha256', this.stateSecret).update(payload).digest('hex');
-      if (signature !== expectedSignature) {
+      if (!timingSafeStringEqual(signature, expectedSignature)) {
         this.logger.warn('Invalid Drive OAuth state signature');
         return null;
       }

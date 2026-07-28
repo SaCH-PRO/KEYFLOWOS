@@ -32,7 +32,7 @@ export class TaskAssignmentController {
   @Post('businesses/:businessId/task-assignments')
   @RateLimit(30, 60_000)
   async assign(
-    @Param('businessId') _businessId: string,
+    @Param('businessId') businessId: string,
     @Body() body: AssignTaskDto,
     @Request() _req: ExpressRequest & { user?: { id: string } },
   ) {
@@ -43,13 +43,14 @@ export class TaskAssignmentController {
       assignableId: body.assignableId,
       assignedBy: _req.user?.id ?? 'system',
       reason: body.reason,
+      businessId,
     });
   }
 
   @Post('businesses/:businessId/task-assignments/bulk')
   @RateLimit(10, 60_000)
   async bulkAssign(
-    @Param('businessId') _businessId: string,
+    @Param('businessId') businessId: string,
     @Body() body: BulkAssignDto,
     @Request() req: ExpressRequest & { user?: { id: string } },
   ) {
@@ -58,13 +59,14 @@ export class TaskAssignmentController {
       body.assignableType as AssignableType,
       body.assignableId,
       req.user?.id ?? 'system',
+      businessId,
     );
   }
 
   @Post('businesses/:businessId/task-assignments/transfer')
   @RateLimit(10, 60_000)
   async transfer(
-    @Param('businessId') _businessId: string,
+    @Param('businessId') businessId: string,
     @Body() body: TransferAssignmentsDto,
     @Request() req: ExpressRequest & { user?: { id: string } },
   ) {
@@ -74,22 +76,24 @@ export class TaskAssignmentController {
       body.toType as AssignableType,
       body.toId,
       req.user?.id ?? 'system',
+      businessId,
     );
   }
 
   @Get('businesses/:businessId/task-assignments/for-task/:taskType/:taskId')
   @RateLimit(60, 60_000)
   async forTask(
+    @Param('businessId') businessId: string,
     @Param('taskType') taskType: TaskType,
     @Param('taskId') taskId: string,
   ) {
-    return this.service.getAssignmentsForTask(taskType, taskId);
+    return this.service.getAssignmentsForTask(taskType, taskId, businessId);
   }
 
   @Get('businesses/:businessId/task-assignments/for-assignee/:assignableType/:assignableId')
   @RateLimit(60, 60_000)
   async forAssignee(
-    @Param('businessId') _businessId: string,
+    @Param('businessId') businessId: string,
     @Param('assignableType') assignableType: AssignableType,
     @Param('assignableId') assignableId: string,
     @Query('taskType') taskType?: TaskType,
@@ -100,6 +104,7 @@ export class TaskAssignmentController {
       taskType,
       limit: limit ? parseInt(limit, 10) : undefined,
       offset: offset ? parseInt(offset, 10) : undefined,
+      businessId,
     });
   }
 
@@ -121,7 +126,7 @@ export class TaskAssignmentController {
   @Delete('businesses/:businessId/task-assignments')
   @RateLimit(20, 60_000)
   async unassign(
-    @Param('businessId') _businessId: string,
+    @Param('businessId') businessId: string,
     @Body() body: UnassignTaskDto,
     @Request() req: ExpressRequest & { user?: { id: string } },
   ) {
@@ -131,6 +136,7 @@ export class TaskAssignmentController {
       assignableType: body.assignableType as AssignableType,
       assignableId: body.assignableId,
       reason: body.reason,
+      businessId,
     });
   }
 }

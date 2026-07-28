@@ -63,7 +63,6 @@ describe('KeyCortexController new endpoints', () => {
       {} as any, // monitorV2
       {} as any, // sandbox
       {} as any, // flowStudio
-      {} as any, // externalConnector
       {} as any, // evolution
       {} as any, // phone
       {} as any, // document

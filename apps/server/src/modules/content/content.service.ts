@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 export interface CreatePostInput {
@@ -298,7 +298,15 @@ export class ContentService {
   }
 
   async disconnectSocialAccount(input: SocialAccountReferenceInput) {
-    await this.prisma.client.socialConnection.delete({ where: { id: input.accountId } });
+    // Scope the delete by BOTH id and businessId so a caller cannot remove
+    // another tenant's connection. A uniform not-found is returned whether the
+    // record is missing or owned by a different business (no ownership oracle).
+    const result = await this.prisma.client.socialConnection.deleteMany({
+      where: { id: input.accountId, businessId: input.businessId },
+    });
+    if (result.count === 0) {
+      throw new NotFoundException('Social account not found');
+    }
     return { disconnected: true };
   }
 

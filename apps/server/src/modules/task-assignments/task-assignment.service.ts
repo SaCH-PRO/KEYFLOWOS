@@ -15,6 +15,13 @@ export interface AssignTaskInput {
   assignableId: string;
   assignedBy: string;
   reason?: string;
+  /**
+   * Tenant scope of the request. When provided (always by the guarded HTTP
+   * controller), the task and assignable must belong to this business or the
+   * operation fails closed. Omitted by trusted internal callers that already
+   * pre-scope their task ids.
+   */
+  businessId?: string;
 }
 
 export interface UnassignTaskInput {
@@ -23,6 +30,8 @@ export interface UnassignTaskInput {
   assignableType: AssignableType;
   assignableId: string;
   reason?: string;
+  /** Tenant scope — see AssignTaskInput.businessId. */
+  businessId?: string;
 }
 
 @Injectable()
@@ -46,6 +55,9 @@ export class TaskAssignmentService {
     }
     await this.validateAssignable(assignableType, input.assignableId);
     await this.validateTask(input.taskType, input.taskId);
+    // Tenant enforcement (no-op when businessId omitted by internal callers).
+    await this.assertTaskInBusiness(input.taskType, input.taskId, input.businessId);
+    await this.assertAssignableInBusiness(assignableType, input.assignableId, input.businessId);
 
     const existing = await this.prisma.client.taskAssignment.findFirst({
       where: {
@@ -103,6 +115,7 @@ export class TaskAssignmentService {
    * Soft-unassign a task from an entity.
    */
   async unassign(input: UnassignTaskInput) {
+    await this.assertTaskInBusiness(input.taskType, input.taskId, input.businessId);
     const assignment = await this.prisma.client.taskAssignment.findFirst({
       where: {
         taskType: input.taskType,
@@ -142,7 +155,8 @@ export class TaskAssignmentService {
   /**
    * Get active assignments for a task.
    */
-  async getAssignmentsForTask(taskType: TaskType, taskId: string) {
+  async getAssignmentsForTask(taskType: TaskType, taskId: string, businessId?: string) {
+    await this.assertTaskInBusiness(taskType, taskId, businessId);
     return this.prisma.client.taskAssignment.findMany({
       where: { taskType, taskId, unassignedAt: null },
       orderBy: { assignedAt: 'desc' },
@@ -159,8 +173,10 @@ export class TaskAssignmentService {
       taskType?: TaskType;
       limit?: number;
       offset?: number;
+      businessId?: string;
     },
   ) {
+    await this.assertAssignableInBusiness(assignableType, assignableId, options?.businessId);
     const where: any = {
       assignableType,
       assignableId,
@@ -190,16 +206,31 @@ export class TaskAssignmentService {
     toType: AssignableType,
     toId: string,
     transferredBy: string,
+    businessId?: string,
   ) {
     await this.validateAssignable(toType, toId);
+    // Both endpoints of the transfer must belong to the tenant (when scoped).
+    await this.assertAssignableInBusiness(fromType, fromId, businessId);
+    await this.assertAssignableInBusiness(toType, toId, businessId);
 
-    const assignments = await this.prisma.client.taskAssignment.findMany({
+    let assignments = await this.prisma.client.taskAssignment.findMany({
       where: {
         assignableType: fromType,
         assignableId: fromId,
         unassignedAt: null,
       },
     });
+
+    // Never move assignments whose parent task belongs to another tenant
+    // (a shared user may hold assignments across businesses).
+    if (businessId) {
+      const owned = [] as typeof assignments;
+      for (const a of assignments) {
+        const owner = await this.getBusinessIdForTask(a.taskType as TaskType, a.taskId);
+        if (owner === businessId) owned.push(a);
+      }
+      assignments = owned;
+    }
 
     const results = [];
     for (const a of assignments) {
@@ -270,6 +301,7 @@ export class TaskAssignmentService {
     assignableType: AssignableType,
     assignableId: string,
     assignedBy: string,
+    businessId?: string,
   ) {
     const results = [];
     for (const t of taskIds) {
@@ -280,6 +312,7 @@ export class TaskAssignmentService {
           assignableType,
           assignableId,
           assignedBy,
+          businessId,
         });
         results.push({ success: true, taskId: t.taskId, assignmentId: r.id });
       } catch (err: any) {
@@ -335,6 +368,43 @@ export class TaskAssignmentService {
     if (!exists) {
       throw new BadRequestException(`${taskType} with id "${taskId}" not found`);
     }
+  }
+
+  /**
+   * Enforce that a task belongs to the given business. No-op when businessId is
+   * omitted (trusted internal callers). Fails closed for task types whose owning
+   * business cannot be resolved (e.g. AutopilotTask, which has no table yet).
+   */
+  private async assertTaskInBusiness(taskType: TaskType, taskId: string, businessId?: string): Promise<void> {
+    if (!businessId) return;
+    const owner = await this.getBusinessIdForTask(taskType, taskId);
+    if (owner !== businessId) {
+      throw new NotFoundException(`${taskType} with id "${taskId}" not found`);
+    }
+  }
+
+  /**
+   * Enforce that an assignable entity belongs to the given business. No-op when
+   * businessId is omitted. KEY is a global assistant; Contractor/KeyflowStaff
+   * have no backing table to scope (documented residual).
+   */
+  private async assertAssignableInBusiness(type: AssignableType, id: string, businessId?: string): Promise<void> {
+    if (!businessId) return;
+    if (type === 'KEY') return;
+    if (type === 'StaffMember') {
+      const staff = await this.prisma.client.staffMember.findFirst({ where: { id, businessId }, select: { id: true } });
+      if (!staff) throw new NotFoundException(`StaffMember with id "${id}" not found`);
+      return;
+    }
+    if (type === 'User') {
+      const member = await this.prisma.client.membership.findUnique({
+        where: { userId_businessId: { userId: id, businessId } },
+        select: { userId: true },
+      });
+      if (!member) throw new NotFoundException(`User with id "${id}" not found`);
+      return;
+    }
+    // Contractor / KeyflowStaff: no dedicated table; cannot tenant-scope here.
   }
 
   private async getBusinessIdForTask(taskType: TaskType, taskId: string): Promise<string | null> {

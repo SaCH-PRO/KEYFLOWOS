@@ -80,18 +80,18 @@ export class StripeConnector implements IConnector, IPaymentGatewayConnector {
     return !!(meta.stripeSecretKey || process.env.STRIPE_SECRET_KEY);
   }
 
-  async sync(businessId: string): Promise<ConnectorSyncResult> {
-    const start = Date.now();
-    const connected = await this.isConnected(businessId);
-    if (!connected) {
-      return { success: false, itemsSynced: 0, errors: ['Stripe not connected'], duration: Date.now() - start };
-    }
-
-    const recentPayments = await this.prisma.client.payment.count({
-      where: { businessId, method: 'STRIPE' },
-    }).catch(() => 0);
-
-    return { success: true, itemsSynced: recentPayments, errors: [], duration: Date.now() - start };
+  async sync(_businessId: string): Promise<ConnectorSyncResult> {
+    // Provider pull sync is not yet implemented for this connector. It previously
+    // counted local rows and returned success:true, misrepresenting a no-op as a
+    // successful provider sync. Real pull sync is future work per connector.
+    return {
+      success: false,
+      itemsSynced: 0,
+      unsupported: true,
+      code: 'PULL_SYNC_NOT_IMPLEMENTED',
+      errors: ['Provider pull sync is not implemented for this connector.'],
+      duration: 0,
+    };
   }
 
   async smokeTest(businessId: string): Promise<ConnectorSmokeResult> {

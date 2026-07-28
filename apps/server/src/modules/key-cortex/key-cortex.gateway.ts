@@ -24,13 +24,14 @@ import {
   ConnectedSocket,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { Injectable, Logger, UseGuards } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 
 // -- KEY Cortex Services --
 import { KeyCortexReasoningService } from './key-cortex-reasoning.service';
 import { KeyCortexApprovalService } from './key-cortex-approval.service';
 import { KeyCortexEventService } from './key-cortex-event.service';
 import { KeyCortexExecutorService } from './key-cortex-executor.service';
+import { KeyCortexWsAuthService, isAllowedWsOrigin } from './key-cortex-ws-auth.service';
 
 // ------------------------------------------------------------------
 // Types
@@ -101,7 +102,13 @@ interface HealthPayload {
 
 @WebSocketGateway({
   namespace: 'key-cortex',
-  cors: { origin: '*' }, // TODO: Restrict to KEYFLOWOS_FRONTEND_URL in production
+  cors: {
+    // Restrict to the centralized allow-list (same source as HTTP CORS).
+    origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+      callback(null, isAllowedWsOrigin(origin));
+    },
+    credentials: true,
+  },
 })
 export class KeyCortexGateway
   implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
@@ -117,6 +124,7 @@ export class KeyCortexGateway
     private readonly approvalService: KeyCortexApprovalService,
     private readonly eventService: KeyCortexEventService,
     private readonly executorService: KeyCortexExecutorService,
+    private readonly wsAuth: KeyCortexWsAuthService,
   ) {}
 
   // ================================================================
@@ -127,40 +135,76 @@ export class KeyCortexGateway
     this.logger.log('KEY Cortex WebSocket initialized on namespace /key-cortex');
   }
 
-  handleConnection(client: Socket) {
-    // Clients must connect with ?userId=xxx&businessId=xxx
-    const { userId, businessId } = client.handshake.query as {
-      userId?: string;
-      businessId?: string;
-    };
+  /**
+   * Authenticate & authorize on connect.
+   *
+   * SECURITY: identity (userId/role) is derived from the validated bearer token
+   * supplied via `handshake.auth.token`, NOT from query parameters. The requested
+   * `businessId` is verified against the user's membership before any room join.
+   * A socket that fails authentication or authorization is disconnected and never
+   * stored, so downstream message handlers (which require `clients.get(id)`) treat
+   * it as unauthenticated. Reconnects re-run this handler with a fresh token.
+   */
+  async handleConnection(client: Socket) {
+    try {
+      const identity = await this.wsAuth.authenticateSocket(client);
+      if (!identity) {
+        this.logger.warn(`Connection rejected: authentication failed (socket ${client.id})`);
+        client.disconnect(true);
+        return;
+      }
 
-    if (!userId || !businessId) {
-      this.logger.warn(`Connection rejected: missing userId or businessId (socket ${client.id})`);
+      // businessId names the requested tenant; it is verified below. It is NOT
+      // an identity claim — userId always comes from the validated token.
+      const businessId =
+        (client.handshake.auth?.businessId as string | undefined) ||
+        (client.handshake.query?.businessId as string | undefined);
+
+      if (!businessId) {
+        this.logger.warn(`Connection rejected: missing businessId (socket ${client.id})`);
+        client.disconnect(true);
+        return;
+      }
+
+      const authorized = await this.wsAuth.verifyBusinessMembership(
+        identity.userId,
+        identity.role,
+        businessId,
+      );
+      if (!authorized) {
+        this.logger.warn(
+          `Connection rejected: user ${identity.userId} lacks access to business ${businessId} (socket ${client.id})`,
+        );
+        client.disconnect(true);
+        return;
+      }
+
+      const info: ClientInfo = { userId: identity.userId, businessId, rooms: [] };
+      this.clients.set(client.id, info);
+
+      // Join scoped rooms for targeted broadcasting (only after authorization)
+      const businessRoom = `business:${businessId}`;
+      const userRoom = `user:${identity.userId}`;
+      client.join(businessRoom);
+      client.join(userRoom);
+      info.rooms.push(businessRoom, userRoom);
+
+      // Emit welcome so the client knows it's ready
+      client.emit('key:connected', {
+        socketId: client.id,
+        userId: identity.userId,
+        businessId,
+        timestamp: new Date().toISOString(),
+      });
+
+      this.logger.debug(
+        `Client connected: ${client.id} (user:${identity.userId}, biz:${businessId})`,
+      );
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      this.logger.error(`Connection error: ${message} (socket ${client.id})`);
       client.disconnect(true);
-      return;
     }
-
-    const info: ClientInfo = { userId, businessId, rooms: [] };
-    this.clients.set(client.id, info);
-
-    // Join scoped rooms for targeted broadcasting
-    const businessRoom = `business:${businessId}`;
-    const userRoom = `user:${userId}`;
-    client.join(businessRoom);
-    client.join(userRoom);
-    info.rooms.push(businessRoom, userRoom);
-
-    // Emit welcome so the client knows it's ready
-    client.emit('key:connected', {
-      socketId: client.id,
-      userId,
-      businessId,
-      timestamp: new Date().toISOString(),
-    });
-
-    this.logger.debug(
-      `Client connected: ${client.id} (user:${userId}, biz:${businessId})`,
-    );
   }
 
   handleDisconnect(client: Socket) {

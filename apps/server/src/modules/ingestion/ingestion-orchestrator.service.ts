@@ -96,7 +96,7 @@ export class IngestionOrchestrator {
       });
     }
 
-    let current = item;
+    let current: typeof item;
     try {
       await this.buildPlan(item.id);
       current = (await this.prisma.client.ingestionItem.findUnique({ where: { id: item.id } })) ?? item;

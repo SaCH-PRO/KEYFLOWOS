@@ -74,8 +74,12 @@ const defaultTakeExtension = Prisma.defineExtension({
 });
 
 // Models known to have a businessId column (auto-filtered when tenant context is active)
+// NOTE: TaskAssignment intentionally excluded — it has no businessId column
+// (polymorphic taskType+taskId). Injecting businessId here throws
+// PrismaClientValidationError. Its tenancy is enforced at the service layer via
+// TaskAssignmentService's task/assignable ownership checks.
 const BUSINESS_ID_MODELS = new Set([
-  'BusinessEvent', 'Evidence', 'TaskAssignment', 'ContentRequest',
+  'BusinessEvent', 'Evidence', 'ContentRequest',
   'ContentDeliveryPackage', 'CallLog', 'ApprovalRequest', 'ApprovalStep',
   'Asset', 'Contact', 'Account', 'Deal', 'Invoice', 'Quote', 'Product',
   'Service', 'Booking', 'StaffMember', 'Project', 'ProjectTask', 'Expense',
