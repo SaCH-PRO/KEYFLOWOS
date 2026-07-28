@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { timingSafeStringEqual } from '../../core/security/timing-safe-equal';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { createHmac } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -129,7 +130,7 @@ export class EmailMarketingService {
       const [data, sig] = token.split('.');
       if (!data || !sig) return null;
       const expectedSig = this.signPayload(data);
-      if (sig !== expectedSig) {
+      if (!timingSafeStringEqual(sig, expectedSig)) {
         this.logger.warn('Invalid unsubscribe token signature');
         return null;
       }
