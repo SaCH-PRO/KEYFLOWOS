@@ -75,13 +75,18 @@ export class MailchimpConnector implements IConnector {
     return (await this.healthCheck(businessId)).status === 'connected';
   }
 
-  async sync(businessId: string): Promise<ConnectorSyncResult> {
-    const start = Date.now();
-    const connected = await this.isConnected(businessId);
-    if (!connected) return { success: false, itemsSynced: 0, errors: ['Mailchimp not connected'], duration: Date.now() - start };
-    const campaigns = await this.prisma.client.emailCampaign.count({ where: { businessId, deletedAt: null } }).catch(() => 0);
-    await this.trackActivity(businessId);
-    return { success: true, itemsSynced: campaigns, errors: [], duration: Date.now() - start };
+  async sync(_businessId: string): Promise<ConnectorSyncResult> {
+    // Provider pull sync is not yet implemented for this connector. It previously
+    // counted local rows and returned success:true, misrepresenting a no-op as a
+    // successful provider sync. Real pull sync is future work per connector.
+    return {
+      success: false,
+      itemsSynced: 0,
+      unsupported: true,
+      code: 'PULL_SYNC_NOT_IMPLEMENTED',
+      errors: ['Provider pull sync is not implemented for this connector.'],
+      duration: 0,
+    };
   }
 
   async disconnect(businessId: string): Promise<void> {

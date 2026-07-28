@@ -69,13 +69,13 @@ export const CONNECTOR_SYNC_MODES: Record<ConnectorType, ConnectorSyncClassifica
   // ── Commerce / Accounting / Marketing ─────────────────────────────────────
   // These have real provider clients but sync() currently counts local rows and
   // returned success:true (silent success). Pull sync is NOT IMPLEMENTED.
-  stripe: { modes: [ConnectorSyncMode.STATUS_ONLY], note: 'sync() counts local payments; provider pull NOT IMPLEMENTED (silent-success defect).' },
-  paypal: { modes: [ConnectorSyncMode.STATUS_ONLY], note: 'sync() counts local payments; provider pull NOT IMPLEMENTED (silent-success defect).' },
-  wipay: { modes: [ConnectorSyncMode.STATUS_ONLY], note: 'sync() counts local payments; provider pull NOT IMPLEMENTED (silent-success defect).' },
-  quickbooks: { modes: [ConnectorSyncMode.STATUS_ONLY], note: 'sync() counts local invoices/payments/expenses; provider pull NOT IMPLEMENTED (silent-success defect).' },
-  xero: { modes: [ConnectorSyncMode.STATUS_ONLY], note: 'sync() counts local invoices/payments/expenses; provider pull NOT IMPLEMENTED (silent-success defect).' },
-  mailchimp: { modes: [ConnectorSyncMode.STATUS_ONLY], note: 'sync() counts local campaigns; provider pull NOT IMPLEMENTED (silent-success defect).' },
-  klaviyo: { modes: [ConnectorSyncMode.STATUS_ONLY], note: 'sync() counts local campaigns; provider pull NOT IMPLEMENTED (silent-success defect).' },
+  stripe: { modes: [ConnectorSyncMode.STATUS_ONLY], note: 'sync() counts local payments; provider pull NOT IMPLEMENTED — fixed, now returns PULL_SYNC_NOT_IMPLEMENTED.' },
+  paypal: { modes: [ConnectorSyncMode.STATUS_ONLY], note: 'sync() counts local payments; provider pull NOT IMPLEMENTED — fixed, now returns PULL_SYNC_NOT_IMPLEMENTED.' },
+  wipay: { modes: [ConnectorSyncMode.STATUS_ONLY], note: 'sync() counts local payments; provider pull NOT IMPLEMENTED — fixed, now returns PULL_SYNC_NOT_IMPLEMENTED.' },
+  quickbooks: { modes: [ConnectorSyncMode.STATUS_ONLY], note: 'sync() counts local invoices/payments/expenses; provider pull NOT IMPLEMENTED — fixed, now returns PULL_SYNC_NOT_IMPLEMENTED.' },
+  xero: { modes: [ConnectorSyncMode.STATUS_ONLY], note: 'sync() counts local invoices/payments/expenses; provider pull NOT IMPLEMENTED — fixed, now returns PULL_SYNC_NOT_IMPLEMENTED.' },
+  mailchimp: { modes: [ConnectorSyncMode.STATUS_ONLY], note: 'sync() counts local campaigns; provider pull NOT IMPLEMENTED — fixed, now returns PULL_SYNC_NOT_IMPLEMENTED.' },
+  klaviyo: { modes: [ConnectorSyncMode.STATUS_ONLY], note: 'sync() counts local campaigns; provider pull NOT IMPLEMENTED — fixed, now returns PULL_SYNC_NOT_IMPLEMENTED.' },
 } as Record<ConnectorType, ConnectorSyncClassification>;
 
 /** The connectors registered by ConnectorInitializerService (source of truth for completeness). */

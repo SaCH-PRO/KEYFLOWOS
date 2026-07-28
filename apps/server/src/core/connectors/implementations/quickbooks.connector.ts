@@ -82,22 +82,18 @@ export class QuickbooksConnector implements IConnector {
    * Real OAuth + remote API call is wired in the dedicated OAuth task; here we keep the framework contract
    * honored and surface counts so the dashboard reflects activity.
    */
-  async sync(businessId: string): Promise<ConnectorSyncResult> {
-    const start = Date.now();
-    const connected = await this.isConnected(businessId);
-    if (!connected) {
-      return { success: false, itemsSynced: 0, errors: ['QuickBooks not connected'], duration: Date.now() - start };
-    }
-
-    const [invoices, payments, expenses] = await Promise.all([
-      this.prisma.client.invoice.count({ where: { businessId, deletedAt: null } }).catch(() => 0),
-      this.prisma.client.payment.count({ where: { businessId } }).catch(() => 0),
-      this.prisma.client.expense.count({ where: { businessId } }).catch(() => 0),
-    ]);
-
-    const total = invoices + payments + expenses;
-    await this.trackActivity(businessId);
-    return { success: true, itemsSynced: total, errors: [], duration: Date.now() - start };
+  async sync(_businessId: string): Promise<ConnectorSyncResult> {
+    // Provider pull sync is not yet implemented for this connector. It previously
+    // counted local rows and returned success:true, misrepresenting a no-op as a
+    // successful provider sync. Real pull sync is future work per connector.
+    return {
+      success: false,
+      itemsSynced: 0,
+      unsupported: true,
+      code: 'PULL_SYNC_NOT_IMPLEMENTED',
+      errors: ['Provider pull sync is not implemented for this connector.'],
+      duration: 0,
+    };
   }
 
   async disconnect(businessId: string): Promise<void> {
