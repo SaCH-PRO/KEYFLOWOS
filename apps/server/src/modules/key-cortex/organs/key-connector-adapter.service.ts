@@ -1,15 +1,13 @@
 /**
  * KeyConnector Organ Adapter
  *
- * Plugs third-party integrations and connectors into KEY's nervous system.
- * Delegates internal module actions to KeyCortexConnectorService and
- * external API calls to KeyCortexExternalConnectorService.
+ * Plugs internal module integrations into KEY's nervous system.
+ * Delegates internal module actions to KeyCortexConnectorService.
  */
 
 import { Injectable, Logger } from '@nestjs/common';
 import { KeyConnectorService } from '../../key-connector/key-connector.service';
 import { KeyCortexConnectorService } from '../key-cortex-connector.service';
-import { KeyCortexExternalConnectorService } from '../key-cortex-external-connector.service';
 import { KeyOrganAdapter } from './key-organ-adapter.interface';
 import {
   KeyCortexToolContext,
@@ -27,7 +25,6 @@ export class KeyConnectorAdapterService extends KeyOrganAdapter {
   constructor(
     private readonly keyConnector: KeyConnectorService,
     private readonly cortexConnector: KeyCortexConnectorService,
-    private readonly externalConnector: KeyCortexExternalConnectorService,
     eventBus: KeyCortexEventBusService,
   ) {
     super();
@@ -109,25 +106,6 @@ export class KeyConnectorAdapterService extends KeyOrganAdapter {
             source: 'key_cortex',
             timestamp: new Date(),
             correlationId: ctx.correlationId ?? ctx.sessionId ?? 'unknown',
-          });
-          return { success: true, data: result };
-        },
-      ),
-      this.makeTool(
-        'key_connector.execute_external',
-        'Execute an action against an external provider',
-        2,
-        true,
-        ['connectorId', 'action'],
-        {
-          params: { type: 'object' },
-        },
-        async (ctx, input) => {
-          const result = await this.externalConnector.execute({
-            connectorId: input.connectorId as string,
-            action: input.action as string,
-            parameters: (input.params as Record<string, unknown>) ?? {},
-            businessId: ctx.businessId,
           });
           return { success: true, data: result };
         },

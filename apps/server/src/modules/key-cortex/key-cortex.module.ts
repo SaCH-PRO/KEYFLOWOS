@@ -123,7 +123,6 @@ import { KeyCortexQualityService } from './key-cortex-quality.service';
 // -- v3 Phase 3 & 4 Services --
 import { KeyCortexSandboxService } from './key-cortex-sandbox.service';
 import { KeyCortexFlowStudioService } from './key-cortex-flow-studio.service';
-import { KeyCortexExternalConnectorService } from './key-cortex-external-connector.service';
 import { KeyCortexEvolutionService } from './key-cortex-evolution.service';
 import { KeyCortexPhoneService } from './key-cortex-phone.service';
 import { KeyCortexDocumentService } from './key-cortex-document.service';
@@ -464,8 +463,6 @@ import { IntegrationHubModule } from '../integration-hub/integration-hub.module'
     // Flow Studio -- visual workflow builder & automation engine
     KeyCortexFlowStudioService,
 
-    // External Connector -- third-party integrations (REST, GraphQL, gRPC)
-    KeyCortexExternalConnectorService,
 
     // Self-Evolution -- adaptive learning, pattern detection & auto-tuning
     KeyCortexEvolutionService,
@@ -549,8 +546,6 @@ import { IntegrationHubModule } from '../integration-hub/integration-hub.module'
     // Flow Studio -- workflow automation accessible by other modules
     KeyCortexFlowStudioService,
 
-    // External Connector -- third-party integrations usable by domain modules
-    KeyCortexExternalConnectorService,
 
     // Document Intelligence -- RAG & extraction available to other modules
     KeyCortexDocumentService,
