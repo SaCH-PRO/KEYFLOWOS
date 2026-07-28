@@ -41,7 +41,7 @@ describe('ConnectorSyncSchedulerService', () => {
   it('does nothing when there are no eligible connectors', async () => {
     const { service, registry } = makeService({});
     const result = await service.runNightlySync();
-    expect(result).toEqual({ businesses: 0, attempted: 0, synced: 0, failed: 0 });
+    expect(result).toEqual({ businesses: 0, attempted: 0, synced: 0, skipped: 0, failed: 0 });
     expect(registry.syncConnector).not.toHaveBeenCalled();
   });
 
@@ -55,7 +55,7 @@ describe('ConnectorSyncSchedulerService', () => {
     });
     const result = await service.runNightlySync();
     expect(registry.syncConnector).toHaveBeenCalledTimes(3);
-    expect(result).toEqual({ businesses: 2, attempted: 3, synced: 3, failed: 0 });
+    expect(result).toEqual({ businesses: 2, attempted: 3, synced: 3, skipped: 0, failed: 0 });
   });
 
   it('skips connectors whose type is not registered', async () => {
@@ -65,7 +65,7 @@ describe('ConnectorSyncSchedulerService', () => {
     });
     const result = await service.runNightlySync();
     expect(registry.syncConnector).not.toHaveBeenCalled();
-    expect(result).toEqual({ businesses: 1, attempted: 0, synced: 0, failed: 0 });
+    expect(result).toEqual({ businesses: 1, attempted: 0, synced: 0, skipped: 0, failed: 0 });
   });
 
   it('records a failure activity when sync returns success=false', async () => {
@@ -74,7 +74,7 @@ describe('ConnectorSyncSchedulerService', () => {
       syncResult: { success: false, itemsSynced: 0, errors: ['Not connected'], duration: 3 },
     });
     const result = await service.runNightlySync();
-    expect(result).toEqual({ businesses: 1, attempted: 1, synced: 0, failed: 1 });
+    expect(result).toEqual({ businesses: 1, attempted: 1, synced: 0, skipped: 0, failed: 1 });
     expect(activity.record).toHaveBeenCalledTimes(1);
     const call = activity.record.mock.calls[0][0];
     expect(call.action).toBe('sync');
@@ -93,7 +93,7 @@ describe('ConnectorSyncSchedulerService', () => {
     });
     const result = await service.runNightlySync();
     expect(registry.syncConnector).toHaveBeenCalledTimes(2);
-    expect(result).toEqual({ businesses: 2, attempted: 2, synced: 0, failed: 2 });
+    expect(result).toEqual({ businesses: 2, attempted: 2, synced: 0, skipped: 0, failed: 2 });
     expect(activity.record).toHaveBeenCalledTimes(2);
     const call = activity.record.mock.calls[0][0];
     expect(call.action).toBe('error');

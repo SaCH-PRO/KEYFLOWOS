@@ -153,6 +153,15 @@ export interface ConnectorSyncResult {
   itemsSynced: number;
   errors: string[];
   duration: number;
+  /**
+   * True when the operation is not a real failure but is not supported by this
+   * connector (e.g. pull sync on a webhook/publish-only connector). The scheduler
+   * treats this as "skipped" rather than a failed sync, so it never marks the
+   * connector unhealthy or advances sync bookkeeping.
+   */
+  unsupported?: boolean;
+  /** Stable machine-readable code, e.g. 'PULL_SYNC_UNSUPPORTED'. */
+  code?: string;
 }
 
 export interface IngestionItemInput {

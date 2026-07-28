@@ -112,24 +112,19 @@ export class MetaSocialConnector implements IConnector {
     return !!connection;
   }
 
-  async sync(businessId: string): Promise<ConnectorSyncResult> {
-    const start = Date.now();
-    const connected = await this.isConnected(businessId);
-    if (!connected) {
-      return { success: false, itemsSynced: 0, errors: ['Meta social not connected'], duration: Date.now() - start };
-    }
-
-    const postCount = await this.prisma.client.socialPost.count({
-      where: { businessId, status: 'POSTED', deletedAt: null },
-    });
-
-    await this.prisma.client.connectorStatus.upsert({
-      where: { businessId_connectorType: { businessId, connectorType: 'meta_social' } },
-      create: { businessId, connectorType: 'meta_social', status: 'connected', lastSyncAt: new Date(), syncCount: 1 },
-      update: { lastSyncAt: new Date(), syncCount: { increment: 1 }, status: 'connected' },
-    });
-
-    return { success: true, itemsSynced: postCount, errors: [], duration: Date.now() - start };
+  async sync(_businessId: string): Promise<ConnectorSyncResult> {
+    // Meta (Facebook/Instagram) does not support pull synchronization: inbound
+    // DMs/engagement arrive via the Meta webhook and outbound content is
+    // published. Return an explicit unsupported result rather than reporting a
+    // local post count as a successful provider sync.
+    return {
+      success: false,
+      itemsSynced: 0,
+      unsupported: true,
+      code: 'PULL_SYNC_UNSUPPORTED',
+      errors: ['Pull sync is not supported for Meta; inbound arrives via webhook and outbound is published.'],
+      duration: 0,
+    };
   }
 
   parseInbound(payload: unknown, _businessId: string): IngestionItemInput[] {
