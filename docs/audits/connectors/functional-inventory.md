@@ -80,7 +80,10 @@ callback-ingest, webhook-ingest), not assumed to be a provider pull for all.
   and the nightly scheduler. **Do not classify social connectors as functional for sync.**
 - **Alternate credential path:** Google/Microsoft connectors read tokens from `Business`
   columns, NOT the central `ConnectorCredentialsService` — two credential systems coexist.
-- No connector currently throws `NotImplemented`; the risk is **silent success**, not explicit stubs.
+- ~~No connector currently throws `NotImplemented`; the risk is **silent success**, not explicit stubs.~~
+  **Superseded (`809d7fb8`):** 17 connectors now return an explicit `PULL_SYNC_NOT_IMPLEMENTED`
+  (or `UNSUPPORTED`) result. The silent-success risk is closed; unimplemented pull is now stated,
+  not hidden.
 
 ## SYSTEMIC finding — silent-success `sync()` across most connectors
 Direct reads confirm the count-only silent-success is **not limited to social**. These
@@ -91,25 +94,39 @@ row count** (or `0`) as `itemsSynced`, so the nightly scheduler records them as
 | Connector | sync() body | Status |
 |---|---|---|
 | meta_social, linkedin, twitter, tiktok | count local posts → success:true | **FIXED → UNSUPPORTED** (`11444c71`) |
-| stripe, paypal, wipay | count local payments → success:true | silent-success (pull NOT IMPLEMENTED) |
-| quickbooks, xero | count invoices/payments/expenses → success:true | silent-success |
-| mailchimp, klaviyo | count campaigns → success:true | silent-success |
-| google_drive | count documentInstance → success:true | silent-success |
-| google_contacts, outlook_contacts | count local contacts → success:true | silent-success |
-| google_calendar | count bookings → success:true (real push is a separate method) | silent-success |
-| google_business_profile, whatsapp | success:true, itemsSynced:0 | no-op success |
+| stripe, paypal, wipay | count local payments → success:true | **FIXED → PULL_SYNC_NOT_IMPLEMENTED** (`809d7fb8`) |
+| quickbooks, xero | count invoices/payments/expenses → success:true | **FIXED** (`809d7fb8`) |
+| mailchimp, klaviyo | count campaigns → success:true | **FIXED** (`809d7fb8`) |
+| google_drive | count documentInstance → success:true | **FIXED** (`809d7fb8`) |
+| google_contacts, outlook_contacts | count local contacts → success:true | **FIXED** (`809d7fb8`) |
+| google_calendar | count bookings → success:true (real push is a separate method) | **FIXED** (`809d7fb8`) |
+| google_business_profile, whatsapp | success:true, itemsSynced:0 | **FIXED** (`809d7fb8`) |
 
 Real ingestion happens in **OAuth-callback** and **webhook** services, not `sync()`.
 
-**Material design decision (flagged for the owner):** should `sync()` perform a real
-provider pull for pull-capable connectors (stripe/quickbooks/xero/…), or is it
-intentionally a status/count refresh? Either way it must not report a **local count**
-as `itemsSynced` with `success:true`. The social family was fixed under explicit
-direction; the remaining ~11 are held pending this decision rather than rewritten
-unilaterally. Machine-readable classification: `connector-sync-modes.ts`.
+**Material design decision — RESOLVED.** The question was whether `sync()` should perform a
+real provider pull for pull-capable connectors (stripe/quickbooks/xero/…), or is intentionally
+a status/count refresh. Resolution: it must not report a **local count** as `itemsSynced` with
+`success:true` under either reading, so all 13 remaining connectors now return an explicit
+failure instead of a fabricated success:
+
+```ts
+{ success: false, itemsSynced: 0, unsupported: true,
+  code: 'PULL_SYNC_NOT_IMPLEMENTED', errors: [...], duration: 0 }
+```
+
+Real provider pull remains **future work, per connector** — the stub records the absence
+honestly rather than implementing it. `gmail` and `google_forms` are deliberately excluded:
+they delegate to real ingestion services and keep their genuine `sync()`.
+
+Guarded by `connector-sync-not-implemented.spec.ts` (14 tests), which asserts the contract
+for all 13 and asserts that gmail/google_forms are *not* stubbed. Machine-readable
+classification: `connector-sync-modes.ts`. The nightly scheduler counts these as
+"skipped (unsupported)" rather than failures.
 
 ## Next
 - Phase 2: build one shared provider-mock harness (auth/pagination/cursor/rate-limit/timeout/
   refresh/revoked/duplicate/tombstone/5xx/4xx) mocking only the provider boundary.
 - Phase 5: certify the Google OAuth family first, verifying each `sync` body against the
   correct ingestion model, starting with `google-calendar` (confirmed real sync).
+- Per-connector real pull sync, now that every gap reports itself explicitly.
