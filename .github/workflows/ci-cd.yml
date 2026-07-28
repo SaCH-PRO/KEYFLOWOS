@@ -11,9 +11,13 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Must match the exact versions in the root package.json `engines` field.
+# Major-only ranges ('20'/'9') resolve to the latest patch, which
+# `pnpm install --frozen-lockfile` then rejects with ERR_PNPM_UNSUPPORTED_ENGINE,
+# failing every job before any code runs.
 env:
-  NODE_VERSION: '20'
-  PNPM_VERSION: '9'
+  NODE_VERSION: '20.18.1'
+  PNPM_VERSION: '9.15.0'
 
 jobs:
   lint-and-typecheck:
