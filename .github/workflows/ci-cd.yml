@@ -163,12 +163,25 @@ jobs:
       - name: Generate Prisma client
         run: pnpm db:generate
 
+      # Each job checks out fresh, so the workspace packages must be built here
+      # too — see the note in lint-and-typecheck.
+      - name: Build workspace packages
+        run: pnpm --filter @keyflow/shared --filter @keyflow/db --filter @keyflow/api build
+
       - name: Build server (compile to dist/)
         run: cd apps/server && pnpm run build
 
+      # Asserts dist/main.js, not dist/src/main.js. apps/server/tsconfig.json
+      # includes ["src/**/*", "test/**/*"] but excludes **/*.test.ts and
+      # **/*.spec.ts — and every file under test/ matches one of those. Only
+      # src/** is ever compiled, so tsc infers rootDir as src/ and emits
+      # dist/main.js. dist/src/main.js has never existed, making this assertion
+      # unsatisfiable. package.json agrees: `start:prod` is `node dist/main.js`.
       - name: Verify compiled output exists
         run: |
-          test -f apps/server/dist/src/main.js && echo "Server compiled successfully" || (echo "Server compilation failed" && exit 1)
+          test -f apps/server/dist/main.js \
+            || { echo "::error::Server compilation failed: apps/server/dist/main.js not found"; exit 1; }
+          echo "Server compiled successfully"
 
   build-web:
     name: Build Web
@@ -194,6 +207,11 @@ jobs:
 
       - name: Generate Prisma client
         run: pnpm db:generate
+
+      # Each job checks out fresh, so the workspace packages must be built here
+      # too — see the note in lint-and-typecheck.
+      - name: Build workspace packages
+        run: pnpm --filter @keyflow/shared --filter @keyflow/db --filter @keyflow/api build
 
       - name: Build web
         run: cd apps/web && pnpm run build
@@ -225,6 +243,12 @@ jobs:
 
       - name: Generate Prisma client
         run: pnpm db:generate
+
+      # Each job checks out fresh, so the workspace packages must be built here
+      # too — see the note in lint-and-typecheck. Every server spec that imports
+      # @keyflow/shared or @keyflow/db fails to collect without this.
+      - name: Build workspace packages
+        run: pnpm --filter @keyflow/shared --filter @keyflow/db --filter @keyflow/api build
 
       - name: Run server tests
         run: cd apps/server && pnpm test:ci
