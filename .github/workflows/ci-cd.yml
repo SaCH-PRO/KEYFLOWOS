@@ -84,8 +84,22 @@ jobs:
       # TS2688 "Cannot find type definition file for 'next'". Locally the step
       # passed only because `next dev`/`next build` had generated them earlier.
       # `next typegen` produces exactly those without a full production build.
+      # next.config calls ensureValidWebEnv(), which hard-requires
+      # NEXT_PUBLIC_API_BASE_URL. Without it typegen throws during config load as
+      # an *unhandled rejection* — the process still exits 0, so the step went
+      # green while generating nothing and the type check failed anyway. Same
+      # env pattern as the Build Web job below.
+      #
+      # The `test -f` guard exists because of that silent-success behaviour: if
+      # typegen ever fails to emit again, fail here rather than three steps later.
       - name: Generate Next types
-        run: pnpm --filter web exec next typegen
+        run: |
+          pnpm --filter web exec next typegen
+          test -f apps/web/next-env.d.ts \
+            || { echo "::error::next typegen did not emit next-env.d.ts"; exit 1; }
+        env:
+          NEXT_PUBLIC_API_BASE_URL: ${{ secrets.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3001' }}
+          NEXT_PUBLIC_SITE_URL: ${{ secrets.NEXT_PUBLIC_SITE_URL || 'http://localhost:5000' }}
 
       - name: Type check web
         run: cd apps/web && npx tsc --noEmit
