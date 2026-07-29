@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { protectedProcedure, router } from "../trpc";
-import { assertBusinessAccess } from "../lib/access";
+import { assertBusinessRole } from "../lib/access";
 
 /**
  * Key Connector tRPC Router
@@ -8,6 +8,33 @@ import { assertBusinessAccess } from "../lib/access";
  * Provides CRUD operations for the unified integration connector.
  * All procedures are protected and scoped to a business.
  */
+/**
+ * Row shapes for the `select` projections below.
+ *
+ * `db` from @keyflow/db is a PrismaClient with four chained `$extends`
+ * (soft-delete, default-take, tenant-isolation, token-encryption). Its emitted
+ * declaration is an opaque DynamicClientExtensionThis<...>, so per-model result
+ * types do not survive into client.d.ts and callback params over a findMany()
+ * result infer as `any`. These mirror the IntegrationConnection fields in
+ * schema.prisma and keep the callbacks typed without reaching for `any`.
+ */
+type ConnectionListRow = {
+  id: string;
+  providerKey: string;
+  displayName: string | null;
+  status: string;
+  healthScore: number;
+  lastSyncAt: Date | null;
+  lastError: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+type ConnectionHealthRow = Pick<
+  ConnectionListRow,
+  "providerKey" | "status" | "healthScore" | "lastSyncAt" | "lastError" | "updatedAt"
+>;
+
 export const keyConnectorRouter = router({
   /**
    * List all available integration providers for a business
@@ -15,7 +42,7 @@ export const keyConnectorRouter = router({
   getProviders: protectedProcedure
     .input(z.void().optional())
     .query(async ({ ctx }) => {
-      const { businessId } = assertBusinessAccess(ctx, ["OWNER", "ADMIN"]);
+      const { businessId } = await assertBusinessRole(ctx, ["OWNER", "ADMIN"]);
 
       const connections = await ctx.db.integrationConnection.findMany({
         where: { businessId },
@@ -33,7 +60,7 @@ export const keyConnectorRouter = router({
         orderBy: { providerKey: "asc" },
       });
 
-      return connections.map((c) => ({
+      return connections.map((c: ConnectionListRow) => ({
         key: c.providerKey,
         displayName:
           c.displayName ?? c.providerKey.replace(/_/g, " ").toUpperCase(),
@@ -55,7 +82,7 @@ export const keyConnectorRouter = router({
   getProviderDetail: protectedProcedure
     .input(z.object({ providerKey: z.string() }))
     .query(async ({ ctx, input }) => {
-      const { businessId } = assertBusinessAccess(ctx, ["OWNER", "ADMIN"]);
+      const { businessId } = await assertBusinessRole(ctx, ["OWNER", "ADMIN"]);
 
       const connection = await ctx.db.integrationConnection.findUnique({
         where: {
@@ -98,7 +125,7 @@ export const keyConnectorRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const { businessId, userId } = assertBusinessAccess(ctx, [
+      const { businessId, userId } = await assertBusinessRole(ctx, [
         "OWNER",
         "ADMIN",
       ]);
@@ -151,7 +178,7 @@ export const keyConnectorRouter = router({
   disconnectProvider: protectedProcedure
     .input(z.object({ providerKey: z.string() }))
     .mutation(async ({ ctx, input }) => {
-      const { businessId, userId } = assertBusinessAccess(ctx, [
+      const { businessId, userId } = await assertBusinessRole(ctx, [
         "OWNER",
         "ADMIN",
       ]);
@@ -181,7 +208,7 @@ export const keyConnectorRouter = router({
   getConnections: protectedProcedure
     .input(z.void().optional())
     .query(async ({ ctx }) => {
-      const { businessId } = assertBusinessAccess(ctx, ["OWNER", "ADMIN"]);
+      const { businessId } = await assertBusinessRole(ctx, ["OWNER", "ADMIN"]);
 
       return ctx.db.integrationConnection.findMany({
         where: { businessId },
@@ -200,7 +227,7 @@ export const keyConnectorRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const { businessId, userId } = assertBusinessAccess(ctx, [
+      const { businessId, userId } = await assertBusinessRole(ctx, [
         "OWNER",
         "ADMIN",
       ]);
@@ -243,7 +270,7 @@ export const keyConnectorRouter = router({
         .optional(),
     )
     .query(async ({ ctx, input }) => {
-      const { businessId } = assertBusinessAccess(ctx, ["OWNER", "ADMIN"]);
+      const { businessId } = await assertBusinessRole(ctx, ["OWNER", "ADMIN"]);
 
       const [items, total] = await Promise.all([
         ctx.db.connectorAuditLog.findMany({
@@ -277,7 +304,7 @@ export const keyConnectorRouter = router({
   getConnectionHealth: protectedProcedure
     .input(z.void().optional())
     .query(async ({ ctx }) => {
-      const { businessId } = assertBusinessAccess(ctx, ["OWNER", "ADMIN"]);
+      const { businessId } = await assertBusinessRole(ctx, ["OWNER", "ADMIN"]);
 
       const connections = await ctx.db.integrationConnection.findMany({
         where: { businessId },
@@ -293,7 +320,7 @@ export const keyConnectorRouter = router({
 
       const overallScore = connections.length
         ? Math.round(
-            connections.reduce((sum, c) => sum + (c.healthScore ?? 0), 0) /
+            connections.reduce((sum: number, c: ConnectionHealthRow) => sum + (c.healthScore ?? 0), 0) /
               connections.length,
           )
         : 100;
@@ -308,7 +335,7 @@ export const keyConnectorRouter = router({
       return {
         overallScore,
         overallStatus,
-        providers: connections.map((c) => ({
+        providers: connections.map((c: ConnectionHealthRow) => ({
           providerKey: c.providerKey,
           status: c.status.toLowerCase(),
           healthScore: c.healthScore,
@@ -331,7 +358,7 @@ export const keyConnectorRouter = router({
         .optional(),
     )
     .query(async ({ ctx, input }) => {
-      const { businessId } = assertBusinessAccess(ctx, ["OWNER", "ADMIN"]);
+      const { businessId } = await assertBusinessRole(ctx, ["OWNER", "ADMIN"]);
 
       const [items, total] = await Promise.all([
         ctx.db.connectorAuditLog.findMany({
@@ -357,7 +384,7 @@ export const keyConnectorRouter = router({
   processAiCommand: protectedProcedure
     .input(z.object({ command: z.string(), providerKey: z.string().optional() }))
     .mutation(async ({ ctx, input }) => {
-      const { businessId, userId } = assertBusinessAccess(ctx, [
+      const { businessId, userId } = await assertBusinessRole(ctx, [
         "OWNER",
         "ADMIN",
       ]);
