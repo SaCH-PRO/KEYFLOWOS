@@ -62,6 +62,16 @@ jobs:
       - name: Lint web
         run: pnpm --filter web lint --max-warnings 44
 
+      # @keyflow/db and @keyflow/api resolve their `types` to ./dist/*.d.ts, and
+      # dist/ is gitignored. On a fresh CI checkout those declarations do not
+      # exist, so `apps/server` could not resolve either package and every
+      # Prisma-derived callback parameter collapsed to an implicit any — ~40
+      # TS7006 errors cascading from two TS2307s. Locally the step passed only
+      # because a previous build had left dist/ behind. Build the workspace
+      # packages first so the type check sees real declarations.
+      - name: Build workspace packages
+        run: pnpm --filter @keyflow/db --filter @keyflow/api build
+
       - name: Type check server
         run: cd apps/server && npx tsc --noEmit
 
