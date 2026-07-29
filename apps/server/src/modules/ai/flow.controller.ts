@@ -4,6 +4,7 @@ import { Response } from 'express';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { FlowOrchestratorService, FlowAttachment, FlowPageContext } from './flow-orchestrator.service';
+import { BusinessRole } from './role-engine.service';
 
 @Controller('ai')
 @UseGuards(CrmRateLimitGuard)
@@ -56,6 +57,7 @@ export class AiFlowController {
       pageContext?: FlowPageContext;
       attachments?: FlowAttachment[];
       sessionId?: string;
+      role?: string;
     },
     @Res() res: Response,
   ) {
@@ -66,9 +68,10 @@ export class AiFlowController {
     res.flushHeaders();
 
     const history = body.history || [];
+    const role = body.role as BusinessRole | undefined;
 
     try {
-      const stream = this.flow.streamChat(businessId, body.message, history, body.pageContext, undefined, body.attachments, body.sessionId);
+      const stream = this.flow.streamChat(businessId, body.message, history, body.pageContext, role, body.attachments, body.sessionId);
 
       for await (const chunk of stream) {
         if (res.destroyed) break;

@@ -21,7 +21,7 @@ const MODES: { id: ChatMode; label: string; icon: React.ReactNode; description: 
 ];
 
 export function KeyFullChatShell() {
-  const { status, showHistory, setShowHistory, activeSessionId, sessions, chatMode, setChatMode, messages, setMessages, setActiveSessionId, setInput, setStatus, setError } = useKeyChat();
+  const { status, showHistory, setShowHistory, activeSessionId, sessions, chatMode, setChatMode, setMessages, setActiveSessionId, setInput, setStatus, setError } = useKeyChat();
   const { sendMessage, stop, confirmAction, loadSessions, createNewSession, selectSession } = useKeyChatActions();
   const [mode, setMode] = useState<ChatMode>(chatMode ?? "general");
   const [showModeMenu, setShowModeMenu] = useState(false);
@@ -34,11 +34,15 @@ export function KeyFullChatShell() {
     }
   }, [mode, chatMode, setChatMode]);
 
-  // Sync store mode to local when it changes externally
+  // Sync store mode to local when it changes externally (e.g., resetForNewSession)
+  // Use a ref to avoid cascading renders from setState in effect
+  const modeSyncRef = useRef<string | undefined>(chatMode);
   useEffect(() => {
-    if (chatMode && chatMode !== mode) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
-      setMode(chatMode as ChatMode);
+    if (chatMode && chatMode !== mode && chatMode !== modeSyncRef.current) {
+      modeSyncRef.current = chatMode;
+      // Defer setState to avoid synchronous setState in effect
+      const timeout = setTimeout(() => setMode(chatMode as ChatMode), 0);
+      return () => clearTimeout(timeout);
     }
   }, [chatMode, mode]);
 

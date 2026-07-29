@@ -64,6 +64,7 @@ export interface StreamRequest {
   sessionId?: string | null;
   pageContext?: KeyChatPageContext;
   attachments?: KeyChatAttachment[];
+  role?: string;
 }
 
 export function useKeyStream() {
@@ -89,6 +90,7 @@ export function useKeyStream() {
         })),
         sessionId: req.sessionId,
         pageContext: req.pageContext,
+        role: req.role,
         attachments: req.attachments?.map((a) => ({
           type: getAttachmentType(a.contentType),
           url: a.url,

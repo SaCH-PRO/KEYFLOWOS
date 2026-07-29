@@ -12,7 +12,8 @@ interface UseKeyVoiceQueueOptions {
   onError?: (messageId: string, error: string) => void;
 }
 
-const MAX_CACHE_SIZE = 20;
+// Cache limit constant — reserved for future LRU eviction
+const _MAX_CACHE_SIZE = 20;
 
 export function useKeyVoiceQueue(options?: UseKeyVoiceQueueOptions) {
   const { engine, state } = useTts();
@@ -24,6 +25,8 @@ export function useKeyVoiceQueue(options?: UseKeyVoiceQueueOptions) {
 
   // Cleanup on unmount: stop playback and revoke all cached Blob URLs
   useEffect(() => {
+    // Copy ref value to local variable for cleanup closure
+    const cacheMap = audioCacheRef.current;
     return () => {
       activeAudioRef.current?.pause();
       activeAudioRef.current = null;
@@ -32,31 +35,19 @@ export function useKeyVoiceQueue(options?: UseKeyVoiceQueueOptions) {
         timeoutRef.current = null;
       }
       // Revoke all cached Blob URLs to prevent memory leaks
-      audioCacheRef.current.forEach((url) => {
+      cacheMap.forEach((url) => {
         try {
           URL.revokeObjectURL(url);
         } catch {
           // ignore
         }
       });
-      audioCacheRef.current.clear();
+      cacheMap.clear();
     };
   }, []);
 
   const isPlaying = useCallback((messageId: string) => playingMessageId === messageId, [playingMessageId]);
   const isAnyPlaying = useCallback(() => playingMessageId !== null, [playingMessageId]);
-
-  const revokeAndDelete = useCallback((messageId: string) => {
-    const url = audioCacheRef.current.get(messageId);
-    if (url) {
-      try {
-        URL.revokeObjectURL(url);
-      } catch {
-        // ignore
-      }
-      audioCacheRef.current.delete(messageId);
-    }
-  }, []);
 
   const stop = useCallback(() => {
     // Stop any active audio element
@@ -111,7 +102,7 @@ export function useKeyVoiceQueue(options?: UseKeyVoiceQueueOptions) {
           return;
         }
 
-        // Use TTS engine — it returns a promise that resolves when audio finishes
+        // Use TTS engine — it now returns a promise that resolves when audio finishes
         await engine.speak(text, businessId);
         options?.onComplete?.(messageId);
       } catch (err) {
