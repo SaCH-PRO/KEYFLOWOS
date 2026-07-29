@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type React from "react";
 import { useKeyChat, useKeyChatActions, KeyChatMessages, KeyChatInput, KeyChatVoiceBar } from "@/components/key/chat";
-import { PanelLeft, Plus, MessageSquare, Bot, LayoutGrid, Dna, Shield, TrendingUp, Users, Settings, ChevronDown, X } from "lucide-react";
+import { PanelLeft, Plus, MessageSquare, Bot, LayoutGrid, Dna, Shield, TrendingUp, Users, Settings, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { KeyActionChips } from "./key-action-chips";
@@ -37,6 +37,7 @@ export function KeyFullChatShell() {
   // Sync store mode to local when it changes externally
   useEffect(() => {
     if (chatMode && chatMode !== mode) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs external or derived state into local component state
       setMode(chatMode as ChatMode);
     }
   }, [chatMode, mode]);

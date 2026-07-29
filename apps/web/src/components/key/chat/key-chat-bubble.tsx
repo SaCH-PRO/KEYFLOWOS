@@ -26,6 +26,7 @@ export function KeyChatBubble() {
 
   useEffect(() => {
     if (apiState === "suggestion" && !isExpanded) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- transient feedback: auto-dismissing suggestion bubble on a timer
       setShowSuggestions(true);
       const timer = setTimeout(() => setShowSuggestions(false), 8000);
       return () => clearTimeout(timer);

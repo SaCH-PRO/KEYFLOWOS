@@ -42,6 +42,9 @@ import {
   type ContractListItem,
   type ContractStats,
   type ContractTag,
+  type ContractPartyInput,
+  type CreateContractInput,
+  type ExtractContractTermsInput,
 } from "@/lib/api/contracts";
 
 const STATUS_OPTIONS = [
@@ -232,7 +235,7 @@ export default function ContractsPage() {
     setSelectedContract(null);
   };
 
-  const handleSave = async (input: any) => {
+  const handleSave = async (input: CreateContractInput) => {
     if (!businessId) return;
     setActionLoading("save");
     if (sheetMode === "create") {
@@ -272,7 +275,7 @@ export default function ContractsPage() {
     setActionLoading(null);
   };
 
-  const handleExtract = async (source: any) => {
+  const handleExtract = async (source: ExtractContractTermsInput) => {
     if (!businessId || !selectedContract) return;
     setActionLoading("extract");
     const { data, error } = await extractContractTerms(businessId, selectedContract.id, source);
@@ -503,7 +506,7 @@ function ContractForm({
 }: {
   contract: Contract | null;
   tags: ContractTag[];
-  onSubmit: (input: any) => void;
+  onSubmit: (input: CreateContractInput) => void;
   onCancel: () => void;
   loading: boolean;
 }) {
@@ -513,23 +516,24 @@ function ContractForm({
     setForm(initializeForm(contract));
   }, [contract]);
 
-  const update = (key: string, value: any) => setForm((f: any) => ({ ...f, [key]: value }));
+  const update = <K extends keyof ContractFormState>(key: K, value: ContractFormState[K]) =>
+    setForm((f) => ({ ...f, [key]: value }));
 
   const updateParty = (idx: number, key: string, value: string) => {
-    setForm((f: any) => ({
+    setForm((f) => ({
       ...f,
-      parties: f.parties.map((p: any, i: number) => (i === idx ? { ...p, [key]: value } : p)),
+      parties: f.parties.map((p, i) => (i === idx ? { ...p, [key]: value } : p)),
     }));
   };
 
-  const addParty = () => setForm((f: any) => ({ ...f, parties: [...f.parties, { role: "client", name: "" }] }));
+  const addParty = () => setForm((f) => ({ ...f, parties: [...f.parties, { role: "client", name: "" }] }));
   const removeParty = (idx: number) =>
-    setForm((f: any) => ({ ...f, parties: f.parties.filter((_: any, i: number) => i !== idx) }));
+    setForm((f) => ({ ...f, parties: f.parties.filter((_, i) => i !== idx) }));
 
   const toggleTag = (tagId: string) => {
-    setForm((f: any) => ({
+    setForm((f) => ({
       ...f,
-      tagIds: f.tagIds.includes(tagId) ? f.tagIds.filter((id: string) => id !== tagId) : [...f.tagIds, tagId],
+      tagIds: f.tagIds.includes(tagId) ? f.tagIds.filter((id) => id !== tagId) : [...f.tagIds, tagId],
     }));
   };
 
@@ -538,7 +542,7 @@ function ContractForm({
       ...form,
       contractValue: form.contractValue ? Number(form.contractValue) : undefined,
       renewalNoticeDays: form.renewalNoticeDays ? Number(form.renewalNoticeDays) : undefined,
-      parties: form.parties.filter((p: any) => p.name.trim()),
+      parties: form.parties.filter((p) => p.name.trim()),
     };
     onSubmit(input);
   };
@@ -615,7 +619,7 @@ function ContractForm({
           </Button>
         </div>
         <div className="space-y-2">
-          {form.parties.map((party: any, idx: number) => (
+          {form.parties.map((party, idx) => (
             <div key={idx} className="grid grid-cols-12 gap-2 items-center">
               <Input
                 className="col-span-3"
@@ -674,8 +678,25 @@ function ContractForm({
   );
 }
 
+/** Shape of the contract editor's local form state. */
+type ContractFormState = ReturnType<typeof initializeForm>;
+
 function initializeForm(contract: Contract | null) {
+  // Typed explicitly so the mapped branch and the single-party fallback unify to
+  // one element type. The fallback deliberately stays role+name only — the other
+  // fields are optional, so nothing new is sent to the API for a new party.
+  const parties: ContractPartyInput[] = contract?.parties?.map((p) => ({
+    role: p.role,
+    name: p.name,
+    email: p.email ?? "",
+    phone: p.phone ?? "",
+    address: p.address ?? "",
+    notes: p.notes ?? "",
+    contactId: p.contactId ?? "",
+  })) ?? [{ role: "client", name: "" }];
+
   return {
+    parties,
     title: contract?.title ?? "",
     contractType: contract?.contractType ?? "",
     status: contract?.status ?? "DRAFT",
@@ -689,15 +710,6 @@ function initializeForm(contract: Contract | null) {
     jurisdiction: contract?.jurisdiction ?? "",
     retentionPolicy: contract?.retentionPolicy ?? "",
     notes: contract?.notes ?? "",
-    parties: contract?.parties?.map((p) => ({
-      role: p.role,
-      name: p.name,
-      email: p.email ?? "",
-      phone: p.phone ?? "",
-      address: p.address ?? "",
-      notes: p.notes ?? "",
-      contactId: p.contactId ?? "",
-    })) ?? [{ role: "client", name: "" }],
     tagIds: contract?.tags?.map((t) => t.tag.id) ?? [],
   };
 }
@@ -711,7 +723,7 @@ function ContractDetail({
 }: {
   contract: Contract;
   tags: ContractTag[];
-  onExtract: (source: any) => void;
+  onExtract: (source: ExtractContractTermsInput) => void;
   onAcknowledgeAlert: (id: string) => void;
   loading: string | null;
 }) {

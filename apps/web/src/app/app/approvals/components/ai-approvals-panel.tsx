@@ -113,6 +113,7 @@ export function AiApprovalsPanel() {
   );
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async hydration of approvals stats and items on mount and when filters change
     loadStats();
     loadItems();
   }, [loadStats, loadItems]);

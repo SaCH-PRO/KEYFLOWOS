@@ -6,7 +6,7 @@ import { Loader2, ArrowRight, RotateCcw, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import { apiGet, apiPost } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
-import { getGenome, type GenomeIntegrityResult } from "@/lib/api/business-genome";
+import { getGenome } from "@/lib/api/business-genome";
 import type {
   GenesisReadinessScore,
   GenesisIdeaAnalysis,

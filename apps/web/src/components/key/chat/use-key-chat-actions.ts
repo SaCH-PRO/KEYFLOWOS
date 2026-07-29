@@ -4,17 +4,12 @@ import { useCallback, useRef } from "react";
 import { getStoredBusinessId } from "@/lib/workspace";
 import {
   sendFlowChat,
-  confirmFlowAction,
   fetchFlowSessions,
   deleteFlowSession,
   type FlowChatResponse,
-  type FlowPendingConfirmation,
 } from "@/lib/client";
 import {
   sendGenomeMessage,
-  getGenomeMessages,
-  type GenomeChatMessage,
-  type ProposedGenomeUpdate,
 } from "@/lib/api/business-genome";
 import { useKeyChat } from "./key-chat-store";
 import { useKeyStream, type FlowStreamChunk, getAttachmentType } from "./use-key-stream";

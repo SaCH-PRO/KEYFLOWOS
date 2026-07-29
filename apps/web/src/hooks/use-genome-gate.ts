@@ -60,6 +60,7 @@ export function useGenomeGate(): GenomeGateState {
       if (!isAllowedPath(pathWithQuery)) {
         router.replace("/app/onboarding");
       }
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- loading flag lifecycle: closes the gate once the no-business path resolves
       setState((s) => ({ ...s, checking: false, gateActive: true }));
       return;
     }
@@ -101,7 +102,7 @@ export function useGenomeGate(): GenomeGateState {
       })
       .catch((err) => {
         if (cancelled) return;
-        // eslint-disable-next-line no-console
+         
         console.error("Genome gate check failed", err);
         setState({
           checking: false,

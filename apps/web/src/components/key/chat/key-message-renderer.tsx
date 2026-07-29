@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, type CSSProperties } from "react";
-import type { SyntaxHighlighterProps } from "react-syntax-highlighter";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
@@ -106,7 +105,7 @@ export function KeyMessageRenderer({ message, isStreaming, onConfirm, onCardAdva
                           </div>
                           <SyntaxHighlighter
                             language={language}
-                            style={vscDarkPlus as any}
+                            style={vscDarkPlus as Record<string, CSSProperties>}
                             customStyle={{ margin: 0, padding: "1rem", fontSize: "0.8rem" } as CSSProperties}
                           >
                             {codeString}
