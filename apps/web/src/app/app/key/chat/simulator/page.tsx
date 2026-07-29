@@ -2,6 +2,8 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import { KeyChatProvider, useKeyChat, useKeyChatActions } from "@/components/key/chat";
+import type { OnboardingCardData } from "@/components/key/chat/types";
+import type { FlowPendingConfirmation } from "@/lib/client";
 import { KeyFullChatShell } from "@/components/key/chat/key-full-chat-shell";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -198,7 +200,7 @@ function useVirtualSimulator() {
         case "confirmation_required":
           if (chunk.pendingConfirmations) {
             chat.updateMessage(assistantId, {
-              pendingConfirmations: chunk.pendingConfirmations as any,
+              pendingConfirmations: chunk.pendingConfirmations as FlowPendingConfirmation[],
               requiresConfirmation: true,
               plan: chunk.pendingConfirmations.map((pc) => ({
                 toolCallId: pc.toolCallId,
@@ -215,7 +217,7 @@ function useVirtualSimulator() {
 
         case "card":
           if (chunk.card) {
-            chat.updateMessage(assistantId, { card: chunk.card as any });
+            chat.updateMessage(assistantId, { card: chunk.card as OnboardingCardData });
             addLog(`📋 Card: ${chunk.card.type}`);
           }
           break;

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import { useEffect } from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import { KeyChatProvider, useKeyChat } from '../key-chat-store';
 import { KeyActionChips } from '../key-action-chips';
@@ -195,17 +196,24 @@ describe('Key Chat Command Center', () => {
 
   describe('KeyChatProvider', () => {
     it('provides initial state', () => {
-      let chatState: any;
-      
+      let chatState: ReturnType<typeof useKeyChat> | undefined;
+
       function TestConsumer() {
         const chat = useKeyChat();
-        chatState = chat;
+        // Assign in an effect, not during render: writing to a variable declared
+        // outside the component is a render side effect and trips
+        // react-hooks/purity.
+        useEffect(() => {
+          chatState = chat;
+        }, [chat]);
         return null;
       }
       
       renderWithProviders(<TestConsumer />);
       
-      expect(chatState).toBeDefined();
+      // Narrows the union for the assertions below; also fails loudly if the
+      // effect never ran.
+      if (!chatState) throw new Error('chat state was never captured');
       expect(chatState.chatMode).toBe('general');
       expect(chatState.messages).toEqual([]);
       expect(chatState.sessions).toEqual([]);
