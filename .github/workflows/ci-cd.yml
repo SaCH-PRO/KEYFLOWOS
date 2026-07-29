@@ -78,6 +78,15 @@ jobs:
       - name: Type check server
         run: cd apps/server && npx tsc --noEmit
 
+      # apps/web/tsconfig.json lists "next" in compilerOptions.types, which is
+      # satisfied by Next's generated next-env.d.ts + .next/types. Both are
+      # gitignored, so a fresh checkout has neither and tsc fails with
+      # TS2688 "Cannot find type definition file for 'next'". Locally the step
+      # passed only because `next dev`/`next build` had generated them earlier.
+      # `next typegen` produces exactly those without a full production build.
+      - name: Generate Next types
+        run: pnpm --filter web exec next typegen
+
       - name: Type check web
         run: cd apps/web && npx tsc --noEmit
 
