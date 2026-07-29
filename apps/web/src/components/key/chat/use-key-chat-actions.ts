@@ -21,13 +21,13 @@ export function useKeyChatActions() {
   const { start: startStream, stop: stopStream } = useKeyStream();
   const processingRef = useRef(false);
 
-  const chatMode = chat.chatMode ?? "general";
+  const chatMode = (chat.chatMode ?? "general") as string;
 
   const buildHistory = useCallback((): KeyChatMessage[] => {
     return chat.messages.filter((m) => m.role !== "system");
   }, [chat.messages]);
 
-  const appendAssistantFromResponse = useCallback(
+  const _appendAssistantFromResponse = useCallback(
     (res: FlowChatResponse, id?: string) => {
       const messageId = id ?? nanoid();
       const assistantMsg: KeyChatMessage = {
@@ -68,7 +68,12 @@ export function useKeyChatActions() {
       }
 
       if (chunk.type === "content_delta" && chunk.content) {
-        chat.updateLastAssistantMessage({ content: chunk.content });
+        // Accumulate delta content rather than replacing
+        const lastAssistant = [...chat.messages].reverse().find((m) => m.role === "assistant");
+        if (lastAssistant) {
+          const accumulated = (lastAssistant.content || "") + chunk.content;
+          chat.updateMessage(lastAssistant.id, { content: accumulated });
+        }
       }
 
       if (chunk.type === "confirmation_required" && chunk.pendingConfirmations) {
@@ -115,6 +120,84 @@ export function useKeyChatActions() {
     },
     [chat]
   );
+
+  // ─── Session Management (declared before sendMessage to avoid TDZ) ───
+
+  const loadSessions = useCallback(async () => {
+    const businessId = getStoredBusinessId();
+    if (!businessId) return;
+
+    // Genome mode doesn't use flow sessions
+    if (chatMode === "genome_onboarding") {
+      chat.setSessions([]);
+      return;
+    }
+
+    const res = await fetchFlowSessions(businessId);
+    if (!res.data || !Array.isArray(res.data)) return;
+
+    const sessions: KeyChatSession[] = (res.data as Array<Record<string, unknown>>).map((s) => {
+      const messages = ((s.messages as KeyChatMessage[]) ?? []);
+      const firstUser = messages.find((m) => m.role === "user");
+      const title = firstUser?.content?.slice(0, 60) || "New chat";
+      return {
+        id: String(s.id),
+        title: title + (firstUser && firstUser.content.length > 60 ? "…" : ""),
+        updatedAt: String(s.updatedAt),
+        createdAt: String(s.createdAt),
+      };
+    });
+    chat.setSessions(sessions);
+  }, [chat, chatMode]);
+
+  const selectSession = useCallback(
+    async (sessionId: string) => {
+      const businessId = getStoredBusinessId();
+      if (!businessId) return;
+      chat.setActiveSessionId(sessionId);
+      chat.setMessages([]);
+      chat.setStatus("loading");
+
+      const res = await fetchFlowSessions(businessId);
+      const session = ((res.data as Array<Record<string, unknown>>) ?? []).find((s) => s.id === sessionId);
+      if (session && Array.isArray(session.messages as unknown[])) {
+        const restored: KeyChatMessage[] = (session.messages as Array<Record<string, unknown>>).map((m, idx: number) => ({
+          id: String(m.id ?? `${sessionId}-${idx}`),
+          role: String(m.role) as "user" | "assistant" | "system",
+          content: String(m.content || ""),
+          timestamp: m.timestamp ? new Date(String(m.timestamp)).getTime() : Date.now(),
+          attachments: m.attachments as KeyChatMessage["attachments"],
+          pendingConfirmations: m.pendingConfirmations as KeyChatMessage["pendingConfirmations"],
+          plan: m.plan as KeyChatMessage["plan"],
+          toolResults: m.toolResults as KeyChatMessage["toolResults"],
+          requiresConfirmation: Boolean(m.requiresConfirmation),
+          usage: m.usage as KeyChatMessage["usage"],
+        }));
+        chat.setMessages(restored);
+      }
+      chat.setStatus("idle");
+    },
+    [chat]
+  );
+
+  const createNewSession = useCallback(() => {
+    chat.resetForNewSession();
+  }, [chat]);
+
+  const deleteSession = useCallback(
+    async (sessionId: string) => {
+      const businessId = getStoredBusinessId();
+      if (!businessId) return;
+      await deleteFlowSession(businessId, sessionId);
+      if (chat.activeSessionId === sessionId) {
+        chat.resetForNewSession();
+      }
+      await loadSessions();
+    },
+    [chat, loadSessions]
+  );
+
+  // ─── Send Message ───
 
   const sendMessage = useCallback(
     async (text?: string, opts?: { pendingConfirmation?: { toolCallId: string; confirmed: boolean; toolName?: string; toolArgs?: Record<string, unknown> } }) => {
@@ -194,12 +277,12 @@ export function useKeyChatActions() {
             chat.setStatus("error");
             chat.setError(res.error ?? undefined);
           }
-        } catch (err) {
+        } catch (_err) {
           chat.updateMessage(assistantId, {
             content: "Sorry, I encountered an error. Please try again.",
           });
           chat.setStatus("error");
-          chat.setError((err as Error).message);
+          chat.setError((_err as Error).message);
         } finally {
           chat.setStatus("idle");
           processingRef.current = false;
@@ -230,8 +313,26 @@ export function useKeyChatActions() {
           );
           if (res.data) {
             if (res.data.sessionId) chat.setActiveSessionId(res.data.sessionId);
+            // Update the placeholder in-place rather than appending a duplicate
             chat.updateMessage(assistantId, { content: res.data.reply });
-            appendAssistantFromResponse(res.data, assistantId);
+            // Only append plan/confirmation/card metadata from the response
+            if (res.data.pendingConfirmations?.length || res.data.toolResults?.length || res.data.card) {
+              chat.updateMessage(assistantId, {
+                pendingConfirmations: res.data.pendingConfirmations,
+                requiresConfirmation: res.data.requiresConfirmation,
+                toolResults: res.data.toolResults,
+                card: res.data.card,
+                usage: res.data.usage,
+                plan: res.data.pendingConfirmations?.map((pc) => ({
+                  toolCallId: pc.toolCallId,
+                  name: pc.name,
+                  description: pc.description,
+                  arguments: pc.arguments,
+                  riskLevel: pc.riskLevel,
+                  status: "pending" as const,
+                })),
+              });
+            }
           } else {
             chat.updateMessage(assistantId, {
               content: res.error || "Sorry, I encountered an error. Please try again.",
@@ -239,7 +340,7 @@ export function useKeyChatActions() {
             chat.setStatus("error");
             chat.setError(res.error ?? undefined);
           }
-        } catch (err) {
+        } catch (_err) {
           chat.updateMessage(assistantId, {
             content: "Sorry, I encountered an error. Please try again.",
           });
@@ -254,6 +355,7 @@ export function useKeyChatActions() {
           sessionId: chat.activeSessionId,
           pageContext: chat.pageContext,
           attachments,
+          role: chatMode === "genome_onboarding" ? undefined : (chatMode as string),
         },
         {
           onChunk: (chunk) => {
@@ -266,7 +368,7 @@ export function useKeyChatActions() {
             window.dispatchEvent(new CustomEvent("kf:key-state", { detail: { state: "idle" } }));
             void loadSessions();
           },
-          onError: async (error) => {
+          onError: async (_error) => {
             // Fall back to the non-streaming endpoint before giving up.
             await fallbackToRest();
             chat.setStatus("idle");
@@ -276,7 +378,7 @@ export function useKeyChatActions() {
         }
       );
     },
-    [chat, buildHistory, appendAssistantFromResponse, processStreamChunk, startStream, chatMode]
+    [chat, buildHistory, processStreamChunk, startStream, chatMode, loadSessions]
   );
 
   const confirmAction = useCallback(
@@ -294,80 +396,6 @@ export function useKeyChatActions() {
     processingRef.current = false;
     window.dispatchEvent(new CustomEvent("kf:key-state", { detail: { state: "idle" } }));
   }, [stopStream, chat]);
-
-  const loadSessions = useCallback(async () => {
-    const businessId = getStoredBusinessId();
-    if (!businessId) return;
-
-    // Genome mode doesn't use flow sessions
-    if (chatMode === "genome_onboarding") {
-      chat.setSessions([]);
-      return;
-    }
-
-    const res = await fetchFlowSessions(businessId);
-    if (!res.data || !Array.isArray(res.data)) return;
-
-    const sessions: KeyChatSession[] = (res.data as Array<Record<string, unknown>>).map((s) => {
-      const messages = ((s.messages as KeyChatMessage[]) ?? []);
-      const firstUser = messages.find((m) => m.role === "user");
-      const title = firstUser?.content?.slice(0, 60) || "New chat";
-      return {
-        id: String(s.id),
-        title: title + (firstUser && firstUser.content.length > 60 ? "…" : ""),
-        updatedAt: String(s.updatedAt),
-        createdAt: String(s.createdAt),
-      };
-    });
-    chat.setSessions(sessions);
-  }, [chat, chatMode]);
-
-  const selectSession = useCallback(
-    async (sessionId: string) => {
-      const businessId = getStoredBusinessId();
-      if (!businessId) return;
-      chat.setActiveSessionId(sessionId);
-      chat.setMessages([]);
-      chat.setStatus("loading");
-
-      const res = await fetchFlowSessions(businessId);
-      const session = ((res.data as Array<Record<string, unknown>>) ?? []).find((s) => s.id === sessionId);
-      if (session && Array.isArray(session.messages as unknown[])) {
-        const restored: KeyChatMessage[] = (session.messages as Array<Record<string, unknown>>).map((m, idx: number) => ({
-          id: String(m.id ?? `${sessionId}-${idx}`),
-          role: String(m.role) as "user" | "assistant" | "system",
-          content: String(m.content || ""),
-          timestamp: m.timestamp ? new Date(String(m.timestamp)).getTime() : Date.now(),
-          attachments: m.attachments as KeyChatMessage["attachments"],
-          pendingConfirmations: m.pendingConfirmations as KeyChatMessage["pendingConfirmations"],
-          plan: m.plan as KeyChatMessage["plan"],
-          toolResults: m.toolResults as KeyChatMessage["toolResults"],
-          requiresConfirmation: Boolean(m.requiresConfirmation),
-          usage: m.usage as KeyChatMessage["usage"],
-        }));
-        chat.setMessages(restored);
-      }
-      chat.setStatus("idle");
-    },
-    [chat]
-  );
-
-  const createNewSession = useCallback(() => {
-    chat.resetForNewSession();
-  }, [chat]);
-
-  const deleteSession = useCallback(
-    async (sessionId: string) => {
-      const businessId = getStoredBusinessId();
-      if (!businessId) return;
-      await deleteFlowSession(businessId, sessionId);
-      if (chat.activeSessionId === sessionId) {
-        chat.resetForNewSession();
-      }
-      await loadSessions();
-    },
-    [chat, loadSessions]
-  );
 
   return {
     sendMessage,

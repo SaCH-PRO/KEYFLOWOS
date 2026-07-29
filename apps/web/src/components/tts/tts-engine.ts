@@ -230,11 +230,11 @@ export class TtsEngine {
     this.setAutoSpeak(!this.state.autoSpeak);
   }
 
-  speak(text: string, businessId?: string | null) {
-    if (this.state.muted || !text.trim()) return;
+  speak(text: string, businessId?: string | null): Promise<void> {
+    if (this.state.muted || !text.trim()) return Promise.resolve();
     this.cancel();
     const sentences = splitSentences(text);
-    if (sentences.length === 0) return;
+    if (sentences.length === 0) return Promise.resolve();
     this.setState({
       playing: true,
       paused: false,
@@ -242,7 +242,7 @@ export class TtsEngine {
       currentSentence: sentences[0] || "",
       queue: sentences.slice(1),
     });
-    void this.runQueue(sentences, businessId);
+    return this.runQueue(sentences, businessId);
   }
 
   cancel() {
