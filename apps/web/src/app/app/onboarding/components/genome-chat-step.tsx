@@ -19,6 +19,7 @@ export function GenomeChatStep({ onComplete, className }: GenomeChatStepProps) {
 
   useEffect(() => {
     if (!businessId) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async hydration: clears prior error before fetching the genome
     setError(null);
     getGenome(businessId)
       .then(({ data, error: apiError }) => {

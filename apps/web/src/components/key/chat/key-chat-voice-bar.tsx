@@ -12,7 +12,7 @@ import {
   Gauge,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useTts } from "@/components/tts";
+import { useTts, type TtsProviderName } from "@/components/tts";
 import { getStoredBusinessId } from "@/lib/workspace";
 
 export function KeyChatVoiceBar() {
@@ -93,7 +93,7 @@ export function KeyChatVoiceBar() {
 
       <select
         value={state.provider}
-        onChange={(e) => engine.setProvider(e.target.value as any)}
+        onChange={(e) => engine.setProvider(e.target.value as TtsProviderName)}
         className="rounded-lg border border-border/60 bg-background px-2 py-1.5 text-[11px] text-foreground outline-none focus:ring-1 focus:ring-[hsl(var(--kf-accent1))]"
       >
         {providerOptions.map((p) => (

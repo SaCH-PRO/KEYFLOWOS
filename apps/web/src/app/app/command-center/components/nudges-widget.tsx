@@ -21,6 +21,7 @@ export function NudgesWidget({ businessId }: NudgesWidgetProps) {
 
   useEffect(() => {
     let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- loading flag tied to async fetch
     setLoading(true);
     fetchConciergeNudges(businessId).then(({ data }) => {
       if (cancelled) return;

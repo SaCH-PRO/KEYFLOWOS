@@ -20,7 +20,7 @@ export function KeyChatGreeting() {
       <div className="space-y-1">
         <h3 className="text-lg font-semibold">{DEFAULT_GREETING}</h3>
         <p className="text-sm text-muted-foreground">
-          Ask me anything about your business, upload a document, or tell me what you'd like to do.
+          Ask me anything about your business, upload a document, or tell me what you&apos;d like to do.
         </p>
       </div>
       <div className="flex w-full flex-wrap justify-center gap-2">

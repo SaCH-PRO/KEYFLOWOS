@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { useKeyChat, useKeyChatActions, KeyChatMessages, KeyChatInput, KeyChatVoiceBar, KeyChatHistory } from "@/components/key/chat";
+import { useKeyChat, useKeyChatActions, KeyChatMessages, KeyChatInput, KeyChatVoiceBar } from "@/components/key/chat";
 import { PanelLeft, Plus, MessageSquare, Bot } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";

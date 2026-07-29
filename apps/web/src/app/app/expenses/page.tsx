@@ -224,7 +224,7 @@ export default function ExpensesInboxPage() {
           vendor: data.vendor,
           receiptUrl: data.receiptUrl,
         });
-        // eslint-disable-next-line react-hooks/set-state-in-effect -- open side-sheet from query param
+         
         setShowAddDrawer(true);
       }
     } catch {

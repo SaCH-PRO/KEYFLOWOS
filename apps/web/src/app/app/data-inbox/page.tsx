@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, createElement } from "react";
 import {
   Inbox,
   HardDrive,
@@ -527,7 +527,6 @@ function IngestionItemCard({
   selected: boolean;
   onClick: () => void;
 }) {
-  const Icon = getSourceIcon(item.sourceType);
   return (
     <button
       onClick={onClick}
@@ -537,7 +536,11 @@ function IngestionItemCard({
     >
       <div className="flex items-start gap-3">
         <div className="w-9 h-9 rounded-lg bg-muted flex items-center justify-center flex-shrink-0">
-          <Icon className="w-5 h-5 text-[hsl(var(--kf-muted-foreground))]" />
+          {/* createElement avoids a capitalized component-valued local in render scope;
+              getSourceIcon is a lookup returning a stable module-scope reference. */}
+          {createElement(getSourceIcon(item.sourceType), {
+            className: "w-5 h-5 text-[hsl(var(--kf-muted-foreground))]",
+          })}
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">

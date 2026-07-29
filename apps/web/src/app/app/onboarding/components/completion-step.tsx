@@ -45,6 +45,7 @@ export function CompletionStep() {
   }, [businessId]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async hydration: runs the completion request on mount
     complete();
   }, [complete]);
 

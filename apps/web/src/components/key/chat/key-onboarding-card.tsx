@@ -723,6 +723,7 @@ function TemplatePickerCard({
 
   useEffect(() => {
     if (!businessId) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async hydration: clears prior error before fetching templates
     setError(null);
     fetchConciergeTemplates(businessId)
       .then(({ data, error: apiError }) => {
@@ -737,6 +738,7 @@ function TemplatePickerCard({
 
   useEffect(() => {
     if (!businessId || !selected) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- async hydration: clears derived preview before refetching for the new selection
       setPreview(null);
       return;
     }

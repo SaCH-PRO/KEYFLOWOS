@@ -36,6 +36,7 @@ export function TemplatePickerStep({ onComplete }: TemplatePickerStepProps) {
 
   useEffect(() => {
     if (!businessId || !selected) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- async hydration: clears derived preview before refetching for the new selection
       setPreview(null);
       return;
     }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { useMemo } from "react";
 import { useKeyChat } from "./key-chat-store";
 import { useKeyChatActions } from "./use-key-chat-actions";
 import { cn } from "@/lib/utils";

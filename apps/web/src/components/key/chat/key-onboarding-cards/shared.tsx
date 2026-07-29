@@ -8,6 +8,7 @@ import { getStoredBusinessId } from "@/lib/workspace";
 export function useBusinessId() {
   const [businessId, setBusinessId] = useState<string | null>(null);
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- client-only storage hydration
     setBusinessId(getStoredBusinessId());
   }, []);
   return businessId;
@@ -201,14 +202,18 @@ export function SelectInput({
   );
 }
 
-export function ToggleButton({
+// Generic over the option value so callers keep their own narrow type: a
+// string-valued toggle gets Dispatch<SetStateAction<string>> and a boolean one
+// gets Dispatch<SetStateAction<boolean>>. A `string | boolean` union here would
+// be assignable from neither.
+export function ToggleButton<T extends string | boolean>({
   value,
   onChange,
   options,
 }: {
-  value: string | boolean;
-  onChange: (value: any) => void;
-  options: { value: any; label: string }[];
+  value: T;
+  onChange: (value: T) => void;
+  options: { value: T; label: string }[];
 }) {
   return (
     <div className="flex flex-wrap gap-2">
