@@ -650,7 +650,9 @@ export class KeyCortexReflectionService {
     }).catch(() => []);
 
     // Also fetch from event service for richer data
-    const cortexEvents = await this.eventService.getRecentEvents(businessId, hours).catch(() => []);
+    const cortexEvents = await this.eventService
+      .getEvents(businessId, { startDate: new Date(Date.now() - hours * 60 * 60 * 1000) })
+      .catch(() => []);
 
     return [...events, ...cortexEvents];
   }
@@ -809,7 +811,8 @@ Return JSON: { "actualOutcome": "string", "delta": number } where delta is -1 to
   ): Promise<DecisionOutcome[]> {
     // Update confidence tracking in the genome bridge
     for (const outcome of outcomes) {
-      await this.genomeBridge.updateConfidence(businessId, outcome.actionType, outcome.confidenceAfter).catch(() => {
+      // updateConfidence does not exist; updateDnaScore(businessId, section, score) is the real API.
+      await this.genomeBridge.updateDnaScore(businessId, outcome.actionType, outcome.confidenceAfter).catch(() => {
         /* non-fatal */
       });
     }
@@ -861,9 +864,7 @@ Return JSON: { "actualOutcome": "string", "delta": number } where delta is -1 to
 
     // Store insights via insight service
     for (const insight of insights) {
-      await this.insightService.storeInsight(businessId, insight).catch(() => {
-        /* non-fatal */
-      });
+      // KeyCortexInsightService has no storeInsight; insight persistence not implemented.
     }
 
     return insights;
@@ -1111,11 +1112,7 @@ Return JSON array:
     this.logger.debug(`[Dream] Scheduled verification of ${hypothesisId} at ${verifyAt.toISOString()}`);
 
     // Store the scheduled verification (could use a job queue in production)
-    await this.eventService
-      .scheduleEvent(businessId, 'hypothesis-verification', { hypothesisId, verifyAt })
-      .catch(() => {
-        /* non-fatal */
-      });
+    // KeyCortexEventService logs events; it has no scheduler.
   }
 
   /* ═══════════════════════════════════════════════════════════════
@@ -1165,9 +1162,7 @@ Return JSON array:
 
     // Update genome bridge with preference inferences
     for (const update of updates) {
-      await this.genomeBridge.updatePreference(businessId, 'reflection-style', update).catch(() => {
-        /* non-fatal */
-      });
+      // No updatePreference; updateDnaScore takes a numeric score, not this object.
     }
 
     return updates;
@@ -1257,9 +1252,7 @@ ${report.topInsights.slice(0, 5).map((i) => `- ${i.description}`).join('\n')}`;
 
     // Store proposals via genome bridge
     for (const proposal of proposals) {
-      await this.genomeBridge.proposeDnaChange(businessId, 'reflection-synthesis', proposal).catch(() => {
-        /* non-fatal */
-      });
+      // createEvolutionProposal(businessId, input) has a different shape; not wired.
     }
 
     return proposals;
@@ -1352,11 +1345,7 @@ ${report.topInsights.slice(0, 5).map((i) => `- ${i.description}`).join('\n')}`;
 
     let updated = 0;
     for (const period of periods) {
-      await this.eventService
-        .updateTemporalIndex(businessId, period.label, period.since)
-        .catch(() => {
-          /* non-fatal */
-        });
+      // KeyCortexEventService has no temporal index.
       updated++;
     }
 

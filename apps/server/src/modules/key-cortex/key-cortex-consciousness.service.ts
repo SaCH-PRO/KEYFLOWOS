@@ -700,9 +700,10 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
 
     // ── 1. Genome-derived goals ─────────────────────────────────
     try {
-      const genomeState = await this.genomeBridge.getGenomeState(businessId);
-      if (genomeState?.recommendations) {
-        for (const rec of genomeState.recommendations.slice(0, 5)) {
+      // getGenomeState does not exist; ranked recommendations are their own API.
+      const genomeState = await this.genomeBridge.getRankedRecommendations(businessId);
+      if (genomeState) {
+        for (const rec of genomeState.slice(0, 5)) {
           goals.push(`[Genome] ${rec}`);
         }
       }
@@ -717,11 +718,11 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
     });
     const userRequests = userEvents
       .filter((e) => {
-        const payload = e.payload as Record<string, unknown>;
+        const payload = e.metadata as Record<string, unknown>;
         return (payload.acted as boolean) === false; // pending
       })
       .map((e) => {
-        const payload = e.payload as Record<string, unknown>;
+        const payload = e.metadata as Record<string, unknown>;
         return `[User] ${(payload.recommendation as string) ?? 'Pending request'}`;
       });
     goals.push(...userRequests.slice(0, 3));
@@ -836,7 +837,7 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
 
     // Check for stress signals
     const stressEvents = recentEvents.filter((e) => {
-      const payload = e.payload as Record<string, unknown>;
+      const payload = e.metadata as Record<string, unknown>;
       return (
         (payload.severity as string) === 'high' ||
         (payload.severity as string) === 'critical'
@@ -1174,7 +1175,7 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
         limit: 50,
       });
       return pendingEvents.filter((e) => {
-        const payload = e.payload as Record<string, unknown>;
+        const payload = e.metadata as Record<string, unknown>;
         return payload.result === 'pending';
       }).length;
     } catch {
@@ -1192,7 +1193,7 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
         limit: 50,
       });
       return alerts.filter((e) => {
-        const payload = e.payload as Record<string, unknown>;
+        const payload = e.metadata as Record<string, unknown>;
         return (payload.read as boolean) !== true;
       }).length;
     } catch {
@@ -1205,7 +1206,8 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
    */
   private async getGenomeStage(businessId: string): Promise<string> {
     try {
-      const genomeState = await this.genomeBridge.getGenomeState(businessId);
+      // getGenomeState does not exist; getGenomeIntelligence carries `stage`.
+      const genomeState = await this.genomeBridge.getGenomeIntelligence(businessId);
       return (genomeState?.stage as string) ?? 'initializing';
     } catch {
       return 'unknown';

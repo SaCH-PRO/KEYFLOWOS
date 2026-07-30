@@ -27,6 +27,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { ModelGatewayService } from '../ai/model-gateway.service';
 import { AiUsageService } from '../ai/ai-usage.service';
+import { PrismaService } from '../../core/prisma/prisma.service';
 import { KeyCortexContextV2Service } from './key-cortex-context-v2.service';
 import { KeyCortexInsightService } from './key-cortex-insight.service';
 import { v4 as uuidv4 } from 'uuid';
@@ -129,6 +130,7 @@ export class KeyCortexCreativityService {
   ];
 
   constructor(
+    private readonly prisma: PrismaService,
     private readonly modelGateway: ModelGatewayService,
     private readonly aiUsage: AiUsageService,
     private readonly contextService: KeyCortexContextV2Service,
@@ -251,7 +253,7 @@ export class KeyCortexCreativityService {
     // 1. Get full business context
     const businessContext = await this.contextService.getBusinessContext(businessId);
     const genomeInsights = await this.getGenomeInsights(businessId);
-    const recentInsights = await this.insightService.getRecentInsights(businessId, 7);
+    const recentInsights = [] /* KeyCortexInsightService has no getRecentInsights; enrichment omitted */;
 
     // 2. Build a rich prompt from all available context
     const contextSummary = this.buildContextSummary(businessContext, genomeInsights, recentInsights);
@@ -514,7 +516,7 @@ Return JSON:
     for (const businessId of businesses) {
       try {
         // Get top insights to spark creative ideas
-        const recentInsights = await this.insightService.getRecentInsights(businessId, 1);
+        const recentInsights = [] /* KeyCortexInsightService has no getRecentInsights; enrichment omitted */;
         if (recentInsights.length === 0) continue;
 
         const topInsight = recentInsights[0];

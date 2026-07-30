@@ -236,11 +236,11 @@ export class KeyCortexMetacognitionService {
 
     const lowConfidenceTopics = lowConfidenceEvents
       .filter((e) => {
-        const payload = e.payload as Record<string, unknown>;
+        const payload = e.metadata as Record<string, unknown>;
         return (payload.confidence as number) < 0.5;
       })
       .map((e) => {
-        const payload = e.payload as Record<string, unknown>;
+        const payload = e.metadata as Record<string, unknown>;
         return (payload.decision as string) ?? '';
       })
       .filter(Boolean);
@@ -253,7 +253,7 @@ export class KeyCortexMetacognitionService {
 
     const missingDataFailures = failedActions
       .filter((e) => {
-        const payload = e.payload as Record<string, unknown>;
+        const payload = e.metadata as Record<string, unknown>;
         return (
           payload.result === 'error' &&
           ((payload.parameters as Record<string, unknown>)?.errorReason ===
@@ -263,7 +263,7 @@ export class KeyCortexMetacognitionService {
         );
       })
       .map((e) => {
-        const payload = e.payload as Record<string, unknown>;
+        const payload = e.metadata as Record<string, unknown>;
         return (payload.action as string) ?? '';
       })
       .filter(Boolean);
@@ -397,7 +397,7 @@ export class KeyCortexMetacognitionService {
     // Look up the statement — search across decisions
     const events = await this.prisma.client.businessEvent.findMany({
       where: {
-        payload: {
+        metadata: {
           path: ['correlationId'],
           equals: statementId,
         },
@@ -624,7 +624,7 @@ export class KeyCortexMetacognitionService {
     if (events.length === 0) return 0;
 
     const successes = events.filter((e) => {
-      const payload = e.payload as Record<string, unknown>;
+      const payload = e.metadata as Record<string, unknown>;
       return payload.result === 'success';
     }).length;
 
@@ -665,7 +665,7 @@ export class KeyCortexMetacognitionService {
     });
 
     const predictions = decisions.filter((e) => {
-      const payload = e.payload as Record<string, unknown>;
+      const payload = e.metadata as Record<string, unknown>;
       const decision = (payload.decision as string) ?? '';
       return (
         decision.includes('will') ||
@@ -764,7 +764,7 @@ export class KeyCortexMetacognitionService {
       (e) =>
         e.type === BusinessEventType.RECOMMENDATION_ACTED ||
         (e.type === BusinessEventType.ACTION_EXECUTED &&
-          (e.payload as Record<string, unknown>).result === 'success') ||
+          (e.metadata as Record<string, unknown>).result === 'success') ||
         e.type === BusinessEventType.GENOME_EVOLUTION,
     ).length;
 
@@ -977,12 +977,12 @@ export class KeyCortexMetacognitionService {
 
     const missingDataKeywords = failedDataQueries
       .filter((e) => {
-        const payload = e.payload as Record<string, unknown>;
+        const payload = e.metadata as Record<string, unknown>;
         const error = ((payload.error as string) ?? '').toLowerCase();
         return error.includes('missing') || error.includes('not found');
       })
       .map((e) => {
-        const payload = e.payload as Record<string, unknown>;
+        const payload = e.metadata as Record<string, unknown>;
         return ((payload.parameters as Record<string, unknown>)?.dataType as string) ?? '';
       })
       .filter(Boolean);
