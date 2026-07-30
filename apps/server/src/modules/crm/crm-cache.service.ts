@@ -16,7 +16,7 @@ export class CrmCacheService {
       const raw = await this.redis.get(key);
       if (!raw) return null;
       return JSON.parse(raw) as T;
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Cache read failed for ${key}: ${(err as Error).message}`);
       return null;
     }
@@ -24,8 +24,8 @@ export class CrmCacheService {
 
   async set(key: string, value: unknown, ttlMs = this.defaultTtlMs): Promise<void> {
     try {
-      await this.redis.setex(key, Math.ceil(ttlMs / 1000), JSON.stringify(value));
-    } catch (err) {
+      await (this.redis as any).setex(key, Math.ceil(ttlMs / 1000), JSON.stringify(value));
+    } catch (err: any) {
       this.logger.warn(`Cache write failed for ${key}: ${(err as Error).message}`);
     }
   }
@@ -40,7 +40,7 @@ export class CrmCacheService {
         }
         await pipeline.exec();
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Cache invalidate failed for ${prefix}: ${(err as Error).message}`);
     }
   }

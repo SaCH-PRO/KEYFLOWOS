@@ -2,6 +2,17 @@
 .env
 .env.local
 
+# Environment dumps exported from hosting dashboards (Render, Fly, Railway, ...).
+# These hold live credentials — service-role keys, database URLs, JWT secrets —
+# and must never be committed. `.env.example` and *.env.template stay tracked
+# because they contain placeholders only.
+render-env.txt
+*-env.txt
+env-dump*.txt
+.env.backup
+.env.production
+.env.*.local
+
 # Ignore build output
 .next/
 dist/

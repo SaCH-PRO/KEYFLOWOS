@@ -79,7 +79,7 @@ export class CustomerReferralService {
         const next = { ...(contact.custom as Record<string, unknown> | null ?? {}), referralOwnerCode: code };
         await this.prisma.client.contact.update({ where: { id: contact.id }, data: { custom: next as never } });
       }
-    } catch (err) {
+    } catch (err: any) {
         this.logger.warn(`— minting the code does not depend on the contact write.: ${err instanceof Error ? err.message : err}`);
       }
 

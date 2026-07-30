@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { CalendarDays, Plus, Loader2, Lock, Unlock, Trash2 } from "lucide-react";
+import { CalendarDays, Plus, Loader2, Lock, Unlock } from "lucide-react";
 import { toast } from "sonner";
 import { UnifiedPageShell } from "@/components/layout/unified-page-shell";
 import { DataTable } from "@/components/ui/data-table";
@@ -11,7 +11,7 @@ import { fetchAccountingPeriods, createAccountingPeriod, closeAccountingPeriod, 
 export default function AccountingPeriodsPage() {
   const businessId = getStoredBusinessId() ?? "";
   const [periods, setPeriods] = useState<AccountingPeriod[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [_loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);

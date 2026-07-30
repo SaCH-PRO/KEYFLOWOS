@@ -279,7 +279,7 @@ export class SignatureParserService {
     if (!business?.signatureParsingEnabled) return;
     try {
       await this.parseAndApply(payload.businessId, payload.body);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `signature parse failed: ${err instanceof Error ? err.message : String(err)}`,
       );

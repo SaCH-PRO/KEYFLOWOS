@@ -256,7 +256,7 @@ Provide specific, actionable insights about what worked and what to improve. Com
           outputCategory: 'reports',
         });
         aiBriefing = result.content;
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(`AI briefing generation failed: ${err}`);
       }
     }
@@ -301,7 +301,7 @@ Provide specific, actionable insights about what worked and what to improve. Com
           body: aiBriefing || `${metrics.openRate.toFixed(1)}% open rate (avg: ${averages.avgOpenRate.toFixed(1)}%)`,
           data: { campaignId, briefingId: briefing.id, performanceVsAvg },
         });
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(`Failed to create briefing notification: ${err}`);
       }
     }
@@ -752,7 +752,7 @@ Provide specific, actionable insights about what worked and what to improve. Com
         await this.generateBriefing(campaign.businessId, campaign.id);
         generated++;
         this.logger.log(`Generated briefing for campaign ${campaign.id} (${campaign.name})`);
-      } catch (err) {
+      } catch (err: any) {
         this.logger.error(`Failed to generate briefing for campaign ${campaign.id}`, err);
       }
     }

@@ -93,7 +93,7 @@ export function WorkspaceShell({
     setCurrentMeta({ selectedEntityLabel: title });
   }, [setCurrentMeta, title]);
 
-  const [queryTab, setQueryTab] = useState<string | null>(() => {
+  const [queryTab, _setQueryTab] = useState<string | null>(() => {
     if (typeof window === "undefined") return null;
     return new URLSearchParams(window.location.search).get("tab");
   });

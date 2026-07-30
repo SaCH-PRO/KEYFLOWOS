@@ -26,6 +26,7 @@ interface CommandCardProps {
   onExecute?: (id: string) => void | Promise<void>;
   onComplete?: (id: string) => void | Promise<void>;
   onAssign?: (id: string) => void | Promise<void>;
+  onSnooze?: (id: string) => void | Promise<void>;
   onReopen?: (id: string) => void | Promise<void>;
 }
 
@@ -52,7 +53,7 @@ const STATUS_LABELS: Record<string, string> = {
   COMPLETED: "Completed",
 };
 
-export function CommandCard({ item, selected, onSelect, onDismiss, onApprove, onExecute, onComplete, onAssign, onReopen }: CommandCardProps) {
+export function CommandCard({ item, selected, onSelect, onDismiss, onApprove, onExecute, onComplete, onAssign, onSnooze, onReopen }: CommandCardProps) {
   const router = useRouter();
   const [loading, setLoading] = useState<string | null>(null);
   const color = CATEGORY_COLORS[item.category] ?? "hsl(var(--kf-accent1))";
@@ -192,6 +193,16 @@ export function CommandCard({ item, selected, onSelect, onDismiss, onApprove, on
                 title="Assign"
               >
                 {loading === "assign" ? <Loader2 className="w-3 h-3 animate-spin" /> : <UserPlus className="w-3.5 h-3.5" />}
+              </button>
+            )}
+            {onSnooze && (
+              <button
+                onClick={() => handleAction("snooze", onSnooze)}
+                disabled={!!loading}
+                className="inline-flex items-center gap-1 px-2 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
+                title="Snooze 24h"
+              >
+                {loading === "snooze" ? <Loader2 className="w-3 h-3 animate-spin" /> : <Clock className="w-3.5 h-3.5" />}
               </button>
             )}
             <button

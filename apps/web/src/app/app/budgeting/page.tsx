@@ -31,16 +31,16 @@ function formatCurrency(amount: number): string {
   return `TTD $${amount.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 }
 
-function formatK(amount: number): string {
+function _formatK(amount: number): string {
   if (amount >= 1000) return `${(amount / 1000).toFixed(1)}k`;
   return String(Math.round(amount));
 }
 
 export default function BudgetingOverviewPage() {
   const router = useRouter();
-  const [businessId, setBusinessId] = useState<string | null>(() => getStoredBusinessId() ?? null);
+  const [businessId, _setBusinessId] = useState<string | null>(() => getStoredBusinessId() ?? null);
   const [budgets, setBudgets] = useState<ExpenseBudget[]>([]);
-  const [summary, setSummary] = useState<ExpenseSummary | null>(null);
+  const [_summary, setSummary] = useState<ExpenseSummary | null>(null);
   const [vendors, setVendors] = useState<VendorAnalytics[]>([]);
   const [loading, setLoading] = useState(false);
 

@@ -39,7 +39,7 @@ export class WhatsAppNotificationsListener {
       if (!result.success) {
         this.logger.warn(`WhatsApp booking confirmation failed: ${result.error}`);
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`WhatsApp notification error (booking.created): ${(err as Error).message}`);
     }
   }
@@ -65,7 +65,7 @@ export class WhatsAppNotificationsListener {
       if (!result.success) {
         this.logger.warn(`WhatsApp invoice reminder failed: ${result.error}`);
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`WhatsApp notification error (invoice.created): ${(err as Error).message}`);
     }
   }
@@ -86,7 +86,7 @@ export class WhatsAppNotificationsListener {
       if (!result.success) {
         this.logger.warn(`WhatsApp payment confirmation failed: ${result.error}`);
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`WhatsApp notification error (invoice.paid): ${(err as Error).message}`);
     }
   }

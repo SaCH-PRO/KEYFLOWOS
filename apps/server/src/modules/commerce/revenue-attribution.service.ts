@@ -83,7 +83,7 @@ export class RevenueAttributionService {
           input.referralCode,
           db,
         );
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(
           `[revenue-attribution] referral lookup failed code=${input.referralCode}: ${(err as Error).message}`,
         );

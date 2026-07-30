@@ -4,6 +4,7 @@ This document maps every environment variable the server and web app use, whethe
 
 For deployment specifics see `DEPLOYMENT.md`.
 For a pre-flight checklist see `PRODUCTION_READINESS.md`.
+For the third-party account and pricing guide see `docs/development/THIRD_PARTY_ACCOUNTS.md`.
 
 ---
 

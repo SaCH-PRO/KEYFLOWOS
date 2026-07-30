@@ -1,4 +1,5 @@
 import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
+import { timingSafeStringEqual } from '../../core/security/timing-safe-equal';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { createHmac, randomBytes } from 'crypto';
 import { ContactImportedPayload } from '../../core/event-bus/events.types';
@@ -80,7 +81,7 @@ export class CrmGoogleService {
       const signature = decoded.substring(lastDotIndex + 1);
       
       const expectedSignature = createHmac('sha256', this.stateSecret).update(payload).digest('hex');
-      if (signature !== expectedSignature) {
+      if (!timingSafeStringEqual(signature, expectedSignature)) {
         this.logger.warn('Invalid OAuth state signature');
         return null;
       }
@@ -92,7 +93,7 @@ export class CrmGoogleService {
       }
       
       return state;
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn('Failed to verify OAuth state');
       return null;
     }
@@ -253,7 +254,7 @@ export class CrmGoogleService {
           sourceDetail: person.resourceName,
         });
         imported++;
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(`Failed to import contact: ${(err as Error).message}`);
         skipped++;
       }

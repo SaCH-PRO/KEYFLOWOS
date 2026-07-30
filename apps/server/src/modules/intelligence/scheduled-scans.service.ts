@@ -33,7 +33,7 @@ export class ScheduledScansService implements OnModuleInit {
     for (const b of businesses) {
       try {
         await this.scanBusiness(b.id);
-      } catch (err) {
+      } catch (err: any) {
         this.logger.error(`Scan failed for business ${b.id}: ${(err as Error).message}`);
       }
     }
@@ -340,7 +340,7 @@ export class ScheduledScansService implements OnModuleInit {
           default:
             break;
         }
-      } catch (err) {
+      } catch (err: any) {
         this.logger.error(`Rule ${rule.key} failed for business ${businessId}: ${(err as Error).message}`);
       }
     }

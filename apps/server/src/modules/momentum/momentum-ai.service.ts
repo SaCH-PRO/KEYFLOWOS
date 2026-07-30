@@ -141,7 +141,7 @@ export class MomentumAiService {
       });
 
       return draft;
-    } catch (error) {
+    } catch (error: any) {
       this.logger.warn(`Momentum AI draft failed, using fallback: ${(error as Error).message}`);
       return this.fallbackDraft(input, contactFirstName, ctx);
     }

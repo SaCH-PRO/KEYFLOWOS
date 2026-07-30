@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 
 /**
  * Hardcoded snapshot of TTD exchange rates used as the seed cache and as the
@@ -54,7 +54,7 @@ export class CurrencyRatesService {
   private lastAttemptAt = 0;
   private readonly fetchImpl: FetchFn;
 
-  constructor(fetchImpl?: FetchFn) {
+  constructor(@Optional() @Inject('CURRENCY_RATES_FETCH_IMPL') fetchImpl?: FetchFn) {
     this.fetchImpl =
       fetchImpl ??
       ((url, init) =>
@@ -102,7 +102,7 @@ export class CurrencyRatesService {
     if (this.lastAttemptAt && now - this.lastAttemptAt < FAILURE_BACKOFF_MS) return;
     try {
       await this.refresh();
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `FX refresh failed, continuing with ${this.snapshot.source} rates from ${this.snapshot.fetchedAt.toISOString()}: ${
           err instanceof Error ? err.message : String(err)

@@ -42,7 +42,7 @@ export class RevenueReportingRollupScheduler implements OnModuleInit, OnModuleDe
       try {
         await this.reporting.refreshRollup(b.id, { start, end: now });
         ok += 1;
-      } catch (err) {
+      } catch (err: any) {
         failed += 1;
         this.logger.error(`rollup for business ${b.id} failed: ${(err as Error).message}`);
       }

@@ -52,7 +52,7 @@ export class BestChannelSchedulerService implements OnModuleInit, OnModuleDestro
       this.logger.log(
         `Nightly best-channel recompute complete for ${dateKey}: ${result.processed} contacts across ${result.businesses} businesses (${result.failed} failures)`,
       );
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(
         `Nightly best-channel recompute failed: ${err instanceof Error ? err.message : String(err)}`,
       );
@@ -70,7 +70,7 @@ export class BestChannelSchedulerService implements OnModuleInit, OnModuleDestro
         const r = await this.bestChannel.recomputeAllForBusiness(b.id);
         processed += r.processed;
         failed += r.failed;
-      } catch (err) {
+      } catch (err: any) {
         failed += 1;
         this.logger.warn(
           `Best-channel recompute failed for business ${b.id}: ${err instanceof Error ? err.message : String(err)}`,

@@ -79,7 +79,7 @@ export class GenesisRiskRegisterService {
       });
       existingKeys.add(key);
       return created;
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `Failed to create ${category} risk "${title}" for ${businessId}: ${(err as Error).message}`,
       );

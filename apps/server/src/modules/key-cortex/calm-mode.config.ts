@@ -8,6 +8,7 @@
  */
 
 import { FeatureVisibility, UserTier } from './cortex-genome-contracts';
+export { UserTier } from './cortex-genome-contracts';
 
 export const CALM_MODE_FEATURES: FeatureVisibility[] = [
   // ═══════════════════════════════════════════════════════════

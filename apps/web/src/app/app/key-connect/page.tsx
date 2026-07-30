@@ -202,7 +202,7 @@ const PRIORITY_TYPES = new Set([
   "tiktok",
 ]);
 
-const PLACEHOLDER_TYPES = new Set(["facebook_page", "instagram", "meta_messenger"]);
+const _PLACEHOLDER_TYPES = new Set(["facebook_page", "instagram", "meta_messenger"]);
 
 const PLACEHOLDER_ENTRIES: DashboardEntry[] = [
   {

@@ -414,7 +414,7 @@ export class AutopilotService {
     const realTaskId = actionId.replace(/^(auto_|pending_|overdue_inv_|checkin_|nudge_|postbooking_|autowelcome_|stalenudge_)/, '');
     try {
       await this.updateTaskStatus(realTaskId, businessId, 'AUTO_EXECUTED', 'autopilot');
-    } catch (err) {
+    } catch (err: any) {
         this.logger.warn(`Action may not correspond to an AutopilotTask (CRM flow actions use synthetic IDs): ${err instanceof Error ? err.message : err}`);
       }
 

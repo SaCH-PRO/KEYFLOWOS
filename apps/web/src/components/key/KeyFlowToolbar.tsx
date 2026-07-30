@@ -160,13 +160,11 @@ export function KeyFlowToolbar({
           <Circle
             size={8}
             className="text-[#FFC34D] fill-[#FFC34D] shrink-0"
-            title="Unsaved changes"
           />
         ) : (
           <Check
             size={12}
             className="text-[#4CAF50] shrink-0"
-            title="All changes saved"
           />
         )}
       </div>

@@ -203,7 +203,7 @@ export class PostingService {
       return await this.prisma.client.$transaction(async (tx) =>
         exec(tx as unknown as Prisma.TransactionClient),
       );
-    } catch (err) {
+    } catch (err: any) {
       // Race: a concurrent caller wrote the same externalRef between our
       // check and our insert. Prisma raises P2002 on the unique index.
       if (

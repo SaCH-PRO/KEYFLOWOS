@@ -72,7 +72,7 @@ export class ConnectorIntelligenceService implements OnModuleInit, OnModuleDestr
     for (const biz of businesses) {
       try {
         await this.scanBusinessConnectors(biz.id);
-      } catch (err) {
+      } catch (err: any) {
         this.logger.error(`Connector scan failed for ${biz.id}: ${(err as Error).message}`);
       }
     }
@@ -104,7 +104,7 @@ export class ConnectorIntelligenceService implements OnModuleInit, OnModuleDestr
             await this.connectorRegistry.syncConnector('gmail', businessId);
             break;
         }
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(`Scan ${status.connectorType} for ${businessId}: ${(err as Error).message}`);
       }
     }
@@ -195,7 +195,7 @@ export class ConnectorIntelligenceService implements OnModuleInit, OnModuleDestr
       });
 
       return { scanned, newFiles };
-    } catch (err) {
+    } catch (err: any) {
       const message = err instanceof Error ? err.message : String(err);
       await this.prisma.client.driveSyncCursor.update({
         where: { businessId },
@@ -265,7 +265,7 @@ export class ConnectorIntelligenceService implements OnModuleInit, OnModuleDestr
       });
 
       this.logger.log(`Extracted Drive file: ${name} (${result.documentType}, ${Math.round(result.confidence * 100)}%) for ${businessId}`);
-    } catch (err) {
+    } catch (err: any) {
       const message = err instanceof Error ? err.message : String(err);
       await this.prisma.client.driveIntakeFile.update({
         where: { id: intakeId },

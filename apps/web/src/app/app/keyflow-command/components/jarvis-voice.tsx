@@ -2,70 +2,178 @@
 
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Mic, MicOff, Volume2, VolumeX, Sparkles, RefreshCw, Send } from "lucide-react";
+import { Volume2, VolumeX, Send } from "lucide-react";
 import { toast } from "sonner";
 import {
   sendFlowChat,
   transcribeKeyflowSpeech,
-  synthesizeKeyflowSpeech,
+  createVoiceSession,
+  endVoiceSession,
+  fetchVoicePreferences,
 } from "@/lib/client";
-
-interface VoiceTurn {
-  id: string;
-  role: "user" | "assistant";
-  text: string;
-  ts: number;
-}
+import { useTts } from "@/components/tts";
+import {
+  VoiceOrb,
+  PushToTalkButton,
+  VoiceTranscriptDrawer,
+  KeyVoiceSelector,
+  type KeyVoiceKey,
+  type VoiceTurn,
+} from "@/components/voice";
 
 interface Props {
   businessId: string;
   pageContext?: Record<string, unknown>;
 }
 
-const VOICE_OPTIONS = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"] as const;
+const STORAGE_KEY = "kf_voice_settings";
+
+function loadLocalSettings(): { voice: KeyVoiceKey; muted: boolean } {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        return {
+          voice: ["alloy", "echo", "fable", "onyx", "nova", "shimmer"].includes(
+            parsed.voice,
+          )
+            ? parsed.voice
+            : "alloy",
+          muted: !!parsed.muted,
+        };
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return { voice: "alloy", muted: false };
+}
+
+function saveLocalVoice(voice: KeyVoiceKey, muted: boolean) {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ ...parsed, voice, muted }),
+    );
+  } catch {
+    // ignore
+  }
+}
 
 export default function JarvisVoice({ businessId, pageContext }: Props) {
+  const { engine } = useTts();
   const [active, setActive] = useState(false);
   const [recording, setRecording] = useState(false);
   const [thinking, setThinking] = useState(false);
   const [muted, setMuted] = useState(false);
-  const [voice, setVoice] = useState<(typeof VOICE_OPTIONS)[number]>("alloy");
+  const [voice, setVoice] = useState<KeyVoiceKey>("alloy");
   const [turns, setTurns] = useState<VoiceTurn[]>([]);
   const [inputText, setInputText] = useState("");
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animFrameRef = useRef<number>(0);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
+  const sessionIdRef = useRef<string | null>(null);
 
+  // Seed voice/muted from localStorage immediately, then overlay cloud preference
+  useEffect(() => {
+    const local = loadLocalSettings();
+    setVoice(local.voice);
+    setMuted(local.muted);
+
+    fetchVoicePreferences(businessId)
+      .then((res) => {
+        const prefs = res.data;
+        if (!prefs || prefs.length === 0) return;
+        const pref = prefs.find((p) => p.isDefault) ?? prefs[0];
+        const settings =
+          typeof pref.settings === "object" && pref.settings !== null
+            ? (pref.settings as Record<string, unknown>)
+            : {};
+        const cloudVoice = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"].includes(
+          pref.voiceKey,
+        )
+          ? (pref.voiceKey as KeyVoiceKey)
+          : local.voice;
+        const cloudMuted =
+          typeof settings.muted === "boolean" ? settings.muted : local.muted;
+        setVoice(cloudVoice);
+        setMuted(cloudMuted);
+        saveLocalVoice(cloudVoice, cloudMuted);
+      })
+      .catch(() => {
+        // cloud preference optional; local settings remain
+      });
+  }, [businessId]);
+
+  // Keep localStorage in sync when user changes voice/mute inside Jarvis
+  useEffect(() => {
+    saveLocalVoice(voice, muted);
+    engine.setVoice(voice);
+    engine.setMuted(muted);
+  }, [voice, muted, engine]);
+
+  // Voice session lifecycle: create on open, end on close
+  useEffect(() => {
+    if (!active) {
+      if (sessionIdRef.current) {
+        const id = sessionIdRef.current;
+        const transcript = turns
+          .map((t) => `${t.role === "user" ? "User" : "Assistant"}: ${t.text}`)
+          .join("\n");
+        const summary =
+          turns.filter((t) => t.role === "assistant").slice(-1)[0]?.text ??
+          "Voice conversation ended";
+        endVoiceSession(businessId, id, transcript || undefined, summary).catch(
+          () => {
+            // best-effort
+          },
+        );
+        sessionIdRef.current = null;
+      }
+      return;
+    }
+
+    if (sessionIdRef.current) return;
+    createVoiceSession(businessId, "push_to_talk")
+      .then((res) => {
+        if (res.data) {
+          sessionIdRef.current = res.data.id;
+        }
+      })
+      .catch((err) => {
+        toast.error(
+          `Voice session failed: ${(err as Error)?.message ?? "unknown"}`,
+        );
+      });
+
+    return () => {
+      // cleanup handled by the close branch above
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, businessId]);
+
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
       streamRef.current?.getTracks().forEach((t) => t.stop());
-      if (audioRef.current) audioRef.current.pause();
+      engine.cancel();
+      if (sessionIdRef.current) {
+        void endVoiceSession(businessId, sessionIdRef.current);
+      }
     };
-  }, []);
+  }, [businessId, engine]);
 
-  const speak = async (text: string) => {
+  const speak = (text: string) => {
     if (muted) return;
-    const { blob, error } = await synthesizeKeyflowSpeech(businessId, text, voice);
-    if (error || !blob) {
-      if (error) toast.error(`Voice playback failed: ${error}`);
-      return;
-    }
-    const url = URL.createObjectURL(blob);
-    if (audioRef.current) {
-      audioRef.current.pause();
-    }
-    const audio = new Audio(url);
-    audioRef.current = audio;
-    audio.onended = () => URL.revokeObjectURL(url);
-    void audio.play().catch(() => {
-      // Browser blocked autoplay
-    });
+    engine.speak(text, businessId);
   };
 
   const sendToBrain = async (text: string) => {
@@ -96,14 +204,11 @@ export default function JarvisVoice({ businessId, pageContext }: Props) {
     void speak(reply);
   };
 
-
-
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
 
-      // Set up audio analyser for waveform
       const audioCtx = new AudioContext();
       audioCtxRef.current = audioCtx;
       const source = audioCtx.createMediaStreamSource(stream);
@@ -144,7 +249,6 @@ export default function JarvisVoice({ businessId, pageContext }: Props) {
       mr.start();
       setRecording(true);
 
-      // Start waveform animation
       const draw = () => {
         const canvas = canvasRef.current;
         const a = analyserRef.current;
@@ -192,6 +296,8 @@ export default function JarvisVoice({ businessId, pageContext }: Props) {
     await sendToBrain(text);
   };
 
+  const orbState = recording ? "listening" : thinking ? "thinking" : "idle";
+
   return (
     <>
       <button
@@ -205,7 +311,7 @@ export default function JarvisVoice({ businessId, pageContext }: Props) {
         }}
         aria-label="Open Jarvis voice"
       >
-        <Sparkles className="w-6 h-6 text-white" />
+        <SparklesIcon />
       </button>
 
       <AnimatePresence>
@@ -238,47 +344,29 @@ export default function JarvisVoice({ businessId, pageContext }: Props) {
                   borderBottom: "1px solid hsl(var(--border))",
                 }}
               >
-                <motion.div
-                  animate={
-                    recording
-                      ? { scale: [1, 1.15, 1] }
-                      : thinking
-                      ? { rotate: 360 }
-                      : {}
-                  }
-                  transition={
-                    recording
-                      ? { duration: 1, repeat: Infinity }
-                      : thinking
-                      ? { duration: 1.5, repeat: Infinity, ease: "linear" }
-                      : {}
-                  }
-                  className="w-10 h-10 rounded-full flex items-center justify-center"
-                  style={{
-                    background:
-                      "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))",
-                  }}
-                >
-                  <Sparkles className="w-5 h-5 text-white" />
-                </motion.div>
+                <VoiceOrb state={orbState} />
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-semibold">Jarvis</div>
                   <div className="text-[10px] text-muted-foreground">
                     {recording
                       ? "Listening…"
                       : thinking
-                      ? "Thinking…"
-                      : "Voice + text · brain online"}
+                        ? "Thinking…"
+                        : "Voice + text · brain online"}
                   </div>
                 </div>
+                <KeyVoiceSelector
+                  value={voice}
+                  onChange={setVoice}
+                  className="hidden sm:grid grid-cols-3 gap-1"
+                  voices={["alloy", "echo", "fable", "onyx", "nova", "shimmer"]}
+                />
                 <select
                   value={voice}
-                  onChange={(e) =>
-                    setVoice(e.target.value as (typeof VOICE_OPTIONS)[number])
-                  }
-                  className="text-[10px] bg-background/60 border border-border rounded-md px-1.5 py-1"
+                  onChange={(e) => setVoice(e.target.value as KeyVoiceKey)}
+                  className="sm:hidden text-[10px] bg-background/60 border border-border rounded-md px-1.5 py-1"
                 >
-                  {VOICE_OPTIONS.map((v) => (
+                  {["alloy", "echo", "fable", "onyx", "nova", "shimmer"].map((v) => (
                     <option key={v} value={v}>
                       {v}
                     </option>
@@ -304,15 +392,14 @@ export default function JarvisVoice({ businessId, pageContext }: Props) {
                 </button>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-4 space-y-2 min-h-[200px]">
-                {/* Waveform canvas */}
+              <div className="flex-1 overflow-hidden flex flex-col">
                 <AnimatePresence>
                   {recording && (
                     <motion.div
                       initial={{ opacity: 0, height: 0 }}
                       animate={{ opacity: 1, height: "auto" }}
                       exit={{ opacity: 0, height: 0 }}
-                      className="flex justify-center"
+                      className="flex justify-center pt-3"
                     >
                       <canvas
                         ref={canvasRef}
@@ -325,78 +412,21 @@ export default function JarvisVoice({ businessId, pageContext }: Props) {
                   )}
                 </AnimatePresence>
 
-                {turns.length === 0 && !recording ? (
-                  <div className="text-xs text-muted-foreground text-center py-8">
-                    Tap the mic and ask anything — I see your bookings,
-                    contacts, projects, expenses, store, marketplace, community,
-                    automations, and documents.
-                  </div>
-                ) : (
-                  turns.map((t) => (
-                    <motion.div
-                      key={t.id}
-                      initial={{ opacity: 0, y: 6 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className={`max-w-[85%] p-2.5 rounded-2xl text-xs ${
-                        t.role === "user"
-                          ? "ml-auto rounded-br-sm"
-                          : "rounded-bl-sm"
-                      }`}
-                      style={
-                        t.role === "user"
-                          ? {
-                              background:
-                                "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))",
-                              color: "white",
-                            }
-                          : {
-                              background: "hsl(var(--muted) / 0.5)",
-                            }
-                      }
-                    >
-                      <span className="text-[10px] opacity-60 block mb-0.5">
-                        {t.role === "user" ? "You" : "Jarvis"}
-                      </span>
-                      {t.text}
-                    </motion.div>
-                  ))
-                )}
-                {thinking && (
-                  <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    className="max-w-[85%] p-2.5 rounded-2xl rounded-bl-sm text-xs bg-muted/50"
-                  >
-                    <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-                      <RefreshCw className="w-3 h-3 animate-spin" />
-                      <span>Thinking…</span>
-                    </div>
-                  </motion.div>
-                )}
+                <VoiceTranscriptDrawer
+                  turns={turns}
+                  thinking={thinking}
+                  emptyText="Tap the mic and ask anything — I see your bookings, contacts, projects, expenses, store, marketplace, community, automations, and documents."
+                />
               </div>
 
               <form
                 onSubmit={handleSendText}
                 className="p-3 border-t border-border flex items-center gap-2"
               >
-                <button
-                  type="button"
+                <PushToTalkButton
+                  recording={recording}
                   onClick={recording ? stopRecording : startRecording}
-                  className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 transition-all"
-                  style={{
-                    background: recording
-                      ? "hsl(var(--kf-error))"
-                      : "linear-gradient(135deg, hsl(var(--kf-accent1)), hsl(var(--kf-accent2)))",
-                    color: "white",
-                  }}
-                  aria-label={recording ? "Stop recording" : "Start recording"}
-                >
-                  {recording ? (
-                    <MicOff className="w-4 h-4" />
-                  ) : (
-                    <Mic className="w-4 h-4" />
-                  )}
-                </button>
+                />
                 <input
                   value={inputText}
                   onChange={(e) => setInputText(e.target.value)}
@@ -417,5 +447,28 @@ export default function JarvisVoice({ businessId, pageContext }: Props) {
         )}
       </AnimatePresence>
     </>
+  );
+}
+
+function SparklesIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="24"
+      height="24"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="w-6 h-6 text-white"
+    >
+      <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
+      <path d="M5 3v4" />
+      <path d="M19 17v4" />
+      <path d="M3 5h4" />
+      <path d="M17 19h4" />
+    </svg>
   );
 }

@@ -1,9 +1,10 @@
 import { protectedProcedure, router } from '../trpc';
+import type { AnyRouter } from '@trpc/server';
 import { z } from 'zod';
 import { assertBusinessAccess } from '../lib/access';
 import type { Prisma } from '@prisma/client';
 
-export const supplierRouter = router({
+export const supplierRouter: AnyRouter = router({
   // ---- SupplierConnection ----
 
   listSupplierConnections: protectedProcedure

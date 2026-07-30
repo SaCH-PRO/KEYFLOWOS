@@ -10,6 +10,7 @@ import { tap } from 'rxjs/operators';
 import { ResilientEmitterService } from './resilient-emitter.service';
 import { EventSource } from './dto/create-business-event.dto';
 import { Reflector } from '@nestjs/core';
+import { safeRedactedSnapshot } from '../../core/security/redaction';
 
 export const SKIP_BUSINESS_EVENT_KEY = 'skipBusinessEvent';
 
@@ -91,26 +92,10 @@ export class BusinessEventInterceptor implements NestInterceptor {
   }
 
   private safeSnapshot(obj: unknown): Record<string, unknown> | undefined {
-    if (!obj || typeof obj !== 'object') return undefined;
-    try {
-      // Redact sensitive fields
-      const clone = JSON.parse(JSON.stringify(obj));
-      this.redact(clone, ['password', 'token', 'secret', 'refreshToken', 'accessToken', 'apiKey']);
-      return clone;
-    } catch {
-      return undefined;
-    }
-  }
-
-  private redact(obj: Record<string, unknown>, sensitiveKeys: string[]): void {
-    for (const key of Object.keys(obj)) {
-      const lower = key.toLowerCase();
-      if (sensitiveKeys.some((s) => lower.includes(s.toLowerCase()))) {
-        obj[key] = '***REDACTED***';
-      } else if (typeof obj[key] === 'object' && obj[key] !== null) {
-        this.redact(obj[key] as Record<string, unknown>, sensitiveKeys);
-      }
-    }
+    // Deep-redact via the centralized sensitive-field policy (covers nested
+    // objects, arrays, mixed casing, credentials/privateKey and the Business
+    // OAuth token columns from relation includes).
+    return safeRedactedSnapshot(obj);
   }
 
   private extractSubjectId(response: unknown, params: Record<string, string>): string {

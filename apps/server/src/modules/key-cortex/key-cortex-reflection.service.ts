@@ -25,12 +25,12 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { PrismaService } from '../../prisma/prisma.service';
+import { PrismaService } from '../../core/prisma/prisma.service';
 import { KeyCortexEventService } from './key-cortex-event.service';
 import { KeyCortexInsightService } from './key-cortex-insight.service';
 import { KeyCortexGenomeBridgeService } from './key-cortex-genome-bridge.service';
-import { ModelGatewayService } from '../../ai/model-gateway.service';
-import { AiUsageService } from '../../ai/ai-usage.service';
+import { ModelGatewayService } from '../ai/model-gateway.service';
+import { AiUsageService } from '../ai/ai-usage.service';
 import { v4 as uuidv4 } from 'uuid';
 
 /* ─────────────────────────── Type Definitions ─────────────────────────── */
@@ -479,9 +479,7 @@ export class KeyCortexReflectionService {
     const hypotheses = this.dreamJournal.get(businessId) ?? [];
 
     // Also query persisted hypotheses from the database
-    const persistedHypotheses = await this.prisma.keyCortexDreamHypothesis
-      ?.findMany({ where: { businessId } })
-      .catch(() => []);
+    const persistedHypotheses: Array<Record<string, unknown>> = []; // persistence not implemented (model absent from schema)
 
     const allHypotheses = [
       ...hypotheses,
@@ -536,9 +534,7 @@ export class KeyCortexReflectionService {
 
     // Check DB if not in memory
     if (!hypothesis) {
-      const dbHypothesis = await this.prisma.keyCortexDreamHypothesis
-        ?.findUnique({ where: { id: hypothesisId } })
-        .catch(() => null);
+      const dbHypothesis = undefined; // persistence not implemented (model absent from schema)
       if (dbHypothesis) {
         hypothesis = {
           id: (dbHypothesis as Record<string, unknown>).id as string,
@@ -647,7 +643,7 @@ export class KeyCortexReflectionService {
   private async queryRecentBusinessEvents(businessId: string, hours: number): Promise<Array<Record<string, unknown>>> {
     const since = new Date(Date.now() - hours * 60 * 60 * 1000);
 
-    const events = await this.prisma.businessEvent.findMany({
+    const events = await this.prisma.client.businessEvent.findMany({
       where: { businessId, createdAt: { gte: since } },
       orderBy: { createdAt: 'desc' },
       take: 500,
@@ -698,11 +694,18 @@ export class KeyCortexReflectionService {
 Decisions:
 ${decisions.map((d, i) => `[${i}] ${JSON.stringify(d).slice(0, 200)}`).join('\n')}`;
 
-    const response = await this.modelGateway.complete(prompt, { temperature: 0.3, maxTokens: 500 });
-    await this.aiUsage.trackUsage(businessId, 'reflection-rank', response.usage);
+    const response = await this.aiUsage.trackAndComplete(
+      businessId,
+      undefined,
+      'reflection-rank',
+      {
+        messages: [{ role: 'user' as const, content: prompt }],
+      temperature: 0.3, maxTokens: 500
+      },
+    );
 
     try {
-      const indices = JSON.parse(response.text) as number[];
+      const indices = JSON.parse(response.content) as number[];
       return indices.map((i) => decisions[i]).filter(Boolean);
     } catch {
       return decisions;
@@ -735,10 +738,17 @@ Subsequent events: ${subsequentEvents.slice(0, 10).map((e) => JSON.stringify(e).
 
 Return JSON: { "actualOutcome": "string", "delta": number } where delta is -1 to +1.`;
 
-      const response = await this.modelGateway.complete(outcomePrompt, { temperature: 0.2, maxTokens: 300 });
-      await this.aiUsage.trackUsage(businessId, 'reflection-outcome', response.usage);
+      const response = await this.aiUsage.trackAndComplete(
+        businessId,
+        undefined,
+        'reflection-outcome',
+        {
+          messages: [{ role: 'user' as const, content: outcomePrompt }],
+        temperature: 0.2, maxTokens: 300
+        },
+      );
 
-      const result = JSON.parse(response.text) as { actualOutcome: string; delta: number };
+      const result = JSON.parse(response.content) as { actualOutcome: string; delta: number };
       actualOutcome = result.actualOutcome;
       delta = Math.max(-1, Math.min(1, result.delta));
     } catch {
@@ -784,7 +794,7 @@ Return JSON: { "actualOutcome": "string", "delta": number } where delta is -1 to
     businessId: string,
     after: Date,
   ): Promise<Array<Record<string, unknown>>> {
-    return this.prisma.businessEvent
+    return this.prisma.client.businessEvent
       .findMany({
         where: { businessId, createdAt: { gt: after } },
         orderBy: { createdAt: 'asc' },
@@ -913,20 +923,20 @@ Return JSON: { "actualOutcome": "string", "delta": number } where delta is -1 to
     try {
       switch (source) {
         case 'invoices': {
-          const invoices = await this.prisma.invoice.findMany({
+          const invoices = await this.prisma.client.invoice.findMany({
             where: { businessId, createdAt: { gte: since } },
             select: { total: true, paidAt: true },
           });
           return invoices.map((i: { total: number; paidAt: Date | null }) => (i.paidAt ? 1 : 0) * i.total);
         }
         case 'support_tickets': {
-          const tickets = await this.prisma.supportTicket
+          const tickets = await this.prisma.client.supportTicket
             ?.findMany({ where: { businessId, createdAt: { gte: since } } })
             .catch(() => []);
           return (tickets ?? []).map((_: unknown, idx: number) => idx); // Count-based
         }
         case 'tasks': {
-          const tasks = await this.prisma.task.findMany({
+          const tasks = await this.prisma.client.task.findMany({
             where: { businessId, createdAt: { gte: since } },
             select: { status: true },
           });
@@ -979,10 +989,17 @@ Return a JSON array of observations. Each observation must be surprising and cre
 [{"sources": ["a", "b"], "observation": "What if...", "strength": 0.0-1.0}]`;
 
     try {
-      const response = await this.modelGateway.complete(prompt, { temperature: 0.9, maxTokens: 1500 });
-      await this.aiUsage.trackUsage(businessId, 'dream-connections', response.usage);
+      const response = await this.aiUsage.trackAndComplete(
+        businessId,
+        undefined,
+        'dream-connections',
+        {
+          messages: [{ role: 'user' as const, content: prompt }],
+        temperature: 0.9, maxTokens: 1500
+        },
+      );
 
-      const parsed = JSON.parse(response.text) as Array<{ sources: string[]; observation: string; strength: number }>;
+      const parsed = JSON.parse(response.content) as Array<{ sources: string[]; observation: string; strength: number }>;
       connections.push(...parsed.filter((c) => c.strength > 0.3));
     } catch {
       // Fallback: generate heuristic connections
@@ -1026,10 +1043,17 @@ Return JSON array:
 [{"description": "...", "sources": ["..."], "confidence": 0.1-0.4, "creativityScore": 0.0-1.0}]`;
 
     try {
-      const response = await this.modelGateway.complete(prompt, { temperature: 0.95, maxTokens: 2000 });
-      await this.aiUsage.trackUsage(businessId, 'dream-hypotheses', response.usage);
+      const response = await this.aiUsage.trackAndComplete(
+        businessId,
+        undefined,
+        'dream-hypotheses',
+        {
+          messages: [{ role: 'user' as const, content: prompt }],
+        temperature: 0.95, maxTokens: 2000
+        },
+      );
 
-      const parsed = JSON.parse(response.text) as Array<{
+      const parsed = JSON.parse(response.content) as Array<{
         description: string;
         sources: string[];
         confidence: number;
@@ -1077,23 +1101,7 @@ Return JSON array:
 
     // Persist to database
     for (const h of hypotheses) {
-      await this.prisma.keyCortexDreamHypothesis
-        ?.create({
-          data: {
-            id: h.id,
-            description: h.description,
-            sources: h.sources,
-            confidence: h.confidence,
-            creativityScore: h.creativityScore,
-            status: h.status,
-            businessId: h.businessId,
-            parentDreamId: h.parentDreamId,
-            createdAt: h.createdAt,
-          },
-        })
-        .catch(() => {
-          /* table may not exist yet */
-        });
+      // persistence not implemented (model absent from schema); previously a no-op
     }
   }
 
@@ -1122,16 +1130,7 @@ Return JSON array:
     const sessions: ReflectionSession[] = [];
 
     // Query from database
-    const dbSessions = await this.prisma.keyCortexReflectionSession
-      ?.findMany({
-        where: {
-          businessId,
-          startedAt: { gte: weekStart, lte: weekEnd },
-          type: { in: ['reflection', 'dream'] },
-        },
-        orderBy: { startedAt: 'desc' },
-      })
-      .catch(() => []);
+    const dbSessions: Array<Record<string, unknown>> = []; // persistence not implemented (model absent from schema)
 
     if (dbSessions) {
       sessions.push(
@@ -1204,8 +1203,15 @@ Return JSON array:
     try {
       const prompt = `Summarize these weekly insights into 3 key takeaways:
 ${report.topInsights.slice(0, 5).map((i) => `- ${i.description}`).join('\n')}`;
-      const response = await this.modelGateway.complete(prompt, { temperature: 0.5, maxTokens: 800 });
-      await this.aiUsage.trackUsage(businessId, 'synthesis-report', response.usage);
+      const response = await this.aiUsage.trackAndComplete(
+        businessId,
+        undefined,
+        'synthesis-report',
+        {
+          messages: [{ role: 'user' as const, content: prompt }],
+        temperature: 0.5, maxTokens: 800
+        },
+      );
     } catch {
       // Proceed without AI summary
     }
@@ -1282,7 +1288,7 @@ ${report.topInsights.slice(0, 5).map((i) => `- ${i.description}`).join('\n')}`;
   private async cleanExpiredApprovals(businessId: string): Promise<number> {
     const expiryThreshold = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000); // 7 days
 
-    const result = await this.prisma.approvalRequest
+    const result = await this.prisma.client.approvalRequest
       ?.deleteMany({
         where: {
           businessId,
@@ -1299,7 +1305,7 @@ ${report.topInsights.slice(0, 5).map((i) => `- ${i.description}`).join('\n')}`;
     const archiveThreshold = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
     // Find events to archive
-    const oldEvents = await this.prisma.businessEvent
+    const oldEvents = await this.prisma.client.businessEvent
       .findMany({
         where: { businessId, createdAt: { lt: archiveThreshold } },
         take: 1000,
@@ -1309,7 +1315,7 @@ ${report.topInsights.slice(0, 5).map((i) => `- ${i.description}`).join('\n')}`;
     if (oldEvents.length === 0) return 0;
 
     // Archive to cold storage (simplified — in production, move to S3 / archive table)
-    await this.prisma.coldStorageEvent
+    await this.prisma.client.coldStorageEvent
       ?.createMany({
         data: (oldEvents as Array<Record<string, unknown>>).map((e) => ({
           ...e,
@@ -1323,7 +1329,7 @@ ${report.topInsights.slice(0, 5).map((i) => `- ${i.description}`).join('\n')}`;
 
     // Delete from hot storage
     const idsToDelete = (oldEvents as Array<{ id: string }>).map((e) => e.id);
-    await this.prisma.businessEvent
+    await this.prisma.client.businessEvent
       .deleteMany({
         where: { id: { in: idsToDelete } },
       })
@@ -1376,11 +1382,7 @@ ${report.topInsights.slice(0, 5).map((i) => `- ${i.description}`).join('\n')}`;
     }
 
     // Check for null confidence scores
-    const nullConfidence = await this.prisma.keyCortexInsight
-      ?.count({
-        where: { businessId, confidence: { equals: 0 } },
-      })
-      .catch(() => 0);
+    const nullConfidence = 0; // persistence not implemented (model absent from schema)
 
     if (nullConfidence && nullConfidence > 0) {
       issues.push(`${nullConfidence} insights with zero confidence`);
@@ -1391,9 +1393,7 @@ ${report.topInsights.slice(0, 5).map((i) => `- ${i.description}`).join('\n')}`;
 
   private async compactMemoryIfNeeded(businessId: string): Promise<number> {
     // Check memory usage and compact if above threshold
-    const totalInsights = await this.prisma.keyCortexInsight
-      ?.count({ where: { businessId } })
-      .catch(() => 0);
+    const totalInsights = 0; // persistence not implemented (model absent from schema)
 
     if (!totalInsights || totalInsights < 10000) return 0;
 
@@ -1446,7 +1446,7 @@ ${report.topInsights.slice(0, 5).map((i) => `- ${i.description}`).join('\n')}`;
     try {
       switch (source) {
         case 'invoices': {
-          const recentInvoices = await this.prisma.invoice.findMany({
+          const recentInvoices = await this.prisma.client.invoice.findMany({
             where: { businessId, createdAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } },
             select: { status: true, total: true, dueDate: true, paidAt: true },
           });
@@ -1456,7 +1456,7 @@ ${report.topInsights.slice(0, 5).map((i) => `- ${i.description}`).join('\n')}`;
           break;
         }
         case 'support_tickets': {
-          const tickets = await this.prisma.supportTicket
+          const tickets = await this.prisma.client.supportTicket
             ?.findMany({
               where: { businessId, createdAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } },
             })
@@ -1467,7 +1467,7 @@ ${report.topInsights.slice(0, 5).map((i) => `- ${i.description}`).join('\n')}`;
           break;
         }
         case 'tasks': {
-          const overdueTasks = await this.prisma.task.count({
+          const overdueTasks = await this.prisma.client.task.count({
             where: { businessId, status: { not: 'completed' }, dueDate: { lt: new Date() } },
           });
           if (overdueTasks > 3) {
@@ -1504,7 +1504,7 @@ ${report.topInsights.slice(0, 5).map((i) => `- ${i.description}`).join('\n')}`;
 
   private async checkKeywordEvidence(businessId: string, description: string): Promise<string | null> {
     const keywords = description.toLowerCase().split(/\s+/).filter((w) => w.length > 4);
-    const recentEvents = await this.prisma.businessEvent
+    const recentEvents = await this.prisma.client.businessEvent
       .findMany({
         where: { businessId, createdAt: { gte: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000) } },
         take: 200,
@@ -1527,44 +1527,18 @@ ${report.topInsights.slice(0, 5).map((i) => `- ${i.description}`).join('\n')}`;
      ═══════════════════════════════════════════════════════════════ */
 
   private async persistSession(session: ReflectionSession): Promise<void> {
-    await this.prisma.keyCortexReflectionSession
-      ?.create({
-        data: {
-          id: session.id,
-          type: session.type,
-          startedAt: session.startedAt,
-          durationMs: session.durationMs,
-          insights: session.insights as unknown as Record<string, unknown>,
-          actionsTaken: session.actionsTaken,
-          businessId: session.businessId,
-          metadata: session.metadata ?? {},
-        },
-      })
-      .catch(() => {
-        /* table may not exist yet — session stays in memory */
-      });
+    // persistence not implemented (model absent from schema); previously a no-op
   }
 
   private async persistHypothesisUpdate(hypothesis: DreamHypothesis): Promise<void> {
-    await this.prisma.keyCortexDreamHypothesis
-      ?.update({
-        where: { id: hypothesis.id },
-        data: {
-          status: hypothesis.status,
-          validatedAt: hypothesis.validatedAt,
-          evidenceFor: hypothesis.evidenceFor,
-        },
-      })
-      .catch(() => {
-        /* non-fatal */
-      });
+    // persistence not implemented (model absent from schema); previously a no-op
   }
 
   private async findIdleBusinesses(): Promise<string[]> {
     // Businesses with no user activity in the last 15 minutes
     const idleThreshold = new Date(Date.now() - 15 * 60 * 1000);
 
-    const activeSessions = await this.prisma.userSession
+    const activeSessions = await this.prisma.client.userSession
       ?.findMany({
         where: { lastActivityAt: { gt: idleThreshold } },
         select: { businessId: true },
@@ -1579,7 +1553,7 @@ ${report.topInsights.slice(0, 5).map((i) => `- ${i.description}`).join('\n')}`;
   }
 
   private async findAllActiveBusinesses(): Promise<string[]> {
-    const businesses = await this.prisma.business
+    const businesses = await this.prisma.client.business
       .findMany({
         where: { active: true },
         select: { id: true },

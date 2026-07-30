@@ -1,6 +1,7 @@
 import { router, superAdminProcedure } from '../trpc';
+import type { AnyRouter } from '@trpc/server';
 
-export const adminRouter = router({
+export const adminRouter: AnyRouter = router({
   overview: superAdminProcedure.query(() => ({
     users: { total: 1280, active7d: 412, newToday: 6 },
     businesses: { total: 540, newThisWeek: 22 },

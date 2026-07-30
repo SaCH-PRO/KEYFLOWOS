@@ -507,6 +507,19 @@ export class KeyToolRegistryService {
     return { allowed: true };
   }
 
+  async executeTool(
+    toolName: string,
+    rawInput: Record<string, unknown>,
+    businessIdOrCtx: string | KeyToolContext,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ): Promise<ToolResult<any>> {
+    const [module, name] = toolName.includes('.') ? toolName.split('.') : ['general', toolName];
+    const ctx: KeyToolContext = typeof businessIdOrCtx === 'string'
+      ? { businessId: businessIdOrCtx, autonomyLevel: 4 }
+      : businessIdOrCtx;
+    return this.execute(module, name, ctx, rawInput);
+  }
+
   async execute(
     module: string,
     name: string,

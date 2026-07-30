@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { ShieldAlert, ShieldCheck, ArrowRight } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
 import type { CommandCenterModuleReadiness } from "@/lib/api/business-command-center";
 
 interface CommandModuleReadinessPanelProps {
@@ -53,7 +54,15 @@ export function CommandModuleReadinessPanel({ modules }: CommandModuleReadinessP
       </div>
 
       {top.length === 0 ? (
-        <p className="text-xs text-muted-foreground">No module readiness data yet.</p>
+        <EmptyState
+          icon={ShieldCheck}
+          title="No module readiness data yet"
+          description="Complete your Business Genome so KEY can score module readiness."
+          actionLabel="Populate Genome"
+          actionIcon={ArrowRight}
+          onAction={() => router.push("/app/profile?tab=business-genome")}
+          variant="inline"
+        />
       ) : (
         <div className="space-y-2">
           {top.map((m) => (

@@ -145,7 +145,7 @@ export class ActionDispatcherService {
         }
 
         return { success: true, result, dispatchId, durationMs };
-      } catch (err) {
+      } catch (err: any) {
         lastError = (err as Error).message;
         this.logger.warn(`Dispatch ${dispatchId} attempt ${attempt + 1} failed: ${lastError}`);
       }

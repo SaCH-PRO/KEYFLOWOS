@@ -89,38 +89,18 @@ export class OutlookContactsConnector implements IConnector {
     return !!business?.msContactsAccessToken;
   }
 
-  async sync(businessId: string): Promise<ConnectorSyncResult> {
-    const start = Date.now();
-    const connected = await this.isConnected(businessId);
-    if (!connected) {
-      return {
-        success: false,
-        itemsSynced: 0,
-        errors: ['Outlook Contacts not connected'],
-        duration: Date.now() - start,
-      };
-    }
-    const contactCount = await this.prisma.client.contact
-      .count({ where: { businessId, source: 'outlook_contacts' } })
-      .catch(() => 0);
-    await this.prisma.client.business.update({
-      where: { id: businessId },
-      data: { msContactsLastSyncAt: new Date() },
-    });
-    await this.prisma.client.connectorStatus.upsert({
-      where: {
-        businessId_connectorType: { businessId, connectorType: 'outlook_contacts' },
-      },
-      create: {
-        businessId,
-        connectorType: 'outlook_contacts',
-        status: 'connected',
-        lastSyncAt: new Date(),
-        syncCount: 1,
-      },
-      update: { lastSyncAt: new Date(), syncCount: { increment: 1 }, status: 'connected' },
-    });
-    return { success: true, itemsSynced: contactCount, errors: [], duration: Date.now() - start };
+  async sync(_businessId: string): Promise<ConnectorSyncResult> {
+    // Provider pull sync is not yet implemented for this connector. It previously
+    // counted local rows and returned success:true, misrepresenting a no-op as a
+    // successful provider sync. Real pull sync is future work per connector.
+    return {
+      success: false,
+      itemsSynced: 0,
+      unsupported: true,
+      code: 'PULL_SYNC_NOT_IMPLEMENTED',
+      errors: ['Provider pull sync is not implemented for this connector.'],
+      duration: 0,
+    };
   }
 
   async testConnection(
@@ -139,7 +119,7 @@ export class OutlookContactsConnector implements IConnector {
       });
       if (!res.ok) return { success: false, error: `Graph API returned ${res.status}` };
       return { success: true, account: business.msContactsEmail ?? undefined };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }
@@ -170,7 +150,7 @@ export class OutlookContactsConnector implements IConnector {
         account: business.msContactsEmail ?? undefined,
         detail: `${data.value?.length ?? 0} returned`,
       };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }

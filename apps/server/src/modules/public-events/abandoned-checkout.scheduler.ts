@@ -116,7 +116,7 @@ export class AbandonedCheckoutScheduler implements OnModuleInit, OnModuleDestroy
             source: 'storefront',
             actorType: 'SYSTEM',
           });
-        } catch (err) {
+        } catch (err: any) {
           this.logger.debug?.(`[AbandonedCheckout] timeline log skipped: ${(err as Error).message}`);
         }
 
@@ -128,7 +128,7 @@ export class AbandonedCheckoutScheduler implements OnModuleInit, OnModuleDestroy
         });
 
         tasksCreated++;
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(
           `[AbandonedCheckout] failed for order=${order.id}: ${(err as Error).message}`,
         );

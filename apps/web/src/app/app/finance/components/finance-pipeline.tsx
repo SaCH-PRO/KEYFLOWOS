@@ -135,7 +135,6 @@ export function FinancePipeline({
   invoices,
   loading,
   currency = "TTD",
-  contacts = [],
   setInvoices,
   onViewRecord,
 }: FinancePipelineProps) {

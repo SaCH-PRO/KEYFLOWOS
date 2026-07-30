@@ -13,6 +13,8 @@ import {
   Clock,
   ArrowRight,
   X,
+  Bot,
+  Users,
 } from "lucide-react";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
 import {
@@ -23,6 +25,7 @@ import {
   createApprovalRequest,
 } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
+import { AiApprovalsPanel } from "./components/ai-approvals-panel";
 
 const STATUS_LABELS: Record<string, string> = {
   pending: "Pending",
@@ -44,6 +47,7 @@ const STATUS_COLORS: Record<string, string> = {
 
 export default function ApprovalsPage() {
   const router = useRouter();
+  const [activeTab, setActiveTab] = useState<"manual" | "key">("manual");
   const [requests, setRequests] = useState<ApprovalRequest[]>([]);
   const [pendingForMe, setPendingForMe] = useState<ApprovalRequest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -64,7 +68,7 @@ export default function ApprovalsPage() {
       ]);
       if (allRes.data) setRequests(allRes.data.items);
       if (pendingRes.data) setPendingForMe(pendingRes.data);
-    } catch (err) {
+    } catch (_err) {
       toast.error("Failed to load approvals");
     } finally {
       setLoading(false);
@@ -138,16 +142,50 @@ export default function ApprovalsPage() {
               Manage approval workflows and decisions
             </p>
           </div>
-          <button
-            onClick={() => setShowCreate(true)}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-            New Request
-          </button>
+          {activeTab === "manual" && (
+            <button
+              onClick={() => setShowCreate(true)}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              New Request
+            </button>
+          )}
         </div>
 
-        {/* Pending for me */}
+        {/* Tabs */}
+        <div className="border-b">
+          <div className="flex gap-4">
+            <button
+              onClick={() => setActiveTab("manual")}
+              className={`flex items-center gap-2 pb-2 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === "manual"
+                  ? "border-primary text-primary"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <Users className="w-4 h-4" />
+              Team Requests
+            </button>
+            <button
+              onClick={() => setActiveTab("key")}
+              className={`flex items-center gap-2 pb-2 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === "key"
+                  ? "border-primary text-primary"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <Bot className="w-4 h-4" />
+              KEY Actions
+            </button>
+          </div>
+        </div>
+
+        {activeTab === "key" ? (
+          <AiApprovalsPanel />
+        ) : (
+          <>
+            {/* Pending for me */}
         {pendingForMe.length > 0 && (
           <div className="border rounded-xl p-4 bg-amber-50/50">
             <h3 className="text-sm font-medium mb-3 flex items-center gap-2">
@@ -287,10 +325,9 @@ export default function ApprovalsPage() {
             </table>
           </div>
         )}
-      </div>
 
       {/* Create modal */}
-      {showCreate && (
+      {activeTab === "manual" && showCreate && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="bg-background rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-auto">
             <div className="flex items-center justify-between px-6 py-4 border-b">
@@ -337,6 +374,9 @@ export default function ApprovalsPage() {
           </div>
         </div>
       )}
+          </>
+        )}
+      </div>
     </WorkspaceShell>
   );
 }

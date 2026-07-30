@@ -131,7 +131,7 @@ export class ShopifyService {
 
       const data = await this.shopifyRequest<{ shop: { name: string; domain: string } }>(creds, 'shop.json');
       return { success: true, shopName: data.shop.name };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: (err as Error).message };
     }
   }

@@ -395,7 +395,7 @@ export class GrowthIntelligenceService {
           location: [business?.city, business?.country].filter(Boolean).join(', ') || null,
           currency: business?.currency ?? 'TTD',
         });
-      } catch (err) {
+      } catch (err: any) {
         if (err instanceof ForbiddenException) {
           this.logger.log(`Growth insight enrichment skipped (budget): ${err.message}`);
         } else {
@@ -539,7 +539,7 @@ ${JSON.stringify(insightSummaries, null, 2)}`;
         return (parsed as { insights: Array<{ key?: unknown; rationale?: unknown; suggestedAction?: unknown }> }).insights;
       }
       return [];
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Failed to parse growth_insight AI output: ${(err as Error).message}`);
       return [];
     }

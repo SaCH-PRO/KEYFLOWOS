@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { motion } from "framer-motion";
-import { Banknote, Wallet, Receipt, FileText, Landmark, ShieldCheck, ArrowRight, TrendingUp, PiggyBank, Plus, Trash2, Loader2, BookOpen, Scale, ListFilter, Repeat, FileMinus, CalendarDays, Package, Globe, Cable, PackageCheck, Truck, ClipboardList } from "lucide-react";
+import { Banknote, Wallet, Receipt, FileText, Landmark, ShieldCheck, ArrowRight, TrendingUp, PiggyBank, Plus, Trash2, Loader2, BookOpen, Scale, ListFilter, Repeat, FileMinus, CalendarDays, Package, Globe, Cable, PackageCheck, Truck, ClipboardList, Send, Bell, AlertCircle, CheckCircle2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { UnifiedPageShell } from "@/components/layout/unified-page-shell";
@@ -10,6 +10,8 @@ import { MetricCard } from "@/components/ui/metric-card";
 import { SectionCard } from "@/components/ui/section-card";
 import { apiGet } from "@/lib/api";
 import { fetchReserveBuckets, createReserveBucket, deleteReserveBucket, type ReserveBucket } from "@/lib/api/finance";
+import { fetchRoleFlowQueue, resolveFlowSignal, type FlowSignal } from "@/lib/api/flow-signal";
+import { apiPost } from "@/lib/api";
 
 interface FinancialOverview {
   cashBalance: number;
@@ -44,6 +46,41 @@ export default function FinancialFlowPage() {
   const [newTarget, setNewTarget] = useState("");
   const [newCurrent, setNewCurrent] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // KEY FLOWS: AR Clerk proof-of-concept queue
+  const [roleKey, setRoleKey] = useState("ACCOUNTS_RECEIVABLE_CLERK");
+  const [signals, setSignals] = useState<FlowSignal[]>([]);
+  const [signalsLoading, setSignalsLoading] = useState(false);
+  const [actingId, setActingId] = useState<string | null>(null);
+
+  const loadSignals = useCallback(async () => {
+    if (!businessId || !roleKey) return;
+    setSignalsLoading(true);
+    try {
+      const res = await fetchRoleFlowQueue(businessId, roleKey);
+      if (res.data) setSignals(res.data.items);
+    } finally {
+      setSignalsLoading(false);
+    }
+  }, [businessId, roleKey]);
+
+  useEffect(() => {
+    loadSignals();
+  }, [loadSignals]);
+
+  const handleSendReminder = async (signal: FlowSignal) => {
+    if (!businessId) return;
+    const invoiceId = signal.payload?.invoiceId as string | undefined;
+    if (!invoiceId) return;
+    setActingId(signal.id);
+    try {
+      await apiPost({ path: `/commerce/businesses/${businessId}/invoices/${invoiceId}/send-reminder`, body: {} });
+      await resolveFlowSignal(businessId, signal.id);
+      await loadSignals();
+    } finally {
+      setActingId(null);
+    }
+  };
 
   const load = useCallback(async () => {
     if (!businessId) return;
@@ -333,6 +370,85 @@ export default function FinancialFlowPage() {
           </button>
         ))}
       </div>
+
+      {/* KEY FLOWS — AR Clerk proof-of-concept queue */}
+      <SectionCard title="AR Clerk Queue" icon={Bell} compact>
+        <div className="p-3 space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-muted-foreground">
+              Showing signals for role: <span className="font-medium text-foreground">{roleKey.replace(/_/g, " ")}</span>
+            </p>
+            <button
+              onClick={() => loadSignals()}
+              disabled={signalsLoading}
+              className="inline-flex items-center gap-1 text-xs font-medium transition-colors hover:opacity-80 disabled:opacity-50"
+              style={{ color: "hsl(var(--kf-accent1))" }}
+            >
+              {signalsLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <ArrowRight className="w-3 h-3" />}
+              Refresh
+            </button>
+          </div>
+
+          {signalsLoading ? (
+            <div className="space-y-2">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="h-16 kf-card animate-pulse" />
+              ))}
+            </div>
+          ) : signals.length === 0 ? (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground py-4">
+              <CheckCircle2 className="w-4 h-4 text-emerald-500" />
+              No overdue invoices requiring AR clerk attention.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {signals.map((signal) => (
+                <div
+                  key={signal.id}
+                  className="kf-card p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <AlertCircle
+                        className={`w-4 h-4 ${signal.importance === "CRITICAL" ? "text-red-500" : "text-amber-500"}`}
+                      />
+                      <h4 className="text-sm font-medium truncate">{signal.title}</h4>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">
+                        {signal.flows.join(" + ")}
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">{signal.summary}</p>
+                    <p className="text-[10px] text-muted-foreground mt-1">
+                      {new Date(signal.occurredAt).toLocaleDateString()} · {signal.status}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => router.push(`/app/commerce/invoices/${signal.payload?.invoiceId}`)}
+                      className="px-2.5 py-1.5 rounded-lg text-xs font-medium border hover:bg-muted transition-colors"
+                      style={{ borderColor: "hsl(var(--kf-border))" }}
+                    >
+                      View
+                    </button>
+                    <button
+                      onClick={() => handleSendReminder(signal)}
+                      disabled={actingId === signal.id}
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-[hsl(var(--kf-accent1))] text-white hover:opacity-90 transition-opacity disabled:opacity-50"
+                    >
+                      {actingId === signal.id ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <Send className="w-3 h-3" />
+                      )}
+                      Remind
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </SectionCard>
     </UnifiedPageShell>
   );
 }

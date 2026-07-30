@@ -53,7 +53,6 @@ const PAGE_SIZE = 10;
 
 export function InvoiceList({
   invoices,
-  currency,
   gmailStatus,
   onSend,
   onMarkPaid,
@@ -201,7 +200,7 @@ export function InvoiceList({
             <tbody className="divide-y divide-border/20">
               {paginated.map((inv) => {
                 const dueInfo = getDaysUntilDue(inv.dueDate);
-                const smartCTA = getInvoiceSmartCTA(inv.status);
+                const _smartCTA = getInvoiceSmartCTA(inv.status);
                 const paidAmount = (inv.payments ?? [])
                   .filter((p) => p.status === "SUCCESSFUL")
                   .reduce((sum, p) => sum + p.amount, 0);

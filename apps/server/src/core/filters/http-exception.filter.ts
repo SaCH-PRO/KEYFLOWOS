@@ -33,6 +33,7 @@ export class GlobalHttpExceptionFilter implements ExceptionFilter {
     let message: string | string[];
     let error: string;
     let code: string | undefined;
+    let details: Record<string, unknown> = {};
 
     if (exception instanceof HttpException) {
       statusCode = exception.getStatus();
@@ -47,6 +48,10 @@ export class GlobalHttpExceptionFilter implements ExceptionFilter {
         if (resp.code) {
           code = resp.code as string;
         }
+        // Preserve any additional structured fields (e.g. missingPillars,
+        // genomeIntegrity) so clients can render actionable error UI.
+        const reserved = new Set(['statusCode', 'code', 'message', 'error', 'timestamp', 'path', 'correlationId']);
+        details = Object.fromEntries(Object.entries(resp).filter(([key]) => !reserved.has(key)));
       } else {
         message = exception.message;
         error = exception.name;
@@ -65,7 +70,7 @@ export class GlobalHttpExceptionFilter implements ExceptionFilter {
       code = GlobalHttpExceptionFilter.STATUS_CODE_MAP[statusCode] || 'UNKNOWN_ERROR';
     }
 
-    response.status(statusCode).json({
+    const body: Record<string, unknown> = {
       statusCode,
       code,
       message,
@@ -73,6 +78,11 @@ export class GlobalHttpExceptionFilter implements ExceptionFilter {
       timestamp: new Date().toISOString(),
       path: request.url,
       correlationId: correlationId ?? undefined,
-    });
+    };
+    if (Object.keys(details).length > 0) {
+      body.details = details;
+    }
+
+    response.status(statusCode).json(body);
   }
 }

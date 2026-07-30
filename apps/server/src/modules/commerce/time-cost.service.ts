@@ -314,7 +314,7 @@ export class TimeCostService {
           return c?.id ?? null;
         }
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`inferContactId failed for ${refType}:${refId}: ${(err as Error).message}`);
       return null;
     }

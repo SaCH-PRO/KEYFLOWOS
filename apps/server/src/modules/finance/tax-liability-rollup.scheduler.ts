@@ -48,7 +48,7 @@ export class TaxLiabilityRollupScheduler implements OnModuleInit, OnModuleDestro
       try {
         await this.tax.recompute(b.id);
         ok += 1;
-      } catch (err) {
+      } catch (err: any) {
         failed += 1;
         this.logger.error(`rollup for business ${b.id} failed: ${(err as Error).message}`);
       }

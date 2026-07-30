@@ -243,7 +243,7 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
           intervalMin: loop.intervalMin,
           riskTier: loop.riskTier,
         });
-      } catch (err) {
+      } catch (err: any) {
         this.logger.error(`Loop ${loop.loopType} failed for business ${loop.businessId}: ${(err as Error).message}`);
       }
     }
@@ -284,7 +284,7 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
         const sweepResult = await this.momentumService.runDailySweep(business.id);
         this.momentumSweepTracker.set(trackerKey, 'done');
         this.logger.log(`[Autopilot] Momentum sweep complete for ${business.id}: ${sweepResult.contactsProcessed} contacts, ${sweepResult.recommendationsGenerated} recs`);
-      } catch (err) {
+      } catch (err: any) {
         this.momentumSweepTracker.set(trackerKey, 'failed');
         this.logger.error(`[Autopilot] Momentum sweep failed for ${business.id}: ${(err as Error).message}`);
       }
@@ -448,7 +448,7 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
       await this.adaptGovernanceFromHistory(loop.businessId, loop.loopType).catch(() => {});
 
       return { runId: run.id, status: 'completed', itemsMatched: result.itemsMatched, actionsCreated: result.actionsCreated };
-    } catch (err) {
+    } catch (err: any) {
       const durationMs = Date.now() - startTime;
 
       await this.prisma.client.delegationLoopRun.update({

@@ -250,7 +250,12 @@ export class DriveIntakeOrchestrator {
   /**
    * Execute an approved plan. This is the only path that writes financial records.
    */
-  async executePlan(businessId: string, intakeFileId: string, userId: string): Promise<{ success: boolean; results: ActionResult[] }> {
+  async executePlan(
+    businessId: string,
+    intakeFileId: string,
+    userId: string,
+    planOverride?: DriveIntakePlan,
+  ): Promise<{ success: boolean; results: ActionResult[] }> {
     const intake = await this.prisma.client.driveIntakeFile.findFirst({
       where: { id: intakeFileId, businessId },
     });
@@ -262,7 +267,7 @@ export class DriveIntakeOrchestrator {
       throw new BadRequestException(`Intake file is ${intake.status}, cannot execute`);
     }
 
-    const plan = intake.proposedActions as unknown as DriveIntakePlan | null;
+    const plan = planOverride ?? (intake.proposedActions as unknown as DriveIntakePlan | null);
     if (!plan) throw new BadRequestException('No action plan found for this intake file');
 
     const results: ActionResult[] = [];
@@ -385,7 +390,7 @@ export class DriveIntakeOrchestrator {
       await this.resolvePendingApproval(businessId, intakeFileId, 'approved', userId);
 
       return { success: true, results };
-    } catch (err) {
+    } catch (err: any) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.error(`Drive intake execution failed for ${intakeFileId}: ${message}`);
       await this.prisma.client.driveIntakeFile.update({

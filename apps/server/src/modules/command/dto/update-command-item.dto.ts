@@ -3,7 +3,7 @@ import { Transform } from 'class-transformer';
 import { sanitize } from '../../../core/utils/sanitize';
 
 const VALID_STATUSES = [
-  'OPEN', 'IN_PROGRESS', 'WAITING_APPROVAL', 'EXECUTED', 'DISMISSED', 'FAILED', 'COMPLETED',
+  'OPEN', 'IN_PROGRESS', 'WAITING_APPROVAL', 'EXECUTED', 'DISMISSED', 'FAILED', 'COMPLETED', 'SNOOZED',
 ];
 
 const VALID_OWNER_TYPES = ['USER', 'ROLE', 'KEY'];

@@ -261,7 +261,7 @@ export class AiAdvisorService {
         },
         usage: result.usage,
       };
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`AI chat error: ${(error as Error).message}`);
       throw error;
     }
@@ -373,7 +373,7 @@ Respond ONLY with valid JSON in this exact format (no markdown, no code fences):
           usage: result.usage,
         };
       }
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`AI briefing error: ${(error as Error).message}`);
       throw error;
     }
@@ -1030,7 +1030,7 @@ ALL financial figures in TTD. This plan must be of a quality suitable for presen
       };
 
       return { success: true, model: validated, usage: result.usage };
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`Business model generation error: ${(error as Error).message}`);
       return { success: false, error: 'An error occurred generating your business model. Please try again.' };
     }

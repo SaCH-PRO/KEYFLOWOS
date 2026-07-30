@@ -36,8 +36,17 @@ interface ExpenseFormSideSheetProps {
   projects?: ProjectOption[];
   contacts?: ContactOption[];
   services?: ServiceOption[];
+  prefill?: ExpensePrefill | null;
   onClose: () => void;
   onSaved: () => void;
+}
+
+export interface ExpensePrefill {
+  description?: string;
+  amount?: number;
+  date?: string;
+  vendor?: string;
+  receiptUrl?: string;
 }
 
 const ACCENT = "rgb(244,63,94)"; // rose-500
@@ -51,6 +60,7 @@ export function ExpenseFormSideSheet({
   projects = [],
   contacts = [],
   services = [],
+  prefill,
   onClose,
   onSaved,
 }: ExpenseFormSideSheetProps) {
@@ -77,14 +87,19 @@ export function ExpenseFormSideSheet({
         serviceId: editingExpense.serviceId || "",
       };
     }
+    const dateValue =
+      prefill?.date ?? new Date().toISOString().split("T")[0];
     return {
-      description: "",
-      amount: "",
-      date: new Date().toISOString().split("T")[0],
-      vendor: "",
+      description: prefill?.description ?? "",
+      amount: typeof prefill?.amount === "number" ? String(prefill.amount) : "",
+      date:
+        typeof dateValue === "string" && /^\d{4}-\d{2}-\d{2}$/.test(dateValue)
+          ? dateValue
+          : new Date(dateValue).toISOString().split("T")[0] ?? "",
+      vendor: prefill?.vendor ?? "",
       categoryId: "",
       notes: "",
-      receiptUrl: "",
+      receiptUrl: prefill?.receiptUrl ?? "",
       receiptMimeType: "",
       paymentMethod: "",
       tags: "" as string,

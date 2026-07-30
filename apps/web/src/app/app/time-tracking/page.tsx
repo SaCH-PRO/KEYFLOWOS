@@ -73,7 +73,7 @@ function formatDuration(minutes: number | null): string {
   return `${h}:${m.toString().padStart(2, "0")}`;
 }
 
-function formatCurrency(hours: number, rate: number | null): string {
+function _formatCurrency(hours: number, rate: number | null): string {
   if (!rate || hours <= 0) return "$0.00";
   return `$${(hours * rate).toFixed(2)}`;
 }

@@ -15,7 +15,7 @@ export class MessageIntakeListener {
     try {
       const result = await this.orchestrator.receive(event);
       this.logger.log(`Queued message intake ${result.intakeId} for contact ${result.contactId}`);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Failed to queue message intake: ${err instanceof Error ? err.message : String(err)}`);
     }
   }

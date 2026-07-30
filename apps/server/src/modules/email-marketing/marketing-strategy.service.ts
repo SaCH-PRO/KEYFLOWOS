@@ -365,7 +365,7 @@ export class MarketingStrategyService {
         });
         this.logger.log(`Marketing brief emailed for business ${businessId}`);
         return { success: true, method: 'gmail', message: 'Marketing brief sent successfully via Gmail' };
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(`Gmail send failed for marketing brief: ${err}`);
       }
     }

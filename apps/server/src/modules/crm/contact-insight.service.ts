@@ -79,7 +79,7 @@ function parseLooseJson<T>(content: string, fallback: T): T {
     const cleaned = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
     const m = cleaned.match(/\{[\s\S]*\}/);
     if (m) return JSON.parse(m[0]) as T;
-  } catch (err) {
+  } catch (err: any) {
       console.error(`Silent catch:`, err);
     }
   return fallback;
@@ -144,7 +144,7 @@ export class ContactInsightService {
         where: { businessId, contactId },
         data: { stale: true },
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`markStale failed for contact=${contactId}: ${(err as Error).message}`);
     }
   }
@@ -797,7 +797,7 @@ ${JSON.stringify(
         summary: summary.length > 0 ? summary : fallbackSummary,
         modelUsed: result.model ?? null,
       };
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`AI relationship summary failed; using heuristic. ${(err as Error).message}`);
       return { summary: fallbackSummary, modelUsed: null };
     }

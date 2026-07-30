@@ -176,28 +176,34 @@ export class CommerceService {
   async createInvoice(input: {
     businessId: string;
     contactId?: string;
-    items: { description: string; quantity: number; unitPrice: number; productId?: string }[];
+    items: { description: string; quantity: number; unitPrice: number; productId?: string; total?: number }[];
     currency?: string;
     dueDate?: Date | string;
     taxRate?: number;
     discountType?: 'PERCENT' | 'FIXED';
     discountValue?: number;
     notes?: string;
+    invoiceNumber?: string;
+    subtotal?: number;
+    taxAmount?: number;
+    total?: number;
   }) {
     this.validateTaxAndDiscount(input.taxRate, input.discountValue, input.discountType);
-    const subtotal = input.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+    const calculatedSubtotal = input.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+    const subtotal = input.subtotal ?? calculatedSubtotal;
     const taxRate = input.taxRate ?? 0;
-    const taxAmount = (subtotal * taxRate) / 100;
+    const calculatedTaxAmount = (calculatedSubtotal * taxRate) / 100;
+    const taxAmount = input.taxAmount ?? calculatedTaxAmount;
     let discountAmount = 0;
     if (input.discountType === 'PERCENT' && input.discountValue) {
-      discountAmount = (subtotal * input.discountValue) / 100;
+      discountAmount = (calculatedSubtotal * input.discountValue) / 100;
     } else if (input.discountType === 'FIXED' && input.discountValue) {
       discountAmount = input.discountValue;
     }
-    const total = subtotal + taxAmount - discountAmount;
+    const total = input.total ?? (calculatedSubtotal + calculatedTaxAmount - discountAmount);
     const data: any = {
       businessId: input.businessId,
-      invoiceNumber: `INV-${Date.now()}`,
+      invoiceNumber: input.invoiceNumber ?? `INV-${Date.now()}`,
       status: 'DRAFT',
       issueDate: new Date(),
       dueDate: input.dueDate ? new Date(input.dueDate) : null,
@@ -215,7 +221,7 @@ export class CommerceService {
           description: item.description,
           quantity: item.quantity,
           unitPrice: item.unitPrice,
-          total: item.quantity * item.unitPrice,
+          total: item.total ?? item.quantity * item.unitPrice,
         })),
       },
     };
@@ -280,7 +286,7 @@ export class CommerceService {
           target === 'SENT' ? { sentAt: new Date() } : {},
         );
         updated++;
-      } catch (err) {
+      } catch (err: any) {
           this.logger.warn(`409 illegal transition -> skip silently in bulk mode.: ${err instanceof Error ? err.message : err}`);
         }
     }
@@ -343,6 +349,33 @@ export class CommerceService {
     this.events.emit('invoice.deleted', { businessId, invoiceId });
     this.statsCache.invalidateCache(businessId);
     return result;
+  }
+
+  /**
+   * Undo an AI-created invoice. If it is still a draft, soft-delete it;
+   * otherwise revert it to DRAFT so a human can review.
+   */
+  async undoInvoice(invoiceId: string, businessId: string) {
+    const invoice = await this.prisma.client.invoice.findFirst({
+      where: { id: invoiceId, businessId },
+      select: { id: true, status: true },
+    });
+    if (!invoice) {
+      throw new Error('Invoice not found');
+    }
+    if (invoice.status === 'DRAFT') {
+      await this.prisma.client.invoice.update({
+        where: { id: invoiceId },
+        data: { deletedAt: new Date() },
+      });
+      return { id: invoiceId, status: 'deleted' };
+    }
+    const reverted = await this.prisma.client.invoice.update({
+      where: { id: invoiceId },
+      data: { status: 'DRAFT' },
+    });
+    this.statsCache.invalidateCache(businessId);
+    return { id: invoiceId, status: 'reverted_to_draft', invoice: reverted };
   }
 
   async getInvoiceWithBusiness(invoiceId: string, requireShareable = false) {
@@ -992,13 +1025,14 @@ export class CommerceService {
   async createQuote(input: {
     businessId: string;
     contactId: string;
-    items: { description: string; quantity: number; unitPrice: number; productId?: string }[];
+    items: { description: string; quantity: number; unitPrice: number; productId?: string; total?: number }[];
     currency?: string;
     expiryDate?: Date | string;
     taxRate?: number;
     discountType?: 'PERCENT' | 'FIXED';
     discountValue?: number;
     notes?: string;
+    quoteNumber?: string;
   }) {
     this.validateTaxAndDiscount(input.taxRate, input.discountValue, input.discountType);
     const subtotal = input.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
@@ -1007,7 +1041,7 @@ export class CommerceService {
     const discountValue = input.discountValue ?? 0;
     const discountAmount = input.discountType === 'FIXED' ? discountValue : subtotal * discountValue / 100;
     const total = subtotal + taxAmount - discountAmount;
-    
+
     // R2: viewToken is intentionally NOT generated at draft time. The
     // public accept/reject URL is minted only when the quote is sent so
     // pre-send drafts can never be acted on via a leaked link.
@@ -1015,7 +1049,7 @@ export class CommerceService {
       data: {
         businessId: input.businessId,
         contactId: input.contactId,
-        quoteNumber: `QT-${Date.now()}`,
+        quoteNumber: input.quoteNumber ?? `QT-${Date.now()}`,
         status: 'DRAFT',
         issueDate: new Date(),
         expiryDate: input.expiryDate ? new Date(input.expiryDate) : null,
@@ -1033,7 +1067,7 @@ export class CommerceService {
             description: item.description,
             quantity: item.quantity,
             unitPrice: item.unitPrice,
-            total: item.quantity * item.unitPrice,
+            total: item.total ?? item.quantity * item.unitPrice,
             productId: item.productId ?? null,
           })),
         },
@@ -1646,7 +1680,7 @@ export class CommerceService {
     if (!link) {
       try {
         link = await this.createPaymentLink(invoice.id, input.businessId);
-      } catch (err) {
+      } catch (err: any) {
         // Reminders are only sent for non-PAID/non-VOID invoices, so the
         // "paid or voided" refusal shouldn't normally fire — but if a
         // payment landed between the status check above and link creation
@@ -1671,7 +1705,7 @@ export class CommerceService {
       const result = await input.deliver({ invoice, recipientEmail, paymentUrl });
       delivered = result.delivered;
       messageId = result.messageId;
-    } catch (err) {
+    } catch (err: any) {
       // Persist the event regardless so the timeline shows the operator's
       // intent even when delivery fails — but surface the error to the UI.
       this.events.emit('invoice.reminder_failed', {
@@ -1808,6 +1842,7 @@ export class CommerceService {
     discountType?: 'PERCENT' | 'FIXED' | null;
     discountValue?: number | null;
     notes?: string | null;
+    status?: 'SENT' | 'OVERDUE' | 'VOID' | 'PAID' | 'DRAFT';
   }) {
     const invoice = await this.prisma.client.invoice.findFirst({
       where: { id: input.invoiceId, businessId: input.businessId },
@@ -1818,6 +1853,18 @@ export class CommerceService {
     this.validateTaxAndDiscount(input.taxRate, input.discountValue ?? undefined, input.discountType ?? undefined);
     if (invoice.status === 'PAID' || invoice.status === 'PARTIALLY_PAID') {
       throw new Error('Cannot edit a paid or partially paid invoice');
+    }
+
+    if (input.status && input.status !== invoice.status) {
+      if (input.status === 'PAID') {
+        return this.markInvoicePaid(input.invoiceId, 'key_ai');
+      }
+      return this.updateInvoiceStatus({
+        invoiceId: input.invoiceId,
+        status: input.status as 'SENT' | 'OVERDUE' | 'VOID',
+        actorId: 'key_ai',
+        dueDate: input.dueDate,
+      });
     }
 
     const updateData: any = {};

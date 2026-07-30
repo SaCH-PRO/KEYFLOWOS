@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { AuthModule } from '../../core/auth/auth.module';
 import { PrismaModule } from '../../core/prisma/prisma.module';
 import { RedisModule } from '../../core/redis/redis.module';
@@ -12,7 +12,7 @@ import { TemporalFlowMemoryQueueService } from './temporal-flow-memory.queue.ser
 import { TemporalFlowGenomeBridgeService } from './temporal-flow-genome-bridge.service';
 
 @Module({
-  imports: [PrismaModule, AuthModule, RedisModule, AiModule, KeyGenomeModule],
+  imports: [PrismaModule, AuthModule, RedisModule, forwardRef(() => AiModule), KeyGenomeModule],
   controllers: [TemporalFlowController],
   providers: [
     TemporalFlowService,

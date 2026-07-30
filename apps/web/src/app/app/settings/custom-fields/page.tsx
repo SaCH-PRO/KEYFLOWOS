@@ -4,14 +4,12 @@ import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   FormInput,
-  Plus,
   Trash2,
   Archive,
   RotateCcw,
   GripVertical,
   ChevronDown,
   AlertCircle,
-  Check,
   X,
   Loader2,
   Type,

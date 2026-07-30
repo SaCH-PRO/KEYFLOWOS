@@ -1,8 +1,32 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { createHmac, timingSafeEqual } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EntityResolutionService } from '../entity-resolution.service';
-import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary, ConnectorSmokeResult } from '../connector.interface';
+import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary, ConnectorSmokeResult, IngestionItemInput } from '../connector.interface';
+
+interface MetaSocialWebhookBody {
+  type?: string;
+  platform?: string;
+  object?: string;
+  from?: { id?: string; name?: string };
+  message?: string;
+  externalId?: string;
+  entry?: Array<{
+    id?: string;
+    time?: number;
+    messaging?: Array<{
+      sender?: { id?: string };
+      recipient?: { id?: string };
+      timestamp?: number;
+      message?: {
+        mid?: string;
+        text?: string;
+        attachments?: Array<{ type?: string; payload?: { url?: string } }>;
+      };
+    }>;
+  }>;
+}
 
 @Injectable()
 export class MetaSocialConnector implements IConnector {
@@ -88,24 +112,90 @@ export class MetaSocialConnector implements IConnector {
     return !!connection;
   }
 
-  async sync(businessId: string): Promise<ConnectorSyncResult> {
-    const start = Date.now();
-    const connected = await this.isConnected(businessId);
-    if (!connected) {
-      return { success: false, itemsSynced: 0, errors: ['Meta social not connected'], duration: Date.now() - start };
+  async sync(_businessId: string): Promise<ConnectorSyncResult> {
+    // Meta (Facebook/Instagram) does not support pull synchronization: inbound
+    // DMs/engagement arrive via the Meta webhook and outbound content is
+    // published. Return an explicit unsupported result rather than reporting a
+    // local post count as a successful provider sync.
+    return {
+      success: false,
+      itemsSynced: 0,
+      unsupported: true,
+      code: 'PULL_SYNC_UNSUPPORTED',
+      errors: ['Pull sync is not supported for Meta; inbound arrives via webhook and outbound is published.'],
+      duration: 0,
+    };
+  }
+
+  parseInbound(payload: unknown, _businessId: string): IngestionItemInput[] {
+    const body = payload as MetaSocialWebhookBody;
+
+    // Legacy simplified shape used by tests/older integrations.
+    if (
+      typeof body.type === 'string' &&
+      body.type.toUpperCase() === 'DM' &&
+      typeof body.from?.id === 'string'
+    ) {
+      const text = body.message ?? '';
+      const platform = (body.platform ?? '').toLowerCase();
+      return [
+        {
+          sourceType: platform === 'instagram' ? 'instagram' : 'messenger',
+          sourceConnectorType: 'meta_social',
+          externalId: body.externalId ?? body.from.id,
+          receivedAt: new Date(),
+          from: { id: body.from.id, name: body.from.name },
+          subject: text ? text.slice(0, 100) : 'Direct message',
+          body: text,
+          rawPayload: payload as Record<string, unknown>,
+        },
+      ];
     }
 
-    const postCount = await this.prisma.client.socialPost.count({
-      where: { businessId, status: 'POSTED', deletedAt: null },
-    });
+    // Real Meta Graph webhook shape (page / instagram).
+    if (Array.isArray(body.entry) && body.entry.length > 0) {
+      const object = (body.object ?? '').toLowerCase();
+      const event = body.entry[0]?.messaging?.[0];
+      const message = event?.message;
+      if (event?.sender?.id && message) {
+        const text = message.text ?? '';
+        return [
+          {
+            sourceType: object === 'instagram' ? 'instagram' : 'messenger',
+            sourceConnectorType: 'meta_social',
+            externalId: message.mid ?? event.sender.id,
+            receivedAt: event.timestamp ? new Date(event.timestamp) : new Date(),
+            from: { id: event.sender.id, name: event.sender.id },
+            subject: text ? text.slice(0, 100) : 'Direct message',
+            body: text,
+            rawPayload: payload as Record<string, unknown>,
+          },
+        ];
+      }
+    }
 
-    await this.prisma.client.connectorStatus.upsert({
-      where: { businessId_connectorType: { businessId, connectorType: 'meta_social' } },
-      create: { businessId, connectorType: 'meta_social', status: 'connected', lastSyncAt: new Date(), syncCount: 1 },
-      update: { lastSyncAt: new Date(), syncCount: { increment: 1 }, status: 'connected' },
-    });
+    return [];
+  }
 
-    return { success: true, itemsSynced: postCount, errors: [], duration: Date.now() - start };
+  verifyWebhook(payload: unknown, signature: string | undefined, secret: string): boolean {
+    if (!signature || !signature.startsWith('sha256=')) {
+      return false;
+    }
+    let raw: Buffer;
+    if (Buffer.isBuffer(payload)) {
+      raw = payload;
+    } else if (typeof payload === 'string') {
+      raw = Buffer.from(payload, 'utf8');
+    } else {
+      return false;
+    }
+    const expected = createHmac('sha256', secret).update(raw).digest('hex');
+    const provided = signature.slice('sha256='.length);
+    try {
+      return timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(provided, 'hex'));
+    } catch {
+      return false;
+    }
   }
 
   async smokeTest(businessId: string): Promise<ConnectorSmokeResult> {
@@ -128,7 +218,7 @@ export class MetaSocialConnector implements IConnector {
         account: data.name ?? conn.accountName ?? undefined,
         detail: data.id ? `Account ID ${data.id}` : undefined,
       };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }

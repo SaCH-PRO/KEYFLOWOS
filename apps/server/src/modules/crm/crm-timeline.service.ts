@@ -129,7 +129,7 @@ export class CrmTimelineService {
           where: { id: contactId },
           data: { lastContactedAt: new Date() },
         });
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(
           `[CRM] failed to update lastContactedAt for contact=${contactId}: ${(err as Error).message}`,
         );
@@ -597,7 +597,7 @@ export class CrmTimelineService {
           }
         }
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error creating task for autopilot approval:', err);
     }
 
@@ -631,6 +631,102 @@ export class CrmTimelineService {
       actionId: input.actionId,
     });
     return { denied: true, actionId: input.actionId };
+  }
+
+  async getContactTimeline(
+    businessId: string,
+    contactId: string,
+    limit = 50,
+  ): Promise<TimelineEntry[]> {
+    await this.assertContact(businessId, contactId);
+
+    const [events, notes, tasks, invoices, bookings] = await Promise.all([
+      this.prisma.client.contactEvent.findMany({
+        where: { businessId, contactId },
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+      }),
+      this.prisma.client.contactNote.findMany({
+        where: { businessId, contactId },
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+      }),
+      this.prisma.client.contactTask.findMany({
+        where: { businessId, contactId },
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+      }),
+      this.prisma.client.invoice.findMany({
+        where: { businessId, contactId, deletedAt: null },
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+      }),
+      this.prisma.client.booking.findMany({
+        where: { businessId, contactId, deletedAt: null },
+        orderBy: { startTime: 'desc' },
+        take: limit,
+      }),
+    ]);
+
+    const contact = await this.prisma.client.contact.findUnique({
+      where: { id: contactId },
+      select: { id: true, firstName: true, lastName: true, displayName: true, email: true, phone: true },
+    });
+
+    const entries: TimelineEntry[] = [
+      ...events.map((event) => ({
+        id: event.id,
+        type: 'event' as const,
+        contactId: event.contactId,
+        contactName: contact ? this.formatContactName(contact) : undefined,
+        contactEmail: contact?.email ?? null,
+        title: event.type,
+        description: `Event recorded via ${event.source ?? 'system'}`,
+        timestamp: event.createdAt,
+      })),
+      ...notes.map((note) => ({
+        id: note.id,
+        type: 'note' as const,
+        contactId: note.contactId,
+        contactName: contact ? this.formatContactName(contact) : undefined,
+        contactEmail: contact?.email ?? null,
+        title: 'Note added',
+        description: note.body.slice(0, 120),
+        timestamp: note.createdAt,
+      })),
+      ...tasks.map((task) => ({
+        id: task.id,
+        type: 'task' as const,
+        contactId: task.contactId,
+        contactName: contact ? this.formatContactName(contact) : undefined,
+        contactEmail: contact?.email ?? null,
+        title: `Task: ${task.title}`,
+        description: task.dueDate ? `Due ${new Date(task.dueDate).toLocaleString()}` : 'No due date',
+        timestamp: task.createdAt,
+      })),
+      ...invoices.map((invoice) => ({
+        id: invoice.id,
+        type: 'invoice' as const,
+        contactId: invoice.contactId,
+        contactName: contact ? this.formatContactName(contact) : undefined,
+        contactEmail: contact?.email ?? null,
+        title: `Invoice ${invoice.status}`,
+        description: `Total ${invoice.total} ${invoice.currency}`,
+        timestamp: invoice.createdAt,
+      })),
+      ...bookings.map((booking) => ({
+        id: booking.id,
+        type: 'booking' as const,
+        contactId: booking.contactId,
+        contactName: contact ? this.formatContactName(contact) : undefined,
+        contactEmail: contact?.email ?? null,
+        title: `Booking ${booking.status}`,
+        description: `Starts ${booking.startTime?.toISOString() ?? 'TBD'}`,
+        timestamp: booking.startTime ?? booking.createdAt,
+      })),
+    ];
+
+    return entries.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime()).slice(0, limit);
   }
 
   async buildTimeline(businessId: string, limit = 20): Promise<TimelineEntry[]> {

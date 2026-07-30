@@ -143,7 +143,7 @@ Respond in valid JSON with this exact structure:
       this.logger.log(`[CRM] analyzeContacts businessId=${businessId} duration=${duration}ms`);
       if (duration > 1000) this.logger.warn(`[CRM] analyzeContacts slow businessId=${businessId} duration=${duration}ms`);
       return parsed;
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('AI analysis failed', error);
       return {
         analysis: 'Unable to complete analysis at this time. Please try again.',
@@ -187,7 +187,7 @@ Respond in valid JSON with this exact structure:
           },
         });
         created++;
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(`Failed to create task for contact ${task.contactId}`, err);
         failed++;
       }
@@ -448,7 +448,7 @@ ${tasks.filter(t => t.status === 'OPEN').map(t => `- ${t.title} (${t.priority ??
         revenueImpact: parsed.revenueImpact ?? 'low',
         creditsUsed: result.usage?.creditsUsed ?? 1,
       };
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('Contact summary failed', error);
       throw error;
     }
@@ -558,7 +558,7 @@ ${notes.slice(0, 8).map(n => `- ${n.body.substring(0, 150)}`).join('\n') || 'No 
         recommendation: parsed.recommendation ?? '',
         creditsUsed: result.usage?.creditsUsed ?? 1,
       };
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('AI lead scoring failed', error);
       throw error;
     }
@@ -632,7 +632,7 @@ Respond in valid JSON:
         summary: parsed.summary ?? '',
         creditsUsed: result.usage?.creditsUsed ?? 1,
       };
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('Note intelligence failed', error);
       throw error;
     }
@@ -718,7 +718,7 @@ Respond in valid JSON:
         summary: parsed.summary ?? '',
         creditsUsed: result.usage?.creditsUsed ?? 2,
       };
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('Churn detection failed', error);
       throw error;
     }
@@ -824,7 +824,7 @@ Respond in valid JSON:
         totalResults: contacts.length,
         creditsUsed: result.usage?.creditsUsed ?? 1,
       };
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('NL search failed', error);
       throw error;
     }
@@ -962,7 +962,7 @@ Respond in valid JSON:
         currentTags: contact.tags ?? [],
         creditsUsed: result.usage?.creditsUsed ?? 1,
       };
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('AI tag suggestion failed', error);
       throw error;
     }
@@ -1113,7 +1113,7 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
         talkingPoints: Array.isArray(parsed.talkingPoints) ? parsed.talkingPoints : [],
         creditsUsed: result.usage?.creditsUsed ?? 2,
       };
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('Prep brief generation failed', error);
       throw error;
     }
@@ -1666,7 +1666,7 @@ Respond in valid JSON:
         contactName: name,
         creditsUsed: result.usage?.creditsUsed ?? 2,
       };
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('Follow-up draft generation failed', error);
       throw error;
     }

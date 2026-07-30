@@ -1,5 +1,13 @@
-import { Controller, Get, Post, Patch, Param, Body, UseGuards, Inject, Query } from '@nestjs/common';
+import { Controller, Get, Post, Param, Body, UseGuards, Inject } from '@nestjs/common';
 import { OnboardingConciergeService, AutoConfigureResult } from './onboarding-concierge.service';
+import { OnboardingStateService } from './onboarding-state.service';
+import {
+  SaveOnboardingStepDto,
+  ChatDto,
+  AutoConfigureDto,
+  DetectBusinessTypeDto,
+  SnoozeNudgeDto,
+} from './dto';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 
@@ -9,6 +17,8 @@ export class OnboardingConciergeController {
   constructor(
     @Inject(OnboardingConciergeService)
     private readonly concierge: OnboardingConciergeService,
+    @Inject(OnboardingStateService)
+    private readonly state: OnboardingStateService,
   ) {}
 
   @Get('status')
@@ -19,6 +29,24 @@ export class OnboardingConciergeController {
   @Get('state')
   async getConciergeState(@Param('businessId') businessId: string) {
     return this.concierge.getConciergeState(businessId);
+  }
+
+  @Get('onboarding-state')
+  async getOnboardingState(@Param('businessId') businessId: string) {
+    return this.state.getState(businessId);
+  }
+
+  @Post('onboarding-step')
+  async saveOnboardingStep(
+    @Param('businessId') businessId: string,
+    @Body() body: SaveOnboardingStepDto,
+  ) {
+    return this.state.saveStep(businessId, body.step);
+  }
+
+  @Post('seed-demo')
+  async seedDemoData(@Param('businessId') businessId: string) {
+    return this.concierge.seedDemoData(businessId);
   }
 
   @Get('welcome')
@@ -39,10 +67,7 @@ export class OnboardingConciergeController {
   @Post('chat')
   async chat(
     @Param('businessId') businessId: string,
-    @Body() body: {
-      message: string;
-      history?: Array<{ role: string; content: string }>;
-    },
+    @Body() body: ChatDto,
   ) {
     return this.concierge.generateConciergeResponse(
       businessId,
@@ -54,22 +79,17 @@ export class OnboardingConciergeController {
   @Post('auto-configure')
   async autoConfigure(
     @Param('businessId') businessId: string,
-    @Body() body: {
-      templateId: string;
-      createProducts?: boolean;
-      setBusinessHours?: boolean;
-      setPaymentMethods?: boolean;
-      customBusinessName?: string;
-    },
+    @Body() body: AutoConfigureDto,
   ): Promise<AutoConfigureResult> {
     return this.concierge.autoConfigureFromTemplate(businessId, body.templateId, body);
   }
 
   @Post('detect-type')
   async detectBusinessType(
-    @Body() body: { description: string },
+    @Param('businessId') businessId: string,
+    @Body() body: DetectBusinessTypeDto,
   ) {
-    return this.concierge.detectBusinessType(body.description);
+    return this.concierge.detectBusinessType(businessId, body.description);
   }
 
   @Get('nudges')
@@ -81,7 +101,7 @@ export class OnboardingConciergeController {
   async snoozeNudge(
     @Param('businessId') businessId: string,
     @Param('nudgeId') nudgeId: string,
-    @Body() body: { days?: number },
+    @Body() body: SnoozeNudgeDto,
   ) {
     return this.concierge.snoozeNudge(businessId, nudgeId, body.days);
   }

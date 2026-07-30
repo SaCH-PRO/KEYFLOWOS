@@ -579,7 +579,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     businessId: string;
     contactId: string;
     serviceId: string;
-    staffId: string;
+    staffId?: string;
     startTime: Date;
     endTime: Date;
     notes?: string;
@@ -955,7 +955,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
         this.events.emit('booking.invoice_created', payload);
         this.logger.log(`Auto-generated invoice ${invoice.id} for completed booking ${booking.id}`);
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Failed to auto-generate invoice for booking ${booking.id}: ${(err as Error).message}`);
     }
   }

@@ -385,7 +385,7 @@ export class PresenceService {
     if (cleaned.slug) {
       try {
         await this.prisma.client.business.update({ where: { id: businessId }, data: { slug: cleaned.slug } });
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(`Slug update for ${businessId} failed: ${err}`);
       }
     }

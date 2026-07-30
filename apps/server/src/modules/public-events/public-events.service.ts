@@ -165,7 +165,7 @@ export class PublicEventsService {
             data: { custom: merged as Prisma.InputJsonValue },
           });
         }
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(
           `[public-events] attach first-touch failed contact=${input.contactId}: ${(err as Error).message}`,
         );
@@ -232,7 +232,7 @@ export class PublicEventsService {
           visitorId,
         });
         contactId = contact?.id ?? null;
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(`[public-events] contact upsert failed: ${(err as Error).message}`);
       }
     }
@@ -365,7 +365,7 @@ export class PublicEventsService {
         source: STOREFRONT_SOURCE,
       });
       return true;
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `[public-events] timeline log failed type=${type} contact=${contactId}: ${(err as Error).message}`,
       );

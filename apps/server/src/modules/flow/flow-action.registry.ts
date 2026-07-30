@@ -9,6 +9,7 @@ export interface ActionContext {
   contactId?: string | null;
   userId?: string | null;
   input: Record<string, unknown>;
+  test?: boolean;
 }
 
 export type ActionExecutor = (ctx: ActionContext, config: Record<string, unknown>) => Promise<Record<string, unknown>>;

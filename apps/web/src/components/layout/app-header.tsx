@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
+import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Sparkles } from "lucide-react";
 import { NewEntityMenu } from "./new-entity-menu";
@@ -11,6 +12,7 @@ import { MODE_LABELS, type DisclosureMode } from "@/lib/disclosure-mode";
 import { getCachedUser } from "@/lib/workspace";
 import { getNotificationIcon, getNotificationLink, relativeTime } from "@/lib/notifications";
 import type { AppNotification } from "@/lib/notifications";
+import type { CopilotModule } from "@/components/key/chat";
 import {
   Menu,
   Brain,
@@ -28,7 +30,7 @@ import {
 
 interface AppHeaderProps {
   setMobileDrawerOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  copilotModule: import("@/components/ai/copilot-panel").CopilotModule;
+  copilotModule: CopilotModule;
   disclosureMode: DisclosureMode;
   setDisclosureMode: (mode: DisclosureMode) => void;
   modeMenuOpen: boolean;
@@ -120,6 +122,7 @@ export function AppHeader({
   handleLogout,
 }: AppHeaderProps) {
   const [searchFocused, setSearchFocused] = useState(false);
+  const router = useRouter();
 
   const modeColors = {
     startup: { border: "border-emerald-500/30", bg: "bg-emerald-500/10", text: "text-emerald-400", glow: "shadow-[0_0_12px_hsl(142,71%,45%,0.2)]" },
@@ -163,9 +166,7 @@ export function AppHeader({
 
         {/* KEY Search Bar — Desktop */}
         <motion.button
-          onClick={() =>
-            window.dispatchEvent(new CustomEvent("kf:open-key", { detail: { mode: "chat" } }))
-          }
+          onClick={() => router.push("/app/key/chat")}
           onFocus={() => setSearchFocused(true)}
           onBlur={() => setSearchFocused(false)}
           className={cn(

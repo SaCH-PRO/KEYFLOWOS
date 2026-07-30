@@ -72,7 +72,7 @@ export class MarginSnapshotSchedulerService implements OnModuleInit, OnModuleDes
       try {
         await this.captureSnapshotForProduct(p.id, reason);
         captured++;
-      } catch (err) {
+      } catch (err: any) {
         failed++;
         this.logger.error(`Failed to capture margin snapshot for product ${p.id}: ${(err as Error).message}`);
       }

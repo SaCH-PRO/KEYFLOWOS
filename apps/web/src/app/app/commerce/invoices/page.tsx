@@ -56,10 +56,10 @@ export default function InvoicesHubPage() {
   const router = useRouter();
   const { open: openComposer } = useCompose();
   const [businessId, setBusinessId] = useState<string | null>(null);
-  const [businessCurrency, setBusinessCurrency] = useState<string>("TTD");
+  const [businessCurrency, _setBusinessCurrency] = useState<string>("TTD");
   const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [contacts, setContacts] = useState<Contact[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
+  const [_contacts, setContacts] = useState<Contact[]>([]);
+  const [_products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [gmailStatus, setGmailStatus] = useState<{ connected: boolean; email: string | null } | null>(null);
   const [statusFilter, setStatusFilter] = useState("ALL");

@@ -205,7 +205,7 @@ Parse the user's input and call parse_intent with the structured result. Be spec
         clarificationQuestion: parsed.clarificationQuestion,
         rawInput: userInput,
       };
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Intent parse fallback for: ${userInput.slice(0, 100)}... Error: ${(err as Error).message}`);
       return this.fallbackParse(userInput);
     }

@@ -31,7 +31,7 @@ export class DriveIntakeListener {
       const plan = await this.orchestrator.buildPlan(event.businessId, event.intakeId);
       await this.orchestrator.createApprovalItem(event.businessId, plan);
       this.logger.log(`Created approval plan for Drive intake ${event.intakeId}`);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Failed to build Drive intake plan for ${event.intakeId}: ${(err as Error).message}`);
     }
   }

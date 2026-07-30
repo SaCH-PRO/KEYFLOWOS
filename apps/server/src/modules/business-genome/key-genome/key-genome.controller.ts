@@ -36,16 +36,17 @@ import { GenomeRecommendationRankerService } from './genome-recommendation-ranke
 import { GenomeOpportunityDetectorService } from './genome-opportunity-detector.service';
 import { GenomeAutonomyGateService } from './genome-autonomy-gate.service';
 import { GenomeRecommendationOutcomeService } from './genome-recommendation-outcome.service';
-import type { ListGenomeCrossDomainSnapshotsQuery } from './key-genome.types';
-import type { CheckGenomeAutonomyGateInput } from './key-genome.types';
 import type {
-  CreateGenomeExperimentInput,
-  CreateGenomeContentStrategyInput,
-  CreateGenomeGrowthChannelInput,
+  CheckGenomeAutonomyGateInput,
   CloseGenomeRecommendationObservationInput,
+  CreateGenomeContentStrategyInput,
+  CreateGenomeExperimentInput,
+  CreateGenomeGrowthChannelInput,
   GenerateGenomeRecommendationsInput,
   GenomeOutcome,
   GenomeRecommendationExecutionStatus,
+  GenomeRecommendationLearningSummary,
+  ListGenomeCrossDomainSnapshotsQuery,
   RecommendationOutcome,
   UpdateGenomeContentStrategyInput,
   UpdateGenomeGrowthChannelInput,
@@ -282,6 +283,13 @@ export class KeyGenomeController {
     @Param('businessId') businessId: string,
   ) {
     return this.outcomeService.getSummary(businessId);
+  }
+
+  @Get('outcomes/learning-summary')
+  async getRecommendationLearningSummary(
+    @Param('businessId') businessId: string,
+  ): Promise<GenomeRecommendationLearningSummary> {
+    return this.outcomeService.getLearningSummary(businessId);
   }
 
   @Patch('outcomes/:outcomeId/observation')

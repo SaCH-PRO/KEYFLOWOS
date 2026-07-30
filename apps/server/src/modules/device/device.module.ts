@@ -6,9 +6,10 @@ import { DeviceService } from './device.service';
 import { VisualClassifierService } from './visual-classifier.service';
 import { CommandModule } from '../command/command.module';
 import { AiModule } from '../ai/ai.module';
+import { KeyGenomeModule } from '../business-genome/key-genome/key-genome.module';
 
 @Module({
-  imports: [PrismaModule, AuthModule, CommandModule, AiModule],
+  imports: [PrismaModule, AuthModule, CommandModule, AiModule, KeyGenomeModule],
   controllers: [DeviceController],
   providers: [DeviceService, VisualClassifierService],
   exports: [DeviceService, VisualClassifierService],

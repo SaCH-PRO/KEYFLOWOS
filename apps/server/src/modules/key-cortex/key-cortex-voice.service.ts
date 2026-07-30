@@ -259,7 +259,7 @@ export class KeyCortexVoiceService {
       const audioBuffer = Buffer.from(await response.arrayBuffer());
 
       // Track usage for billing and monitoring
-      await this.aiUsageService.trackAudio({
+      this.aiUsageService.trackAudioUsage({
         businessId,
         type: 'audio_tts',
         model: 'tts-1',
@@ -345,7 +345,7 @@ export class KeyCortexVoiceService {
       const extension = this.mimeTypeToExtension(mimeType);
 
       // Create a File object for the OpenAI API
-      const file = new File([audioBuffer], `audio.${extension}`, {
+      const file = new File([audioBuffer as any], `audio.${extension}`, {
         type: mimeType,
       });
 
@@ -359,7 +359,7 @@ export class KeyCortexVoiceService {
       const text = transcription.text;
 
       // Track usage for billing and monitoring
-      await this.aiUsageService.trackAudio({
+      this.aiUsageService.trackAudioUsage({
         businessId,
         type: 'audio_stt',
         model: 'whisper-1',

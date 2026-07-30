@@ -117,7 +117,7 @@ export class SystemEmailService {
       const id = result.data?.id ?? '';
       this.logger.log(`Sent transactional email to ${args.to} (id=${id})`);
       return { id };
-    } catch (err) {
+    } catch (err: any) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.error(`Resend send failed for ${args.to}: ${message}`);
       throw new Error(`Failed to send email: ${message}`, { cause: err });

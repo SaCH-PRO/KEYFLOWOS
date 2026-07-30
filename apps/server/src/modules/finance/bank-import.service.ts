@@ -109,7 +109,7 @@ export function parseBankCsv(content: string): { rows: ParsedBankRow[]; errors: 
       bom: true,
       relax_column_count: true,
     }) as Array<Record<string, string>>;
-  } catch (err) {
+  } catch (err: any) {
     throw new BadRequestException(`Could not parse CSV: ${(err as Error).message}`);
   }
   if (records.length === 0) return { rows: [], errors: ['CSV had no data rows'] };

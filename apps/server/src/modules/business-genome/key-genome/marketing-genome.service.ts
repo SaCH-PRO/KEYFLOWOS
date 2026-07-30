@@ -46,7 +46,7 @@ function computeChannelMix(
   const useBudget = totalBudget > 0;
 
   return active.map((channel) => {
-    let sharePercent = 0;
+    let sharePercent: number;
     if (useBudget) {
       sharePercent = totalBudget > 0 && (channel.monthlyBudget ?? 0) > 0
         ? ((channel.monthlyBudget ?? 0) / totalBudget) * 100

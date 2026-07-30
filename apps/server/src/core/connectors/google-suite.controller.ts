@@ -57,7 +57,7 @@ export class GoogleSuiteController {
         email: result.email,
       });
       return res.redirect(`${appUrl}/app/key-connect?${params.toString()}`);
-    } catch (err) {
+    } catch (err: any) {
       const reason = err instanceof Error ? err.message : 'Unknown error';
       return res.redirect(`${failure}&reason=${encodeURIComponent(reason)}`);
     }

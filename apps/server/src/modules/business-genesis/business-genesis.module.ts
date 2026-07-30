@@ -3,6 +3,7 @@ import { BlueprintModule } from '../blueprint/blueprint.module';
 import { AiModule } from '../ai/ai.module';
 import { DocumentsModule } from '../documents/documents.module';
 import { GovernanceModule } from '../governance/governance.module';
+import { KeyGenomeModule } from '../business-genome/key-genome/key-genome.module';
 import { BusinessGenesisController } from './business-genesis.controller';
 import { GenomeChatController } from './genome-chat.controller';
 import { BusinessGenesisService } from './business-genesis.service';
@@ -20,7 +21,7 @@ import { GenesisMarketStrategyService } from './genesis-market-strategy.service'
 import { GenomeChatService } from './genome-chat.service';
 
 @Module({
-  imports: [BlueprintModule, AiModule, DocumentsModule, GovernanceModule],
+  imports: [BlueprintModule, AiModule, DocumentsModule, GovernanceModule, KeyGenomeModule],
   controllers: [BusinessGenesisController, GenomeChatController],
   providers: [
     BusinessGenesisService,

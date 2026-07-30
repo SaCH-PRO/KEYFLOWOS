@@ -1,7 +1,11 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AiExecutionLogService } from './ai-execution-log.service';
+import { CommerceService } from '../commerce/commerce.service';
+import { CrmService } from '../crm/crm.service';
+import { BookingsService } from '../bookings/bookings.service';
 
 export interface UndoableAction {
   id: string;
@@ -25,7 +29,18 @@ export class UndoService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Inject(AiExecutionLogService) private readonly executionLog: AiExecutionLogService,
+    @Inject(ModuleRef) private readonly moduleRef: ModuleRef,
   ) {}
+
+  private getCommerce() {
+    return this.moduleRef.get(CommerceService, { strict: false });
+  }
+  private getCrm() {
+    return this.moduleRef.get(CrmService, { strict: false });
+  }
+  private getBookings() {
+    return this.moduleRef.get(BookingsService, { strict: false });
+  }
 
   /**
    * Register an action that was auto-executed, making it eligible for undo
@@ -137,7 +152,7 @@ export class UndoService {
       });
 
       return { success: true, message: `${action.entityType} action undone successfully`, restored };
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Undo failed for ${undoId}: ${(err as Error).message}`);
       return { success: false, message: `Undo failed: ${(err as Error).message}` };
     }
@@ -154,64 +169,16 @@ export class UndoService {
   }
 
   private async undoInvoice(action: UndoableAction): Promise<Record<string, any>> {
-    const invoice = await this.prisma.client.invoice.findUnique({
-      where: { id: action.entityId },
-      select: { id: true, status: true },
-    });
-
-    if (!invoice) {
-      throw new Error('Invoice not found');
-    }
-
-    // If invoice hasn't been sent/paid, soft-delete it
-    if (invoice.status === 'DRAFT') {
-      await this.prisma.client.invoice.update({
-        where: { id: action.entityId },
-        data: { deletedAt: new Date() },
-      });
-      return { id: action.entityId, status: 'deleted' };
-    }
-
-    // Otherwise, revert to draft
-    await this.prisma.client.invoice.update({
-      where: { id: action.entityId },
-      data: { status: 'DRAFT' },
-    });
-    return { id: action.entityId, status: 'reverted_to_draft' };
+    const result = await this.getCommerce().undoInvoice(action.entityId, action.businessId);
+    return { id: result.id, status: result.status };
   }
 
   private async undoContact(action: UndoableAction): Promise<Record<string, any>> {
-    // Check if contact has any related activity
-    const hasActivity = await this.prisma.client.contact.findUnique({
-      where: { id: action.entityId },
-      include: {
-        _count: { select: { bookings: true, invoices: true, tasks: true } },
-      },
+    const result = await this.getCrm().undoContact({
+      businessId: action.businessId,
+      contactId: action.entityId,
     });
-
-    if (!hasActivity) {
-      throw new Error('Contact not found');
-    }
-
-    const totalActivity = (hasActivity._count.bookings ?? 0) +
-      (hasActivity._count.invoices ?? 0) +
-      (hasActivity._count.tasks ?? 0);
-
-    if (totalActivity === 0) {
-      // Safe to soft-delete if no activity
-      await this.prisma.client.contact.update({
-        where: { id: action.entityId },
-        data: { deletedAt: new Date() },
-      });
-      return { id: action.entityId, status: 'deleted' };
-    }
-
-    // Otherwise mark as LEAD to indicate it needs review
-    await this.prisma.client.contact.update({
-      where: { id: action.entityId },
-      data: { status: 'LEAD' },
-    });
-    return { id: action.entityId, status: 'reverted_to_lead' };
+    return { id: result.id, status: result.status };
   }
 
   private async undoBooking(action: UndoableAction): Promise<Record<string, any>> {
@@ -225,10 +192,7 @@ export class UndoService {
     }
 
     if (booking.status === 'PENDING') {
-      await this.prisma.client.booking.update({
-        where: { id: action.entityId },
-        data: { status: 'CANCELLED' },
-      });
+      await this.getBookings().updateBookingStatus(action.businessId, action.entityId, 'CANCELLED');
       return { id: action.entityId, status: 'cancelled' };
     }
 

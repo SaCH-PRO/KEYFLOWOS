@@ -41,7 +41,7 @@ export class KeyflowVoiceService {
         },
       );
       return { buffer: result as Buffer, format };
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`TTS failed: ${(err as Error).message}`);
       throw new ServiceUnavailableException('Voice synthesis failed.');
     }
@@ -70,7 +70,7 @@ export class KeyflowVoiceService {
         },
       );
       return { text: result as string };
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`STT failed: ${(err as Error).message}`);
       throw new ServiceUnavailableException('Voice transcription failed.');
     }

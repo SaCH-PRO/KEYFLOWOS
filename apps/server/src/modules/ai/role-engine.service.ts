@@ -3,7 +3,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiMemoryService } from './ai-memory.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 
-export type BusinessRole = 'sales' | 'finance' | 'support' | 'operations' | 'marketing' | 'general' | 'operator';
+export type BusinessRole = 'sales' | 'finance' | 'support' | 'operations' | 'marketing' | 'general' | 'operator' | 'executive';
 
 export interface RoleDefinition {
   id: BusinessRole;
@@ -81,6 +81,8 @@ const ROUTE_ROLE_MAP: Record<string, BusinessRole> = {
   '/app/tickets': 'support',
   '/app/inbox': 'support',
   '/app/inbox/unified': 'support',
+  // Onboarding
+  '/app/onboarding': 'general',
   // Goals & Briefing (cross-functional, use general with hints)
   '/app/goals': 'general',
   '/app/briefing': 'general',
@@ -124,6 +126,7 @@ const ROLE_SWITCH_KEYWORDS: Record<BusinessRole, RegExp> = {
   marketing: /\b(campaign|email blast|newsletter|social|seo|content|ad|promotion|post|review|instagram|facebook)\b/i,
   general: /\b(overview|summary|status|how is everything|what's happening|business health|dashboard)\b/i,
   operator: /\b(execute|run|do it|process|handle|complete|finish|work on|take care of|operate)\b/i,
+  executive: /\b(strategy|board|stakeholder|decision|directive|vision|mission|governance|leadership|executive|CEO|C-suite|approve|authorize|strategic|planning|quarterly|annual|objective|OKR|KPI|metric|performance|review|evaluation|assessment|audit|compliance|risk|mitigation|contingency|succession|partnership|acquisition|merger|investment|funding|capital|valuation|IPO|exit)\b/i,
 };
 
 const ROLE_DEFINITIONS: Record<BusinessRole, RoleDefinition> = {
@@ -237,7 +240,7 @@ const ROLE_DEFINITIONS: Record<BusinessRole, RoleDefinition> = {
     description: 'General-purpose assistant for queries, summaries, and cross-role coordination',
     tone: 'warm, helpful, and conversational — like a knowledgeable friend who is always happy to help',
     priorities: ['Answer questions accurately', 'Summarize business health', 'Coordinate between roles', 'Execute user requests'],
-    approvedTools: ['update_business_blueprint', 'fetch_*', 'crm_search_contacts', 'crm_list_contacts', 'projects_list', 'expenses_list', 'documents_list', 'keyflow_create_note', 'content_list_requests', 'content_get_request', 'call_list_tasks', 'evidence_list', 'approval_list', 'calendar_list_events', 'calendar_check_conflicts', 'helpdesk_list_tickets', 'finance_view_receivables', 'finance_customer_balance', 'finance_list_action_items'],
+    approvedTools: ['update_business_blueprint', 'present_onboarding_card', 'save_onboarding_step', 'fetch_*', 'crm_search_contacts', 'crm_list_contacts', 'projects_list', 'expenses_list', 'documents_list', 'keyflow_create_note', 'content_list_requests', 'content_get_request', 'call_list_tasks', 'evidence_list', 'approval_list', 'calendar_list_events', 'calendar_check_conflicts', 'helpdesk_list_tickets', 'finance_view_receivables', 'finance_customer_balance', 'finance_list_action_items'],
     blockedTools: ['commerce_delete_invoice', 'crm_delete_contact', 'bookings_cancel_booking', 'marketing_send_campaign', 'social_publish_post', 'content_create_request', 'content_assign_request', 'content_transition_status', 'call_create_task', 'approval_create_request', 'projects_delete_task', 'commerce_send_invoice'],
     maxRiskTier: 1,
     autonomyLevel: 1,
@@ -275,6 +278,28 @@ const ROLE_DEFINITIONS: Record<BusinessRole, RoleDefinition> = {
 - Always confirm what you've done clearly, warmly, and concisely
 - Celebrate completions and milestones with the user
 - If a task is outside your authority, escalate to a human manager`,
+  },
+  executive: {
+    id: 'executive',
+    name: 'Executive Advisor',
+    description: 'Strategic advisor for high-level business decisions, governance, stakeholder management, and executive planning',
+    tone: 'measured, authoritative, and forward-thinking — like a trusted board advisor who sees the big picture',
+    priorities: ['Evaluate strategic decisions', 'Assess risk and compliance posture', 'Review business performance against objectives', 'Advise on partnerships and investments', 'Ensure governance and succession readiness'],
+    approvedTools: ['update_business_blueprint', 'fetch_*', 'finance_view_receivables', 'finance_customer_balance', 'finance_list_action_items', 'documents_list', 'keyflow_create_note', 'calendar_list_events', 'calendar_check_conflicts', 'crm_search_contacts', 'crm_list_contacts', 'projects_list', 'expenses_list', 'content_list_requests', 'content_get_request', 'call_list_tasks', 'evidence_list', 'approval_list', 'helpdesk_list_tickets'],
+    blockedTools: ['commerce_delete_invoice', 'crm_delete_contact', 'bookings_cancel_booking', 'marketing_send_campaign', 'social_publish_post', 'content_create_request', 'content_assign_request', 'content_transition_status', 'call_create_task', 'approval_create_request', 'projects_delete_task', 'commerce_send_invoice', 'commerce_update_invoice', 'commerce_update_product', 'marketing_update_campaign', 'social_update_post'],
+    maxRiskTier: 1,
+    autonomyLevel: 1,
+    checkIntervalMinutes: 0,
+    greeting: "Good to see you. Let's look at the big picture.",
+    signOff: "— Executive Key",
+    systemPromptAddendum: `You are the Executive Advisor. Your job is strategic clarity.
+- Always frame advice in terms of business outcomes, risk, and opportunity
+- Never execute operational actions without explicit approval
+- Provide concise, data-backed assessments
+- Highlight governance gaps and compliance risks
+- Help the user think like a CEO — vision, stakeholders, capital, and succession
+- When reviewing performance, connect metrics to strategic objectives
+- Flag decisions that need board or investor input`,
   },
 };
 
@@ -332,6 +357,7 @@ export class RoleEngineService {
   async detectRoleFromContext(ctx: RoleDetectionContext): Promise<BusinessRole> {
     const scores: Record<BusinessRole, number> = {
       sales: 0, finance: 0, support: 0, operations: 0, marketing: 0, general: 0, operator: 0,
+      executive: 0,
     };
 
     // 1. Route context — where is the user in the app?

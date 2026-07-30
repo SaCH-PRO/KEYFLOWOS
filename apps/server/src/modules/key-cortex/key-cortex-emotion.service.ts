@@ -78,7 +78,7 @@ const EMOTION_LEXICON: Record<string, PrimaryEmotion> = {
   // Frustration indicators
   annoyed: 'frustrated', angry: 'frustrated', furious: 'frustrated', ridiculous: 'frustrated',
   unacceptable: 'frustrated', broken: 'frustrated', 'not working': 'frustrated', useless: 'frustrated',
-  waste: 'frustrated', 'sick of': 'frustrated', 'tired of': 'frustrated', fed up: 'frustrated',
+  waste: 'frustrated', 'sick of': 'frustrated', 'tired of': 'frustrated', 'fed up': 'frustrated',
   // Anxiety indicators
   worried: 'anxious', nervous: 'anxious', scared: 'anxious', unsure: 'anxious',
   'what if': 'anxious', 'dont know': 'anxious', "don't know": 'anxious', uncertain: 'anxious',
@@ -148,6 +148,7 @@ export class KeyCortexEmotionService {
    *   5. Weighted aggregation → EmotionalState
    */
   async detectEmotion(
+    businessId: string,
     userId: string,
     text: string,
     sessionHistory: CortexMessage[],
@@ -164,7 +165,7 @@ export class KeyCortexEmotionService {
     const keywordEmotion = this.scoreKeywords(text.toLowerCase());
 
     // ── 4. AI-powered emotion analysis (optional enrichment) ─────────────
-    const aiEmotion = await this.analyzeWithAI(text, userId);
+    const aiEmotion = await this.analyzeWithAI(businessId, text, userId);
 
     // ── 5. Business stress indicators ────────────────────────────────────
     const businessStress = await this.assessBusinessStress(userId);
@@ -440,26 +441,23 @@ export class KeyCortexEmotionService {
    * Falls back to neutral if the gateway is unavailable.
    */
   private async analyzeWithAI(
+    businessId: string,
     text: string,
     userId: string,
   ): Promise<{ emotion: PrimaryEmotion; intensity: number; confidence: number }> {
     try {
       const prompt = this.buildEmotionPrompt(text);
-      const response = await this.modelGateway.complete(prompt, {
+      // trackAndComplete performs the gateway call and records usage in one step;
+      // AiUsageService has no standalone record() method.
+      const response = await this.aiUsage.trackAndComplete(businessId, userId, 'emotion_detection', {
+        messages: [{ role: 'user' as const, content: prompt }],
         temperature: 0.3,
         maxTokens: 128,
       });
 
       // Parse JSON from model response
-      const parsed = this.parseAIEmotionResponse(response.text);
+      const parsed = this.parseAIEmotionResponse(response.content);
 
-      await this.aiUsage.record({
-        userId,
-        model: 'emotion-analysis',
-        tokens: response.usage?.totalTokens ?? 0,
-        purpose: 'emotion_detection',
-        cost: 0,
-      });
 
       return parsed;
     } catch (err) {
@@ -521,7 +519,7 @@ export class KeyCortexEmotionService {
     try {
       // Query business health indicators from the database
       // This is a simplified heuristic — production would use proper aggregation
-      const stressIndicators = await this.prisma.cortexMessage.findMany({
+      const stressIndicators = await this.prisma.client.cortexMessage.findMany({
         where: {
           metadata: {
             path: ['stressIndicator'],
@@ -815,7 +813,7 @@ export class KeyCortexEmotionService {
     // In production, this queries the database for stored emotional states
     // For now, return an empty array which triggers the default profile
     try {
-      const messages = await this.prisma.cortexMessage.findMany({
+      const messages = await this.prisma.client.cortexMessage.findMany({
         where: { userId },
         take: 100,
         orderBy: { timestamp: 'desc' },

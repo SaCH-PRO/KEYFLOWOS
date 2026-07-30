@@ -1,4 +1,5 @@
 import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
+import { timingSafeStringEqual } from '../security/timing-safe-equal';
 import { createHmac } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { ConnectorRegistryService } from './connector-registry.service';
@@ -338,7 +339,7 @@ export class GoogleSuiteService {
     try {
       const body = (await r.json()) as { error?: { message?: string; status?: string } };
       detail = body?.error?.message ?? body?.error?.status ?? '';
-    } catch (err) {
+    } catch (err: any) {
         this.logger.debug(`Parse failure: ${err instanceof Error ? err.message : err}`);
       }
     return `${label} API ${r.status}${detail ? `: ${detail}` : ''}`;
@@ -411,7 +412,7 @@ export class GoogleSuiteService {
       const payload = decoded.slice(0, i);
       const sig = decoded.slice(i + 1);
       const expected = createHmac('sha256', this.stateSecret).update(payload).digest('hex');
-      if (sig !== expected) return null;
+      if (!timingSafeStringEqual(sig, expected)) return null;
       const state: OAuthState = JSON.parse(payload);
       if (state.exp < Date.now()) return null;
       return state;

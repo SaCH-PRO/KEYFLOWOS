@@ -604,7 +604,7 @@ export class CrmSequenceAnalyticsService {
         },
       });
       return 1;
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `Failed to write SequenceAttribution deal=${input.dealId} enrollment=${lastTouch.id}: ${(err as Error).message}`,
       );

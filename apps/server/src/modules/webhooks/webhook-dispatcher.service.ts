@@ -245,7 +245,7 @@ export class WebhookDispatcherService {
       await Promise.allSettled(
         webhooks.map((wh: WebhookRecord) => this.sendWithLogging(wh, event, payload.timestamp, body, businessId)),
       );
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Webhook dispatch error for ${event}: ${(err as Error).message}`);
     }
   }
@@ -311,7 +311,7 @@ export class WebhookDispatcherService {
         this.logger.warn(
           `Webhook ${webhook.id} returned ${response.status} (attempt ${attempt}/${WebhookDispatcherService.MAX_RETRIES})`,
         );
-      } catch (err) {
+      } catch (err: any) {
         lastError = (err as Error).message;
         this.logger.warn(
           `Webhook ${webhook.id} failed (attempt ${attempt}/${WebhookDispatcherService.MAX_RETRIES}): ${lastError}`,

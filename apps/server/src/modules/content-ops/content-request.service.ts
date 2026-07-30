@@ -176,7 +176,7 @@ export class ContentRequestService {
           payload: { contentRequestId: request.id, businessGoal: request.businessGoal },
           steps: [{ stepOrder: 0, approverId: request.requestedBy }],
         });
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(`Failed to create approval request: ${(err as Error).message}`);
       }
     }
@@ -315,7 +315,7 @@ export class ContentRequestService {
     if (request.invoiceOnDelivery && this.contentInvoice) {
       try {
         invoice = await this.contentInvoice.generateInvoiceFromDelivery(requestId, request.businessId);
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(`Auto-invoice generation failed: ${(err as Error).message}`);
       }
     }

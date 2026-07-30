@@ -80,7 +80,7 @@ export class BusinessMatchingService {
         const matches = await this.computeMatches(biz.id);
         await this.persistToDb(biz.id, matches);
         refreshed++;
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(`Failed to refresh matches for ${biz.id}: ${(err as Error).message}`);
       }
     }
@@ -166,7 +166,7 @@ export class BusinessMatchingService {
         select: { id: true },
       });
       return created;
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Failed to record AI suggestion event: ${(err as Error).message}`);
       return null;
     }
@@ -388,7 +388,7 @@ export class BusinessMatchingService {
     });
     try {
       await this.prisma.client.businessMatch.deleteMany({ where: { businessId } });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Failed to invalidate match cache for ${businessId}: ${(err as Error).message}`);
     }
     return result;
@@ -506,7 +506,7 @@ export class BusinessMatchingService {
           });
         }
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Failed to persist matches for ${businessId}: ${(err as Error).message}`);
     }
   }
@@ -576,7 +576,7 @@ export class BusinessMatchingService {
     let explanations: string[] = [];
     try {
       explanations = await this.generateExplanations(sourceBusiness, topMatches);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`AI explanation generation failed: ${(err as Error).message}`);
       explanations = topMatches.map((m) => m.reasons.join('. '));
     }
@@ -778,7 +778,7 @@ export class BusinessMatchingService {
           ],
         },
       });
-    } catch (err) {
+    } catch (err: any) {
         this.logger.warn(`Silent catch: ${err instanceof Error ? err.message : err}`);
       }
 
@@ -957,7 +957,7 @@ export class BusinessMatchingService {
       const cleaned = result.content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
       const parsed = JSON.parse(cleaned);
       if (Array.isArray(parsed)) aiReasons = parsed.map(String);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`AI relevance reason failed: ${(err as Error).message}`);
     }
 

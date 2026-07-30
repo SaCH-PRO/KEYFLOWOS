@@ -108,7 +108,7 @@ function DocRow({ doc, index }: { doc: RecentDoc; index: number }) {
 }
 
 export default function DocumentIntelligencePage() {
-  const router = useRouter();
+  const _router = useRouter();
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {

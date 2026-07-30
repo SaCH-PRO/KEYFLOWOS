@@ -397,7 +397,7 @@ export class RevenuePostingService {
   async safePost<T>(label: string, fn: () => Promise<T>): Promise<T | null> {
     try {
       return await fn();
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `RevenuePostingService.${label} failed: ${err instanceof Error ? err.message : String(err)}`,
       );

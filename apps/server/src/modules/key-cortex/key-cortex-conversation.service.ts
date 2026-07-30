@@ -16,6 +16,7 @@ import {
   CortexPersona,
   CortexVoice,
   CortexMood,
+  CortexProvider,
 } from './key-cortex.types';
 
 /**
@@ -114,7 +115,7 @@ export class KeyCortexConversationService {
       const now = new Date();
       const sessionId = this.generateSessionId();
 
-      const dbSession = await this.prisma.cortexSession.create({
+      const dbSession = await (this.prisma.client as any).cortexSession.create({
         data: {
           id: sessionId,
           businessId,
@@ -138,7 +139,7 @@ export class KeyCortexConversationService {
       await this.cacheSession(session);
 
       return session;
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(
         `[createSession] Failed: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -177,7 +178,7 @@ export class KeyCortexConversationService {
     }
 
     // Fall back to Prisma
-    const dbSession = await this.prisma.cortexSession.findUnique({
+    const dbSession = await (this.prisma.client as any).cortexSession.findUnique({
       where: { id: sessionId },
     });
 
@@ -188,7 +189,7 @@ export class KeyCortexConversationService {
     const session = this.mapDbToCortexSession(dbSession);
 
     // Update last accessed and cache
-    await this.prisma.cortexSession.update({
+    await (this.prisma.client as any).cortexSession.update({
       where: { id: sessionId },
       data: { lastAccessedAt: new Date() },
     });
@@ -217,7 +218,7 @@ export class KeyCortexConversationService {
         });
         (session as CortexSession & { memoryContext?: string }).memoryContext =
           this.memory.formatForPrompt(memories);
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(
           `[getSessionContext] Memory retrieval failed: ${err instanceof Error ? err.message : String(err)}`,
         );
@@ -267,7 +268,7 @@ export class KeyCortexConversationService {
     // Persist to Prisma
     const updatedMessages = [...session.messages, newMessage];
 
-    await this.prisma.cortexSession.update({
+    await (this.prisma.client as any).cortexSession.update({
       where: { id: sessionId },
       data: {
         messages: updatedMessages as unknown as Record<string, unknown>[],
@@ -288,7 +289,7 @@ export class KeyCortexConversationService {
           confidence: 0.9,
           source: 'conversation',
         });
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(
           `[addMessage] Memory store failed: ${err instanceof Error ? err.message : String(err)}`,
         );
@@ -355,13 +356,13 @@ export class KeyCortexConversationService {
       where.status = { not: 'archived' };
     }
 
-    const dbSessions = await this.prisma.cortexSession.findMany({
+    const dbSessions = await (this.prisma.client as any).cortexSession.findMany({
       where,
       orderBy: { lastAccessedAt: 'desc' },
       take: 100,
     });
 
-    return dbSessions.map((s) => this.mapDbToCortexSession(s));
+    return dbSessions.map((s: any) => this.mapDbToCortexSession(s));
   }
 
   // ---------------------------------------------------------------------------
@@ -423,7 +424,7 @@ export class KeyCortexConversationService {
     if (updates.title !== undefined) updateData.title = updates.title;
     if (updates.status !== undefined) updateData.status = updates.status;
 
-    const updated = await this.prisma.cortexSession.update({
+    const updated = await (this.prisma.client as any).cortexSession.update({
       where: { id: sessionId },
       data: updateData,
     });
@@ -433,6 +434,30 @@ export class KeyCortexConversationService {
     // Update cache
     await this.cacheSession(session);
 
+    return session;
+  }
+
+  /**
+   * Update the running conversation summary for a session.
+   */
+  async updateRunningSummary(
+    sessionId: string,
+    runningSummary: string,
+  ): Promise<CortexSession> {
+    const existing = await this.getSessionOrThrow(sessionId);
+
+    const updated = await (this.prisma.client as any).cortexSession.update({
+      where: { id: sessionId },
+      data: {
+        runningSummary,
+        updatedAt: new Date(),
+      },
+    });
+
+    const session = this.mapDbToCortexSession(updated);
+    await this.cacheSession(session);
+
+    this.logger.log(`[updateRunningSummary] session=${sessionId}`);
     return session;
   }
 
@@ -453,7 +478,7 @@ export class KeyCortexConversationService {
 
     await this.getSessionOrThrow(sessionId);
 
-    await this.prisma.cortexSession.update({
+    await (this.prisma.client as any).cortexSession.update({
       where: { id: sessionId },
       data: {
         status: 'archived',
@@ -477,7 +502,7 @@ export class KeyCortexConversationService {
 
     await this.getSessionOrThrow(sessionId);
 
-    await this.prisma.cortexSession.delete({
+    await (this.prisma.client as any).cortexSession.delete({
       where: { id: sessionId },
     });
 
@@ -540,7 +565,7 @@ export class KeyCortexConversationService {
     const compressedMessages = [summaryMessage, ...recentMessages];
 
     // Persist compressed messages
-    await this.prisma.cortexSession.update({
+    await (this.prisma.client as any).cortexSession.update({
       where: { id: session.id },
       data: {
         messages: compressedMessages as unknown as Record<string, unknown>[],
@@ -680,7 +705,7 @@ export class KeyCortexConversationService {
       `[cleanupOldSessions] Archiving sessions older than ${threshold} days (before ${cutoffDate.toISOString()})`,
     );
 
-    const result = await this.prisma.cortexSession.updateMany({
+    const result = await (this.prisma.client as any).cortexSession.updateMany({
       where: {
         lastAccessedAt: { lt: cutoffDate },
         status: { not: 'archived' },
@@ -742,12 +767,13 @@ export class KeyCortexConversationService {
       voice: (dbSession.voice as CortexVoice) ?? 'echo',
       mood: (dbSession.mood as CortexMood) ?? 'focused',
       preferredProvider:
-        (dbSession.preferredProvider as string) ?? 'openai',
+        (dbSession.preferredProvider as CortexProvider) ?? 'openai',
       messages,
       createdAt: new Date(dbSession.createdAt as string | Date),
       updatedAt: new Date(dbSession.updatedAt as string | Date),
       lastAccessedAt: new Date(dbSession.lastAccessedAt as string | Date),
       title: (dbSession.title as string) ?? undefined,
+      runningSummary: (dbSession.runningSummary as string) ?? undefined,
     };
   }
 
@@ -756,12 +782,12 @@ export class KeyCortexConversationService {
    */
   private async cacheSession(session: CortexSession): Promise<void> {
     try {
-      await this.redis.setex(
+      await (this.redis as any).setex(
         `cortex:session:${session.id}`,
         this.SESSION_TTL,
         JSON.stringify(session),
       );
-    } catch (error) {
+    } catch (error: any) {
       this.logger.warn(
         `[cacheSession] Failed to cache session=${session.id}: ${error instanceof Error ? error.message : String(error)}`,
       );

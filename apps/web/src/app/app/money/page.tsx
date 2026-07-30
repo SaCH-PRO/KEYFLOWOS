@@ -1,7 +1,1 @@
-"use client";
-
-import { redirect } from "next/navigation";
-
-export default function MoneyRedirectPage() {
-  redirect("/app/financial-flow");
-}
+export { default } from "@/app/app/finance/page";

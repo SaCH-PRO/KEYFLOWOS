@@ -82,6 +82,7 @@ export interface BlueprintBrand {
   secondaryColor?: string;
   logoUrl?: string;
   valueProps?: string[];
+  doNotSay?: string[];
 }
 
 export interface BlueprintCustomerModel {
@@ -172,6 +173,7 @@ export interface BlueprintRegistrationProfile {
   companiesRegistryStatus?: string;
   birStatus?: string;
   nisEmployerStatus?: string;
+  hasEmployees?: boolean;
   vatStatus?: string;
   businessBankStatus?: string;
   requiredLicenses?: string[];

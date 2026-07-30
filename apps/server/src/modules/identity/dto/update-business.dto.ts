@@ -6,7 +6,6 @@ import {
   IsNumber,
   IsObject,
   IsOptional,
-  IsPhoneNumber,
   IsString,
   IsUrl,
   Max,
@@ -67,8 +66,8 @@ export class UpdateBusinessDto {
   @MaxLength(500)
   address?: string;
 
+  @IsString()
   @IsOptional()
-  @IsPhoneNumber(undefined, { message: 'phone must be a valid phone number' })
   @MaxLength(30)
   phone?: string;
 

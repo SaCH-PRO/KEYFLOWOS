@@ -80,7 +80,7 @@ export class CalendarInsightSchedulerService
             { force: true },
           );
           refreshed += 1;
-        } catch (err) {
+        } catch (err: any) {
           this.logger.warn(
             `Failed to refresh insights for ${biz.id}: ${(err as Error).message}`,
           );

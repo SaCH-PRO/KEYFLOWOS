@@ -43,7 +43,7 @@ export default function HelpdeskPage() {
 
   const businessId = getStoredBusinessId();
 
-  const load = async () => {
+  const _load = async () => {
     if (!businessId) return;
     setLoading(true);
     const res = await fetchSupportTickets(businessId);

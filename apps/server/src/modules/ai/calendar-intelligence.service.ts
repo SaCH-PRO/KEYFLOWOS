@@ -92,7 +92,7 @@ export class CalendarIntelligenceService {
         );
 
         return { available: false, conflicts: googleConflicts.conflicts, alternativeSlots: alternatives };
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(`Google Calendar check failed, falling back to internal: ${(err as Error).message}`);
       }
     }
@@ -310,7 +310,7 @@ Return JSON only:
           return { slots: sorted.slice(0, 5), reasoning };
         }
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`AI slot suggestion failed: ${(err as Error).message}`);
     }
 

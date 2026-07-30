@@ -15,6 +15,7 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { BusinessEventService } from '../business-events/business-event.service';
 import { KeyInboxService } from './key-inbox.service';
 import { KeyInboxActionExecutorService } from './key-inbox-action-executor.service';
@@ -28,7 +29,7 @@ import type { CreateInboxMessageInput, CreateInboxThreadInput } from './key-inbo
 import { normalizeKeyInboxChannel } from './key-inbox.constants';
 
 @Controller('key-inbox/businesses/:businessId')
-@UseGuards(AuthGuard, BusinessGuard)
+@UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
 export class KeyInboxController {
   constructor(
     @Inject(KeyInboxService) private readonly keyInbox: KeyInboxService,
@@ -38,6 +39,7 @@ export class KeyInboxController {
   ) {}
 
   @Get('threads')
+  @RequireModuleScope('operations')
   async listThreads(
     @Param('businessId') businessId: string,
     @Query('channel') channel?: string,
@@ -66,6 +68,7 @@ export class KeyInboxController {
   }
 
   @Get('threads/:threadId')
+  @RequireModuleScope('operations')
   async getThread(
     @Param('businessId') businessId: string,
     @Param('threadId') threadId: string,
@@ -76,6 +79,7 @@ export class KeyInboxController {
   }
 
   @Post('threads/:threadId/analyze')
+  @RequireModuleScope('operations', 'write')
   async analyzeThread(
     @Param('businessId') businessId: string,
     @Param('threadId') threadId: string,
@@ -84,6 +88,7 @@ export class KeyInboxController {
   }
 
   @Get('brief')
+  @RequireModuleScope('operations')
   async getBrief(
     @Param('businessId') businessId: string,
     @Query('scope') scope: 'DAILY' | 'WEEKLY' | 'CUSTOM' = 'DAILY',
@@ -102,6 +107,7 @@ export class KeyInboxController {
   }
 
   @Post('brief/generate')
+  @RequireModuleScope('operations', 'write')
   async generateBrief(
     @Param('businessId') businessId: string,
     @Body() body: Record<string, unknown>,
@@ -116,6 +122,7 @@ export class KeyInboxController {
   }
 
   @Post('intelligence/generate')
+  @RequireModuleScope('operations', 'write')
   async generateIntelligence(
     @Param('businessId') businessId: string,
     @Body() body: GenerateKeyInboxIntelligenceDto,
@@ -125,6 +132,7 @@ export class KeyInboxController {
   }
 
   @Get('intelligence/latest')
+  @RequireModuleScope('operations')
   async getLatestIntelligence(
     @Param('businessId') businessId: string,
     @Query('scope') scope: IntelligenceScope = 'WEEKLY',
@@ -135,6 +143,7 @@ export class KeyInboxController {
   }
 
   @Get('intelligence')
+  @RequireModuleScope('operations')
   async listIntelligence(
     @Param('businessId') businessId: string,
     @Query('scope') scope?: IntelligenceScope,
@@ -144,6 +153,7 @@ export class KeyInboxController {
   }
 
   @Get('intelligence/:insightId')
+  @RequireModuleScope('operations')
   async getIntelligence(
     @Param('businessId') businessId: string,
     @Param('insightId') insightId: string,
@@ -154,6 +164,7 @@ export class KeyInboxController {
   }
 
   @Patch('threads/:threadId')
+  @RequireModuleScope('operations', 'write')
   async updateThread(
     @Param('businessId') businessId: string,
     @Param('threadId') threadId: string,
@@ -163,6 +174,7 @@ export class KeyInboxController {
   }
 
   @Post('threads/:threadId/reply')
+  @RequireModuleScope('operations', 'write')
   async reply(
     @Param('businessId') businessId: string,
     @Param('threadId') threadId: string,
@@ -179,6 +191,7 @@ export class KeyInboxController {
   }
 
   @Post('threads/:threadId/actions/:actionIndex/execute')
+  @RequireModuleScope('operations', 'write')
   async executeAction(
     @Param('businessId') businessId: string,
     @Param('threadId') threadId: string,
@@ -250,6 +263,7 @@ export class KeyInboxController {
   }
 
   @Get('threads/:threadId/timeline')
+  @RequireModuleScope('operations')
   async getTimeline(
     @Param('businessId') businessId: string,
     @Param('threadId') threadId: string,
@@ -261,6 +275,7 @@ export class KeyInboxController {
   }
 
   @Post('ingest')
+  @RequireModuleScope('operations', 'write')
   async ingest(
     @Param('businessId') businessId: string,
     @Body() body: Record<string, unknown>,

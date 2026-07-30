@@ -1,15 +1,16 @@
 /**
- * KEY Cortex Memory Service — Phase 18C
+ * KEY Cortex Memory Service — Phase 0.9 (Memory Unification)
  * Persistent Memory + Personalization
  *
- * Jarvis remembers. This service stores and retrieves multi-level
- * business memory: preferences, facts, decisions, failures, successes.
- * Memory is retrieved before EVERY Cortex response.
+ * Stores and retrieves multi-level business memory: preferences, facts,
+ * decisions, failures, successes. AiMemory is the canonical write path;
+ * Redis remains a query cache.
  */
 
 import { Injectable, Logger } from '@nestjs/common';
-import { PrismaService } from '../../core/prisma/prisma.service';
 import { RedisService } from '../../core/redis/redis.service';
+import { AiMemoryService, MemoryEntry } from '../ai/ai-memory.service';
+import { UnifiedMemoryWriterService } from './unified-memory-writer.service';
 import {
   CortexMemory,
   CortexMemoryQuery,
@@ -30,6 +31,7 @@ const ALL_MEMORY_TYPES: MemoryType[] = [
   'common_workflow',
   'current_goal',
   'long_term_strategy',
+  'document_extraction',
 ];
 
 @Injectable()
@@ -37,7 +39,8 @@ export class KeyCortexMemoryService {
   private readonly logger = new Logger(KeyCortexMemoryService.name);
 
   constructor(
-    private readonly prisma: PrismaService,
+    private readonly aiMemory: AiMemoryService,
+    private readonly writer: UnifiedMemoryWriterService,
     private readonly redis: RedisService,
   ) {}
 
@@ -48,16 +51,11 @@ export class KeyCortexMemoryService {
   async retrieve(query: CortexMemoryQuery): Promise<CortexMemory[]> {
     const cacheKey = this.buildCacheKey(query);
 
-    // Try cache first
     const cached = await this.getCached(cacheKey);
     if (cached) return cached;
 
-    // Build from DB
     const memories = await this.loadFromDatabase(query);
-
-    // Cache result
     await this.cacheResult(cacheKey, memories);
-
     return memories;
   }
 
@@ -77,7 +75,9 @@ export class KeyCortexMemoryService {
       const topItems = items
         .sort((a, b) => b.confidence - a.confidence)
         .slice(0, 3);
-      lines.push(`${this.formatType(type)}: ${topItems.map((i) => i.value).join('; ')}`);
+      lines.push(
+        `${this.formatType(type)}: ${topItems.map((i) => i.value).join('; ')}`,
+      );
     }
 
     lines.push('=======================================');
@@ -95,32 +95,12 @@ export class KeyCortexMemoryService {
     value: string,
     opts?: { userId?: string; confidence?: number; source?: CortexMemory['source'] },
   ): Promise<CortexMemory> {
-    const memory: Omit<CortexMemory, 'id'> = {
-      businessId,
-      userId: opts?.userId,
-      type,
-      key,
-      value,
-      confidence: opts?.confidence ?? 0.8,
-      source: opts?.source ?? 'inferred',
-      lastAccessedAt: new Date(),
-      createdAt: new Date(),
-      accessCount: 1,
-    };
-
-    // Store in Prisma (via generic metadata table or dedicated memory table)
-    // For now: store in Redis with persistence
-    const id = `mem_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-    const fullMemory: CortexMemory = { ...memory, id };
-
-    await this.persistMemory(fullMemory);
+    const memory = await this.writer.store(businessId, type, key, value, opts);
     await this.invalidateCache(businessId, opts?.userId);
-
     this.logger.debug(`[store] ${type}:${key} for business=${businessId}`);
-    return fullMemory;
+    return memory;
   }
 
-  // Store explicit user preference
   async storePreference(
     businessId: string,
     userId: string,
@@ -134,7 +114,6 @@ export class KeyCortexMemoryService {
     });
   }
 
-  // Store business fact
   async storeBusinessFact(
     businessId: string,
     key: string,
@@ -146,7 +125,6 @@ export class KeyCortexMemoryService {
     });
   }
 
-  // Record decision outcome
   async recordDecision(
     businessId: string,
     userId: string,
@@ -173,9 +151,10 @@ export class KeyCortexMemoryService {
   ): Promise<CortexMemory[]> {
     const detected: CortexMemory[] = [];
 
-    // Detect communication style
     const userMessages = recentMessages.filter((m) => m.role === 'user');
-    const avgLength = userMessages.reduce((s, m) => s + m.content.length, 0) / (userMessages.length || 1);
+    const avgLength =
+      userMessages.reduce((s, m) => s + m.content.length, 0) /
+      (userMessages.length || 1);
 
     let style = 'neutral';
     if (avgLength < 50) style = 'brief';
@@ -183,15 +162,25 @@ export class KeyCortexMemoryService {
 
     const formality = this.detectFormality(userMessages.map((m) => m.content));
 
-    detected.push(await this.store(
-      businessId, 'communication_style', 'response_length',
-      style, { userId, confidence: 0.7, source: 'inferred' },
-    ));
+    detected.push(
+      await this.store(
+        businessId,
+        'communication_style',
+        'response_length',
+        style,
+        { userId, confidence: 0.7, source: 'inferred' },
+      ),
+    );
 
-    detected.push(await this.store(
-      businessId, 'communication_style', 'formality',
-      formality, { userId, confidence: 0.7, source: 'inferred' },
-    ));
+    detected.push(
+      await this.store(
+        businessId,
+        'communication_style',
+        'formality',
+        formality,
+        { userId, confidence: 0.7, source: 'inferred' },
+      ),
+    );
 
     return detected;
   }
@@ -201,34 +190,30 @@ export class KeyCortexMemoryService {
   // ═══════════════════════════════════════════════════════════
 
   private async loadFromDatabase(query: CortexMemoryQuery): Promise<CortexMemory[]> {
-    // In production: query Prisma with a dedicated memory table
-    // For now: load from Redis set of memory keys
-    const pattern = `${MEMORY_CACHE_PREFIX}:${query.businessId}:${query.userId ?? '*'}:*`;
-    const keys = await this.redis.keys(pattern);
+    const since =
+      query.recency === 'recent'
+        ? new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
+        : undefined;
 
-    const memories: CortexMemory[] = [];
-    for (const key of keys.slice(0, query.limit ?? 50)) {
-      const raw = await this.redis.get(key);
-      if (raw) {
-        try {
-          memories.push(JSON.parse(raw) as CortexMemory);
-        } catch {
-          // skip corrupted
-        }
-      }
-    }
+    const allRecords = await this.aiMemory.getAll(query.businessId);
 
-    // Filter by type if requested
+    let records = allRecords;
     if (query.memoryTypes && query.memoryTypes.length > 0) {
-      return memories.filter((m) => query.memoryTypes!.includes(m.type));
+      const allowed = new Set(query.memoryTypes as string[]);
+      records = records.filter((r) => allowed.has(r.category));
+    }
+    if (since) {
+      records = records.filter((r) => new Date(r.createdAt) >= since);
     }
 
-    return memories;
+    records.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    const limited = records.slice(0, query.limit ?? 50);
+
+    return limited.map((r) => this.mapRecord(query.businessId, r));
   }
 
-  private async persistMemory(memory: CortexMemory): Promise<void> {
-    const key = `${MEMORY_CACHE_PREFIX}:${memory.businessId}:${memory.userId ?? 'all'}:${memory.id}`;
-    await this.redis.set(key, JSON.stringify(memory), 'PX', MEMORY_CACHE_TTL_MS);
+  private mapRecord(businessId: string, record: MemoryEntry): CortexMemory {
+    return this.writer.mapEntry(businessId, record);
   }
 
   private async getCached(cacheKey: string): Promise<CortexMemory[] | null> {
@@ -241,11 +226,17 @@ export class KeyCortexMemoryService {
     }
   }
 
-  private async cacheResult(cacheKey: string, memories: CortexMemory[]): Promise<void> {
+  private async cacheResult(
+    cacheKey: string,
+    memories: CortexMemory[],
+  ): Promise<void> {
     await this.redis.set(cacheKey, JSON.stringify(memories), 'PX', MEMORY_CACHE_TTL_MS);
   }
 
-  private async invalidateCache(businessId: string, userId?: string): Promise<void> {
+  private async invalidateCache(
+    businessId: string,
+    userId?: string,
+  ): Promise<void> {
     const pattern = `${MEMORY_CACHE_PREFIX}:${businessId}:${userId ?? '*'}:query*`;
     const keys = await this.redis.keys(pattern);
     for (const key of keys) {
@@ -258,7 +249,9 @@ export class KeyCortexMemoryService {
     return `${MEMORY_CACHE_PREFIX}:${query.businessId}:${query.userId ?? 'all'}:query:${types}`;
   }
 
-  private groupByType(memories: CortexMemory[]): Partial<Record<MemoryType, CortexMemory[]>> {
+  private groupByType(
+    memories: CortexMemory[],
+  ): Partial<Record<MemoryType, CortexMemory[]>> {
     const grouped: Partial<Record<MemoryType, CortexMemory[]>> = {};
     for (const m of memories) {
       if (!grouped[m.type]) grouped[m.type] = [];

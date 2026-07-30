@@ -8,6 +8,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { RedisService } from '../../core/redis/redis.service';
 import { ModelGatewayService } from '../ai/model-gateway.service';
 import { AiUsageService } from '../ai/ai-usage.service';
+import { UnifiedMemoryWriterService } from './unified-memory-writer.service';
 import OpenAI from 'openai';
 
 // ---------------------------------------------------------------------------
@@ -120,6 +121,7 @@ export class KeyCortexDocumentService {
     private readonly redis: RedisService,
     private readonly gateway: ModelGatewayService,
     private readonly aiUsage: AiUsageService,
+    private readonly memoryWriter: UnifiedMemoryWriterService,
   ) {
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
@@ -184,7 +186,7 @@ export class KeyCortexDocumentService {
     const storageUrl = await this.storeFileInCloud(file, businessId);
 
     // Create document record
-    const docRecord = await this.prisma.client.keyDocument.create({
+    const docRecord = await (this.prisma.client as any).keyDocument.create({
       data: {
         businessId,
         fileName: file.originalname,
@@ -200,9 +202,9 @@ export class KeyCortexDocumentService {
     let extractedText: string;
     try {
       extractedText = await this.parseDocument(file);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Document parsing failed: ${(err as Error).message}`);
-      await this.prisma.client.keyDocument.update({
+      await (this.prisma.client as any).keyDocument.update({
         where: { id: docRecord.id },
         data: { status: 'failed' },
       });
@@ -221,9 +223,9 @@ export class KeyCortexDocumentService {
     // Generate embeddings for each chunk
     try {
       await this.indexChunks(docRecord.id, chunks, businessId);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Embedding generation failed: ${(err as Error).message}`);
-      await this.prisma.client.keyDocument.update({
+      await (this.prisma.client as any).keyDocument.update({
         where: { id: docRecord.id },
         data: { status: 'failed' },
       });
@@ -233,7 +235,7 @@ export class KeyCortexDocumentService {
     }
 
     // Update document status
-    await this.prisma.client.keyDocument.update({
+    await (this.prisma.client as any).keyDocument.update({
       where: { id: docRecord.id },
       data: {
         status: 'indexed',
@@ -285,7 +287,7 @@ export class KeyCortexDocumentService {
     );
 
     // Verify document exists and belongs to this business
-    const document = await this.prisma.client.keyDocument.findFirst({
+    const document = await (this.prisma.client as any).keyDocument.findFirst({
       where: { id: documentId, businessId },
     });
 
@@ -396,7 +398,7 @@ export class KeyCortexDocumentService {
     );
 
     // Get all indexed documents for this business
-    const documents = await this.prisma.client.keyDocument.findMany({
+    const documents = await (this.prisma.client as any).keyDocument.findMany({
       where: { businessId, status: 'indexed' },
     });
 
@@ -504,7 +506,7 @@ export class KeyCortexDocumentService {
     );
 
     // Verify document
-    const document = await this.prisma.client.keyDocument.findFirst({
+    const document = await (this.prisma.client as any).keyDocument.findFirst({
       where: { id: documentId, businessId },
     });
 
@@ -565,27 +567,13 @@ Respond in this exact shape:
       rawFields: extraction.rawFields ?? [],
     };
 
-    // Store extraction result
-    await this.prisma.client.aiMemory.upsert({
-      where: {
-        businessId_category_key: {
-          businessId,
-          category: 'document_extraction',
-          key: documentId,
-        },
-      },
-      create: {
-        businessId,
-        category: 'document_extraction',
-        key: documentId,
-        value: JSON.stringify(result),
-        source: 'key_document_service',
-      },
-      update: {
-        value: JSON.stringify(result),
-        source: 'key_document_service',
-      },
-    });
+    // Store extraction result in the canonical memory store
+    await this.memoryWriter.storeDocumentExtraction(
+      businessId,
+      documentId,
+      JSON.stringify(result),
+      { source: 'key_document_service' },
+    );
 
     this.logger.debug(
       `Data extracted from ${documentId}: ${Object.keys(result.data).length} fields`,
@@ -615,10 +603,10 @@ Respond in this exact shape:
 
     // Verify both documents
     const [doc1, doc2] = await Promise.all([
-      this.prisma.client.keyDocument.findFirst({
+      (this.prisma.client as any).keyDocument.findFirst({
         where: { id: docId1, businessId },
       }),
-      this.prisma.client.keyDocument.findFirst({
+      (this.prisma.client as any).keyDocument.findFirst({
         where: { id: docId2, businessId },
       }),
     ]);
@@ -698,12 +686,12 @@ Respond in this exact shape:
   async getDocuments(businessId: string): Promise<DocumentListEntry[]> {
     this.logger.debug(`Listing documents for business=${businessId}`);
 
-    const documents = await this.prisma.client.keyDocument.findMany({
+    const documents = await (this.prisma.client as any).keyDocument.findMany({
       where: { businessId },
       orderBy: { createdAt: 'desc' },
     });
 
-    return documents.map((doc) => ({
+    return documents.map((doc: any) => ({
       id: doc.id,
       fileName: doc.fileName,
       fileType: doc.fileType,
@@ -734,7 +722,7 @@ Respond in this exact shape:
     this.logger.log(`Deleting document: ${documentId} for business=${businessId}`);
 
     // Verify document exists and belongs to business
-    const document = await this.prisma.client.keyDocument.findFirst({
+    const document = await (this.prisma.client as any).keyDocument.findFirst({
       where: { id: documentId, businessId },
     });
 
@@ -745,17 +733,15 @@ Respond in this exact shape:
     // Delete all vector embeddings for this document
     await this.deleteVectorEmbeddings(documentId);
 
-    // Delete extraction results from aiMemory
-    await this.prisma.client.aiMemory.deleteMany({
-      where: {
-        businessId,
-        category: 'document_extraction',
-        key: documentId,
-      },
-    });
+    // Delete extraction results from the canonical memory store
+    await this.memoryWriter.remove(
+      businessId,
+      'document_extraction',
+      documentId,
+    );
 
     // Delete the document record
-    await this.prisma.client.keyDocument.delete({
+    await (this.prisma.client as any).keyDocument.delete({
       where: { id: documentId },
     });
 
@@ -812,8 +798,8 @@ Respond in this exact shape:
     try {
       const pdfParse = await import('pdf-parse');
       const result = await pdfParse.default(buffer);
-      return result.text ?? '';
-    } catch (err) {
+      return result.content ?? '';
+    } catch (err: any) {
       this.logger.warn(`pdf-parse failed, falling back to AI vision: ${(err as Error).message}`);
       // Fallback: treat PDF as image and use AI vision
       return this.parseImage(buffer, 'application/pdf');
@@ -828,7 +814,7 @@ Respond in this exact shape:
       const mammoth = await import('mammoth');
       const result = await mammoth.extractRawText({ buffer });
       return result.value ?? '';
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`mammoth failed: ${(err as Error).message}`);
       return buffer.toString('utf-8');
     }
@@ -848,7 +834,7 @@ Respond in this exact shape:
         text += xlsx.utils.sheet_to_csv(sheet);
       }
       return text;
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`xlsx failed: ${(err as Error).message}`);
       return buffer.toString('utf-8');
     }
@@ -879,7 +865,7 @@ Respond in this exact shape:
               type: 'image_url',
               image_url: { url: dataUrl, detail: 'high' },
             } as any,
-          ],
+          ] as any,
         },
       ],
       maxTokens: 2000,

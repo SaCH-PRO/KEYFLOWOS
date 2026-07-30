@@ -137,7 +137,7 @@ export class AuthSecurityService {
           HttpStatus.TOO_MANY_REQUESTS,
         );
       }
-    } catch (err) {
+    } catch (err: any) {
       // Re-throw the 429 so the caller actually rejects the request.
       if (err instanceof HttpException) throw err;
       // Anything else (DB unreachable, etc.) — log + fail open.
@@ -169,7 +169,7 @@ export class AuthSecurityService {
           metadata: (entry.metadata ?? null) as never,
         },
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `audit(${entry.event}/${entry.outcome}) failed: ${err instanceof Error ? err.message : err}`,
       );
@@ -193,7 +193,7 @@ export class AuthSecurityService {
     const cutoff = new Date(now - this.pruneOlderThanMs);
     try {
       await this.prisma.client.authRateLimit.deleteMany({ where: { hitAt: { lt: cutoff } } });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.debug(
         `prune failed (non-fatal): ${err instanceof Error ? err.message : err}`,
       );

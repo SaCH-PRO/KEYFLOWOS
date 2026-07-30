@@ -1,4 +1,5 @@
 import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
+import { timingSafeStringEqual } from '../../core/security/timing-safe-equal';
 import { createHmac } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ConnectorActivityService } from '../../core/connectors/connector-activity.service';
@@ -183,7 +184,7 @@ export class MicrosoftOAuthService {
       const payload = decoded.slice(0, i);
       const sig = decoded.slice(i + 1);
       const expected = createHmac('sha256', this.stateSecret).update(payload).digest('hex');
-      if (sig !== expected) return null;
+      if (!timingSafeStringEqual(sig, expected)) return null;
       const state: OAuthState = JSON.parse(payload);
       if (state.exp < Date.now()) return null;
       return state;

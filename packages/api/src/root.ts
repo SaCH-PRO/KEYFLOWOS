@@ -1,4 +1,5 @@
 import { router } from './trpc';
+import type { AnyRouter } from '@trpc/server';
 import { identityRouter } from './routers/identity';
 import { crmRouter } from './routers/crm';
 import { commerceRouter } from './routers/commerce';
@@ -9,8 +10,9 @@ import { siteRouter } from './routers/site';
 import { adminRouter } from './routers/admin';
 import { diagnosticsRouter } from './routers/diagnostics';
 import { supplierRouter } from './routers/supplier';
+import { keyConnectorRouter } from './routers/key-connector';
 
-export const appRouter = router({
+export const appRouter: AnyRouter = router({
   identity: identityRouter,
   crm: crmRouter,
   commerce: commerceRouter,
@@ -21,6 +23,7 @@ export const appRouter = router({
   admin: adminRouter,
   diagnostics: diagnosticsRouter,
   supplier: supplierRouter,
+  keyConnector: keyConnectorRouter,
 });
 
 export type AppRouter = typeof appRouter;

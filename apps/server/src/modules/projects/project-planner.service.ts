@@ -187,7 +187,7 @@ RULES:
     let parsed: PlanGenerationResult;
     try {
       parsed = JSON.parse(result.content);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Plan generation JSON parse failed, attempting repair: ${(err as Error).message}`);
       const jsonMatch = result.content.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
@@ -339,7 +339,7 @@ Respond with JSON only:
     let parsed: ImpactAnalysisResult;
     try {
       parsed = JSON.parse(result.content);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Impact analysis JSON parse failed: ${(err as Error).message}`);
       parsed = {
         canProceed: true,

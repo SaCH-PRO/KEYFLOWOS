@@ -159,11 +159,39 @@ export interface CommandCenterModuleReadiness {
   lastComputedAt: string;
 }
 
+export interface PulseDimension {
+  label: string;
+  score: number;
+  trend: 'up' | 'down' | 'flat';
+  color: string;
+}
+
+export interface BusinessPulse {
+  overallScore: number;
+  dimensions: PulseDimension[];
+}
+
+export interface KeyBriefing {
+  headline: string;
+  bullets: string[];
+  warnings: string[];
+}
+
+export interface GovernanceSummary {
+  autoReady: number;
+  needsApproval: number;
+  dueToday: number;
+  urgentRisks: number;
+}
+
 export interface BusinessCommandCenterSnapshot {
   businessId: string;
   generatedAt: string;
   health: CommandCenterHealth;
   summary: string;
+  pulse: BusinessPulse;
+  briefing: KeyBriefing;
+  governance: GovernanceSummary;
   topPriorities: CommandCenterItem[];
   pendingApprovals: CommandCenterItem[];
   approvedAwaitingExecution: CommandCenterItem[];

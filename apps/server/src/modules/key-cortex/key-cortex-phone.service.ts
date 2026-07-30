@@ -7,7 +7,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { ModelGatewayService } from '../ai/model-gateway.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { KeyCortexVoiceService } from './key-cortex-voice.service';
-import Twilio from 'twilio';
+
 
 // ---------------------------------------------------------------------------
 // Types
@@ -121,7 +121,7 @@ export interface FollowUpTask {
 @Injectable()
 export class KeyCortexPhoneService {
   private readonly logger = new Logger(KeyCortexPhoneService.name);
-  private readonly twilio: Twilio.Twilio | null = null;
+  private twilioClient: any | null = null;
   private readonly twilioPhoneNumber: string | null = null;
   private readonly webhookBaseUrl: string;
 
@@ -140,14 +140,35 @@ export class KeyCortexPhoneService {
     this.webhookBaseUrl =
       process.env.TWILIO_WEBHOOK_BASE_URL ?? process.env.APP_URL ?? '';
 
-    if (accountSid && authToken) {
-      this.twilio = Twilio(accountSid, authToken);
-      this.logger.log('Twilio client initialized');
-    } else {
+    if (!accountSid || !authToken) {
       this.logger.warn(
         'TWILIO_ACCOUNT_SID or TWILIO_AUTH_TOKEN not set. Phone calls will be unavailable.',
       );
     }
+  }
+
+  private async getTwilioModule(): Promise<any | null> {
+    try {
+      const twilioMod = await import('twilio');
+      return twilioMod.default ?? twilioMod;
+    } catch (err) {
+      this.logger.warn(
+        `Failed to load Twilio SDK: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return null;
+    }
+  }
+
+  private async getTwilioClient(): Promise<any | null> {
+    if (this.twilioClient) return this.twilioClient;
+    const accountSid = process.env.TWILIO_ACCOUNT_SID;
+    const authToken = process.env.TWILIO_AUTH_TOKEN;
+    if (!accountSid || !authToken) return null;
+    const Twilio = await this.getTwilioModule();
+    if (!Twilio) return null;
+    this.twilioClient = Twilio(accountSid, authToken);
+    this.logger.log('Twilio client initialized');
+    return this.twilioClient;
   }
 
   // ========================================================================
@@ -170,7 +191,8 @@ export class KeyCortexPhoneService {
     script: string,
     businessId: string,
   ): Promise<CallSession> {
-    if (!this.twilio || !this.twilioPhoneNumber) {
+    const twilio = await this.getTwilioClient();
+    if (!twilio || !this.twilioPhoneNumber) {
       throw new ServiceUnavailableException(
         'Twilio is not configured. Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER.',
       );
@@ -181,7 +203,7 @@ export class KeyCortexPhoneService {
     );
 
     // Create the call session record in Prisma
-    const sessionRecord = await this.prisma.client.keyCallSession.create({
+    const sessionRecord = await (this.prisma.client as any).keyCallSession.create({
       data: {
         businessId,
         phoneNumber,
@@ -197,10 +219,10 @@ export class KeyCortexPhoneService {
 
     try {
       // Initiate the call via Twilio
-      const call = await this.twilio.calls.create({
+      const call = await twilio.calls.create({
         to: phoneNumber,
         from: this.twilioPhoneNumber,
-        twiml: this.buildOutboundTwiml(sessionRecord.id, script),
+        twiml: await this.buildOutboundTwiml(sessionRecord.id, script),
         statusCallback: statusCallbackUrl,
         statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed'],
         statusCallbackMethod: 'POST',
@@ -210,7 +232,7 @@ export class KeyCortexPhoneService {
       });
 
       // Update the session with the Twilio Call SID
-      await this.prisma.client.keyCallSession.update({
+      await (this.prisma.client as any).keyCallSession.update({
         where: { id: sessionRecord.id },
         data: {
           callSid: call.sid,
@@ -242,7 +264,7 @@ export class KeyCortexPhoneService {
       this.logger.error(`Failed to initiate outbound call: ${message}`);
 
       // Update the session as failed
-      await this.prisma.client.keyCallSession.update({
+      await (this.prisma.client as any).keyCallSession.update({
         where: { id: sessionRecord.id },
         data: { status: 'failed', endedAt: new Date() },
       });
@@ -274,7 +296,7 @@ export class KeyCortexPhoneService {
     this.logger.log(`Incoming call: callSid=${callSid}, from=${from}, to=${to}`);
 
     // Resolve the business from the called number
-    const business = await this.prisma.client.business.findFirst({
+    const business = await (this.prisma.client as any).business.findFirst({
       where: { phoneNumber: to },
       select: { id: true, name: true },
     });
@@ -283,7 +305,7 @@ export class KeyCortexPhoneService {
     const businessName = business?.name ?? 'our business';
 
     // Create a session record
-    const sessionRecord = await this.prisma.client.keyCallSession.create({
+    const sessionRecord = await (this.prisma.client as any).keyCallSession.create({
       data: {
         businessId,
         phoneNumber: from,
@@ -327,6 +349,10 @@ export class KeyCortexPhoneService {
     this.activeCalls.set(callSid, session);
 
     // Build TwiML: play greeting then connect to stream for real-time conversation
+    const Twilio = await this.getTwilioModule();
+    if (!Twilio) {
+      throw new ServiceUnavailableException('Twilio SDK is not available.');
+    }
     const twiml = new Twilio.twiml.VoiceResponse();
     twiml.play(audioUrl);
 
@@ -365,7 +391,7 @@ export class KeyCortexPhoneService {
     this.logger.debug(`Generating call script: purpose="${purpose}", business=${businessId}`);
 
     // Fetch business details for personalisation
-    const business = await this.prisma.client.business.findUnique({
+    const business = await (this.prisma.client as any).business.findUnique({
       where: { id: businessId },
       select: { name: true, industry: true, phoneNumber: true },
     });
@@ -453,13 +479,13 @@ Generate a call script for this purpose.`,
   ): Promise<CallHistoryEntry[]> {
     this.logger.debug(`Fetching call history: business=${businessId}, limit=${limit}`);
 
-    const sessions = await this.prisma.client.keyCallSession.findMany({
+    const sessions = await (this.prisma.client as any).keyCallSession.findMany({
       where: { businessId },
       orderBy: { createdAt: 'desc' },
       take: limit,
     });
 
-    return sessions.map((s) => ({
+    return sessions.map((s: any) => ({
       id: s.id,
       callSid: s.callSid,
       phoneNumber: s.phoneNumber,
@@ -611,7 +637,7 @@ Respond ONLY with valid JSON in this exact shape:
     // If we have an analysis with action items, create tasks from them
     if (callResult.analysis?.actionItems) {
       for (const item of callResult.analysis.actionItems) {
-        const taskRecord = await this.prisma.client.task.create({
+        const taskRecord = await (this.prisma.client as any).task.create({
           data: {
             businessId,
             title: `[Follow-up] ${item.task}`,
@@ -642,7 +668,7 @@ Respond ONLY with valid JSON in this exact shape:
 
     // If the call outcome indicates a callback is needed, create one
     if (callResult.outcome?.toLowerCase().includes('callback')) {
-      const callbackTask = await this.prisma.client.task.create({
+      const callbackTask = await (this.prisma.client as any).task.create({
         data: {
           businessId,
           title: `[Callback] ${callResult.phoneNumber}`,
@@ -672,7 +698,7 @@ Respond ONLY with valid JSON in this exact shape:
 
     // If sentiment is negative, create an escalation task
     if (callResult.analysis?.sentiment === 'negative') {
-      const escalationTask = await this.prisma.client.task.create({
+      const escalationTask = await (this.prisma.client as any).task.create({
         data: {
           businessId,
           title: `[Escalation] Negative call with ${callResult.phoneNumber}`,
@@ -731,7 +757,7 @@ Respond ONLY with valid JSON in this exact shape:
     }
 
     // Update Prisma
-    await this.prisma.client.keyCallSession.updateMany({
+    await (this.prisma.client as any).keyCallSession.updateMany({
       where: { callSid },
       data: {
         status: mappedStatus,
@@ -755,7 +781,7 @@ Respond ONLY with valid JSON in this exact shape:
   ): Promise<void> {
     this.logger.debug(`Recording callback: callSid=${callSid}`);
 
-    await this.prisma.client.keyCallSession.updateMany({
+    await (this.prisma.client as any).keyCallSession.updateMany({
       where: { callSid },
       data: { recordingUrl },
     });
@@ -882,13 +908,13 @@ Respond ONLY with valid JSON in this exact shape:
           },
           session.businessId,
         );
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(`Call analysis failed: ${(err as Error).message}`);
       }
     }
 
     // Persist final state
-    await this.prisma.client.keyCallSession.update({
+    await (this.prisma.client as any).keyCallSession.update({
       where: { id: session.id },
       data: {
         status: session.status,
@@ -916,7 +942,11 @@ Respond ONLY with valid JSON in this exact shape:
   /**
    * Build TwiML for an outbound call.
    */
-  private buildOutboundTwiml(sessionId: string, _script: string): string {
+  private async buildOutboundTwiml(sessionId: string, _script: string): Promise<string> {
+    const Twilio = await this.getTwilioModule();
+    if (!Twilio) {
+      throw new ServiceUnavailableException('Twilio SDK is not available.');
+    }
     const twiml = new Twilio.twiml.VoiceResponse();
 
     // Connect to the media stream for real-time audio
@@ -943,7 +973,7 @@ Respond ONLY with valid JSON in this exact shape:
     businessId: string,
   ): Promise<string> {
     // Check if business has a custom greeting configured
-    const customGreeting = await this.prisma.client.aiMemory.findUnique({
+    const customGreeting = await (this.prisma.client as any).aiMemory.findUnique({
       where: {
         businessId_category_key: {
           businessId,
@@ -1010,7 +1040,7 @@ ${session.script ? `Script/context: ${session.script}` : ''}`,
    * Persist the current transcript to Prisma.
    */
   private async persistTranscript(session: CallSession): Promise<void> {
-    await this.prisma.client.keyCallSession.update({
+    await (this.prisma.client as any).keyCallSession.update({
       where: { id: session.id },
       data: {
         transcript: JSON.stringify(session.transcript),

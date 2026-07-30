@@ -240,7 +240,7 @@ export class CrmRelationshipHealthService {
         const r = await this.recomputeForBusiness(b.id);
         totalUpdated += r.updated;
         totalSkipped += r.skipped;
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(
           `[CRM-Health] recompute failed for business=${b.id}: ${(err as Error).message}`,
         );
@@ -312,7 +312,7 @@ export class CrmRelationshipHealthService {
           source: reason === 'auto' ? 'health_scheduler' : 'crm',
         },
       );
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `[CRM-Health] failed to log change for contact=${contactId}: ${(err as Error).message}`,
       );

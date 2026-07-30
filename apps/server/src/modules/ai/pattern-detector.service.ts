@@ -60,7 +60,7 @@ export class PatternDetectorService implements OnModuleInit, OnModuleDestroy {
     for (const biz of businesses) {
       try {
         await this.scanBusiness(biz.id);
-      } catch (err) {
+      } catch (err: any) {
         this.logger.error(`Pattern scan failed for ${biz.id}: ${(err as Error).message}`);
       }
     }
@@ -352,7 +352,7 @@ Respond with JSON only: { "patterns": [...] }`;
         confidence: Math.min(Math.max(p.confidence ?? 0.5, 0), 1),
         suggestedAction: p.suggestedAction ?? 'Review the data manually',
       }));
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`AI pattern detection failed: ${(err as Error).message}`);
       return [];
     }

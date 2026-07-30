@@ -1,4 +1,5 @@
 import { BadRequestException, Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { timingSafeStringEqual } from '../../core/security/timing-safe-equal';
 import { createHmac, randomBytes } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { GmailConnector } from '../../core/connectors/implementations/gmail.connector';
@@ -68,7 +69,7 @@ export class GmailService {
       const signature = decoded.substring(lastDotIndex + 1);
       
       const expectedSignature = createHmac('sha256', this.stateSecret).update(payload).digest('hex');
-      if (signature !== expectedSignature) {
+      if (!timingSafeStringEqual(signature, expectedSignature)) {
         this.logger.warn('Invalid OAuth state signature');
         return null;
       }

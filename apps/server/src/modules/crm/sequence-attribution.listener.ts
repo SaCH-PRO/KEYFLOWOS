@@ -32,7 +32,7 @@ export class SequenceAttributionListener {
         dealId,
         wonAt,
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `sequence-attribution listener failed for deal=${dealId}: ${(err as Error).message}`,
       );

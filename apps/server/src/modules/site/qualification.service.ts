@@ -276,7 +276,7 @@ export class QualificationService {
             },
           });
         }
-      } catch (err) {
+      } catch (err: any) {
           this.logger.warn(`Silent catch: ${err instanceof Error ? err.message : err}`);
         }
     }

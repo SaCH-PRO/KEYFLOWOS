@@ -200,7 +200,7 @@ export class ProjectPlanExecutorService {
       });
 
       return { status: 'completed', tool: event.automationTool };
-    } catch (err) {
+    } catch (err: any) {
       const errorMessage = (err as Error).message;
       this.logger.error(`Execution failed for event ${eventId}: ${errorMessage}`);
 
@@ -274,7 +274,7 @@ export class ProjectPlanExecutorService {
     for (const event of events) {
       try {
         await this.executeInAppEvent(businessId, event.id, userId);
-      } catch (err) {
+      } catch (err: any) {
         this.logger.error(`Auto-execution failed for event ${event.id}: ${(err as Error).message}`);
         // Continue with next event — don't fail the whole batch
       }

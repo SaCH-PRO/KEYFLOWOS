@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Inject, Param, Post, Put, Query, Req, UseGuards, UnauthorizedException, BadRequestException } from '@nestjs/common';
+import { Body, Controller, Delete, forwardRef, Get, Inject, NotFoundException, Param, Post, Put, Query, Req, UseGuards, UnauthorizedException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CrmRateLimit, CrmRateLimitGuard } from '../crm/guards/rate-limit.guard';
 import { AiAdvisorService } from './ai-advisor.service';
@@ -17,12 +17,14 @@ import { ModelGatewayService, AiMode, BudgetCaps } from './model-gateway.service
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { Request } from 'express';
+import { PrismaService } from '../../core/prisma/prisma.service';
+import { KeyCommandService } from './key-command.service';
+import { KeyActionProposalService } from '../key-autonomy/key-action-proposal.service';
+import { KeyCortexApprovalOrchestratorService } from '../key-cortex/key-cortex-approval-orchestrator.service';
 
 interface AuthenticatedRequest extends Request {
   user?: { id: string; email?: string; role?: string };
 }
-import { PrismaService } from '../../core/prisma/prisma.service';
-import { KeyCommandService } from './key-command.service';
 import { AutopilotRulesService } from './autopilot-rules.service';
 import { AgentHealthService } from './agent-health.service';
 import { JourneyOrchestratorService } from './journey-orchestrator.service';
@@ -94,6 +96,9 @@ export class AiController {
     @Inject(UndoService) private readonly undoService: UndoService,
     @Inject(ProactiveSuggestionService) private readonly suggestions: ProactiveSuggestionService,
     @Inject(WorkflowTemplateService) private readonly workflows: WorkflowTemplateService,
+    @Inject(KeyActionProposalService) private readonly proposals: KeyActionProposalService,
+    @Inject(forwardRef(() => KeyCortexApprovalOrchestratorService))
+    private readonly approvalOrchestrator: KeyCortexApprovalOrchestratorService,
   ) {}
 
   @Get('health')
@@ -459,7 +464,9 @@ export class AiController {
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/ai/approvals')
   async getPendingApprovals(@Param('businessId') businessId: string) {
-    return this.governance.getPendingApprovals(businessId);
+    // Phase 0.6: all pending approvals are served from the canonical
+    // KeyActionProposal table (legacy AI items, PRO_AUTO insights, etc.).
+    return this.proposals.list(businessId, { status: 'PENDING' });
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -468,7 +475,14 @@ export class AiController {
     @Param('businessId') businessId: string,
     @Query('limit') limit?: string,
   ) {
-    return this.governance.getApprovalHistory(businessId, safeInt(limit, 50));
+    // Phase 0.6: approval history is now read from KeyActionProposal.
+    // See getPendingApprovals for the migration note on response shape.
+    const proposals = await this.proposals.list(businessId, { sourceType: 'AI_LEGACY' });
+    const history = proposals
+      .filter((p) => p.status !== 'PENDING')
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .slice(0, safeInt(limit, 50));
+    return history;
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -481,7 +495,7 @@ export class AiController {
   ) {
     const userId = req?.user?.id;
     if (!userId) throw new UnauthorizedException('Authenticated user required to resolve approvals');
-    return this.governance.resolveApproval(approvalId, businessId, body.resolution, userId);
+    return this.resolveLegacyApproval(businessId, approvalId, body.resolution, userId);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -493,7 +507,158 @@ export class AiController {
   ) {
     const userId = req?.user?.id;
     if (!userId) throw new UnauthorizedException('Authenticated user required to resolve approvals');
-    return this.governance.resolveApprovalsBatch(businessId, body.approvalIds, body.resolution, userId);
+    const results = await Promise.allSettled(
+      body.approvalIds.map((id) => this.resolveLegacyApproval(businessId, id, body.resolution, userId)),
+    );
+    const succeeded = results.filter((r) => r.status === 'fulfilled').length;
+    const failed = results.filter((r) => r.status === 'rejected').length;
+    return { succeeded, failed, total: body.approvalIds.length };
+  }
+
+  private async resolveLegacyApproval(
+    businessId: string,
+    approvalId: string,
+    resolution: 'approved' | 'rejected' | 'deferred',
+    userId: string,
+  ) {
+    // Canonical path: resolve directly from KeyActionProposal.
+    let proposal: any;
+    try {
+      proposal = await this.proposals.get(businessId, approvalId);
+    } catch {
+      proposal = null;
+    }
+
+    if (proposal) {
+      await this.assertCanResolveApproval(businessId, proposal.riskTier ?? 2, userId);
+      if (resolution === 'deferred') {
+        // Defer by rejecting with a deferral reason; true deferral state is not in the proposal model.
+        return this.approvalOrchestrator.reject({
+          proposalId: approvalId,
+          businessId,
+          userId,
+          reason: 'Deferred by operator',
+        });
+      }
+      if (proposal.status !== 'PENDING') {
+        throw new BadRequestException(`Proposal ${approvalId} is already resolved (status: ${proposal.status})`);
+      }
+      return resolution === 'approved'
+        ? this.approvalOrchestrator.approve({ proposalId: approvalId, businessId, userId, autoExecute: false })
+        : this.approvalOrchestrator.reject({ proposalId: approvalId, businessId, userId });
+    }
+
+    // Compatibility fallback: legacy aiApprovalItem records are migrated once on resolution.
+    const item = await this.prisma.client.aiApprovalItem.findFirst({
+      where: { id: approvalId, businessId },
+    });
+    if (!item) throw new NotFoundException(`Approval item ${approvalId} not found for business ${businessId}`);
+
+    await this.assertCanResolveApproval(businessId, item.riskTier, userId);
+
+    if (resolution === 'deferred') {
+      await this.prisma.client.aiApprovalItem.update({
+        where: { id: approvalId },
+        data: { status: 'deferred', resolution: 'deferred', resolvedAt: new Date(), resolvedByUserId: userId },
+      });
+      return { deferred: true, approvalId };
+    }
+
+    proposal = await this.migrateAiApprovalItemToProposal(businessId, item);
+    if (proposal.status !== 'PENDING') {
+      throw new BadRequestException(`Proposal ${proposal.id} is already resolved (status: ${proposal.status})`);
+    }
+
+    const resolved =
+      resolution === 'approved'
+        ? await this.approvalOrchestrator.approve({
+            proposalId: proposal.id,
+            businessId,
+            userId,
+            autoExecute: false,
+          })
+        : await this.approvalOrchestrator.reject({
+            proposalId: proposal.id,
+            businessId,
+            userId,
+            reason: (item.rationale ?? undefined) as string | undefined,
+          });
+
+    await this.prisma.client.aiApprovalItem.update({
+      where: { id: item.id },
+      data: {
+        status: resolution,
+        resolution,
+        resolvedAt: new Date(),
+        resolvedByUserId: userId,
+        migratedToProposalId: proposal.id,
+      },
+    });
+
+    return resolved;
+  }
+
+  private async migrateAiApprovalItemToProposal(
+    businessId: string,
+    item: any,
+  ) {
+    if (item.migratedToProposalId) {
+      return this.proposals.get(businessId, item.migratedToProposalId);
+    }
+
+    const proposal = await this.approvalOrchestrator.propose({
+      businessId,
+      userId: item.userId ?? undefined,
+      sourceType: 'AI_LEGACY',
+      sourceId: item.id,
+      actionType: 'EXECUTE_TOOL',
+      toolName: item.toolName,
+      module: item.module ?? undefined,
+      title: item.title,
+      description: item.description ?? undefined,
+      summary: item.description ?? undefined,
+      rationale: item.rationale ?? undefined,
+      expectedBenefit: item.expectedBenefit ?? undefined,
+      risks: item.risks ?? undefined,
+      parameters: (item.inputPayload as Record<string, unknown>) ?? {},
+      affectedEntities: (item.affectedEntities as Record<string, unknown>) ?? {},
+      planId: item.planId ?? undefined,
+      planStepId: item.planStepId ?? undefined,
+      correlationId: item.correlationId ?? undefined,
+    });
+
+    await this.prisma.client.aiApprovalItem.update({
+      where: { id: item.id },
+      data: { migratedToProposalId: proposal.id },
+    });
+
+    return proposal;
+  }
+
+  private async assertCanResolveApproval(
+    businessId: string,
+    riskTier: number,
+    userId: string,
+  ) {
+    const user = await this.prisma.client.user.findUnique({ where: { id: userId } });
+    const isSuperAdmin = user?.role === 'SUPER_ADMIN';
+    if (isSuperAdmin) return;
+
+    const membership = await this.prisma.client.membership.findFirst({
+      where: { userId, businessId },
+    });
+    if (!membership) throw new NotFoundException('User is not a member of this business');
+
+    const DEFAULT_TIERS: Record<string, number> = { OWNER: 4, ADMIN: 3, STAFF: 0 };
+    const hasCustomScopes = membership.permissionScopes !== null && membership.permissionScopes !== undefined;
+    const memberTier =
+      membership.maxApprovalTier !== null && membership.maxApprovalTier !== undefined && (hasCustomScopes || membership.maxApprovalTier !== 0)
+        ? membership.maxApprovalTier
+        : (DEFAULT_TIERS[membership.role] ?? 0);
+
+    if (riskTier > memberTier) {
+      throw new ForbiddenException(`Tier ${riskTier} approvals require approval tier ${riskTier} or higher (you have tier ${memberTier})`);
+    }
   }
 
 

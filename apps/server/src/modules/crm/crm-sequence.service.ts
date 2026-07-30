@@ -299,7 +299,7 @@ export class CrmSequenceService {
         actorType: 'system',
         source: 'sequence',
       });
-    } catch (err) {
+    } catch (err: any) {
       console.warn(`[CrmSequenceService] Failed to log event ${type} for contact ${contactId}:`, err);
     }
   }

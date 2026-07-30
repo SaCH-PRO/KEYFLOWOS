@@ -59,7 +59,7 @@ function CallTasksPage() {
   const [calls, setCalls] = useState<CallLog[]>([]);
   const [scheduled, setScheduled] = useState<CallLog[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filterStatus, setFilterStatus] = useState<string>("");
+  const [filterStatus, _setFilterStatus] = useState<string>("");
   const [searchQuery, setSearchQuery] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -90,7 +90,7 @@ function CallTasksPage() {
       ]);
       if (callsRes.data) setCalls(callsRes.data);
       if (scheduledRes.data) setScheduled(scheduledRes.data);
-    } catch (err) {
+    } catch (_err) {
       toast.error("Failed to load call tasks");
     } finally {
       setLoading(false);
@@ -192,7 +192,7 @@ function CallTasksPage() {
   };
 
   const reachedCount = calls.filter((c) => c.outcome === "reached").length;
-  const noAnswerCount = calls.filter((c) => c.outcome === "no_answer").length;
+  const _noAnswerCount = calls.filter((c) => c.outcome === "no_answer").length;
   const completionRate = calls.length > 0 ? Math.round((reachedCount / calls.length) * 100) : 0;
 
   const fadeUp = {
@@ -200,7 +200,7 @@ function CallTasksPage() {
     show: { opacity: 1, y: 0, transition: { type: "spring" as const, stiffness: 300, damping: 24 } },
   };
 
-  const staggerContainer = {
+  const _staggerContainer = {
     hidden: { opacity: 0 },
     show: { opacity: 1, transition: { staggerChildren: 0.04 } },
   };

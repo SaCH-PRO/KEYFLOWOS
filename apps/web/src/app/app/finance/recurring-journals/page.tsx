@@ -12,7 +12,7 @@ import { fetchRecurringJournals, createRecurringJournal, updateRecurringJournal,
 export default function RecurringJournalsPage() {
   const businessId = getStoredBusinessId() ?? "";
   const [entries, setEntries] = useState<RecurringJournalEntry[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [_loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);

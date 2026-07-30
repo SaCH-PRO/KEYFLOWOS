@@ -55,7 +55,7 @@ export class CalendarMarketingListener {
     }
     try {
       await this.projection.upsertFromSource(input);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `social_post projection failed id=${payload.post.id}: ${(err as Error).message}`,
       );
@@ -99,7 +99,7 @@ export class CalendarMarketingListener {
     }
     try {
       await this.projection.upsertFromSource(input);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `email_campaign projection failed id=${payload.campaign.id}: ${(err as Error).message}`,
       );

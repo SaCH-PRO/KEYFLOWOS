@@ -72,18 +72,18 @@ export class PayPalConnector implements IConnector, IPaymentGatewayConnector {
     return health.status === 'connected';
   }
 
-  async sync(businessId: string): Promise<ConnectorSyncResult> {
-    const start = Date.now();
-    const connected = await this.isConnected(businessId);
-    if (!connected) {
-      return { success: false, itemsSynced: 0, errors: ['PayPal not connected'], duration: Date.now() - start };
-    }
-
-    const recentPayments = await this.prisma.client.payment.count({
-      where: { businessId, method: 'PAYPAL' },
-    }).catch(() => 0);
-
-    return { success: true, itemsSynced: recentPayments, errors: [], duration: Date.now() - start };
+  async sync(_businessId: string): Promise<ConnectorSyncResult> {
+    // Provider pull sync is not yet implemented for this connector. It previously
+    // counted local rows and returned success:true, misrepresenting a no-op as a
+    // successful provider sync. Real pull sync is future work per connector.
+    return {
+      success: false,
+      itemsSynced: 0,
+      unsupported: true,
+      code: 'PULL_SYNC_NOT_IMPLEMENTED',
+      errors: ['Provider pull sync is not implemented for this connector.'],
+      duration: 0,
+    };
   }
 
   async smokeTest(businessId: string): Promise<ConnectorSmokeResult> {
@@ -125,7 +125,7 @@ export class PayPalConnector implements IConnector, IPaymentGatewayConnector {
         account: user.email ?? user.name ?? user.payer_id ?? token.app_id ?? clientId,
         detail: `${isSandbox ? 'Sandbox' : 'Live'}${user.payer_id ? ` • payer ${user.payer_id}` : ''}`,
       };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }
@@ -346,7 +346,7 @@ export class PayPalConnector implements IConnector, IPaymentGatewayConnector {
           const cap = (await capRes.json()) as { amount?: { currency_code?: string } };
           if (cap.amount?.currency_code) captureCurrency = cap.amount.currency_code.toUpperCase();
         }
-      } catch (err) {
+      } catch (err: any) {
           this.logger.debug(`Fall back to USD if capture lookup fails: ${err instanceof Error ? err.message : err}`);
         }
       body.amount = { value: input.amount.toFixed(2), currency_code: captureCurrency };

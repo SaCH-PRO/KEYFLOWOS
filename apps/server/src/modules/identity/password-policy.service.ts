@@ -111,7 +111,7 @@ export class PasswordPolicyService {
     let hash: string;
     try {
       hash = createHash('sha1').update(password, 'utf8').digest('hex').toUpperCase();
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`hibp hash failed: ${err instanceof Error ? err.message : err}`);
       return 0;
     }
@@ -141,7 +141,7 @@ export class PasswordPolicyService {
         }
       }
       return 0;
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`hibp request failed: ${err instanceof Error ? err.message : err}`);
       return 0;
     } finally {

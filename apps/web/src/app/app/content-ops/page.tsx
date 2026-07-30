@@ -13,7 +13,7 @@ import {
   Eye,
   Megaphone,
   Mail,
-  Image,
+  Image as ImageIcon,
   Video,
   PenTool,
   Package,
@@ -62,7 +62,7 @@ const CONTENT_TYPE_ICONS: Record<string, React.ReactNode> = {
   social_post: <Megaphone className="w-4 h-4" />,
   email: <Mail className="w-4 h-4" />,
   video_script: <Video className="w-4 h-4" />,
-  flyer: <Image className="w-4 h-4" />,
+  flyer: <ImageIcon className="w-4 h-4" aria-hidden="true" />,
   whitepaper: <PenTool className="w-4 h-4" />,
   landing_page: <FileText className="w-4 h-4" />,
   case_study: <FileText className="w-4 h-4" />,
@@ -95,7 +95,7 @@ function ContentOpsPage() {
       if (pipeRes.error) throw new Error(pipeRes.error);
       setRequests(listRes.data ?? []);
       setPipeline(pipeRes.data?.counts ?? {});
-    } catch (err) {
+    } catch (_err) {
       toast.error("Failed to load content requests");
     } finally {
       setLoading(false);

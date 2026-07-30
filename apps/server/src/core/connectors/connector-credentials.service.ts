@@ -85,7 +85,7 @@ export class ConnectorCredentialsService {
     if (typeof raw !== 'string' || !raw.length) return null;
     try {
       return decrypt(raw);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Failed to decrypt ${connectorType} credentials for ${businessId}: ${err instanceof Error ? err.message : String(err)}`);
       return null;
     }

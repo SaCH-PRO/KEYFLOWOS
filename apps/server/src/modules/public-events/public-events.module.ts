@@ -4,14 +4,14 @@ import { CrmModule } from '../crm/crm.module';
 import { PublicEventsController } from './public-events.controller';
 import { PublicEventsService } from './public-events.service';
 import { AbandonedCheckoutScheduler } from './abandoned-checkout.scheduler';
-import { PresenceController } from './presence.controller';
+import { PublicPresenceController } from './presence.controller';
 import { PresenceStatsService } from './presence-stats.service';
 import { PublicEventsIngestService } from './public-events.ingest.service';
 import { PresenceAggregatorScheduler } from './presence-aggregator.scheduler';
 
 @Module({
   imports: [PrismaModule, CrmModule],
-  controllers: [PublicEventsController, PresenceController],
+  controllers: [PublicEventsController, PublicPresenceController],
   providers: [
     PublicEventsService,
     AbandonedCheckoutScheduler,

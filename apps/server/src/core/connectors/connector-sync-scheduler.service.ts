@@ -13,6 +13,7 @@ export interface NightlyConnectorSyncResult {
   businesses: number;
   attempted: number;
   synced: number;
+  skipped: number;
   failed: number;
 }
 
@@ -70,9 +71,9 @@ export class ConnectorSyncSchedulerService implements OnModuleInit, OnModuleDest
     try {
       const result = await this.runNightlySync();
       this.logger.log(
-        `Nightly connector sync complete for ${dateKey}: ${result.synced} succeeded, ${result.failed} failed across ${result.businesses} businesses (${result.attempted} attempts)`,
+        `Nightly connector sync complete for ${dateKey}: ${result.synced} succeeded, ${result.skipped} skipped (unsupported), ${result.failed} failed across ${result.businesses} businesses (${result.attempted} attempts)`,
       );
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(
         `Nightly connector sync run failed: ${err instanceof Error ? err.message : String(err)}`,
       );
@@ -95,6 +96,7 @@ export class ConnectorSyncSchedulerService implements OnModuleInit, OnModuleDest
     const businesses = new Set<string>();
     let attempted = 0;
     let synced = 0;
+    let skipped = 0;
     let failed = 0;
 
     for (const row of rows) {
@@ -107,6 +109,10 @@ export class ConnectorSyncSchedulerService implements OnModuleInit, OnModuleDest
         const result = await this.registry.syncConnector(type, row.businessId);
         if (result.success) {
           synced += 1;
+        } else if (result.unsupported) {
+          // Expected: this connector does not support pull sync. Not a failure —
+          // do not mark unhealthy, advance bookkeeping, or emit a nightly alert.
+          skipped += 1;
         } else {
           failed += 1;
           await this.activity.record({
@@ -122,7 +128,7 @@ export class ConnectorSyncSchedulerService implements OnModuleInit, OnModuleDest
             metadata: { source: 'nightly_scheduler' },
           });
         }
-      } catch (err) {
+      } catch (err: any) {
         failed += 1;
         const message = err instanceof Error ? err.message : String(err);
         this.logger.warn(
@@ -142,6 +148,6 @@ export class ConnectorSyncSchedulerService implements OnModuleInit, OnModuleDest
       }
     }
 
-    return { businesses: businesses.size, attempted, synced, failed };
+    return { businesses: businesses.size, attempted, synced, skipped, failed };
   }
 }

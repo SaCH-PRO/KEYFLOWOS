@@ -149,12 +149,13 @@ export class AiMessageSenderService {
         await this.logCommunication(params.businessId, params.contactId, 'whatsapp', 'out', {
           to: phone,
           body: params.body,
+          messageId: result.messageId,
         });
-        return { success: true, channel: 'whatsapp' };
+        return { success: true, channel: 'whatsapp', messageId: result.messageId };
       }
 
       return { success: false, channel: 'whatsapp', error: result.error };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, channel: 'whatsapp', error: (err as Error).message };
     }
   }
@@ -183,12 +184,13 @@ export class AiMessageSenderService {
         await this.logCommunication(params.businessId, params.contactId, 'sms', 'out', {
           to: phone,
           body: params.body,
+          messageId: result.messageId,
         });
-        return { success: true, channel: 'sms' };
+        return { success: true, channel: 'sms', messageId: result.messageId };
       }
 
       return { success: false, channel: 'sms', error: result.error };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, channel: 'sms', error: (err as Error).message };
     }
   }

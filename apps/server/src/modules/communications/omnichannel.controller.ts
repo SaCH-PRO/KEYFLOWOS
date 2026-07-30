@@ -153,6 +153,17 @@ export class OmnichannelController {
     return this.drafts.sendDraft(id, sentById);
   }
 
+  @Patch('drafts/:id')
+  async updateDraft(
+    @Param('businessId') _businessId: string,
+    @Param('id') id: string,
+    @Body('body') body: string,
+    @Request() req: { user?: { sub?: string } },
+  ) {
+    const updatedById = req.user?.sub ?? 'system';
+    return this.drafts.updateDraftBody(id, body, updatedById);
+  }
+
   @Post('threads/:threadId/generate-reply')
   async generateReplyDraft(
     @Param('businessId') businessId: string,

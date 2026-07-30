@@ -273,7 +273,7 @@ ${transcript}`;
         openQuestions: Array.isArray(parsed.openQuestions) ? parsed.openQuestions.slice(0, 5).map((s) => String(s).slice(0, 200)) : [],
         actionItems: Array.isArray(parsed.actionItems) ? parsed.actionItems.slice(0, 5).map((s) => String(s).slice(0, 200)) : [],
       };
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`summarizeThread failed for ${businessId}/${contactId}: ${(err as Error).message}`);
       return { insight: null, cached: false, hash };
     }
@@ -345,7 +345,7 @@ Return JSON:
         urgency: ((parsed.urgency as string) === 'high' || (parsed.urgency as string) === 'medium') ? (parsed.urgency as 'high' | 'medium') : 'low',
         reason: typeof parsed.reason === 'string' ? parsed.reason.slice(0, 240) : '',
       };
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`analyzeMessage failed for ${args.messageRef}: ${(err as Error).message}`);
       return null;
     }
@@ -425,7 +425,7 @@ ${transcript}`;
         tone: typeof p.tone === 'string' ? p.tone.slice(0, 40) : 'professional',
         rationale: typeof p.rationale === 'string' ? p.rationale.slice(0, 200) : '',
       })).filter((r) => r.body.trim().length > 0);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`suggestReplies failed for ${businessId}/${contactId}: ${(err as Error).message}`);
       return [];
     }
@@ -546,7 +546,7 @@ ${transcript}`;
           createdAt: new Date().toISOString(),
         });
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`onInbound analyze failed: ${(err as Error).message}`);
     }
   }

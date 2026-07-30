@@ -2,7 +2,7 @@ import { Controller, Get, Inject } from '@nestjs/common';
 import { AppService } from './app.service';
 import { PrismaService } from './core/prisma/prisma.service';
 import { BusinessEventQueueService } from './modules/business-events/business-event.queue';
-import { getReleaseVersion } from './core/utils/release-version';
+import { getReleaseVersion } from '@keyflow/shared/release-version';
 
 const BOOT_TIME_MS = Date.now();
 

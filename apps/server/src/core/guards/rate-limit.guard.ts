@@ -41,7 +41,7 @@ export class RateLimitGuard implements CanActivate {
 
       await this.redis.zadd(key, now, `${now}-${Math.random().toString(36).slice(2)}`);
       await this.redis.pexpire(key, opts.windowMs);
-    } catch (err) {
+    } catch (err: any) {
       // If Redis is unavailable, fail open (allow request) rather than hard-deny
       // every legitimate user. Log loudly so ops knows the guard is degraded.
       if (err instanceof HttpException) throw err;

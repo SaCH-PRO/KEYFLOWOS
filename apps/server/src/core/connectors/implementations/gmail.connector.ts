@@ -2,7 +2,7 @@ import { Injectable, Inject, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EntityResolutionService } from '../entity-resolution.service';
-import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary } from '../connector.interface';
+import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary, IngestionItemInput } from '../connector.interface';
 import { GmailIngestionService } from './gmail-ingestion.service';
 
 @Injectable()
@@ -94,6 +94,14 @@ export class GmailConnector implements IConnector {
     return this.ingestion.syncInbox(businessId);
   }
 
+  async syncToIngestion(businessId: string): Promise<IngestionItemInput[]> {
+    const connected = await this.isConnected(businessId);
+    if (!connected) {
+      return [];
+    }
+    return this.ingestion.collectInboxInputs(businessId);
+  }
+
   async testConnection(businessId: string): Promise<{ success: boolean; error?: string; account?: string }> {
     const business = await this.prisma.client.business.findUnique({
       where: { id: businessId },
@@ -111,7 +119,7 @@ export class GmailConnector implements IConnector {
       }
       const data = await res.json();
       return { success: true, account: data.emailAddress ?? business.gmailEmail ?? undefined };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }
@@ -168,7 +176,7 @@ export class GmailConnector implements IConnector {
         account: address,
         detail: `Delivered to ${address} • id ${sent.id ?? 'unknown'}`,
       };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }

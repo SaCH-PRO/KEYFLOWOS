@@ -28,11 +28,11 @@ export class CommandSchedulerService {
           if (result.created > 0 || result.skipped > 0) {
             this.logger.debug(`Business ${business.id}: created ${result.created}, skipped ${result.skipped}`);
           }
-        } catch (err) {
+        } catch (err: any) {
           this.logger.warn(`Scheduled scan failed for business ${business.id}: ${(err as Error).message}`);
         }
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Scheduled scan failed: ${(err as Error).message}`);
     }
   }

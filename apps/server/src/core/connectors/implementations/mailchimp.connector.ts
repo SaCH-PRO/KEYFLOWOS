@@ -75,13 +75,18 @@ export class MailchimpConnector implements IConnector {
     return (await this.healthCheck(businessId)).status === 'connected';
   }
 
-  async sync(businessId: string): Promise<ConnectorSyncResult> {
-    const start = Date.now();
-    const connected = await this.isConnected(businessId);
-    if (!connected) return { success: false, itemsSynced: 0, errors: ['Mailchimp not connected'], duration: Date.now() - start };
-    const campaigns = await this.prisma.client.emailCampaign.count({ where: { businessId, deletedAt: null } }).catch(() => 0);
-    await this.trackActivity(businessId);
-    return { success: true, itemsSynced: campaigns, errors: [], duration: Date.now() - start };
+  async sync(_businessId: string): Promise<ConnectorSyncResult> {
+    // Provider pull sync is not yet implemented for this connector. It previously
+    // counted local rows and returned success:true, misrepresenting a no-op as a
+    // successful provider sync. Real pull sync is future work per connector.
+    return {
+      success: false,
+      itemsSynced: 0,
+      unsupported: true,
+      code: 'PULL_SYNC_NOT_IMPLEMENTED',
+      errors: ['Provider pull sync is not implemented for this connector.'],
+      duration: 0,
+    };
   }
 
   async disconnect(businessId: string): Promise<void> {
@@ -131,7 +136,7 @@ export class MailchimpConnector implements IConnector {
         account: root.account_name ?? root.email ?? accountName ?? `Mailchimp (${dc})`,
         detail: `${lists.total_items ?? 0} audience(s)${typeof root.total_subscribers === 'number' ? ` • ${root.total_subscribers} subscribers` : ''}`,
       };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }
@@ -201,7 +206,7 @@ export class MailchimpConnector implements IConnector {
       }));
       await this.trackActivity(businessId);
       return { success: true, lists };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }
@@ -248,7 +253,7 @@ export class MailchimpConnector implements IConnector {
       const errors = (data.errors ?? []).map((e) => e.error);
       await this.trackActivity(businessId);
       return { success: true, created, updated, failed, errors };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, created: 0, updated: 0, failed: contacts.length, errors: [err instanceof Error ? err.message : 'Network error'] };
     }
   }
@@ -273,7 +278,7 @@ export class MailchimpConnector implements IConnector {
         emailsSent: c.emails_sent,
       }));
       return { success: true, campaigns };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }
@@ -293,7 +298,7 @@ export class MailchimpConnector implements IConnector {
       }
       await this.trackActivity(businessId);
       return { success: true };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }

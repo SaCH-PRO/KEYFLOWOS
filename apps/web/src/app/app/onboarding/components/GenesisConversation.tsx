@@ -6,6 +6,7 @@ import { Loader2, ArrowRight, RotateCcw, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import { apiGet, apiPost } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
+import { getGenome } from "@/lib/api/business-genome";
 import type {
   GenesisReadinessScore,
   GenesisIdeaAnalysis,
@@ -23,7 +24,11 @@ import { LegalDisclaimerModal } from "./LegalDisclaimerModal";
 
 type Step = "idea" | "review" | "questions" | "dashboard";
 
-export function GenesisConversation() {
+interface GenesisConversationProps {
+  onComplete?: () => void;
+}
+
+export function GenesisConversation({ onComplete }: GenesisConversationProps) {
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [step, setStep] = useState<Step>("idea");
   const [loading, setLoading] = useState(false);
@@ -34,7 +39,7 @@ export function GenesisConversation() {
   const [questions, setQuestions] = useState<GenesisQuestion[]>([]);
   const [readiness, setReadiness] = useState<GenesisReadinessScore | null>(null);
   const [blueprint, setBlueprint] = useState<BlueprintData | null>(null);
-  const [complianceItems, setComplianceItems] = useState<ComplianceItem[]>([]);
+  const [_complianceItems, setComplianceItems] = useState<ComplianceItem[]>([]);
   const [actionPlan, setActionPlan] = useState<GenesisActionPlan | null>(null);
   const [loadingActionPlan, setLoadingActionPlan] = useState(false);
 
@@ -51,14 +56,19 @@ export function GenesisConversation() {
     }
     setBusinessId(bid);
 
-    apiGet<GenesisReadinessScore>(`/business-genesis/businesses/${bid}/readiness`)
-      .then(({ data, error: err }) => {
-        if (err || !data) {
-          setError(err || "Could not load readiness score.");
+    Promise.all([
+      apiGet<GenesisReadinessScore>(`/business-genesis/businesses/${bid}/readiness`),
+      getGenome(bid),
+    ])
+      .then(([{ data: readinessData, error: readinessErr }, { data: genomeData }]) => {
+        if (readinessErr || !readinessData) {
+          setError(readinessErr || "Could not load readiness score.");
           return;
         }
-        setReadiness(data);
-        if (data.overall >= 80) {
+        setReadiness(readinessData);
+        // Use the same gate the server uses for onboarding completion:
+        // the three-pillar minimum (founder, business, market each >= 50).
+        if (genomeData?.threePillarMinimumMet) {
           setStep("dashboard");
         }
       })
@@ -298,7 +308,16 @@ export function GenesisConversation() {
               actionPlan={actionPlan}
               loadingActionPlan={loadingActionPlan}
             />
-            <div className="flex justify-center mt-6">
+            <div className="flex flex-col items-center justify-center gap-3 mt-6">
+              {onComplete && (
+                <button
+                  onClick={onComplete}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium bg-[hsl(var(--kf-accent1))] text-[hsl(var(--kf-accent1-foreground))] hover:brightness-110 transition-all"
+                >
+                  Continue onboarding
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+              )}
               <button
                 onClick={handleRetake}
                 className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors"

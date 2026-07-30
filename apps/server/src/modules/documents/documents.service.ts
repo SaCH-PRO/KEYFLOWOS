@@ -914,7 +914,7 @@ export class DocumentsService {
       const file = await this.driveService.getFile(businessId, inst.driveFileId);
       remoteModifiedTime = file.modifiedTime || null;
       remoteName = file.name || inst.driveFileName;
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Failed to fetch Drive metadata for ${inst.driveFileId}: ${(err as Error).message}`);
       return {
         linked: true,

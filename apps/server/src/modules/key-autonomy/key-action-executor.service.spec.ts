@@ -5,6 +5,9 @@ import { TemporalFlowService } from '../temporal-flow/temporal-flow.service';
 import { GenomeEvolutionService } from '../business-genome/genome-evolution.service';
 import { ConstitutionVersionService } from '../business-genome/constitution-version.service';
 import { GenomeDocumentPackService } from '../business-genome/document-pack/genome-document-pack.service';
+import { KeyActionExecutorRegistryService } from './key-action-executor-registry.service';
+import { SafetyShellService } from './safety-shell.service';
+import { ActionAuditService } from './action-audit.service';
 import type { KeyActionProposalData } from './key-action-proposal.types';
 
 const baseProposal = (actionType: KeyActionProposalData['actionType'], payload: Record<string, unknown> = {}): KeyActionProposalData => ({
@@ -28,11 +31,25 @@ describe('KeyActionExecutorService', () => {
   let genomeEvolution: GenomeEvolutionService;
   let constitution: ConstitutionVersionService;
   let documentPack: GenomeDocumentPackService;
+  let safetyShell: SafetyShellService;
+  let actionAudit: ActionAuditService;
 
   beforeEach(async () => {
     const moduleRef = await Test.createTestingModule({
       providers: [
         KeyActionExecutorService,
+        {
+          provide: ActionAuditService,
+          useValue: {
+            recordExecuted: vi.fn().mockResolvedValue(undefined),
+            recordBlocked: vi.fn().mockResolvedValue(undefined),
+            recordFailed: vi.fn().mockResolvedValue(undefined),
+          },
+        },
+        {
+          provide: KeyActionExecutorRegistryService,
+          useValue: { register: vi.fn(), execute: vi.fn(), hasPlugin: vi.fn().mockReturnValue(false) },
+        },
         {
           provide: TemporalFlowService,
           useValue: { emit: vi.fn(async () => ({})) },
@@ -57,6 +74,18 @@ describe('KeyActionExecutorService', () => {
             exportDnaReport: vi.fn(async () => ({ filename: 'dna-report.pdf' })),
           },
         },
+        {
+          provide: SafetyShellService,
+          useValue: {
+            check: vi.fn().mockResolvedValue({
+              safe: true,
+              preconditionsMet: true,
+              idempotencyKey: 'key_1',
+              rollbackActions: [],
+            }),
+            rollback: vi.fn().mockResolvedValue({ success: true, results: [] }),
+          },
+        },
       ],
     }).compile();
 
@@ -65,6 +94,8 @@ describe('KeyActionExecutorService', () => {
     genomeEvolution = moduleRef.get(GenomeEvolutionService);
     constitution = moduleRef.get(ConstitutionVersionService);
     documentPack = moduleRef.get(GenomeDocumentPackService);
+    safetyShell = moduleRef.get(SafetyShellService);
+    actionAudit = moduleRef.get(ActionAuditService);
   });
 
   it('CREATE_TASK emits a Temporal Flow event', async () => {
@@ -128,5 +159,45 @@ describe('KeyActionExecutorService', () => {
     const outcome = await service.execute('biz_1', baseProposal('OPEN_GENOME'), 'user_1');
     expect(outcome.success).toBe(false);
     expect(outcome.error).toContain('not executable');
+    expect(safetyShell.rollback).toHaveBeenCalled();
+  });
+
+  it('safety shell blocks unsafe proposals', async () => {
+    (safetyShell.check as any).mockResolvedValueOnce({
+      safe: false,
+      preconditionsMet: false,
+      idempotencyKey: 'key_blocked',
+      reason: 'Required pre-conditions are missing',
+    });
+    const outcome = await service.execute('biz_1', baseProposal('CREATE_TASK'), 'user_1');
+    expect(outcome.success).toBe(false);
+    expect(outcome.error).toContain('pre-conditions');
+    expect(temporal.emit).not.toHaveBeenCalled();
+    expect(actionAudit.recordBlocked).toHaveBeenCalledWith(
+      expect.objectContaining({ businessId: 'biz_1', actionType: 'CREATE_TASK' }),
+    );
+  });
+
+  it('records an audit event when an action executes successfully', async () => {
+    const outcome = await service.execute('biz_1', baseProposal('CREATE_TASK', { title: 'Task' }), 'user_1');
+    expect(outcome.success).toBe(true);
+    expect(actionAudit.recordExecuted).toHaveBeenCalledWith(
+      expect.objectContaining({
+        businessId: 'biz_1',
+        actionType: 'CREATE_TASK',
+        actorId: 'user_1',
+        actorType: 'human',
+        proposalId: 'prop_1',
+      }),
+    );
+  });
+
+  it('records a failed audit event and rolls back when execution fails', async () => {
+    const outcome = await service.execute('biz_1', baseProposal('OPEN_GENOME'), 'user_1');
+    expect(outcome.success).toBe(false);
+    expect(safetyShell.rollback).toHaveBeenCalled();
+    expect(actionAudit.recordFailed).toHaveBeenCalledWith(
+      expect.objectContaining({ businessId: 'biz_1', actionType: 'OPEN_GENOME' }),
+    );
   });
 });

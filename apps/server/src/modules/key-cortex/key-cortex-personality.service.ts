@@ -4,7 +4,7 @@
 // and role-based module expertise (v2)
 // ============================================================
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import {
   CortexPersona,
   CortexPersonalityConfig,
@@ -13,6 +13,8 @@ import {
   CortexContextSnapshot,
   CortexSession,
 } from './key-cortex.types';
+import { BlueprintService } from '../blueprint/blueprint.service';
+import { ModelGatewayService } from '../ai/model-gateway.service';
 
 // ─────────────────────────────────────────────────────────────
 // Role Expertise Mapping — each persona's module specializations
@@ -245,6 +247,11 @@ const MOOD_TEMPERATURE_MAP: Record<CortexMood, number> = {
 export class KeyCortexPersonalityService {
   private readonly logger = new Logger(KeyCortexPersonalityService.name);
 
+  constructor(
+    @Optional() @Inject(BlueprintService) private readonly blueprint?: BlueprintService,
+    @Optional() @Inject(ModelGatewayService) private readonly modelGateway?: ModelGatewayService,
+  ) {}
+
   // ── Retrieval ─────────────────────────────────────────────
 
   /**
@@ -261,6 +268,118 @@ export class KeyCortexPersonalityService {
       return PERSONALITY_CONFIGS['jarvis'];
     }
     return config;
+  }
+
+  // ── LLM-Powered Persona & Tone ────────────────────────────
+
+  /**
+   * Use a tiny LLM prompt to classify the best persona for a query.
+   *
+   * Returns `null` when the LLM is unavailable or the classification is
+   * ambiguous; callers should fall back to the current/default persona.
+   */
+  async classifyPersona(
+    queryText: string,
+    businessId: string,
+  ): Promise<CortexPersona | null> {
+    if (!this.modelGateway) {
+      return null;
+    }
+
+    const personas = Object.keys(
+      PERSONALITY_CONFIGS,
+    ) as CortexPersona[];
+
+    const classifierPrompt = `You are a persona classifier for KEY, an AI business partner built into KeyFlowOS.
+Pick the single best persona from this list: ${personas.join(', ')}.
+
+Persona sketches:
+- jarvis: witty, sophisticated, general business advisor
+- friday: warm, proactive personal assistant
+- titan: profit-focused executive who speaks EBITDA, LTV, CAC
+- nova: wildly creative ideation partner
+- ghost: minimal-intervention observer
+- mentor: patient, educational guide
+- hustler: aggressive growth-focused revenue accelerator
+- jarvis_dark: tactical, no-nonsense operations commander
+
+Respond with ONLY the persona name (lowercase). If the query is ambiguous or general, respond with "ambiguous".`;
+
+    try {
+      const result = await this.modelGateway.complete({
+        businessId,
+        taskCategory: 'classification',
+        messages: [
+          { role: 'system', content: classifierPrompt },
+          { role: 'user', content: `Query: "${queryText.slice(0, 1000)}"\n\nBest persona:` },
+        ],
+        temperature: 0,
+        maxTokens: 20,
+      });
+
+      const raw = (result.content ?? '').trim().toLowerCase();
+      if (raw === 'ambiguous' || !personas.includes(raw as CortexPersona)) {
+        return null;
+      }
+      return raw as CortexPersona;
+    } catch (err: any) {
+      this.logger.warn(
+        `Persona classification failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Select a tone phrase and small temperature adjustment for a query.
+   *
+   * Uses mood-driven or query-driven heuristics. When no clear signal is
+   * present, falls back to the persona's default greeting style.
+   */
+  async selectTone(
+    queryText: string,
+    persona: CortexPersona,
+    mood?: CortexMood,
+  ): Promise<{ tone: string; temperatureAdjustment: number }> {
+    const config = this.getPersonalityConfig(persona);
+    const lower = (queryText ?? '').toLowerCase();
+
+    // Mood-driven baseline
+    if (mood && MOOD_TEMPERATURE_MAP[mood] !== undefined) {
+      const moodTemp = MOOD_TEMPERATURE_MAP[mood];
+      const delta = Math.round((moodTemp - config.temperature) * 100) / 100;
+      const clampedDelta = Math.max(-0.1, Math.min(0.1, delta));
+
+      const toneMap: Record<CortexMood, string> = {
+        focused: 'direct and focused',
+        creative: 'imaginative and energetic',
+        analytical: 'precise and data-driven',
+        casual: 'relaxed and conversational',
+        urgent: 'urgent and concise',
+      };
+
+      return { tone: toneMap[mood], temperatureAdjustment: clampedDelta };
+    }
+
+    // Query-driven heuristics
+    if (/\b(urgent|asap|immediately|critical|emergency|panic)\b/.test(lower)) {
+      return { tone: 'urgent and decisive', temperatureAdjustment: -0.1 };
+    }
+    if (/\b(idea|creative|brainstorm|write|draft|campaign|story|slogan)\b/.test(lower)) {
+      return { tone: 'creative and expansive', temperatureAdjustment: 0.1 };
+    }
+    if (/\b(analyze|data|numbers|metric|kpi|report|roi|forecast)\b/.test(lower)) {
+      return { tone: 'analytical and precise', temperatureAdjustment: -0.05 };
+    }
+    if (/\b(hi|hello|hey|thanks|thank you|good morning|good afternoon)\b/.test(lower)) {
+      return { tone: 'warm and conversational', temperatureAdjustment: 0 };
+    }
+
+    // Persona default
+    return {
+      tone: config.greetingStyle.replace(/_/g, ' '),
+      temperatureAdjustment: 0,
+    };
   }
 
   // ── Voice & Temperature ───────────────────────────────────
@@ -360,6 +479,54 @@ Use a ${config.emojiStyle} level of emoji expression.
 Signature phrases you may occasionally use: ${config.signaturePhrases.join(', ')}.`;
   }
 
+  /**
+   * Build an async Blueprint values block that callers can append to the system prompt.
+   */
+  async buildValueBlock(businessId: string): Promise<string> {
+    if (!this.blueprint) return '';
+    try {
+      const blueprint = await this.blueprint.getBlueprint(businessId);
+      const brand = blueprint.brand;
+      const constraints = blueprint.constraints;
+
+      const parts: string[] = [];
+      if (brand.voice) parts.push(`Brand voice: ${brand.voice}`);
+      if (brand.tone) parts.push(`Brand tone: ${brand.tone}`);
+      if (brand.valueProps?.length) parts.push(`Value propositions: ${brand.valueProps.join(', ')}`);
+      if (brand.doNotSay?.length) parts.push(`Never say: ${brand.doNotSay.join(', ')}`);
+      if (constraints.dealbreakers?.length) parts.push(`Business dealbreakers: ${constraints.dealbreakers.join(', ')}`);
+
+      if (parts.length === 0) return '';
+      return `=== BLUEPRINT VALUES ===\n${parts.join('\n')}\n========================`;
+    } catch {
+      return '';
+    }
+  }
+
+  async detectValueConflict(
+    businessId: string,
+    responseText: string,
+  ): Promise<{ conflict: boolean; terms: string[] }> {
+    if (!this.blueprint) return { conflict: false, terms: [] };
+
+    try {
+      const blueprint = await this.blueprint.getBlueprint(businessId);
+      const terms: string[] = [];
+      const text = responseText.toLowerCase();
+
+      for (const term of blueprint.brand?.doNotSay ?? []) {
+        if (text.includes(term.toLowerCase())) terms.push(term);
+      }
+      for (const term of blueprint.constraints?.dealbreakers ?? []) {
+        if (text.includes(term.toLowerCase())) terms.push(term);
+      }
+
+      return { conflict: terms.length > 0, terms };
+    } catch {
+      return { conflict: false, terms: [] };
+    }
+  }
+
   // ── Greeting Generator ────────────────────────────────────
 
   /**
@@ -422,12 +589,11 @@ Signature phrases you may occasionally use: ${config.signaturePhrases.join(', ')
   private getExpertiseHintForGreeting(persona: CortexPersona): string {
     switch (persona) {
       case 'titan':
-        ' Monitoring commerce, analytics, and finance.';
-        return '';
+        return ' Monitoring commerce, analytics, and finance.';
       case 'nova':
-        ' Content and marketing intelligence active.';
+        return ' Content and marketing intelligence active.';
       case 'jarvis_dark':
-        ' Autopilot and monitoring systems online.';
+        return ' Autopilot and monitoring systems online.';
       default:
         return '';
     }

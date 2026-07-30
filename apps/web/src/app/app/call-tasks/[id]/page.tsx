@@ -64,7 +64,7 @@ export default function CallTaskDetailPage() {
       const res = await fetchCallLog(businessId, id);
       if (res.error) throw new Error(res.error);
       setCall(res.data ?? null);
-    } catch (err) {
+    } catch (_err) {
       toast.error("Failed to load call task");
     } finally {
       setLoading(false);

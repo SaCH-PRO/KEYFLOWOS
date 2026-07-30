@@ -64,7 +64,7 @@ export class AiExecutionLogService {
         },
       });
       return record.id;
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Failed to write execution log: ${(err as Error).message}`);
       return '';
     }

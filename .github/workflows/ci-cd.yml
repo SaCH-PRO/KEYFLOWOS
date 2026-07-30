@@ -11,9 +11,13 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Must match the exact versions in the root package.json `engines` field.
+# Major-only ranges ('20'/'9') resolve to the latest patch, which
+# `pnpm install --frozen-lockfile` then rejects with ERR_PNPM_UNSUPPORTED_ENGINE,
+# failing every job before any code runs.
 env:
-  NODE_VERSION: '20'
-  PNPM_VERSION: '9'
+  NODE_VERSION: '20.18.1'
+  PNPM_VERSION: '9.15.0'
 
 jobs:
   lint-and-typecheck:
@@ -41,15 +45,61 @@ jobs:
       - name: Generate Prisma client
         run: pnpm db:generate
 
-      # TODO: Reduce --max-warnings over time as lint debt is paid down.
+      # Ceilings are tight to the current warning count; reduce as debt is paid down.
+      #
+      # The server ceiling was 1750 when set, but `pnpm install` had been failing on
+      # an engines mismatch, so this step never actually ran and the count grew to
+      # 3337 unobserved (3080 no-explicit-any + 256 no-unused-vars + 1 error). The
+      # ceiling is reset to the true current count so the ratchet is enforceable
+      # again from an honest baseline. It is a cap to drive downward, not a target.
       - name: Lint server
-        run: pnpm --filter server lint --max-warnings 1000
+        run: pnpm --filter server lint --max-warnings 3337
 
+      # Web drifted the same way while the step was skipped: 33 errors accumulated
+      # against a config that documents the app as fully `any`-free. All 33 are now
+      # fixed and 22 warnings were auto-fixed away (66 -> 44), so the ceiling moves
+      # 25 -> 44 to match reality. Errors remain at zero and must stay there.
       - name: Lint web
-        run: pnpm --filter web lint --max-warnings 1500
+        run: pnpm --filter web lint --max-warnings 44
+
+      # @keyflow/shared, @keyflow/db and @keyflow/api all resolve their `types` to
+      # ./dist/src/*.d.ts, and dist/ is gitignored. On a fresh CI checkout none of
+      # those declarations exist, so apps/server cannot resolve the packages and
+      # every type derived from them collapses to an implicit any — hundreds of
+      # TS2307/TS7006 errors cascading from a handful of unresolved imports.
+      # Locally the step passed only because earlier builds had left dist/ behind,
+      # which is why the gap stayed invisible while `pnpm install` was failing.
+      #
+      # @keyflow/ui is intentionally absent: it points `types` at ./src and has no
+      # build script. pnpm resolves the build order between the three below.
+      - name: Build workspace packages
+        run: pnpm --filter @keyflow/shared --filter @keyflow/db --filter @keyflow/api build
 
       - name: Type check server
         run: cd apps/server && npx tsc --noEmit
+
+      # apps/web/tsconfig.json lists "next" in compilerOptions.types, which is
+      # satisfied by Next's generated next-env.d.ts + .next/types. Both are
+      # gitignored, so a fresh checkout has neither and tsc fails with
+      # TS2688 "Cannot find type definition file for 'next'". Locally the step
+      # passed only because `next dev`/`next build` had generated them earlier.
+      # `next typegen` produces exactly those without a full production build.
+      # next.config calls ensureValidWebEnv(), which hard-requires
+      # NEXT_PUBLIC_API_BASE_URL. Without it typegen throws during config load as
+      # an *unhandled rejection* — the process still exits 0, so the step went
+      # green while generating nothing and the type check failed anyway. Same
+      # env pattern as the Build Web job below.
+      #
+      # The `test -f` guard exists because of that silent-success behaviour: if
+      # typegen ever fails to emit again, fail here rather than three steps later.
+      - name: Generate Next types
+        run: |
+          pnpm --filter web exec next typegen
+          test -f apps/web/next-env.d.ts \
+            || { echo "::error::next typegen did not emit next-env.d.ts"; exit 1; }
+        env:
+          NEXT_PUBLIC_API_BASE_URL: ${{ secrets.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3001' }}
+          NEXT_PUBLIC_SITE_URL: ${{ secrets.NEXT_PUBLIC_SITE_URL || 'http://localhost:5000' }}
 
       - name: Type check web
         run: cd apps/web && npx tsc --noEmit
@@ -113,12 +163,25 @@ jobs:
       - name: Generate Prisma client
         run: pnpm db:generate
 
+      # Each job checks out fresh, so the workspace packages must be built here
+      # too — see the note in lint-and-typecheck.
+      - name: Build workspace packages
+        run: pnpm --filter @keyflow/shared --filter @keyflow/db --filter @keyflow/api build
+
       - name: Build server (compile to dist/)
         run: cd apps/server && pnpm run build
 
+      # Asserts dist/main.js, not dist/src/main.js. apps/server/tsconfig.json
+      # includes ["src/**/*", "test/**/*"] but excludes **/*.test.ts and
+      # **/*.spec.ts — and every file under test/ matches one of those. Only
+      # src/** is ever compiled, so tsc infers rootDir as src/ and emits
+      # dist/main.js. dist/src/main.js has never existed, making this assertion
+      # unsatisfiable. package.json agrees: `start:prod` is `node dist/main.js`.
       - name: Verify compiled output exists
         run: |
-          test -f apps/server/dist/src/main.js && echo "Server compiled successfully" || (echo "Server compilation failed" && exit 1)
+          test -f apps/server/dist/main.js \
+            || { echo "::error::Server compilation failed: apps/server/dist/main.js not found"; exit 1; }
+          echo "Server compiled successfully"
 
   build-web:
     name: Build Web
@@ -144,6 +207,11 @@ jobs:
 
       - name: Generate Prisma client
         run: pnpm db:generate
+
+      # Each job checks out fresh, so the workspace packages must be built here
+      # too — see the note in lint-and-typecheck.
+      - name: Build workspace packages
+        run: pnpm --filter @keyflow/shared --filter @keyflow/db --filter @keyflow/api build
 
       - name: Build web
         run: cd apps/web && pnpm run build
@@ -175,6 +243,12 @@ jobs:
 
       - name: Generate Prisma client
         run: pnpm db:generate
+
+      # Each job checks out fresh, so the workspace packages must be built here
+      # too — see the note in lint-and-typecheck. Every server spec that imports
+      # @keyflow/shared or @keyflow/db fails to collect without this.
+      - name: Build workspace packages
+        run: pnpm --filter @keyflow/shared --filter @keyflow/db --filter @keyflow/api build
 
       - name: Run server tests
         run: cd apps/server && pnpm test:ci

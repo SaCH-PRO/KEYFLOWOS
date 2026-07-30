@@ -111,7 +111,7 @@ export class SupabaseAdminService {
         return false;
       }
       return true;
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `deleteUser(${userId}) threw: ${err instanceof Error ? err.message : err}`,
       );

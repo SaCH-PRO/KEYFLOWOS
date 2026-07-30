@@ -11,7 +11,7 @@ import { fetchExchangeRates, createExchangeRate, deleteExchangeRate, type Exchan
 export default function ExchangeRatesPage() {
   const businessId = getStoredBusinessId() ?? "";
   const [rates, setRates] = useState<ExchangeRate[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [_loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);

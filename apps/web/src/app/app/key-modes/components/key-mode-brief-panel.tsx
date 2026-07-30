@@ -164,7 +164,7 @@ export function KeyModeBriefPanel({ brief, mode, businessId }: KeyModeBriefPanel
 
 function FindingCard({ finding, index }: { finding: KeyModeFinding; index: number }) {
   const router = useRouter();
-  const { label, color, bg } = priorityStyle(finding.priority);
+  const { color, bg } = priorityStyle(finding.priority);
 
   return (
     <motion.div

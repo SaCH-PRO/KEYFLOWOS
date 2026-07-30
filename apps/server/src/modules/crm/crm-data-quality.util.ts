@@ -89,7 +89,7 @@ export async function validateEmail(email: string | null | undefined): Promise<E
     mxCache.set(domain, { ok, expiresAt: now + MX_TTL_MS });
     if (ok) return { ok: true };
     return { ok: false, reason: 'no_mx', suggestedFix: suggestEmailFix(trimmed) };
-  } catch (err) {
+  } catch (err: any) {
     const code = (err as NodeJS.ErrnoException | undefined)?.code;
     // Soft-fail on transient/unknown DNS errors so we don't flag every contact
     // when DNS is flaky. We only persist a hard failure when the domain has no

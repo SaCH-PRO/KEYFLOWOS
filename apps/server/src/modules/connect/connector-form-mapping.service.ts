@@ -212,7 +212,7 @@ export class ConnectorFormMappingService {
         result.responsesProcessed += 1;
         if (out.contactCreated) result.contactsCreated += 1;
         newlyProcessed.push(sub.id);
-      } catch (err) {
+      } catch (err: any) {
         result.errors.push(`${sub.id}: ${(err as Error).message}`);
       }
     }
@@ -271,7 +271,7 @@ export class ConnectorFormMappingService {
             },
           });
         }
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(`Could not enrich contact ${submission.contactId}: ${(err as Error).message}`);
       }
       return { contactCreated: false };

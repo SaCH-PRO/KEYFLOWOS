@@ -129,8 +129,7 @@ function makeFileRef(bucket: string, key: string, client: S3Client): S3FileRef {
           new HeadObjectCommand({ Bucket: bucket, Key: key }),
         );
         return head.Metadata ?? {};
-      } catch (err) {
-        // eslint-disable-next-line no-console
+      } catch (err: any) {
         console.error(`Failed to read object metadata: ${(err as Error).message}`);
         return {};
       }
@@ -264,7 +263,7 @@ export class ObjectStorageService {
         }
       });
       body.pipe(res);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error downloading file:", error);
       if (!res.headersSent) {
         res.status(500).json({ error: "Error downloading file" });
@@ -365,6 +364,24 @@ export class ObjectStorageService {
       throw new ObjectNotFoundError();
     }
     return ref;
+  }
+
+  /**
+   * Read an object uploaded via the canonical `/objects/<id>` path into memory.
+   * Falls back to the public/presigned URL if the object is not found locally.
+   */
+  async getObjectEntityBuffer(objectPath: string): Promise<{
+    buffer: Buffer;
+    contentType?: string;
+    contentLength?: number;
+  }> {
+    const ref = await this.getObjectEntityFile(objectPath);
+    const { body, contentType, contentLength } = await ref.read();
+    const chunks: Buffer[] = [];
+    for await (const chunk of body) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    return { buffer: Buffer.concat(chunks), contentType, contentLength };
   }
 
   /**

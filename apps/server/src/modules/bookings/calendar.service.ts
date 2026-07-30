@@ -1,4 +1,5 @@
 import { Injectable, BadRequestException, Logger, Inject, Optional } from '@nestjs/common';
+import { timingSafeStringEqual } from '../../core/security/timing-safe-equal';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { createHmac } from 'crypto';
 import { GoogleCalendarConnector } from '../../core/connectors/implementations/google-calendar.connector';
@@ -77,7 +78,7 @@ export class CalendarService {
       const signature = decoded.substring(lastDotIndex + 1);
       
       const expectedSignature = createHmac('sha256', this.stateSecret).update(payload).digest('hex');
-      if (signature !== expectedSignature) {
+      if (!timingSafeStringEqual(signature, expectedSignature)) {
         this.logger.warn('Invalid OAuth state signature');
         return null;
       }
@@ -532,7 +533,7 @@ export class CalendarService {
 
       const created = await res.json();
       return created.id;
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('Error creating calendar event', error);
       return null;
     }
@@ -560,7 +561,7 @@ export class CalendarService {
       );
 
       return res.ok;
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('Error updating calendar event', error);
       return false;
     }
@@ -590,7 +591,7 @@ export class CalendarService {
         this.logger.error('Failed to patch calendar event', err);
       }
       return res.ok;
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('Error patching calendar event', error);
       return false;
     }
@@ -610,7 +611,7 @@ export class CalendarService {
       );
 
       return res.ok || res.status === 404;
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('Error deleting calendar event', error);
       return false;
     }
@@ -765,7 +766,7 @@ export class CalendarService {
               : undefined,
           };
         });
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('Error listing calendar events', error);
       return [];
     }

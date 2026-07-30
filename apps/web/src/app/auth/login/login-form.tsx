@@ -22,28 +22,29 @@ import {
 } from "lucide-react";
 import { bootstrapIdentity, identityLogin, identityResendVerification } from "@/lib/client";
 import { setStoredToken, setStoredBusinessId, setStoredRefreshToken } from "@/lib/workspace";
+import {
+  generateCodeVerifier,
+  generateCodeChallenge,
+  storeCodeVerifier,
+} from "@/lib/oauth-pkce";
 
-const SAFE_REDIRECT_PREFIX = "/app";
-
-function safeFromParam(raw: string | null | undefined): string {
-  if (!raw) return "/app";
-  if (!raw.startsWith(SAFE_REDIRECT_PREFIX)) return "/app";
-  if (raw.startsWith("//")) return "/app";
-  return raw;
-}
+import { safeFromParam } from "@/lib/safe-redirect";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? (typeof window !== "undefined" ? window.location.origin : "");
 
-function signInWithGoogle() {
+async function signInWithGoogle() {
   if (!SUPABASE_URL) return;
-  // Use current origin for localhost dev, otherwise use configured SITE_URL
-  const origin = typeof window !== "undefined" && window.location.hostname === "localhost"
-    ? window.location.origin
-    : SITE_URL;
+  // Always redirect back to the origin the user is actually on (localhost,
+  // tunnel, preview, etc.). The cookie/state is set on the same origin.
+  const origin = typeof window !== "undefined" ? window.location.origin : SITE_URL;
   const redirectTo = `${origin.replace(/\/$/, "")}/auth/callback`;
-  window.location.href = `${SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirectTo)}`;
+  const codeVerifier = generateCodeVerifier();
+  storeCodeVerifier(codeVerifier);
+  const codeChallenge = await generateCodeChallenge(codeVerifier);
+
+  window.location.href = `${SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirectTo)}&code_challenge=${encodeURIComponent(codeChallenge)}&code_challenge_method=S256`;
 }
 
 async function supabaseResetPassword(email: string) {
@@ -76,7 +77,7 @@ export default function LoginForm() {
 
   const verified = useMemo(() => searchParams?.get("verified") === "1", [searchParams]);
   const resetOk = useMemo(() => searchParams?.get("reset") === "1", [searchParams]);
-  const fromPath = useMemo(() => safeFromParam(searchParams?.get("from")), [searchParams]);
+  const fromPath = useMemo(() => safeFromParam(searchParams?.get("from"), SITE_URL || undefined), [searchParams]);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);

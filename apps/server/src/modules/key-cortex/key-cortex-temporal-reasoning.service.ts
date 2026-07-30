@@ -990,7 +990,7 @@ export class KeyCortexTemporalReasoningService {
     try {
       switch (metric) {
         case 'revenue': {
-          const invoices = await this.prisma.invoice.findMany({
+          const invoices = await this.prisma.client.invoice.findMany({
             where: {
               businessId,
               createdAt: { gte: startDate },
@@ -1004,7 +1004,7 @@ export class KeyCortexTemporalReasoningService {
         }
 
         case 'leads': {
-          const contacts = await this.prisma.contact.findMany({
+          const contacts = await this.prisma.client.contact.findMany({
             where: {
               businessId,
               status: 'lead',
@@ -1018,7 +1018,7 @@ export class KeyCortexTemporalReasoningService {
         }
 
         case 'conversions': {
-          const converted = await this.prisma.contact.findMany({
+          const converted = await this.prisma.client.contact.findMany({
             where: {
               businessId,
               status: 'customer',
@@ -1032,7 +1032,7 @@ export class KeyCortexTemporalReasoningService {
         }
 
         case 'bookings': {
-          const bookings = await this.prisma.booking.findMany({
+          const bookings = await this.prisma.client.booking.findMany({
             where: {
               businessId,
               startTime: { gte: startDate },
@@ -1049,7 +1049,7 @@ export class KeyCortexTemporalReasoningService {
         }
 
         case 'invoices': {
-          const invoices = await this.prisma.invoice.findMany({
+          const invoices = await this.prisma.client.invoice.findMany({
             where: {
               businessId,
               createdAt: { gte: startDate },
@@ -1062,7 +1062,7 @@ export class KeyCortexTemporalReasoningService {
         }
 
         case 'payments': {
-          const payments = await this.prisma.payment.findMany({
+          const payments = await this.prisma.client.payment.findMany({
             where: {
               businessId,
               status: 'completed',
@@ -1076,7 +1076,7 @@ export class KeyCortexTemporalReasoningService {
         }
 
         case 'messages': {
-          const messages = await this.prisma.message.findMany({
+          const messages = await this.prisma.client.message.findMany({
             where: {
               businessId,
               createdAt: { gte: startDate },
@@ -1089,7 +1089,7 @@ export class KeyCortexTemporalReasoningService {
         }
 
         case 'tasks_completed': {
-          const tasks = await this.prisma.autopilotTask.findMany({
+          const tasks = await this.prisma.client.autopilotTask.findMany({
             where: {
               businessId,
               status: 'completed',

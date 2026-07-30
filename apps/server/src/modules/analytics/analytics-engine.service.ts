@@ -397,7 +397,7 @@ export class AnalyticsEngineService {
           snapshotDate: today,
         });
         count++;
-      } catch (error) {
+      } catch (error: any) {
         this.logger.error(`Failed daily snapshot for ${business.id}`, error);
       }
     }
@@ -423,7 +423,7 @@ export class AnalyticsEngineService {
           snapshotDate: weekStart,
         });
         count++;
-      } catch (error) {
+      } catch (error: any) {
         this.logger.error(`Failed weekly snapshot for ${business.id}`, error);
       }
     }
@@ -449,7 +449,7 @@ export class AnalyticsEngineService {
           snapshotDate: monthStart,
         });
         count++;
-      } catch (error) {
+      } catch (error: any) {
         this.logger.error(`Failed monthly snapshot for ${business.id}`, error);
       }
     }

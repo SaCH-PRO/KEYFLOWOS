@@ -99,28 +99,18 @@ export class GoogleCalendarConnector implements IConnector {
     return !!business?.calendarAccessToken;
   }
 
-  async sync(businessId: string): Promise<ConnectorSyncResult> {
-    const start = Date.now();
-    const connected = await this.isConnected(businessId);
-    if (!connected) {
-      return { success: false, itemsSynced: 0, errors: ['Google Calendar not connected'], duration: Date.now() - start };
-    }
-
-    const upcomingBookings = await this.prisma.client.booking.count({
-      where: {
-        businessId,
-        status: { in: ['CONFIRMED', 'PENDING'] },
-        startTime: { gte: new Date() },
-      },
-    });
-
-    await this.prisma.client.connectorStatus.upsert({
-      where: { businessId_connectorType: { businessId, connectorType: 'google_calendar' } },
-      create: { businessId, connectorType: 'google_calendar', status: 'connected', lastSyncAt: new Date(), syncCount: 1 },
-      update: { lastSyncAt: new Date(), syncCount: { increment: 1 }, status: 'connected' },
-    });
-
-    return { success: true, itemsSynced: upcomingBookings, errors: [], duration: Date.now() - start };
+  async sync(_businessId: string): Promise<ConnectorSyncResult> {
+    // Provider pull sync is not yet implemented for this connector. It previously
+    // counted local rows and returned success:true, misrepresenting a no-op as a
+    // successful provider sync. Real pull sync is future work per connector.
+    return {
+      success: false,
+      itemsSynced: 0,
+      unsupported: true,
+      code: 'PULL_SYNC_NOT_IMPLEMENTED',
+      errors: ['Provider pull sync is not implemented for this connector.'],
+      duration: 0,
+    };
   }
 
   async testConnection(businessId: string): Promise<{ success: boolean; error?: string; account?: string }> {
@@ -144,7 +134,7 @@ export class GoogleCalendarConnector implements IConnector {
         return { success: false, error: `Calendar API ${res.status}${body ? `: ${body.slice(0, 160)}` : ''}` };
       }
       return { success: true, account: business.calendarEmail ?? undefined };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }
@@ -203,7 +193,7 @@ export class GoogleCalendarConnector implements IConnector {
         account: business.calendarEmail ?? undefined,
         detail: event.htmlLink ?? undefined,
       };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }

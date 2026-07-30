@@ -1,7 +1,17 @@
 import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { TemporalFlowService } from '../temporal-flow/temporal-flow.service';
+import { GenomeScoringService } from '../business-genome/key-genome/genome-scoring.service';
+import type { GenomeFactData } from '../business-genome/key-genome/key-genome.types';
+import {
+  DNA_SECTION_CONFIG,
+  KeyGenomeService,
+  isPopulated,
+  readObject,
+} from '../business-genome/key-genome/key-genome.service';
+import { GenomeModuleReadinessService } from '../business-genome/key-genome/genome-module-readiness.service';
 import {
   BlueprintBrand,
   BlueprintComplianceProfile,
@@ -14,7 +24,6 @@ import {
   BlueprintFinancials,
   BlueprintFollowUpStep,
   BlueprintFounderProfile,
-  BlueprintGeneratedDocument,
   BlueprintGoals,
   BlueprintIdentity,
   BlueprintIntelligence,
@@ -42,13 +51,20 @@ import {
   BlueprintWorkflowStep,
   ComplianceItem,
   DnaSectionKey,
-  DnaSectionScore,
   GenomeIntegrityResult,
   GenomeRecommendation,
   GenomeStage,
   RecommendedSetupStep,
   SetupStep,
 } from './blueprint.types';
+
+import { normalizeRecommendedEntityType } from './entity-type.helpers';
+
+/**
+ * Prisma transaction client type used when callers want an operation to run
+ * inside an existing transaction.
+ */
+type PrismaTx = Parameters<Parameters<PrismaService['client']['$transaction']>[0]>[0];
 
 const SCHEMA_VERSION = 2;
 
@@ -131,150 +147,6 @@ const COMPLETENESS_FIELDS: Record<BlueprintSectionKey, string[]> = {
   documentProfile: ['generatedDocuments'],
 };
 
-// --- Business Genome DNA mapping ------------------------------------------------
-
-const DNA_SECTION_WEIGHTS: Record<DnaSectionKey, number> = {
-  founder: 10,
-  vision: 5,
-  business: 15,
-  market: 15,
-  financial: 15,
-  legal: 10,
-  operations: 10,
-  sales: 5,
-  marketing: 5,
-  growth: 5,
-  technology: 5,
-  risk: 0,
-};
-
-const DNA_SECTION_CONFIG: Record<
-  DnaSectionKey,
-  { sources: BlueprintSectionKey[]; fields: string[]; label: string }
-> = {
-  founder: {
-    sources: ['founderProfile'],
-    fields: ['founderName', 'background', 'skills', 'weeklyAvailabilityHours'],
-    label: 'Founder DNA',
-  },
-  vision: {
-    sources: ['identity', 'brand'],
-    fields: ['mission', 'vision', 'values', 'voice', 'tone', 'valueProps'],
-    label: 'Vision DNA',
-  },
-  business: {
-    sources: ['identity', 'operatingModel', 'brand', 'goals', 'constraints', 'workflowModel', 'aiPreferences'],
-    fields: [
-      'name',
-      'archetype',
-      'industry',
-      'revenueModel',
-      'deliveryMode',
-      'serviceArea',
-      'teamSize',
-      'northStar',
-      'budgetRange',
-      'timeCommitment',
-      'riskTolerance',
-      'primaryWorkflow',
-      'autonomyLevel',
-      'reportingCadence',
-    ],
-    label: 'Business DNA',
-  },
-  market: {
-    sources: ['customerModel', 'marketProfile'],
-    fields: ['idealCustomer', 'segments', 'painPoints', 'targetGeography', 'marketCategory', 'demandSignals'],
-    label: 'Market DNA',
-  },
-  financial: {
-    sources: ['financials', 'projectionProfile'],
-    fields: [
-      'currency',
-      'pricingModel',
-      'avgTicket',
-      'monthlyTarget',
-      'startupCapital',
-      'monthlyFixedCosts',
-      'variableCostPercent',
-    ],
-    label: 'Financial DNA',
-  },
-  legal: {
-    sources: ['legalProfile', 'registrationProfile', 'taxProfile', 'ownershipProfile', 'complianceProfile'],
-    fields: [
-      'country',
-      'recommendedEntityType',
-      'regulatedIndustry',
-      'businessNameStatus',
-      'companiesRegistryStatus',
-      'vatStatus',
-      'taxIdStatus',
-      'hasPartners',
-      'owners',
-      'complianceItems',
-    ],
-    label: 'Legal DNA',
-  },
-  operations: {
-    sources: ['operationsSystem'],
-    fields: ['coreWorkflows', 'fulfillmentProcess'],
-    label: 'Operations DNA',
-  },
-  sales: {
-    sources: ['salesSystem'],
-    fields: ['salesChannels', 'pipelineStages'],
-    label: 'Sales DNA',
-  },
-  marketing: {
-    sources: ['marketingSystem'],
-    fields: ['channels', 'launchPlan'],
-    label: 'Marketing DNA',
-  },
-  growth: {
-    sources: ['executionRoadmap'],
-    fields: ['today', 'sevenDayPlan', 'thirtyDayPlan'],
-    label: 'Growth DNA',
-  },
-  technology: {
-    sources: ['workflowModel', 'aiPreferences'],
-    fields: ['primaryWorkflow', 'autonomyLevel', 'outreachStyle', 'reportingCadence'],
-    label: 'Technology DNA',
-  },
-  risk: {
-    sources: ['riskProfile'],
-    fields: ['financialRisks', 'legalRisks', 'marketRisks', 'operationalRisks', 'founderRisks', 'mitigationPlan'],
-    label: 'Risk DNA',
-  },
-};
-
-const EXECUTIVE_READINESS_WEIGHTS: Record<string, number> = {
-  legal: 15,
-  financial: 20,
-  market: 15,
-  operations: 15,
-  sales: 10,
-  marketing: 10,
-  risk: 15,
-};
-
-function isPopulated(value: unknown): boolean {
-  if (value === null || value === undefined) return false;
-  if (typeof value === 'boolean') return true;
-  if (typeof value === 'string') return value.trim().length > 0;
-  if (Array.isArray(value)) return value.length > 0;
-  if (typeof value === 'number') return !Number.isNaN(value);
-  if (typeof value === 'object') return Object.keys(value as object).length > 0;
-  return Boolean(value);
-}
-
-function readObject(raw: Prisma.JsonValue | null | undefined): Record<string, unknown> {
-  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
-    return raw as Record<string, unknown>;
-  }
-  return {};
-}
-
 @Injectable()
 export class BlueprintService {
   private readonly logger = new Logger(BlueprintService.name);
@@ -282,6 +154,10 @@ export class BlueprintService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(TemporalFlowService) private readonly temporal: TemporalFlowService,
+    @Inject(GenomeScoringService) private readonly genomeScoring: GenomeScoringService,
+    @Inject(KeyGenomeService) private readonly keyGenome: KeyGenomeService,
+    @Inject(GenomeModuleReadinessService) private readonly moduleReadiness: GenomeModuleReadinessService,
+    @Inject(EventEmitter2) private readonly events: EventEmitter2,
   ) {}
 
   private emitGenomeUpdated(
@@ -313,13 +189,14 @@ export class BlueprintService {
    * existing Business profile + onboarding metaData) on first access. This
    * keeps the rest of the codebase able to assume a row always exists.
    */
-  async getBlueprint(businessId: string): Promise<BlueprintData> {
-    const existing = await this.prisma.client.businessBlueprint.findUnique({
+  async getBlueprint(businessId: string, tx?: PrismaTx): Promise<BlueprintData> {
+    const client = tx ?? this.prisma.client;
+    const existing = await client.businessBlueprint.findUnique({
       where: { businessId },
     });
     if (existing) return this.serialize(existing);
 
-    return this.serialize(await this.seedFromBusiness(businessId));
+    return this.serialize(await this.seedFromBusiness(businessId, tx));
   }
 
   /**
@@ -327,8 +204,13 @@ export class BlueprintService {
    * persist. Each section is shallow-merged so callers can update a single
    * field without clobbering the rest.
    */
-  async updateBlueprint(businessId: string, patch: BlueprintPatch): Promise<BlueprintData> {
-    const current = await this.getBlueprintRecord(businessId);
+  async updateBlueprint(
+    businessId: string,
+    patch: BlueprintPatch,
+    tx?: PrismaTx,
+  ): Promise<BlueprintData> {
+    const client = tx ?? this.prisma.client;
+    const current = await this.getBlueprintRecord(businessId, tx);
 
     const next: Record<BlueprintSectionKey, Record<string, unknown>> = {
       identity: readObject(current.identity),
@@ -369,33 +251,9 @@ export class BlueprintService {
 
     const confidenceScores = this.calculateConfidenceScores(next);
 
-    const genomeResult = this.buildGenomeIntegrityResult({
-      identity: next.identity as Prisma.JsonValue,
-      operatingModel: next.operatingModel as Prisma.JsonValue,
-      goals: next.goals as Prisma.JsonValue,
-      constraints: next.constraints as Prisma.JsonValue,
-      brand: next.brand as Prisma.JsonValue,
-      customerModel: next.customerModel as Prisma.JsonValue,
-      financials: next.financials as Prisma.JsonValue,
-      intelligence: next.intelligence as Prisma.JsonValue,
-      workflowModel: next.workflowModel as Prisma.JsonValue,
-      aiPreferences: next.aiPreferences as Prisma.JsonValue,
-      founderProfile: next.founderProfile as Prisma.JsonValue,
-      legalProfile: next.legalProfile as Prisma.JsonValue,
-      registrationProfile: next.registrationProfile as Prisma.JsonValue,
-      taxProfile: next.taxProfile as Prisma.JsonValue,
-      ownershipProfile: next.ownershipProfile as Prisma.JsonValue,
-      marketProfile: next.marketProfile as Prisma.JsonValue,
-      offerArchitecture: next.offerArchitecture as Prisma.JsonValue,
-      salesSystem: next.salesSystem as Prisma.JsonValue,
-      marketingSystem: next.marketingSystem as Prisma.JsonValue,
-      operationsSystem: next.operationsSystem as Prisma.JsonValue,
-      projectionProfile: next.projectionProfile as Prisma.JsonValue,
-      riskProfile: next.riskProfile as Prisma.JsonValue,
-      complianceProfile: next.complianceProfile as Prisma.JsonValue,
-      executionRoadmap: next.executionRoadmap as Prisma.JsonValue,
-      documentProfile: next.documentProfile as Prisma.JsonValue,
-    });
+    const facts = await this.genomeScoring.computeFactScores(businessId);
+
+    const genomeResult = this.keyGenome.buildIntegrityResult(businessId, next, facts);
 
     const updateData: Prisma.BusinessBlueprintUpdateInput = {
       identity: next.identity as Prisma.InputJsonValue,
@@ -439,7 +297,7 @@ export class BlueprintService {
       updateData.readinessScore = Math.max(0, Math.min(100, patch.readinessScore));
     }
 
-    const updated = await this.prisma.client.businessBlueprint.update({
+    const updated = await client.businessBlueprint.update({
       where: { businessId },
       data: updateData,
     });
@@ -449,46 +307,47 @@ export class BlueprintService {
       genomeIntegrity: genomeResult.genomeIntegrity,
     });
 
+    // P2-6: keep module and department readiness in sync with the latest DNA.
+    await this.moduleReadiness.computeReadiness(businessId, facts).catch((err: unknown) => {
+      this.logger.warn(`Module readiness recomputation failed for ${businessId}: ${err instanceof Error ? err.message : String(err)}`);
+    });
+    // P2-7: auto-version the constitution when the genome moves by >= 1 point.
+    const previousIntegrity = current.genomeIntegrity ?? 0;
+    if (Math.abs(previousIntegrity - genomeResult.genomeIntegrity) >= 1) {
+      this.events.emit('genome.integrity_changed', {
+        businessId,
+        previousIntegrity,
+        currentIntegrity: genomeResult.genomeIntegrity,
+        genomeStage: genomeResult.genomeStage,
+        executiveReadinessScore: genomeResult.executiveReadinessScore,
+      });
+    }
+
     return this.serialize(updated);
   }
 
   /**
    * Compute the full Business Genome integrity result for a business.
+   *
+   * This delegates to KeyGenomeService so Blueprint-derived and fact-based
+   * scoring are reconciled in a single place.
    */
   async calculateGenomeIntegrity(businessId: string): Promise<GenomeIntegrityResult> {
-    const row = await this.getBlueprintRecord(businessId);
-    return this.buildGenomeIntegrityResult(row);
+    return this.keyGenome.getGenomeIntegrity(businessId);
   }
 
   /**
    * Check whether the Three-Pillar Minimum is satisfied.
    */
   checkThreePillarMinimum(scores: Record<DnaSectionKey, number>): boolean {
-    return scores.founder >= 50 && scores.business >= 50 && scores.market >= 50;
+    return this.keyGenome.checkThreePillarMinimum(scores);
   }
 
   /**
    * Determine the business lifecycle stage from integrity and DNA scores.
    */
-  determineGenomeStage(
-    integrity: number,
-    scores: Record<DnaSectionKey, number>,
-  ): GenomeStage {
-    if (integrity >= 95) return 'ENTERPRISE_READY';
-    if (integrity >= 85 && scores.growth >= 60) return 'GROWTH_BUSINESS';
-    if (integrity >= 75 && scores.operations >= 60) return 'OPERATING_BUSINESS';
-    if (integrity >= 60 && scores.sales >= 50 && scores.marketing >= 50) return 'REVENUE_ENGINE';
-    if (
-      scores.founder >= 50 &&
-      scores.business >= 50 &&
-      scores.market >= 50 &&
-      scores.legal >= 60 &&
-      scores.financial >= 40
-    ) {
-      return 'REGISTERED_ENTITY';
-    }
-    if (this.checkThreePillarMinimum(scores)) return 'VALIDATED_CONCEPT';
-    return 'CONCEPT';
+  determineGenomeStage(integrity: number, scores: Record<DnaSectionKey, number>): GenomeStage {
+    return this.keyGenome.determineGenomeStage(integrity, scores);
   }
 
   /**
@@ -830,6 +689,7 @@ export class BlueprintService {
   async inferFromOnboarding(
     businessId: string,
     answers: Record<string, unknown>,
+    tx?: PrismaTx,
   ): Promise<BlueprintData> {
     const patch: BlueprintPatch = {};
 
@@ -939,22 +799,18 @@ export class BlueprintService {
     if (typeof answers.regulatedIndustry === 'boolean') {
       legalProfile.regulatedIndustry = answers.regulatedIndustry;
     }
-    if (typeof answers.legalStructurePreference === 'string') {
-      const allowed: BlueprintRecommendedEntityType[] = [
-        'SOLE_TRADER',
-        'PARTNERSHIP',
-        'LIMITED_COMPANY',
-        'NONPROFIT',
-        'UNKNOWN',
-      ];
-      legalProfile.recommendedEntityType = allowed.includes(
-        answers.legalStructurePreference as BlueprintRecommendedEntityType,
-      )
-        ? (answers.legalStructurePreference as BlueprintRecommendedEntityType)
-        : 'UNKNOWN';
+    const rawEntityType =
+      answers.recommendedEntityType ??
+      answers.entityType ??
+      answers.legalStructurePreference;
+    if (typeof rawEntityType === 'string') {
+      legalProfile.recommendedEntityType = normalizeRecommendedEntityType(rawEntityType);
     }
     if (typeof answers.entityTypeReason === 'string') {
       legalProfile.entityTypeReason = answers.entityTypeReason;
+    }
+    if (typeof answers.disclaimerAcceptedAt === 'string') {
+      legalProfile.disclaimerAcceptedAt = answers.disclaimerAcceptedAt;
     }
     if (Array.isArray(answers.regulatedIndustryNotes)) {
       legalProfile.regulatedIndustryNotes = answers.regulatedIndustryNotes.filter(
@@ -969,6 +825,7 @@ export class BlueprintService {
       registrationProfile.businessNameStatus = answers.registrationStatus;
     }
     if (typeof answers.hasEmployees === 'boolean') {
+      registrationProfile.hasEmployees = answers.hasEmployees;
       registrationProfile.nisEmployerStatus = answers.hasEmployees ? 'NOT_STARTED' : 'NOT_NEEDED';
     }
     if (typeof answers.estimatedAnnualRevenue === 'number') {
@@ -1173,7 +1030,7 @@ export class BlueprintService {
     }
     if (Object.keys(executionRoadmap).length) patch.executionRoadmap = executionRoadmap;
 
-    return this.updateBlueprint(businessId, patch);
+    return this.updateBlueprint(businessId, patch, tx);
   }
 
   /**
@@ -1327,6 +1184,7 @@ export class BlueprintService {
     legalProfile?: BlueprintLegalProfile;
     registrationProfile?: BlueprintRegistrationProfile;
     taxProfile?: BlueprintTaxProfile;
+    ownershipProfile?: BlueprintOwnershipProfile;
     marketProfile?: BlueprintMarketProfile;
     offerArchitecture?: BlueprintOfferArchitecture;
     salesSystem?: BlueprintSalesSystem;
@@ -1362,6 +1220,7 @@ export class BlueprintService {
         legalProfile: bp.legalProfile,
         registrationProfile: bp.registrationProfile,
         taxProfile: bp.taxProfile,
+        ownershipProfile: bp.ownershipProfile,
         marketProfile: bp.marketProfile,
         offerArchitecture: bp.offerArchitecture,
         salesSystem: bp.salesSystem,
@@ -1373,7 +1232,7 @@ export class BlueprintService {
         executionRoadmap: bp.executionRoadmap,
         documentProfile: bp.documentProfile,
       };
-    } catch (err) {
+    } catch (err: any) {
       this.logger.debug(`getBlueprintContext failed for ${businessId}: ${(err as Error).message}`);
       return null;
     }
@@ -1557,20 +1416,22 @@ export class BlueprintService {
 
   // -- internals -----------------------------------------------------------
 
-  private async getBlueprintRecord(businessId: string) {
-    const existing = await this.prisma.client.businessBlueprint.findUnique({
+  private async getBlueprintRecord(businessId: string, tx?: PrismaTx) {
+    const client = tx ?? this.prisma.client;
+    const existing = await client.businessBlueprint.findUnique({
       where: { businessId },
     });
     if (existing) return existing;
-    return this.seedFromBusiness(businessId);
+    return this.seedFromBusiness(businessId, tx);
   }
 
   /**
    * Build a baseline blueprint by mining the existing Business row + meta.
    * Idempotent: only runs when no blueprint row exists.
    */
-  async seedFromBusiness(businessId: string) {
-    const business = await this.prisma.client.business.findUnique({
+  async seedFromBusiness(businessId: string, tx?: PrismaTx) {
+    const client = tx ?? this.prisma.client;
+    const business = await client.business.findUnique({
       where: { id: businessId },
     });
     if (!business) {
@@ -1669,7 +1530,7 @@ export class BlueprintService {
     const completeness = this.calculateCompleteness(seed as any);
     const confidenceScores = this.calculateConfidenceScores(seed as any);
 
-    return this.prisma.client.businessBlueprint.upsert({
+    return client.businessBlueprint.upsert({
       where: { businessId },
       create: {
         businessId,
@@ -1736,34 +1597,15 @@ export class BlueprintService {
     return scores;
   }
 
+  /**
+   * Backwards-compatible wrapper around KeyGenomeService.buildIntegrityResult.
+   * Tests and internal callers that already pass a raw blueprint row can keep
+   * using this helper while the scoring logic lives in one place.
+   */
   private buildGenomeIntegrityResult(
-    row: {
-      identity: Prisma.JsonValue;
-      operatingModel: Prisma.JsonValue;
-      goals: Prisma.JsonValue;
-      constraints: Prisma.JsonValue;
-      brand: Prisma.JsonValue;
-      customerModel: Prisma.JsonValue;
-      financials: Prisma.JsonValue;
-      intelligence: Prisma.JsonValue;
-      workflowModel: Prisma.JsonValue;
-      aiPreferences: Prisma.JsonValue;
-      founderProfile: Prisma.JsonValue;
-      legalProfile: Prisma.JsonValue;
-      registrationProfile: Prisma.JsonValue;
-      taxProfile: Prisma.JsonValue;
-      ownershipProfile: Prisma.JsonValue;
-      marketProfile: Prisma.JsonValue;
-      offerArchitecture: Prisma.JsonValue;
-      salesSystem: Prisma.JsonValue;
-      marketingSystem: Prisma.JsonValue;
-      operationsSystem: Prisma.JsonValue;
-      projectionProfile: Prisma.JsonValue;
-      riskProfile: Prisma.JsonValue;
-      complianceProfile: Prisma.JsonValue;
-      executionRoadmap: Prisma.JsonValue;
-      documentProfile: Prisma.JsonValue;
-    },
+    businessId: string,
+    row: Record<string, unknown>,
+    facts?: GenomeFactData[],
   ): GenomeIntegrityResult {
     const sections: Record<BlueprintSectionKey, Record<string, unknown>> = {
       identity: readObject(row.identity),
@@ -1793,119 +1635,7 @@ export class BlueprintService {
       documentProfile: readObject(row.documentProfile),
     };
 
-    const dnaSections = (Object.keys(DNA_SECTION_CONFIG) as DnaSectionKey[]).map((key) =>
-      this.buildDnaSectionScore(key, sections),
-    );
-
-    const genomeDnaScores: Record<DnaSectionKey, number> = {
-      founder: 0,
-      vision: 0,
-      business: 0,
-      market: 0,
-      financial: 0,
-      legal: 0,
-      operations: 0,
-      sales: 0,
-      marketing: 0,
-      growth: 0,
-      technology: 0,
-      risk: 0,
-    };
-    for (const section of dnaSections) {
-      genomeDnaScores[section.key] = section.integrity;
-    }
-
-    const totalWeight = Object.values(DNA_SECTION_WEIGHTS).reduce((a, b) => a + b, 0);
-    const weightedSum = dnaSections.reduce(
-      (sum, section) => sum + section.integrity * (DNA_SECTION_WEIGHTS[section.key] ?? 0),
-      0,
-    );
-    const genomeIntegrity = totalWeight ? Math.round(weightedSum / totalWeight) : 0;
-
-    const readinessBreakdown: Record<string, number> = {};
-    let readinessWeightedSum = 0;
-    let readinessTotalWeight = 0;
-    for (const [key, weight] of Object.entries(EXECUTIVE_READINESS_WEIGHTS)) {
-      const score = genomeDnaScores[key as DnaSectionKey] ?? 0;
-      readinessBreakdown[key] = score;
-      readinessWeightedSum += score * weight;
-      readinessTotalWeight += weight;
-    }
-    const executiveReadinessScore = readinessTotalWeight
-      ? Math.round(readinessWeightedSum / readinessTotalWeight)
-      : 0;
-
-    const threePillarMinimumMet = this.checkThreePillarMinimum(genomeDnaScores);
-    const genomeStage = this.determineGenomeStage(genomeIntegrity, genomeDnaScores);
-
-    return {
-      genomeIntegrity,
-      genomeDnaScores,
-      genomeDnaConfidence: { ...genomeDnaScores },
-      genomeStage,
-      threePillarMinimumMet,
-      dnaSections,
-      executiveReadinessScore,
-      readinessBreakdown,
-    };
-  }
-
-  private buildDnaSectionScore(
-    key: DnaSectionKey,
-    sections: Record<BlueprintSectionKey, Record<string, unknown>>,
-  ): DnaSectionScore {
-    const config = DNA_SECTION_CONFIG[key];
-    const populatedFields: string[] = [];
-    const missingFields: string[] = [];
-
-    for (const field of config.fields) {
-      let value: unknown;
-      for (const source of config.sources) {
-        const section = sections[source] || {};
-        if (field in section) {
-          value = section[field];
-          break;
-        }
-      }
-      if (isPopulated(value)) {
-        populatedFields.push(field);
-      } else {
-        missingFields.push(field);
-      }
-    }
-
-    const fieldsTotal = config.fields.length;
-    const integrity = fieldsTotal ? Math.round((populatedFields.length / fieldsTotal) * 100) : 0;
-
-    return {
-      key,
-      label: config.label,
-      integrity,
-      confidence: integrity,
-      summary: this.buildSectionSummary(key, integrity, missingFields),
-      fieldsCaptured: populatedFields.length,
-      fieldsTotal,
-      missingFields,
-      recommendation: this.buildSectionRecommendation(key, missingFields),
-    };
-  }
-
-  private buildSectionSummary(
-    key: DnaSectionKey,
-    integrity: number,
-    missingFields: string[],
-  ): string {
-    if (integrity === 100) return `${DNA_SECTION_CONFIG[key].label} is complete.`;
-    if (integrity === 0) return `${DNA_SECTION_CONFIG[key].label} has not been started.`;
-    const firstMissing = missingFields.slice(0, 3).join(', ');
-    return `${DNA_SECTION_CONFIG[key].label} is partially complete. Missing: ${firstMissing}${missingFields.length > 3 ? '...' : ''}`;
-  }
-
-  private buildSectionRecommendation(key: DnaSectionKey, missingFields: string[]): string {
-    if (!missingFields.length) return 'No further fields required.';
-    const next = missingFields[0];
-    const readable = next.replace(/([A-Z])/g, ' $1').toLowerCase();
-    return `Add ${readable} to strengthen ${DNA_SECTION_CONFIG[key].label}.`;
+    return this.keyGenome.buildIntegrityResult(businessId, sections, facts);
   }
 
   private serialize(row: {

@@ -3,11 +3,12 @@ import { CrmRateLimit, CrmRateLimitGuard } from '../crm/guards/rate-limit.guard'
 import { Response } from 'express';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
-import { FlowOrchestratorService, FlowPageContext } from './flow-orchestrator.service';
+import { FlowOrchestratorService, FlowAttachment, FlowPageContext } from './flow-orchestrator.service';
+import { BusinessRole } from './role-engine.service';
 
 @Controller('ai')
 @UseGuards(CrmRateLimitGuard)
-export class FlowController {
+export class AiFlowController {
   constructor(
     @Inject(FlowOrchestratorService) private readonly flow: FlowOrchestratorService,
   ) {}
@@ -22,6 +23,7 @@ export class FlowController {
       history?: any[];
       sessionId?: string;
       pageContext?: FlowPageContext;
+      attachments?: FlowAttachment[];
       pendingConfirmation?: {
         toolCallId: string;
         confirmed: boolean;
@@ -37,6 +39,9 @@ export class FlowController {
       history,
       body.pendingConfirmation,
       body.pageContext,
+      undefined,
+      body.attachments,
+      body.sessionId,
     );
     return result;
   }
@@ -50,6 +55,9 @@ export class FlowController {
       message: string;
       history?: any[];
       pageContext?: FlowPageContext;
+      attachments?: FlowAttachment[];
+      sessionId?: string;
+      role?: string;
     },
     @Res() res: Response,
   ) {
@@ -60,15 +68,16 @@ export class FlowController {
     res.flushHeaders();
 
     const history = body.history || [];
+    const role = body.role as BusinessRole | undefined;
 
     try {
-      const stream = this.flow.streamChat(businessId, body.message, history, body.pageContext);
+      const stream = this.flow.streamChat(businessId, body.message, history, body.pageContext, role, body.attachments, body.sessionId);
 
       for await (const chunk of stream) {
         if (res.destroyed) break;
         res.write(`data: ${JSON.stringify(chunk)}\n\n`);
       }
-    } catch (error) {
+    } catch (error: any) {
       if (!res.destroyed) {
         res.write(`data: ${JSON.stringify({ type: 'error', error: (error as Error).message })}\n\n`);
       }

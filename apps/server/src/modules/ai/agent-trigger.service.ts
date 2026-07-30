@@ -60,7 +60,7 @@ export class AgentTriggerService implements OnModuleInit {
     // Also trigger journeys for this event
     try {
       await this.journeyOrchestrator.handleEvent(eventName, payload);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Journey orchestration failed for ${eventName}: ${(err as Error).message}`);
     }
 
@@ -146,7 +146,7 @@ export class AgentTriggerService implements OnModuleInit {
         }).catch(() => {});
 
         this.logger.log(`Trigger ${trigger.id} created plan ${plan.id} for ${eventName}`);
-      } catch (err) {
+      } catch (err: any) {
         this.logger.error(`Trigger ${trigger.id} failed: ${(err as Error).message}`);
       }
     }

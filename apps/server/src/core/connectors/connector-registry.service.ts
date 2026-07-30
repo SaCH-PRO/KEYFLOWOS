@@ -111,13 +111,18 @@ export class ConnectorRegistryService {
     const startTime = Date.now();
     try {
       const result = await connector.sync(businessId);
-      this.events.emit('connector.synced', {
-        connectorType: type,
-        businessId,
-        timestamp: new Date(),
-        itemsSynced: result.itemsSynced,
-        duration: result.duration,
-      });
+      // Only broadcast a "synced" event for a genuinely successful sync — never
+      // for a failed or unsupported result, which would imply work that did not
+      // happen.
+      if (result.success) {
+        this.events.emit('connector.synced', {
+          connectorType: type,
+          businessId,
+          timestamp: new Date(),
+          itemsSynced: result.itemsSynced,
+          duration: result.duration,
+        });
+      }
       return result;
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -175,7 +180,7 @@ export class ConnectorRegistryService {
         const isConn = await connector.isConnected(businessId);
         result = isConn ? { success: true } : { success: false, error: 'Not connected' };
       }
-    } catch (err) {
+    } catch (err: any) {
       result = { success: false, error: err instanceof Error ? err.message : String(err) };
     }
 
@@ -216,7 +221,7 @@ export class ConnectorRegistryService {
           ? { success: true, action: 'Verified stored connection' }
           : { success: false, error: 'Not connected' };
       }
-    } catch (err) {
+    } catch (err: any) {
       result = {
         success: false,
         error: err instanceof Error ? err.message : String(err),
@@ -272,7 +277,7 @@ export class ConnectorRegistryService {
 
     try {
       await connector.disconnect(businessId);
-    } catch (err) {
+    } catch (err: any) {
         this.logger.warn(`Silent catch: ${err instanceof Error ? err.message : err}`);
       }
 

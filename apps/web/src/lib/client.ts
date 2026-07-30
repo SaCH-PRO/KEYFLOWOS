@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { API_BASE, apiPost, apiPostSimple, apiPatch, apiPut, apiDelete, apiGet as apiGetSimple, getAuthHeaders, emitUnauthorizedEvent, type PlanLimitError } from "./api";
-import { refreshAccessToken } from "./workspace";
+import { refreshAccessToken, setStoredBusinessId } from "./workspace";
 import { DEFAULT_BUSINESS_ID, DEMO_MODE_ENABLED } from "./api/_defaults";
 
 
@@ -9,6 +9,8 @@ export * from "./api/approvals";
 export * from "./api/structure";
 export * from "./api/assets";
 export * from "./api/evidence";
+export * from "./api/contracts";
+export * from "./api/onboarding-concierge";
 
 const contactMetaSchema = z.object({
   outstandingBalance: z.number().optional(),
@@ -2604,6 +2606,7 @@ export async function rejectPublicQuote(token: string, reason?: string) {
 export type BootstrapIdentityResponse = {
   user: { id: string; email: string; name?: string | null; firstName?: string | null; lastName?: string | null; phone?: string | null; avatarUrl?: string | null; role: string };
   business: { id: string; name: string; onboardingComplete?: boolean };
+  isNewBusiness?: boolean;
 };
 
 export type BootstrapIdentityErrorCode = "account_email_conflict";
@@ -2644,6 +2647,18 @@ export async function bootstrapIdentity(input: {
       body: JSON.stringify(input),
     });
     const json: unknown = await res.json().catch(() => null);
+    if (res.ok && json && typeof json === "object") {
+      const data = json as BootstrapIdentityResponse;
+      if (data.business?.id) {
+        setStoredBusinessId(data.business.id);
+      }
+      return {
+        data,
+        error: null,
+        errorCode: null,
+        status: res.status,
+      };
+    }
     if (!res.ok) {
       const parsed = (typeof json === "object" && json !== null ? (json as Record<string, unknown>) : null);
       const nestedMessage = parsed && typeof parsed.message === "object" && parsed.message !== null
@@ -2665,7 +2680,7 @@ export async function bootstrapIdentity(input: {
         status: res.status,
       };
     }
-    return { data: json as BootstrapIdentityResponse, error: null, status: res.status };
+    return { data: null, error: "Unexpected response", status: res.status };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Network error";
     return { data: null, error: message };
@@ -5632,12 +5647,21 @@ export interface FlowPendingConfirmation {
   riskLevel: 'low' | 'medium' | 'high';
 }
 
+export interface OnboardingCardData {
+  type: "welcome" | "genesis-idea" | "genesis-questions" | "readiness-dashboard" | "template-picker" | "completion-gate";
+  title?: string;
+  step?: string;
+  data?: Record<string, unknown>;
+}
+
 export interface FlowChatResponse {
   reply: string;
   toolCalls?: FlowToolCall[];
   toolResults?: FlowToolResult[];
   pendingConfirmations?: FlowPendingConfirmation[];
   requiresConfirmation?: boolean;
+  sessionId?: string;
+  card?: OnboardingCardData;
   usage?: {
     promptTokens: number;
     completionTokens: number;
@@ -5657,10 +5681,12 @@ export async function sendFlowChat(
     toolArgs?: Record<string, unknown>;
   },
   pageContext?: Record<string, unknown>,
+  sessionId?: string | null,
+  attachments?: Array<{ type: string; url: string; name?: string; mimeType?: string }>,
 ): Promise<ApiResult<FlowChatResponse>> {
   return apiPost<FlowChatResponse>({
     path: `/ai/businesses/${encodeURIComponent(businessId)}/flow/chat`,
-    body: { message, history, pendingConfirmation, pageContext },
+    body: { message, history, pendingConfirmation, pageContext, sessionId, attachments },
   });
 }
 
@@ -5686,6 +5712,10 @@ export async function clearFlowSession(businessId: string, sessionId: string): P
     path: `/ai/businesses/${encodeURIComponent(businessId)}/flow/sessions/${encodeURIComponent(sessionId)}/clear`,
     body: {},
   });
+}
+
+export async function deleteFlowSession(businessId: string, sessionId: string): Promise<ApiResult<{ success: boolean }>> {
+  return apiDelete<{ success: boolean }>(`/ai/businesses/${encodeURIComponent(businessId)}/flow/sessions/${encodeURIComponent(sessionId)}`);
 }
 
 // ---
@@ -10699,12 +10729,37 @@ export async function saveVoicePreference(
     pitch?: number;
     personality?: string;
     isDefault?: boolean;
+    settings?: Record<string, unknown>;
   },
 ): Promise<ApiResult<VoicePreference>> {
   return apiPost<VoicePreference>({
     path: `/device/businesses/${encodeURIComponent(businessId)}/voice-preferences`,
     body,
   });
+}
+
+export interface VoiceProviderResponse {
+  name: string;
+  displayName: string;
+  defaultVoice: string;
+  voices: { key: string; name: string; language?: string; gender?: string }[];
+  available: boolean;
+}
+
+export async function fetchVoiceProviders(
+  businessId: string,
+): Promise<ApiResult<{ providers: VoiceProviderResponse[] }>> {
+  try {
+    const res = await fetch(
+      `${API_BASE}/voice/businesses/${encodeURIComponent(businessId)}/providers`,
+      { headers: { ...getAuthHeaders() } },
+    );
+    const data = await res.json().catch(() => null);
+    if (!res.ok) return { data: null, error: data?.message || "Failed to load voice providers" };
+    return { data, error: null };
+  } catch (err) {
+    return { data: null, error: (err as Error).message };
+  }
 }
 
 // ============================================
@@ -14116,6 +14171,29 @@ export async function updateStaffAiSettings(
   data: { maxHoursPerWeek?: number; hourlyRate?: number },
 ): Promise<ApiResult<{ staff: unknown }>> {
   return apiPatch(`/ai/businesses/${encodeURIComponent(businessId)}/ai/settings/staff-workload-config/${encodeURIComponent(staffId)}`, data);
+}
+
+export interface AutonomyProfile {
+  id: string;
+  businessId: string;
+  globalKillSwitch: boolean;
+  maxDailyAutoActions: number;
+  maxDailySpendTtd: number;
+  maxTierWithoutApproval: number;
+  notifyOnBlock: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export async function fetchAutonomyProfile(businessId: string): Promise<ApiResult<AutonomyProfile>> {
+  return apiGet(`/api/v1/cortex/autonomy-profile?businessId=${encodeURIComponent(businessId)}`);
+}
+
+export async function updateAutonomyProfile(
+  businessId: string,
+  data: Partial<Omit<AutonomyProfile, "id" | "businessId" | "createdAt" | "updatedAt">>,
+): Promise<ApiResult<AutonomyProfile>> {
+  return apiPatch(`/api/v1/cortex/autonomy-profile`, { businessId, ...data });
 }
 
 export async function fetchSkills(businessId: string): Promise<ApiResult<Skill[]>> {

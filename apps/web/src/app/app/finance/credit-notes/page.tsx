@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { FileMinus, Plus, Loader2, Trash2, CheckCircle, XCircle } from "lucide-react";
+import { FileMinus, Plus, Loader2, CheckCircle, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { UnifiedPageShell } from "@/components/layout/unified-page-shell";
 import { DataTable } from "@/components/ui/data-table";
@@ -11,7 +11,7 @@ import { fetchCreditNotes, createCreditNote, applyCreditNote, voidCreditNote, ty
 export default function CreditNotesPage() {
   const businessId = getStoredBusinessId() ?? "";
   const [notes, setNotes] = useState<CreditNote[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [_loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [saving, setSaving] = useState(false);

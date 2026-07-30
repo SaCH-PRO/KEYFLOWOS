@@ -63,7 +63,7 @@ export class LinkedInPublisher extends BasePublisher {
       const data = await response.json() as any;
       const errorMsg = data?.message || `LinkedIn API error: ${response.status}`;
       return { platform: this.platform, success: false, error: errorMsg };
-    } catch (err) {
+    } catch (err: any) {
       return { platform: this.platform, success: false, error: (err as Error).message };
     }
   }

@@ -144,7 +144,7 @@ export class RecurringJournalEntryService implements OnModuleInit, OnModuleDestr
     for (const entry of due) {
       try {
         await this.emitEntry(entry, now);
-      } catch (err) {
+      } catch (err: any) {
         const nextRunDate = this.computeNext(entry.frequency, entry.nextRunDate);
         const failureCount = entry.failureCount + 1;
         await this.prisma.client.recurringJournalEntry.update({

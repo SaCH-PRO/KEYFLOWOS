@@ -12,7 +12,6 @@ import {
   Sparkles,
   ShieldCheck,
   CheckCircle2,
-  XCircle,
   CalendarDays,
   Bot,
   Tag,
@@ -450,7 +449,7 @@ export default function KeyInboxPage() {
     );
   };
 
-  const ActionButton = ({
+  const _ActionButton = ({
     action,
     index,
     messageId,

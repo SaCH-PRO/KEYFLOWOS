@@ -133,13 +133,15 @@ export type MemoryType =
   | 'user_preference'
   | 'business_fact'
   | 'past_decision'
+  | 'conversation'
   | 'failed_attempt'
   | 'successful_action'
   | 'communication_style'
   | 'risk_tolerance'
   | 'common_workflow'
   | 'current_goal'
-  | 'long_term_strategy';
+  | 'long_term_strategy'
+  | 'document_extraction';
 
 export interface CortexMemory {
   id: string;
@@ -149,7 +151,7 @@ export interface CortexMemory {
   key: string;
   value: string;
   confidence: number;
-  source: 'explicit' | 'inferred' | 'genome';
+  source: 'explicit' | 'inferred' | 'genome' | 'conversation';
   lastAccessedAt: Date;
   createdAt: Date;
   accessCount: number;
@@ -158,7 +160,7 @@ export interface CortexMemory {
 export interface CortexMemoryQuery {
   businessId: string;
   userId?: string;
-  memoryTypes: MemoryType[];
+  memoryTypes?: MemoryType[];
   recency?: 'recent' | 'all_time';
   limit?: number;
 }

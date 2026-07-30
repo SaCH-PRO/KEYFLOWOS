@@ -10,8 +10,14 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { GenomeGateGuard } from '../../core/auth/genome-gate.guard';
 import { BusinessGenesisService } from './business-genesis.service';
 import { GenesisMarketStrategyService } from './genesis-market-strategy.service';
+import {
+  AnalyzeIdeaDto,
+  SubmitAnswersDto,
+  NextQuestionsQueryDto,
+} from './dto';
 
 @Controller('business-genesis/businesses/:businessId')
 @UseGuards(AuthGuard, BusinessGuard)
@@ -24,7 +30,7 @@ export class BusinessGenesisController {
   @Post('analyze-idea')
   async analyzeIdea(
     @Param('businessId') businessId: string,
-    @Body() body: { ideaText: string },
+    @Body() body: AnalyzeIdeaDto,
   ) {
     return this.genesis.analyzeIdea(businessId, body.ideaText || '');
   }
@@ -32,19 +38,15 @@ export class BusinessGenesisController {
   @Get('questions/next')
   async nextQuestions(
     @Param('businessId') businessId: string,
-    @Query('limit') limit?: string,
+    @Query() query: NextQuestionsQueryDto,
   ) {
-    const parsed = limit ? parseInt(limit, 10) : 3;
-    return this.genesis.getNextQuestions(
-      businessId,
-      Number.isNaN(parsed) ? 3 : parsed,
-    );
+    return this.genesis.getNextQuestions(businessId, query.limit ?? 3);
   }
 
   @Post('answers')
   async submitAnswers(
     @Param('businessId') businessId: string,
-    @Body() body: { answers: Record<string, unknown> },
+    @Body() body: SubmitAnswersDto,
   ) {
     return this.genesis.submitAnswers(businessId, body.answers || {});
   }
@@ -55,11 +57,13 @@ export class BusinessGenesisController {
   }
 
   @Post('generate-roadmap')
+  @UseGuards(GenomeGateGuard)
   async generateRoadmap(@Param('businessId') businessId: string) {
     return this.genesis.generateRoadmap(businessId);
   }
 
   @Post('generate-document-pack')
+  @UseGuards(GenomeGateGuard)
   async generateDocumentPack(@Param('businessId') businessId: string) {
     return this.genesis.generateDocumentPack(businessId);
   }
@@ -70,11 +74,13 @@ export class BusinessGenesisController {
   }
 
   @Post('generate-risk-register')
+  @UseGuards(GenomeGateGuard)
   async generateRiskRegister(@Param('businessId') businessId: string) {
     return this.genesis.generateRiskRegister(businessId);
   }
 
   @Post('generate-market-strategy')
+  @UseGuards(GenomeGateGuard)
   async generateMarketStrategy(@Param('businessId') businessId: string) {
     return this.marketStrategy.generateMarketStrategy(businessId);
   }

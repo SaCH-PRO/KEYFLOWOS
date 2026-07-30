@@ -160,7 +160,7 @@ export class GraphActionsController {
         followOnSuggestions: result.followOnSuggestions,
         tier: decision.tier,
       };
-    } catch (err) {
+    } catch (err: any) {
       const failPayload: ActionExecutedPayload = {
         businessId,
         toolName: body.toolName,

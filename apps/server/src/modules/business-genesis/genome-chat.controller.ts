@@ -11,8 +11,11 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { GenomeGateGuard } from '../../core/auth/genome-gate.guard';
+import { RateLimitGuard } from '../../core/guards/rate-limit.guard';
+import { RateLimit } from '../../core/decorators/rate-limit.decorator';
 import { GenomeChatService } from './genome-chat.service';
-import type { DnaSectionKey } from '../blueprint/blueprint.types';
+import { SendMessageDto, ApplyUpdatesDto } from './dto';
 
 @Controller('genome-chat/businesses/:businessId')
 @UseGuards(AuthGuard, BusinessGuard)
@@ -32,28 +35,29 @@ export class GenomeChatController {
   }
 
   @Post('messages')
+  @UseGuards(RateLimitGuard)
+  @RateLimit(30, 60_000)
   async sendMessage(
     @Param('businessId') businessId: string,
-    @Body() body: { message?: string },
+    @Body() body: SendMessageDto,
     @Req() req: Request & { user?: { id?: string } },
   ) {
-    if (!body.message || typeof body.message !== 'string') {
-      return { error: 'message is required' };
-    }
     const userId = req.user?.id ?? 'unknown';
     return this.chat.sendMessage(businessId, userId, body.message);
   }
 
   @Post('apply-updates')
+  @UseGuards(GenomeGateGuard)
   async applyUpdates(
     @Param('businessId') businessId: string,
-    @Body() body: { section?: DnaSectionKey; data?: Record<string, unknown> },
+    @Body() body: ApplyUpdatesDto,
     @Req() req: Request & { user?: { id?: string } },
   ) {
-    if (!body.section || !body.data) {
-      return { error: 'section and data are required' };
-    }
     const userId = req.user?.id ?? 'unknown';
-    return this.chat.applyUpdates(businessId, userId, body.section, body.data);
+    return this.chat.applyUpdates(businessId, userId, body.section, body.data, {
+      messageId: body.messageId,
+      confidence: body.confidence,
+      source: body.source,
+    });
   }
 }

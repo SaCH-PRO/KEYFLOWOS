@@ -234,7 +234,7 @@ export class PublicEventsIngestService {
         },
         update: { lastSeenAt: new Date() },
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.debug?.(`[public-events] visitor upsert skipped: ${(err as Error).message}`);
     }
   }
@@ -339,7 +339,7 @@ export class PublicEventsIngestService {
           payload: raw.payload as Prisma.JsonValue,
           ts,
         });
-      } catch (err) {
+      } catch (err: any) {
         this.logger.debug?.(`[public-events] ingest failed type=${type}: ${(err as Error).message}`);
       }
     }

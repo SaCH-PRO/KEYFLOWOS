@@ -66,7 +66,7 @@ import { EvidenceModule } from '../evidence/evidence.module';
 import { TaskAssignmentModule } from '../task-assignments/task-assignment.module';
 
 @Module({
-  imports: [SubscriptionsModule, AiModule, ConnectorModule, WhatsAppModule, CommunityModule, TimelineModule, EvidenceModule, TaskAssignmentModule, forwardRef(() => AutopilotModule)],
+  imports: [SubscriptionsModule, forwardRef(() => AiModule), ConnectorModule, WhatsAppModule, CommunityModule, TimelineModule, EvidenceModule, TaskAssignmentModule, forwardRef(() => AutopilotModule)],
   controllers: [
     CrmController,
     CrmCustomFieldsController,

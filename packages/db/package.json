@@ -2,18 +2,22 @@
   "name": "@keyflow/db",
   "version": "0.1.0",
   "description": "",
-  "main": "./src/client.ts",
-  "module": "./src/client.ts",
-  "types": "./src/client.ts",
+  "main": "./dist/src/client.js",
+  "module": "./dist/src/client.js",
+  "types": "./dist/src/client.d.ts",
   "scripts": {
     "build": "tsc --project tsconfig.json",
+    "typecheck": "tsc --noEmit",
     "db:generate": "prisma generate --schema=./prisma/schema.prisma",
     "lint": "eslint src --ext .ts"
   },
+  "prisma": {
+    "seed": "tsx --env-file ../../.env prisma/seed.ts"
+  },
   "exports": {
     ".": {
-      "types": "./src/client.ts",
-      "default": "./src/client.ts"
+      "types": "./dist/src/client.d.ts",
+      "default": "./dist/src/client.js"
     }
   },
   "keywords": [],

@@ -28,6 +28,7 @@ const ACTION_POLICY: Record<KeyExecutableActionType, ActionPolicy> = {
 
   SCHEDULE_FOLLOWUP: { executable: false, requiresApproval: true, riskLevel: 'MEDIUM' },
   ESCALATE_THREAD: { executable: false, requiresApproval: true, riskLevel: 'MEDIUM' },
+  EXECUTE_TOOL: { executable: true, requiresApproval: true, riskLevel: 'MEDIUM' },
 };
 
 @Injectable()

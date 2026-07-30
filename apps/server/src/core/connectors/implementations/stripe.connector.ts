@@ -80,18 +80,18 @@ export class StripeConnector implements IConnector, IPaymentGatewayConnector {
     return !!(meta.stripeSecretKey || process.env.STRIPE_SECRET_KEY);
   }
 
-  async sync(businessId: string): Promise<ConnectorSyncResult> {
-    const start = Date.now();
-    const connected = await this.isConnected(businessId);
-    if (!connected) {
-      return { success: false, itemsSynced: 0, errors: ['Stripe not connected'], duration: Date.now() - start };
-    }
-
-    const recentPayments = await this.prisma.client.payment.count({
-      where: { businessId, method: 'STRIPE' },
-    }).catch(() => 0);
-
-    return { success: true, itemsSynced: recentPayments, errors: [], duration: Date.now() - start };
+  async sync(_businessId: string): Promise<ConnectorSyncResult> {
+    // Provider pull sync is not yet implemented for this connector. It previously
+    // counted local rows and returned success:true, misrepresenting a no-op as a
+    // successful provider sync. Real pull sync is future work per connector.
+    return {
+      success: false,
+      itemsSynced: 0,
+      unsupported: true,
+      code: 'PULL_SYNC_NOT_IMPLEMENTED',
+      errors: ['Provider pull sync is not implemented for this connector.'],
+      duration: 0,
+    };
   }
 
   async smokeTest(businessId: string): Promise<ConnectorSmokeResult> {
@@ -114,7 +114,7 @@ export class StripeConnector implements IConnector, IPaymentGatewayConnector {
         account: data.livemode ? 'Live mode' : 'Test mode',
         detail: top ? `Available: ${(top.amount / 100).toFixed(2)} ${top.currency.toUpperCase()}` : 'Zero balance',
       };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }
@@ -262,7 +262,7 @@ export class StripeConnector implements IConnector, IPaymentGatewayConnector {
         }
       }
       await this.trackActivity(businessId);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `Stripe live transaction fetch failed; serving ${local.length} local row(s): ${err instanceof Error ? err.message : err}`,
       );
@@ -379,7 +379,7 @@ export class StripeConnector implements IConnector, IPaymentGatewayConnector {
           createdAt: new Date(r.created * 1000),
         });
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Stripe refunds list failed: ${err instanceof Error ? err.message : err}`);
     }
     return out;
@@ -438,7 +438,7 @@ export class StripeConnector implements IConnector, IPaymentGatewayConnector {
           currency = (first.currency || 'usd').toUpperCase();
           description = first.description || '';
         }
-      } catch (err) {
+      } catch (err: any) {
           this.logger.warn(`Line item lookup failures: ${err instanceof Error ? err.message : err}`);
         }
       links.push({

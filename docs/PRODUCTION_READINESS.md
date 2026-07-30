@@ -2,6 +2,8 @@
 
 Use this checklist before shipping KEYFlowOS to real users.
 
+For the third-party account and pricing guide see `docs/development/THIRD_PARTY_ACCOUNTS.md`.
+
 ---
 
 ## 1. Build

@@ -464,7 +464,7 @@ export class StoreReadinessService {
             roi: null,
           };
         }
-      } catch (err) {
+      } catch (err: any) {
           this.logger.warn(`Silent catch: ${err instanceof Error ? err.message : err}`);
         }
 

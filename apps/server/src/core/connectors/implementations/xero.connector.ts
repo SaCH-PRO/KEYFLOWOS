@@ -78,19 +78,18 @@ export class XeroConnector implements IConnector {
     return health.status === 'connected';
   }
 
-  async sync(businessId: string): Promise<ConnectorSyncResult> {
-    const start = Date.now();
-    const connected = await this.isConnected(businessId);
-    if (!connected) {
-      return { success: false, itemsSynced: 0, errors: ['Xero not connected'], duration: Date.now() - start };
-    }
-    const [invoices, payments, expenses] = await Promise.all([
-      this.prisma.client.invoice.count({ where: { businessId, deletedAt: null } }).catch(() => 0),
-      this.prisma.client.payment.count({ where: { businessId } }).catch(() => 0),
-      this.prisma.client.expense.count({ where: { businessId } }).catch(() => 0),
-    ]);
-    await this.trackActivity(businessId);
-    return { success: true, itemsSynced: invoices + payments + expenses, errors: [], duration: Date.now() - start };
+  async sync(_businessId: string): Promise<ConnectorSyncResult> {
+    // Provider pull sync is not yet implemented for this connector. It previously
+    // counted local rows and returned success:true, misrepresenting a no-op as a
+    // successful provider sync. Real pull sync is future work per connector.
+    return {
+      success: false,
+      itemsSynced: 0,
+      unsupported: true,
+      code: 'PULL_SYNC_NOT_IMPLEMENTED',
+      errors: ['Provider pull sync is not implemented for this connector.'],
+      duration: 0,
+    };
   }
 
   async disconnect(businessId: string): Promise<void> {
@@ -126,7 +125,7 @@ export class XeroConnector implements IConnector {
         account: first?.tenantName ?? undefined,
         detail: `${data.length} tenant(s)${first?.tenantType ? ` • ${first.tenantType}` : ''}`,
       };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }
@@ -270,7 +269,7 @@ export class XeroConnector implements IConnector {
       const id = data.Contacts?.[0]?.ContactID;
       if (!id) return { success: false, error: 'Xero response missing ContactID' };
       externalId = id;
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
 
@@ -329,7 +328,7 @@ export class XeroConnector implements IConnector {
       const id = data.Invoices?.[0]?.InvoiceID;
       if (!id) return { success: false, error: 'Xero response missing InvoiceID' };
       externalId = id;
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
 
@@ -360,7 +359,7 @@ export class XeroConnector implements IConnector {
       }));
       await this.trackActivity(businessId);
       return { success: true, accounts };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }

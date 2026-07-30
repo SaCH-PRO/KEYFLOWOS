@@ -65,7 +65,7 @@ export class CalendarCommerceListener {
     if (dueInput) {
       try {
         await this.projection.upsertFromSource(dueInput);
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(`invoice projection failed id=${invoice.id}: ${(err as Error).message}`);
       }
     } else {
@@ -133,7 +133,7 @@ export class CalendarCommerceListener {
     }
     try {
       await this.projection.upsertFromSource(input);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`quote projection failed id=${quote.id}: ${(err as Error).message}`);
     }
   }
@@ -163,7 +163,7 @@ export class CalendarCommerceListener {
     if (!input) return;
     try {
       await this.projection.upsertFromSource(input);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `recurring_invoice projection failed id=${r.id}: ${(err as Error).message}`,
       );

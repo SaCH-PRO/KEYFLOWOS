@@ -69,16 +69,19 @@ export abstract class SocialPlatformConnector implements IConnector {
     return (await this.healthCheck(businessId)).status === 'connected';
   }
 
-  async sync(businessId: string): Promise<ConnectorSyncResult> {
-    const start = Date.now();
-    if (!(await this.isConnected(businessId))) {
-      return { success: false, itemsSynced: 0, errors: [`${this.meta.name} not connected`], duration: Date.now() - start };
-    }
-    const posts = await this.prisma.client.socialPost.count({
-      where: { businessId, status: 'POSTED', deletedAt: null },
-    }).catch(() => 0);
-    await this.trackActivity(businessId);
-    return { success: true, itemsSynced: posts, errors: [], duration: Date.now() - start };
+  async sync(_businessId: string): Promise<ConnectorSyncResult> {
+    // Social connectors do not support pull synchronization. Inbound engagement
+    // arrives via webhooks and outbound content is published, not pulled. Return
+    // an explicit unsupported result rather than a misleading success that
+    // reports local post counts as if they were synchronized from the provider.
+    return {
+      success: false,
+      itemsSynced: 0,
+      unsupported: true,
+      code: 'PULL_SYNC_UNSUPPORTED',
+      errors: [`Pull sync is not supported for ${this.meta.name}; social connectors ingest via webhooks and publish outbound.`],
+      duration: 0,
+    };
   }
 
   /**
@@ -102,7 +105,7 @@ export abstract class SocialPlatformConnector implements IConnector {
         ...result,
         account: result.account ?? conn.accountName ?? undefined,
       };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }

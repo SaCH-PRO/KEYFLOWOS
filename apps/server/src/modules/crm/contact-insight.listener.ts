@@ -28,7 +28,7 @@ export class ContactInsightListener {
   private async safeMarkStale(businessId: string, contactId: string, source: string): Promise<void> {
     try {
       await this.insight.markStale(businessId, contactId);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `[${source}] mark-stale failed for contact=${contactId}: ${(err as Error).message}`,
       );

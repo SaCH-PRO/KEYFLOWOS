@@ -7,7 +7,7 @@ import { AiModule } from '../ai/ai.module';
 import { AutopilotModule } from '../autopilot/autopilot.module';
 
 @Module({
-  imports: [PrismaModule, AiModule, forwardRef(() => AutopilotModule)],
+  imports: [PrismaModule, forwardRef(() => AiModule), forwardRef(() => AutopilotModule)],
   controllers: [MomentumController],
   providers: [ClientMomentumService, MomentumAiService],
   exports: [ClientMomentumService, MomentumAiService],

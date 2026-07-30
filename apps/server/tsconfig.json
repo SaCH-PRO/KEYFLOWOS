@@ -11,10 +11,21 @@
     "emitDecoratorMetadata": true,
     "declaration": false,
     "declarationMap": false,
-    "composite": false
+    "composite": false,
+    "strictPropertyInitialization": false,
+    "paths": {
+      "@keyflow/db": ["packages/db/dist/src/client.d.ts"],
+      "@keyflow/db/*": ["packages/db/dist/src/*"],
+      "@keyflow/api": ["packages/api/dist/src/root.d.ts"],
+      "@keyflow/api/*": ["packages/api/dist/src/*"],
+      "@keyflow/ui/*": ["packages/ui/src/*"],
+      "@keyflow/shared": ["packages/shared/dist/src/index.d.ts"],
+      "@keyflow/shared/*": ["packages/shared/dist/src/*"]
+    }
   },
   "ts-node": {
     "swc": true
   },
-  "include": ["src/**/*", "test/**/*"]
+  "include": ["src/**/*", "test/**/*"],
+  "exclude": ["node_modules", "dist", "**/*.spec.ts", "**/*.test.ts"]
 }

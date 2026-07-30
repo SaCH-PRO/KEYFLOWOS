@@ -2,10 +2,11 @@ import { Module } from '@nestjs/common';
 import { CallLogService } from './call-log.service';
 import { CallTaskController } from './call-task.controller';
 import { CallScriptService } from './call-script.service';
-import { ModelGatewayService } from '../ai/model-gateway.service';
+import { AiModule } from '../ai/ai.module';
 
 @Module({
-  providers: [CallLogService, CallScriptService, ModelGatewayService],
+  imports: [AiModule],
+  providers: [CallLogService, CallScriptService],
   controllers: [CallTaskController],
   exports: [CallLogService, CallScriptService],
 })

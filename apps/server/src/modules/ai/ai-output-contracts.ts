@@ -90,6 +90,9 @@ export interface GenesisIdeaExtractionContract {
   operatingModel?: {
     revenueModel?: string;
     deliveryMode?: string;
+    serviceArea?: string;
+    teamSize?: string;
+    channels?: string[];
   };
   legalProfile?: {
     recommendedEntityType?: string;
@@ -99,6 +102,14 @@ export interface GenesisIdeaExtractionContract {
   };
   customerModel?: {
     idealCustomer?: string;
+    segments?: string[];
+    painPoints?: string[];
+  };
+  marketProfile?: {
+    targetGeography?: string;
+    marketCategory?: string;
+    marketStage?: string;
+    demandSignals?: string[];
   };
   financials?: {
     pricingModel?: string;
@@ -111,6 +122,21 @@ export interface GenesisIdeaExtractionContract {
     monthlyFixedCosts?: number;
     expectedMonthlyUnits?: number;
     variableCostPercent?: number;
+  };
+  founderProfile?: {
+    founderName?: string;
+    background?: string;
+    skills?: string[];
+    weeklyAvailabilityHours?: number;
+    riskTolerance?: string;
+  };
+  goals?: {
+    northStar?: string;
+  };
+  constraints?: {
+    budgetRange?: string;
+    timeCommitment?: string;
+    riskTolerance?: string;
   };
   riskProfile?: {
     legalRiskFlags?: string[];

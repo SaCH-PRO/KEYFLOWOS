@@ -81,24 +81,18 @@ export class GoogleDriveConnector implements IConnector {
     return !!business?.driveAccessToken;
   }
 
-  async sync(businessId: string): Promise<ConnectorSyncResult> {
-    const start = Date.now();
-    const connected = await this.isConnected(businessId);
-    if (!connected) {
-      return { success: false, itemsSynced: 0, errors: ['Google Drive not connected'], duration: Date.now() - start };
-    }
-
-    const docCount = await this.prisma.client.documentInstance.count({
-      where: { businessId },
-    }).catch(() => 0);
-
-    await this.prisma.client.connectorStatus.upsert({
-      where: { businessId_connectorType: { businessId, connectorType: 'google_drive' } },
-      create: { businessId, connectorType: 'google_drive', status: 'connected', lastSyncAt: new Date(), syncCount: 1 },
-      update: { lastSyncAt: new Date(), syncCount: { increment: 1 }, status: 'connected' },
-    });
-
-    return { success: true, itemsSynced: docCount, errors: [], duration: Date.now() - start };
+  async sync(_businessId: string): Promise<ConnectorSyncResult> {
+    // Provider pull sync is not yet implemented for this connector. It previously
+    // counted local rows and returned success:true, misrepresenting a no-op as a
+    // successful provider sync. Real pull sync is future work per connector.
+    return {
+      success: false,
+      itemsSynced: 0,
+      unsupported: true,
+      code: 'PULL_SYNC_NOT_IMPLEMENTED',
+      errors: ['Provider pull sync is not implemented for this connector.'],
+      duration: 0,
+    };
   }
 
   async testConnection(businessId: string): Promise<{ success: boolean; error?: string; account?: string }> {
@@ -118,7 +112,7 @@ export class GoogleDriveConnector implements IConnector {
       }
       const data = await res.json();
       return { success: true, account: data.user?.emailAddress ?? business.driveEmail ?? undefined };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }
@@ -185,7 +179,7 @@ export class GoogleDriveConnector implements IConnector {
         account: business.driveEmail ?? undefined,
         detail: file.webViewLink ?? undefined,
       };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }

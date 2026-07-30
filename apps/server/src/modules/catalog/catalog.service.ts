@@ -1,6 +1,10 @@
 import { Injectable, Inject, NotFoundException, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { db } from '@keyflow/db';
+
+type TransactionClient = Parameters<Parameters<typeof db['$transaction']>[0]>[0];
+
 import {
   ProductCreatedPayload,
   ProductUpdatedPayload,
@@ -247,12 +251,13 @@ export class CatalogService {
     };
   }
 
-  async createProduct(input: CatalogProductInput) {
+  async createProduct(input: CatalogProductInput, tx?: TransactionClient) {
     if (!input.name?.trim()) throw new Error('Product name is required');
     if (typeof input.price !== 'number' || Number.isNaN(input.price)) {
       throw new Error('Product price must be a number');
     }
-    const product = await this.prisma.client.product.create({
+    const client = tx ?? this.prisma.client;
+    const product = await client.product.create({
       data: {
         businessId: input.businessId,
         name: input.name,
@@ -284,7 +289,8 @@ export class CatalogService {
     return product;
   }
 
-  async updateProduct(input: CatalogProductPatch) {
+  async updateProduct(input: CatalogProductPatch, tx?: TransactionClient) {
+    const client = tx ?? this.prisma.client;
     const data: Record<string, any> = {};
     const fields: (keyof CatalogProductPatch)[] = [
       'name', 'price', 'currency', 'description', 'category', 'duration',
@@ -294,7 +300,7 @@ export class CatalogService {
     for (const k of fields) {
       if (input[k] !== undefined) data[k as string] = input[k];
     }
-    const product = await this.prisma.client.product.update({
+    const product = await client.product.update({
       where: { id: input.productId, businessId: input.businessId },
       data,
     });
@@ -303,8 +309,9 @@ export class CatalogService {
     return product;
   }
 
-  async deleteProduct(businessId: string, productId: string) {
-    const product = await this.prisma.client.product.update({
+  async deleteProduct(businessId: string, productId: string, tx?: TransactionClient) {
+    const client = tx ?? this.prisma.client;
+    const product = await client.product.update({
       where: { id: productId, businessId },
       data: { deletedAt: new Date() },
     });
@@ -313,8 +320,9 @@ export class CatalogService {
     return product;
   }
 
-  async deactivateProduct(businessId: string, productId: string) {
-    const product = await this.prisma.client.product.update({
+  async deactivateProduct(businessId: string, productId: string, tx?: TransactionClient) {
+    const client = tx ?? this.prisma.client;
+    const product = await client.product.update({
       where: { id: productId, businessId },
       data: { isActive: false },
     });
@@ -323,18 +331,19 @@ export class CatalogService {
     return product;
   }
 
-  async bulkUpdateProducts(businessId: string, ids: string[], action: 'activate' | 'deactivate' | 'delete') {
+  async bulkUpdateProducts(businessId: string, ids: string[], action: 'activate' | 'deactivate' | 'delete', tx?: TransactionClient) {
+    const client = tx ?? this.prisma.client;
     const where = { id: { in: ids }, businessId, deletedAt: null };
     let result: { count: number };
     switch (action) {
       case 'activate':
-        result = await this.prisma.client.product.updateMany({ where, data: { isActive: true } });
+        result = await client.product.updateMany({ where, data: { isActive: true } });
         break;
       case 'deactivate':
-        result = await this.prisma.client.product.updateMany({ where, data: { isActive: false } });
+        result = await client.product.updateMany({ where, data: { isActive: false } });
         break;
       case 'delete':
-        result = await this.prisma.client.product.updateMany({ where, data: { deletedAt: new Date() } });
+        result = await client.product.updateMany({ where, data: { deletedAt: new Date() } });
         break;
     }
     return { updated: result.count, action };
@@ -355,7 +364,8 @@ export class CatalogService {
     });
   }
 
-  async createService(input: CatalogServiceInput) {
+  async createService(input: CatalogServiceInput, tx?: TransactionClient) {
+    const client = tx ?? this.prisma.client;
     if (!input.name?.trim()) throw new Error('Service name is required');
     if (typeof input.duration !== 'number' || input.duration <= 0) {
       throw new Error('Service duration must be a positive number');
@@ -363,7 +373,7 @@ export class CatalogService {
     if (typeof input.price !== 'number' || input.price < 0) {
       throw new Error('Service price must be a non-negative number');
     }
-    const service = await this.prisma.client.service.create({
+    const service = await client.service.create({
       data: {
         businessId: input.businessId,
         name: input.name,
@@ -379,8 +389,9 @@ export class CatalogService {
     return service;
   }
 
-  async updateService(input: CatalogServicePatch) {
-    const existing = await this.prisma.client.service.findFirst({
+  async updateService(input: CatalogServicePatch, tx?: TransactionClient) {
+    const client = tx ?? this.prisma.client;
+    const existing = await client.service.findFirst({
       where: { id: input.serviceId, businessId: input.businessId },
     });
     if (!existing) throw new NotFoundException('Service not found');
@@ -391,7 +402,7 @@ export class CatalogService {
     for (const k of fields) {
       if (input[k] !== undefined) data[k as string] = input[k];
     }
-    const service = await this.prisma.client.service.update({
+    const service = await client.service.update({
       where: { id: input.serviceId },
       data,
     });
@@ -399,12 +410,13 @@ export class CatalogService {
     return service;
   }
 
-  async deleteService(businessId: string, serviceId: string) {
-    const existing = await this.prisma.client.service.findFirst({
+  async deleteService(businessId: string, serviceId: string, tx?: TransactionClient) {
+    const client = tx ?? this.prisma.client;
+    const existing = await client.service.findFirst({
       where: { id: serviceId, businessId },
     });
     if (!existing) throw new NotFoundException('Service not found');
-    const service = await this.prisma.client.service.update({
+    const service = await client.service.update({
       where: { id: serviceId },
       data: { deletedAt: new Date() },
     });
@@ -418,11 +430,13 @@ export class CatalogService {
       add?: Array<Omit<CatalogServiceInput, 'businessId'> & { businessId?: string }>;
       remove?: string[];
     },
+    tx?: TransactionClient,
   ) {
+    const client = tx ?? this.prisma.client;
     const results: { added: number; removed: number; errors: string[] } = { added: 0, removed: 0, errors: [] };
 
     if (body.remove?.length) {
-      const removed = await this.prisma.client.service.updateMany({
+      const removed = await client.service.updateMany({
         where: { id: { in: body.remove }, businessId },
         data: { deletedAt: new Date() },
       });
@@ -436,7 +450,7 @@ export class CatalogService {
     if (body.add?.length) {
       for (const item of body.add) {
         try {
-          await this.createService({ ...item, businessId });
+          await this.createService({ ...item, businessId }, tx);
           results.added++;
         } catch (e) {
           results.errors.push(`Failed to add ${item.name}`);
@@ -451,8 +465,9 @@ export class CatalogService {
    * Internal: link a Service back to its source Product. Used by
    * Commerce store-readiness backfill.
    */
-  async linkServiceToProduct(businessId: string, serviceId: string, productId: string) {
-    const service = await this.prisma.client.service.update({
+  async linkServiceToProduct(businessId: string, serviceId: string, productId: string, tx?: TransactionClient) {
+    const client = tx ?? this.prisma.client;
+    const service = await client.service.update({
       where: { id: serviceId },
       data: { sourceProductId: productId },
     });

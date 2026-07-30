@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { apiGet } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
+import { fetchOnboardingState } from "@/lib/api/onboarding-concierge";
 
 const ALLOWED_PATHS = [
   "/app/profile",
@@ -11,6 +11,7 @@ const ALLOWED_PATHS = [
   "/app/billing",
   "/app/help",
   "/app/key-connect",
+  "/app/onboarding",
   "/logout",
 ];
 
@@ -40,7 +41,7 @@ export function useGenomeGate(): GenomeGateState {
   const router = useRouter();
   const [state, setState] = useState<GenomeGateState>(() => ({
     checking: !!getStoredBusinessId(),
-    gateActive: false,
+    gateActive: true, // fail closed until verified
     threePillarMet: false,
     genomeIntegrity: null,
     genesisCompleted: null,
@@ -49,43 +50,70 @@ export function useGenomeGate(): GenomeGateState {
   useEffect(() => {
     let cancelled = false;
     const businessId = getStoredBusinessId();
-    if (!businessId) return;
 
     const pathWithQuery = searchParams?.toString()
       ? `${pathname}?${searchParams.toString()}`
       : pathname || "";
 
-    apiGet<{
-      met: boolean;
-      founder: number;
-      business: number;
-      market: number;
-    }>(`/blueprint/businesses/${businessId}/genome/three-pillar-status`)
+    if (!businessId) {
+      // No business selected -> keep gate closed and send to onboarding.
+      if (!isAllowedPath(pathWithQuery)) {
+        router.replace("/app/onboarding");
+      }
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- loading flag lifecycle: closes the gate once the no-business path resolves
+      setState((s) => ({ ...s, checking: false, gateActive: true }));
+      return;
+    }
+
+    fetchOnboardingState(businessId)
       .then(({ data, error }) => {
         if (cancelled) return;
         if (error || !data) {
-          setState((s) => ({ ...s, checking: false }));
+          // Fail closed on any API error.
+          setState({
+            checking: false,
+            gateActive: true,
+            threePillarMet: false,
+            genomeIntegrity: null,
+            genesisCompleted: null,
+          });
+          if (!isAllowedPath(pathWithQuery)) {
+            router.replace("/app/onboarding");
+          }
           return;
         }
 
-        const threePillarMet = data.met;
-        const gateActive = !threePillarMet;
-        const minScore = Math.min(data.founder, data.business, data.market);
+        const threePillarMet = data.threePillarMet;
+        const onboardingFinished =
+          data.onboardingComplete || data.onboardingCompletedAt != null;
+        const gateActive = !threePillarMet || !onboardingFinished;
 
         setState({
           checking: false,
           gateActive,
           threePillarMet,
-          genomeIntegrity: minScore,
+          genomeIntegrity: null,
           genesisCompleted: null,
         });
 
         if (gateActive && pathWithQuery && !isAllowedPath(pathWithQuery)) {
-          router.replace("/app/profile?tab=business-genome&intro=1");
+          router.replace("/app/onboarding");
         }
       })
-      .catch(() => {
-        if (!cancelled) setState((s) => ({ ...s, checking: false }));
+      .catch((err) => {
+        if (cancelled) return;
+         
+        console.error("Genome gate check failed", err);
+        setState({
+          checking: false,
+          gateActive: true,
+          threePillarMet: false,
+          genomeIntegrity: null,
+          genesisCompleted: null,
+        });
+        if (!isAllowedPath(pathWithQuery)) {
+          router.replace("/app/onboarding");
+        }
       });
 
     return () => {

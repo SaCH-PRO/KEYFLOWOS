@@ -38,7 +38,7 @@ export class MatchRefreshSchedulerService implements OnModuleInit, OnModuleDestr
       const refreshed = await this.matching.refreshStaleMatches(STALENESS_MS);
       this.lastRunDate = today;
       this.logger.log(`Daily match refresh complete — ${refreshed} businesses refreshed`);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Match refresh cycle failed: ${(err as Error).message}`);
     }
   }

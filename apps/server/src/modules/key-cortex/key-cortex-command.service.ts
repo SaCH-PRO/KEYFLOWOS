@@ -19,7 +19,6 @@
 
 import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { v4 as uuidv4 } from 'uuid';
 
 // ─── Connector Types ──────────────────────────────────────────────────────────
 import {
@@ -122,36 +121,6 @@ export class KeyCortexCommandService {
       `[parseIntent] Parsing: "${inputTrimmed.substring(0, 80)}…" for biz=${context.businessId}`,
     );
 
-    // ── 0. Try command router first (v4) ───────────────────────────────────
-    if (this.router) {
-      try {
-        const routed = await this.router.route(inputTrimmed, {
-          businessId: context.businessId,
-          userId: context.userId,
-          query: inputTrimmed,
-        });
-        if (routed.confidence > 0.7) {
-          this.logger.log(
-            `[parseIntent] Command router matched with confidence ${routed.confidence} — returning routed intents`,
-          );
-          // Convert routed intents to ParsedIntent[] format
-          return routed.intents.map((intent) => ({
-            intent: intent.intent ?? intent.action ?? 'unknown',
-            confidence: routed.confidence,
-            module: intent.module as any,
-            action: intent.action,
-            parameters: intent.parameters ?? {},
-            requiresApproval: intent.requiresApproval ?? false,
-            naturalLanguage: intent.naturalLanguage ?? inputTrimmed,
-          }));
-        }
-      } catch (err) {
-        this.logger.warn(
-          `[parseIntent] Router failed, falling back to AI: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-    }
-
     // ── 1. Capabilities ──────────────────────────────────────────────────────
     const capabilities = this.connector.getAllCapabilities();
 
@@ -165,8 +134,9 @@ export class KeyCortexCommandService {
     while (attempts < MAX_RETRIES) {
       attempts++;
       try {
-        rawText = await this.modelGateway.complete({
-          model: AI_MODEL_FOR_PARSING,
+        const gatewayResponse = await this.modelGateway.complete({
+          taskCategory: 'classification',
+          businessId: context.businessId,
           messages: [
             {
               role: 'system',
@@ -178,8 +148,9 @@ export class KeyCortexCommandService {
           temperature: options.temperature ?? DEFAULT_TEMPERATURE,
           maxTokens: options.maxTokens ?? 2048,
         });
+        rawText = gatewayResponse.content ?? '';
         break;
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(
           `[parseIntent] AI call attempt ${attempts} failed: ${(err as Error).message}`,
         );
@@ -274,8 +245,9 @@ export class KeyCortexCommandService {
     while (attempts < MAX_RETRIES) {
       attempts++;
       try {
-        rawText = await this.modelGateway.complete({
-          model: AI_MODEL_FOR_PARSING,
+        const gatewayResponse = await this.modelGateway.complete({
+          taskCategory: 'classification',
+          businessId: context.businessId,
           messages: [
             {
               role: 'system',
@@ -287,8 +259,9 @@ export class KeyCortexCommandService {
           temperature: options.temperature ?? DEFAULT_TEMPERATURE,
           maxTokens: options.maxTokens ?? 4096,
         });
+        rawText = gatewayResponse.content ?? '';
         break;
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(
           `[parseMultiStep] AI call attempt ${attempts} failed: ${(err as Error).message}`,
         );
@@ -740,7 +713,7 @@ Expected output: [
             /\b(tomorrow)\b/i,
             /\b(today)\b/i,
             /\b(next\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b/i,
-            /\b(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})\b/,
+            /\b(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\b/,
           ];
           for (const re of datePatterns) {
             const m = input.match(re);

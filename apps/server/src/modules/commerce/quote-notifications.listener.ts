@@ -87,7 +87,7 @@ export class QuoteNotificationsListener {
           quoteUrl: this.buildQuoteUrl(quote.viewToken),
         },
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `quote.viewed notification failed for quote=${quote.id}: ${(err as Error).message}`,
       );
@@ -122,7 +122,7 @@ export class QuoteNotificationsListener {
           },
         });
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `quote.accepted owner notification failed for quote=${quote.id}: ${(err as Error).message}`,
       );
@@ -146,7 +146,7 @@ export class QuoteNotificationsListener {
             quoteUrl,
           },
         });
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(
           `quote.accepted customer notification failed for quote=${quote.id}: ${(err as Error).message}`,
         );
@@ -183,7 +183,7 @@ export class QuoteNotificationsListener {
           },
         });
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `quote.rejected owner notification failed for quote=${quote.id}: ${(err as Error).message}`,
       );
@@ -208,7 +208,7 @@ export class QuoteNotificationsListener {
             quoteUrl,
           },
         });
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(
           `quote.rejected customer notification failed for quote=${quote.id}: ${(err as Error).message}`,
         );

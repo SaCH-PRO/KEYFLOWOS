@@ -47,7 +47,7 @@ export default function BudgetPlannerPage() {
   const [budgets, setBudgets] = useState<ExpenseBudget[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [year, setYear] = useState(new Date().getFullYear());
+  const [year, _setYear] = useState(new Date().getFullYear());
   const [edits, setEdits] = useState<Record<string, CellData>>({});
   const [selectedCell, setSelectedCell] = useState<string | null>(null);
 

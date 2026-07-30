@@ -1,4 +1,5 @@
-import { Injectable, Logger, Inject } from '@nestjs/common';
+import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import {
   CreateBusinessEventInput,
@@ -13,6 +14,7 @@ export class BusinessEventService {
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(EventEmitter2) @Optional() private readonly events: EventEmitter2 | null = null,
   ) {}
 
   /**
@@ -39,9 +41,16 @@ export class BusinessEventService {
           riskScore: input.riskScore ?? null,
           source: input.source,
           metadata: input.metadata ?? undefined,
+          sessionId: input.sessionId ?? null,
+          commandId: input.commandId ?? null,
+          correlationId: input.correlationId ?? null,
         },
       });
-    } catch (err) {
+
+      // Also fan out to the EventEmitter2 bridge so KEY FLOWS roles can
+      // subscribe to this signal. Fire-and-forget; never block audit emit.
+      this.events?.emit('business_event.created', input);
+    } catch (err: any) {
       this.logger.error(
         `Failed to emit business event: ${(err as Error).message}`,
         { input: JSON.stringify(input).slice(0, 500) },
@@ -80,7 +89,7 @@ export class BusinessEventService {
           }),
         ),
       );
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(
         `Failed to emit ${inputs.length} business events: ${(err as Error).message}`,
       );

@@ -24,11 +24,11 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { PrismaService } from '../../prisma/prisma.service';
+import { PrismaService } from '../../core/prisma/prisma.service';
 import { KeyCortexEventService } from './key-cortex-event.service';
 import { KeyCortexContextV2Service } from './key-cortex-context-v2.service';
-import { ModelGatewayService } from '../../ai/model-gateway.service';
-import { AiUsageService } from '../../ai/ai-usage.service';
+import { ModelGatewayService } from '../ai/model-gateway.service';
+import { AiUsageService } from '../ai/ai-usage.service';
 import { v4 as uuidv4 } from 'uuid';
 
 /* ─────────────────────────── Type Definitions ─────────────────────────── */
@@ -380,16 +380,7 @@ export class KeyCortexIntuitionService {
    */
   async getSignalHistory(businessId: string, signalType?: string): Promise<WeakSignal[]> {
     // Fetch from database
-    const dbSignals = await this.prisma.keyCortexWeakSignal
-      ?.findMany({
-        where: {
-          businessId,
-          ...(signalType ? { category: signalType } : {}),
-        },
-        orderBy: { detectedAt: 'desc' },
-        take: 500,
-      })
-      .catch(() => []);
+    const dbSignals: Array<Record<string, unknown>> = []; // persistence not implemented (model absent from schema)
 
     // Merge with in-memory cache
     const cachedSignals = this.signalCache.get(businessId) ?? [];
@@ -513,7 +504,7 @@ export class KeyCortexIntuitionService {
     const corpus: Array<{ source: string; text: string; timestamp: Date }> = [];
 
     // Support tickets
-    const tickets = await this.prisma.supportTicket
+    const tickets = await this.prisma.client.supportTicket
       ?.findMany({
         where: { businessId, createdAt: { gte: since } },
         select: { subject: true, description: true, createdAt: true },
@@ -528,7 +519,7 @@ export class KeyCortexIntuitionService {
     }
 
     // Chat messages
-    const chats = await this.prisma.chatMessage
+    const chats = await this.prisma.client.chatMessage
       ?.findMany({
         where: { businessId, createdAt: { gte: since } },
         select: { content: true, createdAt: true },
@@ -543,7 +534,7 @@ export class KeyCortexIntuitionService {
     }
 
     // Email content (if available)
-    const emails = await this.prisma.emailLog
+    const emails = await this.prisma.client.emailLog
       ?.findMany({
         where: { businessId, createdAt: { gte: since } },
         select: { subject: true, body: true, createdAt: true },
@@ -558,7 +549,7 @@ export class KeyCortexIntuitionService {
     }
 
     // Event descriptions
-    const events = await this.prisma.businessEvent
+    const events = await this.prisma.client.businessEvent
       .findMany({
         where: { businessId, createdAt: { gte: since } },
         select: { description: true, createdAt: true },
@@ -641,10 +632,17 @@ ${sample}
 Return JSON array of emerging themes:
 [{"theme": "...", "sources": ["..."], "severity": "low|medium|high", "confidence": 0.0-1.0}]`;
 
-    const response = await this.modelGateway.complete(prompt, { temperature: 0.5, maxTokens: 1000 });
-    await this.aiUsage.trackUsage(businessId, 'intuition-semantic', response.usage);
+    const response = await this.aiUsage.trackAndComplete(
+      businessId,
+      undefined,
+      'intuition-semantic',
+      {
+        messages: [{ role: 'user' as const, content: prompt }],
+      temperature: 0.5, maxTokens: 1000
+      },
+    );
 
-    const themes = JSON.parse(response.text) as Array<{ theme: string; sources: string[]; severity: string; confidence: number }>;
+    const themes = JSON.parse(response.content) as Array<{ theme: string; sources: string[]; severity: string; confidence: number }>;
 
     return themes.map((t) => ({
       id: uuidv4(),
@@ -743,7 +741,7 @@ Return JSON array of emerging themes:
     since: Date,
   ): Promise<{ declineRate: number; dataPoints: string[] }> {
     // Get monthly engagement metrics
-    const recentEvents = await this.prisma.businessEvent
+    const recentEvents = await this.prisma.client.businessEvent
       .findMany({
         where: { businessId, customerId, createdAt: { gte: since } },
         orderBy: { createdAt: 'asc' },
@@ -898,7 +896,7 @@ Return JSON array of emerging themes:
 
   private async getCurrentPeriodRevenue(businessId: string): Promise<number> {
     const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    const result = await this.prisma.invoice
+    const result = await this.prisma.client.invoice
       .aggregate({
         where: { businessId, createdAt: { gte: since } },
         _avg: { total: true },
@@ -996,7 +994,7 @@ Return JSON array of emerging themes:
       const previousPeriod = { spend: 0, leads: 0 };
 
       // Get ad spend data
-      const adData = await this.prisma.adCampaign
+      const adData = await this.prisma.client.adCampaign
         ?.findMany({
           where: { businessId, createdAt: { gte: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000) } },
           select: { spend: true, leads: true, createdAt: true },
@@ -1058,7 +1056,7 @@ Return JSON array of emerging themes:
   private async detectEmailConversionMismatch(businessId: string): Promise<WeakSignal | null> {
     // Check if email open rates are high but conversions are low
     try {
-      const emailData = await this.prisma.emailCampaign
+      const emailData = await this.prisma.client.emailCampaign
         ?.findMany({
           where: { businessId, createdAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } },
           select: { openRate: true, clickRate: true, conversionRate: true, name: true },
@@ -1103,49 +1101,17 @@ Return JSON array of emerging themes:
   private async detectSocialWebMismatch(businessId: string): Promise<WeakSignal | null> {
     // Social media engagement up but website traffic down = platform algorithm change or content mismatch
     try {
-      const socialData = await this.prisma.socialMediaMetric
-        ?.findMany({
-          where: { businessId, createdAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } },
-          select: { engagement: true, followers: true, platform: true },
-        })
-        .catch(() => []);
+      const socialData: Array<Record<string, unknown>> = []; // persistence not implemented (model absent from schema)
 
-      const webData = await this.prisma.websiteAnalytics
-        ?.findMany({
-          where: { businessId, date: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } },
-          select: { sessions: true, pageViews: true },
-        })
-        .catch(() => []);
+      const webData: Array<Record<string, unknown>> = []; // persistence not implemented (model absent from schema)
 
       const socialEngagement = (socialData ?? []).reduce((s: number, m: { engagement: number }) => s + m.engagement, 0);
       const webSessions = (webData ?? []).reduce((s: number, m: { sessions: number }) => s + m.sessions, 0);
 
       // Need historical comparison
-      const oldSocialData = await this.prisma.socialMediaMetric
-        ?.findMany({
-          where: {
-            businessId,
-            createdAt: {
-              gte: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000),
-              lt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-            },
-          },
-          select: { engagement: true },
-        })
-        .catch(() => []);
+      const oldSocialData: Array<Record<string, unknown>> = []; // persistence not implemented (model absent from schema)
 
-      const oldWebData = await this.prisma.websiteAnalytics
-        ?.findMany({
-          where: {
-            businessId,
-            date: {
-              gte: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000),
-              lt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-            },
-          },
-          select: { sessions: true },
-        })
-        .catch(() => []);
+      const oldWebData: Array<Record<string, unknown>> = []; // persistence not implemented (model absent from schema)
 
       const oldSocialEngagement = (oldSocialData ?? []).reduce((s: number, m: { engagement: number }) => s + m.engagement, 0);
       const oldWebSessions = (oldWebData ?? []).reduce((s: number, m: { sessions: number }) => s + m.sessions, 0);
@@ -1185,13 +1151,13 @@ Return JSON array of emerging themes:
     // Support tickets increasing but satisfaction scores also increasing = good (growing + handling well)
     // Support tickets increasing + satisfaction decreasing = bad (overwhelmed)
     try {
-      const recentTickets = await this.prisma.supportTicket
+      const recentTickets = await this.prisma.client.supportTicket
         ?.count({
           where: { businessId, createdAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } },
         })
         .catch(() => 0);
 
-      const oldTickets = await this.prisma.supportTicket
+      const oldTickets = await this.prisma.client.supportTicket
         ?.count({
           where: {
             businessId,
@@ -1278,7 +1244,7 @@ Return JSON array of emerging themes:
   ): Promise<Array<{ theme: string; customerIds: string[]; severity: string }>> {
     const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
-    const tickets = await this.prisma.supportTicket
+    const tickets = await this.prisma.client.supportTicket
       ?.findMany({
         where: { businessId, createdAt: { gte: since } },
         select: { id: true, customerId: true, subject: true, description: true, priority: true },
@@ -1435,7 +1401,7 @@ Return JSON array of emerging themes:
 
     // Learn from actual churned customers
     try {
-      const churnedCustomers = await this.prisma.customer
+      const churnedCustomers = await this.prisma.client.customer
         .findMany({
           where: { businessId, status: 'churned' },
           select: { id: true, name: true, churnedAt: true },
@@ -1450,13 +1416,13 @@ Return JSON array of emerging themes:
         const preChurnStart = new Date(customer.churnedAt.getTime() - 90 * 24 * 60 * 60 * 1000);
 
         // Check support ticket surge
-        const preChurnTickets = await this.prisma.supportTicket
+        const preChurnTickets = await this.prisma.client.supportTicket
           ?.count({
             where: { businessId, customerId: customer.id, createdAt: { gte: preChurnStart, lt: customer.churnedAt } },
           })
           .catch(() => 0);
 
-        const earlierTickets = await this.prisma.supportTicket
+        const earlierTickets = await this.prisma.client.supportTicket
           ?.count({
             where: {
               businessId,
@@ -1482,7 +1448,7 @@ Return JSON array of emerging themes:
   }
 
   private async getActiveCustomers(businessId: string): Promise<Array<{ id: string; name: string }>> {
-    const customers = await this.prisma.customer
+    const customers = await this.prisma.client.customer
       .findMany({
         where: { businessId, status: 'active' },
         select: { id: true, name: true },
@@ -1509,17 +1475,17 @@ Return JSON array of emerging themes:
 
       switch (pattern.name) {
         case 'support_ticket_surge': {
-          const recent = await this.prisma.supportTicket
+          const recent = await this.prisma.client.supportTicket
             ?.count({ where: { businessId, customerId: customer.id, createdAt: { gte: since30 } } })
             .catch(() => 0);
-          const older = await this.prisma.supportTicket
+          const older = await this.prisma.client.supportTicket
             ?.count({ where: { businessId, customerId: customer.id, createdAt: { gte: since60, lt: since30 } } })
             .catch(() => 0);
           matchScore = older === 0 ? (Number(recent) > 0 ? 0.5 : 0) : Math.min((Number(recent) / Number(older)) / 3, 1);
           break;
         }
         case 'payment_delay': {
-          const invoices = await this.prisma.invoice
+          const invoices = await this.prisma.client.invoice
             .findMany({
               where: { businessId, customerId: customer.id, createdAt: { gte: since90 } },
               select: { dueDate: true, paidAt: true },
@@ -1537,10 +1503,10 @@ Return JSON array of emerging themes:
           break;
         }
         case 'engagement_decline': {
-          const recentEvents = await this.prisma.businessEvent
+          const recentEvents = await this.prisma.client.businessEvent
             .count({ where: { businessId, customerId: customer.id, createdAt: { gte: since30 } } })
             .catch(() => 0);
-          const olderEvents = await this.prisma.businessEvent
+          const olderEvents = await this.prisma.client.businessEvent
             .count({ where: { businessId, customerId: customer.id, createdAt: { gte: since60, lt: since30 } } })
             .catch(() => 0);
           matchScore = Math.max(recentEvents, 1) === 0 ? 0 : Math.min((1 - Math.max(recentEvents, 1) / Math.max(olderEvents, 1)) / 0.5, 1);
@@ -1548,7 +1514,7 @@ Return JSON array of emerging themes:
         }
         case 'contract_downgrade': {
           // Check for plan changes in recent period
-          const planChanges = await this.prisma.subscription
+          const planChanges = await this.prisma.client.subscription
             ?.findMany({
               where: { businessId, customerId: customer.id, updatedAt: { gte: since90 } },
               select: { tier: true, seatCount: true },
@@ -1600,14 +1566,10 @@ Return JSON array of emerging themes:
 
   private async analyzeFeatureUsageDrop(businessId: string, customerId: string, since: Date): Promise<number> {
     try {
-      const recentUsage = await this.prisma.featureUsage
-        ?.count({ where: { businessId, customerId, createdAt: { gte: since } } })
-        .catch(() => 0);
+      const recentUsage = 0; // persistence not implemented (model absent from schema)
 
       const olderPeriodStart = new Date(since.getTime() - (Date.now() - since.getTime()));
-      const olderUsage = await this.prisma.featureUsage
-        ?.count({ where: { businessId, customerId, createdAt: { gte: olderPeriodStart, lt: since } } })
-        .catch(() => 0);
+      const olderUsage = 0; // persistence not implemented (model absent from schema)
 
       if (olderUsage === 0) return recentUsage === 0 ? 0 : 0.3;
       const drop = 1 - Number(recentUsage) / Number(olderUsage);
@@ -1626,7 +1588,7 @@ Return JSON array of emerging themes:
     const until = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000); // Exclude current month
 
     try {
-      const invoices = await this.prisma.invoice.findMany({
+      const invoices = await this.prisma.client.invoice.findMany({
         where: { businessId, createdAt: { gte: since, lte: until } },
         select: { total: true, status: true },
       });
@@ -1652,7 +1614,7 @@ Return JSON array of emerging themes:
     const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
     try {
-      const invoices = await this.prisma.invoice.findMany({
+      const invoices = await this.prisma.client.invoice.findMany({
         where: { businessId, createdAt: { gte: since } },
         select: { total: true, status: true },
       });
@@ -1712,10 +1674,17 @@ ${anomalies.map((a) => `- ${a.metric}: ${a.variance > 0 ? '+' : ''}${a.variance.
 
 Return JSON: {"explanations": [{"metric": "...", "explanation": "..."}]}`;
 
-      const response = await this.modelGateway.complete(prompt, { temperature: 0.3, maxTokens: 800 });
-      await this.aiUsage.trackUsage(businessId, 'intuition-anomaly-explain', response.usage);
+      const response = await this.aiUsage.trackAndComplete(
+        businessId,
+        undefined,
+        'intuition-anomaly-explain',
+        {
+          messages: [{ role: 'user' as const, content: prompt }],
+        temperature: 0.3, maxTokens: 800
+        },
+      );
 
-      const result = JSON.parse(response.text) as { explanations: Array<{ metric: string; explanation: string }> };
+      const result = JSON.parse(response.content) as { explanations: Array<{ metric: string; explanation: string }> };
 
       return anomalies.map((a) => {
         const exp = result.explanations.find((e) => e.metric === a.metric);
@@ -1735,12 +1704,12 @@ Return JSON: {"explanations": [{"metric": "...", "explanation": "..."}]}`;
 
     try {
       // Total pending tasks
-      const pendingTasks = await this.prisma.task.count({
+      const pendingTasks = await this.prisma.client.task.count({
         where: { businessId, status: { in: ['pending', 'in_progress'] } },
       });
 
       // Completed in last 7 days
-      const completedWeek = await this.prisma.task.count({
+      const completedWeek = await this.prisma.client.task.count({
         where: { businessId, status: 'completed', updatedAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } },
       });
 
@@ -1775,11 +1744,11 @@ Return JSON: {"explanations": [{"metric": "...", "explanation": "..."}]}`;
     const signals: OperationalStressSignal[] = [];
 
     try {
-      const overdueTasks = await this.prisma.task.count({
+      const overdueTasks = await this.prisma.client.task.count({
         where: { businessId, status: { not: 'completed' }, dueDate: { lt: new Date() } },
       });
 
-      const overdueInvoices = await this.prisma.invoice.count({
+      const overdueInvoices = await this.prisma.client.invoice.count({
         where: { businessId, status: 'overdue' },
       });
 
@@ -1808,7 +1777,7 @@ Return JSON: {"explanations": [{"metric": "...", "explanation": "..."}]}`;
 
     try {
       // Compare last 7 days vs previous 7 days
-      const recent7d = await this.prisma.task.count({
+      const recent7d = await this.prisma.client.task.count({
         where: {
           businessId,
           status: 'completed',
@@ -1816,7 +1785,7 @@ Return JSON: {"explanations": [{"metric": "...", "explanation": "..."}]}`;
         },
       });
 
-      const previous7d = await this.prisma.task.count({
+      const previous7d = await this.prisma.client.task.count({
         where: {
           businessId,
           status: 'completed',
@@ -1856,13 +1825,13 @@ Return JSON: {"explanations": [{"metric": "...", "explanation": "..."}]}`;
     const signals: OperationalStressSignal[] = [];
 
     try {
-      const recentErrors = await this.prisma.errorLog
+      const recentErrors = await this.prisma.client.errorLog
         ?.count({
           where: { businessId, createdAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } },
         })
         .catch(() => 0);
 
-      const previousErrors = await this.prisma.errorLog
+      const previousErrors = await this.prisma.client.errorLog
         ?.count({
           where: {
             businessId,
@@ -1946,35 +1915,7 @@ Return JSON: {"explanations": [{"metric": "...", "explanation": "..."}]}`;
      ═══════════════════════════════════════════════════════════════ */
 
   private async persistSignal(signal: WeakSignal): Promise<void> {
-    await this.prisma.keyCortexWeakSignal
-      ?.upsert({
-        where: { id: signal.id },
-        update: {
-          description: signal.description,
-          confidence: signal.confidence,
-          trend: signal.trend,
-          score: signal.score,
-          validatedAt: signal.validatedAt,
-          validationOutcome: signal.validationOutcome,
-        },
-        create: {
-          id: signal.id,
-          description: signal.description,
-          sources: signal.sources,
-          confidence: signal.confidence,
-          trend: signal.trend,
-          potentialImpact: signal.potentialImpact,
-          recommendedInvestigation: signal.recommendedInvestigation,
-          detectedAt: signal.detectedAt,
-          category: signal.category,
-          score: signal.score,
-          evidence: signal.evidence as unknown as Record<string, unknown>[],
-          businessId: signal.businessId,
-        },
-      })
-      .catch(() => {
-        /* table may not exist */
-      });
+    // persistence not implemented (model absent from schema); previously a no-op
   }
 
   private deserializeWeakSignal(dbRecord: Record<string, unknown>): WeakSignal {
@@ -2003,7 +1944,7 @@ Return JSON: {"explanations": [{"metric": "...", "explanation": "..."}]}`;
   }
 
   private async findAllActiveBusinesses(): Promise<string[]> {
-    const businesses = await this.prisma.business
+    const businesses = await this.prisma.client.business
       .findMany({ where: { active: true }, select: { id: true } })
       .catch(() => []);
 

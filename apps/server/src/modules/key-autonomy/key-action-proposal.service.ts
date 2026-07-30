@@ -1,10 +1,12 @@
 import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { TemporalFlowService } from '../temporal-flow/temporal-flow.service';
 import { KeyActionExecutorService } from './key-action-executor.service';
 import { KeyActionPolicyService } from './key-action-policy.service';
 import { KeyActionGenomePolicyService } from './key-action-genome-policy.service';
+import { AutonomyOrchestratorService } from './autonomy-orchestrator.service';
 import type {
   CreateKeyActionProposalInput,
   KeyActionProposalData,
@@ -21,9 +23,11 @@ export class KeyActionProposalService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(TemporalFlowService) private readonly temporal: TemporalFlowService,
+    @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Inject(KeyActionPolicyService) private readonly policy: KeyActionPolicyService,
     @Inject(KeyActionExecutorService) private readonly executor: KeyActionExecutorService,
     @Inject(KeyActionGenomePolicyService) private readonly genomePolicy: KeyActionGenomePolicyService,
+    @Inject(AutonomyOrchestratorService) private readonly autonomyOrchestrator: AutonomyOrchestratorService,
   ) {}
 
   async create(
@@ -48,6 +52,20 @@ export class KeyActionProposalService {
         evidence: (input.evidence ?? []) as Prisma.InputJsonValue,
         actionType: input.actionType,
         payload: (input.payload ?? {}) as Prisma.InputJsonValue,
+        planId: input.planId ?? null,
+        planStepId: input.planStepId ?? null,
+        correlationId: input.correlationId ?? null,
+        commandId: input.commandId ?? null,
+        sessionId: input.sessionId ?? null,
+        businessEventId: input.businessEventId ?? null,
+        toolName: input.toolName ?? null,
+        module: input.module ?? null,
+        description: input.description ?? null,
+        expectedBenefit: input.expectedBenefit ?? null,
+        risks: input.risks ?? null,
+        inputPayload: (input.inputPayload ?? undefined) as Prisma.InputJsonValue | undefined,
+        affectedEntities: (input.affectedEntities ?? undefined) as Prisma.InputJsonValue | undefined,
+        multiStepParentId: input.multiStepParentId ?? null,
         riskLevel,
         status: 'PENDING',
         requiresApproval,
@@ -74,6 +92,7 @@ export class KeyActionProposalService {
         ...(query.status ? { status: query.status } : {}),
         ...(query.sourceType ? { sourceType: query.sourceType } : {}),
         ...(query.actionType ? { actionType: query.actionType } : {}),
+        ...(query.createdAfter ? { createdAt: { gte: query.createdAfter } } : {}),
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -83,6 +102,14 @@ export class KeyActionProposalService {
   async get(businessId: string, proposalId: string): Promise<KeyActionProposalData> {
     const row = await this.prisma.client.keyActionProposal.findFirst({
       where: { id: proposalId, businessId },
+    });
+    if (!row) throw new NotFoundException('Action proposal not found');
+    return this.serialize(row);
+  }
+
+  async getById(proposalId: string): Promise<KeyActionProposalData> {
+    const row = await this.prisma.client.keyActionProposal.findUnique({
+      where: { id: proposalId },
     });
     if (!row) throw new NotFoundException('Action proposal not found');
     return this.serialize(row);
@@ -116,7 +143,14 @@ export class KeyActionProposalService {
       { approvedBy },
     );
 
-    return this.serialize(row);
+    const proposal = this.serialize(row);
+    this.events.emit('key.action.approved', {
+      proposalId,
+      businessId,
+      proposal,
+    });
+
+    return proposal;
   }
 
   async reject(
@@ -149,7 +183,15 @@ export class KeyActionProposalService {
       { rejectedBy, reason },
     );
 
-    return this.serialize(row);
+    const proposal = this.serialize(row);
+    this.events.emit('key.action.rejected', {
+      proposalId,
+      businessId,
+      proposal,
+      reason,
+    });
+
+    return proposal;
   }
 
   async cancel(businessId: string, proposalId: string): Promise<KeyActionProposalData> {
@@ -194,6 +236,45 @@ export class KeyActionProposalService {
 
     if ((proposal.riskLevel === 'HIGH' || proposal.riskLevel === 'CRITICAL') && !confirm) {
       throw new NotFoundException('High-risk action requires explicit confirmation');
+    }
+
+    const actionKey = `key_autonomy.${proposal.actionType}`;
+    const autonomyVerdict = await this.autonomyOrchestrator.evaluateAction(
+      businessId,
+      actionKey,
+      (proposal.payload as Record<string, unknown>) ?? {},
+      { proposedBy: executedBy, proposalId: proposal.id },
+    );
+
+    if (!autonomyVerdict.allowed) {
+      const row = await this.prisma.client.keyActionProposal.update({
+        where: { id: proposalId },
+        data: {
+          status: 'BLOCKED',
+          executedBy: executedBy ?? null,
+          executedAt: new Date(),
+          failureReason: autonomyVerdict.reason,
+        },
+      });
+
+      await this.emitLifecycleEvent(
+        businessId,
+        proposalId,
+        proposal.actionType,
+        'key.action.blocked_by_autonomy',
+        'HIGH',
+        {
+          executedBy,
+          reason: autonomyVerdict.reason,
+          ruleTrace: autonomyVerdict.ruleTrace,
+        },
+      );
+
+      throw new BadRequestException(autonomyVerdict.reason);
+    }
+
+    if (autonomyVerdict.requiresApproval && !confirm) {
+      throw new BadRequestException(autonomyVerdict.reason);
     }
 
     const genomeDecision = await this.genomePolicy.evaluateExecution(businessId, proposal);
@@ -347,6 +428,20 @@ export class KeyActionProposalService {
       evidence: (row.evidence ?? []) as string[],
       actionType: row.actionType as KeyExecutableActionType,
       payload: (row.payload ?? {}) as Record<string, unknown>,
+      planId: row.planId,
+      planStepId: row.planStepId,
+      correlationId: row.correlationId,
+      commandId: row.commandId,
+      sessionId: row.sessionId,
+      businessEventId: row.businessEventId,
+      toolName: row.toolName,
+      module: row.module,
+      description: row.description,
+      expectedBenefit: row.expectedBenefit,
+      risks: row.risks,
+      inputPayload: (row.inputPayload ?? null) as Record<string, unknown> | null,
+      affectedEntities: (row.affectedEntities ?? null) as Record<string, unknown> | null,
+      multiStepParentId: row.multiStepParentId,
       riskLevel: row.riskLevel,
       status: row.status as KeyActionProposalStatus,
       requiresApproval: row.requiresApproval,

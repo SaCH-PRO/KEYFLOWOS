@@ -104,7 +104,7 @@ export class FeatureFlagsService {
           },
           update: {},
         });
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(`Failed to seed feature flag ${known.key}: ${(err as Error).message}`);
       }
     }

@@ -296,7 +296,7 @@ export class StoreOrderService {
           });
         }
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`[store-order] CRM hook failed: ${(err as Error).message}`);
     }
 
@@ -449,7 +449,7 @@ export class StoreOrderService {
         ...(referralCode ? { custom: { referralCode } } : {}),
       });
       contactId = contact?.id ?? null;
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`[store-order] CRM resolve failed for order ${order.id}: ${(err as Error).message}`);
     }
     if (!contactId) {
@@ -655,7 +655,7 @@ export class StoreOrderService {
         sourceDetail: `order:${order.orderNumber}`,
         data: baseData,
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`[store-order] post-checkout timeline write failed: ${(err as Error).message}`);
     }
 
@@ -678,7 +678,7 @@ export class StoreOrderService {
             });
           }
         }
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(`[store-order] inventory-risk eval failed for ${productId}: ${(err as Error).message}`);
       }
     }

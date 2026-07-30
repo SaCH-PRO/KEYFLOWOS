@@ -150,7 +150,7 @@ export class StorefrontConversionService {
           },
         });
         upserts++;
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(
           `[conversion-daily] upsert failed business=${businessId} day=${dayStart.toISOString()} kind=${kind} ref=${refId}: ${(err as Error).message}`,
         );

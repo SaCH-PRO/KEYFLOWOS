@@ -25,8 +25,8 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { ModelGatewayService } from '../../ai/model-gateway.service';
-import { AiUsageService } from '../../ai/ai-usage.service';
+import { ModelGatewayService } from '../ai/model-gateway.service';
+import { AiUsageService } from '../ai/ai-usage.service';
 import { KeyCortexContextV2Service } from './key-cortex-context-v2.service';
 import { KeyCortexInsightService } from './key-cortex-insight.service';
 import { v4 as uuidv4 } from 'uuid';
@@ -287,13 +287,20 @@ Return JSON:
 }]`;
 
     // 3. Call AI
-    const response = await this.modelGateway.complete(prompt, { temperature: 0.85, maxTokens: 4000 });
-    await this.aiUsage.trackUsage(businessId, 'creativity-strategy', response.usage);
+    const response = await this.aiUsage.trackAndComplete(
+      businessId,
+      undefined,
+      'creativity-strategy',
+      {
+        messages: [{ role: 'user' as const, content: prompt }],
+      temperature: 0.85, maxTokens: 4000
+      },
+    );
 
     // 4. Parse and enrich
     let ideas: CreativeIdea[] = [];
     try {
-      const parsed = JSON.parse(response.text) as Array<{
+      const parsed = JSON.parse(response.content) as Array<{
         title: string;
         description: string;
         category: string;
@@ -385,10 +392,17 @@ Return JSON:
   "inspiration": "lateral-thinking-${reframe.reframe}"
 }]`;
 
-        const response = await this.modelGateway.complete(prompt, { temperature: 0.9, maxTokens: 2000 });
-        await this.aiUsage.trackUsage(businessId, 'creativity-lateral', response.usage);
+        const response = await this.aiUsage.trackAndComplete(
+          businessId,
+          undefined,
+          'creativity-lateral',
+          {
+            messages: [{ role: 'user' as const, content: prompt }],
+          temperature: 0.9, maxTokens: 2000
+          },
+        );
 
-        const parsed = JSON.parse(response.text) as Array<{
+        const parsed = JSON.parse(response.content) as Array<{
           title: string;
           description: string;
           category: string;
@@ -435,7 +449,7 @@ Return JSON:
     const cached = this.creativeHistory.get(businessId) ?? [];
 
     // Query database
-    const dbIdeas = await this.prisma.keyCortexCreativeIdea
+    const dbIdeas = await this.prisma.client.keyCortexCreativeIdea
       ?.findMany({
         where: { businessId },
         orderBy: { generatedAt: 'desc' },
@@ -476,7 +490,7 @@ Return JSON:
 
     // Update database
     try {
-      await this.prisma.keyCortexCreativeIdea?.update({
+      await this.prisma.client.keyCortexCreativeIdea?.update({
         where: { id: ideaId },
         data: { status, feedback, ...(status === 'implemented' ? { implementedAt: new Date() } : {}) },
       });
@@ -592,10 +606,17 @@ Return JSON:
 }]`;
 
     try {
-      const response = await this.modelGateway.complete(aiPrompt, { temperature: 0.85, maxTokens: 2500 });
-      await this.aiUsage.trackUsage(businessId, 'creativity-combination', response.usage);
+      const response = await this.aiUsage.trackAndComplete(
+        businessId,
+        undefined,
+        'creativity-combination',
+        {
+          messages: [{ role: 'user' as const, content: aiPrompt }],
+        temperature: 0.85, maxTokens: 2500
+        },
+      );
 
-      const parsed = JSON.parse(response.text) as Array<{
+      const parsed = JSON.parse(response.content) as Array<{
         title: string;
         description: string;
         category: string;
@@ -653,10 +674,17 @@ Return JSON:
 }]`;
 
     try {
-      const response = await this.modelGateway.complete(aiPrompt, { temperature: 0.9, maxTokens: 2500 });
-      await this.aiUsage.trackUsage(businessId, 'creativity-inversion', response.usage);
+      const response = await this.aiUsage.trackAndComplete(
+        businessId,
+        undefined,
+        'creativity-inversion',
+        {
+          messages: [{ role: 'user' as const, content: aiPrompt }],
+        temperature: 0.9, maxTokens: 2500
+        },
+      );
 
-      const parsed = JSON.parse(response.text) as Array<{
+      const parsed = JSON.parse(response.content) as Array<{
         title: string;
         description: string;
         category: string;
@@ -717,10 +745,17 @@ Return JSON:
 }]`;
 
       try {
-        const response = await this.modelGateway.complete(aiPrompt, { temperature: 0.8, maxTokens: 2000 });
-        await this.aiUsage.trackUsage(businessId, 'creativity-analogy', response.usage);
+        const response = await this.aiUsage.trackAndComplete(
+          businessId,
+          undefined,
+          'creativity-analogy',
+          {
+            messages: [{ role: 'user' as const, content: aiPrompt }],
+          temperature: 0.8, maxTokens: 2000
+          },
+        );
 
-        const parsed = JSON.parse(response.text) as Array<{
+        const parsed = JSON.parse(response.content) as Array<{
           title: string;
           description: string;
           category: string;
@@ -780,10 +815,17 @@ Return JSON:
 }]`;
 
     try {
-      const response = await this.modelGateway.complete(aiPrompt, { temperature: 0.95, maxTokens: 2500 });
-      await this.aiUsage.trackUsage(businessId, 'creativity-constraint-removal', response.usage);
+      const response = await this.aiUsage.trackAndComplete(
+        businessId,
+        undefined,
+        'creativity-constraint-removal',
+        {
+          messages: [{ role: 'user' as const, content: aiPrompt }],
+        temperature: 0.95, maxTokens: 2500
+        },
+      );
 
-      const parsed = JSON.parse(response.text) as Array<{
+      const parsed = JSON.parse(response.content) as Array<{
         title: string;
         description: string;
         category: string;
@@ -849,10 +891,17 @@ Return JSON:
 }]`;
 
       try {
-        const response = await this.modelGateway.complete(aiPrompt, { temperature: 0.85, maxTokens: 2000 });
-        await this.aiUsage.trackUsage(businessId, 'creativity-extreme-users', response.usage);
+        const response = await this.aiUsage.trackAndComplete(
+          businessId,
+          undefined,
+          'creativity-extreme-users',
+          {
+            messages: [{ role: 'user' as const, content: aiPrompt }],
+          temperature: 0.85, maxTokens: 2000
+          },
+        );
 
-        const parsed = JSON.parse(response.text) as Array<{
+        const parsed = JSON.parse(response.content) as Array<{
           title: string;
           description: string;
           category: string;
@@ -919,10 +968,17 @@ Return JSON:
 }]`;
 
       try {
-        const response = await this.modelGateway.complete(aiPrompt, { temperature: 0.8, maxTokens: 2000 });
-        await this.aiUsage.trackUsage(businessId, 'creativity-trend-riding', response.usage);
+        const response = await this.aiUsage.trackAndComplete(
+          businessId,
+          undefined,
+          'creativity-trend-riding',
+          {
+            messages: [{ role: 'user' as const, content: aiPrompt }],
+          temperature: 0.8, maxTokens: 2000
+          },
+        );
 
-        const parsed = JSON.parse(response.text) as Array<{
+        const parsed = JSON.parse(response.content) as Array<{
           title: string;
           description: string;
           category: string;
@@ -986,10 +1042,17 @@ Return JSON:
 }]`;
 
     try {
-      const response = await this.modelGateway.complete(aiPrompt, { temperature: 0.85, maxTokens: 2500 });
-      await this.aiUsage.trackUsage(businessId, 'creativity-problem-first', response.usage);
+      const response = await this.aiUsage.trackAndComplete(
+        businessId,
+        undefined,
+        'creativity-problem-first',
+        {
+          messages: [{ role: 'user' as const, content: aiPrompt }],
+        temperature: 0.85, maxTokens: 2500
+        },
+      );
 
-      const parsed = JSON.parse(response.text) as Array<{
+      const parsed = JSON.parse(response.content) as Array<{
         title: string;
         description: string;
         category: string;
@@ -1489,7 +1552,7 @@ Return JSON:
 
     // Persist to database
     for (const idea of ideas) {
-      await this.prisma.keyCortexCreativeIdea
+      await this.prisma.client.keyCortexCreativeIdea
         ?.upsert({
           where: { id: idea.id },
           update: {
@@ -1548,7 +1611,7 @@ Return JSON:
   }
 
   private async findAllActiveBusinesses(): Promise<string[]> {
-    const businesses = await this.prisma.business
+    const businesses = await this.prisma.client.business
       .findMany({ where: { active: true }, select: { id: true } })
       .catch(() => []);
 

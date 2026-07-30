@@ -35,7 +35,7 @@ export class CalendarOrdersListener {
     }
     try {
       await this.projection.upsertFromSource(input);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `marketplace_order projection failed id=${order.id}: ${(err as Error).message}`,
       );

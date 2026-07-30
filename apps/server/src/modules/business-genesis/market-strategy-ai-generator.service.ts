@@ -159,7 +159,7 @@ Return ONLY valid JSON matching this schema:
     try {
       const response = await this.modelGateway.complete({ businessId, ...params });
       return response.content ?? null;
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Model gateway call failed for ${label}: ${(err as Error).message}; using fallback`);
       return null;
     }
@@ -178,7 +178,7 @@ Return ONLY valid JSON matching this schema:
       const cleaned = raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
       const parsed = JSON.parse(cleaned);
       return coerceToContract<T>(parsed, contract, fallback);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Failed to parse/coerce ${contract}: ${(err as Error).message}; using fallback`);
       return fallback;
     }

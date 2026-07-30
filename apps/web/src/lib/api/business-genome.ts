@@ -471,6 +471,15 @@ export interface GenomeRecommendationOutcomeSummary {
   executionRate: number;
 }
 
+export interface GenomeRecommendationLearningSummary {
+  businessId: string;
+  totalObserved: number;
+  averageImpactScore: number;
+  topPositiveDomains: Array<{ domain: string; count: number; averageImpact: number }>;
+  topNegativeDomains: Array<{ domain: string; count: number; averageImpact: number }>;
+  recentOutcomes: GenomeRecommendationOutcome[];
+}
+
 export interface GenomeRecommendationExecutionStatus {
   recommendationId: string;
   linkedActionType?: string | null;
@@ -523,6 +532,12 @@ export async function listGenomeRecommendationOutcomes(
 export async function getGenomeRecommendationOutcomesSummary(businessId: string) {
   return apiGet<GenomeRecommendationOutcomeSummary>(
     `/business-genome/businesses/${businessId}/key-genome/outcomes/summary`,
+  );
+}
+
+export async function getGenomeRecommendationLearningSummary(businessId: string) {
+  return apiGet<GenomeRecommendationLearningSummary>(
+    `/business-genome/businesses/${businessId}/key-genome/outcomes/learning-summary`,
   );
 }
 

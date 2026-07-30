@@ -105,7 +105,7 @@ export class GoogleFormsConnector implements IConnector {
       const res = await fetch('https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=' + business.formsAccessToken);
       if (!res.ok) return { success: false, error: `Token check returned ${res.status}` };
       return { success: true, account: business.formsEmail ?? undefined };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }
@@ -138,7 +138,7 @@ export class GoogleFormsConnector implements IConnector {
           ? `${count} form(s)${data.files?.[0]?.name ? ` • latest: "${data.files[0].name.slice(0, 40)}"` : ''}`
           : 'No forms found in this account',
       };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }

@@ -110,7 +110,7 @@ export class SeoContentService {
         temperature: 0.6,
         responseMode: 'structured_json',
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`AI brief generation failed: ${(err as Error).message}`);
     }
 
@@ -136,7 +136,7 @@ export class SeoContentService {
           .replace(/\s*```$/i, '')
           .trim();
         parsed = { ...parsed, ...JSON.parse(cleaned) };
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(`Failed to parse AI brief JSON: ${(err as Error).message}`);
       }
     }
@@ -193,7 +193,7 @@ export class SeoContentService {
           notes: `Content gap detected: ${gap.reason} (opportunity score: ${gap.opportunityScore})`,
         });
         briefs.push(brief);
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(`Failed to generate brief for ${gap.keyword}: ${(err as Error).message}`);
       }
     }

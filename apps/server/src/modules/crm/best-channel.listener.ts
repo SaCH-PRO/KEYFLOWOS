@@ -34,7 +34,7 @@ export class BestChannelListener {
         type: payload.type,
         data: payload.data,
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `Best-channel rollup failed for contact=${payload.contactId} type=${payload.type}: ${(err as Error).message}`,
       );

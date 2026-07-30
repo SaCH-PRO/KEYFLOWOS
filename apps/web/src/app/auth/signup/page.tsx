@@ -3,7 +3,7 @@
 import { getApiBase } from "@/lib/api-base";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "../motion-shim";
 import {
@@ -28,31 +28,42 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { bootstrapIdentity, identitySignup, identityResendVerification } from "@/lib/client";
-import { setStoredToken, setStoredBusinessId } from "@/lib/workspace";
+import { setStoredToken, setStoredRefreshToken, setStoredBusinessId } from "@/lib/workspace";
+import {
+  generateCodeVerifier,
+  generateCodeChallenge,
+  storeCodeVerifier,
+} from "@/lib/oauth-pkce";
+import { useUsernameAvailability } from "@/hooks/use-username-availability";
+import { checkUsernameAvailability } from "@/lib/username-availability";
 
 const API_BASE = getApiBase();
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? (typeof window !== "undefined" ? window.location.origin : "http://localhost:3000");
 
-function signUpWithGoogle() {
+async function signUpWithGoogle() {
   if (!SUPABASE_URL) return;
-  // Use current origin for localhost dev, otherwise use configured SITE_URL
-  const origin = typeof window !== "undefined" && window.location.hostname === "localhost"
-    ? window.location.origin
-    : SITE_URL;
+  // Always redirect back to the origin the user is actually on (localhost,
+  // tunnel, preview, etc.). The cookie/state is set on the same origin.
+  const origin = typeof window !== "undefined" ? window.location.origin : SITE_URL;
   const redirectTo = `${origin.replace(/\/$/, "")}/auth/callback`;
-  window.location.href = `${SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirectTo)}`;
+  const ref = typeof window !== "undefined"
+    ? window.localStorage.getItem("kf_referral_code") || new URLSearchParams(window.location.search).get("ref") || ""
+    : "";
+  if (ref && typeof window !== "undefined") {
+    window.localStorage.setItem("kf_referral_code", ref);
+  }
+  // Include PKCE parameters so the callback can exchange the authorization
+  // code for a session. Supabase Auth manages the OAuth state internally, so
+  // we do not pass a custom `state` parameter (doing so causes
+  // `bad_oauth_state`).
+  const codeVerifier = generateCodeVerifier();
+  storeCodeVerifier(codeVerifier);
+  const codeChallenge = await generateCodeChallenge(codeVerifier);
+
+  window.location.href = `${SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirectTo)}&code_challenge=${encodeURIComponent(codeChallenge)}&code_challenge_method=S256`;
 }
 
-async function isUsernameAvailable(username: string): Promise<boolean> {
-  if (!username) return true;
-  try {
-    const res = await fetch(`${API_BASE}/identity/check-username?username=${encodeURIComponent(username.trim())}`);
-    if (!res.ok) return true;
-    const data = await res.json().catch(() => ({ available: true }));
-    return data.available === true;
-  } catch { return true; }
-}
 
 const FEATURES = [
   { icon: Zap, label: "AI Autopilot", desc: "80-90% operations automated" },
@@ -70,6 +81,8 @@ const PW_RULES = [
 
 export default function AuthSignup() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const [referralCode, setReferralCode] = useState<string | undefined>(undefined);
   const [step, setStep] = useState(1);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -85,7 +98,7 @@ export default function AuthSignup() {
   const [resendNote, setResendNote] = useState<{ kind: "success" | "error"; text: string } | null>(null);
   const [resendCooldownSec, setResendCooldownSec] = useState(0);
   const [showPassword, setShowPassword] = useState(false);
-  const [usernameStatus, setUsernameStatus] = useState<"idle" | "checking" | "available" | "taken">("idle");
+  const { status: usernameStatus, error: usernameError, check: checkUsername, reset: resetUsernameStatus } = useUsernameAvailability();
 
   const passwordChecks = useMemo(() => PW_RULES.map((r) => r.test(password)), [password]);
   const passwordStrength = passwordChecks.filter(Boolean).length;
@@ -98,17 +111,25 @@ export default function AuthSignup() {
   }, [resendCooldownSec]);
 
   useEffect(() => {
-    let cancelled = false;
-    if (!username.trim()) { setUsernameStatus("idle"); return; }
-    setUsernameStatus("checking");
-    const id = setTimeout(async () => {
-      const available = await isUsernameAvailable(username.trim());
-      if (!cancelled) setUsernameStatus(available ? "available" : "taken");
-    }, 300);
-    return () => { cancelled = true; clearTimeout(id); };
-  }, [username]);
+    // Capture referral code from URL or localStorage and keep it for bootstrap.
+    const ref = searchParams?.get("ref") || (typeof window !== "undefined" ? window.localStorage.getItem("kf_referral_code") || undefined : undefined);
+    if (ref) {
+      setReferralCode(ref);
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem("kf_referral_code", ref);
+      }
+    }
+  }, [searchParams]);
 
-  const canProceedStep1 = firstName.trim() && lastName.trim() && username.trim() && usernameStatus !== "taken";
+  useEffect(() => {
+    if (!username.trim()) {
+      resetUsernameStatus();
+      return;
+    }
+    checkUsername(username);
+  }, [username, checkUsername, resetUsernameStatus]);
+
+  const canProceedStep1 = firstName.trim() && lastName.trim() && username.trim() && usernameStatus === "available";
   const canProceedStep2 = email.trim() && password.trim() && passwordValid;
 
   const onSubmit = async (e: FormEvent<HTMLFormElement>) => {
@@ -117,14 +138,18 @@ export default function AuthSignup() {
       if (!firstName.trim()) { setError("What's your first name?"); return; }
       if (!lastName.trim()) { setError("And your last name?"); return; }
       if (!username.trim()) { setError("Pick a unique username."); return; }
+      if (usernameStatus === "checking") { setError("Checking username availability…"); return; }
       if (usernameStatus === "taken") { setError("That username is taken."); return; }
+      if (usernameStatus === "unknown") { setError(usernameError || "Unable to verify username. Please check your connection and try again."); return; }
+      if (usernameStatus !== "available") { setError("Please wait for username verification."); return; }
       setError(null); setStep(2); return;
     }
     if (!passwordValid) { setError("Please meet all password requirements."); return; }
     setError(null); setLoading(true);
     try {
-      const available = await isUsernameAvailable(username.trim());
-      if (!available) { setError("That username is taken. Please choose another."); setStep(1); setLoading(false); return; }
+      const availability = await checkUsernameAvailability(username.trim());
+      if (availability.status === "unknown") { setError("Unable to verify username. Please check your connection and try again."); setLoading(false); return; }
+      if (availability.status === "taken") { setError("That username is taken. Please choose another."); setStep(1); setLoading(false); return; }
 
       const profileDraft = {
         firstName: firstName.trim(), lastName: lastName.trim(), username: username.trim(),
@@ -142,6 +167,7 @@ export default function AuthSignup() {
         username: username.trim(),
         company: company.trim() || undefined,
         phone: phone.trim() || undefined,
+        referralCode,
       });
 
       if (result.error || !result.data) {
@@ -155,12 +181,13 @@ export default function AuthSignup() {
         // Auto-confirm path (dev / verification disabled): we received a session,
         // bootstrap the user and route into the app.
         setStoredToken(data.accessToken);
-        if (data.refreshToken) window.localStorage.setItem("kf_refresh_token", data.refreshToken);
+        if (data.refreshToken) setStoredRefreshToken(data.refreshToken);
         const bootstrap = await bootstrapIdentity({
           email: email.trim(), username: username.trim(),
           name: `${firstName.trim()} ${lastName.trim()}`.trim(),
           firstName: firstName.trim(), lastName: lastName.trim(),
           phone: phone.trim(), company: company.trim(),
+          referralCode,
         });
         if (bootstrap.data?.business?.id) {
           setStoredBusinessId(bootstrap.data.business.id);
@@ -416,6 +443,7 @@ export default function AuthSignup() {
                           className={`w-full pl-10 pr-9 py-2.5 rounded-xl text-sm outline-none transition-all bg-white/[0.03] text-[hsl(30_20%_98%)] placeholder:text-[hsl(30_10%_30%)] focus:ring-1 focus:ring-[hsl(24_95%_53%/0.25)] ${
                             usernameStatus === "taken" ? "border border-red-500/50 focus:border-red-500/50" :
                             usernameStatus === "available" ? "border border-emerald-500/50 focus:border-emerald-500/50" :
+                            usernameStatus === "unknown" ? "border border-amber-500/50 focus:border-amber-500/50" :
                             "border border-white/[0.08] focus:border-[hsl(24_95%_53%/0.5)]"
                           }`}
                           placeholder="johndoe" />
@@ -423,9 +451,11 @@ export default function AuthSignup() {
                           {usernameStatus === "checking" && <Loader2 className="w-4 h-4 text-[hsl(24_95%_53%)] animate-spin" />}
                           {usernameStatus === "available" && <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
                           {usernameStatus === "taken" && <X className="w-4 h-4 text-red-400" />}
+                          {usernameStatus === "unknown" && <AlertCircle className="w-4 h-4 text-amber-400" />}
                         </div>
                       </div>
                       {usernameStatus === "taken" && <p className="text-xs text-red-400">Taken — try another</p>}
+                      {usernameStatus === "unknown" && <p className="text-xs text-amber-400">{usernameError || "Couldn’t verify username. Check your connection and try again."}</p>}
                     </div>
 
                     <div className="flex flex-col gap-1.5">

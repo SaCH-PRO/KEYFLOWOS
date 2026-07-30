@@ -1,8 +1,9 @@
-import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { TimelineService } from '../timeline/timeline.service';
-import { ToolResult } from './key-tool.registry';
+import { ToolResult } from './key-tool-registry.service';
 import { KeyToolRegistryService } from './key-tool-registry.service';
+import { KeyCortexToolRegistryService } from '../key-cortex/key-cortex-tool-registry.service';
 import { CommandService } from '../command/command.service';
 
 export enum KeyMode {
@@ -55,8 +56,13 @@ export class KeyCommandService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(TimelineService) private readonly timeline: TimelineService,
-    @Inject(forwardRef(() => KeyToolRegistryService)) private readonly toolRegistry: KeyToolRegistryService,
+    @Optional()
+    @Inject(forwardRef(() => KeyToolRegistryService))
+    private readonly toolRegistry: KeyToolRegistryService | undefined,
     @Inject(forwardRef(() => CommandService)) private readonly commandService: CommandService,
+    @Optional()
+    @Inject(forwardRef(() => KeyCortexToolRegistryService))
+    private readonly keyCortexToolRegistry?: KeyCortexToolRegistryService,
   ) {}
 
   async receiveCommand(
@@ -194,12 +200,25 @@ export class KeyCommandService {
     const results: ToolResult[] = [];
 
     for (const step of plan.steps) {
-      const result = await this.toolRegistry.execute(
-        step.module,
-        step.tool,
-        { businessId, userId: userId ?? null, commandId, autonomyLevel: 2 },
-        step.input,
-      );
+      // Phase 3 Skeleton: prefer canonical registry; fall back to legacy AI-module registry.
+      const canonicalName = `${step.module}.${step.tool}`;
+      let result: ToolResult;
+      if (this.keyCortexToolRegistry?.getTool(canonicalName)) {
+        result = await this.keyCortexToolRegistry.execute(
+          canonicalName,
+          { businessId, userId: userId ?? undefined, commandId, autonomyLevel: 2 },
+          step.input,
+        );
+      } else if (this.toolRegistry) {
+        result = await this.toolRegistry.execute(
+          step.module,
+          step.tool,
+          { businessId, userId: userId ?? undefined, commandId, autonomyLevel: 2 },
+          step.input,
+        );
+      } else {
+        result = { success: false, error: 'No tool registry available' };
+      }
       results.push(result);
     }
 
@@ -477,7 +496,7 @@ export class KeyCommandService {
           executableByKey: true,
         });
         commandItemIds.push(cmdItem.id);
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(`Failed to create CommandItem for action ${action.id}: ${(err as Error).message}`);
       }
     }
@@ -508,5 +527,24 @@ export class KeyCommandService {
 
   async logResult(commandId: string, result: ToolResult[]) {
     this.logger.debug(`Command ${commandId} executed with ${result.length} steps`);
+  }
+
+  /**
+   * Queue an async background job for execution by KEY workers.
+   * Minimal stub: writes a keyCommand audit row and returns queued id.
+   */
+  async enqueue(job: { type: string; payload: Record<string, unknown> }): Promise<{ id: string; type: string; status: string }> {
+    const id = `job_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    this.logger.log(`[enqueue] ${job.type} ${id}`);
+    return { id, type: job.type, status: 'queued' };
+  }
+
+  /**
+   * Execute an ad-hoc command synchronously.
+   * Minimal stub: returns the payload as result.
+   */
+  async execute(command: { type: string; payload: Record<string, unknown> }): Promise<Record<string, unknown>> {
+    this.logger.log(`[execute] ${command.type}`);
+    return { success: true, type: command.type, result: command.payload };
   }
 }

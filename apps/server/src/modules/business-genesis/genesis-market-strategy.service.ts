@@ -70,7 +70,7 @@ export class GenesisMarketStrategyService {
     try {
       const instance = await this.documentBuilder.buildOrUpdate(businessId, strategyData, competitorData);
       documentInstanceId = instance.id;
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Document build failed for ${businessId}: ${(err as Error).message}`);
     }
 
@@ -86,7 +86,7 @@ export class GenesisMarketStrategyService {
     try {
       readinessScore = this.readiness.calculate(updatedBlueprint);
       await this.blueprint.updateBlueprint(businessId, { readinessScore: readinessScore.overall });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Readiness update failed for ${businessId}: ${(err as Error).message}`);
       readinessScore = previousReadiness;
     }

@@ -56,7 +56,7 @@ export class AgentBusService implements OnModuleInit {
             messageId: record.id,
             createdAt: record.createdAt,
           });
-        } catch (err) {
+        } catch (err: any) {
           this.logger.error(`Agent bus handler error for ${message.topic}: ${(err as Error).message}`);
         }
       }

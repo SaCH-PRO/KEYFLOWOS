@@ -16,9 +16,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import {
   TrustExplanation,
   GenomeEvidenceResponse,
-  CortexContextSnapshot,
 } from './cortex-genome-contracts';
-import { CortexActionType } from './key-cortex.types';
+import { CortexActionType, CortexContextSnapshot } from './key-cortex.types';
 
 @Injectable()
 export class TrustExplanationService {

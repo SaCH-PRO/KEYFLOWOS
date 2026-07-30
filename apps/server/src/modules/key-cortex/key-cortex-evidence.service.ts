@@ -47,7 +47,7 @@ export class KeyCortexEvidenceService {
   }): Promise<Evidence> {
     const proofHash = this.hashProof(params.proof);
 
-    const evidence = await this.prisma.client.evidence.create({
+    const evidence = await (this.prisma.client as any).evidence.create({
       data: {
         businessId: params.businessId,
         claim: params.claim,
@@ -82,7 +82,7 @@ export class KeyCortexEvidenceService {
       verificationMethod: string;
     },
   ): Promise<Evidence> {
-    const updated = await this.prisma.client.evidence.update({
+    const updated = await (this.prisma.client as any).evidence.update({
       where: { id: evidenceId },
       data: {
         verified: true,
@@ -109,7 +109,7 @@ export class KeyCortexEvidenceService {
       verificationMethod: string;
     },
   ): Promise<number> {
-    const result = await this.prisma.client.evidence.updateMany({
+    const result = await (this.prisma.client as any).evidence.updateMany({
       where: { id: { in: evidenceIds } },
       data: {
         verified: true,
@@ -138,7 +138,7 @@ export class KeyCortexEvidenceService {
       limit?: number;
     } = {},
   ): Promise<Evidence[]> {
-    return this.prisma.client.evidence.findMany({
+    return (this.prisma.client as any).evidence.findMany({
       where: { businessId, ...filters },
       orderBy: { createdAt: 'desc' },
       take: filters.limit ?? 50,
@@ -158,7 +158,7 @@ export class KeyCortexEvidenceService {
       contributesToDna: true,
     };
     if (dnaSection) where.dnaSection = dnaSection;
-    return this.prisma.client.evidence.findMany({
+    return (this.prisma.client as any).evidence.findMany({
       where,
       orderBy: { confidence: 'desc' },
     });
@@ -176,7 +176,7 @@ export class KeyCortexEvidenceService {
     currentHash: string;
     storedHash: string;
   }> {
-    const evidence = await this.prisma.client.evidence.findUnique({
+    const evidence = await (this.prisma.client as any).evidence.findUnique({
       where: { id: evidenceId },
     });
     if (!evidence) throw new Error('Evidence not found');
@@ -242,7 +242,7 @@ export class KeyCortexEvidenceService {
       { count: number; avgConfidence: number; latest: Date }
     >
   > {
-    const evidence = await this.prisma.client.evidence.groupBy({
+    const evidence = await (this.prisma.client as any).evidence.groupBy({
       by: ['dnaSection'],
       where: { businessId, contributesToDna: true },
       _count: true,
@@ -251,7 +251,7 @@ export class KeyCortexEvidenceService {
     });
 
     return Object.fromEntries(
-      evidence.map((e) => [
+      evidence.map((e: any) => [
         e.dnaSection ?? 'general',
         {
           count: e._count,
@@ -274,14 +274,14 @@ export class KeyCortexEvidenceService {
     byType: Record<string, number>;
   }> {
     const [total, verified, dnaContributing, byType] = await Promise.all([
-      this.prisma.client.evidence.count({ where: { businessId } }),
-      this.prisma.client.evidence.count({
+      (this.prisma.client as any).evidence.count({ where: { businessId } }),
+      (this.prisma.client as any).evidence.count({
         where: { businessId, verified: true },
       }),
-      this.prisma.client.evidence.count({
+      (this.prisma.client as any).evidence.count({
         where: { businessId, contributesToDna: true },
       }),
-      this.prisma.client.evidence.groupBy({
+      (this.prisma.client as any).evidence.groupBy({
         by: ['claimType'],
         where: { businessId },
         _count: true,
@@ -294,7 +294,7 @@ export class KeyCortexEvidenceService {
       unverified: total - verified,
       dnaContributing,
       byType: Object.fromEntries(
-        byType.map((t) => [t.claimType, t._count]),
+        byType.map((t: any) => [t.claimType, t._count]),
       ),
     };
   }

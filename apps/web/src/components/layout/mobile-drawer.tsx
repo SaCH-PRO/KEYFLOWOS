@@ -133,7 +133,6 @@ export function MobileDrawer({
   visibleOperateSections,
   visibleBuildSections,
   visibleMoreNav,
-  meNav,
   isSecondaryActive,
   isFeatureLocked,
   connectorAlertCount,

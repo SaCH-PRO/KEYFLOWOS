@@ -3,6 +3,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'crypto';
 import OpenAI from 'openai';
 import { validateOutputContract, type ContractType } from './ai-output-contracts';
+import { LLMCostService } from './llm-cost.service';
 
 export type AiProvider = 'openai' | 'anthropic' | 'xai' | 'kimi' | 'native' | 'opensource';
 
@@ -10,6 +11,10 @@ export type TaskCategory =
   | 'extraction'
   | 'classification'
   | 'reasoning'
+  | 'emotion-analysis'
+  | 'creative'
+  | 'code'
+  | 'forecasting'
   | 'content-generation'
   | 'summarization'
   | 'analysis'
@@ -35,7 +40,14 @@ export interface GatewayToolDefinition {
 
 export interface GatewayMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
-  content: string | null;
+  content:
+    | string
+    | Array<{
+        type: string;
+        text?: string;
+        image_url?: { url: string; detail?: string };
+      }>
+    | null;
   tool_calls?: GatewayToolCall[];
   tool_call_id?: string;
 }
@@ -50,6 +62,10 @@ export interface GatewayRequest {
   temperature?: number;
   providerOverride?: AiProvider;
   modelOverride?: string;
+  /** @deprecated Use modelOverride */
+  model?: string;
+  /** Response format hint (e.g. json_object) */
+  responseFormat?: { type: string };
   expectedContract?: ContractType;
 }
 
@@ -97,6 +113,8 @@ export interface StreamChunk {
   };
   provider?: AiProvider;
   model?: string;
+  fallbackUsed?: boolean;
+  fallbackProvider?: AiProvider;
   error?: string;
 }
 
@@ -104,6 +122,7 @@ export interface ProviderHealth {
   provider: AiProvider;
   available: boolean;
   configured: boolean;
+  circuitOpen: boolean;
   avgLatencyMs: number;
   errorRate: number;
   lastErrorAt: Date | null;
@@ -221,6 +240,34 @@ const DEFAULT_ROUTING_TABLE: Record<AiMode, Record<TaskCategory, ModelStrategy>>
         { provider: 'kimi', model: 'moonshot-v1-8k' },
       ],
     },
+    'emotion-analysis': {
+      primary: { provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' },
+      fallbacks: [
+        { provider: 'openai', model: 'gpt-4o' },
+        { provider: 'kimi', model: 'moonshot-v1-8k' },
+      ],
+    },
+    creative: {
+      primary: { provider: 'openai', model: 'gpt-4o' },
+      fallbacks: [
+        { provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' },
+        { provider: 'kimi', model: 'moonshot-v1-8k' },
+      ],
+    },
+    code: {
+      primary: { provider: 'openai', model: 'gpt-4o' },
+      fallbacks: [
+        { provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' },
+        { provider: 'kimi', model: 'moonshot-v1-8k' },
+      ],
+    },
+    forecasting: {
+      primary: { provider: 'openai', model: 'gpt-4o' },
+      fallbacks: [
+        { provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' },
+        { provider: 'kimi', model: 'moonshot-v1-8k' },
+      ],
+    },
     general: {
       primary: { provider: 'openai', model: 'gpt-4o' },
       fallbacks: [
@@ -273,6 +320,34 @@ const DEFAULT_ROUTING_TABLE: Record<AiMode, Record<TaskCategory, ModelStrategy>>
       ],
     },
     analysis: {
+      primary: { provider: 'openai', model: 'gpt-4o' },
+      fallbacks: [
+        { provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' },
+        { provider: 'kimi', model: 'moonshot-v1-32k' },
+      ],
+    },
+    'emotion-analysis': {
+      primary: { provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' },
+      fallbacks: [
+        { provider: 'openai', model: 'gpt-4o' },
+        { provider: 'kimi', model: 'moonshot-v1-32k' },
+      ],
+    },
+    creative: {
+      primary: { provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' },
+      fallbacks: [
+        { provider: 'openai', model: 'gpt-4o' },
+        { provider: 'kimi', model: 'moonshot-v1-32k' },
+      ],
+    },
+    code: {
+      primary: { provider: 'openai', model: 'gpt-4o' },
+      fallbacks: [
+        { provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' },
+        { provider: 'kimi', model: 'moonshot-v1-32k' },
+      ],
+    },
+    forecasting: {
       primary: { provider: 'openai', model: 'gpt-4o' },
       fallbacks: [
         { provider: 'anthropic', model: 'claude-3-5-sonnet-20241022' },
@@ -337,6 +412,34 @@ const DEFAULT_ROUTING_TABLE: Record<AiMode, Record<TaskCategory, ModelStrategy>>
         { provider: 'kimi', model: 'moonshot-v1-8k' },
       ],
     },
+    'emotion-analysis': {
+      primary: { provider: 'anthropic', model: 'claude-3-5-haiku-20241022' },
+      fallbacks: [
+        { provider: 'openai', model: 'gpt-4o-mini' },
+        { provider: 'kimi', model: 'moonshot-v1-8k' },
+      ],
+    },
+    creative: {
+      primary: { provider: 'openai', model: 'gpt-4o-mini' },
+      fallbacks: [
+        { provider: 'xai', model: 'grok-2-mini' },
+        { provider: 'kimi', model: 'moonshot-v1-8k' },
+      ],
+    },
+    code: {
+      primary: { provider: 'openai', model: 'gpt-4o-mini' },
+      fallbacks: [
+        { provider: 'xai', model: 'grok-2-mini' },
+        { provider: 'kimi', model: 'moonshot-v1-8k' },
+      ],
+    },
+    forecasting: {
+      primary: { provider: 'openai', model: 'gpt-4o-mini' },
+      fallbacks: [
+        { provider: 'xai', model: 'grok-2-mini' },
+        { provider: 'kimi', model: 'moonshot-v1-8k' },
+      ],
+    },
     general: {
       primary: { provider: 'openai', model: 'gpt-4o-mini' },
       fallbacks: [
@@ -354,6 +457,12 @@ interface ProviderMetrics {
   lastErrorAt: Date | null;
 }
 
+interface CircuitBreakerState {
+  failures: number;
+  lastFailureAt: Date | null;
+  openUntil: Date | null;
+}
+
 @Injectable()
 export class ModelGatewayService {
   private readonly logger = new Logger(ModelGatewayService.name);
@@ -361,6 +470,7 @@ export class ModelGatewayService {
   private readonly openai: OpenAI;
   private readonly providerClients = new Map<AiProvider, { configured: boolean }>();
   private readonly providerMetrics = new Map<AiProvider, ProviderMetrics>();
+  private readonly circuitBreakers = new Map<AiProvider, CircuitBreakerState>();
   private readonly preferencesCache = new Map<string, { data: AiPreferences; expiresAt: number }>();
   private readonly encryptionKey: Buffer;
   private readonly byokEncryptionAvailable: boolean;
@@ -370,10 +480,13 @@ export class ModelGatewayService {
   private static readonly PREFERENCES_TTL_MS = 120_000;
   private static readonly MAX_RETRIES = 2;
   private static readonly RETRY_DELAY_MS = 500;
+  private static readonly CIRCUIT_BREAKER_FAILURE_THRESHOLD = 3;
+  private static readonly CIRCUIT_BREAKER_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
   private static readonly ENCRYPTION_ALGORITHM = 'aes-256-gcm';
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
+    private readonly llmCost: LLMCostService,
   ) {
     this.openai = new OpenAI({
       apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
@@ -416,6 +529,11 @@ export class ModelGatewayService {
         totalErrors: 0,
         latencies: [],
         lastErrorAt: null,
+      });
+      this.circuitBreakers.set(provider, {
+        failures: 0,
+        lastFailureAt: null,
+        openUntil: null,
       });
     }
   }
@@ -556,10 +674,13 @@ export class ModelGatewayService {
           }
         }
 
+        this.recordCostFromResponse(request, response).catch((err: unknown) => {
+          this.logger.warn(`Failed to record LLM cost: ${err instanceof Error ? err.message : String(err)}`);
+        });
+
         return response;
-      } catch (err) {
+      } catch (err: any) {
         lastError = err as Error;
-        this.recordProviderError(candidate.provider);
         this.logger.error(
           `Provider ${candidate.provider}/${candidate.model} failed: ${lastError.message}`,
         );
@@ -567,6 +688,54 @@ export class ModelGatewayService {
     }
 
     throw lastError || new Error('No AI providers available');
+  }
+
+  private async recordCostFromResponse(
+    request: GatewayRequest,
+    response: GatewayResponse,
+  ): Promise<void> {
+    await this.llmCost.recordCost({
+      businessId: request.businessId,
+      sessionId: null,
+      provider: response.provider,
+      model: response.model,
+      taskCategory: request.taskCategory,
+      promptTokens: response.usage.promptTokens,
+      completionTokens: response.usage.completionTokens,
+      totalTokens: response.usage.totalTokens,
+      inputCost: (response.usage.promptTokens / 1000) * (TOKEN_COST_PER_1K[response.model]?.input ?? 0),
+      outputCost: (response.usage.completionTokens / 1000) * (TOKEN_COST_PER_1K[response.model]?.output ?? 0),
+      totalCost: response.usage.estimatedCost,
+      latencyMs: response.latencyMs,
+      fallbackUsed: response.fallbackUsed,
+      metadata: { contractType: request.expectedContract },
+    });
+  }
+
+  private async recordCostFromStream(
+    request: GatewayRequest,
+    provider: AiProvider,
+    model: string,
+    usage: NonNullable<StreamChunk['usage']>,
+    latencyMs: number,
+    fallbackUsed: boolean,
+  ): Promise<void> {
+    await this.llmCost.recordCost({
+      businessId: request.businessId,
+      sessionId: null,
+      provider,
+      model,
+      taskCategory: request.taskCategory,
+      promptTokens: usage.promptTokens,
+      completionTokens: usage.completionTokens,
+      totalTokens: usage.totalTokens,
+      inputCost: (usage.promptTokens / 1000) * (TOKEN_COST_PER_1K[model]?.input ?? 0),
+      outputCost: (usage.completionTokens / 1000) * (TOKEN_COST_PER_1K[model]?.output ?? 0),
+      totalCost: usage.estimatedCost,
+      latencyMs,
+      fallbackUsed,
+      metadata: { source: 'stream', contractType: request.expectedContract },
+    });
   }
 
   async *streamComplete(request: GatewayRequest): AsyncGenerator<StreamChunk> {
@@ -604,6 +773,8 @@ export class ModelGatewayService {
     }
 
     let lastError: Error | null = null;
+    let fallbackUsed = false;
+    let fallbackProvider: AiProvider | undefined;
 
     for (let i = 0; i < effectiveCandidates.length; i++) {
       const candidate = effectiveCandidates[i];
@@ -612,7 +783,9 @@ export class ModelGatewayService {
         continue;
       }
 
-      if (i > 0) {
+      if (i > 0 || (budgetFilteredCandidates.length === 0 && candidate !== candidates[0])) {
+        fallbackUsed = true;
+        fallbackProvider = candidate.provider;
         this.logger.warn(
           `Stream falling back to ${candidate.provider}/${candidate.model} for ${request.taskCategory} (business: ${request.businessId})`,
         );
@@ -621,15 +794,51 @@ export class ModelGatewayService {
       try {
         const startTime = Date.now();
         const stream = this.callProviderStream(request, candidate.provider, candidate.model, preferences);
+        let lastUsageChunk: StreamChunk | undefined;
 
         for await (const chunk of stream) {
-          yield { ...chunk, provider: candidate.provider, model: candidate.model };
+          const enriched = {
+            ...chunk,
+            provider: candidate.provider,
+            model: candidate.model,
+            fallbackUsed,
+            fallbackProvider,
+          };
+
+          if (enriched.type === 'usage' && enriched.usage) {
+            lastUsageChunk = enriched;
+          }
+
+          yield enriched;
         }
 
         const latencyMs = Date.now() - startTime;
         this.recordProviderSuccess(candidate.provider, latencyMs);
+
+        const usage = lastUsageChunk?.usage ?? {
+          promptTokens: 0,
+          completionTokens: 0,
+          totalTokens: 0,
+          estimatedCost: 0,
+        };
+
+        if (!lastUsageChunk) {
+          yield {
+            type: 'usage',
+            usage,
+            provider: candidate.provider,
+            model: candidate.model,
+            fallbackUsed,
+            fallbackProvider,
+          };
+        }
+
+        this.recordCostFromStream(request, candidate.provider, candidate.model, usage, latencyMs, fallbackUsed).catch((err: unknown) => {
+          this.logger.warn(`Failed to record stream LLM cost: ${err instanceof Error ? err.message : String(err)}`);
+        });
+
         return;
-      } catch (err) {
+      } catch (err: any) {
         lastError = err as Error;
         this.recordProviderError(candidate.provider);
         this.logger.error(
@@ -641,6 +850,8 @@ export class ModelGatewayService {
     yield {
       type: 'error',
       error: lastError?.message || 'No AI providers available',
+      fallbackUsed,
+      fallbackProvider,
     };
   }
 
@@ -756,20 +967,20 @@ export class ModelGatewayService {
     if (!apiKey) throw new Error('Anthropic API key not configured');
 
     let systemPrompt = '';
-    const nonSystemMessages: Array<{ role: string; content: string }> = [];
+    const nonSystemMessages: Array<{ role: string; content: string | Array<Record<string, unknown>> }> = [];
 
     for (const msg of messages) {
       if (msg.role === 'system') {
-        systemPrompt += (systemPrompt ? '\n\n' : '') + (msg.content || '');
+        systemPrompt += (systemPrompt ? '\n\n' : '') + (typeof msg.content === 'string' ? msg.content : '');
       } else if (msg.role === 'tool') {
         nonSystemMessages.push({
           role: 'user',
-          content: `[Tool result for ${msg.tool_call_id}]: ${msg.content}`,
+          content: `[Tool result for ${msg.tool_call_id}]: ${typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)}`,
         });
       } else {
         nonSystemMessages.push({
           role: msg.role === 'assistant' ? 'assistant' : 'user',
-          content: msg.content || '',
+          content: this.toAnthropicContent(msg.content),
         });
       }
     }
@@ -778,14 +989,7 @@ export class ModelGatewayService {
       nonSystemMessages.push({ role: 'user', content: 'Please respond.' });
     }
 
-    const mergedMessages: Array<{ role: string; content: string }> = [];
-    for (const msg of nonSystemMessages) {
-      if (mergedMessages.length > 0 && mergedMessages[mergedMessages.length - 1].role === msg.role) {
-        mergedMessages[mergedMessages.length - 1].content += '\n\n' + msg.content;
-      } else {
-        mergedMessages.push({ ...msg });
-      }
-    }
+    const mergedMessages = this.mergeAnthropicMessages(nonSystemMessages);
 
     if (mergedMessages.length > 0 && mergedMessages[0].role !== 'user') {
       mergedMessages.unshift({ role: 'user', content: 'Continue.' });
@@ -1328,24 +1532,38 @@ export class ModelGatewayService {
   }
 
   private isProviderAvailable(provider: AiProvider, preferences: AiPreferences): boolean {
+    let configured = false;
     if (provider === 'openai') {
-      return !!(preferences.byokOpenai || process.env.AI_INTEGRATIONS_OPENAI_API_KEY);
+      configured = !!(preferences.byokOpenai || process.env.AI_INTEGRATIONS_OPENAI_API_KEY);
+    } else if (provider === 'anthropic') {
+      configured = !!(preferences.byokAnthropic || process.env.ANTHROPIC_API_KEY);
+    } else if (provider === 'xai') {
+      configured = !!(preferences.byokXai || process.env.XAI_API_KEY);
+    } else if (provider === 'kimi') {
+      configured = !!(preferences.byokKimi || process.env.KIMI_API_KEY);
+    } else if (provider === 'native') {
+      configured = !!(preferences.byokNative || process.env.NATIVE_AI_API_KEY || process.env.KEYFLOW_NATIVE_AI_URL);
+    } else if (provider === 'opensource') {
+      configured = !!(process.env.OPENROUTER_API_KEY || process.env.OLLAMA_BASE_URL);
     }
-    if (provider === 'anthropic') {
-      return !!(preferences.byokAnthropic || process.env.ANTHROPIC_API_KEY);
+
+    return configured && !this.isCircuitOpen(provider);
+  }
+
+  private isCircuitOpen(provider: AiProvider): boolean {
+    const state = this.circuitBreakers.get(provider);
+    if (!state) return false;
+
+    if (state.openUntil && state.openUntil.getTime() > Date.now()) {
+      return true;
     }
-    if (provider === 'xai') {
-      return !!(preferences.byokXai || process.env.XAI_API_KEY);
+
+    // Reset expired open state
+    if (state.openUntil && state.openUntil.getTime() <= Date.now()) {
+      state.openUntil = null;
+      state.failures = 0;
     }
-    if (provider === 'kimi') {
-      return !!(preferences.byokKimi || process.env.KIMI_API_KEY);
-    }
-    if (provider === 'native') {
-      return !!(preferences.byokNative || process.env.NATIVE_AI_API_KEY || process.env.KEYFLOW_NATIVE_AI_URL);
-    }
-    if (provider === 'opensource') {
-      return !!(process.env.OPENROUTER_API_KEY || process.env.OLLAMA_BASE_URL);
-    }
+
     return false;
   }
 
@@ -1372,8 +1590,9 @@ export class ModelGatewayService {
           latencyMs,
           fallbackUsed: false,
         };
-      } catch (err) {
+      } catch (err: any) {
         lastError = err as Error;
+        this.recordProviderError(provider);
 
         if (this.isRetryable(lastError) && attempt < ModelGatewayService.MAX_RETRIES) {
           await this.delay(ModelGatewayService.RETRY_DELAY_MS * (attempt + 1));
@@ -1428,6 +1647,60 @@ export class ModelGatewayService {
     }
 
     return messages;
+  }
+
+  private toAnthropicContent(
+    content: GatewayMessage['content'],
+  ): string | Array<Record<string, unknown>> {
+    if (!content) return '';
+    if (typeof content === 'string') return content;
+    if (!Array.isArray(content)) return String(content);
+
+    const blocks: Array<Record<string, unknown>> = [];
+    for (const part of content) {
+      if (part.type === 'text' && typeof part.text === 'string') {
+        blocks.push({ type: 'text', text: part.text });
+      } else if (part.type === 'image_url' && part.image_url?.url) {
+        const url = part.image_url.url;
+        if (url.startsWith('data:')) {
+          const match = /^data:([^;]+);base64,(.+)$/.exec(url);
+          if (match) {
+            blocks.push({
+              type: 'image',
+              source: { type: 'base64', media_type: match[1], data: match[2] },
+            });
+          } else {
+            blocks.push({ type: 'text', text: '[Unsupported image data URL]' });
+          }
+        } else {
+          blocks.push({ type: 'image', source: { type: 'url', url } });
+        }
+      } else {
+        blocks.push({ type: 'text', text: JSON.stringify(part) });
+      }
+    }
+    return blocks;
+  }
+
+  private mergeAnthropicMessages(
+    messages: Array<{ role: string; content: string | Array<Record<string, unknown>> }>,
+  ): Array<{ role: string; content: string | Array<Record<string, unknown>> }> {
+    const merged: Array<{ role: string; content: string | Array<Record<string, unknown>> }> = [];
+    for (const msg of messages) {
+      const last = merged[merged.length - 1];
+      if (last && last.role === msg.role) {
+        if (typeof last.content === 'string' && typeof msg.content === 'string') {
+          last.content += '\n\n' + msg.content;
+        } else if (Array.isArray(last.content) && Array.isArray(msg.content)) {
+          last.content = [...last.content, ...msg.content];
+        } else {
+          merged.push({ ...msg });
+        }
+      } else {
+        merged.push({ ...msg });
+      }
+    }
+    return merged;
   }
 
   private async callOpenAi(
@@ -1498,20 +1771,20 @@ export class ModelGatewayService {
     if (!apiKey) throw new Error('Anthropic API key not configured');
 
     let systemPrompt = '';
-    const nonSystemMessages: Array<{ role: string; content: string }> = [];
+    const nonSystemMessages: Array<{ role: string; content: string | Array<Record<string, unknown>> }> = [];
 
     for (const msg of messages) {
       if (msg.role === 'system') {
-        systemPrompt += (systemPrompt ? '\n\n' : '') + (msg.content || '');
+        systemPrompt += (systemPrompt ? '\n\n' : '') + (typeof msg.content === 'string' ? msg.content : '');
       } else if (msg.role === 'tool') {
         nonSystemMessages.push({
           role: 'user',
-          content: `[Tool result for ${msg.tool_call_id}]: ${msg.content}`,
+          content: `[Tool result for ${msg.tool_call_id}]: ${typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)}`,
         });
       } else {
         nonSystemMessages.push({
           role: msg.role === 'assistant' ? 'assistant' : 'user',
-          content: msg.content || '',
+          content: this.toAnthropicContent(msg.content),
         });
       }
     }
@@ -1520,14 +1793,7 @@ export class ModelGatewayService {
       nonSystemMessages.push({ role: 'user', content: 'Please respond.' });
     }
 
-    const mergedMessages: Array<{ role: string; content: string }> = [];
-    for (const msg of nonSystemMessages) {
-      if (mergedMessages.length > 0 && mergedMessages[mergedMessages.length - 1].role === msg.role) {
-        mergedMessages[mergedMessages.length - 1].content += '\n\n' + msg.content;
-      } else {
-        mergedMessages.push({ ...msg });
-      }
-    }
+    const mergedMessages = this.mergeAnthropicMessages(nonSystemMessages);
 
     if (mergedMessages.length > 0 && mergedMessages[0].role !== 'user') {
       mergedMessages.unshift({ role: 'user', content: 'Continue.' });
@@ -1594,14 +1860,16 @@ export class ModelGatewayService {
 
     const toolUseBlocks = data.content?.filter(block => block.type === 'tool_use') ?? [];
     const toolCalls = toolUseBlocks.length > 0
-      ? toolUseBlocks.map(block => ({
-          id: block.id ?? `call_${Date.now()}`,
-          type: 'function' as const,
-          function: {
-            name: block.name ?? '',
-            arguments: JSON.stringify(block.input ?? {}),
-          },
-        ))
+      ? toolUseBlocks.map((block) => {
+          return {
+            id: block.id ?? `call_${Date.now()}`,
+            type: 'function' as const,
+            'function': {
+              name: block.name ?? '',
+              'arguments': JSON.stringify(block.input ?? {}),
+            },
+          };
+        })
       : undefined;
 
     const promptTokens = data.usage?.input_tokens ?? 0;
@@ -1997,6 +2265,7 @@ export class ModelGatewayService {
     for (const provider of ['openai', 'anthropic', 'xai', 'kimi', 'native', 'opensource'] as AiProvider[]) {
       const config = this.providerClients.get(provider);
       const metrics = this.providerMetrics.get(provider)!;
+      const circuitOpen = this.isCircuitOpen(provider);
 
       const recentLatencies = metrics.latencies.slice(-100);
       const avgLatency = recentLatencies.length > 0
@@ -2008,8 +2277,9 @@ export class ModelGatewayService {
 
       results.push({
         provider,
-        available: !!config?.configured,
+        available: !!config?.configured && !circuitOpen,
         configured: !!config?.configured,
+        circuitOpen,
         avgLatencyMs: Math.round(avgLatency),
         errorRate: Math.round(errorRate * 10000) / 10000,
         lastErrorAt: metrics.lastErrorAt,
@@ -2019,6 +2289,65 @@ export class ModelGatewayService {
     }
 
     return results;
+  }
+
+  /**
+   * Select the provider/model that would be used for a request without actually calling it.
+   * Useful for previewing routing decisions and cost estimates.
+   */
+  async route(request: GatewayRequest): Promise<{ provider: AiProvider; model: string; fallbackUsed: boolean }> {
+    if (!this.routingTableLoaded) {
+      await this.loadRoutingConfig();
+    }
+
+    const preferences = await this.getPreferences(request.businessId);
+    const mode = preferences.aiMode;
+    const strategy = this.resolveStrategy(request, mode, preferences);
+    const candidates = [strategy.primary, ...strategy.fallbacks];
+
+    const budgetCaps = preferences.budgetCaps;
+    let spendByProvider: Record<string, number> | undefined;
+    let totalSpend: number | undefined;
+
+    if (budgetCaps && this.hasBudgetCaps(budgetCaps)) {
+      const spendData = await this.getCurrentMonthSpend(request.businessId);
+      spendByProvider = spendData.byProvider;
+      totalSpend = spendData.total;
+    }
+
+    const budgetFilteredCandidates = this.filterCandidatesByBudget(
+      candidates, budgetCaps, spendByProvider, totalSpend,
+    );
+
+    const effectiveCandidates = budgetFilteredCandidates.length > 0
+      ? budgetFilteredCandidates
+      : candidates;
+
+    for (let i = 0; i < effectiveCandidates.length; i++) {
+      const candidate = effectiveCandidates[i];
+      if (this.isProviderAvailable(candidate.provider, preferences)) {
+        return {
+          provider: candidate.provider,
+          model: candidate.model,
+          fallbackUsed: i > 0,
+        };
+      }
+    }
+
+    // Fallback of last resort: return the first candidate even if unavailable
+    return {
+      provider: effectiveCandidates[0].provider,
+      model: effectiveCandidates[0].model,
+      fallbackUsed: false,
+    };
+  }
+
+  /**
+   * Lightweight health check that returns the current provider health snapshot.
+   * Does not perform live probe calls (use provider-specific probes separately if needed).
+   */
+  async healthCheck(): Promise<ProviderHealth[]> {
+    return this.getProviderHealth();
   }
 
   getRoutingConfig(): Record<AiMode, Record<TaskCategory, ModelStrategy>> {
@@ -2042,7 +2371,7 @@ export class ModelGatewayService {
         this.routingTable = this.mergeWithDefaults(parsed);
         this.logger.log('Loaded routing config from database');
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Failed to load routing config from DB, using defaults: ${(err as Error).message}`);
     }
     this.routingTableLoaded = true;
@@ -2111,6 +2440,13 @@ export class ModelGatewayService {
         metrics.latencies = metrics.latencies.slice(-250);
       }
     }
+
+    // Reset circuit breaker on success
+    const circuit = this.circuitBreakers.get(provider);
+    if (circuit) {
+      circuit.failures = 0;
+      circuit.openUntil = null;
+    }
   }
 
   private recordProviderError(provider: AiProvider): void {
@@ -2119,6 +2455,19 @@ export class ModelGatewayService {
       metrics.totalCalls++;
       metrics.totalErrors++;
       metrics.lastErrorAt = new Date();
+    }
+
+    const circuit = this.circuitBreakers.get(provider);
+    if (circuit) {
+      circuit.failures++;
+      circuit.lastFailureAt = new Date();
+
+      if (circuit.failures >= ModelGatewayService.CIRCUIT_BREAKER_FAILURE_THRESHOLD) {
+        circuit.openUntil = new Date(Date.now() + ModelGatewayService.CIRCUIT_BREAKER_COOLDOWN_MS);
+        this.logger.warn(
+          `Circuit breaker opened for ${provider} until ${circuit.openUntil.toISOString()}`,
+        );
+      }
     }
   }
 

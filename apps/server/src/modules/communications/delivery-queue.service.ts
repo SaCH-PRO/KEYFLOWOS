@@ -78,7 +78,7 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
     try {
       await this.processScheduledDeliveries();
       await this.processRetryDeliveries();
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Delivery queue tick failed: ${(err as Error).message}`);
     } finally {
       this.processing = false;
@@ -271,7 +271,7 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
           await this.updateContentStatus(delivery.contentId);
         }
       }
-    } catch (err) {
+    } catch (err: any) {
       const normalized = adapter.normalizeError(err);
       const newRetryCount = delivery.retryCount + 1;
       const errorSnapshot = { errorCode: normalized.code, errorMessage: normalized.message };
@@ -545,7 +545,7 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
           skipDuplicates: true,
         });
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Failed to create campaign tracking: ${(err as Error).message}`);
     }
   }
@@ -590,7 +590,7 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
         where: { campaignId, contactId },
         data: updateData,
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Failed to update campaign contact status: ${(err as Error).message}`);
     }
   }

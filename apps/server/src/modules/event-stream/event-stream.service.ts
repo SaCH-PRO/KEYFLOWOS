@@ -54,7 +54,7 @@ export class EventStreamService implements OnModuleInit {
     for (const subject of set) {
       try {
         subject.next(envelope);
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(`SSE broadcast failed: ${(err as Error).message}`);
       }
     }

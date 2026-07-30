@@ -229,7 +229,7 @@ export class GoogleContactsSyncService {
         },
         update: { metadata: merged as unknown as Prisma.InputJsonValue },
       });
-    } catch (err) {
+    } catch (err: any) {
         this.logger.warn(`Progress is best-effort: ${err instanceof Error ? err.message : err}`);
       }
   }

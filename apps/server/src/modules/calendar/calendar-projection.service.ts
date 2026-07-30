@@ -119,7 +119,7 @@ export class CalendarProjectionService {
       try {
         await this.upsertFromSource(input);
         count += 1;
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(
           `Failed to project ${input.sourceType}:${input.sourceId} for business ${input.businessId}: ${(err as Error).message}`,
         );

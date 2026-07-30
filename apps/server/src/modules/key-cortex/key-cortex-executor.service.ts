@@ -23,12 +23,13 @@ import {
   Injectable,
   Logger,
   InternalServerErrorException,
+  Optional,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'node:crypto';
 
 // ─── Prisma ───────────────────────────────────────────────────────────────────
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaService } from '../../core/prisma/prisma.service';
 
 // ─── Connector ──────────────────────────────────────────────────────────────────
 import {
@@ -40,12 +41,31 @@ import {
 } from './key-cortex-connector.types';
 import { KeyCortexConnectorService } from './key-cortex-connector.service';
 
+// ─── Genome Governance ──────────────────────────────────────────────────────────
+import { GenomeAutonomyGateService } from '../business-genome/key-genome/genome-autonomy-gate.service';
+import { AutonomyOrchestratorService } from '../key-autonomy/autonomy-orchestrator.service';
+import { KeyActionProposalService } from '../key-autonomy/key-action-proposal.service';
+import { KeyCortexApprovalOrchestratorService } from './key-cortex-approval-orchestrator.service';
+
 // ─── Constants ──────────────────────────────────────────────────────────────────
 const EXECUTION_TIMEOUT_MS = 30000;
 const BATCH_STOP_ON_FAILURE = true;
 const MAX_BATCH_SIZE = 50;
 const APPROVAL_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const APPROVAL_CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+
+// Safety blocklist: actions that are too dangerous to expose through the AI
+// command surface until they are hardened with allowlists, read-only scopes,
+// and tenant isolation. See docs/key-cortex-safety.md.
+const BLOCKED_ACTIONS = new Set([
+  'EXECUTE_TOOL',
+  'QUERY_DATABASE',
+  'UPDATE_RECORD',
+]);
+
+function isBlockedCommand(command: ConnectorCommand): boolean {
+  return BLOCKED_ACTIONS.has(command.action);
+}
 
 // ─── Types ──────────────────────────────────────────────────────────────────────
 export interface ExecuteOptions {
@@ -57,6 +77,8 @@ export interface ExecuteOptions {
   rollbackOnFailure?: boolean;
   /** Stop batch on first failure? */
   stopOnFailure?: boolean;
+  /** Alias used by the controller */
+  stopOnError?: boolean;
   /** Emit real-time events? */
   emitEvents?: boolean;
   /** Request source info */
@@ -129,6 +151,12 @@ export class KeyCortexExecutorService {
     private readonly connector: KeyCortexConnectorService,
     private readonly prisma: PrismaService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly autonomyGate: GenomeAutonomyGateService,
+    private readonly autonomyOrchestrator?: AutonomyOrchestratorService,
+    @Optional()
+    private readonly proposalService?: KeyActionProposalService,
+    @Optional()
+    private readonly approvalOrchestrator?: KeyCortexApprovalOrchestratorService,
   ) {
     // Start periodic cleanup of stale pending approvals (Fix 2)
     this.approvalCleanupInterval = setInterval(() => {
@@ -179,6 +207,117 @@ export class KeyCortexExecutorService {
       `[execute] ${command.module}.${command.action} trace=${traceId} biz=${command.businessId}`,
     );
 
+    // ── Safety gate: block high-risk actions ─────────────────────────────────
+    if (isBlockedCommand(command)) {
+      const reason = `Action "${command.action}" is disabled in this build for safety review.`;
+      this.logger.warn(`[execute] Blocked ${command.module}.${command.action}: ${reason}`);
+      return {
+        id: randomUUID(),
+        command,
+        result: {
+          success: false,
+          error: reason,
+          executionTimeMs: 0,
+          command,
+        },
+        startedAt,
+        finishedAt: new Date(),
+        durationMs: 0,
+        traceId,
+        rolledBack: false,
+      };
+    }
+
+    // ── Unified Autonomy Orchestrator: canonical verdict ───────────────────────
+    try {
+      if (this.autonomyOrchestrator) {
+        const verdict = await this.autonomyOrchestrator.evaluateAction(
+          command.businessId,
+          `${command.module}.${command.action}`,
+          command.parameters,
+          { proposedBy: command.userId },
+        );
+
+        if (!verdict.allowed) {
+          const reason = verdict.reason || 'Blocked by autonomy orchestrator';
+          this.logger.warn(`[execute] Autonomy orchestrator BLOCKED ${command.module}.${command.action}: ${reason}`);
+          return {
+            id: randomUUID(),
+            command,
+            result: {
+              success: false,
+              error: reason,
+              executionTimeMs: 0,
+              command,
+            },
+            startedAt,
+            finishedAt: new Date(),
+            durationMs: 0,
+            traceId,
+            rolledBack: false,
+          };
+        }
+
+        if (verdict.requiresApproval && options.skipApproval) {
+          options = { ...options, skipApproval: false };
+        }
+      } else {
+        // Legacy fallback: KEY Genome autonomy gate
+        const gate = await this.autonomyGate.checkGate({
+          businessId: command.businessId,
+          actionType: `${command.module}.${command.action}`,
+          affectedDomains: command.module ? [command.module as any] : undefined,
+          payload: command.parameters,
+          proposedBy: command.userId ?? null,
+        });
+
+        if (gate.decision === 'BLOCK') {
+          const reason =
+            gate.blockingReasons?.join('; ') ||
+            'Blocked by KEY Genome autonomy gate.';
+          this.logger.warn(`[execute] Autonomy gate BLOCKED ${command.module}.${command.action}: ${reason}`);
+          return {
+            id: randomUUID(),
+            command,
+            result: {
+              success: false,
+              error: reason,
+              executionTimeMs: 0,
+              command,
+            },
+            startedAt,
+            finishedAt: new Date(),
+            durationMs: 0,
+            traceId,
+            rolledBack: false,
+          };
+        }
+
+        if (gate.decision === 'ALLOW_WITH_APPROVAL' && options.skipApproval) {
+          options = { ...options, skipApproval: false };
+        }
+      }
+    } catch (gateErr) {
+      this.logger.error(
+        `[execute] Autonomy gate error for ${command.module}.${command.action}: ${(gateErr as Error).message}`,
+      );
+      return {
+        id: randomUUID(),
+        command,
+        result: {
+          success: false,
+          error: 'Autonomy gate unavailable; execution blocked for safety.',
+          executionTimeMs: 0,
+          command,
+        },
+        startedAt,
+        finishedAt: new Date(),
+        durationMs: 0,
+        traceId,
+        rolledBack: false,
+      };
+    }
+
     // ── Emit START event ─────────────────────────────────────────────────────
     if (options.emitEvents !== false) {
       this.eventEmitter.emit('key.cortex.execution.started', {
@@ -221,7 +360,7 @@ export class KeyCortexExecutorService {
     let result: ConnectorResult;
     try {
       result = await this.executeWithTimeout(command, EXECUTION_TIMEOUT_MS);
-    } catch (error) {
+    } catch (error: any) {
       const errMsg =
         error instanceof Error
           ? error.message
@@ -267,7 +406,7 @@ export class KeyCortexExecutorService {
 
     // ── 4. Build record ──────────────────────────────────────────────────────
     const record: ExecutionRecord = {
-      id: uuidv4(),
+      id: randomUUID(),
       command,
       result,
       startedAt,
@@ -348,6 +487,15 @@ export class KeyCortexExecutorService {
     this.logger.log(
       `[executeBatch] Starting batch of ${commands.length} commands trace=${traceId}`,
     );
+
+    // Safety gate: reject batches containing blocked high-risk actions
+    const blocked = commands.filter(isBlockedCommand);
+    if (blocked.length > 0) {
+      const names = blocked.map((c) => `${c.module}.${c.action}`).join(', ');
+      throw new InternalServerErrorException(
+        `Batch contains blocked high-risk actions: ${names}`,
+      );
+    }
 
     // Emit batch started
     this.eventEmitter.emit('key.cortex.batch.started', {
@@ -447,53 +595,87 @@ export class KeyCortexExecutorService {
   async executeWithApproval(
     command: ConnectorCommand,
   ): Promise<ApprovalRequest> {
-    const approvalId = uuidv4();
     const correlationId =
       command.correlationId ?? this.generateTraceId('approval');
 
+    let proposalId: string = randomUUID();
+
+    // Persist as a canonical KeyActionProposal via the unified orchestrator
+    if (this.approvalOrchestrator) {
+      try {
+        const proposal = await this.approvalOrchestrator.propose({
+          businessId: command.businessId,
+          userId: command.userId,
+          sourceType: 'KEY_CORTEX',
+          sourceId: command.correlationId,
+          actionType: 'EXECUTE_TOOL',
+          module: command.module,
+          toolName: command.action,
+          title: this.summarizeCommandForNotification(command),
+          summary: `Pending approval for ${command.module}.${command.action}`,
+          rationale: `Risk tier requires human approval`,
+          parameters: {
+            toolName: `${command.module}.${command.action}`,
+            parameters: command.parameters,
+            commandJson: command,
+          },
+          correlationId,
+        });
+        proposalId = proposal.id;
+      } catch (dbErr) {
+        this.logger.error(
+          `[executeWithApproval] Failed to persist approval proposal: ${(dbErr as Error).message}`,
+        );
+        // Continue with in-memory tracking
+      }
+    } else if (this.proposalService) {
+      // Legacy fallback until module wiring is updated
+      try {
+        const proposal = await this.proposalService.create(
+          command.businessId,
+          {
+            sourceType: 'KEY_CORTEX',
+            sourceMode: command.module,
+            title: this.summarizeCommandForNotification(command),
+            summary: `Pending approval for ${command.module}.${command.action}`,
+            actionType: 'EXECUTE_TOOL',
+            payload: {
+              toolName: `${command.module}.${command.action}`,
+              parameters: command.parameters,
+              correlationId,
+              commandJson: command,
+            },
+          },
+          command.userId,
+        );
+        proposalId = proposal.id;
+      } catch (dbErr) {
+        this.logger.error(
+          `[executeWithApproval] Failed to persist approval proposal: ${(dbErr as Error).message}`,
+        );
+        // Continue with in-memory tracking
+      }
+    }
+
     const request: ApprovalRequest = {
-      id: approvalId,
+      id: proposalId,
       command,
       status: 'pending',
       requestedAt: new Date(),
       correlationId,
     };
 
-    // Persist to database
-    try {
-      await this.prisma.aiApprovalRequest.create({
-        data: {
-          id: approvalId,
-          businessId: command.businessId,
-          userId: command.userId,
-          correlationId,
-          module: command.module,
-          action: command.action,
-          parameters: JSON.stringify(command.parameters),
-          commandJson: JSON.stringify(command),
-          status: 'PENDING',
-          requestedAt: new Date(),
-          expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24h expiry
-        },
-      });
-    } catch (dbErr) {
-      this.logger.error(
-        `[executeWithApproval] Failed to persist approval request: ${(dbErr as Error).message}`,
-      );
-      // Continue with in-memory tracking
-    }
-
     // Cache in memory for quick lookups
-    this.pendingApprovals.set(approvalId, request);
+    this.pendingApprovals.set(proposalId, request);
 
     // Auto-clear after TTL to prevent memory leak (Fix 2)
     setTimeout(() => {
-      this.pendingApprovals.delete(approvalId);
+      this.pendingApprovals.delete(proposalId);
     }, APPROVAL_TTL_MS);
 
     // Emit notification event (non-blocking)
     this.eventEmitter.emit('key.cortex.approval.required', {
-      approvalId,
+      approvalId: proposalId,
       correlationId,
       command,
       summary: this.summarizeCommandForNotification(command),
@@ -502,7 +684,7 @@ export class KeyCortexExecutorService {
     });
 
     this.logger.log(
-      `[executeWithApproval] Created approval request ${approvalId} for ${command.module}.${command.action}`,
+      `[executeWithApproval] Created approval proposal ${proposalId} for ${command.module}.${command.action}`,
     );
 
     return request;
@@ -594,7 +776,7 @@ export class KeyCortexExecutorService {
    */
   async logExecution(record: ExecutionRecord): Promise<void> {
     try {
-      await this.prisma.aiExecutionLog.create({
+      await (this.prisma.client as any).aiExecutionLog.create({
         data: {
           id: record.id,
           businessId: record.command.businessId,
@@ -624,7 +806,7 @@ export class KeyCortexExecutorService {
       this.logger.debug(
         `[logExecution] Logged execution ${record.id} trace=${record.traceId}`,
       );
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(
         `[logExecution] Failed to persist audit log: ${(err as Error).message}`,
       );
@@ -696,7 +878,7 @@ export class KeyCortexExecutorService {
       });
 
       return rollbackResult;
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(
         `[rollback] Rollback execution failed: ${(err as Error).message}`,
       );
@@ -832,7 +1014,7 @@ export class KeyCortexExecutorService {
     _userId: string,
   ): Promise<ApprovalPolicy> {
     try {
-      const setting = await this.prisma.businessSetting.findUnique({
+      const setting = await (this.prisma.client as any).businessSetting.findUnique({
         where: { businessId },
         select: {
           aiAutonomyLevel: true,
@@ -846,7 +1028,7 @@ export class KeyCortexExecutorService {
 
       // Count recent auto-executions for rate-limiting
       const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
-      const recentCount = await this.prisma.aiExecutionLog.count({
+      const recentCount = await (this.prisma.client as any).aiExecutionLog.count({
         where: {
           businessId,
           success: true,
@@ -1122,9 +1304,9 @@ export class KeyCortexExecutorService {
    */
   private async logBatchExecution(batch: BatchResult): Promise<void> {
     try {
-      await this.prisma.aiExecutionLog.create({
+      await (this.prisma.client as any).aiExecutionLog.create({
         data: {
-          id: uuidv4(),
+          id: randomUUID(),
           businessId:
             batch.results[0]?.command.businessId ?? 'unknown',
           userId: batch.results[0]?.command.userId ?? 'unknown',
@@ -1167,7 +1349,7 @@ export class KeyCortexExecutorService {
           source: 'key_cortex',
         },
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(
         `[logBatchExecution] Failed: ${(err as Error).message}`,
       );
@@ -1207,5 +1389,97 @@ export class KeyCortexExecutorService {
     const ts = Date.now().toString(36);
     const rand = Math.random().toString(36).substring(2, 6);
     return `${prefix}_${ts}_${rand}`;
+  }
+
+  /**
+   * Gateway alias: execute the command attached to an already-approved request.
+   */
+  async executeApprovedAction(approvalId: string): Promise<ExecutionRecord> {
+    const start = Date.now();
+
+    if (this.approvalOrchestrator) {
+      try {
+        const before = await this.proposalService?.getById(approvalId);
+        const command = (before?.payload?.commandJson ?? {
+          businessId: before?.businessId,
+          userId: before?.userId,
+        }) as ConnectorCommand;
+
+        const executed = await this.approvalOrchestrator.executeApproved({
+          businessId: before?.businessId ?? command.businessId,
+          proposalId: approvalId,
+          userId: before?.approvedBy ?? undefined,
+        });
+
+        const success = executed.status === 'EXECUTED';
+        const finishedAt = new Date();
+        return {
+          id: approvalId,
+          command,
+          result: {
+            success,
+            data: success ? (executed.executionResult ?? {}) : undefined,
+            error: executed.failureReason ?? undefined,
+            executionTimeMs: finishedAt.getTime() - start,
+            command,
+          },
+          startedAt: new Date(start),
+          finishedAt,
+          durationMs: finishedAt.getTime() - start,
+          traceId: approvalId,
+          rolledBack: false,
+        };
+      } catch (err: unknown) {
+        this.logger.error(
+          `[executeApprovedAction] Failed to execute proposal ${approvalId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        throw err;
+      }
+    }
+
+    if (this.proposalService) {
+      try {
+        const proposal = await this.proposalService.getById(approvalId);
+        if (proposal.status !== 'APPROVED') {
+          throw new Error(`Proposal ${approvalId} is not approved`);
+        }
+        const executed = await this.proposalService.execute(
+          proposal.businessId,
+          approvalId,
+          proposal.approvedBy ?? undefined,
+          true,
+          true,
+        );
+        const command = (proposal.payload?.commandJson ?? {
+          businessId: proposal.businessId,
+          userId: proposal.userId,
+        }) as ConnectorCommand;
+        const success = executed.status === 'EXECUTED';
+        const finishedAt = new Date();
+        return {
+          id: approvalId,
+          command,
+          result: {
+            success,
+            data: success ? (executed.executionResult ?? {}) : undefined,
+            error: executed.failureReason ?? undefined,
+            executionTimeMs: finishedAt.getTime() - start,
+            command,
+          },
+          startedAt: new Date(start),
+          finishedAt,
+          durationMs: finishedAt.getTime() - start,
+          traceId: approvalId,
+          rolledBack: false,
+        };
+      } catch (err: unknown) {
+        this.logger.error(
+          `[executeApprovedAction] Failed to execute proposal ${approvalId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        throw err;
+      }
+    }
+
+    throw new Error(`Approval proposal ${approvalId} not found`);
   }
 }

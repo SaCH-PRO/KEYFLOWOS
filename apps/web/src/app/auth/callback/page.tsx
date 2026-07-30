@@ -3,8 +3,16 @@
 import { useRouter } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { bootstrapIdentity } from "@/lib/client";
-import { setStoredToken, setStoredBusinessId, getStoredBusinessId } from "@/lib/workspace";
+import {
+  setStoredToken,
+  setStoredRefreshToken,
+  setStoredTokenExpiry,
+  setStoredBusinessId,
+  getStoredBusinessId,
+} from "@/lib/workspace";
 import { apiPatch } from "@/lib/api";
+import { clearOAuthState } from "@/lib/oauth-state";
+import { getCodeVerifier, clearCodeVerifier } from "@/lib/oauth-pkce";
 
 /**
  * Derive (firstName, lastName) from a Supabase OAuth user_metadata payload.
@@ -57,7 +65,6 @@ function AuthCallbackInner() {
       try {
         const hash = window.location.hash.substring(1);
         const hashParams = new URLSearchParams(hash);
-        const accessToken = hashParams.get("access_token");
         const searchParams = new URLSearchParams(window.location.search);
         const errorDescription =
           searchParams.get("error_description") ??
@@ -72,11 +79,75 @@ function AuthCallbackInner() {
           throw new Error(providerError);
         }
 
+        // Supabase Auth manages the OAuth state parameter internally; the
+        // callback only receives the authorization code. Clear any stale custom
+        // state cookie from older flows.
+        clearOAuthState();
+
+        let accessToken = hashParams.get("access_token");
+        let refreshToken = hashParams.get("refresh_token");
+        let expiresIn = hashParams.get("expires_in");
+        let expiresAt = hashParams.get("expires_at");
+
+        // PKCE flow: Supabase returns a `code` in the query string that must be
+        // exchanged for tokens using the stored code verifier.
+        const authCode = searchParams.get("code");
+        if (authCode && !accessToken) {
+          const codeVerifier = getCodeVerifier();
+          if (!codeVerifier) {
+            throw new Error("Missing PKCE verifier. Please try signing in again.");
+          }
+          const tokenRes = await fetch(
+            `${process.env.NEXT_PUBLIC_SUPABASE_URL}/auth/v1/token?grant_type=pkce`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "",
+              },
+              body: JSON.stringify({ auth_code: authCode, code_verifier: codeVerifier }),
+            },
+          );
+          if (!tokenRes.ok) {
+            const errBody = await tokenRes.json().catch(() => ({}));
+            throw new Error(errBody.error_description || errBody.message || "Failed to exchange OAuth code");
+          }
+          const tokenData = (await tokenRes.json()) as Record<string, unknown>;
+          accessToken = typeof tokenData.access_token === "string" ? tokenData.access_token : null;
+          refreshToken = typeof tokenData.refresh_token === "string" ? tokenData.refresh_token : null;
+          expiresIn =
+            typeof tokenData.expires_in === "string" || typeof tokenData.expires_in === "number"
+              ? String(tokenData.expires_in)
+              : null;
+          expiresAt =
+            typeof tokenData.expires_at === "string" || typeof tokenData.expires_at === "number"
+              ? String(tokenData.expires_at)
+              : null;
+        }
+
         if (!accessToken) {
           throw new Error("No access token received");
         }
 
         setStoredToken(accessToken);
+        if (refreshToken) {
+          setStoredRefreshToken(refreshToken);
+        }
+        if (expiresAt || expiresIn) {
+          const ms = expiresAt
+            ? Date.parse(expiresAt)
+            : Date.now() + Number(expiresIn) * 1000;
+          if (!Number.isNaN(ms)) setStoredTokenExpiry(ms);
+        }
+
+        // Session is now established; it is safe to clear the one-time PKCE
+        // verifier. Keeping it until this point allows a single retry if the
+        // token exchange initially fails.
+        clearCodeVerifier();
+
+        const referralCode = typeof window !== "undefined"
+          ? window.localStorage.getItem("kf_referral_code") || undefined
+          : undefined;
 
         const userInfoRes = await fetch(
           `${process.env.NEXT_PUBLIC_SUPABASE_URL}/auth/v1/user`,
@@ -119,6 +190,7 @@ function AuthCallbackInner() {
           company: profileDraft.company,
           username: profileDraft.username,
           avatarUrl,
+          referralCode,
         });
         
         if (bootstrap.data?.business?.id) {
@@ -149,7 +221,7 @@ function AuthCallbackInner() {
           throw new Error("Could not create workspace. Please try again.");
         }
 
-        router.push("/app");
+        router.push(bootstrap.data.isNewBusiness ? "/app/onboarding" : "/app");
       } catch (err) {
         const message = err instanceof Error ? err.message : "Authentication failed";
         setErrorKind("generic");

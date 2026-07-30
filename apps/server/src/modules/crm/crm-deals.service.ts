@@ -351,7 +351,7 @@ export class CrmDealsService {
       try {
         const r = await this.moveStage({ businessId: input.businessId, dealId: id, stageId: input.stageId, actorId: input.actorId });
         results.push({ id, ok: true, stageId: r.stageId, status: r.status });
-      } catch (err) {
+      } catch (err: any) {
         results.push({ id, ok: false, error: (err as Error).message });
       }
     }

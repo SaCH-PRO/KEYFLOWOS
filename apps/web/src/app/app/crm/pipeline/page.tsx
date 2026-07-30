@@ -47,7 +47,7 @@ export default function ContactsPage() {
   useReturnNavigation({ restoreScrollOnMount: true });
 
   const {
-    workspaceLoading, workspaceError, businessId,
+    workspaceLoading, workspaceError,
     crmViewTab, setCrmViewTab,
     showBroadcast, setShowBroadcast,
     confirmState, setConfirmState,
@@ -118,7 +118,7 @@ export default function ContactsPage() {
   const handleCancelConfirm = useCallback(() => setConfirmState({ open: false, action: () => {} }), [setConfirmState]);
   const handleViewEngageContact = useCallback((id: string) => { selectContact(id); setCrmViewTab("contacts"); }, [selectContact, setCrmViewTab]);
   const handleToggleAutopilotPause = useCallback(() => setAutopilotPaused((prev: boolean) => !prev), [setAutopilotPaused]);
-  const handleTabChange = useCallback((t: string) => {
+  const _handleTabChange = useCallback((t: string) => {
     if (t === crmViewTab) return;
     const oldIndex = CRM_TABS.indexOf(crmViewTab);
     const newIndex = CRM_TABS.indexOf(t);

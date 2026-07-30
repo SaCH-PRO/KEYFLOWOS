@@ -64,7 +64,7 @@ export default function PayWidgetPage() {
     }
   };
 
-  const notifyParent = (eventName: string, payload: Record<string, unknown>) => {
+  const _notifyParent = (eventName: string, payload: Record<string, unknown>) => {
     if (window.parent !== window) {
       window.parent.postMessage({ type: 'KEYFLOW_WIDGET_EVENT', eventName, payload }, '*');
     }

@@ -28,7 +28,13 @@ export const KEY_ACTION_SOURCE_TYPES: KeyActionSourceType[] = [
   'EXECUTIVE_BRIEF',
   'TEMPORAL_FLOW',
   'GENOME_EVOLUTION',
+  'AI_PLAN',
+  'KEY_CORTEX',
   'MANUAL',
+  'AI_LEGACY',
+  'HUMAN_WORKFLOW',
+  'PLAN_STEP',
+  'AUTONOMY_REVIEW',
 ];
 
 export type KeyActionSourceType =
@@ -36,7 +42,14 @@ export type KeyActionSourceType =
   | 'EXECUTIVE_BRIEF'
   | 'TEMPORAL_FLOW'
   | 'GENOME_EVOLUTION'
-  | 'MANUAL';
+  | 'AI_PLAN'
+  | 'KEY_CORTEX'
+  | 'MANUAL'
+  | 'AI_LEGACY'
+  | 'HUMAN_WORKFLOW'
+  | 'PLAN_STEP'
+  | 'AUTONOMY_REVIEW'
+  | 'PRO_AUTO';
 
 export const KEY_EXECUTABLE_ACTION_TYPES: KeyExecutableActionType[] = [
   'OPEN_GENOME',
@@ -54,6 +67,7 @@ export const KEY_EXECUTABLE_ACTION_TYPES: KeyExecutableActionType[] = [
   'CREATE_GENOME_EVOLUTION_PROPOSAL',
   'SCHEDULE_FOLLOWUP',
   'ESCALATE_THREAD',
+  'EXECUTE_TOOL',
 ];
 
 export type KeyExecutableActionType =
@@ -71,7 +85,8 @@ export type KeyExecutableActionType =
   | 'GENERATE_DOCUMENT_EXPORT'
   | 'CREATE_GENOME_EVOLUTION_PROPOSAL'
   | 'SCHEDULE_FOLLOWUP'
-  | 'ESCALATE_THREAD';
+  | 'ESCALATE_THREAD'
+  | 'EXECUTE_TOOL';
 
 export interface KeyActionProposalData {
   id: string;
@@ -86,6 +101,27 @@ export interface KeyActionProposalData {
   evidence: string[];
   actionType: KeyExecutableActionType;
   payload: Record<string, unknown>;
+
+  // Phase 0 unified governance fields
+  toolName?: string | null;
+  module?: string | null;
+  description?: string | null;
+  expectedBenefit?: string | null;
+  risks?: string | null;
+  inputPayload?: Record<string, unknown> | null;
+  affectedEntities?: Record<string, unknown> | null;
+  resolvedByUserId?: string | null;
+  resolution?: Record<string, unknown> | null;
+  multiStepParentId?: string | null;
+
+  // Identity thread
+  planId?: string | null;
+  planStepId?: string | null;
+  correlationId?: string | null;
+  commandId?: string | null;
+  sessionId?: string | null;
+  businessEventId?: string | null;
+
   riskLevel: KeyActionRiskLevel;
   status: KeyActionProposalStatus;
   requiresApproval: boolean;
@@ -112,10 +148,31 @@ export interface CreateKeyActionProposalInput {
   evidence?: string[];
   actionType: KeyExecutableActionType;
   payload?: Record<string, unknown>;
+
+  // Phase 0 unified governance fields
+  toolName?: string;
+  module?: string;
+  description?: string;
+  expectedBenefit?: string;
+  risks?: string;
+  inputPayload?: Record<string, unknown>;
+  affectedEntities?: Record<string, unknown>;
+  resolvedByUserId?: string;
+  resolution?: Record<string, unknown>;
+  multiStepParentId?: string;
+
+  // Identity thread
+  planId?: string;
+  planStepId?: string;
+  correlationId?: string;
+  commandId?: string;
+  sessionId?: string;
+  businessEventId?: string;
 }
 
 export interface ListKeyActionProposalsQuery {
   status?: string;
   sourceType?: string;
   actionType?: string;
+  createdAfter?: Date;
 }

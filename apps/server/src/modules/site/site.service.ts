@@ -946,7 +946,7 @@ export class SiteService {
         },
         usage: result.usage,
       };
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`AI conversion advice failed: ${(error as Error).message}`);
       return {
         recommendations: [],

@@ -149,7 +149,7 @@ Respond with JSON only: { "steps": [ { "order": 1, "toolName": "tool_name_or_nul
           expectedBenefit: s.expectedBenefit || null,
         };
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Plan generation fallback: ${(err as Error).message}`);
       steps = intent.actionCandidates.map((ac, idx) => ({
         order: idx + 1,

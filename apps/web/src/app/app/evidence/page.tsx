@@ -13,11 +13,9 @@ import {
   Shield,
   X,
   Eye,
-  Filter,
 } from "lucide-react";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
 import { MetricCard } from "@/components/ui/metric-card";
-import { SectionCard } from "@/components/ui/section-card";
 import { EmptyState } from "@/components/ui/empty-state";
 import {
   Evidence,
@@ -53,7 +51,7 @@ function EvidencePage() {
     try {
       const res = await fetchEvidence(businessId);
       if (res.data) setEvidence(res.data);
-    } catch (err) {
+    } catch (_err) {
       toast.error("Failed to load evidence");
     } finally {
       setLoading(false);

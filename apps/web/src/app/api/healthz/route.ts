@@ -1,7 +1,7 @@
 import { getApiBase } from "@/lib/api-base";
 import { NextResponse } from "next/server";
 import { ensureValidWebEnv } from "@/lib/env";
-import { getReleaseVersion } from "@/lib/release-version";
+import { getReleaseVersion } from "@keyflow/shared/release-version";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";

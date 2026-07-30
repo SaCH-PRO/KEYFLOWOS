@@ -236,7 +236,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       }
 
       return result;
-    } catch (err) {
+    } catch (err: any) {
       const durationMs = Date.now() - startTime;
       const errorMsg = (err as Error).message;
 

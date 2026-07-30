@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { CommunicationsController } from './communications.controller';
+import { CommunicationsService } from './communications.service';
 import { ChannelConnectionService } from './channel-connection.service';
 import { OutboundContentService } from './outbound-content.service';
 import { DeliveryQueueService } from './delivery-queue.service';
@@ -22,9 +23,11 @@ import { CommandModule } from '../command/command.module';
 import { CrmModule } from '../crm/crm.module';
 import { TaskAssignmentModule } from '../task-assignments/task-assignment.module';
 import { TimelineModule } from '../timeline/timeline.module';
+import { KeyInboxModule } from '../key-inbox/key-inbox.module';
+import { PrismaModule } from '../../core/prisma/prisma.module';
 
 @Module({
-  imports: [AiModule, CommandModule, CrmModule, TaskAssignmentModule, TimelineModule],
+  imports: [AiModule, CommandModule, CrmModule, TaskAssignmentModule, TimelineModule, KeyInboxModule, PrismaModule],
   controllers: [
     CommunicationsController,
     InboundCommunicationsController,
@@ -46,6 +49,7 @@ import { TimelineModule } from '../timeline/timeline.module';
     OmnichannelProcessorService,
     MessageIntakeOrchestrator,
     MessageIntakeListener,
+    CommunicationsService,
   ],
   exports: [
     ChannelConnectionService,
@@ -61,6 +65,7 @@ import { TimelineModule } from '../timeline/timeline.module';
     TriggerDefinitionService,
     OmnichannelProcessorService,
     MessageIntakeOrchestrator,
+    CommunicationsService,
   ],
 })
 export class CommunicationsModule {}

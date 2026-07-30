@@ -104,7 +104,7 @@ export class FacebookPublisher extends BasePublisher {
         externalUrl: data.id ? `https://www.facebook.com/${data.id}` : undefined,
         publishedAt: new Date().toISOString(),
       };
-    } catch (err) {
+    } catch (err: any) {
       return { platform: this.platform, success: false, error: (err as Error).message };
     }
   }

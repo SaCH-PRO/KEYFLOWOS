@@ -6,6 +6,7 @@ import {
   BlueprintData,
   BlueprintPatch,
   BlueprintSectionKey,
+  DnaSectionKey,
 } from '../blueprint/blueprint.types';
 
 export interface OnboardingMessage {
@@ -31,6 +32,7 @@ interface OnboardingChatResult {
   reply: string;
   blueprint: BlueprintData;
   completeness: number;
+  threePillarMinimumMet: boolean;
   confidenceScores: Record<string, number>;
   extracted: OnboardingExtraction[];
   nextSection: BlueprintSectionKey | null;
@@ -38,7 +40,9 @@ interface OnboardingChatResult {
 
 const SECTION_ORDER: BlueprintSectionKey[] = [
   'identity',
+  'founderProfile',
   'operatingModel',
+  'marketProfile',
   'constraints',
   'goals',
   'brand',
@@ -94,6 +98,16 @@ const SECTION_FOCUS: Partial<Record<BlueprintSectionKey, { label: string; goal: 
     label: 'AI Preferences',
     goal: 'how KEY should behave, communicate, and report back',
     fields: ['autonomyLevel', 'tone', 'outreachStyle', 'reportingCadence'],
+  },
+  founderProfile: {
+    label: 'Founder Profile',
+    goal: 'who is building the business, their background, skills, and availability',
+    fields: ['founderName', 'background', 'skills', 'weeklyAvailabilityHours', 'riskTolerance', 'visionStatement'],
+  },
+  marketProfile: {
+    label: 'Market Profile',
+    goal: 'where the business competes, the target market, and demand signals',
+    fields: ['targetGeography', 'marketCategory', 'marketStage', 'demandSignals', 'trends', 'barriersToEntry'],
   },
   intelligence: {
     label: 'Intelligence',
@@ -160,11 +174,14 @@ export class BlueprintOnboardingService {
         reply,
         blueprint: updatedBlueprint,
         completeness: updatedBlueprint.completeness,
+        threePillarMinimumMet: this.blueprint.checkThreePillarMinimum(
+          (updatedBlueprint.genomeDnaScores ?? {}) as Record<DnaSectionKey, number>,
+        ),
         confidenceScores: updatedBlueprint.confidenceScores as Record<string, number>,
         extracted: extractions,
         nextSection,
       };
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Blueprint onboarding chat failed: ${(err as Error).message}`);
       const fallback = "I'm having trouble thinking that through. Could you tell me a bit more about your business?";
       state.messages.push({ role: 'assistant', content: fallback });
@@ -172,6 +189,9 @@ export class BlueprintOnboardingService {
         reply: fallback,
         blueprint,
         completeness: blueprint.completeness,
+        threePillarMinimumMet: this.blueprint.checkThreePillarMinimum(
+          (blueprint.genomeDnaScores ?? {}) as Record<DnaSectionKey, number>,
+        ),
         confidenceScores: blueprint.confidenceScores as Record<string, number>,
         extracted: [],
         nextSection: state.currentSection,
@@ -280,7 +300,7 @@ Confidence: 0.6 for inferred, 0.85 for stated clearly, 1.0 for explicitly confir
             confidence: typeof item.confidence === 'number' ? Math.min(item.confidence, 1) : 0.8,
           });
         }
-      } catch (err) {
+      } catch (err: any) {
         this.logger.warn(`Failed to parse onboarding extraction block: ${(err as Error).message}`);
       }
     }

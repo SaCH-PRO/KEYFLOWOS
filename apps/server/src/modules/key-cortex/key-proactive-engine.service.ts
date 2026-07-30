@@ -7,15 +7,24 @@
  * Connects to: Temporal Flow, Notifications, Command Center, KEY Inbox, Autonomy.
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { InvoiceStatus } from '@prisma/client';
 import { KeyCortexContextService } from './key-cortex-context.service';
 import {
   ProactiveTrigger,
   ProactiveTriggerType,
-  CortexContextSnapshot,
 } from './cortex-genome-contracts';
+import { CortexContextSnapshot } from './key-cortex.types';
+import { GenomeSignalService } from '../business-genome/key-genome/genome-signal.service';
+import type { CreateGenomeSignalInput } from '../business-genome/key-genome/key-genome.types';
+import {
+  InvoiceOverdueWatcherService,
+  BookingNoShowWatcherService,
+  SentimentWatcherService,
+} from './watchers';
+import { KeyCortexDigestService } from './key-cortex-digest.service';
 
 interface SignalSummary {
   dnaTrend: 'improving' | 'stable' | 'declining';
@@ -35,6 +44,11 @@ export class KeyProactiveEngineService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly context: KeyCortexContextService,
+    @Optional() private readonly signalService?: GenomeSignalService,
+    @Optional() private readonly invoiceWatcher?: InvoiceOverdueWatcherService,
+    @Optional() private readonly bookingWatcher?: BookingNoShowWatcherService,
+    @Optional() private readonly sentimentWatcher?: SentimentWatcherService,
+    @Optional() private readonly digestService?: KeyCortexDigestService,
   ) {}
 
   // ═══════════════════════════════════════════════════════════
@@ -45,6 +59,14 @@ export class KeyProactiveEngineService {
   async generateMorningBriefs(): Promise<void> {
     this.logger.log('[morningBrief] Generating morning briefs...');
 
+    try {
+      await this.invoiceWatcher?.scanAll();
+      await this.sentimentWatcher?.scanAll();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`[morningBrief] watcher scan failed: ${msg}`);
+    }
+
     const activeBusinesses = await this.getActiveBusinesses();
     for (const businessId of activeBusinesses) {
       try {
@@ -54,9 +76,29 @@ export class KeyProactiveEngineService {
           'medium',
         );
         this.logger.debug(`[morningBrief] created for business=${businessId}`);
+        await this.digestService?.deliverDailyDigest(businessId, 'email');
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         this.logger.warn(`[morningBrief] failed for ${businessId}: ${msg}`);
+      }
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // Scheduled: Weekly Report (every Monday at 9 AM)
+  // ═══════════════════════════════════════════════════════════
+
+  @Cron('0 9 * * 1')
+  async generateWeeklyDigests(): Promise<void> {
+    this.logger.log('[weeklyDigest] Generating weekly digests...');
+
+    const activeBusinesses = await this.getActiveBusinesses();
+    for (const businessId of activeBusinesses) {
+      try {
+        await this.digestService?.deliverWeeklyDigest(businessId, 'email');
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`[weeklyDigest] failed for ${businessId}: ${msg}`);
       }
     }
   }
@@ -69,10 +111,18 @@ export class KeyProactiveEngineService {
   async generateEndOfDayReports(): Promise<void> {
     this.logger.log('[endOfDay] Generating EOD reports...');
 
+    try {
+      await this.bookingWatcher?.scanAll();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`[endOfDay] watcher scan failed: ${msg}`);
+    }
+
     const activeBusinesses = await this.getActiveBusinesses();
     for (const businessId of activeBusinesses) {
       try {
         await this.createTrigger(businessId, 'end_of_day_report', 'medium');
+        await this.digestService?.deliverDailyDigest(businessId, 'email');
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         this.logger.warn(`[endOfDay] failed for ${businessId}: ${msg}`);
@@ -104,6 +154,17 @@ export class KeyProactiveEngineService {
 
     if (allTriggers.length > 0) {
       this.logger.log(`[proactive] ${allTriggers.length} triggers created`);
+    }
+
+    try {
+      await Promise.all([
+        this.invoiceWatcher?.scanAll(),
+        this.sentimentWatcher?.scanAll(),
+        this.bookingWatcher?.scanAll(),
+      ]);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`[proactive] watcher scan failed: ${msg}`);
     }
 
     return allTriggers;
@@ -149,41 +210,51 @@ export class KeyProactiveEngineService {
 
     // Risk alerts
     if (signals.pendingInvoices > 5) {
-      triggers.push(await this.createTrigger(
+      const trigger = await this.createTrigger(
         businessId, 'invoice_overdue', 'high',
         { count: signals.pendingInvoices },
-      ));
+      );
+      triggers.push(trigger);
+      await this.persistSignal(trigger, signals);
     }
 
     if (signals.overdueTasks > 3) {
-      triggers.push(await this.createTrigger(
+      const trigger = await this.createTrigger(
         businessId, 'missed_task', 'high',
         { count: signals.overdueTasks },
-      ));
+      );
+      triggers.push(trigger);
+      await this.persistSignal(trigger, signals);
     }
 
     // Revenue anomaly
     if (signals.anomalyScore > 70) {
-      triggers.push(await this.createTrigger(
+      const trigger = await this.createTrigger(
         businessId, 'revenue_anomaly', 'high',
         { score: signals.anomalyScore },
-      ));
+      );
+      triggers.push(trigger);
+      await this.persistSignal(trigger, signals);
     }
 
     // Genome weakness
     if (signals.integrity < 40) {
-      triggers.push(await this.createTrigger(
+      const trigger = await this.createTrigger(
         businessId, 'genome_weakness', 'medium',
         { integrity: signals.integrity },
-      ));
+      );
+      triggers.push(trigger);
+      await this.persistSignal(trigger, signals);
     }
 
     // Opportunity: unconverted leads
     if (signals.unconvertedLeads > 5) {
-      triggers.push(await this.createTrigger(
+      const trigger = await this.createTrigger(
         businessId, 'lead_dormant', 'medium',
         { count: signals.unconvertedLeads },
-      ));
+      );
+      triggers.push(trigger);
+      await this.persistSignal(trigger, signals);
     }
 
     return triggers;
@@ -216,18 +287,173 @@ export class KeyProactiveEngineService {
   }
 
   // ═══════════════════════════════════════════════════════════
+  // Genome Signal Persistence
+  // ═══════════════════════════════════════════════════════════
+
+  private async persistSignal(
+    trigger: ProactiveTrigger,
+    signals: SignalSummary,
+  ): Promise<void> {
+    if (!this.signalService) {
+      return;
+    }
+
+    const input = this.buildGenomeSignalInput(trigger, signals);
+    if (!input) {
+      return;
+    }
+
+    try {
+      await this.signalService.createSignal(input);
+      this.logger.debug(
+        `[persistSignal] Created genome signal for ${trigger.type} (${trigger.businessId})`,
+      );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(
+        `[persistSignal] Failed to create genome signal for ${trigger.type}: ${msg}`,
+      );
+    }
+  }
+
+  private buildGenomeSignalInput(
+    trigger: ProactiveTrigger,
+    signals: SignalSummary,
+  ): CreateGenomeSignalInput | null {
+    const base: Omit<CreateGenomeSignalInput, 'section' | 'domain' | 'signalType' | 'reason'> = {
+      businessId: trigger.businessId,
+      sourceModule: 'key_autonomy',
+      sourceEntityType: 'PROACTIVE_TRIGGER',
+      sourceEntityId: trigger.id,
+      proposedValue: trigger.data,
+      confidence: this.mapPriorityToConfidence(trigger.priority),
+      evidence: [
+        {
+          sourceModule: 'key_autonomy',
+          sourceEntityType: 'PROACTIVE_TRIGGER',
+          sourceEntityId: trigger.id,
+          summary: `Proactive scan detected ${trigger.type}`,
+          evidenceStrength: this.mapPriorityToConfidence(trigger.priority),
+          occurredAt: new Date().toISOString(),
+        },
+      ],
+    };
+
+    switch (trigger.type) {
+      case 'invoice_overdue':
+        return {
+          ...base,
+          section: 'FINANCE',
+          domain: 'cashflow',
+          signalType: 'RISK_PATTERN',
+          reason: `${signals.pendingInvoices} pending/overdue invoices require attention`,
+        };
+      case 'missed_task':
+        return {
+          ...base,
+          section: 'OPERATIONS',
+          domain: 'tasks',
+          signalType: 'OPERATIONS_PATTERN',
+          reason: `${signals.overdueTasks} overdue tasks detected`,
+        };
+      case 'revenue_anomaly':
+        return {
+          ...base,
+          section: 'FINANCE',
+          domain: 'revenue',
+          signalType: 'REVENUE_PATTERN',
+          reason: `Revenue anomaly score ${signals.anomalyScore} / 100`,
+        };
+      case 'genome_weakness':
+        return {
+          ...base,
+          section: 'GENOME',
+          domain: 'integrity',
+          signalType: 'READINESS_BLOCKER',
+          reason: `Genome integrity is low (${signals.integrity} / 100)`,
+        };
+      case 'lead_dormant':
+        return {
+          ...base,
+          section: 'SALES',
+          domain: 'leads',
+          signalType: 'CUSTOMER_PATTERN',
+          reason: `${signals.unconvertedLeads} dormant leads identified`,
+        };
+      default:
+        return null;
+    }
+  }
+
+  private mapPriorityToConfidence(
+    priority: ProactiveTrigger['priority'],
+  ): number {
+    switch (priority) {
+      case 'urgent':
+        return 0.95;
+      case 'high':
+        return 0.85;
+      case 'medium':
+        return 0.7;
+      case 'low':
+      default:
+        return 0.55;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════
   // Private helpers
   // ═══════════════════════════════════════════════════════════
 
   private async getActiveBusinesses(): Promise<string[]> {
-    // Get businesses active in last 7 days
-    // In production: query Prisma for active subscriptions
-    return ['demo-business']; // placeholder
+    // Active businesses = autopilot enabled AND (active subscription OR recent Cortex/AI activity).
+    // We cap at 500 per scan to avoid saturating the scheduler.
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+    try {
+      const businesses = await this.prisma.client.business.findMany({
+        where: {
+          autopilotEnabled: true,
+          OR: [
+            {
+              subscriptions: {
+                some: {
+                  status: { in: ['ACTIVE', 'TRIALING'] },
+                },
+              },
+            },
+            {
+              cortexSessions: {
+                some: {
+                  updatedAt: { gte: sevenDaysAgo },
+                },
+              },
+            },
+            {
+              aiUsageLogs: {
+                some: {
+                  createdAt: { gte: sevenDaysAgo },
+                },
+              },
+            },
+          ],
+        },
+        select: { id: true },
+        take: 500,
+        distinct: ['id'],
+      });
+
+      return businesses.map((b) => b.id);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.error(`[getActiveBusinesses] Failed to query active businesses: ${msg}`);
+      return [];
+    }
   }
 
   private async countOverdueTasks(businessId: string): Promise<number> {
     try {
-      return this.prisma.task.count({
+      return this.prisma.client.task.count({
         where: {
           businessId,
           status: { in: ['todo', 'in_progress'] },
@@ -241,7 +467,7 @@ export class KeyProactiveEngineService {
 
   private async countUnconvertedLeads(businessId: string): Promise<number> {
     try {
-      return this.prisma.lead.count({
+      return this.prisma.client.lead.count({
         where: {
           businessId,
           status: { in: ['new', 'contacted'] },
@@ -255,15 +481,15 @@ export class KeyProactiveEngineService {
 
   private async getRecentRevenue(businessId: string): Promise<number> {
     try {
-      const result = await this.prisma.invoice.aggregate({
+      const result = await this.prisma.client.invoice.aggregate({
         where: {
           businessId,
-          status: 'paid',
+          status: InvoiceStatus.PAID,
           createdAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
         },
         _sum: { total: true },
       });
-      return result._sum.total ?? 0;
+      return result._sum?.total ?? 0;
     } catch {
       return 0;
     }

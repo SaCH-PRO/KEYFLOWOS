@@ -63,13 +63,13 @@ import type { NotificationsModule as NotificationsModuleType } from '../notifica
 
 @Module({
   imports: [
-    CrmModule,
-    FinanceModule,
+    forwardRef(() => CrmModule),
+    forwardRef(() => FinanceModule),
     PublicEventsModule,
     SubscriptionsModule,
-    AiModule,
+    forwardRef(() => AiModule),
     CatalogModule,
-    FinanceModule,
+    forwardRef(() => FinanceModule),
     DocumentTemplateModule,
     GoogleDriveModule,
     TaskAssignmentModule,

@@ -184,7 +184,7 @@ Currency is TTD. Timezone is America/Port_of_Spain. Pick at most 5 topPriorities
             : fallback.warnings,
         };
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `Daily plan AI call failed for ${businessId}: ${(err as Error).message}`,
       );
@@ -320,7 +320,7 @@ Use the byDay totals provided as ground truth. Add 1-3 recommendations to balanc
             : baseline.recommendations,
         };
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `Weekly capacity AI call failed for ${businessId}: ${(err as Error).message}`,
       );

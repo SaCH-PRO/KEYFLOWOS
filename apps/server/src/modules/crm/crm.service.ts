@@ -13,10 +13,16 @@ import { BULK_LIMIT, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from './crm.constants';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { CrmTimelineService } from './crm-timeline.service';
 import { ContactCustomFieldValueService } from './contact-custom-field-value.service';
-import { CrmStatsService } from './crm-stats.service';
+import { CrmStatsService, type ContactMeta, type ContactWithStats } from './crm-stats.service';
 import { CrmListsService } from './crm-lists.service';
 import { CrmFlowService } from './crm-flow.service';
 import { ContactAuditService, ContactAuditActor } from './privacy/contact-audit.service';
+import { contactWhereBase, contactWhereWithId } from './crm.helpers';
+import { buildContactWhere } from './contact-filters.helper';
+import { resolveCrmAccess, visibilityClause, type CrmAccess } from './crm-permissions.helper';
+import { normalizeEmail, normalizePhone, findExistingBulk } from './crm-duplicate.util';
+import { CONTACT_EVENT } from '@keyflow/shared';
+import { EntityResolutionService } from '../../core/connectors/entity-resolution.service';
 
 /**
  * Optional request-scoped audit context that controllers can plumb
@@ -30,13 +36,6 @@ export interface AuditContext {
   userAgent?: string | null;
   reason?: string | null;
 }
-import type { ContactMeta, ContactWithStats } from './crm-stats.service';
-import { contactWhereBase, contactWhereWithId } from './crm.helpers';
-import { buildContactWhere } from './contact-filters.helper';
-import { resolveCrmAccess, visibilityClause, type CrmAccess } from './crm-permissions.helper';
-import { normalizeEmail, normalizePhone, findExistingBulk } from './crm-duplicate.util';
-import { CONTACT_EVENT } from '@keyflow/shared';
-import { EntityResolutionService } from '../../core/connectors/entity-resolution.service';
 
 type ContactSortBy = 'name' | 'newest' | 'oldest' | 'revenue' | 'score' | 'lastInteraction';
 
@@ -393,7 +392,7 @@ export class CrmService {
         LIMIT 1000
       `;
       return rows.map((r) => r.id);
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`TSVector search failed: ${(err as Error).message}`);
       return [];
     }
@@ -876,6 +875,47 @@ export class CrmService {
     this.stats.invalidateCache(input.businessId);
     this.flow.invalidateCache(input.businessId);
     return deleted;
+  }
+
+  /**
+   * Undo an AI-created contact. If the contact has no related activity,
+   * soft-delete it; otherwise revert it to LEAD for human review.
+   */
+  async undoContact(input: { businessId: string; contactId: string }) {
+    const contact = await this.prisma.client.contact.findUnique({
+      where: { id: input.contactId },
+      include: {
+        _count: { select: { bookings: true, invoices: true, tasks: true } },
+      },
+    });
+    if (!contact || contact.businessId !== input.businessId) {
+      throw new NotFoundException('Contact not found');
+    }
+
+    const totalActivity =
+      (contact._count.bookings ?? 0) +
+      (contact._count.invoices ?? 0) +
+      (contact._count.tasks ?? 0);
+
+    if (totalActivity === 0) {
+      const deleted = await this.prisma.client.contact.update({
+        where: { id: input.contactId },
+        data: { deletedAt: new Date() },
+      });
+      this.events.emit('contact.deleted', { contact: deleted, businessId: input.businessId });
+      this.stats.invalidateCache(input.businessId);
+      this.flow.invalidateCache(input.businessId);
+      return { id: input.contactId, status: 'deleted' };
+    }
+
+    const updated = await this.prisma.client.contact.update({
+      where: { id: input.contactId },
+      data: { status: 'LEAD' },
+    });
+    this.events.emit('contact.updated', { contact: updated, businessId: input.businessId });
+    this.stats.invalidateCache(input.businessId);
+    this.flow.invalidateCache(input.businessId);
+    return { id: input.contactId, status: 'reverted_to_lead' };
   }
 
   async bulkUpdateContacts(input: {
@@ -1475,7 +1515,7 @@ export class CrmService {
     try {
       await c.contact.update({ where: { id: op.duplicateId }, data: restoreData as Prisma.ContactUpdateInput });
       restored.contact = 1;
-    } catch (err) {
+    } catch (err: any) {
       // Failing to restore the surviving "duplicate" row is the only true blocker:
       // the rest of the revert depends on this row existing as a contact.
       throw new BadRequestException(`Failed to restore duplicate contact: ${reasonOf(err)}`);
@@ -1513,7 +1553,7 @@ export class CrmService {
           skipped[label] = (skipped[label] ?? 0) + (ids.length - r.count);
           conflicts.push({ table: label, ids, reason: `${ids.length - r.count} row(s) missing or already moved` });
         }
-      } catch (err) {
+      } catch (err: any) {
         skipped[label] = (skipped[label] ?? 0) + ids.length;
         conflicts.push({ table: label, ids, reason: reasonOf(err) });
       }
@@ -1531,7 +1571,7 @@ export class CrmService {
         try {
           await create(row);
           restored[table] = (restored[table] ?? 0) + 1;
-        } catch (err) {
+        } catch (err: any) {
           skipped[table] = (skipped[table] ?? 0) + 1;
           conflicts.push({ table, id: typeof row.id === 'string' ? row.id : undefined, reason: reasonOf(err) });
         }
@@ -1559,7 +1599,7 @@ export class CrmService {
           repointedCounts: { ...(stored as Record<string, unknown>), _revertReport: conflictReport } as Prisma.InputJsonValue,
         },
       });
-    } catch (err) {
+    } catch (err: any) {
         this.logger.warn(`Don't fail the user-visible revert because we couldn't persist the: ${err instanceof Error ? err.message : err}`);
       }
 
@@ -1735,6 +1775,18 @@ export class CrmService {
 
   listContactTasks(input: { businessId: string; contactId?: string; status?: string; dueBefore?: Date }) {
     return this.timeline.listContactTasks(input);
+  }
+
+  getContactTimeline(businessId: string, contactId: string, limit?: number) {
+    return this.timeline.getContactTimeline(businessId, contactId, limit);
+  }
+
+  async countContacts(input: { businessId: string; status?: string; tag?: string }) {
+    const where = buildContactWhere(input.businessId, {
+      status: input.status,
+      tags: input.tag ? [input.tag] : undefined,
+    });
+    return this.prisma.client.contact.count({ where });
   }
 
   dueTasks(input: { businessId: string; windowDays?: number }) {

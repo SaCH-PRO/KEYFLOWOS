@@ -239,7 +239,7 @@ export class TemporalFlowKeyInboxListener {
         externalId: input.externalId ?? this.externalId(input),
         module: 'key_inbox',
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(`Failed to emit temporal flow event: ${(err as Error).message}`);
     }
   }

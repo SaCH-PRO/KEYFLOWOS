@@ -13,12 +13,24 @@ export class RedisService implements OnModuleDestroy {
     return this.redis.get(key);
   }
 
-  async set(key: string, value: string, ttlSeconds?: number): Promise<void> {
-    if (ttlSeconds != null) {
-      await this.redis.set(key, value, 'EX', ttlSeconds);
+  async set(key: string, value: string, ttlSeconds?: number): Promise<void>;
+  async set(key: string, value: string, mode: 'EX' | 'PX', ttl: number): Promise<void>;
+  async set(key: string, value: string, modeOrTtl?: number | 'EX' | 'PX', ttl?: number): Promise<void> {
+    if (modeOrTtl === 'EX' || modeOrTtl === 'PX') {
+      await (this.redis as any).set(key, value, modeOrTtl, ttl ?? 0);
+    } else if (modeOrTtl != null) {
+      await (this.redis as any).set(key, value, 'EX', modeOrTtl);
     } else {
       await this.redis.set(key, value);
     }
+  }
+
+  async setex(key: string, seconds: number, value: string): Promise<void> {
+    await this.redis.set(key, value, 'EX', seconds);
+  }
+
+  async keys(pattern: string): Promise<string[]> {
+    return this.redis.keys(pattern);
   }
 
   async del(key: string): Promise<void> {

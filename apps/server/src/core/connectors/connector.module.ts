@@ -6,6 +6,7 @@ import { ConnectorSyncSchedulerService } from './connector-sync-scheduler.servic
 import { ConnectorCredentialsService } from './connector-credentials.service';
 import { EntityResolutionService } from './entity-resolution.service';
 import { ConnectorController } from './connector.controller';
+import { WebhookIngressLoggerService } from './webhook-ingress-logger.service';
 import { ConnectorInitializerService } from './connector-initializer.service';
 import { GoogleSuiteService } from './google-suite.service';
 import { GoogleSuiteController } from './google-suite.controller';
@@ -51,6 +52,7 @@ import {
     ConnectorCredentialsService,
     EntityResolutionService,
     ConnectorInitializerService,
+    WebhookIngressLoggerService,
     GoogleSuiteService,
     GmailConnector,
     GmailIngestionService,
@@ -84,6 +86,7 @@ import {
     ConnectorSyncSchedulerService,
     ConnectorCredentialsService,
     EntityResolutionService,
+    WebhookIngressLoggerService,
     GoogleSuiteService,
     GmailIngestionService,
     StripeConnector,

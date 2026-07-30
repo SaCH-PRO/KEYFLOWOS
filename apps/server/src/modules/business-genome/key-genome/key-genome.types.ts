@@ -269,6 +269,8 @@ export interface UpsertGenomeFactInput {
   sourceType: string;
   sourceEntityType?: string;
   sourceEntityId?: string;
+  verificationStatus?: VerificationStatus;
+  confidenceScore?: number;
 }
 
 export interface AttachGenomeEvidenceInput {
@@ -1649,4 +1651,21 @@ export interface GenomeRecommendationExecutionStatus {
   executionResult?: string | null;
   failureReason?: string | null;
   checkedAt: string;
+}
+
+export interface GenomeRecommendationLearningSummary {
+  businessId: string;
+  totalObserved: number;
+  averageImpactScore: number;
+  topPositiveDomains: Array<{
+    domain: string;
+    count: number;
+    averageImpact: number;
+  }>;
+  topNegativeDomains: Array<{
+    domain: string;
+    count: number;
+    averageImpact: number;
+  }>;
+  recentOutcomes: GenomeRecommendationOutcomeData[];
 }

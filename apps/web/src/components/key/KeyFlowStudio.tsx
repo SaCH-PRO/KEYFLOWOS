@@ -290,6 +290,72 @@ export function KeyFlowStudio({
     });
   }, [nodes, edges]);
 
+  /* ── actions ────────────────────────────────────────────────────── */
+  const handleDeleteSelected = useCallback(() => {
+    if (!selectedNodeId) return;
+    snapshot();
+    setNodes((prev) => prev.filter((n) => n.id !== selectedNodeId));
+    setEdges((prev) =>
+      prev.filter(
+        (e) => e.source !== selectedNodeId && e.target !== selectedNodeId
+      )
+    );
+    setSelectedNodeId(null);
+  }, [selectedNodeId, snapshot]);
+
+  const handleDuplicateNode = useCallback(
+    (id: string) => {
+      const node = nodes.find((n) => n.id === id);
+      if (!node) return;
+      snapshot();
+      const clone: FlowNodeUI = {
+        ...node,
+        id: uid(),
+        position: {
+          x: node.position.x + 40,
+          y: node.position.y + 40,
+        },
+        data: { ...node.data, config: { ...node.data.config } },
+        inputs: node.inputs.map((p) => ({ ...p })),
+        outputs: node.outputs.map((p) => ({ ...p })),
+      };
+      setNodes((prev) => [...prev, clone]);
+      setSelectedNodeId(clone.id);
+    },
+    [nodes, snapshot]
+  );
+
+  const handleSave = useCallback(() => {
+    onSave?.({ name: flowName, nodes, edges });
+    setIsDirty(false);
+  }, [flowName, nodes, edges, onSave]);
+
+  const handleExecute = useCallback(() => {
+    onExecute?.({ name: flowName, nodes, edges });
+    setLastExecuted(new Date().toISOString());
+  }, [flowName, nodes, edges, onExecute]);
+
+  const handleNodeUpdate = useCallback(
+    (id: string, updates: Partial<FlowNodeUI["data"]>) => {
+      snapshot();
+      setNodes((prev) =>
+        prev.map((n) =>
+          n.id === id
+            ? {
+                ...n,
+                data: {
+                  ...n.data,
+                  ...updates,
+                  config: { ...n.data.config, ...(updates.config ?? {}) },
+                },
+              }
+            : n
+        )
+      );
+    },
+    [snapshot]
+  );
+
   /* ── keyboard shortcuts ─────────────────────────────────────────── */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -315,7 +381,7 @@ export function KeyFlowStudio({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [handleUndo, handleRedo, selectedNodeId]);
+  }, [handleUndo, handleRedo, handleSave, handleDeleteSelected, selectedNodeId]);
 
   /* ── canvas drag-and-drop (new node from palette) ──────────────── */
   const handleCanvasDragOver = useCallback((e: React.DragEvent) => {
@@ -527,72 +593,6 @@ export function KeyFlowStudio({
     window.addEventListener("click", close);
     return () => window.removeEventListener("click", close);
   }, []);
-
-  /* ── actions ────────────────────────────────────────────────────── */
-  const handleDeleteSelected = useCallback(() => {
-    if (!selectedNodeId) return;
-    snapshot();
-    setNodes((prev) => prev.filter((n) => n.id !== selectedNodeId));
-    setEdges((prev) =>
-      prev.filter(
-        (e) => e.source !== selectedNodeId && e.target !== selectedNodeId
-      )
-    );
-    setSelectedNodeId(null);
-  }, [selectedNodeId, snapshot]);
-
-  const handleDuplicateNode = useCallback(
-    (id: string) => {
-      const node = nodes.find((n) => n.id === id);
-      if (!node) return;
-      snapshot();
-      const clone: FlowNodeUI = {
-        ...node,
-        id: uid(),
-        position: {
-          x: node.position.x + 40,
-          y: node.position.y + 40,
-        },
-        data: { ...node.data, config: { ...node.data.config } },
-        inputs: node.inputs.map((p) => ({ ...p })),
-        outputs: node.outputs.map((p) => ({ ...p })),
-      };
-      setNodes((prev) => [...prev, clone]);
-      setSelectedNodeId(clone.id);
-    },
-    [nodes, snapshot]
-  );
-
-  const handleSave = useCallback(() => {
-    onSave?.({ name: flowName, nodes, edges });
-    setIsDirty(false);
-  }, [flowName, nodes, edges, onSave]);
-
-  const handleExecute = useCallback(() => {
-    onExecute?.({ name: flowName, nodes, edges });
-    setLastExecuted(new Date().toISOString());
-  }, [flowName, nodes, edges, onExecute]);
-
-  const handleNodeUpdate = useCallback(
-    (id: string, updates: Partial<FlowNodeUI["data"]>) => {
-      snapshot();
-      setNodes((prev) =>
-        prev.map((n) =>
-          n.id === id
-            ? {
-                ...n,
-                data: {
-                  ...n.data,
-                  ...updates,
-                  config: { ...n.data.config, ...(updates.config ?? {}) },
-                },
-              }
-            : n
-        )
-      );
-    },
-    [snapshot]
-  );
 
   /* ── zoom helpers ───────────────────────────────────────────────── */
   const zoomIn = () =>

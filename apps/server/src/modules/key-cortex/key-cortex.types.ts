@@ -95,6 +95,14 @@ export interface CortexMessage {
     actionsTriggered?: CortexActionResult[];
     mood?: CortexMood;
     voiceUsed?: CortexVoice;
+    isSummary?: boolean;
+    originalMessageCount?: number;
+    // KEY 10/10: cognition metadata
+    role?: string;
+    confidence?: number;
+    taskCategory?: string;
+    fallbackUsed?: boolean;
+    fallbackProvider?: string;
   };
 }
 
@@ -109,6 +117,14 @@ export interface CortexSession {
   preferredProvider: CortexProvider;
   messages: CortexMessage[];
   contextSnapshot?: CortexContextSnapshot;
+  runningSummary?: string;
+  // Phase A/D: cognition metadata
+  detectedRole?: string;
+  detectedFunction?: string;
+  layersUsed?: string[];
+  llmCallsMade?: number;
+  responseTimeMs?: number;
+  userFeedback?: string;
   createdAt: Date;
   updatedAt: Date;
   lastAccessedAt: Date;
@@ -159,16 +175,27 @@ export interface CortexResponse {
   suggestions?: string[];
   followUpQuestions?: string[];
   confidence: number;
+  // KEY 10/10: structured reasoning output
+  role?: string;
+  analysis?: string;
+  hiddenSignals?: string[];
+  risks?: string[];
+  successMetrics?: string[];
+  nextStep?: string;
+  frameworks?: string[];
+  // Phase D: explicit knowledge-gap statement when confidence is miscalibrated
+  knowledgeGap?: string;
 }
 
 export interface CortexActionResult {
   actionType: CortexActionType;
-  status: 'success' | 'error' | 'pending_approval';
+  status: 'success' | 'error' | 'pending_approval' | 'blocked';
   description: string;
   result?: Record<string, unknown>;
   error?: string;
   requiresApproval?: boolean;
   estimatedImpact?: string;
+  approvalRequestId?: string;
 }
 
 export interface CortexPersonalityConfig {

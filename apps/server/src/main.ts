@@ -6,7 +6,7 @@ config({ path: resolve(process.cwd(), '../../.env') });
 import { NestFactory } from '@nestjs/core';
 import { configureNestApp } from './app-bootstrap';
 import { ensureValidServerEnv, assertNoDevAuthBypass } from './core/config/env';
-import { getReleaseVersion } from './core/utils/release-version';
+import { getReleaseVersion } from '@keyflow/shared/release-version';
 
 async function bootstrap() {
   // Fail fast on missing/malformed env. Prints a single, readable list and

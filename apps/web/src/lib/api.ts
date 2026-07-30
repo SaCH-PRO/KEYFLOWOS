@@ -10,6 +10,9 @@ const API_BASE = (() => {
 })();
 const AI_SUGGEST_URL = process.env.NEXT_PUBLIC_AI_SUGGEST_URL;
 
+import { fetchWithRetry } from "./fetch-with-retry";
+import { refreshAccessToken } from "./workspace";
+
 // One-shot reachability check: the first time a network error is observed
 // against API_BASE, log a single loud warning so the developer knows the
 // configured backend URL is wrong. We only nag once per session.
@@ -35,7 +38,7 @@ type FetchOptions = {
   init?: RequestInit;
 };
 
-type ApiResponse<T> = { data: T | null; error: string | null; planLimitReached?: PlanLimitError | null };
+type ApiResponse<T> = { data: T | null; error: string | null; planLimitReached?: PlanLimitError | null; rawError?: Record<string, unknown> | null };
 
 export interface PlanLimitError {
   resource: string;
@@ -107,9 +110,6 @@ function fetchWithTimeout(
   return fetchWithRetry(url, init, { timeoutMs, retries: 3 });
 }
 
-import { fetchWithRetry } from "./fetch-with-retry";
-import { refreshAccessToken } from "./workspace";
-
 /**
  * Wrapper around fetch that attempts to refresh the Supabase access token
  * on 401 and retries the request once with the new token.
@@ -135,9 +135,21 @@ function handleErrorResponse<T>(data: unknown, statusText: string, status?: numb
   const planLimit = parsePlanLimitError(parsed);
   if (planLimit) emitPlanLimitEvent(planLimit);
   if (status === 401) emitUnauthorizedEvent(path ?? "");
-  const message =
-    parsed && typeof parsed.message === "string" ? parsed.message : statusText || "Request failed";
-  return { data: null, error: message, planLimitReached: planLimit };
+  let message: string;
+  if (parsed) {
+    if (typeof parsed.message === "string") {
+      message = parsed.message;
+    } else if (Array.isArray(parsed.message) && parsed.message.length > 0) {
+      message = parsed.message.join("; ");
+    } else if (typeof parsed.error === "string") {
+      message = parsed.error;
+    } else {
+      message = statusText || "Request failed";
+    }
+  } else {
+    message = statusText || "Request failed";
+  }
+  return { data: null, error: message, planLimitReached: planLimit, rawError: parsed };
 }
 
 export async function apiPost<T>({ path, body, init }: FetchOptions): Promise<ApiResponse<T>> {

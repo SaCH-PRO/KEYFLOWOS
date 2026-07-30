@@ -198,7 +198,7 @@ export class RecurringExpenseService implements OnModuleInit, OnModuleDestroy {
         try {
           await this.runOnce(r.id, r.businessId, now);
           generated += 1;
-        } catch (err) {
+        } catch (err: any) {
           failed += 1;
           this.logger.error(`RecurringExpense ${r.id} failed`, (err as Error)?.stack);
           await this.prisma.client.recurringExpense.update({

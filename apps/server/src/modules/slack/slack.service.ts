@@ -32,7 +32,7 @@ export class SlackService {
 
       this.logger.log(`Slack message sent to ${webhookUrl.slice(0, 40)}...`);
       return { success: true };
-    } catch (err) {
+    } catch (err: any) {
       const message = (err as Error).message;
       this.logger.error(`Slack webhook failed: ${message}`);
       return { success: false, error: message };

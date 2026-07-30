@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
+import { timingSafeStringEqual } from '../../core/security/timing-safe-equal';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { createHmac } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -129,7 +130,7 @@ export class EmailMarketingService {
       const [data, sig] = token.split('.');
       if (!data || !sig) return null;
       const expectedSig = this.signPayload(data);
-      if (sig !== expectedSig) {
+      if (!timingSafeStringEqual(sig, expectedSig)) {
         this.logger.warn('Invalid unsubscribe token signature');
         return null;
       }
@@ -422,7 +423,7 @@ export class EmailMarketingService {
                 });
                 gmailDelivered++;
                 await new Promise((r) => setTimeout(r, 200));
-              } catch (err) {
+              } catch (err: any) {
                 gmailFailed++;
                 this.logger.warn(`Failed to send email to ${recipient.email}: ${err}`);
                 await this.prisma.client.emailCampaignContact.updateMany({
@@ -432,7 +433,7 @@ export class EmailMarketingService {
               }
             }
           }
-        } catch (err) {
+        } catch (err: any) {
           this.logger.warn(`Gmail check failed: ${err}`);
         }
       }
@@ -461,7 +462,7 @@ export class EmailMarketingService {
         gmailFailed,
         warning,
       };
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`sendCampaign failed for ${id}, reverting to DRAFT`, err);
       await this.prisma.client.emailCampaign.updateMany({
         where: { id, status: 'SENDING' },
@@ -493,6 +494,49 @@ export class EmailMarketingService {
       },
     });
     this.events.emit('email_campaign.scheduled', { campaign: result, businessId });
+    this.invalidateStatsCache(businessId);
+    return result;
+  }
+
+  /**
+   * Lightweight campaign scheduler used by AI tool loop. Mirrors the legacy
+   * direct-write semantics: validates the date and flips status to SCHEDULED.
+   */
+  async queueCampaign(businessId: string, id: string, scheduledAt: string) {
+    const campaign = await this.prisma.client.emailCampaign.findFirst({
+      where: { id, businessId },
+    });
+    if (!campaign) throw new Error('Campaign not found');
+    if (campaign.status !== 'DRAFT') throw new Error(`Campaign must be in DRAFT status to queue (current: ${campaign.status})`);
+
+    const scheduleDate = new Date(scheduledAt);
+    if (Number.isNaN(scheduleDate.getTime())) throw new Error('Invalid scheduledAt date format');
+
+    const result = await this.prisma.client.emailCampaign.update({
+      where: { id, businessId },
+      data: { status: 'SCHEDULED', scheduledAt: scheduleDate },
+    });
+    this.events.emit('email_campaign.scheduled', { campaign: result, businessId });
+    this.invalidateStatsCache(businessId);
+    return result;
+  }
+
+  /**
+   * Mark a campaign as sent without delivering emails. Used by AI tool loop
+   * where the original direct-write only flipped the status column.
+   */
+  async markCampaignSent(businessId: string, id: string) {
+    const campaign = await this.prisma.client.emailCampaign.findFirst({
+      where: { id, businessId, deletedAt: null },
+    });
+    if (!campaign) throw new Error('Campaign not found');
+    if (campaign.status === 'SENT') throw new Error('Campaign has already been sent');
+
+    const result = await this.prisma.client.emailCampaign.update({
+      where: { id, businessId },
+      data: { status: 'SENT', sentAt: new Date() },
+    });
+    this.events.emit('email_campaign.sent', { campaign: result, businessId, recipientCount: 0 });
     this.invalidateStatsCache(businessId);
     return result;
   }

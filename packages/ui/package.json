@@ -38,6 +38,7 @@
   },
   "scripts": {
     "storybook": "storybook dev -p 6006 -c .storybook",
+    "typecheck": "tsc --noEmit",
     "lint": "eslint src --ext .ts,.tsx"
   },
   "peerDependencies": {

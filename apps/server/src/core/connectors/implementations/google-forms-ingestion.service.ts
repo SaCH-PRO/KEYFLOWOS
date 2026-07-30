@@ -157,13 +157,13 @@ export class GoogleFormsIngestionService {
 
               await this.keyInbox.addMessage(messageInput);
               ingested += 1;
-            } catch (err) {
+            } catch (err: any) {
               const message = err instanceof Error ? err.message : String(err);
               this.logger.warn(`Failed to ingest form response ${response.responseId} for ${businessId}: ${message}`);
               errors.push(`${form.id}/${response.responseId}: ${message}`);
             }
           }
-        } catch (err) {
+        } catch (err: any) {
           const message = err instanceof Error ? err.message : String(err);
           this.logger.warn(`Failed to sync form ${form.id} for ${businessId}: ${message}`);
           errors.push(`${form.id}: ${message}`);
@@ -196,7 +196,7 @@ export class GoogleFormsIngestionService {
         errors,
         duration: Date.now() - start,
       };
-    } catch (err) {
+    } catch (err: any) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.error(`Google Forms ingestion failed for ${businessId}: ${message}`);
 

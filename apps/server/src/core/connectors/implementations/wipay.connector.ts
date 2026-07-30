@@ -71,18 +71,18 @@ export class WiPayConnector implements IConnector, IPaymentGatewayConnector {
     return health.status === 'connected';
   }
 
-  async sync(businessId: string): Promise<ConnectorSyncResult> {
-    const start = Date.now();
-    const connected = await this.isConnected(businessId);
-    if (!connected) {
-      return { success: false, itemsSynced: 0, errors: ['WiPay not connected'], duration: Date.now() - start };
-    }
-
-    const recentPayments = await this.prisma.client.payment.count({
-      where: { businessId, method: 'WIPAY' },
-    }).catch(() => 0);
-
-    return { success: true, itemsSynced: recentPayments, errors: [], duration: Date.now() - start };
+  async sync(_businessId: string): Promise<ConnectorSyncResult> {
+    // Provider pull sync is not yet implemented for this connector. It previously
+    // counted local rows and returned success:true, misrepresenting a no-op as a
+    // successful provider sync. Real pull sync is future work per connector.
+    return {
+      success: false,
+      itemsSynced: 0,
+      unsupported: true,
+      code: 'PULL_SYNC_NOT_IMPLEMENTED',
+      errors: ['Provider pull sync is not implemented for this connector.'],
+      duration: 0,
+    };
   }
 
   async smokeTest(businessId: string): Promise<ConnectorSmokeResult> {
@@ -118,7 +118,7 @@ export class WiPayConnector implements IConnector, IPaymentGatewayConnector {
       let parsed: Record<string, unknown> | null = null;
       try {
         parsed = JSON.parse(text);
-      } catch (err) {
+      } catch (err: any) {
           this.logger.debug(`Non-JSON response (e.g. HTML form page) — that's still a real round trip: ${err instanceof Error ? err.message : err}`);
         }
       const message = (parsed?.message as string | undefined) ?? (parsed?.status as string | undefined) ?? null;
@@ -138,7 +138,7 @@ export class WiPayConnector implements IConnector, IPaymentGatewayConnector {
         account: String(accountNumber),
         detail: message ?? `HTTP ${res.status} from WiPay gateway`,
       };
-    } catch (err) {
+    } catch (err: any) {
       return { success: false, error: err instanceof Error ? err.message : 'Network error' };
     }
   }

@@ -10,8 +10,10 @@ import {
   Param,
   Post,
 } from '@nestjs/common';
+import { timingSafeStringEqual } from '../security/timing-safe-equal';
 import { ConnectorRegistryService } from './connector-registry.service';
 import { ConnectorCredentialsService } from './connector-credentials.service';
+import { WebhookIngressLoggerService } from './webhook-ingress-logger.service';
 import { TypeformConnector, JotformConnector, WebhookFormConnector } from './implementations';
 import type { ConnectorType } from './connector.interface';
 import type { FormPlatformConnector } from './implementations/form-platform.base';
@@ -48,6 +50,7 @@ export class FormWebhookController {
   constructor(
     @Inject(ConnectorRegistryService) private readonly registry: ConnectorRegistryService,
     @Inject(ConnectorCredentialsService) private readonly credentials: ConnectorCredentialsService,
+    @Inject(WebhookIngressLoggerService) private readonly webhookLogger: WebhookIngressLoggerService,
   ) {}
 
   @Post(':businessId/:type')
@@ -70,9 +73,25 @@ export class FormWebhookController {
     const stored = (await this.credentials.getCredentials(businessId, type as ConnectorType)) ?? {};
     const expected = stored.webhookSecret;
     if (!expected) {
+      await this.webhookLogger.log({
+        businessId,
+        connectorType: type,
+        payload: body,
+        headers: { 'x-keyflow-signature': signature },
+        statusCode: 403,
+        errorMessage: 'Webhook secret not configured',
+      });
       throw new ForbiddenException('Webhook secret not configured. Visit Settings → Connectors to set up.');
     }
-    if (!signature || signature !== expected) {
+    if (!signature || !timingSafeStringEqual(signature, expected)) {
+      await this.webhookLogger.log({
+        businessId,
+        connectorType: type,
+        payload: body,
+        headers: { 'x-keyflow-signature': signature },
+        statusCode: 403,
+        errorMessage: 'Invalid webhook signature',
+      });
       throw new ForbiddenException('Invalid webhook signature');
     }
 
@@ -94,8 +113,18 @@ export class FormWebhookController {
       submittedAt: normalized.submittedAt ? new Date(normalized.submittedAt) : undefined,
     });
 
+    const response = { success: true, contactId: result.contactId };
+    await this.webhookLogger.log({
+      businessId,
+      connectorType: type,
+      payload: body,
+      headers: { 'x-keyflow-signature': signature },
+      statusCode: 200,
+      responseBody: JSON.stringify(response),
+    });
+
     this.logger.log(`Form webhook ingested for business=${businessId} type=${type} formId=${normalized.formId}`);
-    return { success: true, contactId: result.contactId };
+    return response;
   }
 }
 

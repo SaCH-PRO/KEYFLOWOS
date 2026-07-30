@@ -50,14 +50,14 @@ export class CrmDataQualityScheduler implements OnModuleInit, OnModuleDestroy {
       for (const id of ids) {
         try {
           await this.dq.scanBusiness(id);
-        } catch (err) {
+        } catch (err: any) {
           this.logger.warn(`Data-quality scan failed for ${id}: ${(err as Error).message}`);
         }
         if (PER_BUSINESS_GAP_MS > 0) {
           await new Promise((res) => setTimeout(res, PER_BUSINESS_GAP_MS));
         }
       }
-    } catch (err) {
+    } catch (err: any) {
       this.logger.error(`Nightly data-quality run errored: ${(err as Error).message}`);
     } finally {
       this.running = false;

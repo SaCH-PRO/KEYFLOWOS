@@ -854,7 +854,11 @@ export default function InvoicesPanel({
                   checked={filteredInvoices.length > 0 && filteredInvoices.every((i) => selectedIds.has(i.id))}
                   onChange={() => {
                     const allSelected = filteredInvoices.every((i) => selectedIds.has(i.id));
-                    allSelected ? clearSelection() : selectAll(filteredInvoices.map((i) => i.id));
+                    if (allSelected) {
+                      clearSelection();
+                    } else {
+                      selectAll(filteredInvoices.map((i) => i.id));
+                    }
                   }}
                   className="w-4 h-4 rounded border-border/50 accent-[hsl(var(--kf-accent1))]"
                   aria-label="Select all visible invoices"

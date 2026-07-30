@@ -74,7 +74,7 @@ export class BookingNoShowListener {
           riskKind: kind,
         },
       });
-    } catch (err) {
+    } catch (err: any) {
       this.logger.warn(
         `booking-no-show notify failed for ${b.id} (${kind}): ${(err as Error).message}`,
       );

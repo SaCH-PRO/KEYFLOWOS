@@ -224,7 +224,7 @@ export class CustomerJourneyService {
       try {
         await this.recomputeJourney(j.id);
         processed += 1;
-      } catch (err) {
+      } catch (err: any) {
         failed += 1;
         this.logger.warn(
           `Recompute failed for journey ${j.id} (business ${businessId}): ${err instanceof Error ? err.message : String(err)}`,

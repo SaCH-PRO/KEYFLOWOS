@@ -50,7 +50,7 @@ export class PublicRateLimitGuard implements CanActivate {
 
       await this.redis.zadd(key, now, `${now}-${Math.random().toString(36).slice(2)}`);
       await this.redis.pexpire(key, opts.windowMs);
-    } catch (err) {
+    } catch (err: any) {
       if (err instanceof HttpException) throw err;
       console.error('[PublicRateLimitGuard] Redis error — failing open:', (err as Error).message);
     }
