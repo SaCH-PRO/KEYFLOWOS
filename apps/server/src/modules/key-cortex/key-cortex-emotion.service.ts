@@ -447,10 +447,10 @@ export class KeyCortexEmotionService {
   ): Promise<{ emotion: PrimaryEmotion; intensity: number; confidence: number }> {
     try {
       const prompt = this.buildEmotionPrompt(text);
-      // trackAndComplete performs the gateway call and records usage in one step;
-      // AiUsageService has no standalone record() method.
-      const response = await this.aiUsage.trackAndComplete(businessId, userId, 'emotion_detection', {
-        messages: [{ role: 'user' as const, content: prompt }],
+      const response = await this.modelGateway.complete({
+        businessId,
+        taskCategory: 'reasoning',
+        messages: [{ role: 'user', content: prompt }],
         temperature: 0.3,
         maxTokens: 128,
       });

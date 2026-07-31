@@ -798,7 +798,7 @@ Respond in this exact shape:
     try {
       const pdfParse = await import('pdf-parse');
       const result = await pdfParse.default(buffer);
-      return result.content ?? '';
+      return result.text ?? '';
     } catch (err: any) {
       this.logger.warn(`pdf-parse failed, falling back to AI vision: ${(err as Error).message}`);
       // Fallback: treat PDF as image and use AI vision
