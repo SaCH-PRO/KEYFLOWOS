@@ -330,7 +330,7 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
       timing.synthesisMs = Date.now() - step9Start;
       this.logger.debug(
         `[Consciousness][S9] Response synthesized: ` +
-          `${response.content.length} chars, ` +
+          `${response.text.length} chars, ` +
           `${response.actions.length} actions ` +
           `(${timing.synthesisMs}ms)`,
       );
@@ -358,7 +358,7 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
         mindState,
         reasoningMode: reasoningResult.bestChain.mode,
         confidence: calibratedConfidence.confidence,
-        outcome: response.content.substring(0, 200),
+        outcome: response.text.substring(0, 200),
         timing: {
           totalMs,
           emotionMs: timing.emotionMs,
@@ -1075,13 +1075,13 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
 
       // Count event types to infer state
       const alertCount = recentEvents.filter(
-        (e) => e.type === BusinessEventType.ALERT_TRIGGERED,
+        (e) => e.eventType === BusinessEventType.ALERT_TRIGGERED,
       ).length;
       const autonomyCount = recentEvents.filter(
-        (e) => e.type === BusinessEventType.AUTONOMY_EXERCISED,
+        (e) => e.eventType === BusinessEventType.AUTONOMY_EXERCISED,
       ).length;
       const genomeCount = recentEvents.filter(
-        (e) => e.type === BusinessEventType.GENOME_EVOLUTION,
+        (e) => e.eventType === BusinessEventType.GENOME_EVOLUTION,
       ).length;
 
       if (alertCount >= 3) {

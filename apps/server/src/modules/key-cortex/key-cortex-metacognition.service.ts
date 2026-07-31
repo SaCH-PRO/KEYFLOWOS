@@ -446,7 +446,7 @@ export class KeyCortexMetacognitionService {
         .split(' ')
         .some(
           (word) =>
-            word.length > 3 && e.claim.toLowerCase().includes(word.toLowerCase()),
+            word.length > 3 && ((e.metadata as Record<string, unknown>)?.claim as string ?? '').toLowerCase().includes(word.toLowerCase()),
         ),
     );
 
@@ -464,7 +464,7 @@ export class KeyCortexMetacognitionService {
         `• I found ${relevantEvidence.length} piece(s) of evidence relevant to this claim`,
       );
       const avgEvidenceConfidence =
-        relevantEvidence.reduce((s, e) => s + e.confidence, 0) /
+        relevantEvidence.reduce((s, e) => s + (((e.metadata as Record<string, unknown>)?.confidence as number) ?? 0), 0) /
         relevantEvidence.length;
       parts.push(
         `  Average evidence confidence: ${Math.round(avgEvidenceConfidence * 100)}%`,
@@ -530,7 +530,7 @@ export class KeyCortexMetacognitionService {
     // Aggregate by capability
     const records = new Map<string, CapabilityRecord>();
     for (const event of events) {
-      const payload = event.payload as Record<string, unknown>;
+      const payload = event.metadata as Record<string, unknown>;
       const cap = payload.capability as string;
       const result = payload.result as string;
       if (!cap) continue;
@@ -869,7 +869,7 @@ export class KeyCortexMetacognitionService {
       .filter((e) =>
         keywords.some(
           (k) =>
-            e.claim.toLowerCase().includes(k) ||
+            ((e.metadata as Record<string, unknown>)?.claim as string ?? '').toLowerCase().includes(k) ||
             ((e.proof as Record<string, unknown>)?.description as string)
               ?.toLowerCase()
               .includes(k),
@@ -878,7 +878,7 @@ export class KeyCortexMetacognitionService {
       .slice(0, 5)
       .map(
         (e) =>
-          `${e.claim} (${e.verified ? 'verified' : 'unverified'}, ${Math.round(e.confidence * 100)}% confidence)`,
+          `${((e.metadata as Record<string, unknown>)?.claim as string ?? '')} (${(((e.metadata as Record<string, unknown>)?.verified as boolean) ?? false) ? 'verified' : 'unverified'}, ${Math.round((((e.metadata as Record<string, unknown>)?.confidence as number) ?? 0) * 100)}% confidence)`,
       );
   }
 
