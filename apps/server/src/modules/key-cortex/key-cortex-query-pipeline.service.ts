@@ -55,6 +55,7 @@ import { KeyCortexPromptContextService } from './key-cortex-prompt-context.servi
 import { KeyCortexToolLoopService } from './key-cortex-tool-loop.service';
 import { KeyCortexActionDetectionService } from './key-cortex-action-detection.service';
 import { KeyCortexStructuredOutputService } from './key-cortex-structured-output.service';
+import { KeyCortexExpertiseLensService } from './key-cortex-expertise-lens.service';
 import { KeyCortexMoodDetectionService } from './key-cortex-mood-detection.service';
 import { KeyCortexSuggestionService } from './key-cortex-suggestion.service';
 import { KeyCortexGenomeContextService } from './key-cortex-genome-context.service';
@@ -145,6 +146,9 @@ export class KeyCortexQueryPipelineService {
     @Optional()
     @Inject(KeyCortexPlannerService)
     private readonly planner?: KeyCortexPlannerService,
+    @Optional()
+    @Inject(KeyCortexExpertiseLensService)
+    private readonly expertiseLens?: KeyCortexExpertiseLensService,
   ) {
     this.MAX_CONTEXT_TOKENS = parseInt(
       process.env.KEY_CORTEX_MAX_CONTEXT_TOKENS ?? '8000',
@@ -575,6 +579,25 @@ export class KeyCortexQueryPipelineService {
         systemPrompt += `\nAdopt a ${toneInfo.tone} tone.`;
       }
 
+      // Expertise lens: the professional discipline this task calls for, and the
+      // shape the answer should take. Framing only — it confers no access — and a
+      // failure here must never block the response.
+      let lensLabel: string | undefined;
+      try {
+        if (this.expertiseLens) {
+          const selection = await this.expertiseLens.select(
+            query.text,
+            query.businessId,
+          );
+          systemPrompt += `\n\n${this.expertiseLens.buildPromptFraming(selection)}`;
+          lensLabel = selection.lens.label;
+        }
+      } catch (err) {
+        this.logger.debug(
+          `[processQuery][${correlationId}] Expertise lens skipped: ${(err as Error).message}`,
+        );
+      }
+
       if (memoryFragments.length > 0) {
         systemPrompt += `\n\n${this.formatMemoryContextBlock(memoryFragments)}`;
       }
@@ -582,6 +605,7 @@ export class KeyCortexQueryPipelineService {
       await this.logEvent(correlationId, 'STEP_7_BUILD_PROMPT', {
         promptLength: systemPrompt.length,
         genomeEnriched: flags.genomeV3Enabled && !!genomeContext,
+        expertiseLens: lensLabel,
         detailLevel,
       });
 
