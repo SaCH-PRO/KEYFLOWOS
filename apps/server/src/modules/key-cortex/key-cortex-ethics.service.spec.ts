@@ -6,19 +6,22 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { KeyCortexEthicsService } from './key-cortex-ethics.service';
 
 function makeService(overrides: {
-  consents?: Array<{ expiresAt?: Date | null }>;
+  consents?: Array<{ revokedAt: Date | null; status?: string }>;
   events?: unknown[];
 } = {}) {
+  // Real models now: BusinessEvent for the audit trail, ConsentRecord for consent.
   const prisma = {
-    cortexEvent: {
-      findUnique: vi.fn().mockResolvedValue(null),
-      findMany: vi.fn().mockResolvedValue(overrides.events ?? []),
-    },
-    dataConsent: {
-      findMany: vi.fn().mockResolvedValue(overrides.consents ?? []),
+    client: {
+      businessEvent: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        findMany: vi.fn().mockResolvedValue(overrides.events ?? []),
+      },
+      consentRecord: {
+        findMany: vi.fn().mockResolvedValue(overrides.consents ?? []),
+      },
     },
   };
-  const eventService = { log: vi.fn().mockResolvedValue(undefined) };
+  const eventService = { logDecision: vi.fn().mockResolvedValue({ id: 'evt_1' }) };
   const service = new KeyCortexEthicsService(
     prisma as never,
     eventService as never,
@@ -101,15 +104,15 @@ describe('KeyCortexEthicsService', () => {
       expect(check).toBeDefined();
     });
 
-    it('treats an expired consent as not valid', async () => {
+    it('treats a revoked consent as not valid', async () => {
       const past = new Date(Date.now() - 86_400_000);
-      const { service: svc } = makeService({ consents: [{ expiresAt: past }] });
+      const { service: svc } = makeService({ consents: [{ revokedAt: past }] });
       const check = await svc.checkDataPrivacy('biz_1', 'export_contacts', { email: 'a@b.c' });
       expect(check).toBeDefined();
     });
 
-    it('accepts a consent with no expiry as still valid', async () => {
-      const { service: svc } = makeService({ consents: [{ expiresAt: null }] });
+    it('accepts a consent that has not been revoked', async () => {
+      const { service: svc } = makeService({ consents: [{ revokedAt: null }] });
       const check = await svc.checkDataPrivacy('biz_1', 'export_contacts', { email: 'a@b.c' });
       expect(check).toBeDefined();
     });

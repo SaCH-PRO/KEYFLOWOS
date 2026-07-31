@@ -29,6 +29,8 @@
  */
 
 import { Injectable, Logger } from '@nestjs/common';
+import { PrismaService } from '../../core/prisma/prisma.service';
+import { KeyCortexEventService } from './key-cortex-event.service';
 import {
   EthicalEvaluation,
   EthicalPrinciple,
@@ -39,55 +41,6 @@ import {
   DataPrivacyCheck,
 } from './key-cortex-consciousness.types';
 
-/** Injected dependencies — resolved at module bootstrap. */
-interface EthicsServiceDeps {
-  prisma: {
-    cortexEvent: {
-      findUnique: (args: unknown) => Promise<{
-        id: string;
-        action: string;
-        params: Record<string, unknown>;
-        ethicalEvaluation?: string;
-        businessId: string;
-        createdAt: Date;
-        metadata?: Record<string, unknown>;
-      } | null>;
-      findMany: (args: unknown) => Promise<
-        Array<{
-          id: string;
-          action: string;
-          params: Record<string, unknown>;
-          ethicalEvaluation?: string;
-          businessId: string;
-          createdAt: Date;
-          metadata?: Record<string, unknown>;
-        }>
-      >;
-    };
-    dataConsent: {
-      findMany: (args: unknown) => Promise<
-        Array<{
-          id: string;
-          businessId: string;
-          dataType: string;
-          purpose: string;
-          granted: boolean;
-          grantedAt: Date;
-          expiresAt?: Date;
-        }>
-      >;
-    };
-  };
-  eventService: {
-    log: (params: {
-      businessId: string;
-      action: string;
-      params: Record<string, unknown>;
-      result: string;
-      confidence: number;
-    }) => Promise<{ id: string }>;
-  };
-}
 
 /** Sensitivity levels for different data types. */
 const DATA_SENSITIVITY: Record<string, 'low' | 'medium' | 'high' | 'critical'> = {
@@ -139,8 +92,8 @@ export class KeyCortexEthicsService {
   private readonly CACHE_TTL_MS = 300_000; // 5 minutes
 
   constructor(
-    private readonly prisma: EthicsServiceDeps['prisma'],
-    private readonly eventService: EthicsServiceDeps['eventService'],
+    private readonly prisma: PrismaService,
+    private readonly eventService: KeyCortexEventService,
   ) {}
 
   /* ═══════════════════════════════════════════════════════════════════════════
@@ -211,13 +164,12 @@ export class KeyCortexEthicsService {
       expiresAt: Date.now() + this.CACHE_TTL_MS,
     });
 
-    await this.eventService.log({
-      businessId,
-      action: 'ethical_evaluation',
-      params: { evaluatedAction: action, permitted },
-      result: explanation,
-      confidence: evaluation.confidence,
-    });
+    await this.eventService.logDecision(businessId, {
+        decision: `ethical_evaluation:${action}`,
+        rationale: explanation,
+        confidence: evaluation.confidence,
+        source: 'ethics',
+      });
 
     this.logger.debug(
       `Ethical evaluation of "${action}" for ${businessId}: ${permitted ? 'PERMITTED' : 'DENIED'} in ${Date.now() - startTime}ms`,
@@ -317,9 +269,9 @@ export class KeyCortexEthicsService {
    * a human-readable ethical explanation.
    */
   async explainDecision(decisionId: string, businessId: string): Promise<string> {
-    const event = await this.prisma.cortexEvent.findUnique({
-      where: { id: decisionId },
-    } as Record<string, unknown>);
+    const event = await this.prisma.client.businessEvent.findFirst({
+      where: { id: decisionId, businessId },
+    });
 
     if (!event) {
       return `Decision ${decisionId} not found in the event log for business ${businessId}.`;
@@ -330,9 +282,13 @@ export class KeyCortexEthicsService {
     }
 
     // If an ethical evaluation was stored, use it
-    if (event.ethicalEvaluation) {
+    // BusinessEvent has no ethicalEvaluation column; a stored evaluation lives
+    // in its metadata JSON.
+    const storedEvaluation = (event.metadata as Record<string, unknown> | null)
+      ?.ethicalEvaluation as string | undefined;
+    if (storedEvaluation) {
       try {
-        const parsed = JSON.parse(event.ethicalEvaluation) as EthicalEvaluation;
+        const parsed = JSON.parse(storedEvaluation) as EthicalEvaluation;
         return this.formatStoredExplanation(parsed, event);
       } catch {
         // Fall through to reconstruction
@@ -340,7 +296,7 @@ export class KeyCortexEthicsService {
     }
 
     // Reconstruct from event data
-    return this.reconstructExplanation(event);
+    return this.reconstructExplanation(this.toExplainable(event));
   }
 
   /** Return KEY's seven immutable core values. */
@@ -371,16 +327,17 @@ export class KeyCortexEthicsService {
     if (involvesExposure && dataTypes.length > 0) {
       // Check consent for each data type
       for (const dataType of dataTypes) {
-        const consents = await this.prisma.dataConsent.findMany({
+        const consents = await this.prisma.client.consentRecord.findMany({
           where: {
             businessId,
-            dataType,
-            granted: true,
+            consentType: dataType,
+            status: 'granted',
+            revokedAt: null,
           },
-        } as Record<string, unknown>);
+        });
 
         const validConsent = consents.some(
-          (c: { expiresAt?: Date | null }) => !c.expiresAt || c.expiresAt > new Date(),
+          (c: { revokedAt: Date | null }) => c.revokedAt === null,
         );
 
         if (!validConsent) {
@@ -410,14 +367,14 @@ export class KeyCortexEthicsService {
     if (involvesThirdParty && dataTypes.length > 0) {
       const unconsentedTypes = [];
       for (const dt of dataTypes) {
-        const consents = await this.prisma.dataConsent.findMany({
+        const consents = await this.prisma.client.consentRecord.findMany({
           where: {
             businessId,
-            dataType: dt,
-            purpose: { contains: 'third_party' },
-            granted: true,
+            consentType: dt,
+            status: 'granted',
+            revokedAt: null,
           },
-        } as Record<string, unknown>);
+        });
         if (consents.length === 0) unconsentedTypes.push(dt);
       }
       if (unconsentedTypes.length > 0) {
@@ -981,7 +938,7 @@ export class KeyCortexEthicsService {
       // Extract key action terms from the recommendation
       const actionTerms = recommendation.toLowerCase().split(/\s+/).slice(0, 5);
 
-      const recentEvents = await this.prisma.cortexEvent.findMany({
+      const recentEvents = await this.prisma.client.businessEvent.findMany({
         where: {
           businessId,
           action: { contains: 'rejection' },
@@ -990,7 +947,7 @@ export class KeyCortexEthicsService {
           },
         },
         take: 50,
-      } as Record<string, unknown>);
+      });
 
       let rejectionCount = 0;
       for (const event of recentEvents) {
@@ -1054,6 +1011,22 @@ export class KeyCortexEthicsService {
   /* ═══════════════════════════════════════════════════════════════════════════
      UTILITIES
      ═══════════════════════════════════════════════════════════════════════════ */
+
+  /**
+   * BusinessEvent -> the { action, params, createdAt } shape the explanation
+   * helpers expect. `metadata` carries what used to be a `params` column.
+   */
+  private toExplainable(event: {
+    action: string;
+    metadata: unknown;
+    createdAt: Date;
+  }): { action: string; params: Record<string, unknown>; createdAt: Date } {
+    return {
+      action: event.action,
+      params: (event.metadata as Record<string, never>) ?? {},
+      createdAt: event.createdAt,
+    };
+  }
 
   private hashAction(action: string, params: Record<string, unknown>, businessId: string): string {
     const str = `${action}:${JSON.stringify(params)}:${businessId}`;
