@@ -43,6 +43,16 @@ import {
   Logger,
   Inject,
 } from '@nestjs/common';
+import {
+  Allow,
+  IsArray,
+  IsBoolean,
+  IsIn,
+  IsNumber,
+  IsObject,
+  IsOptional,
+  IsString,
+} from 'class-validator';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
 import { Observable, Subject, interval, map, from, of, catchError, concatWith } from 'rxjs';
@@ -107,20 +117,42 @@ import { KeyAutonomySafetyService } from '../key-autonomy/key-autonomy-safety.se
 /* ------------------------------------------------------------------ */
 
 class CreateSessionDto {
+  @IsString()
   businessId: string;
+  @IsString()
   userId: string;
+  @IsOptional()
+  @Allow()
   persona?: CortexPersona;
+  @IsOptional()
+  @Allow()
   voice?: CortexVoice;
+  @IsOptional()
+  @Allow()
   provider?: CortexProvider;
+  @IsOptional()
+  @IsString()
   title?: string;
 }
 
 class UpdateSessionDto {
+  @IsOptional()
+  @Allow()
   persona?: CortexPersona;
+  @IsOptional()
+  @Allow()
   voice?: CortexVoice;
+  @IsOptional()
+  @Allow()
   provider?: CortexProvider;
+  @IsOptional()
+  @Allow()
   mood?: CortexMood;
+  @IsOptional()
+  @IsString()
   title?: string;
+  @IsOptional()
+  @Allow()
   status?: CortexSessionStatus;
 }
 
@@ -154,43 +186,77 @@ class VoiceSpeakDto implements CortexVoiceRequest {
 }
 
 class SwitchPersonalityDto {
+  @IsString()
   sessionId: string;
+  @Allow()
   persona: CortexPersona;
 }
 
 class ApproveActionDto {
+  @IsString()
   sessionId: string;
+  @IsString()
   businessId: string;
+  @IsString()
   actionId: string;
+  @IsBoolean()
   approved: boolean;
 }
 
 class InsightsQueryDto {
+  @IsString()
   businessId: string;
+  @IsString()
   query: string;
 }
 
 class FeedbackDto {
+  @IsString()
   sessionId: string;
+  @IsString()
   businessId: string;
+  @IsOptional()
+  @IsString()
   userId?: string;
+  @IsIn(['accepted', 'rejected', 'modified', 'no_action'])
   userResponse: 'accepted' | 'rejected' | 'modified' | 'no_action';
+  @IsOptional()
+  @IsString()
   actualOutcome?: string;
+  @IsOptional()
+  @IsString()
   dismissalReason?: string;
+  @IsOptional()
+  @IsString()
   recommendationId?: string;
+  @IsOptional()
+  @IsObject()
   metadata?: Record<string, unknown>;
 }
 
 class ProfitOpportunitiesQueryDto {
+  @IsString()
   businessId: string;
+  @IsOptional()
+  @IsIn(['automation', 'upsell', 'cost_reduction', 'new_revenue', 'retention'])
   category?: 'automation' | 'upsell' | 'cost_reduction' | 'new_revenue' | 'retention';
 }
 
 class UpdateAutonomyProfileDto {
+  @IsOptional()
+  @IsBoolean()
   globalKillSwitch?: boolean;
+  @IsOptional()
+  @IsNumber()
   maxDailyAutoActions?: number;
+  @IsOptional()
+  @IsNumber()
   maxDailySpendTtd?: number;
+  @IsOptional()
+  @IsNumber()
   maxTierWithoutApproval?: number;
+  @IsOptional()
+  @IsBoolean()
   notifyOnBlock?: boolean;
 }
 
@@ -201,60 +267,102 @@ class UpdateAutonomyProfileDto {
 /** Command execution -- natural language or structured command */
 class ExecuteCommandDto {
   /** Natural language command (e.g. "Create an invoice for John for $500") */
+  @IsString()
   command: string;
+  @IsString()
   businessId: string;
+  @IsString()
   userId: string;
   /** Optional structured override -- bypasses NL parsing */
+  @IsOptional()
+  @Allow()
   module?: ModuleName;
+  @IsOptional()
+  @IsString()
   action?: string;
+  @IsOptional()
+  @IsObject()
   parameters?: Record<string, unknown>;
   /** Require explicit approval before destructive actions */
+  @IsOptional()
+  @IsBoolean()
   requireApproval?: boolean;
 }
 
 /** Direct module query */
 class QueryModuleDto {
+  @Allow()
   module: ModuleName;
+  @IsString()
   query: string;
+  @IsString()
   businessId: string;
+  @IsOptional()
+  @IsObject()
   parameters?: Record<string, unknown>;
 }
 
 /** Business insights request */
 class GenerateInsightsDto {
+  @IsString()
   businessId: string;
   /** Specific insight category or question */
+  @IsOptional()
+  @IsString()
   query?: string;
   /** Limit to specific modules */
+  @IsOptional()
+  @IsArray()
   modules?: ModuleName[];
 }
 
 /** Monitor creation */
 class CreateMonitorDto {
+  @IsString()
   businessId: string;
   /** Natural language description of what to monitor */
+  @IsString()
   description: string;
   /** Module to monitor (e.g. 'commerce', 'crm') */
+  @IsOptional()
+  @Allow()
   module?: ModuleName;
   /** Specific condition that triggers the monitor */
+  @IsOptional()
+  @IsString()
   condition?: string;
   /** Notification channels */
+  @IsOptional()
+  @IsArray()
   notifyChannels?: Array<'email' | 'sms' | 'push' | 'in_app'>;
   /** Run interval in minutes (default: 60) */
+  @IsOptional()
+  @IsNumber()
   intervalMinutes?: number;
 }
 
 /** Monitor update */
 class UpdateMonitorDto {
+  @IsOptional()
+  @IsString()
   description?: string;
+  @IsOptional()
+  @Allow()
   module?: ModuleName;
+  @IsOptional()
+  @IsString()
   condition?: string;
+  @IsOptional()
+  @IsArray()
   notifyChannels?: Array<'email' | 'sms' | 'push' | 'in_app'>;
+  @IsOptional()
+  @IsNumber()
   intervalMinutes?: number;
 }
 
 /** Monitor toggle */
 class ToggleMonitorDto {
+  @IsBoolean()
   active: boolean;
 }
 
@@ -270,20 +378,30 @@ class ExecuteBatchDto {
         parameters: Record<string, unknown>;
       }
   >;
+  @IsString()
   businessId: string;
+  @IsString()
   userId: string;
   /** Stop execution on first failure */
+  @IsOptional()
+  @IsBoolean()
   stopOnError?: boolean;
   /** Require approval for destructive actions */
+  @IsOptional()
+  @IsBoolean()
   requireApproval?: boolean;
 }
 
 /** Rollback request */
 class RollbackDto {
   /** The correlationId of the command to roll back */
+  @IsString()
   correlationId: string;
+  @IsString()
   businessId: string;
   /** Reason for rollback */
+  @IsOptional()
+  @IsString()
   reason?: string;
 }
 
@@ -292,38 +410,69 @@ class RollbackDto {
 /* ------------------------------------------------------------------ */
 
 class SandboxGenerateDto {
+  @IsString()
   description: string;
+  @IsOptional()
+  @IsIn(['typescript', 'javascript', 'python', 'json', 'sql'])
   language?: 'typescript' | 'javascript' | 'python' | 'json' | 'sql';
+  @IsString()
   businessId: string;
+  @IsOptional()
+  @IsObject()
   context?: Record<string, unknown>;
 }
 
 class SandboxExecuteDto {
+  @IsString()
   code: string;
+  @IsOptional()
+  @IsIn(['typescript', 'javascript', 'python', 'json', 'sql'])
   language?: 'typescript' | 'javascript' | 'python' | 'json' | 'sql';
+  @IsString()
   businessId: string;
+  @IsOptional()
+  @IsNumber()
   timeoutMs?: number;
+  @IsOptional()
+  @IsObject()
   inputs?: Record<string, unknown>;
 }
 
 class SandboxAutoDto {
+  @IsString()
   description: string;
+  @IsOptional()
+  @IsIn(['typescript', 'javascript', 'python', 'json', 'sql'])
   language?: 'typescript' | 'javascript' | 'python' | 'json' | 'sql';
+  @IsString()
   businessId: string;
+  @IsOptional()
+  @IsBoolean()
   execute?: boolean;
+  @IsOptional()
+  @IsObject()
   inputs?: Record<string, unknown>;
 }
 
 class SandboxApplyDto {
+  @IsString()
   templateId: string;
+  @IsObject()
   parameters: Record<string, unknown>;
+  @IsString()
   businessId: string;
 }
 
 class SandboxExplainDto {
+  @IsString()
   code: string;
+  @IsOptional()
+  @IsString()
   language?: string;
+  @IsString()
   businessId: string;
+  @IsOptional()
+  @IsIn(['brief', 'detailed', 'line-by-line'])
   detail?: 'brief' | 'detailed' | 'line-by-line';
 }
 
@@ -332,34 +481,65 @@ class SandboxExplainDto {
 /* ------------------------------------------------------------------ */
 
 class FlowGenerateDto {
+  @IsString()
   description: string;
+  @IsString()
   businessId: string;
+  @IsOptional()
+  @IsString()
   trigger?: string;
+  @IsOptional()
+  @IsObject()
   context?: Record<string, unknown>;
 }
 
 class FlowCreateDto {
+  @IsString()
   name: string;
+  @IsString()
   businessId: string;
+  @IsOptional()
+  @IsString()
   description?: string;
+  @IsArray()
   nodes: Array<Record<string, unknown>>;
+  @IsArray()
   edges: Array<Record<string, unknown>>;
+  @IsOptional()
+  @IsObject()
   trigger?: Record<string, unknown>;
+  @IsOptional()
+  @IsBoolean()
   isActive?: boolean;
 }
 
 class FlowUpdateDto {
+  @IsOptional()
+  @IsString()
   name?: string;
+  @IsOptional()
+  @IsString()
   description?: string;
+  @IsOptional()
+  @IsArray()
   nodes?: Array<Record<string, unknown>>;
+  @IsOptional()
+  @IsArray()
   edges?: Array<Record<string, unknown>>;
+  @IsOptional()
+  @IsObject()
   trigger?: Record<string, unknown>;
 }
 
 class FlowApplyTemplateDto {
+  @IsString()
   templateId: string;
+  @IsString()
   name: string;
+  @IsString()
   businessId: string;
+  @IsOptional()
+  @IsObject()
   parameters?: Record<string, unknown>;
 }
 
@@ -372,23 +552,41 @@ class FlowApplyTemplateDto {
 /* ------------------------------------------------------------------ */
 
 class PhoneCallDto {
+  @IsString()
   phoneNumber: string;
+  @IsString()
   businessId: string;
+  @IsOptional()
+  @IsString()
   script?: string;
+  @IsOptional()
+  @IsObject()
   context?: Record<string, unknown>;
+  @IsOptional()
+  @IsBoolean()
   record?: boolean;
 }
 
 class PhoneScriptDto {
+  @IsString()
   objective: string;
+  @IsString()
   businessId: string;
+  @IsOptional()
+  @IsIn(['professional', 'friendly', 'urgent', 'casual'])
   tone?: 'professional' | 'friendly' | 'urgent' | 'casual';
+  @IsOptional()
+  @IsObject()
   context?: Record<string, unknown>;
 }
 
 class PhoneAnalyzeDto {
+  @IsString()
   transcript: string;
+  @IsString()
   businessId: string;
+  @IsOptional()
+  @IsString()
   objective?: string;
 }
 
@@ -397,23 +595,39 @@ class PhoneAnalyzeDto {
 /* ------------------------------------------------------------------ */
 
 class DocumentAskDto {
+  @IsString()
   question: string;
+  @IsString()
   businessId: string;
+  @IsOptional()
+  @IsArray()
   documentIds?: string[];
+  @IsOptional()
+  @IsObject()
   filters?: Record<string, unknown>;
 }
 
 class DocumentExtractDto {
+  @IsString()
   documentId: string;
+  @IsString()
   businessId: string;
+  @IsObject()
   schema: Record<string, unknown>;
+  @IsOptional()
+  @IsString()
   prompt?: string;
 }
 
 class DocumentCompareDto {
+  @IsString()
   documentIdA: string;
+  @IsString()
   documentIdB: string;
+  @IsString()
   businessId: string;
+  @IsOptional()
+  @IsArray()
   aspects?: string[];
 }
 
@@ -422,15 +636,26 @@ class DocumentCompareDto {
 /* ------------------------------------------------------------------ */
 
 class EvolutionTuneDto {
+  @IsString()
   businessId: string;
+  @IsOptional()
+  @IsIn(['global', 'module', 'user'])
   scope?: 'global' | 'module' | 'user';
+  @IsOptional()
+  @IsString()
   targetModule?: string;
+  @IsOptional()
+  @IsBoolean()
   force?: boolean;
 }
 
 class EvolutionExplainDto {
+  @IsString()
   decisionId: string;
+  @IsString()
   businessId: string;
+  @IsOptional()
+  @IsIn(['summary', 'full', 'technical'])
   detail?: 'summary' | 'full' | 'technical';
 }
 
