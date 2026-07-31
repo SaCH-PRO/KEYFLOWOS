@@ -1,4 +1,4 @@
-import { CanActivate, ExecutionContext, HttpException, HttpStatus, Inject, Injectable, SetMetadata } from '@nestjs/common';
+import { CanActivate, ExecutionContext, HttpException, HttpStatus, Inject, Injectable, ServiceUnavailableException, SetMetadata } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { Redis } from 'ioredis';
 import { REDIS_CLIENT } from '../redis/redis.constants';
@@ -52,7 +52,8 @@ export class PublicRateLimitGuard implements CanActivate {
       await this.redis.pexpire(key, opts.windowMs);
     } catch (err: any) {
       if (err instanceof HttpException) throw err;
-      console.error('[PublicRateLimitGuard] Redis error — failing open:', (err as Error).message);
+      console.error('[PublicRateLimitGuard] Redis error — failing closed:', (err as Error).message);
+      throw new ServiceUnavailableException('Rate limiting temporarily unavailable');
     }
 
     return true;

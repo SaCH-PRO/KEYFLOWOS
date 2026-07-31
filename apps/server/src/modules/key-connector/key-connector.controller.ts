@@ -9,8 +9,12 @@ import {
   Req,
   HttpCode,
   HttpStatus,
+  UseGuards,
+  ForbiddenException,
 } from '@nestjs/common';
 import { Request } from 'express';
+import { AuthGuard } from '../../core/auth/auth.guard';
+import { BusinessGuard } from '../../core/auth/business.guard';
 import { KeyConnectorService } from './key-connector.service';
 import { ConnectProviderDto, AiCommandDto } from './dto';
 import {
@@ -38,6 +42,7 @@ import {
  * ───────────────────────────────────────────────────────────────────────
  */
 
+@UseGuards(AuthGuard, BusinessGuard)
 @Controller('key-connector')
 export class KeyConnectorController {
   constructor(private readonly service: KeyConnectorService) {}
@@ -46,20 +51,18 @@ export class KeyConnectorController {
 
   @Get('providers')
   async getProviders(
-    @Req() req: Request,
+    @Query('businessId') businessId: string,
     @Query('category') category?: string,
   ) {
-    const businessId = this.extractBusinessId(req);
     const result = await this.service.getProviders(businessId, category);
     return { success: true, data: result };
   }
 
   @Get('providers/:key')
   async getProviderDetail(
-    @Req() req: Request,
+    @Query('businessId') businessId: string,
     @Param('key') providerKey: string,
   ) {
-    const businessId = this.extractBusinessId(req);
     const result = await this.service.getProviderDetail(
       businessId,
       providerKey,
@@ -70,12 +73,12 @@ export class KeyConnectorController {
   @Post('providers/:key/connect')
   @HttpCode(HttpStatus.CREATED)
   async connectProvider(
-    @Req() req: Request,
+    @Query('businessId') businessId: string,
     @Param('key') providerKey: string,
     @Body() dto: ConnectProviderDto,
+    @Req() req: Request & { user?: { id?: string } },
   ) {
-    const businessId = this.extractBusinessId(req);
-    const userId = this.extractUserId(req);
+    const userId = req.user?.id ?? '';
     const result = await this.service.connectProvider(
       businessId,
       userId,
@@ -92,18 +95,18 @@ export class KeyConnectorController {
   @Delete('connections/:id')
   @HttpCode(HttpStatus.OK)
   async disconnectProvider(
-    @Req() req: Request,
+    @Query('businessId') businessId: string,
     @Param('id') connectionId: string,
+    @Req() req: Request & { user?: { id?: string } },
   ) {
-    const businessId = this.extractBusinessId(req);
-    const userId = this.extractUserId(req);
+    const userId = req.user?.id ?? '';
     await this.service.disconnectProvider(businessId, connectionId, userId);
     return { success: true, message: 'Connection removed' };
   }
 
   @Get('connections')
-  async getConnections(@Req() req: Request) {
-    const businessId = this.extractBusinessId(req);
+  async getConnections(@Query('businessId') businessId: string,
+  ) {
     const result = await this.service.getConnections(businessId);
     return { success: true, data: result };
   }
@@ -111,8 +114,8 @@ export class KeyConnectorController {
   // ── Health ──────────────────────────────────────────────────────────
 
   @Get('health')
-  async getHealth(@Req() req: Request) {
-    const businessId = this.extractBusinessId(req);
+  async getHealth(@Query('businessId') businessId: string,
+  ) {
     const result = await this.service.getConnectionHealth(businessId);
     return { success: true, data: result };
   }
@@ -122,12 +125,11 @@ export class KeyConnectorController {
   @Post('sync/:id/trigger')
   @HttpCode(HttpStatus.ACCEPTED)
   async triggerSync(
-    @Req() req: Request,
+    @Query('businessId') businessId: string,
     @Param('id') connectionId: string,
     @Query('direction')
     direction: 'inbound' | 'outbound' | 'bidirectional' = 'bidirectional',
   ) {
-    const businessId = this.extractBusinessId(req);
     const result = await this.service.triggerSync(
       businessId,
       connectionId,
@@ -138,11 +140,10 @@ export class KeyConnectorController {
 
   @Get('sync')
   async getSyncHistory(
-    @Req() req: Request,
+    @Query('businessId') businessId: string,
     @Query('connectionId') connectionId?: string,
     @Query('limit') limit?: string,
   ) {
-    const businessId = this.extractBusinessId(req);
     const result = await this.service.getSyncHistory(
       businessId,
       connectionId,
@@ -156,11 +157,11 @@ export class KeyConnectorController {
   @Post('ai/command')
   @HttpCode(HttpStatus.OK)
   async executeAiCommand(
-    @Req() req: Request,
+    @Query('businessId') businessId: string,
     @Body() dto: AiCommandDto,
+    @Req() req: Request & { user?: { id?: string } },
   ) {
-    const businessId = this.extractBusinessId(req);
-    const userId = this.extractUserId(req);
+    const userId = req.user?.id ?? '';
 
     const command: AiGatewayCommand = {
       intent: dto.command,
@@ -184,10 +185,9 @@ export class KeyConnectorController {
 
   @Get('audit')
   async getAuditLog(
-    @Req() req: Request,
+    @Query('businessId') businessId: string,
     @Query('limit') limit?: string,
   ) {
-    const businessId = this.extractBusinessId(req);
     const result = await this.service.getAuditLog(
       businessId,
       limit ? parseInt(limit, 10) : 100,
@@ -195,28 +195,4 @@ export class KeyConnectorController {
     return { success: true, data: result };
   }
 
-  // ═══════════════════════════════════════════════════════════════════════
-  // Request helpers
-  // ═══════════════════════════════════════════════════════════════════════
-
-  private extractBusinessId(req: Request): string {
-    // In a real application the business ID is injected by an auth
-    // guard or middleware and attached to the request object.
-    const id =
-      (req as any)['businessId'] as string | undefined;
-    if (!id) {
-      throw new Error('Business ID not found in request context');
-    }
-    return id;
-  }
-
-  private extractUserId(req: Request): string {
-    const id = (req as any)['userId'] as
-      | string
-      | undefined;
-    if (!id) {
-      throw new Error('User ID not found in request context');
-    }
-    return id;
-  }
 }

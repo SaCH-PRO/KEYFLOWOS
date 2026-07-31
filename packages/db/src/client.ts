@@ -104,9 +104,9 @@ function withTenantWhere<T extends { where?: Record<string, unknown>; __skipTena
   args: T | undefined,
   businessId: string,
 ): T {
-  if (!args) return { where: { businessId } } as T;
+  if (!args) return { where: { businessId } } as unknown as T;
   if ((args as any).__skipTenantIsolation) return args;
-  return { ...args, where: { ...(args.where ?? {}), businessId } } as T;
+  return { ...args, where: { ...(args.where ?? {}), businessId } } as unknown as T;
 }
 
 function tenantOperationAllowed(model: string): boolean {

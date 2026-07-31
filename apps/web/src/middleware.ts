@@ -4,6 +4,35 @@ const TOKEN_COOKIE = "kf_token";
 const LOGIN_PATH = "/auth/login";
 
 /**
+ * Decode a base64url-encoded JWT segment. Edge middleware has atob but not
+ * Buffer, so we do the base64url → base64 conversion manually.
+ */
+function base64UrlDecode(segment: string): string {
+  const padding = "=".repeat((4 - (segment.length % 4)) % 4);
+  const base64 = segment.replace(/-/g, "+").replace(/_/g, "/") + padding;
+  return atob(base64);
+}
+
+/**
+ * Lightweight sanity check on the session cookie. We cannot verify the
+ * signature in the edge runtime without the Supabase JWT secret/JWKS, but
+ * we can reject malformed or expired tokens immediately so users with stale
+ * cookies are sent to sign-in instead of hitting API 401s.
+ */
+function isTokenExpiredOrInvalid(token: string): boolean {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return true;
+    const payload = JSON.parse(base64UrlDecode(parts[1])) as Record<string, unknown>;
+    if (typeof payload.exp !== "number") return false; // no expiry = assume valid
+    const now = Math.floor(Date.now() / 1000);
+    return payload.exp < now - 60; // 60 second clock-skew leeway
+  } catch {
+    return true;
+  }
+}
+
+/**
  * Navigation Overhaul Redirects
  *
  * Maps reorganized URLs to their new counterparts.
@@ -67,7 +96,8 @@ export function middleware(req: NextRequest) {
   // 2. Auth gating — all /app/* routes require authentication.
   // Onboarding is part of the authenticated app shell; sign-up/sign-in flows
   // redirect authenticated users into it.
-  if (req.cookies.get(TOKEN_COOKIE)?.value) {
+  const tokenCookie = req.cookies.get(TOKEN_COOKIE)?.value;
+  if (tokenCookie && !isTokenExpiredOrInvalid(tokenCookie)) {
     return NextResponse.next();
   }
 
@@ -75,7 +105,10 @@ export function middleware(req: NextRequest) {
   url.pathname = LOGIN_PATH;
   url.search = "";
   url.searchParams.set("from", pathname + (search || ""));
-  return NextResponse.redirect(url);
+  const response = NextResponse.redirect(url);
+  // Clear the stale/malformed cookie so the next request doesn't carry it.
+  response.cookies.set(TOKEN_COOKIE, "", { maxAge: 0, path: "/" });
+  return response;
 }
 
 export const config = {

@@ -12,7 +12,10 @@ import {
   Post,
   Query,
   Request,
+  UseGuards,
 } from '@nestjs/common';
+import { AuthGuard } from '../../core/auth/auth.guard';
+import { BusinessGuard } from '../../core/auth/business.guard';
 import { KeystoreService } from './keystore.service';
 import {
   CreateListingDto,
@@ -22,6 +25,7 @@ import {
   UpdateOrderStatusDto,
 } from './dto';
 
+@UseGuards(AuthGuard, BusinessGuard)
 @Controller('keystore/admin')
 export class KeystoreAdminController {
   constructor(private readonly keystoreService: KeystoreService) {}
@@ -29,20 +33,20 @@ export class KeystoreAdminController {
   // ── Dashboard Stats ─────────────────────────────────────────────────────
 
   @Get('stats')
-  async getStats(@Request() req: { businessId: string }) {
-    return this.keystoreService.getOrderStats(req.businessId);
+  async getStats(@Query('businessId') businessId: string) {
+    return this.keystoreService.getOrderStats(businessId);
   }
 
   // ── Order Management ────────────────────────────────────────────────────
 
   @Get('orders')
   async getAllOrders(
-    @Request() req: { businessId: string },
+    @Query('businessId') businessId: string,
     @Query('status') status?: string,
     @Query('userId') userId?: string,
     @Query('listingId') listingId?: string,
   ) {
-    return this.keystoreService.getAllOrders(req.businessId, {
+    return this.keystoreService.getAllOrders(businessId, {
       status,
       userId,
       listingId,
@@ -51,50 +55,53 @@ export class KeystoreAdminController {
 
   @Get('orders/:id')
   async getOrder(
-    @Request() req: { businessId: string },
+    @Query('businessId') businessId: string,
     @Param('id') id: string,
   ) {
-    return this.keystoreService.getOrder(req.businessId, id);
+    return this.keystoreService.getOrder(businessId, id);
   }
 
   @Patch('orders/:id/status')
   async updateOrderStatus(
-    @Request() req: { businessId: string; userId: string },
+    @Request() req: { user: { id: string } },
+    @Body('businessId') businessId: string,
     @Param('id') id: string,
     @Body() dto: UpdateOrderStatusDto,
   ) {
     return this.keystoreService.adminUpdateOrderStatus(
-      req.businessId,
+      businessId,
       id,
       dto,
-      req.userId,
+      req.user.id,
     );
   }
 
   @Post('orders/:id/messages')
   async sendMessage(
-    @Request() req: { businessId: string; userId: string },
+    @Request() req: { user: { id: string } },
+    @Body('businessId') businessId: string,
     @Param('id') id: string,
     @Body() dto: SendMessageDto,
   ) {
     return this.keystoreService.adminSendMessage(
-      req.businessId,
+      businessId,
       id,
-      req.userId,
+      req.user.id,
       dto,
     );
   }
 
   @Post('orders/:id/deliver')
   async deliverFiles(
-    @Request() req: { businessId: string; userId: string },
+    @Request() req: { user: { id: string } },
+    @Body('businessId') businessId: string,
     @Param('id') id: string,
     @Body() dto: DeliverFilesDto,
   ) {
     return this.keystoreService.deliverFiles(
-      req.businessId,
+      businessId,
       id,
-      req.userId,
+      req.user.id,
       dto,
     );
   }
@@ -103,42 +110,42 @@ export class KeystoreAdminController {
 
   @Post('listings')
   async createListing(
-    @Request() req: { businessId: string },
+    @Body('businessId') businessId: string,
     @Body() dto: CreateListingDto,
   ) {
-    return this.keystoreService.createListing(req.businessId, dto);
+    return this.keystoreService.createListing(businessId, dto);
   }
 
   @Patch('listings/:id')
   async updateListing(
-    @Request() req: { businessId: string },
+    @Body('businessId') businessId: string,
     @Param('id') id: string,
     @Body() dto: UpdateListingDto,
   ) {
-    return this.keystoreService.updateListing(req.businessId, id, dto);
+    return this.keystoreService.updateListing(businessId, id, dto);
   }
 
   @Delete('listings/:id/archive')
   async archiveListing(
-    @Request() req: { businessId: string },
+    @Query('businessId') businessId: string,
     @Param('id') id: string,
   ) {
-    return this.keystoreService.archiveListing(req.businessId, id);
+    return this.keystoreService.archiveListing(businessId, id);
   }
 
   @Post('listings/:id/pause')
   async pauseListing(
-    @Request() req: { businessId: string },
+    @Body('businessId') businessId: string,
     @Param('id') id: string,
   ) {
-    return this.keystoreService.pauseListing(req.businessId, id);
+    return this.keystoreService.pauseListing(businessId, id);
   }
 
   @Post('listings/:id/activate')
   async activateListing(
-    @Request() req: { businessId: string },
+    @Body('businessId') businessId: string,
     @Param('id') id: string,
   ) {
-    return this.keystoreService.activateListing(req.businessId, id);
+    return this.keystoreService.activateListing(businessId, id);
   }
 }

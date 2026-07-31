@@ -60,6 +60,10 @@ const BUSINESS_ENCRYPTED_FIELDS = new Set([
   'formsRefreshToken',
   'contactsAccessToken',
   'contactsRefreshToken',
+  'contactsSyncToken',
+  'msContactsAccessToken',
+  'msContactsRefreshToken',
+  'msContactsDeltaLink',
   'bpAccessToken',
   'bpRefreshToken',
 ]);

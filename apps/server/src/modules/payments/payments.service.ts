@@ -1078,17 +1078,18 @@ export class PaymentsService {
     }
 
     // Provider-event-id idempotency. WiPay's transaction_id uniquely
-    // identifies a callback delivery; re-deliveries become no-ops.
-    if (transaction_id) {
-      const fresh = await this.invoiceWorkflow.assertNewProviderEvent(
-        'wipay',
-        transaction_id,
-        status,
-        businessId,
-      );
-      if (!fresh) {
-        return { success: true, invoiceId: order_id, message: 'Duplicate callback ignored' };
-      }
+    // identifies a callback delivery; re-deliveries become no-ops. Failure
+    // callbacks that arrive without a transaction_id are deduplicated by
+    // order id so replayed failure notifications cannot accumulate junk rows.
+    const wipayEventId = transaction_id || `wipay_fail_${order_id}`;
+    const fresh = await this.invoiceWorkflow.assertNewProviderEvent(
+      'wipay',
+      wipayEventId,
+      status,
+      businessId,
+    );
+    if (!fresh) {
+      return { success: true, invoiceId: order_id, message: 'Duplicate callback ignored' };
     }
 
     const isSuccessful = status === 'success' || status === '1';

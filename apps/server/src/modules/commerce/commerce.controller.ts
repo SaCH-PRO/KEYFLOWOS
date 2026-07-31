@@ -326,36 +326,36 @@ export class CommerceController {
     return { created, count: created.length, errors, totalAttempted: validProducts.length };
   }
 
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, BusinessGuard)
   @Patch('invoices/:invoiceId/paid')
-  async markInvoicePaid(@Param('invoiceId') invoiceId: string, @Req() req: any) {
-    const invoice = await this.prisma.client.invoice.findUnique({ where: { id: invoiceId }, select: { businessId: true } });
-    if (invoice) await this.verifyBusinessAccess(req.user.id, invoice.businessId);
+  async markInvoicePaid(
+    @Body('businessId') businessId: string,
+    @Param('invoiceId') invoiceId: string,
+    @Req() req: any,
+  ) {
     return this.commerce.markInvoicePaid(invoiceId, req?.user?.id);
   }
 
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, BusinessGuard)
   @Patch('invoices/:invoiceId/payment-failed')
   async markInvoicePaymentFailed(
+    @Body('businessId') businessId: string,
     @Param('invoiceId') invoiceId: string,
     @Req() req: any,
     @Body() body: { reason?: string },
   ) {
-    const invoice = await this.prisma.client.invoice.findUnique({ where: { id: invoiceId }, select: { businessId: true } });
-    if (invoice) await this.verifyBusinessAccess(req.user.id, invoice.businessId);
     return this.commerce.markInvoicePaymentFailed(invoiceId, req?.user?.id, body?.reason);
   }
 
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, BusinessGuard)
   @Patch('invoices/:invoiceId/status/:status')
   async updateInvoiceStatus(
+    @Body('businessId') businessId: string,
     @Param('invoiceId') invoiceId: string,
     @Param('status') status: string,
     @Req() req: any,
     @Body() body: UpdateInvoiceStatusDto,
   ) {
-    const invoice = await this.prisma.client.invoice.findUnique({ where: { id: invoiceId }, select: { businessId: true } });
-    if (invoice) await this.verifyBusinessAccess(req.user.id, invoice.businessId);
     return this.commerce.updateInvoiceStatus({
       invoiceId,
       status: status.toUpperCase() as 'SENT' | 'OVERDUE' | 'VOID',
@@ -440,16 +440,15 @@ export class CommerceController {
     return this.commerce.createInvoice({ businessId, ...body });
   }
 
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, BusinessGuard)
   @Patch('quotes/:quoteId/status/:status')
   async updateQuoteStatus(
+    @Body('businessId') businessId: string,
     @Param('quoteId') quoteId: string,
     @Param('status') status: string,
     @Req() req: any,
   ) {
     try {
-      const quote = await this.prisma.client.quote.findUnique({ where: { id: quoteId }, select: { businessId: true } });
-      if (quote) await this.verifyBusinessAccess(req.user.id, quote.businessId);
       this.logger.log(`Updating quote ${quoteId} to status ${status} by user ${req?.user?.id}`);
       const result = await this.commerce.updateQuoteStatus({
         quoteId,
@@ -464,11 +463,12 @@ export class CommerceController {
     }
   }
 
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, BusinessGuard)
   @Get('invoices/:invoiceId/receipt')
-  async getReceipt(@Param('invoiceId') invoiceId: string, @Req() req: any) {
-    const invoice = await this.prisma.client.invoice.findUnique({ where: { id: invoiceId }, select: { businessId: true } });
-    if (invoice) await this.verifyBusinessAccess(req.user.id, invoice.businessId);
+  async getReceipt(
+    @Query('businessId') businessId: string,
+    @Param('invoiceId') invoiceId: string,
+  ) {
     return this.receipts.buildReceipt(invoiceId);
   }
 

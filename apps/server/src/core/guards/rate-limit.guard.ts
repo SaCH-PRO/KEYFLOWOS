@@ -1,4 +1,4 @@
-import { CanActivate, ExecutionContext, HttpException, HttpStatus, Inject, Injectable } from '@nestjs/common';
+import { CanActivate, ExecutionContext, HttpException, HttpStatus, Inject, Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { Redis } from 'ioredis';
 import { RATE_LIMIT_KEY, RateLimitOptions } from '../decorators/rate-limit.decorator';
@@ -42,10 +42,12 @@ export class RateLimitGuard implements CanActivate {
       await this.redis.zadd(key, now, `${now}-${Math.random().toString(36).slice(2)}`);
       await this.redis.pexpire(key, opts.windowMs);
     } catch (err: any) {
-      // If Redis is unavailable, fail open (allow request) rather than hard-deny
-      // every legitimate user. Log loudly so ops knows the guard is degraded.
+      // If Redis is unavailable, fail closed. Allowing unlimited requests when
+      // the rate-limit store is down defeats the purpose of the guard and can
+      // be exploited to bypass protections.
       if (err instanceof HttpException) throw err;
-      console.error('[RateLimitGuard] Redis error — failing open:', (err as Error).message);
+      console.error('[RateLimitGuard] Redis error — failing closed:', (err as Error).message);
+      throw new ServiceUnavailableException('Rate limiting temporarily unavailable');
     }
 
     return true;

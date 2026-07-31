@@ -1,6 +1,7 @@
 import { BadRequestException, Body, Controller, Inject, Post, UseGuards } from '@nestjs/common';
 import { UploadsService } from './uploads.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
+import { BusinessGuard } from '../../core/auth/business.guard';
 
 const ALLOWED_CONTENT_TYPES = new Set([
   'image/jpeg',
@@ -21,9 +22,12 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024;
 export class UploadsController {
   constructor(@Inject(UploadsService) private readonly uploads: UploadsService) {}
 
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, BusinessGuard)
   @Post('request-url')
-  async requestUploadUrl(@Body() body: { name?: string; size?: number; contentType?: string }) {
+  async requestUploadUrl(
+    @Body('businessId') businessId: string,
+    @Body() body: { name?: string; size?: number; contentType?: string },
+  ) {
     if (body.contentType && !ALLOWED_CONTENT_TYPES.has(body.contentType)) {
       throw new BadRequestException(`File type '${body.contentType}' is not allowed`);
     }
