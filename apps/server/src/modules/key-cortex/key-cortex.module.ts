@@ -116,6 +116,7 @@ import { KeyCortexEthicsService } from './key-cortex-ethics.service';
 import { KeyCortexEmotionService } from './key-cortex-emotion.service';
 import { KeyCortexReasoningEngineService } from './key-cortex-reasoning-engine.service';
 import { KeyCortexTemporalReasoningService } from './key-cortex-temporal-reasoning.service';
+import { KeyCortexCreativityService } from './key-cortex-creativity.service';
 import { KeyCortexMoodDetectionService } from './key-cortex-mood-detection.service';
 import { KeyCortexSuggestionService } from './key-cortex-suggestion.service';
 import { KeyCortexGenomeContextService } from './key-cortex-genome-context.service';
@@ -310,6 +311,7 @@ import { IntegrationHubModule } from '../integration-hub/integration-hub.module'
     KeyCortexEmotionService,
     KeyCortexReasoningEngineService,
     KeyCortexTemporalReasoningService,
+    KeyCortexCreativityService,
     KeyCortexSuggestionService,
     KeyCortexGenomeContextService,
     KeyCortexSystemPromptService,
@@ -531,6 +533,7 @@ import { IntegrationHubModule } from '../integration-hub/integration-hub.module'
     KeyCortexEmotionService,
     KeyCortexReasoningEngineService,
     KeyCortexTemporalReasoningService,
+    KeyCortexCreativityService,
     KeyCortexSuggestionService,
     KeyCortexGenomeContextService,
     KeyCortexSystemPromptService,
