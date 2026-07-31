@@ -39,6 +39,11 @@ export async function verifyAdminToken(
   try {
     const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as AdminTokenPayload;
     if (payload.type !== 'admin') return null;
+    // `exp` is set by buildAdminToken as Date.now() + 24h — MILLISECONDS, not the
+    // JWT seconds convention. Comparing against Date.now()/1000 would make exp
+    // (~1.7e12) always exceed now (~1.7e9), so expiry would never fire and every
+    // admin token would be valid forever. Verified: a token expired a year ago
+    // is accepted under the seconds form.
     if (payload.exp < Date.now()) return null;
 
     if (redis && payload.jti) {

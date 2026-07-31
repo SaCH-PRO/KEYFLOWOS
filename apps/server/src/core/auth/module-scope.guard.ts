@@ -50,13 +50,13 @@ export class ModuleScopeGuard implements CanActivate {
     const requirement = this.reflector.get<ModuleScopeRequirement>(MODULE_SCOPE_KEY, context.getHandler());
     if (!requirement) return true;
 
-    const req = context.switchToHttp().getRequest<{ user?: { id?: string; role?: string }; params?: Record<string, string>; body?: Record<string, string> }>();
+    const req = context.switchToHttp().getRequest<{ user?: { id?: string; role?: string }; params?: Record<string, string>; query?: Record<string, string>; body?: Record<string, string> }>();
     const user = req.user;
     if (!user?.id) throw new ForbiddenException('Authentication required');
 
     if (user.role === 'SUPER_ADMIN') return true;
 
-    const businessId = req.params?.businessId || req.body?.businessId;
+    const businessId = req.params?.businessId || req.body?.businessId || req.query?.businessId;
     if (!businessId) throw new ForbiddenException('businessId is required');
 
     const membership = await this.prisma.client.membership.findUnique({

@@ -18,7 +18,7 @@ export class PlanLimitGuard implements CanActivate {
     if (!resource) return true;
 
     const req = context.switchToHttp().getRequest();
-    const businessId = req.params?.businessId || req.body?.businessId;
+    const businessId = req.params?.businessId || req.body?.businessId || req.query?.businessId;
     if (!businessId) return true;
 
     const result = await this.subscriptions.checkLimit(businessId, resource);

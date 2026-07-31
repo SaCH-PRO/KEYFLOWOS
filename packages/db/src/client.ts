@@ -94,25 +94,75 @@ const BUSINESS_ID_MODELS = new Set([
   'KeyCortexMemory', 'AiApprovalItem', 'AiApprovalRequest',
 ]);
 
+
+
+function activeBusinessId(): string | undefined {
+  return getCurrentBusinessId();
+}
+
+function withTenantWhere<T extends { where?: Record<string, unknown>; __skipTenantIsolation?: boolean }>(
+  args: T | undefined,
+  businessId: string,
+): T {
+  if (!args) return { where: { businessId } } as T;
+  if ((args as any).__skipTenantIsolation) return args;
+  return { ...args, where: { ...(args.where ?? {}), businessId } } as T;
+}
+
+function tenantOperationAllowed(model: string): boolean {
+  const businessId = activeBusinessId();
+  return !!businessId && BUSINESS_ID_MODELS.has(model);
+}
+
 /**
  * Tenant isolation extension: auto-injects businessId into WHERE clauses
- * for findMany and count queries when a tenant context is active.
- * Models without a businessId field silently pass through unchanged.
+ * for all read and mutation operations when a tenant context is active.
+ * Models without a businessId field (or the tenant root Business model)
+ * pass through unchanged. Use `__skipTenantIsolation: true` in args to
+ * opt out of scoping for legitimate global queries.
  */
 const tenantIsolationExtension = Prisma.defineExtension({
   query: {
     $allModels: {
+      async findUnique({ model, args, query }) {
+        if (!tenantOperationAllowed(model)) return query(args);
+        return query(withTenantWhere(args as any, activeBusinessId()!) as any);
+      },
+      async findUniqueOrThrow({ model, args, query }) {
+        if (!tenantOperationAllowed(model)) return query(args);
+        return query(withTenantWhere(args as any, activeBusinessId()!) as any);
+      },
+      async findFirst({ model, args, query }) {
+        if (!tenantOperationAllowed(model)) return query(args);
+        return query(withTenantWhere(args as any, activeBusinessId()!) as any);
+      },
+      async findFirstOrThrow({ model, args, query }) {
+        if (!tenantOperationAllowed(model)) return query(args);
+        return query(withTenantWhere(args as any, activeBusinessId()!) as any);
+      },
       async findMany({ model, args, query }) {
-        const businessId = getCurrentBusinessId();
-        if (!businessId || !BUSINESS_ID_MODELS.has(model)) return query(args);
-        const where = (args as any).where ?? {};
-        return query({ ...args, where: { ...where, businessId } } as any);
+        if (!tenantOperationAllowed(model)) return query(args);
+        return query(withTenantWhere(args as any, activeBusinessId()!) as any);
       },
       async count({ model, args, query }) {
-        const businessId = getCurrentBusinessId();
-        if (!businessId || !BUSINESS_ID_MODELS.has(model)) return query(args);
-        const where = (args as any).where ?? {};
-        return query({ ...args, where: { ...where, businessId } } as any);
+        if (!tenantOperationAllowed(model)) return query(args);
+        return query(withTenantWhere(args as any, activeBusinessId()!) as any);
+      },
+      async update({ model, args, query }) {
+        if (!tenantOperationAllowed(model)) return query(args);
+        return query(withTenantWhere(args as any, activeBusinessId()!) as any);
+      },
+      async updateMany({ model, args, query }) {
+        if (!tenantOperationAllowed(model)) return query(args);
+        return query(withTenantWhere(args as any, activeBusinessId()!) as any);
+      },
+      async delete({ model, args, query }) {
+        if (!tenantOperationAllowed(model)) return query(args);
+        return query(withTenantWhere(args as any, activeBusinessId()!) as any);
+      },
+      async deleteMany({ model, args, query }) {
+        if (!tenantOperationAllowed(model)) return query(args);
+        return query(withTenantWhere(args as any, activeBusinessId()!) as any);
       },
     },
   },
