@@ -507,7 +507,7 @@ export class KeyCortexIntuitionService {
     const tickets = await this.prisma.client.supportTicket
       ?.findMany({
         where: { businessId, createdAt: { gte: since } },
-        select: { subject: true, description: true, createdAt: true },
+        select: { title: true, description: true, createdAt: true },
       })
       .catch(() => []);
     for (const t of tickets ?? []) {
@@ -542,7 +542,7 @@ export class KeyCortexIntuitionService {
     const events = await this.prisma.client.businessEvent
       .findMany({
         where: { businessId, createdAt: { gte: since } },
-        select: { description: true, createdAt: true },
+        select: { action: true, createdAt: true },
       })
       .catch(() => []);
     for (const e of events) {
@@ -733,7 +733,7 @@ Return JSON array of emerging themes:
     // Get monthly engagement metrics
     const recentEvents = await this.prisma.client.businessEvent
       .findMany({
-        where: { businessId, subjectType: 'contact', subjectId: contactId, createdAt: { gte: since } },
+        where: { businessId, createdAt: { gte: since } },
         orderBy: { createdAt: 'asc' },
       })
       .catch(() => []);
@@ -1192,7 +1192,7 @@ Return JSON array of emerging themes:
     const tickets = await this.prisma.client.supportTicket
       ?.findMany({
         where: { businessId, createdAt: { gte: since } },
-        select: { id: true, contactId: true, subject: true, description: true, priority: true },
+        select: { id: true, contactId: true, title: true, description: true, priority: true },
       })
       .catch(() => []);
 
@@ -1208,7 +1208,7 @@ Return JSON array of emerging themes:
       description?: string;
       priority?: string;
     }>) {
-      const text = `${ticket.subject} ${ticket.description ?? ''}`.toLowerCase();
+      const text = `${ticket.title} ${ticket.description ?? ''}`.toLowerCase();
       const keywords = new Set(
         text
           .replace(/[^\w\s]/g, ' ')
@@ -1235,7 +1235,7 @@ Return JSON array of emerging themes:
 
       if (!merged) {
         clusters.push({
-          theme: ticket.subject.slice(0, 80),
+          theme: ticket.title.slice(0, 80),
           customerIds: [ticket.customerId],
           severity: ticket.priority === 'high' ? 'high' : 'medium',
           keywords,
@@ -1252,7 +1252,7 @@ Return JSON array of emerging themes:
     // Compare this business's patterns with anonymized industry data
     try {
       const context = await this.contextService.getFullContext(businessId);
-      const industry = (context as Record<string, unknown>)?.industry;
+      const industry = (context as unknown as Record<string, unknown>)?.industry;
 
       if (!industry) return null;
 
@@ -1349,21 +1349,21 @@ Return JSON array of emerging themes:
       const churnedCustomers = await this.prisma.client.contact
         .findMany({
           where: { businessId, status: 'churned' },
-          select: { id: true, name: true, churnedAt: true },
+          select: { id: true, firstName: true, lastName: true, lastContactedAt: true },
           take: 100,
         })
         .catch(() => []);
 
       for (const customer of churnedCustomers as Array<{ id: string; name: string; churnedAt: Date | null }>) {
-        if (!customer.churnedAt) continue;
+        if (!customer.lastContactedAt) continue;
 
         // Analyze 90 days before churn
-        const preChurnStart = new Date(customer.churnedAt.getTime() - 90 * 24 * 60 * 60 * 1000);
+        const preChurnStart = new Date(customer.lastContactedAt.getTime() - 90 * 24 * 60 * 60 * 1000);
 
         // Check support ticket surge
         const preChurnTickets = await this.prisma.client.supportTicket
           ?.count({
-            where: { businessId, contactId: customer.id, createdAt: { gte: preChurnStart, lt: customer.churnedAt } },
+            where: { businessId, contactId: customer.id, createdAt: { gte: preChurnStart, lt: customer.lastContactedAt } },
           })
           .catch(() => 0);
 
@@ -1396,7 +1396,7 @@ Return JSON array of emerging themes:
     const customers = await this.prisma.client.contact
       .findMany({
         where: { businessId, status: 'active' },
-        select: { id: true, name: true },
+        select: { id: true, firstName: true, lastName: true },
       })
       .catch(() => []);
 
@@ -1449,10 +1449,10 @@ Return JSON array of emerging themes:
         }
         case 'engagement_decline': {
           const recentEvents = await this.prisma.client.businessEvent
-            .count({ where: { businessId, subjectType: 'contact', subjectId: customer.id, createdAt: { gte: since30 } } })
+            .count({ where: { businessId, createdAt: { gte: since30 } } })
             .catch(() => 0);
           const olderEvents = await this.prisma.client.businessEvent
-            .count({ where: { businessId, subjectType: 'contact', subjectId: customer.id, createdAt: { gte: since60, lt: since30 } } })
+            .count({ where: { businessId, createdAt: { gte: since60, lt: since30 } } })
             .catch(() => 0);
           matchScore = Math.max(recentEvents, 1) === 0 ? 0 : Math.min((1 - Math.max(recentEvents, 1) / Math.max(olderEvents, 1)) / 0.5, 1);
           break;
@@ -1461,8 +1461,8 @@ Return JSON array of emerging themes:
           // Check for plan changes in recent period
           const planChanges = await this.prisma.client.subscription
             ?.findMany({
-              where: { businessId, subjectType: 'contact', subjectId: customer.id, updatedAt: { gte: since90 } },
-              select: { tier: true, seatCount: true },
+              where: { businessId, updatedAt: { gte: since90 } },
+              select: { seatCount: true },
               orderBy: { updatedAt: 'desc' },
               take: 2,
             })
@@ -1686,7 +1686,7 @@ Return JSON: {"explanations": [{"metric": "...", "explanation": "..."}]}`;
       });
 
       const overdueInvoices = await this.prisma.client.invoice.count({
-        where: { businessId, status: 'overdue' },
+        where: { businessId, status: 'OVERDUE' },
       });
 
       const totalOverdue = overdueTasks + overdueInvoices;
@@ -1868,7 +1868,7 @@ Return JSON: {"explanations": [{"metric": "...", "explanation": "..."}]}`;
 
   private async findAllActiveBusinesses(): Promise<string[]> {
     const businesses = await this.prisma.client.business
-      .findMany({ where: { active: true }, select: { id: true } })
+      .findMany({ where: { deletedAt: null }, select: { id: true } })
       .catch(() => []);
 
     return (businesses as Array<{ id: string }>).map((b) => b.id);
