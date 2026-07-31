@@ -674,7 +674,7 @@ export class KeyCortexController {
       const response = await this.reasoning.processConsciousQuery(query);
       return response;
     } catch (err) {
-      this.logger.error(`Conscious chat error: ${err.message}`, err.stack);
+      this.logger.error(`Conscious chat error: ${(err as Error).message}`, (err as Error).stack);
       throw new ServiceUnavailableException('Consciousness layer unavailable');
     }
   }
@@ -2884,7 +2884,7 @@ export class KeyCortexController {
       const response = await this.reasoning.processConsciousQuery(query);
       return response;
     } catch (err) {
-      this.logger.error(`Consciousness chat error: ${err.message}`, err.stack);
+      this.logger.error(`Consciousness chat error: ${(err as Error).message}`, (err as Error).stack);
       throw new ServiceUnavailableException('Consciousness layer unavailable');
     }
   }
@@ -2907,7 +2907,7 @@ export class KeyCortexController {
     }
 
     try {
-      const mindState = await this.consciousness.getMindState(businessId);
+      const mindState = await this.consciousness.getConsciousnessSnapshot(businessId);
       return {
         mindState,
         activeLayers: [
@@ -2923,7 +2923,7 @@ export class KeyCortexController {
         timestamp: new Date().toISOString(),
       };
     } catch (err) {
-      this.logger.error(`Consciousness state error: ${err.message}`, err.stack);
+      this.logger.error(`Consciousness state error: ${(err as Error).message}`, (err as Error).stack);
       throw new ServiceUnavailableException('Unable to retrieve consciousness state');
     }
   }
@@ -2949,7 +2949,7 @@ export class KeyCortexController {
     try {
       return await this.emotion.getProfile(businessId, userId);
     } catch (err) {
-      this.logger.error(`Emotional profile error: ${err.message}`, err.stack);
+      this.logger.error(`Emotional profile error: ${(err as Error).message}`, (err as Error).stack);
       throw new ServiceUnavailableException('Unable to retrieve emotional profile');
     }
   }
@@ -2981,7 +2981,7 @@ export class KeyCortexController {
       );
       return { ideas, generatedAt: new Date().toISOString() };
     } catch (err) {
-      this.logger.error(`Brainstorm error: ${err.message}`, err.stack);
+      this.logger.error(`Brainstorm error: ${(err as Error).message}`, (err as Error).stack);
       throw new ServiceUnavailableException('Creativity service unavailable');
     }
   }
@@ -3004,9 +3004,9 @@ export class KeyCortexController {
     }
 
     try {
-      return await this.metacognition.getSelfModel(businessId);
+      return await this.metacognition.buildSelfModel(businessId);
     } catch (err) {
-      this.logger.error(`Metacognition error: ${err.message}`, err.stack);
+      this.logger.error(`Metacognition error: ${(err as Error).message}`, (err as Error).stack);
       throw new ServiceUnavailableException('Unable to retrieve metacognition');
     }
   }
@@ -3023,9 +3023,9 @@ export class KeyCortexController {
     framework: string;
   }> {
     try {
-      return await this.ethics.getFramework();
+      return await this.ethics.getValues();
     } catch (err) {
-      this.logger.error(`Ethics framework error: ${err.message}`, err.stack);
+      this.logger.error(`Ethics framework error: ${(err as Error).message}`, (err as Error).stack);
       throw new ServiceUnavailableException('Unable to retrieve ethics framework');
     }
   }
@@ -3051,7 +3051,7 @@ export class KeyCortexController {
     try {
       return await this.temporalReasoning.analyze(businessId, metric);
     } catch (err) {
-      this.logger.error(`Temporal analysis error: ${err.message}`, err.stack);
+      this.logger.error(`Temporal analysis error: ${(err as Error).message}`, (err as Error).stack);
       throw new ServiceUnavailableException('Unable to retrieve temporal analysis');
     }
   }
@@ -3084,7 +3084,7 @@ export class KeyCortexController {
         timestamp: new Date().toISOString(),
       };
     } catch (err) {
-      this.logger.error(`Reflection error: ${err.message}`, err.stack);
+      this.logger.error(`Reflection error: ${(err as Error).message}`, (err as Error).stack);
       throw new ServiceUnavailableException('Reflection service unavailable');
     }
   }
@@ -3114,7 +3114,7 @@ export class KeyCortexController {
         generatedAt: new Date().toISOString(),
       };
     } catch (err) {
-      this.logger.error(`Intuition signals error: ${err.message}`, err.stack);
+      this.logger.error(`Intuition signals error: ${(err as Error).message}`, (err as Error).stack);
       throw new ServiceUnavailableException('Unable to retrieve intuition signals');
     }
   }
@@ -3136,10 +3136,10 @@ export class KeyCortexController {
     }
 
     try {
-      const ideas = await this.creativity.getRecentIdeas(businessId);
+      const ideas = await this.creativity.getCreativeHistory(businessId);
       return { ideas, generatedAt: new Date().toISOString() };
     } catch (err) {
-      this.logger.error(`Creative ideas error: ${err.message}`, err.stack);
+      this.logger.error(`Creative ideas error: ${(err as Error).message}`, (err as Error).stack);
       throw new ServiceUnavailableException('Unable to retrieve creative ideas');
     }
   }

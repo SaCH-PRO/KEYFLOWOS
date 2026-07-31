@@ -677,16 +677,16 @@ Return JSON array of emerging themes:
     const customers = await this.getActiveCustomers(businessId);
 
     for (const customer of customers) {
-      const customerId = customer.id;
+      const contactId = customer.id;
 
       // Check for declining engagement
-      const engagementTrend = await this.analyzeEngagementTrend(businessId, customerId, since);
+      const engagementTrend = await this.analyzeEngagementTrend(businessId, contactId, since);
 
       if (engagementTrend.declineRate > 0.3) {
         // >30% engagement drop
         signals.push({
           id: uuidv4(),
-          description: `Customer ${customer.name} (${customerId}) engagement dropped ${(engagementTrend.declineRate * 100).toFixed(0)}% over 30 days — potential churn precursor`,
+          description: `Customer ${customer.name} (${contactId}) engagement dropped ${(engagementTrend.declineRate * 100).toFixed(0)}% over 30 days — potential churn precursor`,
           sources: ['engagement_metrics', 'activity_logs'],
           confidence: Math.min(engagementTrend.declineRate * 1.5, 0.9),
           trend: 'weakening',
@@ -706,7 +706,7 @@ Return JSON array of emerging themes:
       }
 
       // Check for unusual login patterns
-      const loginPattern = await this.analyzeLoginPattern(businessId, customerId);
+      const loginPattern = await this.analyzeLoginPattern(businessId, contactId);
       if (loginPattern.anomalyScore > 0.6) {
         signals.push({
           id: uuidv4(),
@@ -737,13 +737,13 @@ Return JSON array of emerging themes:
 
   private async analyzeEngagementTrend(
     businessId: string,
-    customerId: string,
+    contactId: string,
     since: Date,
   ): Promise<{ declineRate: number; dataPoints: string[] }> {
     // Get monthly engagement metrics
     const recentEvents = await this.prisma.client.businessEvent
       .findMany({
-        where: { businessId, customerId, createdAt: { gte: since } },
+        where: { businessId, subjectType: 'contact', subjectId: contactId, createdAt: { gte: since } },
         orderBy: { createdAt: 'asc' },
       })
       .catch(() => []);
@@ -1098,52 +1098,12 @@ Return JSON array of emerging themes:
     return null;
   }
 
-  private async detectSocialWebMismatch(businessId: string): Promise<WeakSignal | null> {
-    // Social media engagement up but website traffic down = platform algorithm change or content mismatch
-    try {
-      const socialData: Array<Record<string, unknown>> = []; // persistence not implemented (model absent from schema)
-
-      const webData: Array<Record<string, unknown>> = []; // persistence not implemented (model absent from schema)
-
-      const socialEngagement = (socialData ?? []).reduce((s: number, m: { engagement: number }) => s + m.engagement, 0);
-      const webSessions = (webData ?? []).reduce((s: number, m: { sessions: number }) => s + m.sessions, 0);
-
-      // Need historical comparison
-      const oldSocialData: Array<Record<string, unknown>> = []; // persistence not implemented (model absent from schema)
-
-      const oldWebData: Array<Record<string, unknown>> = []; // persistence not implemented (model absent from schema)
-
-      const oldSocialEngagement = (oldSocialData ?? []).reduce((s: number, m: { engagement: number }) => s + m.engagement, 0);
-      const oldWebSessions = (oldWebData ?? []).reduce((s: number, m: { sessions: number }) => s + m.sessions, 0);
-
-      if (oldSocialEngagement === 0 || oldWebSessions === 0) return null;
-
-      const socialChange = ((socialEngagement - oldSocialEngagement) / oldSocialEngagement) * 100;
-      const webChange = ((webSessions - oldWebSessions) / oldWebSessions) * 100;
-
-      if (socialChange > 15 && webChange < -15) {
-        return {
-          id: uuidv4(),
-          description: `Social-web disconnect: social engagement up ${socialChange.toFixed(0)}% but website traffic down ${Math.abs(webChange).toFixed(0)}%. Content drives likes but not clicks.`,
-          sources: ['social_media', 'website_analytics'],
-          confidence: 0.65,
-          trend: 'emerging',
-          potentialImpact: 'medium',
-          recommendedInvestigation: 'Social content is engaging but not driving site visits. Add stronger CTAs, link in bio optimization, or create click-worthy content formats.',
-          detectedAt: new Date(),
-          category: 'cross-domain',
-          score: 2,
-          evidence: [
-            { source: 'social_media', detail: `Social: ${oldSocialEngagement} → ${socialEngagement} (${socialChange > 0 ? '+' : ''}${socialChange.toFixed(0)}%)`, timestamp: new Date(), strength: 0.7 },
-            { source: 'website', detail: `Web: ${oldWebSessions} → ${webSessions} (${webChange > 0 ? '+' : ''}${webChange.toFixed(0)}%)`, timestamp: new Date(), strength: 0.7 },
-          ],
-          businessId,
-        };
-      }
-    } catch {
-      // Non-fatal
-    }
-
+  private async detectSocialWebMismatch(businessId: string): Promise<WeakSignal | null>  {
+    // Requires SocialMediaMetric and WebsiteAnalytics, neither of which exists in
+    // schema.prisma. Both queries short-circuited to undefined, so this detector
+    // could never produce a signal. Stated explicitly rather than left as
+    // arithmetic over permanently-empty arrays.
+    void businessId;
     return null;
   }
 
@@ -1247,7 +1207,7 @@ Return JSON array of emerging themes:
     const tickets = await this.prisma.client.supportTicket
       ?.findMany({
         where: { businessId, createdAt: { gte: since } },
-        select: { id: true, customerId: true, subject: true, description: true, priority: true },
+        select: { id: true, contactId: true, subject: true, description: true, priority: true },
       })
       .catch(() => []);
 
@@ -1401,7 +1361,7 @@ Return JSON array of emerging themes:
 
     // Learn from actual churned customers
     try {
-      const churnedCustomers = await this.prisma.client.customer
+      const churnedCustomers = await this.prisma.client.contact
         .findMany({
           where: { businessId, status: 'churned' },
           select: { id: true, name: true, churnedAt: true },
@@ -1418,7 +1378,7 @@ Return JSON array of emerging themes:
         // Check support ticket surge
         const preChurnTickets = await this.prisma.client.supportTicket
           ?.count({
-            where: { businessId, customerId: customer.id, createdAt: { gte: preChurnStart, lt: customer.churnedAt } },
+            where: { businessId, contactId: customer.id, createdAt: { gte: preChurnStart, lt: customer.churnedAt } },
           })
           .catch(() => 0);
 
@@ -1426,7 +1386,7 @@ Return JSON array of emerging themes:
           ?.count({
             where: {
               businessId,
-              customerId: customer.id,
+              contactId: customer.id,
               createdAt: {
                 gte: new Date(preChurnStart.getTime() - 90 * 24 * 60 * 60 * 1000),
                 lt: preChurnStart,
@@ -1448,7 +1408,7 @@ Return JSON array of emerging themes:
   }
 
   private async getActiveCustomers(businessId: string): Promise<Array<{ id: string; name: string }>> {
-    const customers = await this.prisma.client.customer
+    const customers = await this.prisma.client.contact
       .findMany({
         where: { businessId, status: 'active' },
         select: { id: true, name: true },
@@ -1476,10 +1436,10 @@ Return JSON array of emerging themes:
       switch (pattern.name) {
         case 'support_ticket_surge': {
           const recent = await this.prisma.client.supportTicket
-            ?.count({ where: { businessId, customerId: customer.id, createdAt: { gte: since30 } } })
+            ?.count({ where: { businessId, contactId: customer.id, createdAt: { gte: since30 } } })
             .catch(() => 0);
           const older = await this.prisma.client.supportTicket
-            ?.count({ where: { businessId, customerId: customer.id, createdAt: { gte: since60, lt: since30 } } })
+            ?.count({ where: { businessId, contactId: customer.id, createdAt: { gte: since60, lt: since30 } } })
             .catch(() => 0);
           matchScore = older === 0 ? (Number(recent) > 0 ? 0.5 : 0) : Math.min((Number(recent) / Number(older)) / 3, 1);
           break;
@@ -1487,7 +1447,7 @@ Return JSON array of emerging themes:
         case 'payment_delay': {
           const invoices = await this.prisma.client.invoice
             .findMany({
-              where: { businessId, customerId: customer.id, createdAt: { gte: since90 } },
+              where: { businessId, contactId: customer.id, createdAt: { gte: since90 } },
               select: { dueDate: true, paidAt: true },
             })
             .catch(() => []);
@@ -1504,10 +1464,10 @@ Return JSON array of emerging themes:
         }
         case 'engagement_decline': {
           const recentEvents = await this.prisma.client.businessEvent
-            .count({ where: { businessId, customerId: customer.id, createdAt: { gte: since30 } } })
+            .count({ where: { businessId, subjectType: 'contact', subjectId: customer.id, createdAt: { gte: since30 } } })
             .catch(() => 0);
           const olderEvents = await this.prisma.client.businessEvent
-            .count({ where: { businessId, customerId: customer.id, createdAt: { gte: since60, lt: since30 } } })
+            .count({ where: { businessId, subjectType: 'contact', subjectId: customer.id, createdAt: { gte: since60, lt: since30 } } })
             .catch(() => 0);
           matchScore = Math.max(recentEvents, 1) === 0 ? 0 : Math.min((1 - Math.max(recentEvents, 1) / Math.max(olderEvents, 1)) / 0.5, 1);
           break;
@@ -1516,7 +1476,7 @@ Return JSON array of emerging themes:
           // Check for plan changes in recent period
           const planChanges = await this.prisma.client.subscription
             ?.findMany({
-              where: { businessId, customerId: customer.id, updatedAt: { gte: since90 } },
+              where: { businessId, subjectType: 'contact', subjectId: customer.id, updatedAt: { gte: since90 } },
               select: { tier: true, seatCount: true },
               orderBy: { updatedAt: 'desc' },
               take: 2,
@@ -1564,19 +1524,11 @@ Return JSON array of emerging themes:
     };
   }
 
-  private async analyzeFeatureUsageDrop(businessId: string, customerId: string, since: Date): Promise<number> {
-    try {
-      const recentUsage = 0; // persistence not implemented (model absent from schema)
-
-      const olderPeriodStart = new Date(since.getTime() - (Date.now() - since.getTime()));
-      const olderUsage = 0; // persistence not implemented (model absent from schema)
-
-      if (olderUsage === 0) return recentUsage === 0 ? 0 : 0.3;
-      const drop = 1 - Number(recentUsage) / Number(olderUsage);
-      return Math.max(0, Math.min(drop / 0.6, 1)); // 60% drop = full match
-    } catch {
-      return 0;
-    }
+  private async analyzeFeatureUsageDrop(businessId: string, customerId: string, since: Date): Promise<number>  {
+    // Requires a FeatureUsage model with businessId + customerId, which does not
+    // exist (FeatureUsageDaily is global and has neither). Returns no signal.
+    void businessId; void customerId; void since;
+    return 0;
   }
 
   /* ═══════════════════════════════════════════════════════════════

@@ -115,6 +115,7 @@ export class KeyCortexReflectionService {
 
   /** Active reflection sessions per business */
   private activeSessions: Map<string, boolean> = new Map();
+  private readonly lastSessions = new Map<string, ReflectionSession>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -141,6 +142,34 @@ export class KeyCortexReflectionService {
    *  2 customers churned. My confidence in pricing advice drops
    *  from 0.85 → 0.78."
    */
+  /**
+   * Peripheral entry point: run one reflection cycle of the requested kind.
+   *
+   * The four cycles below are the implementations; this dispatches to them so
+   * callers (the HTTP surface, other organs) address the layer by intent rather
+   * than by internal method name.
+   */
+  async reflect(businessId: string, type: string): Promise<ReflectionSession> {
+    const session =
+      type === 'dream'
+        ? await this.runDream(businessId)
+        : type === 'synthesis'
+          ? await this.runSynthesis(businessId)
+          : type === 'maintenance'
+            ? await this.runMaintenance(businessId)
+            : await this.runReflection(businessId);
+    this.lastSessions.set(businessId, session);
+    return session;
+  }
+
+  /**
+   * Most recent completed session for a business, or null if none has run in
+   * this process. Sessions are not persisted, so this is in-memory by design.
+   */
+  async getLastReflectionSession(businessId: string): Promise<ReflectionSession | null> {
+    return this.lastSessions.get(businessId) ?? null;
+  }
+
   async runReflection(businessId: string): Promise<ReflectionSession> {
     const startedAt = new Date();
     const sessionId = uuidv4();
