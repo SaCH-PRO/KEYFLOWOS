@@ -116,6 +116,7 @@ import { KeyCortexActionDetectionService } from './key-cortex-action-detection.s
 import { KeyCortexLegacyInsightService } from './key-cortex-legacy-insight.service';
 import { KeyCortexProviderSelectionService } from './key-cortex-provider-selection.service';
 import { KeyCortexStructuredOutputService } from './key-cortex-structured-output.service';
+import { KeyCortexExpertiseLensService } from './key-cortex-expertise-lens.service';
 import { KeyCortexMoodDetectionService } from './key-cortex-mood-detection.service';
 import { KeyCortexSuggestionService } from './key-cortex-suggestion.service';
 import { KeyCortexGenomeContextService } from './key-cortex-genome-context.service';
@@ -315,6 +316,7 @@ import { IntegrationHubModule } from '../integration-hub/integration-hub.module'
     KeyCortexProviderSelectionService,
     KeyCortexStructuredOutputService,
     KeyCortexMoodDetectionService,
+    KeyCortexExpertiseLensService,
     KeyCortexSuggestionService,
     KeyCortexGenomeContextService,
     KeyCortexSystemPromptService,
@@ -560,6 +562,7 @@ import { IntegrationHubModule } from '../integration-hub/integration-hub.module'
     KeyCortexProviderSelectionService,
     KeyCortexStructuredOutputService,
     KeyCortexMoodDetectionService,
+    KeyCortexExpertiseLensService,
     KeyCortexSuggestionService,
     KeyCortexGenomeContextService,
     KeyCortexSystemPromptService,
