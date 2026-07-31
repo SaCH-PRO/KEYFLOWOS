@@ -2,6 +2,15 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "./dist",
+    // Pinned, not inferred. Every file under test/ currently matches an `exclude`
+    // pattern, so only src/** compiles and tsc infers rootDir as ./src, emitting
+    // dist/main.js — which is what `start:prod` (node dist/main.js) runs.
+    //
+    // Adding a single file under test/ not named *.test.ts / *.spec.ts would pull
+    // test/ into the program, move the inferred rootDir up to apps/server, and
+    // relocate the entry point to dist/src/main.js — breaking production silently.
+    // Pinning it means that mistake fails loudly at build time instead.
+    "rootDir": "./src",
     "sourceMap": true,
     "incremental": true,
     "tsBuildInfoFile": "./dist/.tsbuildinfo",
