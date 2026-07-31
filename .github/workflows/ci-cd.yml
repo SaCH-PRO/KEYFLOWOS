@@ -53,10 +53,10 @@ jobs:
       # ceiling is reset to the true current count so the ratchet is enforceable
       # again from an honest baseline. It is a cap to drive downward, not a target.
       #
-      # 3337 -> 3341: porting the emotion and ethics organs from the consciousness
-      # branch brought 4 pre-existing `any` warnings with them. Zero errors.
+      # 3337 -> 3340: porting the emotion and ethics organs. Rewriting them against
+      # real services removed more `any` than the port introduced. Zero errors.
       - name: Lint server
-        run: pnpm --filter server lint --max-warnings 3341
+        run: pnpm --filter server lint --max-warnings 3340
 
       # Web drifted the same way while the step was skipped: 33 errors accumulated
       # against a config that documents the app as fully `any`-free. All 33 are now

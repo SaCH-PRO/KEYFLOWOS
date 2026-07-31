@@ -20,6 +20,8 @@
  */
 
 import { Injectable, Logger } from '@nestjs/common';
+import { PrismaService } from '../../core/prisma/prisma.service';
+import { AiUsageService } from '../ai/ai-usage.service';
 import {
   EmotionalState,
   EmotionalProfile,
@@ -32,13 +34,6 @@ import {
   CortexPersona,
 } from './key-cortex-consciousness.types';
 
-/** Injected dependencies — resolved at module bootstrap. */
-interface EmotionServiceDeps {
-  prisma: { cortexMessage: { findMany: (args: unknown) => Promise<unknown[]> } };
-  modelGateway: { complete: (prompt: string, opts?: unknown) => Promise<{ text: string; usage?: { totalTokens: number } }> };
-  aiUsage: { record: (params: { userId: string; model: string; tokens: number; purpose: string; cost: number }) => Promise<void> };
-  personalityService: { getActivePersona: (userId: string) => Promise<CortexPersona>; listPersonas: () => Promise<CortexPersona[]> };
-}
 
 /** Persona mapping for emotional adaptation — which persona serves which emotion. */
 const EMOTION_PERSONA_MAP: Record<PrimaryEmotion, string> = {
@@ -126,10 +121,8 @@ export class KeyCortexEmotionService {
   private cacheTimestamps = new Map<string, number>();
 
   constructor(
-    private readonly prisma: EmotionServiceDeps['prisma'],
-    private readonly modelGateway: EmotionServiceDeps['modelGateway'],
-    private readonly aiUsage: EmotionServiceDeps['aiUsage'],
-    private readonly personalityService: EmotionServiceDeps['personalityService'],
+    private readonly prisma: PrismaService,
+    private readonly aiUsage: AiUsageService,
   ) {}
 
   /* ═══════════════════════════════════════════════════════════════════════════
@@ -165,7 +158,7 @@ export class KeyCortexEmotionService {
     const keywordEmotion = this.scoreKeywords(text.toLowerCase());
 
     // ── 4. AI-powered emotion analysis (optional enrichment) ─────────────
-    const aiEmotion = await this.analyzeWithAI(text, userId);
+    const aiEmotion = await this.analyzeWithAI(businessId, text, userId);
 
     // ── 5. Business stress indicators ────────────────────────────────────
     const businessStress = await this.assessBusinessStress(userId);
@@ -441,34 +434,43 @@ export class KeyCortexEmotionService {
    * Falls back to neutral if the gateway is unavailable.
    */
   private async analyzeWithAI(
+    businessId: string,
     text: string,
     userId: string,
   ): Promise<{ emotion: PrimaryEmotion; intensity: number; confidence: number }> {
     try {
       const prompt = this.buildEmotionPrompt(text);
-      // This service declares its own narrow modelGateway dep:
-      // complete(prompt, opts) -> { text, usage }. Not the full GatewayRequest.
-      const response = await this.modelGateway.complete(prompt, {
-        temperature: 0.3,
-        maxTokens: 128,
-      });
-
-      const parsed = this.parseAIEmotionResponse(response.text ?? '');
-
-      // Usage is recorded through this service's narrow aiUsage dep.
-      await this.aiUsage.record({
+      const response = await this.aiUsage.trackAndComplete(
+        businessId,
         userId,
-        model: 'emotion-analysis',
-        tokens: response.usage?.totalTokens ?? 0,
-        purpose: 'emotion_detection',
-        cost: 0,
-      });
+        'emotion_detection',
+        {
+          messages: [{ role: 'user' as const, content: prompt }],
+          temperature: 0.3,
+          maxTokens: 128,
+        },
+      );
+
+      const parsed = this.parseAIEmotionResponse(response.content ?? '');
 
       return parsed;
     } catch (err) {
       this.logger.warn(`AI emotion analysis failed: ${(err as Error).message}`);
       return { emotion: 'calm', intensity: 0.3, confidence: 0.5 };
     }
+  }
+
+  /** Flatten the Json `messages` arrays stored on CortexSession rows. */
+  private extractMessages(
+    sessions: Array<{ messages: unknown }>,
+  ): Array<{ metadata?: Record<string, unknown> }> {
+    const out: Array<{ metadata?: Record<string, unknown> }> = [];
+    for (const s of sessions) {
+      if (Array.isArray(s.messages)) {
+        out.push(...(s.messages as Array<{ metadata?: Record<string, unknown> }>));
+      }
+    }
+    return out;
   }
 
   private buildEmotionPrompt(text: string): string {
@@ -524,16 +526,16 @@ export class KeyCortexEmotionService {
     try {
       // Query business health indicators from the database
       // This is a simplified heuristic — production would use proper aggregation
-      const stressIndicators = await this.prisma.cortexMessage.findMany({
-        where: {
-          metadata: {
-            path: ['stressIndicator'],
-            equals: true,
-          },
-        },
+      // No CortexMessage table exists; messages live in CortexSession.messages (Json).
+      const recentSessions = await this.prisma.client.cortexSession.findMany({
+        where: { userId },
         take: 50,
-        orderBy: { timestamp: 'desc' },
-      } as Record<string, unknown>);
+        orderBy: { updatedAt: 'desc' },
+        select: { messages: true },
+      });
+      const stressIndicators = this.extractMessages(recentSessions).filter(
+        (m) => (m.metadata as Record<string, unknown> | undefined)?.stressIndicator === true,
+      );
 
       // Count recent stress indicator events
       const recentStressCount = stressIndicators.length;
@@ -818,11 +820,13 @@ export class KeyCortexEmotionService {
     // In production, this queries the database for stored emotional states
     // For now, return an empty array which triggers the default profile
     try {
-      const messages = await this.prisma.cortexMessage.findMany({
+      const userSessions = await this.prisma.client.cortexSession.findMany({
         where: { userId },
         take: 100,
-        orderBy: { timestamp: 'desc' },
-      } as Record<string, unknown>) as Array<{ metadata?: { emotion?: EmotionalState } }>;
+        orderBy: { updatedAt: 'desc' },
+        select: { messages: true },
+      });
+      const messages = this.extractMessages(userSessions);
 
       const states: EmotionalState[] = [];
       for (const msg of messages) {
