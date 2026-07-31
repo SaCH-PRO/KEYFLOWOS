@@ -1,7 +1,11 @@
-# KEY: role-aware cognition (design decisions)
+# KEY: expertise-lens cognition (design decisions)
 
 Status: **decided, not yet implemented**
 Date: 2026-07-30
+
+> This file previously framed the feature as KEY adapting to the *caller's* org
+> role. That was a misreading of the intent and is corrected below. This is not
+> about who is asking.
 
 ## Intent
 
@@ -10,82 +14,87 @@ into every module. It runs on the business's own AI account: every model call
 routes through `AiUsageService.trackAndComplete` → `ModelGatewayService.complete`
 → `getPreferences(businessId)`, so provider and model selection are per-business.
 
-KEY should be able to think as any employee, from CEO to floor staff.
+**KEY can cover any and every professional role, and picks the best way to answer
+automatically from the question or task.** Asked to reconcile accounts it thinks
+like an accountant and answers with a table; asked about market position it
+thinks like a strategist and answers with options and tradeoffs; asked about a
+shift problem it thinks like an ops lead and answers with a checklist.
 
-## What already exists
+This is about KEY's own cognitive capability, not about the user's permissions.
 
-The org hierarchy is fully modelled. Cortex simply does not read it.
+## What exists today
 
-```
-JobRole {
-  name                 "CEO", "Floor Staff", ...
-  level         Int    hierarchy 0-10
-  permissions   Json   { module: "read|write|admin" }
-  defaultApprovalTier  Int
-}
-```
+Two auto-selection mechanisms, neither of which does this:
 
-`JobRole` → `OrgAssignment` → `Membership.permissionScopes` + `Membership.maxApprovalTier`.
-`structure.service.ts` already syncs JobRole permissions onto Membership when a
-role changes.
+| Mechanism | Selected by | Represents |
+|---|---|---|
+| Persona (`jarvis`, `friday`, `titan`, `mentor`, `hustler`, …) | `getModuleConfidence(persona, module)` — subject area | tone of voice |
+| `ReasoningMode` (`analytical`, `creative`, `critical`, `strategic`, `analogical`, `counterfactual`, `probabilistic`) | `selectDominantReasoningMode(selfModel)` — **KEY's own historical proficiency** | how it reasons |
 
-## The gap
+Note the second: KEY currently picks *how to think* from what it has historically
+been best at, not from what the question needs. Left as-is for now by decision,
+but recorded because it is surprising and probably wants revisiting.
 
-Verified by inspection:
-
-- `CortexQuery` and `CortexSession` carry `userId`, `persona`, `voice`, `mood`,
-  `provider` — **no role field**
-- Persona is selected by `getModuleConfidence(persona, module)` — by subject
-  matter, not by who is asking
-- The entire `key-cortex` module has **zero** references to `Membership`,
-  `OWNER`, `ADMIN`, `STAFF`, or `JobRole`
-
-So today a floor-staff member and the CEO asking the same question receive
-identical cognition.
+There is **no** dimension representing professional discipline, and nothing that
+varies output format by task.
 
 ## Decisions
 
-### 1. Scope: tone and framing only
+### 1. Expertise lens is a new axis
 
-Role shapes how KEY *speaks* — vocabulary, altitude, what it leads with. It does
-**not** change what data KEY surfaces, and it does **not** gate actions.
+A professional discipline KEY adopts for a task — accountant, marketer, ops
+manager, strategist, legal, and so on — carrying that discipline's framing,
+vocabulary, standard checks, and sense of what is relevant.
 
-**Consequence, stated explicitly:** this is not a security control and must never
-be described or relied upon as one. `JobRole.permissions`, `defaultApprovalTier`
-and `Membership.maxApprovalTier` continue to be enforced wherever they are
-enforced today. Adding role to cortex prompts changes presentation only. If data
-or autonomy gating is ever wanted, that is a separate, deliberate piece of work
-with its own threat model.
+It **composes with**, rather than replaces, the existing axes:
 
-### 2. Persona stays independent
+```
+persona          tone of voice          user preference, independent
+expertise lens   professional framing   auto-selected from the task    <- NEW
+reasoning mode   inference style        currently self-proficiency driven
+module           subject area           routing context
+```
 
-The 8 personas (`jarvis`, `friday`, `jarvis_dark`, `nova`, `titan`, `ghost`,
-`mentor`, `hustler`) remain a user preference. Job role does not select, suggest,
-or override persona. Role affects framing; persona affects voice; they compose.
+### 2. Output format adapts to the task
 
-### 3. Always the caller's real role
+The lens selects presentation, not just thinking:
 
-Role is resolved server-side from the authenticated caller's `Membership` →
-`OrgAssignment` → `JobRole`. It is never taken from the request body, and there
-is no simulation mode — KEY cannot be asked to reason as someone more senior.
+- reconciliation / variance → table
+- strategy / decision → options with tradeoffs
+- operational / procedural → checklist
+- diagnostic → findings with evidence
+- otherwise → narrative
 
-This keeps the surface trivially safe: a client cannot influence it at all.
+### 3. Persona stays independent
 
-## Implementation sketch
+Persona remains a user preference. The lens does not select or override it. A
+user who prefers `hustler` still gets `hustler`'s voice over an accountant's
+framing.
 
-1. Resolve `{ roleName, roleLevel }` for `(businessId, userId)` from the DB,
-   cached per session.
-2. Carry it on `CortexSession` (not on `CortexQuery` — it must not be
-   client-supplied).
-3. Use it only in prompt construction: framing/altitude hints.
-4. Absent role (no assignment) degrades to today's behaviour.
+### 4. Not a permissions mechanism
+
+The lens changes how KEY thinks and presents. It does **not** grant or restrict
+access to anything. `JobRole.permissions`, `defaultApprovalTier` and
+`Membership.maxApprovalTier` remain the sole authority for what a user may see or
+do, enforced where they are enforced today. KEY adopting an "accountant lens"
+must never widen what the caller can reach.
+
+## Open questions
+
+1. **Lens taxonomy** — a fixed enum, or derived from each business's own
+   `JobRole` rows so lenses match that business's actual functions?
+2. **Selection mechanism** — heuristic/keyword classification, a model call, or
+   the existing module routing as a first approximation?
+3. **Ambiguity** — when the task is unclear, does KEY pick a generalist lens,
+   ask, or blend two?
+4. **Observability** — is the chosen lens surfaced to the user
+   ("answering as: operations"), or invisible?
 
 ## Testing
 
 Wiring-level, not behavioural:
 
-- role is resolved from the DB, never read from request input
-- a request body carrying a role field is ignored
-- prompt framing differs between two roles for the same query
-- persona is unchanged by role
-- no data or action differs by role (guards the tone-only boundary)
+- a fixture set of questions each classifies to the expected lens
+- output format matches the lens contract
+- persona is unchanged by lens selection
+- lens selection never widens data access (guards the boundary in §4)
