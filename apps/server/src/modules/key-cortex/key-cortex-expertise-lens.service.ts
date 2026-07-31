@@ -271,10 +271,31 @@ export class KeyCortexExpertiseLensService {
     };
   }
 
+  /**
+   * Evidence discipline applied to every answer, whatever the lens.
+   *
+   * Deliberately unconditional. A discipline that only applied to some lenses
+   * would be one a caller could route around by phrasing a question differently,
+   * so it is prepended to all framing and cannot be opted out of.
+   */
+  static readonly EVIDENCE_DISCIPLINE = [
+    'Ground every claim in this business\'s actual data. Cite the figure, record or',
+    'time period a statement rests on.',
+    'Separate what is observed from what is inferred, and label inference as such.',
+    'Where a number is estimated or extrapolated, say so and give the basis.',
+    'If the data needed to answer is missing, say what is missing and what would',
+    'answer it — do not fill the gap with a plausible guess.',
+    'Do not present industry generalities, benchmarks or averages as facts about',
+    'this business unless they come from its own records.',
+    'State uncertainty plainly rather than hedging vaguely; a wrong confident',
+    'answer is worse than an honest "not determinable from the available data".',
+  ].join(' ');
+
   /** Prompt fragment for the chosen lens. Framing only — it confers no access. */
   buildPromptFraming(selection: LensSelection): string {
     const { lens, format } = selection;
     return [
+      `Evidence: ${KeyCortexExpertiseLensService.EVIDENCE_DISCIPLINE}`,
       `Approach: ${lens.framing}`,
       `Consider: ${lens.standardChecks.join(' ')}`,
       `Present the answer as: ${this.describeFormat(format)}`,
@@ -284,15 +305,28 @@ export class KeyCortexExpertiseLensService {
   private describeFormat(format: OutputFormat): string {
     switch (format) {
       case 'table':
-        return 'a table of the relevant figures, with a one-line takeaway underneath';
+        return (
+          'a table of the relevant figures, each traceable to its source record and ' +
+          'period, with a one-line takeaway underneath'
+        );
       case 'options':
-        return 'the realistic options, each with its cost and what it rules out, then a recommendation';
+        return (
+          'the realistic options, each with its cost, what it rules out, and the ' +
+          'evidence supporting it, then a recommendation stating what would have to ' +
+          'be true for it to hold'
+        );
       case 'checklist':
-        return 'an ordered checklist of concrete steps';
+        return (
+          'an ordered checklist of concrete steps, marking any step that rests on an ' +
+          'assumption rather than on known data'
+        );
       case 'findings':
-        return 'findings, each with the evidence it rests on, most significant first';
+        return (
+          'findings, each with the evidence it rests on and whether it is observed or ' +
+          'inferred, most significant first'
+        );
       default:
-        return 'a direct prose answer';
+        return 'a direct prose answer, citing the data behind any factual claim';
     }
   }
 
