@@ -171,7 +171,7 @@ export class KeyCortexCreativityService {
     this.logger.log(`[Creativity:${sessionId}] 🎨 Brainstorming "${prompt.slice(0, 60)}..." for ${businessId}`);
 
     // 1. Get full business context
-    const businessContext = await this.contextService.getBusinessContext(businessId);
+    const businessContext = await this.contextService.getFullContext(businessId);
     const genomeInsights = await this.getGenomeInsights(businessId);
 
     // 2. Run each creativity technique
@@ -251,9 +251,9 @@ export class KeyCortexCreativityService {
     this.logger.log(`[Creativity:${sessionId}] 🎯 Generating novel strategy for ${businessId}: ${goal}`);
 
     // 1. Get full business context
-    const businessContext = await this.contextService.getBusinessContext(businessId);
+    const businessContext = await this.contextService.getFullContext(businessId);
     const genomeInsights = await this.getGenomeInsights(businessId);
-    const recentInsights = [] /* KeyCortexInsightService has no getRecentInsights; enrichment omitted */;
+    const recentInsights = ([] as Array<Record<string, unknown>>) /* KeyCortexInsightService has no getRecentInsights; enrichment omitted */;
 
     // 2. Build a rich prompt from all available context
     const contextSummary = this.buildContextSummary(businessContext, genomeInsights, recentInsights);
@@ -302,7 +302,7 @@ Return JSON:
     // 4. Parse and enrich
     let ideas: CreativeIdea[] = [];
     try {
-      const parsed = JSON.parse(response.content) as Array<{
+      const parsed = JSON.parse(response.content ?? '[]') as Array<{
         title: string;
         description: string;
         category: string;
@@ -346,7 +346,7 @@ Return JSON:
     this.logger.log(`[Creativity:${sessionId}] 🤔 Lateral thinking on: ${problem.slice(0, 60)}...`);
 
     // Get business context
-    const businessContext = await this.contextService.getBusinessContext(businessId);
+    const businessContext = await this.contextService.getFullContext(businessId);
 
     // 3 reframes
     const reframes: LateralRefame[] = [
@@ -404,7 +404,7 @@ Return JSON:
           },
         );
 
-        const parsed = JSON.parse(response.content) as Array<{
+        const parsed = JSON.parse(response.content ?? '[]') as Array<{
           title: string;
           description: string;
           category: string;
@@ -451,13 +451,7 @@ Return JSON:
     const cached = this.creativeHistory.get(businessId) ?? [];
 
     // Query database
-    const dbIdeas = await this.prisma.client.keyCortexCreativeIdea
-      ?.findMany({
-        where: { businessId },
-        orderBy: { generatedAt: 'desc' },
-        take: 200,
-      })
-      .catch(() => []);
+    const dbIdeas: Array<Record<string, unknown>> = []; // model absent from schema.prisma; call short-circuited to undefined and never ran
 
     const allIdeas = [
       ...cached,
@@ -492,10 +486,7 @@ Return JSON:
 
     // Update database
     try {
-      await this.prisma.client.keyCortexCreativeIdea?.update({
-        where: { id: ideaId },
-        data: { status, feedback, ...(status === 'implemented' ? { implementedAt: new Date() } : {}) },
-      });
+      // model absent from schema.prisma; call short-circuited to undefined and never ran
     } catch {
       // Table may not exist
     }
@@ -516,7 +507,7 @@ Return JSON:
     for (const businessId of businesses) {
       try {
         // Get top insights to spark creative ideas
-        const recentInsights = [] /* KeyCortexInsightService has no getRecentInsights; enrichment omitted */;
+        const recentInsights = ([] as Array<Record<string, unknown>>) /* KeyCortexInsightService has no getRecentInsights; enrichment omitted */;
         if (recentInsights.length === 0) continue;
 
         const topInsight = recentInsights[0];
@@ -618,7 +609,7 @@ Return JSON:
         },
       );
 
-      const parsed = JSON.parse(response.content) as Array<{
+      const parsed = JSON.parse(response.content ?? '[]') as Array<{
         title: string;
         description: string;
         category: string;
@@ -686,7 +677,7 @@ Return JSON:
         },
       );
 
-      const parsed = JSON.parse(response.content) as Array<{
+      const parsed = JSON.parse(response.content ?? '[]') as Array<{
         title: string;
         description: string;
         category: string;
@@ -757,7 +748,7 @@ Return JSON:
           },
         );
 
-        const parsed = JSON.parse(response.content) as Array<{
+        const parsed = JSON.parse(response.content ?? '[]') as Array<{
           title: string;
           description: string;
           category: string;
@@ -827,7 +818,7 @@ Return JSON:
         },
       );
 
-      const parsed = JSON.parse(response.content) as Array<{
+      const parsed = JSON.parse(response.content ?? '[]') as Array<{
         title: string;
         description: string;
         category: string;
@@ -903,7 +894,7 @@ Return JSON:
           },
         );
 
-        const parsed = JSON.parse(response.content) as Array<{
+        const parsed = JSON.parse(response.content ?? '[]') as Array<{
           title: string;
           description: string;
           category: string;
@@ -980,7 +971,7 @@ Return JSON:
           },
         );
 
-        const parsed = JSON.parse(response.content) as Array<{
+        const parsed = JSON.parse(response.content ?? '[]') as Array<{
           title: string;
           description: string;
           category: string;
@@ -1054,7 +1045,7 @@ Return JSON:
         },
       );
 
-      const parsed = JSON.parse(response.content) as Array<{
+      const parsed = JSON.parse(response.content ?? '[]') as Array<{
         title: string;
         description: string;
         category: string;
@@ -1163,7 +1154,7 @@ Return JSON:
 
   private async getGenomeInsights(businessId: string): Promise<string[]> {
     try {
-      const genome = await this.contextService.getBusinessGenome(businessId);
+      const genome = await this.contextService.getGenomeContext(businessId);
       return Object.entries(genome as Record<string, unknown>).map(([k, v]) => `${k}: ${JSON.stringify(v).slice(0, 200)}`);
     } catch {
       return [];
@@ -1554,37 +1545,7 @@ Return JSON:
 
     // Persist to database
     for (const idea of ideas) {
-      await this.prisma.client.keyCortexCreativeIdea
-        ?.upsert({
-          where: { id: idea.id },
-          update: {
-            status: idea.status,
-            score: idea.score,
-            feedback: idea.feedback,
-          },
-          create: {
-            id: idea.id,
-            title: idea.title,
-            description: idea.description,
-            category: idea.category,
-            novelty: idea.novelty,
-            feasibility: idea.feasibility,
-            estimatedImpact: idea.estimatedImpact,
-            implementationSteps: idea.implementationSteps,
-            risks: idea.risks,
-            requiredResources: idea.requiredResources,
-            inspiration: idea.inspiration,
-            technique: idea.technique,
-            businessId: idea.businessId,
-            status: idea.status,
-            score: idea.score,
-            generatedAt: idea.generatedAt,
-            tags: idea.tags,
-          },
-        })
-        .catch(() => {
-          /* table may not exist */
-        });
+      // model absent from schema.prisma; call short-circuited to undefined and never ran
     }
   }
 

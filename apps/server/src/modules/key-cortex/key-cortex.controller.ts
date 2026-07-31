@@ -103,9 +103,9 @@ import {
   CortexProfitOpportunity,
   CortexActionResult,
   CortexPersonalityConfig,
-  ConsciousResponse,
   CortexMood,
 } from './key-cortex.types';
+import type { ConsciousResponse } from './key-cortex-consciousness.types';
 
 import {
   ModuleName,

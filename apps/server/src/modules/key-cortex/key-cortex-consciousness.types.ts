@@ -876,3 +876,41 @@ export interface BrainstormParams {
   /** Business context identifier. */
   businessId: string;
 }
+
+/**
+ * Proficiency tracking for a single capability, aggregated from
+ * ACTION_EXECUTED events tagged by the metacognition layer.
+ */
+export interface CapabilityRecord {
+  capability: string;
+  totalExecutions: number;
+  successes: number;
+  failures: number;
+  partials: number;
+  lastUsed: Date;
+  proficiency: number;
+}
+
+/**
+ * One pass of the conscious pipeline: which layers ran, what they concluded,
+ * and what it cost. Buffered in memory by the consciousness orchestrator.
+ */
+export interface ConsciousProcessLog {
+  sessionId: string;
+  businessId: string;
+  layersUsed: string[];
+  mindState: MindState;
+  reasoningMode: string;
+  confidence: number;
+  outcome: string;
+  timing: {
+    totalMs: number;
+    emotionMs?: number;
+    reasoningMs?: number;
+    metacognitionMs?: number;
+    ethicsMs?: number;
+  };
+  tokensUsed: number;
+  cost: number;
+  createdAt: Date;
+}

@@ -28,8 +28,8 @@ import {
   CortexActionResult,
   CortexActionType,
   CortexPersona,
-  ConsciousResponse,
 } from './key-cortex.types';
+import type { ConsciousResponse } from './key-cortex-consciousness.types';
 import { KeyCortexPersonalityService } from './key-cortex-personality.service';
 import { KeyCortexContextService } from './key-cortex-context.service';
 import { KeyCortexActionsService } from './key-cortex-actions.service';

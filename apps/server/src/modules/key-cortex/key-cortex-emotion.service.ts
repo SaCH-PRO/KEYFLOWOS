@@ -456,7 +456,7 @@ export class KeyCortexEmotionService {
       });
 
       // Parse JSON from model response
-      const parsed = this.parseAIEmotionResponse(response.content);
+      const parsed = this.parseAIEmotionResponse(response.content ?? '');
 
 
       return parsed;

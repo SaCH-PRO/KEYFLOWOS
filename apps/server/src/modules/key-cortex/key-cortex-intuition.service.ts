@@ -534,12 +534,7 @@ export class KeyCortexIntuitionService {
     }
 
     // Email content (if available)
-    const emails = await this.prisma.client.emailLog
-      ?.findMany({
-        where: { businessId, createdAt: { gte: since } },
-        select: { subject: true, body: true, createdAt: true },
-      })
-      .catch(() => []);
+    const emails: Array<Record<string, unknown>> = []; // model absent from schema.prisma; call short-circuited to undefined and never ran
     for (const e of emails ?? []) {
       corpus.push({
         source: 'email',
@@ -642,7 +637,7 @@ Return JSON array of emerging themes:
       },
     );
 
-    const themes = JSON.parse(response.content) as Array<{ theme: string; sources: string[]; severity: string; confidence: number }>;
+    const themes = JSON.parse(response.content ?? '[]') as Array<{ theme: string; sources: string[]; severity: string; confidence: number }>;
 
     return themes.map((t) => ({
       id: uuidv4(),
@@ -1266,7 +1261,7 @@ Return JSON array of emerging themes:
   private async detectIndustryWidePattern(businessId: string): Promise<WeakSignal | null> {
     // Compare this business's patterns with anonymized industry data
     try {
-      const context = await this.contextService.getBusinessContext(businessId);
+      const context = await this.contextService.getFullContext(businessId);
       const industry = (context as Record<string, unknown>)?.industry;
 
       if (!industry) return null;
@@ -1636,7 +1631,7 @@ Return JSON: {"explanations": [{"metric": "...", "explanation": "..."}]}`;
         },
       );
 
-      const result = JSON.parse(response.content) as { explanations: Array<{ metric: string; explanation: string }> };
+      const result = JSON.parse(response.content ?? '[]') as { explanations: Array<{ metric: string; explanation: string }> };
 
       return anomalies.map((a) => {
         const exp = result.explanations.find((e) => e.metric === a.metric);
@@ -1777,23 +1772,9 @@ Return JSON: {"explanations": [{"metric": "...", "explanation": "..."}]}`;
     const signals: OperationalStressSignal[] = [];
 
     try {
-      const recentErrors = await this.prisma.client.errorLog
-        ?.count({
-          where: { businessId, createdAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) } },
-        })
-        .catch(() => 0);
+      const recentErrors = 0; // model absent from schema.prisma; call short-circuited to undefined and never ran
 
-      const previousErrors = await this.prisma.client.errorLog
-        ?.count({
-          where: {
-            businessId,
-            createdAt: {
-              gte: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000),
-              lt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
-            },
-          },
-        })
-        .catch(() => 0);
+      const previousErrors = 0; // model absent from schema.prisma; call short-circuited to undefined and never ran
 
       const errorChange = Number(previousErrors) === 0 ? 0 : ((Number(recentErrors) - Number(previousErrors)) / Number(previousErrors)) * 100;
 

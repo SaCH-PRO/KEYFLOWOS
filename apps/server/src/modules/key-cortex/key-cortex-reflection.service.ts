@@ -736,7 +736,7 @@ ${decisions.map((d, i) => `[${i}] ${JSON.stringify(d).slice(0, 200)}`).join('\n'
     );
 
     try {
-      const indices = JSON.parse(response.content) as number[];
+      const indices = JSON.parse(response.content ?? '[]') as number[];
       return indices.map((i) => decisions[i]).filter(Boolean);
     } catch {
       return decisions;
@@ -779,7 +779,7 @@ Return JSON: { "actualOutcome": "string", "delta": number } where delta is -1 to
         },
       );
 
-      const result = JSON.parse(response.content) as { actualOutcome: string; delta: number };
+      const result = JSON.parse(response.content ?? '[]') as { actualOutcome: string; delta: number };
       actualOutcome = result.actualOutcome;
       delta = Math.max(-1, Math.min(1, result.delta));
     } catch {
@@ -1029,7 +1029,7 @@ Return a JSON array of observations. Each observation must be surprising and cre
         },
       );
 
-      const parsed = JSON.parse(response.content) as Array<{ sources: string[]; observation: string; strength: number }>;
+      const parsed = JSON.parse(response.content ?? '[]') as Array<{ sources: string[]; observation: string; strength: number }>;
       connections.push(...parsed.filter((c) => c.strength > 0.3));
     } catch {
       // Fallback: generate heuristic connections
@@ -1083,7 +1083,7 @@ Return JSON array:
         },
       );
 
-      const parsed = JSON.parse(response.content) as Array<{
+      const parsed = JSON.parse(response.content ?? '[]') as Array<{
         description: string;
         sources: string[];
         confidence: number;
@@ -1337,17 +1337,7 @@ ${report.topInsights.slice(0, 5).map((i) => `- ${i.description}`).join('\n')}`;
     if (oldEvents.length === 0) return 0;
 
     // Archive to cold storage (simplified — in production, move to S3 / archive table)
-    await this.prisma.client.coldStorageEvent
-      ?.createMany({
-        data: (oldEvents as Array<Record<string, unknown>>).map((e) => ({
-          ...e,
-          archivedAt: new Date(),
-        })),
-        skipDuplicates: true,
-      })
-      .catch(() => {
-        /* cold storage table may not exist */
-      });
+    // model absent from schema.prisma; call short-circuited to undefined and never ran
 
     // Delete from hot storage
     const idsToDelete = (oldEvents as Array<{ id: string }>).map((e) => e.id);
@@ -1556,13 +1546,7 @@ ${report.topInsights.slice(0, 5).map((i) => `- ${i.description}`).join('\n')}`;
     // Businesses with no user activity in the last 15 minutes
     const idleThreshold = new Date(Date.now() - 15 * 60 * 1000);
 
-    const activeSessions = await this.prisma.client.userSession
-      ?.findMany({
-        where: { lastActivityAt: { gt: idleThreshold } },
-        select: { businessId: true },
-        distinct: ['businessId'],
-      })
-      .catch(() => []);
+    const activeSessions: Array<Record<string, unknown>> = []; // model absent from schema.prisma; call short-circuited to undefined and never ran
 
     const activeBusinessIds = new Set((activeSessions ?? []).map((s: { businessId: string }) => s.businessId));
 

@@ -454,7 +454,7 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
       .filter((m) => m.role === 'user')
       .pop();
     const isEducational = lastUserMessage
-      ? this.isEducationalQuery(lastUserMessage.content)
+      ? this.isEducationalQuery(lastUserMessage.content ?? '')
       : false;
 
     // Priority-ordered mind state determination
