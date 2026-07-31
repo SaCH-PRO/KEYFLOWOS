@@ -1375,7 +1375,7 @@ ${report.topInsights.slice(0, 5).map((i) => `- ${i.description}`).join('\n')}`;
     const issues: string[] = [];
 
     // Check for orphaned records
-    const orphanedInsights = await this.prisma.$queryRaw`
+    const orphanedInsights = await this.prisma.client.$queryRaw`
       SELECT COUNT(*) as count FROM KeyCortexInsight 
       WHERE businessId = ${businessId} 
       AND sessionId IS NOT NULL
@@ -1406,7 +1406,7 @@ ${report.topInsights.slice(0, 5).map((i) => `- ${i.description}`).join('\n')}`;
     if (!totalInsights || totalInsights < 10000) return 0;
 
     // Compact: merge low-confidence duplicate insights
-    const duplicates = await this.prisma.$queryRaw`
+    const duplicates = await this.prisma.client.$queryRaw`
       SELECT description, COUNT(*) as count, MIN(confidence) as minConfidence
       FROM KeyCortexInsight
       WHERE businessId = ${businessId}
@@ -1484,7 +1484,7 @@ ${report.topInsights.slice(0, 5).map((i) => `- ${i.description}`).join('\n')}`;
           break;
         }
         case 'calendar_events': {
-          const denseDays = await this.prisma.$queryRaw`
+          const denseDays = await this.prisma.client.$queryRaw`
             SELECT DATE(startTime) as day, COUNT(*) as eventCount
             FROM CalendarEvent
             WHERE businessId = ${businessId}

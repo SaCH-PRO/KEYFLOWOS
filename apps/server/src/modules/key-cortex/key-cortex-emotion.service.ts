@@ -519,7 +519,7 @@ export class KeyCortexEmotionService {
     try {
       // Query business health indicators from the database
       // This is a simplified heuristic — production would use proper aggregation
-      const stressIndicators = await this.prisma.client.cortexMessage.findMany({
+      const stressIndicators = await this.prisma.cortexMessage.findMany({
         where: {
           metadata: {
             path: ['stressIndicator'],
@@ -813,7 +813,7 @@ export class KeyCortexEmotionService {
     // In production, this queries the database for stored emotional states
     // For now, return an empty array which triggers the default profile
     try {
-      const messages = await this.prisma.client.cortexMessage.findMany({
+      const messages = await this.prisma.cortexMessage.findMany({
         where: { userId },
         take: 100,
         orderBy: { timestamp: 'desc' },

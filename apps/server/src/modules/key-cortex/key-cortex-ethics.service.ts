@@ -317,7 +317,7 @@ export class KeyCortexEthicsService {
    * a human-readable ethical explanation.
    */
   async explainDecision(decisionId: string, businessId: string): Promise<string> {
-    const event = await this.prisma.client.cortexEvent.findUnique({
+    const event = await this.prisma.cortexEvent.findUnique({
       where: { id: decisionId },
     } as Record<string, unknown>);
 
@@ -981,7 +981,7 @@ export class KeyCortexEthicsService {
       // Extract key action terms from the recommendation
       const actionTerms = recommendation.toLowerCase().split(/\s+/).slice(0, 5);
 
-      const recentEvents = await this.prisma.client.cortexEvent.findMany({
+      const recentEvents = await this.prisma.cortexEvent.findMany({
         where: {
           businessId,
           action: { contains: 'rejection' },
