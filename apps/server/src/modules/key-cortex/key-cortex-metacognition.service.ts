@@ -420,7 +420,7 @@ export class KeyCortexMetacognitionService {
       return `Found ${events.length} related events, but no decision record for statement ${statementId}.`;
     }
 
-    const payload = decisionEvent.payload as Record<string, unknown>;
+    const payload = decisionEvent.metadata as Record<string, unknown>;
     const confidence = (payload.confidence as number) ?? 0.5;
     const decision = (payload.decision as string) ?? 'unknown decision';
 
@@ -593,7 +593,7 @@ export class KeyCortexMetacognitionService {
     // the follow-up events show success
     let positiveOutcomes = 0;
     for (const rec of acted) {
-      const payload = rec.payload as Record<string, unknown>;
+      const payload = rec.metadata as Record<string, unknown>;
       // Check for positive indicators in the payload
       const estimatedImpact = payload.estimatedImpact as Record<
         string,
@@ -681,7 +681,7 @@ export class KeyCortexMetacognitionService {
     // Check for follow-up signals that the prediction was correct
     let verified = 0;
     for (const pred of predictions) {
-      const payload = pred.payload as Record<string, unknown>;
+      const payload = pred.metadata as Record<string, unknown>;
       const confidence = (payload.confidence as number) ?? 0.5;
       // Higher confidence predictions that were followed by positive
       // autonomy events count as verified
@@ -718,7 +718,7 @@ export class KeyCortexMetacognitionService {
     const bucket50: number[] = [];
 
     for (const d of decisions) {
-      const payload = d.payload as Record<string, unknown>;
+      const payload = d.metadata as Record<string, unknown>;
       const confidence = (payload.confidence as number) ?? 0.5;
 
       // Check outcome via follow-up autonomy events
@@ -791,7 +791,7 @@ export class KeyCortexMetacognitionService {
 
     const scored = decisions
       .map((d) => {
-        const payload = d.payload as Record<string, unknown>;
+        const payload = d.metadata as Record<string, unknown>;
         const pastDecision = ((payload.decision as string) ?? '').toLowerCase();
         const matchCount = keywords.filter((k) =>
           pastDecision.includes(k),

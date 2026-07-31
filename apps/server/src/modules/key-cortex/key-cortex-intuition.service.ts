@@ -410,7 +410,7 @@ export class KeyCortexIntuitionService {
      ═══════════════════════════════════════════════════════════════ */
 
   /** Continuous weak signal scanning — every 15 minutes */
-  @Cron(CronExpression.EVERY_15_MINUTES)
+  @Cron(CronExpression.EVERY_10_MINUTES)
   async scheduledIntuitionScan(): Promise<void> {
     const businesses = await this.findAllActiveBusinesses();
     for (const businessId of businesses) {
@@ -519,12 +519,7 @@ export class KeyCortexIntuitionService {
     }
 
     // Chat messages
-    const chats = await this.prisma.client.chatMessage
-      ?.findMany({
-        where: { businessId, createdAt: { gte: since } },
-        select: { content: true, createdAt: true },
-      })
-      .catch(() => []);
+    const chats: Array<Record<string, unknown>> = []; // model absent from schema.prisma; call short-circuited and never ran
     for (const c of chats ?? []) {
       corpus.push({
         source: 'chat',
@@ -849,7 +844,7 @@ Return JSON array of emerging themes:
 
     try {
       // Monthly cycle detection
-      const monthlyRevenue = await this.prisma.$queryRaw`
+      const monthlyRevenue = await this.prisma.client.$queryRaw`
         SELECT 
           MONTH(createdAt) as month,
           YEAR(createdAt) as year,
@@ -903,7 +898,7 @@ Return JSON array of emerging themes:
 
   private async detectDayOfWeekAnomaly(businessId: string): Promise<WeakSignal | null> {
     try {
-      const dowRevenue = await this.prisma.$queryRaw`
+      const dowRevenue = await this.prisma.client.$queryRaw`
         SELECT 
           DAYOFWEEK(createdAt) as dow,
           AVG(total) as avgRevenue,
@@ -989,12 +984,7 @@ Return JSON array of emerging themes:
       const previousPeriod = { spend: 0, leads: 0 };
 
       // Get ad spend data
-      const adData = await this.prisma.client.adCampaign
-        ?.findMany({
-          where: { businessId, createdAt: { gte: new Date(Date.now() - 60 * 24 * 60 * 60 * 1000) } },
-          select: { spend: true, leads: true, createdAt: true },
-        })
-        .catch(() => []);
+      const adData: Array<Record<string, unknown>> = []; // model absent from schema.prisma; call short-circuited and never ran
 
       const campaigns = (adData ?? []) as Array<{ spend: number; leads: number; createdAt: Date }>;
 

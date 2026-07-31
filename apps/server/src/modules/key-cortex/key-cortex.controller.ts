@@ -105,7 +105,15 @@ import {
   CortexPersonalityConfig,
   CortexMood,
 } from './key-cortex.types';
-import type { ConsciousResponse } from './key-cortex-consciousness.types';
+import type {
+  ConsciousResponse,
+  ConsciousnessSnapshot,
+  SelfModel,
+  ReflectionInsight,
+  WeakSignal,
+  CreativeIdea,
+  BrainstormResult,
+} from './key-cortex-consciousness.types';
 
 import {
   ModuleName,
@@ -658,7 +666,7 @@ export class KeyCortexController {
    */
   @Post('chat/conscious')
   @HttpCode(HttpStatus.OK)
-  async consciousChat(@Body() dto: ChatDto): Promise<ConsciousResponse> {
+  async chatConscious(@Body() dto: ChatDto): Promise<ConsciousResponse> {
     if (!dto.text?.trim()) {
       throw new BadRequestException('Query text is required');
     }
@@ -2898,7 +2906,7 @@ export class KeyCortexController {
   async getConsciousnessState(
     @Query('businessId') businessId: string,
   ): Promise<{
-    mindState: Record<string, unknown>;
+    mindState: ConsciousnessSnapshot;
     activeLayers: string[];
     timestamp: string;
   }> {
@@ -2947,7 +2955,8 @@ export class KeyCortexController {
     }
 
     try {
-      return await this.emotion.getProfile(businessId, userId);
+      // getProfile does not exist; getEmotionalBaseline(userId) is the real API.
+      return await this.emotion.getEmotionalBaseline(userId);
     } catch (err) {
       this.logger.error(`Emotional profile error: ${(err as Error).message}`, (err as Error).stack);
       throw new ServiceUnavailableException('Unable to retrieve emotional profile');
@@ -2994,11 +3003,7 @@ export class KeyCortexController {
   @HttpCode(HttpStatus.OK)
   async getMetacognition(
     @Query('businessId') businessId: string,
-  ): Promise<{
-    selfModel: Record<string, unknown>;
-    confidence: number;
-    strategies: string[];
-  }> {
+  ): Promise<SelfModel> {
     if (!businessId) {
       throw new BadRequestException('businessId query parameter is required');
     }
@@ -3049,7 +3054,8 @@ export class KeyCortexController {
     }
 
     try {
-      return await this.temporalReasoning.analyze(businessId, metric);
+      // analyze does not exist; analyzeTimeSeries requires an explicit period.
+      return await this.temporalReasoning.analyzeTimeSeries(businessId, metric, 'month');
     } catch (err) {
       this.logger.error(`Temporal analysis error: ${(err as Error).message}`, (err as Error).stack);
       throw new ServiceUnavailableException('Unable to retrieve temporal analysis');
