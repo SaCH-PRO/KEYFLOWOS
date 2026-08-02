@@ -7,39 +7,116 @@ import { BusinessGuard } from '../../core/auth/business.guard';
 import { RateLimit } from '../../core/decorators/rate-limit.decorator';
 import { RateLimitGuard } from '../../core/guards/rate-limit.guard';
 import { RetainerService } from './retainer.service';
+import {
+  IsBoolean,
+  IsISO8601,
+  IsNumber,
+  IsOptional,
+  IsString,
+} from 'class-validator';
+
+/*
+ * Required for these bodies to survive the global ValidationPipe, which runs
+ * with whitelist:true and deletes any property lacking validator metadata.
+ *
+ * contactId and invoiceId are foreign keys. RetainerService proves they belong
+ * to the caller's business before writing — shape validation here does not
+ * establish ownership. RetainerAgreement.contactId is a bare String with no
+ * Prisma relation, so there is not even database-level FK enforcement to fall
+ * back on.
+ */
 
 class CreateRetainerDto {
+  @IsString()
   contactId!: string;
+
+  @IsString()
   name!: string;
+
+  @IsNumber()
   monthlyAmount!: number;
+
+  @IsISO8601()
   startDate!: string;
+
+  @IsOptional()
+  @IsISO8601()
   endDate?: string;
+
+  @IsOptional()
+  @IsNumber()
   includedHours?: number;
+
+  @IsOptional()
+  @IsBoolean()
   rolloverHours?: boolean;
+
+  @IsOptional()
+  @IsNumber()
   rolloverCap?: number;
 }
 
 class UpdateRetainerDto {
+  @IsOptional()
+  @IsString()
   name?: string;
+
+  @IsOptional()
+  @IsNumber()
   monthlyAmount?: number;
+
+  @IsOptional()
+  @IsISO8601()
   startDate?: string;
+
+  @IsOptional()
+  @IsISO8601()
   endDate?: string | null;
+
+  @IsOptional()
+  @IsNumber()
   includedHours?: number | null;
+
+  @IsOptional()
+  @IsBoolean()
   rolloverHours?: boolean;
+
+  @IsOptional()
+  @IsNumber()
   rolloverCap?: number | null;
+
+  @IsOptional()
+  @IsString()
   status?: string;
 }
 
 class CreatePeriodDto {
+  @IsISO8601()
   periodStart!: string;
+
+  @IsISO8601()
   periodEnd!: string;
+
+  @IsOptional()
+  @IsNumber()
   hoursUsed?: number;
+
+  @IsOptional()
+  @IsNumber()
   amountBilled?: number;
 }
 
 class UpdatePeriodDto {
+  @IsOptional()
+  @IsNumber()
   hoursUsed?: number;
+
+  @IsOptional()
+  @IsString()
   status?: string;
+
+  @IsOptional()
+  @IsString()
   invoiceId?: string;
 }
 

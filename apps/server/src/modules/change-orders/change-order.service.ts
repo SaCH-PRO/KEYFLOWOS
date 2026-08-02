@@ -30,7 +30,29 @@ export class ChangeOrderService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
-  async create(input: CreateChangeOrderInput) {
+  /**
+   * @param businessId  the tenant the caller is acting as, from the route param
+   *
+   * ChangeOrder has NO businessId column (schema.prisma) — tenancy exists only
+   * through `project.businessId`, which is how every read in this service
+   * scopes itself. create() alone ignored it: the controller bound the route
+   * param to `_businessId` and never used it, and projectId went straight into
+   * the row unchecked.
+   *
+   * That was previously unreachable because the DTO carried no validator
+   * metadata and the global whitelist stripped projectId before it arrived.
+   * Making the DTO work makes it reachable, so the project must be proven to
+   * belong to this business first — otherwise a caller could attach a change
+   * order to another tenant's project and then read it back through
+   * listByProject.
+   */
+  async create(input: CreateChangeOrderInput, businessId: string) {
+    const project = await this.prisma.client.project.findFirst({
+      where: { id: input.projectId, businessId },
+      select: { id: true },
+    });
+    if (!project) throw new NotFoundException('Project not found');
+
     return this.prisma.client.changeOrder.create({
       data: {
         projectId: input.projectId,
@@ -75,6 +97,19 @@ export class ChangeOrderService {
 
   async update(id: string, input: UpdateChangeOrderInput, businessId?: string) {
     await this.findById(id, businessId);
+
+    // findById above proves the change order is the caller's, but invoiceId
+    // comes from the body and was written unchecked — it could point at another
+    // tenant's invoice. Only enforceable when businessId was supplied; the
+    // parameter is optional on this method, and a caller with no tenant context
+    // is already limited by findById.
+    if (businessId && input.invoiceId !== undefined && input.invoiceId !== null) {
+      const invoice = await this.prisma.client.invoice.findFirst({
+        where: { id: input.invoiceId, businessId },
+        select: { id: true },
+      });
+      if (!invoice) throw new NotFoundException('Invoice not found');
+    }
 
     return this.prisma.client.changeOrder.update({
       where: { id },

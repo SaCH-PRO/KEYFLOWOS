@@ -31,6 +31,20 @@ export class RetainerService {
   ) {}
 
   async create(input: CreateRetainerInput) {
+    // contactId is caller-supplied and was written unchecked. It is a bare
+    // String column with no Prisma relation (schema.prisma: RetainerAgreement),
+    // so there is not even database-level FK enforcement to fall back on — a
+    // retainer could be attached to another tenant's contact, or to an id that
+    // does not exist at all.
+    //
+    // This was previously unreachable because the DTO carried no validator
+    // metadata and the global whitelist stripped contactId before it arrived.
+    const contact = await this.prisma.client.contact.findFirst({
+      where: { id: input.contactId, businessId: input.businessId },
+      select: { id: true },
+    });
+    if (!contact) throw new NotFoundException('Contact not found');
+
     return this.prisma.client.retainerAgreement.create({
       data: {
         businessId: input.businessId,
@@ -137,6 +151,17 @@ export class RetainerService {
       where: { id: periodId, retainer: { id: retainerId, businessId } },
     });
     if (!period) throw new NotFoundException('Period not found');
+
+    // The period is scoped through its retainer above, but invoiceId came from
+    // the body and was written unchecked — a caller could point their retainer
+    // period at another tenant's invoice.
+    if (data.invoiceId !== undefined && data.invoiceId !== null) {
+      const invoice = await this.prisma.client.invoice.findFirst({
+        where: { id: data.invoiceId, businessId },
+        select: { id: true },
+      });
+      if (!invoice) throw new NotFoundException('Invoice not found');
+    }
 
     return this.prisma.client.retainerPeriod.update({
       where: { id: periodId },
