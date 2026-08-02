@@ -187,6 +187,27 @@ jobs:
             || { echo "::error::Server compilation failed: apps/server/dist/main.js not found"; exit 1; }
           echo "Server compiled successfully"
 
+      # Existence is not runnability. The server once compiled cleanly, produced
+      # dist/main.js, passed 2217 tests — and could not start at all: uuid@14 is
+      # ESM-only, the server emits CommonJS, and Node <20.19 cannot require()
+      # ESM, so it died with ERR_REQUIRE_ESM before NestFactory ran. Every check
+      # above was satisfied by that build.
+      #
+      # This does NOT assert a full boot; CI has no database. It asserts the
+      # process gets PAST module loading, which is the part a missing or
+      # ESM-only dependency breaks. A DB connection failure afterwards is fine
+      # and expected here.
+      - name: Verify the server gets past module loading
+        run: |
+          set +e
+          OUT=$(timeout 45 node apps/server/dist/main.js 2>&1)
+          if echo "$OUT" | grep -qE "ERR_REQUIRE_ESM|ERR_MODULE_NOT_FOUND|ERR_UNSUPPORTED_DIR_IMPORT|Cannot find module"; then
+            echo "::error::Server dies during module loading — it cannot start"
+            echo "$OUT" | grep -aE "ERR_REQUIRE_ESM|ERR_MODULE_NOT_FOUND|Cannot find module" | head -5
+            exit 1
+          fi
+          echo "Server loaded its module graph successfully"
+
   build-web:
     name: Build Web
     runs-on: ubuntu-latest
