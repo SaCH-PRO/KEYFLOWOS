@@ -83,6 +83,14 @@ import {
 import { CortexSession, CortexMessage } from './key-cortex.types';
 
 import { BusinessEventType } from '@prisma/client';
+import {
+  KeyCortexInteroceptionService,
+  type BodyState,
+} from './key-cortex-interoception.service';
+import {
+  KeyCortexEndocrineService,
+  type EndocrineSignal,
+} from './key-cortex-endocrine.service';
 
 /**
  * One completed step of the consciousness pipeline, emitted as it finishes.
@@ -113,10 +121,11 @@ export type ConsciousPhaseListener = (event: ConsciousPhaseEvent) => void;
 /**
  * Phases emitted by processConsciously.
  *
- * Steps 10 and 11 (logging, self-model update) are bookkeeping rather than
- * cognition, so they are folded into a single trailing 'consolidate' phase.
+ * Not equal to the step count. Interoception (3b) emits its own phase, while
+ * steps 10 and 11 — logging and self-model update — are bookkeeping rather than
+ * cognition and are folded into one trailing 'consolidate' phase.
  */
-export const TOTAL_CONSCIOUS_PHASES = 10;
+export const TOTAL_CONSCIOUS_PHASES = 11;
 
 /**
  * UnifiedConsciousnessOrchestrator — The Mind of KEY.
@@ -175,6 +184,12 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
     private readonly personality: KeyCortexPersonalityService,
     private readonly eventService: KeyCortexEventService,
     private readonly prisma: PrismaService,
+    // ── Peripheral nervous system + endocrine ──────────────────
+    // Appended, not inserted: several specs construct this service
+    // positionally, and inserting mid-list silently shifts every argument
+    // after the insertion point.
+    private readonly interoception: KeyCortexInteroceptionService,
+    private readonly endocrine: KeyCortexEndocrineService,
   ) {}
 
   onModuleInit() {
@@ -304,6 +319,28 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
       emit('temporal', 'Placing it in time', timing.temporalMs, {
         contextChars: temporalContext.length,
       });
+
+      // ═══════════════════════════════════════════════════════════
+      // STEP 3b: Interoception — sense the body (AFFERENT PNS)
+      //
+      // Organ adapters have always declared getState(); nothing called it. The
+      // brain could act on organs and could not feel them. Sensing before
+      // reasoning means an impaired subsystem is known while the answer is
+      // being formed, not discovered after it is delivered.
+      // ═══════════════════════════════════════════════════════════
+      const step3bStart = Date.now();
+      const bodyState = await this.interoception.senseBody(session.businessId);
+      timing.interoceptionMs = Date.now() - step3bStart;
+      emit('interoception', 'Sensing system state', timing.interoceptionMs, {
+        healthy: bodyState.healthyCount,
+        total: bodyState.totalCount,
+        unreachable: bodyState.unreachableCount,
+        integrity: bodyState.integrity,
+      });
+      this.logger.debug(
+        `[Consciousness][S3b] Body: ${bodyState.healthyCount}/${bodyState.totalCount} ` +
+          `healthy, ${bodyState.unreachableCount} unreachable (${timing.interoceptionMs}ms)`,
+      );
       this.logger.debug(
         `[Consciousness][S3] Temporal context: ` +
           `${temporalContext.length} chars (${timing.temporalMs}ms)`,
@@ -314,9 +351,21 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
       // ═══════════════════════════════════════════════════════════
       const step4Start = Date.now();
       const context = await this.context.getFullContext(session.businessId);
+
+      // Interoception and the endocrine system reach reasoning as CONTEXT, not
+      // as overrides. Both describe conditions the reasoner should weigh;
+      // neither may assert a fact or foreclose a conclusion.
+      const bodyFraming = this.interoception.describeForPrompt(bodyState);
+      const standingFraming = this.endocrine.describeForPrompt(session.businessId);
+      const reasoningContext: Record<string, unknown> = {
+        ...(context as unknown as Record<string, unknown>),
+        ...(bodyFraming ? { systemState: bodyFraming } : {}),
+        ...(standingFraming ? { standingContext: standingFraming } : {}),
+      };
+
       const reasoningResult = await this.reasoning.reasonMultiModal(
         query,
-        context as unknown as Record<string, unknown>,
+        reasoningContext,
       );
       timing.reasoningMs = Date.now() - step4Start;
       emit('reasoning', 'Reasoning across modes', timing.reasoningMs, {
@@ -485,6 +534,24 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
         'conscious_response',
         ethicalEvaluation.permitted ? 'success' : 'partial',
       );
+      // ═══════════════════════════════════════════════════════════
+      // STEP 11b: Close the feedback loop (ENDOCRINE)
+      //
+      // This is what makes the pipeline a loop rather than a line. What this
+      // thought observed conditions the next one — and, because hormones decay,
+      // stops conditioning it once the conditions stop recurring.
+      // ═══════════════════════════════════════════════════════════
+      this.endocrine.release(
+        session.businessId,
+        this.deriveEndocrineSignals(
+          bodyState,
+          ethicalEvaluation.permitted,
+          reasoningResult.bestChain.confidence,
+          calibratedConfidence.confidence,
+          weakSignals.length,
+        ),
+      );
+
       timing.selfModelMs = Date.now() - step11Start;
       emit(
         'consolidate',
@@ -532,6 +599,75 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
       // Graceful degradation: return a basic response
       return this.createFallbackResponse(query, session, errMsg);
     }
+  }
+
+  /**
+   * Derive endocrine signals from what this pass through the pipeline observed.
+   *
+   * Every signal carries its evidence, because the endocrine service refuses
+   * unexplained pushes — a disposition KEY cannot justify is one it should not
+   * hold.
+   *
+   * Note what is deliberately NOT here: nothing derived from the user's tone or
+   * the emotional state of the conversation. A frustrated user is not evidence
+   * that the business is at risk, and letting mood drive standing disposition
+   * is precisely how a system stops being evidence-based.
+   */
+  private deriveEndocrineSignals(
+    body: BodyState,
+    permitted: boolean,
+    rawConfidence: number,
+    calibratedConfidence: number,
+    weakSignalCount: number,
+  ): EndocrineSignal[] {
+    const signals: EndocrineSignal[] = [];
+
+    if (body.unreachableCount > 0 || body.integrity < 1) {
+      const impaired = body.readings.filter((r) => r.unreachable || !r.healthy);
+      signals.push({
+        hormone: 'malaise',
+        // Scaled by how much of the body is affected, so one flaky organ does
+        // not read the same as half the system being down.
+        magnitude: (1 - body.integrity) * 0.5,
+        reason: `${impaired.length}/${body.totalCount} subsystems impaired (${impaired
+          .map((r) => r.organName)
+          .slice(0, 3)
+          .join(', ')})`,
+      });
+    }
+
+    if (!permitted) {
+      signals.push({
+        hormone: 'cortisol',
+        magnitude: 0.2,
+        reason: 'ethical review flagged a recommendation in this session',
+      });
+    }
+
+    // Metacognition marking the answer down is KEY catching its own
+    // overconfidence. Sustained across queries, that warrants more hedging.
+    const overconfidence = rawConfidence - calibratedConfidence;
+    if (overconfidence > 0.15) {
+      signals.push({
+        hormone: 'humility',
+        magnitude: Math.min(overconfidence, 0.3),
+        reason:
+          `calibration reduced confidence by ` +
+          `${Math.round(overconfidence * 100)} points on this query`,
+      });
+    }
+
+    // Weak signals are early warnings by definition. Several at once is the
+    // intuition layer noticing something before it is nameable.
+    if (weakSignalCount >= 3) {
+      signals.push({
+        hormone: 'cortisol',
+        magnitude: Math.min(weakSignalCount * 0.05, 0.25),
+        reason: `${weakSignalCount} concurrent weak signals detected`,
+      });
+    }
+
+    return signals;
   }
 
   // ═══════════════════════════════════════════════════════════════

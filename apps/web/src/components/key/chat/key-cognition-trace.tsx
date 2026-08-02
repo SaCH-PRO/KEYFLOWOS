@@ -13,6 +13,7 @@ import {
   Waves,
   PenLine,
   Archive,
+  Activity,
   ChevronDown,
   Check,
 } from "lucide-react";
@@ -51,6 +52,11 @@ const LAYER_META: Record<
     icon: Clock,
     tint: "text-sky-400",
     blurb: "Placing it against what came before",
+  },
+  interoception: {
+    icon: Activity,
+    tint: "text-cyan-400",
+    blurb: "Checking which subsystems are healthy",
   },
   reasoning: {
     icon: GitBranch,
@@ -124,6 +130,17 @@ function summarize(phase: CognitionPhase): string | null {
       if (!d.bestMode) return null;
       return `${modes ?? "?"} chains · best: ${String(d.bestMode)}${conf ? ` @ ${conf}` : ""}`;
     }
+    case "interoception": {
+      const total = typeof d.total === "number" ? d.total : 0;
+      const healthy = typeof d.healthy === "number" ? d.healthy : 0;
+      const unreachable = typeof d.unreachable === "number" ? d.unreachable : 0;
+      if (total === 0) return null;
+      if (healthy === total) return `all ${total} subsystems healthy`;
+      // Naming the count of impaired subsystems is the actionable part; a bare
+      // percentage tells the user nothing they can do anything about.
+      const impaired = total - healthy;
+      return `${impaired}/${total} impaired${unreachable > 0 ? ` (${unreachable} unreachable)` : ""}`;
+    }
     case "intuition": {
       const n = typeof d.signals === "number" ? d.signals : 0;
       return n === 0 ? "nothing anomalous" : `${n} weak signal${n === 1 ? "" : "s"}`;
@@ -175,7 +192,10 @@ export function KeyCognitionTrace({
     () => (phases.length > 0 ? phases[phases.length - 1].elapsedMs : 0),
     [phases]
   );
-  const expected = phases[0]?.of ?? 10;
+  // The server sends the authoritative total on every phase; this fallback only
+  // covers the window before the first phase arrives. LAYER_META is declared in
+  // pipeline order, so its length is the right default.
+  const expected = phases[0]?.of ?? Object.keys(LAYER_META).length;
   const current = phases[phases.length - 1];
 
   if (phases.length === 0 && !thinking) return null;

@@ -45,6 +45,8 @@ import { EventEmitterFlowBridgeService } from './event-emitter-flow-bridge.servi
 import { KeyCortexToolRegistryService } from './key-cortex-tool-registry.service';
 import { KeyCortexActionExecutorPlugin } from './key-cortex-action-executor.plugin';
 import { KeyCortexOrganRegistrarService } from './key-cortex-organ-registrar.service';
+import { KeyCortexInteroceptionService } from './key-cortex-interoception.service';
+import { KeyCortexEndocrineService } from './key-cortex-endocrine.service';
 import { KeyCortexLifecycleService } from './key-cortex-lifecycle.service';
 import { KeyCortexSafeDatabaseService } from './key-cortex-safe-database.service';
 import { KeyCortexAuditService } from './key-cortex-audit.service';
@@ -356,6 +358,8 @@ import { IntegrationHubModule } from '../integration-hub/integration-hub.module'
     // -- Phase 2 Body: Organ Registrar --
     // Registers all organ tools into the canonical registry at boot.
     KeyCortexOrganRegistrarService,
+    KeyCortexInteroceptionService,
+    KeyCortexEndocrineService,
 
     // -- Phase 3 Body: Skeleton --
     // Identity/lifecycle manager that ties sessions, commands, execution logs,
@@ -663,6 +667,8 @@ import { IntegrationHubModule } from '../integration-hub/integration-hub.module'
 
     // -- Phase 2 Body: Organ Registrar --
     KeyCortexOrganRegistrarService,
+    KeyCortexInteroceptionService,
+    KeyCortexEndocrineService,
 
     // -- Phase 3 Body: Skeleton --
     KeyCortexLifecycleService,

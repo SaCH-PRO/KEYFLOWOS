@@ -105,13 +105,26 @@ describe('conscious stream route', () => {
 });
 
 describe('phase emission', () => {
-  it('emits one phase per cognitive step', () => {
-    const emits = consciousness.match(/^\s+emit\(/gm) ?? [];
-    expect(emits.length).toBe(10);
+  it('declares exactly as many phases as it emits', () => {
+    // Derived, not hardcoded: the UI renders "n/of" from the declared total, so
+    // a mismatch would show a progress counter that never reaches its end.
+    const declared = Number(
+      /TOTAL_CONSCIOUS_PHASES = (\d+)/.exec(consciousness)?.[1],
+    );
+    const emitted = (consciousness.match(/^\s+emit\(/gm) ?? []).length;
+
+    expect(declared).toBeGreaterThan(0);
+    expect(emitted).toBe(declared);
   });
 
-  it('declares the same total it emits', () => {
-    expect(consciousness).toMatch(/TOTAL_CONSCIOUS_PHASES = 10/);
+  it('emits one phase per cognitive layer, with no layer emitted twice', () => {
+    const layers = [...consciousness.matchAll(/emit\(\s*'([a-zA-Z]+)'/g)].map(
+      (m) => m[1],
+    );
+    expect(new Set(layers).size).toBe(layers.length);
+    // Interoception is the afferent PNS step; its absence means the body is
+    // being sensed but not reported.
+    expect(layers).toContain('interoception');
   });
 
   it('a listener that throws does not kill the pipeline', () => {

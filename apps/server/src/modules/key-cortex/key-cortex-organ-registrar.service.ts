@@ -10,6 +10,7 @@
 
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { KeyCortexToolRegistryService } from './key-cortex-tool-registry.service';
+import type { IKeyOrganAdapter } from './organs/key-organ-adapter.interface';
 import { KeyCortexSafeDatabaseService } from './key-cortex-safe-database.service';
 import { TemporalFlowAdapterService } from './organs/temporal-flow-adapter.service';
 import { KeyInboxAdapterService } from './organs/key-inbox-adapter.service';
@@ -31,14 +32,26 @@ export class KeyCortexOrganRegistrarService implements OnModuleInit {
     private readonly safeDatabase: KeyCortexSafeDatabaseService,
   ) {}
 
-  onModuleInit(): void {
-    const adapters = [
+  /**
+   * Every organ plugged into the peripheral nervous system.
+   *
+   * Exposed because the registrar was previously the only thing holding these
+   * references, and it used them for exactly one purpose: harvesting
+   * listTools() at boot. That is the efferent half — brain acting on organs.
+   * The afferent half, organs reporting their state back, needs the same list.
+   */
+  listAdapters(): IKeyOrganAdapter[] {
+    return [
       this.temporalFlowAdapter,
       this.keyInboxAdapter,
       this.keyGenomeAdapter,
       this.storelinkAdapter,
       this.keyConnectorAdapter,
     ];
+  }
+
+  onModuleInit(): void {
+    const adapters = this.listAdapters();
 
     let totalTools = 0;
     for (const adapter of adapters) {
