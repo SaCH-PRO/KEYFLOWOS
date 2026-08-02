@@ -710,71 +710,41 @@ export class KeyCortexSandboxService {
     databaseAccess: boolean,
     timeoutMs: number,
   ): Promise<Pick<SandboxExecutionResult, 'success' | 'output' | 'error' | 'errorType'>> {
-    if (!databaseAccess) {
-      return {
-        success: false,
-        error: 'Database access is disabled for this execution context',
-        errorType: 'security',
-      };
-    }
+    void code;
+    void businessId;
+    void databaseAccess;
+    void timeoutMs;
 
-    // Validate the SQL is read-only (SELECT or CTE). INSERT/UPDATE/DELETE are
-    // disabled in this build until we have a real query parser, allowlisted
-    // tables, and row-level policy enforcement.
-    const trimmed = code.trim().toUpperCase();
-    const isReadOnlyQuery =
-      trimmed.startsWith('SELECT') || trimmed.startsWith('WITH');
-
-    if (!isReadOnlyQuery) {
-      return {
-        success: false,
-        error: 'Only read-only SELECT / WITH queries are allowed in the sandbox',
-        errorType: 'security',
-      };
-    }
-
-    // Ensure business_id filter is present for INSERT/UPDATE
-    if (trimmed.startsWith('INSERT') || trimmed.startsWith('UPDATE')) {
-      const hasBusinessFilter = code.toLowerCase().includes('business_id');
-      if (!hasBusinessFilter) {
-        return {
-          success: false,
-          error: 'INSERT/UPDATE queries must include a business_id filter for row-level security',
-          errorType: 'security',
-        };
-      }
-    }
-
-    // Whitelist validation for SQL injection prevention
-    const ALLOWED_TABLES = ['Invoice', 'Contact', 'Booking', 'Product', 'Order', 'Task', 'Campaign'];
-    const isSafe = /^(\s*SELECT\s+.*\s+FROM\s*"?(\w+)"?.*)$/i.test(code);
-    if (!isSafe) throw new Error('Only SELECT queries are allowed');
-    const tableMatch = code.match(/FROM\s*"?(\w+)"?/i);
-    const table = tableMatch?.[1];
-    if (table && !ALLOWED_TABLES.includes(table)) throw new Error(`Table ${table} not in whitelist`);
-    // Execute via Prisma with timeout
-    try {
-      const result = await Promise.race([
-        (this.prisma.client as any).$queryRawUnsafe(code),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('SQL execution timeout')), timeoutMs),
-        ),
-      ]);
-
-      const rows = Array.isArray(result) ? result : [result];
-      const limited = rows.slice(0, SQL_MAX_ROWS);
-
-      return {
-        success: true,
-        output: JSON.stringify(limited, null, 2),
-      };
-    } catch (error: any) {
-      const msg = (error as Error).message;
-      if (msg.includes('timeout')) {
-        return { success: false, error: msg, errorType: 'timeout' };
-      }
-      return { success: false, error: msg, errorType: 'runtime' };
-    }
+    // Arbitrary SQL execution is disabled.
+    //
+    // This previously passed the caller's string to $queryRawUnsafe after a
+    // regex "allowlist". That check could not hold:
+    //
+    //   /^(\s*SELECT\s+.*\s+FROM\s*"?(\w+)"?.*)$/i
+    //
+    // `.*$` matches greedily on a single line, so
+    //     SELECT * FROM Invoice; DROP TABLE x
+    // satisfies it — the captured table is the allowlisted `Invoice`, and the
+    // trailing statement rides along into $queryRawUnsafe. Statement chaining
+    // defeats the allowlist outright, and a regex will never be a SQL parser.
+    //
+    // It was previously unreachable over HTTP only because the cortex DTOs
+    // carried no class-validator metadata, so the global ValidationPipe
+    // ({ whitelist: true }) stripped every request body to {} and the route
+    // 400'd before arriving here. That was an accident of a broken pipe, not a
+    // control, and it stopped being true once the DTOs were fixed.
+    //
+    // Re-enabling this needs, at minimum: parameterised $queryRaw against a
+    // fixed set of named queries, or a dedicated read-only database role with
+    // row-level security and `SET TRANSACTION READ ONLY` — plus an explicit
+    // server-side flag defaulting to off and a real role check.
+    return {
+      success: false,
+      error:
+        'SQL execution is disabled in the sandbox. Arbitrary SQL cannot be ' +
+        'safely validated by pattern matching; use a named, parameterised query instead.',
+      errorType: 'security',
+    };
   }
 
   // ══════════════════════════════════════════════════════════

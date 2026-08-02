@@ -2188,16 +2188,22 @@ export class KeyCortexFlowStudioService {
       result[targetKey] = this.resolveValue(sourcePath, context);
     }
 
-    // If a transform script is provided, execute it (sandboxed)
+    // Transform scripts are not executed.
+    //
+    // This previously ran `new Function('context', 'input', data.transformScript)`
+    // over a string stored on the flow node — arbitrary JavaScript in the server
+    // process, with no sandbox despite the comment claiming one. Anyone able to
+    // author or edit a flow could execute code with full process privileges:
+    // filesystem, environment (including DATABASE_URL and signing secrets), and
+    // outbound network.
+    //
+    // Deterministic node types cover the real transform cases; a script field is
+    // not worth an RCE surface. Flows carrying one degrade to the mapped result
+    // rather than silently doing nothing different.
     if (data.transformScript) {
-      try {
-        const fn = new Function('context', 'input', data.transformScript);
-        const scriptResult = fn(context, result);
-        return { ...result, ...scriptResult };
-      } catch (err: any) {
-        this.logger.warn(`[Transform] Script error: ${(err as Error).message}`);
-        return result;
-      }
+      this.logger.warn(
+        '[Transform] transformScript is no longer executed; ignoring it for this node.',
+      );
     }
 
     return result;
@@ -2306,21 +2312,65 @@ export class KeyCortexFlowStudioService {
 
   // ── 10.13 Expression Evaluation ──
 
+  /**
+   * Evaluate a simple `left <op> right` condition against the flow context.
+   *
+   * Replaces `new Function('context', 'with(context){ return !!(expr) }')`, which
+   * executed arbitrary JavaScript from flow data in the server process. This
+   * parses one comparison and applies it, using the same operator semantics as
+   * executeFilter. Anything it cannot parse is false — fail closed.
+   */
   private evaluateExpression(
     expression: string,
     context: Record<string, unknown>,
   ): boolean {
-    try {
-      // Simple expression evaluator with context variables
-      const fn = new Function(
-        'context',
-        `with(context) { return !!(${expression}); }`,
-      );
-      return fn(context);
-    } catch {
-      return false;
+    const expr = (expression ?? '').trim();
+    if (!expr) return false;
+
+    // Bare truthiness check: a single context path.
+    const bare = /^[A-Za-z_$][\w$.]*$/.exec(expr);
+    if (bare) return !!this.getNestedValue(context, expr);
+
+    const m =
+      /^([A-Za-z_$][\w$.]*)\s*(===|!==|==|!=|>=|<=|>|<)\s*(.+)$/.exec(expr);
+    if (!m) return false;
+
+    const [, path, op, rawRight] = m;
+    const left = this.getNestedValue(context, path);
+
+    // Right side is a literal: quoted string, number, boolean, or null.
+    let right: unknown;
+    const r = rawRight.trim();
+    if (/^'.*'$|^".*"$/.test(r)) right = r.slice(1, -1);
+    else if (/^-?\d+(\.\d+)?$/.test(r)) right = Number(r);
+    else if (r === 'true') right = true;
+    else if (r === 'false') right = false;
+    else if (r === 'null') right = null;
+    else if (/^[A-Za-z_$][\w$.]*$/.test(r)) right = this.getNestedValue(context, r);
+    else return false;
+
+    switch (op) {
+      case '===':
+        return left === right;
+      case '!==':
+        return left !== right;
+      case '==':
+        return left == right;
+      case '!=':
+        return left != right;
+      case '>':
+        return Number(left) > Number(right);
+      case '<':
+        return Number(left) < Number(right);
+      case '>=':
+        return Number(left) >= Number(right);
+      case '<=':
+        return Number(left) <= Number(right);
+      default:
+        return false;
     }
   }
+
 
   // ── 10.14 Cycle Detection ──
 
