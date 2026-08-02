@@ -41,6 +41,8 @@ import { TaskAssignmentService } from '../task-assignments/task-assignment.servi
 import { OnboardingConciergeService } from '../onboarding-concierge/onboarding-concierge.service';
 import { OnboardingStateService, type OnboardingStep as ServerOnboardingStep } from '../onboarding-concierge/onboarding-state.service';
 import { BusinessGenesisService } from '../business-genesis/business-genesis.service';
+// Value import for the static EVIDENCE_DISCIPLINE only — no DI, no module coupling.
+import { KeyCortexExpertiseLensService } from '../key-cortex/key-cortex-expertise-lens.service';
 
 
 export interface FlowAttachment {
@@ -255,6 +257,30 @@ Important rules:
 
 Business context:
 {{BUSINESS_CONTEXT}}`;
+
+/**
+ * Append KEY's evidence discipline to a system prompt.
+ *
+ * This is the path that actually answers users. The shipped chat posts to
+ * /ai/businesses/:id/flow/chat/stream, which lands here — NOT on the cortex
+ * query pipeline, which was until now the only place the discipline was
+ * applied and which has no client anywhere in the repo. So the rule documented
+ * as "cannot be opted out of" was in force on a path nobody called, and absent
+ * from the one everybody uses.
+ *
+ * Imported as a static constant, not via DI: the lens service is a KeyCortex
+ * provider and injecting it here would couple AiModule to KeyCortexModule,
+ * which already depends on this module's ModelGatewayService. The constant
+ * carries no state and confers no access, so there is nothing to inject.
+ *
+ * Idempotent — a prompt that already carries the discipline is returned
+ * unchanged, so this stays safe if a caller is ever routed through twice.
+ */
+function withEvidenceDiscipline(systemPrompt: string): string {
+  const discipline = KeyCortexExpertiseLensService.EVIDENCE_DISCIPLINE;
+  if (systemPrompt.includes(discipline)) return systemPrompt;
+  return `${systemPrompt}\n\n=== EVIDENCE DISCIPLINE ===\n${discipline}`;
+}
 
 @Injectable()
 export class FlowOrchestratorService {
@@ -772,7 +798,7 @@ export class FlowOrchestratorService {
     }
 
     const messages: GatewayMessage[] = [
-      { role: 'system', content: systemPrompt },
+      { role: 'system', content: withEvidenceDiscipline(systemPrompt) },
     ];
 
     for (const msg of conversationHistory) {
@@ -1101,7 +1127,7 @@ export class FlowOrchestratorService {
     }
 
     const messages: GatewayMessage[] = [
-      { role: 'system', content: systemPrompt },
+      { role: 'system', content: withEvidenceDiscipline(systemPrompt) },
     ];
 
     for (const msg of conversationHistory) {
