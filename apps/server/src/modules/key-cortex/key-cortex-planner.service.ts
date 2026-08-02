@@ -73,6 +73,26 @@ export class KeyCortexPlannerService {
   ) {}
 
   async createGoal(businessId: string, input: CreateGoalInput) {
+    // parentGoalId is caller-supplied and must be proven to belong to THIS
+    // business before it is written. Until recently the global ValidationPipe
+    // stripped the field (the DTO carried no validator metadata), so the
+    // unchecked write was unreachable and therefore harmless. Making the DTO
+    // work makes the field live, and without this check a caller could parent
+    // their goal onto another tenant's goal — reading its id back out of the
+    // relation afterwards.
+    if (input.parentGoalId) {
+      const parent = await this.prisma.client.aiGoal.findFirst({
+        where: { id: input.parentGoalId, businessId },
+        select: { id: true },
+      });
+      if (!parent) {
+        // Not found vs. not yours are deliberately indistinguishable here:
+        // distinguishing them would confirm the existence of another tenant's
+        // goal id.
+        throw new NotFoundException('Parent goal not found');
+      }
+    }
+
     return this.prisma.client.aiGoal.create({
       data: {
         businessId,

@@ -17,45 +17,151 @@ import { BusinessGuard } from '../../core/auth/business.guard';
 import { KeyCortexPlannerService, CreateGoalInput } from './key-cortex-planner.service';
 import { KeyCortexTriggerService } from './key-cortex-trigger.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import {
+  Allow,
+  IsArray,
+  IsBoolean,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+} from 'class-validator';
+
+/*
+ * These DTOs carry validator metadata because the global ValidationPipe runs
+ * with `whitelist: true`, which DELETES any property without it. Undecorated,
+ * every body here arrived as {} and the handlers' own guard clauses threw 400 —
+ * so goal and plan creation were unreachable over HTTP.
+ *
+ * businessId is declared explicitly on the bodies that carry it: BusinessGuard
+ * reads the RAW pre-pipe body so it passed, but the handler then read a
+ * stripped value and rejected the request itself.
+ */
 
 class CreateGoalDto implements CreateGoalInput {
+  @IsString()
   title: string;
+
+  @IsOptional()
+  @IsString()
   description?: string;
+
+  @IsOptional()
+  @IsInt()
   priority?: number;
+
+  @IsOptional()
+  @IsString()
   targetDate?: string;
+
+  // Ownership is enforced in KeyCortexPlannerService.createGoal, which proves
+  // the parent belongs to the same business before writing it. Validating the
+  // shape here is not sufficient on its own.
+  @IsOptional()
+  @IsString()
   parentGoalId?: string;
+
+  @IsString()
+  businessId: string;
 }
 
 class CreatePlanFromGoalDto {
+  @IsOptional()
+  @IsString()
   userId?: string;
+
+  @IsOptional()
+  @IsString()
+  businessId?: string;
 }
 
 class CreatePlanFromCommandDto {
+  @IsString()
   objective: string;
+
+  @IsOptional()
+  @IsString()
   rawInput?: string;
+
+  @IsOptional()
+  @IsIn(['low', 'normal', 'high', 'critical'])
   urgency?: 'low' | 'normal' | 'high' | 'critical';
+
+  @IsOptional()
+  @IsArray()
   modules?: string[];
+
+  @IsOptional()
+  @IsArray()
   scope?: string[];
+
+  @IsOptional()
+  @IsString()
   userId?: string;
+
+  @IsOptional()
+  @IsString()
+  businessId?: string;
 }
 
 class CreateTriggerRuleDto {
+  @IsString()
   businessId: string;
+
+  @IsString()
   eventType: string;
+
+  // @Allow: a free-form filter document validated by the trigger service, not
+  // a shape this DTO can usefully constrain.
+  @IsOptional()
+  @Allow()
   filterJson?: Record<string, unknown>;
+
+  @IsOptional()
+  @IsString()
   goalTemplateId?: string;
+
+  @IsOptional()
+  @IsInt()
   cooldownMinutes?: number;
+
+  @IsOptional()
+  @IsInt()
   maxDailyFirings?: number;
+
+  @IsOptional()
+  @IsBoolean()
   enabled?: boolean;
 }
 
 class UpdateTriggerRuleDto {
+  @IsOptional()
+  @IsString()
   eventType?: string;
+
+  @IsOptional()
+  @Allow()
   filterJson?: Record<string, unknown>;
+
+  @IsOptional()
+  @IsString()
   goalTemplateId?: string;
+
+  @IsOptional()
+  @IsInt()
   cooldownMinutes?: number;
+
+  @IsOptional()
+  @IsInt()
   maxDailyFirings?: number;
+
+  @IsOptional()
+  @IsBoolean()
   enabled?: boolean;
+
+  @IsOptional()
+  @IsString()
+  businessId?: string;
 }
 
 @Controller('/api/v1/cortex')
