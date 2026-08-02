@@ -1,4 +1,5 @@
 import { Inject, Injectable, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmService } from '../crm/crm.service';
 import { PublicEventsService } from '../public-events/public-events.service';
@@ -195,7 +196,12 @@ export class QualificationService {
     const journey = await this.prisma.client.qualificationJourney.create({
       data: {
         businessId: business.id,
-        sessionId: `session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        // Crypto-random. The previous form was
+        //   session_${Date.now()}_${Math.random().toString(36).slice(2, 8)}
+        // — a timestamp plus ~31 bits of Math.random, which is neither
+        // unpredictable nor collision-safe, so it could never be used to
+        // authorize access to a journey.
+        sessionId: `session_${randomUUID()}`,
         answers: answers as any,
         scores: scored.slice(0, 5) as any,
         recommendedProductIds: recommendations.map(r => r.productId),
@@ -288,6 +294,9 @@ export class QualificationService {
     const journey = await this.prisma.client.qualificationJourney.findUnique({ where: { id: journeyId } });
     if (!journey) throw new NotFoundException('Journey not found');
 
+    // Return only what the storefront renders. The full row carries
+    // customerEmail, customerName, answers, scores and businessId, none of
+    // which the caller needs back from an intake submission.
     return this.prisma.client.qualificationJourney.update({
       where: { id: journeyId },
       data: {
@@ -295,6 +304,12 @@ export class QualificationService {
         intakeStatus: 'submitted',
         intakeCompleted: true,
         status: 'intake_completed',
+      },
+      select: {
+        id: true,
+        status: true,
+        intakeStatus: true,
+        intakeCompleted: true,
       },
     });
   }
