@@ -59,9 +59,9 @@ export const CONNECTOR_SYNC_MODES: Record<ConnectorType, ConnectorSyncClassifica
   tiktok: { modes: [ConnectorSyncMode.PUSH_OR_PUBLISH, ConnectorSyncMode.UNSUPPORTED], note: 'Publish outbound; pull sync UNSUPPORTED via shared base (fixed).' },
 
   // ── Webhook-form (shared FormPlatformConnector) ───────────────────────────
-  typeform: { modes: [ConnectorSyncMode.WEBHOOK_INGEST], note: 'Per-business webhook secret; no sync() method.' },
-  jotform: { modes: [ConnectorSyncMode.WEBHOOK_INGEST], note: 'Per-business webhook secret; no sync() method.' },
-  webhook_form: { modes: [ConnectorSyncMode.WEBHOOK_INGEST], note: 'Generic inbound webhook; no sync() method.' },
+  typeform: { modes: [ConnectorSyncMode.WEBHOOK_INGEST], note: 'Per-business webhook secret; sync() exists (inherited) and returns PULL_SYNC_NOT_IMPLEMENTED.' },
+  jotform: { modes: [ConnectorSyncMode.WEBHOOK_INGEST], note: 'Per-business webhook secret; sync() exists (inherited) and returns PULL_SYNC_NOT_IMPLEMENTED.' },
+  webhook_form: { modes: [ConnectorSyncMode.WEBHOOK_INGEST], note: 'Generic inbound webhook; sync() exists (inherited) and returns PULL_SYNC_NOT_IMPLEMENTED.' },
 
   // ── Messaging ─────────────────────────────────────────────────────────────
   whatsapp: { modes: [ConnectorSyncMode.WEBHOOK_INGEST, ConnectorSyncMode.PUSH_OR_PUBLISH, ConnectorSyncMode.STATUS_ONLY], note: 'Inbound via WhatsApp webhook (idempotent); outbound send; sync() returns itemsSynced:0.' },

@@ -21,6 +21,9 @@ import { OutlookContactsConnector } from './implementations/outlook-contacts.con
 import { WhatsAppConnector } from './implementations/whatsapp.connector';
 import { GmailConnector } from './implementations/gmail.connector';
 import { GoogleFormsConnector } from './implementations/google-forms.connector';
+import { TypeformConnector } from './implementations/typeform.connector';
+import { JotformConnector } from './implementations/jotform.connector';
+import { WebhookFormConnector } from './implementations/webhook-form.connector';
 
 const NOT_IMPLEMENTED: Array<[string, { prototype: { sync: (b: string) => Promise<any> } }]> = [
   ['StripeConnector', StripeConnector as any],
@@ -36,6 +39,14 @@ const NOT_IMPLEMENTED: Array<[string, { prototype: { sync: (b: string) => Promis
   ['GoogleBusinessProfileConnector', GoogleBusinessProfileConnector as any],
   ['OutlookContactsConnector', OutlookContactsConnector as any],
   ['WhatsAppConnector', WhatsAppConnector as any],
+  // Form platforms inherit sync() from FormPlatformConnectorBase, so a
+  // hasOwnProperty check would miss them — Cls.prototype.sync resolves through
+  // the prototype chain, which is what this list relies on. All three used to
+  // COUNT LOCAL leadFormSubmission ROWS and report that as itemsSynced with
+  // success: true, without contacting the provider at all.
+  ['TypeformConnector', TypeformConnector as any],
+  ['JotformConnector', JotformConnector as any],
+  ['WebhookFormConnector', WebhookFormConnector as any],
 ];
 
 describe('connector sync() — pull not implemented', () => {

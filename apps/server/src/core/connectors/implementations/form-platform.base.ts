@@ -69,16 +69,29 @@ export abstract class FormPlatformConnector implements IConnector {
     return (await this.healthCheck(businessId)).status === 'connected';
   }
 
-  async sync(businessId: string): Promise<ConnectorSyncResult> {
-    const start = Date.now();
-    if (!(await this.isConnected(businessId))) {
-      return { success: false, itemsSynced: 0, errors: [`${this.meta.name} not connected`], duration: Date.now() - start };
-    }
-    const submissions = await this.prisma.client.leadFormSubmission.count({
-      where: { businessId, source: this.source },
-    }).catch(() => 0);
-    await this.trackActivity(businessId);
-    return { success: true, itemsSynced: submissions, errors: [], duration: Date.now() - start };
+  /**
+   * Form platforms push to us; there is no provider pull to perform.
+   *
+   * This previously counted LOCAL leadFormSubmission rows and returned
+   * `success: true, itemsSynced: <lifetime local count>` without contacting the
+   * provider at all. The UI reported "Typeform synced — 47 items" when nothing
+   * had been fetched, the nightly scheduler recorded it as a real sync, and
+   * connector.synced fired with a fabricated count. A `.catch(() => 0)` on the
+   * count also meant a failing query reported success with zero items.
+   *
+   * Returns the same explicit unsupported result the other non-pull connectors
+   * use, so the scheduler treats it as skipped rather than healthy, and the UI
+   * says what actually happened.
+   */
+  async sync(_businessId: string): Promise<ConnectorSyncResult> {
+    return {
+      success: false,
+      itemsSynced: 0,
+      unsupported: true,
+      code: 'PULL_SYNC_NOT_IMPLEMENTED',
+      errors: ['Form connectors receive data by webhook; provider pull is not implemented.'],
+      duration: 0,
+    };
   }
 
   async disconnect(businessId: string): Promise<void> {

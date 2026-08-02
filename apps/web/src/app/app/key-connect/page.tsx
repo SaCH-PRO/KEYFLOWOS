@@ -503,12 +503,37 @@ export default function KeyConnectPage() {
         : await syncConnector(businessId, type);
 
     setBusyFor(type, "sync", false);
+
+    // Branch on data.success, not on error — the way handleTest below already
+    // does. The server answers 200 with { success: false, unsupported: true }
+    // for connectors that have no provider-pull implementation, because the
+    // REQUEST succeeded even though the operation did nothing. Checking `error`
+    // alone reported "synced" for roughly 20 of 22 connectors that had not
+    // fetched a single record.
     if (res.error) {
       toast.error(res.error);
-    } else {
-      toast.success(`${name} synced`);
-      fetchDashboard();
+      return;
     }
+
+    const result = res.data as
+      | { success?: boolean; unsupported?: boolean; itemsSynced?: number; errors?: string[] }
+      | undefined;
+
+    if (result?.unsupported) {
+      toast.info(`${name} doesn't support pull sync — it receives data by webhook.`);
+      return;
+    }
+
+    if (result && result.success === false) {
+      toast.error(result.errors?.[0] ?? `${name} sync failed`);
+      return;
+    }
+
+    const count = result?.itemsSynced;
+    toast.success(
+      typeof count === "number" ? `${name} synced — ${count} items` : `${name} synced`,
+    );
+    fetchDashboard();
   };
 
   const handleTest = async (type: string, name: string) => {

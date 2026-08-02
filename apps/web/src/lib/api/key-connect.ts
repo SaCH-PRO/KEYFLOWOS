@@ -39,8 +39,27 @@ export async function disconnectConnector(businessId: string, type: string) {
   });
 }
 
+/**
+ * Trigger a provider sync.
+ *
+ * The server answers HTTP 200 even when the connector has no pull-sync
+ * implementation — correctly, since the REQUEST succeeded; it is the operation
+ * that did not. The result body is the authority:
+ *
+ *   success: false, unsupported: true  -> nothing was fetched
+ *
+ * Callers must branch on `data.success`, never on `error`. Branching on `error`
+ * treats "the server told me it did nothing" as "it worked".
+ */
 export async function syncConnector(businessId: string, type: string) {
-  return apiPost<{ success: boolean; itemsSynced?: number }>({
+  return apiPost<{
+    success: boolean;
+    itemsSynced?: number;
+    /** Set when this connector has no provider-pull implementation. */
+    unsupported?: boolean;
+    code?: string;
+    errors?: string[];
+  }>({
     path: `/connectors/businesses/${encodeURIComponent(businessId)}/sync/${encodeURIComponent(type)}`,
     body: {},
   });
