@@ -148,7 +148,7 @@ describe('ExecuteBatchDto — the per-property case', () => {
 });
 
 describe('ConsciousChatDto — the CNS surface', () => {
-  it('survives the pipe', async () => {
+  it('survives the pipe as a body', async () => {
     const out = await through(
       { text: 'should we hire', businessId: 'biz_1', sessionId: 'sess_1' },
       ConsciousChatDto,
@@ -156,5 +156,37 @@ describe('ConsciousChatDto — the CNS surface', () => {
     expect(out.text).toBe('should we hire');
     expect(out.businessId).toBe('biz_1');
     expect(out.sessionId).toBe('sess_1');
+  });
+
+  // The SSE route uses @Query(), not @Body(). The pipe runs with
+  // type: 'query' there, and whitelist strips undeclared query params exactly
+  // as it strips body properties — so validating only the body path would have
+  // left the actual streaming route untested.
+  const asQuery = (q: Record<string, string>) =>
+    pipe.transform(q, { type: 'query', metatype: ConsciousChatDto }) as Promise<ConsciousChatDto>;
+
+  it('survives the pipe as a QUERY — the path the SSE route actually uses', async () => {
+    const out = await asQuery({
+      businessId: 'biz_1',
+      text: 'should we hire',
+      sessionId: 'sess_1',
+      userId: 'user_1',
+    });
+
+    expect(out.businessId).toBe('biz_1');
+    expect(out.text).toBe('should we hire');
+    expect(out.sessionId).toBe('sess_1');
+    expect(out.userId).toBe('user_1');
+  });
+
+  it('accepts a query with only the two required params', async () => {
+    // The web hook omits userId and sessionId when it does not know them.
+    const out = await asQuery({ businessId: 'biz_1', text: 'hello' });
+    expect(out.businessId).toBe('biz_1');
+    expect(out.userId).toBeUndefined();
+  });
+
+  it('rejects a query missing businessId', async () => {
+    await expect(asQuery({ text: 'hello' })).rejects.toThrow();
   });
 });
