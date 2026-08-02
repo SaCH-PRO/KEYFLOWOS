@@ -119,11 +119,30 @@ async function fetchWithRefresh(url: string, init: RequestInit): Promise<Respons
   if (res.status === 401) {
     const refreshed = await refreshAccessToken();
     if (refreshed) {
-      const newInit = {
-        ...init,
-        headers: buildHeaders(init.headers),
-      };
-      res = await fetchWithTimeout(url, newInit);
+      // `init.headers` was built from the token that just expired, and
+      // buildHeaders() lets caller-supplied headers overwrite the auth header —
+      // so merging alone copied the stale Authorization back over the fresh one
+      // and the refresh was silently discarded, meaning the retry 401'd again.
+      // Every session therefore hard-failed the moment its token expired.
+      //
+      // Merge first to keep any custom caller headers, then re-stamp
+      // Authorization from storage.
+      //
+      // Caveat worth knowing: getAuthHeaders() prefers `kf_admin_token`, while
+      // refreshAccessToken() rotates `kf_token` only. When an admin token is
+      // present this re-stamps the same admin token — correctly, because an
+      // admin token is a separate credential that this refresh cannot renew. A
+      // 401 there means the admin session genuinely expired and the user must
+      // sign in again; the retry is a no-op rather than a fix.
+      const headers = buildHeaders(init.headers);
+      const { Authorization } = getAuthHeaders();
+      // Unconditional set/delete: refreshAccessToken() only returns true after
+      // writing a token, so the absent case is unreachable today — but keeping
+      // the delete means a future change to that contract degrades to an
+      // unauthenticated retry rather than silently replaying a stale header.
+      if (Authorization) headers.set("Authorization", Authorization);
+      else headers.delete("Authorization");
+      res = await fetchWithTimeout(url, { ...init, headers });
     }
   }
   return res;
