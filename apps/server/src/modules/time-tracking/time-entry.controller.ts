@@ -17,38 +17,119 @@ import { BusinessGuard } from '../../core/auth/business.guard';
 import { CurrentUser } from '../../core/decorators/current-user.decorator';
 import { TimeEntryService } from './time-entry.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import {
+  IsArray,
+  IsBoolean,
+  IsISO8601,
+  IsInt,
+  IsNumber,
+  IsOptional,
+  IsString,
+} from 'class-validator';
+
+/*
+ * Decorators are required for these bodies to survive at all: the global
+ * ValidationPipe runs with whitelist:true and deletes any property without
+ * validator metadata, so these DTOs previously arrived as {}.
+ *
+ * projectId / taskId are foreign keys. TimeEntryService.assertOwnedRefs proves
+ * they belong to the caller's business before any write — validating the shape
+ * here does NOT establish ownership.
+ */
 
 class StartTimerDto {
+  @IsOptional()
+  @IsString()
   description?: string;
+
+  @IsOptional()
+  @IsString()
   projectId?: string;
+
+  @IsOptional()
+  @IsString()
   taskId?: string;
+
+  @IsOptional()
+  @IsBoolean()
   billable?: boolean;
+
+  @IsOptional()
+  @IsNumber()
   hourlyRate?: number;
 }
 
 class CreateTimeEntryDto {
+  @IsOptional()
+  @IsString()
   description?: string;
+
+  @IsISO8601()
   startTime!: string;
+
+  @IsOptional()
+  @IsISO8601()
   endTime?: string;
+
+  @IsOptional()
+  @IsString()
   projectId?: string;
+
+  @IsOptional()
+  @IsString()
   taskId?: string;
+
+  @IsOptional()
+  @IsBoolean()
   billable?: boolean;
+
+  @IsOptional()
+  @IsNumber()
   hourlyRate?: number;
 }
 
 class UpdateTimeEntryDto {
+  @IsOptional()
+  @IsString()
   description?: string;
+
+  @IsOptional()
+  @IsISO8601()
   startTime?: string;
+
+  @IsOptional()
+  @IsISO8601()
   endTime?: string;
+
+  @IsOptional()
+  @IsInt()
   durationMinutes?: number;
+
+  // Nullable on purpose: null CLEARS the link. @IsOptional() already permits
+  // null, so no extra decorator is needed for that case.
+  @IsOptional()
+  @IsString()
   projectId?: string | null;
+
+  @IsOptional()
+  @IsString()
   taskId?: string | null;
+
+  @IsOptional()
+  @IsBoolean()
   billable?: boolean;
+
+  @IsOptional()
+  @IsNumber()
   hourlyRate?: number;
 }
 
 class BillTimeEntriesDto {
+  @IsArray()
+  @IsString({ each: true })
   timeEntryIds!: string[];
+
+  @IsString()
   invoiceId!: string;
 }
 

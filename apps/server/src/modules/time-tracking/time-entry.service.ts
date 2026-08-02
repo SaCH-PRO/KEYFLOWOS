@@ -43,7 +43,43 @@ export class TimeEntryService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
+  /**
+   * Prove that caller-supplied project/task references belong to this business.
+   *
+   * These are written straight into the row, and until recently the global
+   * ValidationPipe stripped them (the DTOs carried no validator metadata), so
+   * the unchecked write was unreachable. Making the DTOs work makes the fields
+   * live: without this, a caller could attach their time entry to another
+   * tenant's project or task, and the `include: { project: ... }` on these
+   * queries would then read that project's name straight back out.
+   *
+   * Not-found and not-yours return the same error on purpose — distinguishing
+   * them would confirm the existence of an id the caller has no right to probe.
+   */
+  private async assertOwnedRefs(
+    businessId: string,
+    refs: { projectId?: string | null; taskId?: string | null },
+  ): Promise<void> {
+    if (refs.projectId) {
+      const project = await this.prisma.client.project.findFirst({
+        where: { id: refs.projectId, businessId },
+        select: { id: true },
+      });
+      if (!project) throw new NotFoundException('Project not found');
+    }
+
+    if (refs.taskId) {
+      const task = await this.prisma.client.projectTask.findFirst({
+        where: { id: refs.taskId, project: { businessId } },
+        select: { id: true },
+      });
+      if (!task) throw new NotFoundException('Task not found');
+    }
+  }
+
   async create(input: CreateTimeEntryInput) {
+    await this.assertOwnedRefs(input.businessId, input);
+
     const duration = this.calculateDuration(input.startTime, input.endTime);
 
     return this.prisma.client.timeEntry.create({
@@ -75,6 +111,8 @@ export class TimeEntryService {
     billable?: boolean;
     hourlyRate?: number;
   }) {
+    await this.assertOwnedRefs(input.businessId, input);
+
     // Stop any running timer first
     await this.stopRunningTimer(input.businessId, input.userId);
 
@@ -188,6 +226,11 @@ export class TimeEntryService {
       throw new BadRequestException('Cannot edit a billed time entry');
     }
 
+    // Re-parenting an existing entry crosses the tenant boundary just as
+    // easily as creating one does. Null is allowed through: it clears the
+    // reference rather than pointing it somewhere.
+    await this.assertOwnedRefs(businessId, input);
+
     const data: Record<string, unknown> = {};
     if (input.description !== undefined) data.description = input.description;
     if (input.startTime !== undefined) data.startTime = input.startTime;
@@ -258,6 +301,16 @@ export class TimeEntryService {
   }
 
   async markAsBilled(ids: string[], businessId: string, invoiceId: string) {
+    // The entries are already scoped by businessId in the `where` below, but
+    // invoiceId came from the request body and was written unchecked — so a
+    // caller could mark their own entries as billed against ANOTHER tenant's
+    // invoice, corrupting that tenant's billing records.
+    const invoice = await this.prisma.client.invoice.findFirst({
+      where: { id: invoiceId, businessId },
+      select: { id: true },
+    });
+    if (!invoice) throw new NotFoundException('Invoice not found');
+
     return this.prisma.client.timeEntry.updateMany({
       where: { id: { in: ids }, businessId, billable: true, billed: false },
       data: { billed: true, invoiceId },
