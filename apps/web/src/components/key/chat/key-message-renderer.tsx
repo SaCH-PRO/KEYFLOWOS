@@ -13,6 +13,7 @@ import type { KeyChatMessage, OnboardingStep } from "./types";
 import { KeyAttachmentPreview } from "./key-attachment-preview";
 import { KeyPlanCard } from "./key-plan-card";
 import { KeyOnboardingCard } from "./key-onboarding-card";
+import { KeyCognitionTrace } from "./key-cognition-trace";
 
 interface KeyMessageRendererProps {
   message: KeyChatMessage;
@@ -63,6 +64,15 @@ export function KeyMessageRenderer({ message, isStreaming, onConfirm, onCardAdva
           </div>
         ) : (
           <div className="relative min-w-0">
+            {/* Deep-think messages carry the pipeline trace. Rendered above the
+                answer so the reasoning reads before the conclusion. */}
+            {(message.cognition?.length || message.cognitionActive) && (
+              <KeyCognitionTrace
+                phases={message.cognition ?? []}
+                thinking={Boolean(message.cognitionActive)}
+                className="mb-2"
+              />
+            )}
             {message.content ? (
               <div className="prose prose-sm dark:prose-invert max-w-none text-sm leading-relaxed">
                 <ReactMarkdown

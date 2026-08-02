@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useCallback, useEffect } from "react";
-import { ArrowUp, Paperclip, Mic, Square, Loader2 } from "lucide-react";
+import { ArrowUp, Paperclip, Mic, Square, Loader2, Brain } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useKeyChat } from "./key-chat-store";
 import { useUpload } from "@/hooks/use-upload";
@@ -13,10 +13,16 @@ import { toast } from "sonner";
 interface KeyChatInputProps {
   onSend: () => void;
   onStop: () => void;
+  /**
+   * Route the message through the full consciousness pipeline instead of flow
+   * chat. Optional: shells that do not wire it simply do not show the control,
+   * rather than showing a button that does nothing.
+   */
+  onDeepThink?: () => void;
   disabled?: boolean;
 }
 
-export function KeyChatInput({ onSend, onStop, disabled }: KeyChatInputProps) {
+export function KeyChatInput({ onSend, onStop, onDeepThink, disabled }: KeyChatInputProps) {
   const { input, setInput, attachments, addAttachment, removeAttachment, status } = useKeyChat();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -161,6 +167,20 @@ export function KeyChatInput({ onSend, onStop, disabled }: KeyChatInputProps) {
             >
               {isRecording ? <Square className="h-3.5 w-3.5" /> : <Mic className="h-4 w-4" />}
             </button>
+
+            {onDeepThink && (
+              <button
+                type="button"
+                disabled={!canSend}
+                onClick={onDeepThink}
+                title="Run the full reasoning pipeline and show the working"
+                className="flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+                aria-label="Deep think"
+              >
+                <Brain className="h-4 w-4" />
+                <span className="hidden sm:inline">Deep think</span>
+              </button>
+            )}
           </div>
 
           {isLoading ? (

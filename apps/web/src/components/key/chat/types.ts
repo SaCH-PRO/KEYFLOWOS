@@ -51,6 +51,35 @@ export interface KeyChatMessage {
     totalTokens: number;
     creditsUsed: number;
   };
+  /**
+   * The consciousness pipeline's per-layer trace, present only on messages
+   * produced in deep-think mode. Each entry is a step the server really ran.
+   */
+  cognition?: KeyCognitionPhase[];
+  /** Set while the pipeline is still running, so the trace can animate. */
+  cognitionActive?: boolean;
+  /** Calibrated confidence and reasoning mode, once synthesis completes. */
+  cognitionSummary?: {
+    reasoningMode: string;
+    confidence: number;
+    permitted: boolean;
+  };
+}
+
+/**
+ * One completed step of KEY's consciousness pipeline.
+ *
+ * Mirrors ConsciousPhaseEvent on the server. `ms` is measured there, not
+ * estimated here.
+ */
+export interface KeyCognitionPhase {
+  step: number;
+  of: number;
+  layer: string;
+  label: string;
+  ms: number;
+  elapsedMs: number;
+  detail?: Record<string, unknown>;
 }
 
 export interface KeyChatSession {

@@ -12,7 +12,7 @@ interface KeyChatShellProps {
 
 export function KeyChatShell({ className }: KeyChatShellProps) {
   const { messages, status, showHistory, setShowHistory, activeSessionId, sessions } = useKeyChat();
-  const { sendMessage, stop, confirmAction, loadSessions, createNewSession, selectSession, deleteSession } = useKeyChatActions();
+  const { sendMessage, deepThink, stop, confirmAction, loadSessions, createNewSession, selectSession, deleteSession } = useKeyChatActions();
 
   useEffect(() => {
     void loadSessions();
@@ -118,7 +118,7 @@ export function KeyChatShell({ className }: KeyChatShellProps) {
         <KeyChatVoiceBar />
 
         {/* Input */}
-        <KeyChatInput onSend={sendMessage} onStop={stop} />
+        <KeyChatInput onSend={sendMessage} onStop={stop} onDeepThink={deepThink} />
       </div>
     </div>
   );

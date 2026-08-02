@@ -22,7 +22,7 @@ const MODES: { id: ChatMode; label: string; icon: React.ReactNode; description: 
 
 export function KeyFullChatShell() {
   const { status, showHistory, setShowHistory, activeSessionId, sessions, chatMode, setChatMode, setMessages, setActiveSessionId, setInput, setStatus, setError } = useKeyChat();
-  const { sendMessage, stop, confirmAction, loadSessions, createNewSession, selectSession } = useKeyChatActions();
+  const { sendMessage, deepThink, stop, confirmAction, loadSessions, createNewSession, selectSession } = useKeyChatActions();
   const [mode, setMode] = useState<ChatMode>(chatMode ?? "general");
   const [showModeMenu, setShowModeMenu] = useState(false);
   const modeMenuRef = useRef<HTMLDivElement>(null);
@@ -206,7 +206,7 @@ export function KeyFullChatShell() {
         <KeyChatVoiceBar />
 
         {/* Input */}
-        <KeyChatInput onSend={sendMessage} onStop={stop} />
+        <KeyChatInput onSend={sendMessage} onStop={stop} onDeepThink={deepThink} />
       </div>
 
       {/* Right Context Rail */}

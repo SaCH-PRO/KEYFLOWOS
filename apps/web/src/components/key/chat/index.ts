@@ -14,6 +14,8 @@ export { KeyChatGreeting } from "./key-chat-greeting";
 export { KeyOnboardingCard } from "./key-onboarding-card";
 export { useKeyChatActions } from "./use-key-chat-actions";
 export { useKeyStream } from "./use-key-stream";
+export { useKeyCognition, type CognitionPhase, type CognitionAnswer } from "./use-key-cognition";
+export { KeyCognitionTrace } from "./key-cognition-trace";
 export { useVoiceInput } from "./use-voice-input";
 export { useKeyStatus } from "./use-key-status";
 export { KeyChatVoiceBar } from "./key-chat-voice-bar";

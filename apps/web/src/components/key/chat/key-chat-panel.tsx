@@ -17,7 +17,7 @@ interface KeyChatPanelProps {
 
 export function KeyChatPanel({ className }: KeyChatPanelProps) {
   const { open, setOpen, showHistory, setShowHistory } = useKeyChat();
-  const { sendMessage, stop, confirmAction } = useKeyChatActions();
+  const { sendMessage, deepThink, stop, confirmAction } = useKeyChatActions();
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -91,7 +91,7 @@ export function KeyChatPanel({ className }: KeyChatPanelProps) {
                 <div className="flex min-w-0 flex-1 flex-col">
                   <KeyChatMessages onConfirmAction={confirmAction} />
                   <KeyChatVoiceBar />
-                  <KeyChatInput onSend={sendMessage} onStop={stop} />
+                  <KeyChatInput onSend={sendMessage} onStop={stop} onDeepThink={deepThink} />
                 </div>
               </div>
             </div>

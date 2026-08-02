@@ -85,6 +85,40 @@ import { CortexSession, CortexMessage } from './key-cortex.types';
 import { BusinessEventType } from '@prisma/client';
 
 /**
+ * One completed step of the consciousness pipeline, emitted as it finishes.
+ *
+ * These are observations of work that has ALREADY happened — `ms` is measured,
+ * not estimated, and a phase is emitted only after its step returns. Nothing
+ * here is simulated for the benefit of a progress bar.
+ */
+export interface ConsciousPhaseEvent {
+  /** 1-based position in the pipeline. */
+  step: number;
+  /** Total phases that will be emitted, for progress display. */
+  of: number;
+  /** Which cognitive layer did the work. */
+  layer: string;
+  /** Human-readable name of the step. */
+  label: string;
+  /** Wall-clock duration of this step alone. */
+  ms: number;
+  /** Wall-clock since the pipeline started. */
+  elapsedMs: number;
+  /** Step-specific findings — what this layer actually concluded. */
+  detail?: Record<string, unknown>;
+}
+
+export type ConsciousPhaseListener = (event: ConsciousPhaseEvent) => void;
+
+/**
+ * Phases emitted by processConsciously.
+ *
+ * Steps 10 and 11 (logging, self-model update) are bookkeeping rather than
+ * cognition, so they are folded into a single trailing 'consolidate' phase.
+ */
+export const TOTAL_CONSCIOUS_PHASES = 10;
+
+/**
  * UnifiedConsciousnessOrchestrator — The Mind of KEY.
  *
  * This service is the conductor of the consciousness orchestra. It does not
@@ -179,9 +213,37 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
   async processConsciously(
     query: string,
     session: CortexSession,
+    onPhase?: ConsciousPhaseListener,
   ): Promise<ConsciousResponse> {
     const pipelineStart = Date.now();
     const correlationId = `conscious-${session.businessId}-${Date.now()}`;
+
+    // Phase emission is observation only. A listener that throws must never take
+    // down the pipeline it is observing — an SSE client disconnecting mid-think
+    // would otherwise abort the whole cognition and lose the response.
+    let phaseIndex = 0;
+    const emit = (
+      layer: string,
+      label: string,
+      ms: number,
+      detail?: Record<string, unknown>,
+    ): void => {
+      if (!onPhase) return;
+      phaseIndex += 1;
+      try {
+        onPhase({
+          step: phaseIndex,
+          of: TOTAL_CONSCIOUS_PHASES,
+          layer,
+          label,
+          ms,
+          elapsedMs: Date.now() - pipelineStart,
+          detail,
+        });
+      } catch {
+        // observer failure is not pipeline failure
+      }
+    };
 
     this.logger.log(
       `[Consciousness] Pipeline START for business=${session.businessId} ` +
@@ -208,6 +270,11 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
         ) as unknown as ConsciousCortexMessage[],
       );
       timing.emotionMs = Date.now() - step1Start;
+      emit('emotion', 'Reading emotional state', timing.emotionMs, {
+        primary: emotionalState.primary,
+        intensity: emotionalState.intensity,
+        confidence: emotionalState.confidence,
+      });
       this.logger.debug(
         `[Consciousness][S1] Emotion detected: ${emotionalState.primary} ` +
           `(intensity=${Math.round(emotionalState.intensity * 100)}%, ` +
@@ -221,6 +288,7 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
       const step2Start = Date.now();
       const mindState = this.determineMindState(session, emotionalState);
       timing.mindStateMs = Date.now() - step2Start;
+      emit('mindState', 'Setting mind state', timing.mindStateMs, { mindState });
       this.logger.debug(
         `[Consciousness][S2] Mind state: ${mindState} (${timing.mindStateMs}ms)`,
       );
@@ -233,6 +301,9 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
         session.businessId,
       );
       timing.temporalMs = Date.now() - step3Start;
+      emit('temporal', 'Placing it in time', timing.temporalMs, {
+        contextChars: temporalContext.length,
+      });
       this.logger.debug(
         `[Consciousness][S3] Temporal context: ` +
           `${temporalContext.length} chars (${timing.temporalMs}ms)`,
@@ -248,6 +319,12 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
         context as unknown as Record<string, unknown>,
       );
       timing.reasoningMs = Date.now() - step4Start;
+      emit('reasoning', 'Reasoning across modes', timing.reasoningMs, {
+        chains: reasoningResult.chains.length,
+        modes: reasoningResult.chains.map((c) => c.mode),
+        bestMode: reasoningResult.bestChain.mode,
+        bestConfidence: reasoningResult.bestChain.confidence,
+      });
       this.logger.debug(
         `[Consciousness][S4] Multi-modal reasoning: ` +
           `${reasoningResult.chains.length} chains, ` +
@@ -264,6 +341,9 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
         session.businessId,
       );
       timing.intuitionMs = Date.now() - step5Start;
+      emit('intuition', 'Checking weak signals', timing.intuitionMs, {
+        signals: weakSignals.length,
+      });
       this.logger.debug(
         `[Consciousness][S5] Weak signals: ${weakSignals.length} detected ` +
           `(${timing.intuitionMs}ms)`,
@@ -280,6 +360,10 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
           session.businessId,
         );
       timing.metacognitionMs = Date.now() - step6Start;
+      emit('metacognition', 'Calibrating confidence', timing.metacognitionMs, {
+        raw: reasoningResult.bestChain.confidence,
+        calibrated: calibratedConfidence.confidence,
+      });
       this.logger.debug(
         `[Consciousness][S6] Confidence calibrated: ` +
           `raw=${Math.round(reasoningResult.bestChain.confidence * 100)}% ` +
@@ -297,6 +381,9 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
         session.businessId,
       );
       timing.ethicsMs = Date.now() - step7Start;
+      emit('ethics', 'Ethical review', timing.ethicsMs, {
+        permitted: ethicalEvaluation.permitted,
+      });
       this.logger.debug(
         `[Consciousness][S7] Ethical review: ` +
           `${ethicalEvaluation.permitted ? 'PERMITTED' : 'FLAGGED'} ` +
@@ -312,6 +399,9 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
         session.persona as unknown as CortexPersona,
       );
       timing.emotionalCalibMs = Date.now() - step8Start;
+      emit('emotionalCalibration', 'Tuning delivery', timing.emotionalCalibMs, {
+        empathy: emotionalResponse.toneAdjustment.empathy,
+      });
       this.logger.debug(
         `[Consciousness][S8] Emotional response calibrated: ` +
           `empathy=${Math.round(emotionalResponse.toneAdjustment.empathy * 100)}% ` +
@@ -338,6 +428,10 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
         emotionalResponse,
       );
       timing.synthesisMs = Date.now() - step9Start;
+      emit('synthesis', 'Composing the answer', timing.synthesisMs, {
+        chars: response.text.length,
+        actions: response.actions.length,
+      });
       this.logger.debug(
         `[Consciousness][S9] Response synthesized: ` +
           `${response.text.length} chars, ` +
@@ -392,6 +486,12 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
         ethicalEvaluation.permitted ? 'success' : 'partial',
       );
       timing.selfModelMs = Date.now() - step11Start;
+      emit(
+        'consolidate',
+        'Logging and learning',
+        timing.logMs + timing.selfModelMs,
+        { layersUsed: processLog.layersUsed.length },
+      );
 
       // Final summary
       this.logger.log(
@@ -911,6 +1011,22 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
     temporal: TemporalAnalysis,
     reasoning: MultiModalReasoningResult,
   ): string | null {
+    // KeyCortexTemporalReasoningService.getTemporalContext returns a preformatted
+    // STRING, not a TemporalAnalysis — the call site asserts across that gap. If
+    // the assertion is ever wrong (it is, for that path), reading .anomalies here
+    // throws and takes the whole conscious pipeline down. Accept both shapes.
+    if (typeof temporal === 'string') {
+      const text = (temporal as string).trim();
+      return text.length > 0 ? text : null;
+    }
+    if (
+      !temporal ||
+      !Array.isArray(temporal.anomalies) ||
+      !Array.isArray(temporal.cycles)
+    ) {
+      return null;
+    }
+
     const keywords = reasoning.bestChain.conclusion
       .toLowerCase()
       .split(/\s+/)

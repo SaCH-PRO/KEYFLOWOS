@@ -13,12 +13,14 @@ import {
 } from "@/lib/api/business-genome";
 import { useKeyChat } from "./key-chat-store";
 import { useKeyStream, type FlowStreamChunk, getAttachmentType } from "./use-key-stream";
+import { useKeyCognition } from "./use-key-cognition";
 import type { KeyChatAttachment, KeyChatMessage, KeyChatPlanStep, KeyChatSession } from "./types";
 import { nanoid } from "./utils";
 
 export function useKeyChatActions() {
   const chat = useKeyChat();
   const { start: startStream, stop: stopStream } = useKeyStream();
+  const { think, stop: stopThinking } = useKeyCognition();
   const processingRef = useRef(false);
 
   const chatMode = (chat.chatMode ?? "general") as string;
@@ -381,6 +383,105 @@ export function useKeyChatActions() {
     [chat, buildHistory, processStreamChunk, startStream, chatMode, loadSessions]
   );
 
+  // ─── Deep Think ───
+
+  /**
+   * Route a question through the full consciousness pipeline instead of the
+   * flow chat, streaming each cognitive layer into the message as it lands.
+   *
+   * This is a separate path on purpose. Flow chat is tool-calling and fast;
+   * deep think runs ten cognitive steps and is slower, so the user chooses it
+   * rather than paying for it on every message.
+   */
+  const deepThink = useCallback(
+    async (text?: string) => {
+      const businessId = getStoredBusinessId();
+      if (!businessId) {
+        chat.setError("No business selected");
+        return;
+      }
+
+      const messageText = (text ?? chat.input).trim();
+      if (!messageText) return;
+
+      if (processingRef.current) return;
+      processingRef.current = true;
+
+      chat.setError(undefined);
+      chat.appendMessage({
+        id: nanoid(),
+        role: "user",
+        content: messageText,
+        timestamp: Date.now(),
+      });
+      chat.setInput("");
+      chat.setStatus("streaming");
+      window.dispatchEvent(
+        new CustomEvent("kf:key-state", { detail: { state: "processing" } })
+      );
+
+      const assistantId = nanoid();
+      chat.appendMessage({
+        id: assistantId,
+        role: "assistant",
+        content: "",
+        timestamp: Date.now(),
+        cognition: [],
+        cognitionActive: true,
+      });
+
+      // Accumulate locally: reading phases back off the store would race with
+      // React's batching and drop steps that land in the same tick.
+      const collected: KeyChatMessage["cognition"] = [];
+      let failed = false;
+
+      await think(
+        { businessId, text: messageText, sessionId: chat.activeSessionId },
+        {
+          onPhase: (phase) => {
+            collected.push(phase);
+            chat.updateMessage(assistantId, { cognition: [...collected] });
+          },
+          onAnswer: (answer) => {
+            chat.updateMessage(assistantId, {
+              content: answer.text,
+              cognitionActive: false,
+              cognitionSummary: {
+                reasoningMode: answer.reasoningMode,
+                confidence: answer.confidence,
+                permitted: answer.permitted,
+              },
+            });
+          },
+          onError: (message) => {
+            failed = true;
+            chat.updateMessage(assistantId, {
+              content:
+                "I couldn't complete that line of thinking. Please try again.",
+              cognitionActive: false,
+            });
+            chat.setStatus("error");
+            chat.setError(message);
+          },
+          onDone: () => {
+            chat.updateMessage(assistantId, { cognitionActive: false });
+          },
+        }
+      );
+
+      // Settle once, after the stream has fully finished. onDone does not fire
+      // on the error path, so clearing the guard here covers both — and an
+      // error status must survive rather than be overwritten with "idle".
+      chat.updateMessage(assistantId, { cognitionActive: false });
+      chat.setStatus(failed ? "error" : "idle");
+      processingRef.current = false;
+      window.dispatchEvent(
+        new CustomEvent("kf:key-state", { detail: { state: "idle" } })
+      );
+    },
+    [chat, think]
+  );
+
   const confirmAction = useCallback(
     async (toolCallId: string, confirmed: boolean, toolName: string, toolArgs: Record<string, unknown>) => {
       await sendMessage("", {
@@ -392,13 +493,15 @@ export function useKeyChatActions() {
 
   const stop = useCallback(() => {
     stopStream();
+    stopThinking();
     chat.setStatus("idle");
     processingRef.current = false;
     window.dispatchEvent(new CustomEvent("kf:key-state", { detail: { state: "idle" } }));
-  }, [stopStream, chat]);
+  }, [stopStream, stopThinking, chat]);
 
   return {
     sendMessage,
+    deepThink,
     confirmAction,
     stop,
     loadSessions,

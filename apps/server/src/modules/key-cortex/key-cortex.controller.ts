@@ -43,6 +43,11 @@ import {
   Logger,
   Inject,
 } from '@nestjs/common';
+import { KeyCortexSessionService } from './key-cortex-session.service';
+import {
+  KeyCortexConsciousnessService,
+  type ConsciousPhaseEvent,
+} from './key-cortex-consciousness.service';
 import {
   Allow,
   IsArray,
@@ -422,6 +427,18 @@ class SandboxGenerateDto {
   context?: Record<string, unknown>;
 }
 
+class ConsciousChatDto {
+  @IsString()
+  text: string;
+  @IsString()
+  businessId: string;
+  @IsString()
+  userId: string;
+  @IsOptional()
+  @IsString()
+  sessionId?: string;
+}
+
 class SandboxExecuteDto {
   @IsString()
   code: string;
@@ -698,6 +715,8 @@ export class KeyCortexController {
     // -- Phase 0.6: Unified approval orchestrator / autonomy safety --
     private readonly safety: KeyAutonomySafetyService,
     private readonly approvalOrchestrator: KeyCortexApprovalOrchestratorService,
+    private readonly consciousness: KeyCortexConsciousnessService,
+    private readonly sessionService: KeyCortexSessionService,
   ) {}
 
   /* ================================================================== */
@@ -3019,6 +3038,135 @@ export class KeyCortexController {
   /* ================================================================== */
   /*  Helpers                                                           */
   /* ================================================================== */
+
+  /* ================================================================== */
+  /*  CONSCIOUS CHAT — the CNS surface                                    */
+  /* ================================================================== */
+
+  /**
+   * POST /api/v1/cortex/conscious/chat
+   *
+   * Routes a query through all nine cognitive organs and returns the answer
+   * together with the reasoning that produced it. Until now processConsciously
+   * had no caller anywhere in the repo — the organs were registered and
+   * injectable but nothing drove them.
+   */
+  @Post('conscious/chat')
+  @HttpCode(HttpStatus.OK)
+  async consciousChat(@Body() dto: ConsciousChatDto): Promise<{
+    text: string;
+    phases: ConsciousPhaseEvent[];
+    reasoningMode: string;
+    confidence: number;
+    permitted: boolean;
+    actions: unknown[];
+    meta: Record<string, unknown>;
+  }> {
+    if (!dto.text?.trim()) throw new BadRequestException('text is required');
+    if (!dto.businessId) throw new BadRequestException('businessId is required');
+
+    const session = await this.sessionService.getOrCreateSession({
+      text: dto.text,
+      businessId: dto.businessId,
+      userId: dto.userId,
+      sessionId: dto.sessionId,
+    } as CortexQuery);
+
+    // Collect the phases the pipeline actually emits. Deriving them from
+    // response.meta would only ever recover timings, losing what each layer
+    // concluded — and would silently produce [] if meta ever stopped carrying
+    // *Ms keys. This way the phase list cannot drift from the pipeline.
+    const phases: ConsciousPhaseEvent[] = [];
+    const response = await this.consciousness.processConsciously(
+      dto.text,
+      session,
+      (phase) => phases.push(phase),
+    );
+
+    return {
+      text: response.text,
+      phases,
+      reasoningMode: response.reasoning?.bestChain?.mode ?? 'unknown',
+      confidence: response.confidence?.confidence ?? 0,
+      permitted: response.ethical?.permitted ?? true,
+      actions: response.actions ?? [],
+      meta: (response.meta ?? {}) as unknown as Record<string, unknown>,
+    };
+  }
+
+  /**
+   * SSE /api/v1/cortex/conscious/stream
+   *
+   * The same pipeline, but each cognitive step is pushed to the client the
+   * moment it completes rather than after all ten finish. This is what makes
+   * KEY's thinking watchable: the client sees "Reading emotional state →
+   * frustrated (82%)" while reasoning is still running.
+   *
+   * Event types:
+   *   phase  — one cognitive step completed, with what that layer concluded
+   *   answer — the synthesized response
+   *   error  — pipeline failed; the pipeline itself degrades gracefully, so
+   *            this fires only for setup failures (e.g. session creation)
+   *
+   * Parameters come from the QUERY STRING, not the body. Nest's @Sse registers
+   * a GET (see sse.decorator.js: METHOD_METADATA = RequestMethod.GET), and the
+   * browser EventSource API cannot send a request body on a GET. A body-taking
+   * SSE route is therefore uncallable from any standard client — which is the
+   * bug the pre-existing `chat/stream` route has.
+   */
+  @Sse('conscious/stream')
+  consciousStream(@Query() dto: ConsciousChatDto): Observable<{
+    type: string;
+    data: Record<string, unknown>;
+  }> {
+    if (!dto.text?.trim()) throw new BadRequestException('text is required');
+    if (!dto.businessId) throw new BadRequestException('businessId is required');
+
+    const subject = new Subject<{ type: string; data: Record<string, unknown> }>();
+
+    // Run in a background micro-task so the SSE connection is established
+    // before the first phase lands — otherwise early phases are emitted into a
+    // stream with no subscriber and are lost.
+    void (async () => {
+      try {
+        const session = await this.sessionService.getOrCreateSession({
+          text: dto.text,
+          businessId: dto.businessId,
+          userId: dto.userId,
+          sessionId: dto.sessionId,
+        } as CortexQuery);
+
+        const response = await this.consciousness.processConsciously(
+          dto.text,
+          session,
+          (phase) =>
+            subject.next({
+              type: 'phase',
+              data: phase as unknown as Record<string, unknown>,
+            }),
+        );
+
+        subject.next({
+          type: 'answer',
+          data: {
+            text: response.text,
+            reasoningMode: response.reasoning?.bestChain?.mode ?? 'unknown',
+            confidence: response.confidence?.confidence ?? 0,
+            permitted: response.ethical?.permitted ?? true,
+            actions: response.actions ?? [],
+          },
+        });
+        subject.complete();
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        this.logger.error(`Conscious stream error: ${message}`);
+        subject.next({ type: 'error', data: { message } });
+        subject.complete();
+      }
+    })();
+
+    return subject.asObservable();
+  }
 
   private generateCorrelationId(): string {
     return `kc_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
