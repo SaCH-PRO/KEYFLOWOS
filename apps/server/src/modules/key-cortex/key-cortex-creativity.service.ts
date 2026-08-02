@@ -30,7 +30,12 @@ import { AiUsageService } from '../ai/ai-usage.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { KeyCortexContextV2Service } from './key-cortex-context-v2.service';
 import { KeyCortexInsightService } from './key-cortex-insight.service';
-import { v4 as uuidv4 } from 'uuid';
+// node:crypto, not the `uuid` package: uuid@14 is ESM-only, this server
+// compiles to CommonJS, and Node <20.19 cannot require() ESM — so importing
+// it crashed `node dist/main.js` with ERR_REQUIRE_ESM before NestFactory ran.
+// randomUUID returns a v4 UUID string, and every call site here is a bare
+// uuidv4() with no arguments, so this is a true drop-in.
+import { randomUUID as uuidv4 } from 'node:crypto';
 
 /* ─────────────────────────── Type Definitions ─────────────────────────── */
 

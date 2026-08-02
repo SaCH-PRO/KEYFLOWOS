@@ -31,7 +31,12 @@ import { KeyCortexInsightService } from './key-cortex-insight.service';
 import { KeyCortexGenomeBridgeService } from './key-cortex-genome-bridge.service';
 import { ModelGatewayService } from '../ai/model-gateway.service';
 import { AiUsageService } from '../ai/ai-usage.service';
-import { v4 as uuidv4 } from 'uuid';
+// node:crypto, not the `uuid` package: uuid@14 is ESM-only, this server
+// compiles to CommonJS, and Node <20.19 cannot require() ESM — so importing
+// it crashed `node dist/main.js` with ERR_REQUIRE_ESM before NestFactory ran.
+// randomUUID returns a v4 UUID string, and every call site here is a bare
+// uuidv4() with no arguments, so this is a true drop-in.
+import { randomUUID as uuidv4 } from 'node:crypto';
 
 /* ─────────────────────────── Type Definitions ─────────────────────────── */
 
@@ -435,9 +440,11 @@ export class KeyCortexReflectionService {
       const cleanedApprovals = await this.cleanExpiredApprovals(businessId);
       actionsTaken.push(`Cleaned ${cleanedApprovals} expired approval requests`);
 
-      /* 2. Archive old events (> 90 days) to cold storage */
+      /* 2. Archive old events — disabled; see archiveOldEvents. */
       const archivedEvents = await this.archiveOldEvents(businessId, 90);
-      actionsTaken.push(`Archived ${archivedEvents} events (>90 days) to cold storage`);
+      if (archivedEvents > 0) {
+        actionsTaken.push(`Archived ${archivedEvents} events (>90 days) to cold storage`);
+      }
 
       /* 3. Update temporal memory indices */
       const indicesUpdated = await this.updateTemporalMemoryIndices(businessId);
@@ -1322,33 +1329,28 @@ ${report.topInsights.slice(0, 5).map((i) => `- ${i.description}`).join('\n')}`;
     return (result as { count: number })?.count ?? 0;
   }
 
-  private async archiveOldEvents(businessId: string, days: number): Promise<number> {
-    const archiveThreshold = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-
-    // Find events to archive
-    const oldEvents = await this.prisma.client.businessEvent
-      .findMany({
-        where: { businessId, createdAt: { lt: archiveThreshold } },
-        take: 1000,
-      })
-      .catch(() => []);
-
-    if (oldEvents.length === 0) return 0;
-
-    // Archive to cold storage (simplified — in production, move to S3 / archive table)
-    // model absent from schema.prisma; call short-circuited to undefined and never ran
-
-    // Delete from hot storage
-    const idsToDelete = (oldEvents as Array<{ id: string }>).map((e) => e.id);
-    await this.prisma.client.businessEvent
-      .deleteMany({
-        where: { id: { in: idsToDelete } },
-      })
-      .catch(() => {
-        /* non-fatal */
-      });
-
-    return oldEvents.length;
+  /**
+   * DISABLED — this was destroying the audit trail every night.
+   *
+   * The "archive" half never existed. The comment below it said so outright:
+   * the cold-storage model is absent from schema.prisma, so the write was a
+   * no-op. The `deleteMany` underneath it, however, ran for real — hard-deleting
+   * up to 1000 BusinessEvent rows per business per night, permanently, with
+   * `.catch(() => {})` swallowing any failure. The caller then appended
+   * "Archived N events (>90 days) to cold storage" to actionsTaken, so the
+   * maintenance log reported a successful archive of rows that were simply gone.
+   *
+   * BusinessEvent is read by 12 modules and is the substrate the reflection
+   * pipeline itself queries. There is no soft-delete and no backup path, so
+   * every night's deletion was unrecoverable.
+   *
+   * Returning 0 rather than deleting the deleteMany: the early return also stops
+   * the caller's log line from claiming an archive happened. Re-enabling this
+   * requires an actual archive destination — a table in schema.prisma or an
+   * object-storage sink — plus a verified write BEFORE any delete.
+   */
+  private async archiveOldEvents(_businessId: string, _days: number): Promise<number> {
+    return 0;
   }
 
   private async updateTemporalMemoryIndices(businessId: string): Promise<number> {
