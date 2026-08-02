@@ -22,7 +22,22 @@ services:
       pnpm --filter server build &&
       pnpm --filter web build
     startCommand: bash scripts/start-prod.sh
-    healthCheckPath: /auth/login
+    # /healthz, not /auth/login.
+    #
+    # scripts/start-prod.sh binds the API to the platform $PORT (the web app
+    # gets 5000), so Render probes the API. /auth/login is a Next.js PAGE, not
+    # an API route — the API returns 404 for it. Verified against a running
+    # server: /auth/login -> 404, /healthz -> 200.
+    #
+    # A health check that can never pass means every deploy is marked unhealthy
+    # and rolled back, no matter how good the build is.
+    #
+    # /healthz is the purpose-built liveness probe (app.controller.ts); it
+    # bypasses auth and rate limiting and returns 200 while the process is
+    # alive. Deliberately NOT /readyz, which returns 503 when the database is
+    # unreachable — that is right for a load balancer, but as a deploy gate it
+    # would roll back a perfectly good release during a transient DB blip.
+    healthCheckPath: /healthz
     envVars:
       - key: NODE_ENV
         value: production
