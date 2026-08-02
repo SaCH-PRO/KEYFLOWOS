@@ -33,6 +33,12 @@ async function runMain(value: string): Promise<{ code: number | null; stderr: st
       KEYFLOW_DEV_AUTH_BYPASS: value,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
+    // Node 18.20+/20.12+ refuse to spawn .CMD/.BAT shims without a shell
+    // (the CVE-2024-27980 fix), so this threw EINVAL on Windows and BOTH
+    // assertions were skipped — leaving a security boot guard unverified on
+    // the platform it was being run on. Windows-only: enabling the shell
+    // elsewhere would change argument quoting for no benefit.
+    shell: IS_WINDOWS,
   });
 
   let stderr = '';
