@@ -104,6 +104,45 @@ describe('conscious stream route', () => {
   });
 });
 
+describe('every SSE route in the controller', () => {
+  /**
+   * Nest's @Sse registers RequestMethod.GET (sse.decorator.js). A GET carries no
+   * body, so an @Sse route with @Body() is uncallable by any standard client:
+   * a POST 404s and a GET arrives with an empty body, tripping the handler's own
+   * guard clause. `chat/stream` shipped that way and was dead in both directions
+   * while its JSDoc documented it as a POST.
+   */
+  const routes = [...controller.matchAll(/@Sse\('([^']+)'\)/g)].map((m) => {
+    const after = controller.slice(m.index! + m[0].length);
+    return { path: m[1], signature: after.slice(0, after.indexOf('{')) };
+  });
+
+  it('finds the SSE routes', () => {
+    expect(routes.length).toBeGreaterThanOrEqual(3);
+    expect(routes.map((r) => r.path)).toContain('conscious/stream');
+    expect(routes.map((r) => r.path)).toContain('chat/stream');
+  });
+
+  it('takes NO parameters from the request body', () => {
+    const offenders = routes.filter((r) => r.signature.includes('@Body(')).map((r) => r.path);
+    expect(offenders).toEqual([]);
+  });
+
+  it('is never documented as a POST', () => {
+    // The JSDoc claiming "POST /api/v1/cortex/chat/stream" is what kept this
+    // undetected: readers trusted the comment over the decorator.
+    for (const { path } of routes) {
+      const at = controller.indexOf(`@Sse('${path}')`);
+      const doc = controller.slice(Math.max(0, at - 900), at);
+      const lastComment = doc.lastIndexOf('/**');
+      if (lastComment === -1) continue;
+      expect(doc.slice(lastComment)).not.toMatch(
+        new RegExp(`POST\\s+\\S*${path.replace(/\//g, '\\/')}`),
+      );
+    }
+  });
+});
+
 describe('phase emission', () => {
   it('declares exactly as many phases as it emits', () => {
     // Derived, not hardcoded: the UI renders "n/of" from the declared total, so

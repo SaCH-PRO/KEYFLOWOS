@@ -917,33 +917,54 @@ export class KeyCortexController {
   }
 
   /**
-   * POST /api/v1/cortex/chat/stream
+   * GET /api/v1/cortex/chat/stream
    * SSE streaming chat -- returns a reactive stream of CortexStreamChunks.
+   *
+   * This route was previously documented and written as a POST taking @Body().
+   * It could never have worked: Nest's @Sse registers RequestMethod.GET (see
+   * @nestjs/common/decorators/http/sse.decorator.js), so a POST 404'd, and a GET
+   * carries no body, so @Body() arrived empty and the guard clause below threw
+   * 400 on every request. It was dead in both directions.
+   *
+   * Parameters therefore come from the query string, matching the sibling
+   * `stream` and `conscious/stream` routes. Only the scalar fields are accepted:
+   * the object-valued fields on ChatQueryDto (persona, attachments) have no
+   * sensible query-string encoding, and callers needing those should use the
+   * non-streaming POST /chat.
    */
   @Sse('chat/stream')
-  async streamChat(
-    @Body() query: ChatQueryDto,
-  ): Promise<Observable<CortexStreamChunk>> {
-    if (!query.text?.trim()) {
-      throw new BadRequestException('Query text is required');
+  streamChat(
+    @Query('businessId') businessId: string,
+    @Query('text') text: string,
+    @Query('userId') userId?: string,
+    @Query('sessionId') sessionId?: string,
+  ): Observable<CortexStreamChunk> {
+    if (!text?.trim()) {
+      throw new BadRequestException('text query parameter is required');
     }
-    if (!query.businessId) {
-      throw new BadRequestException('businessId is required');
+    if (!businessId) {
+      throw new BadRequestException('businessId query parameter is required');
     }
 
     const subject = new Subject<CortexStreamChunk>();
 
     // Run the async generator in a background micro-task so the
     // SSE connection is established immediately.
-    (async () => {
+    void (async () => {
       try {
-        const stream = this.reasoning.streamQuery(query as any);
+        const stream = this.reasoning.streamQuery({
+          text,
+          businessId,
+          userId,
+          sessionId,
+        } as unknown as CortexQuery);
         for await (const chunk of stream) {
           subject.next(chunk);
         }
         subject.complete();
-      } catch (err: any) {
-        this.logger.error(`Stream error: ${err.message}`, err.stack);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'Unknown error';
+        this.logger.error(`Stream error: ${message}`);
         subject.error(err);
       }
     })();
