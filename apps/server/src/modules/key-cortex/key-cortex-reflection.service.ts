@@ -109,6 +109,19 @@ export interface WeeklyInsightReport {
   dnaProposals: string[];
 }
 
+/* ─────────────────────────── Persistence ─────────────────────────── */
+
+/**
+ * Discriminators for records this layer stores in KeyCortexMemory.
+ *
+ * That model is reused deliberately: it already carries a `type`, a free-form
+ * `value`, a confidence and the right indexes, so the learning loop became
+ * durable without a schema migration. Adding tables to a production database
+ * is the owner's decision, not a side effect of fixing a no-op.
+ */
+const MEMORY_TYPE_SESSION = 'reflection_session';
+const MEMORY_TYPE_HYPOTHESIS = 'dream_hypothesis';
+
 /* ─────────────────────────── Service ─────────────────────────── */
 
 @Injectable()
@@ -168,11 +181,52 @@ export class KeyCortexReflectionService {
   }
 
   /**
-   * Most recent completed session for a business, or null if none has run in
-   * this process. Sessions are not persisted, so this is in-memory by design.
+   * Most recent completed session for a business.
+   *
+   * Reads through to storage on a miss. Sessions used to be in-memory only, so
+   * this returned null after every restart and the consciousness layer that
+   * consumes it saw a KEY with no recollection of ever having reflected.
    */
   async getLastReflectionSession(businessId: string): Promise<ReflectionSession | null> {
-    return this.lastSessions.get(businessId) ?? null;
+    const cached = this.lastSessions.get(businessId);
+    if (cached) return cached;
+
+    try {
+      const row = await this.prisma.client.keyCortexMemory.findFirst({
+        where: { businessId, type: MEMORY_TYPE_SESSION },
+        select: { key: true, value: true, createdAt: true },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (!row) return null;
+
+      const parsed = JSON.parse(row.value) as {
+        type?: string;
+        startedAt?: string;
+        durationMs?: number;
+        insights?: ReflectionInsight[];
+        actionsTaken?: string[];
+        metadata?: Record<string, unknown>;
+      };
+
+      const session: ReflectionSession = {
+        id: row.key,
+        type: (parsed.type ?? 'reflection') as ReflectionSessionType,
+        startedAt: parsed.startedAt ? new Date(parsed.startedAt) : row.createdAt,
+        durationMs: parsed.durationMs ?? 0,
+        insights: parsed.insights ?? [],
+        actionsTaken: parsed.actionsTaken ?? [],
+        businessId,
+        metadata: parsed.metadata,
+      };
+      this.lastSessions.set(businessId, session);
+      return session;
+    } catch (error: unknown) {
+      this.logger.debug(
+        `[Reflection] Could not load last session: ` +
+          `${error instanceof Error ? error.message : 'unknown'}`,
+      );
+      return null;
+    }
   }
 
   async runReflection(businessId: string): Promise<ReflectionSession> {
@@ -1154,28 +1208,66 @@ Return JSON array:
      PRIVATE HELPERS — Synthesis Pipeline
      ═══════════════════════════════════════════════════════════════ */
 
+  /**
+   * Read back the week's reflection cycles.
+   *
+   * This returned a hardcoded empty array, so weekly synthesis consolidated
+   * zero sessions forever while logging that it had consolidated them. It now
+   * reads what persistSession actually wrote.
+   */
   private async getWeeklySessions(
     businessId: string,
     weekStart: Date,
     weekEnd: Date,
   ): Promise<ReflectionSession[]> {
-    const sessions: ReflectionSession[] = [];
-
-    // Query from database
-    const dbSessions: Array<Record<string, unknown>> = []; // persistence not implemented (model absent from schema)
-
-    if (dbSessions) {
-      sessions.push(
-        ...(dbSessions as Array<Record<string, unknown>>).map((s) => ({
-          id: s.id as string,
-          type: s.type as ReflectionSessionType,
-          startedAt: s.startedAt as Date,
-          durationMs: s.durationMs as number,
-          insights: (s.insights as ReflectionInsight[]) ?? [],
-          actionsTaken: (s.actionsTaken as string[]) ?? [],
-          businessId: s.businessId as string,
-        })),
+    let rows: Array<{ key: string; value: string; createdAt: Date }>;
+    try {
+      rows = await this.prisma.client.keyCortexMemory.findMany({
+        where: {
+          businessId,
+          type: MEMORY_TYPE_SESSION,
+          createdAt: { gte: weekStart, lte: weekEnd },
+        },
+        select: { key: true, value: true, createdAt: true },
+        orderBy: { createdAt: 'asc' },
+        // Bounded: a busy business runs a reflection every 30 minutes, so a
+        // week is ~336 cycles. This ceiling keeps a pathological case from
+        // pulling an unbounded set into memory during a scheduled job.
+        take: 500,
+      });
+    } catch (error: unknown) {
+      this.logger.warn(
+        `[Synthesis] Could not read weekly sessions: ` +
+          `${error instanceof Error ? error.message : 'unknown'}`,
       );
+      return [];
+    }
+
+    const sessions: ReflectionSession[] = [];
+    for (const row of rows) {
+      // One malformed row must not lose the whole week.
+      try {
+        const parsed = JSON.parse(row.value) as {
+          type?: string;
+          startedAt?: string;
+          durationMs?: number;
+          insights?: ReflectionInsight[];
+          actionsTaken?: string[];
+          metadata?: Record<string, unknown>;
+        };
+        sessions.push({
+          id: row.key,
+          type: (parsed.type ?? 'reflection') as ReflectionSessionType,
+          startedAt: parsed.startedAt ? new Date(parsed.startedAt) : row.createdAt,
+          durationMs: parsed.durationMs ?? 0,
+          insights: parsed.insights ?? [],
+          actionsTaken: parsed.actionsTaken ?? [],
+          businessId,
+          metadata: parsed.metadata,
+        });
+      } catch {
+        this.logger.debug(`[Synthesis] Skipping unparseable session ${row.key}`);
+      }
     }
 
     return sessions;
@@ -1407,12 +1499,111 @@ ${report.topInsights.slice(0, 5).map((i) => `- ${i.description}`).join('\n')}`;
      PRIVATE HELPERS — Persistence & Discovery
      ═══════════════════════════════════════════════════════════════ */
 
+  /**
+   * Persist a completed reflection cycle.
+   *
+   * This was a no-op, and that made the entire learning layer decorative: every
+   * reflection, dream and synthesis died with the process, so weekly synthesis
+   * consolidated nothing and KEY could not learn across a restart. A cognition
+   * system that cannot remember what it concluded is a very expensive logger.
+   *
+   * Stored in KeyCortexMemory rather than a bespoke table. That model already
+   * exists with exactly the shape needed — a `type` discriminator, a free-form
+   * `value`, a confidence, and indexes on (businessId, type) and
+   * (businessId, createdAt) — so this needs NO schema migration. Adding tables
+   * to a production database is a decision for the owner, not a side effect of
+   * fixing a no-op.
+   *
+   * Failures are logged and swallowed: reflection is background cognition, and
+   * losing one session's record must not take down the cycle or its caller.
+   */
   private async persistSession(session: ReflectionSession): Promise<void> {
-    // persistence not implemented (model absent from schema); previously a no-op
+    try {
+      await this.prisma.client.keyCortexMemory.create({
+        data: {
+          businessId: session.businessId,
+          type: MEMORY_TYPE_SESSION,
+          key: session.id,
+          value: JSON.stringify({
+            id: session.id,
+            type: session.type,
+            startedAt: session.startedAt.toISOString(),
+            durationMs: session.durationMs,
+            insights: session.insights,
+            actionsTaken: session.actionsTaken,
+            metadata: session.metadata,
+          }),
+          source: session.type,
+          // Sessions are observations of what happened, not inferences about
+          // it, so they are recorded at full confidence. The per-insight
+          // confidences inside the payload carry the real uncertainty.
+          confidence: 1,
+        },
+      });
+    } catch (error: unknown) {
+      this.logger.warn(
+        `[Reflection] Could not persist session ${session.id}: ` +
+          `${error instanceof Error ? error.message : 'unknown'}`,
+      );
+    }
   }
 
+  /**
+   * Persist a dream hypothesis, or update it in place once validated.
+   *
+   * Upserted on (businessId, type, key) semantics via a find-then-write: a
+   * hypothesis that gets confirmed or rejected later must REPLACE its earlier
+   * record, not accumulate duplicates that would each be counted again by the
+   * weekly report.
+   */
   private async persistHypothesisUpdate(hypothesis: DreamHypothesis): Promise<void> {
-    // persistence not implemented (model absent from schema); previously a no-op
+    try {
+      const value = JSON.stringify({
+        id: hypothesis.id,
+        description: hypothesis.description,
+        sources: hypothesis.sources,
+        creativityScore: hypothesis.creativityScore,
+        status: hypothesis.status,
+        createdAt: hypothesis.createdAt.toISOString(),
+        validatedAt: hypothesis.validatedAt?.toISOString(),
+        evidenceFor: hypothesis.evidenceFor,
+        evidenceAgainst: hypothesis.evidenceAgainst,
+        parentDreamId: hypothesis.parentDreamId,
+      });
+
+      const existing = await this.prisma.client.keyCortexMemory.findFirst({
+        where: {
+          businessId: hypothesis.businessId,
+          type: MEMORY_TYPE_HYPOTHESIS,
+          key: hypothesis.id,
+        },
+        select: { id: true },
+      });
+
+      if (existing) {
+        await this.prisma.client.keyCortexMemory.update({
+          where: { id: existing.id },
+          data: { value, confidence: hypothesis.confidence },
+        });
+        return;
+      }
+
+      await this.prisma.client.keyCortexMemory.create({
+        data: {
+          businessId: hypothesis.businessId,
+          type: MEMORY_TYPE_HYPOTHESIS,
+          key: hypothesis.id,
+          value,
+          source: 'dream',
+          confidence: hypothesis.confidence,
+        },
+      });
+    } catch (error: unknown) {
+      this.logger.warn(
+        `[Reflection] Could not persist hypothesis ${hypothesis.id}: ` +
+          `${error instanceof Error ? error.message : 'unknown'}`,
+      );
+    }
   }
 
   private async findIdleBusinesses(): Promise<string[]> {
