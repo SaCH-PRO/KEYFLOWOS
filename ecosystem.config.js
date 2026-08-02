@@ -3,8 +3,16 @@ module.exports = {
     {
       name: "keyflow-api",
       cwd: "./apps/server",
+      // Compiled output, not tsx. tsx does not emit `design:paramtypes`, so
+      // NestJS type-based dependency injection fails: `tsx src/main.ts`
+      // produces 64 "undefined dependency" errors, maps 0 routes and exits
+      // non-zero. This holds regardless of NODE_ENV.
+      //
+      // Every script in apps/server/package.json (dev, start, start:prod)
+      // already runs `node dist/main.js`; this file was the outlier. Run
+      // `pnpm --filter server build` before starting.
       script: "node",
-      args: "--import tsx src/main.ts",
+      args: "dist/main.js",
       env: {
         NODE_ENV: "development",
       },

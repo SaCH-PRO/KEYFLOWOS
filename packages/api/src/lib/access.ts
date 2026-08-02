@@ -1,6 +1,23 @@
+import type { Business } from '@prisma/client';
 import { AppContext } from '../trpc';
 
-export async function assertBusinessAccess(ctx: AppContext, businessId: string) {
+/**
+ * The return type is annotated rather than inferred.
+ *
+ * `ctx.db` is a PrismaClient with several chained `$extends`, so the inferred
+ * result of findFirst can only be named by pointing at
+ * `packages/db/node_modules/@prisma/client/runtime/library` — a path that does
+ * not exist for consumers of this package. tsc rejects that with TS2742
+ * ("cannot be named without a reference to ... This is likely not portable"),
+ * which broke `pnpm --filter @keyflow/api build` and therefore any deployment
+ * that builds the workspace.
+ *
+ * `Business` is the model type and is what callers actually use.
+ */
+export async function assertBusinessAccess(
+  ctx: AppContext,
+  businessId: string,
+): Promise<Business> {
   if (!ctx.user?.id) {
     throw new Error('Unauthorized');
   }

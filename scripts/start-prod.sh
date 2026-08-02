@@ -7,10 +7,18 @@
 # correctly observes a crash and re-rolls the deployment, instead of
 # leaving a half-broken stack running because one process is still up.
 #
-# We intentionally use `tsx src/main.ts` for the server (matching dev)
-# because the server's workspace deps (`@keyflow/db`, `@keyflow/api`)
-# export TypeScript source — `node dist/...` cannot resolve them.
-# See AUDIT_REPORT.md §9.
+# The server runs its COMPILED output, not tsx.
+#
+# tsx does not emit `design:paramtypes`, which NestJS needs for type-based
+# dependency injection. Running `tsx src/main.ts` produces 64 "Nest encountered
+# an undefined dependency" errors, maps 0 routes and exits non-zero — verified
+# directly. Every deploy through this script was starting a server that could
+# not come up.
+#
+# The comment this replaces said `node dist/...` could not resolve the
+# workspace deps because they export TypeScript source. That is no longer true:
+# @keyflow/db, @keyflow/shared and @keyflow/api all point their `main` at
+# built JS under dist/. `node dist/main.js` boots and maps 2104 routes.
 
 set -euo pipefail
 
@@ -41,10 +49,18 @@ fi
 export GIT_COMMIT
 echo "[start-prod] release version GIT_COMMIT=${GIT_COMMIT:0:12}"
 
+# The build must have run. Without this the script would exec a missing file and
+# the failure would surface as a confusing MODULE_NOT_FOUND rather than "you did
+# not build".
+if [ ! -f apps/server/dist/main.js ]; then
+  echo "[start-prod] FATAL: apps/server/dist/main.js not found — run the build step first" >&2
+  exit 1
+fi
+
 # --- start the API in the background, prefixed-line logged --------------------
 (
   cd apps/server
-  exec pnpm exec tsx src/main.ts 2>&1 | sed -u "s/^/${LOG_PREFIX_API} /"
+  exec node dist/main.js 2>&1 | sed -u "s/^/${LOG_PREFIX_API} /"
 ) &
 API_PID=$!
 

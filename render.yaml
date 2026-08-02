@@ -5,7 +5,22 @@ services:
     region: ohio
     plan: standard
     branch: main
-    buildCommand: npm install -g pnpm@9.15.0 && pnpm install
+    # The build actually has to build. This previously ran `pnpm install` only,
+    # which is why the start command had to use tsx — there was no compiled
+    # output to run. tsx cannot start this server (it does not emit
+    # design:paramtypes, so NestJS dependency injection fails), so the deploy
+    # was broken either way.
+    #
+    # Order matters: workspace packages first (the server imports @keyflow/db,
+    # @keyflow/shared and @keyflow/api by their built entrypoints), then the
+    # Prisma client, then the apps.
+    buildCommand: >-
+      npm install -g pnpm@9.15.0 &&
+      pnpm install --frozen-lockfile &&
+      pnpm --filter @keyflow/shared --filter @keyflow/db --filter @keyflow/api build &&
+      pnpm --filter @keyflow/db run db:generate &&
+      pnpm --filter server build &&
+      pnpm --filter web build
     startCommand: bash scripts/start-prod.sh
     healthCheckPath: /auth/login
     envVars:
