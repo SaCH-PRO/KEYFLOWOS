@@ -4,7 +4,6 @@ import {
   Inject,
   Optional,
   ServiceUnavailableException,
-  type OnModuleInit,
 } from '@nestjs/common';
 import {
   ModelGatewayService,
@@ -77,7 +76,7 @@ import type { MemoryFragment } from './unified-memory.types';
  * KeyCortexReasoningService orchestrator.
  */
 @Injectable()
-export class KeyCortexQueryPipelineService implements OnModuleInit {
+export class KeyCortexQueryPipelineService {
   private readonly logger = new Logger(KeyCortexQueryPipelineService.name);
 
   private readonly MAX_CONTEXT_TOKENS: number;
@@ -155,23 +154,6 @@ export class KeyCortexQueryPipelineService implements OnModuleInit {
       process.env.KEY_CORTEX_MAX_CONTEXT_TOKENS ?? '8000',
       10,
     );
-  }
-
-  /**
-   * The lens is injected @Optional(), so a missing provider would not fail
-   * startup — every answer would just quietly ship without the evidence
-   * discipline, which is exactly the failure this is meant to prevent. It is
-   * registered in KeyCortexModule today, so this is a regression alarm rather
-   * than a hard failure: throwing here would take down the whole module for a
-   * degradation that is otherwise survivable.
-   */
-  onModuleInit(): void {
-    if (!this.expertiseLens) {
-      this.logger.warn(
-        'KeyCortexExpertiseLensService is not available — responses will ship WITHOUT ' +
-          'the evidence discipline. Check that it is registered in KeyCortexModule providers.',
-      );
-    }
   }
 
   async processQuery(
@@ -1258,34 +1240,6 @@ export class KeyCortexQueryPipelineService implements OnModuleInit {
           contextSnapshot,
         );
       }
-
-      // Expertise lens: same framing the non-streaming path applies. This is the
-      // path the chat UI actually uses, so without it no user-facing answer would
-      // carry the evidence discipline. Appended to systemPrompt *before* the
-      // RESPONSE FORMAT check below, so ordering matches processQuery and the
-      // structured-output instructions still come last. Failure is non-blocking.
-      let lensLabel: string | undefined;
-      try {
-        if (this.expertiseLens) {
-          const selection = await this.expertiseLens.select(
-            query.text,
-            query.businessId,
-          );
-          systemPrompt += `\n\n${this.expertiseLens.buildPromptFraming(selection)}`;
-          lensLabel = selection.lens.label;
-        }
-      } catch (err) {
-        this.logger.debug(
-          `[streamQuery][${correlationId}] Expertise lens skipped: ${(err as Error).message}`,
-        );
-      }
-
-      await this.logEvent(correlationId, 'STEP_7_BUILD_PROMPT', {
-        promptLength: systemPrompt.length,
-        genomeEnriched: flags.genomeV3Enabled && !!genomeContext,
-        expertiseLens: lensLabel,
-        streaming: true,
-      });
 
       const taskCategory = routeDecision.taskCategory;
       const structuredInstructions =
