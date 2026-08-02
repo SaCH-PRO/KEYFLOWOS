@@ -797,6 +797,18 @@ export interface ConsciousResponse {
   /** Proposed actions the user can take. */
   actions: ProposedAction[];
 
+  /**
+   * Alternative framings of the problem, produced only when calibrated
+   * confidence fell below the lateral-thinking threshold.
+   *
+   * Present so the caller can surface them: computing reframes and discarding
+   * them would spend a model call to change nothing.
+   */
+  reframes?: Array<{
+    reframe: string;
+    reframeDescription: string;
+  }>;
+
   /** Observability and cost metadata. */
   meta: ConsciousResponseMeta;
 }

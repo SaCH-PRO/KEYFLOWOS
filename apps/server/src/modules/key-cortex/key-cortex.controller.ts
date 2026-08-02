@@ -161,18 +161,54 @@ class UpdateSessionDto {
   status?: CortexSessionStatus;
 }
 
-class ChatQueryDto implements CortexQuery {
+export class ChatQueryDto implements CortexQuery {
+  @IsString()
   text: string;
+
+  @IsOptional()
+  @IsString()
   sessionId?: string;
+
+  @IsString()
   businessId: string;
+
+  @IsString()
   userId: string;
+
+  // @Allow() rather than @IsObject()/@IsIn(): these carry union and structured
+  // shapes validated downstream. @Allow contributes the metadata that keeps
+  // whitelist:true from deleting them, without asserting a shape here that
+  // would reject legitimate payloads.
+  @IsOptional()
+  @Allow()
   persona?: CortexPersona;
+
+  @IsOptional()
+  @Allow()
   voice?: CortexVoice;
+
+  @IsOptional()
+  @Allow()
   provider?: CortexProvider;
+
+  @IsOptional()
+  @Allow()
   mood?: CortexMood;
+
+  @IsOptional()
+  @IsBoolean()
   stream?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
   enableActions?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
   enableVoice?: boolean;
+
+  @IsOptional()
+  @IsArray()
   attachments?: Array<{
     type: 'image' | 'document' | 'audio' | 'spreadsheet';
     url: string;
@@ -181,12 +217,28 @@ class ChatQueryDto implements CortexQuery {
   }>;
 }
 
-class VoiceSpeakDto implements CortexVoiceRequest {
+export class VoiceSpeakDto implements CortexVoiceRequest {
+  @IsString()
   text: string;
+
+  @IsOptional()
+  @Allow()
   voice?: CortexVoice;
+
+  @IsOptional()
+  @IsIn(['mp3', 'opus', 'aac', 'flac', 'wav'])
   format?: 'mp3' | 'opus' | 'aac' | 'flac' | 'wav';
+
+  @IsOptional()
+  @IsNumber()
   speed?: number;
+
+  @IsOptional()
+  @Allow()
   persona?: CortexPersona;
+
+  @IsOptional()
+  @IsString()
   instructions?: string;
 }
 
@@ -372,8 +424,9 @@ class ToggleMonitorDto {
 }
 
 /** Batch execution */
-class ExecuteBatchDto {
+export class ExecuteBatchDto {
   /** Either natural language commands or structured commands */
+  @IsArray()
   commands: Array<
     | { type: 'natural'; command: string }
     | {
@@ -427,13 +480,20 @@ class SandboxGenerateDto {
   context?: Record<string, unknown>;
 }
 
-class ConsciousChatDto {
+export class ConsciousChatDto {
   @IsString()
   text: string;
+
   @IsString()
   businessId: string;
+
+  // Optional: AuthGuard already establishes who the caller is, and the session
+  // is created without it. Requiring it here would 400 every client that does
+  // not happen to know its own user id — including this repo's own web hook.
+  @IsOptional()
   @IsString()
-  userId: string;
+  userId?: string;
+
   @IsOptional()
   @IsString()
   sessionId?: string;

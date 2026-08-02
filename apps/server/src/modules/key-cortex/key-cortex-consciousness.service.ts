@@ -125,7 +125,17 @@ export type ConsciousPhaseListener = (event: ConsciousPhaseEvent) => void;
  * steps 10 and 11 — logging and self-model update — are bookkeeping rather than
  * cognition and are folded into one trailing 'consolidate' phase.
  */
-export const TOTAL_CONSCIOUS_PHASES = 11;
+export const TOTAL_CONSCIOUS_PHASES = 12;
+
+/**
+ * Calibrated confidence below which KEY questions the framing of the problem
+ * rather than only its answer.
+ *
+ * Above this, the conventional reasoning chains agree well enough that a
+ * lateral reframe costs a model call to add noise. Below it, the framing is
+ * plausibly the thing that is wrong.
+ */
+export const LATERAL_THINKING_THRESHOLD = 0.6;
 
 /**
  * UnifiedConsciousnessOrchestrator — The Mind of KEY.
@@ -413,6 +423,55 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
         raw: reasoningResult.bestChain.confidence,
         calibrated: calibratedConfidence.confidence,
       });
+
+      // ═══════════════════════════════════════════════════════════
+      // STEP 6b: Lateral Reframing (LAYER 6) — CONDITIONAL
+      //
+      // The creativity organ had zero call sites anywhere in the server. It is
+      // wired here rather than into every query on purpose: lateral reframing
+      // costs a model call, and when the conventional chains already agree at
+      // high confidence, a reframe adds latency and noise instead of insight.
+      // Low calibrated confidence is precisely the case where the framing of
+      // the problem is the thing worth questioning.
+      // ═══════════════════════════════════════════════════════════
+      const step6bStart = Date.now();
+      let reframes: Awaited<
+        ReturnType<KeyCortexCreativityService['lateralThinking']>
+      > = [];
+      const needsReframe =
+        calibratedConfidence.confidence < LATERAL_THINKING_THRESHOLD;
+
+      if (needsReframe) {
+        try {
+          reframes = await this.creativity.lateralThinking(query, session.businessId);
+        } catch (error: unknown) {
+          // Creativity is an enhancement, never a dependency. A failure here
+          // must degrade the answer, not prevent it.
+          this.logger.debug(
+            `[Consciousness][S6b] Lateral thinking unavailable: ` +
+              `${error instanceof Error ? error.message : 'unknown'}`,
+          );
+        }
+      }
+      timing.creativityMs = Date.now() - step6bStart;
+
+      // Emitted whether or not it ran. A phase that appears only sometimes
+      // would make the declared total wrong and leave the progress counter
+      // stuck at n-1; saying "skipped, and why" is both honest and fixed-width.
+      emit('creativity', 'Reframing the problem', timing.creativityMs, {
+        skipped: !needsReframe,
+        reframes: reframes.length,
+        confidence: calibratedConfidence.confidence,
+        threshold: LATERAL_THINKING_THRESHOLD,
+      });
+      this.logger.debug(
+        needsReframe
+          ? `[Consciousness][S6b] ${reframes.length} reframes generated ` +
+              `(confidence ${Math.round(calibratedConfidence.confidence * 100)}% ` +
+              `below threshold, ${timing.creativityMs}ms)`
+          : `[Consciousness][S6b] Skipped — confidence ` +
+              `${Math.round(calibratedConfidence.confidence * 100)}% is sufficient`,
+      );
       this.logger.debug(
         `[Consciousness][S6] Confidence calibrated: ` +
           `raw=${Math.round(reasoningResult.bestChain.confidence * 100)}% ` +
@@ -476,6 +535,15 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
         calibratedConfidence,
         emotionalResponse,
       );
+      // Attach the reframes so the caller can offer them. Producing them and
+      // then dropping them would spend a model call to change nothing.
+      if (reframes.length > 0) {
+        response.reframes = reframes.map((r) => ({
+          reframe: r.reframe,
+          reframeDescription: r.reframeDescription,
+        }));
+      }
+
       timing.synthesisMs = Date.now() - step9Start;
       emit('synthesis', 'Composing the answer', timing.synthesisMs, {
         chars: response.text.length,

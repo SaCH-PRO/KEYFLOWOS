@@ -98,20 +98,80 @@ describe('cortex DTO validation under the global ValidationPipe', () => {
 });
 
 describe('the real cortex controller DTOs', () => {
-  it('every DTO class in the controller carries validator metadata', async () => {
+  const VALIDATORS =
+    /@(IsString|IsNumber|IsBoolean|IsObject|IsArray|IsIn|IsEnum|IsInt|IsOptional|Allow)\(/;
+
+  /**
+   * Split the controller into DTO class blocks.
+   *
+   * `class \w+Dto\b`, NOT `class \w+Dto \{`. The earlier pattern required the
+   * brace to follow the name immediately, so it could not see
+   * `class ChatQueryDto implements CortexQuery {` — and both classes that use
+   * `implements` were entirely undecorated. They folded into the preceding
+   * block, which was decorated, so this suite passed while POST /cortex/chat
+   * 400'd on every request. The test asserted a property it could not observe.
+   */
+  async function dtoBlocks(): Promise<Array<{ name: string; body: string }>> {
     const { readFileSync } = await import('node:fs');
     const { join } = await import('node:path');
     const src = readFileSync(join(__dirname, 'key-cortex.controller.ts'), 'utf8');
 
-    // Each `class XDto {` must be followed by at least one decorator before its
-    // first field, otherwise whitelist:true will strip that DTO's body.
-    const blocks = src.split(/\n(?=(?:export )?class \w+Dto \{)/).slice(1);
-    expect(blocks.length).toBeGreaterThan(0);
+    return src
+      .split(/\n(?=(?:export )?class \w+Dto\b)/)
+      .slice(1)
+      .map((block) => ({
+        name: (block.match(/class (\w+Dto)\b/) ?? [])[1] ?? 'unknown',
+        // Stop at the class's closing brace so a later class's decorators are
+        // never mistaken for this one's.
+        body: block.slice(0, block.indexOf('\n}')),
+      }));
+  }
 
-    const undecorated = blocks
-      .filter((b) => !/@(IsString|IsNumber|IsBoolean|IsObject|IsArray|IsIn|IsOptional|Allow)\(/.test(b))
-      .map((b) => (b.match(/class (\w+Dto)/) ?? [])[1]);
+  it('sees the DTO classes declared with `implements`', async () => {
+    // Guard on the guard: if this regression is ever reintroduced, the two
+    // classes that triggered it must still be visible to the checks below.
+    const names = (await dtoBlocks()).map((b) => b.name);
+    expect(names).toContain('ChatQueryDto');
+    expect(names).toContain('VoiceSpeakDto');
+  });
+
+  it('every DTO class carries validator metadata', async () => {
+    const undecorated = (await dtoBlocks())
+      .filter((b) => !VALIDATORS.test(b.body))
+      .map((b) => b.name);
 
     expect(undecorated).toEqual([]);
+  });
+
+  it('every DECLARED PROPERTY carries metadata, not just one per class', async () => {
+    // whitelist:true strips per PROPERTY. ExecuteBatchDto.commands was the only
+    // undecorated field in an otherwise-decorated class, so POST /cortex/batch
+    // always 400'd with "commands array is required" while a class-level check
+    // reported the DTO as fine.
+    const offenders: string[] = [];
+
+    for (const { name, body } of await dtoBlocks()) {
+      const lines = body.split('\n');
+      let pendingDecorator = false;
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('@')) {
+          pendingDecorator ||= VALIDATORS.test(trimmed);
+          continue;
+        }
+        // A top-level property declaration: `name: type;` or `name?: type;`.
+        // Nested object-literal members are indented deeper and are skipped —
+        // whitelist only strips at the top level unless @ValidateNested is used.
+        const isProperty = /^ {2}(readonly )?\w+\??:/.test(line);
+        if (!isProperty) continue;
+
+        const property = (trimmed.match(/^(?:readonly )?(\w+)\??:/) ?? [])[1];
+        if (!pendingDecorator) offenders.push(`${name}.${property}`);
+        pendingDecorator = false;
+      }
+    }
+
+    expect(offenders).toEqual([]);
   });
 });
