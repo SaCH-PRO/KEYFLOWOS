@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { API_BASE, apiPost, apiPostSimple, apiPatch, apiPut, apiDelete, apiGet as apiGetSimple, getAuthHeaders, emitUnauthorizedEvent, type PlanLimitError } from "./api";
-import { refreshAccessToken, setStoredBusinessId } from "./workspace";
+import { refreshAccessToken, setStoredBusinessId, getStoredBusinessId } from "./workspace";
 import { DEFAULT_BUSINESS_ID, DEMO_MODE_ENABLED } from "./api/_defaults";
 
 
@@ -2146,11 +2146,15 @@ export async function setStaffAvailability(businessId: string, staffId: string, 
   });
 }
 
-export async function markInvoicePaid(invoiceId: string) {
-  return apiPost<Invoice>({
-    path: `/commerce/invoices/${encodeURIComponent(invoiceId)}/paid`,
-    body: {},
-  });
+export async function markInvoicePaid(invoiceId: string, businessId?: string) {
+  // PATCH, not POST: the server declares @Patch('invoices/:invoiceId/paid'),
+  // so every POST 404'd. And businessId must be in the BODY — BusinessGuard
+  // resolves the tenant from params/body/query, this route has no :businessId
+  // param, and the old empty body meant even a corrected verb would 403.
+  return apiPatch<Invoice>(
+    `/commerce/invoices/${encodeURIComponent(invoiceId)}/paid`,
+    { businessId: businessId ?? getStoredBusinessId() },
+  );
 }
 
 export async function recordInvoicePayment(businessId: string, invoiceId: string, input: {
@@ -2339,11 +2343,25 @@ export async function createInvoice(input: {
   });
 }
 
-export async function updateInvoiceStatus(invoiceId: string, status: "SENT" | "OVERDUE" | "VOID", options?: { dueDate?: string }) {
-  return apiPost<Invoice>({
-    path: `/commerce/invoices/${encodeURIComponent(invoiceId)}/status/${status.toLowerCase()}`,
-    body: options ?? {},
-  });
+export async function updateInvoiceStatus(
+  invoiceId: string,
+  status: "SENT" | "OVERDUE" | "VOID",
+  options?: { dueDate?: string; sentAt?: string; businessId?: string },
+) {
+  // Same two defects as markInvoicePaid: the server route is @Patch, and
+  // BusinessGuard needs businessId in the body. `status` is also sent in the
+  // body because UpdateInvoiceStatusDto declares it required — the handler
+  // reads it from the URL param, but validation runs first and rejected the
+  // body without it.
+  return apiPatch<Invoice>(
+    `/commerce/invoices/${encodeURIComponent(invoiceId)}/status/${status.toLowerCase()}`,
+    {
+      businessId: options?.businessId ?? getStoredBusinessId(),
+      status,
+      ...(options?.dueDate ? { dueDate: options.dueDate } : {}),
+      ...(options?.sentAt ? { sentAt: options.sentAt } : {}),
+    },
+  );
 }
 
 export async function deleteInvoice(businessId: string, invoiceId: string) {
@@ -2488,10 +2506,17 @@ export async function updateQuote(input: {
   );
 }
 
-export async function updateQuoteStatus(quoteId: string, status: "DRAFT" | "SENT" | "ACCEPTED" | "REJECTED") {
+export async function updateQuoteStatus(
+  quoteId: string,
+  status: "DRAFT" | "SENT" | "ACCEPTED" | "REJECTED",
+  businessId?: string,
+) {
+  // The verb was already right here; the empty body was not. BusinessGuard
+  // reads businessId from params/body/query and this route has no :businessId
+  // param, so every call 403'd.
   return apiPatch<Quote>(
     `/commerce/quotes/${encodeURIComponent(quoteId)}/status/${status.toLowerCase()}`,
-    {},
+    { businessId: businessId ?? getStoredBusinessId() },
   );
 }
 

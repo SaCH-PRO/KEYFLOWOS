@@ -31,13 +31,19 @@ export class CreateBookingDto {
   @IsNotEmpty()
   staffId!: string;
 
+  // NOT @Type(() => Date). class-transformer runs before class-validator, so
+  // @Type would hand isISO8601 a Date object — and isISO8601 is
+  // `typeof value === 'string' && ...`, so it rejected every payload. A valid
+  // ISO string came back as "startTime must be a valid ISO 8601 date string",
+  // meaning booking creation returned 400 unconditionally.
+  //
+  // The type stays `string` because that is what actually arrives and what the
+  // controller expects: bookings.controller.ts does `new Date(body.startTime)`.
   @IsISO8601()
-  @Type(() => Date)
-  startTime!: Date;
+  startTime!: string;
 
   @IsISO8601()
-  @Type(() => Date)
-  endTime!: Date;
+  endTime!: string;
 
   @IsString()
   @IsOptional()
