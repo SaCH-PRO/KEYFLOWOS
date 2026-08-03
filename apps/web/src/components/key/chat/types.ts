@@ -148,4 +148,19 @@ export interface KeyChatState {
   error?: string;
 }
 
-export type KeyChatMode = "general" | "genome_onboarding" | "executive" | "finance" | "sales" | "operations";
+/**
+ * Mirrors BusinessRole on the server (role-engine.service.ts), plus the
+ * client-only `genome_onboarding` mode. `support`, `marketing` and `operator`
+ * were missing here, which is why three of the eight server roles could not be
+ * selected from the UI at all.
+ */
+export type KeyChatMode =
+  | "general"
+  | "genome_onboarding"
+  | "executive"
+  | "finance"
+  | "sales"
+  | "operations"
+  | "support"
+  | "marketing"
+  | "operator";

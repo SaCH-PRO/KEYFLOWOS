@@ -357,7 +357,22 @@ export function useKeyChatActions() {
           sessionId: chat.activeSessionId,
           pageContext: chat.pageContext,
           attachments,
-          role: chatMode === "genome_onboarding" ? undefined : (chatMode as string),
+          // Send a role ONLY when the user picked a specific one.
+          //
+          // This used to send `chatMode ?? "general"`, and "general" is truthy,
+          // so the server's `role ?? inferRole(...)` always short-circuited —
+          // detectRoleFromContext never ran in production. Route, focused
+          // entity and conversation stickiness were all dead, and KEY was never
+          // Sales Key or Finance Key for anyone. The docked chat bubble, which
+          // is the chat most users touch, has no mode picker at all, so it was
+          // permanently pinned to general.
+          //
+          // "General" now means what its label says — general assistance,
+          // adapt to what I'm doing — rather than "force the generalist role".
+          role:
+            !chatMode || chatMode === "general" || chatMode === "genome_onboarding"
+              ? undefined
+              : (chatMode as string),
         },
         {
           onChunk: (chunk) => {

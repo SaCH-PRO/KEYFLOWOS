@@ -48,6 +48,23 @@ export class AiOversightService {
     @Inject(RoleEngineService) private readonly roleEngine: RoleEngineService,
   ) {}
 
+  /**
+   * Clamp business autonomy down to what the active role is trusted with.
+   *
+   * Returns a copy — mutating the cached business settings would leak one
+   * role's ceiling into every subsequent request for that business.
+   */
+  private applyRoleCeiling(settings: AutonomySettings, role: BusinessRole): AutonomySettings {
+    const def = this.roleEngine.getRoleDefinition(role);
+    if (!def) return settings;
+
+    return {
+      ...settings,
+      maxAutoTier: Math.min(settings.maxAutoTier, def.maxRiskTier) as RiskTier,
+      autonomyLevel: Math.min(settings.autonomyLevel, def.autonomyLevel),
+    };
+  }
+
   getToolTier(toolName: string): RiskTier {
     const tool = getToolByName(toolName);
     if (tool && tool.riskTier) {
@@ -70,7 +87,21 @@ export class AiOversightService {
     role?: BusinessRole,
   ): Promise<GovernanceDecision> {
     const tier = this.getToolTier(toolName);
-    const settings = await this.getAutonomySettings(businessId);
+    const businessSettings = await this.getAutonomySettings(businessId);
+
+    // A role's authority caps the business's, never raises it.
+    //
+    // RoleDefinition carries maxRiskTier and autonomyLevel per role — the
+    // Executive Advisor is maxRiskTier 1 / autonomyLevel 1, the Operator is
+    // much higher. Both fields were printed into the system prompt and read by
+    // nothing, so every role acted with identical authority and the numbers
+    // were decoration. This is what makes eight roles into tiers of staff:
+    // a junior hat cannot approve what a senior one can, regardless of what
+    // the business allows overall.
+    //
+    // Always the MINIMUM of the two. Selecting a role can restrict KEY; it can
+    // never be used to escalate past the business's own ceiling.
+    const settings = role ? this.applyRoleCeiling(businessSettings, role) : businessSettings;
 
     const blocked = { allowed: false, requiresQuickConfirm: false, requiresFormalApproval: false, requiresAdminApproval: false, tier };
 

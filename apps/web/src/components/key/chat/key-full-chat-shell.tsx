@@ -3,21 +3,35 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type React from "react";
 import { useKeyChat, useKeyChatActions, KeyChatMessages, KeyChatInput, KeyChatVoiceBar } from "@/components/key/chat";
-import { PanelLeft, Plus, MessageSquare, Bot, LayoutGrid, Dna, Shield, TrendingUp, Users, Settings, ChevronDown } from "lucide-react";
+import { PanelLeft, Plus, MessageSquare, Bot, LayoutGrid, Dna, Shield, TrendingUp, Users, Settings, ChevronDown, LifeBuoy, Megaphone, Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { KeyActionChips } from "./key-action-chips";
 import { KeyGenomePreview } from "./key-genome-preview";
 
-type ChatMode = "general" | "genome_onboarding" | "executive" | "finance" | "sales" | "operations";
+type ChatMode =
+  | "general"
+  | "genome_onboarding"
+  | "executive"
+  | "finance"
+  | "sales"
+  | "operations"
+  | "support"
+  | "marketing"
+  | "operator";
 
 const MODES: { id: ChatMode; label: string; icon: React.ReactNode; description: string }[] = [
-  { id: "general", label: "General", icon: <LayoutGrid className="h-3.5 w-3.5" />, description: "General assistance" },
+  { id: "general", label: "General", icon: <LayoutGrid className="h-3.5 w-3.5" />, description: "Adapts to what you are working on" },
   { id: "genome_onboarding", label: "Genome", icon: <Dna className="h-3.5 w-3.5" />, description: "Business genome onboarding" },
   { id: "executive", label: "Executive", icon: <Shield className="h-3.5 w-3.5" />, description: "Executive decisions" },
   { id: "finance", label: "Finance", icon: <TrendingUp className="h-3.5 w-3.5" />, description: "Financial analysis" },
   { id: "sales", label: "Sales", icon: <Users className="h-3.5 w-3.5" />, description: "Sales and CRM" },
   { id: "operations", label: "Operations", icon: <Settings className="h-3.5 w-3.5" />, description: "Operations" },
+  // support, marketing and operator exist on the server and had no way to be
+  // selected — three of the eight roles were unreachable from the UI.
+  { id: "support", label: "Support", icon: <LifeBuoy className="h-3.5 w-3.5" />, description: "Tickets and customer care" },
+  { id: "marketing", label: "Marketing", icon: <Megaphone className="h-3.5 w-3.5" />, description: "Campaigns, social and SEO" },
+  { id: "operator", label: "Operator", icon: <Wrench className="h-3.5 w-3.5" />, description: "Hands-on execution across the business" },
 ];
 
 export function KeyFullChatShell() {
