@@ -72,6 +72,9 @@ export interface CreativeIdea {
   tags: string[];
 }
 
+/** KeyCortexMemory discriminator for persisted creative ideas. */
+const MEMORY_TYPE_CREATIVE_IDEA = 'creative_idea';
+
 export interface BrainstormResult {
   prompt: string;
   ideas: CreativeIdea[];
@@ -517,18 +520,73 @@ Return JSON:
     const businesses = await this.findAllActiveBusinesses();
     for (const businessId of businesses) {
       try {
-        // Get top insights to spark creative ideas
-        const recentInsights = ([] as Array<{ description: string; type: string }>) /* KeyCortexInsightService has no getRecentInsights; enrichment omitted */;
-        if (recentInsights.length === 0) continue;
+        // This job used to be inert by construction: `recentInsights` was a
+        // hardcoded [] followed by `if (length === 0) continue`, so it skipped
+        // every business every day. The enrichment source it wanted had been
+        // removed and never replaced.
+        //
+        // It now sparks from what the intuition layer actually found overnight.
+        // Weak signals are the right input for creative exploration: they are
+        // the things nobody has explained yet.
+        const signals = await this.recentWeakSignals(businessId);
+        if (signals.length === 0) continue;
 
-        const topInsight = recentInsights[0];
-        const prompt = `Based on this business insight: "${topInsight.description}"
-Generate creative opportunities that this insight suggests.`;
+        const top = signals[0];
+        const prompt = `KEY's intuition layer detected this weak signal in the business: "${top.description}"
 
-        await this.brainstorm(prompt, businessId, { count: 3, wildcards: false });
+It has not yet been explained. Generate creative, concrete opportunities or
+explanations this signal suggests. Ground every idea in the business's own data.`;
+
+        // brainstorm() already calls persistIdeas internally, so the result is
+        // durable as soon as it returns. Logged here so the daily job's effect
+        // is observable rather than inferred.
+        const result = await this.brainstorm(prompt, businessId, { count: 3, wildcards: false });
+        this.logger.log(
+          `[Creativity] ${result.ideas.length} ideas from weak signal "${top.description.slice(0, 60)}"`,
+        );
       } catch (err) {
         this.logger.error(`Creative exploration failed for ${businessId}: ${err instanceof Error ? err.message : String(err)}`);
       }
+    }
+  }
+
+  /**
+   * The highest-scoring weak signals the intuition layer recorded recently.
+   *
+   * Read from KeyCortexMemory rather than calling the intuition service, so the
+   * two organs stay decoupled — creativity consumes what was durably observed,
+   * not a fresh scan it would pay for again.
+   */
+  private async recentWeakSignals(
+    businessId: string,
+  ): Promise<Array<{ description: string; confidence: number }>> {
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    try {
+      const rows = await this.prisma.client.keyCortexMemory.findMany({
+        where: { businessId, type: 'weak_signal', createdAt: { gte: since } },
+        orderBy: { confidence: 'desc' },
+        take: 5,
+        select: { value: true, confidence: true },
+      });
+
+      const out: Array<{ description: string; confidence: number }> = [];
+      for (const row of rows) {
+        try {
+          const parsed = JSON.parse(row.value) as { description?: string };
+          if (parsed.description) {
+            out.push({ description: parsed.description, confidence: row.confidence });
+          }
+        } catch {
+          // one malformed row must not lose the rest
+        }
+      }
+      return out;
+    } catch (error: unknown) {
+      this.logger.warn(
+        `[Creativity] Could not read weak signals: ` +
+          `${error instanceof Error ? error.message : 'unknown'}`,
+      );
+      return [];
     }
   }
 
@@ -1551,14 +1609,60 @@ Return JSON:
      PRIVATE — PERSISTENCE & HELPERS
      ═══════════════════════════════════════════════════════════════ */
 
+  /**
+   * Persist generated ideas so they survive the process that thought of them.
+   *
+   * The database half of this was a dead loop with a comment explaining that
+   * the model was absent from schema.prisma. Everything this service produced
+   * lived only in `creativeHistory`, an in-memory Map — so every idea, from
+   * every brainstorm, novel-strategy run and lateral-thinking reframe, was lost
+   * on restart. 1,596 lines and a real model call per invocation, leaving
+   * nothing behind.
+   *
+   * Stored in KeyCortexMemory, which already has the shape needed (type
+   * discriminator, free-form value, confidence), so no schema migration is
+   * required. Called from brainstorm, generateNovelStrategy and
+   * lateralThinking, so filling it in makes all three durable.
+   */
   private async persistIdeas(businessId: string, ideas: CreativeIdea[]): Promise<void> {
-    // Update in-memory cache
+    // Update in-memory cache first — it is the read path for the current
+    // process and must stay populated even if the write below fails.
     const existing = this.creativeHistory.get(businessId) ?? [];
     this.creativeHistory.set(businessId, [...existing, ...ideas]);
 
-    // Persist to database
     for (const idea of ideas) {
-      // model absent from schema.prisma; call short-circuited to undefined and never ran
+      try {
+        await this.prisma.client.keyCortexMemory.create({
+          data: {
+            businessId,
+            type: MEMORY_TYPE_CREATIVE_IDEA,
+            key: idea.id,
+            value: JSON.stringify({
+              title: idea.title,
+              description: idea.description,
+              category: idea.category,
+              novelty: idea.novelty,
+              feasibility: idea.feasibility,
+              estimatedImpact: idea.estimatedImpact,
+              implementationSteps: idea.implementationSteps,
+              risks: idea.risks,
+              requiredResources: idea.requiredResources,
+              inspiration: idea.inspiration,
+              technique: idea.technique,
+            }),
+            source: 'creativity',
+            // Feasibility, not novelty: a wildly novel idea nobody can execute
+            // should not outrank a practical one when these are read back.
+            confidence: idea.feasibility,
+          },
+        });
+      } catch (error: unknown) {
+        // Idea generation must not fail because storage did.
+        this.logger.warn(
+          `[Creativity] Could not persist idea ${idea.id}: ` +
+            `${error instanceof Error ? error.message : 'unknown'}`,
+        );
+      }
     }
   }
 

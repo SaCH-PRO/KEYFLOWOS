@@ -42,6 +42,33 @@ export type SignalTrend = 'emerging' | 'strengthening' | 'weakening' | 'confirme
 export type ImpactLevel = 'low' | 'medium' | 'high' | 'critical';
 export type SignalCategory = 'linguistic' | 'behavioral' | 'temporal' | 'cross-domain' | 'network' | 'operational';
 
+/** KeyCortexMemory discriminator for persisted weak signals. */
+const MEMORY_TYPE_WEAK_SIGNAL = 'weak_signal';
+
+/** KeyCortexMemory discriminator for persisted churn predictions. */
+const MEMORY_TYPE_CHURN_RISK = 'churn_risk';
+
+/**
+ * Below this confidence a signal is not worth remembering — the detectors emit
+ * a long tail of very low-confidence hits, and persisting all of them would
+ * bury the ones that matter.
+ */
+const SIGNAL_PERSIST_THRESHOLD = 0.3;
+
+/**
+ * Alerting bar, deliberately higher than the persistence bar and applied ON TOP
+ * of a high/critical impact requirement. A weak signal is uncertain by
+ * definition; alerting on every one trains the user to ignore the channel,
+ * which is worse than having no channel at all.
+ */
+const SIGNAL_ALERT_THRESHOLD = 0.6;
+
+/**
+ * Churn alerts key off riskScore, not confidence alone: a confident prediction
+ * about a marginal account is not worth interrupting anyone over.
+ */
+const CHURN_ALERT_RISK_THRESHOLD = 0.7;
+
 export interface WeakSignal {
   id: string;
   description: string;
@@ -419,10 +446,121 @@ export class KeyCortexIntuitionService {
   async scheduledIntuitionScan(): Promise<void> {
     const businesses = await this.findAllActiveBusinesses();
     for (const businessId of businesses) {
-      await this.detectWeakSignals(businessId).catch((err) =>
-        this.logger.error(`Scheduled intuition scan failed for ${businessId}: ${err instanceof Error ? err.message : String(err)}`),
-      );
+      await this.detectWeakSignals(businessId)
+        // The whole point of the scan. This previously DISCARDED its return
+        // value: every ten minutes, for every active business, KEY computed
+        // weak signals at real database cost and told nobody. 1,887 lines of
+        // detection with no output is not intuition, it is a load generator.
+        .then((signals) => this.recordSignals(businessId, signals))
+        .catch((err) =>
+          this.logger.error(`Scheduled intuition scan failed for ${businessId}: ${err instanceof Error ? err.message : String(err)}`),
+        );
     }
+  }
+
+  /**
+   * Persist what the scan found, and raise the ones worth interrupting someone
+   * over.
+   *
+   * Two distinct jobs, deliberately separated:
+   *
+   *  - PERSIST everything above the noise floor, so a signal that keeps
+   *    recurring can be seen to recur. Stored in KeyCortexMemory, which already
+   *    has the right shape (type discriminator, free-form value, confidence),
+   *    so this needs no schema migration.
+   *
+   *  - ALERT only on high/critical impact with real confidence. A weak signal
+   *    is by definition uncertain; alerting on all of them would train the user
+   *    to ignore the channel, which is worse than not having it.
+   *
+   * Never throws: this runs inside a scheduled job whose failure must not stop
+   * the remaining businesses in the loop.
+   */
+  private async recordSignals(businessId: string, signals: WeakSignal[]): Promise<void> {
+    if (signals.length === 0) return;
+
+    for (const signal of signals) {
+      if (signal.confidence < SIGNAL_PERSIST_THRESHOLD) continue;
+
+      try {
+        await this.prisma.client.keyCortexMemory.upsert({
+          // Keyed on the signal id so a recurring signal UPDATES rather than
+          // accumulating a duplicate row every ten minutes.
+          where: { id: `sig_${businessId}_${signal.id}` },
+          create: {
+            id: `sig_${businessId}_${signal.id}`,
+            businessId,
+            type: MEMORY_TYPE_WEAK_SIGNAL,
+            key: signal.id,
+            value: JSON.stringify({
+              description: signal.description,
+              category: signal.category,
+              trend: signal.trend,
+              potentialImpact: signal.potentialImpact,
+              recommendedInvestigation: signal.recommendedInvestigation,
+              sources: signal.sources,
+              score: signal.score,
+              detectedAt: signal.detectedAt,
+            }),
+            source: 'intuition',
+            confidence: signal.confidence,
+          },
+          update: {
+            value: JSON.stringify({
+              description: signal.description,
+              category: signal.category,
+              trend: signal.trend,
+              potentialImpact: signal.potentialImpact,
+              recommendedInvestigation: signal.recommendedInvestigation,
+              sources: signal.sources,
+              score: signal.score,
+              detectedAt: signal.detectedAt,
+            }),
+            confidence: signal.confidence,
+          },
+        });
+      } catch (error: unknown) {
+        this.logger.warn(
+          `[Intuition] Could not persist signal ${signal.id}: ` +
+            `${error instanceof Error ? error.message : 'unknown'}`,
+        );
+      }
+    }
+
+    const worthRaising = signals.filter(
+      (s) =>
+        (s.potentialImpact === 'high' || s.potentialImpact === 'critical') &&
+        s.confidence >= SIGNAL_ALERT_THRESHOLD,
+    );
+
+    for (const signal of worthRaising) {
+      try {
+        await this.eventService.logAlert(businessId, {
+          alert: signal.description,
+          severity: signal.potentialImpact === 'critical' ? 'critical' : 'high',
+          module: 'key_cortex',
+          source: 'intuition',
+          details: {
+            signalId: signal.id,
+            category: signal.category,
+            trend: signal.trend,
+            confidence: signal.confidence,
+            recommendedInvestigation: signal.recommendedInvestigation,
+            sources: signal.sources,
+          },
+        });
+      } catch (error: unknown) {
+        this.logger.warn(
+          `[Intuition] Could not raise alert for ${signal.id}: ` +
+            `${error instanceof Error ? error.message : 'unknown'}`,
+        );
+      }
+    }
+
+    this.logger.log(
+      `[Intuition] Recorded ${signals.length} signals for ${businessId}, ` +
+        `raised ${worthRaising.length} alerts`,
+    );
   }
 
   /** Daily deep churn analysis — 6:00 AM */
@@ -430,10 +568,100 @@ export class KeyCortexIntuitionService {
   async scheduledChurnAnalysis(): Promise<void> {
     const businesses = await this.findAllActiveBusinesses();
     for (const businessId of businesses) {
-      await this.detectChurnPrecursors(businessId).catch((err) =>
-        this.logger.error(`Scheduled churn analysis failed for ${businessId}: ${err instanceof Error ? err.message : String(err)}`),
-      );
+      await this.detectChurnPrecursors(businessId)
+        // Also previously discarded. A customer predicted to churn is the most
+        // actionable thing this service produces, and it was computed daily and
+        // thrown away.
+        .then((matches) => this.recordChurnRisk(businessId, matches))
+        .catch((err) =>
+          this.logger.error(`Scheduled churn analysis failed for ${businessId}: ${err instanceof Error ? err.message : String(err)}`),
+        );
     }
+  }
+
+  /**
+   * Persist churn predictions and alert on the ones with a real chance of
+   * being right.
+   *
+   * Alert severity tracks riskScore rather than confidence alone: a
+   * high-confidence prediction about a marginal account is not worth an
+   * interruption, while a strong risk score on any account is.
+   */
+  private async recordChurnRisk(businessId: string, matches: PatternMatch[]): Promise<void> {
+    if (matches.length === 0) return;
+
+    let alerted = 0;
+    for (const match of matches) {
+      if (match.confidence < SIGNAL_PERSIST_THRESHOLD) continue;
+
+      try {
+        await this.prisma.client.keyCortexMemory.upsert({
+          where: { id: `churn_${businessId}_${match.matchedEntity}` },
+          create: {
+            id: `churn_${businessId}_${match.matchedEntity}`,
+            businessId,
+            type: MEMORY_TYPE_CHURN_RISK,
+            key: match.matchedEntity,
+            value: JSON.stringify({
+              pattern: match.pattern,
+              prediction: match.prediction,
+              timeHorizon: match.timeHorizon,
+              matchedEntityType: match.matchedEntityType,
+              riskScore: match.riskScore,
+              precursors: match.precursors,
+            }),
+            source: 'intuition',
+            confidence: match.confidence,
+          },
+          update: {
+            value: JSON.stringify({
+              pattern: match.pattern,
+              prediction: match.prediction,
+              timeHorizon: match.timeHorizon,
+              matchedEntityType: match.matchedEntityType,
+              riskScore: match.riskScore,
+              precursors: match.precursors,
+            }),
+            confidence: match.confidence,
+          },
+        });
+      } catch (error: unknown) {
+        this.logger.warn(
+          `[Intuition] Could not persist churn risk for ${match.matchedEntity}: ` +
+            `${error instanceof Error ? error.message : 'unknown'}`,
+        );
+        continue;
+      }
+
+      if (match.riskScore >= CHURN_ALERT_RISK_THRESHOLD && match.confidence >= SIGNAL_ALERT_THRESHOLD) {
+        try {
+          await this.eventService.logAlert(businessId, {
+            alert: match.prediction,
+            severity: match.riskScore >= 0.85 ? 'critical' : 'high',
+            module: 'key_cortex',
+            source: 'intuition',
+            details: {
+              matchedEntity: match.matchedEntity,
+              matchedEntityType: match.matchedEntityType,
+              pattern: match.pattern,
+              timeHorizon: match.timeHorizon,
+              riskScore: match.riskScore,
+              confidence: match.confidence,
+            },
+          });
+          alerted += 1;
+        } catch (error: unknown) {
+          this.logger.warn(
+            `[Intuition] Could not raise churn alert: ` +
+              `${error instanceof Error ? error.message : 'unknown'}`,
+          );
+        }
+      }
+    }
+
+    this.logger.log(
+      `[Intuition] Recorded ${matches.length} churn predictions for ${businessId}, raised ${alerted} alerts`,
+    );
   }
 
   /* ═══════════════════════════════════════════════════════════════
