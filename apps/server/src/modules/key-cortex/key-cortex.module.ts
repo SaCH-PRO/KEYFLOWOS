@@ -41,6 +41,7 @@ import { KeyCortexGoalsController } from './key-cortex-goals.controller';
 import { AdaptiveRouterService } from './adaptive-router.service';
 import { CognitiveTriageService } from './cognitive-triage.service';
 import { KeyCortexEfferentBridgeService } from './key-cortex-efferent-bridge.service';
+import { KeyCortexHomeostasisService } from './key-cortex-homeostasis.service';
 import { KeyCortexEventBusService } from './key-cortex-event-bus.service';
 import { FlowSignalBridgeService } from './flow-signal-bridge.service';
 import { EventEmitterFlowBridgeService } from './event-emitter-flow-bridge.service';
@@ -337,6 +338,7 @@ import { IntegrationHubModule } from '../integration-hub/integration-hub.module'
     AdaptiveRouterService,
     CognitiveTriageService,
     KeyCortexEfferentBridgeService,
+    KeyCortexHomeostasisService,
 
     // Conversation manager -- session lifecycle & message history
     KeyCortexConversationService,
@@ -566,6 +568,7 @@ import { IntegrationHubModule } from '../integration-hub/integration-hub.module'
     AdaptiveRouterService,
     CognitiveTriageService,
     KeyCortexEfferentBridgeService,
+    KeyCortexHomeostasisService,
     KeyCortexConversationService,
     KeyCortexActionsService,
     KeyCortexVoiceService,
