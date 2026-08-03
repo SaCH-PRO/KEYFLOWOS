@@ -13,6 +13,7 @@ import {
   type KeyActionProposalStatus,
 } from "@/lib/api/key-autonomy";
 import { ProposalCard } from "./components/proposal-card";
+import { ReflexPanel } from "./components/reflex-panel";
 
 const TABS: { key: string; label: string; status?: KeyActionProposalStatus }[] = [
   { key: "all", label: "All" },
@@ -134,6 +135,12 @@ export default function KeyAutonomyPage() {
           <ProposalCard key={proposal.id} businessId={businessId} proposal={proposal} onUpdated={load} />
         ))}
       </motion.div>
+
+      {/* The autonomic switch. Approvals above are KEY asking permission; these
+          are the events it may respond to without asking at all. */}
+      <div className="mt-6">
+        <ReflexPanel businessId={businessId} />
+      </div>
     </WorkspaceShell>
   );
 }

@@ -6222,6 +6222,30 @@ export async function fetchAgentTriggers(businessId: string) {
   );
 }
 
+/**
+ * Enable or disable an autopilot reflex.
+ *
+ * The endpoint has existed since AgentController was registered; nothing in the
+ * product called it, so rules seeded disabled could never be switched on.
+ */
+export async function updateAgentTrigger(
+  businessId: string,
+  triggerId: string,
+  patch: Partial<{ enabled: boolean; autoExecute: boolean; maxRiskTier: number }>,
+) {
+  const res = await fetchWithAuthRetry(
+    `${API_BASE}/ai/businesses/${encodeURIComponent(businessId)}/agent/triggers/${encodeURIComponent(triggerId)}`,
+    {
+      method: 'PUT',
+      headers: { ...await getAuthHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    },
+  );
+  const data = await res.json().catch(() => null);
+  if (!res.ok) return { data: null, error: data?.message || 'Failed to update reflex' };
+  return { data, error: null };
+}
+
 export async function fetchDetectedPatterns(businessId: string) {
   return apiGetSimple<{ patterns: Array<{ id: string; type: string; description: string; confidence: number; detectedAt: string }> }>(
     `/ai/businesses/${encodeURIComponent(businessId)}/agent/patterns`,
