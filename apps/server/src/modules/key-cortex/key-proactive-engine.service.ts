@@ -25,6 +25,7 @@ import {
   SentimentWatcherService,
 } from './watchers';
 import { KeyCortexDigestService } from './key-cortex-digest.service';
+import { KeyCortexCircadianService } from './key-cortex-circadian.service';
 
 interface SignalSummary {
   dnaTrend: 'improving' | 'stable' | 'declining';
@@ -49,15 +50,31 @@ export class KeyProactiveEngineService {
     @Optional() private readonly bookingWatcher?: BookingNoShowWatcherService,
     @Optional() private readonly sentimentWatcher?: SentimentWatcherService,
     @Optional() private readonly digestService?: KeyCortexDigestService,
+    @Optional() private readonly circadian?: KeyCortexCircadianService,
   ) {}
 
   // ═══════════════════════════════════════════════════════════
   // Scheduled: Morning Brief (every day at 8 AM)
   // ═══════════════════════════════════════════════════════════
 
-  @Cron(CronExpression.EVERY_DAY_AT_8AM)
+  /**
+   * Hourly, acting on the businesses for which it is locally 8AM.
+   *
+   * This was `EVERY_DAY_AT_8AM`, which is 8AM on the SERVER. Business.timezone
+   * has existed all along, defaulting to America/Port_of_Spain, and nothing
+   * scheduling a rhythm read it — so on a UTC host the "morning" briefing
+   * arrived at 4am local. Not an error, just KEY not knowing what time it is
+   * where you are.
+   *
+   * The hour advances once per hour in every timezone, so each business still
+   * matches exactly once per day. No scheduling state to keep.
+   */
+  @Cron(CronExpression.EVERY_HOUR)
   async generateMorningBriefs(): Promise<void> {
-    this.logger.log('[morningBrief] Generating morning briefs...');
+    const due = this.circadian ? await this.circadian.businessesAtLocalHour(8) : [];
+    if (this.circadian && due.length === 0) return;
+
+    this.logger.log(`[morningBrief] Generating morning briefs for ${due.length} business(es)...`);
 
     try {
       await this.invoiceWatcher?.scanAll();
@@ -67,7 +84,11 @@ export class KeyProactiveEngineService {
       this.logger.warn(`[morningBrief] watcher scan failed: ${msg}`);
     }
 
-    const activeBusinesses = await this.getActiveBusinesses();
+    // Without the circadian clock this degrades to the previous behaviour
+    // rather than silently briefing nobody.
+    const activeBusinesses = this.circadian
+      ? due.map((b) => b.id)
+      : await this.getActiveBusinesses();
     for (const businessId of activeBusinesses) {
       try {
         const trigger = await this.createTrigger(
@@ -88,11 +109,17 @@ export class KeyProactiveEngineService {
   // Scheduled: Weekly Report (every Monday at 9 AM)
   // ═══════════════════════════════════════════════════════════
 
-  @Cron('0 9 * * 1')
+  /** Hourly; acts where it is locally Monday 9AM. */
+  @Cron(CronExpression.EVERY_HOUR)
   async generateWeeklyDigests(): Promise<void> {
-    this.logger.log('[weeklyDigest] Generating weekly digests...');
+    const due = this.circadian ? await this.circadian.businessesAtLocalTime(9, 1) : [];
+    if (this.circadian && due.length === 0) return;
 
-    const activeBusinesses = await this.getActiveBusinesses();
+    this.logger.log(`[weeklyDigest] Generating weekly digests for ${due.length} business(es)...`);
+
+    const activeBusinesses = this.circadian
+      ? due.map((b) => b.id)
+      : await this.getActiveBusinesses();
     for (const businessId of activeBusinesses) {
       try {
         await this.digestService?.deliverWeeklyDigest(businessId, 'email');
@@ -107,8 +134,12 @@ export class KeyProactiveEngineService {
   // Scheduled: End of Day Report (every day at 6 PM)
   // ═══════════════════════════════════════════════════════════
 
-  @Cron(CronExpression.EVERY_DAY_AT_6PM)
+  /** Hourly; acts where it is locally 6PM. */
+  @Cron(CronExpression.EVERY_HOUR)
   async generateEndOfDayReports(): Promise<void> {
+    const dueEod = this.circadian ? await this.circadian.businessesAtLocalHour(18) : [];
+    if (this.circadian && dueEod.length === 0) return;
+
     this.logger.log('[endOfDay] Generating EOD reports...');
 
     try {
@@ -118,7 +149,9 @@ export class KeyProactiveEngineService {
       this.logger.warn(`[endOfDay] watcher scan failed: ${msg}`);
     }
 
-    const activeBusinesses = await this.getActiveBusinesses();
+    const activeBusinesses = this.circadian
+      ? dueEod.map((b) => b.id)
+      : await this.getActiveBusinesses();
     for (const businessId of activeBusinesses) {
       try {
         await this.createTrigger(businessId, 'end_of_day_report', 'medium');
