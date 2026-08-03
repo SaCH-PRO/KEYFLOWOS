@@ -168,6 +168,79 @@ They are **separate paths**. Ordinary messages never touch the cortex.
 subset — `processConsciously` just never passes one. **Graded cognition is
 supported in the signature and unused.**
 
+Ordinary messages now pass through a thalamus (`CognitiveTriageService`) that
+grades effort per message with zero model calls, but it does **not** escalate to
+the cortex, because `processConsciously` cannot execute tools. See §6b.
+
+## 6b. KEY's nervous system — what is real
+
+The project frames KEY as a body: receptors, nerves, reflexes, a spinal cord, a
+thalamus, a cortex, hormones. Much of that anatomy genuinely exists in code. The
+useful question is never "does the structure exist" but **"is it on a path a
+user's message actually travels."** Mapped 2026-08-03.
+
+### Live — on the shipped path
+
+| Structure | Where |
+|---|---|
+| Spinal reflex arcs | `key-proactive-engine` `@Cron('*/15 * * * *')` → watchers → `key-cortex-event-bus` → `flow-signal-bridge` (pure rule router, no LLM) |
+| Second reflex arc | `agent-trigger.service.ts` `events.onAny` → `agentTrigger.findMany` → `planner.createPlan` |
+| Medulla (vital regulation) | `model-gateway.service.ts` retries, backoff, circuit breaker |
+| Medulla (heartbeat) | `agent-health.service.ts` 5-minute `setInterval` |
+| Domain routing | `role-engine.detectRoleFromContext` — gates the tool set and prompt |
+| **Thalamus (effort routing)** | `cognitive-triage.service.ts` — per message, zero model calls |
+| **Subcortex (hormones)** | `key-cortex-endocrine.service.ts` — written by triage from body state |
+| Motor neurons | `flow-orchestrator.executeTool` — **the only tool execution in the server** |
+| Gating / inhibition | `ai-oversight`, `key-autonomy-safety` (kill switch, daily caps, tier ceiling), `undo.service` |
+
+### Inert — real code, no path to it
+
+| Structure | Why it never runs |
+|---|---|
+| Cortex query pipeline | Entered only from `key-cortex.controller.ts:917/961/1069` and `key-cortex.gateway.ts:263`. **`apps/web` calls none of them, and has no `socket.io-client` dependency at all.** |
+| `AdaptiveRouterService` (as used there) | Live-bodied, but its only consumers sit on that pipeline. `CognitiveTriageService` is what put it on a real path. |
+| Nociceptive reflex (`runSafetyCheck`) | Same pipeline. |
+| `core/utils/circuit-breaker.ts` | Zero importers anywhere. `model-gateway` and `resilient-emitter` each rolled their own inline. Dead file. |
+
+### Stubs that look like cognition
+
+- **`RouteDecision.layers` gates nothing.** `resolveLayers` really computes which
+  reasoning layers should fire; every consumer then interpolates it into a
+  prompt as English (`Active reasoning layers: ...`). The query-pipeline
+  constructor injects **none** of the eight layer services. Selecting a layer
+  writes the layer's *name* into a string.
+- **`processConsciously` has no hands.** Its constructor takes the eight
+  cognition layers and nothing else — no executor, no tool registry, no
+  dispatcher. Grep `executor|toolLoop|toolRegistry|executeTool` in it: zero
+  hits. **It can think but cannot act**, which is the hard constraint on any
+  "escalate the hard questions to the cortex" design.
+
+### Two traps specific to this subsystem
+
+**Readers without writers.** `effortMultiplier` and `describeForPrompt` were
+correct, tested, and returned neutral for every business — because the only
+`endocrine.release` caller sat inside `processConsciously`, behind the Deep
+think button. A reader with no writer is indistinguishable from working code.
+Check both halves.
+
+**The classifiers measure something narrower than their names.**
+`classifyEmotionalWeight` matches first-person feeling words (frustrated,
+anxious, upset), so it detects **the user's stated mood, not what is at stake** —
+"our biggest client just threatened to leave" scores `low`. Measured over
+realistic phrasing, `emotionalWeight` and `urgency` were `low` on 13 of 13
+messages. Do not build scoring that leans on them without measuring first;
+`classifyUrgency` and `classifyTimeHorizon` also disagree about the word "now".
+
+### Cost, corrected
+
+`reasonMultiModal(query, context, availableModes?)` accepts a mode subset and
+`processConsciously` never passes one, so all seven modes run. Each mode was
+also making **two** model calls — a real one plus an `aiUsage.callAi` under a
+`// Track usage` comment whose result was discarded, and `callAi` executes
+rather than records. Fixed in `875de7d6`; pinned by
+`key-cortex-reasoning-cost.spec.ts`. Every organ except reasoning makes zero
+model calls, so reasoning is essentially the whole bill.
+
 ## 7. Deployment
 
 - `render.yaml` targets **`branch: main`**, plan `pro` (4 GB).
