@@ -3,7 +3,18 @@ services:
     name: keyflowos
     runtime: node
     region: ohio
-    plan: standard
+    # Pro (4GB), not Standard (2GB). The server's tsc does not fit in 2GB and no
+    # configuration closes the gap — measured on a cold cache:
+    #
+    #   2048MB  OOM   <- Standard's ceiling; this is where deploys died
+    #   3328MB  OOM
+    #   3584MB  builds
+    #   4096MB  builds
+    #
+    # `tsc --noCheck` (accepted in TypeScript 5.9) still OOM'd at 3072MB, so
+    # skipping type checking does not help either. 1,219 files / ~314k lines is
+    # simply a large compile.
+    plan: pro
     branch: main
     # The build actually has to build. This previously ran `pnpm install` only,
     # which is why the start command had to use tsx — there was no compiled
@@ -62,6 +73,16 @@ services:
         value: "3001"
       - key: WEB_PORT
         value: "10000"
+
+      # 3584, not 4096. The measured minimum that builds is 3584MB (3328 OOMs),
+      # and giving Node a heap equal to the box's entire 4GB invites the kernel
+      # OOM-killer instead of a clean V8 failure — leaving ~512MB for the OS and
+      # node's own non-heap memory is the point.
+      #
+      # This is a ceiling, not an allocation, so it is harmless at runtime where
+      # the server uses a fraction of it.
+      - key: NODE_OPTIONS
+        value: --max-old-space-size=3584
 
       # REQUIRED AT BUILD TIME — without it `pnpm --filter web build` throws and
       # the whole deploy fails.
