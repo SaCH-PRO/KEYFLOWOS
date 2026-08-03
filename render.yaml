@@ -14,9 +14,23 @@ services:
     # Order matters: workspace packages first (the server imports @keyflow/db,
     # @keyflow/shared and @keyflow/api by their built entrypoints), then the
     # Prisma client, then the apps.
+    # --prod=false is load-bearing. NODE_ENV=production is set below (correctly,
+    # for runtime), and pnpm honours it at INSTALL time by skipping
+    # devDependencies — the build log said so outright:
+    #   "devDependencies: skipped because NODE_ENV is set to production"
+    #
+    # typescript and @types/node are devDependencies, so every `tsc` in the
+    # steps that follow had no compiler and no node types. What it did find was
+    # a TypeScript 7 pulled in transitively by a prod dependency, which has
+    # REMOVED `baseUrl` and `moduleResolution: node10` — hence the build dying
+    # with TS5102/TS5108/TS2688 on tsconfig files that are perfectly valid for
+    # the TypeScript 5.9 this repo pins.
+    #
+    # The failure was invisible locally because NODE_ENV is not production on a
+    # dev machine, so devDependencies always install.
     buildCommand: >-
       npm install -g pnpm@9.15.0 &&
-      pnpm install --frozen-lockfile &&
+      pnpm install --frozen-lockfile --prod=false &&
       pnpm --filter @keyflow/shared --filter @keyflow/db --filter @keyflow/api build &&
       pnpm --filter @keyflow/db run db:generate &&
       pnpm --filter server build &&
