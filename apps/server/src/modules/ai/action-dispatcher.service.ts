@@ -1,6 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional, forwardRef, Inject } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { FeedbackLoopService } from './feedback-loop.service';
 import { AiExecutionLogService } from '../ai/ai-execution-log.service';
 import { AiOversightService } from '../ai/ai-oversight.service';
 import { FlowOrchestratorService } from '../ai/flow-orchestrator.service';
@@ -49,6 +50,13 @@ export class ActionDispatcherService {
     private readonly governance: AiOversightService,
     private readonly flowOrchestrator: FlowOrchestratorService,
     private readonly undoService: UndoService,
+    // Appended, not spliced in — other call sites construct positionally.
+    // @Optional + forwardRef: FeedbackLoopService pulls in PlannerService, and
+    // making dispatch hard-depend on the analysis layer would mean a module
+    // that omits it could no longer execute a tool at all.
+    @Optional()
+    @Inject(forwardRef(() => FeedbackLoopService))
+    private readonly feedbackLoop?: FeedbackLoopService,
   ) {}
 
   async dispatch(ctx: DispatchContext): Promise<DispatchResult> {
@@ -144,6 +152,8 @@ export class ActionDispatcherService {
           }
         }
 
+        await this.runFeedback(ctx, result, true);
+
         return { success: true, result, dispatchId, durationMs };
       } catch (err: any) {
         lastError = (err as Error).message;
@@ -179,7 +189,57 @@ export class ActionDispatcherService {
       reason: lastError,
     });
 
+    await this.runFeedback(ctx, undefined, false, lastError);
+
     return { success: false, error: lastError, dispatchId, durationMs };
+  }
+
+  /**
+   * Let the feedback loop see how this step went.
+   *
+   * FeedbackLoopService was registered in ai.module.ts and injected by nothing —
+   * 223 lines that could decide whether to continue, skip, replan or record a
+   * learned correction, and were never given the chance. DispatchContext already
+   * carried planId and planStepId, exactly the shape FeedbackContext wants; the
+   * wiring was simply never done.
+   *
+   * Only runs for dispatches that belong to a plan. A one-off tool call has no
+   * plan to adapt, and analyze() would have nothing to act on.
+   *
+   * Cheap on the happy path: analyze() returns immediately for a successful,
+   * healthy result and only spends a model call when something actually went
+   * wrong — which is when the analysis is worth paying for.
+   *
+   * Never throws. Feedback is an improvement on the outcome, not part of it:
+   * the tool has already run and its result must be returned regardless.
+   */
+  private async runFeedback(
+    ctx: DispatchContext,
+    outputResult: unknown,
+    success: boolean,
+    errorMessage?: string,
+  ): Promise<void> {
+    if (!this.feedbackLoop || !ctx.planId || !ctx.planStepId) return;
+
+    try {
+      const feedbackCtx = {
+        businessId: ctx.businessId,
+        planId: ctx.planId,
+        planStepId: ctx.planStepId,
+        toolName: ctx.toolName,
+        inputPayload: ctx.args,
+        outputResult,
+        success,
+        errorMessage,
+      };
+      const analysis = await this.feedbackLoop.analyze(feedbackCtx);
+      await this.feedbackLoop.applyFeedbackToPlan(feedbackCtx, analysis);
+    } catch (error: unknown) {
+      this.logger.warn(
+        `Feedback loop failed for ${ctx.toolName}: ` +
+          `${error instanceof Error ? error.message : 'unknown'}`,
+      );
+    }
   }
 
   async dispatchBatch(ctxs: DispatchContext[]): Promise<DispatchResult[]> {
