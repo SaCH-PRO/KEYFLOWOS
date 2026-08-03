@@ -15,6 +15,7 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { KeyAutonomySafetyService } from '../key-autonomy/key-autonomy-safety.service';
+import { KeyActionProposalService } from '../key-autonomy/key-action-proposal.service';
 import { KeyIdempotencyService } from './key-idempotency.service';
 import { KeyCortexSagaService } from './key-cortex-saga.service';
 import { KeyCortexLearningService } from './key-cortex-learning.service';
@@ -110,6 +111,8 @@ export class KeyCortexToolRegistryService {
     private readonly auditService?: KeyCortexAuditService,
     @Optional()
     private readonly eventBus?: KeyCortexEventBusService,
+    @Optional()
+    private readonly proposals?: KeyActionProposalService,
   ) {}
 
   // ========================================================================
@@ -221,7 +224,28 @@ export class KeyCortexToolRegistryService {
 
     const riskCheck = this.checkRisk(tool, ctx.autonomyLevel ?? 0);
     if (!riskCheck.allowed) {
-      return { success: false, error: riskCheck.reason };
+      // A refusal used to end here. The tier-3 message even said the tool
+      // "requires explicit user approval" — and then there was no way to ask
+      // for any. KEY could decline, never request. That is a brain with an
+      // inhibitory gate and no voluntary pathway around it.
+      //
+      // Tier 4 stays a hard refusal: critical actions are not delegated to a
+      // request. Everything else becomes a proposal a human can approve, and
+      // approving it now genuinely executes — KeyCortexActionExecutorPlugin
+      // dispatches to the right registry with the right payload key, which it
+      // did not do until recently.
+      if (tool.riskTier < 4) {
+        const proposalId = await this.proposeForApproval(tool, ctx, input, riskCheck.reason);
+        if (proposalId) {
+          return {
+            success: false,
+            requiresApproval: true,
+            error: `${riskCheck.reason} — sent for approval`,
+            data: { proposalId } as KeyCortexToolResult['data'],
+          };
+        }
+      }
+      return { success: false, error: riskCheck.reason, requiresApproval: tool.riskTier < 4 };
     }
 
     const startMs = Date.now();
@@ -477,6 +501,59 @@ export class KeyCortexToolRegistryService {
   // ========================================================================
   // Risk / Approval helpers
   // ========================================================================
+
+  /**
+   * Turn a refusal into a request.
+   *
+   * The payload shape is the contract KeyCortexActionExecutorPlugin reads back
+   * on approval: `toolName` plus `inputPayload`. Getting either wrong means the
+   * proposal is approved and then fails silently, which is exactly what used to
+   * happen — the plugin read `payload.parameters` while the planner wrote
+   * `payload.inputPayload`, so every approved action executed with `{}`.
+   *
+   * Never throws. A proposal that cannot be filed must degrade to the original
+   * refusal, not turn a blocked action into an error the caller cannot read.
+   */
+  private async proposeForApproval(
+    tool: KeyCortexToolDefinition,
+    ctx: KeyCortexToolContext,
+    input: Record<string, unknown>,
+    reason?: string,
+  ): Promise<string | null> {
+    if (!this.proposals) return null;
+
+    try {
+      const proposal = await this.proposals.create(
+        ctx.businessId,
+        {
+          sourceType: 'KEY_CORTEX',
+          sourceId: ctx.correlationId ?? ctx.sessionId,
+          title: `${tool.name}`,
+          summary: tool.description,
+          rationale: reason,
+          actionType: 'EXECUTE_TOOL',
+          toolName: tool.name,
+          module: tool.module,
+          payload: {
+            toolName: tool.name,
+            inputPayload: input,
+          },
+        },
+        ctx.userId,
+      );
+
+      this.logger.log(
+        `[execute][${ctx.businessId}] ${tool.name} exceeded autonomy — proposal ${proposal.id} filed for approval`,
+      );
+      return proposal.id;
+    } catch (err: unknown) {
+      this.logger.warn(
+        `[execute][${ctx.businessId}] could not file approval for ${tool.name}: ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+      );
+      return null;
+    }
+  }
 
   checkRisk(
     tool: KeyCortexToolDefinition,
