@@ -209,11 +209,32 @@ user's message actually travels."** Mapped 2026-08-03.
   prompt as English (`Active reasoning layers: ...`). The query-pipeline
   constructor injects **none** of the eight layer services. Selecting a layer
   writes the layer's *name* into a string.
-- **`processConsciously` has no hands.** Its constructor takes the eight
-  cognition layers and nothing else — no executor, no tool registry, no
-  dispatcher. Grep `executor|toolLoop|toolRegistry|executeTool` in it: zero
-  hits. **It can think but cannot act**, which is the hard constraint on any
-  "escalate the hard questions to the cortex" design.
+- **`processConsciously` has no hands *of its own*.** Its constructor takes the
+  eight cognition layers and nothing else. Since `91b3e65e` the cortex reaches
+  the business through the canonical registry instead —
+  `KeyCortexEfferentBridgeService` mirrors all 118 `FLOW_TOOLS` into it at boot,
+  so cortex-initiated action is possible and passes the registry's gate. The
+  consciousness *service* still has no direct executor, so escalating a chat
+  message to it would still lose tool execution.
+
+### The efferent path (added 2026-08-03)
+
+Two motor vocabularies used to share **zero** names — 118 bare `FLOW_TOOLS`
+reachable only from chat, ~45 dotted cortex tools reachable only from the cortex.
+They are now one surface.
+
+The load-bearing rule, if you touch this: **never call
+`FlowOrchestratorService.executeToolDirectly` from cortex code.** It runs
+`executeToolAction` with *no* governance — oversight is enforced by the caller
+on the chat path, so the direct entry point is a raw motor pathway with no
+inhibitory gate. Going through the registry instead inherits idempotency, the
+kill switch, daily action/spend caps and tier thresholds. A test pins that the
+bridge contains exactly one *call* to it — comments stripped — inside the
+registered handler.
+
+A gated tool below tier 4 now files a `KeyActionProposal` (`toolName` +
+`inputPayload`) rather than dead-ending, and approving one genuinely executes.
+Tier 4 stays a hard refusal.
 
 ### Two traps specific to this subsystem
 
@@ -222,6 +243,23 @@ correct, tested, and returned neutral for every business — because the only
 `endocrine.release` caller sat inside `processConsciously`, behind the Deep
 think button. A reader with no writer is indistinguishable from working code.
 Check both halves.
+
+**Two layers disagreeing is worse than either being wrong.** The tool filter
+treated the `general` role as unrestricted and offered all 118 tools;
+`AiOversightService` treated the same role as read-only and refused 86 of them.
+Each layer was internally coherent. Together they meant **KEY could not perform
+a single write action for any user** — the web pins `role: "general"`, so that
+was every user, every message. Fixed in `4cf6ce61`. The rule now is: **roles
+gate scope, tiers gate risk.** Blocking writes at the role layer added no
+safety, because the tier system (confirm / approve / admin) was already there —
+it just made it unreachable.
+
+**Perception and answering read different tables.** Everything the afferent side
+records — webhooks, watchers, organ adapters, crons — lands in `CognitiveEvent`,
+`BusinessEvent`, `GenomeMemoryEvent`, `TemporalFlowMemory`, `CognitionMemory`,
+`AiExecutionLog`, `CortexActionLog`. The chat read none of them until `199a6819`.
+`UnifiedMemoryRetrievalService` reads all eight and is now on the live path,
+graded by the thalamus (reflex skips it entirely).
 
 **The classifiers measure something narrower than their names.**
 `classifyEmotionalWeight` matches first-person feeling words (frustrated,
