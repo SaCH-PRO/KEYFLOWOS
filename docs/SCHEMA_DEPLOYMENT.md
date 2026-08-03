@@ -1,114 +1,168 @@
-# Schema deployment — the actual state, and how to fix it
+# Schema deployment — the actual state, and how it was fixed
 
 Written 2026-08-03 while investigating "migration drift". The drift turned out
-to be a symptom. This is the disease.
+to be a symptom. This is the disease, and the cure.
 
 ---
 
-## 1. There is no schema deployment step in production
+## 0. Correction to the first version of this document
 
-Verified directly:
+The first version of this file claimed:
+
+```
+models in schema.prisma ............ 430
+tables created by migrations/ ....... 11        <-- WRONG
+```
+
+**That number was wrong.** It came from a broken extraction that collapsed the
+list of `CREATE TABLE` statements. It is preserved here rather than quietly
+deleted because it was committed (`1f2bd678`) and acted on.
+
+The real numbers, each verified directly:
+
+| Measure | Value | How |
+|---|---|---|
+| Distinct tables the 19 migrations *contain* DDL for | **404** | `grep -o` over every `migration.sql`, deduplicated |
+| Tables `prisma migrate deploy` actually *produces* on an empty database | **1** | ran it; see below |
+| Tables `schema.prisma` needs | **433** | 430 models + 3 implicit m-n join tables |
+| Tables in `schema.prisma` that **no** migration creates | **29** | set difference |
+
+So the original claim was wrong in both directions at once. The migrations
+directory is far *richer* than reported — 404 tables, not 11 — and far *more
+broken*, because none of that DDL ever runs.
+
+## 1. `prisma migrate deploy` could not build a database at all
+
+This is the finding that matters, and it is worse than incompleteness.
+
+```
+$ DATABASE_URL=<virgin db> npx prisma migrate deploy
+19 migrations found in prisma/migrations
+Applying migration `20250626_add_key_connector_fields`
+Error: P3018
+Database error code: 42P01
+ERROR: relation "integration_connections" does not exist
+```
+
+**It died on migration 1 of 19 and produced one table** (`_prisma_migrations`).
+
+The cause is ordering. Migrations apply in lexicographic order of directory
+name, so `20250626_add_key_connector_fields` (June) runs *first* — but it does
+`ALTER TABLE "integration_connections"`, and that table is created by
+`20251128000000_baseline_full_schema` (November), five months later in name
+order. The migration is written with `ADD COLUMN IF NOT EXISTS` throughout,
+which is why it looked safe; `IF NOT EXISTS` guards the *column*, not the
+*table*.
+
+Every environment therefore got its schema from `prisma db push`, which writes
+no migration — which is exactly how the history drifted this far without
+anyone noticing.
+
+## 2. There is still no schema deployment step in production
+
+Verified directly, and **not yet fixed**:
 
 | Where | Schema step |
 |---|---|
 | `render.yaml` `buildCommand` | `db:generate` only — that builds the Prisma **client**, not the database |
 | `scripts/start-prod.sh` | none |
 | `.github/workflows/ci-cd.yml` | none, and the deploy job is commented out |
-| `scripts/start-cloud-app.sh` | `pnpm db:push` — but this is the **local dev** orchestrator (tmux sessions, `ensure_local_postgres`) |
+| `scripts/start-cloud-app.sh` | `pnpm db:push` — but this is the **local dev** orchestrator (tmux, `ensure_local_postgres`) |
 
-**Nothing applies schema changes to production.** Adding a model or a column to
-`schema.prisma` reaches production only if a human runs something by hand.
+Adding a model or a column reaches production only if a human runs something by
+hand. This is not theoretical: the `flow_sessions.user_id` column added for
+session privacy (`18d599ae`) is a **security fix**, and no automated process
+applies it.
 
-This is not theoretical. The `flow_sessions.user_id` column added for session
-privacy (`18d599ae`) is a security fix, and no automated process will apply it.
+Now that §3 gives `migrate deploy` a working path, adding that step is finally
+a safe change. It was not safe before — it would have failed on migration 1.
 
-## 2. The migrations directory is vestigial
+## 3. What was done: the baseline was adopted
 
-```
-models in schema.prisma ............ 430
-tables created by migrations/ ....... 11
-```
-
-`prisma migrate deploy` against an empty database produces **11 tables**, not
-430. The migration history was abandoned early and the schema has been kept in
-sync by `prisma db push` ever since — which writes no migration.
-
-Consequences that have already bitten:
-
-- Nine migrations existed in the local database with no files on disk. They came
-  from commit `c7ab974a` ("Phase 5: payroll MVP") on a branch that **never
-  merged to main**. Someone ran them locally; the branch was abandoned; the
-  tables stayed.
-- `OrgAssignment` and `DelegationRule` are live models queried by
-  `structure.service.ts`, and **no migration creates them**. On any freshly
-  migrated database that code fails at runtime.
-- Four tables exist in the local dev database (`payroll_runs`,
-  `staff_performance_snapshots`, `support_ticket_messages`, and contract-clause
-  tables) whose models are **not in `schema.prisma`**. All are empty.
-
-## 3. What was fixed on 2026-08-03
-
-`prisma migrate status` now reports **"Database schema is up to date"**. Two
-migrations were reconciled with `migrate resolve --applied`, which writes
-bookkeeping rows only and runs no DDL:
-
-- `20250626_add_key_connector_fields` — its three columns and the
-  `connector_audit_logs` table were already present, and the SQL is written with
-  `IF NOT EXISTS` throughout, so it was already effectively applied.
-- `20260803180000_flow_session_user_scope` — applied by hand
-  (`ALTER TABLE ... ADD COLUMN IF NOT EXISTS`) precisely because `migrate dev`
-  would have seen the drift above and offered to reset the database.
-
-That makes the status output honest. It does **not** make the migrations
-directory able to build a database.
-
-## 4. An accurate baseline is ready, and is NOT yet installed
-
-`packages/db/prisma/baseline/schema-baseline.sql` — 13,589 lines, **433
-`CREATE TABLE` statements**, generated with:
+`prisma/migrations/` now contains exactly one migration, `0_baseline`,
+generated from `schema.prisma` with:
 
 ```bash
-pnpm --filter @keyflow/db exec prisma migrate diff \
-  --from-empty --to-schema-datamodel prisma/schema.prisma --script
+prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script
 ```
 
-It is staged rather than installed, because adopting it changes migration
-history for **every** developer and every environment. That is a decision for
-the repo owner, not a side effect of a bug investigation.
+with `CREATE EXTENSION IF NOT EXISTS "vector";` prepended by hand — `migrate
+diff` does not emit it, and `AiMemoryEmbedding.embedding` is
+`Unsupported("vector(1536)")`, so the baseline fails on a virgin database
+without it. (`docker-compose.yml` was also corrected from `postgres:16-alpine`,
+which ships no pgvector, to `pgvector/pgvector:pg16`.)
 
-### To adopt it
+The 19 previous migrations moved to `prisma/migrations-archive/`. **Order
+mattered**: `0_baseline` sorts lexicographically before `20250626…`, so
+installing it alongside the old folders would have created all 433 tables and
+then aborted with 42P07 on the first duplicate. They had to be archived in the
+same change, not after it.
 
-1. Move the existing 19 migration folders to `prisma/migrations-archive/`
-   (they remain in git history regardless — do not delete them).
-2. Move `baseline/schema-baseline.sql` to
-   `prisma/migrations/0_baseline/migration.sql`.
-3. On **every existing database**, including production:
-   ```bash
-   pnpm --filter @keyflow/db exec prisma migrate resolve --applied 0_baseline
-   ```
-   This records the baseline as applied without running it. Skipping this on a
-   populated database means the next `migrate deploy` tries to create 433 tables
-   that already exist.
-4. From then on, schema changes go through `prisma migrate dev`, and deployment
-   gains a `prisma migrate deploy` step.
+Verified on a virgin `pgvector/pgvector:pg16` database:
 
-### Before adopting, decide about the four orphan tables
+```
+$ npx prisma migrate deploy
+Applying migration `0_baseline`
+All migrations have been successfully applied.        exit 0
 
-`payroll_runs`, `staff_performance_snapshots`, `support_ticket_messages` and the
-contract-clause tables exist in databases that ran the abandoned branch, and are
-absent from `schema.prisma`. They are empty locally. After baselining, any
-`prisma db push` will want to drop them and will refuse without
-`--accept-data-loss`, which can block a deploy. Either restore the models or
-drop the tables deliberately — do not let a deploy discover this.
+tables: 433
+$ npx prisma migrate status      -> Database schema is up to date!
+$ npx prisma migrate diff --from-url <that db> --to-schema-datamodel prisma/schema.prisma
+                                 -> No difference detected.
+```
 
-## 5. Until then
+An independent adversarial audit of the generated SQL (10 agents, one per
+dimension) found the translation exact: 430 models to 433 tables with the gap
+fully explained by 3 implicit m-n join tables, enums 16/16 including member
+*ordering*, defaults 1641/1641 with zero missing or extra, unique indexes
+179/179 name-for-name, and **534/534 foreign keys with zero `onDelete` or
+`onUpdate` mismatches**.
 
-`db push` remains the only working mechanism. It is genuinely risky in
-production: it drops columns and tables that `schema.prisma` no longer declares,
-and this repo has already demonstrated a database holding tables the schema does
-not know about.
+### Existing databases
 
-If a schema change must reach production before baselining, apply it by hand as
-additive SQL — `ADD COLUMN IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS` — the
-way `20260803180000_flow_session_user_scope` was applied, and commit the
-matching migration file so the eventual baseline includes it.
+`0_baseline` describes a database that already exists, so it must be recorded
+as applied rather than run:
+
+```bash
+pnpm --filter @keyflow/db exec prisma migrate resolve --applied 0_baseline
+```
+
+This writes one bookkeeping row and executes no DDL. **Skipping it on a
+populated database means the next `migrate deploy` tries to create 433 tables
+that are already there.** Done for local dev; **still required on production**.
+
+## 4. The orphans — twelve, not four, and five held data
+
+Tables that existed in the local database with no model in `schema.prisma`, no
+Prisma client accessor, and no raw SQL reference anywhere in `apps/` or
+`packages/`. They came from commit `c7ab974a` ("Phase 5: payroll MVP") on a
+branch that never merged.
+
+The earlier draft of this document said there were four and that they were
+empty. There were **eleven tables plus one column**, and **five held a row
+each** — all one business, all 2026-07-22, all self-identified as test data
+(`payroll_runs.notes = 'verification run'`, `support_ticket_messages.id =
+'p11_msg_1'`). Re-checking immediately before dropping is what caught it.
+
+Everything was dumped **with data** to
+`prisma/migrations-archive/ORPHAN_TABLES.sql` (restore verified against a real
+database, not assumed) before anything was removed. Worth keeping rather than
+deleting: `pay_rates`, `payroll_items`, `payroll_runs` and
+`staff_performance_snapshots` are the data layer for people/HR, the next organ
+scheduled to be built, and they reference `org_assignments`, which is live.
+
+One piece is **not yet applied** — `prisma/migrations-archive/CLOSE_LOCAL_DRIFT.sql`
+removes an `org_assignments` row named 'Test Payroll Clerk' plus the dead
+"contact-only assignment" columns. It matters because `schema.prisma` declares
+`org_assignments.membership_id` and `.user_id` NOT NULL while a contact-only
+row has both null — so while that row exists, the real schema cannot be applied
+to that database.
+
+## 5. From here
+
+- Schema changes go through `prisma migrate dev`, which now works.
+- **Production still needs `migrate resolve --applied 0_baseline` once**, then a
+  `prisma migrate deploy` step in the deploy path (§2).
+- `db push` should no longer be used outside throwaway databases. It drops
+  columns and tables `schema.prisma` no longer declares, and this repo has
+  already demonstrated a database holding twelve such objects.

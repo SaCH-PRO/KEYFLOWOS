@@ -1,3 +1,19 @@
+-- Required extensions.
+--
+-- prisma migrate diff does NOT emit these. schema.prisma declares
+-- `Unsupported("vector(1536)")` on AiMemoryEmbedding.embedding but never
+-- declares the extension itself (that needs previewFeatures =
+-- ["postgresqlExtensions"] plus an `extensions` list on the datasource), so the
+-- generated SQL asks for a type Postgres does not have yet.
+--
+-- Without this line the baseline fails on a virgin database with
+--   ERROR: type "vector" does not exist
+-- which is how it was found: by applying it to an empty database rather than
+-- trusting the generator.
+--
+-- tsvector needs no extension — it is built into PostgreSQL.
+CREATE EXTENSION IF NOT EXISTS "vector";
+
 -- CreateSchema
 CREATE SCHEMA IF NOT EXISTS "public";
 

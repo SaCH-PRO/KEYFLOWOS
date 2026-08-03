@@ -18,7 +18,17 @@
 
 services:
   db:
-    image: postgres:16-alpine
+    # pgvector, not plain postgres. schema.prisma declares
+    # `Unsupported("vector(1536)")` on AiMemoryEmbedding.embedding, which is the
+    # pgvector extension type — semantic memory search does not work without it.
+    #
+    # This said `postgres:16-alpine`, which ships no pgvector, so
+    # `docker compose up` on a clean machine produced a database that could not
+    # host the schema. Existing volumes already have the extension because they
+    # were created by some other image, which is why nobody noticed.
+    #
+    # Same PostgreSQL major version, so an existing data directory keeps working.
+    image: pgvector/pgvector:pg16
     restart: unless-stopped
     environment:
       POSTGRES_USER: keyflow

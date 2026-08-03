@@ -46,6 +46,41 @@ services:
       pnpm --filter @keyflow/shared --filter @keyflow/db --filter @keyflow/api build &&
       pnpm --filter server build &&
       pnpm --filter web build
+    # Nothing applied schema changes to production. `db:generate` above builds
+    # the Prisma CLIENT, not the database; start-prod.sh does no schema work;
+    # CI's deploy job is commented out. So a new model or column reached
+    # production only if a human ran something by hand — including
+    # `flow_sessions.user_id`, which is a SECURITY fix (session privacy).
+    #
+    # This could not have been added earlier. `migrate deploy` was itself broken:
+    # migrations apply in lexicographic order, and 20250626_add_key_connector_fields
+    # sorted FIRST while doing `ALTER TABLE "integration_connections"` — a table
+    # created five months later by 20251128000000_baseline_full_schema. On a
+    # virgin database it died on migration 1 of 19 with 42P01 and produced one
+    # table. The `IF NOT EXISTS` guards in it protect the columns, not the table.
+    #
+    # That history is now archived in prisma/migrations-archive/ and replaced by
+    # a single generated 0_baseline, verified on a virgin pgvector database:
+    # 433 tables, exit 0, `migrate diff` reports "No difference detected".
+    #
+    # preDeployCommand runs after the build and BEFORE the new version takes
+    # traffic, so a schema failure blocks the release instead of shipping code
+    # against a database that cannot serve it.
+    #
+    # ┌─ ONE-TIME PREREQUISITE — do this BEFORE the next deploy ──────────────┐
+    # │ Production's database already contains all 433 tables, and its        │
+    # │ _prisma_migrations still lists the 19 archived migrations. Left as is, │
+    # │ `migrate deploy` will try to CREATE tables that already exist and the  │
+    # │ deploy will fail. Record the baseline as applied first — it writes one │
+    # │ bookkeeping row and runs no DDL:                                      │
+    # │                                                                       │
+    # │   pnpm --filter @keyflow/db exec prisma migrate resolve \             │
+    # │     --applied 0_baseline                                              │
+    # │                                                                       │
+    # │ Run it once, against production's DATABASE_URL, from a Render shell   │
+    # │ or any machine that can reach the database.                           │
+    # └───────────────────────────────────────────────────────────────────────┘
+    preDeployCommand: pnpm --filter @keyflow/db exec prisma migrate deploy
     startCommand: bash scripts/start-prod.sh
     # /api/healthz — the WEB app's health route, because the WEB app is what
     # binds Render's $PORT here.
