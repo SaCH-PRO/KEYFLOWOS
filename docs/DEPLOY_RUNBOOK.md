@@ -17,7 +17,7 @@ equivalents are given where the syntax differs — in PowerShell,
 
 `git push` auto-deploys — `render.yaml` sets `branch: main` and does not disable
 `autoDeploy` — and that deploy now runs `prisma migrate deploy` as a pre-deploy
-step. There are 27 unpushed commits on `main` right now.
+step. There are 30 unpushed commits on `main` right now.
 
 ## What you need
 
@@ -115,12 +115,58 @@ Sanity-check you are pointed at production and not your laptop:
 npx prisma migrate status
 ```
 
-Expect it to list **the 19 archived migrations as applied** and report
-`0_baseline` as not yet applied. If it says "Database schema is up to date"
-with 1 migration, you are still pointed at your local database — fix the URL
-before continuing.
+The real output, captured against a database built to match production:
 
-### 2.3 Record the baseline
+```
+2 migrations found in prisma/migrations
+Your local migration history and the migrations table from your database are different:
+The last common migration is: null
+The migrations have not yet been applied:
+0_baseline
+20260803190000_flow_session_user_scope
+The migrations from the database are not found locally in prisma/migrations:
+20250626_add_key_connector_fields
+20251128000000_baseline_full_schema
+…17 more…
+20260803180000_flow_session_user_scope
+```
+
+**This exits 1, and that is expected here.** The 19 appear under *"not found
+locally"* — **not** as applied — because their folders now live in
+`migrations-archive/`, which Prisma does not read. Seeing all 19 names listed is
+how you know you are on production: your laptop prints "Database schema is up to
+date!" instead. If you see that, fix the URL before continuing.
+
+### 2.3 Prove the baseline is safe to record — do not skip this
+
+`migrate resolve --applied` **asserts** that production's schema already matches
+`0_baseline`. It does not check. If the assertion is wrong you have told Prisma
+something untrue that it will believe permanently.
+
+So check, rather than assume:
+
+```powershell
+npx prisma migrate diff --from-url "$env:DATABASE_URL" --to-schema-datamodel prisma/schema.prisma
+```
+
+**Expected — exactly this and nothing more:**
+
+```
+[*] Changed the `flow_sessions` table
+  [+] Added column `user_id`
+  [+] Added index on columns (business_id, user_id)
+```
+
+That single delta is precisely what migration `20260803190000` applies during the
+deploy, so it is the correct expected state. `No difference detected.` is equally
+fine — it means production already has the column.
+
+**Anything else means stop.** Extra tables, missing tables or other columns mean
+production's schema is not what `0_baseline` describes, and recording the
+baseline would put the bookkeeping permanently out of step with reality. Bring
+the difference back here before going further.
+
+### 2.4 Record the baseline
 
 ```powershell
 npx prisma migrate resolve --applied 0_baseline
@@ -131,28 +177,41 @@ Expect: **`Migration 0_baseline marked as applied.`**
 This writes one bookkeeping row into `_prisma_migrations` and runs **no DDL**.
 No table is created, altered or dropped. Your data is untouched.
 
-### 2.4 Verify
+### 2.5 Verify
 
 ```powershell
 npx prisma migrate status
 ```
 
-Expect: **`Database schema is up to date!`**
+Expect `0_baseline` to have disappeared from the pending list, leaving:
 
-### 2.5 You do NOT need to delete the 19 old rows
+```
+The migrations have not yet been applied:
+20260803190000_flow_session_user_scope
+```
 
-Rehearsed: with `0_baseline` recorded alongside all 19 stale rows (21 rows
-total), `migrate status` reports "up to date" and `migrate deploy` exits 0.
+**Still exit 1, and still correct.** That migration is *meant* to be pending —
+Render applies it during the deploy, and it is what puts `flow_sessions.user_id`
+on production. `migrate status` only reports "Database schema is up to date!"
+after the deploy has run, which is the check in Part 3.
+
+### 2.6 You do NOT need to delete the 19 old rows
+
+Rehearsed end to end: with `0_baseline` recorded alongside all 19 stale rows,
+the deploy applies the remaining migration and `migrate status` then reports
+**"Database schema is up to date!"** at exit 0, with 21 rows in the table and
+`migrate diff` reporting `No difference detected.`
+
 Prisma only applies migrations found on disk; rows describing folders that no
 longer exist are inert. Leave them — deleting them is unnecessary risk.
 
-### 2.6 If your production DATABASE_URL is a pooled connection
+### 2.7 If your production DATABASE_URL is a pooled connection
 
 Check the URL you pasted. If it contains `:6543`, `pgbouncer=true`, or a
 `-pooler` host (the Supabase convention), it is a **transaction pooler**.
 
 Prisma Migrate cannot work through one — it takes a session-level advisory lock
-— so it hangs or fails rather than applying DDL. `migrate resolve` in 2.3 is
+— so it hangs or fails rather than applying DDL. `migrate resolve` in 2.4 is
 only an INSERT and is unaffected, but the migration that runs during the deploy
 is real DDL.
 
@@ -163,7 +222,7 @@ automatically, and nothing changes if you do not.
 
 For your own commands in 2.3, use the direct URL (`:5432`) if you have one.
 
-### 2.7 Close the terminal, or clear the variable
+### 2.8 Close the terminal, or clear the variable
 
 ```powershell
 Remove-Item Env:\DATABASE_URL
