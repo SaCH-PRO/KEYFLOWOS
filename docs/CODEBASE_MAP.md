@@ -217,6 +217,38 @@ user's message actually travels."** Mapped 2026-08-03.
   consciousness *service* still has no direct executor, so escalating a chat
   message to it would still lose tool execution.
 
+### The complete loop (as of 2026-08-03)
+
+`stimulus → receptor → afferent → integration → efferent → effector → feedback`
+now exists end to end. Each element, and the file that owns it:
+
+| Element | Service | Cadence |
+|---|---|---|
+| Receptors | webhooks, 3 Google pollers, 5 organ adapters, 18 crons | continuous |
+| Afferent | `key-cortex-event-bus` → `CognitiveEvent` / `BusinessEvent` | per event |
+| **Salience (amygdala)** | `key-cortex-salience.service.ts` | hourly |
+| **Thalamus** | `cognitive-triage.service.ts` | per message |
+| Cortex | `key-cortex-consciousness.service.ts` | Deep think |
+| Efferent | `key-cortex-efferent-bridge.service.ts` (118 tools) | per action |
+| **Subcortex** | `key-cortex-endocrine.service.ts` (persisted) | continuous |
+| **Homeostasis** | `key-cortex-homeostasis.service.ts` | 30 min |
+| **Cerebellum** | `key-cortex-cerebellum.service.ts` | 6 hourly |
+| **Circadian** | `key-cortex-circadian.service.ts` | hourly |
+
+Three services are deliberately **handless** — homeostasis, cerebellum and
+salience score, learn and modulate disposition, but never act. Each has a test
+asserting it contains no executor reference. A control loop that could act on
+the business would oscillate against real data.
+
+**Hormone writers, which took four attempts to get right:**
+
+| Hormone | Written by | Meaning |
+|---|---|---|
+| `cortisol` | salience | sustained threat, above this business's own normal |
+| `humility` | homeostasis | KEY's own actions failing |
+| `malaise` | homeostasis | organ degradation |
+| `dopamine` | consciousness only | sustained opportunity — still no live writer |
+
 ### The efferent path (added 2026-08-03)
 
 Two motor vocabularies used to share **zero** names — 118 bare `FLOW_TOOLS`
@@ -253,6 +285,34 @@ was every user, every message. Fixed in `4cf6ce61`. The rule now is: **roles
 gate scope, tiers gate risk.** Blocking writes at the role layer added no
 safety, because the tier system (confirm / approve / admin) was already there —
 it just made it unreachable.
+
+**Your own tests are the least trustworthy evidence you have.** An adversarial
+audit of a day's work mutation-proved three escapes, each of which had a green
+suite:
+
+- deleting `businessId` from **both** endocrine where-clauses — a total
+  cross-tenant leak — left all 32 tests passing, because the stub ignored its
+  arguments. *A stub that does not filter cannot test filtering.*
+- an "aged, not resurrected" test passed with hydration replaced by a no-op: the
+  48-hour gap decayed the level below `NOISE_FLOOR`, so the assertion's first
+  disjunct always fired.
+- reverting both gateway call sites to hardcoded `maxTokens: 1000` left 25/25
+  triage tests green — nothing verified the tier reached the model.
+
+Two more general lessons from the same audit, both of which cost real time:
+
+- **Assertions that match their own explanatory comment.** Happened four times.
+  Strip `//` lines before asserting on source.
+- **`dist` goes stale.** A boot check verified an artifact two commits old, and
+  Nest maps routes *before* calling `onModuleInit` — so route count does not
+  prove hooks ran. Rebuild, then verify the compiled output.
+
+**Verify against a real database, not only mocks.** Bringing up
+`docker compose` exposed a data-destroying bug that every unit test had passed:
+`persist()` wrote the in-memory map wholesale, so a process that had not
+hydrated a business erased every hormone it had not seen. The homeostasis cron
+made it systematic across the estate. Every test reused ONE instance, which is
+exactly why none of them could see it.
 
 **Perception and answering read different tables.** Everything the afferent side
 records — webhooks, watchers, organ adapters, crons — lands in `CognitiveEvent`,
