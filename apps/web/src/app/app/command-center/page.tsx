@@ -34,6 +34,7 @@ import { CommandKeyGenomeCard } from "./components/command-key-genome-card";
 import { CommandModuleReadinessPanel } from "./components/command-module-readiness-panel";
 import { CommandConstitutionCard } from "./components/command-constitution-card";
 import { CrossDomainPanel } from "./components/cross-domain-panel";
+import { KeyAwarenessPanel } from "@/components/key";
 import { CommandGenomeOutcomesCard } from "./components/command-genome-outcomes-card";
 import { NudgesWidget } from "./components/nudges-widget";
 
@@ -340,6 +341,11 @@ export default function CommandCenterPage() {
         <CommandGenomeOutcomesCard key={businessId} businessId={businessId} />
 
         <CrossDomainPanel businessId={businessId} />
+
+        {/* What KEY noticed on its own. The intuition and creativity layers
+            record weak signals, churn risk and ideas on a schedule; until this
+            panel there was no way to see any of it. */}
+        <KeyAwarenessPanel businessId={businessId} />
       </motion.div>
     </WorkspaceShell>
   );
