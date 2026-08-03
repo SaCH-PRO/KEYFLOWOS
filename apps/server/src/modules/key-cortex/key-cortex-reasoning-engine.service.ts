@@ -23,10 +23,7 @@ import {
   Logger,
   Inject,
 } from '@nestjs/common';
-import {
-  ModelGatewayService,
-  GatewayMessage,
-} from '../ai/model-gateway.service';
+import { GatewayMessage } from '../ai/model-gateway.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { KeyCortexContextV2Service } from './key-cortex-context-v2.service';
 
@@ -290,8 +287,6 @@ export class KeyCortexReasoningEngineService {
   private readonly TOTAL_TIMEOUT_MS = 45000;
 
   constructor(
-    @Inject(ModelGatewayService)
-    private readonly modelGateway: ModelGatewayService,
     @Inject(AiUsageService)
     private readonly aiUsage: AiUsageService,
     @Inject(KeyCortexContextV2Service)
@@ -618,38 +613,36 @@ Provide your reasoning as JSON in the exact format specified.`,
     ];
 
     try {
-      const response = await this.modelGateway.complete({
-        businessId: (context.businessId as string) || 'unknown',
-        taskCategory: 'reasoning',
-        messages,
-        maxTokens: 2500,
-        temperature: mode === 'creative' ? 0.9 : 0.4,
-      });
-
-      const content = response.content ?? '';
-      const chain = this.parseReasoningChain(content, mode, startTime);
-
-      // Track usage
-      try {
-        await this.aiUsage.callAi({
-          businessId: (context.businessId as string) || 'unknown',
-          feature: 'reasoning_engine',
-          // GatewayMessage.content is a union (string | content parts); callAi
-          // wants plain text, so flatten rather than assume a string.
-          messages: messages.map((m) => ({
-            role: m.role as 'system' | 'user' | 'assistant',
-            content: typeof m.content === 'string' ? m.content : '',
-          })),
+      // ONE call that both answers and records. This used to be two.
+      //
+      // The old shape was `modelGateway.complete(...)` for the answer, followed
+      // by `aiUsage.callAi(...)` with identical messages, maxTokens and
+      // temperature, under a `// Track usage` comment, with its result
+      // discarded. But callAi is not a recorder — it builds `executeCall`,
+      // which invokes `gateway.complete`, and runs it. So every reasoning mode
+      // paid for TWO 2500-token completions and used one. processConsciously
+      // runs seven modes, which made Deep think 14 completions for the
+      // reasoning step rather than 7.
+      //
+      // It also meant credit limits were never enforced here: checkCredits ran
+      // only inside the discarded call, whose ForbiddenException was swallowed
+      // by that empty catch. trackAndComplete enforces it on the real call, and
+      // a refusal now degrades a single mode through the Promise.allSettled in
+      // reasonMultiModal rather than failing the pipeline.
+      const response = await this.aiUsage.trackAndComplete(
+        (context.businessId as string) || 'unknown',
+        undefined,
+        'reasoning_engine',
+        {
+          taskCategory: 'reasoning',
+          messages,
           maxTokens: 2500,
           temperature: mode === 'creative' ? 0.9 : 0.4,
-          taskCategory: 'reasoning',
-          responseMode: 'structured_json',
-        });
-      } catch {
-        // Non-blocking: usage tracking failure should not fail reasoning
-      }
+        },
+      );
 
-      return chain;
+      const content = response.content ?? '';
+      return this.parseReasoningChain(content, mode, startTime);
     } catch (error) {
       this.logger.error(
         `[executeReasoningMode] Mode '${mode}' failed: ${error instanceof Error ? error.message : String(error)}`,
