@@ -33,7 +33,8 @@
  *     drift.
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import { PrismaService } from '../../core/prisma/prisma.service';
 
 /**
  * The modulators KEY runs on.
@@ -83,12 +84,21 @@ const NOISE_FLOOR = 0.05;
 /** A single observation can never saturate the system on its own. */
 const MAX_SINGLE_PUSH = 0.35;
 
+/** KeyCortexMemory discriminators for persisted hormone state. */
+const MEMORY_TYPE_HORMONES = 'endocrine_state';
+const MEMORY_KEY_HORMONES = 'hormones';
+
 @Injectable()
 export class KeyCortexEndocrineService {
   private readonly logger = new Logger(KeyCortexEndocrineService.name);
 
-  /** businessId → hormone → level. In-memory: this is state, not a record. */
+  /** businessId → hormone → level. Working state; durability is below. */
   private readonly levels = new Map<string, Map<HormoneName, HormoneLevel>>();
+
+  /** Businesses whose state has been loaded from storage this process. */
+  private readonly hydrated = new Set<string>();
+
+  constructor(@Optional() private readonly prisma?: PrismaService) {}
 
   /**
    * Register observations. Levels rise toward 1 but never reach it from any
@@ -131,10 +141,113 @@ export class KeyCortexEndocrineService {
     }
 
     this.levels.set(businessId, forBusiness);
+
+    // Durability is fire-and-forget on purpose. release() is synchronous
+    // because the thalamus calls it on the request path, and a hormone that
+    // could not be written must never fail the message that observed it.
+    void this.persist(businessId);
+  }
+
+  /**
+   * Durability.
+   *
+   * These levels are the only thing in KEY that carries a disposition across
+   * time, and they lived in a process-local Map — so KEY's accumulated caution
+   * died on every restart and differed between instances. A business that had
+   * been in trouble for three weeks got a fresh, cheerful KEY after a deploy,
+   * which is the exact failure this service was written to prevent.
+   *
+   * Stored in KeyCortexMemory rather than a new table: it is the established
+   * migration-free store in this module, and hormone state is small, per
+   * business, and already shaped like a memory record.
+   *
+   * Decay makes this safe across a gap in time. Levels are anchored to
+   * `updatedAt`, and `levelAt` decays from that anchor — so state written before
+   * a week of downtime is read back correctly aged, not resurrected at full
+   * strength.
+   */
+  private async persist(businessId: string): Promise<void> {
+    if (!this.prisma) return;
+
+    try {
+      const stored = this.levels.get(businessId);
+      const value = JSON.stringify([...(stored?.values() ?? [])]);
+
+      const existing = await this.prisma.client.keyCortexMemory.findFirst({
+        where: { businessId, type: MEMORY_TYPE_HORMONES, key: MEMORY_KEY_HORMONES },
+        select: { id: true },
+      });
+
+      if (existing) {
+        await this.prisma.client.keyCortexMemory.update({
+          where: { id: existing.id },
+          data: { value, lastAccessedAt: new Date() },
+        });
+      } else {
+        await this.prisma.client.keyCortexMemory.create({
+          data: {
+            businessId,
+            type: MEMORY_TYPE_HORMONES,
+            key: MEMORY_KEY_HORMONES,
+            value,
+            source: 'endocrine',
+          },
+        });
+      }
+    } catch (err: unknown) {
+      // Never propagate: losing durability must not lose the observation.
+      this.logger.warn(
+        `[endocrine] could not persist ${businessId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  /**
+   * Load stored levels for a business.
+   *
+   * Async, while `read` and `effortMultiplier` are synchronous because the
+   * thalamus calls them on the request path. So this warms in the background
+   * exactly as interoception's peekBody does: the first message after a restart
+   * sees an unmodulated KEY, every later one sees the real disposition. The
+   * failure direction is toward neutral — cheaper and calmer — never toward
+   * runaway caution.
+   *
+   * In-memory state always wins. A hydrate that clobbered a live level would
+   * undo an observation made while the read was in flight.
+   */
+  async hydrate(businessId: string): Promise<void> {
+    if (!this.prisma || this.hydrated.has(businessId)) return;
+    this.hydrated.add(businessId);
+
+    try {
+      const row = await this.prisma.client.keyCortexMemory.findFirst({
+        where: { businessId, type: MEMORY_TYPE_HORMONES, key: MEMORY_KEY_HORMONES },
+        select: { value: true },
+      });
+      if (!row?.value) return;
+
+      const parsed = JSON.parse(row.value) as Array<
+        Omit<HormoneLevel, 'updatedAt'> & { updatedAt: string }
+      >;
+
+      const forBusiness = this.levels.get(businessId) ?? new Map<HormoneName, HormoneLevel>();
+      for (const h of parsed) {
+        if (forBusiness.has(h.name)) continue;
+        forBusiness.set(h.name, { ...h, updatedAt: new Date(h.updatedAt) });
+      }
+      this.levels.set(businessId, forBusiness);
+    } catch (err: unknown) {
+      this.logger.warn(
+        `[endocrine] could not hydrate ${businessId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   /** Current levels, decayed to now. Only hormones above the noise floor. */
   read(businessId: string, now: Date = new Date()): HormoneLevel[] {
+    // Warm from storage for next time. Cannot be awaited — see hydrate().
+    if (!this.hydrated.has(businessId)) void this.hydrate(businessId);
+
     const stored = this.levels.get(businessId);
     if (!stored) return [];
 
