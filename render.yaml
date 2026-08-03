@@ -80,7 +80,25 @@ services:
     # │ Run it once, against production's DATABASE_URL, from a Render shell   │
     # │ or any machine that can reach the database.                           │
     # └───────────────────────────────────────────────────────────────────────┘
-    preDeployCommand: pnpm --filter @keyflow/db exec prisma migrate deploy
+    # DIRECT_URL when it is set, DATABASE_URL otherwise.
+    #
+    # The datasource declares only `url = env("DATABASE_URL")` and no
+    # `directUrl`, so Migrate runs over whatever DATABASE_URL points at — while
+    # render.yaml's own secret list names DIRECT_URL separately. That pairing
+    # conventionally means DATABASE_URL is a transaction pooler (pgbouncer,
+    # :6543) and DIRECT_URL is the session connection (:5432). Prisma Migrate
+    # cannot work through a transaction pooler: it takes a session-level
+    # advisory lock, so it hangs or fails rather than applying DDL.
+    #
+    # This matters now in a way it did not a moment ago. With only the baseline
+    # present, pre-deploy had no DDL to run on an existing database. The
+    # 20260803190000 migration below it does — it ALTERs flow_sessions.
+    #
+    # The `:-` fallback keeps every environment working: unset DIRECT_URL and
+    # this is exactly the old command. The generated client at runtime is
+    # unaffected and still uses DATABASE_URL, pooler included — only Migrate
+    # needs the direct connection.
+    preDeployCommand: DATABASE_URL="${DIRECT_URL:-$DATABASE_URL}" pnpm --filter @keyflow/db exec prisma migrate deploy
     startCommand: bash scripts/start-prod.sh
     # /api/healthz — the WEB app's health route, because the WEB app is what
     # binds Render's $PORT here.
