@@ -131,6 +131,39 @@ describe('roles can do their own job', () => {
   });
 });
 
+describe('every role has a coherent baseline', () => {
+  // Specialisation without a baseline produced roles that could not do their
+  // own job. Measured before ROLE_BASELINE_TOOLS existed: finance could not
+  // look up a contact, so it could not find the customer whose invoice it was
+  // chasing. Operations and marketing were equally blind, and five of eight
+  // roles could not open a document. Those gaps only surface once role
+  // detection is switched on, which is why they are pinned here.
+  const BASELINE = [
+    'crm_search_contacts',
+    'crm_list_contacts',
+    'calendar_list_events',
+    'calendar_check_conflicts',
+    'documents_list',
+    'documents_search',
+    'keyflow_create_note',
+    'create_task',
+  ];
+
+  for (const tool of BASELINE) {
+    it(`every role can ${tool}`, () => {
+      if (!TOOLS.includes(tool)) return;
+      const missing = ROLES.filter((r) => !engine.isToolAllowed(r, tool));
+      expect(missing, `${tool} missing for: ${missing.join(', ')}`).toEqual([]);
+    });
+  }
+
+  it('a role can still deliberately opt out via blockedTools', () => {
+    // blockedTools is checked before the baseline, so the escape hatch works.
+    // executive blocks commerce_send_invoice and must stay blocked.
+    expect(engine.isToolAllowed('executive', 'commerce_send_invoice')).toBe(false);
+  });
+});
+
 describe('specialisation still means something', () => {
   it('a specialised role is narrower than general', () => {
     // Otherwise the role layer is decoration.

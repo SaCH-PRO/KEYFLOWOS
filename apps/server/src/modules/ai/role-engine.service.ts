@@ -129,6 +129,35 @@ const ROLE_SWITCH_KEYWORDS: Record<BusinessRole, RegExp> = {
   executive: /\b(strategy|board|stakeholder|decision|directive|vision|mission|governance|leadership|executive|CEO|C-suite|approve|authorize|strategic|planning|quarterly|annual|objective|OKR|KPI|metric|performance|review|evaluation|assessment|audit|compliance|risk|mitigation|contingency|succession|partnership|acquisition|merger|investment|funding|capital|valuation|IPO|exit)\b/i,
 };
 
+/**
+ * Tools available to EVERY role, regardless of department.
+ *
+ * Reads that orient you in the business, plus the two low-risk writes that no
+ * employee should have to escalate: leave a note, raise a task.
+ *
+ * This exists because specialisation without a baseline produced incoherent
+ * roles. Measured before it was added: the FINANCE role could not look up a
+ * contact — so it could not find the customer whose invoice it was chasing.
+ * Operations and marketing were equally blind, and only three of eight roles
+ * could open a document.
+ *
+ * Kept as one shared list rather than pasted into eight allowlists so it cannot
+ * drift. A role that genuinely should not have one of these can still say so in
+ * its blockedTools, which is checked first.
+ */
+const ROLE_BASELINE_TOOLS = new Set<string>([
+  // Orient: who is this, what is scheduled, what did we agree
+  'crm_search_contacts',
+  'crm_list_contacts',
+  'calendar_list_events',
+  'calendar_check_conflicts',
+  'documents_list',
+  'documents_search',
+  // Record: never destructive, always attributable
+  'keyflow_create_note',
+  'create_task',
+]);
+
 const ROLE_DEFINITIONS: Record<BusinessRole, RoleDefinition> = {
   sales: {
     id: 'sales',
@@ -511,7 +540,19 @@ export class RoleEngineService {
       return true;
     }
 
-    return false;
+    // Baseline: what any competent employee can do regardless of department.
+    //
+    // Without this, specialisation produced incoherent roles — measured, before
+    // it existed: the FINANCE role could not look up a contact, so it could not
+    // find the customer whose invoice it was chasing. Neither could operations
+    // or marketing. Nobody but general/operator/executive could open a
+    // document. Those are not specialisations, they are gaps, and they would
+    // have surfaced the moment role detection was switched on.
+    //
+    // Kept as one shared list rather than copied into eight allowlists, so it
+    // cannot drift per role. Still subject to blockedTools above, so a role can
+    // deliberately opt out.
+    return ROLE_BASELINE_TOOLS.has(toolName);
   }
 
   getSystemPromptForRole(role: BusinessRole, businessContext: string, onboardingDirective = ''): string {
