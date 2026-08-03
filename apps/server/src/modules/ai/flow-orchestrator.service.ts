@@ -963,6 +963,8 @@ export class FlowOrchestratorService {
     assistantToolResults: FlowToolResult[] | undefined,
     assistantPendingConfirmations: PendingConfirmation[] | undefined,
     usage: { promptTokens: number; completionTokens: number; totalTokens: number; creditsUsed: number },
+    /** Owner of the conversation, so the session it persists is private to them. */
+    userId?: string,
   ): AsyncGenerator<FlowStreamChunk> {
     const sessionMessages: FlowMessage[] = [...conversationHistory];
     if (message.trim() || attachments?.length) {
@@ -982,7 +984,7 @@ export class FlowOrchestratorService {
       requiresConfirmation: assistantPendingConfirmations && assistantPendingConfirmations.length > 0,
       timestamp: new Date(),
     });
-    await this.saveConversationHistory(businessId, sessionId, sessionMessages);
+    await this.saveConversationHistory(businessId, sessionId, sessionMessages, userId);
     yield { type: 'usage', usage };
     yield { type: 'done', sessionId };
   }
@@ -996,6 +998,9 @@ export class FlowOrchestratorService {
     role?: BusinessRole,
     attachments?: FlowAttachment[],
     sessionId?: string,
+    /** Owner of the conversation. A session created without one is private to
+     *  nobody and will not appear in any listing — see saveConversationHistory. */
+    userId?: string,
   ): Promise<FlowResponse> {
     this.aiUsage.checkRateLimit(businessId);
 
@@ -1333,7 +1338,7 @@ ${triage.standingContext}`;
       sessionMessages.push(userMessage);
     }
     sessionMessages.push(assistantMessage);
-    await this.saveConversationHistory(businessId, effectiveSessionId, sessionMessages);
+    await this.saveConversationHistory(businessId, effectiveSessionId, sessionMessages, userId);
 
     return { ...result, sessionId: effectiveSessionId };
   }
@@ -1346,6 +1351,8 @@ ${triage.standingContext}`;
     role?: BusinessRole,
     attachments?: FlowAttachment[],
     sessionId?: string,
+    /** Owner of the conversation — see saveConversationHistory. */
+    userId?: string,
   ): AsyncGenerator<FlowStreamChunk> {
     // Enrich message with uploaded document/image context.
     const effectiveSessionId = sessionId || randomUUID();
@@ -1524,11 +1531,16 @@ ${triage.standingContext}`;
         // strings, so getting this backwards typechecks cleanly and silently
         // writes the session under a swapped id and tenant. It was backwards in
         // the first draft of this block.
-        await this.saveConversationHistory(businessId, effectiveSessionId, [
-          ...conversationHistory,
-          { role: 'user', content: message },
-          { role: 'assistant', content: deliberation.text },
-        ]).catch(() => undefined);
+        await this.saveConversationHistory(
+          businessId,
+          effectiveSessionId,
+          [
+            ...conversationHistory,
+            { role: 'user', content: message },
+            { role: 'assistant', content: deliberation.text },
+          ],
+          userId,
+        ).catch(() => undefined);
 
         yield { type: 'done', sessionId: effectiveSessionId };
         return;
@@ -1612,6 +1624,7 @@ ${triage.standingContext}`;
           undefined,
           undefined,
           usage,
+          userId,
         );
         return;
       }
@@ -1655,6 +1668,7 @@ ${triage.standingContext}`;
           undefined,
           undefined,
           usage,
+          userId,
         );
         return;
       }
@@ -1690,6 +1704,7 @@ ${triage.standingContext}`;
           undefined,
           undefined,
           usage,
+          userId,
         );
         return;
       }
@@ -1720,6 +1735,7 @@ ${triage.standingContext}`;
           undefined,
           pendingConfirmations,
           usage,
+          userId,
         );
         return;
       }
@@ -1783,6 +1799,7 @@ ${triage.standingContext}`;
         toolResults,
         undefined,
         usage,
+        userId,
       );
     } catch (error: any) {
       this.logger.error(`Flow stream chat error: ${(error as Error).message}`);
@@ -4013,42 +4030,79 @@ ${triage.standingContext}`;
     }
   }
 
-  async getConversationHistory(businessId: string, sessionId: string): Promise<FlowMessage[]> {
+  /**
+   * SESSION PRIVACY.
+   *
+   * Chat sessions were scoped to the BUSINESS and nothing else, and
+   * `listSessions` returned every session in it — so any team member could open
+   * the owner's conversations with KEY. An owner discussing whether to let
+   * someone go, or their own cash position, was readable by the person they
+   * were discussing.
+   *
+   * Tenancy in this repo is businessId, and that is right for business DATA:
+   * an invoice belongs to the company. A conversation does not. It is the
+   * closest thing KEY has to a private thought, and the default has to be
+   * private, because you can always choose to share and you cannot un-leak.
+   *
+   * `userId` is nullable because sessions created before this change have no
+   * owner. Those are excluded from every listing rather than shown to
+   * everyone — the safe reading of "we do not know whose this was". They are
+   * not deleted; a backfill can claim them if their owner can be established.
+   */
+  private sessionScope(businessId: string, userId?: string) {
+    // An undefined userId must NEVER widen the query to "all sessions". It
+    // narrows to the legacy-null set, which is empty for any normal caller.
+    return { businessId, userId: userId ?? null };
+  }
+
+  async getConversationHistory(
+    businessId: string,
+    sessionId: string,
+    userId?: string,
+  ): Promise<FlowMessage[]> {
     const session = await this.prisma.client.flowSession.findFirst({
-      where: { id: sessionId, businessId },
+      where: { id: sessionId, ...this.sessionScope(businessId, userId) },
       select: { messages: true },
     });
     if (!session) return [];
     return (session.messages as any[]) || [];
   }
 
-  async saveConversationHistory(businessId: string, sessionId: string, messages: FlowMessage[]): Promise<void> {
+  async saveConversationHistory(
+    businessId: string,
+    sessionId: string,
+    messages: FlowMessage[],
+    userId?: string,
+  ): Promise<void> {
     await this.prisma.client.flowSession.upsert({
       where: { id: sessionId },
-      create: { id: sessionId, businessId, messages: messages as any },
+      create: { id: sessionId, businessId, userId: userId ?? null, messages: messages as any },
+      // userId is set on create only. Re-assigning an existing session's owner
+      // on every save would let whoever writes last take ownership of someone
+      // else's conversation.
       update: { messages: messages as any, updatedAt: new Date() },
     });
   }
 
-  async listSessions(businessId: string) {
+  async listSessions(businessId: string, userId?: string) {
     return this.prisma.client.flowSession.findMany({
-      where: { businessId },
+      where: this.sessionScope(businessId, userId),
       orderBy: { updatedAt: 'desc' },
       take: 20,
       select: { id: true, createdAt: true, updatedAt: true, messages: true },
     });
   }
 
-  async clearSession(businessId: string, sessionId: string) {
+  async clearSession(businessId: string, sessionId: string, userId?: string) {
     await this.prisma.client.flowSession.updateMany({
-      where: { id: sessionId, businessId },
+      where: { id: sessionId, ...this.sessionScope(businessId, userId) },
       data: { messages: [] },
     });
   }
 
-  async deleteSession(businessId: string, sessionId: string) {
+  async deleteSession(businessId: string, sessionId: string, userId?: string) {
     await this.prisma.client.flowSession.deleteMany({
-      where: { id: sessionId, businessId },
+      where: { id: sessionId, ...this.sessionScope(businessId, userId) },
     });
   }
 

@@ -6888,12 +6888,17 @@ model FlowSession {
   id         String   @id @default(cuid())
   businessId String   @map("business_id")
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  /// Owner of this conversation. Nullable for sessions created before chats
+  /// were scoped to a user; those are treated as private to nobody and are
+  /// excluded from every listing rather than shown to everyone.
+  userId     String?  @map("user_id")
   messages   Json     @default("[]")
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")
 
   @@index([businessId])
   @@index([businessId, updatedAt])
+  @@index([businessId, userId])
   @@map("flow_sessions")
 }
 

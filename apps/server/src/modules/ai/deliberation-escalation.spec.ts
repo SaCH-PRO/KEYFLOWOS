@@ -157,7 +157,16 @@ describe('the escalated turn is a complete turn', () => {
     // strings, so reversing them typechecks cleanly and silently writes the
     // session under a swapped id and tenant. It WAS reversed in the first
     // draft of this block and tsc said nothing.
-    expect(block).toMatch(/saveConversationHistory\(businessId, effectiveSessionId,/);
+    // Matched across newlines: the call became multi-line when userId was
+    // threaded through for session privacy, and a single-line regex silently
+    // stopped testing anything.
+    expect(block).toMatch(/saveConversationHistory\(\s*businessId,\s*effectiveSessionId,/);
+  });
+
+  it('records the owner, so a deliberated session is not invisible', () => {
+    // Sessions are private to their user now. One created without an owner
+    // would never appear in that user's own list.
+    expect(block).toMatch(/userId,/);
   });
 
   it('shows progress rather than going silent', () => {

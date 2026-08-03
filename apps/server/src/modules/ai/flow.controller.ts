@@ -5,6 +5,7 @@ import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { FlowOrchestratorService, FlowAttachment, FlowPageContext } from './flow-orchestrator.service';
 import { BusinessRole } from './role-engine.service';
+import { CurrentUser, type AuthenticatedUser } from '../../core/decorators/current-user.decorator';
 
 @Controller('ai')
 @UseGuards(CrmRateLimitGuard)
@@ -31,6 +32,7 @@ export class AiFlowController {
         toolArgs?: Record<string, any>;
       };
     },
+    @CurrentUser() user: AuthenticatedUser | undefined,
   ) {
     const history = body.history || [];
     const result = await this.flow.chat(
@@ -42,6 +44,7 @@ export class AiFlowController {
       undefined,
       body.attachments,
       body.sessionId,
+      user?.id,
     );
     return result;
   }
@@ -51,6 +54,7 @@ export class AiFlowController {
   @Post('businesses/:businessId/flow/chat/stream')
   async flowChatStream(
     @Param('businessId') businessId: string,
+    @CurrentUser() user: AuthenticatedUser | undefined,
     @Body() body: {
       message: string;
       history?: any[];
@@ -71,7 +75,7 @@ export class AiFlowController {
     const role = body.role as BusinessRole | undefined;
 
     try {
-      const stream = this.flow.streamChat(businessId, body.message, history, body.pageContext, role, body.attachments, body.sessionId);
+      const stream = this.flow.streamChat(businessId, body.message, history, body.pageContext, role, body.attachments, body.sessionId, user?.id);
 
       for await (const chunk of stream) {
         if (res.destroyed) break;
@@ -89,10 +93,17 @@ export class AiFlowController {
     }
   }
 
+  // A conversation belongs to the person who had it, not to the company.
+  // BusinessGuard establishes WHICH business is being asked about; it says
+  // nothing about which member is asking, so every session route carries the
+  // caller's identity through to the query.
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/flow/sessions')
-  async listSessions(@Param('businessId') businessId: string) {
-    return this.flow.listSessions(businessId);
+  async listSessions(
+    @Param('businessId') businessId: string,
+    @CurrentUser() user: AuthenticatedUser | undefined,
+  ) {
+    return this.flow.listSessions(businessId, user?.id);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -100,8 +111,9 @@ export class AiFlowController {
   async clearSession(
     @Param('businessId') businessId: string,
     @Param('sessionId') sessionId: string,
+    @CurrentUser() user: AuthenticatedUser | undefined,
   ) {
-    await this.flow.clearSession(businessId, sessionId);
+    await this.flow.clearSession(businessId, sessionId, user?.id);
     return { success: true };
   }
 
@@ -110,8 +122,9 @@ export class AiFlowController {
   async deleteSession(
     @Param('businessId') businessId: string,
     @Param('sessionId') sessionId: string,
+    @CurrentUser() user: AuthenticatedUser | undefined,
   ) {
-    await this.flow.deleteSession(businessId, sessionId);
+    await this.flow.deleteSession(businessId, sessionId, user?.id);
     return { success: true };
   }
 
