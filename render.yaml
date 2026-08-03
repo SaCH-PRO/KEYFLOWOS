@@ -73,19 +73,20 @@ services:
       # set above, so an absent value is a hard build failure — not a runtime
       # one. apps/web/src/lib/env.ts enforces the same requirement.
       #
-      # `/__api` is the same-origin proxy, which is the right answer for THIS
-      # topology: the web app binds the public $PORT and the API sits on 3001 on
-      # the same host, not publicly reachable. next.config.ts rewrites
-      # /__api/:path* to the upstream below, so the browser only ever makes
-      # same-origin requests and needs no public API hostname.
+      # This is the value production is ALREADY running on, not an inferred one.
+      # https://keyflowos.com/api/healthz reports
+      #   "apiBase":"https://api.keyflowos.com","apiReachable":true
+      # so the browser bundle reaches the API on its own public host.
+      #
+      # `/__api` (the same-origin proxy in next.config.ts) is the alternative and
+      # would be correct IF the API were only reachable inside this container on
+      # API_PORT. But the live topology serves the API from a separate public
+      # host, and switching a working production to a proxy path on the strength
+      # of reading one shell script is not a trade worth making. If this service
+      # ever becomes genuinely single-container, switch to /__api and set
+      # KEYFLOW_API_INTERNAL_URL=http://localhost:3001 together.
       - key: NEXT_PUBLIC_API_BASE_URL
-        value: /__api
-
-      # Upstream for that rewrite. Matches API_PORT above. next.config.ts falls
-      # back to this exact value, but it is set explicitly so the two cannot
-      # drift apart silently.
-      - key: KEYFLOW_API_INTERNAL_URL
-        value: http://localhost:3001
+        value: https://api.keyflowos.com
       # Secrets must be added manually in the Render dashboard from your .env file:
       # DATABASE_URL, DIRECT_URL, REDIS_URL, SUPABASE_URL, SUPABASE_ANON_KEY,
       # SUPABASE_JWT_SECRET, SUPABASE_SERVICE_ROLE_KEY, RESEND_API_KEY,
