@@ -22,10 +22,11 @@
  * ============================================================================
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { KeyCortexEventService } from './key-cortex-event.service';
+import { NotificationsAdapterService } from './adapters/notifications-adapter.service';
 import { KeyCortexContextV2Service } from './key-cortex-context-v2.service';
 import { ModelGatewayService } from '../ai/model-gateway.service';
 import { AiUsageService } from '../ai/ai-usage.service';
@@ -160,6 +161,10 @@ export class KeyCortexIntuitionService {
     private readonly contextService: KeyCortexContextV2Service,
     private readonly modelGateway: ModelGatewayService,
     private readonly aiUsage: AiUsageService,
+    // Appended, not inserted: other call sites construct positionally.
+    // @Optional so a module that does not register notifications still boots —
+    // an alert that cannot be delivered must not stop one being detected.
+    @Optional() private readonly notifications?: NotificationsAdapterService,
   ) {}
 
   /* ═══════════════════════════════════════════════════════════════
@@ -555,12 +560,52 @@ export class KeyCortexIntuitionService {
             `${error instanceof Error ? error.message : 'unknown'}`,
         );
       }
+
+      await this.deliver(businessId, {
+        title: signal.description,
+        description: signal.recommendedInvestigation,
+        severity: signal.potentialImpact,
+        entityType: 'weak_signal',
+        entityId: signal.id,
+      });
     }
 
     this.logger.log(
       `[Intuition] Recorded ${signals.length} signals for ${businessId}, ` +
         `raised ${worthRaising.length} alerts`,
     );
+  }
+
+  /**
+   * Put the alert somewhere a person will actually see it.
+   *
+   * logAlert writes a BusinessEvent, which is the audit trail — durable, and
+   * invisible unless someone opens a panel. An alert nobody is told about is
+   * a log line with ambition. This also writes a real Notification row, which
+   * is what the app's notification surfaces read.
+   *
+   * Never throws and never blocks detection: if delivery fails, the signal is
+   * still detected, still persisted and still in the event log.
+   */
+  private async deliver(
+    businessId: string,
+    input: {
+      title: string;
+      description?: string;
+      severity: string;
+      entityType: string;
+      entityId: string;
+    },
+  ): Promise<void> {
+    if (!this.notifications) return;
+    try {
+      await this.notifications.createAlert({ businessId, ...input });
+    } catch (error: unknown) {
+      this.logger.warn(
+        `[Intuition] Alert detected but not delivered (${input.entityId}): ` +
+          `${error instanceof Error ? error.message : 'unknown'}`,
+      );
+    }
   }
 
   /** Daily deep churn analysis — 6:00 AM */
@@ -656,6 +701,14 @@ export class KeyCortexIntuitionService {
               `${error instanceof Error ? error.message : 'unknown'}`,
           );
         }
+
+        await this.deliver(businessId, {
+          title: match.prediction,
+          description: `Predicted window: ${match.timeHorizon}`,
+          severity: match.riskScore >= 0.85 ? 'critical' : 'high',
+          entityType: match.matchedEntityType,
+          entityId: match.matchedEntity,
+        });
       }
     }
 
