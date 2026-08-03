@@ -160,9 +160,13 @@ export function KeyAwarenessPanel({
       <div className="flex items-center gap-3 border-b border-border/40 px-4 py-3">
         <Radar className="h-4 w-4 shrink-0 text-teal-400" />
         <div className="min-w-0 flex-1">
-          <h3 className="text-sm font-semibold">What KEY noticed</h3>
+          {/* Deliberately NOT "What KEY noticed" — KeyNoticedStream already
+              uses that heading for a different source (live module-event
+              insights from ProAutoMonitor). Two panels with the same title
+              showing different data is worse than either alone. */}
+          <h3 className="text-sm font-semibold">Signals &amp; predictions</h3>
           <p className="text-xs text-muted-foreground">
-            Found on its own, without being asked
+            From KEY&apos;s background scans, not this conversation
           </p>
         </div>
         <button
