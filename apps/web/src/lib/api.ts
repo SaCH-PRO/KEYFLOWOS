@@ -275,4 +275,43 @@ export function isPlanLimitError<T>(res: ApiResponse<T>): res is ApiResponse<T> 
   return res.planLimitReached != null;
 }
 
+/**
+ * Drop-in replacement for `fetch` that retries once with a refreshed token.
+ *
+ * The typed apiGet/apiPost/... wrappers already do this. But client.ts contains
+ * a couple of dozen hand-rolled `fetch()` calls — file uploads that need
+ * FormData (so they cannot use the JSON wrappers), plus a long tail of one-offs
+ * — and none of them had a refresh path. Every one hard-401'd the moment the
+ * Supabase access token expired, in the middle of a working session.
+ *
+ * Deliberately identical in signature and first-attempt behaviour to `fetch`:
+ * the caller's init is passed through untouched, so headers, method, body and
+ * Content-Type are exactly what they were. The ONLY change is what happens on
+ * a 401 — refresh, re-stamp Authorization, retry once. That makes this a safe
+ * mechanical substitution at an existing call site.
+ *
+ * FormData note: this never sets Content-Type, so the browser's multipart
+ * boundary is preserved on both the first attempt and the retry. Setting it
+ * would corrupt uploads.
+ */
+export async function fetchWithAuthRetry(
+  url: string,
+  init: RequestInit = {},
+): Promise<Response> {
+  const res = await fetch(url, init);
+  if (res.status !== 401) return res;
+
+  const refreshed = await refreshAccessToken();
+  if (!refreshed) return res;
+
+  // Rebuild from the caller's headers, then let the fresh token win — the
+  // caller's copy was minted from the token that just expired.
+  const headers = new Headers(init.headers);
+  const { Authorization } = getAuthHeaders();
+  if (Authorization) headers.set("Authorization", Authorization);
+  else headers.delete("Authorization");
+
+  return fetch(url, { ...init, headers });
+}
+
 export { API_BASE, getAuthHeaders, AI_SUGGEST_URL };

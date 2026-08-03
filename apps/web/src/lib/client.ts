@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { API_BASE, apiPost, apiPostSimple, apiPatch, apiPut, apiDelete, apiGet as apiGetSimple, getAuthHeaders, emitUnauthorizedEvent, type PlanLimitError } from "./api";
+import { API_BASE, apiPost, apiPostSimple, apiPatch, apiPut, apiDelete, apiGet as apiGetSimple, getAuthHeaders, fetchWithAuthRetry, emitUnauthorizedEvent, type PlanLimitError } from "./api";
 import { refreshAccessToken, setStoredBusinessId, getStoredBusinessId } from "./workspace";
 import { DEFAULT_BUSINESS_ID, DEMO_MODE_ENABLED } from "./api/_defaults";
 
@@ -1718,7 +1718,7 @@ export async function importContactsFromFile(input: {
   const formData = new FormData();
   formData.append('file', input.file);
   const headers = getAuthHeaders();
-  const res = await fetch(url, {
+  const res = await fetchWithAuthRetry(url, {
     method: 'POST',
     headers,
     body: formData,
@@ -1767,7 +1767,7 @@ export async function scanContactImage(imageFile: File, businessId: string = DEF
   const formData = new FormData();
   formData.append('image', imageFile);
   const headers = getAuthHeaders();
-  const res = await fetch(url, {
+  const res = await fetchWithAuthRetry(url, {
     method: 'POST',
     headers,
     body: formData,
@@ -2663,7 +2663,7 @@ export async function bootstrapIdentity(input: {
   referralCode?: string;
 }): Promise<BootstrapIdentityResult> {
   try {
-    const res = await fetch(`${API_BASE}/identity/bootstrap`, {
+    const res = await fetchWithAuthRetry(`${API_BASE}/identity/bootstrap`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -2991,7 +2991,7 @@ export async function updateService(serviceId: string, data: { name?: string; du
 
 export async function deleteService(serviceId: string, businessId: string = DEFAULT_BUSINESS_ID) {
   try {
-    const res = await fetch(`${API_BASE}/bookings/businesses/${encodeURIComponent(businessId)}/services/${encodeURIComponent(serviceId)}`, {
+    const res = await fetchWithAuthRetry(`${API_BASE}/bookings/businesses/${encodeURIComponent(businessId)}/services/${encodeURIComponent(serviceId)}`, {
       method: "DELETE",
       headers: getAuthHeaders(),
     });
@@ -3024,7 +3024,7 @@ export async function createStaff(input: { businessId?: string; name: string; em
 
 export async function deleteStaff(staffId: string, businessId: string = DEFAULT_BUSINESS_ID) {
   try {
-    const res = await fetch(`${API_BASE}/bookings/businesses/${encodeURIComponent(businessId)}/staff/${encodeURIComponent(staffId)}`, {
+    const res = await fetchWithAuthRetry(`${API_BASE}/bookings/businesses/${encodeURIComponent(businessId)}/staff/${encodeURIComponent(staffId)}`, {
       method: "DELETE",
       headers: getAuthHeaders(),
     });
@@ -3301,7 +3301,7 @@ export async function createPlaybook(input: { businessId?: string; name: string;
 export async function updatePlaybook(input: { businessId?: string; playbookId: string; name?: string; triggerEvent?: string; condition?: string | null; actions?: unknown; enabled?: boolean }) {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
   try {
-    const res = await fetch(`${API_BASE}/automation/businesses/${encodeURIComponent(businessId)}/playbooks/${encodeURIComponent(input.playbookId)}`, {
+    const res = await fetchWithAuthRetry(`${API_BASE}/automation/businesses/${encodeURIComponent(businessId)}/playbooks/${encodeURIComponent(input.playbookId)}`, {
       method: "PATCH",
       headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
       body: JSON.stringify({ name: input.name, triggerEvent: input.triggerEvent, condition: input.condition, actions: input.actions, enabled: input.enabled }),
@@ -4940,7 +4940,7 @@ export async function fetchStorefrontConfig(businessId: string): Promise<ApiResu
 }
 
 export async function updateStorefrontConfig(businessId: string, config: Partial<StorefrontConfig>): Promise<ApiResult<StorefrontConfig>> {
-  const res = await fetch(`${API_BASE}/site/businesses/${encodeURIComponent(businessId)}/storefront`, {
+  const res = await fetchWithAuthRetry(`${API_BASE}/site/businesses/${encodeURIComponent(businessId)}/storefront`, {
     method: 'PUT',
     headers: { ...await getAuthHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify(config),
@@ -5265,7 +5265,7 @@ export async function fetchConversionSuggestions(businessId: string): Promise<Ap
 }
 
 export async function fetchAiConversionAdvice(businessId: string): Promise<ApiResult<AiConversionAdvice>> {
-  const res = await fetch(`${API_BASE}/site/businesses/${encodeURIComponent(businessId)}/conversion-advice`, {
+  const res = await fetchWithAuthRetry(`${API_BASE}/site/businesses/${encodeURIComponent(businessId)}/conversion-advice`, {
     method: 'POST',
     headers: { ...await getAuthHeaders(), 'Content-Type': 'application/json' },
   });
@@ -8192,7 +8192,7 @@ export async function updateContactList(
 ): Promise<ApiResult<ContactList>> {
   const url = `${API_BASE}/crm/businesses/${encodeURIComponent(businessId)}/lists/${encodeURIComponent(listId)}`;
   try {
-    const res = await fetch(url, {
+    const res = await fetchWithAuthRetry(url, {
       method: 'PUT',
       headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -9217,7 +9217,7 @@ export async function scanProductImage(imageFile: File, businessId?: string, cur
   if (currency) formData.append('currency', currency);
   try {
     const headers = getAuthHeaders();
-    const res = await fetch(`${API_BASE}/commerce/businesses/${encodeURIComponent(bid)}/products/import/scan`, {
+    const res = await fetchWithAuthRetry(`${API_BASE}/commerce/businesses/${encodeURIComponent(bid)}/products/import/scan`, {
       method: 'POST',
       headers,
       body: formData,
@@ -9239,7 +9239,7 @@ export async function importProductsFile(file: File, businessId?: string): Promi
   formData.append('file', file);
   try {
     const headers = getAuthHeaders();
-    const res = await fetch(`${API_BASE}/commerce/businesses/${encodeURIComponent(bid)}/products/import/file`, {
+    const res = await fetchWithAuthRetry(`${API_BASE}/commerce/businesses/${encodeURIComponent(bid)}/products/import/file`, {
       method: 'POST',
       headers,
       body: formData,
@@ -9612,7 +9612,7 @@ export async function updateCrossModuleWorkflow(input: {
 }): Promise<ApiResult<unknown>> {
   const businessId = input.businessId ?? DEFAULT_BUSINESS_ID;
   try {
-    const res = await fetch(`${API_BASE}/flow/businesses/${encodeURIComponent(businessId)}/cross-module-workflows/${encodeURIComponent(input.workflowKey)}`, {
+    const res = await fetchWithAuthRetry(`${API_BASE}/flow/businesses/${encodeURIComponent(businessId)}/cross-module-workflows/${encodeURIComponent(input.workflowKey)}`, {
       method: "PATCH",
       headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
       body: JSON.stringify({ enabled: input.enabled, config: input.config }),
@@ -10474,7 +10474,7 @@ export async function fetchQualificationConfig(businessId: string): Promise<ApiR
 }
 
 export async function updateQualificationConfig(businessId: string, config: QualificationFlowConfig): Promise<ApiResult<QualificationFlowConfig>> {
-  const res = await fetch(`${API_BASE}/site/businesses/${encodeURIComponent(businessId)}/qualification-config`, {
+  const res = await fetchWithAuthRetry(`${API_BASE}/site/businesses/${encodeURIComponent(businessId)}/qualification-config`, {
     method: 'PUT',
     headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify(config),
@@ -10549,7 +10549,7 @@ export async function fetchKeyflowEvents(
   const path = `/keyflow/businesses/${encodeURIComponent(businessId)}/events${qs ? `?${qs}` : ''}`;
   const url = `${API_BASE}${path}`;
   try {
-    const res = await fetch(url, { headers: getAuthHeaders(), cache: 'no-store', signal: opts?.signal });
+    const res = await fetchWithAuthRetry(url, { headers: getAuthHeaders(), cache: 'no-store', signal: opts?.signal });
     const data = await res.json().catch(() => null);
     if (!res.ok) return { data: null, error: data?.message || 'Failed to load events' };
     return { data, error: null };
@@ -10618,7 +10618,7 @@ export async function synthesizeKeyflowSpeech(
   voice: string = 'alloy',
 ): Promise<{ blob: Blob | null; error: string | null }> {
   try {
-    const res = await fetch(
+    const res = await fetchWithAuthRetry(
       `${API_BASE}/keyflow/businesses/${encodeURIComponent(businessId)}/voice/tts`,
       {
         method: 'POST',
@@ -10645,7 +10645,7 @@ export async function transcribeKeyflowSpeech(
   try {
     const fd = new FormData();
     fd.append('audio', audio, filename);
-    const res = await fetch(
+    const res = await fetchWithAuthRetry(
       `${API_BASE}/keyflow/businesses/${encodeURIComponent(businessId)}/voice/transcribe`,
       {
         method: 'POST',
@@ -10775,7 +10775,7 @@ export async function fetchVoiceProviders(
   businessId: string,
 ): Promise<ApiResult<{ providers: VoiceProviderResponse[] }>> {
   try {
-    const res = await fetch(
+    const res = await fetchWithAuthRetry(
       `${API_BASE}/voice/businesses/${encodeURIComponent(businessId)}/providers`,
       { headers: { ...getAuthHeaders() } },
     );
@@ -12164,7 +12164,7 @@ export async function fetchPresenceDraft(businessId: string) {
 }
 
 export async function savePresenceDraft(businessId: string, payload: PresencePayload) {
-  const res = await fetch(`${API_BASE}/site/presence/businesses/${encodeURIComponent(businessId)}/draft`, {
+  const res = await fetchWithAuthRetry(`${API_BASE}/site/presence/businesses/${encodeURIComponent(businessId)}/draft`, {
     method: 'PUT',
     headers: { ...await getAuthHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify({ payload }),
@@ -12193,7 +12193,7 @@ export async function publishPresence(businessId: string) {
 }
 
 export async function unpublishPresence(businessId: string) {
-  const res = await fetch(`${API_BASE}/site/presence/businesses/${encodeURIComponent(businessId)}/publish`, {
+  const res = await fetchWithAuthRetry(`${API_BASE}/site/presence/businesses/${encodeURIComponent(businessId)}/publish`, {
     method: 'DELETE',
     headers: { ...await getAuthHeaders() },
   });
@@ -13234,7 +13234,7 @@ export function accountantExportUrl(businessId: string, start: string, end: stri
 export async function downloadAccountantExport(businessId: string, start: string, end: string, basis?: 'CASH' | 'ACCRUAL') {
   const url = accountantExportUrl(businessId, start, end, basis);
   const headers = await getAuthHeaders();
-  const res = await fetch(url, { method: 'GET', headers, credentials: 'include' });
+  const res = await fetchWithAuthRetry(url, { method: 'GET', headers, credentials: 'include' });
   if (res.status === 401) emitUnauthorizedEvent(url);
   if (!res.ok) {
     const text = await res.text().catch(() => '');
@@ -13304,7 +13304,7 @@ export async function importBankCsv(
   const url = `${API_BASE}${finBase(businessId)}/accounts/${encodeURIComponent(accountId)}/bank-transactions/import`;
   const fd = new FormData();
   fd.append('file', file);
-  const res = await fetch(url, { method: 'POST', headers: getAuthHeaders(), body: fd });
+  const res = await fetchWithAuthRetry(url, { method: 'POST', headers: getAuthHeaders(), body: fd });
   const payload: unknown = await res.json().catch(() => null);
   if (!res.ok) {
     let msg = res.statusText || 'Import failed';
@@ -13496,7 +13496,7 @@ export async function submitProcurementRequest(businessId: string, id: string) {
 
 export async function downloadReconciliationReportCsv(businessId: string, id: string): Promise<void> {
   const url = `${API_BASE}${finBase(businessId)}/reconciliations/${encodeURIComponent(id)}/report.csv`;
-  const res = await fetch(url, { method: 'GET', headers: getAuthHeaders() });
+  const res = await fetchWithAuthRetry(url, { method: 'GET', headers: getAuthHeaders() });
   if (!res.ok) throw new Error(`Download failed (${res.status})`);
   const blob = await res.blob();
   const objectUrl = URL.createObjectURL(blob);
