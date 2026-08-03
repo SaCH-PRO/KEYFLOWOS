@@ -49,6 +49,10 @@ import {
   type ConsciousPhaseEvent,
 } from './key-cortex-consciousness.service';
 import {
+  KeyCortexAwarenessService,
+  AWARENESS_TYPES,
+} from './key-cortex-awareness.service';
+import {
   Allow,
   IsArray,
   IsBoolean,
@@ -777,6 +781,8 @@ export class KeyCortexController {
     private readonly approvalOrchestrator: KeyCortexApprovalOrchestratorService,
     private readonly consciousness: KeyCortexConsciousnessService,
     private readonly sessionService: KeyCortexSessionService,
+    // Appended, never inserted: specs construct this controller positionally.
+    private readonly awareness: KeyCortexAwarenessService,
   ) {}
 
   /* ================================================================== */
@@ -3247,6 +3253,55 @@ export class KeyCortexController {
     })();
 
     return subject.asObservable();
+  }
+
+  /**
+   * GET /api/v1/cortex/awareness
+   *
+   * Everything KEY has noticed on its own: weak signals, churn predictions,
+   * ideas and reflection cycles. Until now the proactive layers recorded all of
+   * this and nothing read it back — KEY was noticing into a drawer nobody opens.
+   */
+  @Get('awareness')
+  async getAwareness(
+    @Query('businessId') businessId: string,
+    @Query('kinds') kinds?: string,
+    @Query('sinceDays') sinceDays?: string,
+  ): Promise<{
+    items: unknown[];
+    counts: Record<string, number>;
+    latestAt: string | null;
+  }> {
+    if (!businessId) throw new BadRequestException('businessId is required');
+
+    // Only accept kind names we actually store; an unknown one is a client bug
+    // worth surfacing rather than silently returning everything.
+    const valid = Object.keys(AWARENESS_TYPES);
+    const requested = kinds
+      ? kinds.split(',').map((k) => k.trim()).filter(Boolean)
+      : [];
+    const unknown = requested.filter((k) => !valid.includes(k));
+    if (unknown.length > 0) {
+      throw new BadRequestException(
+        `unknown kinds: ${unknown.join(', ')} (valid: ${valid.join(', ')})`,
+      );
+    }
+
+    const days = sinceDays ? Number(sinceDays) : undefined;
+    if (sinceDays !== undefined && (!Number.isFinite(days) || days! <= 0)) {
+      throw new BadRequestException('sinceDays must be a positive number');
+    }
+
+    const summary = await this.awareness.getAwareness(businessId, {
+      kinds: requested as Array<keyof typeof AWARENESS_TYPES>,
+      sinceDays: days,
+    });
+
+    return {
+      items: summary.items,
+      counts: summary.counts,
+      latestAt: summary.latestAt ? summary.latestAt.toISOString() : null,
+    };
   }
 
   private generateCorrelationId(): string {

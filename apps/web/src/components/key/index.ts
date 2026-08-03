@@ -7,6 +7,8 @@ export { KeyActivityFeed } from "./KeyActivityFeed";
 export type { KeyActivityFeedProps, ActivityItem, ActivityStatus, ActivityType } from "./KeyActivityFeed";
 
 export { KeySuggestionCards } from "./KeySuggestionCards";
+
+export { KeyAwarenessPanel } from "./KeyAwarenessPanel";
 export type { KeySuggestionCardsProps, KeySuggestion, SuggestionCategory } from "./KeySuggestionCards";
 
 export { KeyBusinessHealth } from "./KeyBusinessHealth";

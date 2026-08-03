@@ -38,15 +38,29 @@ describe('conscious chat route', () => {
     expect(controller).toMatch(/private readonly sessionService: KeyCortexSessionService/);
   });
 
-  it('injects them at the END of the constructor', () => {
-    // Positional construction elsewhere depends on existing argument order;
-    // inserting mid-list previously broke 8 tests across 3 files.
+  it('is APPENDED to the constructor, never inserted mid-list', () => {
+    // Positional construction elsewhere depends on argument order; inserting
+    // mid-list previously broke 8 tests across 3 files.
+    //
+    // The invariant is "new params go on the end", NOT "these two are last" —
+    // the latter fails the moment anything new is appended, which is exactly
+    // the safe operation it is meant to permit. It did, on the very next one.
     const ctor = controller.slice(controller.indexOf('  constructor('));
     const body = ctor.slice(0, ctor.indexOf('\n  ) {'));
-    const params = body.split('\n').filter((l) => /private readonly \w+:/.test(l));
-    const lastTwo = params.slice(-2).join(' ');
-    expect(lastTwo).toContain('consciousness');
-    expect(lastTwo).toContain('sessionService');
+    const params = body
+      .split('\n')
+      .map((l) => /private readonly (\w+):/.exec(l)?.[1])
+      .filter((n): n is string => Boolean(n));
+
+    const at = (name: string) => params.indexOf(name);
+
+    for (const n of ['approvalOrchestrator', 'consciousness', 'sessionService']) {
+      expect(at(n), `${n} missing from constructor`).toBeGreaterThan(-1);
+    }
+
+    // Each landed after the one before it, i.e. appended rather than spliced in.
+    expect(at('consciousness')).toBeGreaterThan(at('approvalOrchestrator'));
+    expect(at('sessionService')).toBeGreaterThan(at('consciousness'));
   });
 
   it('has a DECORATED dto — an undecorated one is stripped to {} by the global pipe', () => {

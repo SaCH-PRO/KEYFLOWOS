@@ -46,6 +46,7 @@ import { KeyCortexToolRegistryService } from './key-cortex-tool-registry.service
 import { KeyCortexActionExecutorPlugin } from './key-cortex-action-executor.plugin';
 import { KeyCortexOrganRegistrarService } from './key-cortex-organ-registrar.service';
 import { KeyCortexInteroceptionService } from './key-cortex-interoception.service';
+import { KeyCortexAwarenessService } from './key-cortex-awareness.service';
 import { KeyCortexEndocrineService } from './key-cortex-endocrine.service';
 import { KeyCortexLifecycleService } from './key-cortex-lifecycle.service';
 import { KeyCortexSafeDatabaseService } from './key-cortex-safe-database.service';
@@ -359,6 +360,7 @@ import { IntegrationHubModule } from '../integration-hub/integration-hub.module'
     // Registers all organ tools into the canonical registry at boot.
     KeyCortexOrganRegistrarService,
     KeyCortexInteroceptionService,
+    KeyCortexAwarenessService,
     KeyCortexEndocrineService,
 
     // -- Phase 3 Body: Skeleton --
@@ -668,6 +670,7 @@ import { IntegrationHubModule } from '../integration-hub/integration-hub.module'
     // -- Phase 2 Body: Organ Registrar --
     KeyCortexOrganRegistrarService,
     KeyCortexInteroceptionService,
+    KeyCortexAwarenessService,
     KeyCortexEndocrineService,
 
     // -- Phase 3 Body: Skeleton --
