@@ -8,6 +8,7 @@ import { BookingsService } from '../bookings/bookings.service';
 import { ProjectsService } from '../projects/projects.service';
 import { ActivityLogService } from '../activity/activity.service';
 import { EmailMarketingService } from '../email-marketing/email-marketing.service';
+import { DelegationLoopService } from '../autopilot/delegation-loop.service';
 import { SocialService } from '../social/social.service';
 import { FlowService } from '../flow/flow.service';
 import { ExpensesService } from '../expenses/expenses.service';
@@ -362,6 +363,9 @@ export class FlowOrchestratorService {
   }
   private getEmailMarketing() {
     return this.moduleRef.get(EmailMarketingService, { strict: false });
+  }
+  private getDelegationLoop() {
+    return this.moduleRef.get(DelegationLoopService, { strict: false });
   }
   private getSocial() {
     return this.moduleRef.get(SocialService, { strict: false });
@@ -1914,9 +1918,60 @@ ${triage.standingContext}`;
         return { campaign, id: campaign.id };
       }
 
+      // The five delegation loops. These were declared in FLOW_TOOLS with no
+      // case clause at all, so the model could call them — they are offered in
+      // the default role — and every call fell through to
+      // `default: throw new Error('Unknown tool: ...')`. The implementations
+      // were complete the whole time in DelegationLoopService.
+      //
+      // Tool name is `delegation_` + loopType, so one handler covers all five.
+      // ensureLoopsForBusiness is idempotent and must run first: runLoop takes
+      // a DelegationLoop ROW id, not a loop type, and throws NotFoundException
+      // if the business has never had its loops created.
+      case 'delegation_payment_recovery':
+      case 'delegation_lead_reactivation':
+      case 'delegation_post_purchase':
+      case 'delegation_booking_prep':
+      case 'delegation_weekly_hygiene': {
+        const loopType = toolName.slice('delegation_'.length);
+        const delegation = this.getDelegationLoop();
+
+        await delegation.ensureLoopsForBusiness(businessId);
+        const loops = await delegation.getLoops(businessId);
+        const loop = loops.find((l: { loopType: string }) => l.loopType === loopType);
+        if (!loop) {
+          throw new Error(`Delegation loop "${loopType}" is not available for this business`);
+        }
+
+        const run = await delegation.runLoop(businessId, loop.id);
+        return { loopType, ...run };
+      }
+
       case 'marketing_send_campaign': {
-        const updated = await this.getEmailMarketing().markCampaignSent(businessId, args.campaignId);
-        return { campaign: updated, id: updated.id };
+        // sendCampaign, NOT markCampaignSent.
+        //
+        // markCampaignSent flips status to SENT and emits recipientCount: 0 —
+        // it emails nobody. This tool's own confirmation string says "Send
+        // email campaign to all eligible contacts", so KEY was reporting an
+        // action it had not performed. That is the one thing a tool must
+        // never do.
+        //
+        // sendCampaign claims the campaign atomically (so a double-send
+        // throws rather than double-sending), resolves the segment, honours
+        // doNotContact and marketingOptIn, delivers through Gmail when it is
+        // connected, and marks failures BOUNCED. When Gmail is NOT connected
+        // it returns a `warning` saying the campaign was recorded but not
+        // delivered — that must reach the model, or KEY claims delivery again
+        // by a different route.
+        const result = await this.getEmailMarketing().sendCampaign(businessId, args.campaignId);
+        return {
+          campaignId: args.campaignId,
+          recipients: result.sent,
+          delivered: result.gmailDelivered,
+          failed: result.gmailFailed,
+          suppressed: result.suppressed,
+          ...(result.warning ? { warning: result.warning } : {}),
+        };
       }
 
       case 'social_list_posts': {

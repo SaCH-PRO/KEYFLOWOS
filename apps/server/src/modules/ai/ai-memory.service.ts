@@ -61,6 +61,16 @@ export interface MemoryContextBlock {
   priorities: string[];
   bottlenecks: string[];
   corrections: string[];
+  /**
+   * Lessons from KEY's own execution failures, distinct from `corrections`.
+   *
+   * `corrections` is what the USER rejected or corrected — a preference.
+   * These come from FeedbackLoopService after a tool actually failed, so they
+   * are operational rather than preferential, and they must not be blended
+   * into "respect these" or the model will read a stale failure as a standing
+   * instruction from the owner.
+   */
+  learnedCorrections: string[];
   patterns: string[];
 }
 
@@ -181,6 +191,7 @@ export class AiMemoryService {
       priorities: [],
       bottlenecks: [],
       corrections: [],
+      learnedCorrections: [],
       patterns: [],
     };
 
@@ -222,6 +233,21 @@ export class AiMemoryService {
         case 'corrections':
           if (!block.corrections.includes(mem.value)) block.corrections.push(mem.value);
           break;
+        case 'learned_corrections': {
+          // FeedbackLoopService writes this category on every failed tool
+          // execution and nothing read it, so the loop never closed. The
+          // stored value is JSON — surface the lesson, not the blob.
+          let lesson = mem.value;
+          try {
+            const parsed = JSON.parse(mem.value) as { learnedPattern?: string; reason?: string };
+            lesson = parsed.learnedPattern || parsed.reason || mem.value;
+          } catch {
+            // Pre-JSON rows, or a truncated write. The raw value is still
+            // better context than dropping it.
+          }
+          if (!block.learnedCorrections.includes(lesson)) block.learnedCorrections.push(lesson);
+          break;
+        }
         case 'patterns':
           if (!block.patterns.includes(mem.value)) block.patterns.push(mem.value);
           break;
@@ -242,6 +268,8 @@ export class AiMemoryService {
     if (ctx.priorities.length > 0) lines.push(`- Current priorities: ${ctx.priorities.join('; ')}`);
     if (ctx.bottlenecks.length > 0) lines.push(`- Known bottlenecks: ${ctx.bottlenecks.join('; ')}`);
     if (ctx.corrections.length > 0) lines.push(`- User corrections (respect these): ${ctx.corrections.join('; ')}`);
+    if (ctx.learnedCorrections.length > 0)
+      lines.push(`- Lessons from past failures: ${ctx.learnedCorrections.join('; ')}`);
     if (ctx.patterns.length > 0) lines.push(`- Behavioral patterns: ${ctx.patterns.join('; ')}`);
 
     if (lines.length === 0) return '';
