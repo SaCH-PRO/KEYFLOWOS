@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
+import { DefaultTriggersService } from '../ai/default-triggers.service';
 import { sanitizeBusiness } from '../../core/security/sanitize-business';
 import { computeProfileCompleteness, computeTieredCompleteness, COMPLETENESS_TIERS, PROGRESSIVE_DEEPENING_PROMPTS } from './profile-completeness.constants';
 
@@ -29,6 +30,9 @@ export class IdentityService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(BlueprintService) private readonly blueprint: BlueprintService,
+    // Appended. IdentityModule already imports AiModule and AiModule does not
+    // import IdentityModule, so this needs no forwardRef.
+    @Inject(DefaultTriggersService) private readonly defaultTriggers: DefaultTriggersService,
   ) {}
 
   async listBusinesses(userId: string) {
@@ -131,16 +135,43 @@ export class IdentityService {
     return { available: false, slug };
   }
 
-  createBusiness(input: { name: string; ownerId: string }) {
+  async createBusiness(input: { name: string; ownerId: string }) {
     if (!input.ownerId) {
       throw new UnauthorizedException('Owner ID is required to create a business');
     }
-    return this.prisma.client.business.create({
+    const business = await this.prisma.client.business.create({
       data: {
         name: input.name.trim(),
         ownerId: input.ownerId,
       },
     });
+
+    // Seed the autopilot defaults for this business.
+    //
+    // This is the only point at which a business first exists, and
+    // createBusiness emits no `business.created` event, so there is no event
+    // hook to use instead. seedForBusiness had NO callers anywhere, which left
+    // two things broken: AgentTriggerService matched every emitted event
+    // against an empty rule table, and AutopilotSettings — whose only writer is
+    // that same method — never existed, so maxDailyAutoActions was never
+    // enforced and MorningBriefingService had no settings to read.
+    //
+    // Rules are seeded DISABLED (see seedForBusiness); this creates the
+    // settings row and the reviewable rules without KEY starting to act.
+    //
+    // Wrapped: a business must be created even if seeding fails. The seed is
+    // idempotent, so a later retry costs nothing.
+    try {
+      const seeded = await this.defaultTriggers.seedForBusiness(business.id);
+      this.logger.log(`Seeded ${seeded} autopilot triggers for business ${business.id}`);
+    } catch (err: unknown) {
+      this.logger.warn(
+        `Autopilot seed failed for business ${business.id}: ` +
+          `${err instanceof Error ? err.message : 'unknown'}`,
+      );
+    }
+
+    return business;
   }
 
   async updateBusiness(businessId: string, input: {

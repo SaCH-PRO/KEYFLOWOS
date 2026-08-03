@@ -97,6 +97,9 @@ export const DEFAULT_AGENT_TRIGGERS = [
     maxRiskTier: 1,
   },
   {
+    // NOTE: no emitter for 'store_order.abandoned' exists anywhere in the
+    // server, so this rule can never fire. Kept so the intent is not lost;
+    // it needs an emitter before enabling is meaningful.
     name: 'Abandoned Cart → Recovery Email',
     eventPattern: 'store_order.abandoned',
     objective: 'Send abandoned cart recovery email with discount incentive',
@@ -136,6 +139,8 @@ export const DEFAULT_AGENT_TRIGGERS = [
     maxRiskTier: 2,
   },
   {
+    // NOTE: 'content_request.approved' has a listener (event-stream.service.ts)
+    // but no emitter, so this rule can never fire either.
     name: 'Content Approved → Upload to Drive',
     eventPattern: 'content_request.approved',
     objective: 'Create Drive folder for deliverables and notify assigned team to upload files',
@@ -165,7 +170,27 @@ export class DefaultTriggersService {
 
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  async seedForBusiness(businessId: string): Promise<number> {
+  /**
+   * Create this business's default autopilot rules.
+   *
+   * Seeded DISABLED by default. AgentTriggerService listens to every emitted
+   * event and matches rows from this table, so seeding them enabled would mean
+   * KEY begins creating and auto-approving plans against real data the moment a
+   * business is created, with nobody having chosen that. The rules exist so
+   * they can be reviewed and switched on individually.
+   *
+   * Seeding also writes the AutopilotSettings row, which matters independently:
+   * it is the ONLY writer of that table, and two live readers depend on it —
+   * MorningBriefingService (briefingEnabled/briefingModules) and
+   * AgentTriggerService (maxDailyAutoActions). Without it the daily
+   * auto-action cap is never enforced.
+   *
+   * Idempotent: returns 0 if this business already has triggers.
+   */
+  async seedForBusiness(
+    businessId: string,
+    options: { enabled?: boolean } = {},
+  ): Promise<number> {
     const existing = await this.prisma.client.agentTrigger.count({
       where: { businessId },
     });
@@ -187,7 +212,8 @@ export class DefaultTriggersService {
             objective: trigger.objective,
             autoExecute: trigger.autoExecute,
             maxRiskTier: trigger.maxRiskTier,
-            enabled: true,
+            // Opt-in, not opt-out. See the note on seedForBusiness.
+            enabled: options.enabled ?? false,
           },
         });
         created++;
