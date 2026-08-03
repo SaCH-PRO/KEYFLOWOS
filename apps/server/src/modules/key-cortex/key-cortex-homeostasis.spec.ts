@@ -49,7 +49,14 @@ class EndocrineStub {
 
 class InteroStub {
   body: { totalCount: number; integrity: number } | null = null;
-  peekBody = vi.fn(() => this.body);
+  // senseBody, not peekBody. This loop runs on a cron in a process that has
+  // usually served no traffic for the business, so the peek cache was always
+  // cold and bodyIntegrity was structurally null on every sweep — a reading
+  // that never contributed while still paying for a discarded organ fan-out.
+  senseBody = vi.fn(() => Promise.resolve(this.body));
+  peekBody = vi.fn(() => {
+    throw new Error('homeostasis must SENSE, not peek — the cron cache is always cold');
+  });
 }
 
 function make() {

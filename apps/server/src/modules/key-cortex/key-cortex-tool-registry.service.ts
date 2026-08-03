@@ -32,6 +32,21 @@ export interface KeyCortexToolContext {
   correlationId?: string;
   idempotencyKey?: string;
   sagaId?: string;
+  /**
+   * Set ONLY when a human has already approved this exact action.
+   *
+   * checkRisk answers "may KEY do this on its own?" — a question an approved
+   * proposal has already answered with human authority, so it is skipped here.
+   * Without this, a tier-3 tool could never execute at all: checkRisk refuses
+   * tier 3 at EVERY autonomy level, so approving a proposal sent it back
+   * through the same gate, which refused it and filed another proposal. An
+   * infinite approval loop, and the user never got the action they authorised.
+   *
+   * It does NOT bypass KeyAutonomySafetyService. The kill switch, the daily
+   * action cap and the spend cap still apply — an operator killing autonomy
+   * must outrank an approval granted five minutes earlier.
+   */
+  preApproved?: boolean;
 }
 
 export interface KeyCortexToolCompensation {
@@ -222,7 +237,13 @@ export class KeyCortexToolRegistryService {
       return { success: false, error: validation.error };
     }
 
-    const riskCheck = this.checkRisk(tool, ctx.autonomyLevel ?? 0);
+    // An approved action skips the autonomy threshold — a human already
+    // granted the authority checkRisk exists to withhold. Skipping the whole
+    // branch also breaks the loop: re-entering it would file a second proposal
+    // for an action that was already approved.
+    const riskCheck = ctx.preApproved
+      ? { allowed: true as const, reason: undefined }
+      : this.checkRisk(tool, ctx.autonomyLevel ?? 0);
     if (!riskCheck.allowed) {
       // A refusal used to end here. The tier-3 message even said the tool
       // "requires explicit user approval" — and then there was no way to ask

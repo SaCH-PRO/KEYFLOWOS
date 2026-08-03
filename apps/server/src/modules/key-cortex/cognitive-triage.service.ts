@@ -2,10 +2,7 @@ import { Injectable, Logger, Optional } from '@nestjs/common';
 import type { TaskCategory } from '../ai/model-gateway.service';
 import { AdaptiveRouterService, type QueryDimensions } from './adaptive-router.service';
 import { KeyCortexEndocrineService } from './key-cortex-endocrine.service';
-import {
-  KeyCortexInteroceptionService,
-  type BodyState,
-} from './key-cortex-interoception.service';
+import { KeyCortexInteroceptionService } from './key-cortex-interoception.service';
 
 /**
  * The thalamus: how much cognition does this message deserve?
@@ -131,7 +128,7 @@ export class CognitiveTriageService {
     const arousal = this.arousalFor(businessId);
     score = score * arousal;
 
-    const tier = this.tierFor(score, dimensions, hasAttachments);
+    const tier = this.tierFor(score, dimensions, hasAttachments, text);
 
     return {
       tier,
@@ -143,6 +140,30 @@ export class CognitiveTriageService {
       reason: this.reasonFor(tier, dimensions, arousal),
       dimensions,
     };
+  }
+
+  /**
+   * Is the WHOLE message a greeting or acknowledgement?
+   *
+   * Anchored deliberately. The router's simpleMarkers regex matches anywhere,
+   * which meant "ok delete that contact" graded simple — so the cheap tier was
+   * reachable by any destructive request that happened to start with "ok".
+   *
+   * A trailing "please"/"thanks" is tolerated because "ok thanks" is still a
+   * bare acknowledgement, but anything carrying a verb or an object is not.
+   */
+  private isBareAcknowledgement(text: string): boolean {
+    const cleaned = text
+      .toLowerCase()
+      .replace(/[!.,?—–-]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (cleaned.length === 0 || cleaned.length > 24) return false;
+
+    return /^(hi|hello|hey|yo|thanks|thank you|ty|ok|okay|k|yes|yep|no|nope|bye|goodbye|cheers|got it|perfect|great|nice)( (thanks|thank you|please))?$/.test(
+      cleaned,
+    );
   }
 
   /**
@@ -168,13 +189,28 @@ export class CognitiveTriageService {
     score: number,
     dimensions: QueryDimensions,
     hasAttachments: boolean,
+    text: string,
   ): EffortTier {
     // Reflex is a WHITELIST, not a low score. A misclassified real question
     // answered in 400 tokens reads as broken in a way a slow answer never
     // does, so a message only reflexes when every cheap signal agrees it is
     // trivial — a low score alone is not sufficient.
+    //
+    // `complexity === 'simple'` is NOT sufficient on its own, and believing it
+    // was is how this shipped wrong. classifyComplexity's simpleMarkers regex
+    // matches ANYWHERE in the message, so every one of these graded simple and
+    // reflexed at 400 tokens:
+    //
+    //   "ok delete that contact"      "ok cancel the booking"
+    //   "hi can you refund them"      "no, remove that task"
+    //
+    // Destructive requests, answered on the cheapest tier, because they happen
+    // to contain the word "ok". isBareAcknowledgement requires the WHOLE
+    // message to be a greeting or acknowledgement, which is what the whitelist
+    // claim always meant.
     const isReflex =
       !hasAttachments &&
+      this.isBareAcknowledgement(text) &&
       dimensions.complexity === 'simple' &&
       dimensions.dataRequirement === 'none' &&
       dimensions.emotionalWeight === 'low' &&
@@ -230,11 +266,25 @@ export class CognitiveTriageService {
   private standingContext(businessId: string): string | null {
     const parts: string[] = [];
 
-    // Sense the body FIRST, because sensing it can itself release a hormone.
+    // READ ONLY. Triage does not release hormones.
+    //
+    // It used to call releaseFromBody here, and that was wrong twice over:
+    //
+    //  1. The push accumulated per CHAT MESSAGE rather than per observation.
+    //     peekBody serves one cached reading for 15 seconds, so a busy minute
+    //     dosed malaise from the same reading dozens of times, saturating it on
+    //     traffic volume instead of on how long the organs had been degraded.
+    //     A hormone that responds to chattiness is not measuring the body.
+    //
+    //  2. It put an endocrine WRITE on the request path, which meant a database
+    //     persist per message.
+    //
+    // Body-driven malaise now belongs to KeyCortexHomeostasisService, which
+    // samples on a fixed 30-minute cadence — so one push means one half hour of
+    // degradation, which is what the level is supposed to represent.
     let body = null;
     try {
       body = this.interoception?.peekBody(businessId) ?? null;
-      if (body) this.releaseFromBody(businessId, body);
     } catch {
       /* body state is framing, never required */
     }
@@ -256,43 +306,6 @@ export class CognitiveTriageService {
     return parts.length > 0 ? parts.join('\n\n') : null;
   }
 
-  /**
-   * Give the endocrine system a writer on the live path.
-   *
-   * Without this the whole subcortex is a reader with no writer: the only
-   * caller of `release` anywhere in the server is inside processConsciously,
-   * so hormone levels stayed empty for every business that never clicked Deep
-   * think — which means effortMultiplier returned exactly 1.0 and
-   * describeForPrompt returned null, forever. Shipping the reader and
-   * deferring the writer is the failure this repo keeps repeating, and it is
-   * indistinguishable from working.
-   *
-   * `malaise` is documented as "sustained degradation of KEY's own body
-   * (organs)", which is precisely what a degraded BodyState is, so this is the
-   * signal the hormone was defined for rather than a new invention. Magnitude
-   * tracks the size of the degradation; a single push is capped by the service
-   * (MAX_SINGLE_PUSH) and decays hourly, so one bad reading cannot pin KEY into
-   * permanent caution — it takes a recurring condition, which is the point.
-   */
-  private releaseFromBody(businessId: string, body: BodyState): void {
-    if (!this.endocrine) return;
-    if (body.totalCount === 0) return;
-
-    const degraded = 1 - body.integrity;
-    if (degraded <= 0) return;
-
-    const failing = body.readings
-      .filter((r) => r.unreachable || !r.healthy)
-      .map((r) => r.organName);
-
-    this.endocrine.release(businessId, [
-      {
-        hormone: 'malaise',
-        magnitude: Math.min(degraded, 1),
-        reason: `${failing.length} of ${body.totalCount} organs degraded (${failing.join(', ')})`,
-      },
-    ]);
-  }
 
   private reasonFor(tier: EffortTier, d: QueryDimensions, arousal: number): string {
     const base = `${d.complexity}/${d.dataRequirement}/${d.timeHorizon} in ${d.domain}`;

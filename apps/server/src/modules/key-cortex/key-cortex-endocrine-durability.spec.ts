@@ -26,25 +26,56 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { KeyCortexEndocrineService } from './key-cortex-endocrine.service';
 
+/**
+ * A stub that HONOURS its where-clause.
+ *
+ * The first version ignored args entirely and returned rows[0]. An audit
+ * mutation-proved the consequence: deleting `businessId` from the where-clause
+ * in BOTH persist and hydrate — a total cross-tenant leak, one business reading
+ * another's disposition — left all 32 tests in this file green.
+ *
+ * A stub that does not filter cannot test filtering. It converts every tenancy
+ * assertion into a tautology.
+ */
 class PrismaStub {
-  rows: Array<{ id: string; value: string }> = [];
+  rows: Array<{ id: string; businessId: string; type: string; key: string; value: string }> = [];
   failOn: 'none' | 'read' | 'write' = 'none';
+  private seq = 0;
+
+  /** Convenience for tests that only care about a single business. */
+  seed(value: string, businessId = 'biz_1') {
+    this.rows.push({
+      id: `mem_${(this.seq += 1)}`,
+      businessId,
+      type: 'endocrine_state',
+      key: 'hormones',
+      value,
+    });
+  }
+
+  private match(where: Record<string, unknown>) {
+    return this.rows.find((r) =>
+      Object.entries(where).every(([k, v]) => (r as Record<string, unknown>)[k] === v),
+    );
+  }
 
   client = {
     keyCortexMemory: {
-      findFirst: vi.fn(() => {
+      findFirst: vi.fn((args: { where: Record<string, unknown> }) => {
         if (this.failOn === 'read') return Promise.reject(new Error('db down'));
-        return Promise.resolve(this.rows[0] ?? null);
+        return Promise.resolve(this.match(args.where) ?? null);
       }),
-      create: vi.fn((args: { data: { value: string } }) => {
+      create: vi.fn((args: { data: Record<string, string> }) => {
         if (this.failOn === 'write') return Promise.reject(new Error('db down'));
-        this.rows.push({ id: 'mem_1', value: args.data.value });
-        return Promise.resolve(this.rows[0]);
+        const row = { id: `mem_${(this.seq += 1)}`, ...args.data } as PrismaStub['rows'][number];
+        this.rows.push(row);
+        return Promise.resolve(row);
       }),
-      update: vi.fn((args: { data: { value: string } }) => {
+      update: vi.fn((args: { where: { id: string }; data: { value: string } }) => {
         if (this.failOn === 'write') return Promise.reject(new Error('db down'));
-        this.rows[0].value = args.data.value;
-        return Promise.resolve(this.rows[0]);
+        const row = this.rows.find((r) => r.id === args.where.id);
+        if (row) row.value = args.data.value;
+        return Promise.resolve(row);
       }),
     },
   };
@@ -110,25 +141,82 @@ describe('hormone state survives a restart', () => {
   });
 });
 
-describe('restored state is aged, not resurrected', () => {
-  it('a level written long ago comes back decayed', async () => {
+describe('one business can never read another’s disposition', () => {
+  // MUTATION-PROVED GAP. Deleting `businessId` from the where-clause in BOTH
+  // persist and hydrate — a total cross-tenant leak — left all 32 tests in this
+  // file green, because the old stub ignored its arguments and returned rows[0].
+  //
+  // Endocrine state is a business's private condition: which pressures it is
+  // under, and the evidence for each. Leaking it across tenants would put one
+  // company's financial distress into another's prompt.
+  it('hydrate reads only its own tenant’s row', async () => {
     const prisma = new PrismaStub();
-    const old = new Date('2026-08-01T00:00:00Z');
+    prisma.seed(
+      JSON.stringify([
+        { name: 'cortisol', level: 0.6, reasons: ['biz_1 cash crisis'], updatedAt: new Date().toISOString() },
+      ]),
+      'biz_1',
+    );
+
+    const svc = new KeyCortexEndocrineService(prisma as never);
+    await svc.hydrate('biz_2');
+
+    expect(svc.read('biz_2'), 'biz_2 hydrated biz_1’s hormones').toEqual([]);
+    expect(svc.effortMultiplier('biz_2')).toBe(1);
+  });
+
+  it('persist writes to its own tenant’s row', async () => {
+    const prisma = new PrismaStub();
+    prisma.seed(
+      JSON.stringify([
+        { name: 'cortisol', level: 0.6, reasons: ['biz_1 cash crisis'], updatedAt: new Date().toISOString() },
+      ]),
+      'biz_1',
+    );
+
+    const svc = new KeyCortexEndocrineService(prisma as never);
+    svc.release('biz_2', [{ hormone: 'malaise', magnitude: 0.2, reason: 'biz_2 organs' }]);
+    await flush();
+
+    const b1 = prisma.rows.find((r) => r.businessId === 'biz_1')!;
+    const b2 = prisma.rows.find((r) => r.businessId === 'biz_2')!;
+
+    expect(b2, 'no row written for biz_2').toBeDefined();
+    expect(JSON.parse(b1.value)[0].reasons).toContain('biz_1 cash crisis');
+    expect(JSON.parse(b2.value).map((h: { name: string }) => h.name)).toEqual(['malaise']);
+  });
+});
+
+describe('restored state is aged, not resurrected', () => {
+  it('a level written earlier comes back decayed but still present', async () => {
+    // MUTATION-PROVED USELESS in its first form. The old version used a 48-hour
+    // gap, and 0.35 * 0.92^48 = 0.0064 falls below NOISE_FLOOR, so read()
+    // always returned [] and the assertion
+    //   `restored.length === 0 || restored[0].level < levelThen`
+    // was satisfied by its FIRST disjunct every time. It passed with the entire
+    // hydration merge replaced by a no-op — testing neither restoration nor
+    // aging.
+    //
+    // A four-hour gap keeps the level above the noise floor, so both halves are
+    // forced: the hormone must actually come back, AND it must have decayed.
+    const prisma = new PrismaStub();
+    const written = new Date('2026-08-03T00:00:00Z');
+    const later = new Date('2026-08-03T04:00:00Z');
 
     const first = new KeyCortexEndocrineService(prisma as never);
-    first.release('biz_1', [{ ...SIGNAL, magnitude: 0.35 }], old);
+    first.release('biz_1', [{ ...SIGNAL, magnitude: 0.35 }], written);
     await flush();
-    const levelThen = first.read('biz_1', old)[0].level;
+    const levelThen = first.read('biz_1', written)[0].level;
 
-    // Two days later, in a fresh process.
-    const later = new Date('2026-08-03T00:00:00Z');
     const second = new KeyCortexEndocrineService(prisma as never);
     await second.hydrate('biz_1');
-
     const restored = second.read('biz_1', later);
-    // Decay is anchored to updatedAt, so a gap in time is handled correctly
-    // rather than the level being restored at full strength.
-    expect(restored.length === 0 || restored[0].level < levelThen).toBe(true);
+
+    expect(restored, 'nothing was restored — hydration is a no-op').toHaveLength(1);
+    expect(restored[0].level, 'restored at full strength — decay not applied').toBeLessThan(levelThen);
+    expect(restored[0].level, 'decayed to nothing — the anchor is wrong').toBeGreaterThan(0.05);
+    // 4h at 0.92/hour retains ~71%.
+    expect(restored[0].level).toBeCloseTo(levelThen * Math.pow(0.92, 4), 3);
   });
 });
 
@@ -186,7 +274,7 @@ describe('storage is treated as untrusted input', () => {
     // This value is a JSON string in a database column. A half-written row must
     // not break the request that happened to trigger the read.
     const prisma = new PrismaStub();
-    prisma.rows = [{ id: 'mem_1', value: '{not json' }];
+    prisma.seed('{not json');
 
     const svc = new KeyCortexEndocrineService(prisma as never);
     await expect(svc.hydrate('biz_1')).resolves.toBeUndefined();
@@ -197,16 +285,11 @@ describe('storage is treated as untrusted input', () => {
     // A NaN level would flow into effortMultiplier and produce a NaN token
     // multiplier on the request path — far harder to diagnose than absence.
     const prisma = new PrismaStub();
-    prisma.rows = [
-      {
-        id: 'mem_1',
-        value: JSON.stringify([
+    prisma.seed(JSON.stringify([
           { name: 'cortisol', level: 'high', reasons: [], updatedAt: new Date().toISOString() },
           { name: 'not_a_hormone', level: 0.5, reasons: [], updatedAt: new Date().toISOString() },
           { name: 'humility', level: 0.4, reasons: ['ok'], updatedAt: 'never' },
-        ]),
-      },
-    ];
+        ]));
 
     const svc = new KeyCortexEndocrineService(prisma as never);
     await svc.hydrate('biz_1');
@@ -226,14 +309,9 @@ describe('storage is treated as untrusted input', () => {
     await svc.hydrate('biz_1');
 
     prisma.failOn = 'none';
-    prisma.rows = [
-      {
-        id: 'mem_1',
-        value: JSON.stringify([
+    prisma.seed(JSON.stringify([
           { name: 'cortisol', level: 0.4, reasons: ['recovered'], updatedAt: new Date().toISOString() },
-        ]),
-      },
-    ];
+        ]));
     await svc.hydrate('biz_1');
 
     expect(svc.read('biz_1'), 'hydration never retried after a blip').toHaveLength(1);
@@ -244,14 +322,9 @@ describe('durability never costs correctness', () => {
   it('hydrate does not clobber a level observed while it was in flight', async () => {
     // Storage says cortisol 0.1; the live process has just observed 0.35.
     const prisma = new PrismaStub();
-    prisma.rows = [
-      {
-        id: 'mem_1',
-        value: JSON.stringify([
+    prisma.seed(JSON.stringify([
           { name: 'cortisol', level: 0.1, reasons: ['stale'], updatedAt: new Date().toISOString() },
-        ]),
-      },
-    ];
+        ]));
 
     // Writes are disabled so storage STAYS stale. Without this, release()
     // persists the fresh value first and there is nothing left to clobber —

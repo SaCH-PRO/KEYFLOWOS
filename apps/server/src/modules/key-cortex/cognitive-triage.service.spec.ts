@@ -21,6 +21,8 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { AdaptiveRouterService } from './adaptive-router.service';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { CognitiveTriageService } from './cognitive-triage.service';
 
 class EndocrineStub {
@@ -76,6 +78,43 @@ function degradedBody() {
     sampledAt: new Date(),
   };
 }
+
+describe('the verdict actually reaches the model', () => {
+  // MUTATION-PROVED GAP: an audit reverted BOTH gateway call sites to the
+  // literals `maxTokens: 1000, temperature: 0.7` and all 25 triage tests stayed
+  // green. Everything below this line tested a verdict that nothing consumed.
+  //
+  // Grading a message and then discarding the grade is this repo's signature
+  // defect, and the thalamus had no guard against committing it.
+  const orchestrator = readFileSync(
+    join(__dirname, '..', 'ai', 'flow-orchestrator.service.ts'),
+    'utf8',
+  );
+
+  it('both chat paths pass the triage token budget to the gateway', () => {
+    const applied = orchestrator.match(/maxTokens: triage\?\.maxTokens \?\? 1000/g) ?? [];
+    expect(applied.length, 'a chat path ignores the tier’s token budget').toBe(2);
+  });
+
+  it('both chat paths pass the triage temperature', () => {
+    const applied = orchestrator.match(/temperature: triage\?\.temperature \?\? 0\.7/g) ?? [];
+    expect(applied.length, 'a chat path ignores the tier’s temperature').toBe(2);
+  });
+
+  it('neither gateway call reverts to a hardcoded budget', () => {
+    // Scoped to the two trackAndComplete/trackAndStream argument objects.
+    // A file-wide match is wrong here: `temperature: 0.7` legitimately appears
+    // in other AI calls that triage does not govern, so asserting on the whole
+    // file failed against correct code.
+    for (const entry of ['trackAndComplete(', 'trackAndStream(']) {
+      const i = orchestrator.indexOf(entry);
+      expect(i, `${entry} not found`).toBeGreaterThan(-1);
+      const args = orchestrator.slice(i, i + 1200);
+      expect(args, `${entry} hardcodes maxTokens`).not.toMatch(/maxTokens: 1000,/);
+      expect(args, `${entry} hardcodes temperature`).not.toMatch(/temperature: 0\.7,/);
+    }
+  });
+});
 
 describe('CognitiveTriageService', () => {
   let endocrine: EndocrineStub;
@@ -133,6 +172,35 @@ describe('CognitiveTriageService', () => {
       }
     });
 
+    it('NEVER reflexes an action-bearing message that merely contains an ack', () => {
+      // This shipped wrong. classifyComplexity's simpleMarkers regex matches
+      // ANYWHERE, so `complexity === 'simple'` was true for all of these and
+      // every one was answered on the cheapest tier at 400 tokens:
+      //
+      //   "ok delete that contact"   "ok cancel the booking"
+      //   "hi can you refund them"   "no, remove that task"
+      //
+      // Destructive requests on the reflex tier, because they contain "ok".
+      // The whitelist claim was only ever true if the WHOLE message is an
+      // acknowledgement.
+      for (const m of [
+        'ok delete that contact',
+        'yes send it',
+        'ok cancel the booking',
+        'hi can you refund them',
+        'no, remove that task',
+        'thanks, now delete the invoice',
+      ]) {
+        expect(svc.triage('biz_1', m).tier, `"${m}" reflexed`).not.toBe('reflex');
+      }
+    });
+
+    it('still reflexes a genuine bare acknowledgement', () => {
+      for (const m of ['hi', 'ok', 'thanks!', 'thank you', 'yes', 'no', 'bye', 'ok thanks']) {
+        expect(svc.triage('biz_1', m).tier, `"${m}" did not reflex`).toBe('reflex');
+      }
+    });
+
     it('an attachment always floors the message out of reflex', () => {
       // "hi" plus a document is not a greeting.
       expect(svc.triage('biz_1', 'hi', true).tier).not.toBe('reflex');
@@ -172,39 +240,45 @@ describe('CognitiveTriageService', () => {
     });
   });
 
-  describe('the subcortex has a writer, not just a reader', () => {
-    it('a degraded body releases malaise', () => {
+  describe('triage READS the subcortex and never writes to it', () => {
+    // It used to release malaise here, and that was wrong twice over.
+    //
+    // The push accumulated per CHAT MESSAGE rather than per observation.
+    // peekBody serves one cached reading for 15 seconds, so a busy minute dosed
+    // malaise from the SAME reading dozens of times — saturating the hormone on
+    // traffic volume instead of on how long the organs had actually been
+    // degraded. A hormone that responds to chattiness is not measuring the body.
+    //
+    // It also put an endocrine write, and therefore a database persist, on the
+    // per-message request path.
+    //
+    // Body-driven malaise now belongs to the homeostasis loop, which samples on
+    // a fixed 30-minute cadence, so one push means one half hour of degradation.
+    it('does not release on a degraded body — that is the control loop’s job', () => {
       intero.body = degradedBody();
       svc.triage('biz_1', 'hi');
 
-      expect(endocrine.release).toHaveBeenCalledTimes(1);
-      const [signal] = endocrine.released[0].signals;
-      expect(signal.hormone).toBe('malaise');
-      expect(signal.magnitude).toBeCloseTo(2 / 3, 5);
+      expect(endocrine.release).not.toHaveBeenCalled();
     });
 
-    it('names the failing organs as the reason', () => {
-      // release() refuses an unexplained signal, so this is required, not nice.
+    it('does not release on a hundred messages either', () => {
+      // The accumulation bug in one assertion: the old code would have dosed
+      // malaise a hundred times from a single cached reading.
       intero.body = degradedBody();
-      svc.triage('biz_1', 'hi');
+      for (let i = 0; i < 100; i += 1) svc.triage('biz_1', 'hi');
 
-      const [signal] = endocrine.released[0].signals;
-      expect(String(signal.reason)).toContain('finance');
-      expect(String(signal.reason)).toContain('calendar');
-    });
-
-    it('a healthy body releases nothing', () => {
-      intero.body = healthyBody();
-      svc.triage('biz_1', 'hi');
       expect(endocrine.release).not.toHaveBeenCalled();
     });
 
-    it('an unknown body releases nothing', () => {
-      // peekBody returns null on a cache miss; absence of a reading is not
-      // evidence of illness.
-      intero.body = null;
-      svc.triage('biz_1', 'hi');
-      expect(endocrine.release).not.toHaveBeenCalled();
+    it('still READS disposition for the prompt', () => {
+      // Reading is the whole point — only writing moved.
+      endocrine.description = 'STANDING CONTEXT — elevated cortisol';
+      expect(svc.triage('biz_1', 'hi').standingContext).toContain('elevated cortisol');
+    });
+
+    it('still reads body state into the prompt', () => {
+      intero.body = degradedBody();
+      expect(svc.triage('biz_1', 'hi').standingContext).toContain('organs degraded');
     });
   });
 

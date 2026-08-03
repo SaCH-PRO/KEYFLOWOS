@@ -109,6 +109,12 @@ export class KeyCortexActionExecutorPlugin
       sessionId: payload.sessionId,
       correlationId: payload.correlationId,
       autonomyLevel: payload.autonomyLevel ?? 4,
+      // This plugin only ever runs an APPROVED proposal — that is the whole
+      // contract of KeyActionExecutorPlugin. Without this flag a tier-3 tool
+      // could never execute: checkRisk refuses tier 3 at every autonomy level,
+      // so the approval bounced off the same gate that raised it and filed
+      // another proposal. Safety limits and the kill switch still apply.
+      preApproved: true,
     };
 
     const result = await this.toolRegistry.execute(toolName, ctx, args);

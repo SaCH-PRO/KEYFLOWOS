@@ -277,12 +277,22 @@ export class KeyCortexHomeostasisService {
   /**
    * Receptor: organ health.
    *
-   * peekBody is cache-only and never polls, so this reads whatever the last
-   * sensing left behind. A cold cache returns null — unmeasured, not unhealthy.
+   * SENSES rather than peeks, and that distinction was a real defect.
+   *
+   * peekBody is cache-only. This loop runs on a 30-minute cron in a process
+   * that has usually served no chat traffic for that business, so the cache was
+   * always cold — bodyIntegrity was structurally null on every sweep. It never
+   * contributed a reading, while still paying for the background organ fan-out
+   * peekBody fires on a miss and then discards.
+   *
+   * senseBody is the right call here precisely because this is not the request
+   * path: a 3-second-per-organ poll is unacceptable in front of a user and
+   * completely acceptable in a background loop that runs twice an hour. It also
+   * warms the cache that the request path then reads for free.
    */
-  private measureBodyIntegrity(businessId: string): number | null {
+  private async measureBodyIntegrity(businessId: string): Promise<number | null> {
     try {
-      const body = this.interoception?.peekBody(businessId);
+      const body = await this.interoception?.senseBody(businessId);
       return body && body.totalCount > 0 ? body.integrity : null;
     } catch {
       return null;
