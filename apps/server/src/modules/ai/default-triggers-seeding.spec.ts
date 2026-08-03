@@ -117,7 +117,9 @@ describe('rules that cannot fire are marked', () => {
     // reader must not assume enabling them does anything.
     const { readFileSync } = await import('node:fs');
     const { join } = await import('node:path');
-    const src = readFileSync(join(__dirname, 'default-triggers.service.ts'), 'utf8');
+    // The rules moved to a decorator-free module so scripts/ can import them
+    // through tsx, which cannot process NestJS parameter decorators.
+    const src = readFileSync(join(__dirname, 'default-triggers.constants.ts'), 'utf8');
 
     const abandoned = src.slice(0, src.indexOf("eventPattern: 'store_order.abandoned'"));
     const approved = src.slice(0, src.indexOf("eventPattern: 'content_request.approved'"));
