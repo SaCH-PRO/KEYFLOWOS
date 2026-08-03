@@ -122,7 +122,14 @@ export class UnifiedMemoryRetrievalService {
 
     const includeEpisodic = options.includeEpisodic !== false;
     const episodicSince = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+    // Episodic memory is PERSONAL. AiExecutionLog and CortexActionLog carry a
+    // userId and a rationale describing why someone asked for something; those
+    // belong to the person, not the company. The business-wide stores below are
+    // deliberately NOT narrowed — an assistant that could not see that an
+    // invoice went overdue because a colleague was the one who noticed would be
+    // useless.
     const episodicWhere: any = { businessId, createdAt: { gte: episodicSince } };
+    if (options.userId) episodicWhere.userId = options.userId;
 
     const [
       aiMemories,

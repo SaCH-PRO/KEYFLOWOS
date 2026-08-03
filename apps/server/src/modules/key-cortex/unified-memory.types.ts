@@ -46,6 +46,20 @@ export interface MemoryFragment {
 }
 
 export interface MemoryRetrievalOptions {
+  /**
+   * Restrict PERSONALLY-ATTRIBUTED memory to one user.
+   *
+   * The episodic stores — AiExecutionLog and CortexActionLog — record what a
+   * specific person asked KEY to do, including the rationale and an input
+   * summary. Business-wide stores (cognitive events, business events, genome,
+   * temporal flow) describe the BUSINESS and stay shared, because a business
+   * assistant that did not know an invoice went overdue would be useless.
+   *
+   * Omitting this leaves episodic memory business-wide, which is correct for
+   * background jobs reasoning about the company as a whole and wrong for
+   * anything rendering into one person's prompt.
+   */
+  userId?: string;
   /** Natural-language query for semantic search */
   query?: string;
   /** Hard limit on number of fragments */

@@ -517,6 +517,7 @@ export class FlowOrchestratorService {
     businessId: string,
     query: string,
     tier: string | undefined,
+    userId?: string,
   ): Promise<string> {
     if (tier === 'reflex') return '';
 
@@ -559,6 +560,10 @@ export class FlowOrchestratorService {
         // read. Those run as one parallel batch, each bounded to 50 rows and
         // a 90-day window, and they are the half of perception the chat was
         // missing.
+        // Personally-attributed memory is narrowed to the caller. Without this
+        // one member's execution history — including the rationale for why they
+        // asked — renders into another member's prompt.
+        userId,
         limit: tier === 'deliberate' ? 12 : 6,
         // 0.3 was decorative — it could not reject a single row.
         //
@@ -1079,7 +1084,7 @@ ${triage.standingContext}`;
 
     // Join the two halves of perception: what KEY sensed, not just what it was
     // told. Graded by the thalamus so a greeting pays nothing for it.
-    systemPrompt += await this.buildPerceptionSection(businessId, message, triage?.tier);
+    systemPrompt += await this.buildPerceptionSection(businessId, message, triage?.tier, userId);
 
     const messages: GatewayMessage[] = [
       { role: 'system', content: withEvidenceDiscipline(systemPrompt) },
@@ -1433,7 +1438,7 @@ ${triage.standingContext}`;
 
     // Join the two halves of perception: what KEY sensed, not just what it was
     // told. Graded by the thalamus so a greeting pays nothing for it.
-    systemPrompt += await this.buildPerceptionSection(businessId, message, triage?.tier);
+    systemPrompt += await this.buildPerceptionSection(businessId, message, triage?.tier, userId);
 
     const messages: GatewayMessage[] = [
       { role: 'system', content: withEvidenceDiscipline(systemPrompt) },

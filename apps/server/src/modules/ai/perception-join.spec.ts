@@ -63,7 +63,7 @@ function makeOrchestrator(memory: MemoryStub) {
   const impl = (
     FlowOrchestratorService.prototype as unknown as Record<
       string,
-      (b: string, q: string, t?: string) => Promise<string>
+      (b: string, q: string, t?: string, u?: string) => Promise<string>
     >
   ).buildPerceptionSection;
 
@@ -74,7 +74,8 @@ function makeOrchestrator(memory: MemoryStub) {
   };
 
   return {
-    buildPerceptionSection: (b: string, q: string, t?: string) => impl.call(instance, b, q, t),
+    buildPerceptionSection: (b: string, q: string, t?: string, u?: string) =>
+      impl.call(instance, b, q, t, u),
   };
 }
 
@@ -204,6 +205,54 @@ describe('cost is graded by the thalamus', () => {
   });
 });
 
+describe('personal memory stays personal', () => {
+  // The audit's finding: "any business member sees every other member's queries
+  // and actions in their prompt". AiExecutionLog and CortexActionLog record
+  // what a SPECIFIC person asked KEY to do, including a rationale explaining
+  // why — "draft a termination letter for Ana" is not shared business context.
+  //
+  // The line drawn: business events describe the BUSINESS and stay shared,
+  // because an assistant that could not see an invoice went overdue just
+  // because a colleague noticed it first would be useless. Episodic memory
+  // describes a PERSON.
+  let memory: MemoryStub;
+
+  beforeEach(() => {
+    memory = new MemoryStub();
+    memory.fragments = [{ sourceType: 'ai_execution_log', title: 't', content: 'c' }];
+  });
+
+  it('narrows retrieval to the caller', async () => {
+    await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard', 'user_1');
+
+    const opts = (memory.retrieveContext.mock.calls[0] as unknown as [
+      string,
+      { userId?: string },
+    ])[1];
+    expect(opts.userId, 'perception is not scoped to the caller').toBe('user_1');
+  });
+
+  it('is passed on BOTH chat paths', () => {
+    const wired = src.match(/buildPerceptionSection\(businessId, message, triage\?\.tier, userId\)/g) ?? [];
+    expect(wired.length, 'a chat path leaks other members’ history').toBe(2);
+  });
+
+  it('only the EPISODIC stores are narrowed, not the business-wide ones', () => {
+    // Over-restricting is the opposite failure: narrowing cognitive/business
+    // events by user would make KEY blind to anything a colleague's action
+    // triggered.
+    const unified = readFileSync(
+      join(__dirname, '..', 'key-cortex', 'unified-memory-retrieval.service.ts'),
+      'utf8',
+    );
+    const fn = unified.slice(unified.indexOf('private async loadStructuredMemory('));
+    const body = fn.slice(0, fn.indexOf('\n  private '));
+
+    expect(body).toMatch(/episodicWhere\.userId = options\.userId/);
+    expect(body).not.toMatch(/whereBase\.userId/);
+  });
+});
+
 describe('the real retrieval service behaves as the stub assumes', () => {
   // Guards the gap that let the defect through: these assertions read the
   // ACTUAL implementation, so they fail if its contract changes underneath the
@@ -254,7 +303,10 @@ describe('it is wired into BOTH chat paths', () => {
   });
 
   it('passes the triage tier through, so grading actually applies', () => {
-    expect(src).toMatch(/buildPerceptionSection\(businessId, message, triage\?\.tier\)/);
+    // Tolerant of trailing arguments: `userId` was appended when perception was
+    // scoped per user, and an exact-arity match silently stopped testing
+    // anything the moment the signature grew.
+    expect(src).toMatch(/buildPerceptionSection\(businessId, message, triage\?\.tier[,)]/);
   });
 
   it('skips retrieval on reflex inside the method itself', () => {
