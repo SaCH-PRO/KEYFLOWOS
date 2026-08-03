@@ -31,8 +31,8 @@ services:
     buildCommand: >-
       npm install -g pnpm@9.15.0 &&
       pnpm install --frozen-lockfile --prod=false &&
-      pnpm --filter @keyflow/shared --filter @keyflow/db --filter @keyflow/api build &&
       pnpm --filter @keyflow/db run db:generate &&
+      pnpm --filter @keyflow/shared --filter @keyflow/db --filter @keyflow/api build &&
       pnpm --filter server build &&
       pnpm --filter web build
     startCommand: bash scripts/start-prod.sh
