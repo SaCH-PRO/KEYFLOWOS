@@ -48,6 +48,7 @@ import {
   CognitiveTriageService,
   type TriageVerdict,
 } from '../key-cortex/cognitive-triage.service';
+import { UnifiedMemoryRetrievalService } from '../key-cortex/unified-memory-retrieval.service';
 
 
 export interface FlowAttachment {
@@ -371,6 +372,71 @@ export class FlowOrchestratorService {
   }
   private getDelegationLoop() {
     return this.moduleRef.get(DelegationLoopService, { strict: false });
+  }
+  private getUnifiedMemory(): UnifiedMemoryRetrievalService | null {
+    try {
+      return this.moduleRef.get(UnifiedMemoryRetrievalService, { strict: false });
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * What KEY has PERCEIVED, as opposed to what it has been told.
+   *
+   * The two halves of perception were not joined. Everything on the afferent
+   * side — every webhook, watcher, organ adapter and cron — lands in
+   * CognitiveEvent, BusinessEvent, GenomeMemoryEvent, TemporalFlowMemory,
+   * CognitionMemory, AiExecutionLog and CortexActionLog. The chat that actually
+   * answers users read businessGraph, AiMemory and semanticMemory, and NONE of
+   * those tables. So KEY could watch an invoice go overdue, record it, alert on
+   * it — and then answer "how are we doing?" without knowing.
+   *
+   * UnifiedMemoryRetrievalService already reads all eight stores and ranks them
+   * by recency, relevance and confidence. Its only consumers were on the cortex
+   * query pipeline, which the web never calls.
+   *
+   * COST IS GRADED BY THE THALAMUS. This is one indexed query, but it is not
+   * free, and a greeting does not need to know what the watchers saw last week.
+   * Reflex skips it entirely; deliberate gets a wider window.
+   *
+   * Never throws — perception is context, and missing context must degrade the
+   * answer, not fail the request.
+   */
+  private async buildPerceptionSection(
+    businessId: string,
+    query: string,
+    tier: string | undefined,
+  ): Promise<string> {
+    if (tier === 'reflex') return '';
+
+    const memory = this.getUnifiedMemory();
+    if (!memory) return '';
+
+    try {
+      const fragments = await memory.retrieveContext(businessId, {
+        query,
+        limit: tier === 'deliberate' ? 12 : 6,
+        minRankScore: 0.3,
+      });
+      if (fragments.length === 0) return '';
+
+      const lines = fragments.map(
+        (f) => `- [${f.sourceType}] ${f.title}: ${f.content.slice(0, 240)}`,
+      );
+
+      return (
+        `\n\nWHAT YOU HAVE OBSERVED — recorded by your own watchers, connectors and\n` +
+        `organs, not stated by the user in this conversation. Treat these as things\n` +
+        `you noticed. Cite them when they bear on the answer, and do not repeat one\n` +
+        `back as fact if the user contradicts it:\n${lines.join('\n')}`
+      );
+    } catch (err: unknown) {
+      this.logger.warn(
+        `[perception] retrieval failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return '';
+    }
   }
   private getSocial() {
     return this.moduleRef.get(SocialService, { strict: false });
@@ -851,6 +917,10 @@ export class FlowOrchestratorService {
 ${triage.standingContext}`;
     }
 
+    // Join the two halves of perception: what KEY sensed, not just what it was
+    // told. Graded by the thalamus so a greeting pays nothing for it.
+    systemPrompt += await this.buildPerceptionSection(businessId, message, triage?.tier);
+
     const messages: GatewayMessage[] = [
       { role: 'system', content: withEvidenceDiscipline(systemPrompt) },
     ];
@@ -1198,6 +1268,10 @@ ${triage.standingContext}`;
 
 ${triage.standingContext}`;
     }
+
+    // Join the two halves of perception: what KEY sensed, not just what it was
+    // told. Graded by the thalamus so a greeting pays nothing for it.
+    systemPrompt += await this.buildPerceptionSection(businessId, message, triage?.tier);
 
     const messages: GatewayMessage[] = [
       { role: 'system', content: withEvidenceDiscipline(systemPrompt) },
