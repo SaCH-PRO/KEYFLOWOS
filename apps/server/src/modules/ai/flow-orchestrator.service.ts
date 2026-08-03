@@ -49,6 +49,7 @@ import {
   type TriageVerdict,
 } from '../key-cortex/cognitive-triage.service';
 import { UnifiedMemoryRetrievalService } from '../key-cortex/unified-memory-retrieval.service';
+import { KeyCortexConsciousnessService } from '../key-cortex/key-cortex-consciousness.service';
 
 
 export interface FlowAttachment {
@@ -139,7 +140,7 @@ export interface FlowResponse {
 }
 
 export interface FlowStreamChunk {
-  type: 'content_delta' | 'tool_calls' | 'tool_results' | 'confirmation_required' | 'usage' | 'done' | 'error' | 'card' | 'triage';
+  type: 'content_delta' | 'tool_calls' | 'tool_results' | 'confirmation_required' | 'usage' | 'done' | 'error' | 'card' | 'triage' | 'thinking';
   content?: string;
   toolCalls?: FlowToolCall[];
   toolResults?: FlowToolResult[];
@@ -147,6 +148,8 @@ export interface FlowStreamChunk {
   card?: OnboardingCard;
   /** Thalamic verdict for this message. Observability only — nothing branches on it. */
   triage?: { tier: string; score: number; arousal: number; reason: string };
+  /** Progress while KEY is deliberating. Observational — nothing branches on it. */
+  thinking?: { label: string; step: number; of: number };
   sessionId?: string;
   usage?: {
     promptTokens: number;
@@ -381,6 +384,105 @@ export class FlowOrchestratorService {
   private getDelegationLoop() {
     return this.moduleRef.get(DelegationLoopService, { strict: false });
   }
+  /**
+   * Should this message be routed to real deliberation?
+   *
+   * The thalamus has been able to grade a message `deliberate` since it was
+   * built, and all that ever did was widen the token budget. Two things blocked
+   * routing to the cortex, and only one of them is left:
+   *
+   *   COST — fixed. reasonMultiModal fired all seven modes on every query
+   *   because no caller passed a subset. processConsciously now selects modes,
+   *   so a deliberate question costs what it needs.
+   *
+   *   HANDS — still real. processConsciously injects the eight cognition layers
+   *   and NO executor. It returns `actions` as PROPOSALS, never executions. So
+   *   routing an action-bearing message there would produce excellent reasoning
+   *   and silently perform nothing — the worst possible failure, because it
+   *   looks like success.
+   *
+   * Hence the action-intent guard. It is not a heuristic nicety; it is the
+   * thing that stops escalation from swallowing work the user asked for. If
+   * only one condition here survives review, it is this one.
+   */
+  private shouldDeliberate(
+    triage: TriageVerdict | null,
+    message: string,
+    hasAttachments: boolean,
+  ): boolean {
+    if (triage?.tier !== 'deliberate') return false;
+    if (hasAttachments) return false;
+
+    // Anything that asks KEY to DO something stays on the tool path.
+    if (
+      /\b(create|make|add|send|schedule|book|update|change|delete|remove|cancel|invoice|draft|generate|assign|move|set|mark|pay|refund|publish|post)\b/i.test(
+        message,
+      )
+    ) {
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
+   * Route a genuinely deliberative question through the cortex.
+   *
+   * Returns the reasoned answer, or NULL — and null must always be survivable,
+   * because the caller's job on a null is to carry on as if this never
+   * happened. Losing a user's message to a failed experiment in thinking harder
+   * would be far worse than answering it shallowly.
+   *
+   * processConsciously only reads six fields off the session, so the synthetic
+   * one below is honest rather than a stub: everything it reads is real.
+   */
+  private async deliberate(
+    businessId: string,
+    message: string,
+    conversationHistory: FlowMessage[],
+    onPhase?: (label: string, step: number, of: number) => void,
+  ): Promise<{ text: string; actions: Array<{ command: string; requiresApproval: boolean }> } | null> {
+    try {
+      const consciousness = this.moduleRef.get(KeyCortexConsciousnessService, { strict: false });
+      if (!consciousness) return null;
+
+      const now = new Date();
+      const response = await consciousness.processConsciously(
+        message,
+        {
+          id: `flow-deliberate-${businessId}-${now.getTime()}`,
+          businessId,
+          userId: '',
+          status: 'active',
+          persona: 'jarvis',
+          voice: 'default',
+          mood: 'neutral',
+          preferredProvider: 'openai',
+          messages: conversationHistory.slice(-10).map((m) => ({
+            role: m.role,
+            content: m.content,
+            timestamp: now,
+          })),
+          createdAt: now,
+          updatedAt: now,
+          lastAccessedAt: now,
+        } as never,
+        onPhase
+          ? (phase: { label: string; step: number; of: number }) =>
+              onPhase(phase.label, phase.step, phase.of)
+          : undefined,
+      );
+
+      if (!response?.text?.trim()) return null;
+      return { text: response.text, actions: response.actions ?? [] };
+    } catch (err: unknown) {
+      this.logger.warn(
+        `[deliberate] falling back to the fast path: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return null;
+    }
+  }
+
   private getUnifiedMemory(): UnifiedMemoryRetrievalService | null {
     try {
       return this.moduleRef.get(UnifiedMemoryRetrievalService, { strict: false });
@@ -1382,6 +1484,55 @@ ${triage.standingContext}`;
           reason: triage.reason,
         },
       };
+    }
+
+
+    // ─── ESCALATION ─────────────────────────────────────────────
+    // The thalamus has been able to grade a message `deliberate` since it was
+    // built, and until now that only widened the token budget. This is the
+    // routing it was always for.
+    //
+    // Guarded hard, because the failure mode is invisible: processConsciously
+    // has no executor, so an action-bearing message sent here would be reasoned
+    // about beautifully and never acted on. shouldDeliberate refuses anything
+    // carrying an action verb.
+    //
+    // A null result is fully survivable — the fast path below runs exactly as
+    // it would have. Losing a user's message to a failed attempt at thinking
+    // harder would be far worse than answering it shallowly.
+    if (this.shouldDeliberate(triage, message, Boolean(attachments?.length))) {
+      const phases: Array<{ label: string; step: number; of: number }> = [];
+      const deliberation = await this.deliberate(
+        businessId,
+        enrichedMessage,
+        conversationHistory,
+        (label, step, of) => phases.push({ label, step, of }),
+      );
+
+      if (deliberation) {
+        // Phases are emitted after the fact rather than live: this generator
+        // cannot yield from inside an awaited callback. The user still sees
+        // what KEY considered, which is the point — silence during a slow
+        // think reads as a hang.
+        for (const phase of phases.slice(-6)) {
+          yield { type: 'thinking', thinking: phase };
+        }
+
+        yield { type: 'content_delta', content: deliberation.text };
+
+        // (businessId, sessionId, messages) — NOT the other way round. Both are
+        // strings, so getting this backwards typechecks cleanly and silently
+        // writes the session under a swapped id and tenant. It was backwards in
+        // the first draft of this block.
+        await this.saveConversationHistory(businessId, effectiveSessionId, [
+          ...conversationHistory,
+          { role: 'user', content: message },
+          { role: 'assistant', content: deliberation.text },
+        ]).catch(() => undefined);
+
+        yield { type: 'done', sessionId: effectiveSessionId };
+        return;
+      }
     }
 
     try {
