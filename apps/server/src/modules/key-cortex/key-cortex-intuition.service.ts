@@ -44,6 +44,16 @@ export type ImpactLevel = 'low' | 'medium' | 'high' | 'critical';
 export type SignalCategory = 'linguistic' | 'behavioral' | 'temporal' | 'cross-domain' | 'network' | 'operational';
 
 /** KeyCortexMemory discriminator for persisted weak signals. */
+/**
+ * Rows read per corpus source per scan.
+ *
+ * scheduledIntuitionScan runs every ten minutes across every active business,
+ * so an unbounded read here is a full-table scan per tenant per source, six
+ * times an hour. A few hundred recent items is ample for detecting a shift in
+ * language; older text is what the temporal detectors are for.
+ */
+const CORPUS_PER_SOURCE_LIMIT = 200;
+
 const MEMORY_TYPE_WEAK_SIGNAL = 'weak_signal';
 
 /** KeyCortexMemory discriminator for persisted churn predictions. */
@@ -794,6 +804,10 @@ export class KeyCortexIntuitionService {
       ?.findMany({
         where: { businessId, createdAt: { gte: since } },
         select: { title: true, description: true, createdAt: true },
+        orderBy: { createdAt: 'desc' },
+        // Bounded like the sources below. This ran unbounded, on a job that
+        // fires every ten minutes for every active business.
+        take: CORPUS_PER_SOURCE_LIMIT,
       })
       .catch(() => []);
     for (const t of tickets ?? []) {
@@ -804,24 +818,53 @@ export class KeyCortexIntuitionService {
       });
     }
 
-    // Chat messages
-    const chats: Array<Record<string, unknown>> = []; // model absent from schema.prisma; call short-circuited and never ran
-    for (const c of chats ?? []) {
-      corpus.push({
-        source: 'chat',
-        text: (c as { content: string }).content,
-        timestamp: (c as { createdAt: Date }).createdAt,
-      });
+    // Inbox messages — email and channel traffic.
+    //
+    // This and the two sources below used to be `const x = []` with a comment
+    // reading "model absent from schema.prisma". That comment was stale: the
+    // models exist. The linguistic detector was therefore running on support
+    // tickets and event names alone, which is most of why this service made
+    // only eight database reads in 1,887 lines.
+    const inbox = await this.prisma.client.keyInboxMessage
+      .findMany({
+        where: { businessId, createdAt: { gte: since }, contentText: { not: null } },
+        select: { contentText: true, createdAt: true },
+        orderBy: { createdAt: 'desc' },
+        take: CORPUS_PER_SOURCE_LIMIT,
+      })
+      .catch(() => []);
+    for (const m of inbox) {
+      if (m.contentText) {
+        corpus.push({ source: 'inbox', text: m.contentText, timestamp: m.createdAt });
+      }
     }
 
-    // Email content (if available)
-    const emails: Array<Record<string, unknown>> = []; // model absent from schema.prisma; call short-circuited to undefined and never ran
-    for (const e of emails ?? []) {
-      corpus.push({
-        source: 'email',
-        text: `${(e as { subject?: string }).subject ?? ''} ${(e as { body?: string }).body ?? ''}`,
-        timestamp: (e as { createdAt: Date }).createdAt,
-      });
+    // Conversation messages — scoped through the thread, which is where
+    // businessId lives; ConversationMessage itself has no tenant column.
+    const conversations = await this.prisma.client.conversationMessage
+      .findMany({
+        where: { thread: { businessId }, createdAt: { gte: since } },
+        select: { body: true, createdAt: true },
+        orderBy: { createdAt: 'desc' },
+        take: CORPUS_PER_SOURCE_LIMIT,
+      })
+      .catch(() => []);
+    for (const c of conversations) {
+      corpus.push({ source: 'conversation', text: c.body, timestamp: c.createdAt });
+    }
+
+    // Contact notes — what the team wrote about customers in their own words,
+    // which is the richest linguistic signal of the three.
+    const notes = await this.prisma.client.contactNote
+      .findMany({
+        where: { businessId, createdAt: { gte: since } },
+        select: { body: true, createdAt: true },
+        orderBy: { createdAt: 'desc' },
+        take: CORPUS_PER_SOURCE_LIMIT,
+      })
+      .catch(() => []);
+    for (const n of notes) {
+      corpus.push({ source: 'note', text: n.body, timestamp: n.createdAt });
     }
 
     // Event descriptions
@@ -829,6 +872,8 @@ export class KeyCortexIntuitionService {
       .findMany({
         where: { businessId, createdAt: { gte: since } },
         select: { action: true, createdAt: true },
+        orderBy: { createdAt: 'desc' },
+        take: CORPUS_PER_SOURCE_LIMIT,
       })
       .catch(() => []);
     for (const e of events) {
