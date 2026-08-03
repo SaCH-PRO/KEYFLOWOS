@@ -373,9 +373,19 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
         ...(standingFraming ? { standingContext: standingFraming } : {}),
       };
 
+      // Graded. Every Deep-think query used to fire all seven reasoning modes —
+      // seven model calls whether the question was "why are we losing clients"
+      // or "should we sign this term sheet". The subset parameter had existed
+      // since the method was written and no caller ever passed one, so the cost
+      // of deliberation was fixed at its maximum and nothing could afford to
+      // route to it automatically.
+      //
+      // analytical + critical always fire; the rest are earned by the question.
+      const selectedModes = this.reasoning.selectModes(query);
       const reasoningResult = await this.reasoning.reasonMultiModal(
         query,
         reasoningContext,
+        selectedModes,
       );
       timing.reasoningMs = Date.now() - step4Start;
       emit('reasoning', 'Reasoning across modes', timing.reasoningMs, {

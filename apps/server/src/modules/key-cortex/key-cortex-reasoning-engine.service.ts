@@ -307,6 +307,48 @@ export class KeyCortexReasoningEngineService {
    * @param context      Business context (will be enriched with FullBusinessContext)
    * @param availableModes Which modes to run (defaults to ALL 7)
    */
+  /**
+   * Choose which reasoning modes a question actually needs.
+   *
+   * `reasonMultiModal` has always accepted a mode subset and every caller
+   * passed none, so all seven modes fired on every Deep-think query — seven
+   * model calls whether the question was "why are we losing clients" or "should
+   * we sign this term sheet". Graded cognition was supported in the signature
+   * and unused, which made deliberation too expensive to route to
+   * automatically. That is the whole reason the thalamus could grade a message
+   * `deliberate` and then do nothing but widen its token budget.
+   *
+   * ANALYTICAL and CRITICAL are always included. Decomposing the problem and
+   * challenging the result are not optional for any question worth deliberating
+   * over — a "cheap" mode set that could skip criticism would produce
+   * confident, unchallenged answers, which is worse than a shallow one.
+   *
+   * Pure keyword selection: no model call, no I/O. Adding a mode must be
+   * cheaper than the mode itself or the optimisation is self-defeating.
+   */
+  selectModes(query: string): ReasoningMode[] {
+    const text = query.toLowerCase();
+    const modes = new Set<ReasoningMode>(['analytical', 'critical']);
+
+    if (/\b(strategy|strategic|long.?term|position|market|competitor|moat|next year|roadmap|vision)\b/.test(text)) {
+      modes.add('strategic');
+    }
+    if (/\b(risk|probability|likely|chance|forecast|predict|estimate|expect|uncertain|odds)\b/.test(text)) {
+      modes.add('probabilistic');
+    }
+    if (/\b(idea|creative|new|novel|brainstorm|alternative|different way|what could|options)\b/.test(text)) {
+      modes.add('creative');
+    }
+    if (/\b(like|similar|compare|other (businesses|companies|industries)|benchmark|precedent)\b/.test(text)) {
+      modes.add('analogical');
+    }
+    if (/\b(what if|instead|had we|would have|counterfactual|alternative outcome|should we have)\b/.test(text)) {
+      modes.add('counterfactual');
+    }
+
+    return [...modes];
+  }
+
   async reasonMultiModal(
     query: string,
     context: Record<string, unknown>,

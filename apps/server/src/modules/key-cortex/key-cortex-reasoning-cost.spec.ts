@@ -50,6 +50,86 @@ function makeEngine(usage: AiUsageStub) {
   return new KeyCortexReasoningEngineService(usage as never, new ContextStub() as never);
 }
 
+describe('deliberation is graded, not fixed at maximum', () => {
+  // reasonMultiModal has ALWAYS accepted a mode subset and every caller passed
+  // none, so all seven modes fired on every Deep-think query — seven model
+  // calls whether the question was "why are we losing clients" or "should we
+  // sign this term sheet".
+  //
+  // That is why the thalamus could grade a message `deliberate` and then do
+  // nothing but widen its token budget: routing to deliberation automatically
+  // was unaffordable while its cost was fixed at maximum.
+  const engine = new KeyCortexReasoningEngineService(
+    new AiUsageStub() as never,
+    new ContextStub() as never,
+  );
+
+  it('always includes analytical AND critical', () => {
+    // Decomposing the problem and challenging the result are not optional for
+    // any question worth deliberating over. A "cheap" set that could skip
+    // criticism would produce confident, unchallenged answers — worse than a
+    // shallow one.
+    for (const q of ['what should we do', 'hi', 'should we raise prices']) {
+      const modes = engine.selectModes(q);
+      expect(modes, q).toContain('analytical');
+      expect(modes, q).toContain('critical');
+    }
+  });
+
+  it('a plain question costs the minimum', () => {
+    expect(engine.selectModes('what is our revenue this month')).toHaveLength(2);
+  });
+
+  it('earns strategic depth only when the question is strategic', () => {
+    expect(engine.selectModes('what is our revenue')).not.toContain('strategic');
+    expect(engine.selectModes('how should we position against our competitor')).toContain(
+      'strategic',
+    );
+  });
+
+  it('earns probabilistic reasoning for questions about risk and forecast', () => {
+    expect(engine.selectModes('what is the risk of losing this client')).toContain(
+      'probabilistic',
+    );
+  });
+
+  it('earns counterfactual reasoning for "what if"', () => {
+    expect(engine.selectModes('what if we had raised prices last year')).toContain(
+      'counterfactual',
+    );
+  });
+
+  it('never exceeds the full set', () => {
+    const modes = engine.selectModes(
+      'what if we compare our long-term strategy risk to other companies with new ideas',
+    );
+    expect(modes.length).toBeLessThanOrEqual(7);
+    expect(new Set(modes).size, 'duplicate modes').toBe(modes.length);
+  });
+
+  it('costs zero model calls to decide', () => {
+    // Selecting modes must be cheaper than the modes themselves, or the
+    // optimisation is self-defeating.
+    const usage = new AiUsageStub();
+    const e = new KeyCortexReasoningEngineService(usage as never, new ContextStub() as never);
+
+    e.selectModes('should we take the series a term sheet');
+    expect(usage.trackAndComplete).not.toHaveBeenCalled();
+  });
+
+  it('processConsciously ACTUALLY passes the subset', async () => {
+    // The compute-and-discard guard. selectModes could be perfect and unused,
+    // which is this repo's signature defect and has already happened twice
+    // today.
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const src = readFileSync(join(__dirname, 'key-cortex-consciousness.service.ts'), 'utf8');
+
+    expect(src).toMatch(/const selectedModes = this\.reasoning\.selectModes\(query\)/);
+    expect(src).toMatch(/reasonMultiModal\(\s*query,\s*reasoningContext,\s*selectedModes,/);
+  });
+});
+
 describe('reasoning cost', () => {
   let usage: AiUsageStub;
   let engine: KeyCortexReasoningEngineService;

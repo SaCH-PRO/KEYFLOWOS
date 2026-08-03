@@ -161,16 +161,21 @@ They are **separate paths**. Ordinary messages never touch the cortex.
 - **Every organ except reasoning makes ZERO model calls** — emotion, ethics,
   metacognition, temporal, intuition, interoception and endocrine are heuristic.
 - All cost is in `reasonMultiModal`, which fires **one model call per reasoning
-  mode** and defaults to all seven (`ALL_REASONING_MODES`).
-- They run via `Promise.allSettled`, so **latency ≈ 1 call, cost ≈ 7×**.
+  mode**. It defaulted to all seven for the life of the codebase, because the
+  `availableModes` subset it accepts was never passed by any caller.
+- They run via `Promise.allSettled`, so **latency ≈ 1 call, cost ≈ N×**.
 
-`reasonMultiModal(query, context, availableModes?)` already accepts a mode
-subset — `processConsciously` just never passes one. **Graded cognition is
-supported in the signature and unused.**
+`processConsciously` now calls `reasoning.selectModes(query)` and passes the
+result. `analytical` + `critical` always fire — decomposing and challenging are
+not optional for a question worth deliberating over — and the other five are
+earned by the question. A plain question costs 2 modes rather than 7.
 
-Ordinary messages now pass through a thalamus (`CognitiveTriageService`) that
-grades effort per message with zero model calls, but it does **not** escalate to
-the cortex, because `processConsciously` cannot execute tools. See §6b.
+Ordinary messages pass through a thalamus (`CognitiveTriageService`) that grades
+effort per message with zero model calls. It still does **not** escalate to the
+cortex: `processConsciously` injects the eight cognition layers and no executor,
+so an action-bearing message routed there would reason well and perform no
+action. Grading is now affordable enough for escalation to be worth designing —
+the blocker is the missing efferent path *inside consciousness*, not cost. See §6b.
 
 ## 6b. KEY's nervous system — what is real
 
@@ -247,7 +252,7 @@ the business would oscillate against real data.
 | `cortisol` | salience | sustained threat, above this business's own normal |
 | `humility` | homeostasis | KEY's own actions failing |
 | `malaise` | homeostasis | organ degradation |
-| `dopamine` | consciousness only | sustained opportunity — still no live writer |
+| `dopamine` | salience | sustained opportunity or momentum |
 
 ### The efferent path (added 2026-08-03)
 

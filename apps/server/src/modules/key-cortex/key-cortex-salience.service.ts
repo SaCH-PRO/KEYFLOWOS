@@ -68,8 +68,36 @@ const THREAT_SIGNALS: Record<string, number> = {
   'proactive.booking_no_show': 0.5,
 };
 
+/**
+ * Opportunity signals — the amygdala's second polarity.
+ *
+ * The first version of this service detected only threat, which made KEY a
+ * sentinel rather than a partner: it could tell you the building was on fire
+ * and never that you were having your best week. `dopamine` is defined in the
+ * endocrine system as "sustained opportunity or momentum — widens exploration"
+ * and had NO writer anywhere in the server. A hormone that decays, is excluded
+ * from effortMultiplier, and is never released.
+ *
+ * These are ordinary business events rather than watcher output, because
+ * momentum is not something a watcher fires on — it is the ordinary events
+ * arriving faster than usual.
+ *
+ * Releasing dopamine is safe by construction: effortMultiplier deliberately
+ * excludes it, so a good week can widen exploration but can never buy KEY less
+ * thinking.
+ */
+const OPPORTUNITY_SIGNALS: Record<string, number> = {
+  'invoice.paid': 0.6,
+  'payment.received': 0.6,
+  'booking.created': 0.5,
+  'booking.completed': 0.5,
+  'contact.created': 0.4,
+};
+
 export interface Concern {
   signal: string;
+  /** Which way this cuts. Threat raises caution; opportunity widens exploration. */
+  valence: 'threat' | 'opportunity';
   /** 0–1. Change-weighted, not volume-weighted. */
   salience: number;
   recentCount: number;
@@ -112,30 +140,74 @@ export class KeyCortexSalienceService {
    * Returns the concerns so this is observable rather than a silent effect.
    */
   async appraise(businessId: string): Promise<Concern[]> {
-    const concerns = await this.rank(businessId);
-    if (concerns.length === 0 || !this.endocrine) return concerns;
-
-    // Only the top concern releases. Dosing once per concern would let a bad
-    // day in three areas saturate the hormone, which is the overactive-amygdala
-    // failure this service exists to avoid.
-    const worst = concerns[0];
-
-    this.endocrine.release(businessId, [
-      {
-        hormone: 'cortisol',
-        magnitude: worst.salience * 0.35,
-        reason: worst.summary,
-      },
+    const [threats, opportunities] = await Promise.all([
+      this.rank(businessId),
+      this.rankOpportunities(businessId),
     ]);
 
+    const all = [...threats, ...opportunities];
+    if (all.length === 0 || !this.endocrine) return all;
+
+    // ONE dose per valence, from the strongest of each. Dosing per concern
+    // would let a busy day in three areas saturate the hormone, which is the
+    // overactive-amygdala failure this service exists to avoid.
+    //
+    // Both may fire in the same pass, and that is correct rather than
+    // contradictory: a business can be winning new work and losing old clients
+    // in the same week, and KEY should hold both. Cortisol tightens risk
+    // tolerance while dopamine widens exploration, and effortMultiplier
+    // deliberately reads only the caution side — so optimism can never buy less
+    // thinking, no matter how good the week.
+    const signals = [];
+    const worstThreat = threats[0];
+    const bestOpportunity = opportunities[0];
+
+    if (worstThreat) {
+      signals.push({
+        hormone: 'cortisol' as const,
+        magnitude: worstThreat.salience * 0.35,
+        reason: worstThreat.summary,
+      });
+    }
+    if (bestOpportunity) {
+      signals.push({
+        hormone: 'dopamine' as const,
+        magnitude: bestOpportunity.salience * 0.35,
+        reason: bestOpportunity.summary,
+      });
+    }
+
+    this.endocrine.release(businessId, signals);
+
     this.logger.log(
-      `[salience] ${businessId}: ${concerns.length} concern(s), worst — ${worst.summary}`,
+      `[salience] ${businessId}: ${threats.length} threat(s), ${opportunities.length} opportunity(s)` +
+        `${worstThreat ? ` — worst: ${worstThreat.summary}` : ''}` +
+        `${bestOpportunity ? ` — best: ${bestOpportunity.summary}` : ''}`,
     );
-    return concerns;
+    return all;
   }
 
-  /** Rank current threat signals by change-weighted salience. Never throws. */
+  /** Rank threat signals. Never throws. */
   async rank(businessId: string): Promise<Concern[]> {
+    return this.scoreSignals(businessId, THREAT_SIGNALS, 'threat');
+  }
+
+  /**
+   * Rank opportunity signals — the same change-weighted maths, opposite sign.
+   *
+   * Deliberately the SAME scorer: momentum is noticed the way threat is, by
+   * comparing against this business's own normal. A business that always takes
+   * twenty bookings a day is not having a good week at twenty.
+   */
+  async rankOpportunities(businessId: string): Promise<Concern[]> {
+    return this.scoreSignals(businessId, OPPORTUNITY_SIGNALS, 'opportunity');
+  }
+
+  private async scoreSignals(
+    businessId: string,
+    signalWeights: Record<string, number>,
+    valence: 'threat' | 'opportunity',
+  ): Promise<Concern[]> {
     const now = Date.now();
     const recentSince = new Date(now - RECENT_HOURS * 3600_000);
     const baselineSince = new Date(now - BASELINE_DAYS * 24 * 3600_000);
@@ -145,7 +217,7 @@ export class KeyCortexSalienceService {
       rows = await this.prisma.client.businessEvent.findMany({
         where: {
           businessId,
-          eventType: { in: Object.keys(THREAT_SIGNALS) },
+          eventType: { in: Object.keys(signalWeights) },
           createdAt: { gte: baselineSince },
         },
         select: { eventType: true, createdAt: true },
@@ -158,7 +230,7 @@ export class KeyCortexSalienceService {
 
     const concerns: Concern[] = [];
 
-    for (const [signal, weight] of Object.entries(THREAT_SIGNALS)) {
+    for (const [signal, weight] of Object.entries(signalWeights)) {
       const all = rows.filter((r) => r.eventType === signal);
       if (all.length === 0) continue;
 
@@ -191,11 +263,12 @@ export class KeyCortexSalienceService {
 
       concerns.push({
         signal,
+        valence,
         salience,
         recentCount: recent,
         baselineRate: Math.round(baselineRate * 100) / 100,
         escalating,
-        summary: this.describe(signal, recent, baselineRate, escalating),
+        summary: this.describe(signal, recent, baselineRate, escalating, valence),
       });
     }
 
@@ -215,21 +288,35 @@ export class KeyCortexSalienceService {
     recent: number,
     baseline: number,
     escalating: boolean,
+    valence: 'threat' | 'opportunity',
   ): string {
     const label =
       {
         'proactive.invoice_overdue': 'overdue invoices',
         'proactive.negative_sentiment': 'negative-sentiment signals',
         'proactive.booking_no_show': 'booking no-shows',
+        'invoice.paid': 'invoices paid',
+        'payment.received': 'payments received',
+        'booking.created': 'new bookings',
+        'booking.completed': 'bookings delivered',
+        'contact.created': 'new contacts',
       }[signal] ?? signal;
 
     if (baseline === 0) {
-      return `${recent} ${label} in 24h, with none in the preceding fortnight — this is new`;
+      return valence === 'threat'
+        ? `${recent} ${label} in 24h, with none in the preceding fortnight — this is new`
+        : `${recent} ${label} in 24h, with none in the preceding fortnight — this is new momentum`;
     }
+
     const normal = Math.round(baseline * 10) / 10;
-    return escalating
+    if (!escalating) return `${recent} ${label} in 24h (normal is ${normal}/day)`;
+
+    // "Escalating" is the wrong word for a good week, and the phrasing is not
+    // cosmetic — this string is the evidence stored on the hormone and the
+    // sentence the owner eventually reads.
+    return valence === 'threat'
       ? `${recent} ${label} in 24h against a normal of ${normal}/day — escalating`
-      : `${recent} ${label} in 24h (normal is ${normal}/day)`;
+      : `${recent} ${label} in 24h against a normal of ${normal}/day — well above trend`;
   }
 
   private async findAllActiveBusinesses(): Promise<string[]> {

@@ -208,6 +208,106 @@ describe('it gives cortisol its first live writer', () => {
   });
 });
 
+describe('the second polarity — KEY notices good weeks too', () => {
+  // The first version detected only threat, which made KEY a sentinel rather
+  // than a partner: it could tell you the building was on fire and never that
+  // you were having your best month.
+  //
+  // `dopamine` is defined in the endocrine system as "sustained opportunity or
+  // momentum" and had NO writer anywhere in the server — a hormone that decays,
+  // is excluded from effortMultiplier, and was never once released.
+  it('detects momentum against the business’s own normal', async () => {
+    const { svc, prisma } = make();
+    prisma.events = [...recent('invoice.paid', 14), ...historic('invoice.paid', 14)];
+
+    const [best] = await svc.rankOpportunities('biz_1');
+    expect(best).toBeDefined();
+    expect(best.valence).toBe('opportunity');
+    expect(best.summary).toMatch(/above trend/);
+  });
+
+  it('a busy business at its normal level is not a windfall', async () => {
+    // Habituation applies to good news too, or KEY congratulates a business
+    // every single day for existing.
+    const { svc, prisma } = make();
+    prisma.events = [...recent('booking.created', 3), ...historic('booking.created', 30)];
+
+    const opportunities = await svc.rankOpportunities('biz_1');
+    expect(opportunities.every((o) => !o.escalating)).toBe(true);
+  });
+
+  it('releases DOPAMINE, giving that hormone its first writer', async () => {
+    const { svc, prisma, endocrine } = make();
+    prisma.events = recent('invoice.paid', 10);
+
+    await svc.appraise('biz_1');
+
+    const hormones = endocrine.released[0].signals.map((s) => s.hormone);
+    expect(hormones).toContain('dopamine');
+  });
+
+  it('holds BOTH at once — a business can be winning and losing in the same week', async () => {
+    // Not a contradiction. Cortisol tightens risk tolerance while dopamine
+    // widens exploration, and they describe different facts.
+    const { svc, prisma, endocrine } = make();
+    prisma.events = [
+      ...recent('proactive.negative_sentiment', 6),
+      ...recent('invoice.paid', 12),
+    ];
+
+    const all = await svc.appraise('biz_1');
+
+    const hormones = endocrine.released[0].signals.map((s) => s.hormone).sort();
+    expect(hormones).toEqual(['cortisol', 'dopamine']);
+    expect(all.some((c) => c.valence === 'threat')).toBe(true);
+    expect(all.some((c) => c.valence === 'opportunity')).toBe(true);
+  });
+
+  it('still doses only ONCE per valence', async () => {
+    // Five opportunity signals must not mean five doses.
+    const { svc, prisma, endocrine } = make();
+    prisma.events = [
+      ...recent('invoice.paid', 8),
+      ...recent('booking.created', 8),
+      ...recent('contact.created', 8),
+    ];
+
+    await svc.appraise('biz_1');
+
+    const dopamine = endocrine.released[0].signals.filter((s) => s.hormone === 'dopamine');
+    expect(dopamine).toHaveLength(1);
+  });
+
+  it('good news can never buy KEY less thinking', async () => {
+    // The safety property. effortMultiplier excludes dopamine by design, so a
+    // great month cannot make KEY lazier about a hard question. Asserted here
+    // because this service is what makes dopamine reachable at all.
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const endocrineSrc = readFileSync(
+      join(__dirname, 'key-cortex-endocrine.service.ts'),
+      'utf8',
+    );
+    const fn = endocrineSrc.slice(endocrineSrc.indexOf('effortMultiplier('));
+
+    expect(fn.slice(0, fn.indexOf('\n  }'))).toMatch(/!== 'dopamine'/);
+  });
+
+  it('never describes a good week as "escalating"', async () => {
+    // The phrasing is not cosmetic: this string is the evidence stored on the
+    // hormone and the sentence the owner eventually reads. "14 invoices paid,
+    // escalating" reads as an alarm about getting paid.
+    const { svc, prisma } = make();
+    prisma.events = [...recent('invoice.paid', 14), ...historic('invoice.paid', 14)];
+
+    const opportunities = await svc.rankOpportunities('biz_1');
+    expect(opportunities.length).toBeGreaterThan(0);
+    for (const o of opportunities) {
+      expect(o.summary, `"${o.summary}" uses threat vocabulary`).not.toMatch(/escalating/);
+    }
+  });
+});
+
 describe('it cannot flood, stall or act', () => {
   it('caps the number of concerns', async () => {
     const { svc, prisma } = make();
