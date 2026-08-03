@@ -88,6 +88,9 @@ const MAX_SINGLE_PUSH = 0.35;
 const MEMORY_TYPE_HORMONES = 'endocrine_state';
 const MEMORY_KEY_HORMONES = 'hormones';
 
+/** Runtime guard for values parsed out of the database column. */
+const HORMONE_NAMES: HormoneName[] = ['cortisol', 'dopamine', 'humility', 'malaise'];
+
 @Injectable()
 export class KeyCortexEndocrineService {
   private readonly logger = new Logger(KeyCortexEndocrineService.name);
@@ -170,13 +173,36 @@ export class KeyCortexEndocrineService {
     if (!this.prisma) return;
 
     try {
-      const stored = this.levels.get(businessId);
-      const value = JSON.stringify([...(stored?.values() ?? [])]);
-
       const existing = await this.prisma.client.keyCortexMemory.findFirst({
         where: { businessId, type: MEMORY_TYPE_HORMONES, key: MEMORY_KEY_HORMONES },
-        select: { id: true },
+        select: { id: true, value: true },
       });
+
+      // MERGE, never overwrite.
+      //
+      // The first version of this serialised `this.levels.get(businessId)`
+      // directly, and that DESTROYED DATA. A process that has not hydrated a
+      // business holds only the hormone it just released, so writing that map
+      // wholesale erased every level it had never seen. Proved against the real
+      // database: a business carrying cortisol and humility was reduced to a
+      // single malaise entry by one cold release.
+      //
+      // The homeostasis cron made it systematic rather than rare — it sweeps
+      // EVERY business every 30 minutes from a process that has usually never
+      // hydrated any of them, so within half an hour of a deploy the stored
+      // disposition of the entire estate would be replaced by whatever that one
+      // sweep observed.
+      //
+      // In-memory wins per hormone (it is the fresher observation), but a
+      // hormone this process has never seen is carried through untouched. It
+      // stays correctly aged because levels are anchored to their own
+      // updatedAt, so a preserved entry keeps decaying from when it was set.
+      const merged = new Map<HormoneName, HormoneLevel>();
+
+      for (const h of this.parseStored(existing?.value)) merged.set(h.name, h);
+      for (const h of this.levels.get(businessId)?.values() ?? []) merged.set(h.name, h);
+
+      const value = JSON.stringify([...merged.values()]);
 
       if (existing) {
         await this.prisma.client.keyCortexMemory.update({
@@ -224,22 +250,63 @@ export class KeyCortexEndocrineService {
         where: { businessId, type: MEMORY_TYPE_HORMONES, key: MEMORY_KEY_HORMONES },
         select: { value: true },
       });
-      if (!row?.value) return;
-
-      const parsed = JSON.parse(row.value) as Array<
-        Omit<HormoneLevel, 'updatedAt'> & { updatedAt: string }
-      >;
-
       const forBusiness = this.levels.get(businessId) ?? new Map<HormoneName, HormoneLevel>();
-      for (const h of parsed) {
+      for (const h of this.parseStored(row?.value)) {
         if (forBusiness.has(h.name)) continue;
-        forBusiness.set(h.name, { ...h, updatedAt: new Date(h.updatedAt) });
+        forBusiness.set(h.name, h);
       }
-      this.levels.set(businessId, forBusiness);
+      if (forBusiness.size > 0) this.levels.set(businessId, forBusiness);
     } catch (err: unknown) {
+      // Release the marker so a later read retries. Marking before the query is
+      // what dedupes concurrent reads; leaving it set after a failure would
+      // disable hydration for this business for the rest of the process.
+      this.hydrated.delete(businessId);
       this.logger.warn(
         `[endocrine] could not hydrate ${businessId}: ${err instanceof Error ? err.message : String(err)}`,
       );
+    }
+  }
+
+  /**
+   * Parse stored levels, tolerating anything that is not what we wrote.
+   *
+   * Returns [] rather than throwing: this value is a JSON string from a
+   * database column, and a corrupt or half-written row must degrade KEY to
+   * neutral, never break the request that happened to trigger the read.
+   *
+   * Each entry is validated field by field because a malformed level would
+   * otherwise flow straight into effortMultiplier's arithmetic and produce a
+   * NaN multiplier on the request path — which would be far harder to diagnose
+   * than a missing hormone.
+   */
+  private parseStored(value?: string | null): HormoneLevel[] {
+    if (!value) return [];
+
+    try {
+      const parsed: unknown = JSON.parse(value);
+      if (!Array.isArray(parsed)) return [];
+
+      return parsed.flatMap((raw): HormoneLevel[] => {
+        const h = raw as Partial<HormoneLevel> & { updatedAt?: string };
+        if (!h.name || !HORMONE_NAMES.includes(h.name)) return [];
+        if (typeof h.level !== 'number' || !Number.isFinite(h.level)) return [];
+
+        const at = h.updatedAt ? new Date(h.updatedAt) : null;
+        if (!at || Number.isNaN(at.getTime())) return [];
+
+        return [
+          {
+            name: h.name,
+            level: Math.min(Math.max(h.level, 0), 1),
+            reasons: Array.isArray(h.reasons)
+              ? h.reasons.filter((r): r is string => typeof r === 'string')
+              : [],
+            updatedAt: at,
+          },
+        ];
+      });
+    } catch {
+      return [];
     }
   }
 

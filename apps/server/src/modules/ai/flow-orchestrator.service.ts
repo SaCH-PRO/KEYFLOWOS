@@ -415,7 +415,26 @@ export class FlowOrchestratorService {
 
     try {
       const fragments = await memory.retrieveContext(businessId, {
-        query,
+        // `query` is deliberately NOT passed.
+        //
+        // retrieveContext runs its own semanticMemory.search when given one
+        // (unified-memory-retrieval.service.ts), and search() calls
+        // generateEmbedding — a real embedding API request. The orchestrator
+        // already performed exactly that search on this same message forty
+        // lines above, so passing the query here bought a SECOND embedding
+        // call per chat message for a result the prompt already contained.
+        //
+        // Caught auditing this after it shipped. It survived its own tests
+        // because they stub retrieveContext wholesale, so the stub never
+        // exercised what the real implementation does — testing a mock of the
+        // thing rather than the thing.
+        //
+        // What this call is actually for is the eight STRUCTURED stores
+        // (cognitive events, business events, genome, temporal flow, cognition
+        // memory, execution and action logs) that the semantic path does not
+        // read. Those run as one parallel batch, each bounded to 50 rows and
+        // a 90-day window, and they are the half of perception the chat was
+        // missing.
         limit: tier === 'deliberate' ? 12 : 6,
         minRankScore: 0.3,
       });

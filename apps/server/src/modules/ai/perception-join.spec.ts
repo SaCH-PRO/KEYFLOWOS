@@ -155,6 +155,63 @@ describe('cost is graded by the thalamus', () => {
     expect(opts.limit).toBeLessThanOrEqual(25);
     expect(opts.minRankScore).toBeGreaterThan(0);
   });
+
+  it('does NOT pass a query — that would buy a second embedding call per message', async () => {
+    // The defect this pins actually shipped, and every test above passed
+    // while it was live, because they stub retrieveContext wholesale and a
+    // stub cannot reveal what the real implementation does.
+    //
+    // UnifiedMemoryRetrievalService.retrieveContext branches on options.query
+    // and runs semanticMemory.search, which calls generateEmbedding — a real
+    // API request. FlowOrchestrator already runs that exact search on the same
+    // message ~40 lines earlier, so passing a query here doubled the embedding
+    // cost of every chat message for a result already in the prompt.
+    //
+    // The structured stores are what this call is for.
+    await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'how are we doing', 'standard');
+
+    const opts = (memory.retrieveContext.mock.calls[0] as unknown as [
+      string,
+      Record<string, unknown>,
+    ])[1];
+    expect(opts.query, 'passing query re-runs semantic search and re-embeds').toBeUndefined();
+  });
+});
+
+describe('the real retrieval service behaves as the stub assumes', () => {
+  // Guards the gap that let the defect through: these assertions read the
+  // ACTUAL implementation, so they fail if its contract changes underneath the
+  // stub the tests above rely on.
+  const unified = readFileSync(
+    join(__dirname, '..', 'key-cortex', 'unified-memory-retrieval.service.ts'),
+    'utf8',
+  );
+
+  it('still runs semantic search only when a query is supplied', () => {
+    expect(unified).toMatch(/options\.query \? this\.loadSemanticMemory\(/);
+  });
+
+  it('its semantic path really does embed — this is why we omit the query', () => {
+    // Sliced to the NEXT method rather than the first `\n  }`, which lands on a
+    // nested block and truncates the body before the call.
+    const semantic = readFileSync(join(__dirname, 'semantic-memory.service.ts'), 'utf8');
+    const start = semantic.indexOf('async search(');
+    const next = semantic.slice(start + 10).search(/\n {2}(private |async |[a-z][a-zA-Z]*\()/);
+    expect(semantic.slice(start, start + 10 + next)).toMatch(/generateEmbedding\(/);
+  });
+
+  it('its structured reads stay bounded and tenant-scoped', () => {
+    // 8 tables in one parallel batch, on the chat path. If any loses its take
+    // or its businessId scope, that is a per-message full scan or a leak.
+    const fn = unified.slice(unified.indexOf('private async loadStructuredMemory('));
+    const body = fn.slice(0, fn.indexOf('\n  private '));
+
+    const takes = body.match(/take: \d+/g) ?? [];
+    const wheres = body.match(/where: \w+/g) ?? [];
+    expect(takes.length).toBeGreaterThanOrEqual(8);
+    expect(wheres.length).toBeGreaterThanOrEqual(8);
+    expect(body).toMatch(/businessId/);
+  });
 });
 
 describe('it is wired into BOTH chat paths', () => {

@@ -132,6 +132,114 @@ describe('restored state is aged, not resurrected', () => {
   });
 });
 
+describe('a cold process must not destroy accumulated state', () => {
+  // THIS IS THE ONE THE ORIGINAL SUITE MISSED, and it was data-destroying.
+  //
+  // persist() serialised the in-memory Map wholesale. A process that has never
+  // hydrated a business holds only the hormone it just released, so writing
+  // that map erased every level it had not seen. Proved against a real
+  // Postgres: a business carrying cortisol and humility was reduced to a
+  // single malaise entry by one release from a cold instance.
+  //
+  // The homeostasis @Cron made it systematic rather than rare — it sweeps
+  // EVERY business every 30 minutes from a process that has usually hydrated
+  // none of them, so within half an hour of a deploy the stored disposition of
+  // the whole estate would be replaced by whatever that sweep observed.
+  //
+  // Every test in the original suite reused ONE instance, so none of them
+  // could see it.
+  it('preserves hormones the releasing process has never seen', async () => {
+    const prisma = new PrismaStub();
+
+    const warm = new KeyCortexEndocrineService(prisma as never);
+    warm.release('biz_1', [{ hormone: 'cortisol', magnitude: 0.3, reason: 'cash tightening' }]);
+    await flush();
+    warm.release('biz_1', [{ hormone: 'humility', magnitude: 0.3, reason: 'predictions wrong' }]);
+    await flush();
+
+    // A brand-new instance that has never hydrated this business.
+    const cold = new KeyCortexEndocrineService(prisma as never);
+    cold.release('biz_1', [{ hormone: 'malaise', magnitude: 0.2, reason: 'organs degraded' }]);
+    await flush();
+
+    const names = JSON.parse(prisma.rows[0].value).map((h: { name: string }) => h.name).sort();
+    expect(names, 'a cold release wiped prior state').toEqual(['cortisol', 'humility', 'malaise']);
+  });
+
+  it('the fresher observation still wins for a hormone in both', async () => {
+    const prisma = new PrismaStub();
+    const warm = new KeyCortexEndocrineService(prisma as never);
+    warm.release('biz_1', [{ hormone: 'cortisol', magnitude: 0.1, reason: 'old' }]);
+    await flush();
+
+    const cold = new KeyCortexEndocrineService(prisma as never);
+    cold.release('biz_1', [{ hormone: 'cortisol', magnitude: 0.35, reason: 'new and worse' }]);
+    await flush();
+
+    const [stored] = JSON.parse(prisma.rows[0].value);
+    expect(stored.reasons).toContain('new and worse');
+  });
+});
+
+describe('storage is treated as untrusted input', () => {
+  it('a corrupt row degrades to neutral instead of throwing', async () => {
+    // This value is a JSON string in a database column. A half-written row must
+    // not break the request that happened to trigger the read.
+    const prisma = new PrismaStub();
+    prisma.rows = [{ id: 'mem_1', value: '{not json' }];
+
+    const svc = new KeyCortexEndocrineService(prisma as never);
+    await expect(svc.hydrate('biz_1')).resolves.toBeUndefined();
+    expect(svc.read('biz_1')).toEqual([]);
+  });
+
+  it('a malformed level never reaches the arithmetic', async () => {
+    // A NaN level would flow into effortMultiplier and produce a NaN token
+    // multiplier on the request path — far harder to diagnose than absence.
+    const prisma = new PrismaStub();
+    prisma.rows = [
+      {
+        id: 'mem_1',
+        value: JSON.stringify([
+          { name: 'cortisol', level: 'high', reasons: [], updatedAt: new Date().toISOString() },
+          { name: 'not_a_hormone', level: 0.5, reasons: [], updatedAt: new Date().toISOString() },
+          { name: 'humility', level: 0.4, reasons: ['ok'], updatedAt: 'never' },
+        ]),
+      },
+    ];
+
+    const svc = new KeyCortexEndocrineService(prisma as never);
+    await svc.hydrate('biz_1');
+
+    expect(svc.read('biz_1')).toEqual([]);
+    expect(Number.isFinite(svc.effortMultiplier('biz_1'))).toBe(true);
+  });
+
+  it('a transient read failure does not disable hydration permanently', async () => {
+    // Marking the business hydrated before the query is what dedupes concurrent
+    // reads; leaving it marked after a failure would run that business
+    // permanently neutral while believing it had loaded state.
+    const prisma = new PrismaStub();
+    prisma.failOn = 'read';
+    const svc = new KeyCortexEndocrineService(prisma as never);
+
+    await svc.hydrate('biz_1');
+
+    prisma.failOn = 'none';
+    prisma.rows = [
+      {
+        id: 'mem_1',
+        value: JSON.stringify([
+          { name: 'cortisol', level: 0.4, reasons: ['recovered'], updatedAt: new Date().toISOString() },
+        ]),
+      },
+    ];
+    await svc.hydrate('biz_1');
+
+    expect(svc.read('biz_1'), 'hydration never retried after a blip').toHaveLength(1);
+  });
+});
+
 describe('durability never costs correctness', () => {
   it('hydrate does not clobber a level observed while it was in flight', async () => {
     // Storage says cortisol 0.1; the live process has just observed 0.35.
