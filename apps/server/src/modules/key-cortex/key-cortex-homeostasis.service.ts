@@ -125,6 +125,14 @@ const MIN_SAMPLE = 8;
 /** Bound on the rows any single measurement reads. */
 const SAMPLE_LIMIT = 500;
 
+/**
+ * Mirrors MAX_SINGLE_PUSH in KeyCortexEndocrineService.
+ *
+ * Deviations are scaled into this range before release, so the endocrine
+ * clamp never binds and severity ordering survives the handoff.
+ */
+const MAX_SINGLE_PUSH = 0.35;
+
 @Injectable()
 export class KeyCortexHomeostasisService {
   private readonly logger = new Logger(KeyCortexHomeostasisService.name);
@@ -168,7 +176,19 @@ export class KeyCortexHomeostasisService {
       .filter((r) => r.deviation > 0)
       .map((r) => ({
         hormone: VARIABLES.find((v) => v.name === r.variable)!.hormone,
-        magnitude: r.deviation,
+        // Scaled into the endocrine system's per-observation ceiling rather
+        // than handed over raw.
+        //
+        // release() clamps any magnitude to MAX_SINGLE_PUSH (0.35), so passing
+        // the raw deviation threw away severity above that point: a deviation
+        // of 0.4 and a deviation of 1.0 — half-broken and completely broken —
+        // produced an identical hormonal response, and the control loop could
+        // not tell them apart.
+        //
+        // Mapping the full 0..1 deviation onto 0..MAX_SINGLE_PUSH keeps the
+        // ceiling doing its job (one observation can never saturate) while
+        // preserving the ordering the loop depends on.
+        magnitude: r.deviation * MAX_SINGLE_PUSH,
         reason: r.reason,
       }));
 

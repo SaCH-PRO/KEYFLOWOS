@@ -156,6 +156,32 @@ describe('cost is graded by the thalamus', () => {
     expect(opts.minRankScore).toBeGreaterThan(0);
   });
 
+  it('gives up rather than stalling time-to-first-token', async () => {
+    // Eight tables are queried in parallel and awaited BEFORE the first token,
+    // so one locked table would stall every message. Perception is context:
+    // worth a moment, never worth making the chat feel broken.
+    memory.retrieveContext = vi.fn(() => new Promise(() => {})) as never;
+
+    const started = Date.now();
+    const out = await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard');
+
+    expect(out).toBe('');
+    expect(Date.now() - started, 'no deadline — a hung query blocks the answer').toBeLessThan(3000);
+  });
+
+  it('applies a quality floor that can actually reject a row', async () => {
+    // 0.3 was decorative: rankScore floors at 0.5*0.45 + 0*0.35 + 0.75*0.2 =
+    // 0.375, so nothing was ever below the "floor". The value must sit inside
+    // the real 0.375–1.0 range or the filter is a comment.
+    await makeOrchestrator(memory).buildPerceptionSection('biz_1', 'q', 'standard');
+
+    const opts = (memory.retrieveContext.mock.calls[0] as unknown as [
+      string,
+      { minRankScore: number },
+    ])[1];
+    expect(opts.minRankScore, 'floor is below the minimum achievable rank').toBeGreaterThan(0.375);
+  });
+
   it('does NOT pass a query — that would buy a second embedding call per message', async () => {
     // The defect this pins actually shipped, and every test above passed
     // while it was live, because they stub retrieveContext wholesale and a

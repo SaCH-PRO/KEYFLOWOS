@@ -102,7 +102,7 @@ describe('role authority caps business authority', () => {
     return svc;
   }
 
-  const BUSINESS = { maxAutoTier: 4, autonomyLevel: 5, mode: 'autopilot' };
+  const BUSINESS = { maxAutoTier: 4, autonomyLevel: 5, mode: 'autopilot', approvedTools: [] as string[] };
 
   it('clamps down to the executive role, which is advisory', () => {
     const exec = roleEngine.getRoleDefinition('executive');
@@ -149,6 +149,44 @@ describe('role authority caps business authority', () => {
     // and the clamped value is what the tier checks read
     expect(body).toMatch(/settings\.autonomyLevel/);
     expect(body).toMatch(/settings\.maxAutoTier/);
+  });
+
+  it('the pre-approved list cannot outrank the role', () => {
+    // The bypass that made the whole ceiling inert for the tools most likely to
+    // be used. `evaluate` short-circuits to auto-execute for anything in
+    // settings.approvedTools WITHOUT consulting the role — and
+    // DefaultTriggersService seeds that list with commerce_create_invoice,
+    // crm_create_contact and eight more. So the Executive Advisor, maxRiskTier
+    // 1 and "never execute operational actions without explicit approval",
+    // would have auto-executed every one of them.
+    const svc = makeOversight() as unknown as {
+      applyRoleCeiling(s: Record<string, unknown>, r: string): { approvedTools: string[] };
+      getToolTier(t: string): number;
+    };
+
+    const granted = ['crm_search_contacts', 'commerce_create_invoice', 'commerce_send_invoice'];
+    const out = svc.applyRoleCeiling({ ...BUSINESS, approvedTools: granted }, 'executive');
+
+    const execCeiling = roleEngine.getRoleDefinition('executive').maxRiskTier;
+    for (const tool of out.approvedTools) {
+      expect(
+        svc.getToolTier(tool),
+        `${tool} survives the ceiling at tier ${svc.getToolTier(tool)} > ${execCeiling}`,
+      ).toBeLessThanOrEqual(execCeiling);
+    }
+  });
+
+  it('keeps the grants a junior role IS trusted with', () => {
+    // Filtered, not cleared — a low-risk grant must survive.
+    const svc = makeOversight() as unknown as {
+      applyRoleCeiling(s: Record<string, unknown>, r: string): { approvedTools: string[] };
+    };
+    const out = svc.applyRoleCeiling(
+      { ...BUSINESS, approvedTools: ['crm_search_contacts'] },
+      'executive',
+    );
+
+    expect(out.approvedTools).toContain('crm_search_contacts');
   });
 
   it('a senior role is trusted with more than a junior one', () => {

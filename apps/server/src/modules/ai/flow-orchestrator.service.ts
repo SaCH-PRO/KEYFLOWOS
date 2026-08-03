@@ -207,6 +207,14 @@ function formatPageContextSection(ctx?: FlowPageContext): string {
   return '\n' + lines.join('\n');
 }
 
+/**
+ * How long the chat will wait for perception before answering without it.
+ *
+ * Eight tables are queried in parallel and the result is awaited before the
+ * first token, so this bounds the worst case rather than the typical one.
+ */
+const PERCEPTION_DEADLINE_MS = 1_200;
+
 const FLOW_SYSTEM_PROMPT = `{{ONBOARDING_DIRECTIVE}}You are KEY — the operating intelligence of this business, and the owner's second mind. You have full access to their business data and can take real actions on their behalf.
 
 You are not a chatbot bolted onto software. You are the part of the business that never forgets, never loses the thread, and can act at any hour. The owner should be able to hand you anything — a question, a mess, a decision, a whole function — and have it come back handled.
@@ -414,7 +422,21 @@ export class FlowOrchestratorService {
     if (!memory) return '';
 
     try {
-      const fragments = await memory.retrieveContext(businessId, {
+      // Bounded by wall-clock, not just by row count.
+      //
+      // retrieveContext fans out across eight tables and this is awaited before
+      // the first token reaches the user, so a single slow or locked table
+      // would stall time-to-first-token on every message. Perception is
+      // context: worth waiting a moment for, never worth making the chat feel
+      // broken. Losing it degrades the answer, which is the correct failure.
+      const withDeadline = <T,>(p: Promise<T>, ms: number): Promise<T | null> =>
+        Promise.race([
+          p,
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), ms)),
+        ]);
+
+      const fragments = await withDeadline(
+        memory.retrieveContext(businessId, {
         // `query` is deliberately NOT passed.
         //
         // retrieveContext runs its own semanticMemory.search when given one
@@ -436,9 +458,21 @@ export class FlowOrchestratorService {
         // a 90-day window, and they are the half of perception the chat was
         // missing.
         limit: tier === 'deliberate' ? 12 : 6,
-        minRankScore: 0.3,
-      });
-      if (fragments.length === 0) return '';
+        // 0.3 was decorative — it could not reject a single row.
+        //
+        // rankScore = relevance*0.45 + recency*0.35 + sourceWeight*0.2, and
+        // with no similarity score relevance floors at 0.5 while sourceWeight
+        // floors at 0.75. So even a maximally stale, minimally trusted fragment
+        // scores 0.5*0.45 + 0*0.35 + 0.75*0.2 = 0.375. Nothing was ever below
+        // the "quality floor".
+        //
+        // 0.5 sits inside the real 0.375–1.0 range, so it drops the stale
+        // low-confidence band while keeping anything recent or well-evidenced.
+          minRankScore: 0.5,
+        }),
+        PERCEPTION_DEADLINE_MS,
+      );
+      if (!fragments || fragments.length === 0) return '';
 
       const lines = fragments.map(
         (f) => `- [${f.sourceType}] ${f.title}: ${f.content.slice(0, 240)}`,

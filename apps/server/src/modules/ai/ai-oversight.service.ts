@@ -62,6 +62,21 @@ export class AiOversightService {
       ...settings,
       maxAutoTier: Math.min(settings.maxAutoTier, def.maxRiskTier) as RiskTier,
       autonomyLevel: Math.min(settings.autonomyLevel, def.autonomyLevel),
+      // The pre-approved list is a BUSINESS-level grant, and it short-circuits
+      // straight to auto-execute without consulting the role. That made the
+      // whole role ceiling inert for precisely the tools most likely to be
+      // used: DefaultTriggersService seeds approvedTools with
+      // commerce_create_invoice, crm_create_contact and eight more, so the
+      // Executive Advisor — maxRiskTier 1, "never execute operational actions
+      // without explicit approval" — would auto-execute all of them.
+      //
+      // A grant the business made cannot exceed the authority of the hat KEY is
+      // currently wearing. Entries above the role's tier are dropped rather
+      // than the list being cleared, so a junior role keeps the low-risk grants
+      // and loses only what it was never trusted with.
+      approvedTools: (settings.approvedTools ?? []).filter(
+        (t) => this.getToolTier(t) <= def.maxRiskTier,
+      ),
     };
   }
 

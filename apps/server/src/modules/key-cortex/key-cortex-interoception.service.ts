@@ -72,6 +72,9 @@ export class KeyCortexInteroceptionService {
   private readonly logger = new Logger(KeyCortexInteroceptionService.name);
   private readonly cache = new Map<string, BodyState>();
 
+  /** In-flight background warms, so concurrent cold reads share one fan-out. */
+  private readonly warming = new Map<string, Promise<unknown>>();
+
   constructor(private readonly registrar: KeyCortexOrganRegistrarService) {}
 
   /**
@@ -139,9 +142,24 @@ export class KeyCortexInteroceptionService {
       return cached;
     }
 
-    // Warm for next time. senseBody never throws, but a floating rejection
-    // would still be an unhandled rejection, so it is caught explicitly.
-    void this.senseBody(businessId).catch(() => undefined);
+    // Warm for next time — but only ONE warm at a time per business.
+    //
+    // Without the in-flight guard this fired a fresh five-organ fan-out on
+    // every concurrent cold-cache request. Measured: 8 simultaneous triages
+    // produced 40 organ getState calls, all racing to compute the same reading.
+    // That also made the "triage does zero I/O" claim false in exactly the
+    // conditions where it mattered — a burst of traffic after a restart.
+    //
+    // The entry is cleared when the sense settles so a later miss can warm
+    // again. senseBody never throws, but a floating rejection would still be an
+    // unhandled rejection, so it is caught explicitly.
+    if (!this.warming.has(businessId)) {
+      const inFlight = this.senseBody(businessId)
+        .catch(() => undefined)
+        .finally(() => this.warming.delete(businessId));
+      this.warming.set(businessId, inFlight);
+    }
+
     return null;
   }
 
