@@ -146,7 +146,24 @@ total), `migrate status` reports "up to date" and `migrate deploy` exits 0.
 Prisma only applies migrations found on disk; rows describing folders that no
 longer exist are inert. Leave them — deleting them is unnecessary risk.
 
-### 2.6 Close the terminal, or clear the variable
+### 2.6 If your production DATABASE_URL is a pooled connection
+
+Check the URL you pasted. If it contains `:6543`, `pgbouncer=true`, or a
+`-pooler` host (the Supabase convention), it is a **transaction pooler**.
+
+Prisma Migrate cannot work through one — it takes a session-level advisory lock
+— so it hangs or fails rather than applying DDL. `migrate resolve` in 2.3 is
+only an INSERT and is unaffected, but the migration that runs during the deploy
+is real DDL.
+
+`render.yaml`'s pre-deploy command already handles this: it uses
+`${DIRECT_URL:-$DATABASE_URL}`, so if you have `DIRECT_URL` set in Render (it is
+in the documented secret list) the deploy uses the direct connection
+automatically, and nothing changes if you do not.
+
+For your own commands in 2.3, use the direct URL (`:5432`) if you have one.
+
+### 2.7 Close the terminal, or clear the variable
 
 ```powershell
 Remove-Item Env:\DATABASE_URL
@@ -170,12 +187,23 @@ see the comments in `render.yaml`), then runs the pre-deploy command.
 **In the deploy log, look for:**
 
 ```
-1 migration found in prisma/migrations
-No pending migrations to apply.
+2 migrations found in prisma/migrations
+Applying migration `20260803190000_flow_session_user_scope`
+All migrations have been successfully applied.
 ```
 
 That is the rehearsed success case — exit 0, and the deploy proceeds to swap in
 the new version.
+
+`0_baseline` is skipped because Part 2 recorded it. The second migration is the
+session-privacy column, and it is expected to actually run: the baseline
+*declares* `flow_sessions.user_id` but `migrate resolve` executes no DDL, so on
+production the column arrives here rather than there. On a database that already
+has it, both statements are `IF NOT EXISTS` and the migration is a no-op.
+
+If pre-deploy instead prints "No pending migrations to apply", the column was
+never created and `sessionScope()` will fail with P2022 on every session read —
+stop and check `flow_sessions` before letting the release stand.
 
 **Then check the app:**
 
