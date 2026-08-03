@@ -43,6 +43,10 @@ import { OnboardingStateService, type OnboardingStep as ServerOnboardingStep } f
 import { BusinessGenesisService } from '../business-genesis/business-genesis.service';
 // Value import for the static EVIDENCE_DISCIPLINE only — no DI, no module coupling.
 import { KeyCortexExpertiseLensService } from '../key-cortex/key-cortex-expertise-lens.service';
+import {
+  CognitiveTriageService,
+  type TriageVerdict,
+} from '../key-cortex/cognitive-triage.service';
 
 
 export interface FlowAttachment {
@@ -133,12 +137,14 @@ export interface FlowResponse {
 }
 
 export interface FlowStreamChunk {
-  type: 'content_delta' | 'tool_calls' | 'tool_results' | 'confirmation_required' | 'usage' | 'done' | 'error' | 'card';
+  type: 'content_delta' | 'tool_calls' | 'tool_results' | 'confirmation_required' | 'usage' | 'done' | 'error' | 'card' | 'triage';
   content?: string;
   toolCalls?: FlowToolCall[];
   toolResults?: FlowToolResult[];
   pendingConfirmations?: PendingConfirmation[];
   card?: OnboardingCard;
+  /** Thalamic verdict for this message. Observability only — nothing branches on it. */
+  triage?: { tier: string; score: number; arousal: number; reason: string };
   sessionId?: string;
   usage?: {
     promptTokens: number;
@@ -313,6 +319,19 @@ export class FlowOrchestratorService {
   }
   private getCallScript() {
     return this.moduleRef.get(CallScriptService, { strict: false });
+  }
+  /**
+   * The thalamus. Resolved lazily like every other cross-module dependency
+   * here: KeyCortexModule and AiModule already forwardRef each other, and
+   * adding a constructor parameter would put a new edge in the boot graph for
+   * something the chat must survive without.
+   */
+  private getTriage(): CognitiveTriageService | null {
+    try {
+      return this.moduleRef.get(CognitiveTriageService, { strict: false });
+    } catch {
+      return null;
+    }
   }
   private getEvidence() {
     return this.moduleRef.get(EvidenceService, { strict: false });
@@ -785,6 +804,13 @@ export class FlowOrchestratorService {
     const blueprintSection = await this.buildBlueprintSection(businessId);
     const onboardingDirective = await this.buildOnboardingDirective(businessId, pageContext);
 
+    // ─── THALAMUS ───────────────────────────────────────────────
+    // Grade the message before spending anything on it. Zero model calls,
+    // zero I/O: six regex classifiers plus two in-memory reads. Never throws;
+    // on any failure it returns today's exact parameters.
+    const triage: TriageVerdict | null =
+      this.getTriage()?.triage(businessId, message, Boolean(attachments?.length)) ?? null;
+
     let systemPrompt: string;
     if (detectedRole && detectedRole !== 'general') {
       const businessContext = onboardingDirective + contextSnapshot + memorySection + semanticMemorySection + pageContextSection + blueprintSection;
@@ -795,6 +821,16 @@ export class FlowOrchestratorService {
         .replace('{{CURRENT_DATE}}', new Date().toISOString())
         .replace('{{ONBOARDING_DIRECTIVE}}', onboardingDirective)
         .replace('{{BUSINESS_CONTEXT}}', contextSnapshot + memorySection + semanticMemorySection + pageContextSection + blueprintSection);
+    }
+
+    // Standing state from the CNS — endocrine disposition and body integrity.
+    // Appended AFTER the role prompt so it frames the answer without competing
+    // with the role's own instructions, and it is null unless there is
+    // genuinely something to report.
+    if (triage?.standingContext) {
+      systemPrompt += `
+
+${triage.standingContext}`;
     }
 
     const messages: GatewayMessage[] = [
@@ -894,8 +930,10 @@ export class FlowOrchestratorService {
             ? getOpenAiToolDefinitions().filter((t) => this.roleEngine.isToolAllowed(detectedRole, t.function.name))
             : getOpenAiToolDefinitions(),
           toolChoice: 'auto',
-          maxTokens: 1000,
-          temperature: 0.7,
+          // Content-driven for the first time. taskCategory is deliberately
+          // NOT overridden — see CognitiveTriageService.categoryFor.
+          maxTokens: triage?.maxTokens ?? 1000,
+          temperature: triage?.temperature ?? 0.7,
         },
       );
 
@@ -1114,6 +1152,13 @@ export class FlowOrchestratorService {
     const blueprintSection = await this.buildBlueprintSection(businessId);
     const onboardingDirective = await this.buildOnboardingDirective(businessId, pageContext);
 
+    // ─── THALAMUS ───────────────────────────────────────────────
+    // Grade the message before spending anything on it. Zero model calls,
+    // zero I/O: six regex classifiers plus two in-memory reads. Never throws;
+    // on any failure it returns today's exact parameters.
+    const triage: TriageVerdict | null =
+      this.getTriage()?.triage(businessId, message, Boolean(attachments?.length)) ?? null;
+
     let systemPrompt: string;
     if (detectedRole && detectedRole !== 'general') {
       const businessContext = onboardingDirective + contextSnapshot + memorySection + semanticMemorySection + pageContextSection + blueprintSection;
@@ -1124,6 +1169,16 @@ export class FlowOrchestratorService {
         .replace('{{CURRENT_DATE}}', new Date().toISOString())
         .replace('{{ONBOARDING_DIRECTIVE}}', onboardingDirective)
         .replace('{{BUSINESS_CONTEXT}}', contextSnapshot + memorySection + semanticMemorySection + pageContextSection + blueprintSection);
+    }
+
+    // Standing state from the CNS — endocrine disposition and body integrity.
+    // Appended AFTER the role prompt so it frames the answer without competing
+    // with the role's own instructions, and it is null unless there is
+    // genuinely something to report.
+    if (triage?.standingContext) {
+      systemPrompt += `
+
+${triage.standingContext}`;
     }
 
     const messages: GatewayMessage[] = [
@@ -1164,6 +1219,26 @@ export class FlowOrchestratorService {
 
     messages.push({ role: 'user', content: enrichedMessage });
 
+    // Publish the thalamic verdict before the answer starts. Nothing branches
+    // on this — it exists so the tier distribution over real traffic can be
+    // measured before any tier is given authority over cost or depth. Every
+    // later step (canned reflex replies, escalation to the cortex) depends on
+    // knowing that distribution, and right now nobody does.
+    if (triage) {
+      this.logger.log(
+        `[thalamus] ${triage.reason} score=${triage.score} maxTokens=${triage.maxTokens}`,
+      );
+      yield {
+        type: 'triage',
+        triage: {
+          tier: triage.tier,
+          score: triage.score,
+          arousal: triage.arousal,
+          reason: triage.reason,
+        },
+      };
+    }
+
     try {
       const stream = this.aiUsage.trackAndStream(
         businessId,
@@ -1175,8 +1250,10 @@ export class FlowOrchestratorService {
             ? getOpenAiToolDefinitions().filter((t) => this.roleEngine.isToolAllowed(detectedRole, t.function.name))
             : getOpenAiToolDefinitions(),
           toolChoice: 'auto',
-          maxTokens: 1000,
-          temperature: 0.7,
+          // Content-driven for the first time. taskCategory is deliberately
+          // NOT overridden — see CognitiveTriageService.categoryFor.
+          maxTokens: triage?.maxTokens ?? 1000,
+          temperature: triage?.temperature ?? 0.7,
         },
       );
 

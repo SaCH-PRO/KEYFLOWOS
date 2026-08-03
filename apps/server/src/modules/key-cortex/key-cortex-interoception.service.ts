@@ -120,6 +120,32 @@ export class KeyCortexInteroceptionService {
   }
 
   /**
+   * Non-blocking read of the body — cache only.
+   *
+   * senseBody polls every organ on a miss, and each organ may take up to
+   * ORGAN_TIMEOUT_MS. That is fine behind the Deep-think button, where the user
+   * has opted into waiting, but it cannot sit in front of an ordinary chat
+   * message. So the fast path peeks instead: if a reading is warm, use it;
+   * otherwise return null and warm the cache in the background for the next
+   * message.
+   *
+   * The cost of a miss is that the first message in a 15s window carries no
+   * body framing. That is the correct trade — a reflex arc that waited for
+   * interoception would not be a reflex.
+   */
+  peekBody(businessId: string): BodyState | null {
+    const cached = this.cache.get(businessId);
+    if (cached && Date.now() - cached.sampledAt.getTime() < READING_TTL_MS) {
+      return cached;
+    }
+
+    // Warm for next time. senseBody never throws, but a floating rejection
+    // would still be an unhandled rejection, so it is caught explicitly.
+    void this.senseBody(businessId).catch(() => undefined);
+    return null;
+  }
+
+  /**
    * Render body state as a line of context for the reasoning prompt.
    *
    * Returns null when everything is healthy. Telling the model "all systems

@@ -150,10 +150,21 @@ export class AdaptiveRouterService {
   private classifyComplexity(text: string): QueryComplexity {
     const complexMarkers =
       /\b(strategy|plan|roadmap|forecast|model|scenario|compare|evaluate|assess|why|how should|what if|trade-off|risk analysis|due diligence|comprehensive|deep dive|multi-step|action plan)\b/;
+    // Deliberative decisions. Measured against real phrasing, the list above
+    // missed every one of them: "should we take the series a term sheet",
+    // "should we hire or outsource" and "is it worth raising prices" all came
+    // back `moderate`, because it carries "how should" but not "should we".
+    // These are the queries most worth thinking hard about, so a router that
+    // under-rates them under-rates exactly the wrong thing.
+    const decisionMarkers =
+      /\b(should (we|i)|do we (need|have to)|is it worth|worth (it|doing)|which (option|one) should|or should we|better to|pros and cons)\b/;
     const simpleMarkers =
       /\b(hello|hi|hey|what is|who is|when is|where is|define|yes|no|ok|thanks|thank you|goodbye|bye)\b/;
 
-    if (complexMarkers.test(text)) return 'complex';
+    if (complexMarkers.test(text) || decisionMarkers.test(text)) return 'complex';
+    // Checked AFTER the complex markers on purpose: simpleMarkers contains
+    // "what is", so "what is the right way to structure this deal" would
+    // otherwise be graded simple on its first two words.
     if (simpleMarkers.test(text)) return 'simple';
     return 'moderate';
   }
