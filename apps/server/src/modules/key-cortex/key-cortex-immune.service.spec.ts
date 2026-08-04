@@ -238,7 +238,10 @@ describe('it has no hands', () => {
     // the one containment primitive in the repo (SafetyShellService.rollback)
     // returns success:true without reverting anything.
     expect(code).not.toMatch(/executeTool|toolRegistry|executeToolDirectly/);
-    expect(code).not.toMatch(/\.delete\(|\.deleteMany\(|suspend|revoke|ban\(/);
+    // Scoped to Prisma: `this.loading.delete(id)` is Map bookkeeping, not a
+    // business mutation, and matching a bare `.delete(` caught it.
+    expect(code).not.toMatch(/prisma\.client\.\w+\.delete/);
+    expect(code).not.toMatch(/suspend|revoke|ban\(/);
   });
 
   it('only ever writes its own memory type', () => {
@@ -301,5 +304,120 @@ describe('it is actually wired, not merely written', () => {
   it('subscribes to the anomaly event that previously went nowhere', () => {
     const src = readFileSync(join(__dirname, 'key-cortex-immune.service.ts'), 'utf8');
     expect(src).toMatch(/@OnEvent\('business_event\.anomaly_detected'\)/);
+  });
+});
+
+describe('the severity table matches what the detector really emits', () => {
+  // THIS is the test that was missing. The table keyed on 'entity_cycle' while
+  // the detector emits 'suspicious_entity_cycle', so the branch documented as
+  // "scores highest of all" resolved to the unknown default — which was then
+  // BELOW routine mass deletion, inverting the ordering the table exists to
+  // express. Every existing test passed, because they called record() with the
+  // literal 'entity_cycle', a string production never emits.
+  //
+  // So this reads the PRODUCER's source rather than trusting a literal.
+  const detector = readFileSync(
+    join(__dirname, '..', 'business-events', 'business-event-anomaly.service.ts'),
+    'utf8',
+  );
+  const emitted = [...detector.matchAll(/fireAnomaly\([^,]+,[^,]+,\s*'([a-z_]+)'/g)].map((m) => m[1]);
+  const src = readFileSync(join(__dirname, 'key-cortex-immune.service.ts'), 'utf8');
+  const table = src.slice(src.indexOf('const BASE_SEVERITY'), src.indexOf('const UNKNOWN_SEVERITY'));
+
+  it('found the emitted anomaly types', () => {
+    expect(emitted.length).toBeGreaterThanOrEqual(3);
+    expect(emitted).toContain('suspicious_entity_cycle');
+  });
+
+  it('has an entry for every type the detector can emit', () => {
+    const missing = emitted.filter((t) => !table.includes(`${t}:`));
+    expect(missing).toEqual([]);
+  });
+
+  it('scores an unknown type ABOVE every known one', async () => {
+    // If a key ever stops matching again, the failure must be over-caution
+    // rather than a silently wrong ordering.
+    const { service } = makeService();
+    const known = await service.record(BIZ, ACTOR, 'mass_deletion', {}, T0);
+    const unknown = await service.record(BIZ, 'other', 'a_type_nobody_declared', {}, T0);
+
+    expect(unknown.severity).toBeGreaterThan(known.severity);
+  });
+});
+
+describe('one bulk operation is one episode, not eighty', () => {
+  it('does not count a detector re-fire as a new encounter', async () => {
+    // The detector keeps a rolling one-hour window and re-fires on EVERY event
+    // once the threshold is crossed, so deleting 100 contacts raises ~81
+    // anomalies. Counting those made the prompt assert an actor had done it
+    // "81 times in 30 days" — a false accusation about a named person from one
+    // afternoon's tidy-up.
+    const { service } = makeService();
+    let last = await service.record(BIZ, ACTOR, 'mass_deletion', {}, T0);
+    for (let i = 1; i < 80; i++) {
+      last = await service.record(BIZ, ACTOR, 'mass_deletion', {}, new Date(T0.getTime() + i * 1000));
+    }
+
+    expect(last.encounters).toBe(1);
+  });
+
+  it('still counts a genuinely separate episode', async () => {
+    const { service } = makeService();
+    await service.record(BIZ, ACTOR, 'mass_deletion', {}, T0);
+    const later = await service.record(BIZ, ACTOR, 'mass_deletion', {}, at(T0, 2));
+
+    expect(later.encounters).toBe(2);
+  });
+});
+
+describe('hydration cannot lose what it was loading', () => {
+  it('a record() during an in-flight hydrate keeps the stored history', async () => {
+    // hydrate() used to mark the business hydrated BEFORE awaiting the read, so
+    // an anomaly arriving mid-flight saw hydrated=true and an empty Map: prior
+    // was null, encounters reset to 1, and persist() wrote that back over the
+    // durable row. Adaptive immunity forgot everything, and it looked exactly
+    // like a first encounter.
+    const { rows, service } = makeService();
+    rows.push({
+      id: 'seed', businessId: BIZ, type: 'immune_incident', key: `mass_deletion:${ACTOR}`,
+      value: JSON.stringify({
+        anomalyType: 'mass_deletion', actorId: ACTOR, encounters: 4,
+        firstSeen: at(T0, -10).toISOString(), lastSeen: at(T0, -1).toISOString(),
+        severity: 1, details: {},
+      }),
+    });
+
+    // Kick off hydration and record concurrently, without awaiting the first.
+    const hydrating = service.hydrate(BIZ);
+    const recorded = await service.record(BIZ, ACTOR, 'mass_deletion', {}, T0);
+    await hydrating;
+
+    expect(recorded.encounters).toBe(5);
+  });
+
+  it('a failed hydrate does not blind the service for the process', async () => {
+    let attempts = 0;
+    const prisma = {
+      client: {
+        keyCortexMemory: {
+          findMany: vi.fn(async () => {
+            attempts += 1;
+            if (attempts === 1) throw new Error('db down');
+            return [];
+          }),
+          findFirst: vi.fn(async () => null),
+          create: vi.fn(async ({ data }: any) => ({ id: 'x', ...data })),
+          update: vi.fn(async () => ({})),
+        },
+      },
+    } as never;
+    const service = new KeyCortexImmuneService(prisma, undefined);
+
+    await service.hydrate(BIZ);
+    await service.hydrate(BIZ);
+
+    // A failed read must not mark the tenant hydrated — otherwise the next
+    // record() overwrites its durable history with encounters:1.
+    expect(attempts).toBe(2);
   });
 });

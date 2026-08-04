@@ -264,6 +264,11 @@ export class KeyCortexEpigeneticsService {
           status: { in: ['approved', 'rejected', 'APPROVED', 'REJECTED'] },
         },
         select: { status: true },
+        // Ordered, because take: 200 without it is whatever the index scan
+        // hands back. On (businessId, status) that can be an all-approved or
+        // all-rejected block, and the result is rendered to the model as a
+        // statement of fact about how this business behaves.
+        orderBy: { createdAt: 'desc' },
         take: SAMPLE_LIMIT,
       })
       .catch(() => [] as any[]);

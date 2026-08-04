@@ -206,33 +206,54 @@ export class KeyCortexIncentiveService {
     return cached ? this.render(cached) : null;
   }
 
-  /** Rendered separately so wording is testable without a database. */
+  /**
+   * Rendered separately so wording is testable without a database.
+   *
+   * NOBODY IS NAMED. This used to interpolate `userId` directly, and
+   * `standingContext` takes only a businessId — so the resulting text went into
+   * the system prompt of EVERY member of the business, with no role check.
+   * A junior with no team-management permission would have had colleagues'
+   * relative output and last-active dates sitting in their assistant's context
+   * on every message, which no screen in the product would show them.
+   *
+   * Fixing the disclosure by threading a requesting user and a permission check
+   * through triage would be the larger change; it is also not obviously worth
+   * it, because the identifier available here is an opaque cuid that means
+   * nothing to a reader anyway. The distribution is the useful signal — that
+   * one person is carrying the week is worth surfacing, and who they are is
+   * something the owner can see for themselves on a screen built to show it.
+   */
   render(c: TeamContribution): string | null {
     const lines: string[] = [];
 
     if (c.carrying) {
       lines.push(
-        `- ${c.carrying.userId} recorded ${Math.round(c.carrying.share * 100)}% of all team activity ` +
-          `in the last ${WINDOW_DAYS} days (${c.carrying.actions} of ${c.totalActions} actions).`,
+        `- One person accounts for ${Math.round(c.carrying.share * 100)}% of recorded activity ` +
+          `in the last ${WINDOW_DAYS} days (${c.carrying.actions} of ${c.totalActions} actions), ` +
+          `across ${c.contributors.length} people who did anything at all.`,
       );
     }
 
-    for (const q of c.wentQuiet.slice(0, 3)) {
+    if (c.wentQuiet.length > 0) {
+      const n = c.wentQuiet.length;
       lines.push(
-        `- ${q.userId} was active earlier in the period and has recorded nothing since ` +
-          `${q.lastActiveAt.toISOString().slice(0, 10)}.`,
+        `- ${n === 1 ? 'One person' : `${n} people`} active earlier in the period ` +
+          `${n === 1 ? 'has' : 'have'} recorded nothing in its most recent third.`,
       );
     }
 
     if (lines.length === 0) return null;
 
     return [
-      `TEAM CONTRIBUTION — recorded activity over ${WINDOW_DAYS} days, per person:`,
+      `TEAM CONTRIBUTION — distribution of recorded activity over ${WINDOW_DAYS} days:`,
       ...lines,
-      'This counts recorded ACTIONS, which is a measure of activity and not of value or effort:',
-      'ten considered decisions can be worth more than two hundred logged clicks, and someone',
-      'may be quiet because they are on leave. Raise it as something to look at, never as a verdict',
-      'on a person, and never suggest pay or standing on this basis alone.',
+      'Two things this does NOT measure. It counts actions on the routes that write an audit',
+      'record, which is a subset of the product — work done in modules that do not log leaves no',
+      'trace here, so an apparently quiet person may simply work somewhere this cannot see. And an',
+      'action count is not value: ten considered decisions can be worth more than two hundred',
+      'logged clicks, and someone may be quiet because they are on leave.',
+      'Raise it as a question about workload distribution. Never as a verdict on a person, never',
+      'as grounds for pay or standing, and do not name individuals from this.',
     ].join('\n');
   }
 }

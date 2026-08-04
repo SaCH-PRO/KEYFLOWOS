@@ -75,6 +75,16 @@ const MEMORY_TYPE_INCIDENT = 'immune_incident';
  */
 const STRAIN_MEMORY_DAYS = 30;
 
+/**
+ * Two firings of the same strain closer together than this are one episode.
+ *
+ * Matched to the detector's own rolling window: it re-fires on EVERY event once
+ * the threshold is crossed, so a single bulk delete of 100 rows raises ~81
+ * anomalies. Anything shorter than its window would still count one operation
+ * many times over.
+ */
+const EPISODE_COOLDOWN_MS = 60 * 60 * 1000;
+
 /** Matches the endocrine clamp. A single dose can never saturate. */
 const MAX_SINGLE_PUSH = 0.35;
 
@@ -88,12 +98,25 @@ const MAX_SINGLE_PUSH = 0.35;
  */
 const BASE_SEVERITY: Record<string, number> = {
   mass_deletion: 0.7,
-  entity_cycle: 0.85,
+  suspicious_entity_cycle: 0.85,
   mass_update: 0.45,
 };
 
-/** Anything unrecognised still counts — an unknown strain is not a safe one. */
-const UNKNOWN_SEVERITY = 0.5;
+/**
+ * Anything unrecognised still counts — an unknown strain is not a safe one.
+ *
+ * Set ABOVE every known severity rather than in the middle. This started as 0.5
+ * and the cycle key was written `entity_cycle` while the detector emits
+ * `suspicious_entity_cycle`, so the branch documented as "scores highest of all"
+ * silently resolved to 0.5 — BELOW routine mass deletion — inverting the exact
+ * ordering the table exists to express. The spec passed because it called
+ * record() with the literal `entity_cycle`, a string production never emits.
+ *
+ * A key that stops matching now produces the most cautious answer instead of a
+ * quietly wrong one, and `key-cortex-immune.service.spec.ts` reads the
+ * detector's source to assert every emitted type has an entry here.
+ */
+const UNKNOWN_SEVERITY = 0.9;
 
 export interface ImmuneIncident {
   anomalyType: string;
@@ -126,6 +149,9 @@ export class KeyCortexImmuneService {
 
   /** Businesses whose incidents have been loaded from storage this process. */
   private readonly hydrated = new Set<string>();
+
+  /** In-flight loads, so concurrent callers await the same read. */
+  private readonly loading = new Map<string, Promise<void>>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -182,7 +208,24 @@ export class KeyCortexImmuneService {
   ): Promise<ImmuneIncident> {
     const prior = await this.recall(businessId, anomalyType, actorId, now);
 
-    const encounters = (prior?.encounters ?? 0) + 1;
+    // Count distinct EPISODES, not detector firings.
+    //
+    // The detector keeps a rolling one-hour window and re-fires on every event
+    // once the threshold is crossed — so deleting 100 contacts in one bulk
+    // operation raises 81 separate anomalies, not one. Counting those directly
+    // made `encounters` 81, and the prompt then asserted this actor had done it
+    // "81 times in 30 days" about a named person, from a single afternoon's
+    // tidy-up. That is not a miscount, it is a false accusation.
+    //
+    // Inside the cooldown the episode is refreshed rather than re-counted: still
+    // happening, still the same event.
+    const withinSameEpisode =
+      prior != null &&
+      now.getTime() - new Date(prior.lastSeen).getTime() < EPISODE_COOLDOWN_MS;
+
+    const encounters = withinSameEpisode
+      ? prior!.encounters
+      : (prior?.encounters ?? 0) + 1;
     const base = BASE_SEVERITY[anomalyType] ?? UNKNOWN_SEVERITY;
 
     // Adaptive immunity: a strain already met provokes a stronger response than
@@ -242,15 +285,46 @@ export class KeyCortexImmuneService {
    */
   async hydrate(businessId: string): Promise<void> {
     if (this.hydrated.has(businessId)) return;
-    this.hydrated.add(businessId);
 
+    // Share one in-flight load rather than marking the business hydrated before
+    // the read resolves.
+    //
+    // The marker used to be set on the line above the await. A record() arriving
+    // during that round trip — an anomaly firing while the first chat message
+    // after a restart warms the cache — saw hydrated=true and an empty Map, so
+    // `prior` was null, encounters reset from 5 to 1, and persist() then wrote
+    // that 1 back over the durable row. The merge guard below could not help:
+    // by the time the read resolved, the fresh (wrong) entry was already there
+    // and correctly skipped. Adaptive immunity silently forgot everything it
+    // had learned, and the failure looked exactly like a first encounter.
+    const existing = this.loading.get(businessId);
+    if (existing) return existing;
+
+    const load = this.load(businessId).finally(() => this.loading.delete(businessId));
+    this.loading.set(businessId, load);
+    return load;
+  }
+
+  private async load(businessId: string): Promise<void> {
+    let failed = false;
     const rows = await this.prisma.client.keyCortexMemory
       .findMany({
         where: { businessId, type: MEMORY_TYPE_INCIDENT },
         orderBy: { lastAccessedAt: 'desc' },
         take: 50,
       })
-      .catch(() => [] as any[]);
+      .catch((err: any) => {
+        // A failed read must NOT mark the business hydrated. Doing so blinded
+        // the immune system to that tenant for the rest of the process, and the
+        // next record() would overwrite its durable history with encounters:1.
+        failed = true;
+        this.logger.warn(
+          `[immune] hydrate failed for ${businessId}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+        return [] as any[];
+      });
 
     const forBusiness = this.incidents.get(businessId) ?? new Map<string, ImmuneIncident>();
     for (const row of rows) {
@@ -262,6 +336,10 @@ export class KeyCortexImmuneService {
       }
     }
     this.incidents.set(businessId, forBusiness);
+
+    // Only now. A business is hydrated when its history is actually in memory,
+    // not when someone started trying to fetch it.
+    if (!failed) this.hydrated.add(businessId);
   }
 
   /**

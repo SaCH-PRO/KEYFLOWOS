@@ -153,21 +153,41 @@ describe('going quiet is a change in behaviour, not a low total', () => {
 });
 
 describe('what it tells KEY about people', () => {
-  it('quotes the numbers behind the claim', async () => {
+  it('names nobody', async () => {
+    // standingContext takes only a businessId, so this text lands in the system
+    // prompt of EVERY member of the business with no role check. Naming people
+    // would put colleagues' relative output in a junior's assistant context on
+    // every message, which no screen in the product would show them.
     const { service } = makeService([...rows('alice', 60), ...rows('bob', 10)]);
     const text = service.render(await service.measure(BIZ, T0))!;
 
-    expect(text).toMatch(/alice/);
-    expect(text).toMatch(/86%|85%|\d+%/);
+    expect(text).not.toMatch(/alice|bob/);
+  });
+
+  it('still gives the distribution, which is the useful part', async () => {
+    const { service } = makeService([...rows('alice', 60), ...rows('bob', 10)]);
+    const text = service.render(await service.measure(BIZ, T0))!;
+
+    expect(text).toMatch(/86%/);
     expect(text).toMatch(/60 of 70 actions/);
   });
 
-  it('states plainly that activity is not value', async () => {
-    // Without this, a business is nudged toward rewarding whoever clicks most.
+  it('admits it only sees the routes that log', async () => {
+    // TeamActivityLog is written by an interceptor on routes carrying
+    // @AuditAction - a subset of the product. Calling it "all team activity"
+    // made the rendered percentage simply false for anyone working elsewhere.
     const { service } = makeService([...rows('alice', 60), ...rows('bob', 10)]);
     const text = service.render(await service.measure(BIZ, T0))!;
 
-    expect(text).toMatch(/not of value or effort/i);
+    expect(text).toMatch(/subset of the product/i);
+    expect(text).toMatch(/may simply work somewhere this cannot see/i);
+  });
+
+  it('states plainly that activity is not value', async () => {
+    const { service } = makeService([...rows('alice', 60), ...rows('bob', 10)]);
+    const text = service.render(await service.measure(BIZ, T0))!;
+
+    expect(text).toMatch(/not value/i);
     expect(text).toMatch(/ten considered decisions/i);
   });
 
@@ -176,7 +196,8 @@ describe('what it tells KEY about people', () => {
     const text = service.render(await service.measure(BIZ, T0))!;
 
     expect(text).toMatch(/never as a verdict/i);
-    expect(text).toMatch(/never suggest pay/i);
+    expect(text).toMatch(/as grounds for pay/i);
+    expect(text).toMatch(/do not name individuals/i);
   });
 
   it('offers the innocent explanation for silence', async () => {
@@ -187,6 +208,7 @@ describe('what it tells KEY about people', () => {
     const text = service.render(await service.measure(BIZ, T0))!;
 
     expect(text).toMatch(/on leave/i);
+    expect(text).not.toMatch(/bob/);
   });
 });
 
@@ -237,7 +259,7 @@ describe('the chat path is synchronous', () => {
     const { service } = makeService([...rows('alice', 60), ...rows('bob', 10)]);
     await service.measure(BIZ, T0);
 
-    expect(service.describeForPrompt(BIZ, T0)).toMatch(/alice/);
+    expect(service.describeForPrompt(BIZ, T0)).toMatch(/86%/);
   });
 });
 
