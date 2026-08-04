@@ -1360,8 +1360,39 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
 
     if (recentTasks.length < 10) return;
 
-    const approved = recentTasks.filter((t: { status: string }) => t.status === 'COMPLETED' || t.status === 'AUTO_EXECUTED').length;
-    const rejected = recentTasks.filter((t: { status: string }) => t.status === 'REJECTED' || t.status === 'SKIPPED').length;
+    // ONLY HUMAN DECISIONS COUNT.
+    //
+    // This used to read:
+    //   approved = COMPLETED || AUTO_EXECUTED
+    //
+    // AUTO_EXECUTED is written by THIS loop, at :637, with executedBy: 'AI',
+    // immediately after it sends the email. No human ever saw it. So once a
+    // loop was auto-executing, every task it completed counted as an approval,
+    // approvalRate converged on 1.0 by construction, and the >= 0.9 branch
+    // below promoted maxAutoTier — which let MORE things auto-execute, which
+    // produced more AUTO_EXECUTED rows.
+    //
+    // That is positive feedback on the autonomy axis wearing the costume of
+    // negative feedback: the system granted itself more authority BECAUSE it
+    // had acted, not because anyone agreed with what it did. A control system
+    // whose gain rises as a consequence of its own output is not self-
+    // regulating, and the variable it was escalating is permission to act
+    // without asking.
+    //
+    // COMPLETED is written only by approveTask (autopilot.service.ts:168-187),
+    // which records approvedBy — a real person. SKIPPED is written only by
+    // denyTask (:189-194). Those two are the evidence.
+    //
+    // REJECTED is retained in the query and here for forward compatibility, but
+    // nothing writes it to an autopilotTask today; denial is SKIPPED.
+    const approved = recentTasks.filter((t: { status: string }) => t.status === 'COMPLETED').length;
+    const rejected = recentTasks.filter(
+      (t: { status: string }) => t.status === 'REJECTED' || t.status === 'SKIPPED',
+    ).length;
+
+    // Deliberately excludes AUTO_EXECUTED from the denominator too. It is not
+    // weak evidence of trust, it is no evidence: nobody expressed a view, and
+    // whether the action actually worked is not measured anywhere.
     const total = approved + rejected;
     if (total === 0) return;
 
