@@ -25,30 +25,72 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { KeyCortexSalienceService } from './key-cortex-salience.service';
 
-type Ev = { eventType: string; createdAt: Date };
+type Ev = { eventType: string; createdAt: Date; subjectId: string };
 
+/**
+ * Stands in for the two raw SQL queries the service issues.
+ *
+ * It models the SEMANTICS deliberately, not the SQL: distinct subject_id for
+ * the recent window, and the average of per-day distinct counts for the
+ * baseline. Both were verified against a real PostgreSQL database — a fixture
+ * of 12 invoices re-emitted every 15 minutes for 24h gives 1152 rows and 12
+ * distinct subjects, and the same pattern over 13 days gives a per-day average
+ * of exactly 12.00 rather than the 0.92 that naive distinct-over-window
+ * produces.
+ *
+ * The previous stub returned a plain row count over a fixture that created ONE
+ * row per notional invoice. That baked the false model into the test: the
+ * service counted emissions, the fixture supplied one emission per entity, and
+ * the numbers agreed. In production the watchers re-emit every 15 minutes, so a
+ * business with 12 overdue invoices would have been told it had 1152.
+ */
 class PrismaStub {
   events: Ev[] = [];
-  lastQuery: Record<string, unknown> | null = null;
+  lastQuery: unknown = null;
+  private queries: string[] = [];
+
   client = {
-    businessEvent: {
-      // The service counts rather than sampling — `take: SAMPLE_LIMIT` with
-      // newest-first ordering truncated the OLDER bucket, so baselineRate came
-      // out low and every signal read as escalating. This stub derives the same
-      // two numbers from the same fixture events, so the assertions below are
-      // unchanged and still describe real behaviour.
-      count: vi.fn((q: any) => {
-        this.lastQuery = q;
-        const where = q?.where ?? {};
-        const gte: Date | undefined = where.createdAt?.gte;
-        const n = this.events.filter(
-          (e) =>
-            (where.eventType === undefined || e.eventType === where.eventType) &&
-            (gte === undefined || e.createdAt >= gte),
-        ).length;
-        return Promise.resolve(n);
-      }),
-    },
+    $queryRaw: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => {
+      const sql = strings.join('?');
+      this.queries.push(sql);
+      this.lastQuery = { sql, values };
+
+      // values: [businessId, eventType, since] or [businessId, eventType, from, to]
+      const eventType = values[1] as string;
+      const matching = this.events.filter((e) => e.eventType === eventType);
+
+      if (sql.includes('date_trunc')) {
+        const from = values[2] as Date;
+        const to = values[3] as Date;
+        const inWindow = matching.filter((e) => e.createdAt >= from && e.createdAt < to);
+        const distinctPerDay = sql.includes('COUNT(DISTINCT subject_id)');
+        const perDay = new Map<string, string[]>();
+        for (const e of inWindow) {
+          const day = e.createdAt.toISOString().slice(0, 10);
+          if (!perDay.has(day)) perDay.set(day, []);
+          perDay.get(day)!.push(e.subjectId);
+        }
+        if (perDay.size === 0) return Promise.resolve([{ avg: null }]);
+        const total = [...perDay.values()].reduce(
+          (n, ids) => n + (distinctPerDay ? new Set(ids).size : ids.length),
+          0,
+        );
+        return Promise.resolve([{ avg: total / perDay.size }]);
+      }
+
+      const since = values[2] as Date;
+      const inWindow = matching.filter((e) => e.createdAt >= since);
+
+      // The stub HONOURS the SQL rather than assuming it. A stub that always
+      // returned a distinct count would keep passing if the service reverted to
+      // COUNT(*), which is precisely how the previous fixture hid this defect —
+      // it modelled the behaviour the author intended instead of the query the
+      // service actually sends.
+      const c = sql.includes('COUNT(DISTINCT subject_id)')
+        ? new Set(inWindow.map((e) => e.subjectId)).size
+        : inWindow.length;
+      return Promise.resolve([{ c }]);
+    }),
     business: { findMany: vi.fn(() => Promise.resolve([{ id: 'biz_1' }])) },
   };
 }
@@ -69,20 +111,48 @@ function make() {
 const HOUR = 3600_000;
 const DAY = 24 * HOUR;
 
-/** n events of `type`, spread across the last `withinHours`. */
+/** n DISTINCT entities of `type` seen in the last `withinHours`. */
 function recent(type: string, n: number, withinHours = 12): Ev[] {
   return Array.from({ length: n }, (_, i) => ({
     eventType: type,
+    subjectId: `${type}_e${i}`,
     createdAt: new Date(Date.now() - ((i % withinHours) + 1) * HOUR),
   }));
 }
 
-/** n events of `type` spread across the baseline window, older than 24h. */
+/**
+ * n distinct entities per day, every day of the baseline window.
+ *
+ * Per DAY, not across the window: the baseline is "a normal day", so a fixture
+ * spreading n entities over 13 days would describe a business with n/13 per day.
+ */
 function historic(type: string, n: number): Ev[] {
-  return Array.from({ length: n }, (_, i) => ({
-    eventType: type,
-    createdAt: new Date(Date.now() - (2 + (i % 12)) * DAY),
-  }));
+  const out: Ev[] = [];
+  for (let day = 2; day <= 13; day++) {
+    for (let i = 0; i < n; i++) {
+      out.push({
+        eventType: type,
+        subjectId: `${type}_h${i}`,
+        createdAt: new Date(Date.now() - day * DAY),
+      });
+    }
+  }
+  return out;
+}
+
+/** The production pattern: one entity, re-emitted every 15 minutes for 24h. */
+function reEmitted(type: string, entities: number, sweeps = 96): Ev[] {
+  const out: Ev[] = [];
+  for (let i = 0; i < entities; i++) {
+    for (let s = 0; s < sweeps; s++) {
+      out.push({
+        eventType: type,
+        subjectId: `${type}_e${i}`,
+        createdAt: new Date(Date.now() - s * 15 * 60_000),
+      });
+    }
+  }
+  return out;
 }
 
 const OVERDUE = 'proactive.invoice_overdue';
@@ -96,7 +166,7 @@ describe('habituation — volume alone is not an emergency', () => {
 
   it('a business that ALWAYS has overdue invoices is not in crisis at its normal level', async () => {
     // ~2.5/day historically, and 3 today. Business as usual.
-    ctx.prisma.events = [...recent(OVERDUE, 3), ...historic(OVERDUE, 30)];
+    ctx.prisma.events = [...recent(OVERDUE, 3), ...historic(OVERDUE, 3)];
 
     const concerns = await ctx.svc.rank('biz_1');
     const overdue = concerns.find((c) => c.signal === OVERDUE);
@@ -105,7 +175,7 @@ describe('habituation — volume alone is not an emergency', () => {
   });
 
   it('does not dose cortisol for a business at its own baseline', async () => {
-    ctx.prisma.events = [...recent(OVERDUE, 3), ...historic(OVERDUE, 30)];
+    ctx.prisma.events = [...recent(OVERDUE, 3), ...historic(OVERDUE, 3)];
 
     await ctx.svc.appraise('biz_1');
 
@@ -121,7 +191,7 @@ describe('habituation — volume alone is not an emergency', () => {
     // and gets the priority exactly backwards.
     ctx.prisma.events = [
       ...recent(OVERDUE, 20),
-      ...historic(OVERDUE, 200),
+      ...historic(OVERDUE, 15),
       ...recent('proactive.negative_sentiment', 2),
     ];
 
@@ -148,7 +218,7 @@ describe('sensitisation — change is what matters', () => {
 
   it('flags a genuine escalation above the business’s own normal', async () => {
     // ~0.9/day historically, 12 today.
-    ctx.prisma.events = [...recent(OVERDUE, 12), ...historic(OVERDUE, 12)];
+    ctx.prisma.events = [...recent(OVERDUE, 12), ...historic(OVERDUE, 1)];
 
     const [concern] = await ctx.svc.rank('biz_1');
     expect(concern.escalating).toBe(true);
@@ -159,7 +229,7 @@ describe('sensitisation — change is what matters', () => {
     // "12 overdue invoices" is a number the owner already knows. The baseline
     // is what makes it a fact worth surfacing — and release() requires it as
     // evidence.
-    ctx.prisma.events = [...recent(OVERDUE, 12), ...historic(OVERDUE, 12)];
+    ctx.prisma.events = [...recent(OVERDUE, 12), ...historic(OVERDUE, 1)];
 
     const [concern] = await ctx.svc.rank('biz_1');
     expect(concern.summary).toMatch(/normal of/);
@@ -214,7 +284,7 @@ describe('it gives cortisol its first live writer', () => {
 
   it('stays silent when there is nothing recent', async () => {
     const { svc, prisma, endocrine } = make();
-    prisma.events = historic(OVERDUE, 40); // all older than the recent window
+    prisma.events = historic(OVERDUE, 3); // all older than the recent window
 
     expect(await svc.rank('biz_1')).toEqual([]);
     await svc.appraise('biz_1');
@@ -232,7 +302,7 @@ describe('the second polarity — KEY notices good weeks too', () => {
   // is excluded from effortMultiplier, and was never once released.
   it('detects momentum against the business’s own normal', async () => {
     const { svc, prisma } = make();
-    prisma.events = [...recent('invoice.paid', 14), ...historic('invoice.paid', 14)];
+    prisma.events = [...recent('invoice.paid', 14), ...historic('invoice.paid', 1)];
 
     const [best] = await svc.rankOpportunities('biz_1');
     expect(best).toBeDefined();
@@ -244,7 +314,7 @@ describe('the second polarity — KEY notices good weeks too', () => {
     // Habituation applies to good news too, or KEY congratulates a business
     // every single day for existing.
     const { svc, prisma } = make();
-    prisma.events = [...recent('booking.created', 3), ...historic('booking.created', 30)];
+    prisma.events = [...recent('booking.created', 3), ...historic('booking.created', 3)];
 
     const opportunities = await svc.rankOpportunities('biz_1');
     expect(opportunities.every((o) => !o.escalating)).toBe(true);
@@ -312,7 +382,7 @@ describe('the second polarity — KEY notices good weeks too', () => {
     // hormone and the sentence the owner eventually reads. "14 invoices paid,
     // escalating" reads as an alarm about getting paid.
     const { svc, prisma } = make();
-    prisma.events = [...recent('invoice.paid', 14), ...historic('invoice.paid', 14)];
+    prisma.events = [...recent('invoice.paid', 14), ...historic('invoice.paid', 1)];
 
     const opportunities = await svc.rankOpportunities('biz_1');
     expect(opportunities.length).toBeGreaterThan(0);
@@ -334,25 +404,30 @@ describe('it cannot flood, stall or act', () => {
     expect((await svc.rank('biz_1')).length).toBeLessThanOrEqual(5);
   });
 
-  it('reads windowed and tenant-scoped, and returns a scalar rather than rows', async () => {
-    const { svc, prisma } = make();
-    await svc.rank('biz_1');
+  it('reads windowed, tenant-scoped, and counts entities rather than rows', () => {
+    // The service issues raw SQL now, because neither thing it needs is
+    // expressible in the Prisma query API: `count` has no DISTINCT, and
+    // `groupBy` cannot truncate a timestamp to a day.
+    const src = readFileSync(join(__dirname, 'key-cortex-salience.service.ts'), 'utf8');
+    const fn = src.slice(src.indexOf('private async countSignal('));
+    const body = fn.slice(0, fn.indexOf('/** Rank threat signals'));
 
-    const q = prisma.lastQuery as { take?: number; where?: Record<string, unknown> };
-    expect(q.where?.businessId).toBe('biz_1');
-    expect(q.where?.createdAt, 'no time window').toBeDefined();
+    expect(body).toMatch(/business_id = \$\{businessId\}/);
+    expect(body).toMatch(/created_at >= \$\{recentSince\}/);
 
-    // `take` is deliberately gone. It used to bound a findMany, and that bound
-    // was the bug: truncating newest-first threw away the OLDER events, so the
-    // baseline read low and everything looked like an escalation. A count is
-    // inherently bounded — it returns one number however many rows match — so
-    // the read is exact AND cannot flood memory.
-    expect(q.take).toBeUndefined();
+    // The whole point: entities, not sightings of entities.
+    expect(body).toMatch(/COUNT\(DISTINCT subject_id\)/);
+    expect(body).not.toMatch(/COUNT\(\*\)/);
+
+    // And a per-day average, not distinct-over-the-window — which would read
+    // every steady state as a 13x escalation.
+    expect(body).toMatch(/date_trunc\('day', created_at\)/);
+    expect(body).toMatch(/AVG\(c\)/);
   });
 
   it('survives a database failure', async () => {
     const { svc, prisma } = make();
-    prisma.client.businessEvent.count = vi.fn(() => Promise.reject(new Error('locked')));
+    prisma.client.$queryRaw = vi.fn(() => Promise.reject(new Error('locked')));
 
     await expect(svc.rank('biz_1')).resolves.toEqual([]);
   });
@@ -362,7 +437,7 @@ describe('it cannot flood, stall or act', () => {
     prisma.client.business.findMany = vi.fn(() =>
       Promise.resolve([{ id: 'biz_1' }, { id: 'biz_2' }]),
     );
-    prisma.client.businessEvent.count = vi.fn(() => Promise.reject(new Error('locked')));
+    prisma.client.$queryRaw = vi.fn(() => Promise.reject(new Error('locked')));
 
     await expect(svc.scheduledAppraisal()).resolves.toBeUndefined();
   });
@@ -396,7 +471,7 @@ describe('the counted facts finally escape', () => {
 
   it('states the summary as a fact once appraised', async () => {
     const { svc, prisma } = make();
-    prisma.events = [...recent('proactive.invoice_overdue', 12), ...historic('proactive.invoice_overdue', 3)];
+    prisma.events = [...recent('proactive.invoice_overdue', 12), ...historic('proactive.invoice_overdue', 1)];
     await svc.appraise('biz_1');
 
     const text = svc.describeForPrompt('biz_1')!;
@@ -410,7 +485,7 @@ describe('the counted facts finally escape', () => {
     // NOT to treat it as reportable fact. Without an explicit counter the model
     // gets two opposing directives about one number.
     const { svc, prisma } = make();
-    prisma.events = [...recent('proactive.invoice_overdue', 12), ...historic('proactive.invoice_overdue', 3)];
+    prisma.events = [...recent('proactive.invoice_overdue', 12), ...historic('proactive.invoice_overdue', 1)];
     await svc.appraise('biz_1');
 
     expect(svc.describeForPrompt('biz_1')).toMatch(/not inference/);
@@ -418,7 +493,7 @@ describe('the counted facts finally escape', () => {
 
   it('goes quiet rather than asserting a stale count as current', async () => {
     const { svc, prisma } = make();
-    prisma.events = [...recent('proactive.invoice_overdue', 12), ...historic('proactive.invoice_overdue', 3)];
+    prisma.events = [...recent('proactive.invoice_overdue', 12), ...historic('proactive.invoice_overdue', 1)];
     await svc.appraise('biz_1');
 
     const muchLater = new Date(Date.now() + 4 * 60 * 60 * 1000);
@@ -427,7 +502,7 @@ describe('the counted facts finally escape', () => {
 
   it('is synchronous, because the chat path that reads it is', async () => {
     const { svc, prisma } = make();
-    prisma.events = [...recent('proactive.invoice_overdue', 12), ...historic('proactive.invoice_overdue', 3)];
+    prisma.events = [...recent('proactive.invoice_overdue', 12), ...historic('proactive.invoice_overdue', 1)];
     await svc.appraise('biz_1');
 
     expect(svc.describeForPrompt('biz_1')).not.toBeInstanceOf(Promise);
@@ -435,7 +510,7 @@ describe('the counted facts finally escape', () => {
 
   it('never mixes one business into another', async () => {
     const { svc, prisma } = make();
-    prisma.events = [...recent('proactive.invoice_overdue', 12), ...historic('proactive.invoice_overdue', 3)];
+    prisma.events = [...recent('proactive.invoice_overdue', 12), ...historic('proactive.invoice_overdue', 1)];
     await svc.appraise('biz_1');
 
     expect(svc.describeForPrompt('biz_other')).toBeNull();
@@ -467,5 +542,75 @@ describe('it is wired to the chat, not merely written', () => {
     const ctor = triage.slice(triage.indexOf('constructor('), triage.indexOf(') {}'));
     const params = [...ctor.matchAll(/private readonly (\w+)\?/g)].map((m) => m[1]);
     expect(params.slice(0, 3)).toEqual(['router', 'endocrine', 'interoception']);
+  });
+});
+
+describe('it counts things, not sightings of things', () => {
+  // THE test that was missing. The watchers re-publish one event for every
+  // still-matching entity on every sweep, and the sweep runs every 15 minutes
+  // with no dedupe. Counting rows counted emissions: a business with 12 overdue
+  // invoices would have been told, as a stated fact about its own books, that it
+  // had 1152.
+  //
+  // The old fixture created exactly one row per notional invoice, so the false
+  // model and the test agreed with each other and the suite stayed green.
+  // reEmitted() models what production actually writes.
+
+  it('reports 12 invoices as 12, not as 1152 emissions', async () => {
+    const { svc, prisma } = make();
+    prisma.events = [
+      ...reEmitted(OVERDUE, 12),            // 12 invoices × 96 sweeps = 1152 rows
+      ...historic(OVERDUE, 1),              // normally ~1/day
+    ];
+
+    const [concern] = await svc.rank('biz_1');
+
+    expect(concern.recentCount).toBe(12);
+    expect(concern.summary).toMatch(/\b12 overdue invoices\b/);
+    expect(concern.summary).not.toMatch(/1152/);
+  });
+
+  it('does not read a steady state as an escalation', async () => {
+    // The second trap, and the one that would have been introduced by fixing
+    // only the first: 12 invoices overdue every day for a fortnight are 12
+    // distinct subjects across 13 days. Distinct-over-the-window reads that as a
+    // baseline of 0.9/day against 12 today — a 13x false escalation on a
+    // business where nothing changed. Verified against real PostgreSQL: the
+    // per-day average returns 12.00 and the ratio is 1.00.
+    const { svc, prisma } = make();
+    prisma.events = [...reEmitted(OVERDUE, 12), ...historic(OVERDUE, 12)];
+
+    const [concern] = await svc.rank('biz_1');
+
+    expect(concern?.escalating ?? false).toBe(false);
+  });
+
+  it('still catches a real escalation through the re-emission noise', async () => {
+    const { svc, prisma } = make();
+    prisma.events = [...reEmitted(OVERDUE, 12), ...historic(OVERDUE, 2)];
+
+    const [concern] = await svc.rank('biz_1');
+
+    expect(concern.escalating).toBe(true);
+    expect(concern.recentCount).toBe(12);
+  });
+
+  it('never mixes units — opportunities arrive once per occurrence', async () => {
+    // Opportunity signals come from the event bridge, one row per real event,
+    // while threat signals come from re-emitting watchers. A row count would put
+    // one true number and one 96x-inflated number in the same list of "facts".
+    const { svc, prisma } = make();
+    prisma.events = [
+      ...reEmitted(OVERDUE, 5),
+      ...recent('invoice.paid', 5),
+      ...historic('invoice.paid', 1),
+      ...historic(OVERDUE, 1),
+    ];
+
+    const threats = await svc.rank('biz_1');
+    const opportunities = await svc.rankOpportunities('biz_1');
+
+    expect(threats[0].recentCount).toBe(5);
+    expect(opportunities[0].recentCount).toBe(5);
   });
 });

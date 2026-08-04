@@ -238,6 +238,72 @@ export class KeyCortexSalienceService {
     ].join('\n');
   }
 
+
+  /**
+   * Distinct ENTITIES, not event rows — and a per-day baseline.
+   *
+   * Two mistakes live here, both of which produce a confidently wrong sentence
+   * now that these numbers are stated to the owner as fact.
+   *
+   * FIRST: counting rows counts watcher emissions. The proactive watchers
+   * re-publish one event for every still-matching entity on every sweep, and the
+   * sweep runs every 15 minutes with no dedupe — so a business with 12 overdue
+   * invoices accumulates ~1150 `proactive.invoice_overdue` rows in 24 hours, and
+   * KEY would have said "1152 overdue invoices in 24h". The event bus sets
+   * `subjectId` to the entity id, so counting DISTINCT subjectId counts invoices
+   * rather than sightings of invoices. Opportunity signals arrive once per real
+   * occurrence, so a row count would also have mixed one true number with one
+   * inflated by ~96x in the same list.
+   *
+   * SECOND, and easy to miss while fixing the first: distinct-over-the-baseline-
+   * window is not a rate. Twelve invoices overdue for a fortnight are 12 distinct
+   * subjects across 13 days, which reads as a baseline of ~0.9/day against a
+   * present count of 12 — so every steady state would look like a 13x escalation.
+   * The baseline is therefore the AVERAGE of the per-day distinct counts, which
+   * is the quantity "a normal day for this business" actually means.
+   *
+   * Raw SQL because neither is expressible in the Prisma query API: `count` has
+   * no DISTINCT, and `groupBy` cannot truncate a timestamp to a day. Written for
+   * PostgreSQL against the real column names — note that the existing raw-SQL in
+   * this codebase (key-cortex-intuition.service.ts) is MySQL syntax against a
+   * Postgres database and does not run.
+   */
+  private async countSignal(
+    businessId: string,
+    signal: string,
+    recentSince: Date,
+    baselineSince: Date,
+  ): Promise<{ signal: string; recent: number; baselinePerDay: number }> {
+    const recentRows = await this.prisma.client.$queryRaw<Array<{ c: bigint | number }>>`
+      SELECT COUNT(DISTINCT subject_id) AS c
+      FROM business_events
+      WHERE business_id = ${businessId}
+        AND event_type = ${signal}
+        AND created_at >= ${recentSince}
+    `;
+
+    // The baseline window deliberately EXCLUDES the recent one: including it
+    // would let today's spike inflate the normal it is measured against and
+    // hide itself.
+    const baselineRows = await this.prisma.client.$queryRaw<Array<{ avg: number | null }>>`
+      SELECT AVG(c) AS avg FROM (
+        SELECT date_trunc('day', created_at) AS d, COUNT(DISTINCT subject_id) AS c
+        FROM business_events
+        WHERE business_id = ${businessId}
+          AND event_type = ${signal}
+          AND created_at >= ${baselineSince}
+          AND created_at < ${recentSince}
+        GROUP BY 1
+      ) per_day
+    `;
+
+    return {
+      signal,
+      recent: Number(recentRows?.[0]?.c ?? 0),
+      baselinePerDay: Number(baselineRows?.[0]?.avg ?? 0),
+    };
+  }
+
   /** Rank threat signals. Never throws. */
   async rank(businessId: string): Promise<Concern[]> {
     return this.scoreSignals(businessId, THREAT_SIGNALS, 'threat');
@@ -277,20 +343,10 @@ export class KeyCortexSalienceService {
     // wrong baseline is KEY asserting something false about the owner's own
     // books, in a confident voice. `count` is exact and unbounded, and two
     // counts per signal are cheaper than the rows they replace.
-    let counts: Array<{ signal: string; recent: number; older: number }>;
+    let counts: Array<{ signal: string; recent: number; baselinePerDay: number }>;
     try {
       counts = await Promise.all(
-        Object.keys(signalWeights).map(async (signal) => {
-          const [recent, total] = await Promise.all([
-            this.prisma.client.businessEvent.count({
-              where: { businessId, eventType: signal, createdAt: { gte: recentSince } },
-            }),
-            this.prisma.client.businessEvent.count({
-              where: { businessId, eventType: signal, createdAt: { gte: baselineSince } },
-            }),
-          ]);
-          return { signal, recent, older: Math.max(0, total - recent) };
-        }),
+        Object.keys(signalWeights).map((signal) => this.countSignal(businessId, signal, recentSince, baselineSince)),
       );
     } catch {
       return [];
@@ -304,13 +360,8 @@ export class KeyCortexSalienceService {
 
       const recent = counted.recent;
       if (recent === 0) continue;
+      const baselineRate = counted.baselinePerDay;
 
-      // What a normal 24h looks like for THIS business, from the portion of the
-      // baseline window that excludes the recent one — otherwise today's spike
-      // inflates the baseline it is being compared against and hides itself.
-      const older = counted.older;
-      const olderDays = BASELINE_DAYS - RECENT_HOURS / 24;
-      const baselineRate = olderDays > 0 ? older / olderDays : 0;
 
       // HABITUATION. Ratio against the business's own normal, not an absolute
       // count. A business that always carries thirty overdue invoices is not in
