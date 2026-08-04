@@ -167,6 +167,28 @@ describe('the choice is offered, and its state is honest', () => {
   const src = readFileSync(join(__dirname, 'model-gateway.service.ts'), 'utf8');
   const controller = readFileSync(join(__dirname, 'ai.controller.ts'), 'utf8');
 
+  it('offers Gemini, which the gateway could not reach at all before', () => {
+    // Google was absent from AiProvider entirely, so it was not merely
+    // unconfigured — there was no code path to it. Listing a provider the
+    // gateway cannot call would be a menu item that silently does nothing,
+    // which the implementation test below enforces.
+    expect(SELECTABLE_PROVIDERS).toContain('google');
+  });
+
+  it('reaches Gemini through the OpenAI-compatible endpoint, not a bespoke client', () => {
+    // Google publishes an OpenAI-shaped surface. Using it means the same tool
+    // schema and the same tool_calls contract as every other provider — no
+    // translation layer to silently lose tool calling in, which is exactly how
+    // the Anthropic streaming path broke.
+    expect(src).toMatch(/generativelanguage\.googleapis\.com\/v1beta\/openai/);
+  });
+
+  it('sends tools on the Gemini streaming path', () => {
+    const fn = src.slice(src.indexOf('private async *streamGoogle('));
+    expect(fn.slice(0, 3000)).toMatch(/params\.tools = request\.tools/);
+    expect(fn.slice(0, 3000)).toMatch(/tool_call_delta/);
+  });
+
   it('offers more than one provider', () => {
     expect(SELECTABLE_PROVIDERS.length).toBeGreaterThan(1);
     expect(SELECTABLE_PROVIDERS).toContain('openai');
@@ -184,6 +206,7 @@ describe('the choice is offered, and its state is honest', () => {
       anthropic: 'callAnthropic',
       xai: 'callXai',
       kimi: 'callKimi',
+      google: 'callGoogle',
     };
 
     for (const provider of SELECTABLE_PROVIDERS) {

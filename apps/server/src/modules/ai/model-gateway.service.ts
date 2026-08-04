@@ -5,7 +5,7 @@ import OpenAI from 'openai';
 import { validateOutputContract, type ContractType } from './ai-output-contracts';
 import { LLMCostService } from './llm-cost.service';
 
-export type AiProvider = 'openai' | 'anthropic' | 'xai' | 'kimi' | 'native' | 'opensource';
+export type AiProvider = 'openai' | 'anthropic' | 'xai' | 'kimi' | 'google' | 'native' | 'opensource';
 
 export type TaskCategory =
   | 'extraction'
@@ -178,6 +178,7 @@ export interface AiPreferences {
   byokAnthropic?: string;
   byokXai?: string;
   byokKimi?: string;
+  byokGoogle?: string;
   byokNative?: string;
   budgetCaps?: BudgetCaps;
 }
@@ -207,13 +208,14 @@ export interface AiPreferences {
  * OpenAI is reliably configured; the rest are selectable and simply fall through
  * until someone supplies a key.
  */
-export const SELECTABLE_PROVIDERS: AiProvider[] = ['openai', 'anthropic', 'xai', 'kimi'];
+export const SELECTABLE_PROVIDERS: AiProvider[] = ['openai', 'anthropic', 'google', 'xai', 'kimi'];
 
 const PROVIDER_DEFAULT_MODEL: Partial<Record<AiProvider, string>> = {
   openai: 'gpt-4o',
   anthropic: 'claude-3-5-sonnet-20241022',
   xai: 'grok-2',
   kimi: 'moonshot-v1-32k',
+  google: 'gemini-2.0-flash',
 };
 
 const DEFAULT_PREFERENCES: AiPreferences = {
@@ -249,6 +251,8 @@ const TOKEN_COST_PER_1K: Record<string, { input: number; output: number }> = {
   'gpt-4o-mini': { input: 0.00015, output: 0.0006 },
   'claude-3-5-sonnet-20241022': { input: 0.003, output: 0.015 },
   'claude-3-5-haiku-20241022': { input: 0.0008, output: 0.004 },
+  'gemini-2.0-flash': { input: 0.0001, output: 0.0004 },
+  'gemini-2.5-pro': { input: 0.00125, output: 0.010 },
   'grok-2': { input: 0.005, output: 0.015 },
   'grok-2-mini': { input: 0.001, output: 0.005 },
   'moonshot-v1-8k': { input: 0.003, output: 0.003 },
@@ -596,6 +600,9 @@ export class ModelGatewayService {
     });
     this.providerClients.set('xai', {
       configured: !!process.env.XAI_API_KEY,
+    });
+    this.providerClients.set('google', {
+      configured: !!(process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY),
     });
     this.providerClients.set('kimi', {
       configured: !!process.env.KIMI_API_KEY,
@@ -959,6 +966,9 @@ export class ModelGatewayService {
         break;
       case 'kimi':
         yield* this.streamKimi(normalizedMessages, model, request, preferences.byokKimi);
+        break;
+      case 'google':
+        yield* this.streamGoogle(normalizedMessages, model, request, preferences.byokGoogle);
         break;
       case 'native':
         yield* this.streamNative(normalizedMessages, model, request, preferences.byokNative);
@@ -1723,6 +1733,14 @@ export class ModelGatewayService {
       configured = !!(preferences.byokXai || process.env.XAI_API_KEY);
     } else if (provider === 'kimi') {
       configured = !!(preferences.byokKimi || process.env.KIMI_API_KEY);
+    } else if (provider === 'google') {
+      // Either name works — GEMINI_API_KEY is what Google's own docs use, and
+      // GOOGLE_API_KEY is the more common convention in deployment configs.
+      configured = !!(
+        preferences.byokGoogle ||
+        process.env.GOOGLE_API_KEY ||
+        process.env.GEMINI_API_KEY
+      );
     } else if (provider === 'native') {
       configured = !!(preferences.byokNative || process.env.NATIVE_AI_API_KEY || process.env.KEYFLOW_NATIVE_AI_URL);
     } else if (provider === 'opensource') {
@@ -1805,6 +1823,8 @@ export class ModelGatewayService {
         return this.callXai(normalizedMessages, model, request, preferences.byokXai);
       case 'kimi':
         return this.callKimi(normalizedMessages, model, request, preferences.byokKimi);
+      case 'google':
+        return this.callGoogle(normalizedMessages, model, request, preferences.byokGoogle);
       case 'native':
         return this.callNative(normalizedMessages, model, request, preferences.byokNative);
       case 'opensource':
@@ -1815,7 +1835,7 @@ export class ModelGatewayService {
   }
 
   private normalizeMessages(messages: GatewayMessage[], provider: AiProvider): GatewayMessage[] {
-    if (provider === 'openai' || provider === 'xai' || provider === 'kimi' || provider === 'native' || provider === 'opensource') {
+    if (provider === 'openai' || provider === 'xai' || provider === 'kimi' || provider === 'google' || provider === 'native' || provider === 'opensource') {
       return messages;
     }
 
@@ -2198,6 +2218,157 @@ export class ModelGatewayService {
     };
   }
 
+/**
+   * Google Gemini, through its OpenAI-compatible endpoint.
+   *
+   * Google publishes an OpenAI-shaped surface at
+   * generativelanguage.googleapis.com/v1beta/openai/, which means the same SDK,
+   * the same message shape, and — crucially — the same tool-calling contract as
+   * every other provider here. xAI and Moonshot are integrated the same way.
+   *
+   * Writing a native Gemini client instead would mean translating messages,
+   * translating tool schemas into functionDeclarations, and translating
+   * functionCall responses back — three chances to lose tool calling the way the
+   * Anthropic streaming path silently did. Compatibility endpoint, no
+   * translation, no divergence.
+   */
+  private async callGoogle(
+    messages: GatewayMessage[],
+    model: string,
+    request: GatewayRequest,
+    byokKey?: string,
+  ): Promise<Omit<GatewayResponse, 'provider' | 'model' | 'latencyMs' | 'fallbackUsed' | 'fallbackProvider'>> {
+    const apiKey = byokKey || process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
+    if (!apiKey) throw new Error('Google API key not configured');
+
+    const client = new OpenAI({
+      apiKey,
+      baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai/',
+    });
+
+    const params: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
+      model,
+      messages: messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+      max_tokens: request.maxTokens ?? 500,
+      temperature: request.temperature ?? 0.7,
+    };
+
+    if (request.tools && request.tools.length > 0) {
+      params.tools = request.tools as OpenAI.Chat.Completions.ChatCompletionTool[];
+      if (request.toolChoice) {
+        params.tool_choice = request.toolChoice as OpenAI.Chat.Completions.ChatCompletionToolChoiceOption;
+      }
+    }
+
+    const response = await client.chat.completions.create(params);
+
+    const choice = response.choices[0];
+    const promptTokens = response.usage?.prompt_tokens ?? 0;
+    const completionTokens = response.usage?.completion_tokens ?? 0;
+    const totalTokens = promptTokens + completionTokens;
+    const costs = priceFor(model);
+    const estimatedCost =
+      (promptTokens / 1000) * costs.input + (completionTokens / 1000) * costs.output;
+
+    const googleToolCalls = choice?.message?.tool_calls
+      ?.filter((tc) => tc.type === 'function')
+      .map((tc) => ({
+        id: tc.id,
+        type: 'function' as const,
+        function: { name: tc.function.name, arguments: tc.function.arguments },
+      }));
+
+    return {
+      content: choice?.message?.content ?? null,
+      toolCalls: googleToolCalls && googleToolCalls.length > 0 ? googleToolCalls : undefined,
+      usage: {
+        promptTokens,
+        completionTokens,
+        totalTokens,
+        estimatedCost: Math.round(estimatedCost * 10000) / 10000,
+      },
+    };
+  }
+
+  /** Streaming Gemini. Same compatibility endpoint, same chunk contract. */
+  private async *streamGoogle(
+    messages: GatewayMessage[],
+    model: string,
+    request: GatewayRequest,
+    byokKey?: string,
+  ): AsyncGenerator<StreamChunk> {
+    const apiKey = byokKey || process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
+    if (!apiKey) throw new Error('Google API key not configured');
+
+    const client = new OpenAI({
+      apiKey,
+      baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai/',
+    });
+
+    const params: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
+      model,
+      messages: messages as OpenAI.Chat.Completions.ChatCompletionMessageParam[],
+      max_tokens: request.maxTokens ?? 500,
+      temperature: request.temperature ?? 0.7,
+      stream: true,
+      stream_options: { include_usage: true },
+    };
+
+    // Tools on the streaming path too. Omitting them here is exactly how the
+    // Anthropic fallback ended up able to describe an action and never take one.
+    if (request.tools && request.tools.length > 0) {
+      params.tools = request.tools as OpenAI.Chat.Completions.ChatCompletionTool[];
+      if (request.toolChoice) {
+        params.tool_choice = request.toolChoice as OpenAI.Chat.Completions.ChatCompletionToolChoiceOption;
+      }
+    }
+
+    const stream = await client.chat.completions.create(params);
+
+    for await (const chunk of stream) {
+      const delta = chunk.choices?.[0]?.delta;
+
+      if (delta?.content) {
+        yield { type: 'content_delta', content: delta.content };
+      }
+
+      if (delta?.tool_calls) {
+        for (const tc of delta.tool_calls) {
+          yield {
+            type: 'tool_call_delta',
+            toolCall: {
+              index: tc.index,
+              id: tc.id,
+              name: tc.function?.name,
+              argumentsDelta: tc.function?.arguments,
+            },
+          };
+        }
+      }
+
+      if (chunk.usage) {
+        const promptTokens = chunk.usage.prompt_tokens ?? 0;
+        const completionTokens = chunk.usage.completion_tokens ?? 0;
+        const costs = priceFor(model);
+        yield {
+          type: 'usage',
+          usage: {
+            promptTokens,
+            completionTokens,
+            totalTokens: promptTokens + completionTokens,
+            estimatedCost:
+              Math.round(
+                ((promptTokens / 1000) * costs.input +
+                  (completionTokens / 1000) * costs.output) * 10000,
+              ) / 10000,
+          },
+        };
+      }
+    }
+
+    yield { type: 'done' };
+  }
+
   private async callNative(
     messages: GatewayMessage[],
     model: string,
@@ -2362,6 +2533,7 @@ export class ModelGatewayService {
       anthropic: preferences.byokAnthropic,
       xai: preferences.byokXai,
       kimi: preferences.byokKimi,
+      google: preferences.byokGoogle,
     };
 
     const labels: Partial<Record<AiProvider, string>> = {
@@ -2369,6 +2541,7 @@ export class ModelGatewayService {
       anthropic: 'Anthropic',
       xai: 'xAI (Grok)',
       kimi: 'Moonshot (Kimi)',
+      google: 'Google (Gemini)',
     };
 
     return SELECTABLE_PROVIDERS.map((provider) => {
@@ -2419,6 +2592,7 @@ export class ModelGatewayService {
         if (prefs.byokAnthropic) prefs.byokAnthropic = this.safeDecrypt(prefs.byokAnthropic);
         if (prefs.byokXai) prefs.byokXai = this.safeDecrypt(prefs.byokXai);
         if (prefs.byokKimi) prefs.byokKimi = this.safeDecrypt(prefs.byokKimi);
+        if (prefs.byokGoogle) prefs.byokGoogle = this.safeDecrypt(prefs.byokGoogle);
         if (prefs.byokNative) prefs.byokNative = this.safeDecrypt(prefs.byokNative);
 
         this.preferencesCache.set(businessId, {
@@ -2469,6 +2643,7 @@ export class ModelGatewayService {
     if (merged.byokAnthropic === '') merged.byokAnthropic = undefined;
     if (merged.byokXai === '') merged.byokXai = undefined;
     if (merged.byokKimi === '') merged.byokKimi = undefined;
+    if (merged.byokGoogle === '') merged.byokGoogle = undefined;
     if (merged.byokNative === '') merged.byokNative = undefined;
 
     const validModes: AiMode[] = ['balanced', 'premium', 'fast'];
@@ -2496,6 +2671,7 @@ export class ModelGatewayService {
     if (toStore.byokAnthropic) toStore.byokAnthropic = this.encryptSecret(toStore.byokAnthropic);
     if (toStore.byokXai) toStore.byokXai = this.encryptSecret(toStore.byokXai);
     if (toStore.byokKimi) toStore.byokKimi = this.encryptSecret(toStore.byokKimi);
+    if (toStore.byokGoogle) toStore.byokGoogle = this.encryptSecret(toStore.byokGoogle);
     if (toStore.byokNative) toStore.byokNative = this.encryptSecret(toStore.byokNative);
 
     await this.prisma.client.aiMemory.upsert({
