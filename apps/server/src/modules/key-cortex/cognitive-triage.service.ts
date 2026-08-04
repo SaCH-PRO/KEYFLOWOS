@@ -2,6 +2,7 @@ import { Injectable, Logger, Optional } from '@nestjs/common';
 import type { TaskCategory } from '../ai/model-gateway.service';
 import { AdaptiveRouterService, type QueryDimensions } from './adaptive-router.service';
 import { KeyCortexEndocrineService } from './key-cortex-endocrine.service';
+import { KeyCortexImmuneService } from './key-cortex-immune.service';
 import { KeyCortexInteroceptionService } from './key-cortex-interoception.service';
 
 /**
@@ -77,6 +78,12 @@ export class CognitiveTriageService {
     @Optional() private readonly router?: AdaptiveRouterService,
     @Optional() private readonly endocrine?: KeyCortexEndocrineService,
     @Optional() private readonly interoception?: KeyCortexInteroceptionService,
+    // APPENDED, never inserted. The specs construct this service positionally
+    // (`new CognitiveTriageService(router, endocrine, intero)`), so adding a
+    // parameter in the middle silently feeds each stub into the wrong slot —
+    // which is exactly what happened when this went in above interoception, and
+    // the only symptom was peekBody never being called.
+    @Optional() private readonly immune?: KeyCortexImmuneService,
   ) {}
 
   /**
@@ -301,6 +308,17 @@ export class CognitiveTriageService {
       if (described) parts.push(described);
     } catch {
       /* body state is framing, never required */
+    }
+
+    try {
+      // Immune memory. Sync by design — see the note on KeyCortexImmuneService's
+      // `incidents` map. Before this, a detected anomaly reached exactly one
+      // listener: an SSE broadcast that returns early when no dashboard is open,
+      // so at 3am the detection was simply discarded.
+      const threats = this.immune?.describeForPrompt(businessId) ?? null;
+      if (threats) parts.push(threats);
+    } catch {
+      /* immune state is framing, never required */
     }
 
     return parts.length > 0 ? parts.join('\n\n') : null;

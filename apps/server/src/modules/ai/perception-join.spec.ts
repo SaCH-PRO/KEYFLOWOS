@@ -248,8 +248,46 @@ describe('personal memory stays personal', () => {
     const fn = unified.slice(unified.indexOf('private async loadStructuredMemory('));
     const body = fn.slice(0, fn.indexOf('\n  private '));
 
-    expect(body).toMatch(/episodicWhere\.userId = options\.userId/);
+    // This used to assert `episodicWhere.userId = options.userId` and passed
+    // while the bug was live, because ONE object called `episodicWhere` was
+    // shared by businessEvent, aiExecutionLog and cortexActionLog. Only the
+    // latter two have a userId column, so the businessEvent query referenced a
+    // column that does not exist, Prisma rejected it, and a single shared
+    // `.catch()` returning eight empty arrays wiped out every store.
+    //
+    // A variable NAME is not the behaviour. Assert which query gets which
+    // where-clause instead — see unified-memory-retrieval-scoping.spec.ts for
+    // the runtime proof that businessEvent is never handed a userId.
+    expect(body).toMatch(/personalWhere\.userId = options\.userId/);
     expect(body).not.toMatch(/whereBase\.userId/);
+    expect(body).not.toMatch(/episodicWhere\.userId/);
+
+    const businessEventQuery = body.slice(body.indexOf('businessEvent.findMany'));
+    expect(businessEventQuery.slice(0, 200)).toMatch(/where:\s*episodicWhere/);
+
+    for (const personal of ['aiExecutionLog', 'cortexActionLog']) {
+      const q = body.slice(body.indexOf(`${personal}.findMany`));
+      expect(q.slice(0, 200), `${personal} must be narrowed to the caller`).toMatch(
+        /where:\s*personalWhere/,
+      );
+    }
+  });
+
+  it('one failing store cannot impersonate an empty business', () => {
+    // The concealment mechanism, not the bug itself: a single Promise.all with
+    // one shared catch returned eight empty arrays, so any malformed query made
+    // perception look merely quiet rather than broken.
+    const unified = readFileSync(
+      join(__dirname, '..', 'key-cortex', 'unified-memory-retrieval.service.ts'),
+      'utf8',
+    );
+    const code = unified
+      .split('\n')
+      .filter((l) => !l.trimStart().startsWith('//') && !l.trimStart().startsWith('*'))
+      .join('\n');
+
+    expect(code).not.toMatch(/\[\]\s*,\s*\[\]\s*,\s*\[\]\s*,\s*\[\]\s*,\s*\[\]\s*,\s*\[\]/);
+    expect(code).toMatch(/Structured memory load failed for/);
   });
 });
 
