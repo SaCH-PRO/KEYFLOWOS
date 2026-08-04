@@ -177,17 +177,56 @@ const DEFAULT_PREFERENCES: AiPreferences = {
 
 const BUDGET_NEAR_LIMIT_THRESHOLD = 0.85;
 
+/**
+ * Cost per 1,000 tokens, in USD.
+ *
+ * LAST VERIFIED AGAINST PROVIDER PRICING: 2026-08-04.
+ *
+ * This is not decoration — it is the instrument. filterCandidatesByBudget cuts
+ * providers off using these numbers, getBudgetStatus and the admin spend view
+ * report them, and every "is this worth it" judgement about model routing is
+ * made against them.
+ *
+ * The gpt-4o entries were the May-2024 launch prices and had not been touched
+ * since: gpt-4o was carrying $5/$15 per 1M against an actual $2.50/$10, and
+ * gpt-4o-mini $0.40/$1.60 against an actual $0.15/$0.60. So budget caps fired at
+ * roughly half the real spend and pushed traffic onto fallbacks nothing needed.
+ *
+ * Worse for decision-making: the mini overstatement (2.7x) was LARGER than the
+ * gpt-4o one (2x), so the table understated how much cheaper the cheap tier is —
+ * biasing exactly the routing choices this table exists to inform.
+ *
+ * Provider prices move. Re-check them when this comment gets stale, and treat a
+ * missing entry as a bug rather than as free — see recordCost below.
+ */
 const TOKEN_COST_PER_1K: Record<string, { input: number; output: number }> = {
-  'gpt-4o': { input: 0.005, output: 0.015 },
-  'gpt-4o-mini': { input: 0.0004, output: 0.0016 },
+  'gpt-4o': { input: 0.0025, output: 0.010 },
+  'gpt-4o-mini': { input: 0.00015, output: 0.0006 },
   'claude-3-5-sonnet-20241022': { input: 0.003, output: 0.015 },
-  'claude-3-5-haiku-20241022': { input: 0.001, output: 0.005 },
+  'claude-3-5-haiku-20241022': { input: 0.0008, output: 0.004 },
   'grok-2': { input: 0.005, output: 0.015 },
   'grok-2-mini': { input: 0.001, output: 0.005 },
   'moonshot-v1-8k': { input: 0.003, output: 0.003 },
   'moonshot-v1-32k': { input: 0.006, output: 0.006 },
   'moonshot-v1-128k': { input: 0.012, output: 0.012 },
 };
+
+/**
+ * Price for a model, never zero.
+ *
+ * The call sites used `TOKEN_COST_PER_1K[model]?.input ?? 0`, so any model
+ * reached through a modelOverride and absent from the table recorded as FREE —
+ * while the estimate path fell back to gpt-4o pricing, producing two different
+ * numbers for the same call in the same row. A missing price is a bug, and the
+ * safe direction for a cost figure is to overstate rather than to vanish.
+ */
+function priceFor(model: string): { input: number; output: number } {
+  const known = TOKEN_COST_PER_1K[model];
+  if (known) return known;
+  // eslint-disable-next-line no-console
+  console.warn(`[model-gateway] no price for "${model}"; billing it as gpt-4o`);
+  return TOKEN_COST_PER_1K['gpt-4o'];
+}
 
 const DEFAULT_ROUTING_TABLE: Record<AiMode, Record<TaskCategory, ModelStrategy>> = {
   balanced: {
@@ -703,8 +742,8 @@ export class ModelGatewayService {
       promptTokens: response.usage.promptTokens,
       completionTokens: response.usage.completionTokens,
       totalTokens: response.usage.totalTokens,
-      inputCost: (response.usage.promptTokens / 1000) * (TOKEN_COST_PER_1K[response.model]?.input ?? 0),
-      outputCost: (response.usage.completionTokens / 1000) * (TOKEN_COST_PER_1K[response.model]?.output ?? 0),
+      inputCost: (response.usage.promptTokens / 1000) * priceFor(response.model).input,
+      outputCost: (response.usage.completionTokens / 1000) * priceFor(response.model).output,
       totalCost: response.usage.estimatedCost,
       latencyMs: response.latencyMs,
       fallbackUsed: response.fallbackUsed,
@@ -729,8 +768,8 @@ export class ModelGatewayService {
       promptTokens: usage.promptTokens,
       completionTokens: usage.completionTokens,
       totalTokens: usage.totalTokens,
-      inputCost: (usage.promptTokens / 1000) * (TOKEN_COST_PER_1K[model]?.input ?? 0),
-      outputCost: (usage.completionTokens / 1000) * (TOKEN_COST_PER_1K[model]?.output ?? 0),
+      inputCost: (usage.promptTokens / 1000) * priceFor(model).input,
+      outputCost: (usage.completionTokens / 1000) * priceFor(model).output,
       totalCost: usage.estimatedCost,
       latencyMs,
       fallbackUsed,

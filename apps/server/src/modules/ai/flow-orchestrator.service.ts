@@ -1185,10 +1185,32 @@ ${triage.standingContext}`;
         'flow_chat',
         {
           messages: messages as GatewayMessage[],
-          tools: detectedRole && detectedRole !== 'general'
-            ? getOpenAiToolDefinitions().filter((t) => this.roleEngine.isToolAllowed(detectedRole, t.function.name))
-            : getOpenAiToolDefinitions(),
-          toolChoice: 'auto',
+          // No tools on the reflex tier.
+          //
+          // The tool schemas serialise to ~53,000 characters — about 13,300
+          // tokens, roughly 80% of everything sent on an ordinary turn. They
+          // were attached unconditionally, so "hi" cost about as much as a
+          // strategy question.
+          //
+          // This is safe precisely because the reflex whitelist is so narrow:
+          // isBareAcknowledgement requires the WHOLE message to match a fixed
+          // list of greetings and acknowledgements at 24 characters or fewer,
+          // AND simple complexity, AND no data requirement, AND low emotional
+          // weight, AND no attachments. By the time the tier is 'reflex' the
+          // message has been established to be literally "hi" or "thanks".
+          // Handing that 118 tool definitions including create_invoice and
+          // cancel_booking buys nothing.
+          //
+          // Note this is the TOOLS lever, not the taskCategory lever —
+          // CognitiveTriageService.categoryFor deliberately refuses to reroute
+          // the model, for reasons documented there, and this does not
+          // contradict it.
+          tools: triage?.tier === 'reflex'
+            ? undefined
+            : detectedRole && detectedRole !== 'general'
+              ? getOpenAiToolDefinitions().filter((t) => this.roleEngine.isToolAllowed(detectedRole, t.function.name))
+              : getOpenAiToolDefinitions(),
+          toolChoice: triage?.tier === 'reflex' ? undefined : 'auto',
           // Content-driven for the first time. taskCategory is deliberately
           // NOT overridden — see CognitiveTriageService.categoryFor.
           maxTokens: triage?.maxTokens ?? 1000,
@@ -1567,10 +1589,32 @@ ${triage.standingContext}`;
         'flow_chat_stream',
         {
           messages,
-          tools: detectedRole && detectedRole !== 'general'
-            ? getOpenAiToolDefinitions().filter((t) => this.roleEngine.isToolAllowed(detectedRole, t.function.name))
-            : getOpenAiToolDefinitions(),
-          toolChoice: 'auto',
+          // No tools on the reflex tier.
+          //
+          // The tool schemas serialise to ~53,000 characters — about 13,300
+          // tokens, roughly 80% of everything sent on an ordinary turn. They
+          // were attached unconditionally, so "hi" cost about as much as a
+          // strategy question.
+          //
+          // This is safe precisely because the reflex whitelist is so narrow:
+          // isBareAcknowledgement requires the WHOLE message to match a fixed
+          // list of greetings and acknowledgements at 24 characters or fewer,
+          // AND simple complexity, AND no data requirement, AND low emotional
+          // weight, AND no attachments. By the time the tier is 'reflex' the
+          // message has been established to be literally "hi" or "thanks".
+          // Handing that 118 tool definitions including create_invoice and
+          // cancel_booking buys nothing.
+          //
+          // Note this is the TOOLS lever, not the taskCategory lever —
+          // CognitiveTriageService.categoryFor deliberately refuses to reroute
+          // the model, for reasons documented there, and this does not
+          // contradict it.
+          tools: triage?.tier === 'reflex'
+            ? undefined
+            : detectedRole && detectedRole !== 'general'
+              ? getOpenAiToolDefinitions().filter((t) => this.roleEngine.isToolAllowed(detectedRole, t.function.name))
+              : getOpenAiToolDefinitions(),
+          toolChoice: triage?.tier === 'reflex' ? undefined : 'auto',
           // Content-driven for the first time. taskCategory is deliberately
           // NOT overridden — see CognitiveTriageService.categoryFor.
           maxTokens: triage?.maxTokens ?? 1000,
