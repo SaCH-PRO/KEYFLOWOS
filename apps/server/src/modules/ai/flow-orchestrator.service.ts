@@ -44,6 +44,7 @@ import { OnboardingStateService, type OnboardingStep as ServerOnboardingStep } f
 import { BusinessGenesisService } from '../business-genesis/business-genesis.service';
 // Value import for the static EVIDENCE_DISCIPLINE only — no DI, no module coupling.
 import { KeyCortexExpertiseLensService } from '../key-cortex/key-cortex-expertise-lens.service';
+import { KeyCortexPersonalityService } from '../key-cortex/key-cortex-personality.service';
 import {
   CognitiveTriageService,
   type TriageVerdict,
@@ -1344,6 +1345,7 @@ ${triage.standingContext}`;
     }
     sessionMessages.push(assistantMessage);
     await this.saveConversationHistory(businessId, effectiveSessionId, sessionMessages, userId);
+    void this.enforceDoNotSay(businessId, String(assistantMessage.content ?? ''));
 
     return { ...result, sessionId: effectiveSessionId };
   }
@@ -1546,6 +1548,7 @@ ${triage.standingContext}`;
           ],
           userId,
         ).catch(() => undefined);
+        void this.enforceDoNotSay(businessId, deliberation.text);
 
         yield { type: 'done', sessionId: effectiveSessionId };
         return;
@@ -4054,6 +4057,72 @@ ${triage.standingContext}`;
    * everyone — the safe reading of "we do not know whose this was". They are
    * not deleted; a backfill can claim them if their owner can be established.
    */
+
+  /**
+   * Check a completed reply against the words this business forbade.
+   *
+   * `BusinessBlueprint.brand.doNotSay` invites an operator to declare language
+   * KEY must never use, and `detectValueConflict` has existed to check it since
+   * it was written — with zero callers. So the invitation created an
+   * expectation nothing honoured. KEY is now also TOLD about the terms in its
+   * prompt (KeyCortexEpigeneticsService), but a prompt instruction is guidance,
+   * not enforcement.
+   *
+   * WHAT CANNOT BE DONE, HONESTLY. The chat streams token by token. By the time
+   * a forbidden word exists it has already been sent, and no post-hoc check can
+   * unsay it. Buffering the whole reply to screen it first would put the entire
+   * generation latency in front of the first token, which trades a rare wording
+   * slip for a guaranteed worse experience on every message.
+   *
+   * So this does not pretend to block. It LEARNS. A violation is written to
+   * AiMemory `learned_corrections`, which `buildContextBlock` already renders
+   * into the next prompt under "Lessons from past failures" — a loop that is
+   * live and proven. The instruction gets stronger and more specific precisely
+   * when it has been ignored, which is when it needs to be.
+   *
+   * Fire-and-forget, and never throws: this runs after the user already has
+   * their answer, and must not be able to affect it.
+   */
+  private async enforceDoNotSay(businessId: string, text: string): Promise<void> {
+    if (!text?.trim()) return;
+
+    try {
+      const personality = this.moduleRef.get(KeyCortexPersonalityService, { strict: false });
+      const memory = this.moduleRef.get(AiMemoryService, { strict: false });
+      if (!personality || !memory) return;
+
+      const { conflict, terms } = await personality.detectValueConflict(businessId, text);
+      if (!conflict || terms.length === 0) return;
+
+      this.logger.warn(
+        `[doNotSay] reply used ${terms.length} forbidden term(s) for ${businessId}: ${terms.join(', ')}`,
+      );
+
+      // Keyed on the terms so repeating the same slip refreshes one lesson
+      // rather than accumulating thousands of near-identical rows.
+      const key = `do_not_say:${terms.map((t: string) => t.toLowerCase()).sort().join('|')}`;
+      await memory.upsert(businessId, {
+        category: 'learned_corrections',
+        key,
+        value: JSON.stringify({
+          category: 'brand_voice',
+          reason: 'A previous reply used language this business has forbidden.',
+          learnedPattern:
+            `Never write ${terms.map((t: string) => `"${t}"`).join(' or ')} — ` +
+            `this business declared ${terms.length === 1 ? 'it' : 'them'} off-limits, ` +
+            `and a previous reply used ${terms.length === 1 ? 'it' : 'them'} anyway.`,
+        }),
+        source: 'feedback_loop',
+        confidence: 1,
+        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      });
+    } catch (err) {
+      this.logger.debug(
+        `[doNotSay] check skipped: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
   private sessionScope(businessId: string, userId?: string) {
     // An undefined userId must NEVER widen the query to "all sessions". It
     // narrows to the legacy-null set, which is empty for any normal caller.
