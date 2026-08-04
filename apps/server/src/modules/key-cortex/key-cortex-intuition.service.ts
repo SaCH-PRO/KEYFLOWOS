@@ -155,6 +155,53 @@ export interface OperationalStressSignal {
 
 /* ─────────────────────────── Service ─────────────────────────── */
 
+/**
+ * A stable id for a signal, derived from what MAKES it that signal.
+ *
+ * recordSignals upserts on `sig_${businessId}_${signal.id}` and says so in a
+ * comment: "so a recurring signal UPDATES rather than accumulating a duplicate
+ * row every ten minutes". The ids were `uuidv4()`, fresh on every scan, so the
+ * key was unique every time and the upsert only ever inserted. The scan runs
+ * 144 times a day per business, so the intent was documented and defeated in
+ * the same file, and the awareness panel's 25-row window filled with 25 copies
+ * of one signal.
+ *
+ * Identity here is the thing being observed, not the observation: two scans
+ * that both notice "task backlog is high" are the SAME signal seen twice, and
+ * the second should refresh the first. Values deliberately do not contribute —
+ * a backlog of 41 and then 43 is one persisting signal, not two.
+ */
+function stableSignalId(...parts: Array<string | undefined>): string {
+  return parts
+    .filter((p): p is string => !!p)
+    .map((p) => p.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, ''))
+    .join(':');
+}
+
+/**
+ * Identity for a signal, from its content rather than its id.
+ *
+ * There are sixteen places that construct a WeakSignal and every one of them
+ * assigned `uuidv4()`. Fixing each individually would leave the next new
+ * detector free to reintroduce the bug, so identity is computed HERE — at the
+ * one place that persists — from what the signal says.
+ *
+ * Numbers are stripped deliberately. "Operational stress: task_backlog at 41.0
+ * (baseline: 12.0)" and the same sentence reading 43.0 an hour later are the
+ * same signal persisting, not two signals; leaving the values in would
+ * reintroduce a duplicate per scan in a subtler form that looks like it works.
+ */
+function signalIdentity(signal: { id?: string; category?: string; description?: string }): string {
+  const withoutNumbers = (signal.description ?? '')
+    .replace(/[\d.,%+-]+/g, ' ')
+    .slice(0, 160);
+
+  const identity = stableSignalId(signal.category, withoutNumbers);
+  // A signal with no description at all falls back to its own id, which keeps
+  // the old behaviour rather than collapsing every such signal into one row.
+  return identity || stableSignalId(signal.id);
+}
+
 @Injectable()
 export class KeyCortexIntuitionService {
   private readonly logger = new Logger(KeyCortexIntuitionService.name);
@@ -318,7 +365,9 @@ export class KeyCortexIntuitionService {
       // Flag if variance > 15% (either direction)
       if (Math.abs(variance) > 15) {
         anomalies.push({
-          id: uuidv4(),
+          // Same metric moving the same way in the same period is one anomaly
+          // observed repeatedly, not a new one every ten minutes.
+          id: stableSignalId('anomaly', metric, variance > 0 ? 'spike' : 'drop', 'current_month'),
           type: variance > 0 ? 'spike' : 'drop',
           metric,
           expectedValue: expected,
@@ -391,7 +440,9 @@ export class KeyCortexIntuitionService {
     const signals: WeakSignal[] = stressSignals
       .filter((s) => s.status !== 'healthy')
       .map((s) => ({
-        id: uuidv4(),
+        // Keyed on the metric alone. The VALUES move between scans while the
+        // signal — this metric is under stress — is the same one persisting.
+        id: stableSignalId('stress', s.metric),
         description: `Operational stress: ${s.metric} at ${s.currentValue.toFixed(1)} (baseline: ${s.baselineValue.toFixed(1)}, deviation: ${s.deviation > 0 ? '+' : ''}${s.deviation.toFixed(1)}%) — Status: ${s.status.toUpperCase()}`,
         sources: ['task_system', 'analytics', 'error_logs'],
         confidence: Math.min(Math.abs(s.deviation) / 100, 0.95),
@@ -456,8 +507,22 @@ export class KeyCortexIntuitionService {
      SCHEDULED CRON — Periodic Intuition Scan
      ═══════════════════════════════════════════════════════════════ */
 
-  /** Continuous weak signal scanning — every 15 minutes */
-  @Cron(CronExpression.EVERY_10_MINUTES)
+  /**
+   * Weak-signal scanning, hourly.
+   *
+   * This was EVERY_10_MINUTES — 144 sweeps a day, every business, each one
+   * running a paid semantic analysis over a corpus with a FOURTEEN DAY window.
+   * Two scans ten minutes apart see a corpus that differs by at most ten minutes
+   * of small-business message traffic, and usually by nothing at all, so each
+   * piece of text was re-analysed roughly two thousand times over its life.
+   *
+   * Hourly keeps every detector's behaviour identical — the windows are 14 and
+   * 60 days, so an hour is still far finer than the thing being measured — at a
+   * sixth of the calls. The comment above this used to say "every 15 minutes"
+   * while the decorator said ten, which is its own small warning about how
+   * closely this cadence had been looked at.
+   */
+  @Cron(CronExpression.EVERY_HOUR)
   async scheduledIntuitionScan(): Promise<void> {
     const businesses = await this.findAllActiveBusinesses();
     for (const businessId of businesses) {
@@ -501,9 +566,9 @@ export class KeyCortexIntuitionService {
         await this.prisma.client.keyCortexMemory.upsert({
           // Keyed on the signal id so a recurring signal UPDATES rather than
           // accumulating a duplicate row every ten minutes.
-          where: { id: `sig_${businessId}_${signal.id}` },
+          where: { id: `sig_${businessId}_${signalIdentity(signal)}` },
           create: {
-            id: `sig_${businessId}_${signal.id}`,
+            id: `sig_${businessId}_${signalIdentity(signal)}`,
             businessId,
             type: MEMORY_TYPE_WEAK_SIGNAL,
             key: signal.id,
