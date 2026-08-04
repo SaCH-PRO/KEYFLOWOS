@@ -1606,16 +1606,74 @@ ${report.topInsights.slice(0, 5).map((i) => `- ${i.description}`).join('\n')}`;
     }
   }
 
+  /**
+   * Businesses nobody has touched recently.
+   *
+   * This gate existed and did nothing. The activity lookup was a literal:
+   *
+   *     const activeSessions: Array<{ businessId: string }> = [];
+   *     // model absent from schema.prisma; call short-circuited to undefined
+   *
+   * so `activeBusinessIds` was always empty and the filter kept EVERY business.
+   * `idleThreshold` was computed and never read. Reflection therefore ran on the
+   * whole estate every 30 minutes, making paid model calls, and the cost landed
+   * hardest on the busiest tenants — the exact opposite of what a
+   * quiet-hours-only job is for.
+   *
+   * Two real signals now, because "active" means someone is using the product,
+   * not only that someone is chatting:
+   *   FlowSession.updatedAt   — a live conversation with KEY
+   *   TeamActivityLog.createdAt — any audited action anywhere in the product
+   *
+   * Both are already indexed on exactly this shape (`[businessId, updatedAt]`
+   * and `[businessId, createdAt]`), and each is ONE distinct query rather than a
+   * lookup per business, so the gate costs far less than the work it prevents.
+   *
+   * Fails CLOSED — on a read error it returns no businesses rather than all of
+   * them. The failure mode of this gate is spend, so the safe direction is to
+   * skip a cycle. Reflection is a background nicety; nothing breaks if it waits
+   * thirty minutes.
+   */
   private async findIdleBusinesses(): Promise<string[]> {
-    // Businesses with no user activity in the last 15 minutes
     const idleThreshold = new Date(Date.now() - 15 * 60 * 1000);
 
-    const activeSessions: Array<{ businessId: string }> = []; // model absent from schema.prisma; call short-circuited to undefined and never ran
+    try {
+      const [chatting, working] = await Promise.all([
+        this.prisma.client.flowSession.findMany({
+          where: { updatedAt: { gte: idleThreshold } },
+          select: { businessId: true },
+          distinct: ['businessId'],
+          take: 1000,
+        }),
+        this.prisma.client.teamActivityLog.findMany({
+          where: { createdAt: { gte: idleThreshold } },
+          select: { businessId: true },
+          distinct: ['businessId'],
+          take: 1000,
+        }),
+      ]);
 
-    const activeBusinessIds = new Set((activeSessions ?? []).map((s: { businessId: string }) => s.businessId));
+      const active = new Set<string>([
+        ...chatting.map((s: { businessId: string }) => s.businessId),
+        ...working.map((a: { businessId: string }) => a.businessId),
+      ]);
 
-    const allBusinesses = await this.findAllActiveBusinesses();
-    return allBusinesses.filter((b) => !activeBusinessIds.has(b));
+      const allBusinesses = await this.findAllActiveBusinesses();
+      const idle = allBusinesses.filter((b) => !active.has(b));
+
+      this.logger.debug(
+        `[reflection] ${idle.length} idle of ${allBusinesses.length} businesses; ` +
+          `${active.size} active in the last 15 minutes`,
+      );
+      return idle;
+    } catch (err: unknown) {
+      this.logger.warn(
+        `[reflection] idle check failed, skipping this cycle: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      return [];
+    }
   }
 
   private async findAllActiveBusinesses(): Promise<string[]> {
