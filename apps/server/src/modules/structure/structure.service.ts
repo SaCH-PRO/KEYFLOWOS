@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CreateOrgUnitDto } from './dto/create-org-unit.dto';
 import { UpdateOrgUnitDto } from './dto/update-org-unit.dto';
@@ -55,7 +55,11 @@ export class StructureService {
           skills: { select: { name: true } },
           user: { select: { id: true, name: true, firstName: true, lastName: true, email: true } },
           orgAssignments: {
-            where: { endedAt: null },
+            // businessId as well as the membership scope. Assignments created
+            // before assertAssignmentRefs existed could name a membership in
+            // another business, so nesting under a scoped membership is not on
+            // its own proof that the assignment belongs here.
+            where: { businessId, endedAt: null },
             orderBy: { isPrimary: 'desc' },
             take: 1,
             select: {
@@ -268,7 +272,100 @@ export class StructureService {
     });
   }
 
+  /**
+   * Every id in an assignment must belong to the business in the route.
+   *
+   * The guard chain (AuthGuard, BusinessGuard, ModuleScopeGuard with
+   * team:write) proves the CALLER belongs to :businessId. It says nothing about
+   * the ids in the body, and the DTO validates that they are strings — which is
+   * the shape of hole that looks closed because something is clearly checking
+   * something.
+   *
+   * What that cost here: createAssignment ends by writing
+   *
+   *   membership.update({ where: { id: dto.membershipId }, data: {
+   *     permissionScopes: jobRole.permissions, maxApprovalTier: jobRole.defaultApprovalTier } })
+   *
+   * on a caller-supplied membershipId, with a jobRole the caller also names. So
+   * anyone with team:write in one business could rewrite the permission scopes
+   * and approval tier of ANY membership in ANY business — including their own
+   * low-privilege membership elsewhere, using a job role they had every right to
+   * create at tier 4 in their own org. That is cross-tenant privilege
+   * escalation reached with two legitimate API calls.
+   *
+   * userId is checked against the membership rather than merely for presence:
+   * OrgAssignment.userId is denormalised "for quick lookups", so a mismatch
+   * silently attributes one person's assignment to another.
+   */
+  private async assertAssignmentRefs(
+    businessId: string,
+    refs: {
+      membershipId?: string;
+      userId?: string;
+      orgUnitId?: string;
+      jobRoleId?: string | null;
+      reportsToId?: string | null;
+    },
+  ): Promise<void> {
+    const checks: Array<Promise<void>> = [];
+
+    if (refs.membershipId) {
+      checks.push(
+        (async () => {
+          const membership = await this.prisma.client.membership.findFirst({
+            where: { id: refs.membershipId, businessId },
+            select: { userId: true },
+          });
+          if (!membership) throw new NotFoundException('Membership not found');
+          if (refs.userId && refs.userId !== membership.userId) {
+            throw new BadRequestException('userId does not belong to that membership');
+          }
+        })(),
+      );
+    }
+
+    if (refs.orgUnitId) {
+      checks.push(
+        (async () => {
+          const unit = await this.prisma.client.orgUnit.findFirst({
+            where: { id: refs.orgUnitId, businessId },
+            select: { id: true },
+          });
+          if (!unit) throw new NotFoundException('Org unit not found');
+        })(),
+      );
+    }
+
+    if (refs.jobRoleId) {
+      checks.push(
+        (async () => {
+          const role = await this.prisma.client.jobRole.findFirst({
+            where: { id: refs.jobRoleId as string, businessId },
+            select: { id: true },
+          });
+          if (!role) throw new NotFoundException('Job role not found');
+        })(),
+      );
+    }
+
+    if (refs.reportsToId) {
+      checks.push(
+        (async () => {
+          const manager = await this.prisma.client.orgAssignment.findFirst({
+            where: { id: refs.reportsToId as string, businessId },
+            select: { id: true },
+          });
+          if (!manager) throw new NotFoundException('Reporting line not found');
+        })(),
+      );
+    }
+
+    await Promise.all(checks);
+  }
+
   async createAssignment(businessId: string, dto: CreateAssignmentDto) {
+    await this.assertAssignmentRefs(businessId, dto);
+
     const assignment = await this.prisma.client.orgAssignment.create({
       data: {
         businessId,
@@ -312,6 +409,10 @@ export class StructureService {
 
   async updateAssignment(businessId: string, id: string, dto: UpdateAssignmentDto) {
     const existing = await this.getAssignment(businessId, id);
+    // membershipId comes from `existing`, which getAssignment already scoped —
+    // but jobRoleId, orgUnitId and reportsToId all arrive from the body and
+    // reach the same permission-syncing write.
+    await this.assertAssignmentRefs(businessId, dto);
     const updated = await this.prisma.client.orgAssignment.update({
       where: { id },
       data: {
