@@ -112,3 +112,62 @@ describe('KeyCortexSagaService', () => {
     expect(client.steps.every((s) => s.status === 'compensated')).toBe(true);
   });
 });
+
+describe('a saga does not claim it rolled back when it did not', () => {
+  it('records compensation_unavailable when no step declared a compensation', async () => {
+    // Every real saga hits this. The planner registers steps without a
+    // compensation argument, no tool declares one, and the only path that
+    // builds them has zero callers — so the loop skips every step and used to
+    // write status:'compensated' anyway. A durable audit claim that a recovery
+    // happened.
+    const updated: any[] = [];
+    const prisma = {
+      client: {
+        sagaStep: {
+          findMany: vi.fn(async () => [
+            { id: 's1', stepIndex: 0, stepName: 'create', compensationAction: null },
+            { id: 's2', stepIndex: 1, stepName: 'send', compensationAction: null },
+          ]),
+          updateMany: vi.fn(async () => ({})),
+        },
+        sagaExecution: {
+          update: vi.fn(async ({ data }: any) => {
+            updated.push(data);
+            return {};
+          }),
+        },
+      },
+    } as never;
+
+    const svc = new KeyCortexSagaService(prisma, undefined as never);
+    const results = await svc.compensate('saga_1');
+
+    expect(results).toEqual([]);
+    expect(updated[0].status).toBe('compensation_unavailable');
+    expect(updated[0].status).not.toBe('compensated');
+  });
+
+  it('still says compensated when something genuinely was', async () => {
+    const updated: any[] = [];
+    const prisma = {
+      client: {
+        sagaStep: {
+          findMany: vi.fn(async () => [
+            {
+              id: 's1', stepIndex: 0, stepName: 'create',
+              compensationAction: { action: 'crm.create_contact', payload: { businessId: 'b1' } },
+            },
+          ]),
+          updateMany: vi.fn(async () => ({})),
+        },
+        sagaExecution: { update: vi.fn(async ({ data }: any) => { updated.push(data); return {}; }) },
+      },
+    } as never;
+    const compensation = { compensate: vi.fn(async () => ({ compensated: true })) } as never;
+
+    const svc = new KeyCortexSagaService(prisma, compensation);
+    await svc.compensate('saga_1');
+
+    expect(updated[0].status).toBe('compensated');
+  });
+});

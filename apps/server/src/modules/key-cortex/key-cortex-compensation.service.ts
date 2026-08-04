@@ -111,14 +111,28 @@ export class KeyCortexCompensationService {
       const invoiceId = (input.output?.id ?? input.parameters?.invoiceId) as string | undefined;
       if (!invoiceId) return;
       this.logger.log(`[compensate] void invoice ${invoiceId}`);
-      await this.commerce.updateInvoiceStatus({ invoiceId, status: 'VOID' });
+      // businessId is threaded through and ENFORCED. Without it the lookup is
+      // by primary key alone, so an id from a saga payload would void that
+      // invoice whoever owns it.
+      await this.commerce.updateInvoiceStatus({
+        invoiceId,
+        status: 'VOID',
+        businessId: input.businessId,
+      });
     });
 
     this.register('commerce.void_invoice', async (input) => {
       const invoiceId = (input.output?.id ?? input.parameters?.invoiceId) as string | undefined;
       if (!invoiceId) return;
       this.logger.log(`[compensate] void invoice ${invoiceId}`);
-      await this.commerce.updateInvoiceStatus({ invoiceId, status: 'VOID' });
+      // businessId is threaded through and ENFORCED. Without it the lookup is
+      // by primary key alone, so an id from a saga payload would void that
+      // invoice whoever owns it.
+      await this.commerce.updateInvoiceStatus({
+        invoiceId,
+        status: 'VOID',
+        businessId: input.businessId,
+      });
     });
 
     this.register('bookings.create_booking', async (input) => {

@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { BookingStatus } from '@prisma/client';
 import { KeyCortexCompensationService } from './key-cortex-compensation.service';
 import { CrmService } from '../crm/crm.service';
@@ -86,7 +88,7 @@ describe('KeyCortexCompensationService', () => {
       businessId: 'b1',
       output: { id: 'i1' },
     });
-    expect(commerce.updateInvoiceStatus).toHaveBeenCalledWith({ invoiceId: 'i1', status: 'VOID' });
+    expect(commerce.updateInvoiceStatus).toHaveBeenCalledWith({ invoiceId: 'i1', status: 'VOID', businessId: 'b1' });
   });
 
   it('compensates bookings.create_booking', async () => {
@@ -204,5 +206,21 @@ describe('KeyCortexCompensationService', () => {
   it('returns not-compensated for unknown actions', async () => {
     const result = await service.compensate('unknown.action', { businessId: 'b1' });
     expect(result.compensated).toBe(false);
+  });
+});
+
+describe('compensation cannot reach across tenants', () => {
+  it('passes businessId to every handler that resolves a record by id', () => {
+    // updateInvoiceStatus looks the invoice up by primary key alone. Without a
+    // tenant, an id lifted out of a saga payload voids that invoice whoever
+    // owns it. A guard establishes who is asking; it does not constrain what a
+    // query touches.
+    const src = readFileSync(join(__dirname, 'key-cortex-compensation.service.ts'), 'utf8');
+    const calls = [...src.matchAll(/updateInvoiceStatus\(\{[^}]*\}/gs)];
+
+    expect(calls.length).toBeGreaterThan(0);
+    for (const call of calls) {
+      expect(call[0], 'invoice compensation must carry the tenant').toMatch(/businessId/);
+    }
   });
 });

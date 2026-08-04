@@ -118,9 +118,13 @@ export class KeyCortexSagaService {
     });
 
     const results: SagaStepResult[] = [];
+    /** Steps that declared a compensation and therefore could be undone. */
+    let compensable = 0;
+
     for (const step of steps) {
       const action = step.compensationAction as SagaCompensation | null;
       if (!action) continue;
+      compensable += 1;
 
       try {
         let compensationResult: Record<string, unknown> = { success: true, logged: true };
@@ -157,9 +161,37 @@ export class KeyCortexSagaService {
       }
     }
 
+    // 'compensated' is a durable claim that the work was undone. Only say it if
+    // something actually was.
+    //
+    // This used to be written unconditionally, at the end of a loop whose every
+    // iteration begins `if (!action) continue`. Nothing in production writes
+    // SagaStep.compensationAction — the planner omits the argument, no tool
+    // declares one, and the one path that builds compensations
+    // (KeyCortexSagaExecutorService) has zero callers. So every real saga
+    // skipped every step, returned [], and then recorded that it had rolled
+    // back. The audit trail asserted a recovery that never happened.
+    //
+    // A saga with steps but no declared compensations is not compensated; it is
+    // a saga nobody taught how to undo itself. Recording that distinctly is the
+    // difference between a known gap and a false record of safety.
+    const status =
+      compensable === 0 && steps.length > 0
+        ? 'compensation_unavailable'
+        : results.some((r) => !r.success)
+          ? 'compensation_failed'
+          : 'compensated';
+
+    if (status !== 'compensated') {
+      this.logger.warn(
+        `[compensate][${sagaId}] ${status}: ${compensable} of ${steps.length} step(s) ` +
+          `declared a compensating action. Nothing was undone for the rest.`,
+      );
+    }
+
     await this.prisma.client.sagaExecution.update({
       where: { id: sagaId },
-      data: { status: 'compensated', completedAt: new Date() },
+      data: { status, completedAt: new Date() },
     });
 
     return results;

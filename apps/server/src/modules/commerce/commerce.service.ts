@@ -688,12 +688,31 @@ export class CommerceService {
     actorId?: string | null;
     sentAt?: Date | string;
     dueDate?: Date | string | null;
+    /**
+     * Tenant the caller believes this invoice belongs to.
+     *
+     * Optional for compatibility with existing callers that reach this behind a
+     * BusinessGuard, but ENFORCED whenever supplied. A guard establishes which
+     * tenant is asking; it does not constrain what a query touches, and the
+     * lookup below is by primary key alone.
+     *
+     * This exists because the compensation handlers call this with an invoice id
+     * lifted out of a saga payload and no tenant at all — so any id reaching
+     * that path would void that invoice regardless of who owns it. Callers that
+     * know the tenant should always pass it.
+     */
+    businessId?: string;
   }) {
     const existingInvoice = await this.prisma.client.invoice.findUnique({
       where: { id: params.invoiceId },
       select: { businessId: true },
     });
     if (!existingInvoice) {
+      throw new Error('Invoice not found');
+    }
+    if (params.businessId && existingInvoice.businessId !== params.businessId) {
+      // Indistinguishable from "no such invoice" on purpose: a different error
+      // for "exists but is not yours" confirms the id belongs to someone.
       throw new Error('Invoice not found');
     }
     if (params.actorId) {
