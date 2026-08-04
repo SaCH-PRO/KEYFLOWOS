@@ -43,6 +43,17 @@ export class EventEmitterFlowBridgeService implements OnModuleInit {
     /^expense\./,
     /^receipt\./,
     /^bill\./,
+    // Money actually arriving. Emitted with a businessId by all five payment
+    // connectors (Stripe, PayPal, QuickBooks, Xero, WiPay) and, before this,
+    // matched by nothing here — so `payment.received` never became a
+    // BusinessEvent and the cortex could not see revenue land.
+    //
+    // KeyCortexSalienceService counts it as an OPPORTUNITY_SIGNAL, which is the
+    // only input to the dopamine arm. `invoice.paid`, `booking.created`,
+    // `booking.completed` and `contact.created` already pass via their own
+    // prefixes; this was the one gap, and it was the most direct evidence a
+    // business is doing well.
+    /^payment\./,
     /^deposit\./,
     /^transaction\./,
     /^bank\./,
