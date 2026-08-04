@@ -219,6 +219,26 @@ function formatPageContextSection(ctx?: FlowPageContext): string {
  */
 const PERCEPTION_DEADLINE_MS = 1_200;
 
+/**
+ * The current time, truncated to the hour, for the system prompt.
+ *
+ * This was `new Date().toISOString()` — millisecond precision — interpolated at
+ * roughly 98% of the way through the static system prompt. Every request
+ * therefore produced a unique prefix from that point on, and provider prompt
+ * caching works by matching an IDENTICAL prefix. The precision was also unusable
+ * by construction: the prompt asks the model to "interpret relative dates (e.g.
+ * tomorrow at 2pm)", which needs the date and roughly the time and never the
+ * millisecond.
+ *
+ * Truncated to the hour rather than the day on purpose. Date-only would lose
+ * time-of-day, which genuinely matters for "book me in two hours"; an hour is
+ * stable far longer than any provider cache lives (minutes), so it costs nothing
+ * in cacheability and keeps the precision that is actually used.
+ */
+function currentDateForPrompt(now: Date = new Date()): string {
+  return `${now.toISOString().slice(0, 13)}:00Z`;
+}
+
 const FLOW_SYSTEM_PROMPT = `{{ONBOARDING_DIRECTIVE}}You are KEY — the operating intelligence of this business, and the owner's second mind. You have full access to their business data and can take real actions on their behalf.
 
 You are not a chatbot bolted onto software. You are the part of the business that never forgets, never loses the thread, and can act at any hour. The owner should be able to hand you anything — a question, a mess, a decision, a whole function — and have it come back handled.
@@ -1070,10 +1090,10 @@ export class FlowOrchestratorService {
     if (detectedRole && detectedRole !== 'general') {
       const businessContext = onboardingDirective + contextSnapshot + memorySection + semanticMemorySection + pageContextSection + blueprintSection;
       systemPrompt = this.roleEngine.getSystemPromptForRole(detectedRole, businessContext, onboardingDirective)
-        .replace('{{CURRENT_DATE}}', new Date().toISOString());
+        .replace('{{CURRENT_DATE}}', currentDateForPrompt());
     } else {
       systemPrompt = FLOW_SYSTEM_PROMPT
-        .replace('{{CURRENT_DATE}}', new Date().toISOString())
+        .replace('{{CURRENT_DATE}}', currentDateForPrompt())
         .replace('{{ONBOARDING_DIRECTIVE}}', onboardingDirective)
         .replace('{{BUSINESS_CONTEXT}}', contextSnapshot + memorySection + semanticMemorySection + pageContextSection + blueprintSection);
     }
@@ -1447,10 +1467,10 @@ ${triage.standingContext}`;
     if (detectedRole && detectedRole !== 'general') {
       const businessContext = onboardingDirective + contextSnapshot + memorySection + semanticMemorySection + pageContextSection + blueprintSection;
       systemPrompt = this.roleEngine.getSystemPromptForRole(detectedRole, businessContext, onboardingDirective)
-        .replace('{{CURRENT_DATE}}', new Date().toISOString());
+        .replace('{{CURRENT_DATE}}', currentDateForPrompt());
     } else {
       systemPrompt = FLOW_SYSTEM_PROMPT
-        .replace('{{CURRENT_DATE}}', new Date().toISOString())
+        .replace('{{CURRENT_DATE}}', currentDateForPrompt())
         .replace('{{ONBOARDING_DIRECTIVE}}', onboardingDirective)
         .replace('{{BUSINESS_CONTEXT}}', contextSnapshot + memorySection + semanticMemorySection + pageContextSection + blueprintSection);
     }
