@@ -5,6 +5,7 @@ import { KeyCortexEndocrineService } from './key-cortex-endocrine.service';
 import { KeyCortexImmuneService } from './key-cortex-immune.service';
 import { KeyCortexEpigeneticsService } from './key-cortex-epigenetics.service';
 import { KeyCortexIncentiveService } from './key-cortex-incentive.service';
+import { KeyCortexSalienceService } from './key-cortex-salience.service';
 import { KeyCortexInteroceptionService } from './key-cortex-interoception.service';
 
 /**
@@ -97,6 +98,7 @@ export class CognitiveTriageService {
     @Optional() private readonly immune?: KeyCortexImmuneService,
     @Optional() private readonly epigenetics?: KeyCortexEpigeneticsService,
     @Optional() private readonly incentive?: KeyCortexIncentiveService,
+    @Optional() private readonly salience?: KeyCortexSalienceService,
   ) {}
 
   /**
@@ -332,6 +334,17 @@ export class CognitiveTriageService {
       if (threats) parts.push(threats);
     } catch {
       /* immune state is framing, never required */
+    }
+
+    try {
+      // Counted facts from the business's own event log. Placed before style and
+      // team distribution because withinBudget drops whole trailing sections —
+      // "12 overdue invoices against a normal of 3" should survive a squeeze
+      // that a tone preference does not.
+      const concerns = this.salience?.describeForPrompt(businessId) ?? null;
+      if (concerns) parts.push(concerns);
+    } catch {
+      /* counted facts are framing too — never required */
     }
 
     try {

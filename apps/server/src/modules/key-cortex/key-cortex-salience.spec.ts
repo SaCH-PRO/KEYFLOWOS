@@ -21,6 +21,8 @@
  *                  IS the urgent fact, and a pure count ranks it last.
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { KeyCortexSalienceService } from './key-cortex-salience.service';
 
 type Ev = { eventType: string; createdAt: Date };
@@ -30,9 +32,21 @@ class PrismaStub {
   lastQuery: Record<string, unknown> | null = null;
   client = {
     businessEvent: {
-      findMany: vi.fn((q: Record<string, unknown>) => {
+      // The service counts rather than sampling — `take: SAMPLE_LIMIT` with
+      // newest-first ordering truncated the OLDER bucket, so baselineRate came
+      // out low and every signal read as escalating. This stub derives the same
+      // two numbers from the same fixture events, so the assertions below are
+      // unchanged and still describe real behaviour.
+      count: vi.fn((q: any) => {
         this.lastQuery = q;
-        return Promise.resolve(this.events);
+        const where = q?.where ?? {};
+        const gte: Date | undefined = where.createdAt?.gte;
+        const n = this.events.filter(
+          (e) =>
+            (where.eventType === undefined || e.eventType === where.eventType) &&
+            (gte === undefined || e.createdAt >= gte),
+        ).length;
+        return Promise.resolve(n);
       }),
     },
     business: { findMany: vi.fn(() => Promise.resolve([{ id: 'biz_1' }])) },
@@ -320,19 +334,25 @@ describe('it cannot flood, stall or act', () => {
     expect((await svc.rank('biz_1')).length).toBeLessThanOrEqual(5);
   });
 
-  it('reads bounded, windowed and tenant-scoped', async () => {
+  it('reads windowed and tenant-scoped, and returns a scalar rather than rows', async () => {
     const { svc, prisma } = make();
     await svc.rank('biz_1');
 
     const q = prisma.lastQuery as { take?: number; where?: Record<string, unknown> };
-    expect(q.take).toBeGreaterThan(0);
     expect(q.where?.businessId).toBe('biz_1');
     expect(q.where?.createdAt, 'no time window').toBeDefined();
+
+    // `take` is deliberately gone. It used to bound a findMany, and that bound
+    // was the bug: truncating newest-first threw away the OLDER events, so the
+    // baseline read low and everything looked like an escalation. A count is
+    // inherently bounded — it returns one number however many rows match — so
+    // the read is exact AND cannot flood memory.
+    expect(q.take).toBeUndefined();
   });
 
   it('survives a database failure', async () => {
     const { svc, prisma } = make();
-    prisma.client.businessEvent.findMany = vi.fn(() => Promise.reject(new Error('locked')));
+    prisma.client.businessEvent.count = vi.fn(() => Promise.reject(new Error('locked')));
 
     await expect(svc.rank('biz_1')).resolves.toEqual([]);
   });
@@ -342,7 +362,7 @@ describe('it cannot flood, stall or act', () => {
     prisma.client.business.findMany = vi.fn(() =>
       Promise.resolve([{ id: 'biz_1' }, { id: 'biz_2' }]),
     );
-    prisma.client.businessEvent.findMany = vi.fn(() => Promise.reject(new Error('locked')));
+    prisma.client.businessEvent.count = vi.fn(() => Promise.reject(new Error('locked')));
 
     await expect(svc.scheduledAppraisal()).resolves.toBeUndefined();
   });
@@ -358,5 +378,94 @@ describe('it cannot flood, stall or act', () => {
     const src = readFileSync(join(__dirname, 'key-cortex-salience.service.ts'), 'utf8');
 
     expect(src).not.toMatch(/executeTool|toolRegistry|executeToolDirectly|dispatch\(/);
+  });
+});
+
+describe('the counted facts finally escape', () => {
+  // appraise() builds up to ten ranked concerns with sentences like "12 overdue
+  // invoices in 24h against a normal of 3/day — escalating", then discarded
+  // eight and let two survive only as the `reason` on a hormone. The endocrine
+  // block that carries them is labelled disposition and ends with "It must NOT
+  // change what you report as fact" — so there was NO path on which KEY could
+  // state the number. The system knew it exactly and could only imply it.
+
+  it('says nothing before the first appraisal', () => {
+    const { svc } = make();
+    expect(svc.describeForPrompt('biz_1')).toBeNull();
+  });
+
+  it('states the summary as a fact once appraised', async () => {
+    const { svc, prisma } = make();
+    prisma.events = [...recent('proactive.invoice_overdue', 12), ...historic('proactive.invoice_overdue', 3)];
+    await svc.appraise('biz_1');
+
+    const text = svc.describeForPrompt('biz_1')!;
+    expect(text).toMatch(/overdue/);
+    expect(text).toMatch(/exact counts from its event log/);
+    expect(text).toMatch(/may be stated plainly/);
+  });
+
+  it('contradicts nothing — it explicitly overrides the disposition framing', async () => {
+    // The same sentence rides on the hormone as "Basis:", under an instruction
+    // NOT to treat it as reportable fact. Without an explicit counter the model
+    // gets two opposing directives about one number.
+    const { svc, prisma } = make();
+    prisma.events = [...recent('proactive.invoice_overdue', 12), ...historic('proactive.invoice_overdue', 3)];
+    await svc.appraise('biz_1');
+
+    expect(svc.describeForPrompt('biz_1')).toMatch(/not inference/);
+  });
+
+  it('goes quiet rather than asserting a stale count as current', async () => {
+    const { svc, prisma } = make();
+    prisma.events = [...recent('proactive.invoice_overdue', 12), ...historic('proactive.invoice_overdue', 3)];
+    await svc.appraise('biz_1');
+
+    const muchLater = new Date(Date.now() + 4 * 60 * 60 * 1000);
+    expect(svc.describeForPrompt('biz_1', muchLater)).toBeNull();
+  });
+
+  it('is synchronous, because the chat path that reads it is', async () => {
+    const { svc, prisma } = make();
+    prisma.events = [...recent('proactive.invoice_overdue', 12), ...historic('proactive.invoice_overdue', 3)];
+    await svc.appraise('biz_1');
+
+    expect(svc.describeForPrompt('biz_1')).not.toBeInstanceOf(Promise);
+  });
+
+  it('never mixes one business into another', async () => {
+    const { svc, prisma } = make();
+    prisma.events = [...recent('proactive.invoice_overdue', 12), ...historic('proactive.invoice_overdue', 3)];
+    await svc.appraise('biz_1');
+
+    expect(svc.describeForPrompt('biz_other')).toBeNull();
+  });
+});
+
+describe('it is wired to the chat, not merely written', () => {
+  const triage = readFileSync(join(__dirname, 'cognitive-triage.service.ts'), 'utf8')
+    .split('\n')
+    .filter((l) => !l.trimStart().startsWith('*') && !l.trimStart().startsWith('//'))
+    .join('\n');
+
+  it('reaches the system prompt through standingContext', () => {
+    const block = triage.slice(triage.indexOf('private standingContext('));
+    const body = block.slice(0, block.indexOf('\n  private '));
+    expect(body).toMatch(/this\.salience\?\.describeForPrompt\(businessId\)/);
+  });
+
+  it('outranks style and team distribution under the budget', () => {
+    // withinBudget drops whole trailing sections. A counted fact should survive
+    // a squeeze that a tone preference does not.
+    const block = triage.slice(triage.indexOf('private standingContext('));
+    const body = block.slice(0, block.indexOf('\n  private '));
+    expect(body.indexOf('this.salience?')).toBeLessThan(body.indexOf('this.epigenetics?'));
+    expect(body.indexOf('this.salience?')).toBeLessThan(body.indexOf('this.incentive?'));
+  });
+
+  it('did not shift the pre-existing constructor positions', () => {
+    const ctor = triage.slice(triage.indexOf('constructor('), triage.indexOf(') {}'));
+    const params = [...ctor.matchAll(/private readonly (\w+)\?/g)].map((m) => m[1]);
+    expect(params.slice(0, 3)).toEqual(['router', 'endocrine', 'interoception']);
   });
 });

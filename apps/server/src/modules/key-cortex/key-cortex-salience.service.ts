@@ -48,11 +48,11 @@ const RECENT_HOURS = 24;
 /** The baseline it is judged against — what "normal" looks like here. */
 const BASELINE_DAYS = 14;
 
-/** Bound on rows read per business. */
-const SAMPLE_LIMIT = 500;
-
 /** Below this, a signal is not worth KEY's attention or the user's. */
 const SALIENCE_FLOOR = 0.25;
+
+/** Past this, a cached appraisal is history rather than a current fact. */
+const CONCERN_TTL_MS = 90 * 60 * 1000;
 
 /** How many concerns are worth surfacing at once. */
 const MAX_CONCERNS = 5;
@@ -111,6 +111,17 @@ export interface Concern {
 export class KeyCortexSalienceService {
   private readonly logger = new Logger(KeyCortexSalienceService.name);
 
+  /**
+   * Last appraisal per business, so `describeForPrompt` can be SYNCHRONOUS —
+   * it is read from CognitiveTriageService.standingContext on the request path
+   * for every message. Same reasoning as the endocrine and immune services.
+   *
+   * In-memory only, deliberately. A restart means KEY says nothing about
+   * concerns until the hourly cron runs again, and that is the right failure
+   * direction: silence rather than a stale count asserted as current fact.
+   */
+  private readonly current = new Map<string, { concerns: Concern[]; appraisedAt: Date }>();
+
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Optional() private readonly endocrine?: KeyCortexEndocrineService,
@@ -146,6 +157,7 @@ export class KeyCortexSalienceService {
     ]);
 
     const all = [...threats, ...opportunities];
+    this.current.set(businessId, { concerns: all, appraisedAt: new Date() });
     if (all.length === 0 || !this.endocrine) return all;
 
     // ONE dose per valence, from the strongest of each. Dosing per concern
@@ -187,6 +199,45 @@ export class KeyCortexSalienceService {
     return all;
   }
 
+
+  /**
+   * The counted facts, or null.
+   *
+   * This is the half of salience that never escaped. `appraise()` builds up to
+   * ten ranked concerns with sentences like "12 overdue invoices in 24h against
+   * a normal of 3/day — escalating", and then eight of them are discarded and
+   * the other two survive only as the `reason` riding on a hormone. The
+   * endocrine block that carries them is explicitly labelled disposition, and
+   * ends with "It must NOT change what you report as fact" — so there was no
+   * path on which KEY could state the number at all. A user could only ever get
+   * a vaguer, mood-shaped version of a fact the system already knew exactly.
+   *
+   * Synchronous, like every other standing-context source. Returns null rather
+   * than a stale reading: a count from six hours ago asserted in the present
+   * tense is worse than saying nothing.
+   */
+  describeForPrompt(businessId: string, now: Date = new Date()): string | null {
+    const entry = this.current.get(businessId);
+    if (!entry) return null;
+    if (now.getTime() - entry.appraisedAt.getTime() > CONCERN_TTL_MS) return null;
+
+    const threats = entry.concerns.filter((c) => c.valence === 'threat').slice(0, 3);
+    const momentum = entry.concerns.filter((c) => c.valence === 'opportunity').slice(0, 1);
+    const shown = [...threats, ...momentum];
+    if (shown.length === 0) return null;
+
+    return [
+      "WHAT THIS BUSINESS'S OWN RECORDS SHOW — exact counts from its event log, not inference:",
+      ...shown.map((c) => `- ${c.summary}`),
+      `Counted ${Math.round((now.getTime() - entry.appraisedAt.getTime()) / 60000)} minutes ago.`,
+      // Load-bearing. The endocrine block already in this prompt carries these
+      // same sentences as "Basis:" under an instruction NOT to treat them as
+      // reportable fact. Without this line the model receives two contradictory
+      // directives about one set of numbers.
+      'These are facts and may be stated plainly if they bear on what was asked.',
+    ].join('\n');
+  }
+
   /** Rank threat signals. Never throws. */
   async rank(businessId: string): Promise<Concern[]> {
     return this.scoreSignals(businessId, THREAT_SIGNALS, 'threat');
@@ -212,18 +263,35 @@ export class KeyCortexSalienceService {
     const recentSince = new Date(now - RECENT_HOURS * 3600_000);
     const baselineSince = new Date(now - BASELINE_DAYS * 24 * 3600_000);
 
-    let rows: Array<{ eventType: string; createdAt: Date }>;
+    // COUNTED, not sampled.
+    //
+    // This used to fetch rows with `take: SAMPLE_LIMIT` ordered newest-first,
+    // then derive `older = all.length - recent`. For any business with more
+    // events than the limit in the baseline window, the OLDER bucket is the one
+    // that gets truncated — so baselineRate came out too low, every ratio too
+    // high, and every signal read as escalating. A business that genuinely
+    // averages 30 overdue invoices a day would be told its normal was 3.
+    //
+    // As a hormone nudge that was merely too jumpy. These summaries are now
+    // stated to the user as fact, so an approximation is not good enough: a
+    // wrong baseline is KEY asserting something false about the owner's own
+    // books, in a confident voice. `count` is exact and unbounded, and two
+    // counts per signal are cheaper than the rows they replace.
+    let counts: Array<{ signal: string; recent: number; older: number }>;
     try {
-      rows = await this.prisma.client.businessEvent.findMany({
-        where: {
-          businessId,
-          eventType: { in: Object.keys(signalWeights) },
-          createdAt: { gte: baselineSince },
-        },
-        select: { eventType: true, createdAt: true },
-        take: SAMPLE_LIMIT,
-        orderBy: { createdAt: 'desc' },
-      });
+      counts = await Promise.all(
+        Object.keys(signalWeights).map(async (signal) => {
+          const [recent, total] = await Promise.all([
+            this.prisma.client.businessEvent.count({
+              where: { businessId, eventType: signal, createdAt: { gte: recentSince } },
+            }),
+            this.prisma.client.businessEvent.count({
+              where: { businessId, eventType: signal, createdAt: { gte: baselineSince } },
+            }),
+          ]);
+          return { signal, recent, older: Math.max(0, total - recent) };
+        }),
+      );
     } catch {
       return [];
     }
@@ -231,16 +299,16 @@ export class KeyCortexSalienceService {
     const concerns: Concern[] = [];
 
     for (const [signal, weight] of Object.entries(signalWeights)) {
-      const all = rows.filter((r) => r.eventType === signal);
-      if (all.length === 0) continue;
+      const counted = counts.find((c) => c.signal === signal);
+      if (!counted) continue;
 
-      const recent = all.filter((r) => r.createdAt >= recentSince).length;
+      const recent = counted.recent;
       if (recent === 0) continue;
 
       // What a normal 24h looks like for THIS business, from the portion of the
       // baseline window that excludes the recent one — otherwise today's spike
       // inflates the baseline it is being compared against and hides itself.
-      const older = all.length - recent;
+      const older = counted.older;
       const olderDays = BASELINE_DAYS - RECENT_HOURS / 24;
       const baselineRate = olderDays > 0 ? older / olderDays : 0;
 
