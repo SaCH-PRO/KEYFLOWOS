@@ -37,6 +37,14 @@ export interface UnassignTaskInput {
 @Injectable()
 export class TaskAssignmentService {
   private readonly logger = new Logger(TaskAssignmentService.name);
+
+  /**
+   * How many of a person's assignments the tenant-scoped read will consider.
+   * Tenant filtering happens after the fetch (TaskAssignment has no businessId
+   * to filter on), so this is the ceiling on what a single page can be drawn
+   * from — deliberately far above any realistic per-person assignment count.
+   */
+  private static readonly MAX_ASSIGNMENT_SCAN = 500;
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(BusinessEventService) private readonly events: BusinessEventService,
@@ -184,17 +192,94 @@ export class TaskAssignmentService {
     };
     if (options?.taskType) where.taskType = options.taskType;
 
-    const [items, total] = await Promise.all([
-      this.prisma.client.taskAssignment.findMany({
-        where,
-        orderBy: { assignedAt: 'desc' },
-        skip: options?.offset ?? 0,
-        take: options?.limit ?? 50,
-      }),
-      this.prisma.client.taskAssignment.count({ where }),
-    ]);
+    const offset = options?.offset ?? 0;
+    const limit = options?.limit ?? 50;
 
-    return { items, total, offset: options?.offset ?? 0, limit: options?.limit ?? 50 };
+    // Trusted internal callers pre-scope their own task ids and pass no
+    // businessId; they keep DB-level pagination.
+    if (!options?.businessId) {
+      const [items, total] = await Promise.all([
+        this.prisma.client.taskAssignment.findMany({
+          where,
+          orderBy: { assignedAt: 'desc' },
+          skip: offset,
+          take: limit,
+        }),
+        this.prisma.client.taskAssignment.count({ where }),
+      ]);
+
+      return { items, total, offset, limit };
+    }
+
+    // The guarded path. assertAssignableInBusiness above establishes that the
+    // PERSON belongs to this business — it says nothing about their tasks, and
+    // TaskAssignment carries no businessId of its own. So business A asking for
+    // Ada, who also works for business B, was handed B's assignments: task ids,
+    // who assigned them, and the free-text `reason`. That is content across the
+    // tenant boundary from a live, rate-limited HTTP route.
+    //
+    // The filter has to run before pagination or `total` and the page windows
+    // describe a set the caller is not allowed to see, so the scan is bounded
+    // and paginated in memory rather than by the database.
+    const candidates = await this.prisma.client.taskAssignment.findMany({
+      where,
+      orderBy: { assignedAt: 'desc' },
+      take: TaskAssignmentService.MAX_ASSIGNMENT_SCAN,
+    });
+
+    const scoped = await this.filterAssignmentsToBusiness(candidates, options.businessId);
+
+    return { items: scoped.slice(offset, offset + limit), total: scoped.length, offset, limit };
+  }
+
+  /**
+   * Keep only the assignments whose TASK belongs to this business.
+   *
+   * Fails closed: a task type with no known table, or a lookup that throws,
+   * drops the row rather than passing it through unscoped.
+   */
+  private async filterAssignmentsToBusiness<T extends { taskType: string; taskId: string }>(
+    rows: T[],
+    businessId: string,
+  ): Promise<T[]> {
+    const byType = new Map<string, string[]>();
+    for (const row of rows) {
+      const ids = byType.get(row.taskType) ?? [];
+      ids.push(row.taskId);
+      byType.set(row.taskType, ids);
+    }
+
+    const allowed = new Set<string>();
+    await Promise.all(
+      [...byType].map(async ([taskType, ids]) => {
+        for (const id of await this.taskIdsInBusiness(taskType, ids, businessId)) {
+          allowed.add(`${taskType}:${id}`);
+        }
+      }),
+    );
+
+    return rows.filter((row) => allowed.has(`${row.taskType}:${row.taskId}`));
+  }
+
+  private async taskIdsInBusiness(taskType: string, ids: string[], businessId: string): Promise<string[]> {
+    if (ids.length === 0) return [];
+    const where = { businessId, id: { in: ids } };
+    const select = { id: true };
+
+    try {
+      if (taskType === 'ContactTask') {
+        return (await this.prisma.client.contactTask.findMany({ where, select })).map((t) => t.id);
+      }
+      if (taskType === 'ProjectTask') {
+        return (await this.prisma.client.projectTask.findMany({ where, select })).map((t) => t.id);
+      }
+      if (taskType === 'AutopilotTask') {
+        return (await this.prisma.client.autopilotTask.findMany({ where, select })).map((t) => t.id);
+      }
+      return [];
+    } catch {
+      return [];
+    }
   }
 
   /**
