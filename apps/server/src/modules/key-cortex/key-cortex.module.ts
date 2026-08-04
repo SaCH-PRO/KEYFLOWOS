@@ -179,7 +179,6 @@ import {
   BookingNoShowWatcherService,
   SentimentWatcherService,
 } from './watchers';
-import { EscalationService } from './escalation.service';
 import { DigitalEmployeeAcceptanceService } from './digital-employee-acceptance.service';
 import { KeyCortexMemoryService } from './key-cortex-memory.service';
 import { CognitionSessionService } from './cognition-session.service';
@@ -494,7 +493,6 @@ import { IntegrationHubModule } from '../integration-hub/integration-hub.module'
     KnowledgeIngestionService,
     MemoryConsolidationService,
     SelfAssessmentService,
-    EscalationService,
     DigitalEmployeeAcceptanceService,
 
     // -- Phase A: Cognition session context primitive --
@@ -663,7 +661,6 @@ import { IntegrationHubModule } from '../integration-hub/integration-hub.module'
     KnowledgeIngestionService,
     MemoryConsolidationService,
     SelfAssessmentService,
-    EscalationService,
     DigitalEmployeeAcceptanceService,
 
     // -- Phase 1 Body: Peripheral Nervous System --
