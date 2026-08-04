@@ -3,6 +3,8 @@ import type { TaskCategory } from '../ai/model-gateway.service';
 import { AdaptiveRouterService, type QueryDimensions } from './adaptive-router.service';
 import { KeyCortexEndocrineService } from './key-cortex-endocrine.service';
 import { KeyCortexImmuneService } from './key-cortex-immune.service';
+import { KeyCortexEpigeneticsService } from './key-cortex-epigenetics.service';
+import { KeyCortexIncentiveService } from './key-cortex-incentive.service';
 import { KeyCortexInteroceptionService } from './key-cortex-interoception.service';
 
 /**
@@ -84,6 +86,8 @@ export class CognitiveTriageService {
     // which is exactly what happened when this went in above interoception, and
     // the only symptom was peekBody never being called.
     @Optional() private readonly immune?: KeyCortexImmuneService,
+    @Optional() private readonly epigenetics?: KeyCortexEpigeneticsService,
+    @Optional() private readonly incentive?: KeyCortexIncentiveService,
   ) {}
 
   /**
@@ -319,6 +323,26 @@ export class CognitiveTriageService {
       if (threats) parts.push(threats);
     } catch {
       /* immune state is framing, never required */
+    }
+
+    try {
+      // How this business works — its declared voice, and what its own approval
+      // record shows about how boldly it actually moves. Last in the list on
+      // purpose: this modulates HOW everything above is said, rather than adding
+      // anything further to say.
+      const style = this.epigenetics?.describeForPrompt(businessId) ?? null;
+      if (style) parts.push(style);
+    } catch {
+      /* expression is framing, never required */
+    }
+
+    try {
+      // Who is actually carrying the work. The one per-person axis KEY has —
+      // every hormone above this line is addressed to KEY itself.
+      const team = this.incentive?.describeForPrompt(businessId) ?? null;
+      if (team) parts.push(team);
+    } catch {
+      /* team contribution is framing, never required */
     }
 
     return parts.length > 0 ? parts.join('\n\n') : null;

@@ -46,6 +46,8 @@ import { KeyCortexCerebellumService } from './key-cortex-cerebellum.service';
 import { KeyCortexCircadianService } from './key-cortex-circadian.service';
 import { KeyCortexSalienceService } from './key-cortex-salience.service';
 import { KeyCortexImmuneService } from './key-cortex-immune.service';
+import { KeyCortexEpigeneticsService } from './key-cortex-epigenetics.service';
+import { KeyCortexIncentiveService } from './key-cortex-incentive.service';
 import { KeyCortexEventBusService } from './key-cortex-event-bus.service';
 import { FlowSignalBridgeService } from './flow-signal-bridge.service';
 import { EventEmitterFlowBridgeService } from './event-emitter-flow-bridge.service';
@@ -347,6 +349,8 @@ import { IntegrationHubModule } from '../integration-hub/integration-hub.module'
     KeyCortexCircadianService,
     KeyCortexSalienceService,
   KeyCortexImmuneService,
+  KeyCortexEpigeneticsService,
+  KeyCortexIncentiveService,
 
     // Conversation manager -- session lifecycle & message history
     KeyCortexConversationService,
@@ -581,6 +585,8 @@ import { IntegrationHubModule } from '../integration-hub/integration-hub.module'
     KeyCortexCircadianService,
     KeyCortexSalienceService,
   KeyCortexImmuneService,
+  KeyCortexEpigeneticsService,
+  KeyCortexIncentiveService,
     KeyCortexConversationService,
     KeyCortexActionsService,
     KeyCortexVoiceService,
