@@ -122,14 +122,30 @@ export class UnifiedMemoryRetrievalService {
 
     const includeEpisodic = options.includeEpisodic !== false;
     const episodicSince = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
-    // Episodic memory is PERSONAL. AiExecutionLog and CortexActionLog carry a
-    // userId and a rationale describing why someone asked for something; those
-    // belong to the person, not the company. The business-wide stores below are
-    // deliberately NOT narrowed — an assistant that could not see that an
-    // invoice went overdue because a colleague was the one who noticed would be
-    // useless.
+    // Some episodic memory is PERSONAL. AiExecutionLog and CortexActionLog carry
+    // a userId and a rationale describing why someone asked for something; those
+    // belong to the person, not the company. Business-wide stores are
+    // deliberately NOT narrowed — an assistant that could not see that an invoice
+    // went overdue because a colleague was the one who noticed would be useless.
     const episodicWhere: any = { businessId, createdAt: { gte: episodicSince } };
-    if (options.userId) episodicWhere.userId = options.userId;
+
+    // Only AiExecutionLog and CortexActionLog actually HAVE a userId column.
+    // BusinessEvent does not — it identifies the actor via actorType/actorId.
+    //
+    // This was one object shared by all three. Adding `userId` to it made the
+    // BusinessEvent query reference a column that does not exist, Prisma
+    // rejected it, and because all eight stores are awaited by a single
+    // Promise.all with one shared .catch() returning eight empty arrays, EVERY
+    // store was lost — not just business events. The live chat always supplies a
+    // userId, so the entire "WHAT YOU HAVE OBSERVED" section was silently absent
+    // from every authenticated message, leaving one warn line behind.
+    //
+    // Worth knowing why it was easy to get wrong: apps/server/prisma/schema.prisma
+    // is a stale duplicate whose BusinessEvent DOES declare userId. The runtime
+    // schema is packages/db/prisma/schema.prisma, which is what PrismaService
+    // binds to.
+    const personalWhere: any = { ...episodicWhere };
+    if (options.userId) personalWhere.userId = options.userId;
 
     const [
       aiMemories,
@@ -231,7 +247,7 @@ export class UnifiedMemoryRetrievalService {
         : Promise.resolve([]),
       includeEpisodic
         ? this.prisma.client.aiExecutionLog.findMany({
-            where: episodicWhere,
+            where: personalWhere,
             orderBy: { createdAt: 'desc' },
             take: 50,
             select: {
@@ -250,7 +266,7 @@ export class UnifiedMemoryRetrievalService {
         : Promise.resolve([]),
       includeEpisodic
         ? this.prisma.client.cortexActionLog.findMany({
-            where: episodicWhere,
+            where: personalWhere,
             orderBy: { createdAt: 'desc' },
             take: 50,
             select: {
@@ -266,10 +282,25 @@ export class UnifiedMemoryRetrievalService {
             },
           })
         : Promise.resolve([]),
-    ]).catch((err: any) => {
-      this.logger.warn(`Structured memory load failed: ${err instanceof Error ? err.message : String(err)}`);
-      return [[], [], [], [], [], [], [], []];
-    });
+      // Settled individually, NOT Promise.all with one shared catch.
+      //
+      // A single shared .catch() returning eight empty arrays meant any one
+      // malformed query silently erased all eight stores. That is precisely how
+      // the BusinessEvent/userId bug above stayed invisible: perception looked
+      // merely empty rather than broken. Now a bad store costs only itself, and
+      // says which one it was.
+    ].map((p, i) =>
+      Promise.resolve(p).catch((err: any) => {
+        const names = [
+          'aiMemory', 'genomeMemoryEvent', 'temporalFlowMemory', 'cognitionMemory',
+          'cognitiveEvent', 'businessEvent', 'aiExecutionLog', 'cortexActionLog',
+        ];
+        this.logger.warn(
+          `Structured memory load failed for ${names[i]}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        return [] as any[];
+      }),
+    ));
 
     const rows: RawMemoryRow[] = [];
 
