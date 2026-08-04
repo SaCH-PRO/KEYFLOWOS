@@ -609,7 +609,25 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
         priority,
       });
 
-      if (!needsApproval && invoice.contact.email) {
+      // The window is checked HERE, at the send, not when the task is created.
+      // A task raised at 21:55 must not fire at 22:05 because it was cleared
+      // earlier, and the loop sweeps every 5 minutes so the check must reflect
+      // the moment of contact.
+      const window = !needsApproval && invoice.contact.email
+        ? await this.contactWindow(businessId)
+        : { allowed: true as const, reason: undefined };
+
+      if (!window.allowed) {
+        // DEFERRED, not dropped. The task stays pending, the next sweep
+        // reconsiders it, and dedupeKey below prevents a double send when the
+        // window opens. Cancelling would silently lose a collection because the
+        // customer happened to fall due overnight.
+        this.logger.log(
+          `[payment_recovery] deferring ${invoice.id} for ${businessId}: ${window.reason}`,
+        );
+      }
+
+      if (!needsApproval && invoice.contact.email && window.allowed) {
         try {
           const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:5000';
           const invoiceUrl = `${appUrl}/pay/${invoice.id}`;
@@ -1344,6 +1362,101 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
         this.logger.warn(`Pattern summarization failed for business ${businessId}`);
       }
     }
+  }
+
+
+  /**
+   * May this business be contacted right now?
+   *
+   * Quiet hours were configured, surfaced in the UI, defaulted to 22:00-07:00 —
+   * and enforced nowhere that sends anything. `getSettings()` had exactly one
+   * consumer in the server, inside ClientMomentumService.autoExecuteLowRisk,
+   * and what that guards is a database status flip. The code that actually
+   * emails a customer, right here, read neither quiet hours nor pausedUntil nor
+   * autopilotEnabled. A payment chaser could go out at 3am local, from a
+   * setting whose entire promise is that it would not.
+   *
+   * TIMEZONE IS THE BUSINESS'S, not the server's. The one place that did check
+   * quiet hours used `new Date().getHours()` — server-local — while its own
+   * sibling scheduler correctly used Intl with business.timezone. On a UTC host
+   * serving a UTC-4 business that applies the window four hours off, which is
+   * worse than not applying it: it goes quiet during the working day and sends
+   * in the evening.
+   *
+   * Returns a REASON rather than a boolean so the caller can log why nothing
+   * was sent. Fails OPEN on a read error — a quiet-hours lookup that throws
+   * should not silently stop a business's collections.
+   */
+  private async contactWindow(
+    businessId: string,
+    now: Date = new Date(),
+  ): Promise<{ allowed: boolean; reason?: string }> {
+    try {
+      const business = await this.prisma.client.business.findUnique({
+        where: { id: businessId },
+        select: { timezone: true, metaData: true, autopilotEnabled: true },
+      });
+      if (!business) return { allowed: true };
+
+      if (business.autopilotEnabled === false) {
+        return { allowed: false, reason: 'autopilot disabled' };
+      }
+
+      const meta = (business.metaData ?? {}) as Record<string, unknown>;
+      const autopilot = (meta.autopilot ?? {}) as Record<string, unknown>;
+
+      const pausedUntil = autopilot.pausedUntil ? new Date(String(autopilot.pausedUntil)) : null;
+      if (pausedUntil && !Number.isNaN(pausedUntil.getTime()) && pausedUntil > now) {
+        return { allowed: false, reason: `paused until ${pausedUntil.toISOString()}` };
+      }
+
+      const start = this.parseHourOfDay(autopilot.quietHoursStart) ?? 22;
+      const end = this.parseHourOfDay(autopilot.quietHoursEnd) ?? 7;
+      const hour = this.localHour(business.timezone ?? 'UTC', now);
+
+      // The window normally wraps midnight (22:00 -> 07:00), so the two cases
+      // are genuinely different comparisons rather than one with a sign flip.
+      const quiet = start === end ? false : start > end
+        ? hour >= start || hour < end
+        : hour >= start && hour < end;
+
+      return quiet
+        ? { allowed: false, reason: `quiet hours ${start}:00-${end}:00, local hour ${hour}` }
+        : { allowed: true };
+    } catch (err) {
+      this.logger.warn(
+        `[contactWindow] read failed for ${businessId}, allowing send: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      return { allowed: true };
+    }
+  }
+
+  /** Local hour in an IANA zone. Same technique as KeyCortexCircadianService. */
+  private localHour(timezone: string, now: Date): number {
+    try {
+      const hour = new Intl.DateTimeFormat('en-GB', {
+        timeZone: timezone,
+        hour: '2-digit',
+        hour12: false,
+      }).format(now);
+      const parsed = Number.parseInt(hour, 10);
+      return Number.isFinite(parsed) ? parsed % 24 : now.getUTCHours();
+    } catch {
+      // An invalid tz string must not stop every other business's collections.
+      return now.getUTCHours();
+    }
+  }
+
+  /** "22:00" | "22" | 22 -> 22. Null when unparseable. */
+  private parseHourOfDay(value: unknown): number | null {
+    if (typeof value === 'number' && Number.isFinite(value)) return Math.floor(value) % 24;
+    if (typeof value !== 'string') return null;
+    const match = /^(\d{1,2})/.exec(value.trim());
+    if (!match) return null;
+    const hour = Number.parseInt(match[1], 10);
+    return Number.isFinite(hour) ? hour % 24 : null;
   }
 
   private async adaptGovernanceFromHistory(businessId: string, loopType: string) {
