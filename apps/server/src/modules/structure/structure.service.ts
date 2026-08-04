@@ -13,6 +13,133 @@ import { UpdateDelegationRuleDto } from './dto/update-delegation-rule.dto';
 export class StructureService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * The people directory: everyone who works here, in one shape.
+   *
+   * There are two distinct concepts of "person" in this schema and neither one
+   * is the whole answer:
+   *
+   *   Membership  — a real account. Has a User, a login, an access level and an
+   *                 approval tier. This is who can be TOLD to do something.
+   *   StaffMember — a bookable resource. Has skills, weekly hours, services and
+   *                 a calendar, and NO userId at all. This is who appears on a
+   *                 booking.
+   *
+   * A hairdresser is usually the second and often not the first. Listing only
+   * memberships would answer "who works here" with the office manager; listing
+   * only staff would omit the owner. Both are returned, tagged with `kind`, and
+   * a caller that needs to act on a person needs that tag to know which id
+   * space it is in.
+   *
+   * Projected field by field, never spread. Two things are deliberately absent:
+   *
+   *   hourlyRate       — pay data. Chat cannot establish whether the person
+   *                      asking is entitled to see a colleague's rate, and
+   *                      Membership.role is an access level rather than an
+   *                      answer to that question.
+   *   permissionScopes — the raw permission blob, which is security
+   *                      configuration and not something a model should be
+   *                      reasoning about or repeating.
+   */
+  async listPeople(businessId: string, opts: { search?: string; limit?: number } = {}) {
+    const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
+
+    const [memberships, staff] = await Promise.all([
+      this.prisma.client.membership.findMany({
+        where: { businessId },
+        select: {
+          id: true,
+          role: true,
+          maxApprovalTier: true,
+          dailyCapacityHours: true,
+          skills: { select: { name: true } },
+          user: { select: { id: true, name: true, firstName: true, lastName: true, email: true } },
+          orgAssignments: {
+            where: { endedAt: null },
+            orderBy: { isPrimary: 'desc' },
+            take: 1,
+            select: {
+              orgUnit: { select: { name: true, type: true } },
+              jobRole: { select: { name: true, level: true } },
+              reportsTo: {
+                select: {
+                  membership: { select: { user: { select: { name: true, email: true } } } },
+                },
+              },
+            },
+          },
+        },
+        take: 200,
+      }),
+      this.prisma.client.staffMember.findMany({
+        where: { businessId, deletedAt: null },
+        select: {
+          id: true,
+          name: true,
+          maxHoursPerWeek: true,
+          skills: { select: { name: true } },
+        },
+        take: 200,
+      }),
+    ]);
+
+    const people = [
+      ...memberships.map((m) => {
+        const assignment = m.orgAssignments[0];
+        const reportsToUser = assignment?.reportsTo?.membership?.user;
+        return {
+          id: m.user.id,
+          kind: 'account' as const,
+          name:
+            m.user.name ||
+            [m.user.firstName, m.user.lastName].filter(Boolean).join(' ') ||
+            m.user.email ||
+            m.user.id,
+          email: m.user.email ?? null,
+          accessLevel: m.role,
+          approvalTier: m.maxApprovalTier,
+          jobRole: assignment?.jobRole?.name ?? null,
+          jobRoleLevel: assignment?.jobRole?.level ?? null,
+          orgUnit: assignment?.orgUnit?.name ?? null,
+          orgUnitType: assignment?.orgUnit?.type ?? null,
+          reportsTo: reportsToUser?.name ?? reportsToUser?.email ?? null,
+          weeklyCapacityHours: m.dailyCapacityHours != null ? m.dailyCapacityHours * 5 : null,
+          skills: m.skills.map((s) => s.name),
+        };
+      }),
+      ...staff.map((s) => ({
+        id: s.id,
+        kind: 'staff' as const,
+        name: s.name,
+        email: null,
+        accessLevel: null,
+        approvalTier: null,
+        jobRole: null,
+        jobRoleLevel: null,
+        orgUnit: null,
+        orgUnitType: null,
+        reportsTo: null,
+        weeklyCapacityHours: s.maxHoursPerWeek ?? null,
+        skills: s.skills.map((sk) => sk.name),
+      })),
+    ];
+
+    const needle = opts.search?.trim().toLowerCase();
+    const filtered = needle
+      ? people.filter((p) =>
+          [p.name, p.email, p.jobRole, p.orgUnit, ...p.skills]
+            .filter(Boolean)
+            .some((field) => String(field).toLowerCase().includes(needle)),
+        )
+      : people;
+
+    return {
+      people: filtered.slice(0, limit),
+      total: filtered.length,
+      truncated: filtered.length > limit,
+    };
+  }
+
   // ─── Org Units ───
   async listOrgUnits(businessId: string) {
     return this.prisma.client.orgUnit.findMany({

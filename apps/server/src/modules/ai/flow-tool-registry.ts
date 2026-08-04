@@ -2560,6 +2560,138 @@ export const FLOW_TOOLS: FlowTool[] = [
     outputSchema: { type: 'object', description: 'Updated blueprint summary', fields: { completeness: { type: 'number', description: 'New completeness percentage 0-100' }, confidenceScores: { type: 'object', description: 'Per-section confidence scores' } } },
   },
 
+  // ================================================================
+  //  PEOPLE — the org, who works here, and delegating to a human
+  // ================================================================
+  //
+  // KEY is meant to plug into any role, tier and level of staff, and until now
+  // it had no concept of staff at all: five live Prisma models, three working
+  // web pages, and zero tools. It could assign a task to itself and to nobody
+  // else, which makes KEY a worker rather than a colleague.
+  //
+  // Read tools are tier 1. people_assign_task is tier 2 and 'execute' because
+  // it puts an obligation on a named human — reversible, but it changes what
+  // someone is expected to do, which is not a draft.
+  //
+  // No tool here returns pay. StaffMember.hourlyRate is one field away from
+  // every row these assemble, and chat cannot establish whether the person
+  // asking is entitled to a colleague's rate.
+  {
+    name: 'people_list',
+    description: 'List the people who work in this business — accounts and bookable staff — with job role, org unit, who they report to, skills and weekly capacity. Use this before assigning work, or to answer questions about who does what. Does not include pay.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/structure',
+    parameters: {
+      type: 'object',
+      properties: {
+        search: { type: 'string', description: 'Optional: filter by name, email, job role, org unit or skill.' },
+        limit: { type: 'number', description: 'Maximum people to return (default 50, max 200).' },
+      },
+      required: [],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'The people directory',
+      fields: {
+        people: { type: 'array', description: 'Each with id, kind ("account" or "staff"), name, email, accessLevel, approvalTier, jobRole, orgUnit, reportsTo, weeklyCapacityHours, skills' },
+        total: { type: 'number', description: 'How many matched before the limit' },
+        truncated: { type: 'boolean', description: 'True when more matched than were returned' },
+      },
+    },
+  },
+  {
+    name: 'people_workload',
+    description: 'See who is carrying what right now — open task counts per person against their weekly capacity, plus how many open tasks nobody owns. Use this to answer "who is free", "who is overloaded", or before deciding who should take on new work.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/structure',
+    parameters: { type: 'object', properties: {}, required: [] },
+    outputSchema: {
+      type: 'object',
+      description: 'Current workload across the team',
+      fields: {
+        people: { type: 'array', description: 'Each with assignableType, assignableId, name, openTasks, weeklyCapacityHours — busiest first' },
+        unassignedOpenTasks: { type: 'number', description: 'Open tasks with no owner' },
+        truncated: { type: 'boolean', description: 'True when there were more open tasks than could be scanned' },
+      },
+    },
+  },
+  {
+    name: 'people_org_chart',
+    description: 'Get the organisational structure — units, job roles, reporting lines and active delegation rules. Use this to understand hierarchy, or to find who manages a team.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/structure',
+    parameters: { type: 'object', properties: {}, required: [] },
+    outputSchema: {
+      type: 'object',
+      description: 'Org structure',
+      fields: {
+        tree: { type: 'array', description: 'Org units in hierarchy, each with name, type and children' },
+        stats: { type: 'object', description: 'unitCount, roleCount, assignmentCount, delegationCount' },
+      },
+    },
+  },
+  {
+    name: 'people_recommend_assignee',
+    description: 'Rank who should take on a piece of work, scored on current workload, recent completion rate and skill match against their past tasks. Returns candidates with a stated reason. Recommends — it does not assign.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/structure',
+    parameters: {
+      type: 'object',
+      properties: {
+        taskTitle: { type: 'string', description: 'What the work is. Used for skill matching against completed tasks; omitting it makes every candidate neutral on skill.' },
+        taskType: { type: 'string', description: 'ContactTask, ProjectTask or AutopilotTask.', enum: ['ContactTask', 'ProjectTask', 'AutopilotTask'] },
+      },
+      required: ['taskTitle'],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'Ranked candidates',
+      fields: {
+        recommendations: { type: 'array', description: 'Up to 5, each with assignableType, assignableId, name, score 0-100 and reason' },
+      },
+    },
+  },
+  {
+    name: 'people_assign_task',
+    description: 'Assign an existing task to a person. Requires the exact assignableId from people_list or people_recommend_assignee — never guess it from a name. Replaces any current assignee on that task.',
+    family: 'execute',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    changedEntities: ['TaskAssignment'],
+    followOnSuggestions: ['people_workload'],
+    manualEquivalentRoute: '/app/work/projects',
+    parameters: {
+      type: 'object',
+      properties: {
+        taskType: { type: 'string', description: 'Which kind of task is being assigned.', enum: ['ContactTask', 'ProjectTask', 'AutopilotTask'] },
+        taskId: { type: 'string', description: 'The id of the task to assign.' },
+        assignableType: { type: 'string', description: 'The id space assignableId belongs to. "account" people from people_list are User; "staff" people are StaffMember.', enum: ['User', 'StaffMember', 'Contractor', 'KeyflowStaff', 'KEY'] },
+        assignableId: { type: 'string', description: 'The id of the person, exactly as returned by people_list or people_recommend_assignee.' },
+        reason: { type: 'string', description: 'Why this person. Shown to them and kept on the record.' },
+      },
+      required: ['taskType', 'taskId', 'assignableType', 'assignableId'],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'The assignment that was made',
+      fields: {
+        assignmentId: { type: 'string', description: 'Id of the new assignment' },
+        taskType: { type: 'string', description: 'Task type' },
+        taskId: { type: 'string', description: 'Task id' },
+        assignableType: { type: 'string', description: 'Assignee id space' },
+        assignableId: { type: 'string', description: 'Assignee id' },
+      },
+    },
+  },
+
 ];
 
 export function getOpenAiToolDefinitions() {

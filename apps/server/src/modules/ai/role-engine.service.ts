@@ -153,6 +153,14 @@ const ROLE_BASELINE_TOOLS = new Set<string>([
   'calendar_check_conflicts',
   'documents_list',
   'documents_search',
+  // Know the team. Every role has colleagues, and a role that cannot see who
+  // works there cannot hand anything over, escalate to a manager, or answer
+  // "who normally handles this" — the same shape of gap as finance being unable
+  // to look up a contact. Reads only; the assignment WRITE is per-role below.
+  'people_list',
+  'people_workload',
+  'people_org_chart',
+  'people_recommend_assignee',
   // Record: never destructive, always attributable
   'keyflow_create_note',
   'create_task',
@@ -227,7 +235,7 @@ const ROLE_DEFINITIONS: Record<BusinessRole, RoleDefinition> = {
     description: 'Manages scheduling, inventory, staff, tasks, ensures business runs smoothly day-to-day',
     tone: 'efficient, organized, direct, action-oriented',
     priorities: ['Fill calendar gaps', 'Manage staff schedules', 'Track inventory levels', 'Complete tasks on time', 'Optimize workflows'],
-    approvedTools: ['update_business_blueprint', 'bookings_*', 'projects_*', 'create_task', 'schedule_action', 'tag_contact', 'fetch_*', 'content_*', 'call_*', 'evidence_*', 'approval_*', 'drive_*', 'calendar_*', 'time_*', 'helpdesk_*', 'finance_list_action_items', 'documents_search', 'automations_*', 'delegation_*', 'draft_project_update', 'enable_flow_with_approval', 'update_status_with_confirmation', 'apply_storefront_recommendation', 'store_list_products', 'store_list_recent_orders', 'marketplace_list_listings', 'marketplace_list_orders'],
+    approvedTools: ['people_assign_task', 'update_business_blueprint', 'bookings_*', 'projects_*', 'create_task', 'schedule_action', 'tag_contact', 'fetch_*', 'content_*', 'call_*', 'evidence_*', 'approval_*', 'drive_*', 'calendar_*', 'time_*', 'helpdesk_*', 'finance_list_action_items', 'documents_search', 'automations_*', 'delegation_*', 'draft_project_update', 'enable_flow_with_approval', 'update_status_with_confirmation', 'apply_storefront_recommendation', 'store_list_products', 'store_list_recent_orders', 'marketplace_list_listings', 'marketplace_list_orders'],
     blockedTools: ['commerce_delete_invoice', 'crm_delete_contact'],
     maxRiskTier: 2,
     autonomyLevel: 3,
@@ -269,7 +277,7 @@ const ROLE_DEFINITIONS: Record<BusinessRole, RoleDefinition> = {
     description: 'General-purpose assistant for queries, summaries, and cross-role coordination',
     tone: 'warm, helpful, and conversational — like a knowledgeable friend who is always happy to help',
     priorities: ['Answer questions accurately', 'Summarize business health', 'Coordinate between roles', 'Execute user requests'],
-    approvedTools: ['update_business_blueprint', 'present_onboarding_card', 'save_onboarding_step', 'fetch_*', 'crm_*', 'commerce_*', 'bookings_*', 'projects_*', 'expenses_*', 'calendar_*', 'time_*', 'helpdesk_*', 'content_*', 'call_*', 'evidence_*', 'approval_*', 'drive_*', 'documents_*', 'finance_*', 'marketing_*', 'social_*', 'store_*', 'marketplace_*', 'automations_*', 'delegation_*', 'draft_*', 'create_task', 'create_followup_queue', 'schedule_action', 'tag_contact', 'segment_contacts', 'send_message_with_approval', 'queue_campaign', 'keyflow_create_note', 'sync_seo_pages', 'generate_content_brief', 'apply_storefront_recommendation', 'enable_flow_with_approval', 'update_status_with_confirmation', 'community_list_posts'],
+    approvedTools: ['people_assign_task', 'update_business_blueprint', 'present_onboarding_card', 'save_onboarding_step', 'fetch_*', 'crm_*', 'commerce_*', 'bookings_*', 'projects_*', 'expenses_*', 'calendar_*', 'time_*', 'helpdesk_*', 'content_*', 'call_*', 'evidence_*', 'approval_*', 'drive_*', 'documents_*', 'finance_*', 'marketing_*', 'social_*', 'store_*', 'marketplace_*', 'automations_*', 'delegation_*', 'draft_*', 'create_task', 'create_followup_queue', 'schedule_action', 'tag_contact', 'segment_contacts', 'send_message_with_approval', 'queue_campaign', 'keyflow_create_note', 'sync_seo_pages', 'generate_content_brief', 'apply_storefront_recommendation', 'enable_flow_with_approval', 'update_status_with_confirmation', 'community_list_posts'],
     blockedTools: ['commerce_delete_invoice', 'crm_delete_contact', 'bookings_cancel_booking', 'marketing_send_campaign', 'social_publish_post', 'content_create_request', 'content_assign_request', 'content_transition_status', 'call_create_task', 'approval_create_request', 'projects_delete_task', 'commerce_send_invoice'],
     maxRiskTier: 1,
     autonomyLevel: 1,
@@ -290,7 +298,7 @@ const ROLE_DEFINITIONS: Record<BusinessRole, RoleDefinition> = {
     description: 'AI worker that executes tasks across all modules — creates content, logs calls, submits evidence, manages approvals, and drives workflows end-to-end',
     tone: 'efficient and reliable, but warm and clear when confirming what you have done',
     priorities: ['Execute assigned tasks autonomously', 'Move content through production pipeline', 'Log call outcomes and schedule follow-ups', 'Submit and verify evidence', 'Create and manage approval requests', 'Create Drive folders and documents'],
-    approvedTools: ['update_business_blueprint', 'content_*', 'call_*', 'evidence_*', 'approval_*', 'drive_*', 'crm_*', 'bookings_*', 'projects_*', 'create_task', 'tag_contact', 'fetch_*', 'expenses_*', 'documents_*', 'keyflow_create_note', 'calendar_*', 'time_*', 'helpdesk_*', 'finance_*', 'commerce_update_invoice', 'commerce_update_product', 'commerce_send_invoice', 'marketing_update_campaign', 'social_update_post', 'automations_*', 'delegation_*', 'store_*', 'marketplace_*', 'update_status_with_confirmation', 'enable_flow_with_approval'],
+    approvedTools: ['people_assign_task', 'update_business_blueprint', 'content_*', 'call_*', 'evidence_*', 'approval_*', 'drive_*', 'crm_*', 'bookings_*', 'projects_*', 'create_task', 'tag_contact', 'fetch_*', 'expenses_*', 'documents_*', 'keyflow_create_note', 'calendar_*', 'time_*', 'helpdesk_*', 'finance_*', 'commerce_update_invoice', 'commerce_update_product', 'commerce_send_invoice', 'marketing_update_campaign', 'social_update_post', 'automations_*', 'delegation_*', 'store_*', 'marketplace_*', 'update_status_with_confirmation', 'enable_flow_with_approval'],
     blockedTools: ['commerce_delete_invoice', 'crm_delete_contact', 'bookings_cancel_booking', 'marketing_send_campaign', 'social_publish_post', 'content_upload_deliverables', 'content_deliver_request'],
     maxRiskTier: 3,
     autonomyLevel: 3,
@@ -314,7 +322,7 @@ const ROLE_DEFINITIONS: Record<BusinessRole, RoleDefinition> = {
     description: 'Strategic advisor for high-level business decisions, governance, stakeholder management, and executive planning',
     tone: 'measured, authoritative, and forward-thinking — like a trusted board advisor who sees the big picture',
     priorities: ['Evaluate strategic decisions', 'Assess risk and compliance posture', 'Review business performance against objectives', 'Advise on partnerships and investments', 'Ensure governance and succession readiness'],
-    approvedTools: ['update_business_blueprint', 'fetch_*', 'finance_view_receivables', 'finance_customer_balance', 'finance_list_action_items', 'documents_list', 'keyflow_create_note', 'calendar_list_events', 'calendar_check_conflicts', 'crm_search_contacts', 'crm_list_contacts', 'projects_list', 'expenses_list', 'content_list_requests', 'content_get_request', 'call_list_tasks', 'evidence_list', 'approval_list', 'approval_decide_step', 'helpdesk_list_tickets', 'documents_search'],
+    approvedTools: ['people_assign_task', 'update_business_blueprint', 'fetch_*', 'finance_view_receivables', 'finance_customer_balance', 'finance_list_action_items', 'documents_list', 'keyflow_create_note', 'calendar_list_events', 'calendar_check_conflicts', 'crm_search_contacts', 'crm_list_contacts', 'projects_list', 'expenses_list', 'content_list_requests', 'content_get_request', 'call_list_tasks', 'evidence_list', 'approval_list', 'approval_decide_step', 'helpdesk_list_tickets', 'documents_search'],
     blockedTools: ['commerce_delete_invoice', 'crm_delete_contact', 'bookings_cancel_booking', 'marketing_send_campaign', 'social_publish_post', 'content_create_request', 'content_assign_request', 'content_transition_status', 'call_create_task', 'approval_create_request', 'projects_delete_task', 'commerce_send_invoice', 'commerce_update_invoice', 'commerce_update_product', 'marketing_update_campaign', 'social_update_post'],
     maxRiskTier: 1,
     autonomyLevel: 1,

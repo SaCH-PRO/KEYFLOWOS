@@ -39,6 +39,8 @@ import { EvidenceService } from '../evidence/evidence.service';
 import { ApprovalRequestService } from '../approvals/approval-request.service';
 import { GoogleDriveService } from '../google-drive/google-drive.service';
 import { TaskAssignmentService } from '../task-assignments/task-assignment.service';
+import { TaskAssignmentRecommenderService } from '../task-assignments/task-assignment-recommender.service';
+import { StructureService } from '../structure/structure.service';
 import { OnboardingConciergeService } from '../onboarding-concierge/onboarding-concierge.service';
 import { OnboardingStateService, type OnboardingStep as ServerOnboardingStep } from '../onboarding-concierge/onboarding-state.service';
 import { BusinessGenesisService } from '../business-genesis/business-genesis.service';
@@ -383,6 +385,12 @@ export class FlowOrchestratorService {
   }
   private getTaskAssignment() {
     return this.moduleRef.get(TaskAssignmentService, { strict: false });
+  }
+  private getStructure() {
+    return this.moduleRef.get(StructureService, { strict: false });
+  }
+  private getAssignmentRecommender() {
+    return this.moduleRef.get(TaskAssignmentRecommenderService, { strict: false });
   }
   private getCrm() {
     return this.moduleRef.get(CrmService, { strict: false });
@@ -3900,6 +3908,62 @@ ${triage.standingContext}`;
           scheduledAt: args.scheduledFor ? new Date(args.scheduledFor).toISOString() : undefined,
         });
         return { id: post.id, status: post.status };
+      }
+
+      // ─── People ───
+      //
+      // KEY could assign a task to itself and to nobody else. These give it the
+      // rest of the team: who they are, what they are carrying, and the ability
+      // to hand work to a human.
+      case 'people_list': {
+        return this.getStructure().listPeople(businessId, {
+          search: args.search,
+          limit: args.limit,
+        });
+      }
+
+      case 'people_workload': {
+        return this.getTaskAssignment().workloadSummary(businessId);
+      }
+
+      case 'people_org_chart': {
+        const structure = this.getStructure();
+        const [tree, stats] = await Promise.all([
+          structure.getOrgTree(businessId),
+          structure.getStats(businessId),
+        ]);
+        return { tree, stats };
+      }
+
+      case 'people_recommend_assignee': {
+        return this.getAssignmentRecommender().recommend(businessId, {
+          taskType: args.taskType ?? 'ContactTask',
+          taskTitle: args.taskTitle,
+        });
+      }
+
+      case 'people_assign_task': {
+        // businessId is passed explicitly. Without it TaskAssignmentService
+        // skips assertAssignableInBusiness entirely — the parameter is optional
+        // precisely so trusted internal callers can opt out — and a model that
+        // hallucinated an id from another tenant would be obeyed.
+        const assignment = await this.getTaskAssignment().assign({
+          taskType: args.taskType,
+          taskId: args.taskId,
+          assignableType: args.assignableType,
+          assignableId: args.assignableId,
+          assignedBy: 'KEY',
+          reason: args.reason,
+          businessId,
+        });
+
+        return {
+          assignmentId: assignment.id,
+          taskType: args.taskType,
+          taskId: args.taskId,
+          assignableType: args.assignableType,
+          assignableId: args.assignableId,
+        };
       }
 
       default:

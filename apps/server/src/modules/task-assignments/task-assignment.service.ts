@@ -45,6 +45,13 @@ export class TaskAssignmentService {
    * from — deliberately far above any realistic per-person assignment count.
    */
   private static readonly MAX_ASSIGNMENT_SCAN = 500;
+
+  /**
+   * Ceiling on open tasks considered by workloadSummary. Reported back as
+   * `truncated` rather than silently capped, because "nobody is overloaded" and
+   * "we stopped counting at 2000" must not look the same to a reader.
+   */
+  private static readonly MAX_WORKLOAD_SCAN = 2000;
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(BusinessEventService) private readonly events: BusinessEventService,
@@ -230,6 +237,116 @@ export class TaskAssignmentService {
     const scoped = await this.filterAssignmentsToBusiness(candidates, options.businessId);
 
     return { items: scoped.slice(offset, offset + limit), total: scoped.length, offset, limit };
+  }
+
+  /**
+   * Who is carrying what, right now, in this business.
+   *
+   * Tenant-scoped BY CONSTRUCTION rather than by a filter that can be
+   * forgotten: the open-task ids are read from business-scoped queries first,
+   * and the assignment lookup is then constrained to those ids. There is no
+   * order of operations in which this reads another business's rows.
+   *
+   * Counts BOTH assignment mechanisms. ContactTask carries its own `assigneeId`
+   * string alongside the polymorphic TaskAssignment join, both are written in
+   * production, and counting either one alone reports a number that is
+   * confidently wrong. Deduped by task, so a task recorded in both ways counts
+   * once.
+   *
+   * Deliberately returns no pay data. StaffMember.hourlyRate sits one field
+   * away from every row assembled here, and chat has no way to know whether the
+   * person asking is entitled to see it.
+   */
+  async workloadSummary(businessId: string): Promise<{
+    people: Array<{
+      assignableType: AssignableType;
+      assignableId: string;
+      name: string;
+      openTasks: number;
+      weeklyCapacityHours: number | null;
+    }>;
+    unassignedOpenTasks: number;
+    scanned: number;
+    truncated: boolean;
+  }> {
+    const [openContact, openProject, members, staff] = await Promise.all([
+      this.prisma.client.contactTask.findMany({
+        where: { businessId, status: { not: 'DONE' }, deletedAt: null },
+        select: { id: true, assigneeId: true },
+        take: TaskAssignmentService.MAX_WORKLOAD_SCAN,
+      }),
+      this.prisma.client.projectTask.findMany({
+        where: { businessId, isCompleted: false },
+        select: { id: true },
+        take: TaskAssignmentService.MAX_WORKLOAD_SCAN,
+      }),
+      this.prisma.client.membership.findMany({
+        where: { businessId },
+        select: {
+          dailyCapacityHours: true,
+          user: { select: { id: true, name: true, email: true } },
+        },
+        take: 200,
+      }),
+      this.prisma.client.staffMember.findMany({
+        where: { businessId, deletedAt: null },
+        select: { id: true, name: true, maxHoursPerWeek: true },
+        take: 200,
+      }),
+    ]);
+
+    const openIds = [...openContact.map((t) => t.id), ...openProject.map((t) => t.id)];
+    const assignments = openIds.length
+      ? await this.prisma.client.taskAssignment.findMany({
+          where: { unassignedAt: null, taskId: { in: openIds } },
+          select: { taskId: true, assignableType: true, assignableId: true },
+        })
+      : [];
+
+    // Task ids per person, as a set so the two mechanisms cannot double-count.
+    const held = new Map<string, Set<string>>();
+    const add = (type: string, id: string, taskId: string) => {
+      const key = `${type}:${id}`;
+      const set = held.get(key) ?? new Set<string>();
+      set.add(taskId);
+      held.set(key, set);
+    };
+
+    for (const a of assignments) add(a.assignableType, a.assignableId, a.taskId);
+    for (const t of openContact) {
+      if (t.assigneeId) add('User', t.assigneeId, t.id);
+    }
+
+    const assignedTaskIds = new Set<string>();
+    for (const set of held.values()) for (const id of set) assignedTaskIds.add(id);
+
+    const people = [
+      ...members.map((m) => ({
+        assignableType: 'User' as AssignableType,
+        assignableId: m.user.id,
+        name: m.user.name ?? m.user.email ?? m.user.id,
+        openTasks: held.get(`User:${m.user.id}`)?.size ?? 0,
+        // Stored per day; reported per week because capacity conversations are
+        // weekly and StaffMember's equivalent field already is.
+        weeklyCapacityHours: m.dailyCapacityHours != null ? m.dailyCapacityHours * 5 : null,
+      })),
+      ...staff.map((s) => ({
+        assignableType: 'StaffMember' as AssignableType,
+        assignableId: s.id,
+        name: s.name,
+        openTasks: held.get(`StaffMember:${s.id}`)?.size ?? 0,
+        weeklyCapacityHours: s.maxHoursPerWeek ?? null,
+      })),
+    ].sort((a, b) => b.openTasks - a.openTasks);
+
+    return {
+      people,
+      unassignedOpenTasks: openIds.filter((id) => !assignedTaskIds.has(id)).length,
+      scanned: openIds.length,
+      truncated:
+        openContact.length >= TaskAssignmentService.MAX_WORKLOAD_SCAN ||
+        openProject.length >= TaskAssignmentService.MAX_WORKLOAD_SCAN,
+    };
   }
 
   /**
