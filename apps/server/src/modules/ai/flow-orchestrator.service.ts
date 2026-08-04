@@ -991,6 +991,11 @@ export class FlowOrchestratorService {
       timestamp: new Date(),
     });
     await this.saveConversationHistory(businessId, sessionId, sessionMessages, userId);
+    // The ordinary streamed reply — the path almost every message takes. It was
+    // missed on the first pass, which wired only the non-streaming path and the
+    // rare deliberation branch, and the spec asserted "2 call sites" so it
+    // passed while the main path went unchecked.
+    void this.enforceDoNotSay(businessId, String(assistantContent ?? ''));
     yield { type: 'usage', usage };
     yield { type: 'done', sessionId };
   }

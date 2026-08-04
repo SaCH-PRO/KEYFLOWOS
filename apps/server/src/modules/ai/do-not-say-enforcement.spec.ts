@@ -140,12 +140,35 @@ describe('it stays out of the way', () => {
     await expect(enforce(broken, 'biz_1', 'synergy')).resolves.toBeUndefined();
   });
 
-  it('is fire-and-forget at both call sites, so it cannot delay a reply', () => {
-    const calls = [...code.matchAll(/this\.enforceDoNotSay\(/g)];
-    expect(calls.length).toBe(2);
+  it('is fire-and-forget everywhere, so it cannot delay a reply', () => {
     // `void` rather than `await`: this runs after the answer is already sent.
     expect(code).not.toMatch(/await this\.enforceDoNotSay\(/);
-    expect((code.match(/void this\.enforceDoNotSay\(/g) ?? []).length).toBe(2);
+    const calls = (code.match(/void this\.enforceDoNotSay\(/g) ?? []).length;
+    expect(calls).toBeGreaterThan(0);
+  });
+
+  it('covers EVERY path that persists an assistant reply', () => {
+    // This replaced `expect(calls.length).toBe(2)`, which passed while the main
+    // path was unchecked — the assertion encoded how many sites had been wired
+    // rather than how many exist. A magic number cannot notice a path you
+    // forgot; counting the real save points can.
+    //
+    // saveConversationHistory is the point at which a completed reply is known,
+    // so every call to it inside a response-producing method must be followed by
+    // the check. There are three: the non-streaming chat, the ordinary streamed
+    // reply (finalizeStreamSession — the one almost every message takes), and
+    // the deliberation branch.
+    const saves = [...code.matchAll(/await this\.saveConversationHistory\(/g)];
+    expect(saves.length).toBeGreaterThanOrEqual(3);
+
+    for (const save of saves) {
+      const after = code.slice(save.index!, save.index! + 700);
+      expect(
+        after,
+        'a reply is persisted here with no doNotSay check — this is how the ' +
+          'main streaming path was missed',
+      ).toMatch(/enforceDoNotSay\(/);
+    }
   });
 });
 
