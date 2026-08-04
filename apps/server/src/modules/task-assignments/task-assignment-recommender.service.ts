@@ -86,7 +86,19 @@ export class TaskAssignmentRecommenderService {
     ];
   }
 
-  private async workloadScore(assignableType: string, assignableId: string, _businessId: string): Promise<number> {
+  /**
+   * Open tasks for this person IN THIS BUSINESS.
+   *
+   * TaskAssignment carries no businessId — it is a polymorphic join keyed on
+   * (assignableType, assignableId) — so the tenant boundary can only be applied
+   * where the row lands, at the task table. Every scorer here took a
+   * `_businessId` it never used, which meant a person who belongs to two
+   * businesses had their workload summed across both: business A saw Ada as
+   * overloaded because of business B's work, and learned a fact about B in the
+   * process. Business is the tenant boundary in this codebase and an aggregate
+   * is still a disclosure.
+   */
+  private async workloadScore(assignableType: string, assignableId: string, businessId: string): Promise<number> {
     const assignments = await this.prisma.client.taskAssignment.findMany({
       where: { assignableType, assignableId, unassignedAt: null },
       select: { taskType: true, taskId: true },
@@ -98,12 +110,12 @@ export class TaskAssignmentRecommenderService {
     const [openContacts, openProjects] = await Promise.all([
       contactTaskIds.length > 0
         ? this.prisma.client.contactTask.count({
-            where: { id: { in: contactTaskIds }, status: { not: 'DONE' } },
+            where: { businessId, id: { in: contactTaskIds }, status: { not: 'DONE' } },
           })
         : 0,
       projectTaskIds.length > 0
         ? this.prisma.client.projectTask.count({
-            where: { id: { in: projectTaskIds }, isCompleted: false },
+            where: { businessId, id: { in: projectTaskIds }, isCompleted: false },
           })
         : 0,
     ]);
@@ -111,44 +123,45 @@ export class TaskAssignmentRecommenderService {
     return openContacts + openProjects;
   }
 
-  private async velocityScore(assignableType: string, assignableId: string, _businessId: string): Promise<number> {
+  /**
+   * What share of the week's work this person actually finished.
+   *
+   * Both halves of the ratio are ContactTask and both are scoped to this
+   * business. Previously the denominator counted assignments of EVERY type
+   * across EVERY business while the numerator counted only this-business
+   * ContactTask completions, so anyone whose work was mostly project tasks —
+   * or who simply belonged to a second business — scored a low velocity that
+   * measured nothing but the mismatch.
+   */
+  private async velocityScore(assignableType: string, assignableId: string, businessId: string): Promise<number> {
     const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
-    const [assignedAll, completedCount] = await Promise.all([
-      this.prisma.client.taskAssignment.count({
-        where: { assignableType, assignableId, assignedAt: { gte: since } },
+    const assignments = await this.prisma.client.taskAssignment.findMany({
+      where: { assignableType, assignableId, taskType: 'ContactTask', assignedAt: { gte: since } },
+      select: { taskId: true },
+      take: 200,
+    });
+    const taskIds = assignments.map((a) => a.taskId);
+    if (taskIds.length === 0) return 50; // neutral
+
+    const [assignedHere, completedCount] = await Promise.all([
+      this.prisma.client.contactTask.count({
+        where: { businessId, id: { in: taskIds } },
       }),
-      this.prisma.client.taskAssignment.count({
-        where: {
-          assignableType,
-          assignableId,
-          taskType: 'ContactTask',
-          assignedAt: { gte: since },
-        },
-      }).then(async (count) => {
-        if (count === 0) return 0;
-        const assignments = await this.prisma.client.taskAssignment.findMany({
-          where: { assignableType, assignableId, taskType: 'ContactTask', assignedAt: { gte: since } },
-          select: { taskId: true },
-          take: 200,
-        });
-        const taskIds = assignments.map((a) => a.taskId);
-        if (taskIds.length === 0) return 0;
-        return this.prisma.client.contactTask.count({
-          where: { id: { in: taskIds }, status: 'DONE', completedAt: { gte: since } },
-        });
+      this.prisma.client.contactTask.count({
+        where: { businessId, id: { in: taskIds }, status: 'DONE', completedAt: { gte: since } },
       }),
     ]);
 
-    if (assignedAll === 0) return 50; // neutral
-    return Math.round((completedCount / assignedAll) * 100);
+    if (assignedHere === 0) return 50; // neutral
+    return Math.round((completedCount / assignedHere) * 100);
   }
 
   private async skillScore(
     assignableType: string,
     assignableId: string,
     taskTitle: string,
-    _businessId: string,
+    businessId: string,
   ): Promise<number> {
     const taskWords = this.tokenize(taskTitle);
     if (taskWords.length === 0) return 50;
@@ -163,8 +176,11 @@ export class TaskAssignmentRecommenderService {
     if (assignments.length === 0) return 50;
 
     const taskIds = assignments.map((a) => a.taskId);
+    // The sharpest of the three. This reads task TITLES, so without businessId
+    // one tenant's task text was scoring recommendations in another — content
+    // across the boundary rather than a count.
     const tasks = await this.prisma.client.contactTask.findMany({
-      where: { id: { in: taskIds }, status: 'DONE' },
+      where: { businessId, id: { in: taskIds }, status: 'DONE' },
       select: { title: true },
       take: 50,
     });
