@@ -16,6 +16,26 @@ services:
     # simply a large compile.
     plan: pro
     branch: main
+    # ┌─ BEFORE YOU SCALE THIS PAST ONE INSTANCE ─────────────────────────────┐
+    # │ There is no leader election or single-runner guard on any @Cron, and  │
+    # │ there are 25 of them. Every replica would run every sweep for every   │
+    # │ business in the estate.                                               │
+    # │                                                                       │
+    # │ Some are idempotent and would only waste work. These are not:         │
+    # │                                                                       │
+    # │   key-proactive-engine.service.ts — three hourly rhythms that SEND    │
+    # │   the morning brief, the weekly digest and the end-of-day summary.    │
+    # │   N replicas means N copies of each email.                            │
+    # │                                                                       │
+    # │   key-cortex-homeostasis / -salience — release hormones. release()    │
+    # │   accumulates asymptotically, so N replicas push N doses per window   │
+    # │   and KEY's disposition shifts on replica count rather than on the    │
+    # │   business.                                                           │
+    # │                                                                       │
+    # │ Latent today because Render defaults to one instance, which is why    │
+    # │ this is a note rather than a Postgres advisory lock nobody needs yet. │
+    # │ Adding instances without a guard makes it real immediately.           │
+    # └───────────────────────────────────────────────────────────────────────┘
     # The build actually has to build. This previously ran `pnpm install` only,
     # which is why the start command had to use tsx — there was no compiled
     # output to run. tsx cannot start this server (it does not emit
