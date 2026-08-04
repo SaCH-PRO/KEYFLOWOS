@@ -162,6 +162,21 @@ export class KeyCortexSalienceService {
 
     const all = [...threats, ...opportunities];
     this.current.set(businessId, { concerns: all, appraisedAt: new Date() });
+
+    // Persist FIRST, and unconditionally.
+    //
+    // The empty appraisal is not a no-op — it is the single case the deleteMany
+    // inside exists for. Everything that was worrying has resolved, and the rows
+    // still asserting otherwise are what a human reads. Returning early on
+    // `all.length === 0` meant the retraction never ran: the dashboard went on
+    // reporting twelve overdue invoices, at "100% confident", after they were
+    // paid, with nothing that could ever clear them.
+    //
+    // The endocrine service is @Optional, so gating on it here also meant a
+    // deployment without it surfaced nothing at all. Visibility must not depend
+    // on the hormone system being wired.
+    await this.persistConcerns(businessId, threats, opportunities);
+
     if (all.length === 0 || !this.endocrine) return all;
 
     // ONE dose per valence, from the strongest of each. Dosing per concern
@@ -194,21 +209,6 @@ export class KeyCortexSalienceService {
     }
 
     this.endocrine.release(businessId, signals);
-
-    // And make them VISIBLE, not merely felt.
-    //
-    // Everything above converts a ranked concern into a disposition: a hormone
-    // that shifts how KEY writes. That is the whole arc the atlas calls open —
-    // the signal is real, well-formed, and terminates in a change of tone. The
-    // owner only learns "12 overdue invoices against a normal of 3" if they
-    // happen to open the chat and ask something it bears on.
-    //
-    // The awareness feed is already live and already rendered on the command
-    // centre, so surfacing here costs one write and reaches a human without
-    // being asked. Deliberately NOT an action: this service states, in its own
-    // header, that it has no hands, and giving a background sweep the ability to
-    // act on the business is a product decision rather than a missing wire.
-    await this.persistConcerns(businessId, threats, opportunities);
 
     this.logger.log(
       `[salience] ${businessId}: ${threats.length} threat(s), ${opportunities.length} opportunity(s)` +
@@ -335,6 +335,19 @@ export class KeyCortexSalienceService {
    * that no longer clears the salience floor must VANISH, or the dashboard goes
    * on reporting twelve overdue invoices after they have been paid. A stale
    * fact stated confidently is worse than no fact.
+   *
+   * Which is why appraise() calls this before its own early returns, including
+   * the empty one. An appraisal that finds nothing is the retraction.
+   *
+   * This makes concerns VISIBLE rather than merely felt. The rest of appraise
+   * converts a ranked concern into a disposition — a hormone that shifts how KEY
+   * writes — so the arc terminated in a change of TONE, and the owner learned
+   * "12 overdue invoices against a normal of 3" only if they happened to open
+   * the chat and ask something it bore on. The awareness feed is already live
+   * and already rendered on the command centre, so this costs one write and
+   * reaches a human unprompted. Deliberately NOT an action: this service states
+   * in its own header that it has no hands, and letting a background sweep act
+   * on a business is a product decision rather than a missing wire.
    */
   private async persistConcerns(
     businessId: string,
@@ -389,8 +402,9 @@ export class KeyCortexSalienceService {
         },
       });
     } catch (err: unknown) {
-      // A failed write must never undo the hormone release that already
-      // happened, nor stop the sweep for the rest of the estate.
+      // A failed write must never cost the hormone release that follows it, nor
+      // stop the sweep for the rest of the estate. Surfacing is the softer of
+      // the two effects; losing the disposition as well would be worse.
       this.logger.warn(
         `[salience] persist failed for ${businessId}: ${err instanceof Error ? err.message : String(err)}`,
       );

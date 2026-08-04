@@ -227,6 +227,38 @@ describe('the choice is offered, and its state is honest', () => {
     expect(fn.slice(0, 2500)).toMatch(/reason/);
   });
 
+  it('every dispatchable provider has metrics and a circuit breaker', () => {
+    // Three separate hardcoded provider literals existed — metrics init,
+    // circuit-breaker init, and getProviderHealth — and adding `google` today
+    // updated none of them. Not cosmetic: every recorder guards with
+    // `if (metrics)` / `if (circuit)` and isCircuitOpen returns false for a
+    // provider it holds no state for, so a failing Gemini endpoint recorded no
+    // errors, never tripped its breaker, and would have been re-tried on every
+    // single request with the fallback chain paying each time.
+    //
+    // Asserted through the public health surface rather than by reading the
+    // literals, so the next provider added is covered by construction.
+    const gateway = new ModelGatewayService({} as never, {} as never);
+    const health = gateway.getProviderHealth();
+    const reported = health.map((h) => h.provider);
+
+    for (const provider of SELECTABLE_PROVIDERS) {
+      expect(reported, `${provider} is selectable but absent from health`).toContain(provider);
+    }
+  });
+
+  it('reports health for a provider that has never been called', () => {
+    // The metrics entry has to EXIST, not merely be reachable once traffic
+    // flows — which is the difference between an undefined map lookup and a
+    // zeroed record.
+    const gateway = new ModelGatewayService({} as never, {} as never);
+    const google = gateway.getProviderHealth().find((h) => h.provider === 'google');
+
+    expect(google).toBeDefined();
+    expect(google!.errorRate).toBe(0);
+    expect(google!.circuitOpen).toBe(false);
+  });
+
   it('is reachable over HTTP, behind the tenant guard', () => {
     const route = controller.indexOf("@Get('businesses/:businessId/ai/providers')");
     expect(route).toBeGreaterThan(-1);

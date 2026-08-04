@@ -153,9 +153,20 @@ describe('CognitiveTriageService', () => {
   });
 
   describe('reflex is a whitelist, not a low score', () => {
-    it('reflexes on greetings and acknowledgements', () => {
-      for (const m of ['hi', 'hello', 'thanks', 'ok', 'bye']) {
+    it('reflexes on greetings and sign-offs', () => {
+      for (const m of ['hi', 'hello', 'thanks', 'thank you', 'bye']) {
         expect(svc.triage('biz_1', m).tier, m).toBe('reflex');
+      }
+    });
+
+    it('the whitelist is an upper bound, not a guarantee', () => {
+      // `yo`, `ty` and `cheers` are in isBareAcknowledgement's regex and have
+      // never once reflexed: reflex also requires complexity === 'simple', and
+      // the dimension classifier's simpleMarkers do not match them. Recorded
+      // rather than fixed — the conservative direction is harmless, and someone
+      // reading the regex would otherwise assume coverage it does not have.
+      for (const m of ['yo', 'ty', 'cheers']) {
+        expect(svc.triage('biz_1', m).tier, m).not.toBe('reflex');
       }
     });
 
@@ -195,9 +206,32 @@ describe('CognitiveTriageService', () => {
       }
     });
 
-    it('still reflexes a genuine bare acknowledgement', () => {
-      for (const m of ['hi', 'ok', 'thanks!', 'thank you', 'yes', 'no', 'bye', 'ok thanks']) {
+    it('still reflexes a genuine bare greeting', () => {
+      for (const m of ['hi', 'hey', 'thanks!', 'thank you', 'bye', 'goodbye', 'hi thanks']) {
         expect(svc.triage('biz_1', m).tier, `"${m}" did not reflex`).toBe('reflex');
+      }
+    });
+
+    it('NEVER reflexes a bare confirmation, because the reflex tier has no tools', () => {
+      // A confirmation carries no meaning of its own — it means whatever KEY
+      // asked on the previous turn. "Shall I send the invoice to Ada?" / "yes"
+      // graded reflex, and the reflex tier sends `tools: undefined`, so the only
+      // reply available to the model was one that CLAIMED a send it could not
+      // perform.
+      //
+      // Rejections are here for the same reason in reverse: declining a pending
+      // action is a cancellation, which is also a tool call.
+      for (const m of ['yes', 'yep', 'ok', 'okay', 'k', 'no', 'nope', 'got it', 'perfect']) {
+        expect(svc.triage('biz_1', m).tier, `"${m}" reflexed`).not.toBe('reflex');
+      }
+    });
+
+    it('does not let a trailing pleasantry launder a confirmation', () => {
+      // "ok thanks" reads as a sign-off and is also exactly how someone
+      // approves a pending action. The optional-suffix group must not turn a
+      // confirmation into a greeting.
+      for (const m of ['ok thanks', 'yes please', 'ok please']) {
+        expect(svc.triage('biz_1', m).tier, `"${m}" reflexed`).not.toBe('reflex');
       }
     });
 

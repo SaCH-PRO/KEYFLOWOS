@@ -174,6 +174,27 @@ export class CognitiveTriageService {
    * A trailing "please"/"thanks" is tolerated because "ok thanks" is still a
    * bare acknowledgement, but anything carrying a verb or an object is not.
    */
+  /**
+   * Greetings and sign-offs only — deliberately NOT confirmations.
+   *
+   * The reflex tier sends `tools: undefined`. That is safe for "hi" and it is
+   * not safe for "yes", because a bare confirmation carries no meaning of its
+   * own: it means whatever KEY asked in the previous turn. "Shall I send the
+   * invoice to Ada?" / "yes" graded reflex, went to the model with no tools,
+   * and the only reply available was one that CLAIMED the send. KEY confirming
+   * an action it had no hands to perform is the exact failure mode this codebase
+   * has been closing all day.
+   *
+   * So the split is not social-vs-terse, it is: can this word authorise
+   * something? `ok, okay, k, yes, yep, no, nope, got it, perfect, great, nice`
+   * all can, including the rejections — declining a pending action is itself a
+   * cancellation, which is also a tool call. `thanks` and `bye` cannot, whatever
+   * preceded them.
+   *
+   * The trade is deliberately lopsided. Missing a reflex costs a few hundred
+   * tokens on the next tier and still answers correctly; a false reflex makes
+   * KEY lie about work it did not do.
+   */
   private isBareAcknowledgement(text: string): boolean {
     const cleaned = text
       .toLowerCase()
@@ -183,7 +204,7 @@ export class CognitiveTriageService {
 
     if (cleaned.length === 0 || cleaned.length > 24) return false;
 
-    return /^(hi|hello|hey|yo|thanks|thank you|ty|ok|okay|k|yes|yep|no|nope|bye|goodbye|cheers|got it|perfect|great|nice)( (thanks|thank you|please))?$/.test(
+    return /^(hi|hello|hey|yo|thanks|thank you|ty|bye|goodbye|cheers)( (thanks|thank you|please))?$/.test(
       cleaned,
     );
   }

@@ -20,6 +20,56 @@ import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AWARENESS_TYPES } from './key-cortex-awareness.service';
+import { KeyCortexSalienceService } from './key-cortex-salience.service';
+
+const BIZ = 'biz_1';
+
+function threat(signal: string) {
+  return {
+    signal,
+    summary: `${signal} is escalating`,
+    valence: 'threat' as const,
+    salience: 0.8,
+    recentCount: 12,
+    baselineRate: 3,
+    escalating: true,
+  };
+}
+
+/**
+ * Drives the REAL appraise() with the two rankers stubbed, so persistence is
+ * observed rather than inferred from the shape of the source.
+ */
+function makeSalience(
+  threats: ReturnType<typeof threat>[],
+  opts: { opportunities?: ReturnType<typeof threat>[]; withEndocrine?: boolean } = {},
+) {
+  const upserts: any[] = [];
+  const deletes: any[] = [];
+
+  const service = Object.assign(Object.create(KeyCortexSalienceService.prototype), {
+    prisma: {
+      client: {
+        keyCortexMemory: {
+          upsert: vi.fn(async (a: any) => {
+            upserts.push(a);
+          }),
+          deleteMany: vi.fn(async (a: any) => {
+            deletes.push(a);
+          }),
+        },
+      },
+    },
+    current: new Map(),
+    logger: { log: vi.fn(), warn: vi.fn() },
+    endocrine: opts.withEndocrine === false ? undefined : { release: vi.fn() },
+  });
+
+  service.rank = vi.fn(async () => threats);
+  service.rankOpportunities = vi.fn(async () => opts.opportunities ?? []);
+
+  return { upserts, deletes, service, appraise: () => service.appraise(BIZ) };
+}
 
 const server = readFileSync(join(__dirname, 'key-cortex-salience.service.ts'), 'utf8');
 const awareness = readFileSync(join(__dirname, 'key-cortex-awareness.service.ts'), 'utf8');
@@ -34,10 +84,18 @@ describe('the concerns are written where something reads them', () => {
     expect(fn.slice(0, 2600)).toMatch(/keyCortexMemory\.upsert/);
   });
 
-  it('is called from the appraisal, not merely defined', () => {
+  it('is called from the appraisal, not merely defined', async () => {
     // The failure this codebase repeats: a complete method nothing invokes.
-    const appraise = server.slice(server.indexOf('async appraise('));
-    expect(appraise.slice(0, 2600)).toMatch(/await this\.persistConcerns\(/);
+    //
+    // This assertion used to read the SOURCE of appraise for the substring
+    // `await this.persistConcerns(`. It passed for weeks while the call sat
+    // below `if (all.length === 0 || !this.endocrine) return all;` and was
+    // unreachable in the case that mattered. Text proximity is not reachability;
+    // run the method.
+    const h = makeSalience([threat('overdue_invoice')]);
+    await h.appraise();
+
+    expect(h.upserts).toHaveLength(1);
   });
 
   it('uses the types the awareness feed actually whitelists', () => {
@@ -59,22 +117,57 @@ describe('the concerns are written where something reads them', () => {
 });
 
 describe('a resolved concern disappears', () => {
-  it('deletes concerns that no longer clear the floor', () => {
+  it('deletes concerns that no longer clear the floor', async () => {
     // The half that is easy to forget and matters most. Without it the
     // dashboard goes on reporting twelve overdue invoices after they are paid,
     // and a stale fact stated confidently is worse than no fact.
-    const fn = server.slice(server.indexOf('private async persistConcerns('));
-    expect(fn.slice(0, 2600)).toMatch(/deleteMany/);
-    expect(fn.slice(0, 2600)).toMatch(/notIn: live/);
+    const h = makeSalience([threat('overdue_invoice')]);
+    await h.appraise();
+
+    expect(h.deletes).toHaveLength(1);
+    expect(h.deletes[0].where.key.notIn).toEqual(['overdue_invoice']);
   });
 
-  it('scopes the delete to one business', () => {
+  it('RETRACTS when the appraisal comes back empty', async () => {
+    // The case the whole delete exists for, and the one it did not run in.
+    // `if (all.length === 0 || !this.endocrine) return all;` sat above the
+    // persist call, so the moment every concern resolved — the good news — the
+    // rows saying otherwise became permanent. Nothing else in the system ever
+    // clears them, and getAwareness applies no default age filter.
+    const h = makeSalience([]);
+    await h.appraise();
+
+    expect(h.deletes).toHaveLength(1);
+    expect(h.deletes[0].where.key.notIn).toEqual([]);
+    expect(h.upserts).toEqual([]);
+  });
+
+  it('surfaces even with no endocrine service wired', async () => {
+    // It is @Optional, and it gated visibility. A deployment without hormones
+    // showed the owner nothing at all.
+    const h = makeSalience([threat('overdue_invoice')], { withEndocrine: false });
+    await h.appraise();
+
+    expect(h.upserts).toHaveLength(1);
+  });
+
+  it('scopes the delete to one business', async () => {
     // Without businessId this clears every tenant's concerns on every hourly
     // appraisal. The guard establishes who is asking; it does not constrain
     // what a query touches.
-    const fn = server.slice(server.indexOf('private async persistConcerns('));
-    const del = fn.slice(fn.indexOf('deleteMany'), fn.indexOf('deleteMany') + 400);
-    expect(del).toMatch(/businessId,/);
+    const h = makeSalience([threat('overdue_invoice')]);
+    await h.appraise();
+
+    expect(h.deletes[0].where.businessId).toBe(BIZ);
+  });
+
+  it('retracts only its own memory types', async () => {
+    // notIn: [] on an empty appraisal matches every row, so the type filter is
+    // the only thing standing between a quiet week and a wiped memory store.
+    const h = makeSalience([]);
+    await h.appraise();
+
+    expect(h.deletes[0].where.type.in).toEqual(['salience_concern', 'salience_momentum']);
   });
 
   it('refreshes one row per signal rather than accumulating hourly', () => {

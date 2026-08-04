@@ -218,12 +218,19 @@ describe('the send is actually gated, and deferred rather than dropped', () => {
   });
 
   it('a blocked task is left pending, not cancelled', () => {
-    // Cancelling would silently lose a collection because the customer happened
-    // to fall due overnight. The 5-minute sweep reconsiders it, and dedupeKey
-    // prevents a double send once the window opens.
+    // Kept, but it is worth being honest about how little it proves. This
+    // assertion passed against code that created a PENDING task and then never
+    // sent the email for the life of the invoice, because the milestone dedupe
+    // carried no status predicate and every later sweep skipped the task it had
+    // just made. "Not cancelled" and "eventually sent" are different claims, and
+    // only this one was ever checked.
+    //
+    // payment-recovery-deferral.spec.ts makes the other claim, by running the
+    // loop across a closed sweep and then an open one. THAT is the test that
+    // fails if the deferral is dropped.
     const block = code.slice(code.indexOf('if (!window.allowed)'));
-    expect(block.slice(0, 400)).toMatch(/deferring/);
-    expect(block.slice(0, 400)).not.toMatch(/SKIPPED|CANCELLED|status:/);
+    expect(block.slice(0, 800)).toMatch(/deferring/);
+    expect(block.slice(0, 800)).not.toMatch(/SKIPPED|CANCELLED|status:/);
   });
 
   it('checks at send time, not at task creation', () => {

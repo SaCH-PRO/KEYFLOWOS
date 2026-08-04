@@ -531,7 +531,20 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
           aiContext: { path: ['milestone'], equals: currentMilestone },
         },
       });
-      if (existingForMilestone) continue;
+
+      // A task already raised for this milestone is only FINISHED WITH if it was
+      // actioned, or if it belongs to a human now. One still sitting at PENDING
+      // with no executedAt is precisely what the contact-window deferral below
+      // creates — and skipping it here is what turned "deferred" into "never
+      // sent", because the very next sweep found the task it had just made and
+      // continued past it for the rest of the invoice's life.
+      const deferred =
+        !!existingForMilestone &&
+        existingForMilestone.status === 'PENDING' &&
+        !existingForMilestone.requiresApproval &&
+        !existingForMilestone.executedAt;
+
+      if (existingForMilestone && !deferred) continue;
 
       if (invoice.status === 'SENT' && daysPastDue >= graceDays) {
         await this.prisma.client.invoice.update({
@@ -566,7 +579,10 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
       const contactName = [invoice.contact.firstName, invoice.contact.lastName].filter(Boolean).join(' ') || 'Customer';
       const needsApproval = requiresConfirm || priority === 'URGENT';
 
-      const task = await this.prisma.client.autopilotTask.create({
+      // Resume the deferred task rather than raising a second one for the same
+      // milestone. The email carries a dedupeKey as a second line of defence,
+      // but two tasks for one reminder is itself the wrong record.
+      const task = existingForMilestone ?? await this.prisma.client.autopilotTask.create({
         data: {
           businessId,
           title: `Payment reminder: ${invoice.invoiceNumber} — TTD ${Number(invoice.total).toFixed(2)}`,
@@ -592,22 +608,34 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
         },
       });
 
-      await this.timeline.logEvent(
-        businessId,
-        invoice.contact.id,
-        CONTACT_EVENT.AUTOPILOT_PAYMENT_RECOVERY,
-        { description: `${cadenceLabel} created for invoice ${invoice.invoiceNumber} (${daysPastDue} days overdue)`, taskId: task.id, invoiceId: invoice.id, daysPastDue, cadence: cadenceLabel, milestone: currentMilestone },
-        { source: 'delegation_loop' },
-      );
+      if (existingForMilestone) {
+        // Governance can change between the deferral and the retry — a business
+        // turning on confirm-before-send overnight must hand the task to a human
+        // rather than have it silently sent at 07:00 on the old flags.
+        if (existingForMilestone.requiresApproval !== needsApproval) {
+          await this.prisma.client.autopilotTask.update({
+            where: { id: task.id },
+            data: { requiresApproval: needsApproval, autoExecutable: !needsApproval },
+          });
+        }
+      } else {
+        await this.timeline.logEvent(
+          businessId,
+          invoice.contact.id,
+          CONTACT_EVENT.AUTOPILOT_PAYMENT_RECOVERY,
+          { description: `${cadenceLabel} created for invoice ${invoice.invoiceNumber} (${daysPastDue} days overdue)`, taskId: task.id, invoiceId: invoice.id, daysPastDue, cadence: cadenceLabel, milestone: currentMilestone },
+          { source: 'delegation_loop' },
+        );
 
-      this.events.emit('autopilot.task.created', {
-        businessId,
-        taskId: task.id,
-        category: 'PAYMENT_RECOVERY',
-        loopType: 'payment_recovery',
-        relatedId: invoice.id,
-        priority,
-      });
+        this.events.emit('autopilot.task.created', {
+          businessId,
+          taskId: task.id,
+          category: 'PAYMENT_RECOVERY',
+          loopType: 'payment_recovery',
+          relatedId: invoice.id,
+          priority,
+        });
+      }
 
       // The window is checked HERE, at the send, not when the task is created.
       // A task raised at 21:55 must not fire at 22:05 because it was cleared
@@ -618,9 +646,11 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
         : { allowed: true as const, reason: undefined };
 
       if (!window.allowed) {
-        // DEFERRED, not dropped. The task stays pending, the next sweep
-        // reconsiders it, and dedupeKey below prevents a double send when the
-        // window opens. Cancelling would silently lose a collection because the
+        // DEFERRED, not dropped — which is only true because the milestone
+        // dedupe above deliberately lets a PENDING, never-executed task through
+        // again. The task stays pending, the next sweep resumes THIS row rather
+        // than raising a new one, and dedupeKey below is the second guard on a
+        // double send. Cancelling would silently lose a collection because the
         // customer happened to fall due overnight.
         this.logger.log(
           `[payment_recovery] deferring ${invoice.id} for ${businessId}: ${window.reason}`,

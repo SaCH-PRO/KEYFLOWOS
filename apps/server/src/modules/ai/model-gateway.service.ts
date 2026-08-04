@@ -210,6 +210,23 @@ export interface AiPreferences {
  */
 export const SELECTABLE_PROVIDERS: AiProvider[] = ['openai', 'anthropic', 'google', 'xai', 'kimi'];
 
+/**
+ * Every provider the gateway can dispatch to, selectable or not.
+ *
+ * Metrics, circuit breakers and health all derive from this ONE list, because
+ * they used to be three separate literals and adding `google` updated none of
+ * them. The consequences were not cosmetic: `providerMetrics.get('google')` and
+ * `circuitBreakers.get('google')` both returned undefined, every recorder guards
+ * with `if (metrics)` / `if (circuit)`, so a failing Gemini endpoint recorded no
+ * errors and its breaker could never open — isCircuitOpen returns false for a
+ * provider it has no state for. A dead endpoint would have been retried on every
+ * request, indefinitely, with the fallback chain paying for it each time.
+ *
+ * `native` and `opensource` are dispatch targets that are not user-selectable,
+ * which is the whole reason this cannot simply BE SELECTABLE_PROVIDERS.
+ */
+const ALL_PROVIDERS: AiProvider[] = [...SELECTABLE_PROVIDERS, 'native', 'opensource'];
+
 const PROVIDER_DEFAULT_MODEL: Partial<Record<AiProvider, string>> = {
   openai: 'gpt-4o',
   anthropic: 'claude-3-5-sonnet-20241022',
@@ -614,7 +631,7 @@ export class ModelGatewayService {
       configured: !!process.env.OPENROUTER_API_KEY || !!process.env.OLLAMA_BASE_URL,
     });
 
-    for (const provider of ['openai', 'anthropic', 'xai', 'kimi', 'native', 'opensource'] as AiProvider[]) {
+    for (const provider of ALL_PROVIDERS) {
       this.providerMetrics.set(provider, {
         totalCalls: 0,
         totalErrors: 0,
@@ -2701,7 +2718,7 @@ export class ModelGatewayService {
   getProviderHealth(): ProviderHealth[] {
     const results: ProviderHealth[] = [];
 
-    for (const provider of ['openai', 'anthropic', 'xai', 'kimi', 'native', 'opensource'] as AiProvider[]) {
+    for (const provider of ALL_PROVIDERS) {
       const config = this.providerClients.get(provider);
       const metrics = this.providerMetrics.get(provider)!;
       const circuitOpen = this.isCircuitOpen(provider);

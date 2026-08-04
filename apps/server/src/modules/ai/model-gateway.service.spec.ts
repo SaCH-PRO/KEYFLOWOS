@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
-import { ModelGatewayService, type GatewayRequest, type AiProvider, type AiMode, type TaskCategory } from './model-gateway.service';
+import { ModelGatewayService, SELECTABLE_PROVIDERS, type GatewayRequest, type AiProvider, type AiMode, type TaskCategory } from './model-gateway.service';
 import { LLMCostService } from './llm-cost.service';
 
 const mockPrismaClient = {
@@ -421,7 +421,18 @@ describe('ModelGatewayService', () => {
   describe('Provider health tracking', () => {
     it('starts with zero metrics for all providers', () => {
       const health = service.getProviderHealth();
-      expect(health).toHaveLength(6);
+
+      // Derived, not a magic number. This read `toHaveLength(6)` and adding a
+      // seventh provider failed here — which is the right alarm, but it says
+      // nothing about WHICH provider is missing, and the tempting fix is to
+      // bump the 6 to a 7 rather than to check coverage.
+      for (const provider of SELECTABLE_PROVIDERS) {
+        expect(
+          health.map((h) => h.provider),
+          `${provider} is selectable but has no metrics entry`,
+        ).toContain(provider);
+      }
+      expect(health.length).toBeGreaterThanOrEqual(SELECTABLE_PROVIDERS.length);
 
       for (const h of health) {
         expect(h.totalCalls).toBe(0);
