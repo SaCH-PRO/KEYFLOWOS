@@ -171,7 +171,17 @@ export const PLANS: Record<string, PlanDefinition> = {
       staffMembers: 1,
       products: 10,
       automations: 0,
-      aiCreditsPerMonth: 10000,
+      // 10, not 10000. The feature list two lines up advertises "10 AI
+      // credits/month" and the paid FLOW tier at $15/mo gets 100 — so this gave
+      // free accounts one hundred times what customers pay for, and a thousand
+      // times what they were promised. Every other FREE limit here is small
+      // (50 contacts, 5 invoices, 1 staff member), which is what makes it a
+      // slipped keystroke rather than a decision.
+      //
+      // getActiveSubscription falls back to PLANS.FREE for any business with no
+      // subscription row or an expired trial, so this was the default ceiling
+      // for every unpaid account in the system.
+      aiCreditsPerMonth: 10,
       aiSuggestions: false,
       customBranding: false,
       prioritySupport: false,

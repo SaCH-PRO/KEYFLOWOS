@@ -62,7 +62,13 @@ interface UsageSummary {
   budget?: BudgetStatus;
 }
 
-const FEATURE_TASK_MAP: Record<string, TaskCategory> = {
+/**
+ * Exported so a test can assert every feature passed to trackAndComplete has an
+ * entry. An unmapped feature falls through to 'general' and is billed at the
+ * top model rate without anyone choosing that, which is exactly how the entire
+ * cortex background workload ended up on gpt-4o.
+ */
+export const FEATURE_TASK_MAP: Record<string, TaskCategory> = {
   flow_chat: 'tool-calling',
   plan_decompose: 'reasoning',
   intent_parse: 'classification',
@@ -121,6 +127,66 @@ const FEATURE_TASK_MAP: Record<string, TaskCategory> = {
   revenue_action: 'reasoning',
   note_summarize: 'summarization',
   automation_generate: 'tool-calling',
+
+  // ─── Cortex background work ────────────────────────────────────────────────
+  //
+  // None of these were mapped, so resolveTaskCategory fell through to 'general'
+  // — which the balanced routing table points at gpt-4o, the most expensive
+  // model available. They are the highest-VOLUME calls in the system by a wide
+  // margin (reflection alone can make 21 per business per tick, and it ticks
+  // every 30 minutes), and not one of them is a reasoning task: they rank,
+  // classify and summarise, which is exactly what the map already sends to
+  // gpt-4o-mini for sixty other features.
+  //
+  // gpt-4o vs gpt-4o-mini is roughly 12x on input and 9x on output, so this
+  // costs nothing in behaviour and removes most of the background bill.
+  //
+  // A feature absent from this map is silently billed at the top rate, which is
+  // why the omission was invisible. `ai-usage-feature-coverage.spec.ts` now
+  // asserts every feature string passed to trackAndComplete appears here.
+  'reflection-rank': 'analysis',
+  'reflection-outcome': 'classification',
+  'dream-connections': 'analysis',
+  // Left on the expensive tier deliberately: hypothesis generation is the one
+  // place where output quality is the whole point, and it runs twice per
+  // business per night rather than 48 times a day.
+  'dream-hypotheses': 'creative',
+  'synthesis-report': 'summarization',
+  'intuition-semantic': 'analysis',
+  'intuition-anomaly-explain': 'analysis',
+
+  // Ideation. Kept on the expensive tier on purpose — this is the one place
+  // where the quality of the output IS the product, and each runs once a day
+  // rather than on a 10- or 30-minute sweep. The cost lever here is how many
+  // techniques get invoked per run, not which model answers them.
+  'creativity-strategy': 'creative',
+  'creativity-lateral': 'creative',
+  'creativity-combination': 'creative',
+  'creativity-inversion': 'creative',
+  'creativity-analogy': 'creative',
+  'creativity-constraint-removal': 'creative',
+  'creativity-extreme-users': 'creative',
+  'creativity-trend-riding': 'creative',
+  'creativity-problem-first': 'creative',
+
+  // Interpreting a user's phrasing into a structured intent. Classification by
+  // any other name, and previously billed as open-ended reasoning.
+  key_flow_interpret: 'classification',
+  key_delegation_interpret: 'classification',
+  key_calendar_interpret: 'classification',
+  key_inbox_classify: 'classification',
+
+  key_inbox_intelligence: 'analysis',
+  key_inbox_brief: 'summarization',
+  calendar_action_intelligence: 'analysis',
+  blueprint_onboarding: 'extraction',
+
+  // There is a dedicated category for this; it was falling through to general.
+  emotion_detection: 'emotion-analysis',
+
+  // Genuinely multi-step reasoning, and named so deliberately rather than by
+  // omission.
+  reasoning_engine: 'reasoning',
 };
 
 @Injectable()
