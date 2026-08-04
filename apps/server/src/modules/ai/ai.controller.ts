@@ -13,7 +13,7 @@ import { StrategicIntelligenceService } from './strategic-intelligence.service';
 import { ProAutoMonitorService } from './pro-auto-monitor.service';
 import { ProfileIntelligenceService } from './profile-intelligence.service';
 import { WorkspaceRecommendationsService } from './workspace-recommendations.service';
-import { ModelGatewayService, AiMode, BudgetCaps } from './model-gateway.service';
+import { ModelGatewayService, AiMode, BudgetCaps, AiProvider } from './model-gateway.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { Request } from 'express';
@@ -1144,6 +1144,22 @@ export class AiController {
     return { success: true };
   }
 
+  /**
+   * Which AI providers this business can pick between, and whether each is
+   * usable right now.
+   *
+   * Returns every provider the product supports rather than only the working
+   * ones, with a reason attached when a provider is unusable. A business that
+   * cannot see Anthropic in the list has no reason to go and supply an
+   * Anthropic key, so hiding the unconfigured ones would keep them
+   * unconfigured.
+   */
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/ai/providers')
+  async getAiProviders(@Param('businessId') businessId: string) {
+    return { providers: await this.gateway.listSelectableProviders(businessId) };
+  }
+
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/ai/preferences')
   async getAiPreferences(@Param('businessId') businessId: string) {
@@ -1151,6 +1167,7 @@ export class AiController {
     return {
       mode: prefs.aiMode,
       writingStyle: prefs.preferredWritingStyle || 'professional',
+      preferredProvider: prefs.preferredProvider ?? null,
       byokOpenai: prefs.byokOpenai ? '••••••••' : null,
       byokAnthropic: prefs.byokAnthropic ? '••••••••' : null,
       byokXai: prefs.byokXai ? '••••••••' : null,
@@ -1164,6 +1181,8 @@ export class AiController {
     @Param('businessId') businessId: string,
     @Body() body: {
       mode?: AiMode;
+      /** Null clears the preference and returns routing to the default chain. */
+      preferredProvider?: AiProvider | null;
       writingStyle?: string;
       byokOpenai?: string | null;
       byokAnthropic?: string | null;
@@ -1188,6 +1207,12 @@ export class AiController {
     const updates: Record<string, unknown> = {};
     if (body.mode !== undefined) updates.aiMode = body.mode;
     if (body.writingStyle !== undefined) updates.preferredWritingStyle = body.writingStyle;
+    // '' is the clear signal the gateway understands, matching how the BYOK
+    // fields below treat null. Validation of the value itself lives in
+    // updatePreferences so it applies however the preference is set.
+    if (body.preferredProvider !== undefined) {
+      updates.preferredProvider = body.preferredProvider === null ? '' : body.preferredProvider;
+    }
     if (body.byokOpenai !== undefined) updates.byokOpenai = body.byokOpenai === null ? '' : body.byokOpenai;
     if (body.byokAnthropic !== undefined) updates.byokAnthropic = body.byokAnthropic === null ? '' : body.byokAnthropic;
     if (body.byokXai !== undefined) updates.byokXai = body.byokXai === null ? '' : body.byokXai;
@@ -1198,6 +1223,7 @@ export class AiController {
       success: true,
       mode: merged.aiMode,
       writingStyle: merged.preferredWritingStyle || 'professional',
+      preferredProvider: merged.preferredProvider ?? null,
       budgetCaps: merged.budgetCaps || null,
     };
   }

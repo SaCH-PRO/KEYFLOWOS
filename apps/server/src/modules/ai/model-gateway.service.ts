@@ -162,6 +162,17 @@ export interface BudgetStatus {
 
 export interface AiPreferences {
   aiMode: AiMode;
+  /**
+   * The provider this business would rather KEY used.
+   *
+   * A PREFERENCE, not a pin. If the chosen provider has no key configured, or
+   * its circuit breaker is open, routing falls through the normal chain exactly
+   * as if nothing had been chosen — a business that picks a provider it has not
+   * supplied a key for gets a working assistant, not an error.
+   *
+   * Left unset, routing behaves exactly as before.
+   */
+  preferredProvider?: AiProvider;
   preferredWritingStyle?: string;
   byokOpenai?: string;
   byokAnthropic?: string;
@@ -170,6 +181,40 @@ export interface AiPreferences {
   byokNative?: string;
   budgetCaps?: BudgetCaps;
 }
+
+/**
+ * The model to use when a business has PREFERRED a provider that the routing
+ * table does not list for this task.
+ *
+ * A preference must not become a hard failure, so it needs a model that the
+ * provider definitely serves. These are the general-purpose choice for each —
+ * not necessarily the cheapest or the strongest, but the one least likely to be
+ * wrong for arbitrary work.
+ *
+ * A provider absent from this map simply cannot be promoted, and routing falls
+ * through to the normal chain.
+ */
+/**
+ * Providers a business may choose between.
+ *
+ * 'opensource' and 'native' are deliberately excluded: they are infrastructure
+ * routes (OpenRouter / Ollama / a self-hosted endpoint) configured by operators
+ * rather than products a business picks, and neither has a per-business BYOK
+ * field to make the choice meaningful.
+ *
+ * Being listed here does NOT mean the provider is usable — that depends on a key
+ * being configured, which isProviderAvailable checks at routing time. Today only
+ * OpenAI is reliably configured; the rest are selectable and simply fall through
+ * until someone supplies a key.
+ */
+export const SELECTABLE_PROVIDERS: AiProvider[] = ['openai', 'anthropic', 'xai', 'kimi'];
+
+const PROVIDER_DEFAULT_MODEL: Partial<Record<AiProvider, string>> = {
+  openai: 'gpt-4o',
+  anthropic: 'claude-3-5-sonnet-20241022',
+  xai: 'grok-2',
+  kimi: 'moonshot-v1-32k',
+};
 
 const DEFAULT_PREFERENCES: AiPreferences = {
   aiMode: 'balanced',
@@ -1621,8 +1666,10 @@ export class ModelGatewayService {
   private resolveStrategy(
     request: GatewayRequest,
     mode: AiMode,
-    _preferences: AiPreferences,
+    preferences: AiPreferences,
   ): ModelStrategy {
+    // An explicit per-request override still wins over everything. It is used by
+    // callers that know exactly what they need and is not a user preference.
     if (request.providerOverride && request.modelOverride) {
       return {
         primary: { provider: request.providerOverride, model: request.modelOverride },
@@ -1630,7 +1677,40 @@ export class ModelGatewayService {
       };
     }
 
-    return this.routingTable[mode][request.taskCategory] || this.routingTable[mode].general;
+    const strategy =
+      this.routingTable[mode][request.taskCategory] || this.routingTable[mode].general;
+
+    // The business's chosen provider, if it has one.
+    //
+    // This parameter was `_preferences` — accepted and never read — so a
+    // business had no way to say which provider it wanted. Choice existed only
+    // as a per-request override that nothing user-facing set.
+    //
+    // Promotion, not pinning. The preferred provider becomes the FIRST
+    // candidate and the original chain stays behind it as fallbacks, so a
+    // provider that is unconfigured, rate-limited or circuit-broken degrades to
+    // exactly the behaviour that existed before the preference was set. The
+    // caller loop already skips unavailable candidates; this only changes the
+    // order they are tried in.
+    const preferred = preferences.preferredProvider;
+    if (!preferred || preferred === strategy.primary.provider) return strategy;
+    if (!this.isProviderAvailable(preferred, preferences)) return strategy;
+
+    // Prefer a model this provider is already trusted with for this task; fall
+    // back to its general-purpose model. Picking a model the provider does not
+    // serve would turn a preference into a hard failure.
+    const fromChain = [strategy.primary, ...strategy.fallbacks].find(
+      (c) => c.provider === preferred,
+    );
+    const model = fromChain?.model ?? PROVIDER_DEFAULT_MODEL[preferred];
+    if (!model) return strategy;
+
+    return {
+      primary: { provider: preferred, model },
+      fallbacks: [strategy.primary, ...strategy.fallbacks].filter(
+        (c) => !(c.provider === preferred && c.model === model),
+      ),
+    };
   }
 
   private isProviderAvailable(provider: AiProvider, preferences: AiPreferences): boolean {
@@ -2248,6 +2328,72 @@ export class ModelGatewayService {
     };
   }
 
+/**
+   * Which providers this business can choose between, and whether each would
+   * actually work right now.
+   *
+   * The distinction matters and is the whole reason this returns two flags
+   * rather than one. `selectable` means the product offers it. `available`
+   * means a request routed there would be served — a key is configured (either
+   * the platform's or the business's own) and the circuit breaker is closed.
+   *
+   * Today only OpenAI is reliably configured, and that is a deployment fact
+   * rather than a product limit: every provider here has a working
+   * implementation in this gateway, and each becomes usable the moment a key
+   * exists. The UI should show them all and mark the unconfigured ones, not
+   * hide them — a business that cannot see Anthropic has no reason to supply an
+   * Anthropic key.
+   */
+  async listSelectableProviders(businessId: string): Promise<
+    Array<{
+      provider: AiProvider;
+      label: string;
+      selectable: boolean;
+      available: boolean;
+      usingOwnKey: boolean;
+      preferred: boolean;
+      reason?: string;
+    }>
+  > {
+    const preferences = await this.getPreferences(businessId);
+
+    const byok: Partial<Record<AiProvider, string | undefined>> = {
+      openai: preferences.byokOpenai,
+      anthropic: preferences.byokAnthropic,
+      xai: preferences.byokXai,
+      kimi: preferences.byokKimi,
+    };
+
+    const labels: Partial<Record<AiProvider, string>> = {
+      openai: 'OpenAI',
+      anthropic: 'Anthropic',
+      xai: 'xAI (Grok)',
+      kimi: 'Moonshot (Kimi)',
+    };
+
+    return SELECTABLE_PROVIDERS.map((provider) => {
+      const available = this.isProviderAvailable(provider, preferences);
+      const usingOwnKey = !!byok[provider];
+
+      let reason: string | undefined;
+      if (!available) {
+        reason = this.isCircuitOpen(provider)
+          ? 'Temporarily unavailable after repeated failures'
+          : 'No API key configured';
+      }
+
+      return {
+        provider,
+        label: labels[provider] ?? provider,
+        selectable: true,
+        available,
+        usingOwnKey,
+        preferred: preferences.preferredProvider === provider,
+        reason,
+      };
+    });
+  }
+
   async getPreferences(businessId: string): Promise<AiPreferences> {
     const cached = this.preferencesCache.get(businessId);
     if (cached && cached.expiresAt > Date.now()) {
@@ -2328,6 +2474,21 @@ export class ModelGatewayService {
     const validModes: AiMode[] = ['balanced', 'premium', 'fast'];
     if (!validModes.includes(merged.aiMode)) {
       merged.aiMode = 'balanced';
+    }
+
+    // An empty string clears the preference rather than storing "".
+    if ((merged.preferredProvider as unknown as string) === '') {
+      merged.preferredProvider = undefined;
+    }
+
+    // Validated the same way aiMode is: an unrecognised provider is discarded,
+    // not persisted. Without this, a typo would be stored, silently fail
+    // isProviderAvailable forever, and look like the preference was ignored.
+    if (merged.preferredProvider && !SELECTABLE_PROVIDERS.includes(merged.preferredProvider)) {
+      this.logger.warn(
+        `[gateway] discarding unknown preferredProvider "${merged.preferredProvider}" for ${businessId}`,
+      );
+      merged.preferredProvider = undefined;
     }
 
     const toStore = { ...merged };
