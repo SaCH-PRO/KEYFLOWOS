@@ -161,3 +161,83 @@ describe('the sweep no longer re-reads a fortnight every ten minutes', () => {
     expect(code).toMatch(/14 \* 24 \* 60 \* 60 \* 1000/);
   });
 });
+
+describe('what collapses to one key, and why that is correct', () => {
+  // Stripping digits is the riskiest part of this transform: two GENUINELY
+  // different signals whose descriptions differ only in numbers would merge into
+  // one row and hide one of them. Checked against every real description
+  // template in the service rather than invented examples.
+
+  it('keeps signals distinct when the template carries a name', () => {
+    // metric, keyword, theme, industry, day-of-week and customer identifiers all
+    // survive digit-stripping, which is what keeps these apart.
+    const cases: Array<[string, string]> = [
+      [
+        'Operational stress: task_backlog at 41.0 (baseline: 12.0)',
+        'Operational stress: error_rate at 41.0 (baseline: 12.0)',
+      ],
+      [
+        'Emerging keyword "refund" appearing 12x (3.0x above baseline)',
+        'Emerging keyword "delay" appearing 12x (3.0x above baseline)',
+      ],
+      [
+        'AI-detected theme: "pricing confusion" across 4 sources',
+        'AI-detected theme: "delivery delays" across 4 sources',
+      ],
+      [
+        'Strong day-of-week revenue effect: Monday is 3.0x higher than Sunday',
+        'Strong day-of-week revenue effect: Friday is 3.0x higher than Sunday',
+      ],
+      [
+        'Revenue above monthly expectation by 20.0% (500 vs expected 400)',
+        'Revenue below monthly expectation by 20.0% (300 vs expected 400)',
+      ],
+    ];
+
+    for (const [a, b] of cases) {
+      expect(
+        signalIdentity({ category: 'x', description: a }),
+        `these two must not merge:\n  ${a}\n  ${b}`,
+      ).not.toBe(signalIdentity({ category: 'x', description: b }));
+    }
+  });
+
+  it('keeps two customers apart even though their ids contain digits', () => {
+    // Customer templates embed a cuid. Digit-stripping leaves the letters, which
+    // still differ between customers.
+    const a = signalIdentity({
+      category: 'churn',
+      description: 'Customer Acme (cmrvdk4la00039z9gcby655qq) engagement dropped 40% over 30 days',
+    });
+    const b = signalIdentity({
+      category: 'churn',
+      description: 'Customer Globex (cmrtnh5fv00h29zd4r4j3trte) engagement dropped 40% over 30 days',
+    });
+
+    expect(a).not.toBe(b);
+  });
+
+  it('DOES collapse the business-level conditions, which is the point', () => {
+    // Three templates carry no distinguishing token at all: ad fatigue, the
+    // email engagement gap, and the ticket surge. Each describes ONE condition a
+    // business is either in or not, so two observations of it are the same
+    // signal at different moments - exactly what should share a row.
+    const fatigueA = signalIdentity({
+      category: 'marketing',
+      description: 'Ad fatigue detected: marketing spend increased 40% but leads decreased 20%. Current CPL: $85.00',
+    });
+    const fatigueB = signalIdentity({
+      category: 'marketing',
+      description: 'Ad fatigue detected: marketing spend increased 55% but leads decreased 31%. Current CPL: $92.00',
+    });
+
+    expect(fatigueA).toBe(fatigueB);
+  });
+
+  it('still separates those conditions from each other', () => {
+    const fatigue = signalIdentity({ category: 'marketing', description: 'Ad fatigue detected: spend increased 40%' });
+    const tickets = signalIdentity({ category: 'support', description: 'Support ticket volume surged 40%' });
+
+    expect(fatigue).not.toBe(tickets);
+  });
+});
