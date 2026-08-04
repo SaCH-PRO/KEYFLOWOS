@@ -1,5 +1,20 @@
 # Deploy runbook — the baseline cutover
 
+> **STOP — read `PRODUCTION_STATE.md` first.**
+>
+> This runbook was written for a production database that already holds the 433
+> tables and only needs the baseline recorded. Measured on 2026-08-03, that is
+> **not** what production is: it has **29 tables**, a migration history from a
+> branch that no longer exists, and a schema frozen since 2025-11-30.
+>
+> Part 2 (`migrate resolve --applied 0_baseline`) is therefore **wrong for
+> production as it stands** — it would assert 404 tables exist that do not, and
+> Prisma would believe it permanently. `scripts/prepare-production-db.ps1`
+> refuses to run there, by design.
+>
+> Part 1 (local cleanup) is done and remains correct. The rest of this file
+> stays as the procedure for a database that genuinely matches the baseline.
+
 Every command below was rehearsed on 2026-08-03 against a throwaway PostgreSQL
 container built to match production exactly: all 433 tables present,
 `_prisma_migrations` listing the 19 archived migrations, and no `0_baseline`
