@@ -72,14 +72,58 @@ export class SafetyShellService {
     };
   }
 
-  async rollback(_actionKey: string, rollbackActions: unknown[]): Promise<{ success: boolean; results: unknown[] }> {
-    const results: unknown[] = [];
-    for (const action of rollbackActions) {
-      // Foundation: log rollback actions; real compensations are body-specific.
-      this.logger.log(`[rollback] Would execute compensating action: ${JSON.stringify(action)}`);
-      results.push({ action, status: 'logged' });
-    }
-    return { success: true, results };
+  /**
+   * Compensate a failed action.
+   *
+   * THIS DOES NOT COMPENSATE ANYTHING YET, AND NOW SAYS SO.
+   *
+   * It used to log "Would execute compensating action" for each item and return
+   * `{ success: true }` regardless — a component whose entire job is safety,
+   * reporting that it had undone work it had not touched.
+   *
+   * Today that is harmless in practice, which is the only reason this is a
+   * correction rather than an incident: the sole caller of `check()`
+   * (key-action-executor.service.ts:31) does not pass `rollbackActions`, so the
+   * list is always empty, the loop never runs, and `success: true` is the
+   * truthful answer to "did you undo the nothing I gave you".
+   *
+   * It is still a loaded gun. The first caller to pass real rollback actions
+   * gets silent no-ops reported as success, and the failure would surface as
+   * data that should have been reverted and quietly was not.
+   *
+   * So: an empty list still succeeds, because there is genuinely nothing to do.
+   * A non-empty list now FAILS LOUDLY. That is not a regression — no caller can
+   * currently reach that branch — it is a tripwire, so that whoever wires the
+   * first real compensation is told to implement this rather than discovering
+   * months later that it never ran.
+   *
+   * Implementing it for real means delegating to KeyCortexCompensationService,
+   * which holds genuine handlers (soft-delete contact, void invoice, cancel
+   * booking). That registry is itself unreachable today — nothing writes
+   * SagaStep.compensationAction — so wiring one inert component to another would
+   * have produced a longer call chain that still reverts nothing.
+   */
+  async rollback(
+    actionKey: string,
+    rollbackActions: unknown[],
+  ): Promise<{ success: boolean; results: unknown[]; reason?: string }> {
+    if (rollbackActions.length === 0) return { success: true, results: [] };
+
+    const reason =
+      'SafetyShellService.rollback cannot compensate: no handler is wired. ' +
+      'Delegate to KeyCortexCompensationService (and make its handler map ' +
+      'reachable) before relying on this.';
+
+    this.logger.error(
+      `[rollback] REFUSING to report success for ${rollbackActions.length} ` +
+        `compensating action(s) on "${actionKey}" — none were executed. ${reason}`,
+    );
+
+    return {
+      success: false,
+      reason,
+      results: rollbackActions.map((action) => ({ action, status: 'not_executed' })),
+    };
   }
 
   private validatePreconditions(
