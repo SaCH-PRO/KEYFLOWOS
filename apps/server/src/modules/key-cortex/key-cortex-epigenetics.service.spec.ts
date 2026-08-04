@@ -310,3 +310,25 @@ describe('it is actually wired, not merely written', () => {
     expect(params.slice(0, 3)).toEqual(['router', 'endocrine', 'interoception']);
   });
 });
+
+describe('operator free text cannot run away with the prompt', () => {
+  it('caps a pasted document in a brand field', async () => {
+    // voice/tone/doNotSay have no length limit anywhere in the stack and are
+    // spliced into the system prompt of EVERY message.
+    const huge = 'x'.repeat(50_000);
+    const { service } = makeService({ blueprint: { brand: { voice: huge } } });
+    const text = service.render(await service.express(BIZ, T0))!;
+
+    expect(text.length).toBeLessThan(1_000);
+    expect(text).toMatch(/\.\.\./);
+  });
+
+  it('caps each forbidden phrase too', async () => {
+    const { service } = makeService({
+      blueprint: { brand: { doNotSay: Array(50).fill('y'.repeat(5_000)) } },
+    });
+    const text = service.render(await service.express(BIZ, T0))!;
+
+    expect(text.length).toBeLessThan(3_000);
+  });
+});

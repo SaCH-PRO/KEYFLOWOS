@@ -272,3 +272,22 @@ describe('it is actually wired, not merely written', () => {
     expect(params.slice(0, 3)).toEqual(['router', 'endocrine', 'interoception']);
   });
 });
+
+describe('the standing context as a whole is bounded', () => {
+  const triage = readFileSync(join(__dirname, 'cognitive-triage.service.ts'), 'utf8');
+
+  it('has a ceiling on the combined block', () => {
+    // Five sections concatenate now, several carrying operator free text.
+    expect(triage).toMatch(/MAX_STANDING_CONTEXT_CHARS/);
+  });
+
+  it('drops whole sections rather than truncating one', () => {
+    // Every section ends with the constraints on how it may be used ("not proof
+    // of intent", "never as a verdict on a person"). Cutting mid-section would
+    // reliably keep the accusation and discard the caveat.
+    const fn = triage.slice(triage.indexOf('private withinBudget('));
+    const body = fn.slice(0, fn.indexOf('\n  }'));
+    expect(body).toMatch(/break;/);
+    expect(body).not.toMatch(/\.slice\(0,\s*MAX_STANDING_CONTEXT_CHARS/);
+  });
+});

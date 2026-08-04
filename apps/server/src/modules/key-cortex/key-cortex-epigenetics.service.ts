@@ -63,6 +63,17 @@ const SAMPLE_LIMIT = 200;
 /** Cached expression is re-derived after this long. */
 const CACHE_TTL_MS = 30 * 60 * 1000;
 
+/**
+ * Cap on any single free-text field taken from the blueprint.
+ *
+ * voice, tone, outreachStyle, reportingCadence and every doNotSay entry are
+ * operator-supplied strings with no length limit anywhere in the stack, and they
+ * are spliced into the system prompt of EVERY message. Without a bound, one
+ * pasted document in a brand field crowds out the user's actual question on
+ * every turn thereafter.
+ */
+const MAX_FIELD_CHARS = 160;
+
 export type RiskAppetite = 'cautious' | 'balanced' | 'bold';
 
 export interface Epigenome {
@@ -292,11 +303,20 @@ export class KeyCortexEpigeneticsService {
   }
 
   private str(value: unknown): string | null {
-    return typeof value === 'string' && value.trim() ? value.trim() : null;
+    if (typeof value !== 'string') return null;
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    // Bounded here rather than at render time, so every consumer of Epigenome
+    // inherits the limit instead of each having to remember it.
+    return trimmed.length > MAX_FIELD_CHARS
+      ? `${trimmed.slice(0, MAX_FIELD_CHARS)}...`
+      : trimmed;
   }
 
   private strArray(value: unknown): string[] {
     if (!Array.isArray(value)) return [];
-    return value.filter((v): v is string => typeof v === 'string' && v.trim().length > 0);
+    return value
+      .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+      .map((v) => (v.trim().length > MAX_FIELD_CHARS ? `${v.trim().slice(0, MAX_FIELD_CHARS)}...` : v.trim()));
   }
 }

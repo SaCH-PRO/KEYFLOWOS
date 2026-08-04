@@ -64,6 +64,15 @@ export interface TriageVerdict {
 const STANDARD_TEMPERATURE = 0.7;
 const STANDARD_MAX_TOKENS = 1000;
 
+/**
+ * Ceiling on the whole standing-context block, in characters.
+ *
+ * ~2000 chars is roughly 500 tokens — a meaningful but not dominant share of the
+ * 1000-token standard budget, and comfortably more than all five sections need
+ * when the operator has written sane values.
+ */
+const MAX_STANDING_CONTEXT_CHARS = 2000;
+
 const TIER_PARAMS: Record<EffortTier, { temperature: number; maxTokens: number }> = {
   // A greeting does not need 1000 tokens or room to improvise.
   reflex: { temperature: 0.3, maxTokens: 400 },
@@ -345,7 +354,42 @@ export class CognitiveTriageService {
       /* team contribution is framing, never required */
     }
 
-    return parts.length > 0 ? parts.join('\n\n') : null;
+    return this.withinBudget(parts);
+  }
+
+  /**
+   * Join the standing-context sections, dropping whole sections once the budget
+   * is spent.
+   *
+   * Five sections concatenate here now — disposition, body, immune, expression,
+   * team — and several interpolate operator-supplied free text. Unbounded, a
+   * pasted document in one blueprint field would crowd out the user's actual
+   * question on every message thereafter.
+   *
+   * Whole sections are dropped rather than the text truncated, because each one
+   * ends with the constraints on how it may be used ("not proof of intent",
+   * "never as a verdict on a person"). Cutting mid-section would reliably keep
+   * the accusation and discard the caveat.
+   *
+   * Earlier sections win: disposition and body state are what KEY needs to
+   * answer safely, while style and team contribution modulate how it answers.
+   */
+  private withinBudget(parts: string[]): string | null {
+    const kept: string[] = [];
+    let used = 0;
+
+    for (const part of parts) {
+      if (used + part.length > MAX_STANDING_CONTEXT_CHARS) {
+        this.logger.debug(
+          `[triage] standing context budget reached; dropped ${parts.length - kept.length} section(s)`,
+        );
+        break;
+      }
+      kept.push(part);
+      used += part.length;
+    }
+
+    return kept.length > 0 ? kept.join('\n\n') : null;
   }
 
 
