@@ -1007,6 +1007,25 @@ export class ModelGatewayService {
       body.system = systemPrompt;
     }
 
+    // Mirrors callAnthropic. Without this the streaming path — which is the one
+    // the live chat uses — sent no tools at all, so any failover to Anthropic
+    // quietly turned KEY into a chatbot that could describe an action and never
+    // take one.
+    if (request.tools && request.tools.length > 0) {
+      body.tools = request.tools.map((t) => ({
+        name: t.function.name,
+        description: t.function.description || '',
+        input_schema: t.function.parameters || { type: 'object', properties: {} },
+      }));
+      if (request.toolChoice === 'auto') {
+        body.tool_choice = { type: 'auto' };
+      } else if (request.toolChoice === 'required') {
+        body.tool_choice = { type: 'any' };
+      } else if (typeof request.toolChoice === 'object' && request.toolChoice?.function?.name) {
+        body.tool_choice = { type: 'tool', name: request.toolChoice.function.name };
+      }
+    }
+
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -1051,6 +1070,50 @@ export class ModelGatewayService {
 
               if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
                 yield { type: 'content_delta', content: event.delta.text };
+              }
+
+              // TOOL CALLS. This stream previously parsed only text_delta, and
+              // the request body sent no `tools` at all — while the
+              // non-streaming callAnthropic did. Since the live chat IS the
+              // streaming path, every turn that failed over to Anthropic
+              // silently lost all 118 tools: KEY answered warmly and performed
+              // nothing, which reads as success.
+              //
+              // Sending tools without parsing the response would have been
+              // worse than either — the model would decide to act and the
+              // decision would be dropped on the floor. Both halves are here.
+              //
+              // Anthropic emits a tool call across three events: a
+              // content_block_start carrying id and name, a run of
+              // input_json_delta fragments carrying the arguments as partial
+              // JSON, and a content_block_stop. `index` is the block index,
+              // which is what the consumer reassembles on.
+              if (
+                event.type === 'content_block_start' &&
+                event.content_block?.type === 'tool_use'
+              ) {
+                yield {
+                  type: 'tool_call_delta',
+                  toolCall: {
+                    index: event.index ?? 0,
+                    id: event.content_block.id,
+                    name: event.content_block.name,
+                    argumentsDelta: '',
+                  },
+                };
+              }
+
+              if (
+                event.type === 'content_block_delta' &&
+                event.delta?.type === 'input_json_delta'
+              ) {
+                yield {
+                  type: 'tool_call_delta',
+                  toolCall: {
+                    index: event.index ?? 0,
+                    argumentsDelta: event.delta.partial_json ?? '',
+                  },
+                };
               }
 
               if (event.type === 'message_start' && event.message?.usage) {
