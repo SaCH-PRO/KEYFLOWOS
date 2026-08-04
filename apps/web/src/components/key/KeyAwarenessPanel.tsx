@@ -11,6 +11,7 @@ import {
   RefreshCw,
   ChevronDown,
   AlertTriangle,
+  TrendingUp,
 } from "lucide-react";
 import { getApiBase } from "@/lib/api-base";
 import { fetchWithAuthRetry } from "@/lib/api";
@@ -37,7 +38,14 @@ const API_BASE = getApiBase();
  *     presenting them at uniform certainty would misrepresent what they are.
  */
 
-type AwarenessKind = "weakSignal" | "churnRisk" | "idea" | "reflection" | "hypothesis";
+type AwarenessKind =
+  | "weakSignal"
+  | "churnRisk"
+  | "idea"
+  | "reflection"
+  | "hypothesis"
+  | "concern"
+  | "momentum";
 
 interface AwarenessItem {
   id: string;
@@ -82,6 +90,18 @@ const KIND_META: Record<
     icon: BookOpen,
     tint: "text-sky-400",
     ring: "ring-sky-500/20",
+  },
+  concern: {
+    label: "Concern",
+    icon: AlertTriangle,
+    tint: "text-rose-400",
+    ring: "ring-rose-500/20",
+  },
+  momentum: {
+    label: "Momentum",
+    icon: TrendingUp,
+    tint: "text-emerald-400",
+    ring: "ring-emerald-500/20",
   },
   hypothesis: {
     label: "Hypothesis",

@@ -25,6 +25,18 @@ export const AWARENESS_TYPES = {
   idea: 'creative_idea',
   reflection: 'reflection_session',
   hypothesis: 'dream_hypothesis',
+  // The amygdala's ranked output. It computed up to ten concerns per pass with
+  // human-readable summaries and discarded eight of them; the surviving two
+  // escaped only as the `reason` riding on a hormone, under an instruction that
+  // explicitly forbids treating them as reportable fact. So a user could never
+  // be TOLD "12 overdue invoices against a normal of 3" — only given a vaguer,
+  // mood-shaped version of a number the system knew exactly.
+  //
+  // Threat and momentum are separate kinds rather than one: the panel colours
+  // and counts by kind, and rendering new bookings in threat red would be
+  // actively wrong.
+  concern: 'salience_concern',
+  momentum: 'salience_momentum',
 } as const;
 
 export interface AwarenessItem {
@@ -160,6 +172,11 @@ export class KeyCortexAwarenessService {
       }
       case 'hypothesis':
         return str('description') ?? 'Hypothesis formed';
+      case 'concern':
+      case 'momentum':
+        // The sentence salience already wrote is exactly the line the owner
+        // should read. Nothing to reword.
+        return str('summary') ?? 'A ranked signal from the hourly appraisal';
     }
   }
 

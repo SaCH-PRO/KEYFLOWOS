@@ -52,6 +52,10 @@ const BASELINE_DAYS = 14;
 const SALIENCE_FLOOR = 0.25;
 
 /** Past this, a cached appraisal is history rather than a current fact. */
+/** Awareness-feed discriminators, matching AWARENESS_TYPES. */
+const MEMORY_TYPE_CONCERN = 'salience_concern';
+const MEMORY_TYPE_MOMENTUM = 'salience_momentum';
+
 const CONCERN_TTL_MS = 90 * 60 * 1000;
 
 /** How many concerns are worth surfacing at once. */
@@ -191,6 +195,21 @@ export class KeyCortexSalienceService {
 
     this.endocrine.release(businessId, signals);
 
+    // And make them VISIBLE, not merely felt.
+    //
+    // Everything above converts a ranked concern into a disposition: a hormone
+    // that shifts how KEY writes. That is the whole arc the atlas calls open —
+    // the signal is real, well-formed, and terminates in a change of tone. The
+    // owner only learns "12 overdue invoices against a normal of 3" if they
+    // happen to open the chat and ask something it bears on.
+    //
+    // The awareness feed is already live and already rendered on the command
+    // centre, so surfacing here costs one write and reaches a human without
+    // being asked. Deliberately NOT an action: this service states, in its own
+    // header, that it has no hands, and giving a background sweep the ability to
+    // act on the business is a product decision rather than a missing wire.
+    await this.persistConcerns(businessId, threats, opportunities);
+
     this.logger.log(
       `[salience] ${businessId}: ${threats.length} threat(s), ${opportunities.length} opportunity(s)` +
         `${worstThreat ? ` — worst: ${worstThreat.summary}` : ''}` +
@@ -302,6 +321,80 @@ export class KeyCortexSalienceService {
       recent: Number(recentRows?.[0]?.c ?? 0),
       baselinePerDay: Number(baselineRows?.[0]?.avg ?? 0),
     };
+  }
+
+/**
+   * Write the ranked concerns to the awareness feed, and clear the ones that
+   * have resolved.
+   *
+   * Keyed on the signal so a persisting concern REFRESHES one row rather than
+   * accumulating one per hour — the same defect that filled the panel with
+   * duplicates from intuition.
+   *
+   * The delete is the half that is easy to forget and matters most: a concern
+   * that no longer clears the salience floor must VANISH, or the dashboard goes
+   * on reporting twelve overdue invoices after they have been paid. A stale
+   * fact stated confidently is worse than no fact.
+   */
+  private async persistConcerns(
+    businessId: string,
+    threats: Concern[],
+    opportunities: Concern[],
+  ): Promise<void> {
+    const rows = [
+      ...threats.map((c) => ({ c, type: MEMORY_TYPE_CONCERN })),
+      ...opportunities.map((c) => ({ c, type: MEMORY_TYPE_MOMENTUM })),
+    ];
+
+    try {
+      for (const { c, type } of rows) {
+        const id = `conc_${businessId}_${c.signal}`;
+        const value = JSON.stringify({
+          summary: c.summary,
+          signal: c.signal,
+          valence: c.valence,
+          salience: c.salience,
+          recentCount: c.recentCount,
+          baselineRate: c.baselineRate,
+          escalating: c.escalating,
+        });
+
+        await this.prisma.client.keyCortexMemory.upsert({
+          where: { id },
+          create: {
+            id,
+            businessId,
+            type,
+            key: c.signal,
+            value,
+            source: 'salience',
+            // 1, not the salience score. These are exact counts from the event
+            // log, and the panel renders confidence as "N% confident" — telling
+            // an owner we are 72% sure of a number we counted would be false
+            // modesty about the wrong thing. Salience travels in the value.
+            confidence: 1,
+          },
+          update: { value, type, confidence: 1 },
+        });
+      }
+
+      const live = rows.map((r) => r.c.signal);
+      await this.prisma.client.keyCortexMemory.deleteMany({
+        where: {
+          // businessId is mandatory here. Without it this clears every tenant's
+          // concerns on every appraisal.
+          businessId,
+          type: { in: [MEMORY_TYPE_CONCERN, MEMORY_TYPE_MOMENTUM] },
+          key: { notIn: live },
+        },
+      });
+    } catch (err: unknown) {
+      // A failed write must never undo the hormone release that already
+      // happened, nor stop the sweep for the rest of the estate.
+      this.logger.warn(
+        `[salience] persist failed for ${businessId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   /** Rank threat signals. Never throws. */
