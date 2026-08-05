@@ -25,6 +25,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { CORTEX_TOOL_BRIDGE, isCortexBridgedTool } from './flow-tool-registry';
 
 const orchestrator = readFileSync(join(__dirname, 'flow-orchestrator.service.ts'), 'utf8');
 const registry = readFileSync(join(__dirname, 'flow-tool-registry.ts'), 'utf8');
@@ -48,8 +49,33 @@ describe('every declared tool has a handler', () => {
 
     expect(declared.length).toBeGreaterThan(100);
 
-    const orphaned = declared.filter((t) => !handled.has(t));
+    // Bridged organ tools are dispatched by name from the `default:` branch
+    // rather than by a case clause, because their handler belongs to the organ
+    // adapter that registered it — see CORTEX_TOOL_BRIDGE. They are exempt from
+    // the case-clause rule and NOT from this test's actual claim, which is that
+    // nothing reaches `throw new Error('Unknown tool')`: cortex-tool-bridge.spec
+    // proves each one dispatches, and that every unmapped name still throws.
+    const orphaned = declared.filter((t) => !handled.has(t) && !isCortexBridgedTool(t));
     expect(orphaned, `declared with no case clause: ${orphaned.join(', ')}`).toEqual([]);
+  });
+
+  it('the bridge exemption cannot be used to silence this test', () => {
+    // Without this, the cheapest way to make the assertion above pass is to add
+    // a name to CORTEX_TOOL_BRIDGE — which would advertise a tool, exempt it
+    // from needing a handler, and route it to an organ that never registered
+    // it. Two things keep the exemption honest: the default branch must
+    // actually dispatch, and every exempted name must map to a dotted organ
+    // tool rather than to itself.
+    const start = orchestrator.indexOf('private async executeToolAction(');
+    const body = orchestrator.slice(start);
+
+    expect(body).toMatch(/if \(isCortexBridgedTool\(toolName\)\) \{/);
+    expect(body).toMatch(/executeBridgedCortexTool\(businessId, toolName, args\)/);
+
+    for (const [flowName, cortexName] of Object.entries(CORTEX_TOOL_BRIDGE)) {
+      expect(cortexName, `${flowName} maps to itself`).not.toBe(flowName);
+      expect(cortexName, `${flowName} does not map to an organ tool`).toContain('.');
+    }
   });
 });
 

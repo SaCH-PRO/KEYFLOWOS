@@ -2561,6 +2561,97 @@ export const FLOW_TOOLS: FlowTool[] = [
   },
 
   // ================================================================
+  //  INBOX — bridged from the cortex organ registry
+  // ================================================================
+  //
+  // See CORTEX_TOOL_BRIDGE below for why these are declared here rather than
+  // being exposed directly under their dotted organ names.
+  //
+  // The gap these close: KEY could SEND (send_message_with_approval) and could
+  // not READ. Running a support or sales inbox is the most common "be my staff"
+  // request there is, and KEY could only ever talk into it.
+  //
+  // key_inbox.send_reply is deliberately NOT bridged — send_message_with_approval
+  // already covers it on the flow side, and two tools for one action is how a
+  // model ends up sending twice.
+  {
+    name: 'inbox_list_threads',
+    description: 'List inbox threads across every connected channel, filtered by channel, status, priority or detected intent. Use this to see what has come in and what still needs an answer.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/inbox',
+    parameters: {
+      type: 'object',
+      properties: {
+        channel: { type: 'string', description: 'Optional: restrict to one channel (email, whatsapp, sms, ...).' },
+        status: { type: 'string', description: 'Optional: thread status, e.g. open or resolved.' },
+        priority: { type: 'string', description: 'Optional: priority filter.' },
+        intent: { type: 'string', description: 'Optional: detected intent filter.' },
+        limit: { type: 'number', description: 'Maximum threads to return.' },
+        offset: { type: 'number', description: 'Pagination offset.' },
+      },
+      required: [],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'Inbox threads',
+      fields: { threads: { type: 'array', description: 'Matching threads with channel, status, priority and last activity' } },
+    },
+  },
+  {
+    name: 'inbox_read_thread',
+    description: 'Read one inbox thread in full, including its messages. Use after inbox_list_threads to see what was actually said before replying or acting.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/inbox',
+    parameters: {
+      type: 'object',
+      properties: { threadId: { type: 'string', description: 'The thread to read.' } },
+      required: ['threadId'],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'One thread and its messages',
+      fields: { thread: { type: 'object', description: 'Thread with its message history' } },
+    },
+  },
+  {
+    name: 'inbox_brief',
+    description: 'Generate an intelligence brief over the inbox — what is waiting, what looks urgent, and what patterns are showing up across threads.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/inbox',
+    parameters: { type: 'object', properties: {}, required: [] },
+    outputSchema: {
+      type: 'object',
+      description: 'Inbox brief',
+      fields: { brief: { type: 'object', description: 'Summary of what is waiting and what it means' } },
+    },
+  },
+  {
+    name: 'inbox_mark_resolved',
+    description: 'Mark an inbox thread as done. Only after the underlying request has actually been handled.',
+    family: 'organize',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    changedEntities: ['InboxThread'],
+    manualEquivalentRoute: '/app/inbox',
+    parameters: {
+      type: 'object',
+      properties: { threadId: { type: 'string', description: 'The thread to mark resolved.' } },
+      required: ['threadId'],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'Resolution result',
+      fields: { threadId: { type: 'string', description: 'The thread marked resolved' } },
+    },
+  },
+
+  // ================================================================
   //  PEOPLE — the org, who works here, and delegating to a human
   // ================================================================
   //
@@ -2693,6 +2784,59 @@ export const FLOW_TOOLS: FlowTool[] = [
   },
 
 ];
+
+/**
+ * Flow tool name -> canonical cortex registry name.
+ *
+ * THE OTHER DIRECTION OF THE EFFERENT BRIDGE.
+ *
+ * KeyCortexEfferentBridgeService mirrors FLOW_TOOLS *into* the cortex registry,
+ * so the deliberating brain can act. Nothing went the other way: the chat's
+ * tool list is `getOpenAiToolDefinitions()`, which is FLOW_TOOLS and only
+ * FLOW_TOOLS, so the 29 tools the organ adapters register were invisible to the
+ * model that talks to the user. KEY could reason about the inbox and could not
+ * open it.
+ *
+ * Three reasons this is an explicit table rather than "expose every cortex tool
+ * dynamically", and each one is a bug that design would have shipped:
+ *
+ *  1. DOTS ARE ILLEGAL. OpenAI and Anthropic both constrain function names to
+ *     [a-zA-Z0-9_-]{1,64}. Every organ tool is dotted (`key_inbox.list_threads`),
+ *     so advertising them verbatim is a 400 from the provider on every request
+ *     that carries one.
+ *
+ *  2. TIERS WOULD SILENTLY COLLAPSE TO 2. AiOversightService.getToolTier looks
+ *     the name up in FLOW_TOOLS and returns 2 when it misses. A cortex tool at
+ *     tier 4 — `cortex.query_database` is one — would be gated as if it were
+ *     medium risk. Declaring the bridged tools as real FlowTools gives them a
+ *     real tier, and the risk class is stated in the same file a reviewer reads.
+ *
+ *  3. COST. Tool definitions are sent on every single request. Bridging all 29
+ *     indiscriminately would put ~29 unused schemas in the prompt of every chat
+ *     turn forever, which is the opposite of what this system is being tuned
+ *     for. Exposure is a judgement about value, so it is written down.
+ *
+ * Declaring them as FlowTools also means they inherit every gate that already
+ * exists — role reachability, the manual-route CI check, oversight tiering —
+ * rather than needing a parallel set of them.
+ *
+ * EXECUTION still goes through the cortex registry (see the dispatcher in
+ * FlowOrchestratorService), so the organ's own handler, risk tier, idempotency
+ * and safety gate are what actually run. This maps the name; it does not
+ * reimplement the tool.
+ *
+ * To bridge another organ tool: add a FlowTool above and one line here.
+ */
+export const CORTEX_TOOL_BRIDGE: Record<string, string> = {
+  inbox_list_threads: 'key_inbox.list_threads',
+  inbox_read_thread: 'key_inbox.get_thread',
+  inbox_brief: 'key_inbox.generate_brief',
+  inbox_mark_resolved: 'key_inbox.mark_resolved',
+};
+
+export function isCortexBridgedTool(name: string): boolean {
+  return Object.prototype.hasOwnProperty.call(CORTEX_TOOL_BRIDGE, name);
+}
 
 export function getOpenAiToolDefinitions() {
   return FLOW_TOOLS.map((tool) => ({

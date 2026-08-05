@@ -161,6 +161,14 @@ const ROLE_BASELINE_TOOLS = new Set<string>([
   'people_workload',
   'people_org_chart',
   'people_recommend_assignee',
+  // Read what the customer actually said. Bridged from the inbox organ, which
+  // the chat could write to and not read from. The same argument as the contact
+  // lookup above: finance chasing an invoice needs the thread where the client
+  // disputed it, and a role that cannot see the conversation is not specialised,
+  // it is blind. Summarising and closing threads is inbox WORK and stays with
+  // the roles that run one.
+  'inbox_list_threads',
+  'inbox_read_thread',
   // Record: never destructive, always attributable
   'keyflow_create_note',
   'create_task',
@@ -215,7 +223,7 @@ const ROLE_DEFINITIONS: Record<BusinessRole, RoleDefinition> = {
     description: 'Handles inquiries, resolves complaints, manages tickets, ensures customer satisfaction',
     tone: 'empathetic, patient, solution-oriented, reassuring',
     priorities: ['Respond to all inquiries within 4 hours', 'Resolve complaints with empathy', 'Escalate urgent issues', 'Follow up on resolved tickets'],
-    approvedTools: ['update_business_blueprint', 'crm_*', 'bookings_*', 'draft_followup_message', 'send_message_with_approval', 'create_task', 'tag_contact', 'helpdesk_*', 'calendar_*', 'finance_customer_balance', 'fetch_*', 'documents_search'],
+    approvedTools: ['inbox_brief', 'inbox_mark_resolved', 'update_business_blueprint', 'crm_*', 'bookings_*', 'draft_followup_message', 'send_message_with_approval', 'create_task', 'tag_contact', 'helpdesk_*', 'calendar_*', 'finance_customer_balance', 'fetch_*', 'documents_search'],
     blockedTools: ['commerce_delete_invoice', 'crm_delete_contact', 'bookings_cancel_booking', 'projects_delete_task'],
     maxRiskTier: 2,
     autonomyLevel: 2,
@@ -277,7 +285,7 @@ const ROLE_DEFINITIONS: Record<BusinessRole, RoleDefinition> = {
     description: 'General-purpose assistant for queries, summaries, and cross-role coordination',
     tone: 'warm, helpful, and conversational — like a knowledgeable friend who is always happy to help',
     priorities: ['Answer questions accurately', 'Summarize business health', 'Coordinate between roles', 'Execute user requests'],
-    approvedTools: ['people_assign_task', 'update_business_blueprint', 'present_onboarding_card', 'save_onboarding_step', 'fetch_*', 'crm_*', 'commerce_*', 'bookings_*', 'projects_*', 'expenses_*', 'calendar_*', 'time_*', 'helpdesk_*', 'content_*', 'call_*', 'evidence_*', 'approval_*', 'drive_*', 'documents_*', 'finance_*', 'marketing_*', 'social_*', 'store_*', 'marketplace_*', 'automations_*', 'delegation_*', 'draft_*', 'create_task', 'create_followup_queue', 'schedule_action', 'tag_contact', 'segment_contacts', 'send_message_with_approval', 'queue_campaign', 'keyflow_create_note', 'sync_seo_pages', 'generate_content_brief', 'apply_storefront_recommendation', 'enable_flow_with_approval', 'update_status_with_confirmation', 'community_list_posts'],
+    approvedTools: ['inbox_brief', 'inbox_mark_resolved', 'people_assign_task', 'update_business_blueprint', 'present_onboarding_card', 'save_onboarding_step', 'fetch_*', 'crm_*', 'commerce_*', 'bookings_*', 'projects_*', 'expenses_*', 'calendar_*', 'time_*', 'helpdesk_*', 'content_*', 'call_*', 'evidence_*', 'approval_*', 'drive_*', 'documents_*', 'finance_*', 'marketing_*', 'social_*', 'store_*', 'marketplace_*', 'automations_*', 'delegation_*', 'draft_*', 'create_task', 'create_followup_queue', 'schedule_action', 'tag_contact', 'segment_contacts', 'send_message_with_approval', 'queue_campaign', 'keyflow_create_note', 'sync_seo_pages', 'generate_content_brief', 'apply_storefront_recommendation', 'enable_flow_with_approval', 'update_status_with_confirmation', 'community_list_posts'],
     blockedTools: ['commerce_delete_invoice', 'crm_delete_contact', 'bookings_cancel_booking', 'marketing_send_campaign', 'social_publish_post', 'content_create_request', 'content_assign_request', 'content_transition_status', 'call_create_task', 'approval_create_request', 'projects_delete_task', 'commerce_send_invoice'],
     maxRiskTier: 1,
     autonomyLevel: 1,
@@ -298,7 +306,7 @@ const ROLE_DEFINITIONS: Record<BusinessRole, RoleDefinition> = {
     description: 'AI worker that executes tasks across all modules — creates content, logs calls, submits evidence, manages approvals, and drives workflows end-to-end',
     tone: 'efficient and reliable, but warm and clear when confirming what you have done',
     priorities: ['Execute assigned tasks autonomously', 'Move content through production pipeline', 'Log call outcomes and schedule follow-ups', 'Submit and verify evidence', 'Create and manage approval requests', 'Create Drive folders and documents'],
-    approvedTools: ['people_assign_task', 'update_business_blueprint', 'content_*', 'call_*', 'evidence_*', 'approval_*', 'drive_*', 'crm_*', 'bookings_*', 'projects_*', 'create_task', 'tag_contact', 'fetch_*', 'expenses_*', 'documents_*', 'keyflow_create_note', 'calendar_*', 'time_*', 'helpdesk_*', 'finance_*', 'commerce_update_invoice', 'commerce_update_product', 'commerce_send_invoice', 'marketing_update_campaign', 'social_update_post', 'automations_*', 'delegation_*', 'store_*', 'marketplace_*', 'update_status_with_confirmation', 'enable_flow_with_approval'],
+    approvedTools: ['inbox_brief', 'inbox_mark_resolved', 'people_assign_task', 'update_business_blueprint', 'content_*', 'call_*', 'evidence_*', 'approval_*', 'drive_*', 'crm_*', 'bookings_*', 'projects_*', 'create_task', 'tag_contact', 'fetch_*', 'expenses_*', 'documents_*', 'keyflow_create_note', 'calendar_*', 'time_*', 'helpdesk_*', 'finance_*', 'commerce_update_invoice', 'commerce_update_product', 'commerce_send_invoice', 'marketing_update_campaign', 'social_update_post', 'automations_*', 'delegation_*', 'store_*', 'marketplace_*', 'update_status_with_confirmation', 'enable_flow_with_approval'],
     blockedTools: ['commerce_delete_invoice', 'crm_delete_contact', 'bookings_cancel_booking', 'marketing_send_campaign', 'social_publish_post', 'content_upload_deliverables', 'content_deliver_request'],
     maxRiskTier: 3,
     autonomyLevel: 3,

@@ -22,7 +22,8 @@ import { AiExecutionLogService } from './ai-execution-log.service';
 import { AiOversightService } from './ai-oversight.service';
 import { BusinessGraphService } from './business-graph.service';
 import { PlannerService } from './planner.service';
-import { getOpenAiToolDefinitions, getToolByName, RiskLevel, ToolFamily, wrapToolResult, FlowTool } from './flow-tool-registry';
+import { getOpenAiToolDefinitions, getToolByName, RiskLevel, ToolFamily, wrapToolResult, FlowTool, CORTEX_TOOL_BRIDGE, isCortexBridgedTool } from './flow-tool-registry';
+import { KeyCortexToolRegistryService } from '../key-cortex/key-cortex-tool-registry.service';
 import { AiMemoryService } from './ai-memory.service';
 import { ModelGatewayService, GatewayMessage, StreamChunk } from './model-gateway.service';
 import { DocumentIntelligenceService } from './document-intelligence.service';
@@ -3967,8 +3968,65 @@ ${triage.standingContext}`;
       }
 
       default:
+        // Bridged organ tools, before we give up. These are declared as
+        // FlowTools so they inherit role, route and tier gating, but the work
+        // itself belongs to the organ adapter that registered it — so dispatch
+        // through the cortex registry rather than reimplementing the handler
+        // here. See CORTEX_TOOL_BRIDGE.
+        if (isCortexBridgedTool(toolName)) {
+          return this.executeBridgedCortexTool(businessId, toolName, args);
+        }
         throw new Error(`Unknown tool: ${toolName}`);
     }
+  }
+
+  /**
+   * Run an organ tool that was bridged into the chat's vocabulary.
+   *
+   * The flow name is a label; the work belongs to the organ adapter, so this
+   * hands off to the cortex registry's `execute` rather than reimplementing the
+   * handler. That keeps the organ's own tier, input validation, idempotency and
+   * autonomy-safety gate in the pathway — the same reasoning the bridge in the
+   * other direction gives for registering rather than calling directly.
+   *
+   * `preApproved: true` is correct and load-bearing here. checkRisk answers
+   * "may KEY do this unattended?", which is the wrong question on this path: a
+   * human typed the request, and the chat already ran AiOversightService.evaluate
+   * — role allowlist, business blocked-tools, tier thresholds and the
+   * confirm/approve flow — before we got here. Without it, an organ tool above
+   * the autonomy threshold would be refused and filed as an approval proposal
+   * for an action the user is sitting there asking for.
+   *
+   * It does NOT bypass KeyAutonomySafetyService: the kill switch, the daily
+   * action cap and the spend cap are checked before this and still apply.
+   */
+  private async executeBridgedCortexTool(
+    businessId: string,
+    toolName: string,
+    args: Record<string, any>,
+  ): Promise<any> {
+    const cortexName = CORTEX_TOOL_BRIDGE[toolName];
+
+    let registry: KeyCortexToolRegistryService;
+    try {
+      registry = this.moduleRef.get(KeyCortexToolRegistryService, { strict: false });
+    } catch {
+      throw new Error(`${toolName} is unavailable: the cortex registry is not loaded`);
+    }
+
+    if (!registry.hasTool(cortexName)) {
+      // The organ that owns this name did not register. Say which name is
+      // missing rather than returning an empty result that reads like "your
+      // inbox is empty" — a wrong answer is worse here than an error.
+      throw new Error(`${toolName} is unavailable: no organ has registered ${cortexName}`);
+    }
+
+    const result = await registry.execute(cortexName, { businessId, preApproved: true }, args);
+
+    if (!result.success) {
+      throw new Error(result.error ?? `${toolName} failed`);
+    }
+    return result.data ?? {};
   }
 
   private describeToolCall(toolName: string, args: Record<string, any>): string {
