@@ -101,6 +101,33 @@ describe('the verdict actually reaches the model', () => {
     expect(applied.length, 'a chat path ignores the tier’s temperature').toBe(2);
   });
 
+  it('both chat paths append the standing context to the system prompt', () => {
+    // THE SAME GAP, ONE FIELD OVER — and the more expensive one.
+    //
+    // When the mutation above proved maxTokens and temperature were unguarded,
+    // the fix covered those two literals and stopped. standingContext travels
+    // on the same verdict, through the same two call sites, and had no guard at
+    // all. A second audit deleted both append blocks and 2765 tests stayed
+    // green.
+    //
+    // What rides on this one hop: the endocrine disposition, interoception's
+    // body state, the immune centre, salience's ranked concerns, business
+    // epigenetics and the incentive frame. Six subsystems, each with its own
+    // careful spec, every one of them terminating at these three lines. Delete
+    // them and every one of those specs still passes while KEY silently stops
+    // knowing anything it perceived.
+    const applied = orchestrator.match(/systemPrompt \+= `\s*\n\s*\$\{triage\.standingContext\}`/g) ?? [];
+    expect(applied.length, 'a chat path drops the standing context').toBe(2);
+  });
+
+  it('guards the standing context behind a presence check, not unconditionally', () => {
+    // It is null unless there is genuinely something to report, and appending
+    // an empty block every turn would break the cacheable prefix the prompt
+    // work depends on.
+    const guards = orchestrator.match(/if \(triage\?\.standingContext\) \{/g) ?? [];
+    expect(guards.length).toBe(2);
+  });
+
   it('neither gateway call reverts to a hardcoded budget', () => {
     // Scoped to the two trackAndComplete/trackAndStream argument objects.
     // A file-wide match is wrong here: `temperature: 0.7` legitimately appears
