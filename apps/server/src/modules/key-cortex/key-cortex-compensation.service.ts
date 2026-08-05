@@ -58,22 +58,47 @@ export class KeyCortexCompensationService {
   }
 
   /**
-   * Returns the compensating action ref for a canonical tool name and result.
-   * This lets the executor/tool-loop pick the right rollback without
-   * string-heuristics.
+   * What undoes this tool.
+   *
+   * KEYS ARE REAL TOOL NAMES. That sounds obvious and it is the entire bug this
+   * table used to have: it was keyed on `create_contact`, `create_invoice`,
+   * `create_booking`, `send_message` — none of which exist. The tools are
+   * `crm_create_contact`, `commerce_create_invoice`, `bookings_create_booking`
+   * and `send_message_with_approval`. Eight of the ten keys matched nothing, so
+   * even after the lookup was wired into the live path it would have returned
+   * undefined for almost everything and every saga would still have recorded
+   * `compensation_unavailable` — a fix that looks like a fix and changes
+   * nothing.
+   *
+   * VALUES ARE REGISTERED HANDLER NAMES, checked against `this.handlers` by
+   * the spec, because a compensating action nothing can run is the same failure
+   * one layer down.
+   *
+   * Absence is meaningful and deliberate. A tool with no entry is one nobody
+   * has taught KEY to undo, and KeyCortexSagaService records that distinctly
+   * (`compensation_unavailable`) rather than claiming a rollback happened.
+   * Adding a key here is a promise that the handler below genuinely reverses
+   * the effect — do not add one to make a number go up.
    */
   getCompensatingAction(toolName: string, _result?: Record<string, unknown>): string | undefined {
     const map: Record<string, string> = {
-      'create_contact': 'crm.delete_contact',
-      'create_lead': 'crm.delete_lead',
-      'create_task': 'autopilot.delete_task',
-      'create_event': 'calendar.delete_event',
-      'send_message': 'communications.recall_message',
-      'create_invoice': 'commerce.void_invoice',
-      'create_booking': 'bookings.cancel_booking',
-      'create_command_item': 'command.delete_command_item',
+      // CRM
+      crm_create_contact: 'crm.delete_contact',
+      // Work items
+      create_task: 'autopilot.delete_task',
+      call_create_task: 'autopilot.delete_task',
+      projects_create_task: 'autopilot.delete_task',
+      // Calendar
+      calendar_create_event: 'calendar.delete_event',
+      // Money — the one where an un-undone action is felt hardest
+      commerce_create_invoice: 'commerce.void_invoice',
+      // Bookings
+      bookings_create_booking: 'bookings.cancel_booking',
+      // Outbound. Recall is best-effort by nature; a sent email cannot truly be
+      // unsent, and the handler marks the record rather than pretending.
+      send_message_with_approval: 'communications.recall_message',
+      // Organ tools, under their canonical dotted names
       'key_inbox.send_reply': 'key_inbox.mark_draft',
-      'key_genome.dna_update': 'key_genome.revert_blueprint_field',
     };
     return map[toolName];
   }

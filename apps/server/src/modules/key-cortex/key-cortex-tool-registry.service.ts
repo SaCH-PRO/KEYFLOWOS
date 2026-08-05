@@ -18,6 +18,7 @@ import { KeyAutonomySafetyService } from '../key-autonomy/key-autonomy-safety.se
 import { KeyActionProposalService } from '../key-autonomy/key-action-proposal.service';
 import { KeyIdempotencyService } from './key-idempotency.service';
 import { KeyCortexSagaService } from './key-cortex-saga.service';
+import { KeyCortexCompensationService } from './key-cortex-compensation.service';
 import { KeyCortexLearningService } from './key-cortex-learning.service';
 import { KeyCortexAuditService } from './key-cortex-audit.service';
 import { KeyCortexEventBusService } from './key-cortex-event-bus.service';
@@ -128,6 +129,12 @@ export class KeyCortexToolRegistryService {
     private readonly eventBus?: KeyCortexEventBusService,
     @Optional()
     private readonly proposals?: KeyActionProposalService,
+    // APPENDED, never inserted. Every spec in this repo constructs services
+    // positionally, so adding a parameter mid-list silently shifts every
+    // argument after it — which is how peekBody stopped being called once
+    // already, with no symptom other than a feature quietly not happening.
+    @Optional()
+    private readonly compensation?: KeyCortexCompensationService,
   ) {}
 
   // ========================================================================
@@ -184,6 +191,52 @@ export class KeyCortexToolRegistryService {
   // ========================================================================
   // Execution
   // ========================================================================
+
+  /**
+   * How this step would be undone, recorded BEFORE it runs.
+   *
+   * Two sources, in priority order. A tool that declares its own compensation
+   * wins — nothing does today, but the field is part of the definition and a
+   * hand-written one should beat a table lookup. Otherwise ask
+   * KeyCortexCompensationService what reverses this tool.
+   *
+   * That second source is the one that was missing, and its absence was total:
+   * `tool.compensation` is set by no tool anywhere, and the only code that ever
+   * built a compensation from the table lives in KeyCortexSagaExecutorService,
+   * which has no callers. So every saga step in production stored
+   * `compensationAction: null`, every rollback found nothing to run, and the
+   * saga was recorded `compensation_unavailable`. Every limb that moves money,
+   * mail or bookings had no undo, and this is the line where that was decided.
+   *
+   * Recorded before execution rather than after, deliberately: a step that
+   * crashes mid-write is exactly the one that needs undoing, and a compensation
+   * written on the success path would not exist for it.
+   *
+   * Returning undefined is a real answer — this tool has no known reversal —
+   * and the saga service records that distinctly instead of claiming a rollback.
+   */
+  private compensationFor(
+    name: string,
+    ctx: KeyCortexToolContext,
+    input: Record<string, unknown>,
+  ): { stepName: string; action: string; payload: Record<string, unknown> } | undefined {
+    const tool = this.tools.get(name);
+
+    if (tool?.compensation) {
+      return {
+        stepName: name,
+        action: tool.compensation.action,
+        payload: tool.compensation.payload,
+      };
+    }
+
+    const action = this.compensation?.getCompensatingAction(name);
+    if (!action) return undefined;
+
+    // businessId LAST so it wins: a tool argument of the same name must not be
+    // able to point the rollback at another tenant.
+    return { stepName: name, action, payload: { ...input, businessId: ctx.businessId } };
+  }
 
   async execute(
     name: string,
@@ -279,13 +332,7 @@ export class KeyCortexToolRegistryService {
           sagaStepIndex,
           name,
           input,
-          tool.compensation
-            ? {
-                stepName: name,
-                action: tool.compensation.action,
-                payload: tool.compensation.payload,
-              }
-            : undefined,
+          this.compensationFor(name, ctx, input),
         );
       }
 

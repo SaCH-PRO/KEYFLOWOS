@@ -195,12 +195,38 @@ describe('KeyCortexCompensationService', () => {
   });
 
   it('resolves compensating action refs for canonical tools', () => {
-    expect(service.getCompensatingAction('create_contact')).toBe('crm.delete_contact');
-    expect(service.getCompensatingAction('create_lead')).toBe('crm.delete_lead');
-    expect(service.getCompensatingAction('create_invoice')).toBe('commerce.void_invoice');
-    expect(service.getCompensatingAction('create_command_item')).toBe('command.delete_command_item');
+    // These assertions used to read `create_contact`, `create_invoice`,
+    // `create_command_item` and `key_genome.dna_update`. Every one of those
+    // passed, and NONE of them is a tool name — the tools are
+    // `crm_create_contact`, `commerce_create_invoice`, and the genome adapter
+    // registers `key_genome.update_dna_section`. The test certified a table
+    // keyed on strings nothing would ever look up, which is why the table could
+    // sit there fully populated and never return a single compensation.
+    expect(service.getCompensatingAction('crm_create_contact')).toBe('crm.delete_contact');
+    expect(service.getCompensatingAction('commerce_create_invoice')).toBe('commerce.void_invoice');
+    expect(service.getCompensatingAction('bookings_create_booking')).toBe('bookings.cancel_booking');
+    expect(service.getCompensatingAction('calendar_create_event')).toBe('calendar.delete_event');
+    expect(service.getCompensatingAction('send_message_with_approval')).toBe('communications.recall_message');
     expect(service.getCompensatingAction('key_inbox.send_reply')).toBe('key_inbox.mark_draft');
-    expect(service.getCompensatingAction('key_genome.dna_update')).toBe('key_genome.revert_blueprint_field');
+  });
+
+  it('does not map the genome update, because its rollback would destroy data', () => {
+    // Deliberately absent, and worth stating. revertBlueprintField writes
+    // `previousValue ?? null`, and the pre-image can only be captured by
+    // reading the blueprint BEFORE the write — which the registry, where
+    // compensations are now recorded, is not positioned to do. Mapping it
+    // anyway would turn "undo my change" into "erase the field", which is
+    // worse than the honest `compensation_unavailable` the saga records
+    // instead.
+    expect(service.getCompensatingAction('key_genome.update_dna_section')).toBeUndefined();
+  });
+
+  it('maps no tool name that does not exist', () => {
+    // The durable form of the bug above: a key nobody can look up is dead
+    // weight that reads as coverage.
+    for (const dead of ['create_contact', 'create_lead', 'create_invoice', 'create_booking', 'send_message', 'create_command_item']) {
+      expect(service.getCompensatingAction(dead), `"${dead}" is not a tool name`).toBeUndefined();
+    }
   });
 
   it('returns not-compensated for unknown actions', async () => {
