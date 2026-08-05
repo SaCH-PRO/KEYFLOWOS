@@ -124,7 +124,7 @@ export class KeyCortexSafeDatabaseService {
 
       const rows = await delegate.findMany(args);
 
-      this.audit(ctx, 'cortex.query_database', model, true, { count: rows.length }, Date.now() - startedAt);
+      this.audit(ctx, 'cortex.query_business_data', model, true, { count: rows.length }, Date.now() - startedAt);
 
       return {
         success: true,
@@ -133,7 +133,7 @@ export class KeyCortexSafeDatabaseService {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.error(`[safeQuery] ${model}: ${message}`);
-      this.audit(ctx, 'cortex.query_database', model, false, { error: message }, Date.now() - startedAt);
+      this.audit(ctx, 'cortex.query_business_data', model, false, { error: message }, Date.now() - startedAt);
       return this.errorResult(`Query failed: ${message}`);
     }
   }
@@ -209,7 +209,7 @@ export class KeyCortexSafeDatabaseService {
 
   getQueryToolDefinition(): any {
     return {
-      name: 'cortex.query_database',
+      name: 'cortex.query_business_data',
       module: 'key_cortex',
       description:
         'Read-only query against a safe allow-list of business-domain models. ' +

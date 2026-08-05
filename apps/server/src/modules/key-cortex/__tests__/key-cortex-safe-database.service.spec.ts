@@ -119,7 +119,9 @@ describe('KeyCortexSafeDatabaseService', () => {
   it('registers canonical tool definitions', () => {
     const { service } = setup;
     const queryTool = service.getQueryToolDefinition();
-    expect(queryTool.name).toBe('cortex.query_database');
+    // Was 'cortex.query_database', which collided with a tier-4 raw-query tool
+    // of the same name. See tool-name-collision.spec.ts.
+    expect(queryTool.name).toBe('cortex.query_business_data');
     expect(queryTool.riskTier).toBe(2);
 
     const updateTool = service.getUpdateToolDefinition();

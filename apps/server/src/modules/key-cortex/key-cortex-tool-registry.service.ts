@@ -145,9 +145,39 @@ export class KeyCortexToolRegistryService {
     if (!tool.name || !tool.module) {
       throw new Error(`Tool must have a name and module: ${JSON.stringify(tool)}`);
     }
-    if (this.tools.has(tool.name)) {
+
+    const existing = this.tools.get(tool.name);
+    if (existing) {
       this.logger.warn(`Tool "${tool.name}" is being overwritten in the canonical registry`);
+
+      // A name collision between tools of DIFFERENT risk is a safety bug, not a
+      // duplicate. `cortex.query_database` was registered twice — tier 4 with
+      // approval required ("run a raw database query") and tier 2 without
+      // ("read-only, allow-listed, business-scoped, capped at 100 rows") — and
+      // because this method overwrites, which handler ran AND which safety
+      // class applied depended on module initialisation order. Nothing in the
+      // system made that order deterministic.
+      //
+      // Both are legitimate tools; they were never the same tool. They are
+      // named apart now. This keeps the failure from recurring silently: on a
+      // tier disagreement the registry keeps the HIGHER tier, so an accidental
+      // collision can only ever make KEY more cautious, never less.
+      if (existing.riskTier !== tool.riskTier) {
+        const safest = Math.max(existing.riskTier, tool.riskTier) as KeyCortexToolDefinition['riskTier'];
+        this.logger.error(
+          `Tool "${tool.name}" registered at conflicting risk tiers ` +
+            `(${existing.riskTier} by ${existing.module}, ${tool.riskTier} by ${tool.module}). ` +
+            `Keeping tier ${safest}. These are almost certainly two different tools sharing a name.`,
+        );
+        this.tools.set(tool.name, {
+          ...tool,
+          riskTier: safest,
+          requiresApproval: existing.requiresApproval || tool.requiresApproval,
+        });
+        return;
+      }
     }
+
     this.tools.set(tool.name, tool);
   }
 

@@ -122,7 +122,10 @@ describe('KeyCortexOrganRegistrarService', () => {
     expect(registry.hasTool('key_genome.get_blueprint')).toBe(true);
     expect(registry.hasTool('storelink.get_analytics')).toBe(true);
     expect(registry.hasTool('key_connector.list_providers')).toBe(true);
-    expect(registry.hasTool('cortex.query_database')).toBe(true);
+    // Renamed apart from the tier-4 raw query in KeyCortexActionsService, which
+    // registered the same name; whichever module initialised last decided both
+    // the handler and the safety class.
+    expect(registry.hasTool('cortex.query_business_data')).toBe(true);
     expect(registry.hasTool('cortex.update_record')).toBe(true);
   });
 
