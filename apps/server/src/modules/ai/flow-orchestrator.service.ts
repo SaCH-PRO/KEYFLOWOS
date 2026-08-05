@@ -25,6 +25,7 @@ import { PlannerService } from './planner.service';
 import { getOpenAiToolDefinitions, getToolByName, RiskLevel, ToolFamily, wrapToolResult, FlowTool, CORTEX_TOOL_BRIDGE, isCortexBridgedTool } from './flow-tool-registry';
 import { KeyCortexToolRegistryService } from '../key-cortex/key-cortex-tool-registry.service';
 import { KEY_SYSTEM_ACTOR_ID } from '../../core/auth/system-actor';
+import { TransactionalEmailService } from '../notifications/transactional-email.service';
 import { AiMemoryService } from './ai-memory.service';
 import { ModelGatewayService, GatewayMessage, StreamChunk } from './model-gateway.service';
 import { DocumentIntelligenceService } from './document-intelligence.service';
@@ -258,7 +259,7 @@ You have 4 tool families at your disposal:
 - draft_storefront_copy, draft_project_update
 
 **Organize** (structural changes, moderate risk):
-- create_task, create_followup_queue, tag_contact, segment_contacts, schedule_action
+- create_task, create_followup_queue, tag_contact, segment_contacts
 
 **Execute** (high-impact actions, may require approval):
 - queue_campaign, send_message_with_approval, apply_storefront_recommendation
@@ -387,6 +388,9 @@ export class FlowOrchestratorService {
   }
   private getTaskAssignment() {
     return this.moduleRef.get(TaskAssignmentService, { strict: false });
+  }
+  private getTransactionalEmail() {
+    return this.moduleRef.get(TransactionalEmailService, { strict: false });
   }
   private getStructure() {
     return this.moduleRef.get(StructureService, { strict: false });
@@ -2413,8 +2417,19 @@ ${triage.standingContext}`;
           name: args.name,
           trigger: args.triggerEvent,
           condition: args.condition ?? null,
+          actions: Array.isArray(args.actions) ? args.actions : [],
         });
-        return { playbook, id: playbook.id };
+        // Say plainly when the playbook cannot do anything, rather than
+        // returning a record that reads like success. It is created disabled in
+        // that case, and the model should tell the user why.
+        return {
+          playbook,
+          id: playbook.id,
+          enabled: playbook.enabled,
+          ...(playbook.enabled
+            ? {}
+            : { warning: 'Created DISABLED: no actions were supplied, so this automation would do nothing when triggered.' }),
+        };
       }
 
       case 'automations_toggle_playbook': {
@@ -3005,36 +3020,6 @@ ${triage.standingContext}`;
         };
       }
 
-      case 'schedule_action': {
-        let parsedPayload = null;
-        if (args.payload) {
-          try { parsedPayload = JSON.parse(args.payload); }
-          catch { parsedPayload = { raw: args.payload }; }
-        }
-        const scheduledAction = await this.getActivityLog().createActivity({
-          businessId,
-          module: 'ai',
-          action: 'scheduled_action',
-          entityType: args.actionType,
-          entityId: args.targetId ?? null,
-          title: args.description,
-          detail: JSON.stringify({
-            actionType: args.actionType,
-            scheduledFor: args.scheduledFor,
-            payload: parsedPayload,
-            status: 'scheduled',
-          }),
-          tone: 'info',
-        });
-
-        return {
-          id: scheduledAction.id,
-          actionType: args.actionType,
-          scheduledFor: args.scheduledFor,
-          description: args.description,
-          status: 'scheduled',
-        };
-      }
 
       // ========== EXECUTE FAMILY ==========
 
@@ -3873,6 +3858,37 @@ ${triage.standingContext}`;
         });
         if (!invoice) throw new Error('Invoice not found');
         if (!invoice.contact?.email) throw new Error('Contact has no email address');
+        // ACTUALLY SEND IT.
+        //
+        // This tool's description is "Send an invoice to the customer via email
+        // (marks status as SENT)". It flipped the status, wrote an activity log
+        // reading "Invoice INV-001 sent to Ada", and called no email service at
+        // all. The customer never received anything, the invoice sat at SENT,
+        // and nobody chased it because the record said it had gone.
+        //
+        // Sent BEFORE the status flip, so a delivery failure leaves the invoice
+        // in its original state rather than marked SENT with nothing sent. The
+        // same ordering the compensation work uses: record or perform the risky
+        // half first, so a failure is visible rather than papered over.
+        const contactName =
+          [invoice.contact.firstName, invoice.contact.lastName].filter(Boolean).join(' ') || 'Customer';
+        const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:5000';
+
+        await this.getTransactionalEmail().send({
+          businessId,
+          type: 'invoice_sent',
+          recipientEmail: invoice.contact.email,
+          recipientName: contactName,
+          contactId: invoice.contactId ?? undefined,
+          templateData: {
+            invoiceNumber: invoice.invoiceNumber,
+            total: Number(invoice.total).toFixed(2),
+            currency: invoice.currency ?? 'TTD',
+            invoiceUrl: `${appUrl}/pay/${invoice.id}`,
+          },
+          dedupeKey: `invoice_sent_${invoice.id}`,
+        });
+
         const updated = await this.getCommerce().updateInvoiceStatus({
           invoiceId: args.invoiceId,
           status: 'SENT',
@@ -3887,10 +3903,10 @@ ${triage.standingContext}`;
           action: 'invoice_sent',
           entityType: 'invoice',
           entityId: invoice.id,
-          title: `Invoice ${invoice.invoiceNumber} sent to ${invoice.contact.firstName ?? ''} ${invoice.contact.lastName ?? ''}`,
+          title: `Invoice ${invoice.invoiceNumber} sent to ${contactName}`,
           tone: 'success',
         });
-        return { id: updated.id, status: updated.status };
+        return { id: updated.id, status: updated.status, emailedTo: invoice.contact.email };
       }
 
       // === MARKETING/SOCIAL UPDATES ===

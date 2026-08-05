@@ -279,6 +279,11 @@ export class CommerceService {
       select: { id: true, status: true },
     });
     let updated = 0;
+    // Failures are COLLECTED, not swallowed. `updated` was always honest, but a
+    // run where every row failed returned { updated: 0 } with no reason
+    // attached — so KEY could only report "nothing happened" and the owner had
+    // no way to learn that all ten invoices were already paid, or already void.
+    const failed: Array<{ id: string; reason: string }> = [];
     for (const row of candidates) {
       try {
         await this.invoiceWorkflow.transition(
@@ -288,11 +293,13 @@ export class CommerceService {
         );
         updated++;
       } catch (err: any) {
-          this.logger.warn(`409 illegal transition -> skip silently in bulk mode.: ${err instanceof Error ? err.message : err}`);
-        }
+        const reason = err instanceof Error ? err.message : String(err);
+        this.logger.warn(`bulk ${action}: skipping ${row.id}: ${reason}`);
+        failed.push({ id: row.id, reason });
+      }
     }
     this.statsCache.invalidateCache(businessId);
-    return { updated, action };
+    return { updated, action, failed, failedCount: failed.length };
   }
 
   async bulkUpdateQuotes(businessId: string, ids: string[], action: 'send' | 'reject' | 'delete') {

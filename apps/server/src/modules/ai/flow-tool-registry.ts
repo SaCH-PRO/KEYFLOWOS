@@ -505,35 +505,6 @@ export const FLOW_TOOLS: FlowTool[] = [
       },
     },
   },
-  {
-    name: 'schedule_action',
-    description: 'Schedule a future action (e.g. send a reminder, create a task, follow up) to execute at a specific time.',
-    family: 'organize',
-    riskLevel: 'medium',
-    riskTier: 2 as RiskTier,
-    manualEquivalentRoute: '/app/automations',
-    changedEntities: ['scheduledAction'],
-    parameters: {
-      type: 'object',
-      properties: {
-        actionType: { type: 'string', description: 'Type of action to schedule', enum: ['send_reminder', 'create_task', 'follow_up', 'status_change'] },
-        scheduledFor: { type: 'string', description: 'When to execute (ISO date)' },
-        targetId: { type: 'string', description: 'Target entity ID (contact, invoice, etc.)' },
-        payload: { type: 'string', description: 'JSON string of action-specific parameters' },
-        description: { type: 'string', description: 'Human-readable description of the scheduled action' },
-      },
-      required: ['actionType', 'scheduledFor', 'description'],
-    },
-    outputSchema: {
-      type: 'object',
-      description: 'Scheduled action',
-      fields: {
-        id: { type: 'string', description: 'Scheduled action ID' },
-        actionType: { type: 'string', description: 'Type of scheduled action' },
-        scheduledFor: { type: 'string', description: 'Scheduled execution time' },
-      },
-    },
-  },
 
   // ================================================================
   //  EXECUTE FAMILY — Tier 3-4, high-impact state changes
@@ -1154,8 +1125,13 @@ export const FLOW_TOOLS: FlowTool[] = [
         name: { type: 'string', description: 'Playbook name' },
         triggerEvent: { type: 'string', description: 'The event that triggers this automation (e.g. contact_created, invoice_paid)' },
         condition: { type: 'string', description: 'Optional condition for when to run' },
+        actions: {
+          type: 'array',
+          description: 'REQUIRED. What the automation does when it fires. Each item is an object with a "type" from add_tag, create_task, send_email, send_email_campaign, send_whatsapp, update_status, plus the fields that action needs. An automation with no actions fires forever and does nothing.',
+          items: { type: 'object' },
+        },
       },
-      required: ['name', 'triggerEvent'],
+      required: ['name', 'triggerEvent', 'actions'],
     },
     outputSchema: { type: 'object', description: 'Created playbook', fields: { playbook: { type: 'object', description: 'Playbook record' } } },
   },
@@ -1496,7 +1472,7 @@ export const FLOW_TOOLS: FlowTool[] = [
   // ================================================================
   {
     name: 'store_list_products',
-    description: 'List products in the storefront/store with pricing and stock.',
+    description: 'List products in the storefront/store with pricing and active status. Does NOT include stock levels — stock lives in InventoryStock and is not joined here.',
     family: 'read',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,

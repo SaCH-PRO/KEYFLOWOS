@@ -609,15 +609,33 @@ export class FlowService {
     name: string;
     trigger: string;
     condition?: string | null;
+    /**
+     * What the automation DOES. Each entry needs a `type` the executor
+     * recognises — add_tag, create_task, send_email, send_email_campaign,
+     * send_whatsapp, update_status — plus that action's own fields.
+     */
+    actions?: unknown[];
   }) {
+    // `actionData: []` was hardcoded here, and no caller could pass anything
+    // else. Every automation created through this method — including every one
+    // KEY created, since automations_create_playbook had no actions parameter
+    // at all — fired on its trigger and did nothing, forever. It appeared in
+    // the UI as an enabled playbook, so the owner believed the work was
+    // happening.
+    //
+    // Created DISABLED when there is nothing to run. An automation that cannot
+    // act should not sit in the list looking live; enabling it is a deliberate
+    // act once actions exist.
+    const actions = Array.isArray(input.actions) ? input.actions : [];
+
     return this.prisma.client.automation.create({
       data: {
         businessId: input.businessId,
         name: input.name,
         trigger: input.trigger,
         condition: input.condition ?? null,
-        actionData: [],
-        enabled: true,
+        actionData: actions as never,
+        enabled: actions.length > 0,
       },
     });
   }
