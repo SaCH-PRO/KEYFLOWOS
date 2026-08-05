@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
+import { Inject, Injectable, Logger, NotFoundException, Optional, BadRequestException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SocialPublishingService } from './social-publishing.service';
@@ -108,19 +108,19 @@ export class SocialService {
       return { post: updatedPost, results };
     }
 
-    const updated = await this.prisma.client.socialPost.update({
-      where: { id: post.id },
-      data: { status: 'POSTED', postedAt: new Date() },
-    });
-    const payload: PostPublishedPayload = {
-      post: updated,
-      businessId,
-      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-      // @ts-ignore
-      eventName: 'post.published',
-    };
-    this.events.emit('post.published', payload);
-    return updated;
+    // NO CONNECTED ACCOUNT, so nothing can be published.
+    //
+    // This branch used to set status POSTED, stamp postedAt and emit
+    // post.published — with no channel, no API call, and nothing anywhere on
+    // the internet. KEY reported the post as live, the UI showed it as live,
+    // and the owner found out when someone asked why the announcement never
+    // went out. The same shape as markCampaignSent emitting recipientCount: 0.
+    //
+    // Refusing is the honest answer and it is also the useful one: the fix is
+    // for a human to connect an account, and they only learn that if we say so.
+    throw new BadRequestException(
+      'No connected social account. Connect a channel before publishing, or pass explicit channelIds.',
+    );
   }
 
   async fetchRecentExternalPosts(businessId: string, platformFilter?: string) {

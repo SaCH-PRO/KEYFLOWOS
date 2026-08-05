@@ -2137,7 +2137,7 @@ export const FLOW_TOOLS: FlowTool[] = [
         startAt: { type: 'string', description: 'ISO start datetime' },
         endAt: { type: 'string', description: 'ISO end datetime' },
         allDay: { type: 'boolean', description: 'All-day event' },
-        type: { type: 'string', description: 'Event type: MEETING, REMINDER, MILESTONE, DEADLINE, OTHER', enum: ['MEETING', 'REMINDER', 'MILESTONE', 'DEADLINE', 'OTHER'] },
+        type: { type: 'string', description: 'What kind of entry this is. FOLLOW_UP for a general reminder or meeting, CONTACT_TASK when it is about a specific customer, PROJECT_TASK when it belongs to a project.', enum: ['FOLLOW_UP', 'CONTACT_TASK', 'PROJECT_TASK'] },
         priority: { type: 'string', description: 'Priority: LOW, NORMAL, HIGH, URGENT', enum: ['LOW', 'NORMAL', 'HIGH', 'URGENT'] },
         color: { type: 'string', description: 'Optional color hex' },
       },

@@ -20,6 +20,7 @@ import { InvoiceWorkflowService, InvoiceStatus } from './invoice-workflow.servic
 import { CatalogService } from '../catalog/catalog.service';
 import { PublicEventsService } from '../public-events/public-events.service';
 import { RevenuePostingService } from '../finance/revenue-posting.service';
+import { isSystemActor } from '../../core/auth/system-actor';
 
 @Injectable()
 export class CommerceService {
@@ -440,7 +441,15 @@ export class CommerceService {
     return invoice;
   }
 
-  async markInvoicePaid(invoiceId: string, actorId?: string | null) {
+  /**
+   * @param businessId Tenant the caller believes this invoice belongs to.
+   *   Optional for existing callers that reach this behind a BusinessGuard, and
+   *   ENFORCED whenever supplied — the lookup below is by primary key alone, so
+   *   a guard establishes who is asking without constraining what is touched.
+   *   REQUIRED when the actor is KEY: a system actor's authority comes from the
+   *   tenant scope its caller established, and there is nothing else to check.
+   */
+  async markInvoicePaid(invoiceId: string, actorId?: string | null, businessId?: string) {
     const existingInvoice = await this.prisma.client.invoice.findUnique({
       where: { id: invoiceId },
       select: { businessId: true, status: true, total: true, currency: true },
@@ -448,7 +457,22 @@ export class CommerceService {
     if (!existingInvoice) {
       throw new Error('Invoice not found');
     }
-    if (actorId) {
+    if (businessId && existingInvoice.businessId !== businessId) {
+      // Indistinguishable from "no such invoice" on purpose: a different error
+      // for "exists but is not yours" confirms the id belongs to someone.
+      throw new Error('Invoice not found');
+    }
+    if (isSystemActor(actorId)) {
+      // KEY has no Membership by design — see core/auth/system-actor.ts. Its
+      // authority is the tenant scope the caller proved, so demand that proof
+      // rather than accepting the actor on its own word. Without this the
+      // membership check below was the ONLY barrier on this path, and skipping
+      // it for KEY would turn a tool that always failed into one that could
+      // mark any invoice in any business paid.
+      if (!businessId) {
+        throw new Error('Not authorized to update this invoice');
+      }
+    } else if (actorId) {
       const membership = await this.prisma.client.membership.findFirst({
         where: { businessId: existingInvoice.businessId, userId: actorId },
       });
@@ -715,7 +739,13 @@ export class CommerceService {
       // for "exists but is not yours" confirms the id belongs to someone.
       throw new Error('Invoice not found');
     }
-    if (params.actorId) {
+    if (isSystemActor(params.actorId)) {
+      // See markInvoicePaid: KEY's authority is the proven tenant scope, so the
+      // scope must actually have been supplied and checked above.
+      if (!params.businessId) {
+        throw new Error('Not authorized to update this invoice');
+      }
+    } else if (params.actorId) {
       const membership = await this.prisma.client.membership.findFirst({
         where: { businessId: existingInvoice.businessId, userId: params.actorId },
       });

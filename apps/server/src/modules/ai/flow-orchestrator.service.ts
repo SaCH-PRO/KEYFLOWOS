@@ -24,6 +24,7 @@ import { BusinessGraphService } from './business-graph.service';
 import { PlannerService } from './planner.service';
 import { getOpenAiToolDefinitions, getToolByName, RiskLevel, ToolFamily, wrapToolResult, FlowTool, CORTEX_TOOL_BRIDGE, isCortexBridgedTool } from './flow-tool-registry';
 import { KeyCortexToolRegistryService } from '../key-cortex/key-cortex-tool-registry.service';
+import { KEY_SYSTEM_ACTOR_ID } from '../../core/auth/system-actor';
 import { AiMemoryService } from './ai-memory.service';
 import { ModelGatewayService, GatewayMessage, StreamChunk } from './model-gateway.service';
 import { DocumentIntelligenceService } from './document-intelligence.service';
@@ -2153,7 +2154,7 @@ ${triage.standingContext}`;
       }
 
       case 'commerce_mark_invoice_paid': {
-        const invoice = await this.getCommerce().markInvoicePaid(args.invoiceId, 'key_ai');
+        const invoice = await this.getCommerce().markInvoicePaid(args.invoiceId, KEY_SYSTEM_ACTOR_ID, businessId);
         return { invoice, id: invoice.id };
       }
 
@@ -3143,7 +3144,7 @@ ${triage.standingContext}`;
             let updated = 0;
             for (const id of ids) {
               try {
-                await this.getCommerce().markInvoicePaid(id, 'key_ai');
+                await this.getCommerce().markInvoicePaid(id, KEY_SYSTEM_ACTOR_ID, businessId);
                 updated++;
               } catch (err: any) {
                 this.logger.warn(`bulk mark paid skipped for ${id}: ${(err as Error).message}`);
@@ -3680,7 +3681,7 @@ ${triage.standingContext}`;
             startAt: args.startAt,
             endAt: args.endAt ?? null,
             allDay: args.allDay ?? false,
-            type: args.type ?? 'OTHER',
+            type: args.type ?? 'FOLLOW_UP',
             priority: args.priority ?? 'NORMAL',
             color: args.color ?? null,
           },
@@ -3875,7 +3876,8 @@ ${triage.standingContext}`;
         const updated = await this.getCommerce().updateInvoiceStatus({
           invoiceId: args.invoiceId,
           status: 'SENT',
-          actorId: 'key_ai',
+          actorId: KEY_SYSTEM_ACTOR_ID,
+          businessId,
           sentAt: new Date(),
         });
         // Log activity
