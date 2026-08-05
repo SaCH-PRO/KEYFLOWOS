@@ -48,3 +48,4 @@ screenshot-home.png
 
 # Agent worktrees — transient, never part of the repo
 .claude/worktrees/
+*.tsbuildinfo
