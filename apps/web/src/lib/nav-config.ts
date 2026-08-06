@@ -295,11 +295,24 @@ export const meNav: NavItem[] = [
 // MOBILE BOTTOM NAV
 // ============================================================================
 
-export const mobileBottomNav = [
+/**
+ * `showUnreadBadge` marks the item that carries the unread count.
+ *
+ * It was a route comparison in the component — `item.href === "/app/inbox"` —
+ * against an href that is `/app/data-inbox` here. So the badge never rendered,
+ * and nothing said so. A flag on the item cannot drift from itself the way two
+ * copies of a route string can.
+ */
+export const mobileBottomNav: Array<{
+  label: string;
+  href: string;
+  icon: LucideIcon;
+  showUnreadBadge?: boolean;
+}> = [
   { label: "Home", href: "/app/command-center", icon: Zap },
   { label: "Flows", href: "#flows", icon: Briefcase },
   { label: "AI", href: "#key", icon: Brain },
-  { label: "Inbox", href: "/app/data-inbox", icon: Inbox },
+  { label: "Inbox", href: "/app/data-inbox", icon: Inbox, showUnreadBadge: true },
   { label: "Me", href: "#me", icon: User },
 ];
 

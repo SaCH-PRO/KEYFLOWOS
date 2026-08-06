@@ -106,7 +106,7 @@ export function MobileBottomNav({
             >
               <div className="relative">
                 <Icon className="w-[18px] h-[18px]" />
-                {item.href === "/app/inbox" && unreadCount > 0 && (
+                {item.showUnreadBadge && unreadCount > 0 && (
                   <span className="absolute -top-1 -right-2 h-3.5 min-w-[14px] px-0.5 rounded-full text-[8px] font-bold flex items-center justify-center text-white bg-gradient-to-r from-[hsl(var(--kf-accent1))] to-[hsl(var(--kf-accent2))]">
                     {unreadCount > 9 ? "9+" : unreadCount}
                   </span>

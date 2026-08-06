@@ -136,6 +136,33 @@ describe('the modes are nested, not arbitrary', () => {
   });
 });
 
+describe('the mobile unread badge is attached to something that exists', () => {
+  // Same class of defect, third instance in this file's neighbourhood. The
+  // component gated the badge on `item.href === "/app/inbox"` while nav-config
+  // declares that item as "/app/data-inbox", so the unread count never rendered
+  // on mobile and nothing failed. It is a flag on the item now — a flag cannot
+  // drift from itself the way two copies of a route string can.
+  const nav = readFileSync(join(__dirname, '..', 'nav-config.ts'), 'utf8');
+  const component = readFileSync(
+    join(__dirname, '..', '..', 'components', 'layout', 'mobile-bottom-nav.tsx'),
+    'utf8',
+  );
+
+  it('exactly one bottom-nav item claims the badge', () => {
+    const block = nav.slice(nav.indexOf('export const mobileBottomNav'));
+    const marked = [...block.slice(0, 900).matchAll(/showUnreadBadge: true/g)];
+
+    expect(marked).toHaveLength(1);
+  });
+
+  it('the component reads the flag rather than matching a route', () => {
+    expect(component).toMatch(/item\.showUnreadBadge\s*&&/);
+    expect(component, 'still comparing against a hardcoded route').not.toMatch(
+      /item\.href === ["']\/app\//,
+    );
+  });
+});
+
 describe('enterprise is complete, even though the filter skips it', () => {
   const { operate } = navLabels();
 
