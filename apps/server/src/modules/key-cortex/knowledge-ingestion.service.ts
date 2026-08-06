@@ -1,3 +1,12 @@
+// @keyflow:dormant — registered in key-cortex.module.ts and injected by nothing.
+//
+// Verified 2026-08-06: zero injection sites repo-wide. Nothing ingests external
+// knowledge into semantic memory, so docs/neuro-atlas-code-mapping.md §45
+// (Neurodevelopment / Neurogenesis) currently maps to a file rather than to a
+// behaviour.
+//
+// This is roadmap capability with no caller, not a wiring slip — writing the
+// driver is the work, and until then the atlas entry overstates what runs.
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SemanticMemoryService } from '../ai/semantic-memory.service';

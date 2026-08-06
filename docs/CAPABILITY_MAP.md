@@ -18,8 +18,8 @@ checklist), `MASTER_ROLLOUT_PLAN.md` (phases), `PRODUCTION_STATE.md` (deployed).
 | Web screens | 202 `page.tsx`, **29 redirects/re-exports → 173 real** |
 | Cortex services | 97 · server modules 101 · nav destinations 55 |
 | Organ tools | 29 registered, **4 bridged** |
-| Standing gates | **17 specs** — the original 14 plus `trust-explanation-wiring`, `standing-context-reachability`, and the extended fabrication/honesty rules |
-| Tests | **3,122 server · 117 web**, all green |
+| Standing gates | **18 specs** — the original 14 plus `trust-explanation-wiring`, `standing-context-reachability`, `phantom-injection`, and the extended fabrication/honesty/domain-parity rules |
+| Tests | **3,114 server · 117 web**, all green |
 
 ---
 
@@ -104,7 +104,7 @@ reaches a human unprompted.
 | `value-learning:20` | Approvals/rejections → weighted value constraints | REST + 1 caller (weak) |
 | `key-cortex-genome-context` / `-bridge` | Genome-enriched context, autonomy gating, opportunity ranking | 6 callers |
 | `key-cortex-epigenetics` | How a business *expresses* its genome — style, cadence | triage `:376` |
-| **`knowledge-ingestion:22`** | Ingest external knowledge into semantic memory | **nothing — INERT** |
+| **`knowledge-ingestion`** | Ingest external knowledge into semantic memory | **nothing — INERT**, tagged `@keyflow:dormant` |
 
 ## 1.6 Regulation — LIVE
 
@@ -176,8 +176,41 @@ The guard is deliberate and the reasoning at `:433-441` is sound:
 Widening the guard would reintroduce exactly that. But the consequence stands:
 the seven immutable values and the stakeholder veto — plus emotion, temporal
 reasoning, metacognition, the reasoning engine and creativity — **never see a
-tool call**. If ethics should gate actions, it must be invoked *from the tool
-path*, beside `AiOversightService`. **Owner decision.**
+tool call**.
+
+The obvious fix is to invoke it *from the tool path*, beside
+`AiOversightService`. **Measured 2026-08-06 — and the answer is no, not as
+written.**
+
+`evaluateAction(action, params, businessId)` takes the action as a **string** and
+scores it with substring heuristics. Probed against all 78 real write tools:
+
+| Probe | Result |
+|---|---|
+| 78 write tools, empty params | **0 denied** |
+| `data_export_all_customers` | **PERMITTED** — though `data_export` is on its own `HIGH_RISK_ACTIONS` list |
+| `third_party_share_contacts` | **PERMITTED** — likewise on that list |
+| `marketing_send_campaign`, `bulkSize: 5000` | **PERMITTED** |
+| `permanently_delete_all_contacts` | DENIED |
+| `issue_refund` | DENIED unless `requiresApproval: true` |
+
+The two hard vetoes in `computePermitted` fire on `permanent`+`delete` and on
+`charge|bill|refund`. **No tool in the registry contains any of those
+substrings** — the three `delete` tools do not say `permanent`. The veto is
+unreachable by construction, and the high-risk flags that do fire are
+non-critical and change nothing.
+
+Wiring it would deny nothing that exists while creating the appearance of an
+ethical gate — the exact failure this codebase keeps finding, in the component
+whose own value list includes `honesty`. **Decision: not wired.**
+
+What governs the tool path today is real and enforced: risk tiers plus approval
+routing (`ai-oversight.service.ts:63,173-181`), T3/T4 requiring human approval.
+
+Doing this properly means expressing the values check over **registry metadata**
+— tier, family, recipient count, tenant scope, whether the action moves money or
+leaves the building — rather than over how an action name happens to be spelled.
+That is a build, not a wiring fix.
 
 **Five dead services.** Two are a worse category: `@Optional()` is genuinely
 present, so Nest binds `undefined`, boot stays clean, and every call site reads
@@ -185,11 +218,26 @@ as wired.
 
 | Service | State |
 |---|---|
-| `key-cortex-keystore-adapter.service.ts:20` | In no module, no caller |
-| `cognition-session.service.ts:20` | Registered `key-cortex.module.ts:499,644`, zero injection sites |
-| `knowledge-ingestion.service.ts:22` | Registered `:493,661`, zero injection sites |
-| ~~`trust-explanation.service.ts:23`~~ | **FIXED 2026-08-06** — registered in `key-cortex.module.ts`; held by `trust-explanation-wiring.spec.ts` |
-| `key-command-router.service.ts:28` | **In no module**, `@Optional()`-injected at `key-cortex-command:94`, **never read** |
+| ~~`key-cortex-keystore-adapter.service.ts:20`~~ | **DELETED** — in no module, no caller |
+| `cognition-session.service.ts` | Registered, zero injection sites — **kept, tagged `@keyflow:dormant`** |
+| `knowledge-ingestion.service.ts` | Registered, zero injection sites — **kept, tagged `@keyflow:dormant`** |
+
+**The rule applied:** delete what *lies*, keep and mark what is merely dormant.
+`KeyCommandRouterService` claimed to be the single command pathway while
+registered nowhere and read by nothing, and `KeyCortexKeystoreAdapterService` was
+an orphan — both gone, along with a 204-line spec that constructed the router
+directly with mocks and so passed while nothing could reach it. The other two are
+honestly registered and simply unused; they carry the existing
+`@keyflow:dormant` marker rather than a phantom injection, so nobody reads them
+as live.
+
+**And the class is now gated.** `phantom-injection.spec.ts` scans the whole
+server: any `@Optional() @Inject(X)` where `X` appears in no `providers` array
+fails the build. Without `@Optional()` Nest refuses to start and you find out in
+seconds — `@Optional()` is precisely what converts a loud boot failure into a
+silent permanent no-op. Both known instances are also asserted by name.
+| ~~`trust-explanation.service.ts:23`~~ | **FIXED** — registered; held by `trust-explanation-wiring.spec.ts` |
+| ~~`key-command-router.service.ts:28`~~ | **DELETED** — with its injection and its spec |
 
 `key-command-router.service.ts` opens by claiming "ONE pathway for all commands.
 No more direct Cortex execution." The opposite ships.
@@ -375,8 +423,9 @@ reachable only as a tab inside a dormant-flagged marketplace page.
 
 ## Tier 0 — one-liners with real behaviour behind them
 1. ~~**Register `TrustExplanationService`**~~ — **DONE 2026-08-06.**
-2. **Decide the two zombies** — `KeyCommandRouterService` (+ its unused injection)
-   and `KeyCortexKeystoreAdapterService`. Delete, or wire deliberately.
+2. ~~**Decide the two zombies**~~ — **DONE 2026-08-06.** Both deleted; the two
+   honestly-dormant services tagged `@keyflow:dormant`; the class gated by
+   `phantom-injection.spec.ts`.
 
 ## Tier 1 — close the gate blind spots (before adding more tools)
 3. ~~**Extend `no-fabricated-screens`**~~ — **DONE 2026-08-06.** Walks component
@@ -432,7 +481,10 @@ Service and UI already exist for all of these; only tools are missing.
 20. **Helpdesk** — no thread, no SLA. Product build. Defer.
 
 ## Owner decisions
-- **Ethics is not in the execution path** (§1.9). Guard, or gap to close?
+- ~~**Ethics is not in the execution path**~~ — **decided 2026-08-06: not
+  wired.** It denies 0 of 78 real write tools and permits two actions on its own
+  high-risk list; see §1.9 for the probe. Gating on registry metadata rather
+  than name spelling is a build, and belongs in the queue when wanted.
 - **25 of 29 organ tools unbridged.** Bridge, or keep internal?
 - **Addon packs do not gate tools** — 12 tools on `/app/seo` and
   `/app/call-tasks` work for businesses that cannot open the screen.

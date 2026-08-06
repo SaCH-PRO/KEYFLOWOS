@@ -17,7 +17,7 @@
 //   9. Utility Helpers
 // ============================================================================
 
-import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 
 // ─── Connector Types ──────────────────────────────────────────────────────────
@@ -31,9 +31,6 @@ import {
 
 // ─── Connector Service ────────────────────────────────────────────────────────
 import { KeyCortexConnectorService } from './key-cortex-connector.service';
-
-// ─── Command Router (v4) ─────────────────────────────────────────────────────
-import { KeyCommandRouterService } from './key-command-router.service';
 
 // ─── AI Services ──────────────────────────────────────────────────────────────
 import { ModelGatewayService } from '../ai/model-gateway.service';
@@ -87,11 +84,16 @@ export class KeyCortexCommandService {
     private readonly modelGateway: ModelGatewayService,
     private readonly connector: KeyCortexConnectorService,
     private readonly aiUsage: AiUsageService,
-
-    // ── v4: Command Router (optional — graceful degradation) ──
-    @Optional()
-    @Inject(KeyCommandRouterService)
-    private readonly router?: KeyCommandRouterService,
+    // KeyCommandRouterService was injected here @Optional() and never read.
+    // It was registered in no module, so Nest always bound undefined — the
+    // parameter existed, looked wired, and could not have done anything. Its
+    // file claimed "ONE pathway for all commands. No more direct Cortex
+    // execution"; the opposite shipped. Deleted 2026-08-06 along with the
+    // service and its spec, which constructed it directly with mocks and so
+    // passed while nothing could reach it.
+    //
+    // The real command path is FlowOrchestrator -> tool registry -> executor,
+    // with governance in AiOversightService and KeyCortexApprovalOrchestrator.
   ) {}
 
   // ══════════════════════════════════════════════════════════════════════════════
@@ -100,14 +102,13 @@ export class KeyCortexCommandService {
   /**
    * Parse a single natural-language request into one or more structured intents.
    *
-   * 1. Try command router first (v4) for high-confidence matches.
-   * 2. Fetch all module capabilities from the connector.
-   * 3. Build a comprehensive AI prompt including capabilities, business context,
+   * 1. Fetch all module capabilities from the connector.
+   * 2. Build a comprehensive AI prompt including capabilities, business context,
    *    and the user's request.
-   * 4. Call gpt-4o-mini with the prompt.
-   * 5. Parse the JSON response safely — with retry/fallback logic.
-   * 6. Optionally validate each intent against registered capabilities.
-   * 7. Return an ordered array of ParsedIntent objects.
+   * 3. Call gpt-4o-mini with the prompt.
+   * 4. Parse the JSON response safely — with retry/fallback logic.
+   * 5. Optionally validate each intent against registered capabilities.
+   * 6. Return an ordered array of ParsedIntent objects.
    */
   async parseIntent(
     input: string,

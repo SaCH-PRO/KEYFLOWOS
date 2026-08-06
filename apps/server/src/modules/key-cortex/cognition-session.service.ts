@@ -1,3 +1,12 @@
+// @keyflow:dormant — registered in key-cortex.module.ts and injected by nothing.
+//
+// Verified 2026-08-06: zero injection sites repo-wide. Nest constructs it on
+// every boot and no code path ever calls it. Kept rather than deleted because
+// it is honestly dormant — unlike KeyCommandRouterService, which was deleted
+// the same day for being @Optional()-injected while registered nowhere, so its
+// call site read as wired when it could never resolve.
+//
+// Either give it a driver or delete it; do not leave it looking live.
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import type { CognitionSession, Prisma } from '@prisma/client';
