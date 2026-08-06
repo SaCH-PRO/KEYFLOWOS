@@ -43,6 +43,28 @@ import {
 
 
 /** Sensitivity levels for different data types. */
+/**
+ * Which recorded consent purpose, if any, governs a given data type.
+ *
+ * ConsentRecord.consentType is written as 'marketing' | 'recording' | 'all'
+ * (see communications/consent.service.ts). Most of the data types below have no
+ * corresponding consent purpose in this product — there is no such thing as
+ * "consent to hold a financial figure" here — and asking for one produced a
+ * question the database could never answer yes to.
+ *
+ * Absent from this map means NOT EVALUABLE, and not-evaluable must not be
+ * reported as not-consented. Add an entry only when the purpose is genuinely
+ * the one a user granted or withheld.
+ */
+const CONSENT_PURPOSE_FOR_DATA_TYPE: Record<string, 'marketing' | 'recording'> = {
+  // Reaching a person on a channel is what marketing consent governs.
+  email: 'marketing',
+  phone: 'marketing',
+  // Call and meeting capture is what recording consent governs.
+  voice: 'recording',
+  call_recording: 'recording',
+};
+
 const DATA_SENSITIVITY: Record<string, 'low' | 'medium' | 'high' | 'critical'> = {
   email: 'medium',
   phone: 'high',
@@ -325,25 +347,39 @@ export class KeyCortexEthicsService {
     const involvesExposure = exposureActions.some((a) => actionLower.includes(a));
 
     if (involvesExposure && dataTypes.length > 0) {
-      // Check consent for each data type
+      // A check that can never pass is worse than no check.
+      //
+      // This queried `consentType: dataType`, where dataType comes from
+      // DATA_SENSITIVITY — email, phone, financial, health, biometric... and
+      // ConsentRecord.consentType is written as 'marketing' | 'recording' |
+      // 'all'. Zero overlap, so validConsent was ALWAYS false and every
+      // deliberate answer touching sensitive data shipped a DATA PRIVACY ALERT.
+      //
+      // An alarm that fires on everything is not caution, it is noise, and it
+      // trains the reader to ignore the one that matters — the overactive
+      // immune system the atlas warns about, in its purest form.
+      //
+      // So: only raise an issue where consent is genuinely EVALUABLE. Where the
+      // data type maps to a purpose this product actually records, ask about
+      // that purpose. Where it does not, say nothing rather than assert an
+      // absence we never checked.
       for (const dataType of dataTypes) {
-        const consents = await this.prisma.client.consentRecord.findMany({
+        const purpose = CONSENT_PURPOSE_FOR_DATA_TYPE[dataType];
+        if (!purpose) continue;
+
+        const granted = await this.prisma.client.consentRecord.count({
           where: {
             businessId,
-            consentType: dataType,
+            consentType: { in: [purpose, 'all'] },
             status: 'granted',
             revokedAt: null,
           },
         });
 
-        const validConsent = consents.some(
-          (c: { revokedAt: Date | null }) => c.revokedAt === null,
-        );
-
-        if (!validConsent) {
+        if (granted === 0) {
           const sensitivity = DATA_SENSITIVITY[dataType] || 'medium';
           if (sensitivity === 'critical' || sensitivity === 'high') {
-            issues.push(`No valid consent for ${sensitivity}-sensitivity data type "${dataType}"`);
+            issues.push(`No recorded ${purpose} consent covering ${sensitivity}-sensitivity data "${dataType}"`);
           }
         }
       }
@@ -365,17 +401,25 @@ export class KeyCortexEthicsService {
       actionLower.includes(kw),
     );
     if (involvesThirdParty && dataTypes.length > 0) {
+      // Same vocabulary mismatch as the exposure check above, and worse here:
+      // this one had no sensitivity floor, so it flagged EVERY data type it
+      // recognised — including `name`, sensitivity 'low'. Any mention of an
+      // API, webhook or integration produced a consent complaint about the
+      // customer's name.
       const unconsentedTypes = [];
       for (const dt of dataTypes) {
-        const consents = await this.prisma.client.consentRecord.findMany({
+        const purpose = CONSENT_PURPOSE_FOR_DATA_TYPE[dt];
+        if (!purpose) continue;
+
+        const granted = await this.prisma.client.consentRecord.count({
           where: {
             businessId,
-            consentType: dt,
+            consentType: { in: [purpose, 'all'] },
             status: 'granted',
             revokedAt: null,
           },
         });
-        if (consents.length === 0) unconsentedTypes.push(dt);
+        if (granted === 0) unconsentedTypes.push(dt);
       }
       if (unconsentedTypes.length > 0) {
         issues.push(`Third-party sharing lacks consent for: ${unconsentedTypes.join(', ')}`);

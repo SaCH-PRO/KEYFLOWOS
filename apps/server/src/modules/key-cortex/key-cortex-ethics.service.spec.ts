@@ -18,6 +18,7 @@ function makeService(overrides: {
       },
       consentRecord: {
         findMany: vi.fn().mockResolvedValue(overrides.consents ?? []),
+        count: vi.fn().mockResolvedValue((overrides.consents ?? []).filter((c: any) => !c.revokedAt).length),
       },
     },
   };
@@ -98,23 +99,52 @@ describe('KeyCortexEthicsService', () => {
   });
 
   describe('checkDataPrivacy', () => {
-    it('reports no valid consent when none exists', async () => {
+    // These three tests used to assert `expect(check).toBeDefined()` — three
+    // different names, one vacuous assertion, and nothing about behaviour. They
+    // passed for months against a check that could NEVER succeed: it queried
+    // ConsentRecord.consentType with values from DATA_SENSITIVITY (email, phone,
+    // financial, health) while the column is only ever written 'marketing',
+    // 'recording' or 'all'. Zero overlap, so every deliberate answer touching
+    // sensitive data shipped a DATA PRIVACY ALERT that meant nothing.
+
+    it('raises an issue for high-sensitivity data with no recorded consent', async () => {
       const { service: svc } = makeService({ consents: [] });
-      const check = await svc.checkDataPrivacy('biz_1', 'export_contacts', { email: 'a@b.c' });
-      expect(check).toBeDefined();
+
+      const check = await svc.checkDataPrivacy('biz_1', 'export_contacts', { phone: '555-0100' });
+
+      expect(check.compliant).toBe(false);
+      expect(check.issues.join(' ')).toMatch(/marketing consent/);
     });
 
-    it('treats a revoked consent as not valid', async () => {
+    it('is satisfied by a granted consent', async () => {
+      // The half that could never happen before. If this cannot pass, the check
+      // is an alarm rather than a gate.
+      const { service: svc } = makeService({ consents: [{ revokedAt: null }] });
+
+      const check = await svc.checkDataPrivacy('biz_1', 'export_contacts', { phone: '555-0100' });
+
+      expect(check.compliant).toBe(true);
+    });
+
+    it('treats a revoked consent as absent', async () => {
       const past = new Date(Date.now() - 86_400_000);
       const { service: svc } = makeService({ consents: [{ revokedAt: past }] });
-      const check = await svc.checkDataPrivacy('biz_1', 'export_contacts', { email: 'a@b.c' });
-      expect(check).toBeDefined();
+
+      const check = await svc.checkDataPrivacy('biz_1', 'export_contacts', { phone: '555-0100' });
+
+      expect(check.compliant).toBe(false);
     });
 
-    it('accepts a consent that has not been revoked', async () => {
-      const { service: svc } = makeService({ consents: [{ revokedAt: null }] });
-      const check = await svc.checkDataPrivacy('biz_1', 'export_contacts', { email: 'a@b.c' });
-      expect(check).toBeDefined();
+    it('says NOTHING about data types this product records no consent for', async () => {
+      // The core correction. There is no such thing as "consent to hold a
+      // customer's name" here, so asserting its absence is a claim we never
+      // checked — and it is what made the alert fire on everything.
+      const { service: svc } = makeService({ consents: [] });
+
+      const check = await svc.checkDataPrivacy('biz_1', 'export_contacts', { name: 'Ada Lovelace' });
+
+      expect(check.issues).toEqual([]);
+      expect(check.compliant).toBe(true);
     });
   });
 });

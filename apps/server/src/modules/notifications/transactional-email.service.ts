@@ -312,6 +312,37 @@ export class TransactionalEmailService implements OnModuleInit, OnModuleDestroy 
       return { status: 'FAILED' };
     }
 
+    // "Do not contact" is enforced HERE, once, rather than by each caller.
+    //
+    // It was enforced by convention: DelegationLoopService checks
+    // `contact.doNotContact` before payment recovery, and the campaign sender
+    // filters on doNotContact and marketingOptIn. Every other caller was on its
+    // honour — and the invoice-send path added to this codebase on 2026-08-05
+    // promptly forgot, which is the argument for putting it in the pathway
+    // instead of in a checklist.
+    //
+    // Scoped to the tenant on purpose: a contactId from another business must
+    // not silently resolve. If the id does not belong here, refuse rather than
+    // send blind.
+    if (params.contactId) {
+      const contact = await this.prisma.client.contact.findFirst({
+        where: { id: params.contactId, businessId: params.businessId },
+        select: { doNotContact: true },
+      });
+
+      if (!contact) {
+        this.logger.warn(
+          `[notify] refusing ${params.type}: contact ${params.contactId} is not in business ${params.businessId}`,
+        );
+        return { status: 'FAILED' };
+      }
+
+      if (contact.doNotContact) {
+        this.logger.warn(`[notify] refusing ${params.type}: contact ${params.contactId} is marked do-not-contact`);
+        return { status: 'FAILED' };
+      }
+    }
+
     if (params.dedupeKey) {
       const existing = await this.prisma.client.customerNotificationLog.findFirst({
         where: {
