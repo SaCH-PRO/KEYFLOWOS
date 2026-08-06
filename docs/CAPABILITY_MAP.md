@@ -18,7 +18,8 @@ checklist), `MASTER_ROLLOUT_PLAN.md` (phases), `PRODUCTION_STATE.md` (deployed).
 | Web screens | 202 `page.tsx`, **29 redirects/re-exports → 173 real** |
 | Cortex services | 97 · server modules 101 · nav destinations 55 |
 | Organ tools | 29 registered, **4 bridged** |
-| Standing gates | 14 specs, 149 assertions |
+| Standing gates | **17 specs** — the original 14 plus `trust-explanation-wiring`, `standing-context-reachability`, and the extended fabrication/honesty rules |
+| Tests | **3,122 server · 117 web**, all green |
 
 ---
 
@@ -246,7 +247,11 @@ temporal (5) are invisible to chat. `key_inbox.send_reply` is deliberately
 unbridged (`:2550`): `send_message_with_approval` covers it, and "two tools for
 one action is how a model ends up sending twice."
 
-## 2.3 Seven handlers that misreport
+## 2.3 Seven handlers that misreported — **all fixed 2026-08-06**
+
+Kept as a record of the defect class, not as an open list. The gate that now
+catches it is described in §5.1.
+
 
 Prior honesty fixes held — `marketing_send_campaign` calls `sendCampaign`,
 `commerce_send_invoice` throws on `delivery.status === 'FAILED'`, the five
@@ -383,17 +388,25 @@ reachable only as a tab inside a dormant-flagged marketplace page.
    Then fix `time_*` → `/app/time-tracking`, `documents_*` → the documents screen,
    `finance_*` → `/app/financial-flow`.
 
-## Tier 2 — stop the misreporting
-6. **S1/S2** — route to the real services, or rename the tools to what they do.
-7. **S3/S4/S6** — return what the service returned.
-8. **S5** — lowercase content statuses; surface the auto-generated invoice id.
-9. **S7** — call `ReceivablesService.getAging` and `detectContentGaps`.
-10. **Extend `tool-honesty-sweep`** to the class: a handler that `await`s a
-    service call and returns an object built only from `args`.
+## Tier 2 — stop the misreporting — **ALL DONE 2026-08-06**
+6. ~~**S1/S2**~~ — now call `SeoService.syncPageInventory` and
+   `SeoContentService.generateBrief`.
+7. ~~**S3/S4/S6**~~ — return what the service returned.
+8. ~~**S5**~~ — statuses come from the service in its own vocabulary, and
+   `deliverRequest` now returns `invoiceRequested`/`deliveryInvoiceId`/
+   `invoiceError`; the tool **throws** when an invoice was due and did not
+   appear, rather than reporting a clean delivery.
+9. ~~**S7**~~ — `ReceivablesService.getAging` (basis-aware, ledger-reconciled,
+   surfacing `ledgerDelta`) and `detectContentGaps`.
+10. ~~**Extend `tool-honesty-sweep`**~~ — a handler that drops a service result
+    cannot build its return from `args` and literals alone. Four void writes
+    exempted by name with reasons. Negative-controlled against `evidence_verify`.
 
-## Tier 3 — protect the CNS
-11. Gate asserting the six `describeForPrompt()` outputs reach the prompt in
-    **both** stream and non-stream paths.
+## Tier 3 — protect the CNS — **DONE 2026-08-06**
+11. ~~Gate asserting the six `describeForPrompt()` outputs reach the prompt in
+    both paths.~~ `standing-context-reachability.spec.ts`, 10 assertions.
+    Negative control: removing only the streaming interpolation fails one
+    assertion and leaves the other nine green.
 
 ## Tier 4 — organs, by value per unit of effort
 Service and UI already exist for all of these; only tools are missing.
@@ -449,9 +462,15 @@ time screen is `/app/time-tracking`. Same class: `documents_*` → `/app/profile
 (`:1385,:1402`); `finance_view_receivables|list_action_items` → `/app/finance`
 (`:2279,:2311`), a 7-line redirect stub.
 
-Queue items 3, 5 and 10 close these. Each must **fail against `HEAD`** before the
-underlying defect is fixed — that is the proof it catches the class rather than
-the instance.
+Items 3 and 10 are **closed**; item 5 (manual-parity) remains open. Each gate was
+made to **fail against `HEAD`** before the underlying defect was fixed — that is
+the proof it catches the class rather than the instance.
+
+`tool-honesty-sweep` gained the third blind spot in the same family: a handler
+that drops a service result and answers with its own arguments. Seven handlers
+shared that shape while the spec written for exactly this class passed them all,
+because it only asked whether a tool that *claims to send* reaches a send path —
+never whether a tool that *did* something reports what happened.
 
 ## 5.2 The 14 standing gates
 
