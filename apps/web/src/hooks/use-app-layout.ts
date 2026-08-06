@@ -111,9 +111,9 @@ export function useAppLayout(): AppLayoutState {
     if (pathname.startsWith("/app/social") || pathname.startsWith("/app/marketing") || pathname.startsWith("/app/communicate")) return "content";
     if (pathname.startsWith("/app/projects") || pathname.startsWith("/app/work")) return "projects";
     if (pathname.startsWith("/app/expenses")) return "expenses";
-    if (pathname.startsWith("/app/automations") || pathname.startsWith("/app/build/automate")) return "flows";
-    if (pathname.startsWith("/app/settings") || pathname.startsWith("/app/build/system")) return "settings";
-    if (pathname.startsWith("/app/store") || pathname.startsWith("/app/build/business/store")) return "store";
+    if (pathname.startsWith("/app/automations")) return "flows";
+    if (pathname.startsWith("/app/settings")) return "settings";
+    if (pathname.startsWith("/app/store")) return "store";
     if (pathname.startsWith("/app/profile")) return "profile";
     if (pathname.startsWith("/app/structure")) return "flows";
     return "cockpit";

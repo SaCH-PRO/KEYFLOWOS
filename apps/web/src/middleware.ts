@@ -39,19 +39,22 @@ function isTokenExpiredOrInvalid(token: string): boolean {
  * Only URLs that have been MOVED (not pages with real existing content) are redirected.
  */
 const REDIRECTS: Record<string, string> = {
-  // Settings reorganized into Build > System — only the three that actually
-  // moved. The rest still live under /app/settings and are served there; see
-  // PREFIX_REDIRECTS below for why a blanket rule was wrong.
-  "/app/settings": "/app/build/system/workspace",
-  "/app/settings/ai": "/app/build/system/ai",
-  "/app/settings/compliance": "/app/build/system/compliance",
-  "/app/settings/developers": "/app/build/system/developers",
+  // The /app/build/* tree was eleven ModuleShell pages — tab strips with no
+  // content and no data source — and settings redirected into it. So
+  // /app/settings/ai sent a 793-line AI preferences screen to a 25-line empty
+  // frame, /app/settings/compliance sent 218 lines to another, and
+  // /app/settings sent the whole area to a third.
+  //
+  // An earlier fix here removed the blanket prefix rule and kept these three
+  // because their targets EXISTED. Existing was the wrong test: a shell passes
+  // it. The tree is deleted and the redirects with it; the real screens live
+  // under /app/settings and are served there.
+  //
   // Money hub consolidation — finance merged into /app/money
   "/app/finance": "/app/money",
   "/app/finance/cashflow": "/app/money",
   "/app/accounting": "/app/money/books",
 };
-
 /**
  * Prefix redirects — only for paths that have truly moved.
  *

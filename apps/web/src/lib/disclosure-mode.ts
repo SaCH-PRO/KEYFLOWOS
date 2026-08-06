@@ -16,54 +16,18 @@ const STORAGE_KEY = "kf_disclosure_mode";
 
 const DEFAULT_MODE: DisclosureMode = "startup";
 
-/** Which nav routes are visible in each mode. */
-const MODE_VISIBILITY: Record<DisclosureMode, Set<string>> = {
-  startup: new Set([
-    "/app/keyflow-command",   // Cockpit
-    "/app/money",             // Money
-    "/app/money/revenue",     // Revenue
-    "/app/crm/contacts",            // People
-    "/app/crm/contacts",   // Pipeline
-    "/app/schedule",          // Schedule
-    "/app/schedule/bookings", // Bookings
-    "/app/build",             // Build
-    "/app/build/business",    // Business
-    "/app/build/business/store", // Storefront
-    "/app/build/system",      // System
-    "/app/build/system/workspace", // Workspace settings
-    "/app/profile",           // Profile
-  ]),
-  growth: new Set([
-    "/app/keyflow-command",   // Cockpit
-    "/app/money",             // Money
-    "/app/money/revenue",     // Revenue
-    "/app/money/expenses",    // Expenses
-    "/app/crm/contacts",            // People
-    "/app/crm/contacts",   // Pipeline
-    "/app/work",              // Work
-    "/app/work/projects",     // Projects
-    "/app/schedule",          // Schedule
-    "/app/schedule/bookings", // Bookings
-    "/app/schedule/calendar", // Calendar
-    "/app/inbox",             // Inbox
-    "/app/communicate",       // Communicate
-    "/app/communicate/campaigns", // Campaigns
-    "/app/intelligence",      // Intelligence
-    "/app/intelligence/reports", // Reports
-    "/app/build",             // Build
-    "/app/build/business",    // Business
-    "/app/build/business/store", // Storefront
-    "/app/build/system",      // System
-    "/app/build/system/workspace", // Workspace
-    "/app/build/automate",    // Automate
-    "/app/build/automate/flows", // Flows
-    "/app/profile",           // Profile
-  ]),
-  enterprise: new Set([
-    // All routes — every path starting with /app is visible
-    "*",
-  ]),
-};
+/**
+ * REMOVED: a route-based visibility table.
+ *
+ * It listed /app/money, /app/work, /app/schedule, /app/build/* — an information
+ * architecture that never shipped. nav-config emits /app/commerce,
+ * /app/projects, /app/bookings, and the /app/build tree has been deleted, so
+ * every entry named a route the nav does not use.
+ *
+ * Nothing read it: use-app-layout filters on the LABEL allowlists below. A
+ * second, contradictory source of truth that no code consults is how the two
+ * lists below drifted far enough to hide most of the app.
+ */
 
 /**
  * Which Operate nav items are shown per mode.
@@ -170,19 +134,13 @@ export function setDisclosureMode(mode: DisclosureMode): void {
   window.dispatchEvent(new CustomEvent("kf:disclosure-mode-changed", { detail: { mode } }));
 }
 
-/** Check if a route is visible in the current mode. */
-export function isRouteVisible(route: string, mode?: DisclosureMode): boolean {
-  const m = mode ?? getDisclosureMode();
-  const visible = MODE_VISIBILITY[m];
-  if (visible.has("*")) return true;
-  // Check exact match or parent route match
-  if (visible.has(route)) return true;
-  // Check if any visible prefix matches
-  for (const prefix of visible) {
-    if (route.startsWith(prefix + "/")) return true;
-  }
-  return false;
-}
+/**
+ * REMOVED with it: isRouteVisible(), the only consumer of that table.
+ *
+ * No caller anywhere in apps/web. It read routes the nav does not emit, so even
+ * its callers would have got wrong answers — a dead function over a dead table,
+ * describing an architecture that never shipped.
+ */
 
 /** Returns true if the user has explicitly chosen a mode (not just the default). */
 export function hasChosenMode(): boolean {

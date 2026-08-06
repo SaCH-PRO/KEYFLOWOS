@@ -267,7 +267,7 @@ export class WorkspaceRecommendationsService {
             sourceModule: 'crm',
             targetModule: 'crm',
             actionLabel: 'Filter leads',
-            actionRoute: '/app/crm/pipeline?status=LEAD',
+            actionRoute: '/app/crm/contacts?status=LEAD',
             severity: 50,
           });
         }

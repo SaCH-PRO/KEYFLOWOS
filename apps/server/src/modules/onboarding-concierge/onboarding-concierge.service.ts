@@ -941,7 +941,7 @@ EXTRACTED: archetype=service_provider`;
         title: 'Import your contacts',
         body: "You've set up your services but haven't added any customers yet. Import from CSV or add them manually.",
         ctaLabel: 'Import contacts',
-        ctaHref: '/app/crm/pipeline?action=import',
+        ctaHref: '/app/crm/contacts?action=import',
       },
       {
         key: 'payments',

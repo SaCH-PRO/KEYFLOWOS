@@ -915,7 +915,7 @@ export class AiController {
         module: 'crm',
         urgency: 50,
         actionLabel: 'View Leads',
-        actionRoute: '/app/crm/pipeline',
+        actionRoute: '/app/crm/contacts',
       });
     }
 
@@ -981,7 +981,7 @@ export class AiController {
         description: 'Leads inactive 30+ days — high churn risk without re-engagement',
         module: 'crm',
         actionLabel: 'View Leads',
-        actionRoute: '/app/crm/pipeline',
+        actionRoute: '/app/crm/contacts',
       });
     }
 

@@ -46,6 +46,11 @@ const isDir = (p: string) => fs.existsSync(p) && fs.statSync(p).isDirectory();
 
 /** Does this app-router path render a page? Mirrors the check in check-tool-routes. */
 function pageExists(route: string): boolean {
+  return pageFor(route) !== null;
+}
+
+/** The page file a route renders, or null. */
+function pageFor(route: string): string | null {
   let dir = APP_DIR;
   for (const segment of route.replace(/^\//, '').split('/').filter(Boolean)) {
     const literal = path.join(dir, segment);
@@ -56,10 +61,10 @@ function pageExists(route: string): boolean {
     const dynamic = isDir(dir)
       ? fs.readdirSync(dir).find((d) => /^[[(]/.test(d) && isDir(path.join(dir, d)))
       : undefined;
-    if (!dynamic) return false;
+    if (!dynamic) return null;
     dir = path.join(dir, dynamic);
   }
-  return ['page.tsx', 'page.ts'].some((f) => fs.existsSync(path.join(dir, f)));
+  return ['page.tsx', 'page.ts'].map((f) => path.join(dir, f)).find((f) => fs.existsSync(f)) ?? null;
 }
 
 describe('every redirect lands somewhere', () => {
@@ -74,6 +79,32 @@ describe('every redirect lands somewhere', () => {
       expect(pageExists(to), `${to} has no page.tsx — this redirect is a 404`).toBe(true);
     });
   }
+
+  it('no redirect sends a real screen to an empty shell', () => {
+    // EXISTENCE WAS THE WRONG TEST, and this spec made that mistake first.
+    //
+    // The blanket /app/settings/ prefix rule was replaced with three per-path
+    // redirects because their targets existed. They were ModuleShell pages —
+    // a tab strip, no content, no data source — so /app/settings/ai still sent
+    // a 793-line AI preferences screen to a 25-line empty frame. It passed
+    // every assertion here.
+    //
+    // A redirect must not lose substance: if the source has a data source and
+    // the destination does not, the destination is not where that screen went.
+    for (const [from, to] of Object.entries(redirectTables().exact)) {
+      const source = pageFor(from);
+      const target = pageFor(to);
+      if (!source || !target) continue;
+
+      const hasData = (f: string) => /from ["']@\/lib\/(api|client)/.test(fs.readFileSync(f, 'utf8'));
+      const isShell = (f: string) => /ModuleShell/.test(fs.readFileSync(f, 'utf8')) && !hasData(f);
+
+      expect(
+        hasData(source) && isShell(target),
+        `${from} has a data source and ${to} is a contentless shell — the screen is being thrown away`,
+      ).toBe(false);
+    }
+  });
 
   it('no redirect points at a page that redirects again indefinitely', () => {
     // A -> B -> A would loop in the browser. Cheap to check, expensive to hit.

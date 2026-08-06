@@ -297,7 +297,7 @@ export class FlowService {
       quickActions.push({ id: 'add-product', label: 'Add First Product', description: 'Create your first product or service', icon: 'Package', href: '/app/commerce?tab=products&action=new', priority: 1 });
     }
     if (totalContacts === 0) {
-      quickActions.push({ id: 'add-contact', label: 'Add First Contact', description: 'Import or create your first customer', icon: 'UserPlus', href: '/app/crm/pipeline?action=new', priority: 1 });
+      quickActions.push({ id: 'add-contact', label: 'Add First Contact', description: 'Import or create your first customer', icon: 'UserPlus', href: '/app/crm/contacts?action=new', priority: 1 });
     }
     if (overdueInvoices > 0) {
       quickActions.push({ id: 'overdue-invoices', label: 'Handle Overdue', description: `${overdueInvoices} overdue invoice${overdueInvoices > 1 ? 's' : ''} need attention`, icon: 'AlertTriangle', href: '/app/commerce?tab=invoices&status=OVERDUE', priority: 1 });
@@ -309,7 +309,7 @@ export class FlowService {
       quickActions.push({ id: 'publish-drafts', label: 'Publish Draft Posts', description: `${draftPosts} post${draftPosts > 1 ? 's' : ''} ready to publish`, icon: 'Send', href: '/app/social', priority: 2 });
     }
     if (activeLeads > 5) {
-      quickActions.push({ id: 'convert-leads', label: 'Convert Leads', description: `${activeLeads} leads ready for follow-up`, icon: 'TrendingUp', href: '/app/crm/pipeline?status=LEAD', priority: 2 });
+      quickActions.push({ id: 'convert-leads', label: 'Convert Leads', description: `${activeLeads} leads ready for follow-up`, icon: 'TrendingUp', href: '/app/crm/contacts?status=LEAD', priority: 2 });
     }
     if (services.length === 0) {
       quickActions.push({ id: 'add-service', label: 'Add a Service', description: 'Set up services for bookings', icon: 'Calendar', href: '/app/bookings?tab=services', priority: 2 });
@@ -471,7 +471,7 @@ export class FlowService {
         description: `No activity for ${daysSince} days`,
         urgency: daysSince > 60 ? 'high' : 'medium',
         actionLabel: 'Re-engage',
-        actionHref: `/app/crm/pipeline?contact=${c.id}`,
+        actionHref: `/app/crm/contacts?contact=${c.id}`,
         contactName: name,
         daysSince,
         whatsappLink: phone ? this.buildWhatsAppLink(phone, `Hi ${name}! Just checking in to see if you're still interested in our services. We'd love to help!`) : undefined,

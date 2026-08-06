@@ -133,7 +133,7 @@ components/ai/
 hooks/
   use-module-ai.ts            — Core hook with tools + suggestions
 
-app/app/crm/pipeline/
+app/app/crm/contacts/
   hooks/use-crm-ai-hub.ts    — CRM-specific hub implementation
   components/crm-tool-results.tsx — CRM tool result renderers
 ```
