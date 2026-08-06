@@ -904,19 +904,11 @@ export class KeyCortexIntuitionService {
       }
     }
 
-    // Conversation messages — scoped through the thread, which is where
-    // businessId lives; ConversationMessage itself has no tenant column.
-    const conversations = await this.prisma.client.conversationMessage
-      .findMany({
-        where: { thread: { businessId }, createdAt: { gte: since } },
-        select: { body: true, createdAt: true },
-        orderBy: { createdAt: 'desc' },
-        take: CORPUS_PER_SOURCE_LIMIT,
-      })
-      .catch(() => []);
-    for (const c of conversations) {
-      corpus.push({ source: 'conversation', text: c.body, timestamp: c.createdAt });
-    }
+    // The conversation corpus used to be read here, from a second message
+    // store. Both omnichannel inboxes were merged into key_inbox_* on
+    // 2026-08-06, so the query directly above already covers this traffic —
+    // reading it twice would double-count every phrase and inflate every
+    // keyword frequency the linguistic detector computes.
 
     // Contact notes — what the team wrote about customers in their own words,
     // which is the richest linguistic signal of the three.

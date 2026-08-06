@@ -404,7 +404,6 @@ model Business {
   sagaExecutions            SagaExecution[]
   agentTriggers             AgentTrigger[]
   journeyInstances          JourneyInstance[]
-  conversationThreads       ConversationThread[]
   businessGoals             BusinessGoal[]
   projectPlans              ProjectPlan[]
 
@@ -1970,31 +1969,35 @@ model DriveIntakeFile {
 }
 
 model MessageIntake {
-  id              String              @id @default(cuid())
-  businessId      String              @map("business_id")
-  business        Business            @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  connectorType   String              @map("connector_type") // whatsapp | gmail | meta_social | sms
-  sourceChannel   String              @map("source_channel") // whatsapp | email | sms | instagram | messenger
-  externalId      String?             @map("external_id")
+  id              String          @id @default(cuid())
+  businessId      String          @map("business_id")
+  business        Business        @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  connectorType   String          @map("connector_type") // whatsapp | gmail | meta_social | sms
+  sourceChannel   String          @map("source_channel") // whatsapp | email | sms | instagram | messenger
+  externalId      String?         @map("external_id")
   from            String
-  fromName        String?             @map("from_name")
+  fromName        String?         @map("from_name")
   to              String?
   subject         String?
   body            String
-  rawPayload      Json?               @map("raw_payload")
-  contactId       String?             @map("contact_id")
-  contact         Contact?            @relation(fields: [contactId], references: [id], onDelete: SetNull)
-  threadId        String?             @map("thread_id")
-  thread          ConversationThread? @relation(fields: [threadId], references: [id], onDelete: SetNull)
-  status          String              @default("pending") // pending | extracted | reviewing | approved | rejected | error
+  rawPayload      Json?           @map("raw_payload")
+  contactId       String?         @map("contact_id")
+  contact         Contact?        @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  threadId        String?         @map("thread_id")
+  /// Points at key_inbox_threads since the omnichannel merge. The orchestrator
+  /// writes this id from keyInboxThread.create(); while the relation still
+  /// named ConversationThread the approve-an-intake update violated its foreign
+  /// key at runtime, which no typecheck could see because the column is String?.
+  thread          KeyInboxThread? @relation(fields: [threadId], references: [id], onDelete: SetNull)
+  status          String          @default("pending") // pending | extracted | reviewing | approved | rejected | error
   confidence      Float?
-  intentType      String?             @map("intent_type")
-  riskTier        Int                 @default(1)
-  extractedData   Json?               @map("extracted_data")
-  proposedActions Json?               @map("proposed_actions")
-  errorMessage    String?             @map("error_message")
-  detectedAt      DateTime            @default(now()) @map("detected_at")
-  processedAt     DateTime?           @map("processed_at")
+  intentType      String?         @map("intent_type")
+  riskTier        Int             @default(1)
+  extractedData   Json?           @map("extracted_data")
+  proposedActions Json?           @map("proposed_actions")
+  errorMessage    String?         @map("error_message")
+  detectedAt      DateTime        @default(now()) @map("detected_at")
+  processedAt     DateTime?       @map("processed_at")
 
   @@unique([businessId, sourceChannel, externalId])
   @@index([businessId, status])
@@ -2319,7 +2322,6 @@ model Contact {
   financialTransactions   FinancialTransaction[]
   insightSnapshot         ContactInsightSnapshot?
   supportTickets          SupportTicket[]
-  conversationThreads     ConversationThread[]
 
   createdAt         DateTime  @default(now()) @map("created_at")
   leadScore         Int?      @map("lead_score")
@@ -7953,52 +7955,6 @@ model JourneyInstance {
   @@map("journey_instances")
 }
 
-model ConversationThread {
-  id            String    @id @default(cuid())
-  businessId    String    @map("business_id")
-  business      Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  contactId     String?   @map("contact_id")
-  contact       Contact?  @relation(fields: [contactId], references: [id], onDelete: SetNull)
-  channel       String // whatsapp | email | sms | instagram | messenger
-  channelId     String    @map("channel_id") // phone, email, or social handle
-  subject       String?
-  status        String    @default("open") // open | pending | resolved | archived
-  assignedRole  String?   @map("assigned_role")
-  priority      Int       @default(0)
-  lastMessageAt DateTime? @map("last_message_at")
-  resolvedAt    DateTime? @map("resolved_at")
-  createdAt     DateTime  @default(now()) @map("created_at")
-
-  messages       ConversationMessage[]
-  messageIntakes MessageIntake[]
-
-  @@index([businessId, contactId])
-  @@index([businessId, channel, status])
-  @@index([businessId, assignedRole, status])
-  @@index([lastMessageAt])
-  @@map("conversation_threads")
-}
-
-model ConversationMessage {
-  id         String             @id @default(cuid())
-  threadId   String             @map("thread_id")
-  thread     ConversationThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
-  direction  String // inbound | outbound
-  body       String
-  rawPayload Json?              @map("raw_payload")
-  role       String? // sales | finance | support | ops | marketing | general
-  intent     String?
-  sentiment  String?
-  aiDraft    Boolean            @default(false) @map("ai_draft")
-  aiApproved Boolean            @default(false) @map("ai_approved")
-  externalId String?            @map("external_id")
-  createdAt  DateTime           @default(now()) @map("created_at")
-
-  @@index([threadId, createdAt])
-  @@index([threadId, direction])
-  @@map("conversation_messages")
-}
-
 model BusinessGoal {
   id           String    @id @default(cuid())
   businessId   String    @map("business_id")
@@ -11444,7 +11400,8 @@ model KeyInboxThread {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  messages KeyInboxMessage[]
+  messages       KeyInboxMessage[]
+  messageIntakes MessageIntake[]
 
   @@unique([businessId, channel, externalThreadId])
   @@index([businessId, lastMessageAt])

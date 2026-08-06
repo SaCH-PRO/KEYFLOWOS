@@ -72,12 +72,23 @@ describe('collectTextCorpus sources', () => {
     svc = makeService(prisma) as KeyCortexIntuitionService & Internals;
   });
 
-  it('reads the three sources that used to be stubbed out', async () => {
+  it('reads the sources that used to be stubbed out', async () => {
     await svc.collectTextCorpus('biz_1', SINCE);
 
     expect(prisma.calls.keyInboxMessage, 'inbox never queried').toBeDefined();
-    expect(prisma.calls.conversationMessage, 'conversations never queried').toBeDefined();
     expect(prisma.calls.contactNote, 'notes never queried').toBeDefined();
+  });
+
+  it('does NOT read a second message store', async () => {
+    // There was one: conversation_messages, queried here as a separate corpus
+    // source. Both omnichannel inboxes were merged into key_inbox_* on
+    // 2026-08-06, so that traffic now arrives through the inbox query above.
+    // Reading it twice would double-count every phrase and inflate every
+    // keyword frequency this detector computes — the corpus is the input to
+    // "this word is appearing 3x more than baseline".
+    await svc.collectTextCorpus('biz_1', SINCE);
+
+    expect(prisma.calls.conversationMessage, 'the retired store is queried again').toBeUndefined();
   });
 
   it('scopes inbox and notes by businessId directly', async () => {
@@ -87,16 +98,14 @@ describe('collectTextCorpus sources', () => {
     expect(prisma.calls.contactNote[0].where.businessId).toBe('biz_1');
   });
 
-  it('scopes conversations THROUGH the thread — the message has no tenant column', async () => {
-    // ConversationMessage has only threadId; businessId lives on
-    // ConversationThread. Filtering the message directly would silently read
-    // every tenant's conversations.
+  it('scopes the inbox by businessId directly, now that it is the only store', async () => {
+    // This used to assert the conversation query was scoped THROUGH its thread,
+    // because ConversationMessage carried no tenant column of its own.
+    // KeyInboxMessage does, which is one of the reasons it won the merge: the
+    // tenant boundary is on the row rather than one join away.
     await svc.collectTextCorpus('biz_1', SINCE);
 
-    const where = prisma.calls.conversationMessage[0].where as {
-      thread?: { businessId?: string };
-    };
-    expect(where.thread?.businessId).toBe('biz_1');
+    expect(prisma.calls.keyInboxMessage[0].where.businessId).toBe('biz_1');
   });
 
   it('applies the time window to every source', async () => {
@@ -136,13 +145,12 @@ describe('collectTextCorpus sources', () => {
       { contentText: 'the invoice never arrived', createdAt: new Date('2026-08-02') },
     ];
     prisma.rows.contactNote = [{ body: 'client sounded frustrated', createdAt: new Date('2026-08-02') }];
-    prisma.rows.conversationMessage = [{ body: 'can we reschedule again', createdAt: new Date('2026-08-02') }];
 
     const corpus = await svc.collectTextCorpus('biz_1', SINCE);
 
     expect(corpus.find((c) => c.source === 'inbox')?.text).toBe('the invoice never arrived');
     expect(corpus.find((c) => c.source === 'note')?.text).toBe('client sounded frustrated');
-    expect(corpus.find((c) => c.source === 'conversation')?.text).toBe('can we reschedule again');
+    expect(corpus.find((c) => c.source === 'conversation'), 'the retired source still emits').toBeUndefined();
   });
 
   it('skips inbox rows with no text rather than pushing empty strings', async () => {
