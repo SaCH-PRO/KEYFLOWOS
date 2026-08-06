@@ -3866,15 +3866,26 @@ ${triage.standingContext}`;
         // all. The customer never received anything, the invoice sat at SENT,
         // and nobody chased it because the record said it had gone.
         //
-        // Sent BEFORE the status flip, so a delivery failure leaves the invoice
-        // in its original state rather than marked SENT with nothing sent. The
-        // same ordering the compensation work uses: record or perform the risky
-        // half first, so a failure is visible rather than papered over.
+        // Sent BEFORE the status flip, AND the result is checked.
+        //
+        // Ordering alone was not enough, and the first version of this fix got
+        // that wrong. TransactionalEmailService.send() reports failure by
+        // RETURN VALUE — 'FAILED' | 'QUEUED' | 'SENT' — it does not throw. So
+        // awaiting it and discarding the result reinstated the exact bug this
+        // handler was written to fix: no email, status flipped to SENT,
+        // activity log reading "sent to Ada", and `emailedTo` handed back to the
+        // model.
+        //
+        // Worse than the original, in one specific way: `send()` returns FAILED
+        // when the contact is marked do-not-contact. The guard added to that
+        // service in this same session refuses the send, and this caller walked
+        // straight past the refusal and reported success. A guard nobody reads
+        // is not a guard.
         const contactName =
           [invoice.contact.firstName, invoice.contact.lastName].filter(Boolean).join(' ') || 'Customer';
         const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:5000';
 
-        await this.getTransactionalEmail().send({
+        const delivery = await this.getTransactionalEmail().send({
           businessId,
           type: 'invoice_sent',
           recipientEmail: invoice.contact.email,
@@ -3888,6 +3899,17 @@ ${triage.standingContext}`;
           },
           dedupeKey: `invoice_sent_${invoice.id}`,
         });
+
+        if (delivery.status === 'FAILED') {
+          // Nothing is flipped, nothing is logged, and the model is told the
+          // truth. The common causes are actionable by a human — Gmail not
+          // connected, notification type disabled, or the customer marked
+          // do-not-contact — and none of them are helped by pretending.
+          throw new Error(
+            `Invoice ${invoice.invoiceNumber} was NOT emailed to ${invoice.contact.email}. ` +
+              `Check that email sending is connected for this business and that the contact is not marked do-not-contact.`,
+          );
+        }
 
         const updated = await this.getCommerce().updateInvoiceStatus({
           invoiceId: args.invoiceId,
@@ -3906,7 +3928,12 @@ ${triage.standingContext}`;
           title: `Invoice ${invoice.invoiceNumber} sent to ${contactName}`,
           tone: 'success',
         });
-        return { id: updated.id, status: updated.status, emailedTo: invoice.contact.email };
+        return {
+          id: updated.id,
+          status: updated.status,
+          emailedTo: invoice.contact.email,
+          delivery: delivery.status,
+        };
       }
 
       // === MARKETING/SOCIAL UPDATES ===

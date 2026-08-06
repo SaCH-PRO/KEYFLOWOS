@@ -9,6 +9,7 @@ import {
   ExecutionRecord,
 } from './key-cortex-executor.service';
 import { KeyCortexSagaService } from './key-cortex-saga.service';
+import { KeyCortexCompensationService } from './key-cortex-compensation.service';
 import { ConnectorCommand } from './key-cortex-connector.types';
 
 export interface CreateGoalInput {
@@ -70,6 +71,10 @@ export class KeyCortexPlannerService {
     @Optional()
     @Inject(AiUsageService)
     private readonly aiUsage?: AiUsageService,
+    // APPENDED, never inserted — specs here construct positionally.
+    @Optional()
+    @Inject(KeyCortexCompensationService)
+    private readonly compensation?: KeyCortexCompensationService,
   ) {}
 
   async createGoal(businessId: string, input: CreateGoalInput) {
@@ -373,10 +378,31 @@ export class KeyCortexPlannerService {
       });
 
       const command = this.buildCommand(plan, step, options);
-      await this.saga.addStep(saga.id, i, `${step.module}.${step.action}`, {
-        stepId: step.id,
-        command,
-      });
+      const actionRef = `${step.module}.${step.action}`;
+
+      // Record how this step would be undone, BEFORE running it.
+      //
+      // This call passed no compensation at all, so every step of every plan
+      // stored `compensationAction: null` and the rollback below found nothing
+      // to run — KeyCortexSagaService then recorded the saga
+      // `compensation_unavailable`. This is the ONLY saga driver that runs in
+      // production, so "sagas can roll back" was false everywhere it mattered.
+      const undo = this.compensation?.getCompensatingAction(actionRef);
+      await this.saga.addStep(
+        saga.id,
+        i,
+        actionRef,
+        { stepId: step.id, command },
+        undo
+          ? {
+              stepName: actionRef,
+              action: undo,
+              // businessId last so a step payload cannot aim the rollback at
+              // another tenant.
+              payload: { ...(step.inputPayload as Record<string, unknown> ?? {}), businessId: plan.businessId },
+            }
+          : undefined,
+      );
 
       const record = await this.executor.execute(command, {
         ...options,

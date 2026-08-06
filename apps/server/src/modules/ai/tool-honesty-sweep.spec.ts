@@ -46,20 +46,22 @@ describe('a tool that promises an email sends one', () => {
     expect(body, 'the handler never calls a mail service').toMatch(/getTransactionalEmail\(\)\.send\(/);
   });
 
-  it('sends BEFORE marking the invoice SENT', () => {
-    // Ordering is the assertion. If the status flip came first, a delivery
-    // failure would leave the invoice recorded as sent with nothing sent —
-    // exactly the state this is fixing, reached by a different route.
-    const start = orchestrator.indexOf("case 'commerce_send_invoice':");
-    const body = orchestrator.slice(start, start + 2400);
-
-    expect(body.indexOf('getTransactionalEmail')).toBeLessThan(body.indexOf("status: 'SENT'"));
-  });
-
-  it('tells the caller where it went', () => {
+  it('checks the delivery result rather than discarding it', () => {
+    // This used to assert ORDERING by string position — that
+    // `getTransactionalEmail` appeared before `status: 'SENT'` in the source.
+    // It passed against code that awaited send(), threw the result away, and
+    // flipped the invoice to SENT on every failure path, because
+    // TransactionalEmailService reports failure by RETURN VALUE and never
+    // throws. Source order is not control flow.
+    //
+    // invoice-send-delivery.spec.ts is the real guard: it runs the handler with
+    // a FAILED delivery and asserts nothing is flipped, nothing is logged, and
+    // the caller is told. This one only checks the result is bound at all.
     const start = orchestrator.indexOf("case 'commerce_send_invoice':");
     const body = orchestrator.slice(start, start + 4000);
 
+    expect(body).toMatch(/const delivery = await this\.getTransactionalEmail\(\)\.send\(/);
+    expect(body).toMatch(/delivery\.status === 'FAILED'/);
     expect(body).toMatch(/emailedTo/);
   });
 });

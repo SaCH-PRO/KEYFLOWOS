@@ -99,6 +99,29 @@ export class KeyCortexCompensationService {
       send_message_with_approval: 'communications.recall_message',
       // Organ tools, under their canonical dotted names
       'key_inbox.send_reply': 'key_inbox.mark_draft',
+
+      // TWO CALLERS, TWO VOCABULARIES — and this table has to answer both.
+      //
+      // KeyCortexToolRegistryService.execute looks up FLOW tool names
+      // (crm_create_contact). KeyCortexPlannerService — the only saga driver
+      // that runs in production — builds `${step.module}.${step.action}`
+      // (crm.create_contact) and never touches the registry at all.
+      //
+      // An earlier pass rewrote these keys from dotted to flow-style, fixed the
+      // registry path, and silently un-fixed the planner path. The registry
+      // path is reached only when ctx.sagaId is set, which no production caller
+      // does — so the half that was fixed is the half nothing uses, and the
+      // half that was broken is the one that actually runs plans. Both are
+      // listed now, deliberately, rather than picking a winner.
+      'crm.create_contact': 'crm.delete_contact',
+      'crm.create_lead': 'crm.delete_lead',
+      'commerce.create_invoice': 'commerce.void_invoice',
+      'bookings.create_booking': 'bookings.cancel_booking',
+      'calendar.create_event': 'calendar.delete_event',
+      'autopilot.create_task': 'autopilot.delete_task',
+      'command.create_command_item': 'command.delete_command_item',
+      'communications.send_message': 'communications.recall_message',
+      'communications.send_email': 'communications.recall_message',
     };
     return map[toolName];
   }
