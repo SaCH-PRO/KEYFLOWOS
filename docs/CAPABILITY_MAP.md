@@ -10,16 +10,16 @@ checklist), `MASTER_ROLLOUT_PLAN.md` (phases), `PRODUCTION_STATE.md` (deployed).
 
 | | |
 |---|---|
-| KEY tools | **126** — 41 read · 7 draft · 17 organize · 16 execute · 45 crud |
-| Risk tiers | 68 T1 · 43 T2 · 12 T3 · 3 T4 |
-| Write-family | 78 · read/draft 48 |
-| Dispatch | 122 native `case` + 4 cortex-bridged — zero orphans, zero unhandled |
+| KEY tools | **137** — 46 read · 7 draft · 18 organize · 18 execute · 48 crud |
+| Risk tiers | 73 T1 · 48 T2 · 13 T3 · 3 T4 |
+| Write-family | 84 · read/draft 53 |
+| Dispatch | 133 native `case` + 4 cortex-bridged — zero orphans, zero unhandled |
 | Prisma models | 428 |
 | Web screens | 202 `page.tsx`, **29 redirects/re-exports → 173 real** |
 | Cortex services | 97 · server modules 101 · nav destinations 55 |
 | Organ tools | 29 registered, **4 bridged** |
-| Standing gates | **18 specs** — the original 14 plus `trust-explanation-wiring`, `standing-context-reachability`, `phantom-injection`, and the extended fabrication/honesty/domain-parity rules |
-| Tests | **3,114 server · 117 web**, all green |
+| Standing gates | **19 specs** — the original 14 plus `trust-explanation-wiring`, `standing-context-reachability`, `phantom-injection`, and the extended fabrication/honesty/domain-parity rules |
+| Tests | **3,126 server · 117 web**, all green |
 
 ---
 
@@ -330,13 +330,12 @@ look.
 
 ## 3.1 Zero-tool domains — HANDS_OFF
 
-Verified by direct count against `flow-tool-registry.ts`: `deal` 0 · `pipeline` 0
-· `refund` 0 · `report` 0 · `goal` 0 · `contract` 0 · `inventory` 0 · `stock` 0 ·
+~~Deals~~ was the twelfth and is **DONE 2026-08-06** — 11 tools, see §3.6.
+The rest, verified by direct count against `flow-tool-registry.ts`: `refund` 0 · `report` 0 · `goal` 0 · `contract` 0 · `inventory` 0 · `stock` 0 ·
 `warehouse` 0 · `retainer` 0 · `portal` 0 · `asset` 0 · `procure` 0 · `supplier` 0.
 
 | Domain | Service depth | Writable UI | Nav |
 |---|---|---|---|
-| **Deals / pipeline** | `crm-deals` 16 methods + forecast/health/velocity | `crm/deals/page.tsx` **356** | ✅ `:139` |
 | **Inventory & stock** | continental-ops ~19 + marketplace | `inventory-command-center.tsx` **2,032** | ❌ |
 | **Procurement / suppliers** | procurement 13 + supplier 24 | `procurement/[requestId]` 507 | ❌ |
 | **Contracts** | contracts 14 | `contracts/page.tsx` **895** | ✅ `:182` |
@@ -348,8 +347,8 @@ Verified by direct count against `flow-tool-registry.ts`: `deal` 0 · `pipeline`
 | **Legal / compliance** | governance (no legal module) | `legal/page.tsx` 157 | ✅ `:183` |
 | **Portal** | portal 6 / 91 ln | `portal/page.tsx` 125 | ❌ |
 
-Together: **~70 models, ~120 service methods, ~5,600 lines of writable UI KEY
-cannot reach.** Five sit in the main nav — a user works in them daily and finds
+Together: **~65 models, ~105 service methods, ~5,250 lines of writable UI KEY
+cannot reach.** Four sit in the main nav — a user works in them daily and finds
 the assistant blind.
 
 ## 3.2 READ_ONLY — service depth ≫ tool depth
@@ -395,6 +394,22 @@ all inside `retainer.service.ts` (`:133,150,166,180`). `createPeriod:119` takes
 `hoursUsed` as a caller parameter — there is no `TimeEntry` rollup and no code
 path generates an invoice from a period. `apps/web/src/lib/retainers.ts` exports
 zero period functions, so the half is unreachable from any UI.
+
+## 3.6 Deals / pipeline — OPERATIONAL (added 2026-08-06)
+
+11 tools over `CrmDealsService` (16 methods) plus the forecast and velocity
+services. Read: list/filter, detail, stages, weighted forecast, velocity and
+bottlenecks. Write: create, update, move stage, mark won, mark lost, delete.
+
+Three decisions worth keeping: `deals_list_stages` exists because `moveStage`
+takes an **id**, not a name, and a write without the lookup is a tool that can
+only fail; win/lose are `execute`-family because closing a deal moves money in
+every report; `deals_delete` is tier 3 and points at `deals_mark_lost`, since a
+lost deal is history that win rates and velocity depend on. `deals_create`
+compensates to a tenant-scoped soft delete — closing does **not** compensate,
+because reopening a deal rewrites revenue history.
+
+Held by `deals-tools.spec.ts` (12 assertions).
 
 ## 3.4 OPERATIONAL
 
@@ -468,8 +483,7 @@ reachable only as a tab inside a dormant-flagged marketplace page.
 ## Tier 4 — organs, by value per unit of effort
 Service and UI already exist for all of these; only tools are missing.
 
-12. **Deals** — in nav, full pipeline, forecasting services, zero tools. Largest
-    single gap in the product.
+12. ~~**Deals**~~ — **DONE 2026-08-06.** 11 tools; see §3.6.
 13. **Inventory & stock** — tools *and* a nav entry.
 14. **Payments** — refund, payment link, retry.
 15. **Contracts · reports · goals** — in nav, complete services, zero tools.
