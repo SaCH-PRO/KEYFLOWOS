@@ -156,6 +156,9 @@ export const operateSections: NavSection[] = [
       { label: "Sequences", href: "/app/crm/sequences", icon: Send },
       { label: "Intelligence", href: "/app/crm/intelligence", icon: Brain },
       { label: "Service", href: "/app/helpdesk", icon: Headset },
+      // Five call_* tools point here; the screen is AddonPackGate pack="salesPack"
+      // and had no nav entry.
+      { label: "Calls", href: "/app/call-tasks", icon: MessageCircle, dormantFlag: "salesPack" },
     ],
   },
   {
@@ -175,6 +178,11 @@ export const operateSections: NavSection[] = [
       { label: "Campaigns", href: "/app/marketing", icon: Mail },
       { label: "Content", href: "/app/content-ops", icon: PenTool },
       { label: "Social", href: "/app/social", icon: Share2 },
+      // Seven seo_* tools declare /app/seo as their manual equivalent and the
+      // screen had no nav entry at all, so a human could not reach the thing
+      // KEY was allowed to do. The screen is AddonPackGate pack="webPresencePack";
+      // the entry carries the same flag so the two appear and disappear together.
+      { label: "SEO", href: "/app/seo", icon: Globe, dormantFlag: "webPresencePack" },
     ],
   },
   {
