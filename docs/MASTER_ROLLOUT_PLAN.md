@@ -1,193 +1,211 @@
 # KEYFLOWOS — master rollout plan
 
-**Baseline, verified 2026-08-05:** 126 tools · 430 models · 335 spec files ·
-3,080 tests green · tsc clean · 126/126 tools resolve to a real page ·
-76 commits unpushed · **nothing has touched production.**
+**Baseline, verified 2026-08-06:** 126 tools · 430 models · 217 screens ·
+3,107 server tests + 110 web tests green · tsc clean · 126/126 tools resolve to
+a real page with manual parity · 93 commits unpushed · **nothing has touched
+production.**
 
-Companion documents:
-- `docs/business-organism-map.md` — the organ checklist and definition of done
-- `docs/neuro-atlas-code-mapping.md` — the CNS checklist
-- `docs/PRODUCTION_STATE.md` — what is actually deployed
+Companion documents: `docs/business-organism-map.md` (organ checklist),
+`docs/neuro-atlas-code-mapping.md` (CNS checklist),
+`docs/PRODUCTION_STATE.md` (what is actually deployed).
 
----
-
-## Where this stands
-
-The mind is built and audited. The nervous system senses, decides, acts and can
-now undo. The first organ (people/HR) is in, the inbox is readable, and the
-tools that lied have been found and fixed.
-
-What remains is **reach** — organs over services that already exist — plus one
-thing the framework revealed that does not exist at all (§20 learning
-infrastructure), and one hard prerequisite the product thesis demands (manual
-parity).
-
-Three phases. Each is independently shippable and none depends on the next.
+> **This supersedes the 2026-08-05 draft, which was wrong in three places.**
+> It said inventory had no screens (it has five, all writable), that the alerts
+> were computed and discarded (they are on an HTTP route and rendered by a
+> 2,032-line command centre), and that inventory therefore needed a UI build
+> first. All three came from trusting an audit report instead of the code.
+> Corrections are recorded rather than quietly overwritten.
 
 ---
 
-## Phase 0 — Trust (DONE)
+## What this product actually is
 
-Completed 2026-08-04/05. Recorded because everything after it stands on it.
+Not underbuilt. **Unwired.**
 
-| Fix | Was |
-|---|---|
-| Identity | `'key_ai'` at 25 sites, no `User`/`Membership`. `commerce_mark_invoice_paid` failed 100% of calls. |
-| Calendar enum | Tool offered 5 values, **none** valid. Failed 100% of calls. |
-| Invoice send | Marked SENT, logged "sent to Ada", emailed nobody. |
-| Scheduled actions | Promised future execution; nothing read the row. **Removed.** |
-| Automations | `actionData: []` hardcoded, enabled — fired forever, did nothing. |
-| Social publish | Marked POSTED with no connected account. |
-| Campaign send | `recipientCount: 0`, emailed nobody. |
-| Saga rollback | No compensation ever recorded; table keyed on names that did not exist. |
-| Efferent bridge | Cortex organ tools invisible to the chat model. |
-| Tenant leaks | 3 (recommender, assignee tasks, org-assignment privilege escalation). |
+The organs are largely grown — deal pipelines, reconciliation, a 507-line PO
+state machine, a 792-line payments console, a 985-line SEO workspace, a
+1,014-line team settings screen. Then never connected to anything: no nav entry,
+a broken redirect, a filter that hid them, or no tool over them.
 
-**Standing gates** — these now fail the build rather than the customer:
+Two defect shapes account for nearly everything found in this audit, and both
+are worth naming because they will recur:
 
-`flow-tool-honesty` (every tool has a handler) · `role-tool-reachability` (every
-tool reachable by ≥1 role) · `tool-enum-validity` (tool enums match domain
-enums) · `tool-honesty-sweep` (a tool that says it sends must reach a send path)
-· `cortex-tool-bridge` · `saga-compensation-wiring` · `check-tool-routes`
-(every manual route resolves).
+**1. A string compared across two files.** Nav labels vs mode allowlists.
+Compensation keys vs tool names. Redirect targets vs pages. A badge's route vs
+the config's. Tool enums vs domain enums. Each drifted silently and deleted a
+feature. None broke a test.
+
+**2. Something claiming work it did not do.** Campaigns "sent" to nobody.
+Invoices marked SENT with no email. Automations that fire and do nothing.
+Posts POSTED with no connected account. Toggles that toast success and persist
+nothing. Screens that fake a spinner over invented numbers.
+
+The second is the product thesis inverted. Every instance now has a test whose
+negative control names the casualties.
 
 ---
 
-## Phase 1 — Manual parity (next, small)
+## Phase 0 — Trust and reach (DONE, 2026-08-04 → 08-06)
 
-**The product rule:** every organ must be usable by hand. KEY is optional, never
-mandatory.
+### Tools that lied
+`commerce_send_invoice` marked SENT and emailed nobody — then, after the first
+fix, discarded the send RESULT and did it again. `schedule_action` promised
+future execution nothing performed (removed). `automations_create_playbook`
+created playbooks with `actionData: []`, enabled. `social.publishPost` marked
+POSTED with no account. `markCampaignSent` emitted `recipientCount: 0`.
+Bulk invoice updates swallowed every failure.
 
-The route gate proves a page *exists*. It does not prove the page can perform
-the write. `/app/accounting` passes today while offering the user no way to do
-anything.
+### Tools that could never work
+`commerce_mark_invoice_paid` and `commerce_update_invoice` failed 100% of calls
+— `'key_ai'` resolves to no Membership. `calendar_create_event` failed 100% —
+its enum had **zero** overlap with the domain enum.
 
-**1.1** Extend `check-tool-routes.ts`: a tool of family `execute`/`crud` must
-point at a page that imports at least one mutation function. Measured baseline
-for the affected domains — contracts and assets have full manual CRUD; retainers,
-procurement and portal are create-only; accounting, legal and budgeting are
-**read-only for humans too**.
+### Structural
+Efferent bridge made two-way. Saga compensation wired into the planner (the
+only driver production uses). **Tenant isolation switched on** — a complete
+Prisma extension over 47 models, applied since it was written, that had never
+once fired.
 
-**1.2** Record the exemptions explicitly. A tool whose manual equivalent is
-genuinely absent should be listed with a reason, not silently pass.
+### Reach
+17 settings screens (5,438 lines) were 404 behind a prefix redirect. The default
+nav mode showed **three** items. Three nav-linked screens fabricated metrics.
+Inbox tools pointed at a different inbox over a different table. SEO and Calls
+had 12 tools and no way in.
 
-**Why first:** it is one file, and it makes every organ after it correct by
-construction rather than by discipline.
+### Standing gates
+`flow-tool-honesty` · `role-tool-reachability` · `tool-enum-validity` ·
+`tool-honesty-sweep` · `cortex-tool-bridge` · `saga-compensation-wiring` ·
+`check-tool-routes` (route exists **+ manual parity**, and self-tests that it
+can still fail) · `disclosure-mode` · `middleware-redirect-targets` ·
+`no-fabricated-screens`.
+
+---
+
+## Phase 1 — Consolidation (next, and it is mostly deletion)
+
+217 screens for one product is a smell, and the audit found the reason: the same
+capability built more than once.
+
+**1.1 Decide the duplicate clusters.** Contact lists (`crm`, `crm/pipeline`,
+`crm/dashboard`, `people`, `people-flow`, `network/contacts`). Money
+(`money`, `accounting`, `finance*`, `revenue`, `payments`, `commerce/*`).
+Inboxes (`inbox/unified` and `key-inbox` are two omnichannel inboxes over two
+different tables). The `/app/build/*` tree versus its top-level twins. Pick one
+survivor per cluster; delete or redirect the rest.
+
+**1.2 Fix the nav labels that lie.** "Deals" points at `/app/crm/contacts`.
+"Reports" points at `/app/finance`. "Storefront" pointed at `/app/commerce`.
+`/app/commerce` appears three times, `/app/approvals` three times.
+
+**1.3 Delete what nothing uses.** 21 redirect stubs, 15 `ModuleShell` pages
+rendering "This module is being prepared", 9 one-line re-exports.
+
+**Why first:** every organ added on top of an ambiguous IA doubles the ambiguity,
+and deletion is the cheapest work in this plan.
 
 ---
 
 ## Phase 2 — The organs, in value order
 
-Definition of done for each: **models + service + manual UI + tools (read *and*
+Definition of done: **models + service + reachable manual UI + tools (read *and*
 write) + compensation registered + the §27 reflex closes.**
 
-### 2.1 Inventory & stock — first, and zero-to-one
-KEY cannot currently perceive a stock level. `marketplace.service.ts` already
-computes `getInventoryAlerts` and `getInventorySummary` and throws them away.
-Models: `InventoryStock`, `Warehouse`, `StockMovement`, `StockCount`.
-Verbs: read level · below-reorder alert · adjust · write off · transfer ·
-receive goods.
-**Manual UI must be built** — there are no inventory pages today.
+### 2.1 Inventory & stock — a tool layer, not a UI build
+Corrected from the previous draft. Everything exists for humans and KEY has
+nothing.
 
-### 2.2 Contracts — the cheapest real organ
-Manual CRUD already complete (create, update, delete, parties), 15 service
-methods, 7 models, zero tools. Honours manual parity on day one.
-Verbs: list · expiring this quarter · acknowledge alert · create · amend ·
-extract terms. Also: renewal alerts only regenerate on human edit — no cron.
+| | |
+|---|---|
+| Models | `InventoryStock`, `Warehouse`, `StockMovement`, `StockCount`, `PurchaseOrder` (29 fields), `ProcurementRequest` |
+| Services | 4 continental-ops services (28 methods), fulfillment-routing, catalog |
+| Manual UI | stock-counts, goods-receipts (create/delete/**post**), delivery-notes (create/delete/**fulfil**/**cancel**), receipts, plus a 2,032-line inventory command centre |
+| Tools | **0** |
+| Nav | **absent** — the real gap for humans |
 
-### 2.3 Documents & Drive — the substrate
+Work: tools + nav entries. Verbs: read level · below-reorder · adjust · write
+off · transfer · receive · raise and advance a PO.
+
+### 2.2 Contracts
+Manual CRUD complete (895 lines, create/update/delete/parties + AI extraction),
+13 service methods, 7 models, **zero tools**. Also: renewal alerts only
+regenerate when a human edits — no cron.
+
+### 2.3 Documents & Drive
 `documents.service.ts` (1,011 lines) and `google-drive.service.ts` (1,417) are
-complete and read-only to KEY. Every other organ leans on this: proposals,
-contracts, NDAs, attachments.
-Verbs: generate · read body · edit clause · move to review/approve/sign · email ·
-list/open/upload/share.
+complete and read-only to KEY. The substrate every other organ leans on.
 
 ### 2.4 Quote→cash completion
-Highest revenue leverage per line of code, over a service that is already
-operational. Send/chase/convert a quote · record part or cash payment · refund ·
-credit note · payment link · recurring invoice.
+Highest revenue leverage per line, over an operational service. Send/chase/
+convert a quote · part payment · refund · credit note · payment link.
 
 ### 2.5 Small completions — one sitting each
-- **Bookings status** — confirm / no-show / complete are all one hardcoded
-  `'CANCELLED'` at `flow-orchestrator.service.ts`.
-- **Calendar edit** — `patchEvent`/`cancelEvent` sit ready in
-  `calendar-query.service.ts`.
-- **Time-tracking reads** — three reads turn the clock into an invoice.
-- **`people_unassign`** — KEY cannot take back work it misassigned.
-- **Inbox reply threading** — `key_inbox.send_reply` exists on the organ and is
-  not bridged.
-- **Consent check before outbound** — KEY can send against a recorded opt-out
-  the database already holds. *Do this one early; it is a compliance exposure,
-  not a feature gap.*
+Bookings status (confirm/no-show/complete are all one hardcoded `'CANCELLED'`) ·
+calendar edit (`patchEvent`/`cancelEvent` sit ready) · time-tracking reads ·
+`people_unassign` · consent check before outbound · inbox reply threading.
 
 ### 2.6 Procurement + supplier
-Shares models with inventory, so it follows it naturally. **Repair first:** two
-shipped GET routes are swallowed by `:id` and 404, and approve/reject writes
-columns that do not exist on `ProcurementRequest`.
+Shares models with inventory. **Repair first:** two GET routes are swallowed by
+`:id` and 404, and approve/reject writes columns that do not exist on
+`ProcurementRequest`.
 
 ### 2.7 Deep finance — last of the near set
-Richest data layer in the system (`Account`, `LedgerEntry`, `Reconciliation`,
-`TaxLiability`, `TaxRate`, `AccountingPeriod`) and **no human write path**.
-Giving KEY journal-posting before the manual UI exists inverts the product rule.
-Manual UI first, then tools.
+Richest data layer, **and the manual UI is read-only for humans**. Building
+tools first inverts the product rule. Manual write UI first, then tools.
 
-**Deliberately deferred:** helpdesk threading (no message thread, no SLA, no KB —
-a product build, not a tool layer) · retainers (the periods→hours→invoice loop
-exists in no service) · storefront intelligence (mocked end to end).
+**Deferred:** helpdesk threading (no message thread, no SLA — a product build) ·
+retainers (the periods→hours→invoice loop exists in no service) · storefront
+intelligence (fabricated end to end).
 
 ---
 
-## Phase 3 — The learning organ (the differentiator)
+## Phase 3 — The learning organ
 
-Framework §20. Absent from all 430 models — a module-organised audit could not
-have found it, because it does not partly exist.
+Framework §20, absent from all 430 models: assumption register · hypothesis
+register · experiment registry · metric dictionary · data lineage · decision log
+with dissent and review dates · review cadence · policy and pricing version
+control.
 
-| Organ | Purpose |
-|---|---|
-| Assumption register | What the business believes but has not proven |
-| Hypothesis register | Formal testable claims with a failure threshold |
-| Experiment registry | What was tested, by whom, against what criteria |
-| Metric dictionary | One definition per metric so teams cannot diverge |
-| Data lineage | Where a number came from and how much to trust it |
-| Decision log | Decision + evidence + dissent + review date |
-| Review cadence | Daily / weekly / monthly / quarterly / annual |
-| Policy & pricing version control | What changed, when, why |
-
-**Why this is the differentiator:** every competitor ships an assistant that
-does tasks. None ships a business that knows what it believes, tests it, and
-records the answer. KEY is already built to own this — memory consolidation,
-salience, reflection and an evidence service, all with nothing to file into.
-
-This turns the §19 lifecycle (observe → hypothesise → test → measure → decide →
-standardise → scale) from a document into a system.
+Competitors ship assistants that do tasks. None ships a business that knows what
+it believes, tests it, and records the answer. KEY already has memory
+consolidation, salience, reflection and an evidence service with nothing to file
+into.
 
 ---
 
 ## Phase 4 — Deployment
 
-Not started, deliberately. Recorded so it is not lost.
+Unstarted, deliberately.
 
-- Production has **29 tables** on a migration lineage from a branch that does not
-  exist, frozen since 2025-11-30, with **19 real auth accounts that must not be
-  touched**. It needs a rebuild, not a baseline-resolve — `prepare-production-db.ps1`
-  will correctly refuse.
+- Production has **29 tables** on a migration lineage from a branch that does
+  not exist, frozen since 2025-11-30, with **19 real auth accounts that must not
+  be touched**. It needs a rebuild, not a baseline-resolve.
 - CI's deploy job is commented out and points at a disconnected Vercel.
-- The Supabase password shared earlier in this work **must be rotated**.
-- Local: run `CLOSE_LOCAL_DRIFT.sql`, and
-  `docker compose up -d --force-recreate db` to pick up pgvector.
+- **The Supabase password shared earlier must be rotated.**
+- Local: run `CLOSE_LOCAL_DRIFT.sql`; `docker compose up -d --force-recreate db`
+  for pgvector.
 
-**None of this work reaches a user until Phase 4 is done.** It should be planned
-against the server, not the repo.
+**None of this work reaches a user until Phase 4 is done.**
 
 ---
 
-## How each organ gets verified
+## Open decisions for the owner
 
-Not by tool count. By the §27 reflex closing end to end:
+1. **Addon packs do not gate tools.** `/app/seo` and `/app/call-tasks` are
+   behind `webPresencePack` and `salesPack`; their 12 tools are not gated at
+   all. A business without the pack cannot open the screen while KEY works on
+   it for them. Either packs gate tools, or these are not pack features.
+2. **Two omnichannel inboxes** over two different tables. One should win.
+3. **Disclosure modes** — startup now shows 7 Operate items. Is that the right
+   floor for a solopreneur?
 
-> signal detected → classified → owner assigned → evidence gathered → decision
-> made → action executed → result measured → knowledge retained
+---
 
-And per change: a test, negative-controlled — revert the fix, confirm the test
-fails **by name**, restore. This repo has produced tests that passed against
-broken code more than once, and every one of those was caught by that step.
+## How each change gets verified
+
+A test, negative-controlled: revert the fix, confirm the test fails **by name**,
+restore. Every defect in Phase 0 was found or confirmed that way, including two
+where my own first fix was wrong and the negative control was what proved it.
+
+And for anything sourced from an audit or agent: **verify against the code
+before acting.** Five of five headline claims in the UI audit held up; three
+claims I relayed from an earlier one did not.
