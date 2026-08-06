@@ -65,43 +65,77 @@ const MODE_VISIBILITY: Record<DisclosureMode, Set<string>> = {
   ]),
 };
 
-/** Which Operate nav items are shown per mode.
- *  These labels must match the `label` field in operateNav exactly.
+/**
+ * Which Operate nav items are shown per mode.
+ *
+ * These labels must match the `label` field in operateSections EXACTLY — the
+ * filter in use-app-layout.ts is a strict allowlist, so a label that does not
+ * match hides the item rather than failing loudly.
+ *
+ * That constraint was written in a comment and enforced by nothing, and the two
+ * files drifted. Measured before this fix: of startup's six entries only
+ * "Revenue", "Calendar" and "Bookings" existed. "Overview", "Directory" and
+ * "Pipeline" matched nothing — the real labels are "Command Center",
+ * "Contacts" and "Deals". Since startup is the DEFAULT mode and empty sections
+ * are dropped entirely, every new user saw a nav containing three items.
+ *
+ * disclosure-mode.spec.ts now asserts every entry here resolves to a real nav
+ * label, so the next rename fails a test instead of quietly hiding a feature.
  */
 export const MODE_OPERATE_ITEMS: Record<DisclosureMode, string[]> = {
-  startup: ["Overview", "Revenue", "Directory", "Pipeline", "Calendar", "Bookings"],
-  growth: [
-    "Overview", "Revenue", "Expenses",
-    "Directory", "Pipeline",
-    "Projects", "Time",
+  // A solopreneur: see the money, the people, and the diary. Nothing else.
+  startup: [
+    "Command Center",
+    "Revenue", "Expenses",
+    "Contacts", "Deals",
     "Calendar", "Bookings",
-    "Inbox", "Campaigns",
-    "Reports", "Goals",
   ],
+  // A team: add delivery, the shared inbox, campaigns and reporting.
+  growth: [
+    "Command Center", "Data Inbox",
+    "Revenue", "Expenses", "Budgeting", "Reports",
+    "Contacts", "Deals", "Sequences", "Service",
+    "Projects", "Tasks",
+    "Calendar", "Bookings",
+    "Campaigns",
+    "Goals",
+  ],
+  // Everything. use-app-layout short-circuits on this mode, so the list is not
+  // consulted — but it is kept accurate rather than decorative, because the
+  // spec checks it and a wrong list is how the other two got wrong.
   enterprise: [
-    "Overview", "Revenue", "Expenses", "Accounting", "Cash Flow",
-    "Directory", "Pipeline", "Sequences", "Intelligence", "Service",
-    "Projects", "Time", "Agreements", "Tasks",
-    "Calendar", "Bookings", "Calls",
-    "Inbox", "Campaigns", "Content", "Social",
-    "Reports", "Goals", "Operations", "Compliance",
+    "Command Center", "KEY Worker", "KEY Chat", "KEY Autonomy", "KEY Modes",
+    "Data Inbox", "Capture",
+    "Financial Flow", "Revenue", "Expenses", "Budgeting", "Reports",
+    "Temporal Flow", "Calendar", "Bookings", "Projects", "Tasks",
+    "People Flow", "Contacts", "Sequences", "Intelligence", "Service",
+    "Commerce", "Deals",
+    "Campaigns", "Content", "Social",
+    "Approvals", "Compliance", "Contracts", "Legal",
+    "Executive Intelligence", "Growth", "Storefront", "Documents",
+    "Market Strategy", "Goals", "Business Genome",
   ],
 };
 
-/** Which Build nav items are shown per mode.
- *  These labels must match the `label` field in buildNav exactly.
+/**
+ * Which Build nav items are shown per mode.
+ *
+ * Same rule and same history as MODE_OPERATE_ITEMS above: "Blueprint" was in
+ * all three lists and the nav label is "Business Genome", so the one item a new
+ * business most needs to fill in was hidden from them. "Overview", "Google",
+ * "Microsoft", "Payments", "Accounting", "Marketing", "Forms" and "WhatsApp"
+ * matched nothing either.
  */
 export const MODE_BUILD_ITEMS: Record<DisclosureMode, string[]> = {
-  startup: ["Blueprint", "Storefront", "Presence", "Account", "Workspace", "Key Connect"],
+  startup: ["Business Genome", "Storefront", "Presence", "Account", "Workspace", "Key Connect"],
   growth: [
-    "Blueprint", "Storefront", "Presence", "Templates",
-    "Account", "Workspace", "AI",
-    "Overview", "Flows", "Key Connect",
+    "Business Genome", "Storefront", "Presence", "Templates",
+    "Account", "Workspace", "Team", "AI",
+    "Flows", "Key Connect",
   ],
   enterprise: [
-    "Blueprint", "Storefront", "Presence", "Templates",
-    "Account", "Workspace", "AI", "Compliance", "Developers",
-    "Overview", "Google", "Microsoft", "Payments", "Accounting", "Marketing", "Social", "Forms", "WhatsApp",
+    "Business Genome", "Storefront", "Presence", "Templates",
+    "Account", "Workspace", "Team", "Structure", "AI", "Compliance", "Developers",
     "Flows", "Workflows", "Key Connect",
   ],
 };
