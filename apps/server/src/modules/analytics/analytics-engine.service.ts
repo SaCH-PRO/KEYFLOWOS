@@ -258,8 +258,8 @@ export class AnalyticsEngineService {
 
   private async aggregateMessages(businessId: string, since: Date) {
     const [sent, received] = await Promise.all([
-      this.prisma.client.conversationMessage.count({ where: { thread: { businessId }, createdAt: { gte: since }, direction: 'OUTBOUND' } }),
-      this.prisma.client.conversationMessage.count({ where: { thread: { businessId }, createdAt: { gte: since }, direction: 'INBOUND' } }),
+      this.prisma.client.keyInboxMessage.count({ where: { businessId, createdAt: { gte: since }, direction: 'outbound' } }),
+      this.prisma.client.keyInboxMessage.count({ where: { businessId, createdAt: { gte: since }, direction: 'inbound' } }),
     ]);
     const responseRate = received > 0 ? Math.min(100, (sent / received) * 100) : 0;
     return { sent, received, responseRate: Math.round(responseRate * 100) / 100, avgResponseTime: 0 };

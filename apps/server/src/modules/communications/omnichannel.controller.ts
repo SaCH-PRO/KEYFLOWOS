@@ -170,7 +170,7 @@ export class OmnichannelController {
     @Param('threadId') threadId: string,
     @Request() req: { user?: { sub?: string } },
   ) {
-    const thread = await this.prisma.client.conversationThread.findFirst({
+    const thread = await this.prisma.client.keyInboxThread.findFirst({
       where: { id: threadId, businessId },
       include: {
         messages: { orderBy: { createdAt: 'asc' } },
@@ -180,7 +180,7 @@ export class OmnichannelController {
     if (!thread) return { error: 'Thread not found' };
 
     const lastInbound = thread.messages.filter((m: { direction: string }) => m.direction === 'inbound').pop();
-    const body = lastInbound?.body ?? '';
+    const body = lastInbound?.contentText ?? '';
 
     const classification = this.classifier.classify(body, undefined, thread.channel);
     const contactName = thread.contact?.displayName ?? thread.contact?.firstName ?? 'there';
@@ -313,13 +313,13 @@ export class OmnichannelController {
     const skip = parseInt(offset ?? '0', 10);
 
     const [threads, drafts, intents] = await Promise.all([
-      prisma.conversationThread.findMany({
+      prisma.keyInboxThread.findMany({
         where: { businessId },
         orderBy: { updatedAt: 'desc' },
         take,
         skip,
         include: {
-          messages: { orderBy: { sentAt: 'desc' }, take: 1, select: { body: true, direction: true, status: true, sentAt: true } },
+          messages: { orderBy: { sentAt: 'desc' }, take: 1, select: { contentText: true, direction: true, sendStatus: true, sentAt: true } },
           contact: { select: { firstName: true, lastName: true, email: true, phone: true } },
         },
       }),

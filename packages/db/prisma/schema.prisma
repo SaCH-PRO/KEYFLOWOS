@@ -550,10 +550,10 @@ model Business {
   inventoryLastSyncAt      DateTime? @map("inventory_last_sync_at")
 
   // Store Settings
-  storeEnabled       Boolean @default(true) @map("store_enabled")
-  onboardingComplete Boolean @default(false) @map("onboarding_complete")
-  onboardingStep       String?   @default("welcome") @map("onboarding_step")
-  onboardingStartedAt  DateTime? @map("onboarding_started_at")
+  storeEnabled          Boolean   @default(true) @map("store_enabled")
+  onboardingComplete    Boolean   @default(false) @map("onboarding_complete")
+  onboardingStep        String?   @default("welcome") @map("onboarding_step")
+  onboardingStartedAt   DateTime? @map("onboarding_started_at")
   onboardingCompletedAt DateTime? @map("onboarding_completed_at")
 
   // Booking Reminder (minutes before appointment to send reminder email)
@@ -698,7 +698,7 @@ model Business {
   competitors    Competitor[]
 
   // KEY FLOWS
-  flowSignals         FlowSignal[]
+  flowSignals           FlowSignal[]
   flowRoleSubscriptions FlowRoleSubscription[]
 
   createdAt DateTime  @default(now()) @map("created_at")
@@ -1000,9 +1000,9 @@ model FlowSignal {
   reminderAt  DateTime? @map("reminder_at")
   completedAt DateTime? @map("completed_at")
 
-  status     FlowSignalStatus   @default(RECORDED) @map("status")
+  status     FlowSignalStatus     @default(RECORDED) @map("status")
   importance FlowSignalImportance @default(NORMAL) @map("importance")
-  visibility String             @default("USER") // USER, ADMIN, HIDDEN
+  visibility String               @default("USER") // USER, ADMIN, HIDDEN
 
   ownerRoleHint String? @map("owner_role_hint") // e.g. ACCOUNTS_RECEIVABLE_CLERK
 
@@ -1026,7 +1026,7 @@ model FlowRoleSubscription {
   businessId String   @map("business_id")
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
-  roleKey String   @map("role_key") // e.g. DATA_ENTRY_CLERK, SDR
+  roleKey  String   @map("role_key") // e.g. DATA_ENTRY_CLERK, SDR
   flowType FlowType @map("flow_type")
 
   typeFilter       String? @map("type_filter") // e.g. invoice.%
@@ -2356,6 +2356,7 @@ model Contact {
   customFieldValues ContactCustomFieldValue[]
   crmTasks          CrmTask[]
   crmActivities     CrmActivity[]
+  keyInboxThreads   KeyInboxThread[]
 
   @@unique([businessId, emailNormalized])
   @@unique([businessId, phoneNormalized])
@@ -11428,6 +11429,18 @@ model KeyInboxThread {
 
   metadata Json? @default("{}")
 
+  /// Carried over from ConversationThread when the two omnichannel inboxes were
+  /// merged into this one. The channel CONNECTION this thread arrived on —
+  /// `channel` is the kind (email, whatsapp), this is the specific account.
+  channelId    String?   @map("channel_id")
+  /// The thread's contact, joinable. ConversationThread had this relation and
+  /// key_inbox only had the bare id, so merging the two inboxes needed it —
+  /// every inbox list shows who the message is from.
+  contact      Contact?  @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  /// Which business role owns this thread, when triage has assigned one.
+  assignedRole String?   @map("assigned_role")
+  resolvedAt   DateTime? @map("resolved_at")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -11469,6 +11482,18 @@ model KeyInboxMessage {
   extractedEntities Json?  @default("{}")
   suggestedActions  Json?  @default("[]")
   aiConfidence      Float? @map("ai_confidence")
+
+  /// Carried over from ConversationMessage in the inbox merge. Per-message
+  /// triage — the thread-level aiIntent/aiSentiment describe the conversation,
+  /// these describe this one message.
+  rawPayload Json?   @map("raw_payload")
+  role       String?
+  intent     String?
+  sentiment  String?
+  /// The draft-approval flow response-draft.service.ts depends on: KEY writes a
+  /// reply as a draft, a human approves it, and only then is it sent.
+  aiDraft    Boolean @default(false) @map("ai_draft")
+  aiApproved Boolean @default(false) @map("ai_approved")
 
   createdAt DateTime @default(now()) @map("created_at")
 

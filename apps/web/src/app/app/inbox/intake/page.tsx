@@ -36,7 +36,7 @@ export default function MessageIntakePage() {
     <div className="space-y-4 max-w-3xl mx-auto p-4">
       <div className="flex items-center gap-2">
         <Link
-          href="/app/inbox/unified"
+          href="/app/key-inbox"
           className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
         >
           <ArrowLeft className="h-3 w-3" /> Back to Inbox

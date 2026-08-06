@@ -70,12 +70,16 @@ export class OmnichannelProcessorService implements OnModuleInit {
     const thread = await this.findOrCreateThread(businessId, contactId, channel, from, subject);
 
     // 2. Create message
-    const message = await this.prisma.client.conversationMessage.create({
+    const message = await this.prisma.client.keyInboxMessage.create({
       data: {
+        businessId,
         threadId: thread.id,
+        channel: channel.toLowerCase(),
         direction: 'inbound',
-        body: body ?? '',
-        externalId: event.externalId ?? null,
+        contentText: body ?? '',
+        senderHandle: from ?? null,
+        externalMessageId: event.externalId ?? null,
+        receivedAt: timestamp ? new Date(timestamp) : new Date(),
         rawPayload: {
           from,
           to: event.to,
@@ -224,7 +228,7 @@ export class OmnichannelProcessorService implements OnModuleInit {
     subject?: string,
   ) {
     const existing = contactId
-      ? await this.prisma.client.conversationThread.findFirst({
+      ? await this.prisma.client.keyInboxThread.findFirst({
           where: {
             businessId,
             contactId,
@@ -236,14 +240,15 @@ export class OmnichannelProcessorService implements OnModuleInit {
       : null;
 
     if (existing) {
-      await this.prisma.client.conversationThread.update({
+      await this.prisma.client.keyInboxThread.update({
         where: { id: existing.id },
-        data: { lastMessageAt: new Date() },
+        data: { lastMessageAt: new Date(), lastInboundAt: new Date() },
       });
       return existing;
     }
 
-    return this.prisma.client.conversationThread.create({
+    const now = new Date();
+    return this.prisma.client.keyInboxThread.create({
       data: {
         businessId,
         contactId,
@@ -251,7 +256,9 @@ export class OmnichannelProcessorService implements OnModuleInit {
         channelId: from,
         subject: subject ?? null,
         status: 'open',
-        lastMessageAt: new Date(),
+        priority: 'normal',
+        lastMessageAt: now,
+        lastInboundAt: now,
       },
     });
   }

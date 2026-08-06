@@ -111,7 +111,7 @@ export class ResponseDraftService {
 
     let contactId = draft.contactId;
     if (!contactId && draft.threadId) {
-      const thread = await this.prisma.client.conversationThread.findUnique({
+      const thread = await this.prisma.client.keyInboxThread.findUnique({
         where: { id: draft.threadId },
         select: { contactId: true },
       });

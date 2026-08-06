@@ -38,15 +38,16 @@ export class UnifiedInboxService {
     contactId?: string,
     subject?: string,
   ): Promise<{ id: string; contactId: string | null; assignedRole: string | null }> {
-    const existing = await this.prisma.client.conversationThread.findFirst({
+    const existing = await this.prisma.client.keyInboxThread.findFirst({
       where: { businessId, channel, channelId },
+      orderBy: { lastMessageAt: 'desc' },
       select: { id: true, contactId: true, assignedRole: true },
     });
 
     if (existing) {
       // Update contact if provided and different
       if (contactId && existing.contactId !== contactId) {
-        await this.prisma.client.conversationThread.update({
+        await this.prisma.client.keyInboxThread.update({
           where: { id: existing.id },
           data: { contactId },
         });
@@ -54,7 +55,7 @@ export class UnifiedInboxService {
       return existing;
     }
 
-    const thread = await this.prisma.client.conversationThread.create({
+    const thread = await this.prisma.client.keyInboxThread.create({
       data: {
         businessId,
         channel,
@@ -62,6 +63,8 @@ export class UnifiedInboxService {
         contactId: contactId ?? null,
         subject: subject ?? null,
         status: 'open',
+        priority: 'normal',
+        lastMessageAt: new Date(),
       },
     });
 
@@ -78,19 +81,22 @@ export class UnifiedInboxService {
   async recordInboundMessage(ctx: InboundMessageContext): Promise<{ threadId: string; messageId: string }> {
     const thread = await this.ensureThread(ctx.businessId, ctx.channel, ctx.from, ctx.contactId, ctx.subject);
 
-    const message = await this.prisma.client.conversationMessage.create({
+    const message = await this.prisma.client.keyInboxMessage.create({
       data: {
+        businessId: ctx.businessId,
         threadId: thread.id,
+        channel: ctx.channel,
         direction: 'inbound',
-        body: ctx.body,
+        contentText: ctx.body,
         rawPayload: ctx.rawPayload ? (ctx.rawPayload as any) : undefined,
-        externalId: ctx.messageId ?? null,
+        externalMessageId: ctx.messageId ?? null,
+        receivedAt: new Date(),
       },
     });
 
-    await this.prisma.client.conversationThread.update({
+    await this.prisma.client.keyInboxThread.update({
       where: { id: thread.id },
-      data: { lastMessageAt: new Date() },
+      data: { lastMessageAt: new Date(), lastInboundAt: new Date() },
     });
 
     this.events.emit('conversation.message_received', {
@@ -114,20 +120,29 @@ export class UnifiedInboxService {
       rawPayload?: Record<string, any>;
     },
   ): Promise<string> {
-    const message = await this.prisma.client.conversationMessage.create({
+    // key_inbox_messages carries its own businessId and channel; the old
+    // conversation_messages inherited both from the thread relation.
+    const thread = await this.prisma.client.keyInboxThread.findUniqueOrThrow({
+      where: { id: threadId },
+      select: { businessId: true, channel: true },
+    });
+
+    const message = await this.prisma.client.keyInboxMessage.create({
       data: {
+        businessId: thread.businessId,
         threadId,
+        channel: thread.channel,
         direction: 'outbound',
-        body,
+        contentText: body,
         role: opts?.role ?? null,
         aiDraft: opts?.aiDraft ?? false,
         aiApproved: opts?.aiApproved ?? false,
-        externalId: opts?.externalId ?? null,
+        externalMessageId: opts?.externalId ?? null,
         rawPayload: opts?.rawPayload ? (opts.rawPayload as any) : undefined,
       },
     });
 
-    await this.prisma.client.conversationThread.update({
+    await this.prisma.client.keyInboxThread.update({
       where: { id: threadId },
       data: { lastMessageAt: new Date() },
     });
@@ -139,11 +154,11 @@ export class UnifiedInboxService {
     threadId: string,
     limit = 10,
   ): Promise<Array<{ role: 'user' | 'assistant'; content: string; timestamp: Date }>> {
-    const messages = await this.prisma.client.conversationMessage.findMany({
+    const messages = await this.prisma.client.keyInboxMessage.findMany({
       where: { threadId },
       orderBy: { createdAt: 'desc' },
       take: limit,
-      select: { direction: true, body: true, createdAt: true, aiDraft: true },
+      select: { direction: true, contentText: true, createdAt: true, aiDraft: true },
     });
 
     return messages
@@ -151,7 +166,7 @@ export class UnifiedInboxService {
       .filter((m) => !m.aiDraft) // Don't include draft messages in history
       .map((m) => ({
         role: m.direction === 'inbound' ? ('user' as const) : ('assistant' as const),
-        content: m.body,
+        content: m.contentText ?? '',
         timestamp: m.createdAt,
       }));
   }
@@ -167,7 +182,7 @@ export class UnifiedInboxService {
     if (filters?.contactId) where.contactId = filters.contactId;
 
     const [threads, total] = await Promise.all([
-      this.prisma.client.conversationThread.findMany({
+      this.prisma.client.keyInboxThread.findMany({
         where,
         orderBy: { lastMessageAt: 'desc' },
         take: filters?.limit ?? 50,
@@ -177,18 +192,18 @@ export class UnifiedInboxService {
           messages: {
             orderBy: { createdAt: 'desc' },
             take: 1,
-            select: { body: true, createdAt: true, direction: true },
+            select: { contentText: true, createdAt: true, direction: true },
           },
         },
       }),
-      this.prisma.client.conversationThread.count({ where }),
+      this.prisma.client.keyInboxThread.count({ where }),
     ]);
 
     return { threads, total };
   }
 
   async getThread(threadId: string): Promise<any | null> {
-    return this.prisma.client.conversationThread.findUnique({
+    return this.prisma.client.keyInboxThread.findUnique({
       where: { id: threadId },
       include: {
         contact: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
@@ -197,7 +212,7 @@ export class UnifiedInboxService {
           select: {
             id: true,
             direction: true,
-            body: true,
+            contentText: true,
             role: true,
             intent: true,
             sentiment: true,
@@ -211,46 +226,47 @@ export class UnifiedInboxService {
   }
 
   async assignRole(threadId: string, role: string): Promise<void> {
-    await this.prisma.client.conversationThread.update({
+    await this.prisma.client.keyInboxThread.update({
       where: { id: threadId },
       data: { assignedRole: role },
     });
   }
 
   async resolveThread(threadId: string): Promise<void> {
-    await this.prisma.client.conversationThread.update({
+    await this.prisma.client.keyInboxThread.update({
       where: { id: threadId },
       data: { status: 'resolved', resolvedAt: new Date() },
     });
   }
 
   async reopenThread(threadId: string): Promise<void> {
-    await this.prisma.client.conversationThread.update({
+    await this.prisma.client.keyInboxThread.update({
       where: { id: threadId },
       data: { status: 'open', resolvedAt: null },
     });
   }
 
-  async setPriority(threadId: string, priority: number): Promise<void> {
-    await this.prisma.client.conversationThread.update({
+  /** key_inbox_threads carries priority as a label, not the old numeric rank. */
+  async setPriority(threadId: string, priority: string): Promise<void> {
+    await this.prisma.client.keyInboxThread.update({
       where: { id: threadId },
       data: { priority },
     });
   }
 
   async getOpenThreadCount(businessId: string): Promise<number> {
-    return this.prisma.client.conversationThread.count({
+    return this.prisma.client.keyInboxThread.count({
       where: { businessId, status: 'open' },
     });
   }
 
   async getThreadsByRole(businessId: string, role: string): Promise<any[]> {
-    return this.prisma.client.conversationThread.findMany({
+    return this.prisma.client.keyInboxThread.findMany({
       where: { businessId, assignedRole: role, status: 'open' },
       orderBy: { lastMessageAt: 'desc' },
       include: {
         contact: { select: { id: true, firstName: true, lastName: true } },
-        messages: { orderBy: { createdAt: 'desc' }, take: 1, select: { body: true, createdAt: true } },
+        messages: { orderBy: { createdAt: 'desc' }, take: 1, select: { contentText: true, createdAt: true } },
       },
     });
   }

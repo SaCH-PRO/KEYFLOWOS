@@ -294,25 +294,40 @@ export class MessageIntakeOrchestrator {
               rawPayload?: Record<string, unknown>;
               externalId?: string;
             };
-            const thread = await this.prisma.client.conversationThread.create({
+            // Writes to key_inbox_* — the single omnichannel store.
+            //
+            // This wrote conversation_threads, a second inbound store with its
+            // own screen. Gmail and Google Forms landed in key_inbox_threads,
+            // everything arriving through this webhook landed here, and neither
+            // screen showed the other's messages — a business's conversations
+            // split in half by channel, with the four inbox_* KEY tools able to
+            // see only one half.
+            const now = new Date();
+            const thread = await this.prisma.client.keyInboxThread.create({
               data: {
                 businessId,
                 contactId: intake.contactId,
                 channel: payload.channel,
                 channelId: payload.channelId,
+                externalThreadId: payload.externalId ?? null,
                 subject: payload.subject,
                 status: 'open',
-                lastMessageAt: new Date(),
+                priority: 'normal',
+                lastMessageAt: now,
+                lastInboundAt: now,
               },
             });
-            const message = await this.prisma.client.conversationMessage.create({
+            const message = await this.prisma.client.keyInboxMessage.create({
               data: {
+                businessId,
                 threadId: thread.id,
+                channel: payload.channel,
                 direction: 'inbound',
-                body: payload.body,
+                contentText: payload.body,
                 rawPayload: payload.rawPayload ?? {},
                 intent: intake.intentType,
-                externalId: payload.externalId,
+                externalMessageId: payload.externalId,
+                receivedAt: now,
               },
             });
             threadId = thread.id;
