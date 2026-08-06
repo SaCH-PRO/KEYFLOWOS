@@ -182,6 +182,7 @@ import {
 import { DigitalEmployeeAcceptanceService } from './digital-employee-acceptance.service';
 import { KeyCortexMemoryService } from './key-cortex-memory.service';
 import { CognitionSessionService } from './cognition-session.service';
+import { TrustExplanationService } from './trust-explanation.service';
 
 // -- Infrastructure --
 import { PrismaModule } from '../../core/prisma/prisma.module';
@@ -498,6 +499,19 @@ import { IntegrationHubModule } from '../integration-hub/integration-hub.module'
     // -- Phase A: Cognition session context primitive --
     CognitionSessionService,
 
+    // Phase 18F Layer 7 — every recommendation explains itself.
+    //
+    // This was written, injected @Optional() into KeyCortexReasoningService and
+    // KeyCortexQueryPipelineService, and never registered anywhere. @Optional()
+    // meant Nest bound `undefined` rather than failing at boot, so the guard at
+    // key-cortex-query-pipeline.service.ts:988 —
+    //
+    //   if (this.trustExplanation && executedActions.length > 0)
+    //
+    // was false on every request since the service was authored. No error, no
+    // failing test, and no explanation ever produced for any executed action.
+    TrustExplanationService,
+
     // -- v3: Phase 3 & 4 Services --
     // Sandbox -- AI-powered code generation & secure execution
     KeyCortexSandboxService,
@@ -642,6 +656,9 @@ import { IntegrationHubModule } from '../integration-hub/integration-hub.module'
 
     // -- Phase A: Cognition session context primitive --
     CognitionSessionService,
+
+    // Phase 18F Layer 7 — see the note in providers above.
+    TrustExplanationService,
 
     // Canonical structured-memory writer (Phase 0.9 unification)
     UnifiedMemoryWriterService,
