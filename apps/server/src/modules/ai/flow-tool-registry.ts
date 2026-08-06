@@ -1382,7 +1382,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'read',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
-    manualEquivalentRoute: '/app/profile',
+    manualEquivalentRoute: '/app/document-intelligence',
     parameters: {
       type: 'object',
       properties: {
@@ -1399,7 +1399,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'read',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
-    manualEquivalentRoute: '/app/profile',
+    manualEquivalentRoute: '/app/document-intelligence',
     parameters: {
       type: 'object',
       properties: {
@@ -2148,7 +2148,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'organize',
     riskLevel: 'low',
     riskTier: 2 as RiskTier,
-    manualEquivalentRoute: '/app/projects',
+    manualEquivalentRoute: '/app/time-tracking',
     changedEntities: ['timeEntry'],
     parameters: {
       type: 'object',
@@ -2168,7 +2168,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'organize',
     riskLevel: 'low',
     riskTier: 2 as RiskTier,
-    manualEquivalentRoute: '/app/projects',
+    manualEquivalentRoute: '/app/time-tracking',
     changedEntities: ['timeEntry'],
     parameters: {
       type: 'object',
@@ -2185,7 +2185,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'organize',
     riskLevel: 'low',
     riskTier: 2 as RiskTier,
-    manualEquivalentRoute: '/app/projects',
+    manualEquivalentRoute: '/app/time-tracking',
     changedEntities: ['timeEntry'],
     parameters: {
       type: 'object',
@@ -2734,7 +2734,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     riskTier: 2 as RiskTier,
     changedEntities: ['TaskAssignment'],
     followOnSuggestions: ['people_workload'],
-    manualEquivalentRoute: '/app/work/projects',
+    manualEquivalentRoute: '/app/projects',
     parameters: {
       type: 'object',
       properties: {

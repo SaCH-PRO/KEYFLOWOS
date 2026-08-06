@@ -92,6 +92,44 @@ async function main() {
     return !page || !canWrite(page, appRoot);
   });
 
+  // ── Domain parity ──────────────────────────────────────────────────────
+  //
+  // Reaching *a* mutation is not the same as reaching *the* mutation. The three
+  // time-tracking tools declared /app/projects, which has plenty of mutations
+  // and is not the time-tracking screen — so a user told "do this yourself"
+  // landed somewhere they could not. /app/time-tracking is 600 lines and
+  // writable; it was simply never pointed at. Same shape: documents_* declared
+  // /app/profile, and people_assign_task declared /app/work/projects, a
+  // one-line re-export shim.
+  //
+  // A name-matching heuristic alone is noise here — social_* legitimately live
+  // under /app/marketing, delegation_* under /app/automations, drive_create_*
+  // under /app/content-ops. So the rule is: the tool's domain prefix must
+  // appear in its route, OR the pairing must be written down once with a
+  // reason. New mismatches fail until somebody decides which it is.
+  const crossDomain = writeTools.filter((t) => {
+    const route = (t.manualEquivalentRoute ?? '').trim();
+    if (!route || CROSS_DOMAIN_ROUTES[t.name]) return false;
+    const domain = t.name.split('_')[0].toLowerCase();
+    return !route.toLowerCase().replace(/[/-]/g, '').includes(domain);
+  });
+
+  if (crossDomain.length > 0) {
+    const header = `[check-tool-routes] ${crossDomain.length} write tool(s) point outside their own domain:`;
+    if (WARN_ONLY) {
+      console.warn(header);
+      for (const t of crossDomain) console.warn(`  - ${t.name} -> ${t.manualEquivalentRoute}`);
+    } else {
+      console.error(header);
+      for (const t of crossDomain) console.error(`  - ${t.name} -> ${t.manualEquivalentRoute}`);
+      console.error(
+        'Point the tool at its own screen, or add a CROSS_DOMAIN_ROUTES entry saying why\n' +
+          'this destination is where a person really does this.',
+      );
+      process.exit(1);
+    }
+  }
+
   if (noManualWrite.length > 0) {
     const header =
       `[check-tool-routes] ${noManualWrite.length} write tool(s) point at a screen a human cannot write from:`;
@@ -113,9 +151,50 @@ async function main() {
   console.log(
     `[check-tool-routes] Scan complete — ${tools.length - missing.length}/${tools.length} tools declare manualEquivalentRoute, ` +
       `${tools.length - unresolved.length}/${tools.length} resolve to a real page, ` +
-      `${writeTools.length - noManualWrite.length}/${writeTools.length} write tools have manual parity.`,
+      `${writeTools.length - noManualWrite.length}/${writeTools.length} write tools have manual parity, ` +
+      `${writeTools.length - crossDomain.length}/${writeTools.length} point inside their own domain.`,
   );
 }
+
+/**
+ * Write tools whose manual screen is deliberately in another domain.
+ *
+ * Each entry is a decision someone made about where a user really does this
+ * thing, not a place to silence the check. A tool that gets its own screen
+ * later must leave this list.
+ */
+const CROSS_DOMAIN_ROUTES: Record<string, string> = {
+  // Verb-first names — the domain is in the noun, not the prefix.
+  create_task: 'tasks live on the projects board',
+  people_assign_task: 'a task is assigned from the board it lives on, not the people screen',
+  create_followup_queue: 'follow-up queues are automations',
+  tag_contact: 'tagging happens on the contact record',
+  segment_contacts: 'segments are built from the contacts list',
+  queue_campaign: 'campaign scheduling is the marketing screen',
+  send_message_with_approval: 'outbound messaging is composed in marketing',
+  apply_storefront_recommendation: 'storefront recommendations are applied in Store',
+  enable_flow_with_approval: 'flows are enabled from the automations screen',
+  update_status_with_confirmation: 'bulk status changes are made on the contacts list',
+  sync_seo_pages: 'page inventory is synced from the SEO workspace',
+  save_onboarding_step: 'the onboarding wizard is the manual path',
+  update_business_blueprint: 'the blueprint screen is the manual path',
+
+  // Domains rendered inside a larger workspace.
+  social_create_post: 'social is a section of the marketing workspace',
+  social_update_post: 'social is a section of the marketing workspace',
+  social_publish_post: 'social is a section of the marketing workspace',
+  social_list_posts: 'social is a section of the marketing workspace',
+  drive_create_folder: 'Drive folders are created from content-ops delivery',
+  drive_create_document: 'Drive docs are created from content-ops delivery',
+  commerce_update_product: 'products are edited in the Store catalog',
+
+  // The five delegation loops are configured as automations.
+  delegation_payment_recovery: 'delegation loops are automations',
+  delegation_lead_reactivation: 'delegation loops are automations',
+  delegation_post_purchase: 'delegation loops are automations',
+  delegation_booking_prep: 'delegation loops are automations',
+  delegation_weekly_hygiene: 'delegation loops are automations',
+};
 
 /**
  * MANUAL PARITY: a tool that CHANGES something must point at a screen where a
@@ -272,6 +351,49 @@ const GENERIC_WRITE = /^(apiPost|apiPatch|apiPut|apiDelete)$/;
 const API_LAYER = /^@\/lib\/(api\b|client$)/;
 
 /**
+ * The app has TWO api-module conventions, and only one was recognised.
+ *
+ * Most domains live under @/lib/api/<domain>. Nine do not — @/lib/time-tracking,
+ * @/lib/retainers, @/lib/portal, @/lib/plans, @/lib/workflows and friends are
+ * top-level files that wrap ./api directly.
+ *
+ * The path regex above missed all of them, so /app/time-tracking — 600 lines
+ * importing createTimeEntry, updateTimeEntry, deleteTimeEntry, startTimer and
+ * stopTimer — read as a screen with no write path. That went unnoticed because
+ * the three time tools pointed at /app/projects instead, which passes for
+ * reasons that have nothing to do with time tracking. Two defects hiding each
+ * other: the wrong route, and a checker that would have rejected the right one.
+ *
+ * Detected by content rather than by name, so a new domain module is covered the
+ * day it is written. This widens which import SPECIFIERS count as the api layer;
+ * it does not widen recursion, which still stops dead at lib/ (see
+ * isApiLayerFile) — walking through lib/client.ts is what made an earlier
+ * version of this check unfailable.
+ */
+const apiModuleCache = new Map<string, boolean>();
+
+function isApiModule(spec: string, fromFile: string, appRoot: string): boolean {
+  if (!spec.startsWith('@/lib/') && !spec.startsWith('./') && !spec.startsWith('../')) return false;
+
+  for (const resolved of resolveImport(spec, fromFile, appRoot)) {
+    const rel = path.relative(appRoot, resolved).split(path.sep).join('/');
+    if (!rel.startsWith('lib/')) continue;
+
+    const cached = apiModuleCache.get(resolved);
+    if (cached !== undefined) {
+      if (cached) return true;
+      continue;
+    }
+
+    // An api module is one that calls the transport itself.
+    const wraps = /from\s+["'](\.\/api|@\/lib\/api)["']/.test(read(resolved));
+    apiModuleCache.set(resolved, wraps);
+    if (wraps) return true;
+  }
+  return false;
+}
+
+/**
  * Depth 3, not 2. Pages compose through hooks as well as components —
  * /app/onboarding is page -> use-onboarding -> the api call — and stopping at 2
  * reported it as having no manual path when the whole screen is a wizard whose
@@ -285,7 +407,7 @@ function canWrite(file: string, appRoot: string, depth = 3, seen = new Set<strin
 
   // A mutation pulled in from the API layer, in this file.
   for (const imp of body.matchAll(/import\s*\{([^}]+)\}\s*from\s*["']([^"']+)["']/g)) {
-    if (!API_LAYER.test(imp[2])) continue;
+    if (!API_LAYER.test(imp[2]) && !isApiModule(imp[2], file, appRoot)) continue;
     const named = imp[1].split(',').map((n) => n.trim().split(/\s+as\s+/)[0].trim());
     if (named.some((n) => MUTATION_NAME.test(n) || GENERIC_WRITE.test(n))) return true;
   }
