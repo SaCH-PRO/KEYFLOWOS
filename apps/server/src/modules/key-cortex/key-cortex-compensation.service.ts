@@ -84,6 +84,11 @@ export class KeyCortexCompensationService {
     const map: Record<string, string> = {
       // CRM
       crm_create_contact: 'crm.delete_contact',
+      // Pipeline. A deal created by mistake is a forecast that lies, so it is
+      // withdrawn rather than left open. Closing a deal (won/lost) is NOT
+      // compensated: reopening it would rewrite revenue history, and a wrong
+      // close is corrected by a human deciding what actually happened.
+      deals_create: 'crm.delete_deal',
       // Work items
       create_task: 'autopilot.delete_task',
       call_create_task: 'autopilot.delete_task',
@@ -114,6 +119,7 @@ export class KeyCortexCompensationService {
       // half that was broken is the one that actually runs plans. Both are
       // listed now, deliberately, rather than picking a winner.
       'crm.create_contact': 'crm.delete_contact',
+      'crm.create_deal': 'crm.delete_deal',
       'crm.create_lead': 'crm.delete_lead',
       'commerce.create_invoice': 'commerce.void_invoice',
       'bookings.create_booking': 'bookings.cancel_booking',
@@ -139,6 +145,20 @@ export class KeyCortexCompensationService {
       if (!contactId || !input.businessId) return;
       this.logger.log(`[compensate] soft-delete contact ${contactId}`);
       await this.crm.softDeleteContact({ businessId: input.businessId, contactId });
+    });
+
+    this.register('crm.delete_deal', async (input) => {
+      const dealId = (input.output?.id ?? input.parameters?.dealId ?? input.parameters?.id) as string | undefined;
+      if (!dealId || !input.businessId) return;
+      this.logger.log(`[compensate] soft-delete deal ${dealId}`);
+      // Scoped by businessId in the WHERE, not just by id: a compensating
+      // action must not be redirectable at another tenant by a crafted
+      // parameter. updateMany returns a count rather than throwing on no match,
+      // which is the right shape for a rollback that may run twice.
+      await this.prisma.client.deal.updateMany({
+        where: { id: dealId, businessId: input.businessId, deletedAt: null },
+        data: { deletedAt: new Date() },
+      });
     });
 
     this.register('crm.create_lead', async (input) => {

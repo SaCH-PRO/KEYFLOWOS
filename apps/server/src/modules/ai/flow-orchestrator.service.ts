@@ -39,6 +39,9 @@ import { ContentRequestService } from '../content-ops/content-request.service';
 import { CallLogService } from '../call-tasks/call-log.service';
 import { CallScriptService } from '../call-tasks/call-script.service';
 import { EvidenceService } from '../evidence/evidence.service';
+import { CrmDealsService } from '../crm/crm-deals.service';
+import { DealForecastService } from '../crm/deal-forecast.service';
+import { DealVelocityService } from '../crm/deal-velocity.service';
 import { SeoService } from '../seo/seo.service';
 import { SeoContentService } from '../seo/seo-content.service';
 import { ReceivablesService } from '../finance/receivables.service';
@@ -382,6 +385,15 @@ export class FlowOrchestratorService {
   }
   private getEvidence() {
     return this.moduleRef.get(EvidenceService, { strict: false });
+  }
+  private getDeals() {
+    return this.moduleRef.get(CrmDealsService, { strict: false });
+  }
+  private getDealForecast() {
+    return this.moduleRef.get(DealForecastService, { strict: false });
+  }
+  private getDealVelocity() {
+    return this.moduleRef.get(DealVelocityService, { strict: false });
   }
   private getSeo() {
     return this.moduleRef.get(SeoService, { strict: false });
@@ -2137,6 +2149,117 @@ ${triage.standingContext}`;
           contactId: args.contactId,
         });
         return { success: true, deletedId: args.contactId };
+      }
+
+      // === DEALS / PIPELINE ===
+      //
+      // Every handler returns what the service returned. CrmDealsService emits
+      // timeline events and crm.deal.* bus events, and moveStage/winDeal/loseDeal
+      // derive the resulting status from the destination stage's category — so
+      // echoing the requested status back would be wrong as well as dishonest.
+      case 'deals_list': {
+        const result = await this.getDeals().listDeals({
+          businessId,
+          status: args.status,
+          stageIds: args.stageIds,
+          contactId: args.contactId,
+          search: args.search,
+          minValue: args.minValue,
+          maxValue: args.maxValue,
+          expectedCloseFrom: args.expectedCloseFrom ? new Date(args.expectedCloseFrom) : undefined,
+          expectedCloseTo: args.expectedCloseTo ? new Date(args.expectedCloseTo) : undefined,
+          take: args.limit ?? 50,
+        });
+        return { deals: result.deals, total: result.total };
+      }
+      case 'deals_get': {
+        const deal = await this.getDeals().getDeal({ businessId, dealId: args.dealId });
+        return { deal };
+      }
+      case 'deals_list_stages': {
+        const stages = await this.getDeals().listStages(businessId);
+        return { stages };
+      }
+      case 'deals_forecast': {
+        const forecast = await this.getDealForecast().getForecast({
+          businessId,
+          windowDays: args.windowDays,
+        });
+        return { forecast };
+      }
+      case 'deals_pipeline_velocity': {
+        const report = await this.getDealVelocity().getReport(businessId);
+        return { report };
+      }
+      case 'deals_create': {
+        const deal = await this.getDeals().createDeal({
+          businessId,
+          contactId: args.contactId,
+          title: args.title,
+          value: args.value ?? null,
+          currency: args.currency,
+          stageId: args.stageId,
+          expectedCloseAt: args.expectedCloseAt ?? null,
+          probability: args.probability ?? null,
+          description: args.description ?? null,
+          source: args.source ?? null,
+          notes: args.notes ?? null,
+          actorId: KEY_SYSTEM_ACTOR_ID,
+        });
+        return { deal };
+      }
+      case 'deals_update': {
+        const deal = await this.getDeals().updateDeal({
+          businessId,
+          dealId: args.dealId,
+          title: args.title,
+          value: args.value,
+          expectedCloseAt: args.expectedCloseAt,
+          probability: args.probability,
+          description: args.description,
+          notes: args.notes,
+          actorId: KEY_SYSTEM_ACTOR_ID,
+        });
+        return { deal };
+      }
+      case 'deals_move_stage': {
+        const deal = await this.getDeals().moveStage({
+          businessId,
+          dealId: args.dealId,
+          stageId: args.stageId,
+          actorId: KEY_SYSTEM_ACTOR_ID,
+        });
+        return { deal };
+      }
+      case 'deals_mark_won': {
+        const deal = await this.getDeals().winDeal({
+          businessId,
+          dealId: args.dealId,
+          actualValue: args.actualValue,
+          reasonNotes: args.reasonNotes ?? null,
+          actorId: KEY_SYSTEM_ACTOR_ID,
+        });
+        return { deal };
+      }
+      case 'deals_mark_lost': {
+        const deal = await this.getDeals().loseDeal({
+          businessId,
+          dealId: args.dealId,
+          lossReason: args.lossReason,
+          reasonNotes: args.reasonNotes ?? null,
+          actorId: KEY_SYSTEM_ACTOR_ID,
+        });
+        return { deal };
+      }
+      case 'deals_delete': {
+        // deleteDeal returns { ok }, and getDeal inside it throws NotFound for a
+        // deal in another tenant — so `ok` is the service's word, not ours.
+        const removed = await this.getDeals().deleteDeal({
+          businessId,
+          dealId: args.dealId,
+          actorId: KEY_SYSTEM_ACTOR_ID,
+        });
+        return { success: removed.ok, deletedId: args.dealId };
       }
 
       case 'commerce_list_invoices': {

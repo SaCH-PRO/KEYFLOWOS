@@ -786,6 +786,214 @@ export const FLOW_TOOLS: FlowTool[] = [
   },
 
   // ================================================================
+  //  DEALS / PIPELINE
+  // ================================================================
+  //
+  // The largest gap in the product until 2026-08-06: a full pipeline with
+  // forecasting, health scoring and velocity services, a writable 356-line
+  // screen, an entry in the main nav — and zero tools. A user worked their
+  // pipeline daily and KEY could not see a single deal.
+  //
+  // Stage moves need a stageId, so deals_list_stages is not optional garnish:
+  // without it the model cannot name a destination and every move fails.
+  {
+    name: 'deals_list',
+    description: 'List and filter sales deals — by status, stage, owner, value range, expected close date or free text. Use this to see the pipeline, find deals closing soon, or spot the biggest open opportunities.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/crm/deals',
+    parameters: {
+      type: 'object',
+      properties: {
+        // 'ALL' is accepted by CrmDealsService.listDeals alongside the three
+        // DealStatus values; advertising it avoids the model inventing a filter.
+        status: { type: 'string', description: 'Deal status filter', enum: ['OPEN', 'WON', 'LOST', 'ALL'] },
+        stageIds: { type: 'array', description: 'Restrict to these pipeline stage ids', items: { type: 'string' } },
+        contactId: { type: 'string', description: 'Only deals for this contact' },
+        search: { type: 'string', description: 'Free text over title, company, description and notes' },
+        minValue: { type: 'number', description: 'Minimum deal value' },
+        maxValue: { type: 'number', description: 'Maximum deal value' },
+        expectedCloseFrom: { type: 'string', description: 'Earliest expected close date (ISO)' },
+        expectedCloseTo: { type: 'string', description: 'Latest expected close date (ISO)' },
+        limit: { type: 'number', description: 'Maximum deals to return (default 50, max 200)' },
+      },
+      required: [],
+    },
+    outputSchema: { type: 'object', description: 'Deal list', fields: { deals: { type: 'array', description: 'Deal records with stage and contact' }, total: { type: 'number', description: 'Total matching' } } },
+  },
+  {
+    name: 'deals_get',
+    description: 'Get one deal in full, including its stage and the contact it belongs to.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/crm/deals',
+    parameters: {
+      type: 'object',
+      properties: { dealId: { type: 'string', description: 'Deal id' } },
+      required: ['dealId'],
+    },
+    outputSchema: { type: 'object', description: 'Deal detail', fields: { deal: { type: 'object', description: 'Deal record' } } },
+  },
+  {
+    name: 'deals_list_stages',
+    description: 'List the pipeline stages for this business, in order, with their category (OPEN, WON or LOST). Call this before moving a deal so you have a real stage id.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/crm/deals',
+    parameters: { type: 'object', properties: {}, required: [] },
+    outputSchema: { type: 'object', description: 'Pipeline stages', fields: { stages: { type: 'array', description: 'Stage records in position order' } } },
+  },
+  {
+    name: 'deals_forecast',
+    description: 'Weighted pipeline forecast — expected revenue over a window, based on deal value and stage win rates. Use this to answer "what is likely to close" rather than "what is open".',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/crm/deals',
+    parameters: {
+      type: 'object',
+      properties: {
+        windowDays: { type: 'number', description: 'Forecast horizon in days (default 90)' },
+      },
+      required: [],
+    },
+    outputSchema: { type: 'object', description: 'Forecast report', fields: { forecast: { type: 'object', description: 'Weighted pipeline projection' } } },
+  },
+  {
+    name: 'deals_pipeline_velocity',
+    description: 'How fast deals move — average time in each stage, and where deals are stalling. Use this to explain why the pipeline is slow, not just how big it is.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/crm/deals',
+    parameters: { type: 'object', properties: {}, required: [] },
+    outputSchema: { type: 'object', description: 'Velocity report', fields: { report: { type: 'object', description: 'Stage timings and bottlenecks' } } },
+  },
+  {
+    name: 'deals_create',
+    description: 'Create a new deal against a contact. If no stage is given the first open stage is used.',
+    family: 'crud',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/crm/deals',
+    changedEntities: ['deal'],
+    parameters: {
+      type: 'object',
+      properties: {
+        contactId: { type: 'string', description: 'Contact this deal belongs to' },
+        title: { type: 'string', description: 'Deal title' },
+        value: { type: 'number', description: 'Deal value' },
+        currency: { type: 'string', description: 'Currency code (defaults to the business currency)' },
+        stageId: { type: 'string', description: 'Pipeline stage id — omit to use the first open stage' },
+        expectedCloseAt: { type: 'string', description: 'Expected close date (ISO)' },
+        probability: { type: 'number', description: 'Win probability, 0-100' },
+        description: { type: 'string', description: 'What the deal is for' },
+        source: { type: 'string', description: 'Where the opportunity came from' },
+        notes: { type: 'string', description: 'Internal notes' },
+      },
+      required: ['contactId', 'title'],
+    },
+    outputSchema: { type: 'object', description: 'Created deal', fields: { deal: { type: 'object', description: 'Deal record' } } },
+  },
+  {
+    name: 'deals_update',
+    description: 'Update a deal — value, title, expected close date, probability, owner or notes. To change the stage use deals_move_stage; to close it use deals_mark_won or deals_mark_lost.',
+    family: 'crud',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/crm/deals',
+    changedEntities: ['deal'],
+    parameters: {
+      type: 'object',
+      properties: {
+        dealId: { type: 'string', description: 'Deal id' },
+        title: { type: 'string', description: 'New title' },
+        value: { type: 'number', description: 'New value' },
+        expectedCloseAt: { type: 'string', description: 'New expected close date (ISO)' },
+        probability: { type: 'number', description: 'Win probability, 0-100' },
+        description: { type: 'string', description: 'New description' },
+        notes: { type: 'string', description: 'New notes' },
+      },
+      required: ['dealId'],
+    },
+    outputSchema: { type: 'object', description: 'Updated deal', fields: { deal: { type: 'object', description: 'Deal record' } } },
+  },
+  {
+    name: 'deals_move_stage',
+    description: 'Move a deal to a different pipeline stage. Call deals_list_stages first to get a valid stage id. Moving into a WON or LOST stage closes the deal.',
+    family: 'organize',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/crm/deals',
+    changedEntities: ['deal'],
+    parameters: {
+      type: 'object',
+      properties: {
+        dealId: { type: 'string', description: 'Deal id' },
+        stageId: { type: 'string', description: 'Destination stage id from deals_list_stages' },
+      },
+      required: ['dealId', 'stageId'],
+    },
+    outputSchema: { type: 'object', description: 'Moved deal', fields: { deal: { type: 'object', description: 'Deal record with its new stage' } } },
+  },
+  {
+    name: 'deals_mark_won',
+    description: 'Mark a deal as won. Records the close date and the actual value. This is a real revenue event — confirm the amount before calling it.',
+    family: 'execute',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/crm/deals',
+    changedEntities: ['deal'],
+    parameters: {
+      type: 'object',
+      properties: {
+        dealId: { type: 'string', description: 'Deal id' },
+        actualValue: { type: 'number', description: 'Value actually closed, if it differs from the deal value' },
+        reasonNotes: { type: 'string', description: 'Why it was won' },
+      },
+      required: ['dealId'],
+    },
+    outputSchema: { type: 'object', description: 'Won deal', fields: { deal: { type: 'object', description: 'Deal record' } } },
+  },
+  {
+    name: 'deals_mark_lost',
+    description: 'Mark a deal as lost, with the reason. Losing a deal is how the pipeline stays honest — record it rather than leaving it open.',
+    family: 'execute',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/crm/deals',
+    changedEntities: ['deal'],
+    parameters: {
+      type: 'object',
+      properties: {
+        dealId: { type: 'string', description: 'Deal id' },
+        lossReason: { type: 'string', description: 'Why the deal was lost' },
+        reasonNotes: { type: 'string', description: 'Additional context' },
+      },
+      required: ['dealId'],
+    },
+    outputSchema: { type: 'object', description: 'Lost deal', fields: { deal: { type: 'object', description: 'Deal record' } } },
+  },
+  {
+    name: 'deals_delete',
+    description: 'Soft-delete a deal. Prefer deals_mark_lost — a lost deal is pipeline history worth keeping, a deleted one is not.',
+    family: 'crud',
+    riskLevel: 'high',
+    riskTier: 3 as RiskTier,
+    manualEquivalentRoute: '/app/crm/deals',
+    changedEntities: ['deal'],
+    parameters: {
+      type: 'object',
+      properties: { dealId: { type: 'string', description: 'Deal id' } },
+      required: ['dealId'],
+    },
+    outputSchema: { type: 'object', description: 'Deletion result', fields: { success: { type: 'boolean', description: 'Whether the deal was deleted' } } },
+  },
+
+  // ================================================================
   //  CRUD — COMMERCE (existing tools, tagged with family)
   // ================================================================
   {
