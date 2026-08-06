@@ -384,9 +384,17 @@ reachable only as a tab inside a dormant-flagged marketplace page.
    screens, and catches synthesised (seeded-RNG) series. Negative-controlled: it
    failed on the four Store panels before they were fixed.
 4. ~~**Fix the Store performance tab**~~ — **DONE 2026-08-06.**
-5. **Tighten manual-parity** so a route must reach the *domain's own* mutation.
-   Then fix `time_*` → `/app/time-tracking`, `documents_*` → the documents screen,
-   `finance_*` → `/app/financial-flow`.
+5. ~~**Tighten manual-parity**~~ — **DONE 2026-08-06.** Domain parity is a
+   reviewed list (25 documented cross-domain pairings, 3 fixed), because
+   name-matching alone flags 28 of which most are correct. `time_*` →
+   `/app/time-tracking`, `people_assign_task` → `/app/projects`, `documents_*` →
+   `/app/document-intelligence`.
+
+   Fixing the routes exposed a second defect the first had been hiding: the
+   checker recognised only `@/lib/api` and `@/lib/client`, so `/app/time-tracking`
+   — 600 lines writing through `@/lib/time-tracking` — read as having no write
+   path. Nine such top-level api modules exist; detection is now by content
+   (does this file wrap `./api`) rather than by path.
 
 ## Tier 2 — stop the misreporting — **ALL DONE 2026-08-06**
 6. ~~**S1/S2**~~ — now call `SeoService.syncPageInventory` and
@@ -455,12 +463,21 @@ straight into render state. Both gaps are now closed, plus a third the original
 rule would still have missed — a deterministic RNG generating a chart series,
 which is fabrication that never names itself a placeholder.
 
-**Manual-parity checks *a* mutation, not *the* mutation.** `time_*` are
-write-family with `manualEquivalentRoute: '/app/projects'`
-(`registry:2151,2171,2188`). Projects has mutations, so parity passes — but the
-time screen is `/app/time-tracking`. Same class: `documents_*` → `/app/profile`
-(`:1385,:1402`); `finance_view_receivables|list_action_items` → `/app/finance`
-(`:2279,:2311`), a 7-line redirect stub.
+**Manual-parity checked *a* mutation, not *the* mutation** (closed 2026-08-06).
+`time_*` were write-family pointing at `/app/projects`, which has mutations and
+is not the time screen. `documents_*` → `/app/profile`; `people_assign_task` →
+`/app/work/projects`, a one-line re-export shim.
+
+The instructive part: pointing the time tools at the *correct* screen made
+parity **fail**. `/app/time-tracking` writes through `@/lib/time-tracking`, and
+the checker recognised only `@/lib/api` and `@/lib/client`. Two defects had been
+concealing each other — the wrong route, and a checker that would have rejected
+the right one. This is the general hazard with gates that pass: a green check can
+mean the rule is satisfied *or* that the rule cannot see the thing it judges.
+
+Still open in this family: `finance_view_receivables|list_action_items` →
+`/app/finance` (`registry:2279,2311`), a 7-line redirect stub. Read-family, so
+domain parity does not cover them, and `/app/finance` is not in nav at all.
 
 Items 3 and 10 are **closed**; item 5 (manual-parity) remains open. Each gate was
 made to **fail against `HEAD`** before the underlying defect was fixed — that is
