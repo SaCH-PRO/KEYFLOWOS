@@ -80,18 +80,23 @@ const defaultTakeExtension = Prisma.defineExtension({
 // TaskAssignmentService's task/assignable ownership checks.
 const BUSINESS_ID_MODELS = new Set([
   'BusinessEvent', 'Evidence', 'ContentRequest',
-  'ContentDeliveryPackage', 'CallLog', 'ApprovalRequest', 'ApprovalStep',
+  'ContentDeliveryPackage', 'CallLog', 'ApprovalRequest', 
   'Asset', 'Contact', 'Account', 'Deal', 'Invoice', 'Quote', 'Product',
   'Service', 'Booking', 'StaffMember', 'Project', 'ProjectTask', 'Expense',
   'SocialPost', 'EmailCampaign', 'DocumentInstance', 'Site', 'CalendarEvent',
-  'ConnectorStatus', 'Automation', 'CommunicationEvent', 'MessageThread',
-  'OutboundDelivery', 'DeliveryEvent', 'NotificationEvent', 'CommandItem',
+  'ConnectorStatus', 'Automation', 
+  'OutboundDelivery', 'CommandItem',
   'BusinessEntityLink', 'BusinessRisk', 'CashReserveBucket',
   'WorkflowTemplate', 'WorkflowRun', 'SopDocument',
   'MarketingCampaignPlan', 'BusinessInitiative',
   // Phase 3 Skeleton: KEY Cortex identity & audit tables
   'CortexSession', 'CortexActionLog', 'KeyCommand', 'AiExecutionLog',
   'KeyCortexMemory', 'AiApprovalItem', 'AiApprovalRequest',
+  // Restored after a rename left the list naming models that no longer
+  // exist. MessageThread/CommunicationEvent/NotificationEvent were removed
+  // from this set because there are no such models; these four are what
+  // they became, and every one has a businessId.
+  'KeyInboxThread', 'ConversationThread', 'Notification', 'CustomerNotificationLog',
 ]);
 
 

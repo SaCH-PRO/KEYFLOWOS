@@ -1,6 +1,7 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { APP_INTERCEPTOR } from '@nestjs/core';
+import { TenantInterceptor } from './core/tenant/tenant.interceptor';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './core/prisma/prisma.module';
@@ -245,6 +246,10 @@ import { VoiceModule } from './modules/voice/voice.module';
     AuthMiddleware,
     { provide: APP_INTERCEPTOR, useClass: LoggingInterceptor },
     { provide: APP_INTERCEPTOR, useClass: BusinessEventInterceptor },
+    // Establishes the AsyncLocalStorage tenant scope for every authenticated
+    // request that names a business. Without it the tenant isolation extension
+    // in packages/db is inert — see main.ts, where the provider is installed.
+    { provide: APP_INTERCEPTOR, useClass: TenantInterceptor },
   ],
 })
 export class AppModule implements NestModule {

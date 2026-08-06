@@ -20,7 +20,7 @@ import { InvoiceWorkflowService, InvoiceStatus } from './invoice-workflow.servic
 import { CatalogService } from '../catalog/catalog.service';
 import { PublicEventsService } from '../public-events/public-events.service';
 import { RevenuePostingService } from '../finance/revenue-posting.service';
-import { isSystemActor } from '../../core/auth/system-actor';
+import { isSystemActor, KEY_SYSTEM_ACTOR_ID } from '../../core/auth/system-actor';
 
 @Injectable()
 export class CommerceService {
@@ -1912,13 +1912,22 @@ export class CommerceService {
     }
 
     if (input.status && input.status !== invoice.status) {
+      // input.businessId was in scope the whole time and was never passed.
+      //
+      // Both callees validate the actor, and 'key_ai' resolves to no Membership
+      // — so every status change through updateInvoice threw "Not authorized",
+      // which means commerce_update_invoice failed on 100% of status changes
+      // from the day it shipped. It is also the tenant proof the system actor
+      // now requires: KEY's authority is the scope its caller established, and
+      // this caller had established it and thrown it away.
       if (input.status === 'PAID') {
-        return this.markInvoicePaid(input.invoiceId, 'key_ai');
+        return this.markInvoicePaid(input.invoiceId, KEY_SYSTEM_ACTOR_ID, input.businessId);
       }
       return this.updateInvoiceStatus({
         invoiceId: input.invoiceId,
         status: input.status as 'SENT' | 'OVERDUE' | 'VOID',
-        actorId: 'key_ai',
+        actorId: KEY_SYSTEM_ACTOR_ID,
+        businessId: input.businessId,
         dueDate: input.dueDate,
       });
     }

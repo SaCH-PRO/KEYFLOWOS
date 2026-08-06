@@ -124,3 +124,55 @@ describe('Cross-tenant attacks on TaskAssignment (businessId enforcement)', () =
     expect(Array.isArray(list)).toBe(true);
   });
 });
+
+describe('the tenant extension actually filters, now that it is wired', () => {
+  // Until 2026-08-06 this extension was applied to the Prisma client and had
+  // NEVER fired: tenantOperationAllowed() needs an active businessId, and
+  // setTenantContextProvider was called from this test file and nowhere else.
+  // main.ts now installs it at boot and TenantInterceptor is registered
+  // globally, so these assertions describe production behaviour rather than a
+  // capability nothing switches on.
+
+  it('scopes a covered model to the active tenant without an explicit where', async () => {
+    setTenantContextProvider({ getCurrentBusinessId: () => ID.bizA });
+    try {
+      const contacts = await db.contact.findMany({ where: { id: { in: [ID.contactA, ID.contactB] } } });
+
+      expect(contacts.map((c: { id: string }) => c.id)).toEqual([ID.contactA]);
+    } finally {
+      setTenantContextProvider({ getCurrentBusinessId: () => undefined });
+    }
+  });
+
+  it('returns both when there is no tenant context — crons and sweeps are unaffected', async () => {
+    // Background work runs outside a request, so getCurrentBusinessId() is
+    // undefined and the extension is a no-op. That is what makes this safe to
+    // switch on: nothing that iterates the estate changes behaviour.
+    setTenantContextProvider({ getCurrentBusinessId: () => undefined });
+
+    const contacts = await db.contact.findMany({ where: { id: { in: [ID.contactA, ID.contactB] } } });
+
+    expect(contacts.map((c: { id: string }) => c.id).sort()).toEqual([ID.contactA, ID.contactB].sort());
+  });
+
+  it('cannot be talked past by naming another tenant explicitly', async () => {
+    // The security property, asserted as it actually behaves rather than as I
+    // first assumed. withTenantWhere spreads the caller's where and THEN sets
+    // businessId, so an explicit `businessId: bizB` is overwritten with the
+    // active tenant — you get your own rows, never theirs.
+    //
+    // Worth knowing precisely, because it is silent: a caller that genuinely
+    // meant to read another tenant gets wrong data rather than an error. That
+    // is the right trade for a leak-prevention layer, and it is a reason this
+    // is defence in depth and not a substitute for scoping queries properly.
+    setTenantContextProvider({ getCurrentBusinessId: () => ID.bizA });
+    try {
+      const contacts = await db.contact.findMany({ where: { businessId: ID.bizB } });
+
+      expect(contacts.every((c: { businessId: string }) => c.businessId === ID.bizA)).toBe(true);
+      expect(contacts.some((c: { id: string }) => c.id === ID.contactB)).toBe(false);
+    } finally {
+      setTenantContextProvider({ getCurrentBusinessId: () => undefined });
+    }
+  });
+});

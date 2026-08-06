@@ -150,6 +150,52 @@ describe('and cannot reach past its own tenant to do it', () => {
   });
 });
 
+describe('updateInvoice passes the scope it already had', () => {
+  it('forwards businessId when changing status to PAID', async () => {
+    // input.businessId was in scope and was never passed, so both callees saw a
+    // system actor with no tenant proof and refused. commerce_update_invoice
+    // failed on 100% of status changes from the day it shipped — before the
+    // system-actor contract existed it failed on the Membership lookup instead,
+    // so it has never once worked.
+    const markInvoicePaid = vi.fn(async () => ({ id: 'inv_1', status: 'PAID' }));
+    const service = Object.assign(Object.create(CommerceService.prototype), {
+      prisma: {
+        client: {
+          invoice: { findFirst: vi.fn(async () => ({ id: 'inv_1', status: 'SENT', items: [] })) },
+        },
+      },
+      validateTaxAndDiscount: vi.fn(),
+      markInvoicePaid,
+      logger: { log: vi.fn(), warn: vi.fn() },
+    });
+
+    await service.updateInvoice({ invoiceId: 'inv_1', businessId: MINE, status: 'PAID' });
+
+    expect(markInvoicePaid).toHaveBeenCalledWith('inv_1', KEY_SYSTEM_ACTOR_ID, MINE);
+  });
+
+  it('forwards businessId when changing status to SENT', async () => {
+    const updateInvoiceStatus = vi.fn(async () => ({ id: 'inv_1', status: 'SENT' }));
+    const service = Object.assign(Object.create(CommerceService.prototype), {
+      prisma: {
+        client: {
+          invoice: { findFirst: vi.fn(async () => ({ id: 'inv_1', status: 'DRAFT', items: [] })) },
+        },
+      },
+      validateTaxAndDiscount: vi.fn(),
+      updateInvoiceStatus,
+      logger: { log: vi.fn(), warn: vi.fn() },
+    });
+
+    await service.updateInvoice({ invoiceId: 'inv_1', businessId: MINE, status: 'SENT' });
+
+    expect(updateInvoiceStatus.mock.calls[0][0]).toMatchObject({
+      actorId: KEY_SYSTEM_ACTOR_ID,
+      businessId: MINE,
+    });
+  });
+});
+
 describe('the same contract on updateInvoiceStatus', () => {
   function statusService(invoiceBusinessId = MINE) {
     const transition = vi.fn(async () => ({ id: 'inv_1', businessId: invoiceBusinessId, contactId: null }));

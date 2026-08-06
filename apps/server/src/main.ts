@@ -7,6 +7,8 @@ import { NestFactory } from '@nestjs/core';
 import { configureNestApp } from './app-bootstrap';
 import { ensureValidServerEnv, assertNoDevAuthBypass } from './core/config/env';
 import { getReleaseVersion } from '@keyflow/shared/release-version';
+import { setTenantContextProvider } from '@keyflow/db';
+import { getCurrentBusinessId } from './core/tenant/tenant-context';
 
 async function bootstrap() {
   // Fail fast on missing/malformed env. Prints a single, readable list and
@@ -50,6 +52,20 @@ async function bootstrap() {
   }
 
   const { AppModule } = await import('./app.module');
+  // Install the tenant context provider BEFORE the app starts serving.
+  //
+  // packages/db ships a Prisma extension that injects `where: { businessId }`
+  // into every query on 47 tenant-scoped models. It has been applied to the
+  // client since it was written and has never once fired, because
+  // tenantOperationAllowed() needs an active businessId and this function —
+  // the only thing that supplies one — was called from a test file and nowhere
+  // else. A complete isolation mechanism, switched off.
+  //
+  // It is defence in depth, not the primary control: every query should still
+  // scope itself. But three cross-tenant leaks were found in this codebase in a
+  // single afternoon, and this is the layer that would have caught all three.
+  setTenantContextProvider({ getCurrentBusinessId });
+
   const app = await NestFactory.create(AppModule, { rawBody: true });
   configureNestApp(app);
 
