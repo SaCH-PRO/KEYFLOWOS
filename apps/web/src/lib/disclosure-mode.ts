@@ -136,7 +136,7 @@ export const MODE_BUILD_ITEMS: Record<DisclosureMode, string[]> = {
   enterprise: [
     "Business Genome", "Storefront", "Presence", "Templates",
     "Account", "Workspace", "Team", "Structure", "AI", "Compliance", "Developers",
-    "Flows", "Workflows", "Key Connect",
+    "Flows", "Key Connect",
   ],
 };
 

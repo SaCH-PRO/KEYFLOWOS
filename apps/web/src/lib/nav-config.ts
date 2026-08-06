@@ -131,7 +131,11 @@ export const operateSections: NavSection[] = [
       { label: "Revenue", href: "/app/commerce", icon: TrendingUp },
       { label: "Expenses", href: "/app/expenses", icon: Receipt },
       { label: "Budgeting", href: "/app/budgeting", icon: Target },
-      { label: "Reports", href: "/app/finance", icon: BarChart3 },
+      // Pointed at /app/finance, an 8-line redirect to /app/financial-flow —
+      // the same destination as the "Financial Flow" entry directly above, so
+      // this section had two labels for one screen and no way to reach the real
+      // 546-line reports page.
+      { label: "Reports", href: "/app/reports", icon: BarChart3 },
     ],
   },
   {
@@ -167,7 +171,9 @@ export const operateSections: NavSection[] = [
     icon: TrendingUp,
     items: [
       { label: "Commerce", href: "/app/commerce", icon: Receipt },
-      { label: "Deals", href: "/app/crm/contacts", icon: Contact },
+      // Pointed at /app/crm/contacts. /app/crm/deals is a real 356-line deals
+      // screen — forecast, stages, velocity, account pivot — and had no way in.
+      { label: "Deals", href: "/app/crm/deals", icon: TrendingUp },
     ],
   },
   {
@@ -183,15 +189,6 @@ export const operateSections: NavSection[] = [
       // KEY was allowed to do. The screen is AddonPackGate pack="webPresencePack";
       // the entry carries the same flag so the two appear and disappear together.
       { label: "SEO", href: "/app/seo", icon: Globe, dormantFlag: "webPresencePack" },
-    ],
-  },
-  {
-    id: "operations",
-    label: "Operations",
-    icon: BriefcaseBusiness,
-    items: [
-      { label: "Projects", href: "/app/projects", icon: FolderKanban },
-      { label: "Tasks", href: "/app/approvals", icon: CheckSquare },
     ],
   },
   {
@@ -279,7 +276,6 @@ export const buildSections: NavSection[] = [
     icon: Zap,
     items: [
       { label: "Flows", href: "/app/flows", icon: RefreshCw },
-      { label: "Workflows", href: "/app/workflows", icon: Layers },
     ],
   },
 ];
