@@ -809,7 +809,21 @@ export class KeyCortexToolRegistryService {
           durationMs,
         },
       );
-      return;
+      // No `return` here. It used to sit inside this branch, and the audit
+      // service is registered in the module — so it is always present, so the
+      // event-bus emit below was unreachable in every real configuration and
+      // tool.executed / tool.failed never reached the bus.
+      //
+      // These are two different sinks with two different jobs: the audit log is
+      // the durable compliance record, the bus is how other cortex services
+      // react in the moment. Doing one INSTEAD of the other was never the
+      // intent — the branch is about whether the audit service exists, not
+      // about suppressing the bus.
+      //
+      // Nothing subscribes to these events today, so this is the pathway being
+      // correct rather than an outage being fixed. It matters when something
+      // does: a subscriber added later would have failed silently and looked
+      // like the subscriber's bug.
     }
 
     if (this.eventBus) {
