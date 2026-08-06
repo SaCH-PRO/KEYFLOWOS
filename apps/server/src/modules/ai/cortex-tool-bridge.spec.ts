@@ -115,6 +115,26 @@ describe('the bridged tools are first-class, not smuggled in', () => {
   });
 });
 
+describe('the manual equivalent shows the same data the tool touches', () => {
+  it('points at the screen backed by KeyInboxService, not the other inbox', () => {
+    // These tools operate on keyInboxThread via KeyInboxService. They declared
+    // manualEquivalentRoute '/app/inbox', which redirects to /app/inbox/unified
+    // — a SEPARATE omnichannel inbox reading a different table through
+    // fetchUnifiedInbox. So every "you can do this yourself here" link sent the
+    // user to a screen that could not display the thread the tool had just
+    // touched.
+    //
+    // The route check and the manual-parity check both passed: the page exists
+    // and a human can write from it. Neither asks whether it is the SAME data.
+    // /app/key-inbox reads @/lib/api/key-inbox, which is the matching source.
+    for (const name of BRIDGED) {
+      expect(getToolByName(name)!.manualEquivalentRoute, `${name} points at the wrong inbox`).toBe(
+        '/app/key-inbox',
+      );
+    }
+  });
+});
+
 describe('the organ tool it points at actually exists', () => {
   it('every bridged target is declared by the real adapter', () => {
     // The tests above stub the registry, so they prove the WIRING and nothing

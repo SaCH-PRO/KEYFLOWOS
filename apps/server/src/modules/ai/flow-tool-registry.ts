@@ -2556,7 +2556,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'read',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
-    manualEquivalentRoute: '/app/inbox',
+    manualEquivalentRoute: '/app/key-inbox',
     parameters: {
       type: 'object',
       properties: {
@@ -2581,7 +2581,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'read',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
-    manualEquivalentRoute: '/app/inbox',
+    manualEquivalentRoute: '/app/key-inbox',
     parameters: {
       type: 'object',
       properties: { threadId: { type: 'string', description: 'The thread to read.' } },
@@ -2599,7 +2599,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'read',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
-    manualEquivalentRoute: '/app/inbox',
+    manualEquivalentRoute: '/app/key-inbox',
     parameters: { type: 'object', properties: {}, required: [] },
     outputSchema: {
       type: 'object',
@@ -2614,7 +2614,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
     changedEntities: ['InboxThread'],
-    manualEquivalentRoute: '/app/inbox',
+    manualEquivalentRoute: '/app/key-inbox',
     parameters: {
       type: 'object',
       properties: { threadId: { type: 'string', description: 'The thread to mark resolved.' } },

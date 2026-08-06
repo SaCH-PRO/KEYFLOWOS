@@ -92,7 +92,7 @@ export const MODE_OPERATE_ITEMS: Record<DisclosureMode, string[]> = {
   ],
   // A team: add delivery, the shared inbox, campaigns and reporting.
   growth: [
-    "Command Center", "Data Inbox",
+    "Command Center", "KEY Inbox", "Data Inbox",
     "Revenue", "Expenses", "Budgeting", "Reports",
     "Contacts", "Deals", "Sequences", "Service",
     "Projects", "Tasks",
@@ -105,7 +105,7 @@ export const MODE_OPERATE_ITEMS: Record<DisclosureMode, string[]> = {
   // spec checks it and a wrong list is how the other two got wrong.
   enterprise: [
     "Command Center", "KEY Worker", "KEY Chat", "KEY Autonomy", "KEY Modes",
-    "Data Inbox", "Capture",
+    "KEY Inbox", "Data Inbox", "Capture",
     "Financial Flow", "Revenue", "Expenses", "Budgeting", "Reports",
     "Temporal Flow", "Calendar", "Bookings", "Projects", "Tasks",
     "People Flow", "Contacts", "Sequences", "Intelligence", "Service",

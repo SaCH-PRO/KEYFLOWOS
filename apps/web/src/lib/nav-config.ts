@@ -113,6 +113,11 @@ export const operateSections: NavSection[] = [
       { label: "KEY Chat", href: "/app/key/chat", icon: MessageSquare },
       { label: "KEY Autonomy", href: "/app/key-autonomy", icon: CheckSquare },
       { label: "KEY Modes", href: "/app/key-modes", icon: BrainCircuit },
+      // KEY Inbox is the screen behind the four inbox_* tools — it reads the
+      // same keyInboxThread data KeyInboxService writes. It had no nav entry,
+      // so the tools' "do it yourself" link was unreachable, and they pointed
+      // at /app/inbox, a DIFFERENT inbox over a different table entirely.
+      { label: "KEY Inbox", href: "/app/key-inbox", icon: Inbox },
       { label: "Data Inbox", href: "/app/data-inbox", icon: Inbox },
       { label: "Capture", href: "/app/capture", icon: Camera },
     ],
