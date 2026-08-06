@@ -61,12 +61,8 @@ function navItems(): Array<{ label: string; href: string }> {
  * name the same destination differently.
  */
 const INTENTIONAL_ALIASES: Record<string, string> = {
-  '/app/command-center': 'drawer says "Command Center", mobile bottom nav says "Home"',
-  '/app/data-inbox': 'drawer says "Data Inbox", mobile bottom nav says "Inbox"',
-  '/app/commerce': 'Revenue / Commerce / Storefront — UNRESOLVED, see the rollout plan',
-  '/app/approvals': 'Tasks / Approvals — the same queue seen from two jobs',
+  '/app/key-inbox': 'drawer says "Inbox" under KEY, mobile bottom nav says "Inbox"',
 };
-
 describe('every nav item goes somewhere real', () => {
   const items = navItems();
 
@@ -131,7 +127,11 @@ describe('the screens that were unreachable now have a door', () => {
     expect(byLabel.get('Reports')).toBe('/app/reports');
   });
 
-  it('KEY Inbox goes to the inbox the inbox_* tools write to', () => {
-    expect(byLabel.get('KEY Inbox')).toBe('/app/key-inbox');
+  it('Inbox goes to the inbox the inbox_* tools write to', () => {
+    // Labelled "KEY Inbox" until the nav was streamlined; inside the KEY
+    // section "Inbox" is unambiguous. The mobile bottom nav also says "Inbox"
+    // and pointed at /app/data-inbox, which is data capture — not the thing a
+    // user means when they say inbox.
+    expect(byLabel.get('Inbox')).toBe('/app/key-inbox');
   });
 });

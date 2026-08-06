@@ -101,16 +101,20 @@ describe('the default mode is usable', () => {
   it('startup can reach money, people and schedule', () => {
     const visible = new Set(MODE_OPERATE_ITEMS.startup.filter((l) => operate.has(l)));
 
-    expect(visible.has('Revenue'), 'no way to see money').toBe(true);
+    // Names streamlined 2026-08-06: "Revenue" -> "Sales", because one screen
+    // was reached as Revenue, Commerce AND Storefront.
+    expect(visible.has('Sales'), 'no way to see money').toBe(true);
     expect(visible.has('Contacts'), 'no way to see customers').toBe(true);
     expect(visible.has('Calendar'), 'no way to see the diary').toBe(true);
   });
 
-  it('startup can reach the Business Genome, which onboarding asks them to fill in', () => {
-    // This was the sharpest single casualty: the list said "Blueprint", the nav
-    // says "Business Genome", so the screen the whole onboarding funnels toward
-    // was hidden from exactly the users being onboarded.
-    expect(MODE_BUILD_ITEMS.startup.filter((l) => build.has(l))).toContain('Business Genome');
+  it('startup can reach the business profile, which onboarding asks them to fill in', () => {
+    // The sharpest single casualty of the original drift: the allowlist said
+    // "Blueprint", the nav said "Business Genome", so the screen the whole
+    // onboarding funnels toward was hidden from exactly the users being
+    // onboarded. Renamed to "Profile" when the nav was streamlined — genome is
+    // internal vocabulary, not something an owner would look for.
+    expect(MODE_BUILD_ITEMS.startup.filter((l) => build.has(l))).toContain('Profile');
   });
 });
 

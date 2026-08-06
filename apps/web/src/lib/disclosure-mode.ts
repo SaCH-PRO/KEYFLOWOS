@@ -83,37 +83,35 @@ const MODE_VISIBILITY: Record<DisclosureMode, Set<string>> = {
  * label, so the next rename fails a test instead of quietly hiding a feature.
  */
 export const MODE_OPERATE_ITEMS: Record<DisclosureMode, string[]> = {
-  // A solopreneur: see the money, the people, and the diary. Nothing else.
+  // A solopreneur: talk to KEY, see the money, know the customers, keep the diary.
   startup: [
-    "Command Center",
-    "Revenue", "Expenses",
+    "Chat", "Inbox",
+    "Overview", "Sales", "Expenses",
     "Contacts", "Deals",
     "Calendar", "Bookings",
   ],
-  // A team: add delivery, the shared inbox, campaigns and reporting.
+  // A team: add delivery, support, campaigns and reporting.
   growth: [
-    "Command Center", "KEY Inbox", "Data Inbox",
-    "Revenue", "Expenses", "Budgeting", "Reports",
-    "Contacts", "Deals", "Sequences", "Service",
-    "Projects", "Tasks",
+    "Chat", "Inbox", "Worker", "Autonomy",
+    "Overview", "Sales", "Expenses", "Budgets", "Reports",
+    "Contacts", "Deals", "Sequences", "Support",
     "Calendar", "Bookings",
+    "Projects", "Approvals",
     "Campaigns",
     "Goals",
   ],
-  // Everything. use-app-layout short-circuits on this mode, so the list is not
-  // consulted — but it is kept accurate rather than decorative, because the
-  // spec checks it and a wrong list is how the other two got wrong.
+  // Everything. use-app-layout short-circuits this mode, so the list is not
+  // consulted — kept accurate anyway, because a list nobody reads is where the
+  // other two got their errors from.
   enterprise: [
-    "Command Center", "KEY Worker", "KEY Chat", "KEY Autonomy", "KEY Modes",
-    "KEY Inbox", "Data Inbox", "Capture",
-    "Financial Flow", "Revenue", "Expenses", "Budgeting", "Reports",
-    "Temporal Flow", "Calendar", "Bookings", "Projects", "Tasks",
-    "People Flow", "Contacts", "Sequences", "Intelligence", "Service", "Calls",
-    "Commerce", "Deals",
+    "Chat", "Inbox", "Worker", "Autonomy", "Modes", "Data Inbox", "Capture",
+    "Overview", "Sales", "Expenses", "Budgets", "Reports",
+    "Contacts", "Deals", "Sequences", "Support", "Calls", "Insights",
+    "Calendar", "Bookings",
+    "Projects", "Approvals",
     "Campaigns", "Content", "Social", "SEO",
-    "Approvals", "Compliance", "Contracts", "Legal",
-    "Executive Intelligence",
-    "Market Strategy", "Goals", "Business Genome",
+    "Evidence", "Contracts", "Legal",
+    "Goals", "Market",
   ],
 };
 
@@ -127,16 +125,16 @@ export const MODE_OPERATE_ITEMS: Record<DisclosureMode, string[]> = {
  * matched nothing either.
  */
 export const MODE_BUILD_ITEMS: Record<DisclosureMode, string[]> = {
-  startup: ["Business Genome", "Storefront", "Presence", "Account", "Workspace", "Key Connect"],
+  startup: ["Profile", "Storefront", "Presence", "Account", "Workspace", "Integrations"],
   growth: [
-    "Business Genome", "Storefront", "Presence", "Templates",
+    "Profile", "Storefront", "Presence", "Templates",
     "Account", "Workspace", "Team", "AI",
-    "Flows", "Key Connect",
+    "Flows", "Integrations",
   ],
   enterprise: [
-    "Business Genome", "Storefront", "Presence", "Templates",
-    "Account", "Workspace", "Team", "Structure", "AI", "Compliance", "Developers",
-    "Flows", "Key Connect",
+    "Profile", "Storefront", "Presence", "Templates",
+    "Account", "Workspace", "Team", "Org Chart", "AI", "Compliance", "Developers",
+    "Flows", "Integrations",
   ],
 };
 

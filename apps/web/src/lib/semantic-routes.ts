@@ -140,7 +140,7 @@ export const SEMANTIC_ROUTES: SemanticRoute[] = [
   { segment: "sequences", label: "Sequences", workspace: "contacts", icon: Mail, isDetailSurface: true, entityType: "sequence" },
 
   /* ─── Commerce ─── */
-  { segment: "commerce", label: "Revenue", workspace: "commerce", icon: Banknote, parentOverride: [{ label: "Financial Flow", href: "/app/money" }] },
+  { segment: "commerce", label: "Sales", workspace: "commerce", icon: Banknote, parentOverride: [{ label: "Money", href: "/app/money" }] },
   { segment: "invoices", label: "Invoices", workspace: "commerce", icon: Receipt, isDetailSurface: true, entityType: "invoice" },
   { segment: "quotes", label: "Quotes", workspace: "commerce", icon: FileText, isDetailSurface: true, entityType: "quote" },
   { segment: "products", label: "Products", workspace: "commerce", icon: Package, isDetailSurface: true, entityType: "product" },
@@ -157,10 +157,10 @@ export const SEMANTIC_ROUTES: SemanticRoute[] = [
   { segment: "presence", label: "Presence", workspace: "storefront", icon: Store },
 
   /* ─── Finance ─── */
-  { segment: "money", label: "Financial Flow", workspace: "finance", icon: Wallet },
-  { segment: "finance", label: "Books", workspace: "finance", icon: BookOpen, parentOverride: [{ label: "Financial Flow", href: "/app/money" }] },
-  { segment: "expenses", label: "Expenses", workspace: "finance", icon: Receipt, parentOverride: [{ label: "Financial Flow", href: "/app/money" }] },
-  { segment: "budgeting", label: "Budgeting", workspace: "finance", icon: BarChart3, parentOverride: [{ label: "Financial Flow", href: "/app/money" }] },
+  { segment: "money", label: "Money", workspace: "finance", icon: Wallet },
+  { segment: "finance", label: "Books", workspace: "finance", icon: BookOpen, parentOverride: [{ label: "Money", href: "/app/money" }] },
+  { segment: "expenses", label: "Expenses", workspace: "finance", icon: Receipt, parentOverride: [{ label: "Money", href: "/app/money" }] },
+  { segment: "budgeting", label: "Budgeting", workspace: "finance", icon: BarChart3, parentOverride: [{ label: "Money", href: "/app/money" }] },
   { segment: "accounts", label: "Accounts", workspace: "finance", icon: Landmark },
   { segment: "tax", label: "Tax", workspace: "finance", icon: ShieldCheck },
   { segment: "reconciliation", label: "Reconciliation", workspace: "finance", icon: ShieldCheck },
@@ -175,7 +175,7 @@ export const SEMANTIC_ROUTES: SemanticRoute[] = [
   { segment: "sops", label: "SOPs", workspace: "operations", icon: FileText, isDetailSurface: true, entityType: "sop" },
 
   /* ─── Reports ─── */
-  { segment: "reports", label: "Reports", workspace: "reports", icon: BarChart3, parentOverride: [{ label: "Financial Flow", href: "/app/money" }] },
+  { segment: "reports", label: "Reports", workspace: "reports", icon: BarChart3, parentOverride: [{ label: "Money", href: "/app/money" }] },
   { segment: "analytics", label: "Analytics", workspace: "reports", icon: BarChart3 },
   { segment: "insights", label: "Insights", workspace: "reports", icon: TrendingUp },
   { segment: "intelligence", label: "Intelligence", workspace: "reports", icon: TrendingUp },
@@ -194,7 +194,7 @@ export const SEMANTIC_ROUTES: SemanticRoute[] = [
 
   /* ─── Team ─── */
   { segment: "settings", label: "Studio", workspace: "settings", icon: Settings, isConfigSurface: true },
-  { segment: "structure", label: "Structure", workspace: "team", icon: Users },
+  { segment: "structure", label: "Org Chart", workspace: "team", icon: Users },
   { segment: "team", label: "Team", workspace: "team", icon: Users },
   { segment: "profile", label: "Profile", workspace: "settings", icon: Users, isConfigSurface: true },
 
