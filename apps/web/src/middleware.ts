@@ -39,8 +39,13 @@ function isTokenExpiredOrInvalid(token: string): boolean {
  * Only URLs that have been MOVED (not pages with real existing content) are redirected.
  */
 const REDIRECTS: Record<string, string> = {
-  // Settings reorganized into Build > System
+  // Settings reorganized into Build > System — only the three that actually
+  // moved. The rest still live under /app/settings and are served there; see
+  // PREFIX_REDIRECTS below for why a blanket rule was wrong.
   "/app/settings": "/app/build/system/workspace",
+  "/app/settings/ai": "/app/build/system/ai",
+  "/app/settings/compliance": "/app/build/system/compliance",
+  "/app/settings/developers": "/app/build/system/developers",
   // Money hub consolidation — finance merged into /app/money
   "/app/finance": "/app/money",
   "/app/finance/cashflow": "/app/money",
@@ -49,10 +54,31 @@ const REDIRECTS: Record<string, string> = {
 
 /**
  * Prefix redirects — only for paths that have truly moved.
+ *
+ * EMPTY, deliberately, and it should stay that way.
+ *
+ * It used to contain `"/app/settings/": "/app/build/system/"`. There are 21
+ * screens under /app/settings and exactly five under /app/build/system, so
+ * seventeen of them redirected to a URL with no page and returned a hard 404 —
+ * including by typing the address, because middleware runs before routing.
+ * 5,438 lines of finished settings code, unreachable by any means:
+ *
+ *   team 1014 · output-templates 680 · webhooks 626 · custom-fields 528
+ *   ai-control 479 · notifications 466 · templates 314 · insights 225
+ *   autonomy 213 · privacy 206 · conversion 168 · invite 161 · security 158
+ *   catalog 103 · business 65 · billing 18 · profile 14
+ *
+ * Two of them were linked from the main nav — "Account" (/app/settings/profile)
+ * and "Team" (/app/settings/team) — and "Account" is in the startup disclosure
+ * allowlist, so a brand-new user clicking it landed on a 404.
+ *
+ * A prefix rule cannot express "these three moved and those seventeen did not",
+ * which is exactly the shape of this migration. Per-path entries in REDIRECTS
+ * can, and middleware-redirect-targets.spec.ts now asserts every destination
+ * resolves to a real page — so a half-finished move fails a test instead of
+ * deleting a third of the settings area.
  */
-const PREFIX_REDIRECTS: Record<string, string> = {
-  "/app/settings/": "/app/build/system/",
-};
+const PREFIX_REDIRECTS: Record<string, string> = {};
 
 function getRedirect(pathname: string, search: string): string | null {
   const exactDest = REDIRECTS[pathname];
