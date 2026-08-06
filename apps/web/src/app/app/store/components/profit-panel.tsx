@@ -1,7 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { motion } from "framer-motion";
+import { toast } from "sonner";
+import { getStoredBusinessId } from "@/lib/workspace";
+import { fetchStoreOrders, fetchMarginAnalysis, type StoreOrder } from "@/lib/api/store";
 import {
   DollarSign,
   TrendingUp,
@@ -36,28 +39,117 @@ interface DailyProfit {
   profit: number;
 }
 
-const DEMO_SUMMARY: ProfitSummary = {
-  totalRevenue: 4250.00,
-  totalCost: 1487.50,
-  grossProfit: 2762.50,
-  grossMargin: 65.0,
-  netRevenue: 3925.00,
-  totalDiscounts: 225.00,
-  totalRefunds: 100.00,
-};
+/**
+ * Profit is derived, not stored.
+ *
+ * Revenue and units come from the order items; unit cost comes from the margin
+ * analysis (commerce-insights.controller.ts:45), which is the same landed-cost
+ * engine the Commerce screens use — so this panel and the margin report cannot
+ * disagree. Everything below replaces DEMO_SUMMARY, DEMO_PRODUCTS and a
+ * seeded-random trend series.
+ *
+ * Orders that were cancelled or refunded are excluded from revenue and counted
+ * separately, because a refunded sale is not profit.
+ */
+const EXCLUDED_FROM_REVENUE = new Set(["cancelled", "refunded"]);
 
-const DEMO_PRODUCTS: ProfitProduct[] = [
-  { id: "p1", name: "Deep Tissue Massage", unitsSold: 12, revenue: 1440.00, cost: 360.00, profit: 1080.00, margin: 75.0 },
-  { id: "p2", name: "Essential Oil Set", unitsSold: 8, revenue: 719.92, cost: 320.00, profit: 399.92, margin: 55.5 },
-  { id: "p3", name: "Full Body Treatment", unitsSold: 5, revenue: 1250.00, cost: 375.00, profit: 875.00, margin: 70.0 },
-  { id: "p4", name: "Facial Treatment", unitsSold: 6, revenue: 600.00, cost: 240.00, profit: 360.00, margin: 60.0 },
-  { id: "p5", name: "Recovery Balm", unitsSold: 15, revenue: 600.00, cost: 150.00, profit: 450.00, margin: 75.0 },
-  { id: "p6", name: "Face Mask Pack", unitsSold: 4, revenue: 200.00, cost: 80.00, profit: 120.00, margin: 60.0 },
-];
+function isRefunded(o: StoreOrder) {
+  return (o.status ?? "").toLowerCase() === "refunded";
+}
 
-function seedRandom(seed: number) {
-  let s = seed;
-  return () => { s = (s * 16807 + 0) % 2147483647; return (s - 1) / 2147483646; };
+function isCounted(o: StoreOrder) {
+  return !EXCLUDED_FROM_REVENUE.has((o.status ?? "").toLowerCase());
+}
+
+function buildProducts(orders: StoreOrder[], costByProduct: Map<string, number>): ProfitProduct[] {
+  const acc = new Map<string, ProfitProduct>();
+
+  for (const order of orders) {
+    if (!isCounted(order)) continue;
+
+    for (const item of order.items ?? []) {
+      const unitCost = costByProduct.get(item.productId) ?? 0;
+      const existing = acc.get(item.productId);
+      const revenue = item.total;
+      const cost = unitCost * item.quantity;
+
+      if (existing) {
+        existing.unitsSold += item.quantity;
+        existing.revenue += revenue;
+        existing.cost += cost;
+      } else {
+        acc.set(item.productId, {
+          id: item.productId,
+          name: item.name,
+          unitsSold: item.quantity,
+          revenue,
+          cost,
+          profit: 0,
+          margin: 0,
+        });
+      }
+    }
+  }
+
+  for (const p of acc.values()) {
+    p.profit = p.revenue - p.cost;
+    p.margin = p.revenue > 0 ? (p.profit / p.revenue) * 100 : 0;
+  }
+
+  return [...acc.values()];
+}
+
+function buildSummary(orders: StoreOrder[], products: ProfitProduct[]): ProfitSummary {
+  const counted = orders.filter(isCounted);
+
+  const totalRevenue = counted.reduce((s, o) => s + o.total, 0);
+  const totalCost = products.reduce((s, p) => s + p.cost, 0);
+  const totalDiscounts = counted.reduce((s, o) => s + (o.discountAmount ?? 0), 0);
+  const totalRefunds = orders.filter(isRefunded).reduce((s, o) => s + o.total, 0);
+  const grossProfit = totalRevenue - totalCost;
+
+  return {
+    totalRevenue,
+    totalCost,
+    grossProfit,
+    grossMargin: totalRevenue > 0 ? (grossProfit / totalRevenue) * 100 : 0,
+    netRevenue: totalRevenue - totalDiscounts - totalRefunds,
+    totalDiscounts,
+    totalRefunds,
+  };
+}
+
+/** One bucket per day in the window, so gaps render as gaps rather than closing up. */
+function buildTrend(
+  orders: StoreOrder[],
+  costByProduct: Map<string, number>,
+  days: number,
+  now: Date,
+): DailyProfit[] {
+  const buckets = new Map<string, DailyProfit>();
+
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(now);
+    d.setDate(d.getDate() - i);
+    const key = d.toISOString().split("T")[0];
+    buckets.set(key, { date: key, revenue: 0, profit: 0 });
+  }
+
+  for (const order of orders) {
+    if (!isCounted(order)) continue;
+    const key = (order.createdAt ?? "").split("T")[0];
+    const bucket = buckets.get(key);
+    if (!bucket) continue;
+
+    const cost = (order.items ?? []).reduce(
+      (s, i) => s + (costByProduct.get(i.productId) ?? 0) * i.quantity,
+      0,
+    );
+    bucket.revenue += order.total;
+    bucket.profit += order.total - cost;
+  }
+
+  return [...buckets.values()];
 }
 
 
@@ -93,17 +185,6 @@ function ProfitCard({ label, value, sub, color, icon: Icon, trend }: {
 type TrendPeriod = "30d" | "90d";
 type TrendMode = "daily" | "weekly";
 
-function generateTrendData(days: number, seed: number): DailyProfit[] {
-  const rng = seedRandom(seed);
-  return Array.from({ length: days }, (_, i) => {
-    const d = new Date("2026-04-05");
-    d.setDate(d.getDate() - (days - 1 - i));
-    const revenue = Math.round(80 + rng() * 200);
-    const profit = Math.round(revenue * (0.5 + rng() * 0.25));
-    return { date: d.toISOString().split("T")[0], revenue, profit };
-  });
-}
-
 function aggregateWeekly(data: DailyProfit[]): DailyProfit[] {
   const weeks: DailyProfit[] = [];
   for (let i = 0; i < data.length; i += 7) {
@@ -117,11 +198,7 @@ function aggregateWeekly(data: DailyProfit[]): DailyProfit[] {
   return weeks;
 }
 
-const TREND_DATA_30 = generateTrendData(30, 42);
-const TREND_DATA_90 = generateTrendData(90, 99);
-
-function TrendChart({ period, mode }: { period: TrendPeriod; mode: TrendMode }) {
-  const rawData = period === "30d" ? TREND_DATA_30 : TREND_DATA_90;
+function TrendChart({ rawData, mode }: { rawData: DailyProfit[]; mode: TrendMode }) {
   const data = mode === "weekly" ? aggregateWeekly(rawData) : rawData;
   const maxRev = Math.max(...data.map((d) => d.revenue), 1);
 
@@ -153,16 +230,96 @@ export function ProfitPanel() {
   const [sortBy, setSortBy] = useState<"revenue" | "profit" | "margin">("profit");
   const [trendPeriod, setTrendPeriod] = useState<TrendPeriod>("30d");
   const [trendMode, setTrendMode] = useState<TrendMode>("daily");
-  const summary = DEMO_SUMMARY;
-  const products = [...DEMO_PRODUCTS].sort((a, b) => b[sortBy] - a[sortBy]);
+  const [orders, setOrders] = useState<StoreOrder[]>([]);
+  const [costByProduct, setCostByProduct] = useState<Map<string, number>>(new Map());
+  const [productsMissingCost, setProductsMissingCost] = useState(0);
+  const [loading, setLoading] = useState(true);
+
+  const businessId = getStoredBusinessId() ?? "";
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      if (!businessId) {
+        setLoading(false);
+        return;
+      }
+
+      const [orderRes, marginRes] = await Promise.all([
+        fetchStoreOrders(businessId, { pageSize: 100 }),
+        fetchMarginAnalysis(businessId),
+      ]);
+      if (cancelled) return;
+
+      if (orderRes.error) toast.error(orderRes.error);
+      // A missing margin report degrades cost to zero rather than blanking the
+      // panel; the "no cost data" notice below is what keeps that honest.
+      if (marginRes.error) toast.error(marginRes.error);
+
+      const costs = new Map<string, number>();
+      for (const p of marginRes.data?.products ?? []) {
+        costs.set(p.productId, p.landedCost);
+      }
+
+      setOrders(orderRes.data?.data ?? []);
+      setCostByProduct(costs);
+      setProductsMissingCost(
+        Math.max((marginRes.data?.totalProducts ?? 0) - (marginRes.data?.productsWithCostData ?? 0), 0),
+      );
+      setLoading(false);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [businessId]);
+
+  const products = useMemo(
+    () => buildProducts(orders, costByProduct).sort((a, b) => b[sortBy] - a[sortBy]),
+    [orders, costByProduct, sortBy],
+  );
+
+  const summary = useMemo(
+    () => buildSummary(orders, buildProducts(orders, costByProduct)),
+    [orders, costByProduct],
+  );
+
+  const trendData = useMemo(
+    () => buildTrend(orders, costByProduct, trendPeriod === "30d" ? 30 : 90, new Date()),
+    [orders, costByProduct, trendPeriod],
+  );
+
+  if (loading) {
+    return (
+      <div className="rounded-xl p-8 text-center" style={{ background: "hsl(var(--kf-card))", border: "1px solid hsl(var(--kf-border)/0.5)" }}>
+        <p className="text-sm text-muted-foreground">Loading profitability…</p>
+      </div>
+    );
+  }
 
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
+      {productsMissingCost > 0 && (
+        // Without a cost profile, landed cost reads as 0 and the product shows a
+        // 100% margin. Saying so is the difference between a gap and a lie.
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
+          <p className="text-xs text-amber-700 dark:text-amber-400">
+            {productsMissingCost} product{productsMissingCost === 1 ? " has" : "s have"} no cost
+            profile, so their cost counts as $0 and their margin reads high. Set costs in Commerce
+            to make these figures exact.
+          </p>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
-        <ProfitCard label="Revenue" value={`$${summary.totalRevenue.toLocaleString("en-US", { minimumFractionDigits: 2 })}`} color="var(--kf-accent1)" icon={DollarSign} trend={8.5} />
-        <ProfitCard label="Cost of Goods" value={`$${summary.totalCost.toLocaleString("en-US", { minimumFractionDigits: 2 })}`} sub="This month" color="var(--kf-warning)" icon={Package} />
-        <ProfitCard label="Gross Profit" value={`$${summary.grossProfit.toLocaleString("en-US", { minimumFractionDigits: 2 })}`} color="var(--kf-success)" icon={TrendingUp} trend={12.3} />
-        <ProfitCard label="Gross Margin" value={`${summary.grossMargin.toFixed(1)}%`} sub="Target: 60%" color="var(--kf-info)" icon={TrendingUp} />
+        {/* trend={8.5} and trend={12.3} were hardcoded period-over-period deltas.
+            Computing them needs a prior-period comparison this panel does not
+            fetch, so the arrows are gone rather than invented. */}
+        <ProfitCard label="Revenue" value={`$${summary.totalRevenue.toLocaleString("en-US", { minimumFractionDigits: 2 })}`} color="var(--kf-accent1)" icon={DollarSign} />
+        <ProfitCard label="Cost of Goods" value={`$${summary.totalCost.toLocaleString("en-US", { minimumFractionDigits: 2 })}`} color="var(--kf-warning)" icon={Package} />
+        <ProfitCard label="Gross Profit" value={`$${summary.grossProfit.toLocaleString("en-US", { minimumFractionDigits: 2 })}`} color="var(--kf-success)" icon={TrendingUp} />
+        <ProfitCard label="Gross Margin" value={`${summary.grossMargin.toFixed(1)}%`} color="var(--kf-info)" icon={TrendingUp} />
         <ProfitCard label="Net Revenue" value={`$${summary.netRevenue.toLocaleString("en-US", { minimumFractionDigits: 2 })}`} sub={`-$${summary.totalDiscounts.toFixed(2)} discounts, -$${summary.totalRefunds.toFixed(2)} refunds`} color="var(--kf-success)" icon={DollarSign} />
       </div>
 
@@ -183,7 +340,7 @@ export function ProfitPanel() {
             ))}
           </div>
         </div>
-        <TrendChart period={trendPeriod} mode={trendMode} />
+        <TrendChart rawData={trendData} mode={trendMode} />
       </div>
 
       <div className="rounded-xl overflow-hidden" style={{ background: "hsl(var(--kf-card))", border: "1px solid hsl(var(--kf-border)/0.5)" }}>

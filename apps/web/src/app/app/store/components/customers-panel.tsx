@@ -1,7 +1,10 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { toast } from "sonner";
+import { getStoredBusinessId } from "@/lib/workspace";
+import { fetchStoreOrders, type StoreOrder } from "@/lib/api/store";
 import {
   Users,
   Search,
@@ -34,66 +37,63 @@ interface Customer {
   orders: CustomerOrder[];
 }
 
-const DEMO_CUSTOMERS: Customer[] = [
-  {
-    id: "c1", name: "Maria Garcia", email: "maria@example.com",
-    totalOrders: 5, totalSpent: 1025.00, lastOrderDate: "2026-04-04",
-    isRepeat: true,
-    orders: [
-      { ref: "ORD-001", date: "2026-04-04", total: 245.00, status: "confirmed", items: ["Deep Tissue Massage", "Aromatherapy Add-on"] },
-      { ref: "ORD-006", date: "2026-03-28", total: 160.00, status: "delivered", items: ["Hot Stone Massage"] },
-      { ref: "ORD-011", date: "2026-03-15", total: 220.00, status: "delivered", items: ["Full Body Treatment"] },
-      { ref: "ORD-018", date: "2026-02-20", total: 200.00, status: "delivered", items: ["Deep Tissue Massage", "Recovery Balm"] },
-      { ref: "ORD-025", date: "2026-01-10", total: 200.00, status: "delivered", items: ["Deep Tissue Massage", "Recovery Balm"] },
-    ],
-  },
-  {
-    id: "c2", name: "James Wilson", email: "james@example.com",
-    totalOrders: 3, totalSpent: 389.97, lastOrderDate: "2026-04-03",
-    isRepeat: true,
-    orders: [
-      { ref: "ORD-002", date: "2026-04-03", total: 89.99, status: "shipped", items: ["Essential Oil Set"] },
-      { ref: "ORD-012", date: "2026-03-10", total: 149.99, status: "delivered", items: ["Premium Skincare Set"] },
-      { ref: "ORD-019", date: "2026-02-15", total: 149.99, status: "delivered", items: ["Premium Skincare Set"] },
-    ],
-  },
-  {
-    id: "c3", name: "Aisha Mohammed", email: "aisha@example.com",
-    totalOrders: 2, totalSpent: 700.00, lastOrderDate: "2026-04-02",
-    isRepeat: true,
-    orders: [
-      { ref: "ORD-003", date: "2026-04-02", total: 350.00, status: "delivered", items: ["Full Body Treatment", "Facial Treatment"] },
-      { ref: "ORD-020", date: "2026-02-28", total: 350.00, status: "delivered", items: ["Full Body Treatment", "Facial Treatment"] },
-    ],
-  },
-  {
-    id: "c4", name: "Chen Wei", email: "chen@example.com",
-    totalOrders: 1, totalSpent: 0.00, lastOrderDate: "2026-04-01",
-    isRepeat: false,
-    orders: [
-      { ref: "ORD-004", date: "2026-04-01", total: 75.00, status: "cancelled", items: ["Relaxation Package"] },
-    ],
-  },
-  {
-    id: "c5", name: "Sofia Petrov", email: "sofia@example.com",
-    totalOrders: 1, totalSpent: 199.50, lastOrderDate: "2026-03-30",
-    isRepeat: false,
-    orders: [
-      { ref: "ORD-005", date: "2026-03-30", total: 199.50, status: "refunded", items: ["Premium Skincare Set", "Face Mask Pack"] },
-    ],
-  },
-  {
-    id: "c6", name: "David Brown", email: "david@example.com",
-    totalOrders: 4, totalSpent: 560.00, lastOrderDate: "2026-03-25",
-    isRepeat: true,
-    orders: [
-      { ref: "ORD-013", date: "2026-03-25", total: 160.00, status: "delivered", items: ["Hot Stone Massage"] },
-      { ref: "ORD-016", date: "2026-03-05", total: 120.00, status: "delivered", items: ["Deep Tissue Massage"] },
-      { ref: "ORD-021", date: "2026-02-10", total: 160.00, status: "delivered", items: ["Hot Stone Massage"] },
-      { ref: "ORD-026", date: "2026-01-05", total: 120.00, status: "delivered", items: ["Deep Tissue Massage"] },
-    ],
-  },
-];
+
+/**
+ * There is no customer table behind the storefront.
+ *
+ * MarketplaceOrder carries customerName/customerEmail as plain columns — a
+ * guest checkout never creates a Contact — so "customers" here means "the
+ * distinct people who have ordered", grouped from the orders themselves. That
+ * is what the fabricated DEMO_CUSTOMERS was pretending to be a table of.
+ *
+ * Grouping key is the email, lowercased. Orders with no email cannot be
+ * attributed to a repeat buyer, so each becomes its own single-order entry
+ * rather than being merged under a shared blank key — merging them would invent
+ * a customer with everyone else's spend.
+ */
+function groupIntoCustomers(orders: StoreOrder[]): Customer[] {
+  const byEmail = new Map<string, Customer>();
+
+  for (const o of orders) {
+    const email = (o.customerEmail ?? "").trim().toLowerCase();
+    const key = email || `order:${o.id}`;
+
+    const entry: CustomerOrder = {
+      ref: o.orderNumber,
+      date: o.createdAt,
+      total: o.total,
+      status: (o.status ?? "").toLowerCase(),
+      items: (o.items ?? []).map((i) => i.name),
+    };
+
+    const existing = byEmail.get(key);
+    if (existing) {
+      existing.totalOrders += 1;
+      existing.totalSpent += o.total;
+      existing.orders.push(entry);
+      if (o.createdAt > existing.lastOrderDate) existing.lastOrderDate = o.createdAt;
+      existing.isRepeat = existing.totalOrders > 1;
+      continue;
+    }
+
+    byEmail.set(key, {
+      id: key,
+      name: o.customerName,
+      email: o.customerEmail ?? "",
+      totalOrders: 1,
+      totalSpent: o.total,
+      lastOrderDate: o.createdAt,
+      isRepeat: false,
+      orders: [entry],
+    });
+  }
+
+  for (const c of byEmail.values()) {
+    c.orders.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }
+
+  return [...byEmail.values()];
+}
 
 function StatCard({ label, value, icon: Icon, color }: { label: string; value: string | number; icon: React.ElementType; color: string }) {
   return (
@@ -112,7 +112,26 @@ export function CustomersPanel() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<"spent" | "orders" | "recent">("spent");
 
-  const customers = DEMO_CUSTOMERS;
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const businessId = getStoredBusinessId() ?? "";
+
+  const load = useCallback(async () => {
+    if (!businessId) {
+      setLoading(false);
+      return;
+    }
+    const { data, error } = await fetchStoreOrders(businessId, { pageSize: 100 });
+    if (error) toast.error(error);
+    setCustomers(groupIntoCustomers(data?.data ?? []));
+    setLoading(false);
+  }, [businessId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
   const repeatCount = customers.filter((c) => c.isRepeat).length;
   const newCount = customers.length - repeatCount;
   const avgOrderValue = customers.reduce((s, c) => s + c.totalSpent, 0) / Math.max(customers.reduce((s, c) => s + c.totalOrders, 0), 1);
@@ -232,7 +251,11 @@ export function CustomersPanel() {
       </div>
 
       <div className="space-y-2">
-        {filtered.length === 0 ? (
+        {loading ? (
+          <div className="rounded-xl p-8 text-center" style={{ background: "hsl(var(--kf-card))", border: "1px solid hsl(var(--kf-border)/0.5)" }}>
+            <p className="text-sm text-muted-foreground">Loading customers…</p>
+          </div>
+        ) : filtered.length === 0 ? (
           <div className="rounded-xl p-8 text-center" style={{ background: "hsl(var(--kf-card))", border: "1px solid hsl(var(--kf-border)/0.5)" }}>
             <Users className="w-8 h-8 mx-auto mb-2 text-muted-foreground/30" />
             <p className="text-sm text-muted-foreground">No customers found</p>

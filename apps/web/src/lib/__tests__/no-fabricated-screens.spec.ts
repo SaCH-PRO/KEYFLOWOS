@@ -145,3 +145,123 @@ describe('no nav-linked screen fabricates data', () => {
     expect(stale, `these now fetch data and should leave the list: ${stale.join(', ')}`).toEqual([]);
   });
 });
+
+/**
+ * The same defect one level down, which everything above was blind to.
+ *
+ * The Store performance tab renders four panels of hardcoded business data —
+ * orders with customer names and totals, profit summaries with margins,
+ * customer lifetime values, promo redemption counts. None of them fetch
+ * anything. `performance-tab.tsx` mounts all four.
+ *
+ * Every assertion above passed on it, for three separate structural reasons:
+ *
+ *   1. hasDataSource() walks the whole import tree and returns true if ANYTHING
+ *      in it reaches @/lib/api. /app/store genuinely fetches for its catalog, so
+ *      one real call cleared the entire page including the fabricated half.
+ *   2. FAKES_A_LOAD is tested against pageFor(route) — the page file only. The
+ *      panels are components, so the regex never saw them.
+ *   3. It iterates nav destinations, so a screen outside the nav is never
+ *      examined at all.
+ *
+ * The lesson generalises past this file: the gate checked a SHAPE (does this
+ * route's tree contain a fetch?) rather than a REFERENT (does the thing on
+ * screen come from the database?). The manual-parity checker had the same flaw
+ * in the same week — it accepted any mutation rather than the domain's own, so
+ * the time-tracking tools point at /app/projects and pass.
+ *
+ * This block checks the referent directly, file by file, with no nav filter and
+ * no import-tree escape hatch.
+ */
+describe('no component renders invented data', () => {
+  /** Constants whose name announces they are not real. */
+  const FABRICATED_CONST = /^const (DEMO|MOCK|SAMPLE|FAKE|PLACEHOLDER|DUMMY)_[A-Z0-9_]*/m;
+
+  /**
+   * Files allowed to declare one, with the reason.
+   *
+   * A component that fetches AND keeps a placeholder for the empty state is
+   * honest — the placeholder is never what the user is shown as fact. That case
+   * is handled by the data-source check below rather than by this list, so the
+   * list should stay empty unless something genuinely static needs it.
+   */
+  const FABRICATION_ALLOWED: Record<string, string> = {};
+
+  /** Every .tsx/.ts file under app/, which is where screens and their parts live. */
+  function walk(dir: string, out: string[] = []): string[] {
+    for (const entry of fs.readdirSync(dir)) {
+      const full = path.join(dir, entry);
+      if (isDir(full)) walk(full, out);
+      else if (/\.tsx?$/.test(entry)) out.push(full);
+    }
+    return out;
+  }
+
+  /**
+   * Deliberately NOT the transitive hasDataSource() above.
+   *
+   * Asking whether this file talks to the API is the whole point — following
+   * imports is exactly how four fabricated panels inherited the catalog's
+   * legitimacy. A component that receives real data through props sits in a tree
+   * whose fetching parent passes; a component that seeds its own state from a
+   * constant does not, and that is the distinction being drawn.
+   */
+  const fetchesItself = (body: string) => /from ["']@\/lib\/(api|client)/.test(body);
+
+  it('no file seeds its own render state from a hardcoded dataset', () => {
+    const fabricated = walk(APP_DIR)
+      .filter((file) => {
+        const rel = path.relative(WEB_SRC, file).split(path.sep).join('/');
+        if (FABRICATION_ALLOWED[rel]) return false;
+
+        const body = fs.readFileSync(file, 'utf8');
+        return FABRICATED_CONST.test(body) && !fetchesItself(body);
+      })
+      .map((f) => path.relative(WEB_SRC, f).split(path.sep).join('/'));
+
+    expect(
+      fabricated,
+      'these render hardcoded business data and never call the API — wire them to ' +
+        'a service, or delete the surface rather than dressing it as working software',
+    ).toEqual([]);
+  });
+
+  it('no file synthesises a data series instead of hardcoding one', () => {
+    // A second, sneakier shape found in the same sweep. profit-panel.tsx carried
+    //
+    //   function seedRandom(seed: number) { ... }
+    //   const TREND_DATA_30 = generateTrendData(30, 42);
+    //
+    // and charted it as "Revenue & Profit Trend" with 30 and 90-day toggles.
+    // The DEMO_ rule above does not catch this: the constant is not named like a
+    // placeholder, and the numbers are computed rather than written down. A
+    // deterministic RNG in a rendering component has no honest use — real
+    // randomness is not reproducible, and reproducibility is only wanted when
+    // the output is meant to look like data.
+    const synthesised = walk(APP_DIR)
+      .filter((file) => {
+        const body = fs.readFileSync(file, 'utf8');
+        return /function seed[Rr]andom|const\s+\w*(rng|RNG)\w*\s*=\s*seed/.test(body);
+      })
+      .map((f) => path.relative(WEB_SRC, f).split(path.sep).join('/'));
+
+    expect(
+      synthesised,
+      'these generate a reproducible pseudo-random series and render it as business data',
+    ).toEqual([]);
+  });
+
+  it('the allowance list stays honest', () => {
+    const stale = Object.keys(FABRICATION_ALLOWED).filter((rel) => {
+      const full = path.join(WEB_SRC, rel);
+      if (!fs.existsSync(full)) return true;
+      const body = fs.readFileSync(full, 'utf8');
+      return !FABRICATED_CONST.test(body) || fetchesItself(body);
+    });
+
+    expect(
+      stale,
+      `no longer fabricating (or gone) — remove from the list: ${stale.join(', ')}`,
+    ).toEqual([]);
+  });
+});

@@ -1,7 +1,17 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { motion } from "framer-motion";
+import { toast } from "sonner";
+import { getStoredBusinessId } from "@/lib/workspace";
+import {
+  fetchPromoCodes,
+  createPromoCode,
+  updatePromoCode,
+  deletePromoCode,
+  type PromoCode as ApiPromoCode,
+  type PromoCodeType,
+} from "@/lib/api/store";
 import {
   Tag,
   Plus,
@@ -31,17 +41,40 @@ interface PromoCode {
   validFrom: string;
   validTo: string;
   active: boolean;
-  revenueGenerated: number;
-  totalDiscountGiven: number;
 }
 
-const DEMO_PROMOS: PromoCode[] = [
-  { id: "pr1", code: "WELCOME10", discountType: "percentage", value: 10, minimumOrder: 50, maxUses: 100, currentUses: 34, validFrom: "2026-01-01", validTo: "2026-12-31", active: true, revenueGenerated: 2450.00, totalDiscountGiven: 245.00 },
-  { id: "pr2", code: "SPRING25", discountType: "percentage", value: 25, minimumOrder: 100, maxUses: 50, currentUses: 18, validFrom: "2026-03-01", validTo: "2026-05-31", active: true, revenueGenerated: 3200.00, totalDiscountGiven: 800.00 },
-  { id: "pr3", code: "FLAT20", discountType: "fixed", value: 20, minimumOrder: 75, maxUses: 200, currentUses: 45, validFrom: "2026-01-15", validTo: "2026-06-30", active: true, revenueGenerated: 4500.00, totalDiscountGiven: 900.00 },
-  { id: "pr4", code: "FREESHIP", discountType: "free_shipping", value: 0, minimumOrder: 40, maxUses: 500, currentUses: 112, validFrom: "2026-01-01", validTo: "2026-12-31", active: true, revenueGenerated: 8900.00, totalDiscountGiven: 560.00 },
-  { id: "pr5", code: "VIP50", discountType: "percentage", value: 50, minimumOrder: 200, maxUses: 10, currentUses: 10, validFrom: "2026-02-01", validTo: "2026-03-31", active: false, revenueGenerated: 1800.00, totalDiscountGiven: 900.00 },
-];
+/**
+ * The server speaks PERCENT/FIXED/FREE_SHIPPING; this panel speaks
+ * percentage/fixed/free_shipping. Mapped in one place rather than at each use.
+ */
+const TYPE_TO_API: Record<DiscountType, PromoCodeType> = {
+  percentage: "PERCENT",
+  fixed: "FIXED",
+  free_shipping: "FREE_SHIPPING",
+};
+
+const TYPE_FROM_API: Record<string, DiscountType> = {
+  PERCENT: "percentage",
+  FIXED: "fixed",
+  FREE_SHIPPING: "free_shipping",
+};
+
+const dateOnly = (v?: string | null) => (v ? v.slice(0, 10) : "");
+
+function fromApi(p: ApiPromoCode): PromoCode {
+  return {
+    id: p.id,
+    code: p.code,
+    discountType: TYPE_FROM_API[p.type] ?? "percentage",
+    value: p.value,
+    minimumOrder: p.minOrderValue ?? 0,
+    maxUses: p.maxUses ?? 0,
+    currentUses: p.currentUses ?? 0,
+    validFrom: dateOnly(p.validFrom),
+    validTo: dateOnly(p.validTo),
+    active: p.active,
+  };
+}
 
 const DISCOUNT_ICONS: Record<DiscountType, React.ElementType> = {
   percentage: Percent,
@@ -156,10 +189,28 @@ function PromoFormModal({ initial, onSave, onClose }: { initial?: PromoFormState
 }
 
 export function PromosPanel() {
-  const [promos, setPromos] = useState<PromoCode[]>(DEMO_PROMOS);
+  const [promos, setPromos] = useState<PromoCode[]>([]);
+  const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingPromo, setEditingPromo] = useState<PromoCode | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const businessId = getStoredBusinessId() ?? "";
+
+  const load = useCallback(async () => {
+    if (!businessId) {
+      setLoading(false);
+      return;
+    }
+    const { data, error } = await fetchPromoCodes(businessId);
+    if (error) toast.error(error);
+    setPromos((data ?? []).map(fromApi));
+    setLoading(false);
+  }, [businessId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   const handleCopy = useCallback((code: string, id: string) => {
     navigator.clipboard.writeText(code);
@@ -167,30 +218,63 @@ export function PromosPanel() {
     setTimeout(() => setCopiedId(null), 2000);
   }, []);
 
-  const handleToggle = useCallback((id: string) => {
-    setPromos((prev) => prev.map((p) => p.id === id ? { ...p, active: !p.active } : p));
-  }, []);
+  const handleToggle = useCallback(async (id: string) => {
+    const promo = promos.find((p) => p.id === id);
+    if (!promo || !businessId) return;
 
-  const handleDelete = useCallback((id: string) => {
-    setPromos((prev) => prev.filter((p) => p.id !== id));
-  }, []);
-
-  const handleSave = useCallback((data: PromoFormState) => {
-    if (editingPromo) {
-      setPromos((prev) => prev.map((p) => p.id === editingPromo.id ? { ...p, ...data } : p));
-    } else {
-      const newPromo: PromoCode = {
-        id: `pr_${Date.now()}`, ...data, currentUses: 0, active: true, revenueGenerated: 0, totalDiscountGiven: 0,
-      };
-      setPromos((prev) => [newPromo, ...prev]);
+    const { error } = await updatePromoCode(businessId, id, { active: !promo.active });
+    if (error) {
+      toast.error(error);
+      return;
     }
+    // Re-read rather than patch local state: the server is the authority on
+    // what a toggle actually did, and a local flip that silently diverges is
+    // the bug this whole panel was.
+    await load();
+  }, [promos, businessId, load]);
+
+  const handleDelete = useCallback(async (id: string) => {
+    if (!businessId) return;
+    const { error } = await deletePromoCode(businessId, id);
+    if (error) {
+      toast.error(error);
+      return;
+    }
+    toast.success("Promo code deleted");
+    await load();
+  }, [businessId, load]);
+
+  const handleSave = useCallback(async (data: PromoFormState) => {
+    if (!businessId) return;
+
+    const payload = {
+      code: data.code,
+      type: TYPE_TO_API[data.discountType],
+      value: data.discountType === "free_shipping" ? 0 : data.value,
+      minOrderValue: data.minimumOrder,
+      maxUses: data.maxUses,
+      validFrom: data.validFrom || undefined,
+      validTo: data.validTo || undefined,
+    };
+
+    const { error } = editingPromo
+      ? await updatePromoCode(businessId, editingPromo.id, payload)
+      : await createPromoCode(businessId, { ...payload, active: true });
+
+    if (error) {
+      toast.error(error);
+      return;
+    }
+
+    toast.success(editingPromo ? "Promo code updated" : "Promo code created");
     setShowForm(false);
     setEditingPromo(null);
-  }, [editingPromo]);
+    await load();
+  }, [editingPromo, businessId, load]);
 
   const activeCount = promos.filter((p) => p.active).length;
-  const totalRevenue = promos.reduce((s, p) => s + p.revenueGenerated, 0);
-  const totalDiscount = promos.reduce((s, p) => s + p.totalDiscountGiven, 0);
+  const totalRedemptions = promos.reduce((s, p) => s + p.currentUses, 0);
+  const expiredCount = promos.filter((p) => p.validTo && new Date(p.validTo) < new Date()).length;
 
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
@@ -199,13 +283,20 @@ export function PromosPanel() {
           <p className="text-[10px] text-muted-foreground mb-1">Active Codes</p>
           <p className="text-lg font-bold">{activeCount}</p>
         </div>
+        {/*
+          "Revenue Generated" and "Total Discounts" used to sit here, summed from
+          two fields the PromoCode model does not have. Attributing revenue to a
+          code needs an aggregation over its orders that no endpoint performs, so
+          showing a number here would be inventing one. Redemptions and expiry
+          are columns the server actually keeps.
+        */}
         <div className="rounded-xl p-3.5" style={{ background: "hsl(var(--kf-card))", border: "1px solid hsl(var(--kf-border)/0.5)" }}>
-          <p className="text-[10px] text-muted-foreground mb-1">Revenue Generated</p>
-          <p className="text-lg font-bold">${totalRevenue.toLocaleString()}</p>
+          <p className="text-[10px] text-muted-foreground mb-1">Redemptions</p>
+          <p className="text-lg font-bold">{totalRedemptions.toLocaleString()}</p>
         </div>
         <div className="rounded-xl p-3.5" style={{ background: "hsl(var(--kf-card))", border: "1px solid hsl(var(--kf-border)/0.5)" }}>
-          <p className="text-[10px] text-muted-foreground mb-1">Total Discounts</p>
-          <p className="text-lg font-bold">${totalDiscount.toLocaleString()}</p>
+          <p className="text-[10px] text-muted-foreground mb-1">Expired</p>
+          <p className="text-lg font-bold">{expiredCount}</p>
         </div>
       </div>
 
@@ -220,7 +311,11 @@ export function PromosPanel() {
       </div>
 
       <div className="space-y-2">
-        {promos.length === 0 ? (
+        {loading ? (
+          <div className="rounded-xl p-8 text-center" style={{ background: "hsl(var(--kf-card))", border: "1px solid hsl(var(--kf-border)/0.5)" }}>
+            <p className="text-sm text-muted-foreground">Loading promo codes…</p>
+          </div>
+        ) : promos.length === 0 ? (
           <div className="rounded-xl p-8 text-center" style={{ background: "hsl(var(--kf-card))", border: "1px solid hsl(var(--kf-border)/0.5)" }}>
             <Tag className="w-8 h-8 mx-auto mb-2 text-muted-foreground/30" />
             <p className="text-sm text-muted-foreground">No promo codes yet</p>
@@ -259,10 +354,9 @@ export function PromosPanel() {
                       <span>·</span>
                       <span className="flex items-center gap-0.5"><Calendar className="w-2.5 h-2.5" />{new Date(promo.validFrom).toLocaleDateString("en-US", { month: "short", day: "numeric" })} – {new Date(promo.validTo).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
                     </div>
-                    <div className="flex items-center gap-3 mt-1.5 text-[10px]">
-                      <span style={{ color: "hsl(var(--kf-success))" }}>Revenue: ${promo.revenueGenerated.toLocaleString()}</span>
-                      <span className="text-muted-foreground">Discounts: ${promo.totalDiscountGiven.toLocaleString()}</span>
-                    </div>
+                    {/* Per-code revenue and discount totals were shown here from
+                        fields that do not exist on the model. See the note on the
+                        summary tiles above. */}
 
                     <div className="mt-2 h-1.5 rounded-full overflow-hidden" style={{ background: "hsl(var(--kf-muted)/0.15)" }}>
                       <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(usagePercent, 100)}%`, background: usagePercent >= 90 ? "hsl(var(--kf-error))" : usagePercent >= 70 ? "hsl(var(--kf-warning))" : "hsl(var(--kf-accent1))" }} />

@@ -1,7 +1,15 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { motion } from "framer-motion";
+import { toast } from "sonner";
+import { getStoredBusinessId } from "@/lib/workspace";
+import {
+  fetchStoreOrders,
+  updateStoreOrderStatus,
+  refundStoreOrder,
+  type StoreOrder,
+} from "@/lib/api/store";
 import {
   Search,
   Filter,
@@ -36,7 +44,62 @@ interface Order {
   total: number;
   status: OrderStatus;
   paymentMethod: string;
-  statusHistory: { status: OrderStatus; date: string }[];
+  /**
+   * MarketplaceOrder keeps no status history — there is no audit table and no
+   * status-change log. The panel used to render a full invented timeline
+   * ("pending 10:30 → confirmed 10:35 → shipped …"). These are the two
+   * timestamps the row actually carries.
+   */
+  placedAt: string;
+  lastUpdatedAt: string;
+}
+
+/** The server stores uppercase; this panel renders lowercase. */
+const STATUS_TO_API: Record<OrderStatus, string> = {
+  pending: "PENDING",
+  confirmed: "CONFIRMED",
+  processing: "PROCESSING",
+  shipped: "SHIPPED",
+  delivered: "DELIVERED",
+  cancelled: "CANCELLED",
+  refunded: "REFUNDED",
+};
+
+const KNOWN_STATUSES = new Set<string>(Object.keys(STATUS_TO_API));
+
+/**
+ * Anything unrecognised becomes "pending" rather than crashing a lookup —
+ * MarketplaceOrder.status defaults to "placed" and is a free string column, so
+ * values outside this union genuinely occur.
+ */
+function statusFromApi(raw: string): OrderStatus {
+  const lower = (raw ?? "").toLowerCase();
+  if (KNOWN_STATUSES.has(lower)) return lower as OrderStatus;
+  if (lower === "placed") return "pending";
+  if (lower === "completed") return "delivered";
+  return "pending";
+}
+
+function fromApi(o: StoreOrder): Order {
+  return {
+    id: o.id,
+    ref: o.orderNumber,
+    customerName: o.customerName,
+    customerEmail: o.customerEmail ?? "",
+    date: o.createdAt,
+    items: (o.items ?? []).map((i) => ({
+      id: i.id,
+      name: i.name,
+      quantity: i.quantity,
+      unitPrice: i.unitPrice,
+      total: i.total,
+    })),
+    total: o.total,
+    status: statusFromApi(o.status),
+    paymentMethod: o.paymentMethod ?? "—",
+    placedAt: o.createdAt,
+    lastUpdatedAt: o.updatedAt,
+  };
 }
 
 const STATUS_ICON: Record<OrderStatus, React.ElementType> = {
@@ -51,70 +114,6 @@ const STATUS_ICON: Record<OrderStatus, React.ElementType> = {
 
 const STATUS_FLOW: OrderStatus[] = ["pending", "confirmed", "processing", "shipped", "delivered"];
 
-const DEMO_ORDERS: Order[] = [
-  {
-    id: "ord_1", ref: "ORD-001", customerName: "Maria Garcia", customerEmail: "maria@example.com",
-    date: "2026-04-04T10:30:00Z", total: 245.00, status: "confirmed", paymentMethod: "Credit Card",
-    items: [
-      { id: "i1", name: "Deep Tissue Massage", quantity: 1, unitPrice: 120.00, total: 120.00 },
-      { id: "i2", name: "Aromatherapy Add-on", quantity: 1, unitPrice: 45.00, total: 45.00 },
-      { id: "i3", name: "Recovery Balm", quantity: 2, unitPrice: 40.00, total: 80.00 },
-    ],
-    statusHistory: [{ status: "pending", date: "2026-04-04T10:30:00Z" }, { status: "confirmed", date: "2026-04-04T10:35:00Z" }],
-  },
-  {
-    id: "ord_2", ref: "ORD-002", customerName: "James Wilson", customerEmail: "james@example.com",
-    date: "2026-04-03T14:15:00Z", total: 89.99, status: "shipped", paymentMethod: "PayPal",
-    items: [{ id: "i4", name: "Essential Oil Set", quantity: 1, unitPrice: 89.99, total: 89.99 }],
-    statusHistory: [
-      { status: "pending", date: "2026-04-03T14:15:00Z" }, { status: "confirmed", date: "2026-04-03T14:20:00Z" },
-      { status: "processing", date: "2026-04-03T15:00:00Z" }, { status: "shipped", date: "2026-04-04T09:00:00Z" },
-    ],
-  },
-  {
-    id: "ord_3", ref: "ORD-003", customerName: "Aisha Mohammed", customerEmail: "aisha@example.com",
-    date: "2026-04-02T09:00:00Z", total: 350.00, status: "delivered", paymentMethod: "Credit Card",
-    items: [
-      { id: "i5", name: "Full Body Treatment", quantity: 1, unitPrice: 250.00, total: 250.00 },
-      { id: "i6", name: "Facial Treatment", quantity: 1, unitPrice: 100.00, total: 100.00 },
-    ],
-    statusHistory: [
-      { status: "pending", date: "2026-04-02T09:00:00Z" }, { status: "confirmed", date: "2026-04-02T09:10:00Z" },
-      { status: "processing", date: "2026-04-02T10:00:00Z" }, { status: "shipped", date: "2026-04-03T08:00:00Z" },
-      { status: "delivered", date: "2026-04-04T11:00:00Z" },
-    ],
-  },
-  {
-    id: "ord_4", ref: "ORD-004", customerName: "Chen Wei", customerEmail: "chen@example.com",
-    date: "2026-04-01T16:45:00Z", total: 75.00, status: "cancelled", paymentMethod: "Credit Card",
-    items: [{ id: "i7", name: "Relaxation Package", quantity: 1, unitPrice: 75.00, total: 75.00 }],
-    statusHistory: [
-      { status: "pending", date: "2026-04-01T16:45:00Z" }, { status: "cancelled", date: "2026-04-01T17:00:00Z" },
-    ],
-  },
-  {
-    id: "ord_5", ref: "ORD-005", customerName: "Sofia Petrov", customerEmail: "sofia@example.com",
-    date: "2026-03-30T11:20:00Z", total: 199.50, status: "refunded", paymentMethod: "PayPal",
-    items: [
-      { id: "i8", name: "Premium Skincare Set", quantity: 1, unitPrice: 149.50, total: 149.50 },
-      { id: "i9", name: "Face Mask Pack", quantity: 1, unitPrice: 50.00, total: 50.00 },
-    ],
-    statusHistory: [
-      { status: "pending", date: "2026-03-30T11:20:00Z" }, { status: "confirmed", date: "2026-03-30T11:25:00Z" },
-      { status: "refunded", date: "2026-03-31T09:00:00Z" },
-    ],
-  },
-  {
-    id: "ord_6", ref: "ORD-006", customerName: "Maria Garcia", customerEmail: "maria@example.com",
-    date: "2026-03-28T13:00:00Z", total: 160.00, status: "delivered", paymentMethod: "Credit Card",
-    items: [{ id: "i10", name: "Hot Stone Massage", quantity: 1, unitPrice: 160.00, total: 160.00 }],
-    statusHistory: [
-      { status: "pending", date: "2026-03-28T13:00:00Z" }, { status: "confirmed", date: "2026-03-28T13:05:00Z" },
-      { status: "processing", date: "2026-03-28T14:00:00Z" }, { status: "shipped", date: "2026-03-29T08:00:00Z" },
-      { status: "delivered", date: "2026-03-30T10:00:00Z" },
-    ],
-  },
-];
 
 const STATUS_FILTERS: { value: OrderStatus | "all"; label: string }[] = [
   { value: "all", label: "All Orders" },
@@ -166,17 +165,26 @@ function OrderDetailSheet({ order, onClose, onStatusUpdate }: { order: Order; on
         </div>
 
         <div className="rounded-xl p-4 space-y-3" style={{ background: "hsl(var(--kf-muted)/0.08)", border: "1px solid hsl(var(--kf-border)/0.3)" }}>
-          <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Status Timeline</h4>
+          <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Timeline</h4>
           <div className="space-y-2">
-            {order.statusHistory.map((entry, idx) => {
-              const Icon = STATUS_ICON[entry.status];
+            {/*
+              A per-status timeline needs a status-change log, and there is no
+              such table. Showing placed/last-updated is what the order row can
+              actually support; the invented five-step history it replaced was
+              indistinguishable from a real one.
+            */}
+            {[
+              { icon: Clock, label: "Placed", at: order.placedAt },
+              { icon: STATUS_ICON[order.status], label: order.status, at: order.lastUpdatedAt },
+            ].map((entry, idx) => {
+              const Icon = entry.icon;
               return (
                 <div key={idx} className="flex items-center gap-3">
                   <Icon className="w-4 h-4 flex-shrink-0" style={{ color: "hsl(var(--kf-accent1))" }} />
                   <div className="flex-1">
-                    <span className="text-xs font-medium capitalize">{entry.status.replace("_", " ")}</span>
+                    <span className="text-xs font-medium capitalize">{entry.label.replace("_", " ")}</span>
                   </div>
-                  <span className="text-[10px] text-muted-foreground">{new Date(entry.date).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                  <span className="text-[10px] text-muted-foreground">{new Date(entry.at).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
                 </div>
               );
             })}
@@ -218,13 +226,37 @@ function OrderDetailSheet({ order, onClose, onStatusUpdate }: { order: Order; on
 }
 
 export function OrdersPanel() {
-  const [orders, setOrders] = useState<Order[]>(DEMO_ORDERS);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<OrderStatus | "all">("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [showFilters, setShowFilters] = useState(false);
+
+  const businessId = getStoredBusinessId() ?? "";
+
+  /**
+   * Filtering stays client-side even though the endpoint supports it: the panel
+   * already had working filter UI over an in-memory list, and a page of 100 is
+   * enough for a storefront's recent orders. Server-side paging is the change to
+   * make when a business outgrows that, not before.
+   */
+  const load = useCallback(async () => {
+    if (!businessId) {
+      setLoading(false);
+      return;
+    }
+    const { data, error } = await fetchStoreOrders(businessId, { pageSize: 100 });
+    if (error) toast.error(error);
+    setOrders((data?.data ?? []).map(fromApi));
+    setLoading(false);
+  }, [businessId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   const filtered = useMemo(() => {
     let result = orders;
@@ -238,26 +270,35 @@ export function OrdersPanel() {
     return result.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [orders, search, statusFilter, dateFrom, dateTo]);
 
-  const handleStatusUpdate = useCallback((orderId: string, newStatus: OrderStatus) => {
-    setOrders((prev) =>
-      prev.map((o) => {
-        if (o.id !== orderId) return o;
-        return {
-          ...o,
-          status: newStatus,
-          statusHistory: [...o.statusHistory, { status: newStatus, date: new Date().toISOString() }],
-        };
-      })
-    );
-    setSelectedOrder((prev) => {
-      if (!prev || prev.id !== orderId) return prev;
-      return {
-        ...prev,
-        status: newStatus,
-        statusHistory: [...prev.statusHistory, { status: newStatus, date: new Date().toISOString() }],
-      };
-    });
-  }, []);
+  const handleStatusUpdate = useCallback(async (orderId: string, newStatus: OrderStatus) => {
+    if (!businessId) return;
+
+    // Refund is its own endpoint, not a status write — it also flips
+    // paymentStatus and emits store_order.refunded (store-order.service.ts:763).
+    // Routing it through the status update would move the label and refund
+    // nobody.
+    const { data, error } = newStatus === "refunded"
+      ? await refundStoreOrder(businessId, orderId)
+      : await updateStoreOrderStatus(businessId, orderId, STATUS_TO_API[newStatus]);
+
+    if (error) {
+      toast.error(error);
+      return;
+    }
+
+    const updated = data ? fromApi(data) : null;
+    if (!updated) {
+      await load();
+      return;
+    }
+
+    // Render what came back, not what was requested. The server decides the
+    // resulting status; assuming it matched the request is how a screen ends up
+    // showing a state the database never reached.
+    setOrders((prev) => prev.map((o) => (o.id === orderId ? updated : o)));
+    setSelectedOrder((prev) => (prev && prev.id === orderId ? updated : prev));
+    toast.success(`Order ${updated.ref} is now ${updated.status}`);
+  }, [businessId, load]);
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: orders.length };
@@ -324,7 +365,11 @@ export function OrdersPanel() {
       )}
 
       <div className="space-y-2">
-        {filtered.length === 0 ? (
+        {loading ? (
+          <div className="rounded-xl p-8 text-center" style={{ background: "hsl(var(--kf-card))", border: "1px solid hsl(var(--kf-border)/0.5)" }}>
+            <p className="text-sm text-muted-foreground">Loading orders…</p>
+          </div>
+        ) : filtered.length === 0 ? (
           <div className="rounded-xl p-8 text-center" style={{ background: "hsl(var(--kf-card))", border: "1px solid hsl(var(--kf-border)/0.5)" }}>
             <Package className="w-8 h-8 mx-auto mb-2 text-muted-foreground/30" />
             <p className="text-sm text-muted-foreground">No orders found</p>
