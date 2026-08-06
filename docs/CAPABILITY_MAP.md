@@ -187,7 +187,7 @@ as wired.
 | `key-cortex-keystore-adapter.service.ts:20` | In no module, no caller |
 | `cognition-session.service.ts:20` | Registered `key-cortex.module.ts:499,644`, zero injection sites |
 | `knowledge-ingestion.service.ts:22` | Registered `:493,661`, zero injection sites |
-| `trust-explanation.service.ts:23` | **In no module**, `@Optional()`-injected at `key-cortex-reasoning:167` and `key-cortex-query-pipeline:130` |
+| ~~`trust-explanation.service.ts:23`~~ | **FIXED 2026-08-06** — registered in `key-cortex.module.ts`; held by `trust-explanation-wiring.spec.ts` |
 | `key-command-router.service.ts:28` | **In no module**, `@Optional()`-injected at `key-cortex-command:94`, **never read** |
 
 `key-command-router.service.ts` opens by claiming "ONE pathway for all commands.
@@ -320,12 +320,16 @@ the assistant blind.
 find again, and cannot answer "how many hours did I log this week."
 `time-tracking/page.tsx` is 600 lines and fully writable. Not in nav.
 
-**Store performance tab — SHELL.** Four panels render hardcoded constants and
-never fetch: `orders-panel.tsx:54,221` · `profit-panel.tsx:39,49,156-157`
-(`const summary = DEMO_SUMMARY`) · `customers-panel.tsx:37,115` ·
-`promos-panel.tsx:38,159`. All mounted by `performance-tab.tsx:33-36`. The
-catalog half of Store is genuinely operational — see §5.1 for why the gate misses
-this.
+**Store performance tab — ~~SHELL~~ FIXED 2026-08-06.** Four panels rendered
+hardcoded constants and never fetched; a fifth fabrication, `seedRandom()` →
+`generateTrendData(30, 42)`, was charted as "Revenue & Profit Trend". Now wired
+to `lib/api/store.ts` over endpoints that already existed
+(`site.controller.ts:248-343`, `commerce-insights.controller.ts:45`). Customers
+are grouped from the orders themselves — there is no customer table behind a
+guest checkout — and profit joins order items to the landed-cost margin engine
+the Commerce screens use. Per-promo revenue attribution, the invented status
+timeline and the hardcoded trend deltas were removed rather than wired: no
+source exists for them. See §5.1 for why the gate missed all of this.
 
 **Helpdesk — stub data model.** `SupportTicket` (`schema.prisma:4223-4252`) is 30
 lines with no message thread and no SLA (`slaBreach|slaDue|firstResponseAt` → 0
@@ -365,17 +369,16 @@ reachable only as a tab inside a dormant-flagged marketplace page.
 # Part 4 — The queue
 
 ## Tier 0 — one-liners with real behaviour behind them
-1. **Register `TrustExplanationService`** in `key-cortex.module.ts`. Zero deps;
-   activates the guarded call site at `key-cortex-query-pipeline.service.ts:988`.
+1. ~~**Register `TrustExplanationService`**~~ — **DONE 2026-08-06.**
 2. **Decide the two zombies** — `KeyCommandRouterService` (+ its unused injection)
    and `KeyCortexKeystoreAdapterService`. Delete, or wire deliberately.
 
 ## Tier 1 — close the gate blind spots (before adding more tools)
-3. **Extend `no-fabricated-screens`** — walk component trees, flag
-   `DEMO_|MOCK_|SAMPLE_|FAKE_` constants feeding render state, cover non-nav
-   screens. Must fail on the four Store panels first.
-4. **Fix the Store performance tab** — wire to `store-order.service.ts` /
-   `storefront-conversion.service.ts`, or remove it.
+3. ~~**Extend `no-fabricated-screens`**~~ — **DONE 2026-08-06.** Walks component
+   trees, flags placeholder-named constants feeding render state, covers non-nav
+   screens, and catches synthesised (seeded-RNG) series. Negative-controlled: it
+   failed on the four Store panels before they were fixed.
+4. ~~**Fix the Store performance tab**~~ — **DONE 2026-08-06.**
 5. **Tighten manual-parity** so a route must reach the *domain's own* mutation.
    Then fix `time_*` → `/app/time-tracking`, `documents_*` → the documents screen,
    `finance_*` → `/app/financial-flow`.
@@ -424,8 +427,8 @@ Service and UI already exist for all of these; only tools are missing.
 Every standing gate passes, and this map still found real defects. Both gate
 families check a **shape** and not a **referent**.
 
-**`no-fabricated-screens` misses fabricated panels.** Three structural reasons the
-Store tab passes:
+**`no-fabricated-screens` missed fabricated panels** (closed 2026-08-06). Three
+structural reasons the Store tab passed:
 
 - `hasDataSource()` (`no-fabricated-screens.spec.ts:79-94`) returns true if
   **anything** in the import tree at depth 3 touches `@/lib/api`. Store fetches
@@ -434,8 +437,10 @@ Store tab passes:
   DEMO panels are components; the regex never sees them.
 - It iterates nav destinations only — non-nav screens are never checked.
 
-It also has no test for the actual smell: a module-scope constant assigned
-straight into render state.
+It also had no test for the actual smell: a module-scope constant assigned
+straight into render state. Both gaps are now closed, plus a third the original
+rule would still have missed — a deterministic RNG generating a chart series,
+which is fabrication that never names itself a placeholder.
 
 **Manual-parity checks *a* mutation, not *the* mutation.** `time_*` are
 write-family with `manualEquivalentRoute: '/app/projects'`
