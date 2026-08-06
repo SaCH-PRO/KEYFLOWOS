@@ -112,7 +112,7 @@ export const MODE_OPERATE_ITEMS: Record<DisclosureMode, string[]> = {
     "Commerce", "Deals",
     "Campaigns", "Content", "Social",
     "Approvals", "Compliance", "Contracts", "Legal",
-    "Executive Intelligence", "Growth", "Storefront", "Documents",
+    "Executive Intelligence",
     "Market Strategy", "Goals", "Business Genome",
   ],
 };

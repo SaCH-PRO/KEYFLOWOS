@@ -203,9 +203,12 @@ export const operateSections: NavSection[] = [
     icon: Brain,
     items: [
       { label: "Executive Intelligence", href: "/app/intelligence", icon: LayoutDashboard },
-      { label: "Growth", href: "/app/growth", icon: TrendingUp },
-      { label: "Storefront", href: "/app/storefront-intelligence", icon: Store },
-      { label: "Documents", href: "/app/document-intelligence", icon: FileText },
+      // Growth, Storefront and Documents were removed from this section on
+      // 2026-08-06. All three fetch nothing, wait on a setTimeout to fake
+      // network latency, and render invented business metrics — "7.4%
+      // conversion", "$29.60 AOV", "94% accuracy". The pages still exist and the
+      // layout work is reusable; they are simply not presented as product until
+      // they read real data. See no-fabricated-screens.spec.ts.
     ],
   },
   {
