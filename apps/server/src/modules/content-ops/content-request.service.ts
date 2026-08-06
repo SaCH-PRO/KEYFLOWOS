@@ -312,11 +312,13 @@ export class ContentRequestService {
     });
 
     let invoice = null;
+    let invoiceError: string | null = null;
     if (request.invoiceOnDelivery && this.contentInvoice) {
       try {
         invoice = await this.contentInvoice.generateInvoiceFromDelivery(requestId, request.businessId);
       } catch (err: any) {
-        this.logger.warn(`Auto-invoice generation failed: ${(err as Error).message}`);
+        invoiceError = (err as Error).message;
+        this.logger.warn(`Auto-invoice generation failed: ${invoiceError}`);
       }
     }
 
@@ -333,7 +335,20 @@ export class ContentRequestService {
       });
     }
 
-    return updated;
+    // Additive fields, not a shape change — existing callers read .status and
+    // .id as before.
+    //
+    // The invoice outcome used to exist only in an event payload and a
+    // logger.warn, so a caller could not tell whether delivery had raised an
+    // invoice, failed to, or never tried. `content_deliver_request` reported
+    // success either way; on a business with invoiceOnDelivery set, a silent
+    // generation failure looked exactly like a delivery with no invoice due.
+    return {
+      ...updated,
+      invoiceRequested: !!request.invoiceOnDelivery,
+      deliveryInvoiceId: invoice?.id ?? null,
+      invoiceError,
+    };
   }
 
   async cancelRequest(requestId: string, actorId: string) {

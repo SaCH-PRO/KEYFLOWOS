@@ -39,6 +39,9 @@ import { ContentRequestService } from '../content-ops/content-request.service';
 import { CallLogService } from '../call-tasks/call-log.service';
 import { CallScriptService } from '../call-tasks/call-script.service';
 import { EvidenceService } from '../evidence/evidence.service';
+import { SeoService } from '../seo/seo.service';
+import { SeoContentService } from '../seo/seo-content.service';
+import { ReceivablesService } from '../finance/receivables.service';
 import { ApprovalRequestService } from '../approvals/approval-request.service';
 import { GoogleDriveService } from '../google-drive/google-drive.service';
 import { TaskAssignmentService } from '../task-assignments/task-assignment.service';
@@ -379,6 +382,15 @@ export class FlowOrchestratorService {
   }
   private getEvidence() {
     return this.moduleRef.get(EvidenceService, { strict: false });
+  }
+  private getSeo() {
+    return this.moduleRef.get(SeoService, { strict: false });
+  }
+  private getSeoContent() {
+    return this.moduleRef.get(SeoContentService, { strict: false });
+  }
+  private getReceivables() {
+    return this.moduleRef.get(ReceivablesService, { strict: false });
   }
   private getApprovalRequest() {
     return this.moduleRef.get(ApprovalRequestService, { strict: false });
@@ -3392,29 +3404,11 @@ ${triage.standingContext}`;
       }
 
       case 'fetch_content_gaps': {
-        const trackedKeywords = await this.prisma.client.seoKeyword.findMany({
-          where: { businessId, isTracked: true },
-        });
-        const gaps = trackedKeywords
-          .map(kw => {
-            let opportunityScore = 0;
-            let reason = '';
-            if (!kw.pageId) {
-              opportunityScore = 80;
-              reason = 'No dedicated page targeting this keyword';
-            } else if (kw.currentPosition && kw.currentPosition > 10 && kw.currentPosition <= 30) {
-              opportunityScore = 70;
-              reason = `Ranking on page 2-3 (position ${kw.currentPosition})`;
-            } else if (kw.impressions > 100 && kw.ctr < 0.02) {
-              opportunityScore = 50;
-              reason = 'High impressions, low CTR — meta needs optimization';
-            }
-            return opportunityScore > 0
-              ? { keyword: kw.keyword, currentPosition: kw.currentPosition, opportunityScore, reason }
-              : null;
-          })
-          .filter(Boolean)
-          .sort((a: any, b: any) => b.opportunityScore - a.opportunityScore);
+        // The scoring above was a second copy of
+        // SeoContentService.detectContentGaps (seo-content.service.ts:16). Two
+        // implementations of one heuristic drift, and then KEY and the SEO
+        // workspace disagree about which keyword is worth writing for.
+        const gaps = await this.getSeoContent().detectContentGaps(businessId);
         return { gaps };
       }
 
@@ -3441,34 +3435,25 @@ ${triage.standingContext}`;
       }
 
       case 'sync_seo_pages': {
-        const business = await this.prisma.client.business.findFirst({
-          where: { id: businessId, deletedAt: null },
-          select: { slug: true, name: true },
-        });
-        if (!business?.slug) return { synced: 0 };
-        const baseUrl = `/book/${business.slug}`;
-        await this.prisma.client.seoPage.upsert({
-          where: { businessId_path: { businessId, path: baseUrl } },
-          create: { businessId, url: baseUrl, path: baseUrl, pageType: 'storefront', title: business.name ?? 'Storefront' },
-          update: { title: business.name ?? 'Storefront' },
-        });
-        return { synced: 1, message: 'Storefront page synced. Use the SEO workspace for full inventory sync.' };
+        // This used to upsert exactly one storefront page inline and return
+        // `{ synced: 1 }` — a constant, not a count — with a message telling the
+        // user to go and do the real sync themselves. SeoService.syncPageInventory
+        // (seo.service.ts:290) walks products and services and is what the SEO
+        // workspace calls. A tool named "sync SEO pages" now runs that.
+        return this.getSeo().syncPageInventory(businessId);
       }
 
       case 'generate_content_brief': {
-        const brief = await this.prisma.client.contentBrief.create({
-          data: {
-            businessId,
-            title: `Content brief: ${args.targetKeyword}`,
-            targetKeyword: args.targetKeyword,
-            contentType: args.contentType ?? 'article',
-            status: 'draft',
-            priority: 'medium',
-            approvalStatus: 'pending',
-            contentGapSource: args.notes ?? null,
-          },
+        // The tool's family is 'draft' and it drafted nothing: a bare row was
+        // written with raw Prisma and the message told the user to go generate
+        // the real brief in the SEO workspace. SeoContentService.generateBrief
+        // (seo-content.service.ts:65) is that generator.
+        return this.getSeoContent().generateBrief(businessId, {
+          targetKeyword: args.targetKeyword,
+          targetPath: args.targetPath,
+          contentType: args.contentType,
+          notes: args.notes,
         });
-        return { brief, message: 'Brief stub created. Use the SEO workspace to generate full AI brief.' };
       }
 
       // === CONTENT OPS ===
@@ -3500,25 +3485,50 @@ ${triage.standingContext}`;
         });
         return { id: request.id, status: request.status };
       }
+      // These five returned their own arguments back, and two of them returned
+      // an UPPERCASE status the domain does not use. ContentRequest statuses are
+      // lowercase and VALID_TRANSITIONS is keyed on the lowercase form
+      // (content-request.service.ts:26-31), so feeding a returned status into
+      // content_transition_status raised BadRequestException — KEY reporting a
+      // step it had just completed and then being unable to act on it.
       case 'content_assign_request': {
-        await this.getContentRequest().assignRequest(args.requestId, args.teamMemberIds, 'key_ai');
-        return { requestId: args.requestId, assignedTo: args.teamMemberIds };
+        const assigned = await this.getContentRequest().assignRequest(args.requestId, args.teamMemberIds, 'key_ai');
+        return {
+          requestId: assigned.id,
+          status: assigned.status,
+          assignedTo: assigned.assignedTeamMemberIds,
+        };
       }
       case 'content_transition_status': {
-        await this.getContentRequest().transitionStatus(args.requestId, args.newStatus, 'key_ai', args.comment);
-        return { requestId: args.requestId, newStatus: args.newStatus };
+        const moved = await this.getContentRequest().transitionStatus(args.requestId, args.newStatus, 'key_ai', args.comment);
+        return { requestId: moved.id, newStatus: moved.status };
       }
       case 'content_submit_for_review': {
-        await this.getContentRequest().submitForReview(args.requestId, 'key_ai', args.comment);
-        return { requestId: args.requestId, status: 'INTERNAL_REVIEW' };
+        const submitted = await this.getContentRequest().submitForReview(args.requestId, 'key_ai', args.comment);
+        return { requestId: submitted.id, status: submitted.status };
       }
       case 'content_upload_deliverables': {
-        await this.getContentRequest().uploadDeliverables(args.requestId, args.fileIds, args.folderId, 'key_ai');
-        return { requestId: args.requestId, uploaded: args.fileIds.length };
+        // `uploaded: args.fileIds.length` was the count KEY asked for, not the
+        // count that persisted.
+        const uploaded = await this.getContentRequest().uploadDeliverables(args.requestId, args.fileIds, args.folderId, 'key_ai');
+        return {
+          requestId: uploaded.id,
+          status: uploaded.status,
+          uploaded: uploaded.deliveryFileIds?.length ?? 0,
+        };
       }
       case 'content_deliver_request': {
-        await this.getContentRequest().deliverRequest(args.requestId, 'key_ai');
-        return { requestId: args.requestId, status: 'DELIVERED' };
+        const delivered = await this.getContentRequest().deliverRequest(args.requestId, 'key_ai');
+        if (delivered.invoiceRequested && !delivered.deliveryInvoiceId) {
+          throw new Error(
+            `Content request ${args.requestId} was delivered, but the invoice it was set to raise on delivery FAILED: ${delivered.invoiceError ?? 'unknown error'}. The client has the work and has not been billed.`,
+          );
+        }
+        return {
+          requestId: delivered.id,
+          status: delivered.status,
+          invoiceId: delivered.deliveryInvoiceId,
+        };
       }
 
       // === CALL TASKS ===
@@ -3544,12 +3554,21 @@ ${triage.standingContext}`;
         return { id: log.id, contactId: args.contactId };
       }
       case 'call_log_outcome': {
+        // `completed` used to be assigned and dropped, and the return echoed the
+        // arguments back. completeCall throws if the call was already completed
+        // and computes completedAt itself, so the echo could report an outcome
+        // that was never written.
         const completed = await this.getCallLog().completeCall(args.callLogId, {
           outcome: args.outcome,
           duration: args.duration ?? undefined,
           notes: args.notes ?? undefined,
         }, 'key_ai');
-        return { callLogId: args.callLogId, outcome: args.outcome };
+        return {
+          callLogId: completed.id,
+          outcome: completed.outcome,
+          duration: completed.duration,
+          completedAt: completed.completedAt,
+        };
       }
       case 'call_generate_script': {
         const script = await this.getCallScript().generateScript(businessId, args.callLogId, args.contactId);
@@ -3595,8 +3614,19 @@ ${triage.standingContext}`;
         return { id: ev.id, linkedType: args.linkedType, linkedId: args.linkedId };
       }
       case 'evidence_verify': {
-        await this.getEvidence().verify({ evidenceId: args.evidenceId, verifierId: 'key_ai' });
-        return { evidenceId: args.evidenceId, verified: true };
+        // `verified: true` was hardcoded — the tool asserted success rather than
+        // reporting it. verify() returns the updated row with verifiedAt set, so
+        // the flag can be derived from what was actually written.
+        const verified = await this.getEvidence().verify({
+          evidenceId: args.evidenceId,
+          verifierId: 'key_ai',
+        });
+        return {
+          evidenceId: verified.id,
+          verified: !!verified.verifiedAt,
+          verifiedAt: verified.verifiedAt,
+          verifiedBy: verified.verifiedBy,
+        };
       }
 
       // === APPROVALS ===
@@ -3756,24 +3786,30 @@ ${triage.standingContext}`;
 
       // === FINANCE ===
       case 'finance_view_receivables': {
+        // The aging maths used to be reimplemented here over raw invoice rows.
+        // ReceivablesService.getAging (receivables.service.ts:220) is what the
+        // Finance screen reads, and it does two things this handler could not:
+        // it respects the business's accounting basis (CASH vs ACCRUAL) and it
+        // reconciles against the ledger AR balance, reporting the delta.
+        //
+        // So KEY was quoting an AR figure derived differently from the one on
+        // screen, with no way to notice when they disagreed.
         const asOf = args.asOfDate ? new Date(args.asOfDate) : new Date();
-        const outstanding = await this.prisma.client.invoice.findMany({
-          where: { businessId, deletedAt: null, status: { in: ['SENT', 'OVERDUE'] } },
-          include: { contact: { select: { firstName: true, lastName: true } } },
-        });
-        const buckets = { current: 0, overdue1_30: 0, overdue31_60: 0, overdue61_90: 0, overdue90plus: 0 };
-        for (const inv of outstanding) {
-          const due = inv.dueDate ? new Date(inv.dueDate) : null;
-          if (!due) { buckets.current += Number(inv.total); continue; }
-          const daysOverdue = Math.floor((asOf.getTime() - due.getTime()) / 86400000);
-          if (daysOverdue <= 0) buckets.current += Number(inv.total);
-          else if (daysOverdue <= 30) buckets.overdue1_30 += Number(inv.total);
-          else if (daysOverdue <= 60) buckets.overdue31_60 += Number(inv.total);
-          else if (daysOverdue <= 90) buckets.overdue61_90 += Number(inv.total);
-          else buckets.overdue90plus += Number(inv.total);
-        }
-        const totalOutstanding = outstanding.reduce((sum, inv) => sum + Number(inv.total), 0);
-        return { totalOutstanding, ...buckets, invoices: outstanding.map(i => ({ id: i.id, number: i.invoiceNumber, total: Number(i.total), contact: i.contact })) };
+        const aging = await this.getReceivables().getAging(businessId, asOf);
+        return {
+          asOf: aging.asOf,
+          currency: aging.currency,
+          basis: aging.basis,
+          totalOutstanding: aging.totalOutstanding,
+          totalOverdue: aging.totalOverdue,
+          buckets: aging.totals,
+          customers: aging.customers,
+          // Surfaced deliberately: if the ledger and the invoices disagree, KEY
+          // should say so rather than pick one and sound certain.
+          ledgerArBalance: aging.ledgerArBalance,
+          ledgerReconciled: aging.ledgerReconciled,
+          ledgerDelta: aging.ledgerDelta,
+        };
       }
       case 'finance_customer_balance': {
         const [invoicedAgg, paidAgg, invoices] = await Promise.all([

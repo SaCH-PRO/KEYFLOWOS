@@ -205,4 +205,83 @@ describe('the class of defect, not just the instances', () => {
       ).toBe(true);
     }
   });
+
+  it('no handler awaits a service and then reports its own arguments back', () => {
+    // Seven handlers shared one shape, and the spec above did not look for it:
+    //
+    //   await this.getContentRequest().uploadDeliverables(id, fileIds, ...);
+    //   return { requestId: args.requestId, uploaded: args.fileIds.length };
+    //
+    // The write happens. The report is fabricated from the inputs. `uploaded` is
+    // the count KEY ASKED FOR, never the count that persisted. Worse variants
+    // returned hardcoded values — evidence_verify returned `verified: true`
+    // without reading the result, and content_submit_for_review returned
+    // 'INTERNAL_REVIEW' while the domain writes 'internal_review', so feeding
+    // the returned status back into content_transition_status threw.
+    //
+    // This is the same failure as a tool claiming to send an email it never
+    // sent, one level quieter: the action is real and only the account of it is
+    // invented. That is harder to notice, because nothing downstream breaks
+    // until someone acts on the answer.
+    //
+    // The rule: if a handler drops the result of a service call, its return
+    // cannot be built purely from `args` and literals — it has nothing to
+    // describe what actually happened.
+    const src = orchestrator.slice(orchestrator.indexOf('executeToolAction'));
+
+    /**
+     * Void writes. A delete that did not throw deleted; there is no richer
+     * truth to report. Every entry must name why the call has no meaningful
+     * return, and a handler whose service later starts returning something has
+     * to leave this list.
+     */
+    const VOID_WRITES: Record<string, string> = {
+      save_onboarding_step: 'saveStep returns void — saved unless it threw',
+      crm_delete_contact: 'soft delete returns nothing meaningful',
+      commerce_delete_invoice: 'delete returns nothing meaningful',
+      projects_delete_task: 'delete returns nothing meaningful',
+    };
+
+    const offenders: string[] = [];
+
+    for (const match of src.matchAll(/case '([a-z0-9_]+)': \{/g)) {
+      const name = match[1];
+      if (VOID_WRITES[name]) continue;
+
+      // Brace-match the case body. A fixed-size window bleeds into the next
+      // case and reports handlers that are fine.
+      let depth = 0;
+      let end = match.end ?? src.length;
+      for (let i = (match.index ?? 0) + match[0].length - 1; i < src.length; i++) {
+        if (src[i] === '{') depth++;
+        else if (src[i] === '}' && --depth === 0) {
+          end = i + 1;
+          break;
+        }
+      }
+      const body = src.slice((match.index ?? 0), end);
+
+      // A service or prisma call whose result is never bound to anything.
+      if (!/^\s+await this\.(get[A-Z]\w*\(\)|prisma)/m.test(body)) continue;
+
+      const returns = [...body.matchAll(/return \{([\s\S]*?)\};/g)];
+      if (!returns.length) continue;
+
+      const last = returns[returns.length - 1][1];
+      const values = [...last.matchAll(/:\s*([A-Za-z_$][\w.$]*)/g)].map((m) => m[1]);
+      const fromLocals = values.filter(
+        (v) => !v.startsWith('args.') && !['true', 'false', 'null', 'undefined'].includes(v),
+      );
+
+      if (!fromLocals.length) {
+        offenders.push(`${name} -> {${last.trim().replace(/\s+/g, ' ').slice(0, 60)}}`);
+      }
+    }
+
+    expect(
+      offenders,
+      'these discard what the service returned and answer with their own inputs — ' +
+        'capture the result and report it, or add a VOID_WRITES entry saying why there is nothing to report',
+    ).toEqual([]);
+  });
 });
