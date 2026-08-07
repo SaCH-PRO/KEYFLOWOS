@@ -1,2 +1,2 @@
 export * from '@prisma/client';
-export { db, setTenantContextProvider } from './client';
+export { db, setTenantContextProvider, skipTenantIsolation } from './client';

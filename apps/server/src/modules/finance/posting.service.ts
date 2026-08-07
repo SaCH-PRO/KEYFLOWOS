@@ -1,5 +1,6 @@
 import { Inject, Injectable, BadRequestException, ConflictException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { skipTenantIsolation } from '@keyflow/db';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 export interface PostingEntryInput {
@@ -131,11 +132,21 @@ export class PostingService {
 
       // Verify every accountId belongs to the same businessId. Doing this
       // in one query (vs N round-trips) keeps the hot path fast.
+      //
+      // __skipTenantIsolation is load-bearing, not decoration. ChartOfAccount is
+      // in BUSINESS_ID_MODELS, so without it the extension would add
+      // `businessId: <ambient>` here — a foreign account would vanish from the
+      // result set, the length check below would fire first with the misleading
+      // "Unknown chart-of-account id(s)", and the cross-business throw that
+      // follows it would become unreachable dead code. This query must SEE the
+      // foreign row in order to reject it.
       const accountIds = Array.from(new Set(input.entries.map((e) => e.accountId)));
-      const accounts = await tx.chartOfAccount.findMany({
-        where: { id: { in: accountIds } },
-        select: { id: true, businessId: true },
-      });
+      const accounts = await tx.chartOfAccount.findMany(
+        skipTenantIsolation({
+          where: { id: { in: accountIds } },
+          select: { id: true, businessId: true },
+        }),
+      );
       if (accounts.length !== accountIds.length) {
         const found = new Set(accounts.map((a) => a.id));
         const missing = accountIds.filter((id) => !found.has(id));
@@ -236,10 +247,18 @@ export class PostingService {
   ): Promise<PostingResult> {
     if (!businessId) throw new BadRequestException('reverse requires businessId');
     const exec = async (tx: Prisma.TransactionClient): Promise<PostingResult> => {
-      const original = await tx.financialTransaction.findUnique({
-        where: { id: transactionId },
-        include: { entries: true, reversedBy: true },
-      });
+      // Same shape as the chart-of-account check above, and the same reason.
+      // FinancialTransaction is scoped, so an injected businessId would make a
+      // foreign transaction return null, the "not found" below would fire, and
+      // the explicit cross-business throw underneath it could never run — in
+      // either direction, for any ambient value. The comparison IS the control;
+      // this read has to be able to see the row it rejects.
+      const original = await tx.financialTransaction.findUnique(
+        skipTenantIsolation({
+          where: { id: transactionId },
+          include: { entries: true, reversedBy: true },
+        }),
+      );
       if (!original) throw new BadRequestException(`Transaction ${transactionId} not found`);
       // Tenant scoping — never reverse a transaction that belongs to a
       // different business than the caller asserts.
