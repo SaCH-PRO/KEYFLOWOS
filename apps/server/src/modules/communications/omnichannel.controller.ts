@@ -118,50 +118,50 @@ export class OmnichannelController {
 
   @Post('drafts/:id/approve')
   async approveDraft(
-    @Param('businessId') _businessId: string,
+    @Param('businessId') businessId: string,
     @Param('id') id: string,
     @Request() req: { user?: { sub?: string } },
   ) {
     const approvedById = req.user?.sub ?? 'system';
-    return this.drafts.approveDraft(id, approvedById);
+    return this.drafts.approveDraft(businessId, id, approvedById);
   }
 
   @Post('drafts/:id/reject')
   async rejectDraft(
-    @Param('businessId') _businessId: string,
+    @Param('businessId') businessId: string,
     @Param('id') id: string,
     @Body('reason') reason: string,
   ) {
-    return this.drafts.rejectDraft(id, reason ?? 'No reason provided');
+    return this.drafts.rejectDraft(businessId, id, reason ?? 'No reason provided');
   }
 
   @Post('drafts/:id/sent')
   async markDraftSent(
-    @Param('businessId') _businessId: string,
+    @Param('businessId') businessId: string,
     @Param('id') id: string,
   ) {
-    return this.drafts.markSent(id);
+    return this.drafts.markSent(businessId, id);
   }
 
   @Post('drafts/:id/send')
   async sendDraft(
-    @Param('businessId') _businessId: string,
+    @Param('businessId') businessId: string,
     @Param('id') id: string,
     @Request() req: { user?: { sub?: string } },
   ) {
     const sentById = req.user?.sub ?? 'system';
-    return this.drafts.sendDraft(id, sentById);
+    return this.drafts.sendDraft(businessId, id, sentById);
   }
 
   @Patch('drafts/:id')
   async updateDraft(
-    @Param('businessId') _businessId: string,
+    @Param('businessId') businessId: string,
     @Param('id') id: string,
     @Body('body') body: string,
     @Request() req: { user?: { sub?: string } },
   ) {
     const updatedById = req.user?.sub ?? 'system';
-    return this.drafts.updateDraftBody(id, body, updatedById);
+    return this.drafts.updateDraftBody(businessId, id, body, updatedById);
   }
 
   @Post('threads/:threadId/generate-reply')

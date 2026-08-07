@@ -283,8 +283,8 @@ export class OmnichannelProcessorService implements OnModuleInit {
           { threadId: thread.id },
         );
         // Auto-approve and mark as sent for true auto-reply
-        await this.drafts.approveDraft(draft.id, 'SYSTEM');
-        await this.drafts.markSent(draft.id);
+        await this.drafts.approveDraft(draft.businessId, draft.id, 'SYSTEM');
+        await this.drafts.markSent(draft.businessId, draft.id);
         this.logger.log(`Auto-reply draft ${draft.id} created and sent for thread ${thread.id}`);
         break;
       }
