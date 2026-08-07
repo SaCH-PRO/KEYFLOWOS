@@ -4,10 +4,19 @@
 of this working tree. Every number below was derived by running the command or reading
 the file cited, not quoted from an existing report.
 
-> **Revision 2, 2026-08-07.** §5.3 is **closed** by `c5dd8bc4` — and closing it proved the
-> fix four times larger than this document estimated (§7, Tier 0 item 1). §5.4 carried a
-> **wrong heading** and is corrected there. Where a finding has since changed, the original
-> claim is left visible with the correction beside it rather than quietly rewritten.
+> **Revision 3, 2026-08-07.** Four items are now **closed**, and each cost more than this
+> document estimated — Tier 0 item 1 (`c5dd8bc4`) by 4×, item 3 (`4bb52e99`), Tier 1
+> item 8 (`250cb43b`), plus two security fixes this document did not find at all
+> (`ed5a84a7`, `d89118e5` — a request body could name its own tenant on 25 write paths).
+> §5.4 carried a **wrong heading**, corrected in place. Where a finding has changed, the
+> original claim is left visible with the correction beside it rather than quietly rewritten.
+>
+> **The pattern across all of them is worth more than any single finding.** Every claim in
+> this document that was *reasoned* had an exception; every claim that was *executed* held.
+> Three separate scans behind item 8 were wrong in three different directions — over-reporting
+> on a `select` match, under-reporting on a `where:` literal match, and arithmetic that did
+> not close — and each was caught by running something, never by re-reading it. Treat the
+> estimates here as lower bounds and the measurements as the only load-bearing part.
 
 ---
 
@@ -233,9 +242,9 @@ Layers, from strongest to weakest:
    The 16 controllers without it are admin, public, webhook or health endpoints, plus
    `ai-intelligence.controller.ts` which is correctly scoped by `userId` instead. **No gap
    found here.**
-2. **The Prisma tenant extension — covers 48 of 340 tenant-scoped models (14%).**
-   `tenantOperationAllowed()` returns false for the other **292**, which pass through
-   completely unscoped.
+2. **The Prisma tenant extension — covered 48 of 340 tenant-scoped models (14%).**
+   `tenantOperationAllowed()` returned false for the other **292**, which passed through
+   completely unscoped. **Now 77 / 340 (23%)** as of `250cb43b` — see the Tier 1 note below.
 3. **No Postgres row-level security anywhere** — grep for `ENABLE ROW LEVEL SECURITY`
    returns nothing across schema and migrations.
 
@@ -426,8 +435,8 @@ are perhaps 15% of those 90K lines.
 |---|---|:--:|---|
 | 6 | **Put finance in the nav and give KEY 8–10 finance write tools** | 1–2 wk | Unlocks the single most valuable asset in the repo. "KEY, reconcile last month and show me the trial balance" is a demo no competitor in §3 can run. |
 | 7 | Enable Postgres RLS on the top 40 revenue-bearing tables | 1 wk | Turns 6,434 acts of developer attention into one database-enforced invariant. Do not attempt all 340 — pick the tables a leak would be fatal on. |
-| 8 | Extend `BUSINESS_ID_MODELS` to those same 40 first | 2 d | Cheap intermediate step; the spec that diffs it already exists. |
-| 9 | **Extend** the existing real-database pattern to finance — 15–20 tests over posting, ledger balance, reconciliation | 3–4 d | *Revised.* The original wording ("first tests in the repo that execute SQL") was wrong — see §5.4. The harness, the seeding convention and the CI Postgres all exist as of `c5dd8bc4`; this is coverage work on an established pattern, not new infrastructure, and it is cheaper than first estimated. |
+| 8 | ~~Extend `BUSINESS_ID_MODELS` to those same 40 first~~ | ~~2 d~~ ✅ **done, `250cb43b`** | 30 models added (48 → **77 / 340, 23%**), audited at all **98** unscoped call sites. Three sites had to be fixed first: two in `posting.service.ts` read across businesses *on purpose* so an explicit cross-tenant throw can fire — scoping them deletes the control and leaves a misleading "not found". **And the documented opt-out had never worked**: `__skipTenantIsolation` was forwarded to Prisma, which rejects unknown arguments; nothing used it, so nothing failed. Repaired, with `skipTenantIsolation()` exported as a typed helper. `Payment`/`MarketplaceOrder` excluded in code with the reason. |
+| 9 | **Extend** the existing real-database pattern to finance — 15–20 tests over posting, ledger balance, reconciliation | ~~3–4 d~~ **2 d** | *Revised twice.* The original wording ("first tests in the repo that execute SQL") was wrong — see §5.4. Cheaper again after `250cb43b`, which adds `tenant-scope-extension.integration.test.ts` as a worked pattern: real client, real ALS context, a negative control proving the suite can't pass vacuously, and a ratchet verified by breaking it. Copy its shape. |
 | 10 | Uncomment the deploy job; make `migrate deploy` the only path to schema change | 3 d | Removes "a human remembered" from the release process. |
 | 11 | Meter the chat path against `aiCreditsPerMonth`; replace "Unlimited" with "2,000 credits, then $X" | 3 d | Makes gross margin a computable number. |
 | 12 | Gate the 28 crons on last-activity — skip businesses idle >14 days | 2 d | Directly cuts the dormant-account cost floor. |
