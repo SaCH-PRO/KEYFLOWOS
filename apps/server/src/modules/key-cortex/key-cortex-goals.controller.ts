@@ -248,12 +248,7 @@ export class KeyCortexGoalsController {
     @Query('businessId') businessId: string,
   ) {
     if (!businessId) throw new BadRequestException('businessId is required');
-    const goal = await this.prisma.client.aiGoal.findFirst({
-      where: { id: goalId, businessId },
-    });
-    if (!goal) throw new NotFoundException('Goal not found');
-    await this.prisma.client.aiGoal.delete({ where: { id: goalId } });
-    return { success: true };
+    return this.planner.deleteGoal(businessId, goalId);
   }
 
   // -- Phase 4: Trigger Rules --

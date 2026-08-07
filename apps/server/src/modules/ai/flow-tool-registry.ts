@@ -1314,6 +1314,251 @@ export const FLOW_TOOLS: FlowTool[] = [
   },
 
   // ================================================================
+  //  CONTRACTS
+  // ================================================================
+  //
+  // 7 models, a 573-line service with 14 public methods, an 895-line screen
+  // with full manual CRUD and AI term extraction, an entry in the main nav —
+  // and zero tools until 2026-08-07. Renewal dates are the point of a contract
+  // register, and KEY could not read one.
+  {
+    name: 'contracts_list',
+    description: 'List contracts, filtered by status, free text, or how soon they expire. Use expiringWithinDays to answer "what renews soon" — that is what a contract register is for.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/contracts',
+    parameters: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', description: 'Contract status', enum: ['DRAFT', 'ACTIVE', 'RENEWAL_DUE', 'EXPIRED', 'TERMINATED', 'ARCHIVED'] },
+        search: { type: 'string', description: 'Free text over title and counterparties' },
+        expiringWithinDays: { type: 'number', description: 'Only contracts expiring within this many days' },
+        limit: { type: 'number', description: 'Maximum to return (default 50, max 200)' },
+      },
+      required: [],
+    },
+    outputSchema: { type: 'object', description: 'Contract list', fields: { contracts: { type: 'array', description: 'Contract records' } } },
+  },
+  {
+    name: 'contracts_get',
+    description: 'Get one contract in full — parties, extracted terms, versions and alerts.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/contracts',
+    parameters: {
+      type: 'object',
+      properties: { contractId: { type: 'string', description: 'Contract id' } },
+      required: ['contractId'],
+    },
+    outputSchema: { type: 'object', description: 'Contract detail', fields: { contract: { type: 'object', description: 'Contract record' } } },
+  },
+  {
+    name: 'contracts_stats',
+    description: 'Contract portfolio summary — counts by status, total value, and what is coming up for renewal.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/contracts',
+    parameters: { type: 'object', properties: {}, required: [] },
+    outputSchema: { type: 'object', description: 'Contract stats', fields: { stats: { type: 'object', description: 'Counts, values and renewal pipeline' } } },
+  },
+  {
+    name: 'contracts_create',
+    description: 'Record a contract. Set expiryDate and renewalNoticeDays so the renewal alerts can fire — a contract with no dates is a document, not a register entry.',
+    family: 'crud',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/contracts',
+    changedEntities: ['contract'],
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Contract title' },
+        contractType: { type: 'string', description: 'Kind of agreement', enum: ['SERVICE_AGREEMENT', 'NDA', 'EMPLOYMENT', 'VENDOR', 'LEASE', 'LICENSE', 'RENTAL', 'SUBSCRIPTION', 'PARTNERSHIP', 'OTHER'] },
+        status: { type: 'string', description: 'Initial status (defaults to DRAFT)', enum: ['DRAFT', 'ACTIVE', 'RENEWAL_DUE', 'EXPIRED', 'TERMINATED', 'ARCHIVED'] },
+        effectiveDate: { type: 'string', description: 'When it starts (ISO)' },
+        expiryDate: { type: 'string', description: 'When it ends (ISO)' },
+        renewalDate: { type: 'string', description: 'When it renews (ISO)' },
+        renewalNoticeDays: { type: 'number', description: 'Days of notice required before renewal' },
+        contractValue: { type: 'number', description: 'Total contract value' },
+        currency: { type: 'string', description: 'Currency code' },
+        jurisdiction: { type: 'string', description: 'Governing jurisdiction' },
+        notes: { type: 'string', description: 'Internal notes' },
+      },
+      required: ['title'],
+    },
+    outputSchema: { type: 'object', description: 'Created contract', fields: { contract: { type: 'object', description: 'Contract record' } } },
+  },
+  {
+    name: 'contracts_update',
+    description: 'Update a contract — status, dates, value or notes.',
+    family: 'crud',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/contracts',
+    changedEntities: ['contract'],
+    parameters: {
+      type: 'object',
+      properties: {
+        contractId: { type: 'string', description: 'Contract id' },
+        title: { type: 'string', description: 'New title' },
+        status: { type: 'string', description: 'New status', enum: ['DRAFT', 'ACTIVE', 'RENEWAL_DUE', 'EXPIRED', 'TERMINATED', 'ARCHIVED'] },
+        expiryDate: { type: 'string', description: 'New expiry date (ISO)' },
+        renewalDate: { type: 'string', description: 'New renewal date (ISO)' },
+        renewalNoticeDays: { type: 'number', description: 'Days of notice before renewal' },
+        contractValue: { type: 'number', description: 'New value' },
+        notes: { type: 'string', description: 'New notes' },
+      },
+      required: ['contractId'],
+    },
+    outputSchema: { type: 'object', description: 'Updated contract', fields: { contract: { type: 'object', description: 'Contract record' } } },
+  },
+  {
+    name: 'contracts_acknowledge_alert',
+    description: 'Acknowledge a contract renewal or expiry alert, so it stops being outstanding.',
+    family: 'organize',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/contracts',
+    changedEntities: ['contractAlert'],
+    parameters: {
+      type: 'object',
+      properties: { alertId: { type: 'string', description: 'Alert id from contracts_get' } },
+      required: ['alertId'],
+    },
+    outputSchema: { type: 'object', description: 'Acknowledged alert', fields: { alert: { type: 'object', description: 'Alert record' } } },
+  },
+  {
+    name: 'contracts_delete',
+    description: 'Delete a contract. Prefer contracts_update to TERMINATED or ARCHIVED — a contract that existed is a fact about the business, and the register is evidence.',
+    family: 'crud',
+    riskLevel: 'high',
+    riskTier: 3 as RiskTier,
+    manualEquivalentRoute: '/app/contracts',
+    changedEntities: ['contract'],
+    parameters: {
+      type: 'object',
+      properties: { contractId: { type: 'string', description: 'Contract id' } },
+      required: ['contractId'],
+    },
+    outputSchema: { type: 'object', description: 'Deletion result', fields: { success: { type: 'boolean', description: 'Whether it was deleted' } } },
+  },
+
+  // ================================================================
+  //  REPORTS
+  // ================================================================
+  {
+    name: 'reports_generate',
+    description: 'Generate a business report over a date range — executive summary, P&L, revenue, expenses or client portfolio. Returns the computed figures together with a written analysis.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/reports',
+    parameters: {
+      type: 'object',
+      properties: {
+        // Exactly the five the service branches on (reports.service.ts:244-248).
+        // A sixth would produce a report with no written analysis at all.
+        type: { type: 'string', description: 'Report type', enum: ['executive', 'pnl', 'revenue', 'expenses', 'clients'] },
+        startDate: { type: 'string', description: 'Period start (ISO). Defaults to the start of this month.' },
+        endDate: { type: 'string', description: 'Period end (ISO). Defaults to today.' },
+        compare: { type: 'boolean', description: 'Include comparison against the preceding period' },
+      },
+      required: ['type'],
+    },
+    outputSchema: { type: 'object', description: 'Report', fields: { report: { type: 'object', description: 'Figures and written analysis' } } },
+  },
+
+  // ================================================================
+  //  GOALS
+  // ================================================================
+  //
+  // executePlan is deliberately NOT exposed. It accepts skipApproval, so a tool
+  // over it would let KEY run arbitrary plan steps with governance turned off —
+  // a self-escalation surface, not a capability. Plans are proposed here and
+  // executed by a human from /app/goals.
+  {
+    name: 'goals_list',
+    description: 'List business goals, optionally by status.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/goals',
+    parameters: {
+      type: 'object',
+      properties: { status: { type: 'string', description: 'Filter by status, e.g. ACTIVE' } },
+      required: [],
+    },
+    outputSchema: { type: 'object', description: 'Goals', fields: { goals: { type: 'array', description: 'Goal records by priority' } } },
+  },
+  {
+    name: 'goals_get',
+    description: 'Get one goal with the plans that have been built from it.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/goals',
+    parameters: {
+      type: 'object',
+      properties: { goalId: { type: 'string', description: 'Goal id' } },
+      required: ['goalId'],
+    },
+    outputSchema: { type: 'object', description: 'Goal detail', fields: { goal: { type: 'object', description: 'Goal with its plans' } } },
+  },
+  {
+    name: 'goals_create',
+    description: 'Set a business goal. Give it a target date and a priority so it can be ranked against the others.',
+    family: 'crud',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/goals',
+    changedEntities: ['aiGoal'],
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'What the goal is' },
+        description: { type: 'string', description: 'Detail and success criteria' },
+        priority: { type: 'number', description: 'Higher sorts first' },
+        targetDate: { type: 'string', description: 'When it should be achieved (ISO)' },
+      },
+      required: ['title'],
+    },
+    outputSchema: { type: 'object', description: 'Created goal', fields: { goal: { type: 'object', description: 'Goal record' } } },
+  },
+  {
+    name: 'goals_create_plan',
+    description: 'Decompose a goal into a concrete plan of steps. This PROPOSES the plan — it does not run it. Executing a plan stays with a human on the goals screen.',
+    family: 'organize',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/goals',
+    changedEntities: ['aiPlan'],
+    parameters: {
+      type: 'object',
+      properties: { goalId: { type: 'string', description: 'Goal to plan for' } },
+      required: ['goalId'],
+    },
+    outputSchema: { type: 'object', description: 'Created plan', fields: { plan: { type: 'object', description: 'Plan with its steps' } } },
+  },
+  {
+    name: 'goals_delete',
+    description: 'Delete a goal and the plans attached to it.',
+    family: 'crud',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/goals',
+    changedEntities: ['aiGoal'],
+    parameters: {
+      type: 'object',
+      properties: { goalId: { type: 'string', description: 'Goal id' } },
+      required: ['goalId'],
+    },
+    outputSchema: { type: 'object', description: 'Deletion result', fields: { success: { type: 'boolean', description: 'Whether it was deleted' } } },
+  },
+
+  // ================================================================
   //  CRUD — COMMERCE (existing tools, tagged with family)
   // ================================================================
   {

@@ -33,6 +33,7 @@ describe('KeyCortexGoalsController', () => {
       listGoals: vi.fn().mockResolvedValue([mockGoal]),
       getGoal: vi.fn().mockResolvedValue({ ...mockGoal, plans: [mockPlan] }),
       createPlanFromGoal: vi.fn().mockResolvedValue(mockPlan),
+      deleteGoal: vi.fn().mockResolvedValue({ success: true, deletedId: 'goal_1' }),
       createPlanFromCommand: vi.fn().mockResolvedValue(mockPlan),
       getPlan: vi.fn().mockResolvedValue(mockPlan),
       executePlan: vi.fn().mockResolvedValue({ planId: 'plan_1', status: 'completed', executed: 1, sagaId: 'saga_1' }),
@@ -88,18 +89,21 @@ describe('KeyCortexGoalsController', () => {
       expect(result).toEqual(expect.objectContaining({ id: 'goal_1', plans: [mockPlan] }));
     });
 
-    it('deletes a goal', async () => {
+    it('deletes a goal through the planner, scoped to the business', async () => {
+      // The findFirst + delete used to live in this controller. It moved to
+      // KeyCortexPlannerService so the HTTP route and the goals_delete tool run
+      // the same scoped code — the controller's job is now to insist on a
+      // businessId and hand off.
       const result = await controller.deleteGoal('goal_1', 'biz_1');
-      expect((prisma.client as any).aiGoal.findFirst).toHaveBeenCalledWith({
-        where: { id: 'goal_1', businessId: 'biz_1' },
-      });
-      expect((prisma.client as any).aiGoal.delete).toHaveBeenCalledWith({ where: { id: 'goal_1' } });
-      expect(result).toEqual({ success: true });
+      expect(planner.deleteGoal).toHaveBeenCalledWith('biz_1', 'goal_1');
+      expect(result).toEqual({ success: true, deletedId: 'goal_1' });
     });
 
-    it('throws when deleting a missing goal', async () => {
-      (prisma.client as any).aiGoal.findFirst = vi.fn().mockResolvedValueOnce(null);
-      await expect(controller.deleteGoal('missing', 'biz_1')).rejects.toThrow(NotFoundException);
+    it('refuses to delete without a businessId', async () => {
+      await expect(controller.deleteGoal('goal_1', undefined as unknown as string)).rejects.toThrow(
+        /businessId is required/,
+      );
+      expect(planner.deleteGoal).not.toHaveBeenCalled();
     });
   });
 

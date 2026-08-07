@@ -146,6 +146,22 @@ export class KeyCortexPlannerService {
    * layers, deliberately: the extension only fires when a request-scoped tenant
    * context is active, and cron and event-driven callers have none.
    */
+  /**
+   * Deleting was written inline in the controller. Lifted here so the HTTP
+   * route and the goals_delete tool run the same scoped code — the alternative
+   * is a handler doing its own prisma work, which is how finance_view_receivables
+   * ended up computing an AR figure that could disagree with the Finance screen.
+   */
+  async deleteGoal(businessId: string, goalId: string) {
+    const goal = await this.prisma.client.aiGoal.findFirst({
+      where: { id: goalId, businessId },
+    });
+    if (!goal) throw new NotFoundException('Goal not found');
+
+    await this.prisma.client.aiGoal.delete({ where: { id: goalId } });
+    return { success: true, deletedId: goalId };
+  }
+
   async createPlanFromGoal(businessId: string, goalId: string, userId?: string) {
     const goal = await this.prisma.client.aiGoal.findFirst({
       where: { id: goalId, businessId },

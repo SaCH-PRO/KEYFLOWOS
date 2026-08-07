@@ -41,6 +41,9 @@ import { CallScriptService } from '../call-tasks/call-script.service';
 import { EvidenceService } from '../evidence/evidence.service';
 import { MarketplaceService } from '../marketplace/marketplace.service';
 import { PaymentsOpsService } from '../payments/payments-ops.service';
+import { ContractsService } from '../contracts/contracts.service';
+import { ReportsService } from '../reports/reports.service';
+import { KeyCortexPlannerService } from '../key-cortex/key-cortex-planner.service';
 import { CrmDealsService } from '../crm/crm-deals.service';
 import { DealForecastService } from '../crm/deal-forecast.service';
 import { DealVelocityService } from '../crm/deal-velocity.service';
@@ -396,6 +399,15 @@ export class FlowOrchestratorService {
   }
   private getPaymentsOps() {
     return this.moduleRef.get(PaymentsOpsService, { strict: false });
+  }
+  private getContracts() {
+    return this.moduleRef.get(ContractsService, { strict: false });
+  }
+  private getReports() {
+    return this.moduleRef.get(ReportsService, { strict: false });
+  }
+  private getPlanner() {
+    return this.moduleRef.get(KeyCortexPlannerService, { strict: false });
   }
   private getDealForecast() {
     return this.moduleRef.get(DealForecastService, { strict: false });
@@ -2268,6 +2280,114 @@ ${triage.standingContext}`;
           actorId: KEY_SYSTEM_ACTOR_ID,
         });
         return { success: removed.ok, deletedId: args.dealId };
+      }
+
+      // === CONTRACTS ===
+      case 'contracts_list': {
+        const result = await this.getContracts().listContracts(businessId, {
+          status: args.status,
+          search: args.search,
+          expiringWithinDays: args.expiringWithinDays,
+          limit: args.limit ?? 50,
+        });
+        return result;
+      }
+      case 'contracts_get': {
+        const contract = await this.getContracts().getContract(businessId, args.contractId);
+        return { contract };
+      }
+      case 'contracts_stats': {
+        const stats = await this.getContracts().getStats(businessId);
+        return { stats };
+      }
+      case 'contracts_create': {
+        const contract = await this.getContracts().createContract(
+          businessId,
+          {
+            title: args.title,
+            contractType: args.contractType,
+            status: args.status,
+            effectiveDate: args.effectiveDate,
+            expiryDate: args.expiryDate,
+            renewalDate: args.renewalDate,
+            renewalNoticeDays: args.renewalNoticeDays,
+            contractValue: args.contractValue,
+            currency: args.currency,
+            jurisdiction: args.jurisdiction,
+            notes: args.notes,
+          },
+          KEY_SYSTEM_ACTOR_ID,
+        );
+        return { contract };
+      }
+      case 'contracts_update': {
+        const contract = await this.getContracts().updateContract(businessId, args.contractId, {
+          title: args.title,
+          status: args.status,
+          expiryDate: args.expiryDate,
+          renewalDate: args.renewalDate,
+          renewalNoticeDays: args.renewalNoticeDays,
+          contractValue: args.contractValue,
+          notes: args.notes,
+        });
+        return { contract };
+      }
+      case 'contracts_acknowledge_alert': {
+        const alert = await this.getContracts().acknowledgeAlert(
+          businessId,
+          args.alertId,
+          KEY_SYSTEM_ACTOR_ID,
+        );
+        return { alert };
+      }
+      case 'contracts_delete': {
+        const removed = await this.getContracts().deleteContract(businessId, args.contractId);
+        return { success: true, deletedId: args.contractId, result: removed };
+      }
+
+      // === REPORTS ===
+      case 'reports_generate': {
+        const report = await this.getReports().generateReport(
+          businessId,
+          args.type,
+          args.startDate,
+          args.endDate,
+          args.compare ?? false,
+        );
+        return { report };
+      }
+
+      // === GOALS ===
+      case 'goals_list': {
+        const goals = await this.getPlanner().listGoals(businessId, args.status);
+        return { goals };
+      }
+      case 'goals_get': {
+        const goal = await this.getPlanner().getGoal(businessId, args.goalId);
+        return { goal };
+      }
+      case 'goals_create': {
+        const goal = await this.getPlanner().createGoal(businessId, {
+          title: args.title,
+          description: args.description,
+          priority: args.priority,
+          targetDate: args.targetDate,
+        });
+        return { goal };
+      }
+      case 'goals_create_plan': {
+        // businessId first, and it is the tenant's own — not a value the model
+        // supplied. This path used to resolve a goal id against every business.
+        const plan = await this.getPlanner().createPlanFromGoal(
+          businessId,
+          args.goalId,
+          KEY_SYSTEM_ACTOR_ID,
+        );
+        return { plan };
+      }
+      case 'goals_delete': {
+        const removed = await this.getPlanner().deleteGoal(businessId, args.goalId);
+        return removed;
       }
 
       // === PAYMENTS ===
