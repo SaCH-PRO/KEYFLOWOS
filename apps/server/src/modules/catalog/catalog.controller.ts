@@ -38,7 +38,7 @@ export class CatalogController {
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/products')
   createProduct(@Param('businessId') businessId: string, @Body() body: CreateProductDto) {
-    return this.catalog.createProduct({ businessId, ...body });
+    return this.catalog.createProduct({ ...body, businessId });
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -54,7 +54,7 @@ export class CatalogController {
     @Param('productId') productId: string,
     @Body() body: Partial<CreateProductDto>,
   ) {
-    return this.catalog.updateProduct({ businessId, productId, ...body });
+    return this.catalog.updateProduct({ ...body, businessId, productId });
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -74,7 +74,7 @@ export class CatalogController {
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/services')
   createService(@Param('businessId') businessId: string, @Body() body: CreateCatalogServiceDto) {
-    return this.catalog.createService({ businessId, ...body });
+    return this.catalog.createService({ ...body, businessId });
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -84,7 +84,7 @@ export class CatalogController {
     @Param('serviceId') serviceId: string,
     @Body() body: UpdateCatalogServiceDto,
   ) {
-    return this.catalog.updateService({ businessId, serviceId, ...body });
+    return this.catalog.updateService({ ...body, businessId, serviceId });
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

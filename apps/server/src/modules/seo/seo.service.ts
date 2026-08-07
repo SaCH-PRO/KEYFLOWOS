@@ -366,7 +366,7 @@ export class SeoService {
   }) {
     return this.prisma.client.seoPage.upsert({
       where: { businessId_path: { businessId, path: data.path } },
-      create: { businessId, ...data },
+      create: { ...data, businessId },
       update: {
         title: data.title,
         wordCount: data.wordCount,

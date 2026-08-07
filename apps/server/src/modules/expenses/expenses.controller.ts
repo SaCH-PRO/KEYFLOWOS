@@ -165,7 +165,7 @@ export class ExpensesController {
       items?: Array<{ amount: number; categoryId?: string | null; description?: string; taxRateId?: string | null }>;
     },
   ) {
-    return this.expenses.createExpense({ businessId, ...body });
+    return this.expenses.createExpense({ ...body, businessId });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -195,7 +195,7 @@ export class ExpensesController {
       items?: Array<{ amount: number; categoryId?: string | null; description?: string; taxRateId?: string | null }> | null;
     },
   ) {
-    return this.expenses.updateExpense({ businessId, expenseId, ...body });
+    return this.expenses.updateExpense({ ...body, businessId, expenseId });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -224,7 +224,7 @@ export class ExpensesController {
     @Param('businessId') businessId: string,
     @Body() body: { name: string; icon?: string; color?: string },
   ) {
-    return this.expenses.createCategory({ businessId, ...body });
+    return this.expenses.createCategory({ ...body, businessId });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -266,7 +266,7 @@ export class ExpensesController {
       rollover?: boolean;
     },
   ) {
-    return this.expenses.upsertBudget({ businessId, ...body });
+    return this.expenses.upsertBudget({ ...body, businessId });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)

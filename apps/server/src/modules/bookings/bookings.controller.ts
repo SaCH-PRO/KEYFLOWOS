@@ -233,7 +233,7 @@ export class BookingsController {
     @Param('serviceId') serviceId: string,
     @Body() body: { name?: string; duration?: number; price?: number; description?: string; bufferMins?: number; leadTimeMins?: number },
   ) {
-    return this.catalog.updateService({ businessId, serviceId, ...body });
+    return this.catalog.updateService({ ...body, businessId, serviceId });
   }
 
   /** @deprecated Use Catalog endpoint. Pass-through to CatalogService.deleteService. */

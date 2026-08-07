@@ -45,7 +45,7 @@ export class RecurringInvoiceController {
       metadata?: Record<string, unknown> | null;
     },
   ) {
-    return this.service.createRecurringInvoice({ businessId, ...body });
+    return this.service.createRecurringInvoice({ ...body, businessId });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -70,7 +70,7 @@ export class RecurringInvoiceController {
       metadata?: Record<string, unknown> | null;
     },
   ) {
-    return this.service.updateRecurringInvoice({ id, businessId, ...body });
+    return this.service.updateRecurringInvoice({ ...body, id, businessId });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)

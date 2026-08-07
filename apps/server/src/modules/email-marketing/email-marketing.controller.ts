@@ -39,7 +39,7 @@ export class EmailMarketingController {
       scheduledAt?: string;
     },
   ) {
-    return this.emailMarketing.createCampaign({ businessId, ...body });
+    return this.emailMarketing.createCampaign({ ...body, businessId });
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -55,7 +55,7 @@ export class EmailMarketingController {
       scheduledAt?: string;
     },
   ) {
-    return this.emailMarketing.updateCampaign({ businessId, id, ...body });
+    return this.emailMarketing.updateCampaign({ ...body, businessId, id });
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

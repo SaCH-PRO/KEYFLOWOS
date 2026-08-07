@@ -195,7 +195,7 @@ export class ReputationService {
 
     const saved = await this.prisma.client.businessReputation.upsert({
       where: { businessId },
-      create: { businessId, ...data },
+      create: { ...data, businessId },
       update: data,
     });
 

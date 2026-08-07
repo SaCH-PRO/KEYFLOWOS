@@ -50,7 +50,7 @@ export class ChannelConnectionService {
     providerMeta?: Record<string, unknown>;
   }) {
     const conn = await this.prisma.client.channelConnection.create({
-      data: { businessId, ...data },
+      data: { ...data, businessId },
       include: { destinations: true },
     });
 
@@ -138,7 +138,7 @@ export class ChannelConnectionService {
     }
 
     return this.prisma.client.channelDestination.create({
-      data: { connectionId, businessId, ...data },
+      data: { ...data, connectionId, businessId },
     });
   }
 

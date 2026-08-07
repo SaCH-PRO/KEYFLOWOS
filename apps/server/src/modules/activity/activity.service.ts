@@ -63,7 +63,7 @@ export class ActivityLogService {
 
   async logActivity(businessId: string, data: { type: string; description: string; userId?: string; metadata?: Record<string, unknown> }) {
     return this.prisma.client.activityLog.create({
-      data: { businessId, ...data, createdAt: new Date() },
+      data: { ...data, businessId, createdAt: new Date() },
     });
   }
 

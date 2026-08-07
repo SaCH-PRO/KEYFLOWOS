@@ -74,7 +74,7 @@ export class CrmDealsController {
   @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/won-lost-reasons')
   createReason(@Param('businessId') businessId: string, @Body() body: CreateWonLostReasonDto) {
-    return this.reasons.create({ businessId, ...body });
+    return this.reasons.create({ ...body, businessId });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -86,7 +86,7 @@ export class CrmDealsController {
     @Param('reasonId') reasonId: string,
     @Body() body: UpdateWonLostReasonDto,
   ) {
-    return this.reasons.update({ businessId, reasonId, ...body });
+    return this.reasons.update({ ...body, businessId, reasonId });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -113,7 +113,7 @@ export class CrmDealsController {
   @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/deal-stages')
   createStage(@Param('businessId') businessId: string, @Body() body: CreateDealStageDto) {
-    return this.deals.createStage({ businessId, ...body });
+    return this.deals.createStage({ ...body, businessId });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -125,7 +125,7 @@ export class CrmDealsController {
     @Param('stageId') stageId: string,
     @Body() body: UpdateDealStageDto,
   ) {
-    return this.deals.updateStage({ businessId, stageId, ...body });
+    return this.deals.updateStage({ ...body, businessId, stageId });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -189,7 +189,7 @@ export class CrmDealsController {
     @Body() body: CreateDealDto,
     @Req() req: any,
   ) {
-    return this.deals.createDeal({ businessId, ...body, actorId: req?.user?.id });
+    return this.deals.createDeal({ ...body, businessId, actorId: req?.user?.id });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -210,7 +210,7 @@ export class CrmDealsController {
     @Body() body: UpdateDealDto,
     @Req() req: any,
   ) {
-    return this.deals.updateDeal({ businessId, dealId, ...body, actorId: req?.user?.id });
+    return this.deals.updateDeal({ ...body, businessId, dealId, actorId: req?.user?.id });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -260,7 +260,7 @@ export class CrmDealsController {
     @Body() body: WinDealDto,
     @Req() req: any,
   ) {
-    return this.deals.winDeal({ businessId, dealId, ...body, actorId: req?.user?.id ?? undefined });
+    return this.deals.winDeal({ ...body, businessId, dealId, actorId: req?.user?.id ?? undefined });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -273,7 +273,7 @@ export class CrmDealsController {
     @Body() body: LoseDealDto,
     @Req() req: any,
   ) {
-    return this.deals.loseDeal({ businessId, dealId, ...body, actorId: req?.user?.id });
+    return this.deals.loseDeal({ ...body, businessId, dealId, actorId: req?.user?.id });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
