@@ -101,9 +101,29 @@ export class KeyCortexPlannerService {
     return goal;
   }
 
-  async createPlanFromGoal(goalId: string, userId?: string) {
-    const goal = await this.prisma.client.aiGoal.findUnique({
-      where: { id: goalId },
+  /**
+   * businessId is required, and it is first so that every existing caller fails
+   * to compile until it supplies one.
+   *
+   * This used to take only a goalId and resolve it with
+   * `findUnique({ where: { id: goalId } })` — no tenant scoping anywhere in the
+   * path. AiGoal is not among the 47 models the Prisma tenant extension covers,
+   * so nothing upstream was scoping it either, and POST
+   * /cortex/goals/:goalId/plans passes the id straight from the URL with no
+   * ownership check.
+   *
+   * So an authenticated user of business A could post another business's goal
+   * id and get back a plan whose objective is built from that goal's title and
+   * description. A cross-tenant read, and a write into the other tenant, from a
+   * route that looks like it only touches your own data.
+   *
+   * AiGoal and AiPlan have since been added to BUSINESS_ID_MODELS as well. Two
+   * layers, deliberately: the extension only fires when a request-scoped tenant
+   * context is active, and cron and event-driven callers have none.
+   */
+  async createPlanFromGoal(businessId: string, goalId: string, userId?: string) {
+    const goal = await this.prisma.client.aiGoal.findFirst({
+      where: { id: goalId, businessId },
     });
     if (!goal) throw new NotFoundException('Goal not found');
 

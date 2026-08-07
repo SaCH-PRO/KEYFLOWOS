@@ -43,7 +43,9 @@ describe('KeyCortexTriggerService', () => {
     prisma = createMockPrisma();
     eventBus = createEventBus();
     planner = {
-      createGoal: vi.fn().mockResolvedValue({ id: 'goal_1' }),
+      // createGoal returns a full AiGoal row; the businessId on it is what
+      // scopes the plan lookup that follows.
+      createGoal: vi.fn().mockResolvedValue({ id: 'goal_1', businessId: 'biz_1' }),
       createPlanFromGoal: vi.fn().mockResolvedValue({ id: 'plan_1' }),
       executePlan: vi.fn().mockResolvedValue({ status: 'completed' }),
     };
@@ -93,7 +95,7 @@ describe('KeyCortexTriggerService', () => {
     });
 
     expect(planner.createGoal).toHaveBeenCalledWith('b1', expect.objectContaining({ title: expect.stringContaining('Triggered goal') }));
-    expect(planner.createPlanFromGoal).toHaveBeenCalledWith('goal_1', undefined);
+    expect(planner.createPlanFromGoal).toHaveBeenCalledWith('biz_1', 'goal_1', undefined);
     expect(planner.executePlan).toHaveBeenCalledWith('plan_1', { traceId: undefined });
   });
 

@@ -105,9 +105,18 @@ describe('KeyCortexGoalsController', () => {
 
   describe('plans', () => {
     it('creates a plan from a goal', async () => {
-      const result = await controller.createPlanFromGoal('goal_1', {});
-      expect(planner.createPlanFromGoal).toHaveBeenCalledWith('goal_1', undefined);
+      const result = await controller.createPlanFromGoal('goal_1', { businessId: 'biz_1' });
+      expect(planner.createPlanFromGoal).toHaveBeenCalledWith('biz_1', 'goal_1', undefined);
       expect(result).toEqual(mockPlan);
+    });
+
+    it('refuses to build a plan from a goal id with no business attached', async () => {
+      // The hole this closes: the route took the goal id straight from the URL
+      // and the service resolved it with findUnique on the bare id, so a user of
+      // one business could build a plan from another business's goal and read
+      // its title and description back in the response.
+      await expect(controller.createPlanFromGoal('goal_1', {})).rejects.toThrow(/businessId is required/);
+      expect(planner.createPlanFromGoal).not.toHaveBeenCalled();
     });
 
     it('creates a plan from a command', async () => {

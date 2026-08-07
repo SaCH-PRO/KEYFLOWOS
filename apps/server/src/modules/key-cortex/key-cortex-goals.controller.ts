@@ -99,10 +99,14 @@ export class KeyCortexGoalsController {
   @Post('goals/:goalId/plans')
   async createPlanFromGoal(
     @Param('goalId') goalId: string,
-    @Body() dto: CreatePlanFromGoalDto,
+    @Body() dto: CreatePlanFromGoalDto & { businessId?: string },
   ) {
+    // businessId was absent here entirely, so the goal id from the URL was
+    // resolved against every business. Every sibling route on this controller
+    // already demanded it; this one did not, and it is the only one that wrote.
+    if (!dto.businessId) throw new BadRequestException('businessId is required');
     this.logger.log(`[goals] create plan from goal ${goalId}`);
-    return this.planner.createPlanFromGoal(goalId, dto.userId);
+    return this.planner.createPlanFromGoal(dto.businessId, goalId, dto.userId);
   }
 
   @Post('plans')
