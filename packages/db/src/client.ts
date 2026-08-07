@@ -96,7 +96,18 @@ const BUSINESS_ID_MODELS = new Set([
   // exist. MessageThread/CommunicationEvent/NotificationEvent were removed
   // from this set because there are no such models; these four are what
   // they became, and every one has a businessId.
-  'KeyInboxThread', 'ConversationThread', 'Notification', 'CustomerNotificationLog',
+  'KeyInboxThread', 'Notification', 'CustomerNotificationLog',
+  // ConversationThread was removed 2026-08-07: the model was dropped when the
+  // two omnichannel inboxes were merged, so this set named a model that no
+  // longer exists — the exact drift the note above describes, committed by the
+  // same person who wrote the note.
+  //
+  // AiGoal/AiPlan added the same day. POST /cortex/goals/:goalId/plans resolved
+  // a goal id from the URL with no tenant scoping at any layer, because these
+  // were absent here AND the service used findUnique on the bare id. The
+  // service is scoped now; this is the second layer, for the paths that do not
+  // go through a controller.
+  'AiGoal', 'AiPlan',
 ]);
 
 

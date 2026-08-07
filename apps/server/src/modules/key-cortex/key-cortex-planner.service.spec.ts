@@ -182,7 +182,7 @@ describe('KeyCortexPlannerService', () => {
     });
     (prisma.client.aiPlan.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 'plan_1', goalId: goal.id, steps: [] });
 
-    const plan = await service.createPlanFromGoal(goal.id);
+    const plan = await service.createPlanFromGoal('biz_1', goal.id);
     expect(planner.createPlan).toHaveBeenCalledWith('biz_1', expect.objectContaining({ objective: expect.stringContaining('Collect overdue invoices') }), undefined);
     expect(prisma.client.aiPlan.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ goalId: goal.id }) }));
     expect(plan).toEqual({ id: 'plan_1', goalId: goal.id, steps: [] });

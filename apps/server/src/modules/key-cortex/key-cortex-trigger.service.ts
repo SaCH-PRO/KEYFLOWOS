@@ -163,7 +163,7 @@ export class KeyCortexTriggerService implements OnModuleInit {
     this.logger.log(`[trigger] Created goal ${goal.id} from rule ${rule.id}`);
 
     if (rule.goalTemplateId) {
-      const plan = await this.planner.createPlanFromGoal(goal.id, event.userId);
+      const plan = await this.planner.createPlanFromGoal(goal.businessId, goal.id, event.userId);
       if (plan?.id) {
         await this.planner.executePlan(plan.id, { traceId: event.metadata?.correlationId });
       }

@@ -192,7 +192,7 @@ export class KeyCortexQueryPipelineService {
             description: goalIntent.description,
             priority: 1,
           });
-          const plan = await this.planner.createPlanFromGoal(goal.id, query.userId);
+          const plan = await this.planner.createPlanFromGoal(goal.businessId, goal.id, query.userId);
           if (!plan) {
             throw new Error('Planner returned no plan');
           }
