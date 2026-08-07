@@ -130,6 +130,35 @@ async function main() {
     }
   }
 
+  // ── Framework redirects ────────────────────────────────────────────────
+  const configTable = nextConfigRedirects(appRoot);
+  const redirectedAway = tools.filter((t) => {
+    const route = (t.manualEquivalentRoute ?? '').trim();
+    if (!route || REDIRECTED_BY_DESIGN[route]) return false;
+    return followConfigRedirects(route, configTable) !== route;
+  });
+
+  if (redirectedAway.length > 0) {
+    const header = `[check-tool-routes] ${redirectedAway.length} tool(s) declare a route next.config redirects away:`;
+    if (WARN_ONLY) {
+      console.warn(header);
+      for (const t of redirectedAway) {
+        console.warn(`  - ${t.name} -> ${t.manualEquivalentRoute} => ${followConfigRedirects(t.manualEquivalentRoute!, configTable)}`);
+      }
+    } else {
+      console.error(header);
+      for (const t of redirectedAway) {
+        console.error(`  - ${t.name} -> ${t.manualEquivalentRoute} => ${followConfigRedirects(t.manualEquivalentRoute!, configTable)}`);
+      }
+      console.error(
+        'The tool names a route the framework moves. Open the destination and confirm it is the\n' +
+          'same screen: if it is, add a REDIRECTED_BY_DESIGN entry; if it is not, the tool is\n' +
+          'pointing at a manual equivalent that does not exist.',
+      );
+      process.exit(1);
+    }
+  }
+
   if (noManualWrite.length > 0) {
     const header =
       `[check-tool-routes] ${noManualWrite.length} write tool(s) point at a screen a human cannot write from:`;
@@ -266,6 +295,69 @@ function assertParityCheckWorks(appDir: string, appRoot: string): void {
     process.exit(2);
   }
 }
+
+/**
+ * next.config.ts has its own redirect table, and nothing here ever read it.
+ *
+ * That is how /app/payments shipped broken. It was a permanent 308 to
+ * /app/commerce?tab=payments; commerce redirects on to /app/money/revenue (a
+ * one-line re-export of the commerce page), which treats "payments" as an old
+ * tab name and silently rewrites it to "pipeline". The 792-line payments
+ * console was unreachable by any URL — and seven tools plus a brand-new nav
+ * entry pointed at it.
+ *
+ * Every check in this file resolved page FILES and followed in-page redirect()
+ * calls, so all of it passed. The defect lived one layer up, in framework
+ * config, and was found only by starting the app and following the chain with
+ * curl. Tests that read source cannot see a redirect the framework performs.
+ */
+function nextConfigRedirects(appRoot: string): Record<string, string> {
+  const cfg = fs.readFileSync(path.join(appRoot, '..', 'next.config.ts'), 'utf8');
+  const at = cfg.indexOf('async redirects()');
+  if (at === -1) return {};
+
+  const table: Record<string, string> = {};
+  // \s covers the newline, so this matches whether the entry is formatted
+  // across lines or collapsed onto one. The first version demanded a literal
+  // \n between the two keys and silently missed single-line entries — caught by
+  // the negative control, which is the only reason to run one.
+  for (const m of cfg.slice(at).matchAll(/source:\s*"([^"]+)"\s*,\s*destination:\s*"([^"]+)"/g)) {
+    table[m[1]] = m[2];
+  }
+  return table;
+}
+
+/** Follow the config table until it stops moving. */
+function followConfigRedirects(route: string, table: Record<string, string>): string {
+  let current = route;
+  for (let hop = 0; hop < 5; hop++) {
+    const direct = table[current];
+    const prefixed = Object.entries(table).find(
+      ([src]) => src.endsWith('/:path*') && current.startsWith(src.slice(0, -7) + '/'),
+    )?.[1];
+    const next = direct ?? prefixed;
+    if (!next || next === current) break;
+    current = next;
+  }
+  return current;
+}
+
+/**
+ * Tool routes the config deliberately moves, with where they end up.
+ *
+ * These are a real information-architecture migration: the destinations exist,
+ * render, and are the same screens under new paths. Listing them is the point —
+ * an entry says someone looked at the destination and agreed it is the same
+ * place, which is exactly the check nobody performed for /app/payments.
+ */
+const REDIRECTED_BY_DESIGN: Record<string, string> = {
+  '/app/commerce': '/app/money/revenue — re-exports the commerce page',
+  '/app/projects': '/app/work/projects — re-exports the projects page',
+  '/app/calendar': '/app/schedule/calendar — same screen, new path',
+  '/app/marketing': '/app/communicate/campaigns — same screen, new path',
+  '/app/expenses': '/app/money/expenses — same screen, new path',
+  '/app/finance': '/app/money — the finance cockpit landing',
+};
 
 /**
  * Does this app-router path render a page?

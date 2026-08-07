@@ -123,16 +123,16 @@ const nextConfig: NextConfig = {
         destination: "/app/keyflow-command",
         permanent: true,
       },
-      {
-        source: "/app/payments",
-        destination: "/app/commerce?tab=payments",
-        permanent: true,
-      },
-      {
-        source: "/app/payments/:path*",
-        destination: "/app/commerce?tab=payments",
-        permanent: true,
-      },
+      // REMOVED 2026-08-07: /app/payments -> /app/commerce?tab=payments.
+      //
+      // Commerce redirects on to /app/money/revenue (a one-line re-export of
+      // the commerce page), which treats "payments" as an old tab name and
+      // silently rewrites it to "pipeline". So this permanent redirect made the
+      // 792-line payments console unreachable by any URL, and it was found only
+      // by starting the app and following the chain -- check-tool-routes reads
+      // page files and in-page redirect() calls, and never looked in here.
+      //
+      // Payments is its own surface now, with a nav entry under Money.
       // Financial Flow unification: old finance cockpit sub-routes now live
       // under their own top-level Financial Flow pages.
       {
