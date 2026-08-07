@@ -3,6 +3,7 @@
 import type { LucideIcon } from "lucide-react";
 import {
   Zap,
+  Boxes,
   Briefcase,
   Wrench,
   User,
@@ -124,6 +125,12 @@ export const operateSections: NavSection[] = [
     items: [
       { label: "Overview", href: "/app/financial-flow", icon: Banknote },
       { label: "Sales", href: "/app/commerce", icon: Receipt },
+      // Stock is money you have already spent and not yet earned back, so it
+      // belongs beside Sales rather than in a systems menu. It had no nav entry
+      // at all until 2026-08-07 — the command centre was a tab inside a
+      // dormant-flagged marketplace page, behind a redirect to a tab that did
+      // not exist.
+      { label: "Inventory", href: "/app/inventory", icon: Boxes },
       { label: "Expenses", href: "/app/expenses", icon: Receipt },
       { label: "Budgets", href: "/app/budgeting", icon: Target },
       { label: "Reports", href: "/app/reports", icon: BarChart3 },

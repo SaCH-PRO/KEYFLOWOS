@@ -994,6 +994,197 @@ export const FLOW_TOOLS: FlowTool[] = [
   },
 
   // ================================================================
+  //  INVENTORY & STOCK
+  // ================================================================
+  //
+  // Ten models, ~19 continental-ops service methods, a full REST surface and a
+  // 2,032-line command centre — and until 2026-08-07, zero tools and no nav
+  // entry. The screen was a tab inside a dormant-flagged marketplace page,
+  // behind a redirect to a commerce tab that did not exist, so nobody could
+  // open it either.
+  //
+  // inventory_list_warehouses is the same shape of prerequisite as
+  // deals_list_stages: a transfer needs two warehouse IDs, and without the
+  // lookup the model invents them.
+  {
+    name: 'inventory_list_stock',
+    description: 'List stock on hand — quantity per product per warehouse. Use this to answer "how many do we have" and "where is it".',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/inventory',
+    parameters: {
+      type: 'object',
+      properties: {
+        warehouseId: { type: 'string', description: 'Restrict to one warehouse' },
+      },
+      required: [],
+    },
+    outputSchema: { type: 'object', description: 'Stock levels', fields: { inventory: { type: 'array', description: 'Stock records with product and warehouse' } } },
+  },
+  {
+    name: 'inventory_summary',
+    description: 'Total stock value, unit counts and warehouse breakdown. The whole-inventory picture rather than a per-product one.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/inventory',
+    parameters: { type: 'object', properties: {}, required: [] },
+    outputSchema: { type: 'object', description: 'Inventory summary', fields: { summary: { type: 'object', description: 'Totals and per-warehouse breakdown' } } },
+  },
+  {
+    name: 'inventory_low_stock_alerts',
+    description: 'Products at or below their reorder point, and what is at risk of going out of stock. Use this to decide what to buy.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/inventory',
+    parameters: { type: 'object', properties: {}, required: [] },
+    outputSchema: { type: 'object', description: 'Stock alerts', fields: { alerts: { type: 'array', description: 'Products below reorder point' } } },
+  },
+  {
+    name: 'inventory_list_movements',
+    description: 'Recent stock movements — every adjustment, transfer and receipt with its reason code and note. This is the audit trail for "why did the count change".',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/inventory',
+    parameters: {
+      type: 'object',
+      properties: { limit: { type: 'number', description: 'How many movements to return (default 100)' } },
+      required: [],
+    },
+    outputSchema: { type: 'object', description: 'Movement history', fields: { movements: { type: 'array', description: 'Stock movement records' } } },
+  },
+  {
+    name: 'inventory_list_warehouses',
+    description: 'List active warehouses with their stock. Call this before a transfer so you have real warehouse ids.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/inventory',
+    parameters: { type: 'object', properties: {}, required: [] },
+    outputSchema: { type: 'object', description: 'Warehouses', fields: { warehouses: { type: 'array', description: 'Warehouse records' } } },
+  },
+  {
+    name: 'inventory_adjust_stock',
+    description: 'Change the quantity of one stock record, with a reason. Positive adds, negative removes. Writes a StockMovement so the change is auditable — never adjust to "correct" a number without knowing why it moved.',
+    family: 'organize',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/inventory',
+    changedEntities: ['inventoryStock', 'stockMovement'],
+    parameters: {
+      type: 'object',
+      properties: {
+        stockId: { type: 'string', description: 'Stock record id from inventory_list_stock' },
+        quantityChange: { type: 'number', description: 'Signed change — positive adds, negative removes' },
+        // Matches the six options the human form offers
+        // (inventory-command-center.tsx:1861-1868). A seventh value here would
+        // let KEY file a reason no person could pick.
+        reasonCode: {
+          type: 'string',
+          description: 'Why the quantity changed',
+          enum: ['COUNT_CORRECTION', 'DAMAGE', 'RETURN', 'THEFT_LOSS', 'MANUAL', 'INITIAL_COUNT'],
+        },
+        note: { type: 'string', description: 'Context for the adjustment. REQUIRED when reasonCode is MANUAL — the server rejects a manual adjustment without one.' },
+      },
+      required: ['stockId', 'quantityChange', 'reasonCode'],
+    },
+    outputSchema: { type: 'object', description: 'Adjusted stock', fields: { stock: { type: 'object', description: 'Updated stock record' } } },
+  },
+  {
+    name: 'inventory_transfer_stock',
+    description: 'Move stock of one product between two warehouses. Call inventory_list_warehouses first for the ids.',
+    family: 'organize',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/inventory',
+    changedEntities: ['inventoryStock', 'stockMovement'],
+    parameters: {
+      type: 'object',
+      properties: {
+        productId: { type: 'string', description: 'Product to move' },
+        fromWarehouseId: { type: 'string', description: 'Source warehouse id' },
+        toWarehouseId: { type: 'string', description: 'Destination warehouse id — must differ from the source' },
+        quantity: { type: 'number', description: 'Units to move; must be positive' },
+        note: { type: 'string', description: 'Why the stock is moving' },
+      },
+      required: ['productId', 'fromWarehouseId', 'toWarehouseId', 'quantity'],
+    },
+    outputSchema: { type: 'object', description: 'Transfer result', fields: { transfer: { type: 'object', description: 'Updated source and destination stock' } } },
+  },
+  {
+    name: 'inventory_list_purchase_orders',
+    description: 'List purchase orders raised with suppliers, optionally by status. Use this to see what stock is on its way.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/inventory',
+    parameters: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', description: 'Filter by status', enum: ['DRAFT', 'SUBMITTED', 'ACKNOWLEDGED', 'SHIPPED', 'RECEIVED'] },
+        limit: { type: 'number', description: 'Maximum to return (default 50)' },
+      },
+      required: [],
+    },
+    outputSchema: { type: 'object', description: 'Purchase orders', fields: { purchaseOrders: { type: 'array', description: 'PO records' }, total: { type: 'number', description: 'Total count' } } },
+  },
+  {
+    name: 'inventory_create_purchase_order',
+    description: 'Raise a purchase order with a supplier. Totals are computed from the line items.',
+    family: 'crud',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/inventory',
+    changedEntities: ['purchaseOrder'],
+    parameters: {
+      type: 'object',
+      properties: {
+        supplierName: { type: 'string', description: 'Supplier name' },
+        supplierEmail: { type: 'string', description: 'Supplier email' },
+        items: {
+          type: 'array',
+          // The registry's parameter type allows only a scalar `items` shape,
+          // so the line structure is described rather than schema'd. Totals are
+          // computed server-side from quantity * unitPrice, so a line missing
+          // unitPrice silently contributes zero — say so here rather than let
+          // the model guess.
+          description: 'Line items. Each is an object with { name, quantity, unitPrice } and optionally productId. unitPrice is required for the line to contribute to the order total.',
+          items: { type: 'object' },
+        },
+        currency: { type: 'string', description: 'Currency code' },
+        expectedDelivery: { type: 'string', description: 'Expected delivery date (ISO)' },
+        notes: { type: 'string', description: 'Notes for the supplier' },
+      },
+      required: ['supplierName', 'items'],
+    },
+    outputSchema: { type: 'object', description: 'Created purchase order', fields: { purchaseOrder: { type: 'object', description: 'PO record with computed totals' } } },
+  },
+  {
+    name: 'inventory_advance_purchase_order',
+    description: 'Move a purchase order to its next state. RECEIVED is the one that matters — it is what brings the stock onto the books.',
+    family: 'execute',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/inventory',
+    changedEntities: ['purchaseOrder', 'inventoryStock'],
+    parameters: {
+      type: 'object',
+      properties: {
+        purchaseOrderId: { type: 'string', description: 'Purchase order id' },
+        // Exactly the four the controller accepts
+        // (marketplace.controller.ts:306-313). DRAFT is absent deliberately:
+        // advancing is forward-only.
+        status: { type: 'string', description: 'New status', enum: ['SUBMITTED', 'ACKNOWLEDGED', 'SHIPPED', 'RECEIVED'] },
+      },
+      required: ['purchaseOrderId', 'status'],
+    },
+    outputSchema: { type: 'object', description: 'Advanced purchase order', fields: { purchaseOrder: { type: 'object', description: 'PO record in its new state' } } },
+  },
+
+  // ================================================================
   //  CRUD — COMMERCE (existing tools, tagged with family)
   // ================================================================
   {

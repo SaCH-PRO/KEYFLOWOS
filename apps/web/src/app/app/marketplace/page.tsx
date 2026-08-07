@@ -71,7 +71,12 @@ function MarketplacePageInner() {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
     if (params.get("tab") === "inventory" || activeTab === "inventory") {
-      window.location.replace("/app/commerce?tab=inventory");
+      // Was "/app/commerce?tab=inventory" — a migration that was started and
+      // abandoned. Commerce has tabs snapshot | invoices | quotes | products |
+      // recurring and no inventory, so this landed on a page that ignored the
+      // parameter, and the 2,032-line command centre mounted below could never
+      // render. Inventory now has its own route.
+      window.location.replace("/app/inventory");
     }
   }, [activeTab]);
   const [loading, setLoading] = useState(true);

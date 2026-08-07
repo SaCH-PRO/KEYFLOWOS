@@ -39,6 +39,7 @@ import { ContentRequestService } from '../content-ops/content-request.service';
 import { CallLogService } from '../call-tasks/call-log.service';
 import { CallScriptService } from '../call-tasks/call-script.service';
 import { EvidenceService } from '../evidence/evidence.service';
+import { MarketplaceService } from '../marketplace/marketplace.service';
 import { CrmDealsService } from '../crm/crm-deals.service';
 import { DealForecastService } from '../crm/deal-forecast.service';
 import { DealVelocityService } from '../crm/deal-velocity.service';
@@ -388,6 +389,9 @@ export class FlowOrchestratorService {
   }
   private getDeals() {
     return this.moduleRef.get(CrmDealsService, { strict: false });
+  }
+  private getMarketplace() {
+    return this.moduleRef.get(MarketplaceService, { strict: false });
   }
   private getDealForecast() {
     return this.moduleRef.get(DealForecastService, { strict: false });
@@ -2260,6 +2264,86 @@ ${triage.standingContext}`;
           actorId: KEY_SYSTEM_ACTOR_ID,
         });
         return { success: removed.ok, deletedId: args.dealId };
+      }
+
+      // === INVENTORY & STOCK ===
+      case 'inventory_list_stock': {
+        const inventory = await this.getMarketplace().getInventory(businessId, args.warehouseId);
+        return { inventory };
+      }
+      case 'inventory_summary': {
+        const summary = await this.getMarketplace().getInventorySummary(businessId);
+        return { summary };
+      }
+      case 'inventory_low_stock_alerts': {
+        const alerts = await this.getMarketplace().getInventoryAlerts(businessId);
+        return { alerts };
+      }
+      case 'inventory_list_movements': {
+        const movements = await this.getMarketplace().getInventoryMovements(businessId, args.limit ?? 100);
+        return { movements };
+      }
+      case 'inventory_list_warehouses': {
+        const warehouses = await this.getMarketplace().getWarehouses(businessId);
+        return { warehouses };
+      }
+      case 'inventory_adjust_stock': {
+        // The controller enforces this before the service sees it
+        // (marketplace.controller.ts:401-402). Enforcing it here too means KEY
+        // fails with a sentence the user can act on rather than a 400 from a
+        // layer it never mentioned.
+        if (args.reasonCode === 'MANUAL' && !args.note?.trim()) {
+          throw new Error(
+            'A manual stock adjustment needs a note explaining it. Either supply one, or use a specific reasonCode (COUNT_CORRECTION, DAMAGE, RETURN, THEFT_LOSS, INITIAL_COUNT).',
+          );
+        }
+        const stock = await this.getMarketplace().adjustInventory(businessId, {
+          stockId: args.stockId,
+          quantityChange: args.quantityChange,
+          reasonCode: args.reasonCode,
+          note: args.note,
+          userId: KEY_SYSTEM_ACTOR_ID,
+        });
+        return { stock };
+      }
+      case 'inventory_transfer_stock': {
+        const transfer = await this.getMarketplace().transferInventory(businessId, {
+          productId: args.productId,
+          fromWarehouseId: args.fromWarehouseId,
+          toWarehouseId: args.toWarehouseId,
+          quantity: args.quantity,
+          note: args.note,
+          userId: KEY_SYSTEM_ACTOR_ID,
+        });
+        return { transfer };
+      }
+      case 'inventory_list_purchase_orders': {
+        const result = await this.getMarketplace().getPurchaseOrders(
+          businessId,
+          args.status ? { status: args.status } : undefined,
+          1,
+          args.limit ?? 50,
+        );
+        return { purchaseOrders: result.data ?? result, total: result.total };
+      }
+      case 'inventory_create_purchase_order': {
+        const purchaseOrder = await this.getMarketplace().createPurchaseOrder(businessId, {
+          supplierName: args.supplierName,
+          supplierEmail: args.supplierEmail,
+          items: args.items ?? [],
+          currency: args.currency,
+          expectedDelivery: args.expectedDelivery,
+          notes: args.notes,
+        });
+        return { purchaseOrder };
+      }
+      case 'inventory_advance_purchase_order': {
+        const purchaseOrder = await this.getMarketplace().advancePurchaseOrderStatus(
+          businessId,
+          args.purchaseOrderId,
+          { status: args.status },
+        );
+        return { purchaseOrder };
       }
 
       case 'commerce_list_invoices': {
