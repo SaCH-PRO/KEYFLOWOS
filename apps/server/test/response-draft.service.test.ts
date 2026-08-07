@@ -12,6 +12,9 @@ function makePrismaMock(initialStatus = 'PENDING_APPROVAL') {
   return {
     client: {
       responseDraft: {
+        // findFirst, not findUnique: updateDraftBody resolves the draft with
+        // { id, businessId } so a caller cannot reach another tenant's row.
+        findFirst: vi.fn(async () => stored),
         findUnique: vi.fn(async () => stored),
         update: vi.fn(async ({ data }: any) => {
           stored = { ...stored, ...data };
@@ -33,7 +36,7 @@ describe('ResponseDraftService.updateDraftBody', () => {
     const prisma = makePrismaMock('PENDING_APPROVAL') as any;
     const service = new ResponseDraftService(prisma, new SenderMock() as any);
 
-    const updated = await service.updateDraftBody('draft_1', 'edited body', 'user_1');
+    const updated = await service.updateDraftBody('biz_1', 'draft_1', 'edited body', 'user_1');
 
     expect(updated.body).toBe('edited body');
     expect(updated.evidence).toMatchObject({
@@ -47,7 +50,7 @@ describe('ResponseDraftService.updateDraftBody', () => {
     const prisma = makePrismaMock('APPROVED') as any;
     const service = new ResponseDraftService(prisma, new SenderMock() as any);
 
-    const updated = await service.updateDraftBody('draft_1', 'edited after approval');
+    const updated = await service.updateDraftBody('biz_1', 'draft_1', 'edited after approval');
 
     expect(updated.status).toBe('PENDING_APPROVAL');
   });
@@ -56,7 +59,7 @@ describe('ResponseDraftService.updateDraftBody', () => {
     const prisma = makePrismaMock('REJECTED') as any;
     const service = new ResponseDraftService(prisma, new SenderMock() as any);
 
-    const updated = await service.updateDraftBody('draft_1', 'edited after rejection');
+    const updated = await service.updateDraftBody('biz_1', 'draft_1', 'edited after rejection');
 
     expect(updated.status).toBe('REJECTED');
   });
@@ -65,12 +68,13 @@ describe('ResponseDraftService.updateDraftBody', () => {
     const prisma = {
       client: {
         responseDraft: {
+          findFirst: vi.fn(async () => null),
           findUnique: vi.fn(async () => null),
         },
       },
     } as any;
     const service = new ResponseDraftService(prisma, new SenderMock() as any);
 
-    await expect(service.updateDraftBody('missing', 'body')).rejects.toThrow('Draft not found');
+    await expect(service.updateDraftBody('biz_1', 'missing', 'body')).rejects.toThrow('Draft not found');
   });
 });

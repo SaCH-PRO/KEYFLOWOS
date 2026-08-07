@@ -1,4 +1,4 @@
-import { Injectable, Inject, Logger } from '@nestjs/common';
+import { Injectable, Inject, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiMessageSenderService } from '../ai/ai-message-sender.service';
 
@@ -68,22 +68,41 @@ export class ResponseDraftService {
     return draft;
   }
 
-  async approveDraft(draftId: string, approvedById: string) {
-    const draft = await this.prisma.client.responseDraft.update({
-      where: { id: draftId },
-      data: {
-        status: 'APPROVED',
-        approvedById,
-      },
+  /**
+   * TENANT SCOPING — every method below takes businessId FIRST, and it is required.
+   *
+   * These methods used to take a bare draftId and resolve it with
+   * `where: { id: draftId }`. The route is
+   * POST /api/communications/businesses/:businessId/drafts/:id/approve, guarded
+   * by BusinessGuard — which validates that the caller belongs to the business
+   * in the URL, and nothing more. The handler then took that parameter as
+   * `_businessId` and discarded it.
+   *
+   * So an authenticated user of business A passed THEIR OWN businessId (guard
+   * passes) with business B's draft id, and approved, rejected, edited or SENT
+   * B's customer message. ResponseDraft carries a businessId column and is not
+   * in BUSINESS_ID_MODELS, so no layer caught it.
+   *
+   * businessId is first and required so every existing caller fails to compile
+   * until it supplies one — the same forcing function used on
+   * createPlanFromGoal. `updateMany` is deliberate on the writes: it scopes in
+   * the WHERE and returns a count, so a mismatched tenant is a 0 rather than a
+   * P2025 that reads like a missing row.
+   */
+  async approveDraft(businessId: string, draftId: string, approvedById: string) {
+    const { count } = await this.prisma.client.responseDraft.updateMany({
+      where: { id: draftId, businessId },
+      data: { status: 'APPROVED', approvedById },
     });
+    if (count === 0) throw new NotFoundException('Draft not found');
 
     this.logger.log(`Draft ${draftId} approved by ${approvedById}`);
-    return draft;
+    return this.getDraftById(businessId, draftId);
   }
 
-  async rejectDraft(draftId: string, reason: string) {
-    const draft = await this.prisma.client.responseDraft.update({
-      where: { id: draftId },
+  async rejectDraft(businessId: string, draftId: string, reason: string) {
+    const { count } = await this.prisma.client.responseDraft.updateMany({
+      where: { id: draftId, businessId },
       data: {
         status: 'REJECTED',
         evidence: {
@@ -92,14 +111,16 @@ export class ResponseDraftService {
         },
       },
     });
+    if (count === 0) throw new NotFoundException('Draft not found');
 
     this.logger.log(`Draft ${draftId} rejected: ${reason}`);
-    return draft;
+    return this.getDraftById(businessId, draftId);
   }
 
-  async sendDraft(draftId: string, sentById?: string) {
-    const draft = await this.prisma.client.responseDraft.findUnique({
-      where: { id: draftId },
+  async sendDraft(businessId: string, draftId: string, sentById?: string) {
+    // The worst of the six: this one puts a message in front of a customer.
+    const draft = await this.prisma.client.responseDraft.findFirst({
+      where: { id: draftId, businessId },
     });
 
     if (!draft) {
@@ -138,7 +159,7 @@ export class ResponseDraftService {
     }
 
     const updated = await this.prisma.client.responseDraft.update({
-      where: { id: draftId },
+      where: { id: draft.id },
       data: { status: 'SENT', sentAt: new Date() },
     });
 
@@ -146,11 +167,13 @@ export class ResponseDraftService {
     return updated;
   }
 
-  async markSent(draftId: string) {
-    return this.prisma.client.responseDraft.update({
-      where: { id: draftId },
+  async markSent(businessId: string, draftId: string) {
+    const { count } = await this.prisma.client.responseDraft.updateMany({
+      where: { id: draftId, businessId },
       data: { status: 'SENT', sentAt: new Date() },
     });
+    if (count === 0) throw new NotFoundException('Draft not found');
+    return this.getDraftById(businessId, draftId);
   }
 
   async listDrafts(
@@ -177,17 +200,17 @@ export class ResponseDraftService {
     return { items, total };
   }
 
-  async getDraftById(draftId: string) {
-    return this.prisma.client.responseDraft.findUnique({
-      where: { id: draftId },
+  async getDraftById(businessId: string, draftId: string) {
+    return this.prisma.client.responseDraft.findFirst({
+      where: { id: draftId, businessId },
     });
   }
 
-  async updateDraftBody(draftId: string, body: string, updatedById?: string) {
-    const draft = await this.prisma.client.responseDraft.findUnique({
-      where: { id: draftId },
+  async updateDraftBody(businessId: string, draftId: string, body: string, updatedById?: string) {
+    const draft = await this.prisma.client.responseDraft.findFirst({
+      where: { id: draftId, businessId },
     });
-    if (!draft) throw new Error('Draft not found');
+    if (!draft) throw new NotFoundException('Draft not found');
 
     const nextStatus = draft.status === 'APPROVED' ? 'PENDING_APPROVAL' : draft.status;
 
