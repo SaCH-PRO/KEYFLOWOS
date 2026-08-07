@@ -64,7 +64,7 @@ export class RecurringExpensesController {
   @AuditAction('expenses', 'recurring_created', 'recurring_expense')
   @Post('businesses/:businessId/recurring')
   create(@Param('businessId') businessId: string, @Body() body: RecurringExpenseCreateBody) {
-    return this.svc.create({ businessId, ...body });
+    return this.svc.create({ ...body, businessId });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -73,7 +73,7 @@ export class RecurringExpensesController {
   @AuditAction('expenses', 'recurring_updated', 'recurring_expense')
   @Patch('businesses/:businessId/recurring/:id')
   update(@Param('businessId') businessId: string, @Param('id') id: string, @Body() body: RecurringExpenseUpdateBody) {
-    return this.svc.update({ businessId, id, ...body });
+    return this.svc.update({ ...body, businessId, id });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)

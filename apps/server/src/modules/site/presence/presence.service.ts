@@ -298,7 +298,7 @@ export class PresenceService {
     const upserted = await this.prisma.client.sitePageDraft.upsert({
       where: { businessId },
       update: data,
-      create: { businessId, ...data },
+      create: { ...data, businessId },
     });
     return {
       id: upserted.id,

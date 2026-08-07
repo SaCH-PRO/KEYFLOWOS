@@ -86,7 +86,7 @@ export class CommerceController {
     @Param('businessId') businessId: string,
     @Body() body: CreateProductDto,
   ) {
-    return this.commerce.createProduct({ businessId, ...body });
+    return this.commerce.createProduct({ ...body, businessId });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -109,7 +109,7 @@ export class CommerceController {
     @Param('productId') productId: string,
     @Body() body: Partial<CreateProductDto>,
   ) {
-    return this.commerce.updateProduct({ businessId, productId, ...body });
+    return this.commerce.updateProduct({ ...body, businessId, productId });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -437,7 +437,7 @@ export class CommerceController {
       notes?: string;
     },
   ) {
-    return this.commerce.createInvoice({ businessId, ...body });
+    return this.commerce.createInvoice({ ...body, businessId });
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -524,7 +524,7 @@ export class CommerceController {
       notes?: string | null;
     },
   ) {
-    return this.commerce.updateInvoice({ invoiceId, businessId, ...body });
+    return this.commerce.updateInvoice({ ...body, invoiceId, businessId });
   }
 
   // ========== QUOTES ==========
@@ -657,7 +657,7 @@ export class CommerceController {
       expiryDate?: string;
     },
   ) {
-    return this.commerce.createQuote({ businessId, ...body });
+    return this.commerce.createQuote({ ...body, businessId });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -673,7 +673,7 @@ export class CommerceController {
       expiryDate?: string | null;
     },
   ) {
-    return this.commerce.updateQuote({ quoteId, businessId, ...body });
+    return this.commerce.updateQuote({ ...body, quoteId, businessId });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -700,7 +700,7 @@ export class CommerceController {
       dueDate?: string;
     },
   ) {
-    return this.commerce.convertQuoteToInvoice({ quoteId, businessId, ...body });
+    return this.commerce.convertQuoteToInvoice({ ...body, quoteId, businessId });
   }
 
   // ========== GMAIL INTEGRATION ==========
@@ -1191,10 +1191,8 @@ export class CommerceController {
       driveFileId?: string;
     },
   ) {
-    return this.paymentEvidence.processEvidence({
-      businessId,
+    return this.paymentEvidence.processEvidence({ ...body, businessId,
       invoiceId,
-      ...body,
     });
   }
 
@@ -1211,9 +1209,7 @@ export class CommerceController {
       driveFileId?: string;
     },
   ) {
-    const { extracted, raw } = await this.paymentEvidence.extractEvidence({
-      businessId,
-      ...body,
+    const { extracted, raw } = await this.paymentEvidence.extractEvidence({ ...body, businessId,
     });
 
     // Fetch unpaid invoices as candidates

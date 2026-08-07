@@ -300,7 +300,7 @@ export class CrmController {
     @Param('businessId') businessId: string,
     @Body() body: CreateContactDto,
   ) {
-    return this.crm.createContact({ businessId, ...body });
+    return this.crm.createContact({ ...body, businessId });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -342,11 +342,9 @@ export class CrmController {
     @Body() body: UpdateContactDto,
     @Req() req: any,
   ) {
-    return this.crm.updateContact({
-      businessId,
+    return this.crm.updateContact({ ...body, businessId,
       contactId,
       actorUserId: req?.user?.id,
-      ...body,
     });
   }
 
@@ -1221,7 +1219,7 @@ export class CrmController {
     @Param('businessId') businessId: string,
     @Body() body: { name: string; description?: string; color?: string; type?: string; filters?: any; rules?: any; contactIds?: string[] },
   ) {
-    return this.crm.createContactList({ businessId, ...body });
+    return this.crm.createContactList({ ...body, businessId });
   }
 
   // ---- Per-user contact saved views ---------------------------------
@@ -1291,7 +1289,7 @@ export class CrmController {
     @Param('listId') listId: string,
     @Body() body: { name?: string; description?: string; color?: string; type?: string; filters?: any; rules?: any; contactIds?: string[] },
   ) {
-    return this.crm.updateContactList({ businessId, listId, ...body });
+    return this.crm.updateContactList({ ...body, businessId, listId });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)

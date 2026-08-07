@@ -60,7 +60,7 @@ export class CrmAccountsController {
   @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/accounts')
   create(@Param('businessId') businessId: string, @Body() body: CreateAccountDto) {
-    return this.accounts.createAccount({ businessId, ...body });
+    return this.accounts.createAccount({ ...body, businessId });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -72,7 +72,7 @@ export class CrmAccountsController {
     @Param('accountId') accountId: string,
     @Body() body: UpdateAccountDto,
   ) {
-    return this.accounts.updateAccount({ businessId, accountId, ...body });
+    return this.accounts.updateAccount({ ...body, businessId, accountId });
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)

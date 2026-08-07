@@ -38,7 +38,7 @@ export class LeadFormsController {
       settings?: any;
     },
   ) {
-    return this.leadForms.createForm({ businessId, ...body });
+    return this.leadForms.createForm({ ...body, businessId });
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -53,7 +53,7 @@ export class LeadFormsController {
       settings?: any;
     },
   ) {
-    return this.leadForms.updateForm({ businessId, id, ...body });
+    return this.leadForms.updateForm({ ...body, businessId, id });
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

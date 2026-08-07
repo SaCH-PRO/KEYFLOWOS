@@ -45,11 +45,13 @@ export class TemporalFlowMemoryService {
     } else {
       record = await this.prisma.client.temporalFlowMemory.create({
         data: {
+          // Spread FIRST: a caller-supplied `data` must not be able to name its
+          // own tenant. See core/auth/tenant-body-override.spec.ts.
+          ...data,
           businessId: input.businessId,
           entityType: input.entityType,
           entityId: input.entityId ?? null,
           type: input.type,
-          ...data,
         },
       });
     }

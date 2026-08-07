@@ -306,7 +306,7 @@ export class KeyCortexGenomeBridgeService {
         status: 'PENDING',
       },
     });
-    return { id: created.id, businessId, ...input, status: 'PENDING' };
+    return { ...input, id: created.id, businessId, status: 'PENDING' };
   }
 
   async getEvolutionHistory(businessId: string): Promise<Array<Record<string, unknown>>> {

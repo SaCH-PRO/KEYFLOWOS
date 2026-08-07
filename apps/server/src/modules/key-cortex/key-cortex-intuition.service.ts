@@ -674,7 +674,7 @@ export class KeyCortexIntuitionService {
   ): Promise<void> {
     if (!this.notifications) return;
     try {
-      await this.notifications.createAlert({ businessId, ...input });
+      await this.notifications.createAlert({ ...input, businessId });
     } catch (error: unknown) {
       this.logger.warn(
         `[Intuition] Alert detected but not delivered (${input.entityId}): ` +
