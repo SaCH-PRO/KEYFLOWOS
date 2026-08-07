@@ -4,6 +4,11 @@
 of this working tree. Every number below was derived by running the command or reading
 the file cited, not quoted from an existing report.
 
+> **Revision 2, 2026-08-07.** §5.3 is **closed** by `c5dd8bc4` — and closing it proved the
+> fix four times larger than this document estimated (§7, Tier 0 item 1). §5.4 carried a
+> **wrong heading** and is corrected there. Where a finding has since changed, the original
+> claim is left visible with the correction beside it rather than quietly rewritten.
+
 ---
 
 ## 0. Verdict in one paragraph
@@ -266,21 +271,47 @@ Two secondary observations:
 
 I ran them: **all 45 files pass, 239 tests, 30.7 seconds.** The tenant-attack suite alone
 runs in 8.5s. Given §5.2, these are the *most* important tests in the repository and
-nothing enforces them. This is the highest value-per-minute fix available — one line in
-`package.json`.
+nothing enforces them.
 
-Also absent from CI: the 17 Playwright E2E specs and all 117 web tests.
+> **✅ Closed 2026-08-07, `c5dd8bc4`.** And the fix was **not** the one line in
+> `package.json` this section claimed. Implementing it showed the gap was wider: **29 of
+> the 45 files matched no vitest config at all** — including `business.guard.test.ts`, the
+> single control standing between two businesses' data — and **14 need a real Postgres**,
+> so the one-liner would have turned the build red rather than green. The workflow now
+> runs `pgvector/pgvector:pg16` with `db:deploy`, and `test:ci` is the unfiltered run:
+> **3,177 tests gated for 95s of CI**, verified.
 
-### 5.4 🟠 Zero tests execute SQL
+Also absent from CI: the 17 Playwright E2E specs and all 117 web tests. **Still open** —
+they are unaffected by `c5dd8bc4`, which touched only the server job.
 
-2,917 unit tests across 298 files, of which 60 files mock at the Prisma boundary, and
-`vitest.integration.config.ts` carries `passWithNoTests: true`. Against **428 models and
-6,434 query sites**, no test in the CI path ever runs a real query. What this cannot catch: broken relations, cascade
-behaviour, unique-constraint violations, N+1 explosions, migration drift, and — critically
-— tenant leakage in the 292 unprotected models.
+### 5.4 🟠 The CI path executed no SQL — *corrected, and closed*
 
-The `posting.service.integration.spec.ts` in the finance module shows the pattern is
-understood. It is applied once.
+> **Correction, 2026-08-07.** This section was published under the heading "Zero tests
+> execute SQL." **That heading was wrong**, and the error changed the remediation, so it is
+> worth stating plainly. **14 files in `apps/server/test/` deliberately exercise a real
+> database.** `tenant-membership-boundary.integration.test.ts` opens with *"Nothing on the
+> isolation boundary is mocked: Prisma, membership rows, the guard, and DB constraints are
+> all real."* I ran those tests and they passed — that was itself the disproof. The finding
+> generalized from the CI path to the whole repository and should not have.
+
+**The accurate claim:** nothing *in the CI path* ran a query. 2,917 unit tests across 298
+files, 60 of which mock at the Prisma boundary, while `test:ci` excluded every
+real-database file. Against 428 models and 6,434 query sites, the gate could not catch
+broken relations, cascade behaviour, unique-constraint violations, migration drift, or
+tenant leakage in the 292 unprotected models.
+
+**Closed 2026-08-07** by `c5dd8bc4` — which is also where the true scope surfaced. 29 of
+the 45 files in `test/` end in plain `.test.ts` and matched **no vitest config at all** —
+not unit, not smoke, not integration. They passed only under a bare `vitest run`: what a
+human runs by hand, and what CI never ran. `test:ci` is now unfiltered, and the workflow
+supplies `pgvector/pgvector:pg16` plus `db:deploy`. Held by
+`test-coverage-gating.spec.ts`, which fails if `test:ci` pins a config again — an include
+pattern being precisely what orphaned the 29.
+
+**What remains open is coverage, not capability.** The real-database pattern is
+established and now gated, but it covers the isolation boundary and little else. Finance —
+the deepest domain in the repo — has one such test
+(`posting.service.integration.spec.ts`). See the revised Tier 1 item 9.
 
 ### 5.5 🟠 Release engineering is the weakest layer
 
@@ -383,7 +414,7 @@ are perhaps 15% of those 90K lines.
 
 | # | Action | Effort | Why |
 |---|---|:--:|---|
-| 1 | `"test:ci": "pnpm test:unit && pnpm test:smoke && pnpm test:integration"` | **2 min** | Gates 60 passing tenant-attack and secret-disclosure tests. Costs 8.5s of CI. Highest value-per-minute change available. |
+| 1 | ~~`"test:ci": "… && pnpm test:integration"`~~ → **`"test:ci": "vitest run"` + a Postgres service in the workflow** | ~~2 min~~ **~3 h** — ✅ **done, `c5dd8bc4`** | The priority was right; **the estimate was wrong and the reason is instructive.** The gap was not "integration is ungated" — 29 of 45 files in `test/` matched *no* config at all, and 14 of them need a real database, so a one-line script edit would have turned the build red. Now: 346 files / **3,177 tests** gated (verified), 95s. Held by `test-coverage-gating.spec.ts`. |
 | 2 | Add web tests + Playwright E2E to CI | 30 min | 117 + 17 specs currently gate nothing. |
 | 3 | Write `nav-reachability.spec.ts` — every `page.tsx` is either nav-reachable, linked from a reachable page, or on an explicit allowlist | **2 h** | Converts §5.1 from a recurring bug into an impossible state. The allowlist becomes the honest backlog. |
 | 4 | Patch the 5 criticals; make `pnpm audit --audit-level critical` blocking | 2 h | `jspdf` is on the invoice-PDF path. |
@@ -396,7 +427,7 @@ are perhaps 15% of those 90K lines.
 | 6 | **Put finance in the nav and give KEY 8–10 finance write tools** | 1–2 wk | Unlocks the single most valuable asset in the repo. "KEY, reconcile last month and show me the trial balance" is a demo no competitor in §3 can run. |
 | 7 | Enable Postgres RLS on the top 40 revenue-bearing tables | 1 wk | Turns 6,434 acts of developer attention into one database-enforced invariant. Do not attempt all 340 — pick the tables a leak would be fatal on. |
 | 8 | Extend `BUSINESS_ID_MODELS` to those same 40 first | 2 d | Cheap intermediate step; the spec that diffs it already exists. |
-| 9 | Set up a test database and port 20 integration tests, finance-first | 1 wk | First tests in the repo that execute SQL. |
+| 9 | **Extend** the existing real-database pattern to finance — 15–20 tests over posting, ledger balance, reconciliation | 3–4 d | *Revised.* The original wording ("first tests in the repo that execute SQL") was wrong — see §5.4. The harness, the seeding convention and the CI Postgres all exist as of `c5dd8bc4`; this is coverage work on an established pattern, not new infrastructure, and it is cheaper than first estimated. |
 | 10 | Uncomment the deploy job; make `migrate deploy` the only path to schema change | 3 d | Removes "a human remembered" from the release process. |
 | 11 | Meter the chat path against `aiCreditsPerMonth`; replace "Unlimited" with "2,000 credits, then $X" | 3 d | Makes gross margin a computable number. |
 | 12 | Gate the 28 crons on last-activity — skip businesses idle >14 days | 2 d | Directly cuts the dormant-account cost floor. |
