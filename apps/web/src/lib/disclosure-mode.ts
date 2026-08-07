@@ -58,6 +58,7 @@ export const MODE_OPERATE_ITEMS: Record<DisclosureMode, string[]> = {
   growth: [
     "Chat", "Inbox", "Worker", "Autonomy",
     "Overview", "Sales", "Inventory", "Payments", "Expenses", "Budgets", "Reports",
+    "Accounts & tax setup", "Reconcile bank", "Tax", "Close the month", "General ledger", "Trial balance", "Recurring journals", "Assets & depreciation",
     "Contacts", "Deals", "Sequences", "Support",
     "Calendar", "Bookings",
     "Projects", "Approvals",
@@ -70,6 +71,7 @@ export const MODE_OPERATE_ITEMS: Record<DisclosureMode, string[]> = {
   enterprise: [
     "Chat", "Inbox", "Worker", "Autonomy", "Modes", "Data Inbox", "Capture",
     "Overview", "Sales", "Inventory", "Payments", "Expenses", "Budgets", "Reports",
+    "Accounts & tax setup", "Reconcile bank", "Tax", "Close the month", "General ledger", "Trial balance", "Recurring journals", "Assets & depreciation",
     "Contacts", "Deals", "Sequences", "Support", "Calls", "Insights",
     "Calendar", "Bookings",
     "Projects", "Approvals",

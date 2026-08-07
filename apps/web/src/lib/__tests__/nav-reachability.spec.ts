@@ -45,7 +45,7 @@
  *   deliberately-unlinked     a redirect shim or re-export; a forwarding
  *                             address, not a destination
  *   todo-connect              a real screen with no door. THIS IS WORK, not an
- *                             exemption. 47 entries today; the number should
+ *                             exemption. 39 entries today (was 47 — eight finance screens connected 2026-08-07); the number should
  *                             only go down.
  *
  * Adding a page without a nav entry now requires writing down which of those it
@@ -90,8 +90,6 @@ const ORPHANED_BY_DESIGN: Record<string, Reason> = {
   "/app/document-intelligence":          'todo-connect',
   "/app/documents":                      'deliberately-unlinked',
   "/app/documents/[instanceId]":         'detail-route-of:/app/documents',
-  "/app/finance":                        'deliberately-unlinked',
-  "/app/finance/accounting-periods":     'todo-connect',
   "/app/finance/accounts":               'deliberately-unlinked',
   "/app/finance/actions":                'todo-connect',
   "/app/finance/bank-rules":             'todo-connect',
@@ -99,16 +97,9 @@ const ORPHANED_BY_DESIGN: Record<string, Reason> = {
   "/app/finance/credit-notes":           'todo-connect',
   "/app/finance/exchange-rates":         'todo-connect',
   "/app/finance/expenses":               'todo-connect',
-  "/app/finance/fixed-assets":           'todo-connect',
   "/app/finance/journal":                'deliberately-unlinked',
-  "/app/finance/ledger":                 'todo-connect',
-  "/app/finance/reconciliation":         'todo-connect',
-  "/app/finance/recurring-journals":     'todo-connect',
   "/app/finance/reports":                'todo-connect',
   "/app/finance/revenue":                'todo-connect',
-  "/app/finance/settings":               'todo-connect',
-  "/app/finance/tax":                    'todo-connect',
-  "/app/finance/trial-balance":          'todo-connect',
   "/app/governance-flow":                'todo-connect',
   "/app/growth":                         'todo-connect',
   "/app/inbox":                          'deliberately-unlinked',
@@ -232,6 +223,6 @@ describe('every screen has a door, or a written reason it does not', () => {
       todo.length,
       'more screens are now unreachable than when this gate was written. Connect one, or ' +
         'delete one, before adding another',
-    ).toBeLessThanOrEqual(47);
+    ).toBeLessThanOrEqual(39);
   });
 });

@@ -138,6 +138,28 @@ export const operateSections: NavSection[] = [
       { label: "Expenses", href: "/app/expenses", icon: Receipt },
       { label: "Budgets", href: "/app/budgeting", icon: Target },
       { label: "Reports", href: "/app/reports", icon: BarChart3 },
+
+      // ── The books ────────────────────────────────────────────────────────
+      //
+      // A complete double-entry engine — 43 service files behind these — that
+      // no user could reach. /app/finance and its sub-routes were absent from
+      // this file entirely, so the chart of accounts, the ledger, bank
+      // reconciliation, the tax rollup and the period close were built, tested
+      // and then left with no door. It is the single most valuable thing in the
+      // repository and it was the least reachable.
+      //
+      // "Accounts & tax setup" comes FIRST deliberately: it is where the chart
+      // of accounts and tax rates are defined, and the seven rows below it are
+      // unusable until that exists. Ordering here is onboarding order, not
+      // alphabetical.
+      { label: "Accounts & tax setup", href: "/app/finance/settings", icon: Cog },
+      { label: "Reconcile bank", href: "/app/finance/reconciliation", icon: RefreshCw },
+      { label: "Tax", href: "/app/finance/tax", icon: Scale },
+      { label: "Close the month", href: "/app/finance/accounting-periods", icon: CalendarDays },
+      { label: "General ledger", href: "/app/finance/ledger", icon: BookOpen },
+      { label: "Trial balance", href: "/app/finance/trial-balance", icon: BarChart3 },
+      { label: "Recurring journals", href: "/app/finance/recurring-journals", icon: RefreshCw },
+      { label: "Assets & depreciation", href: "/app/finance/fixed-assets", icon: Building },
     ],
   },
   {
