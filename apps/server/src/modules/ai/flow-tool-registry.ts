@@ -1185,6 +1185,135 @@ export const FLOW_TOOLS: FlowTool[] = [
   },
 
   // ================================================================
+  //  PAYMENTS
+  // ================================================================
+  //
+  // A 792-line operations console over three gateways — transactions, payment
+  // links, refunds — with zero tools and no nav entry until 2026-08-07. KEY
+  // could raise an invoice and email it, and then had no idea whether the money
+  // arrived, no way to send a link, and no way to refund.
+  //
+  // payments_list_gateways is the prerequisite here and it carries more weight
+  // than the equivalents in deals or inventory: it reports not just WHICH
+  // gateways exist but whether each one is connected and whether it supports
+  // links and refunds at all. Calling a refund on a gateway that does not
+  // support them is a BadRequest, not a no-op.
+  {
+    name: 'payments_list_gateways',
+    description: 'List payment gateways, whether each is connected, and what each supports (transactions, payment links, refunds). Call this before creating a link or issuing a refund — gateways differ and an unconnected one will reject the call.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/payments',
+    parameters: { type: 'object', properties: {}, required: [] },
+    outputSchema: { type: 'object', description: 'Gateway statuses', fields: { gateways: { type: 'array', description: 'Gateways with connected flag and capability matrix' } } },
+  },
+  {
+    name: 'payments_list_transactions',
+    description: 'List charges and refunds across every connected gateway, newest first. Use this to answer "did that payment come in".',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/payments',
+    parameters: {
+      type: 'object',
+      properties: { limit: { type: 'number', description: 'Maximum transactions to return (default 50)' } },
+      required: [],
+    },
+    outputSchema: { type: 'object', description: 'Transactions', fields: { transactions: { type: 'array', description: 'Charges and refunds with amount, customer and invoice link' } } },
+  },
+  {
+    name: 'payments_search_transactions',
+    description: 'Find a payment by customer name, email, amount, charge id or invoice id. Use this to locate the charge id a refund needs.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/payments',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Text to match against customer, amount, charge id or invoice id' },
+        limit: { type: 'number', description: 'Maximum to return (default 50)' },
+      },
+      required: ['query'],
+    },
+    outputSchema: { type: 'object', description: 'Matching transactions', fields: { transactions: { type: 'array', description: 'Transactions matching the query' } } },
+  },
+  {
+    name: 'payments_list_links',
+    description: 'List active payment links across connected gateways.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/payments',
+    parameters: { type: 'object', properties: {}, required: [] },
+    outputSchema: { type: 'object', description: 'Payment links', fields: { links: { type: 'array', description: 'Link records with url and amount' } } },
+  },
+  {
+    name: 'payments_create_link',
+    description: 'Create a payment link a customer can pay through. This does not move money by itself — it creates a way for someone to send it.',
+    family: 'crud',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/payments',
+    changedEntities: ['paymentLink'],
+    parameters: {
+      type: 'object',
+      properties: {
+        gateway: { type: 'string', description: 'Gateway to create the link on', enum: ['stripe', 'paypal', 'wipay'] },
+        amount: { type: 'number', description: 'Amount to charge; must be greater than zero' },
+        currency: { type: 'string', description: 'Currency code' },
+        description: { type: 'string', description: 'What the payment is for — required, and shown to the customer' },
+        customerEmail: { type: 'string', description: 'Send the link to this address' },
+      },
+      required: ['gateway', 'amount', 'currency', 'description'],
+    },
+    outputSchema: { type: 'object', description: 'Created link', fields: { link: { type: 'object', description: 'Payment link with its url' } } },
+  },
+  {
+    name: 'payments_revoke_link',
+    description: 'Revoke a payment link so it can no longer be paid.',
+    family: 'organize',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/payments',
+    changedEntities: ['paymentLink'],
+    parameters: {
+      type: 'object',
+      properties: {
+        gateway: { type: 'string', description: 'Gateway the link belongs to', enum: ['stripe', 'paypal', 'wipay'] },
+        linkId: { type: 'string', description: 'Payment link id from payments_list_links' },
+      },
+      required: ['gateway', 'linkId'],
+    },
+    outputSchema: { type: 'object', description: 'Revocation result', fields: { revoked: { type: 'boolean', description: 'Whether the link was revoked' } } },
+  },
+  {
+    name: 'payments_refund_charge',
+    description: 'Refund a charge, in full or in part. This sends money OUT of the business and cannot be undone by any other tool — confirm the charge id and the amount with the owner before calling it. Use payments_search_transactions to find the charge first.',
+    family: 'execute',
+    riskLevel: 'high',
+    // Tier 3, the same tier as deleting a deal, and for a stronger reason: this
+    // is the only tool in the arsenal that moves money out of the business to a
+    // third party. There is no compensating action — a refund cannot be
+    // un-refunded, only re-charged, which requires the customer to pay again.
+    riskTier: 3 as RiskTier,
+    manualEquivalentRoute: '/app/payments',
+    changedEntities: ['payment'],
+    parameters: {
+      type: 'object',
+      properties: {
+        gateway: { type: 'string', description: 'Gateway holding the charge', enum: ['stripe', 'paypal', 'wipay'] },
+        chargeId: { type: 'string', description: 'Charge id to refund, from payments_search_transactions' },
+        amount: { type: 'number', description: 'Amount to refund. Omit to refund the charge in full.' },
+        reason: { type: 'string', description: 'Why the refund is being issued — recorded against the payment' },
+      },
+      required: ['gateway', 'chargeId'],
+    },
+    outputSchema: { type: 'object', description: 'Refund result', fields: { refund: { type: 'object', description: 'Refund record with amount, currency and status' } } },
+  },
+
+  // ================================================================
   //  CRUD — COMMERCE (existing tools, tagged with family)
   // ================================================================
   {

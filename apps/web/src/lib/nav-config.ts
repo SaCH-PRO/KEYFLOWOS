@@ -4,6 +4,7 @@ import type { LucideIcon } from "lucide-react";
 import {
   Zap,
   Boxes,
+  CreditCard,
   Briefcase,
   Wrench,
   User,
@@ -131,6 +132,9 @@ export const operateSections: NavSection[] = [
       // dormant-flagged marketplace page, behind a redirect to a tab that did
       // not exist.
       { label: "Inventory", href: "/app/inventory", icon: Boxes },
+      // A 792-line operations console over three gateways -- transactions,
+      // payment links, refunds -- that was never linked from anywhere.
+      { label: "Payments", href: "/app/payments", icon: CreditCard },
       { label: "Expenses", href: "/app/expenses", icon: Receipt },
       { label: "Budgets", href: "/app/budgeting", icon: Target },
       { label: "Reports", href: "/app/reports", icon: BarChart3 },

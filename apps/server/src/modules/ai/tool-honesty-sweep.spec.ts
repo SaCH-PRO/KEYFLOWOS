@@ -186,8 +186,18 @@ describe('the class of defect, not just the instances', () => {
     // word "email" anywhere caught crm_search_contacts, whose description
     // merely names email as a searchable field — a false positive that would
     // have made this test noise, and noisy tests get deleted rather than fixed.
+    //
+    // Second narrowing, 2026-08-07: the verb alone is not enough either.
+    // payments_refund_charge says "this sends money OUT of the business" and
+    // reaches a payment gateway, not a mail service — correctly, since money is
+    // not a message. The rule is about outbound CONTACT, so the verb now has to
+    // land on something a person receives.
+    const OUTBOUND_MEDIUM = /\b(email|e-mail|message|sms|whatsapp|campaign|notification|reply|post|newsletter|reminder)\b/i;
     const senders = FLOW_TOOLS.filter(
-      (t) => t.family === 'execute' && /\b(sends?|notif\w+)\b/i.test(t.description),
+      (t) =>
+        t.family === 'execute' &&
+        /\b(sends?|notif\w+)\b/i.test(t.description) &&
+        OUTBOUND_MEDIUM.test(t.description),
     );
 
     expect(senders.length, 'expected some outbound tools to exist').toBeGreaterThan(0);
@@ -240,6 +250,7 @@ describe('the class of defect, not just the instances', () => {
       crm_delete_contact: 'soft delete returns nothing meaningful',
       commerce_delete_invoice: 'delete returns nothing meaningful',
       projects_delete_task: 'delete returns nothing meaningful',
+      payments_revoke_link: 'PaymentsOpsService.revokePaymentLink returns void and throws on failure',
     };
 
     const offenders: string[] = [];

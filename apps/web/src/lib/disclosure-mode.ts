@@ -57,7 +57,7 @@ export const MODE_OPERATE_ITEMS: Record<DisclosureMode, string[]> = {
   // A team: add delivery, support, campaigns and reporting.
   growth: [
     "Chat", "Inbox", "Worker", "Autonomy",
-    "Overview", "Sales", "Inventory", "Expenses", "Budgets", "Reports",
+    "Overview", "Sales", "Inventory", "Payments", "Expenses", "Budgets", "Reports",
     "Contacts", "Deals", "Sequences", "Support",
     "Calendar", "Bookings",
     "Projects", "Approvals",
@@ -69,7 +69,7 @@ export const MODE_OPERATE_ITEMS: Record<DisclosureMode, string[]> = {
   // other two got their errors from.
   enterprise: [
     "Chat", "Inbox", "Worker", "Autonomy", "Modes", "Data Inbox", "Capture",
-    "Overview", "Sales", "Inventory", "Expenses", "Budgets", "Reports",
+    "Overview", "Sales", "Inventory", "Payments", "Expenses", "Budgets", "Reports",
     "Contacts", "Deals", "Sequences", "Support", "Calls", "Insights",
     "Calendar", "Bookings",
     "Projects", "Approvals",

@@ -40,6 +40,7 @@ import { CallLogService } from '../call-tasks/call-log.service';
 import { CallScriptService } from '../call-tasks/call-script.service';
 import { EvidenceService } from '../evidence/evidence.service';
 import { MarketplaceService } from '../marketplace/marketplace.service';
+import { PaymentsOpsService } from '../payments/payments-ops.service';
 import { CrmDealsService } from '../crm/crm-deals.service';
 import { DealForecastService } from '../crm/deal-forecast.service';
 import { DealVelocityService } from '../crm/deal-velocity.service';
@@ -392,6 +393,9 @@ export class FlowOrchestratorService {
   }
   private getMarketplace() {
     return this.moduleRef.get(MarketplaceService, { strict: false });
+  }
+  private getPaymentsOps() {
+    return this.moduleRef.get(PaymentsOpsService, { strict: false });
   }
   private getDealForecast() {
     return this.moduleRef.get(DealForecastService, { strict: false });
@@ -2264,6 +2268,55 @@ ${triage.standingContext}`;
           actorId: KEY_SYSTEM_ACTOR_ID,
         });
         return { success: removed.ok, deletedId: args.dealId };
+      }
+
+      // === PAYMENTS ===
+      case 'payments_list_gateways': {
+        const gateways = await this.getPaymentsOps().getGatewayStatuses(businessId);
+        return { gateways };
+      }
+      case 'payments_list_transactions': {
+        const transactions = await this.getPaymentsOps().listAllTransactions(businessId, args.limit ?? 50);
+        return { transactions };
+      }
+      case 'payments_search_transactions': {
+        const transactions = await this.getPaymentsOps().searchCharges(businessId, {
+          query: args.query,
+          limit: args.limit ?? 50,
+        });
+        return { transactions };
+      }
+      case 'payments_list_links': {
+        const links = await this.getPaymentsOps().listAllPaymentLinks(businessId);
+        return { links };
+      }
+      case 'payments_create_link': {
+        const link = await this.getPaymentsOps().createPaymentLink(businessId, args.gateway, {
+          amount: args.amount,
+          currency: args.currency,
+          description: args.description,
+          customerEmail: args.customerEmail,
+        });
+        return { link };
+      }
+      case 'payments_revoke_link': {
+        // revokePaymentLink returns void — it throws on failure, so reaching the
+        // next line IS the result. Reported as the service's silence rather than
+        // as an invented success object.
+        await this.getPaymentsOps().revokePaymentLink(businessId, args.gateway, args.linkId);
+        return { revoked: true, linkId: args.linkId, gateway: args.gateway };
+      }
+      case 'payments_refund_charge': {
+        // The one tool that moves money OUT of the business. refundCharge
+        // returns the gateway's refund record; report that, never the request —
+        // a partial refund can come back at a different amount than asked for,
+        // and the gateway is the authority on what actually happened.
+        const refund = await this.getPaymentsOps().refundCharge(businessId, args.gateway, {
+          chargeId: args.chargeId,
+          amount: args.amount,
+          reason: args.reason,
+        });
+        return { refund };
       }
 
       // === INVENTORY & STOCK ===
