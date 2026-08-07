@@ -248,6 +248,39 @@ jobs:
     name: Run Tests
     runs-on: ubuntu-latest
     needs: [lint-and-typecheck]
+
+    # Postgres, because a third of the suite is not mocked.
+    #
+    # test:ci used to be `test:unit && test:smoke`, which ran src/**/*.spec.ts
+    # and four smoke files. That left 41 files in apps/server/test/ gated by
+    # nothing -- including tenant-membership-boundary, the connector-credentials
+    # and form-webhook tenancy attack suites, business-token-disclosure and
+    # webhook-ingress-secret-redaction. The tests most worth running were the
+    # ones CI never ran.
+    #
+    # 14 of them exercise a REAL database on purpose ("Nothing on the isolation
+    # boundary is mocked: Prisma, membership rows, the guard, and DB constraints
+    # are all real"), so gating them needs a server, not just a script change.
+    # pgvector/pg16 matches docker-compose so local and CI agree.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: keyflow
+          POSTGRES_PASSWORD: keyflow
+          POSTGRES_DB: keyflowos
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U keyflow"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://keyflow:keyflow@localhost:5432/keyflowos
+      DIRECT_URL: postgresql://keyflow:keyflow@localhost:5432/keyflowos
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -274,6 +307,9 @@ jobs:
       # @keyflow/shared or @keyflow/db fails to collect without this.
       - name: Build workspace packages
         run: pnpm --filter @keyflow/shared --filter @keyflow/db --filter @keyflow/api build
+
+      - name: Apply migrations to the test database
+        run: pnpm db:deploy
 
       - name: Run server tests
         run: cd apps/server && pnpm test:ci
