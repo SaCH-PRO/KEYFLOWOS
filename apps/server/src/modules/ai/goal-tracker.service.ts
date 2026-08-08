@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject } from '@nestjs/common';
+import { Injectable, Logger, Inject, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RoleEngineService, BusinessRole } from './role-engine.service';
@@ -104,9 +104,26 @@ export class GoalTrackerService {
     role: string;
     autoActions: boolean;
   }>): Promise<any> {
-    const goal = await this.prisma.client.businessGoal.update({
-      where: { id: goalId },
+    // businessId was taken as an argument and then used only for the event
+    // emit — the write itself resolved a bare goalId against every business, so
+    // any authenticated caller could edit any business's goal by id. deleteGoal,
+    // eleven lines below, already scopes correctly; this was the outlier.
+    //
+    // updateMany rather than update: a tenant mismatch gives count 0, which is
+    // unambiguous. Prisma's singular update raises P2025 "record not found",
+    // which reads as missing data and gets triaged as a data bug rather than an
+    // isolation one.
+    const result = await this.prisma.client.businessGoal.updateMany({
+      where: { id: goalId, businessId },
       data: data as any,
+    });
+
+    if (result.count === 0) {
+      throw new NotFoundException('Goal not found');
+    }
+
+    const goal = await this.prisma.client.businessGoal.findFirst({
+      where: { id: goalId, businessId },
     });
 
     this.events.emit('goal.updated', { businessId, goalId });
