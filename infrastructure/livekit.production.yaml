@@ -1,5 +1,33 @@
 # LiveKit production config (docker-compose.production `livekit` service).
-# Generate strong keys and put them in .env.production (LIVEKIT_API_KEY/SECRET).
+#
+# KEYS ARE NOT SET HERE. They come from the LIVEKIT_KEYS environment variable,
+# which docker-compose.production.yml builds from LIVEKIT_API_KEY and
+# LIVEKIT_API_SECRET in .env.production.
+#
+# This file used to contain:
+#
+#     keys:
+#       ${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}
+#
+# Compose interpolates ${...} in its OWN yaml. It does not touch the contents of
+# a bind-mounted file. So LiveKit read those sixteen characters literally and
+# registered an API key named "${LIVEKIT_API_KEY}" with the secret
+# "${LIVEKIT_API_SECRET}" — the standard template text, identical on every
+# deployment that copies these docs.
+#
+# It said so in its own startup log and started anyway:
+#
+#   2026-07-24T17:06:26 ERROR livekit config/config.go:614
+#     secret is too short, should be at least 32 characters for security
+#     {"apiKey": "${LIVEKIT_API_KEY}"}
+#
+# Caddy proxies {$LIVEKIT_DOMAIN} to livekit:7880 — the HTTP/signalling API — so
+# for fifteen days anyone who guessed the template could mint a valid token and
+# join, publish to, or subscribe to any room.
+#
+# Do not reintroduce a `keys:` block. If one exists, LiveKit accepts BOTH it and
+# LIVEKIT_KEYS, so a stale placeholder here would stay valid alongside the real
+# credential and the hole would silently reopen.
 port: 7880
 bind_addresses:
   - "0.0.0.0"
@@ -9,8 +37,6 @@ rtc:
   use_external_ip: true
 redis:
   address: redis:6379
-keys:
-  ${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}
 log_level: info
 turn:
   enabled: false
