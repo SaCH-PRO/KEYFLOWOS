@@ -153,12 +153,18 @@ export class StatementSourceService {
     const folderId = account?.sources?.driveFolderId;
     if (!folderId) { result.errors.push('No Drive folder configured for this account.'); return result; }
 
-    const since = account?.sources?.lastSweptAt;
-    const query =
-      `'${folderId}' in parents and trashed = false` +
-      (since ? ` and modifiedTime > '${since}'` : '');
-
-    const list = await this.drive.listFiles(businessId, { query, pageSize: 50, orderBy: 'modifiedTime desc' });
+    // listFiles' `query` option is a FILENAME SUBSTRING, not a Drive query.
+    // This originally hand-built `'<folder>' in parents and trashed = false`
+    // and passed it as `query`, which Drive received as a search for a file
+    // *named* that — matching nothing, every night, without erroring. Only a
+    // test at the fetch boundary showed it; every test that mocked listFiles
+    // passed. Hence folderId/modifiedAfter, which build the clauses properly.
+    const list = await this.drive.listFiles(businessId, {
+      folderId,
+      modifiedAfter: account?.sources?.lastSweptAt,
+      pageSize: 50,
+      orderBy: 'modifiedTime desc',
+    });
     const files = list.files ?? [];
     result.filesConsidered = files.length;
 

@@ -309,14 +309,32 @@ export class GoogleDriveService {
     this.logger.log(`Google Drive disconnected for business ${businessId}`);
   }
 
+  /**
+   * List files.
+   *
+   * NOTE ON `query`: it is a FILENAME SUBSTRING, not a Drive query. It is
+   * wrapped in `name contains '...'` below. Passing raw Drive syntax here does
+   * not error — it silently becomes a search for a filename containing that
+   * text, and matches nothing. That is exactly what the statement sweep did
+   * for its first day: it asked for `'<folderId>' in parents and trashed =
+   * false` and got an empty list every night, with no failure anywhere.
+   *
+   * Use `folderId` to scope to a folder and `modifiedAfter` for an incremental
+   * pass. Both build proper Drive clauses.
+   */
   async listFiles(
     businessId: string,
     options?: {
       pageToken?: string;
+      /** Filename substring. NOT a Drive query — see the note above. */
       query?: string;
       mimeType?: string;
       pageSize?: number;
       orderBy?: string;
+      /** Only files whose parent is this folder. */
+      folderId?: string;
+      /** RFC 3339 timestamp; only files modified strictly after it. */
+      modifiedAfter?: string;
     },
   ): Promise<DriveListResult> {
     const accessToken = await this.getValidAccessToken(businessId);
@@ -325,6 +343,12 @@ export class GoogleDriveService {
     const qParts: string[] = ['trashed = false'];
     if (options?.query) {
       qParts.push(`name contains '${options.query.replace(/'/g, "\\'")}'`);
+    }
+    if (options?.folderId) {
+      qParts.push(`'${options.folderId.replace(/'/g, "\\'")}' in parents`);
+    }
+    if (options?.modifiedAfter) {
+      qParts.push(`modifiedTime > '${options.modifiedAfter.replace(/'/g, "\\'")}'`);
     }
     if (options?.mimeType) {
       if (options.mimeType === 'folder') {
