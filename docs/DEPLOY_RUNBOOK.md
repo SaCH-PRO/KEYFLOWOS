@@ -1,11 +1,27 @@
 # Deploy runbook — the baseline cutover
 
-> **STOP — read `PRODUCTION_STATE.md` first.**
+> # ⛔ SUPERSEDED 2026-08-08 — DO NOT FOLLOW THIS
 >
-> This runbook was written for a production database that already holds the 433
-> tables and only needs the baseline recorded. Measured on 2026-08-03, that is
-> **not** what production is: it has **29 tables**, a migration history from a
-> branch that no longer exists, and a schema frozen since 2025-11-30.
+> **This runbook deploys to Render. KEYFLOW OS does not run on Render.**
+> Production is a Hetzner VPS at `37.27.27.0` running Docker Compose from
+> `/opt/keyflowos`. The Render workspace was deleted on 2026-08-08.
+>
+> **To deploy:** `ssh` to the box, then `./scripts/deploy.sh <git-ref>`.
+> It backs up, verifies the dump, tags rollback images, builds, migrates before
+> traffic, and asserts `/healthz` reports the hash it just built.
+>
+> **The banner that used to be here is itself a lesson.** It said production had
+> **29 tables** as of 2026-08-03 and a schema frozen since 2025-11-30. A `pg_dump`
+> of the real production on 2026-08-08 contained **443 tables**, with 24
+> migrations applied and current. That 29-table reading was almost certainly
+> taken against the *Render* database — an environment that had no `DATABASE_URL`
+> and never served a request. Two measurements, two databases, and for five days
+> the wrong one was believed.
+>
+> Everything below describes an environment that no longer exists. Kept for the
+> migration-history archaeology in the later sections, which is still accurate.
+> See `docs/CRITICAL_ANALYSIS_2026-08.md` and `render.yaml` for where production
+> actually is.
 >
 > Part 2 (`migrate resolve --applied 0_baseline`) is therefore **wrong for
 > production as it stands** — it would assert 404 tables exist that do not, and

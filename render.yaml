@@ -1,189 +1,74 @@
-services:
-  - type: web
-    name: keyflowos
-    runtime: node
-    region: ohio
-    # Pro (4GB), not Standard (2GB). The server's tsc does not fit in 2GB and no
-    # configuration closes the gap — measured on a cold cache:
-    #
-    #   2048MB  OOM   <- Standard's ceiling; this is where deploys died
-    #   3328MB  OOM
-    #   3584MB  builds
-    #   4096MB  builds
-    #
-    # `tsc --noCheck` (accepted in TypeScript 5.9) still OOM'd at 3072MB, so
-    # skipping type checking does not help either. 1,219 files / ~314k lines is
-    # simply a large compile.
-    plan: pro
-    branch: main
-    # ┌─ BEFORE YOU SCALE THIS PAST ONE INSTANCE ─────────────────────────────┐
-    # │ There is no leader election or single-runner guard on any @Cron, and  │
-    # │ there are 25 of them. Every replica would run every sweep for every   │
-    # │ business in the estate.                                               │
-    # │                                                                       │
-    # │ Some are idempotent and would only waste work. These are not:         │
-    # │                                                                       │
-    # │   key-proactive-engine.service.ts — three hourly rhythms that SEND    │
-    # │   the morning brief, the weekly digest and the end-of-day summary.    │
-    # │   N replicas means N copies of each email.                            │
-    # │                                                                       │
-    # │   key-cortex-homeostasis / -salience — release hormones. release()    │
-    # │   accumulates asymptotically, so N replicas push N doses per window   │
-    # │   and KEY's disposition shifts on replica count rather than on the    │
-    # │   business.                                                           │
-    # │                                                                       │
-    # │ Latent today because Render defaults to one instance, which is why    │
-    # │ this is a note rather than a Postgres advisory lock nobody needs yet. │
-    # │ Adding instances without a guard makes it real immediately.           │
-    # └───────────────────────────────────────────────────────────────────────┘
-    # The build actually has to build. This previously ran `pnpm install` only,
-    # which is why the start command had to use tsx — there was no compiled
-    # output to run. tsx cannot start this server (it does not emit
-    # design:paramtypes, so NestJS dependency injection fails), so the deploy
-    # was broken either way.
-    #
-    # Order matters: workspace packages first (the server imports @keyflow/db,
-    # @keyflow/shared and @keyflow/api by their built entrypoints), then the
-    # Prisma client, then the apps.
-    # --prod=false is load-bearing. NODE_ENV=production is set below (correctly,
-    # for runtime), and pnpm honours it at INSTALL time by skipping
-    # devDependencies — the build log said so outright:
-    #   "devDependencies: skipped because NODE_ENV is set to production"
-    #
-    # typescript and @types/node are devDependencies, so every `tsc` in the
-    # steps that follow had no compiler and no node types. What it did find was
-    # a TypeScript 7 pulled in transitively by a prod dependency, which has
-    # REMOVED `baseUrl` and `moduleResolution: node10` — hence the build dying
-    # with TS5102/TS5108/TS2688 on tsconfig files that are perfectly valid for
-    # the TypeScript 5.9 this repo pins.
-    #
-    # The failure was invisible locally because NODE_ENV is not production on a
-    # dev machine, so devDependencies always install.
-    buildCommand: >-
-      npm install -g pnpm@9.15.0 &&
-      pnpm install --frozen-lockfile --prod=false &&
-      pnpm --filter @keyflow/db run db:generate &&
-      pnpm --filter @keyflow/shared --filter @keyflow/db --filter @keyflow/api build &&
-      pnpm --filter server build &&
-      pnpm --filter web build
-    # Nothing applied schema changes to production. `db:generate` above builds
-    # the Prisma CLIENT, not the database; start-prod.sh does no schema work;
-    # CI's deploy job is commented out. So a new model or column reached
-    # production only if a human ran something by hand — including
-    # `flow_sessions.user_id`, which is a SECURITY fix (session privacy).
-    #
-    # This could not have been added earlier. `migrate deploy` was itself broken:
-    # migrations apply in lexicographic order, and 20250626_add_key_connector_fields
-    # sorted FIRST while doing `ALTER TABLE "integration_connections"` — a table
-    # created five months later by 20251128000000_baseline_full_schema. On a
-    # virgin database it died on migration 1 of 19 with 42P01 and produced one
-    # table. The `IF NOT EXISTS` guards in it protect the columns, not the table.
-    #
-    # That history is now archived in prisma/migrations-archive/ and replaced by
-    # a single generated 0_baseline, verified on a virgin pgvector database:
-    # 433 tables, exit 0, `migrate diff` reports "No difference detected".
-    #
-    # preDeployCommand runs after the build and BEFORE the new version takes
-    # traffic, so a schema failure blocks the release instead of shipping code
-    # against a database that cannot serve it.
-    #
-    # ┌─ ONE-TIME PREREQUISITE — do this BEFORE the next deploy ──────────────┐
-    # │ Production's database already contains all 433 tables, and its        │
-    # │ _prisma_migrations still lists the 19 archived migrations. Left as is, │
-    # │ `migrate deploy` will try to CREATE tables that already exist and the  │
-    # │ deploy will fail. Record the baseline as applied first — it writes one │
-    # │ bookkeeping row and runs no DDL:                                      │
-    # │                                                                       │
-    # │   pnpm --filter @keyflow/db exec prisma migrate resolve \             │
-    # │     --applied 0_baseline                                              │
-    # │                                                                       │
-    # │ Run it once, against production's DATABASE_URL, from a Render shell   │
-    # │ or any machine that can reach the database.                           │
-    # └───────────────────────────────────────────────────────────────────────┘
-    # DIRECT_URL when it is set, DATABASE_URL otherwise.
-    #
-    # The datasource declares only `url = env("DATABASE_URL")` and no
-    # `directUrl`, so Migrate runs over whatever DATABASE_URL points at — while
-    # render.yaml's own secret list names DIRECT_URL separately. That pairing
-    # conventionally means DATABASE_URL is a transaction pooler (pgbouncer,
-    # :6543) and DIRECT_URL is the session connection (:5432). Prisma Migrate
-    # cannot work through a transaction pooler: it takes a session-level
-    # advisory lock, so it hangs or fails rather than applying DDL.
-    #
-    # This matters now in a way it did not a moment ago. With only the baseline
-    # present, pre-deploy had no DDL to run on an existing database. The
-    # 20260803190000 migration below it does — it ALTERs flow_sessions.
-    #
-    # The `:-` fallback keeps every environment working: unset DIRECT_URL and
-    # this is exactly the old command. The generated client at runtime is
-    # unaffected and still uses DATABASE_URL, pooler included — only Migrate
-    # needs the direct connection.
-    preDeployCommand: DATABASE_URL="${DIRECT_URL:-$DATABASE_URL}" pnpm --filter @keyflow/db exec prisma migrate deploy
-    startCommand: bash scripts/start-prod.sh
-    # /api/healthz — the WEB app's health route, because the WEB app is what
-    # binds Render's $PORT here.
-    #
-    # Read the env block below carefully before changing this: WEB_PORT is set
-    # to the same value as PORT (10000) while API_PORT is 3001, and
-    # scripts/start-prod.sh resolves WEB_PORT="${WEB_PORT:-5000}". So Render
-    # probes the Next.js app, not the NestJS API. The API's own /healthz is on
-    # port 3001 and is not publicly reachable in this topology.
-    #
-    # apps/web/src/app/api/healthz/route.ts returns 200 when the web env is
-    # valid and additionally probes the API's /readyz, reporting apiReachable in
-    # the body — so a green health check means the web is up, and the body says
-    # whether the API behind it is too.
-    #
-    # NOT the API's /healthz (404 on the web app) and NOT /readyz (503 on a
-    # transient DB blip would roll back a good release).
-    healthCheckPath: /api/healthz
-    envVars:
-      - key: NODE_ENV
-        value: production
-      - key: PORT
-        value: "10000"
-      - key: API_PORT
-        value: "3001"
-      - key: WEB_PORT
-        value: "10000"
-
-      # 3584, not 4096. The measured minimum that builds is 3584MB (3328 OOMs),
-      # and giving Node a heap equal to the box's entire 4GB invites the kernel
-      # OOM-killer instead of a clean V8 failure — leaving ~512MB for the OS and
-      # node's own non-heap memory is the point.
-      #
-      # This is a ceiling, not an allocation, so it is harmless at runtime where
-      # the server uses a fraction of it.
-      - key: NODE_OPTIONS
-        value: --max-old-space-size=3584
-
-      # REQUIRED AT BUILD TIME — without it `pnpm --filter web build` throws and
-      # the whole deploy fails.
-      #
-      # apps/web/src/lib/api.ts evaluates at module load:
-      #   if (!process.env.NEXT_PUBLIC_API_BASE_URL && NODE_ENV === 'production')
-      #     throw new Error('NEXT_PUBLIC_API_BASE_URL is required in production')
-      # Next.js evaluates modules during the build, and NODE_ENV=production is
-      # set above, so an absent value is a hard build failure — not a runtime
-      # one. apps/web/src/lib/env.ts enforces the same requirement.
-      #
-      # This is the value production is ALREADY running on, not an inferred one.
-      # https://keyflowos.com/api/healthz reports
-      #   "apiBase":"https://api.keyflowos.com","apiReachable":true
-      # so the browser bundle reaches the API on its own public host.
-      #
-      # `/__api` (the same-origin proxy in next.config.ts) is the alternative and
-      # would be correct IF the API were only reachable inside this container on
-      # API_PORT. But the live topology serves the API from a separate public
-      # host, and switching a working production to a proxy path on the strength
-      # of reading one shell script is not a trade worth making. If this service
-      # ever becomes genuinely single-container, switch to /__api and set
-      # KEYFLOW_API_INTERNAL_URL=http://localhost:3001 together.
-      - key: NEXT_PUBLIC_API_BASE_URL
-        value: https://api.keyflowos.com
-      # Secrets must be added manually in the Render dashboard from your .env file:
-      # DATABASE_URL, DIRECT_URL, REDIS_URL, SUPABASE_URL, SUPABASE_ANON_KEY,
-      # SUPABASE_JWT_SECRET, SUPABASE_SERVICE_ROLE_KEY, RESEND_API_KEY,
-      # S3_BUCKET, S3_REGION, S3_ENDPOINT, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY,
-      # S3_PUBLIC_URL, S3_FORCE_PATH_STYLE, PRIVATE_OBJECT_DIR,
-      # PUBLIC_OBJECT_SEARCH_PATHS, OPENAI_API_KEY, STRIPE_SECRET_KEY, etc.
+# THIS FILE NO LONGER DESCRIBES A DEPLOYMENT. IT IS KEPT ONLY AS A SIGNPOST.
+#
+# KEYFLOW OS does not run on Render and, as far as anyone can establish, never
+# successfully did. The Render service returned HTTP 502 on its own URL, its
+# dashboard held seven environment variables and no DATABASE_URL, and line 185 of
+# the old version of this file said the secrets had to be added by hand — they
+# never were. The workspace was deleted on 2026-08-08.
+#
+# On 2026-08-07 this file cost roughly forty minutes: production was eleven days
+# and 221 commits stale, carrying a cross-tenant write that had been proven
+# exploitable, and the search for how to deploy started here because this is what
+# looked like the deployment config. It was not.
+#
+#   ┌─────────────────────────────────────────────────────────────────────────┐
+#   │  PRODUCTION IS A HETZNER VPS AT 37.27.27.0, RUNNING DOCKER COMPOSE.      │
+#   │                                                                          │
+#   │    project dir   /opt/keyflowos                                          │
+#   │    compose file  docker-compose.production.yml                           │
+#   │    proxy         Caddy (infrastructure/Caddyfile), auto-HTTPS            │
+#   │    database      pgvector/pgvector:pg16 in the keyflowos-db-1 container  │
+#   │    also          redis · minio · livekit · docling · voice-agent         │
+#   │                                                                          │
+#   │    DEPLOY        ssh in, then:  ./scripts/deploy.sh <git-ref>            │
+#   │                                                                          │
+#   │  NOTE: docker-compose.production.yml, the Caddyfile and scripts/deploy/  │
+#   │  are NOT on `main` — they live on the branch production actually runs.   │
+#   │  See docs/CRITICAL_ANALYSIS_2026-08.md for the fork and how to close it. │
+#   └─────────────────────────────────────────────────────────────────────────┘
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# WHAT WAS WORTH KEEPING
+#
+# These were measured, not guessed, and they hold wherever this is built. The
+# rest of the old file described Render specifics and is in git history if anyone
+# ever wants it (`git log -- render.yaml`).
+#
+#   BUILD MEMORY. The server's tsc does not fit in 2GB, and no configuration
+#   closes the gap. Measured on a cold cache:
+#       2048MB  OOM
+#       3328MB  OOM
+#       3584MB  builds
+#       4096MB  builds
+#   `tsc --noCheck` still OOM'd at 3072MB, so skipping type checking does not
+#   help. 1,219 files / ~314k lines is simply a large compile. The VPS has 7.6GB
+#   and 4GB of swap was added on 2026-08-08 to keep this survivable alongside the
+#   running stack.
+#
+#   tsx CANNOT START THE SERVER. It does not emit `design:paramtypes`, so NestJS
+#   type-based dependency injection fails: 64 "undefined dependency" errors, zero
+#   routes mapped, non-zero exit. Run the compiled output — `node dist/main.js`.
+#
+#   NODE_ENV=production BREAKS THE BUILD AT INSTALL TIME. pnpm honours it and
+#   skips devDependencies, which is where typescript and @types/node live. Every
+#   subsequent tsc then finds no compiler. Any build step needs
+#   `pnpm install --frozen-lockfile --prod=false`. This is invisible locally,
+#   because NODE_ENV is not production on a dev machine.
+#
+#   DO NOT RUN MORE THAN ONE APP INSTANCE. There is no leader election or
+#   single-runner guard on any @Cron, and there are 28 of them. Some are
+#   idempotent. These are not: key-proactive-engine sends the morning brief, the
+#   weekly digest and the end-of-day summary — N replicas means N copies of each
+#   email. key-cortex-homeostasis and -salience release hormones that accumulate
+#   asymptotically, so KEY's disposition would shift on replica count rather than
+#   on the business. Latent only because one instance runs today.
+#
+#   PRISMA MIGRATE NEEDS A SESSION CONNECTION. It takes a session-level advisory
+#   lock, so it hangs or fails through a transaction pooler (pgbouncer, :6543).
+#   Where DATABASE_URL is a pooler, migrations must use the direct :5432 URL.
+#   Irrelevant on the current VPS — Postgres is a container on the compose
+#   network — but it will matter again the moment a managed database appears.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# Deliberately left as comments only. A Render blueprint here would recreate the
+# service that was just deleted.

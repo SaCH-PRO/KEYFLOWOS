@@ -1,5 +1,20 @@
 # KEYFLOWOS Deployment Guide
 
+> ## ⚠️ This is not how production is deployed
+>
+> **Production is a Hetzner VPS at `37.27.27.0` running Docker Compose** from
+> `/opt/keyflowos`, behind Caddy. Deploy with `./scripts/deploy.sh <git-ref>` on
+> the box. The Render workspace referenced below was deleted on 2026-08-08 after
+> it was found returning 502 with no database credentials — it had never served a
+> request.
+>
+> Read `render.yaml` for the measured build constraints that still apply
+> (memory ceilings, why `tsx` cannot start the server, why `NODE_ENV=production`
+> breaks the install), and `docs/CRITICAL_ANALYSIS_2026-08.md` for why the deploy
+> tooling lives on a branch `main` does not have.
+>
+> Below is kept for the platform-agnostic parts, which remain useful.
+
 > Platform-agnostic deploy instructions for KEYFLOWOS. No Replit required.
 
 ---
