@@ -37,6 +37,20 @@ export const AWARENESS_TYPES = {
   // actively wrong.
   concern: 'salience_concern',
   momentum: 'salience_momentum',
+  // An automated intake that has stopped working, or has gone quiet for long
+  // enough that it probably has.
+  //
+  // This kind exists because of two defects found on one afternoon, both of
+  // which produced a SILENT ZERO rather than an error: the Drive sweep asked
+  // Google for a filename instead of a folder and matched nothing, and
+  // concurrent imports raced past an in-memory dedupe. Neither would have
+  // raised anything. The nightly job would have reported "0 files considered"
+  // — indistinguishable from a bank that sent nothing — until someone
+  // reconciled at year end.
+  //
+  // A system that runs unattended has to be able to notice its own silence,
+  // and nothing else in the awareness feed watches an integration.
+  integration: 'integration_health',
 } as const;
 
 export interface AwarenessItem {
@@ -177,6 +191,8 @@ export class KeyCortexAwarenessService {
         // The sentence salience already wrote is exactly the line the owner
         // should read. Nothing to reword.
         return str('summary') ?? 'A ranked signal from the hourly appraisal';
+      case 'integration':
+        return str('summary') ?? 'An automatic intake needs attention';
     }
   }
 
@@ -197,6 +213,8 @@ export class KeyCortexAwarenessService {
         const steps = d.implementationSteps;
         return Array.isArray(steps) && steps.length > 0 ? String(steps[0]) : undefined;
       }
+      case 'integration':
+        return str('suggestedAction');
       default:
         return undefined;
     }
