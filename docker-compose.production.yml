@@ -184,6 +184,16 @@ services:
     image: livekit/livekit-server:v1.9.12
     restart: unless-stopped
     command: --config /etc/livekit.yaml
+    environment:
+      # The keys live HERE, not in the mounted yaml. Compose interpolates its own
+      # file; it does NOT interpolate the contents of a bind-mounted file. That is
+      # why the previous `keys:` block registered the literal template text
+      # "${LIVEKIT_API_KEY}" as a working credential on a server Caddy proxies
+      # publicly. LiveKit reads LIVEKIT_KEYS in "key: secret" form.
+      #
+      # Fails closed: with keys from neither source LiveKit refuses to start,
+      # which is the right outcome if .env.production is ever incomplete.
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
     volumes:
       - ./infrastructure/livekit.production.yaml:/etc/livekit.yaml:ro
     ports:
