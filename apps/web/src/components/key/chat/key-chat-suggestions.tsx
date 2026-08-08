@@ -43,6 +43,21 @@ const SUGGESTIONS: Record<KeyChatMode, Suggestion[]> = {
     { id: "process", label: "Process optimization", prompt: "Process optimization." },
     { id: "schedule", label: "Ops schedule", prompt: "Operations schedule." },
   ],
+  support: [
+    { id: "tickets", label: "Open tickets", prompt: "Show open support tickets." },
+    { id: "waiting", label: "Waiting on us", prompt: "Which conversations are waiting on a reply from us?" },
+    { id: "escalations", label: "Escalations", prompt: "Show escalated support issues." },
+  ],
+  marketing: [
+    { id: "campaigns", label: "Campaign performance", prompt: "How are my campaigns performing?" },
+    { id: "audience", label: "Audience growth", prompt: "Show audience and list growth." },
+    { id: "content", label: "Content plan", prompt: "What should we publish next?" },
+  ],
+  operator: [
+    { id: "approvals", label: "Pending approvals", prompt: "What is waiting for my approval?" },
+    { id: "automations", label: "Automation health", prompt: "Show automation and workflow health." },
+    { id: "exceptions", label: "Exceptions", prompt: "What failed or needs manual intervention?" },
+  ],
 };
 
 interface KeyChatSuggestionsProps {

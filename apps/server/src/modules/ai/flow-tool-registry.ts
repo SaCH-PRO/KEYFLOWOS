@@ -4612,9 +4612,12 @@ export const FLOW_TOOLS: FlowTool[] = [
         assignableId: { type: 'string', description: 'Assignee id' },
       },
     },
-    // --- union boundary: main contributed inbox_*/people_* above,
-    // --- integration contributed procurement_*/structure_* below.
-    // --- Verified disjoint: 9 vs 21 tool names, zero overlap.
+  },
+  // ================================================================
+  //  Union boundary. main contributed the inbox_*/people_* tools above,
+  //  integration the procurement_*/structure_* tools below. Verified
+  //  disjoint before unioning: 9 names against 21, zero overlap.
+  //
   //  PROCUREMENT FAMILY — L1 Read / L2 Organize / L3 Execute
   //  Note: approving/rejecting a procurement request is intentionally
   //  NOT an AI tool — a business shouldn't let KEY approve its own

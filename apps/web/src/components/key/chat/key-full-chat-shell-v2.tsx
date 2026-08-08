@@ -24,8 +24,12 @@ import { KeyGenomeChip } from "./key-genome-chip";
 import { openGenomeConversation, GENOME_SESSION_ID } from "./open-genome-conversation";
 import { fetchAiApprovals, type AiApprovalItem } from "@/lib/api/ai-approvals";
 import { getStoredBusinessId } from "@/lib/workspace";
+import type { KeyChatMode } from "./types";
 
-type ChatMode = "general" | "genome_onboarding" | "executive" | "finance" | "sales" | "operations";
+// Mode vocabulary lives in ./types. This file used to redeclare it locally with
+// six members while the shared union had nine, so KeyChatModeTabs' onChange
+// (mode: KeyChatMode) => void could not accept this shell's handler.
+type ChatMode = KeyChatMode;
 
 function ApprovalsRail() {
   const [items, setItems] = useState<AiApprovalItem[] | null>(null);
@@ -209,7 +213,7 @@ export function KeyFullChatShellV2() {
         </div>
 
         <KeyChatVoiceBar />
-        <KeyChatInput onSend={sendMessage} onStop={stop} showModeBadge={false} />
+        <KeyChatInput onSend={sendMessage} onStop={stop} />
       </div>
 
       {/* Right Context Rail */}

@@ -11677,6 +11677,10 @@ model KeyInboxThread {
   @@unique([businessId, channel, externalThreadId])
   @@index([businessId, lastMessageAt])
   @@index([businessId, channel])
+  // 20260806120000_merge_omnichannel_inboxes creates key_inbox_threads_contact_id_idx
+  // in SQL but the model never declared it, so `migrate diff` reported drift and a
+  // future `migrate dev` would have generated a migration dropping a live index.
+  @@index([contactId])
   @@map("key_inbox_threads")
 }
 

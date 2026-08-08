@@ -62,16 +62,13 @@ import { CallScriptService } from '../call-tasks/call-script.service';
 import { EvidenceService } from '../evidence/evidence.service';
 import { MarketplaceService } from '../marketplace/marketplace.service';
 import { PaymentsOpsService } from '../payments/payments-ops.service';
-import { ContractsService } from '../contracts/contracts.service';
 import { ReportsService } from '../reports/reports.service';
 import { KeyCortexPlannerService } from '../key-cortex/key-cortex-planner.service';
-import { CrmDealsService } from '../crm/crm-deals.service';
 import { DealForecastService } from '../crm/deal-forecast.service';
 import { DealVelocityService } from '../crm/deal-velocity.service';
 import { SeoService } from '../seo/seo.service';
 import { SeoContentService } from '../seo/seo-content.service';
 import { ReceivablesService } from '../finance/receivables.service';
-import { BankMatchingService } from '../finance/bank-matching.service';
 import { ApprovalRequestService } from '../approvals/approval-request.service';
 import { GoogleDriveService } from '../google-drive/google-drive.service';
 import { TaskAssignmentService } from '../task-assignments/task-assignment.service';
@@ -461,17 +458,11 @@ export class FlowOrchestratorService {
   private getFinanceAccounts() {
     return this.moduleRef.get(FinanceAccountsService, { strict: false });
   }
-  private getBankMatching() {
-    return this.moduleRef.get(BankMatchingService, { strict: false });
-  }
   private getFinanceCoa() {
     return this.moduleRef.get(FinanceCoaService, { strict: false });
   }
   private getPosting() {
     return this.moduleRef.get(PostingService, { strict: false });
-  }
-  private getContracts() {
-    return this.moduleRef.get(ContractsService, { strict: false });
   }
   private getContractClauses() {
     return this.moduleRef.get(ContractClauseService, { strict: false });
@@ -5125,6 +5116,8 @@ ${triage.standingContext}`;
           assignableType: args.assignableType,
           assignableId: args.assignableId,
         };
+      }
+
       // ----------------------------------------------------------------
       //  PROCUREMENT
       // ----------------------------------------------------------------
