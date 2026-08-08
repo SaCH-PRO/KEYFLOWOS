@@ -373,8 +373,29 @@ export class BankImportService {
     }
 
     if (toCreate.length > 0) {
-      const created = await this.prisma.client.bankTransaction.createMany({ data: toCreate });
+      // skipDuplicates emits ON CONFLICT DO NOTHING, which is what turns the
+      // partial unique index on (account_id, rawData->>'externalId') into a
+      // dedupe mechanism rather than a 500. The in-memory pass above still does
+      // the work in the common case; this is the backstop for the ingest that
+      // interleaves — the 5am cron overlapping a manual sweep, or two accounts
+      // pointed at the same Drive folder.
+      const created = await this.prisma.client.bankTransaction.createMany({
+        data: toCreate,
+        skipDuplicates: true,
+      });
       result.inserted = created.count;
+
+      // Anything the database refused was a duplicate the in-memory pass could
+      // not see. Count it as one rather than losing it: parsed must keep
+      // equalling inserted + duplicates + invalid, or the report stops adding
+      // up and a skipped duplicate reads the same as a dropped transaction.
+      const refused = toCreate.length - created.count;
+      if (refused > 0) {
+        result.duplicates += refused;
+        this.logger.log(
+          `[import] ${refused} row(s) refused by the unique index — a concurrent import had already inserted them`,
+        );
+      }
     }
 
     await this.audit.log({
@@ -460,8 +481,29 @@ export class BankImportService {
     }
 
     if (toCreate.length > 0) {
-      const created = await this.prisma.client.bankTransaction.createMany({ data: toCreate });
+      // skipDuplicates emits ON CONFLICT DO NOTHING, which is what turns the
+      // partial unique index on (account_id, rawData->>'externalId') into a
+      // dedupe mechanism rather than a 500. The in-memory pass above still does
+      // the work in the common case; this is the backstop for the ingest that
+      // interleaves — the 5am cron overlapping a manual sweep, or two accounts
+      // pointed at the same Drive folder.
+      const created = await this.prisma.client.bankTransaction.createMany({
+        data: toCreate,
+        skipDuplicates: true,
+      });
       result.inserted = created.count;
+
+      // Anything the database refused was a duplicate the in-memory pass could
+      // not see. Count it as one rather than losing it: parsed must keep
+      // equalling inserted + duplicates + invalid, or the report stops adding
+      // up and a skipped duplicate reads the same as a dropped transaction.
+      const refused = toCreate.length - created.count;
+      if (refused > 0) {
+        result.duplicates += refused;
+        this.logger.log(
+          `[import] ${refused} row(s) refused by the unique index — a concurrent import had already inserted them`,
+        );
+      }
     }
 
     await this.audit.log({
