@@ -421,9 +421,32 @@ Respond with JSON only:
       throw new NotFoundException('Plan not found');
     }
 
+    // The ownership check above is sound, but it does not make `body` safe to
+    // write wholesale. projects.controller.ts:243 declares @Body() as an inline
+    // type literal, which erases to Object — the global
+    // ValidationPipe({whitelist:true}) skips native metatypes and strips
+    // nothing. So an unlisted key arrives intact, and ProjectPlan.businessId is
+    // a settable scalar.
+    //
+    // The result was not a cross-tenant read: you had to own the plan. It was
+    // tenant RELOCATION — passing {"businessId":"<theirs>"} moved your own plan
+    // into another business, where you could no longer see it and they had not
+    // asked for it. Named fields only.
+    const { status, strategySummary, estimatedTotalHours, estimatedBudget,
+      estimatedPeople, estimatedDurationDays, riskAnalysis, swotAnalysis } = body;
+
     return this.prisma.client.projectPlan.update({
       where: { id: planId },
-      data: body,
+      data: {
+        ...(status !== undefined && { status }),
+        ...(strategySummary !== undefined && { strategySummary }),
+        ...(estimatedTotalHours !== undefined && { estimatedTotalHours }),
+        ...(estimatedBudget !== undefined && { estimatedBudget }),
+        ...(estimatedPeople !== undefined && { estimatedPeople }),
+        ...(estimatedDurationDays !== undefined && { estimatedDurationDays }),
+        ...(riskAnalysis !== undefined && { riskAnalysis: riskAnalysis as never }),
+        ...(swotAnalysis !== undefined && { swotAnalysis: swotAnalysis as never }),
+      },
     });
   }
 
