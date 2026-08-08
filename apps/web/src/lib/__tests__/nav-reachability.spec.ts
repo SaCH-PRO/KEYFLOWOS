@@ -109,6 +109,10 @@ const ORPHANED_BY_DESIGN: Record<string, Reason> = {
   "/app/keyflow-command":                'deliberately-unlinked',
   "/app/marketing-flow":                 'todo-connect',
   "/app/money":                          'deliberately-unlinked',
+  // The expanded finance action list, reached from the "See all" link on the
+  // money hub's panel — which truncates to five. Not in nav on purpose: it is
+  // the panel's overflow, not a destination of its own.
+  "/app/money/actions":                  'detail-route-of:/app/money',
   "/app/money/books":                    'deliberately-unlinked',
   "/app/money/expenses":                 'deliberately-unlinked',
   "/app/money/revenue":                  'deliberately-unlinked',
