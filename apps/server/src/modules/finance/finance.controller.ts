@@ -17,6 +17,7 @@ import { FinanceCoaService, type CreateCoaInput, type UpdateCoaInput } from './f
 import { FinanceTaxRateService, type UpsertTaxRateInput } from './finance-tax-rate.service';
 import { FinanceSettingsService, type UpdateFinanceSettingsInput } from './finance-settings.service';
 import { BankImportService, type ImportProfile } from './bank-import.service';
+import { StatementSourceService, type StatementSources } from './statement-source.service';
 import { BankMatchingService } from './bank-matching.service';
 import { ReconciliationService } from './reconciliation.service';
 import { TaxLiabilityService } from './tax-liability.service';
@@ -55,6 +56,7 @@ export class FinanceController {
     @Inject(FinanceTaxRateService) private readonly taxRates: FinanceTaxRateService,
     @Inject(FinanceSettingsService) private readonly settings: FinanceSettingsService,
     @Inject(BankImportService) private readonly bankImport: BankImportService,
+    @Inject(StatementSourceService) private readonly statementSources: StatementSourceService,
     @Inject(BankMatchingService) private readonly bankMatch: BankMatchingService,
     @Inject(BankRuleService) private readonly bankRules: BankRuleService,
     @Inject(RecurringJournalEntryService) private readonly recurringJournals: RecurringJournalEntryService,
@@ -637,6 +639,39 @@ export class FinanceController {
   ) {
     await this.ensureAccess(req.user.id, businessId);
     return this.bankImport.saveImportProfile(businessId, accountId, body);
+  }
+
+  /**
+   * Connect an automated statement source to this account.
+   *
+   * `driveFolderId` — anything dropped in that Drive folder is imported.
+   * `gmailQuery`    — Gmail search syntax, e.g. `from:republicbank.com`.
+   *
+   * Both are swept nightly. Either can be run on demand below.
+   */
+  @Post('accounts/:accountId/statement-sources')
+  async setStatementSources(
+    @Param('businessId') businessId: string,
+    @Param('accountId') accountId: string,
+    @Body() body: StatementSources,
+    @Req() req: any,
+  ) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.statementSources.setSources(businessId, accountId, body);
+  }
+
+  /** Run a configured source now rather than waiting for the nightly sweep. */
+  @Post('accounts/:accountId/statement-sources/:source/sweep')
+  async sweepStatementSource(
+    @Param('businessId') businessId: string,
+    @Param('accountId') accountId: string,
+    @Param('source') source: string,
+    @Req() req: any,
+  ) {
+    await this.ensureAccess(req.user.id, businessId);
+    if (source === 'drive') return this.statementSources.sweepDrive(businessId, accountId);
+    if (source === 'gmail') return this.statementSources.sweepGmail(businessId, accountId);
+    throw new BadRequestException('source must be "drive" or "gmail"');
   }
 
   /** Split-view payload for the reconciliation UI: bank rows + ledger candidates. */

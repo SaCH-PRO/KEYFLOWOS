@@ -510,4 +510,120 @@ export class GmailService {
     if (!res.ok) throw new BadRequestException(`Gmail API error ${res.status}`);
     return res.json();
   }
+
+  /* ══ READ ═══════════════════════════════════════════════════════════════
+   *
+   * This service was send-only. Reading needed no new OAuth flow and no new
+   * consent screen: `gmail.modify` is already among the scopes requested at
+   * :104-109, and it includes read. Existing connections work unchanged.
+   *
+   * Deliberately kept on GmailService rather than a second Gmail client —
+   * token refresh, expiry skew and the "Gmail not connected" contract all live
+   * in getValidAccessToken, and a parallel client would drift from it.
+   */
+
+  /**
+   * Search the mailbox. `query` is Gmail search syntax, the same string a user
+   * would type into the box — `has:attachment from:republicbank.com newer_than:30d`.
+   */
+  async searchMessages(
+    businessId: string,
+    query: string,
+    maxResults = 25,
+  ): Promise<Array<{ id: string; threadId: string }>> {
+    const accessToken = await this.getValidAccessToken(businessId);
+    const url = new URL('https://gmail.googleapis.com/gmail/v1/users/me/messages');
+    url.searchParams.set('q', query);
+    url.searchParams.set('maxResults', String(Math.min(maxResults, 100)));
+
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+    if (!res.ok) throw new BadRequestException(`Gmail search failed (${res.status})`);
+    const body = (await res.json()) as { messages?: Array<{ id: string; threadId: string }> };
+    return body.messages ?? [];
+  }
+
+  /**
+   * Message metadata plus a flat list of its attachments.
+   *
+   * Gmail nests parts arbitrarily deep — an attachment on a forwarded message
+   * with an inline signature image can sit three levels down — so the walk is
+   * recursive rather than a scan of `payload.parts`.
+   */
+  async getMessageWithAttachments(
+    businessId: string,
+    messageId: string,
+  ): Promise<{
+    id: string;
+    subject: string;
+    from: string;
+    date: Date | null;
+    attachments: Array<{ attachmentId: string; filename: string; mimeType: string; size: number }>;
+  }> {
+    const accessToken = await this.getValidAccessToken(businessId);
+    const res = await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(messageId)}?format=full`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+    );
+    if (!res.ok) throw new BadRequestException(`Gmail message fetch failed (${res.status})`);
+
+    const msg = (await res.json()) as {
+      id: string;
+      internalDate?: string;
+      payload?: GmailPart;
+    };
+
+    const headers = msg.payload?.headers ?? [];
+    const header = (name: string) =>
+      headers.find((h) => h.name.toLowerCase() === name.toLowerCase())?.value ?? '';
+
+    const attachments: Array<{ attachmentId: string; filename: string; mimeType: string; size: number }> = [];
+    const walk = (part?: GmailPart) => {
+      if (!part) return;
+      if (part.body?.attachmentId && part.filename) {
+        attachments.push({
+          attachmentId: part.body.attachmentId,
+          filename: part.filename,
+          mimeType: part.mimeType ?? 'application/octet-stream',
+          size: part.body.size ?? 0,
+        });
+      }
+      (part.parts ?? []).forEach(walk);
+    };
+    walk(msg.payload);
+
+    return {
+      id: msg.id,
+      subject: header('Subject'),
+      from: header('From'),
+      date: msg.internalDate ? new Date(Number(msg.internalDate)) : null,
+      attachments,
+    };
+  }
+
+  /** Fetch one attachment's bytes. Gmail returns base64url, not base64. */
+  async getAttachment(
+    businessId: string,
+    messageId: string,
+    attachmentId: string,
+  ): Promise<Buffer> {
+    const accessToken = await this.getValidAccessToken(businessId);
+    const res = await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+    );
+    if (!res.ok) throw new BadRequestException(`Gmail attachment fetch failed (${res.status})`);
+    const body = (await res.json()) as { data?: string };
+    // base64url: '-' and '_' replace '+' and '/'. Decoding as plain base64
+    // silently corrupts any attachment whose bytes happen to produce them.
+    return Buffer.from((body.data ?? '').replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+  }
+}
+
+/** Minimal shape of a Gmail MIME part — only the fields the walk above reads. */
+interface GmailPart {
+  filename?: string;
+  mimeType?: string;
+  headers?: Array<{ name: string; value: string }>;
+  body?: { attachmentId?: string; size?: number };
+  parts?: GmailPart[];
 }

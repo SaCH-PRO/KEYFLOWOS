@@ -19,6 +19,8 @@ import { FinanceCoaService } from './finance-coa.service';
 import { FinanceTaxRateService } from './finance-tax-rate.service';
 import { FinanceSettingsService } from './finance-settings.service';
 import { BankImportService } from './bank-import.service';
+import { StatementSourceService } from './statement-source.service';
+import { GoogleDriveModule } from '../google-drive/google-drive.module';
 import { BankMatchingService } from './bank-matching.service';
 import { BankRuleService } from './bank-rule.service';
 import { RecurringJournalEntryService } from './recurring-journal-entry.service';
@@ -52,7 +54,7 @@ import { CashReserveService } from './cash-reserve.service';
  * Settings) plus its sub-services.
  */
 @Module({
-  imports: [PrismaModule, AuthModule, forwardRef(() => AiModule), forwardRef(() => CommerceModule), TimelineModule, CommandModule],
+  imports: [PrismaModule, AuthModule, forwardRef(() => AiModule), forwardRef(() => CommerceModule), TimelineModule, CommandModule, GoogleDriveModule],
   controllers: [FinanceController],
   providers: [
     PostingService,
@@ -68,6 +70,7 @@ import { CashReserveService } from './cash-reserve.service';
     FinanceTaxRateService,
     FinanceSettingsService,
     BankImportService,
+    StatementSourceService,
     BankMatchingService,
     BankRuleService,
     RecurringJournalEntryService,
@@ -104,6 +107,7 @@ import { CashReserveService } from './cash-reserve.service';
     FinanceTaxRateService,
     FinanceSettingsService,
     BankImportService,
+    StatementSourceService,
     BankMatchingService,
     BankRuleService,
     RecurringJournalEntryService,
