@@ -25,6 +25,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, cleanup } from '@testing-library/react';
+import { GenomeProvider } from '@/contexts/genome-context';
 
 /* ── Everything a page reaches for that jsdom does not have ─────────────── */
 
@@ -97,6 +98,15 @@ const NEWLY_REACHABLE: Array<[string, () => Promise<{ default: React.ComponentTy
   ['/app/trash', () => import('../trash/page')],
   // Reached from the money hub's "See all"
   ['/app/money/actions', () => import('../money/actions/page')],
+  // Opened by the fork close rather than by bec5a501. These five arrive from
+  // integration/2026-07-consolidation, which shipped them with no nav entry on
+  // either branch, so nothing had ever mounted them. /app/procurement came from
+  // exactly there and threw on an empty response — same origin, same gate.
+  ['/app/commerce/gateway', () => import('../commerce/gateway/page')],
+  ['/app/events', () => import('../events/page')],
+  ['/app/genome', () => import('../genome/page')],
+  ['/app/payroll', () => import('../payroll/page')],
+  ['/app/performance', () => import('../performance/page')],
 ];
 
 let realFetch: typeof globalThis.fetch;
@@ -128,8 +138,9 @@ describe('every newly-reachable screen mounts', () => {
   it('covers every door opened in bec5a501', () => {
     // If a nav entry is added without a line here, this count drifts and the
     // next person notices. 25 nav entries; procurement contributes three
-    // routes and money/actions arrives from the See-all fix.
-    expect(NEWLY_REACHABLE.length).toBeGreaterThanOrEqual(26);
+    // routes and money/actions arrives from the See-all fix. Plus the five the
+    // fork close linked in from integration/2026-07-consolidation.
+    expect(NEWLY_REACHABLE.length).toBeGreaterThanOrEqual(31);
   });
 
   for (const [route, load] of NEWLY_REACHABLE) {
@@ -140,7 +151,21 @@ describe('every newly-reachable screen mounts', () => {
 
       // The assertion is deliberately weak: mounting is the thing the nav
       // entry newly causes, and a throw here is a white screen for the user.
-      expect(() => render(<Page />), `${route} throws on mount`).not.toThrow();
+      //
+      // Rendered inside GenomeProvider because app/app/layout.tsx wraps every
+      // /app/* page in it. A bare render made /app/genome throw "useGenome must
+      // be used within a GenomeProvider" — a page that mounts perfectly well in
+      // the real tree. That is the false death this file's sibling gate warns
+      // about: it would have sent someone to fix working code.
+      expect(
+        () =>
+          render(
+            <GenomeProvider>
+              <Page />
+            </GenomeProvider>,
+          ),
+        `${route} throws on mount`,
+      ).not.toThrow();
     });
   }
 });

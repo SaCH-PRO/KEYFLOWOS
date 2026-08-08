@@ -17,9 +17,14 @@ be verified without touching the server has been. What remains needs the box.
 | Tables | 443 |
 | Deploying | `merge/fork-close` — main + integration, fully merged |
 
-Six migrations are pending against production. Deploying without §2 fails —
+**Seven** migrations are pending against production. Deploying without §2 fails —
 safely, before traffic, because `deploy.sh` dies on a failed `migrate deploy` —
 but it fails.
+
+> Updated 2026-08-08 after merging main's 8 newer commits (29 nav doors, the
+> fabricated-screen gate, and `20260808140000_bank_transaction_external_id_unique`).
+> The migration set went 13 → 14 and the pending set 6 → 7. Everything below was
+> recomputed against 14; the earlier numbers are dead.
 
 ---
 
@@ -112,6 +117,33 @@ Compare it line by line with the block above. Extra `Removed column`, `Removed
 table` or `Dropped` entries beyond the two conversation tables mean production
 has drifted from what the merged schema expects — stop and bring the output back.
 
+**Two honest limits on that expected block.**
+
+*It is a model of production, not production.* It was produced by applying the 8
+migrations production already has to an empty database. Those 8 descend from
+main's `0_baseline`; production's real schema was built by integration's 24
+migrations. The two are believed equivalent — both land on 443 tables — but that
+is the assumption `migrate resolve` is about to make permanent, which is exactly
+why the diff is run against the real database before recording anything.
+
+*`migrate diff` cannot see partial or expression indexes.* Main's new migration
+creates
+
+```sql
+CREATE UNIQUE INDEX IF NOT EXISTS "bank_transactions_account_external_id_key"
+  ON "bank_transactions" ("account_id", (("rawData"->>'externalId')))
+  WHERE "rawData"->>'externalId' IS NOT NULL;
+```
+
+Prisma's datamodel has no way to express that, so it appears in **neither** the
+expected delta nor `migrate diff` output — before or after it is applied. Confirm
+it landed directly instead:
+
+```bash
+docker exec keyflowos-db-1 psql -U postgres -d keyflowos -c \
+  "\di bank_transactions_account_external_id_key"
+```
+
 `scripts/prepare-production-db.ps1` automates this, but its gate was calibrated
 for a **one**-migration delta (`flow_sessions.user_id`) and still refers to
 Render. Against this branch it will refuse and invite `-Force`. Prefer the manual
@@ -124,12 +156,19 @@ Only after 2b matches:
 ```bash
 cd /opt/keyflowos/packages/db
 npx prisma migrate resolve --applied 0_baseline
-npx prisma migrate status        # 0_baseline applied; 5 still pending
+npx prisma migrate status        # 0_baseline applied; 6 still pending
 ```
 
-The five that remain are meant to run: `add_risc_user_identity`,
-`add_user_metadata`, `flow_session_user_scope`, `merge_omnichannel_inboxes`,
-`retire_conversation_store`.
+The six that remain are meant to run:
+
+```
+20260726160935_add_risc_user_identity
+20260726161845_add_user_metadata
+20260803190000_flow_session_user_scope
+20260806120000_merge_omnichannel_inboxes
+20260806130000_retire_conversation_store        <- the destructive one, see §1
+20260808140000_bank_transaction_external_id_unique
+```
 
 The 17 rows in `_prisma_migrations` naming migrations that no longer exist in the
 repo are expected — main squashed them into `0_baseline`. `migrate deploy`

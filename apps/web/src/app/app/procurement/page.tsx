@@ -105,10 +105,10 @@ export default function ProcurementPage() {
               <MetricCard label="Pending Approval" value={stats.pendingApprovals} icon={AlertCircle} iconColor="#f59e0b" />
             </motion.div>
             <motion.div variants={fadeUp} initial="hidden" animate="show" transition={{ delay: 0.1 }}>
-              <MetricCard label="Avg Budget" value={`$${stats.averageBudget.toLocaleString()}`} icon={DollarSign} iconColor="#10b981" />
+              <MetricCard label="Avg Budget" value={`$${(stats.averageBudget ?? 0).toLocaleString()}`} icon={DollarSign} iconColor="#10b981" />
             </motion.div>
             <motion.div variants={fadeUp} initial="hidden" animate="show" transition={{ delay: 0.15 }}>
-              <MetricCard label="Approved" value={stats.byStatus.APPROVED ?? 0} icon={TrendingUp} iconColor="#3b82f6" />
+              <MetricCard label="Approved" value={stats.byStatus?.APPROVED ?? 0} icon={TrendingUp} iconColor="#3b82f6" />
             </motion.div>
           </>
         ) : null}
@@ -118,7 +118,7 @@ export default function ProcurementPage() {
       {!loading && stats && (
         <SectionCard title="Status Breakdown" icon={BarChart3} compact>
           <div className="flex flex-wrap gap-2 p-3">
-            {Object.entries(stats.byStatus).map(([status, count]) => {
+            {Object.entries(stats.byStatus ?? {}).map(([status, count]) => {
               const config = STATUS_CONFIG[status];
               if (!config) return null;
               return (
