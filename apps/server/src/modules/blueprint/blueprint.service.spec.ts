@@ -48,12 +48,17 @@ function makeService(row?: Record<string, unknown>, scoringOverrides?: Partial<G
 
   const keyGenome = new KeyGenomeService(prisma as any, genomeScoring, moduleReadiness as any);
 
+  const genomeBackfill = {
+    backfill: vi.fn().mockResolvedValue({ factsUpserted: 0, evidenceAttached: 0 }),
+  };
+
   return new BlueprintService(
     prisma,
     temporal as any,
     genomeScoring,
     keyGenome,
     moduleReadiness as any,
+    genomeBackfill as any,
     new EventEmitter2(),
   );
 }

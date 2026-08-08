@@ -74,7 +74,10 @@ async function bootstrap() {
   app.enableShutdownHooks();
 
   const port = Number(process.env.PORT) || 3001;
-  await app.listen(port, '0.0.0.0');
+  // Listen on the dual-stack wildcard so both IPv4 (127.0.0.1) and IPv6 (::1)
+  // localhost clients connect — binding to 0.0.0.0 left IPv6-only resolution
+  // paths (localhost's AAAA record) refusing connections in waves.
+  await app.listen(port, '::');
   const version = await getReleaseVersion();
 
   console.log(`[boot] API ready on http://localhost:${port} (commit=${version.short}, env=${process.env.NODE_ENV || 'development'})`);

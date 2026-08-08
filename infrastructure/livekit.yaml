@@ -1,0 +1,15 @@
+# LiveKit dev server config (docker-compose `livekit` service).
+# Dev keys only — production should use LiveKit Cloud or a secured deployment.
+# Redis backs the internal message bus used for agent job dispatch.
+port: 7880
+bind_addresses:
+  - "0.0.0.0"
+rtc:
+  tcp_port: 7881
+  udp_port: 7882
+  use_external_ip: false
+redis:
+  address: redis:6379
+keys:
+  keyflow_dev: keyflow_dev_secret_0123456789abcdef0123456789abcdef
+log_level: info

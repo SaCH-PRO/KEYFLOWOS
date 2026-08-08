@@ -14,8 +14,6 @@ interface KeyPlanCardProps {
 export function KeyPlanCard({ step, onConfirm, isResolving }: KeyPlanCardProps) {
   const [showArgs, setShowArgs] = useState(false);
 
-  const resolved = step.status === "completed" || step.status === "rejected" || step.status === "failed";
-
   return (
     <div className="w-full min-w-0 overflow-hidden rounded-xl border border-border/50 bg-card/60 shadow-sm">
       <div className="flex items-start gap-3 p-3">
@@ -61,7 +59,7 @@ export function KeyPlanCard({ step, onConfirm, isResolving }: KeyPlanCardProps) 
         </div>
       </div>
 
-      {!resolved && (
+      {step.status === "pending" && (
         <div className="flex items-center justify-end gap-2 border-t border-border/40 px-3 py-2">
           <button
             type="button"
@@ -81,6 +79,34 @@ export function KeyPlanCard({ step, onConfirm, isResolving }: KeyPlanCardProps) 
             {isResolving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
             Allow
           </button>
+        </div>
+      )}
+
+      {step.status === "executing" && (
+        <div className="flex items-center gap-1.5 border-t border-border/40 px-3 py-2 text-xs text-muted-foreground">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          Working…
+        </div>
+      )}
+
+      {(step.status === "completed" || step.status === "approved") && (
+        <div className="flex items-center gap-1.5 border-t border-border/40 px-3 py-2 text-xs text-emerald-600 dark:text-emerald-400">
+          <Check className="h-3.5 w-3.5" />
+          Done
+        </div>
+      )}
+
+      {step.status === "failed" && (
+        <div className="flex items-center gap-1.5 border-t border-border/40 px-3 py-2 text-xs text-destructive">
+          <X className="h-3.5 w-3.5" />
+          Failed{step.error ? `: ${step.error}` : ""}
+        </div>
+      )}
+
+      {step.status === "rejected" && (
+        <div className="flex items-center gap-1.5 border-t border-border/40 px-3 py-2 text-xs text-muted-foreground">
+          <X className="h-3.5 w-3.5" />
+          Cancelled
         </div>
       )}
     </div>

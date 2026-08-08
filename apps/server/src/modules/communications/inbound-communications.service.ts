@@ -2,6 +2,8 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { EntityResolutionService } from '../../core/connectors/entity-resolution.service';
+import { StaffChatBridgeService } from '../structure/staff-chat-bridge.service';
+import { WhatsAppService } from '../whatsapp/whatsapp.service';
 
 export interface InboundEmailPayload {
   businessId?: string;
@@ -51,6 +53,8 @@ export class InboundCommunicationsService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Inject(EntityResolutionService) private readonly entityResolution: EntityResolutionService,
+    @Inject(StaffChatBridgeService) private readonly staffChat: StaffChatBridgeService,
+    @Inject(WhatsAppService) private readonly whatsapp: WhatsAppService,
   ) {}
 
   async receiveEmail(payload: InboundEmailPayload): Promise<InboundResult> {
@@ -125,6 +129,20 @@ export class InboundCommunicationsService {
     if (!businessId) {
       this.logger.warn(`Inbound SMS from ${from} could not be routed to a business`);
       return { ok: false, businessId: null, contactId: null, matchedOn: null, reason: 'unrouted' };
+    }
+
+    // Staff members (full account or contact-only) can talk to KEY directly
+    // over SMS — check that before treating this as a customer inquiry.
+    if (payload.body?.trim()) {
+      const staffResult = await this.staffChat.routeInboundMessage(businessId, from, payload.body, 'sms');
+      if (staffResult.handled) {
+        if (staffResult.reply) {
+          // SMS falls back to Twilio-via-WhatsApp for outbound, same as the rest
+          // of the app (see ai-message-sender.service.ts sendSms()).
+          await this.whatsapp.sendMessage(businessId, { to: from, body: staffResult.reply });
+        }
+        return { ok: true, businessId, contactId: null, matchedOn: 'staff_position', reason: 'staff_chat' };
+      }
     }
 
     const business = await this.prisma.client.business.findUnique({

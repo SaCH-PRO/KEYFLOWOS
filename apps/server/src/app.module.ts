@@ -22,6 +22,7 @@ import { CrmModule } from './modules/crm/crm.module';
 import { CatalogModule } from './modules/catalog/catalog.module';
 import { CommerceModule } from './modules/commerce/commerce.module';
 import { BookingsModule } from './modules/bookings/bookings.module';
+import { EventsModule } from './modules/events/events.module';
 import { SocialModule } from './modules/social/social.module';
 import { AutomationModule } from './modules/automation/automation.module';
 import { SiteModule } from './modules/site/site.module';
@@ -115,7 +116,12 @@ import { ContractsModule } from './modules/contracts/contracts.module';
 import { KeyCortexModule } from './modules/key-cortex/key-cortex.module';
 import { KeystoreModule } from './modules/keystore/keystore.module';
 import { KeyConnectorModule } from './modules/key-connector/key-connector.module';
+import { PhoneVoiceModule } from './modules/phone-voice/phone-voice.module';
 import { VoiceModule } from './modules/voice/voice.module';
+import { LivekitModule } from './modules/livekit/livekit.module';
+import { ChatwootModule } from './modules/chatwoot/chatwoot.module';
+import { CapabilitiesModule } from './modules/capabilities/capabilities.module';
+import { RiscModule } from './modules/risc/risc.module';
 
 @Module({
   imports: [
@@ -141,12 +147,14 @@ import { VoiceModule } from './modules/voice/voice.module';
     CatalogModule,
     CommerceModule,
     BookingsModule,
+    EventsModule,
     SocialModule,
     AutomationModule,
     SiteModule,
     AiModule,
     FlowModule,
     TimelineModule,
+    PhoneVoiceModule,
     WebhooksModule,
     ApiKeysModule,
     ActionsModule,
@@ -226,6 +234,7 @@ import { VoiceModule } from './modules/voice/voice.module';
     DeviceModule,
     RealtimeModule,
     SecurityAuditModule,
+    RiscModule,
     ContractsModule,
 
     // KeyStore Service Marketplace — Human-powered deliverables platform
@@ -236,6 +245,15 @@ import { VoiceModule } from './modules/voice/voice.module';
 
     // Voice providers — Browser / OpenAI / ElevenLabs TTS
     VoiceModule,
+
+    // In-app full-duplex KEY voice (rooms, tokens, webhooks)
+    LivekitModule,
+
+    // Chatwoot L1 support desk (agent-bot webhook → KEY replies)
+    ChatwootModule,
+
+    // Platform capability contract + discovery API (Stage 3)
+    CapabilitiesModule,
 
     // AI Intelligence Layer — JARVIS-like conversational engine
     KeyCortexModule,

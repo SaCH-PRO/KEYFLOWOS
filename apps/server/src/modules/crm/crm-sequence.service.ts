@@ -288,6 +288,37 @@ export class CrmSequenceService {
     return { success: true };
   }
 
+  /**
+   * Collections dunning: enroll every contact with an overdue invoice into a
+   * sequence (usually the business's dunning cadence). Contacts already
+   * enrolled in the sequence are skipped by the enrollment upsert.
+   */
+  async enrollOverdueContacts(
+    businessId: string,
+    sequenceId: string,
+    opts?: { minDaysOverdue?: number; limit?: number },
+  ) {
+    const minDays = Math.max(0, opts?.minDaysOverdue ?? 1);
+    const cutoff = new Date(Date.now() - minDays * 86400000);
+
+    const invoices: Array<{ contactId: string | null }> = await this.db.invoice.findMany({
+      where: {
+        businessId,
+        deletedAt: null,
+        status: { in: ['SENT', 'OVERDUE'] },
+        dueDate: { lt: cutoff },
+      },
+      select: { contactId: true },
+      take: opts?.limit ?? 50,
+    });
+
+    const contactIds = [...new Set(invoices.map((i) => i.contactId).filter((id): id is string => !!id))];
+    if (contactIds.length === 0) {
+      return { enrolled: 0, skipped: 0, message: 'No overdue-invoice contacts found' };
+    }
+    return this.enrollContacts(businessId, sequenceId, contactIds);
+  }
+
   private async logEvent(
     businessId: string,
     contactId: string,

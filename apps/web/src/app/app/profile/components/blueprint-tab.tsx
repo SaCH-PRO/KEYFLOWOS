@@ -236,7 +236,7 @@ export function BlueprintTab() {
             {completeness < 80 ? "Continue with KEY" : "Refine with KEY"}
           </button>
           <a
-            href="/app/profile?tab=business-genome"
+            href="/app/genome"
             className="flex-1 px-4 py-2.5 rounded-xl text-sm font-medium flex items-center justify-center gap-2"
             style={{
               background: "hsl(var(--kf-card))",

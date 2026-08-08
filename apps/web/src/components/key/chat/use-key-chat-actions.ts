@@ -93,6 +93,22 @@ export function useKeyChatActions() {
         });
       }
 
+      // Tools that need no confirmation never emit `confirmation_required`, so
+      // without this branch they executed with no plan rendered at all — the
+      // user saw a pause and then a result with nothing in between.
+      if (chunk.type === "tool_calls" && chunk.toolCalls) {
+        chat.updateLastAssistantMessage({
+          plan: chunk.toolCalls.map((tc) => ({
+            toolCallId: tc.id,
+            name: tc.name,
+            description: tc.description ?? tc.name.replace(/_/g, " "),
+            arguments: tc.arguments,
+            riskLevel: tc.riskLevel ?? "low",
+            status: "executing" as const,
+          })),
+        });
+      }
+
       if (chunk.type === "tool_results" && chunk.toolResults) {
         const lastAssistant = [...chat.messages].reverse().find((m) => m.role === "assistant");
         const updatedPlan = lastAssistant?.plan?.map((step) => {
@@ -149,6 +165,8 @@ export function useKeyChatActions() {
         createdAt: String(s.createdAt),
       };
     });
+    // The pinned genome conversation always sorts first.
+    sessions.sort((a, b) => (a.id === "onboarding" ? -1 : b.id === "onboarding" ? 1 : 0));
     chat.setSessions(sessions);
   }, [chat, chatMode]);
 
@@ -202,7 +220,19 @@ export function useKeyChatActions() {
   // ─── Send Message ───
 
   const sendMessage = useCallback(
-    async (text?: string, opts?: { pendingConfirmation?: { toolCallId: string; confirmed: boolean; toolName?: string; toolArgs?: Record<string, unknown> } }) => {
+    async (
+      text?: string,
+      opts?: {
+        pendingConfirmation?: { toolCallId: string; confirmed: boolean; toolName?: string; toolArgs?: Record<string, unknown> };
+        /**
+         * Drive a turn without showing the prompt that caused it. The
+         * onboarding view advances steps by asking KEY for the next card; that
+         * instruction is machinery, not something the user said, so it must not
+         * appear in the transcript.
+         */
+        silent?: boolean;
+      },
+    ) => {
       const businessId = getStoredBusinessId();
       if (!businessId) {
         chat.setError("No business selected");
@@ -220,8 +250,9 @@ export function useKeyChatActions() {
 
       chat.setError(undefined);
 
-      // For a confirmation turn, do not add a new user message.
-      if (!opts?.pendingConfirmation) {
+      // For a confirmation turn (or a silent system-driven advance), do not
+      // add a new user message to the visible transcript.
+      if (!opts?.pendingConfirmation && !opts?.silent) {
         const userMsg: KeyChatMessage = {
           id: nanoid(),
           role: "user",

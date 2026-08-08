@@ -25,6 +25,7 @@ export function NewEntityMenu({ onClose }: { onClose: () => void }) {
       { label: "Contact", icon: Users, href: "/app/crm/contacts", shortcut: "⌘⇧C" },
       { label: "Invoice", icon: Receipt, href: "/app/commerce/invoices/new", shortcut: "⌘⇧I" },
       { label: "Quote", icon: FileText, href: "/app/commerce?tab=quotes" },
+      { label: "Event", icon: Calendar, href: "/app/events/new", shortcut: "⌘⇧E" },
       { label: "Booking", icon: Calendar, href: "/app/bookings", shortcut: "⌘⇧B" },
       { label: "Expense", icon: Receipt, href: "/app/expenses" },
       { label: "Project", icon: FolderKanban, href: "/app/projects" },

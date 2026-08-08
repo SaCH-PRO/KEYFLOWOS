@@ -6,6 +6,8 @@ import { Banknote, Wallet, Receipt, FileText, Landmark, ShieldCheck, ArrowRight,
 import { useRouter } from "next/navigation";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { UnifiedPageShell } from "@/components/layout/unified-page-shell";
+import { FlowQuickLauncher } from "@/components/layout/flow-quick-launcher";
+import type { ModuleLauncherSection } from "@/components/ui/module-launcher-sheet";
 import { MetricCard } from "@/components/ui/metric-card";
 import { SectionCard } from "@/components/ui/section-card";
 import { apiGet } from "@/lib/api";
@@ -82,22 +84,39 @@ export default function FinancialFlowPage() {
     }
   };
 
+  const [loadErrors, setLoadErrors] = useState<string[]>([]);
+
   const load = useCallback(async () => {
     if (!businessId) return;
     setLoading(true);
+    setLoadErrors([]);
+    // Each call races a 12s timeout and all settle independently — one slow or
+    // failing endpoint must never hang the whole page (audit P0).
+    const withTimeout = <T,>(p: Promise<{ data: T | null; error: string | null }>, label: string) =>
+      Promise.race([
+        p,
+        new Promise<{ data: null; error: string }>((resolve) =>
+          setTimeout(() => resolve({ data: null, error: `${label} timed out` }), 12_000),
+        ),
+      ]).then((r) => ({ ...r, label }));
     try {
       const [ovRes, safeRes, fcRes, bucketRes] = await Promise.all([
-        apiGet<FinancialOverview>(`/finance/businesses/${businessId}/overview`),
-        apiGet<SafeToSpend>(`/finance/businesses/${businessId}/safe-to-spend`),
-        apiGet<NonNullable<typeof forecast>>(`/finance/businesses/${businessId}/cashflow-forecast?days=90`),
-        fetchReserveBuckets(businessId).then(r => ({ error: r.error, data: r.data?.items ?? [] }) as { error: string | null; data: ReserveBucket[] }),
+        withTimeout(apiGet<FinancialOverview>(`/finance/businesses/${businessId}/overview`), 'Overview'),
+        withTimeout(apiGet<SafeToSpend>(`/finance/businesses/${businessId}/safe-to-spend`), 'Safe-to-spend'),
+        withTimeout(apiGet<NonNullable<typeof forecast>>(`/finance/businesses/${businessId}/cashflow-forecast?days=90`), 'Forecast'),
+        withTimeout(
+          fetchReserveBuckets(businessId).then(r => ({ error: r.error, data: r.data?.items ?? [] }) as { error: string | null; data: ReserveBucket[] }),
+          'Reserve buckets',
+        ),
       ]);
-      if (ovRes.data) setOverview(ovRes.data);
-      if (safeRes.data) setSafe(safeRes.data);
-      if (fcRes.data) setForecast(fcRes.data);
-      if (bucketRes.data) setBuckets(bucketRes.data);
+      const failed: string[] = [];
+      if (ovRes.data) setOverview(ovRes.data); else failed.push(ovRes.label);
+      if (safeRes.data) setSafe(safeRes.data); else failed.push(safeRes.label);
+      if (fcRes.data) setForecast(fcRes.data); else failed.push(fcRes.label);
+      if (bucketRes.data) setBuckets(bucketRes.data); else failed.push(bucketRes.label);
+      if (failed.length > 0) setLoadErrors(failed);
     } catch {
-      // fail silently
+      setLoadErrors(['financial data']);
     } finally {
       setLoading(false);
     }
@@ -138,6 +157,29 @@ export default function FinancialFlowPage() {
 
   const currency = overview?.currency ?? "TTD";
 
+  const launcherSections: ModuleLauncherSection[] = [
+    {
+      id: "money",
+      label: "Money",
+      items: [
+        { id: "revenue", label: "Revenue", icon: Receipt, href: "/app/commerce", tone: "orange" },
+        { id: "expenses", label: "Expenses", icon: Wallet, href: "/app/expenses", tone: "gold" },
+        { id: "ledger", label: "Ledger", icon: BookOpen, href: "/app/finance/ledger", tone: "teal" },
+        { id: "reports", label: "Reports", icon: FileText, href: "/app/finance/reports", tone: "violet" },
+      ],
+    },
+    {
+      id: "operations",
+      label: "Operations",
+      items: [
+        { id: "bank-rules", label: "Bank Rules", icon: ListFilter, href: "/app/finance/bank-rules", tone: "default" },
+        { id: "recurring", label: "Recurring", icon: Repeat, href: "/app/finance/recurring-journals", tone: "mint" },
+        { id: "assets", label: "Fixed Assets", icon: Package, href: "/app/finance/fixed-assets", tone: "sky" },
+        { id: "connect", label: "Bank Connect", icon: Cable, href: "/app/key-connect?tab=banking", tone: "primary" },
+      ],
+    },
+  ];
+
   const sections = [
     { label: "Money In", href: "/app/commerce", icon: Receipt, desc: "Invoices, quotes, payments" },
     { label: "Money Out", href: "/app/expenses", icon: Wallet, desc: "Expenses, bills, vendors" },
@@ -164,7 +206,22 @@ export default function FinancialFlowPage() {
       subtitle="Cash, reserves, and forecasting."
       icon={Banknote}
       maxWidth="5xl"
+      headerActions={
+        <FlowQuickLauncher
+          title="Financial Modules"
+          subtitle="Money, operations, and reporting"
+          sections={launcherSections}
+        />
+      }
     >
+      {loadErrors.length > 0 && (
+        <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+          <span>Some data failed to load: {loadErrors.join(', ')}. Showing what we have.</span>
+          <button type="button" onClick={() => load()} className="shrink-0 rounded-lg border border-amber-400/40 px-3 py-1 text-xs font-medium hover:bg-amber-500/20">
+            Retry
+          </button>
+        </div>
+      )}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {loading ? (
           Array.from({ length: 4 }).map((_, i) => <div key={i} className="kf-card-metric animate-pulse h-20" />)

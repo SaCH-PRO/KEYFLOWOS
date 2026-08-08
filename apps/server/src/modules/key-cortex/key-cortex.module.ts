@@ -226,12 +226,14 @@ import { BusinessCommandCenterModule } from '../business-command-center/business
 import { IdentityModule } from '../identity/identity.module';
 import { CommandModule } from '../command/command.module';
 import { IntegrationHubModule } from '../integration-hub/integration-hub.module';
+import { AuthModule } from '../../core/auth/auth.module';
 
 @Module({
   imports: [
     // Database & cache infrastructure
     PrismaModule,
     RedisModule,
+    AuthModule,
 
     // HTTP client for external connector calls
     HttpModule,

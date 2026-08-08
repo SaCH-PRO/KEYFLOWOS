@@ -5,6 +5,7 @@ import {
   useContext,
   useState,
   useCallback,
+  useEffect,
   type ReactNode,
 } from "react";
 import type {
@@ -77,7 +78,15 @@ export function KeyChatProvider({ children }: { children: ReactNode }) {
   const [pageContext, setPageContext] = useState<KeyChatPageContext | undefined>(undefined);
   const [chatMode, setChatMode] = useState<KeyChatMode | undefined>("general");
   const [error, setErrorState] = useState<string | undefined>(undefined);
-  const [showHistory, setShowHistoryState] = useState(false);
+  const [showHistory, setShowHistoryState] = useState(true);
+
+  // Mobile: the history rail overlays the chat — start collapsed on small screens.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (window.matchMedia("(max-width: 1023px)").matches) setShowHistoryState(false);
+    }, 0);
+    return () => clearTimeout(t);
+  }, []);
 
   const setOpen = useCallback((value: boolean | ((prev: boolean) => boolean)) => {
     if (typeof value === "function") {

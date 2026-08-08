@@ -9,15 +9,44 @@ const IMPORTANCES = ["LOW", "NORMAL", "HIGH", "CRITICAL"];
 interface TemporalFlowFiltersProps {
   filters: TemporalFlowListParams;
   onChange: (filters: TemporalFlowListParams) => void;
+  onTimeRange?: (range: "today" | "week" | "month" | "all") => void;
 }
 
-export function TemporalFlowFilters({ filters, onChange }: TemporalFlowFiltersProps) {
+export function TemporalFlowFilters({ filters, onChange, onTimeRange }: TemporalFlowFiltersProps) {
   const update = (patch: Partial<TemporalFlowListParams>) => {
     onChange({ ...filters, ...patch });
   };
 
+  const presets: { key: "today" | "week" | "month" | "all"; label: string }[] = [
+    { key: "today", label: "Today" },
+    { key: "week", label: "This Week" },
+    { key: "month", label: "This Month" },
+    { key: "all", label: "All Time" },
+  ];
+
+  const isActive = (key: typeof presets[number]["key"]) => {
+    if (key === "all") return !filters.from && !filters.to;
+    return false; // exact match not tracked; chips are actions, not state
+  };
+
   return (
     <div className="flex flex-wrap items-center gap-2">
+      {onTimeRange && presets.map((preset) => (
+        <button
+          key={preset.key}
+          onClick={() => onTimeRange(preset.key)}
+          className={`text-xs rounded-lg border px-2.5 py-1.5 font-medium transition-colors ${
+            isActive(preset.key)
+              ? "bg-[hsl(var(--kf-accent1))]/10 border-[hsl(var(--kf-accent1))]/30 text-foreground"
+              : "border-border bg-card/40 text-muted-foreground hover:bg-card/80 hover:text-foreground"
+          }`}
+        >
+          {preset.label}
+        </button>
+      ))}
+
+      <div className="w-px h-5 bg-border/50 mx-1" />
+
       <select
         value={filters.source ?? ""}
         onChange={(e) => update({ source: e.target.value || undefined })}

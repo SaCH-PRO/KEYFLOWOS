@@ -52,7 +52,7 @@ export function BlueprintCompletenessWidget({ businessId }: Props) {
 
   return (
     <Link
-      href="/app/profile?tab=business-genome"
+      href="/app/genome"
       className="block rounded-2xl border border-border bg-card p-4 hover:border-orange-500/40 transition-colors group"
     >
       <div className="flex items-center justify-between mb-3">

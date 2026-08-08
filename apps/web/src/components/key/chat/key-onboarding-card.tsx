@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Loader2, CheckCircle2, Circle, ArrowRight, RefreshCw } from "lucide-react";
@@ -759,6 +759,13 @@ function TemplatePickerCard({
       });
   }, [businessId, selected]);
 
+  const handleSelect = (id: string) => {
+    setSelected(id);
+    setLoading(true);
+    setError(null);
+    setPreview(null);
+  };
+
   const handleConfirm = async () => {
     if (!businessId || !selected) return;
     setConfiguring(true);
@@ -785,7 +792,7 @@ function TemplatePickerCard({
             <button
               key={t.id}
               type="button"
-              onClick={() => setSelected(t.id)}
+              onClick={() => handleSelect(t.id)}
               className={cn(
                 "rounded-xl border px-3 py-2 text-sm transition-colors",
                 selected === t.id
@@ -867,7 +874,7 @@ function GenomeCheckCard({
 // ------------------------------------------------------------------
 function CompletionGateCard({
   card,
-  onAdvance,
+  onAdvance: _onAdvance,
 }: {
   card: OnboardingCardData;
   onAdvance?: (step: OnboardingStep) => void;
@@ -877,8 +884,9 @@ function CompletionGateCard({
   const [state, setState] = useState<OnboardingState | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showGenomeChat, setShowGenomeChat] = useState(false);
 
-  useEffect(() => {
+  const loadState = useCallback(() => {
     if (!businessId) return;
     setError(null);
     void import("@/lib/api/onboarding-concierge").then(({ fetchOnboardingState }) => {
@@ -894,19 +902,26 @@ function CompletionGateCard({
     });
   }, [businessId]);
 
+  useEffect(() => {
+    loadState();
+  }, [loadState]);
+
   const handleComplete = async () => {
     if (!businessId) return;
     setLoading(true);
     const { data, error } = await markOnboardingComplete(businessId);
     setLoading(false);
     if (error || !data) {
+      // Most common cause: the three-pillar genome minimum isn't met. Give
+      // the user a way back to the genome chat instead of a dead end.
       toast.error(error || "Could not complete onboarding.");
+      setShowGenomeChat(true);
       return;
     }
     toast.success("Onboarding complete! 🎉");
     if (data.complete) {
-      onAdvance?.("complete");
-      // Auto-redirect to the dashboard after a short celebration pause.
+      // markOnboardingComplete already persisted step="complete" server-side;
+      // advancing through saveStep would 400 by design. Just celebrate + go.
       window.setTimeout(() => {
         router.push("/app/command-center");
       }, 1500);
@@ -935,6 +950,9 @@ function CompletionGateCard({
         {error && (
           <div className="rounded-xl border border-destructive/20 bg-destructive/5 p-3 text-xs text-destructive">
             {error}
+            <button onClick={loadState} className="ml-2 underline">
+              Retry
+            </button>
           </div>
         )}
         <p className="text-sm text-muted-foreground">
@@ -963,6 +981,27 @@ function CompletionGateCard({
             );
           })}
         </div>
+
+        {state && !state.threePillarMet && !showGenomeChat && (
+          <button
+            type="button"
+            onClick={() => setShowGenomeChat(true)}
+            className="w-full rounded-xl border border-[hsl(var(--kf-accent1))]/30 bg-[hsl(var(--kf-accent1))]/5 px-3 py-2 text-sm font-medium text-[hsl(var(--kf-accent1))] transition-colors hover:bg-[hsl(var(--kf-accent1))]/10"
+          >
+            Continue genome setup with KEY
+          </button>
+        )}
+
+        {showGenomeChat && (
+          <GenomeChatStep
+            className="h-[420px] rounded-xl border border-border/40"
+            onComplete={() => {
+              setShowGenomeChat(false);
+              loadState();
+            }}
+          />
+        )}
+
         <PrimaryButton onClick={handleComplete} loading={loading} disabled={!state?.threePillarMet}>
           Finish onboarding
         </PrimaryButton>

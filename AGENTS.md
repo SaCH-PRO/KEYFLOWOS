@@ -24,6 +24,8 @@ This handles port cleanup, stale-cache clearing, env guards, DB checks, build va
 - **Compiled server required for dev:** `pnpm dev` in `apps/server` now runs `node dist/main.js`. Always build the workspace packages (`@keyflow/shared`, `@keyflow/db`, `@keyflow/api`) and the server before starting dev.
 - **Business Genesis (Patch 1):** `BusinessBlueprint` now includes Genesis sections (legal, registration, tax, projections, risk, compliance, execution roadmap). `/app/onboarding` is the Genesis intake flow and feeds these sections into KEY's prompt context.
 - **Onboarding redesign (Patch 2):** The `/app/onboarding` funnel is now a slim chat-driven experience: `welcome → intake (idea extraction) → template picker → configure (storefront/payments/contacts) → genome check (if needed) → complete`. Legacy step values `genesis` and `genome` are mapped to `intake` and `configure` respectively. The completion gate auto-redirects to `/app/command-center`, progress dots are clickable to go back, and `saveStep('complete')` is rejected — only `markOnboardingComplete` can finish onboarding. The embedded genome chat (`BlueprintOnboardingChat`) covers identity, founder profile, operating model, market profile, customer model, financials, and other core sections so users can satisfy the three-pillar Business Genome minimum inside onboarding.
+- **KEY voice (LiveKit):** Full-duplex in-app voice runs on the `livekit` docker-compose service (`livekit/livekit-server:v1.9.12` — do NOT float to `latest`; 1.13.x broke agent job routing to agents-js 1.5.5) with config in `infrastructure/livekit.yaml` (redis-backed bus). The NestJS `livekit` module (`apps/server/src/modules/livekit/`) mints tokens/creates rooms/dispatches the agent; the worker is `apps/voice-agent` (`@keyflow/voice-agent`, OpenAI Realtime `gpt-realtime` — the account has no `gpt-4o-realtime-preview` access). The launcher builds and starts the worker; the web voice control lives in the KEY chat voice bar (`key-live-voice.tsx`). Agent state (listening/thinking/speaking) reaches the client via the `lk.agent.state` participant attribute. `OPENAI_API_KEY` must be overwritten from `AI_INTEGRATIONS_OPENAI_API_KEY` in the worker — a stale user-level env var shadows it.
+- **KEY Chat UI overhaul:** The chat shell (`/app/key/chat`) and slide-out panel share a unified experience: mode pill tabs (`KeyChatModeTabs`), rich assistant/user message bubbles with copy/regenerate/voice actions (`KeyMessageBubble`), inline preview cards for genome/commerce/temporal/approvals (`KeyInlinePreview`), a command bar with slash commands and mode tabs (`KeyChatCommandBar`), mode-aware suggestion chips (`KeyChatSuggestions`), and an animated empty state with quick actions (`KeyChatEmptyState`). Mobile supports full-screen panel, swipe-down-to-close on the header, and left/right swipe to switch modes on the full-page chat. `KeyChatInput` is now a backward-compatible wrapper around `KeyChatCommandBar`.
 
 ### Manual Recovery (if launcher fails)
 ```bash
@@ -40,8 +42,12 @@ rm -rf .turbo/cache \
 mkdir -p apps/web/.next/cache/webpack
 
 # 3. Ensure DB is up
-#    If `migrate dev` fails with "type \"vector\" does not exist", pgvector is
-#    not available in the ephemeral shadow DB. Enable it in template1 first:
+#    The docker-compose `db` service uses `pgvector/pgvector:pg16`, so the
+#    `vector` extension is available (enable once per database:
+#      docker compose exec db psql -U keyflow -d keyflowos -c "CREATE EXTENSION IF NOT EXISTS vector;"
+#    and in template1 for the ephemeral shadow DB used by `migrate dev`).
+#    On an external/plain Postgres instead, `migrate dev` fails with
+#    "type \"vector\" does not exist" — enable it in template1 first:
 #      psql -h localhost -U keyflow -d template1 -c "CREATE EXTENSION IF NOT EXISTS vector;"
 #    See docs/development/prisma-migration-repair.md for the full repair history.
 npx prisma migrate dev --schema packages/db/prisma/schema.prisma
@@ -84,3 +90,36 @@ git commit --amend --no-edit
 - **Web:** Next.js App Router (`apps/web/`). Prefer Server Components; mark Client Components with `"use client"` only when necessary.
 - **Database:** PostgreSQL via Prisma (`packages/db/`).
 - **Auth:** Dual stack — Supabase JWT (primary) and local HMAC-JWT admin tokens (fallback in `AuthMiddleware`).
+
+## UI Overhaul Patterns (Phases 15–18)
+
+### Module Launcher
+- Shared launcher: `apps/web/src/components/ui/module-launcher-sheet.tsx`.
+- Renders as a bottom sheet on mobile (`< md`) and a centered dialog on desktop (`>= md`).
+- Open it globally with `window.dispatchEvent(new CustomEvent("kf:open-module-launcher"))` or the `Shift + K` shortcut.
+- Curated per-page launchers live in `apps/web/src/components/layout/flow-quick-launcher.tsx` and are wired into Command Center, Commerce, Temporal Flow, and all six Flow pages via their shell `headerActions`/`headerRight` props.
+- Mobile bottom nav: the center AI button has an orbiting ring; the "Flows" button opens the launcher; nav taps trigger light haptic feedback when supported.
+
+### Tone System
+- `LauncherTone` values: `default | primary | violet | gold | rose | mint | sky | orange | teal`.
+- Maps to Tailwind semantic tokens (`bg-primary/10 text-primary`, `bg-violet/10 text-violet`, etc.) so icon badges adapt to light/dark mode automatically.
+- Used by `ModuleLauncherSheet`, `KeyActionGrid`, and `RevenueActionMenu`.
+
+### TabNav
+- `apps/web/src/components/ui/tab-nav.tsx` supports `variant="pill"` in addition to the default underline style.
+- Commerce Revenue uses pill tabs.
+
+### Mobile Gestures
+- `apps/web/src/components/functional/mobile-gesture-provider.tsx` handles edge swipes (drawer open/close) and bottom-edge swipe-up for the launcher.
+- `useSwipeTabs` in `apps/web/src/hooks/use-swipe-tabs.ts` enables left/right swipe between tabs; used in Temporal Flow.
+
+### Reduced Motion
+- `apps/web/src/app/globals.css` includes a `prefers-reduced-motion: reduce` rule that disables animations and transitions globally for users who need it.
+
+## Genome Hub (Phase 19)
+
+- Consolidated Business Genome surface lives at `/app/genome`.
+- Replaces the fragmented `/app/profile?tab=business-genome` overview with a unified hub: hero integrity ring, interactive DNA constellation, recommendations/governance action feed, memory timeline, and genome chat.
+- Legacy `/app/profile?tab=business-genome` (without a `section`) redirects to `/app/genome`.
+- Deep links with `?section=...` still render the advanced panels inside the profile tab for now.
+- Navigation links in Command Center, Strategy/Build menus, onboarding, and KEY autonomy now point to `/app/genome`.

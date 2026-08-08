@@ -24,6 +24,7 @@ interface WorkspaceShellProps {
   activeTab?: string;
   onTabChange?: (key: string) => void;
   tabLayoutId?: string;
+  tabVariant?: "underline" | "pill";
   actionLabel?: string;
   actionIcon?: React.ElementType;
   onAction?: () => void;
@@ -62,6 +63,7 @@ export function WorkspaceShell({
   activeTab,
   onTabChange,
   tabLayoutId,
+  tabVariant,
   actionLabel,
   actionIcon,
   onAction,
@@ -177,6 +179,7 @@ export function WorkspaceShell({
           activeTab={activeTab}
           onTabChange={onTabChange}
           layoutId={tabLayoutId ?? `${title.toLowerCase().replace(/\s+/g, "-")}-tabs`}
+          variant={tabVariant}
         />
       )}
 

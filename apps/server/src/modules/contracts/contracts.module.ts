@@ -1,12 +1,13 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { AiModule } from '../ai/ai.module';
 import { ContractsController } from './contracts.controller';
 import { ContractsService } from './contracts.service';
+import { ContractClauseService } from './contract-clause.service';
 
 @Module({
-  imports: [AiModule],
+  imports: [forwardRef(() => AiModule)],
   controllers: [ContractsController],
-  providers: [ContractsService],
-  exports: [ContractsService],
+  providers: [ContractsService, ContractClauseService],
+  exports: [ContractsService, ContractClauseService],
 })
 export class ContractsModule {}

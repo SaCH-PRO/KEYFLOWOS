@@ -33,8 +33,19 @@ export interface JobRole {
 export interface OrgAssignment {
   id: string;
   businessId: string;
-  membershipId: string;
-  userId: string;
+  // Membership path (full logged-in team member) — one of these two paths
+  // is populated, never both. See isContactOnly.
+  membershipId?: string | null;
+  userId?: string | null;
+  // Contact-only path — a staff position filled by someone who won't log
+  // into the app but still needs to receive delegated work/approvals over
+  // WhatsApp/SMS/email (e.g. front-desk, floor staff).
+  isContactOnly?: boolean;
+  contactName?: string | null;
+  contactEmail?: string | null;
+  contactPhone?: string | null;
+  preferredChannel?: string;
+  autoApprovalViaReply?: boolean;
   orgUnitId: string;
   orgUnit?: OrgUnit;
   jobRoleId?: string | null;

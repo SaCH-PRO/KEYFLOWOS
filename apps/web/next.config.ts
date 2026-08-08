@@ -179,13 +179,8 @@ const nextConfig: NextConfig = {
       // namespace. Stubs at the destinations render the current pages so old
       // bookmarks keep working while the new nav is being adopted.
       {
-        source: "/app/commerce",
-        destination: "/app/money/revenue",
-        permanent: true,
-      },
-      {
         source: "/app/finance",
-        destination: "/app/money",
+        destination: "/app/financial-flow",
         permanent: true,
       },
       {
@@ -200,7 +195,7 @@ const nextConfig: NextConfig = {
       },
       {
         source: "/app/crm",
-        destination: "/app/people",
+        destination: "/app/people-flow",
         permanent: true,
       },
       {

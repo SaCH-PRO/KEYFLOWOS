@@ -2300,7 +2300,7 @@ export function getGenomeCrossDomainSnapshot(
   }
   const query = params.toString();
   return apiGet<GenomeCrossDomainSnapshot>(
-    `/business-genome/businesses/${businessId}/cross-domain/snapshot${query ? `?${query}` : ''}`,
+    `/business-genome/businesses/${businessId}/key-genome/cross-domain/snapshot${query ? `?${query}` : ''}`,
   );
 }
 
@@ -2309,7 +2309,7 @@ export function computeGenomeCrossDomainSnapshot(businessId: string, period?: st
   if (period) params.set('period', period);
   const query = params.toString();
   return apiPost<GenomeCrossDomainSnapshot>({
-    path: `/business-genome/businesses/${businessId}/cross-domain/snapshot/compute${query ? `?${query}` : ''}`,
+    path: `/business-genome/businesses/${businessId}/key-genome/cross-domain/snapshot/compute${query ? `?${query}` : ''}`,
     body: {},
   });
 }
@@ -2323,13 +2323,13 @@ export function listGenomeCrossDomainSnapshots(
   if (options.offset !== undefined) params.set('offset', String(options.offset));
   const query = params.toString();
   return apiGet<GenomeCrossDomainSnapshot[]>(
-    `/business-genome/businesses/${businessId}/cross-domain/snapshots${query ? `?${query}` : ''}`,
+    `/business-genome/businesses/${businessId}/key-genome/cross-domain/snapshots${query ? `?${query}` : ''}`,
   );
 }
 
 export function getGenomeCrossDomainRankedRecommendations(businessId: string) {
   return apiGet<GenomeRecommendationRankingResult>(
-    `/business-genome/businesses/${businessId}/cross-domain/recommendations/ranked`,
+    `/business-genome/businesses/${businessId}/key-genome/cross-domain/recommendations/ranked`,
   );
 }
 
@@ -2343,14 +2343,14 @@ export function generateAndRankGenomeRecommendations(
   if (options.maxEffortLevel) params.set('maxEffortLevel', options.maxEffortLevel);
   const query = params.toString();
   return apiPost<GenomeRecommendationRankingResult>({
-    path: `/business-genome/businesses/${businessId}/cross-domain/recommendations/ranked/generate${query ? `?${query}` : ''}`,
+    path: `/business-genome/businesses/${businessId}/key-genome/cross-domain/recommendations/ranked/generate${query ? `?${query}` : ''}`,
     body: {},
   });
 }
 
 export function getGenomeCrossDomainOpportunities(businessId: string) {
   return apiGet<GenomeOpportunityDetectionResult>(
-    `/business-genome/businesses/${businessId}/cross-domain/opportunities`,
+    `/business-genome/businesses/${businessId}/key-genome/cross-domain/opportunities`,
   );
 }
 
@@ -2366,7 +2366,7 @@ export function detectGenomeCrossDomainOpportunities(
   }
   const query = params.toString();
   return apiPost<GenomeOpportunityDetectionResult>({
-    path: `/business-genome/businesses/${businessId}/cross-domain/opportunities/detect${query ? `?${query}` : ''}`,
+    path: `/business-genome/businesses/${businessId}/key-genome/cross-domain/opportunities/detect${query ? `?${query}` : ''}`,
     body: {},
   });
 }
@@ -2376,7 +2376,7 @@ export function checkGenomeAutonomyGate(
   input: CheckGenomeAutonomyGateInput,
 ) {
   return apiPost<GenomeAutonomyGateResult>({
-    path: `/business-genome/businesses/${businessId}/cross-domain/autonomy-gate/check`,
+    path: `/business-genome/businesses/${businessId}/key-genome/cross-domain/autonomy-gate/check`,
     body: input,
   });
 }

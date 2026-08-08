@@ -98,6 +98,22 @@ function splitSentences(text: string): string[] {
   return matches.map((s) => s.trim()).filter(Boolean);
 }
 
+/**
+ * Strips Markdown/artifact syntax so KEY doesn't vocalize asterisks, URLs,
+ * or code fences when speaking chat replies.
+ */
+export function sanitizeSpokenText(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, " code block ")
+    .replace(/`([^`]*)`/g, "$1")
+    .replace(/\[([^\]]+)\]\((?:[^)]+)\)/g, "$1")
+    .replace(/https?:\/\/\S+/g, "link")
+    .replace(/[*_~#>|]/g, "")
+    .replace(/^\s*[-+]\s+/gm, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 function getVoices(): Promise<SpeechSynthesisVoice[]> {
   return new Promise((resolve) => {
     if (!isBrowserTTSAvailable()) {
@@ -143,6 +159,7 @@ export class TtsEngine {
   private pendingBrowserSpeech: { text: string; rate: number } | null = null;
   private speechPermissionListenersActive = false;
   private stopped = false;
+  private activeSentences: string[] | null = null;
 
   constructor() {
     const settings = loadTtsSettings();
@@ -189,6 +206,23 @@ export class TtsEngine {
       if (!res.ok) return;
       const data = (await res.json()) as { providers: VoiceProviderInfo[] };
       this.setState({ availableProviders: data.providers || [] });
+
+      // Default to a real voice when the user has never chosen one: browser
+      // speechSynthesis is the fallback, not the experience we want to ship.
+      const hasStoredPreference = (() => {
+        try {
+          return localStorage.getItem(STORAGE_KEY) !== null;
+        } catch {
+          return true;
+        }
+      })();
+      if (!hasStoredPreference && this.state.provider === "browser") {
+        const best = (data.providers || []).find((p) => p.available && p.name !== "browser");
+        if (best) {
+          this.setProvider(best.name as TtsProviderName);
+          if (best.defaultVoice) this.setVoice(best.defaultVoice);
+        }
+      }
     } catch {
       // best-effort
     }
@@ -233,20 +267,41 @@ export class TtsEngine {
   speak(text: string, businessId?: string | null): Promise<void> {
     if (this.state.muted || !text.trim()) return Promise.resolve();
     this.cancel();
-    const sentences = splitSentences(text);
+    const clean = sanitizeSpokenText(text);
+    const sentences = splitSentences(clean);
+    // Signature is Promise<void>, so every exit has to be a promise.
     if (sentences.length === 0) return Promise.resolve();
+    this.activeSentences = sentences;
     this.setState({
       playing: true,
       paused: false,
-      currentText: text,
+      currentText: clean,
       currentSentence: sentences[0] || "",
       queue: sentences.slice(1),
     });
     return this.runQueue(sentences, businessId);
   }
 
+  /**
+   * Feed text into the voice queue while a reply is still streaming. If the
+   * engine is mid-playback the sentences are appended to the live queue
+   * (the run loop picks them up); otherwise a fresh playback starts.
+   */
+  enqueueSpoken(text: string, businessId?: string | null) {
+    if (this.state.muted || !text.trim()) return;
+    const clean = sanitizeSpokenText(text);
+    const sentences = splitSentences(clean);
+    if (sentences.length === 0) return;
+    if (this.state.playing && this.activeSentences) {
+      this.activeSentences.push(...sentences);
+      return;
+    }
+    this.speak(clean, businessId);
+  }
+
   cancel() {
     this.stopped = true;
+    this.activeSentences = null;
     this.abortController?.abort();
     this.abortController = null;
     if (this.audio) {
@@ -344,6 +399,7 @@ export class TtsEngine {
     }
 
     if (!this.stopped) {
+      this.activeSentences = null;
       this.setState({
         playing: false,
         paused: false,

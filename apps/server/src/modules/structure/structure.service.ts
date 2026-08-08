@@ -8,6 +8,7 @@ import { CreateAssignmentDto } from './dto/create-assignment.dto';
 import { UpdateAssignmentDto } from './dto/update-assignment.dto';
 import { CreateDelegationRuleDto } from './dto/create-delegation-rule.dto';
 import { UpdateDelegationRuleDto } from './dto/update-delegation-rule.dto';
+import { normalizePhone } from '../crm/crm-duplicate.util';
 
 @Injectable()
 export class StructureService {
@@ -364,13 +365,48 @@ export class StructureService {
   }
 
   async createAssignment(businessId: string, dto: CreateAssignmentDto) {
+    // UNION, not a choice. Two branches inserted at the same point doing
+    // different jobs: the contact-only branch decides whether membershipId is
+    // even set, and assertAssignmentRefs scopes every id arriving from the body
+    // to businessId. Shape first, then ownership — assertAssignmentRefs treats
+    // every ref as optional, so it composes with membershipId: null.
+    //
+    // Picking a side here is the trap. assertAssignmentRefs is DEFINED above via
+    // a clean auto-merge, so taking integration's side alone leaves a fully
+    // written security method that nothing calls, and silently reopens the
+    // cross-tenant privilege escalation it exists to close.
+    const isContactOnly = dto.isContactOnly ?? !dto.membershipId;
+    if (isContactOnly) {
+      if (!dto.contactName || !dto.contactPhone) {
+        throw new BadRequestException('Contact-only positions require contactName and contactPhone');
+      }
+    } else if (!dto.membershipId) {
+      throw new BadRequestException('Provide membershipId, or set isContactOnly with contactName + contactPhone');
+    }
+
+    const normalizedPhone = normalizePhone(dto.contactPhone);
+    if (normalizedPhone) {
+      const existing = await this.prisma.client.orgAssignment.findFirst({
+        where: { businessId, contactPhone: normalizedPhone, endedAt: null },
+      });
+      if (existing) {
+        throw new BadRequestException('Another active position already uses this phone number');
+      }
+    }
+
     await this.assertAssignmentRefs(businessId, dto);
 
     const assignment = await this.prisma.client.orgAssignment.create({
       data: {
         businessId,
-        membershipId: dto.membershipId,
-        userId: dto.userId,
+        membershipId: isContactOnly ? null : dto.membershipId,
+        userId: isContactOnly ? null : dto.userId,
+        isContactOnly,
+        contactName: dto.contactName,
+        contactEmail: dto.contactEmail,
+        contactPhone: normalizedPhone,
+        preferredChannel: dto.preferredChannel ?? 'whatsapp',
+        autoApprovalViaReply: dto.autoApprovalViaReply ?? false,
         orgUnitId: dto.orgUnitId,
         jobRoleId: dto.jobRoleId,
         reportsToId: dto.reportsToId,
@@ -379,8 +415,10 @@ export class StructureService {
       include: { jobRole: true },
     });
 
-    // Sync JobRole permissions to Membership
-    if (dto.jobRoleId && assignment.jobRole) {
+    // Sync JobRole permissions to Membership (membership-backed positions only —
+    // contact-only staff have no Membership row to sync onto; their tool/approval
+    // scope is enforced via the JobRole lookup directly wherever they're delegated to)
+    if (!isContactOnly && dto.jobRoleId && assignment.jobRole) {
       await this.prisma.client.membership.update({
         where: { id: dto.membershipId },
         data: {
@@ -391,6 +429,29 @@ export class StructureService {
     }
 
     return assignment;
+  }
+
+  /**
+   * Resolve an inbound WhatsApp/SMS phone number to the staff position it belongs
+   * to, so a message from that number can be routed to KEY as a staff command
+   * instead of the customer-contact intake pipeline. Returns null for unmatched
+   * numbers (the normal case — most inbound messages are from customers).
+   */
+  async resolveStaffByPhone(businessId: string, phone: string) {
+    const normalized = normalizePhone(phone);
+    if (!normalized) return null;
+    return this.prisma.client.orgAssignment.findFirst({
+      where: { businessId, contactPhone: normalized, endedAt: null },
+      include: { jobRole: true, orgUnit: true },
+    });
+  }
+
+  /** Persist the KEY chat session id for a position's WhatsApp/SMS conversation. */
+  async setActiveFlowSession(assignmentId: string, sessionId: string | null) {
+    await this.prisma.client.orgAssignment.update({
+      where: { id: assignmentId },
+      data: { activeFlowSessionId: sessionId },
+    });
   }
 
   async getAssignment(businessId: string, id: string) {
@@ -409,10 +470,23 @@ export class StructureService {
 
   async updateAssignment(businessId: string, id: string, dto: UpdateAssignmentDto) {
     const existing = await this.getAssignment(businessId, id);
+    // UNION — same reasoning as createAssignment above.
+    let normalizedPhone: string | null | undefined;
+    if (dto.contactPhone !== undefined) {
+      normalizedPhone = normalizePhone(dto.contactPhone);
+      if (normalizedPhone) {
+        const clash = await this.prisma.client.orgAssignment.findFirst({
+          where: { businessId, contactPhone: normalizedPhone, endedAt: null, id: { not: id } },
+        });
+        if (clash) throw new BadRequestException('Another active position already uses this phone number');
+      }
+    }
+
     // membershipId comes from `existing`, which getAssignment already scoped —
     // but jobRoleId, orgUnitId and reportsToId all arrive from the body and
     // reach the same permission-syncing write.
     await this.assertAssignmentRefs(businessId, dto);
+
     const updated = await this.prisma.client.orgAssignment.update({
       where: { id },
       data: {
@@ -421,14 +495,19 @@ export class StructureService {
         reportsToId: dto.reportsToId,
         isPrimary: dto.isPrimary,
         endedAt: dto.endedAt ? new Date(dto.endedAt) : undefined,
+        contactName: dto.contactName,
+        contactEmail: dto.contactEmail,
+        contactPhone: normalizedPhone,
+        preferredChannel: dto.preferredChannel,
+        autoApprovalViaReply: dto.autoApprovalViaReply,
       },
       include: { jobRole: true },
     });
 
-    // Sync JobRole permissions to Membership when role changes
-    if (dto.jobRoleId && updated.jobRole) {
+    // Sync JobRole permissions to Membership when role changes (membership-backed only)
+    if (!existing.isContactOnly && dto.jobRoleId && updated.jobRole) {
       await this.prisma.client.membership.update({
-        where: { id: existing.membershipId },
+        where: { id: existing.membershipId! },
         data: {
           permissionScopes: updated.jobRole.permissions as any,
           maxApprovalTier: updated.jobRole.defaultApprovalTier,
@@ -444,6 +523,41 @@ export class StructureService {
     return this.prisma.client.orgAssignment.delete({ where: { id } });
   }
 
+  /**
+   * Find who holds a position, works in an org unit, or matches a name —
+   * powers KEY's "who's the bookkeeper?" / "who does Maria report to?" queries.
+   */
+  async findPeople(businessId: string, filters: { jobRoleName?: string; orgUnitName?: string; personName?: string }) {
+    if (!filters.jobRoleName && !filters.orgUnitName && !filters.personName) {
+      throw new BadRequestException('Provide at least one of jobRoleName, orgUnitName, or personName');
+    }
+    return this.prisma.client.orgAssignment.findMany({
+      where: {
+        businessId,
+        endedAt: null,
+        ...(filters.jobRoleName ? { jobRole: { name: { contains: filters.jobRoleName, mode: 'insensitive' } } } : {}),
+        ...(filters.orgUnitName ? { orgUnit: { name: { contains: filters.orgUnitName, mode: 'insensitive' } } } : {}),
+        ...(filters.personName ? {
+          OR: [
+            { contactName: { contains: filters.personName, mode: 'insensitive' } },
+            { membership: { user: { OR: [
+              { name: { contains: filters.personName, mode: 'insensitive' } },
+              { firstName: { contains: filters.personName, mode: 'insensitive' } },
+              { lastName: { contains: filters.personName, mode: 'insensitive' } },
+            ] } } },
+          ],
+        } : {}),
+      },
+      include: {
+        orgUnit: true,
+        jobRole: true,
+        reportsTo: { include: { jobRole: true, membership: { include: { user: { select: { id: true, name: true, email: true } } } } } },
+        directReports: { include: { jobRole: true } },
+        membership: { include: { user: { select: { id: true, email: true, name: true, firstName: true, lastName: true, avatarUrl: true } } } },
+      },
+    });
+  }
+
   // ─── Delegation Rules ───
   async listDelegationRules(businessId: string) {
     return this.prisma.client.delegationRule.findMany({
@@ -452,7 +566,26 @@ export class StructureService {
     });
   }
 
+  /**
+   * DelegationRule.delegatorId/delegateId are opaque strings (not FK-enforced,
+   * matching the model's own comment). Now that KEY can call
+   * createDelegationRule/updateDelegationRule directly, a hallucinated or
+   * mistyped id would otherwise create a dangling, silently-ineffective rule —
+   * validate both ids resolve to active assignments in this business first.
+   */
+  private async assertActiveAssignment(businessId: string, id: string, label: string): Promise<void> {
+    const found = await this.prisma.client.orgAssignment.findFirst({
+      where: { id, businessId, endedAt: null },
+      select: { id: true },
+    });
+    if (!found) throw new BadRequestException(`${label} "${id}" is not an active position in this business`);
+  }
+
   async createDelegationRule(businessId: string, dto: CreateDelegationRuleDto) {
+    await Promise.all([
+      this.assertActiveAssignment(businessId, dto.delegatorId, 'delegatorId'),
+      this.assertActiveAssignment(businessId, dto.delegateId, 'delegateId'),
+    ]);
     return this.prisma.client.delegationRule.create({
       data: {
         businessId,
@@ -476,6 +609,10 @@ export class StructureService {
 
   async updateDelegationRule(businessId: string, id: string, dto: UpdateDelegationRuleDto) {
     await this.getDelegationRule(businessId, id);
+    await Promise.all([
+      dto.delegatorId ? this.assertActiveAssignment(businessId, dto.delegatorId, 'delegatorId') : Promise.resolve(),
+      dto.delegateId ? this.assertActiveAssignment(businessId, dto.delegateId, 'delegateId') : Promise.resolve(),
+    ]);
     return this.prisma.client.delegationRule.update({
       where: { id },
       data: {

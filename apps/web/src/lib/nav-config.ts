@@ -15,7 +15,6 @@ import {
   Send,
   Brain,
   Headset,
-  BriefcaseBusiness,
   FolderKanban,
   Clock,
   CheckSquare,
@@ -51,6 +50,9 @@ import {
   TrendingUp,
   Camera,
   Inbox,
+  Wallet,
+  Dna,
+  Landmark,
 } from "lucide-react";
 import type { DormantFeatureFlagKey } from "./feature-flags";
 
@@ -94,6 +96,7 @@ export interface PrimaryNavItem {
 
 export const primaryNav: PrimaryNavItem[] = [
   { id: "cockpit", label: "Cockpit", icon: Zap, href: "/app/command-center" },
+  { id: "key-chat", label: "KEY", icon: Bot, href: "/app/key/chat" },
   { id: "operate", label: "Operate", icon: Briefcase },
   { id: "build", label: "Build", icon: Wrench },
   { id: "me", label: "Me", icon: User },
@@ -101,7 +104,8 @@ export const primaryNav: PrimaryNavItem[] = [
 
 // ============================================================================
 // OPERATE — Where you do your work
-// All hrefs point to existing working pages (content migration happens later)
+// Grouped by utility & frequency (see docs/UI_MODULE_MAP_AND_IA_REVIEW.md):
+// daily-use surfaces first, dormant/placeholder surfaces stay out.
 // ============================================================================
 
 export const operateSections: NavSection[] = [
@@ -126,6 +130,10 @@ export const operateSections: NavSection[] = [
     items: [
       { label: "Overview", href: "/app/financial-flow", icon: Banknote },
       { label: "Sales", href: "/app/commerce", icon: Receipt },
+      // The gateway console — transactions, links, refunds across three
+      // providers — sits under /app/commerce, so the drawer reached its
+      // subtree but never named it.
+      { label: "Payment gateway", href: "/app/commerce/gateway", icon: Landmark },
       // Stock is money you have already spent and not yet earned back, so it
       // belongs beside Sales rather than in a systems menu. It had no nav entry
       // at all until 2026-08-07 — the command centre was a tab inside a
@@ -137,6 +145,8 @@ export const operateSections: NavSection[] = [
       { label: "Payments", href: "/app/payments", icon: CreditCard },
       { label: "Expenses", href: "/app/expenses", icon: Receipt },
       { label: "Budgets", href: "/app/budgeting", icon: Target },
+      // Staff pay: a 319-line run/approve console that arrived with no door.
+      { label: "Payroll", href: "/app/payroll", icon: Wallet },
       { label: "Reports", href: "/app/reports", icon: BarChart3 },
 
       // ── The books ────────────────────────────────────────────────────────
@@ -193,6 +203,9 @@ export const operateSections: NavSection[] = [
     items: [
       { label: "Projects", href: "/app/projects", icon: FolderKanban },
       { label: "Approvals", href: "/app/approvals", icon: CheckSquare },
+      // Staff scorecards, team summary and trend snapshots. Arrived with the
+      // consolidation branch and had no entry anywhere.
+      { label: "Performance", href: "/app/performance", icon: Activity },
     ],
   },
   {
@@ -204,6 +217,9 @@ export const operateSections: NavSection[] = [
       { label: "Content", href: "/app/content-ops", icon: PenTool },
       { label: "Social", href: "/app/social", icon: Share2 },
       { label: "SEO", href: "/app/seo", icon: Globe, dormantFlag: "webPresencePack" },
+      // Events, ticket types, attendees and check-in — a four-route cluster
+      // that the consolidation branch shipped without a door.
+      { label: "Events", href: "/app/events", icon: Calendar },
     ],
   },
   {
@@ -234,7 +250,6 @@ export const operateNav: NavItem[] = operateSections.flatMap((s) => s.items);
 
 // ============================================================================
 // BUILD — Where you configure your business
-// All hrefs point to existing working pages
 // ============================================================================
 
 export const buildSections: NavSection[] = [
@@ -244,6 +259,9 @@ export const buildSections: NavSection[] = [
     icon: Building,
     items: [
       { label: "Profile", href: "/app/profile?tab=business-genome", icon: BrainCircuit },
+      // The consolidated genome hub. Every card in the command centre links
+      // here; the nav did not.
+      { label: "Business Genome", href: "/app/genome", icon: Dna },
       { label: "Storefront", href: "/app/store", icon: Store },
       { label: "Presence", href: "/app/presence", icon: Globe },
       { label: "Templates", href: "/app/templates", icon: GraduationCap },

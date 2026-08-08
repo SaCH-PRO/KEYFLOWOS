@@ -1,5 +1,7 @@
 # KEYFLOWOS: Strategic Product & Engineering Master Plan
 
+> **Note (2026-07-20):** The "Screens & Features" status table below is stale — it marks Reports and Projects as "Stub," but both are fully built pages (see `KEYFLOWOS-PRODUCT-AUDIT.md`, written the same day, for the accurate current UX map). Treat the strategic/business sections of this doc as current; treat the per-module status table as historical.
+
 ---
 
 ## PHASE 1 — CURRENT STATE MAP (Verified from Code)

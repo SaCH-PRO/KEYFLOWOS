@@ -90,7 +90,7 @@ function ResetPasswordInner() {
     const localIssue = clientPasswordIssue(password);
     if (localIssue) { setError(localIssue); return; }
     if (password !== confirm) { setError("Passwords don't match."); return; }
-    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) { setError("Authentication is misconfigured. Contact support."); return; }
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY || SUPABASE_URL.includes("your-project")) { setError("Authentication is misconfigured. Contact support."); return; }
 
     setStatus("submitting");
     try {

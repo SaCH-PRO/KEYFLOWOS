@@ -2,9 +2,9 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [main, master, develop]
+    branches: [main, master, develop, integration/2026-07-consolidation]
   pull_request:
-    branches: [main, master, develop]
+    branches: [main, master, develop, integration/2026-07-consolidation]
 
 # Cancel in-progress runs for the same branch/PR to save CI minutes.
 concurrency:

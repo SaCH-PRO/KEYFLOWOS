@@ -57,7 +57,7 @@ export function CommandGenomeOutcomesCard({ businessId }: CommandGenomeOutcomesC
               No recommendation outcomes tracked yet. Decisions you record will show up here.
             </p>
             <Link
-              href="/app/profile?tab=business-genome"
+              href="/app/genome"
               className="inline-flex items-center gap-1 text-[10px] font-medium text-[hsl(var(--kf-accent1))] hover:text-[hsl(var(--kf-accent1))]/80 transition-colors"
             >
               View recommendations <ArrowRight className="w-3 h-3" />
@@ -157,7 +157,7 @@ export function CommandGenomeOutcomesCard({ businessId }: CommandGenomeOutcomesC
             )}
 
             <Link
-              href="/app/profile?tab=business-genome"
+              href="/app/genome"
               className="inline-flex items-center gap-1 text-[10px] font-medium text-[hsl(var(--kf-accent1))] hover:text-[hsl(var(--kf-accent1))]/80 transition-colors"
             >
               Review all recommendations <ArrowRight className="w-3 h-3" />

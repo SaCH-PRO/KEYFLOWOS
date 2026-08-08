@@ -59,6 +59,13 @@ echo "🔨 Type-checking and compiling server..."
   pnpm build >/dev/null 2>&1
 ) || { echo "❌ Server build failed"; exit 1; }
 
+# ── voice agent build (non-fatal — voice is optional) ─────────────────────────
+echo "🔨 Building KEY voice agent..."
+(
+  cd apps/voice-agent
+  pnpm build >/dev/null 2>&1
+) || echo "⚠️  Voice agent build failed — continuing without voice"
+
 # ── launch both servers ────────────────────────────────────────────────────────
 echo "🚀 Starting dev servers (API:3001 + Web:5000)..."
 echo "   Press Ctrl+C to stop both."
@@ -77,12 +84,25 @@ pnpm dev --webpack &
 WEB_PID=$!
 cd ../..
 
+# KEY voice agent worker (LiveKit full-duplex voice). Non-fatal if it fails —
+# the rest of the stack works without voice.
+if [ -d apps/voice-agent/dist ]; then
+  cd apps/voice-agent
+  node dist/main.js dev &
+  VOICE_PID=$!
+  cd ../..
+else
+  echo "⚠️  apps/voice-agent/dist missing — run 'pnpm --filter @keyflow/voice-agent build' for voice support"
+  VOICE_PID=""
+fi
+
 cleanup() {
   echo
   echo "🛑 Shutting down dev servers..."
-  kill "$SERVER_PID" "$WEB_PID" 2>/dev/null || true
+  kill "$SERVER_PID" "$WEB_PID" $VOICE_PID 2>/dev/null || true
   wait "$SERVER_PID" 2>/dev/null || true
   wait "$WEB_PID" 2>/dev/null || true
+  [ -n "$VOICE_PID" ] && wait "$VOICE_PID" 2>/dev/null || true
   exit 0
 }
 trap cleanup INT TERM EXIT
@@ -110,10 +130,13 @@ done
 echo ""
 echo "═══════════════════════════════════════════════════════════════"
 echo "  KEYFLOWOS dev stack is up:"
-echo "    API  → http://localhost:3001"
-echo "    Web  → http://localhost:5000"
+echo "    API   → http://localhost:3001"
+echo "    Web   → http://localhost:5000"
+echo "    Voice → KEY voice agent worker (LiveKit :7880)"
 echo "═══════════════════════════════════════════════════════════════"
 echo ""
 
-# Keep the script alive until one of the servers exits or the user hits Ctrl+C.
+# Keep the script alive until API or Web exits. Voice is optional — monitor it
+# in a background subshell so a voice crash does not tear down the whole stack.
+[ -n "$VOICE_PID" ] && ( wait "$VOICE_PID" 2>/dev/null || true ) &
 wait -n "$SERVER_PID" "$WEB_PID"

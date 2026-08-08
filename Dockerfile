@@ -32,8 +32,12 @@ WORKDIR /app
 # -----------------------------------------------------------------------------
 FROM base AS deps
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+# pnpm.patchedDependencies (next@16.2.4) is applied during install — the patch
+# file must exist before `pnpm install` runs.
+COPY patches ./patches
 COPY apps/server/package.json apps/server/
 COPY apps/web/package.json    apps/web/
+COPY apps/voice-agent/package.json apps/voice-agent/
 COPY packages/api/package.json packages/api/
 COPY packages/db/package.json  packages/db/
 COPY packages/shared/package.json packages/shared/
@@ -53,14 +57,32 @@ RUN pnpm --filter @keyflow/db run db:generate
 # Copy remaining source and build apps
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN pnpm --filter web build
-
-# Compile workspace packages and the server. The runtime stage below copies
-# these dist/ outputs — the server cannot run from source (see below).
+# NEXT_PUBLIC_* is inlined into the client bundle at build time — pass the
+# deployment's public URLs in as build args (compose supplies them from
+# .env.production).
+ARG NEXT_PUBLIC_API_BASE_URL
+ARG NEXT_PUBLIC_SITE_URL
+ARG NEXT_PUBLIC_APP_URL
+ARG NEXT_PUBLIC_SUPABASE_URL
+ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
+ARG NEXT_PUBLIC_LIVEKIT_URL
+ENV NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
+ENV NEXT_PUBLIC_SITE_URL=${NEXT_PUBLIC_SITE_URL}
+ENV NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
+ENV NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
+ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+ENV NEXT_PUBLIC_LIVEKIT_URL=${NEXT_PUBLIC_LIVEKIT_URL}
+# The server codebase is large; tsc exceeds Node's ~2GB default heap.
+ENV NODE_OPTIONS=--max-old-space-size=4096
+# Workspace packages first — web imports @keyflow/shared's compiled output,
+# and @keyflow/api imports @keyflow/db's declarations. The runtime stage below
+# copies these dist/ outputs — the server cannot run from source (see below).
 RUN pnpm --filter @keyflow/shared build
-RUN pnpm --filter @keyflow/api build
 RUN pnpm --filter @keyflow/db build
+RUN pnpm --filter @keyflow/api build
+RUN pnpm --filter web build
 RUN pnpm --filter server build
+RUN pnpm --filter @keyflow/voice-agent build
 
 
 # -----------------------------------------------------------------------------
@@ -79,8 +101,6 @@ RUN pnpm --filter server build
 # dist/.
 # -----------------------------------------------------------------------------
 FROM base AS server
-ENV NODE_ENV=production
-ENV PORT=3001
 COPY --from=builder /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.yaml ./
 COPY --from=builder /app/apps/server/package.json ./apps/server/
 COPY --from=builder /app/packages/api/package.json ./packages/api/
@@ -88,23 +108,57 @@ COPY --from=builder /app/packages/db/package.json  ./packages/db/
 # Must precede the install: pnpm needs every workspace member's manifest present
 # to resolve and link `@keyflow/shared`, which the server depends on.
 COPY --from=builder /app/packages/shared/package.json ./packages/shared/
-# NOTE: we intentionally do NOT pass --prod here. `prisma` (the CLI used by the
-# db:generate step below) is a devDependency of @keyflow/db.
-RUN pnpm install --frozen-lockfile --filter server... --ignore-scripts
-# Compiled output, not src. Each workspace package points its `main` at
-# dist/, so these are what `node dist/main.js` actually resolves.
-COPY --from=builder /app/apps/server/dist      ./apps/server/dist
-COPY --from=builder /app/packages/db/dist      ./packages/db/dist
-COPY --from=builder /app/packages/api/dist     ./packages/api/dist
-COPY --from=builder /app/packages/shared/dist  ./packages/shared/dist
 # Prisma schema is still needed: db:generate below regenerates the client
 # against this stage's node_modules layer.
-COPY --from=builder /app/packages/db/prisma    ./packages/db/prisma
-# Re-generate the Prisma client against the prod node_modules layer.
+COPY --from=builder /app/packages/db/prisma      ./packages/db/prisma
+# pnpm.patchedDependencies is resolved during install — the patch files must
+# exist in this stage too or `pnpm install` fails.
+COPY --from=builder /app/patches ./patches
+# Full workspace install, and intentionally NOT --prod: filtered installs skip
+# workspace deps' devDeps, including the `prisma` CLI that the db:generate step
+# below needs. NODE_ENV is set only after generate so pnpm does not skip
+# devDependencies.
+RUN pnpm install --frozen-lockfile --ignore-scripts
+# Re-generate the Prisma client against this stage's node_modules layer.
 RUN pnpm --filter @keyflow/db run db:generate
+ENV NODE_ENV=production
+ENV PORT=3001
+# Compiled output from the builder stage
+COPY --from=builder /app/apps/server/dist        ./apps/server/dist
+COPY --from=builder /app/packages/db/dist        ./packages/db/dist
+COPY --from=builder /app/packages/api/dist       ./packages/api/dist
+COPY --from=builder /app/packages/shared/dist    ./packages/shared/dist
 EXPOSE 3001
 ENTRYPOINT ["/sbin/tini", "--"]
-CMD ["pnpm", "--filter", "server", "start"]
+CMD ["node", "apps/server/dist/main.js"]
+
+
+# -----------------------------------------------------------------------------
+# Voice agent runtime — KEY's LiveKit voice worker (compiled dist).
+# LiveKit's rtc native bindings have NO musl builds — this stage must run on
+# glibc (Debian), not Alpine.
+# -----------------------------------------------------------------------------
+FROM node:${NODE_VERSION}-bookworm-slim AS base-glibc
+RUN apt-get update && apt-get install -y --no-install-recommends tini openssl ca-certificates && rm -rf /var/lib/apt/lists/*
+ENV PNPM_HOME=/pnpm
+ENV PATH=$PNPM_HOME:$PATH
+RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+WORKDIR /app
+
+FROM base-glibc AS voice-agent
+COPY --from=builder /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.yaml ./
+COPY --from=builder /app/apps/voice-agent/package.json ./apps/voice-agent/
+COPY --from=builder /app/packages/db/package.json ./packages/db/
+COPY --from=builder /app/packages/db/prisma    ./packages/db/prisma
+COPY --from=builder /app/patches ./patches
+RUN pnpm install --frozen-lockfile --ignore-scripts
+RUN pnpm --filter @keyflow/db run db:generate
+ENV NODE_ENV=production
+COPY --from=builder /app/apps/voice-agent/dist ./apps/voice-agent/dist
+COPY --from=builder /app/packages/db/dist      ./packages/db/dist
+# LiveKit agents CLI: `node dist/main.js start` runs the worker in production mode
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["node", "apps/voice-agent/dist/main.js", "start"]
 
 
 # -----------------------------------------------------------------------------
@@ -117,10 +171,13 @@ ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=builder /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.yaml ./
 COPY --from=builder /app/apps/web/package.json ./apps/web/
 COPY --from=builder /app/packages/ui/package.json ./packages/ui/
+COPY --from=builder /app/patches ./patches
 RUN pnpm install --frozen-lockfile --prod --filter web... --ignore-scripts
 COPY --from=builder /app/apps/web/.next ./apps/web/.next
 COPY --from=builder /app/apps/web/public ./apps/web/public
 COPY --from=builder /app/apps/web/next.config.ts ./apps/web/
+# next.config.ts imports ./src/lib/env at load time
+COPY --from=builder /app/apps/web/src/lib/env.ts ./apps/web/src/lib/env.ts
 COPY --from=builder /app/packages/ui/src ./packages/ui/src
 EXPOSE 5000
 ENTRYPOINT ["/sbin/tini", "--"]

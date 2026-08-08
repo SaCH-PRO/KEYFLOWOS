@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { CommunicationsController } from './communications.controller';
 import { CommunicationsService } from './communications.service';
 import { ChannelConnectionService } from './channel-connection.service';
@@ -25,9 +25,11 @@ import { TaskAssignmentModule } from '../task-assignments/task-assignment.module
 import { TimelineModule } from '../timeline/timeline.module';
 import { KeyInboxModule } from '../key-inbox/key-inbox.module';
 import { PrismaModule } from '../../core/prisma/prisma.module';
+import { StructureModule } from '../structure/structure.module';
+import { WhatsAppModule } from '../whatsapp/whatsapp.module';
 
 @Module({
-  imports: [AiModule, CommandModule, CrmModule, TaskAssignmentModule, TimelineModule, KeyInboxModule, PrismaModule],
+  imports: [forwardRef(() => AiModule), CommandModule, CrmModule, TaskAssignmentModule, TimelineModule, KeyInboxModule, PrismaModule, StructureModule, WhatsAppModule],
   controllers: [
     CommunicationsController,
     InboundCommunicationsController,

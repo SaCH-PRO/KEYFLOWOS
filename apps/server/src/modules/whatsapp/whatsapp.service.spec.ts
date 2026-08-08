@@ -6,6 +6,7 @@ import { WhatsAppService } from './whatsapp.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { EntityResolutionService } from '../../core/connectors/entity-resolution.service';
 import { KeyInboxService } from '../key-inbox/key-inbox.service';
+import { StaffChatBridgeService } from '../structure/staff-chat-bridge.service';
 
 function mockPrismaClient(overrides: Record<string, unknown> = {}) {
   return {
@@ -56,6 +57,9 @@ describe('WhatsAppService (B.5 KEYInbox ingestion)', () => {
         { provide: EventEmitter2, useValue: events },
         { provide: EntityResolutionService, useValue: { resolveContact: mockResolvedEntity() } },
         { provide: KeyInboxService, useValue: keyInbox },
+        // These tests are all about the customer-contact intake path; every
+        // inbound number here is a customer, so the staff bridge never matches.
+        { provide: StaffChatBridgeService, useValue: { routeInboundMessage: vi.fn().mockResolvedValue({ handled: false }) } },
       ],
     }).compile();
 

@@ -1,0 +1,59 @@
+[
+  {
+    "step": "login",
+    "status": "success",
+    "url": "http://localhost:5000/app/command-center"
+  },
+  {
+    "route": "/app/command-center",
+    "started_at": "2026-07-23T15:22:29.909894+00:00",
+    "status": "success",
+    "title": "KEYFLOWOS",
+    "url": "http://localhost:5000/app/command-center",
+    "errors": [
+      {
+        "text": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)"
+      },
+      {
+        "text": "Failed to load resource: the server responded with a status of 503 (Service Unavailable)"
+      }
+    ],
+    "screenshot": "audit-output\\app_command-center-mobile.png"
+  },
+  {
+    "route": "/app/key/chat",
+    "started_at": "2026-07-23T15:22:44.060254+00:00",
+    "status": "success",
+    "title": "KEY Chat \u2014 AI Command Center",
+    "url": "http://localhost:5000/app/key/chat",
+    "errors": [],
+    "screenshot": "audit-output\\app_key_chat-mobile.png"
+  },
+  {
+    "route": "/app/temporal-flow",
+    "started_at": "2026-07-23T15:22:53.162841+00:00",
+    "status": "success",
+    "title": "KEYFLOWOS",
+    "url": "http://localhost:5000/app/temporal-flow",
+    "errors": [],
+    "screenshot": "audit-output\\app_temporal-flow-mobile.png"
+  },
+  {
+    "route": "/app/genome",
+    "started_at": "2026-07-23T15:23:01.981447+00:00",
+    "status": "failed",
+    "error": "Page.goto: net::ERR_CONNECTION_REFUSED at http://localhost:5000/app/genome\nCall log:\n  - navigating to \"http://localhost:5000/app/genome\", waiting until \"load\"\n",
+    "url": "chrome-error://chromewebdata/",
+    "errors": [],
+    "screenshot": "audit-output\\app_genome-mobile-timeout.png"
+  },
+  {
+    "route": "/app/settings",
+    "started_at": "2026-07-23T15:23:07.591349+00:00",
+    "status": "failed",
+    "error": "Page.goto: net::ERR_CONNECTION_REFUSED at http://localhost:5000/app/settings\nCall log:\n  - navigating to \"http://localhost:5000/app/settings\", waiting until \"load\"\n",
+    "url": "chrome-error://chromewebdata/",
+    "errors": [],
+    "screenshot": "audit-output\\app_settings-mobile-timeout.png"
+  }
+]
