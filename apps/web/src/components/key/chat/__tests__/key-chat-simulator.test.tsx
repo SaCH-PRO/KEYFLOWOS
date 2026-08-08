@@ -4,6 +4,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { KeyChatProvider, useKeyChat } from '../key-chat-store';
 import { KeyActionChips } from '../key-action-chips';
 import { KeyGenomePreview } from '../key-genome-preview';
+import { GenomeProvider } from '@/contexts/genome-context';
 import { KeyMessageRenderer } from '../key-message-renderer';
 import type { KeyChatMessage } from '../types';
 
@@ -285,17 +286,31 @@ describe('Key Chat Command Center', () => {
   });
 
   describe('KeyGenomePreview', () => {
+    // This component used to fetch its own genome with useState/useEffect. The
+    // 2026-08 fork close took integration's version, which reads GenomeProvider
+    // instead — one fetch shared by every consumer rather than one per mount.
+    // app/app/layout.tsx wraps the app in that provider, so the requirement holds
+    // in the real tree; only this test rendered the component bare. The getGenome
+    // mock above already returns the payload the provider loads.
     it('renders genome integrity score', async () => {
-      render(<KeyGenomePreview />);
-      
+      render(
+        <GenomeProvider>
+          <KeyGenomePreview />
+        </GenomeProvider>,
+      );
+
       await waitFor(() => {
         expect(screen.getByText(/65%/)).toBeInTheDocument();
       });
     });
 
     it('renders stage badge', async () => {
-      render(<KeyGenomePreview />);
-      
+      render(
+        <GenomeProvider>
+          <KeyGenomePreview />
+        </GenomeProvider>,
+      );
+
       await waitFor(() => {
         expect(screen.getByText('Validated')).toBeInTheDocument();
       });

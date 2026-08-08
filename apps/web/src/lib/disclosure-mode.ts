@@ -78,6 +78,10 @@ export const MODE_OPERATE_ITEMS: Record<DisclosureMode, string[]> = {
     "Campaigns", "Content", "Social", "SEO",
     "Evidence", "Contracts", "Legal",
     "Goals", "Market",
+    // Arrived with integration/2026-07-consolidation when the fork was closed.
+    // The nav union added the routes; this list is the other half of that edit,
+    // and the comment above is exactly right about why it must be kept accurate.
+    "Payment gateway", "Payroll", "Performance", "Events",
   ],
 };
 
