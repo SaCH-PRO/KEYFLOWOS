@@ -94,7 +94,40 @@ function hasDataSource(file: string, depth = 3, seen = new Set<string>()): boole
 }
 
 /** A spinner that resolves on a timer, with nothing behind it. */
-const FAKES_A_LOAD = /setTimeout\([\s\S]{0,80}?setLoading\(false\)/;
+/**
+ * A timer whose callback flips a loading flag — the screen performs a request
+ * it never makes.
+ *
+ * The flip must be INSIDE the callback. An earlier version accepted any
+ * `setLoading(false)` within 80 characters of any `setTimeout(`, which is
+ * proximity, not meaning. That wrongly flags the commonest legitimate shape in
+ * this codebase:
+ *
+ *   useEffect(() => { setTimeout(() => load(), 0); setLoading(false); }, [])
+ *
+ * — a real load deferred one tick, usually to dodge the set-state-in-effect
+ * lint rule. Condemning those would send someone to "fix" working screens, and
+ * a gate that cries wolf gets switched off.
+ */
+const FAKES_A_LOAD =
+  /setTimeout\(\s*(?:\(\s*\)|function\s*\(\s*\))\s*(?:=>)?\s*\{?\s*set\w*[Ll]oading\(false\)/;
+
+/**
+ * Invented business numbers written as literals: "$8,420", "+24.5%", "94%".
+ *
+ * The timer test catches THEATRICAL fabrication — a mockup that performs
+ * loading. It says nothing about a static mockup with hardcoded figures and no
+ * timer at all, which misleads a reader just as effectively and was outside
+ * every gate. Three or more, with no data source anywhere in the import tree,
+ * is not a design placeholder; it is a dashboard reporting numbers that do not
+ * exist.
+ *
+ * Measured across all 204 routes: exactly two match, both genuine. A currency
+ * or percent literal is rare in real screens because real screens format
+ * values they fetched.
+ */
+const INVENTED_METRIC = /["'`](?:[+-]?\$[\d,]+(?:\.\d+)?|[+-]?\d[\d,]*(?:\.\d+)?%)["'`]/g;
+const METRIC_THRESHOLD = 3;
 
 /**
  * Every route under /app that renders a page — not just the ones in the nav.
@@ -128,9 +161,13 @@ const FAKES_A_LOAD = /setTimeout\([\s\S]{0,80}?setLoading\(false\)/;
  * work from stopping a fourth. The list may only shrink.
  */
 const KNOWN_FABRICATED = [
+  // The only survivor, and only because deleting it is not free: two KEY tools
+  // name it as their manualEquivalentRoute, so removing the page drops
+  // check-tool-routes off 173/173 unless those tools are repointed or retired.
+  // That makes it a three-way decision — wire it to KeyCortexDocumentService,
+  // repoint the tools, or remove them — rather than the one-line delete the
+  // other two were.
   '/app/document-intelligence',
-  '/app/growth',
-  '/app/storefront-intelligence',
 ];
 
 /** Every route whose page fakes a load and has no data behind it. */
@@ -139,7 +176,14 @@ function fabricatedRoutes(): string[] {
     if (STATIC_BY_DESIGN[route]) return false;
     const page = pageFor(route);
     if (!page) return false;
-    return FAKES_A_LOAD.test(fs.readFileSync(page, 'utf8')) && !hasDataSource(page);
+    const src = fs.readFileSync(page, 'utf8');
+    if (hasDataSource(page)) return false;
+    // Either style of fabrication: performing a load it never does, or simply
+    // stating figures it never had.
+    return (
+      FAKES_A_LOAD.test(src) ||
+      (src.match(INVENTED_METRIC) ?? []).length >= METRIC_THRESHOLD
+    );
   });
 }
 
@@ -193,7 +237,7 @@ describe('no nav-linked screen fabricates data', () => {
     ).toEqual([]);
   });
 
-  it('no screen ANYWHERE fakes a loading state, linked or not', () => {
+  it('no screen ANYWHERE renders invented data, linked or not', () => {
     // The gate above only ever looked at nav destinations, which means a
     // fabricated screen was caught the moment somebody LINKED it. That is
     // backwards: you find out you built a fake dashboard by shipping it.
