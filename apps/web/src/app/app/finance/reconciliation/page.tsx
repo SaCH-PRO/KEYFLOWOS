@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { BookOpen, Check, Download, Loader2, Lock, Upload, X } from "lucide-react";
+import { BookOpen, Cable, Check, Download, FolderSync, Loader2, Lock, Mail, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import { EmptyState } from "@/components/ui/empty-state";
 import { getStoredBusinessId } from "@/lib/workspace";
@@ -10,6 +10,8 @@ import {
   fetchFinanceAccounts,
   fetchBankSplitView,
   importBankCsv,
+  setStatementSources,
+  sweepStatementSource,
   runBankAutoMatch,
   manualMatchBankRow,
   unmatchBankRow,
@@ -42,6 +44,7 @@ function ReconciliationBody({ businessId }: { businessId: string }) {
   const [working, setWorking] = useState(false);
   const [selectedBankId, setSelectedBankId] = useState<string | null>(null);
   const [showSession, setShowSession] = useState(false);
+  const [showSources, setShowSources] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const loadAccounts = useCallback(async () => {
@@ -85,7 +88,15 @@ function ReconciliationBody({ businessId }: { businessId: string }) {
     try {
       const r = await importBankCsv(businessId, accountId, file);
       const am = r.autoMatched ? ` · auto-matched ${r.autoMatched.matched}` : "";
-      toast.success(`Imported ${r.inserted} rows (${r.duplicates} duplicates, ${r.invalid} invalid)${am}`);
+      const fmt = r.format ? ` · read as ${r.format.toUpperCase()}` : "";
+      toast.success(`Imported ${r.inserted} rows (${r.duplicates} duplicates, ${r.invalid} invalid)${am}${fmt}`);
+      // A file with no bank-assigned transaction id was deduped on a guess.
+      // Say so — silence here is what lets a double-import go unnoticed.
+      if (r.exactDedupe === false) {
+        toast.message("Duplicates judged by date, amount and reference", {
+          description: "This format carries no transaction id, so re-importing the same file may create duplicates. OFX and MT940 do not have this problem.",
+        });
+      }
       if (r.errors.length) toast.message(`${r.errors.length} row error(s)`, { description: r.errors.slice(0, 3).join("\n") });
       await loadSplit(accountId);
     } catch (e) {
@@ -161,7 +172,9 @@ function ReconciliationBody({ businessId }: { businessId: string }) {
         <input
           ref={fileRef}
           type="file"
-          accept=".csv,text/csv"
+          /* The importer detects OFX, QFX, QIF, MT940 and CSV by reading the
+             content. Restricting the picker to .csv hid four of them. */
+          accept=".csv,.ofx,.qfx,.qif,.sta,.mt940,.txt,text/csv,text/plain"
           className="hidden"
           onChange={(e) => onFile(e.target.files?.[0] ?? null)}
         />
@@ -169,9 +182,18 @@ function ReconciliationBody({ businessId }: { businessId: string }) {
           onClick={() => fileRef.current?.click()}
           disabled={working || !accountId}
           className="inline-flex items-center gap-1.5 rounded-lg border border-border/40 bg-card/50 px-2.5 py-1.5 text-xs font-medium hover:bg-card/80 disabled:opacity-50"
+          title="CSV, OFX, QFX, QIF or MT940 — the format is detected from the file"
         >
           {working ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
-          Import CSV
+          Import statement
+        </button>
+        <button
+          onClick={() => setShowSources((v) => !v)}
+          disabled={!accountId}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-border/40 bg-card/50 px-2.5 py-1.5 text-xs font-medium hover:bg-card/80 disabled:opacity-50"
+        >
+          <Cable className="w-3.5 h-3.5" />
+          {showSources ? "Hide automation" : "Automate this"}
         </button>
         <button
           onClick={runAuto}
@@ -192,6 +214,16 @@ function ReconciliationBody({ businessId }: { businessId: string }) {
           </span>
         )}
       </div>
+
+      {showSources && accountId && account && (
+        <StatementSourcesPanel
+          businessId={businessId}
+          accountId={accountId}
+          accountName={account.name}
+          initial={account.metadata?.statementSources ?? {}}
+          onImported={() => { loadSplit(accountId); loadAccounts(); }}
+        />
+      )}
 
       {showSession && accountId && (
         <SessionForm
@@ -367,6 +399,140 @@ function LedgerRow({ row, currency, selectable, onClick }: {
         {formatCurrency(row.amount, currency)}
       </span>
     </li>
+  );
+}
+
+/**
+ * Turn the manual upload above into something that happens without anyone.
+ *
+ * Two sources, deliberately the two that need no bank's permission: a Drive
+ * folder someone drops a file into, and the mail the bank already sends. Both
+ * are swept nightly and both can be run now.
+ *
+ * Routing is per-account and explicit — a folder belongs to exactly one
+ * account. That is a restriction worth keeping: inferring the account from an
+ * account number inside the file would post a month of transactions to the
+ * wrong ledger, and the reconciliation would then balance against the wrong
+ * book, which is far harder to notice than an import that simply did not run.
+ */
+function StatementSourcesPanel({ businessId, accountId, accountName, initial, onImported }: {
+  businessId: string;
+  accountId: string;
+  accountName: string;
+  initial: { driveFolderId?: string; gmailQuery?: string; lastSweptAt?: string };
+  onImported: () => void;
+}) {
+  const [driveFolderId, setDriveFolderId] = useState(initial.driveFolderId ?? "");
+  const [gmailQuery, setGmailQuery] = useState(initial.gmailQuery ?? "");
+  const [saving, setSaving] = useState(false);
+  const [sweeping, setSweeping] = useState<"drive" | "gmail" | null>(null);
+
+  const save = async () => {
+    setSaving(true);
+    const r = await setStatementSources(businessId, accountId, {
+      driveFolderId: driveFolderId.trim(),
+      gmailQuery: gmailQuery.trim(),
+    });
+    setSaving(false);
+    if (r.error) { toast.error(r.error); return; }
+    toast.success(`${accountName} will be swept nightly`);
+  };
+
+  const sweep = async (source: "drive" | "gmail") => {
+    setSweeping(source);
+    const r = await sweepStatementSource(businessId, accountId, source);
+    setSweeping(null);
+    if (r.error) { toast.error(r.error); return; }
+    const d = r.data;
+    if (!d) return;
+    // A sweep that finds nothing is the common case and must not read as
+    // failure — "checked, nothing new" is a different sentence from "broken".
+    if (d.errors.length) {
+      toast.message(`Swept with ${d.errors.length} problem(s)`, { description: d.errors.slice(0, 3).join("\n") });
+    } else if (d.imported === 0) {
+      toast.success(`Checked ${d.filesConsidered} file(s) — nothing new to import`);
+    } else {
+      toast.success(`Imported ${d.imported} transaction(s) from ${d.filesConsidered} file(s)`);
+    }
+    onImported();
+  };
+
+  return (
+    <div className="rounded-2xl border border-border/40 bg-card/50 p-4 space-y-4">
+      <div>
+        <h3 className="text-sm font-semibold flex items-center gap-2">
+          <Cable className="w-4 h-4" /> Automatic statement sources
+        </h3>
+        <p className="text-xs text-muted-foreground mt-1">
+          Statements for <span className="font-medium">{accountName}</span> only. Swept every night at 5am, and
+          re-importing the same file is harmless when the format carries a transaction id (OFX, QFX, MT940).
+          {initial.lastSweptAt && (
+            <> Last swept {new Date(initial.lastSweptAt).toLocaleString()}.</>
+          )}
+        </p>
+      </div>
+
+      <div className="grid md:grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <label htmlFor="kf-drive-folder" className="text-xs font-medium flex items-center gap-1.5">
+            <FolderSync className="w-3.5 h-3.5" /> Google Drive folder
+          </label>
+          <input
+            id="kf-drive-folder"
+            value={driveFolderId}
+            onChange={(e) => setDriveFolderId(e.target.value)}
+            placeholder="Folder ID from the Drive URL"
+            className="w-full rounded-lg border border-border/40 bg-background px-2.5 py-1.5 text-sm font-mono"
+          />
+          <p className="text-[11px] text-muted-foreground/70">
+            Open the folder in Drive; the ID is the last part of the address. Anything statement-shaped dropped
+            in it gets imported. Other files are left alone.
+          </p>
+          <button
+            onClick={() => sweep("drive")}
+            disabled={!driveFolderId.trim() || sweeping !== null}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border/40 bg-card/50 px-2.5 py-1.5 text-xs font-medium hover:bg-card/80 disabled:opacity-50"
+          >
+            {sweeping === "drive" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FolderSync className="w-3.5 h-3.5" />}
+            Sweep now
+          </button>
+        </div>
+
+        <div className="space-y-2">
+          <label htmlFor="kf-gmail-query" className="text-xs font-medium flex items-center gap-1.5">
+            <Mail className="w-3.5 h-3.5" /> Gmail search
+          </label>
+          <input
+            id="kf-gmail-query"
+            value={gmailQuery}
+            onChange={(e) => setGmailQuery(e.target.value)}
+            placeholder="from:republicbank.com subject:statement"
+            className="w-full rounded-lg border border-border/40 bg-background px-2.5 py-1.5 text-sm font-mono"
+          />
+          <p className="text-[11px] text-muted-foreground/70">
+            Anything you would type into Gmail&apos;s own search box. <code>has:attachment</code> and a date bound
+            are added for you, so a sweep never re-reads the whole mailbox.
+          </p>
+          <button
+            onClick={() => sweep("gmail")}
+            disabled={!gmailQuery.trim() || sweeping !== null}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border/40 bg-card/50 px-2.5 py-1.5 text-xs font-medium hover:bg-card/80 disabled:opacity-50"
+          >
+            {sweeping === "gmail" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Mail className="w-3.5 h-3.5" />}
+            Sweep now
+          </button>
+        </div>
+      </div>
+
+      <button
+        onClick={save}
+        disabled={saving}
+        className="inline-flex items-center gap-1.5 rounded-lg bg-primary text-primary-foreground px-2.5 py-1.5 text-xs font-medium hover:opacity-90 disabled:opacity-50"
+      >
+        {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+        Save sources
+      </button>
+    </div>
   );
 }
 

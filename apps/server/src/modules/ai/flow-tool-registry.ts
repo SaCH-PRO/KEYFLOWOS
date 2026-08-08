@@ -1321,11 +1321,12 @@ export const FLOW_TOOLS: FlowTool[] = [
   // reference scoring, deterministic tie-breaks — and had no tool over it, so
   // KEY could read receivables and not tell you whether the bank agreed.
   //
-  // Ingestion is deliberately NOT a tool. Statements arrive as files, through
-  // upload or an emailed attachment, and a tool that claimed to "fetch" a
-  // statement would be advertising a bank feed that does not exist for this
-  // market. KEY can see what has been imported, run the match, and say what is
-  // left — which is the part a person actually wants delegated.
+  // On ingestion, the line is drawn at what actually exists. There is still no
+  // bank feed for this market, so no tool claims to pull one. What does exist
+  // is a Drive folder and a Gmail search, swept nightly — so KEY can connect a
+  // source and run a sweep, and those tools are named for what they do rather
+  // than for the bank feed they are not. `reconcile_sweep_statements` fetches
+  // from Drive or Gmail; it never implies the bank was contacted.
   {
     name: 'reconcile_list_unmatched',
     description: 'List bank lines that have not been matched to a ledger entry yet, for one account. This is the "what still needs looking at" list after a statement import.',
@@ -1378,6 +1379,53 @@ export const FLOW_TOOLS: FlowTool[] = [
       required: ['bankTransactionId', 'ledgerTransactionId'],
     },
     outputSchema: { type: 'object', description: 'Matched line', fields: { transaction: { type: 'object', description: 'The bank line, now matched' } } },
+  },
+  {
+    name: 'reconcile_list_statement_sources',
+    description: 'Show where each bank account gets its statements from automatically — a Google Drive folder, a Gmail search, or nothing — and when each was last swept. Use this to answer "is this account importing on its own yet?".',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/finance/reconciliation',
+    parameters: { type: 'object', properties: {}, required: [] },
+    outputSchema: { type: 'object', description: 'Per-account statement sources', fields: { accounts: { type: 'array', description: 'Accounts with their configured source, if any' }, configuredCount: { type: 'number', description: 'How many accounts import automatically' } } },
+  },
+  {
+    name: 'reconcile_connect_statement_source',
+    description: 'Point a bank account at a Google Drive folder or a Gmail search so its statements import themselves nightly. The folder id comes from the Drive URL; the Gmail query is ordinary Gmail search syntax such as "from:republicbank.com". Sets one account only — a source belongs to exactly one account, because guessing which account a statement belongs to would post it to the wrong ledger.',
+    family: 'execute',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/finance/reconciliation',
+    changedEntities: ['financialAccount'],
+    parameters: {
+      type: 'object',
+      properties: {
+        accountId: { type: 'string', description: 'Financial account id the statements belong to' },
+        driveFolderId: { type: 'string', description: 'Google Drive folder id. Pass an empty string to disconnect it.' },
+        gmailQuery: { type: 'string', description: 'Gmail search, e.g. "from:republicbank.com subject:statement". has:attachment and a date bound are added automatically. Empty string disconnects.' },
+      },
+      required: ['accountId'],
+    },
+    outputSchema: { type: 'object', description: 'The saved configuration', fields: { driveFolderId: { type: 'string', description: 'Configured Drive folder, if any' }, gmailQuery: { type: 'string', description: 'Configured Gmail search, if any' } } },
+  },
+  {
+    name: 'reconcile_sweep_statements',
+    description: 'Fetch and import any new statements waiting in an account\'s configured Drive folder or Gmail search, without waiting for the nightly run. This reads Drive or Gmail — it does not contact the bank. Finding nothing is a normal result, not a failure.',
+    family: 'execute',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/finance/reconciliation',
+    changedEntities: ['bankTransaction'],
+    parameters: {
+      type: 'object',
+      properties: {
+        accountId: { type: 'string', description: 'Financial account id' },
+        source: { type: 'string', description: '"drive" or "gmail"' },
+      },
+      required: ['accountId', 'source'],
+    },
+    outputSchema: { type: 'object', description: 'Sweep result', fields: { imported: { type: 'number', description: 'Transactions actually inserted' }, filesConsidered: { type: 'number', description: 'Files or attachments looked at' }, skipped: { type: 'number', description: 'Files that were not statements' }, errors: { type: 'array', description: 'Per-file problems, if any' } } },
   },
 
   // ================================================================

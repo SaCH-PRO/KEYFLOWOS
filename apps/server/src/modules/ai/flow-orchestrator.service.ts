@@ -51,6 +51,7 @@ import { SeoService } from '../seo/seo.service';
 import { SeoContentService } from '../seo/seo-content.service';
 import { ReceivablesService } from '../finance/receivables.service';
 import { BankMatchingService } from '../finance/bank-matching.service';
+import { StatementSourceService } from '../finance/statement-source.service';
 import { ApprovalRequestService } from '../approvals/approval-request.service';
 import { GoogleDriveService } from '../google-drive/google-drive.service';
 import { TaskAssignmentService } from '../task-assignments/task-assignment.service';
@@ -427,6 +428,9 @@ export class FlowOrchestratorService {
   }
   private getBankMatching() {
     return this.moduleRef.get(BankMatchingService, { strict: false });
+  }
+  private getStatementSources() {
+    return this.moduleRef.get(StatementSourceService, { strict: false });
   }
   private getApprovalRequest() {
     return this.moduleRef.get(ApprovalRequestService, { strict: false });
@@ -2316,6 +2320,59 @@ ${triage.standingContext}`;
           KEY_SYSTEM_ACTOR_ID,
         );
         return { transaction: matched };
+      }
+      case 'reconcile_list_statement_sources': {
+        const accounts = await this.prisma.client.financialAccount.findMany({
+          where: { businessId, isActive: true },
+          select: { id: true, name: true, type: true, metadata: true },
+          orderBy: [{ isDefault: 'desc' }, { name: 'asc' }],
+        });
+        // Only the source config leaves this method. metadata also carries the
+        // account's CSV column layout, which is noise to a model and would just
+        // spend tokens.
+        const rows = accounts.map((a) => {
+          const s = (a.metadata as { statementSources?: Record<string, string> } | null)?.statementSources;
+          return {
+            accountId: a.id,
+            name: a.name,
+            type: a.type,
+            driveFolderId: s?.driveFolderId ?? null,
+            gmailQuery: s?.gmailQuery ?? null,
+            lastSweptAt: s?.lastSweptAt ?? null,
+            automatic: Boolean(s?.driveFolderId || s?.gmailQuery),
+          };
+        });
+        return { accounts: rows, configuredCount: rows.filter((r) => r.automatic).length };
+      }
+      case 'reconcile_connect_statement_source': {
+        if (args.driveFolderId === undefined && args.gmailQuery === undefined) {
+          throw new BadRequestException('Give a driveFolderId or a gmailQuery to connect.');
+        }
+        const saved = await this.getStatementSources().setSources(businessId, args.accountId, {
+          ...(args.driveFolderId !== undefined ? { driveFolderId: String(args.driveFolderId).trim() } : {}),
+          ...(args.gmailQuery !== undefined ? { gmailQuery: String(args.gmailQuery).trim() } : {}),
+        });
+        return saved;
+      }
+      case 'reconcile_sweep_statements': {
+        const source = String(args.source ?? '').toLowerCase();
+        if (source !== 'drive' && source !== 'gmail') {
+          throw new BadRequestException('source must be "drive" or "gmail"');
+        }
+        const svc = this.getStatementSources();
+        const result = source === 'drive'
+          ? await svc.sweepDrive(businessId, args.accountId)
+          : await svc.sweepGmail(businessId, args.accountId);
+        // Return the service's own counts. A sweep that considered files and
+        // imported nothing is a real, common, correct answer — reporting it as
+        // success-with-zero is the difference between "checked, nothing new"
+        // and the silent no-op this tool family exists to avoid.
+        return {
+          imported: result.imported,
+          filesConsidered: result.filesConsidered,
+          skipped: result.skipped,
+          errors: result.errors,
+        };
       }
 
       // === CONTRACTS ===
