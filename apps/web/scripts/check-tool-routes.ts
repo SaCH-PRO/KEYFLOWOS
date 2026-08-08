@@ -194,6 +194,14 @@ async function main() {
  */
 const CROSS_DOMAIN_ROUTES: Record<string, string> = {
   // Verb-first names — the domain is in the noun, not the prefix.
+  // Same domain, defeated by spelling: the screen is "reconciliation" and the
+  // tool prefix is "reconcile" — the matcher is a substring test and
+  // "reconciliation" does not contain "reconcile". Listed rather than loosening
+  // the matcher, because a fuzzier rule would start passing genuine mismatches.
+  reconcile_list_unmatched: 'the reconciliation screen — prefix/route spelling differ',
+  reconcile_run_auto_match: 'the reconciliation screen — prefix/route spelling differ',
+  reconcile_match_line: 'the reconciliation screen — prefix/route spelling differ',
+
   create_task: 'tasks live on the projects board',
   people_assign_task: 'a task is assigned from the board it lives on, not the people screen',
   create_followup_queue: 'follow-up queues are automations',

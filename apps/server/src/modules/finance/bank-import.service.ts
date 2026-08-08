@@ -1,8 +1,17 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { parse } from 'csv-parse/sync';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { FinanceAuditService } from './finance-audit.service';
+import {
+  detectFormat,
+  parseOfx,
+  parseQif,
+  parseMt940,
+  type ParseOutcome,
+  type ParsedStatementRow,
+  type StatementFormat,
+} from './bank-statement-parsers';
 
 const D = Prisma.Decimal;
 
@@ -21,6 +30,33 @@ export interface BankImportResult {
   duplicates: number;
   invalid: number;
   errors: string[];
+  /** Which parser handled the file. Absent on the legacy CSV-only path. */
+  format?: StatementFormat;
+  /**
+   * True when the format carried a bank-assigned id for every row, so
+   * duplicates were rejected on that rather than on (date, amount, reference).
+   * A scheduled or email-driven import should only be trusted unattended when
+   * this is true — see the note on `ingest`.
+   */
+  exactDedupe?: boolean;
+}
+
+/**
+ * A remembered column mapping for one account's CSV exports.
+ *
+ * Stored on `FinancialAccount.metadata.importProfile`, so a user maps Republic
+ * Bank's peculiar headers once and every later import — including an automated
+ * one — needs no human. No migration: the column is already Json.
+ */
+export interface ImportProfile {
+  date?: string;
+  description?: string;
+  amount?: string;
+  debit?: string;
+  credit?: string;
+  reference?: string;
+  /** Free-text label so the UI can say "Republic Bank export" rather than a hash. */
+  label?: string;
 }
 
 const COLUMN_ALIASES: Record<keyof ParsedBankRow, string[]> = {
@@ -98,7 +134,10 @@ export function parseBankAmount(raw: string): Prisma.Decimal | null {
  * FIN6 — Pure CSV parser. Exposed for unit tests so we can exercise every
  * column-detection / value-coercion branch without a database.
  */
-export function parseBankCsv(content: string): { rows: ParsedBankRow[]; errors: string[] } {
+export function parseBankCsv(
+  content: string,
+  profile?: ImportProfile | null,
+): { rows: ParsedBankRow[]; errors: string[] } {
   const errors: string[] = [];
   let records: Array<Record<string, string>>;
   try {
@@ -115,15 +154,33 @@ export function parseBankCsv(content: string): { rows: ParsedBankRow[]; errors: 
   if (records.length === 0) return { rows: [], errors: ['CSV had no data rows'] };
 
   const headers = Object.keys(records[0]);
-  const dateCol = pickHeader(headers, COLUMN_ALIASES.date);
-  const descCol = pickHeader(headers, COLUMN_ALIASES.description);
-  const amountCol = pickHeader(headers, COLUMN_ALIASES.amount);
-  const refCol = pickHeader(headers, COLUMN_ALIASES.reference);
+
+  // A saved profile wins over guessing. Guessing is right most of the time and
+  // "most of the time" is not good enough for an unattended import — a bank
+  // that renames "Amount" to "Value (TTD)" would silently start failing, and
+  // the whole point of the profile is that a human resolved that once.
+  //
+  // A profile naming a column the file does not have is a real error, not a
+  // reason to fall back: falling back would hide that the export changed shape.
+  const fromProfile = (key: keyof ImportProfile, aliases: string[]): string | null => {
+    const named = profile?.[key];
+    if (named) {
+      if (headers.includes(named)) return named;
+      errors.push(`Saved column mapping expects "${named}" and this file has no such column.`);
+      return null;
+    }
+    return pickHeader(headers, aliases);
+  };
+
+  const dateCol = fromProfile('date', COLUMN_ALIASES.date);
+  const descCol = fromProfile('description', COLUMN_ALIASES.description);
+  const amountCol = fromProfile('amount', COLUMN_ALIASES.amount);
+  const refCol = fromProfile('reference', COLUMN_ALIASES.reference);
 
   // If there's no single Amount column, look for separate Debit/Credit
   // columns (very common in TT bank exports).
-  const debitCol = !amountCol ? pickHeader(headers, ['debit', 'withdrawal', 'money out']) : null;
-  const creditCol = !amountCol ? pickHeader(headers, ['credit', 'deposit', 'money in']) : null;
+  const debitCol = !amountCol ? fromProfile('debit', ['debit', 'withdrawal', 'money out']) : null;
+  const creditCol = !amountCol ? fromProfile('credit', ['credit', 'deposit', 'money in']) : null;
 
   if (!dateCol) throw new BadRequestException('CSV is missing a Date column');
   if (!descCol) throw new BadRequestException('CSV is missing a Description column');
@@ -173,6 +230,169 @@ export class BankImportService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(FinanceAuditService) private readonly audit: FinanceAuditService,
   ) {}
+
+  private readonly logger = new Logger(BankImportService.name);
+
+  /**
+   * The single ingestion entry point. HTTP upload, emailed attachment, a
+   * scheduled pull and a KEY tool all come through here.
+   *
+   * Format is sniffed from the CONTENT, never the filename — banks emit OFX as
+   * `.txt` and semicolon QIF as `.csv` often enough that trusting the extension
+   * produces a confident wrong parse.
+   *
+   * On dedupe: when the format carries a bank-assigned id (OFX FITID, the MT940
+   * :61: reference) we key on that, which is exact. Otherwise we fall back to
+   * (date, amount, reference), which is a good heuristic and still a heuristic —
+   * two identical card payments to the same shop on the same day with no
+   * reference collapse into one. `result.exactDedupe` reports which happened,
+   * so an unattended caller can decide whether to trust the run or flag it.
+   */
+  async ingest(
+    businessId: string,
+    accountId: string,
+    content: string,
+    opts: { userId?: string | null; source?: string } = {},
+  ): Promise<BankImportResult> {
+    const account = await this.prisma.client.financialAccount.findFirst({
+      where: { id: accountId, businessId },
+      select: { id: true, currency: true, metadata: true },
+    });
+    if (!account) throw new NotFoundException('Bank account not found for this business');
+
+    const format = detectFormat(content);
+    let outcome: ParseOutcome;
+
+    if (format === 'ofx') outcome = parseOfx(content);
+    else if (format === 'qif') outcome = parseQif(content);
+    else if (format === 'mt940') outcome = parseMt940(content);
+    else {
+      const profile = (account.metadata as { importProfile?: ImportProfile } | null)?.importProfile ?? null;
+      const csv = parseBankCsv(content, profile);
+      outcome = {
+        format: 'csv',
+        rows: csv.rows.map((r) => ({ ...r, externalId: null })),
+        errors: csv.errors,
+        exactDedupe: false,
+      };
+    }
+
+    return this.persist(businessId, account, outcome, opts);
+  }
+
+  /**
+   * Remember how this account's CSV exports are laid out.
+   *
+   * Written to FinancialAccount.metadata rather than a new table: the column is
+   * already Json, and a mapping is per-account configuration, not an entity.
+   */
+  async saveImportProfile(
+    businessId: string,
+    accountId: string,
+    profile: ImportProfile,
+  ): Promise<ImportProfile> {
+    const account = await this.prisma.client.financialAccount.findFirst({
+      where: { id: accountId, businessId },
+      select: { id: true, metadata: true },
+    });
+    if (!account) throw new NotFoundException('Bank account not found for this business');
+
+    const meta = (account.metadata as Record<string, unknown> | null) ?? {};
+    await this.prisma.client.financialAccount.update({
+      where: { id: account.id },
+      data: { metadata: { ...meta, importProfile: profile } as unknown as Prisma.InputJsonValue },
+    });
+    return profile;
+  }
+
+  /** Shared dedupe + insert + audit, whatever produced the rows. */
+  private async persist(
+    businessId: string,
+    account: { id: string; currency: string },
+    outcome: ParseOutcome,
+    opts: { userId?: string | null; source?: string },
+  ): Promise<BankImportResult> {
+    const accountId = account.id;
+    const result: BankImportResult = {
+      accountId,
+      parsed: outcome.rows.length,
+      inserted: 0,
+      duplicates: 0,
+      invalid: outcome.errors.length,
+      errors: outcome.errors,
+      format: outcome.format,
+      exactDedupe: outcome.exactDedupe,
+    };
+    if (outcome.rows.length === 0) return result;
+
+    const minDate = new Date(Math.min(...outcome.rows.map((r) => r.date.getTime())));
+    const maxDate = new Date(Math.max(...outcome.rows.map((r) => r.date.getTime())));
+    const existing = await this.prisma.client.bankTransaction.findMany({
+      where: { businessId, accountId, date: { gte: minDate, lte: maxDate } },
+      select: { date: true, amount: true, reference: true, rawData: true },
+    });
+
+    const heuristicKey = (date: Date, amount: Prisma.Decimal | string | number, ref: string | null) =>
+      `${date.toISOString().slice(0, 10)}|${new D(String(amount)).toFixed(4)}|${(ref ?? '').trim().toLowerCase()}`;
+
+    // Two independent sets. An external id is authoritative on its own; the
+    // heuristic key is only consulted when the row has no id, so a statement
+    // re-issued with reformatted memos still dedupes correctly.
+    const seenExternal = new Set<string>();
+    const seenHeuristic = new Set<string>();
+    for (const e of existing) {
+      const ext = (e.rawData as { externalId?: string } | null)?.externalId;
+      if (ext) seenExternal.add(ext);
+      seenHeuristic.add(heuristicKey(e.date, e.amount, e.reference));
+    }
+
+    const toCreate: Prisma.BankTransactionCreateManyInput[] = [];
+    for (const r of outcome.rows) {
+      if (r.externalId) {
+        if (seenExternal.has(r.externalId)) { result.duplicates += 1; continue; }
+        seenExternal.add(r.externalId);
+      } else {
+        const key = heuristicKey(r.date, r.amount, r.reference);
+        if (seenHeuristic.has(key)) { result.duplicates += 1; continue; }
+        seenHeuristic.add(key);
+      }
+      toCreate.push({
+        businessId,
+        accountId,
+        date: r.date,
+        description: r.description,
+        amount: r.amount,
+        currency: account.currency,
+        reference: r.reference,
+        status: 'UNMATCHED',
+        rawData: {
+          ...r.raw,
+          ...(r.externalId ? { externalId: r.externalId } : {}),
+        } as Prisma.InputJsonValue,
+      });
+    }
+
+    if (toCreate.length > 0) {
+      const created = await this.prisma.client.bankTransaction.createMany({ data: toCreate });
+      result.inserted = created.count;
+    }
+
+    await this.audit.log({
+      businessId,
+      userId: opts.userId ?? null,
+      action: 'BANK_TRANSACTION_IMPORTED',
+      entityType: 'FinancialAccount',
+      entityId: accountId,
+      title: `Imported ${result.inserted} bank transactions`,
+      detail: `Format ${outcome.format} via ${opts.source ?? 'upload'} — parsed ${result.parsed}, inserted ${result.inserted}, duplicates ${result.duplicates}, invalid ${result.invalid}`,
+      meta: {
+        parsed: result.parsed, inserted: result.inserted, duplicates: result.duplicates,
+        invalid: result.invalid, format: outcome.format, exactDedupe: outcome.exactDedupe,
+        source: opts.source ?? 'upload',
+      },
+    });
+    return result;
+  }
 
   async importCsv(
     businessId: string,

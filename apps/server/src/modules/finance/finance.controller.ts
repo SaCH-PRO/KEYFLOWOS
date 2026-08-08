@@ -16,7 +16,7 @@ import { FinanceAccountsService, type CreateAccountInput, type UpdateAccountInpu
 import { FinanceCoaService, type CreateCoaInput, type UpdateCoaInput } from './finance-coa.service';
 import { FinanceTaxRateService, type UpsertTaxRateInput } from './finance-tax-rate.service';
 import { FinanceSettingsService, type UpdateFinanceSettingsInput } from './finance-settings.service';
-import { BankImportService } from './bank-import.service';
+import { BankImportService, type ImportProfile } from './bank-import.service';
 import { BankMatchingService } from './bank-matching.service';
 import { ReconciliationService } from './reconciliation.service';
 import { TaxLiabilityService } from './tax-liability.service';
@@ -586,7 +586,14 @@ export class FinanceController {
 
   // ---------- FIN6: Reconciliation ----------
 
-  /** CSV bank statement import. Multipart upload, field name `file`. */
+  /**
+   * Bank statement import. Multipart upload, field name `file`.
+   *
+   * Accepts OFX/QFX, MT940, QIF and CSV — the format is sniffed from the
+   * CONTENT, so a bank that emails OFX with a .csv extension still parses
+   * correctly. Route name and field kept for compatibility with the existing
+   * client; it is no longer CSV-only.
+   */
   @Post('accounts/:accountId/bank-transactions/import')
   @UseInterceptors(FileInterceptor('file', {
     storage: memoryStorage(),
@@ -600,14 +607,36 @@ export class FinanceController {
     @Query('autoMatch') autoMatch?: string,
   ) {
     await this.ensureAccess(req.user.id, businessId);
-    if (!file || !file.buffer) throw new BadRequestException('CSV file is required');
-    const csv = file.buffer.toString('utf8');
-    const result = await this.bankImport.importCsv(businessId, accountId, csv, { userId: req.user.id });
+    if (!file || !file.buffer) throw new BadRequestException('A statement file is required');
+    const content = file.buffer.toString('utf8');
+    const result = await this.bankImport.ingest(businessId, accountId, content, {
+      userId: req.user.id,
+      source: 'upload',
+    });
     if (autoMatch !== 'false') {
       const m = await this.bankMatch.autoMatch(businessId, accountId, { userId: req.user.id });
       return { ...result, autoMatched: m };
     }
     return result;
+  }
+
+  /**
+   * Remember how this account's CSV exports are laid out.
+   *
+   * Column detection guesses well and guessing is not good enough for an
+   * unattended import: a bank renaming "Amount" to "Value (TTD)" would start
+   * failing silently. Map it once here and every later import — including an
+   * automated one — is deterministic.
+   */
+  @Post('accounts/:accountId/import-profile')
+  async saveImportProfile(
+    @Param('businessId') businessId: string,
+    @Param('accountId') accountId: string,
+    @Body() body: ImportProfile,
+    @Req() req: any,
+  ) {
+    await this.ensureAccess(req.user.id, businessId);
+    return this.bankImport.saveImportProfile(businessId, accountId, body);
   }
 
   /** Split-view payload for the reconciliation UI: bank rows + ledger candidates. */

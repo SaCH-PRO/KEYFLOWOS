@@ -1314,6 +1314,73 @@ export const FLOW_TOOLS: FlowTool[] = [
   },
 
   // ================================================================
+  //  BANK RECONCILIATION
+  // ================================================================
+  //
+  // The matching engine was already built — amount tolerance, date windows,
+  // reference scoring, deterministic tie-breaks — and had no tool over it, so
+  // KEY could read receivables and not tell you whether the bank agreed.
+  //
+  // Ingestion is deliberately NOT a tool. Statements arrive as files, through
+  // upload or an emailed attachment, and a tool that claimed to "fetch" a
+  // statement would be advertising a bank feed that does not exist for this
+  // market. KEY can see what has been imported, run the match, and say what is
+  // left — which is the part a person actually wants delegated.
+  {
+    name: 'reconcile_list_unmatched',
+    description: 'List bank lines that have not been matched to a ledger entry yet, for one account. This is the "what still needs looking at" list after a statement import.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/finance/reconciliation',
+    parameters: {
+      type: 'object',
+      properties: {
+        accountId: { type: 'string', description: 'Financial account id' },
+        limit: { type: 'number', description: 'Maximum rows to return (default 50)' },
+      },
+      required: ['accountId'],
+    },
+    outputSchema: { type: 'object', description: 'Unmatched bank lines', fields: { transactions: { type: 'array', description: 'Bank rows still unmatched' } } },
+  },
+  {
+    name: 'reconcile_run_auto_match',
+    description: 'Run automatic matching for an account: pair imported bank lines against ledger entries by amount, date proximity and reference. Reports how many matched and how many are still open. Safe to run repeatedly.',
+    family: 'organize',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/finance/reconciliation',
+    changedEntities: ['bankTransaction'],
+    parameters: {
+      type: 'object',
+      properties: {
+        accountId: { type: 'string', description: 'Financial account id' },
+        sinceDate: { type: 'string', description: 'Only consider bank lines on or after this date (ISO)' },
+      },
+      required: ['accountId'],
+    },
+    outputSchema: { type: 'object', description: 'Match result', fields: { matched: { type: 'number', description: 'Lines newly matched' }, remaining: { type: 'number', description: 'Lines still unmatched' } } },
+  },
+  {
+    name: 'reconcile_match_line',
+    description: 'Match one specific bank line to one specific ledger transaction, when the automatic pass could not decide. Use reconcile_list_unmatched to get the bank line id first.',
+    family: 'organize',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/finance/reconciliation',
+    changedEntities: ['bankTransaction'],
+    parameters: {
+      type: 'object',
+      properties: {
+        bankTransactionId: { type: 'string', description: 'The bank line, from reconcile_list_unmatched' },
+        ledgerTransactionId: { type: 'string', description: 'The ledger entry it corresponds to' },
+      },
+      required: ['bankTransactionId', 'ledgerTransactionId'],
+    },
+    outputSchema: { type: 'object', description: 'Matched line', fields: { transaction: { type: 'object', description: 'The bank line, now matched' } } },
+  },
+
+  // ================================================================
   //  CONTRACTS
   // ================================================================
   //

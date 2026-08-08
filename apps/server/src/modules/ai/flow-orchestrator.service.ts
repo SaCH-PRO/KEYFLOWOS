@@ -50,6 +50,7 @@ import { DealVelocityService } from '../crm/deal-velocity.service';
 import { SeoService } from '../seo/seo.service';
 import { SeoContentService } from '../seo/seo-content.service';
 import { ReceivablesService } from '../finance/receivables.service';
+import { BankMatchingService } from '../finance/bank-matching.service';
 import { ApprovalRequestService } from '../approvals/approval-request.service';
 import { GoogleDriveService } from '../google-drive/google-drive.service';
 import { TaskAssignmentService } from '../task-assignments/task-assignment.service';
@@ -423,6 +424,9 @@ export class FlowOrchestratorService {
   }
   private getReceivables() {
     return this.moduleRef.get(ReceivablesService, { strict: false });
+  }
+  private getBankMatching() {
+    return this.moduleRef.get(BankMatchingService, { strict: false });
   }
   private getApprovalRequest() {
     return this.moduleRef.get(ApprovalRequestService, { strict: false });
@@ -2280,6 +2284,38 @@ ${triage.standingContext}`;
           actorId: KEY_SYSTEM_ACTOR_ID,
         });
         return { success: removed.ok, deletedId: args.dealId };
+      }
+
+      // === BANK RECONCILIATION ===
+      case 'reconcile_list_unmatched': {
+        const transactions = await this.prisma.client.bankTransaction.findMany({
+          where: { businessId, accountId: args.accountId, status: 'UNMATCHED' },
+          orderBy: [{ date: 'asc' }, { id: 'asc' }],
+          take: Math.min(args.limit ?? 50, 200),
+          select: { id: true, date: true, description: true, amount: true, currency: true, reference: true },
+        });
+        return { transactions, count: transactions.length };
+      }
+      case 'reconcile_run_auto_match': {
+        const result = await this.getBankMatching().autoMatch(businessId, args.accountId, {
+          sinceDate: args.sinceDate ? new Date(args.sinceDate) : null,
+          userId: KEY_SYSTEM_ACTOR_ID,
+        });
+        // Report what the matcher decided, and what it left — an owner asked to
+        // reconcile wants the remainder, not a success message.
+        const remaining = await this.prisma.client.bankTransaction.count({
+          where: { businessId, accountId: args.accountId, status: 'UNMATCHED' },
+        });
+        return { ...result, remaining };
+      }
+      case 'reconcile_match_line': {
+        const matched = await this.getBankMatching().manualMatch(
+          businessId,
+          args.bankTransactionId,
+          args.ledgerTransactionId,
+          KEY_SYSTEM_ACTOR_ID,
+        );
+        return { transaction: matched };
       }
 
       // === CONTRACTS ===
