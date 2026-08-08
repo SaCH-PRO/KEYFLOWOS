@@ -48,6 +48,8 @@ import {
   Bell,
   LayoutDashboard,
   TrendingUp,
+  Calculator,
+  Trash2,
   Camera,
   Inbox,
   Wallet,
@@ -144,6 +146,13 @@ export const operateSections: NavSection[] = [
       // payment links, refunds -- that was never linked from anywhere.
       { label: "Payments", href: "/app/payments", icon: CreditCard },
       { label: "Expenses", href: "/app/expenses", icon: Receipt },
+      // One entry opens four routes: the request list, /new, /suppliers and
+      // the [requestId] detail. Purchasing is money leaving on a promise, so
+      // it belongs beside Expenses rather than in an operations menu.
+      { label: "Purchasing", href: "/app/procurement", icon: Truck },
+      // Recurring client fees. The periods -> hours -> invoice loop is still
+      // thin, but the register itself is real and reads live data.
+      { label: "Retainers", href: "/app/retainers", icon: RefreshCw },
       { label: "Budgets", href: "/app/budgeting", icon: Target },
       // Staff pay: a 319-line run/approve console that arrived with no door.
       { label: "Payroll", href: "/app/payroll", icon: Wallet },
@@ -170,6 +179,14 @@ export const operateSections: NavSection[] = [
       { label: "Trial balance", href: "/app/finance/trial-balance", icon: BarChart3 },
       { label: "Recurring journals", href: "/app/finance/recurring-journals", icon: RefreshCw },
       { label: "Assets & depreciation", href: "/app/finance/fixed-assets", icon: Building },
+      // Four more screens that were built against real services and left with
+      // no door, in the same way the eight above were until 2026-08-07.
+      { label: "Bank rules", href: "/app/finance/bank-rules", icon: RefreshCw },
+      { label: "Credit notes", href: "/app/finance/credit-notes", icon: Receipt },
+      { label: "Exchange rates", href: "/app/finance/exchange-rates", icon: Globe },
+      // Pushes invoices and customers to QuickBooks/Xero. 418 lines, and two
+      // KEY tools already treat it as the manual path.
+      { label: "Accounting sync", href: "/app/accounting", icon: Calculator },
     ],
   },
   {
@@ -184,6 +201,20 @@ export const operateSections: NavSection[] = [
       { label: "Support", href: "/app/helpdesk", icon: Headset },
       { label: "Calls", href: "/app/call-tasks", icon: MessageCircle, dormantFlag: "salesPack" },
       { label: "Insights", href: "/app/crm/intelligence", icon: Brain },
+      // Companies, as distinct from the people at them. One entry also opens
+      // the [accountId] detail route.
+      { label: "Accounts", href: "/app/crm/accounts", icon: Building },
+      // 560 lines over three real endpoints (issues, stats, a fix wizard),
+      // and its sibling merge tool. A CRM silently rots without these and
+      // neither had a door.
+      { label: "Data quality", href: "/app/crm/data-quality", icon: ShieldCheck },
+      { label: "Duplicates", href: "/app/crm/duplicates", icon: Layers },
+      { label: "Relationship map", href: "/app/crm/network", icon: Share2 },
+      // 330 lines over ten endpoints — at-risk contacts, due tasks, next
+      // actions, the presence funnel. Distinct from "Overview" above, which
+      // reads people segments; checked before linking.
+      { label: "Dashboard", href: "/app/crm/dashboard", icon: LayoutDashboard },
+      { label: "Sales team", href: "/app/sales-team", icon: Users },
     ],
   },
   {
@@ -206,6 +237,14 @@ export const operateSections: NavSection[] = [
       // Staff scorecards, team summary and trend snapshots. Arrived with the
       // consolidation branch and had no entry anywhere.
       { label: "Performance", href: "/app/performance", icon: Activity },
+      // The largest doorless screen in the product at 600 lines, fully
+      // writable. KEY has had three time tools since the arsenal work, all
+      // declaring /app/projects as their manual equivalent because this
+      // screen was not in the nav to point at.
+      { label: "Time tracking", href: "/app/time-tracking", icon: Clock },
+      { label: "Operations", href: "/app/operations", icon: Briefcase },
+      { label: "SOPs", href: "/app/operations-flow", icon: BookOpen },
+      { label: "Change orders", href: "/app/change-orders", icon: FileText },
     ],
   },
   {
@@ -220,6 +259,12 @@ export const operateSections: NavSection[] = [
       // Events, ticket types, attendees and check-in — a four-route cluster
       // that the consolidation branch shipped without a door.
       { label: "Events", href: "/app/events", icon: Calendar },
+      // A 516-line channel console. WhatsApp is the primary business channel
+      // in this market, and it had no door.
+      { label: "WhatsApp", href: "/app/whatsapp", icon: MessageCircle },
+      // Campaign PLANS, distinct from the campaigns above: fetchCampaignPlans
+      // against its own endpoint. Checked for duplication before linking.
+      { label: "Campaign plans", href: "/app/marketing-flow", icon: Megaphone },
     ],
   },
   {
@@ -265,6 +310,12 @@ export const buildSections: NavSection[] = [
       { label: "Storefront", href: "/app/store", icon: Store },
       { label: "Presence", href: "/app/presence", icon: Globe },
       { label: "Templates", href: "/app/templates", icon: GraduationCap },
+      // The brand-asset library — files and folders. Distinct from Money's
+      // "Assets & depreciation", which is equipment on the balance sheet;
+      // checked before linking so the nav does not offer two "Assets".
+      { label: "Asset library", href: "/app/assets", icon: Layers },
+      // What a client sees when you share work with them.
+      { label: "Client portal", href: "/app/portal", icon: Globe },
     ],
   },
   {
@@ -279,6 +330,9 @@ export const buildSections: NavSection[] = [
       { label: "AI", href: "/app/settings/ai", icon: Bot },
       { label: "Compliance", href: "/app/settings/compliance", icon: ShieldCheck },
       { label: "Developers", href: "/app/settings/developers", icon: Code },
+      // Soft-deleted records, restorable. A trash can nobody can open is a
+      // data-loss surface: deletes look permanent when they are not.
+      { label: "Trash", href: "/app/trash", icon: Trash2 },
     ],
   },
   {
@@ -295,6 +349,11 @@ export const buildSections: NavSection[] = [
     icon: Zap,
     items: [
       { label: "Flows", href: "/app/flows", icon: RefreshCw },
+      // 315 lines over seven API modules — the richest automation surface in
+      // the product, and the one with no way in.
+      { label: "Automations", href: "/app/automations", icon: Zap },
+      // Per-role flow catalogue; one entry also opens the [rolekey] detail.
+      { label: "Role flows", href: "/app/key-flows", icon: Layers },
     ],
   },
 ];

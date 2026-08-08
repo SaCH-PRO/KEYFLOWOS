@@ -201,6 +201,9 @@ const CROSS_DOMAIN_ROUTES: Record<string, string> = {
   reconcile_list_unmatched: 'the reconciliation screen — prefix/route spelling differ',
   reconcile_run_auto_match: 'the reconciliation screen — prefix/route spelling differ',
   reconcile_match_line: 'the reconciliation screen — prefix/route spelling differ',
+  reconcile_list_statement_sources: 'the reconciliation screen — prefix/route spelling differ',
+  reconcile_connect_statement_source: 'the reconciliation screen — prefix/route spelling differ',
+  reconcile_sweep_statements: 'the reconciliation screen — prefix/route spelling differ',
 
   create_task: 'tasks live on the projects board',
   people_assign_task: 'a task is assigned from the board it lives on, not the people screen',

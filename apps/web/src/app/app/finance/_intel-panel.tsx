@@ -86,7 +86,10 @@ export function FinanceIntelPanel({
             <RefreshCw className={`w-3 h-3 ${scanning ? "animate-spin" : ""}`} /> Scan
           </button>
           {compact && (
-            <Link href="/app/money" className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
+            // /app/money/actions, NOT /app/money. The latter re-exports
+            // /app/finance/page, which renders this same panel compact — so
+            // "See all" showed the same five items it was offering to expand.
+            <Link href="/app/money/actions" className="text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
               See all <ArrowRight className="w-3 h-3" />
             </Link>
           )}

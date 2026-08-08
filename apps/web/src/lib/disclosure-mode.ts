@@ -70,12 +70,14 @@ export const MODE_OPERATE_ITEMS: Record<DisclosureMode, string[]> = {
   // other two got their errors from.
   enterprise: [
     "Chat", "Inbox", "Worker", "Autonomy", "Modes", "Data Inbox", "Capture",
-    "Overview", "Sales", "Inventory", "Payments", "Expenses", "Budgets", "Reports",
+    "Overview", "Sales", "Inventory", "Payments", "Expenses", "Purchasing", "Retainers", "Budgets", "Reports",
     "Accounts & tax setup", "Reconcile bank", "Tax", "Close the month", "General ledger", "Trial balance", "Recurring journals", "Assets & depreciation",
+    "Bank rules", "Credit notes", "Exchange rates", "Accounting sync",
     "Contacts", "Deals", "Sequences", "Support", "Calls", "Insights",
+    "Accounts", "Data quality", "Duplicates", "Relationship map", "Dashboard", "Sales team",
     "Calendar", "Bookings",
-    "Projects", "Approvals",
-    "Campaigns", "Content", "Social", "SEO",
+    "Projects", "Approvals", "Time tracking", "Operations", "SOPs", "Change orders",
+    "Campaigns", "Content", "Social", "SEO", "WhatsApp", "Campaign plans",
     "Evidence", "Contracts", "Legal",
     "Goals", "Market",
     // Arrived with integration/2026-07-consolidation when the fork was closed.

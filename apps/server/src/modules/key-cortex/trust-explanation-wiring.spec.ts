@@ -25,9 +25,10 @@
  * is unregistered and @Optional()-injected into KeyCortexCommandService, where
  * the field is never read at all — its file header claims "ONE pathway for all
  * commands. No more direct Cortex execution," and the opposite ships.
- * KeyCortexKeystoreAdapterService is in no module and has no caller. Both are
- * tracked in docs/CAPABILITY_MAP.md rather than fixed here; deleting or wiring
- * them is a decision, not a repair.
+ * KeyCortexKeystoreAdapterService is in no module and has no caller. Both were
+ * since DELETED (333feaf2), and phantom-injection.spec.ts now gates the class
+ * rather than these two instances: every @Optional() @Inject target must be
+ * registered somewhere, so the next one cannot bind undefined in silence.
  */
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';

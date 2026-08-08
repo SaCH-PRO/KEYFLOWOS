@@ -54,7 +54,29 @@ export interface StatementSources {
   gmailQuery?: string;
   /** Set by the sweeps so a re-run does not reprocess what it already saw. */
   lastSweptAt?: string;
+  /**
+   * When a sweep last actually imported something.
+   *
+   * Distinct from `lastSweptAt` on purpose, and the distinction is the whole
+   * point: a sweep that runs nightly and imports nothing looks identical, from
+   * `lastSweptAt` alone, to one that is working perfectly against a quiet
+   * account. Two real defects shipped in exactly that disguise.
+   */
+  lastImportAt?: string;
+  /** Why the last sweep failed, if it did. Cleared by the next success. */
+  lastError?: string;
 }
+
+/**
+ * How long a configured source may import nothing before that is itself worth
+ * reporting.
+ *
+ * A bank statement arrives monthly, so a month of silence is normal and six
+ * weeks is not. This is deliberately not tunable: an alert threshold nobody
+ * can see is one nobody adjusts, and the cost of being wrong is one dismissible
+ * feed row.
+ */
+const QUIET_DAYS_BEFORE_CONCERN = 45;
 
 export interface SweepResult {
   accountId: string;
@@ -153,12 +175,18 @@ export class StatementSourceService {
     const folderId = account?.sources?.driveFolderId;
     if (!folderId) { result.errors.push('No Drive folder configured for this account.'); return result; }
 
-    const since = account?.sources?.lastSweptAt;
-    const query =
-      `'${folderId}' in parents and trashed = false` +
-      (since ? ` and modifiedTime > '${since}'` : '');
-
-    const list = await this.drive.listFiles(businessId, { query, pageSize: 50, orderBy: 'modifiedTime desc' });
+    // listFiles' `query` option is a FILENAME SUBSTRING, not a Drive query.
+    // This originally hand-built `'<folder>' in parents and trashed = false`
+    // and passed it as `query`, which Drive received as a search for a file
+    // *named* that — matching nothing, every night, without erroring. Only a
+    // test at the fetch boundary showed it; every test that mocked listFiles
+    // passed. Hence folderId/modifiedAfter, which build the clauses properly.
+    const list = await this.drive.listFiles(businessId, {
+      folderId,
+      modifiedAfter: account?.sources?.lastSweptAt,
+      pageSize: 50,
+      orderBy: 'modifiedTime desc',
+    });
     const files = list.files ?? [];
     result.filesConsidered = files.length;
 
@@ -178,7 +206,8 @@ export class StatementSourceService {
       }
     }
 
-    await this.markSwept(businessId, accountId);
+    await this.markSwept(businessId, accountId, result);
+    await this.reportHealth(businessId, { id: accountId, name: account?.name ?? accountId, sources: account?.sources }, result);
     return result;
   }
 
@@ -225,12 +254,121 @@ export class StatementSourceService {
       }
     }
 
-    await this.markSwept(businessId, accountId);
+    await this.markSwept(businessId, accountId, result);
+    await this.reportHealth(businessId, { id: accountId, name: account?.name ?? accountId, sources: account?.sources }, result);
     return result;
   }
 
-  private async markSwept(businessId: string, accountId: string) {
-    await this.setSources(businessId, accountId, { lastSweptAt: new Date().toISOString() });
+  private async markSwept(businessId: string, accountId: string, result?: SweepResult) {
+    const now = new Date().toISOString();
+    await this.setSources(businessId, accountId, {
+      lastSweptAt: now,
+      // Only stamp lastImportAt when something actually arrived. A sweep that
+      // considered files and imported none has not proven the source works.
+      ...(result && result.imported > 0 ? { lastImportAt: now } : {}),
+      // '' rather than undefined: setSources merges, so undefined would leave a
+      // stale error in place after the failure had been fixed.
+      ...(result ? { lastError: result.errors[0] ?? '' } : {}),
+    });
+  }
+
+  /* ── noticing its own silence ──────────────────────────────────────── */
+
+  /**
+   * Write an awareness row when an intake looks broken, and clear it when it
+   * recovers.
+   *
+   * Reported rather than thrown, because the failure this guards against is
+   * not an exception — it is a nightly job succeeding at doing nothing. The
+   * two defects that motivated this both returned 200 and an empty list.
+   *
+   * Best-effort by construction: a problem writing the health row must never
+   * be the reason a sweep that did work gets recorded as failed.
+   */
+  private async reportHealth(
+    businessId: string,
+    account: { id: string; name: string; sources?: StatementSources },
+    result: SweepResult | { errors: string[]; imported: number },
+  ): Promise<void> {
+    const key = `statement_source:${account.id}`;
+    const sources = account.sources ?? {};
+
+    let headline: string | null = null;
+    let suggestedAction = '';
+    if (result.errors.length > 0) {
+      headline = `${account.name}: automatic statement import failed — ${result.errors[0]}`;
+      suggestedAction = 'Reconnect the source on Finance → Reconciliation, or run a sweep to see the error again.';
+    } else if (result.imported === 0) {
+      // Nothing arrived. That is only notable if nothing has arrived for a
+      // while, which is what separates "the bank has not sent this month's yet"
+      // from "this has not worked since it was set up".
+      const lastImport = sources.lastImportAt ? Date.parse(sources.lastImportAt) : null;
+      const quietSince = lastImport ?? (sources.lastSweptAt ? Date.parse(sources.lastSweptAt) : null);
+      const quietDays = quietSince ? (Date.now() - quietSince) / 86_400_000 : null;
+      if (quietDays !== null && quietDays > QUIET_DAYS_BEFORE_CONCERN) {
+        headline =
+          `${account.name}: connected for automatic statement import, but nothing has ` +
+          `imported in ${Math.floor(quietDays)} days. The connection may be broken, or the ` +
+          `folder or mail search may no longer match anything.`;
+        suggestedAction = 'Check the Drive folder or Gmail search still matches, then sweep now.';
+      }
+    }
+
+    try {
+      const existing = await this.prisma.client.keyCortexMemory.findFirst({
+        where: { businessId, type: 'integration_health', key },
+        select: { id: true },
+      });
+
+      if (!headline) {
+        // Recovered. Remove the row rather than leaving a resolved alarm up —
+        // a feed that accumulates stale warnings stops being read.
+        if (existing) {
+          await this.prisma.client.keyCortexMemory.delete({ where: { id: existing.id } });
+        }
+        return;
+      }
+
+      const data = {
+        // JSON, not a sentence. getAwareness does JSON.parse(row.value) and
+        // silently skips anything that throws — a plain string here would be
+        // stored and then dropped by the reader with only a debug log, which
+        // is precisely the silent failure this whole feature exists to end.
+        value: JSON.stringify({
+          summary: headline,
+          suggestedAction,
+          accountId: account.id,
+          accountName: account.name,
+          reason: result.errors.length > 0 ? 'error' : 'quiet',
+        }),
+        confidence: result.errors.length > 0 ? 0.9 : 0.6,
+        lastAccessedAt: new Date(),
+      };
+      if (existing) {
+        await this.prisma.client.keyCortexMemory.update({ where: { id: existing.id }, data });
+      } else {
+        await this.prisma.client.keyCortexMemory.create({
+          data: {
+            // The spread goes FIRST and businessId last, so the tenant cannot
+            // be overwritten by whatever `data` happens to contain. `data` is
+            // built locally here and holds no businessId, but the ordering is
+            // not a judgement about this object — `{ businessId, ...x }` is
+            // refused on sight by tenant-body-override.spec.ts, because the
+            // reviewer who has to decide "is this particular spread safe?"
+            // gets it wrong eventually. Safe order costs nothing.
+            ...data,
+            type: 'integration_health',
+            key,
+            source: 'statement_sweep',
+            // No userId. A broken intake belongs to the business, not to
+            // whoever happens to be in the chat.
+            businessId,
+          },
+        });
+      }
+    } catch (err: any) {
+      this.logger.warn(`[sweep] could not record health for ${account.id}: ${(err as Error).message}`);
+    }
   }
 
   /* ── the automation itself ─────────────────────────────────────────── */
@@ -268,7 +406,12 @@ export class StatementSourceService {
         }
       } catch (err: any) {
         // One business's expired Gmail token must not stop the estate.
-        this.logger.warn(`[sweep] ${a.businessId}/${a.id} failed: ${(err as Error).message}`);
+        const message = (err as Error).message;
+        this.logger.warn(`[sweep] ${a.businessId}/${a.id} failed: ${message}`);
+        // A sweep that THREW never reached markSwept, so without this the one
+        // failure mode loud enough to raise would be the only one that never
+        // reaches a human.
+        await this.reportHealth(a.businessId, a, { errors: [message], imported: 0 });
       }
     }
 

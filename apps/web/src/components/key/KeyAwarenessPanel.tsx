@@ -12,6 +12,7 @@ import {
   ChevronDown,
   AlertTriangle,
   TrendingUp,
+  PlugZap,
 } from "lucide-react";
 import { getApiBase } from "@/lib/api-base";
 import { fetchWithAuthRetry } from "@/lib/api";
@@ -45,7 +46,8 @@ type AwarenessKind =
   | "reflection"
   | "hypothesis"
   | "concern"
-  | "momentum";
+  | "momentum"
+  | "integration";
 
 interface AwarenessItem {
   id: string;
@@ -67,6 +69,16 @@ const KIND_META: Record<
   AwarenessKind,
   { label: string; icon: typeof Radar; tint: string; ring: string }
 > = {
+  // An automated intake that has stopped working, or gone quiet long enough
+  // that it probably has. Amber rather than red: it is usually a reconnect,
+  // not an incident — but it must not read as informational, because the
+  // failure it reports is one that produces no other symptom until year end.
+  integration: {
+    label: "Intake",
+    icon: PlugZap,
+    tint: "text-orange-400",
+    ring: "ring-orange-500/20",
+  },
   weakSignal: {
     label: "Weak signal",
     icon: Radar,

@@ -9815,6 +9815,18 @@ model BankTransaction {
   @@index([businessId, status])
   @@index([businessId, accountId, status])
   @@map("bank_transactions")
+
+  /// NOT EXPRESSIBLE HERE — see migration 20260808140000.
+  ///
+  /// A partial unique index on (account_id, (rawData->>'externalId')) WHERE the
+  /// id is not null stops two concurrent imports inserting the same bank line
+  /// twice. Prisma has no syntax for an expression index, so it lives only in
+  /// the migration; do not "tidy" it away by regenerating this model, and
+  /// expect `migrate diff` to be silent about it rather than to confirm it.
+  ///
+  /// It is partial because only OFX/QFX/MT940 carry a bank-assigned id. CSV and
+  /// QIF rows have none and must stay unconstrained — the same amount to the
+  /// same payee twice in one day is a real thing that happens.
 }
 
 /// Bank-statement reconciliation session. On completion, all in-period

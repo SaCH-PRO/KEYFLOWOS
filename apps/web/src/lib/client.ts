@@ -12966,6 +12966,16 @@ export interface FinancialAccountRow {
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
+  /**
+   * Holds only layout and delivery config — `importProfile` (how this bank's
+   * CSV columns are arranged) and `statementSources` (where its statements
+   * arrive from). No credentials live here; the OAuth tokens for Drive and
+   * Gmail stay on their own connection records.
+   */
+  metadata?: {
+    importProfile?: Record<string, unknown>;
+    statementSources?: StatementSourcesPayload;
+  } | null;
 }
 
 export interface ChartOfAccountRow {
@@ -13319,6 +13329,53 @@ export interface BankImportResultPayload {
   invalid: number;
   errors: string[];
   autoMatched?: { scanned: number; matched: number; ambiguous: number };
+  /** Which format the sniffer decided on: ofx | qfx | qif | mt940 | csv. */
+  format?: string;
+  /**
+   * False when the file carried no bank-assigned transaction id, so duplicates
+   * were judged on (date, amount, reference) instead. Worth surfacing: an
+   * unattended nightly import running on a heuristic is a thing the person who
+   * turned it on should be able to see they chose.
+   */
+  exactDedupe?: boolean;
+}
+
+/** Where an account's statements arrive from without anyone uploading them. */
+export interface StatementSourcesPayload {
+  driveFolderId?: string;
+  gmailQuery?: string;
+  lastSweptAt?: string;
+}
+
+export interface StatementSweepResult {
+  accountId: string;
+  source: 'drive' | 'gmail';
+  filesConsidered: number;
+  imported: number;
+  skipped: number;
+  errors: string[];
+}
+
+export async function setStatementSources(
+  businessId: string,
+  accountId: string,
+  body: StatementSourcesPayload,
+) {
+  return apiPost<StatementSourcesPayload>({
+    path: `${finBase(businessId)}/accounts/${encodeURIComponent(accountId)}/statement-sources`,
+    body,
+  });
+}
+
+export async function sweepStatementSource(
+  businessId: string,
+  accountId: string,
+  source: 'drive' | 'gmail',
+) {
+  return apiPost<StatementSweepResult>({
+    path: `${finBase(businessId)}/accounts/${encodeURIComponent(accountId)}/statement-sources/${source}/sweep`,
+    body: {},
+  });
 }
 
 export async function importBankCsv(
