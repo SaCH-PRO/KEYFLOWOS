@@ -128,6 +128,15 @@ COPY --from=builder /app/apps/server/dist        ./apps/server/dist
 COPY --from=builder /app/packages/db/dist        ./packages/db/dist
 COPY --from=builder /app/packages/api/dist       ./packages/api/dist
 COPY --from=builder /app/packages/shared/dist    ./packages/shared/dist
+# Build identity. getReleaseVersion() (packages/shared/src/release-version.ts:57)
+# resolves GIT_COMMIT -> SOURCE_COMMIT -> .deploy-version -> `git rev-parse HEAD`
+# -> "unknown". In a container the last two can never work: .dockerignore:16
+# excludes .git, and nothing writes .deploy-version. So /healthz reported
+# "unknown" and production could not be asked what it was running — which, on
+# 2026-08-08, meant confirming a security deploy by grepping compiled JS inside
+# the container instead of reading one field.
+ARG GIT_COMMIT=unknown
+ENV GIT_COMMIT=${GIT_COMMIT}
 EXPOSE 3001
 ENTRYPOINT ["/sbin/tini", "--"]
 CMD ["node", "apps/server/dist/main.js"]
@@ -179,6 +188,10 @@ COPY --from=builder /app/apps/web/next.config.ts ./apps/web/
 # next.config.ts imports ./src/lib/env at load time
 COPY --from=builder /app/apps/web/src/lib/env.ts ./apps/web/src/lib/env.ts
 COPY --from=builder /app/packages/ui/src ./packages/ui/src
+# Build identity — see the note on the server stage. This is the one /healthz
+# actually reads, since /api/healthz is served by the web app.
+ARG GIT_COMMIT=unknown
+ENV GIT_COMMIT=${GIT_COMMIT}
 EXPOSE 5000
 ENTRYPOINT ["/sbin/tini", "--"]
 CMD ["pnpm", "--filter", "web", "start"]

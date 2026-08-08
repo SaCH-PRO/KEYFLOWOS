@@ -42,6 +42,7 @@ services:
         NEXT_PUBLIC_APP_URL: ${APP_URL}
         NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
         NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
         NEXT_PUBLIC_LIVEKIT_URL: ${PUBLIC_LIVEKIT_WS_URL}
     dns:
       - 1.1.1.1
@@ -70,6 +71,7 @@ services:
         NEXT_PUBLIC_APP_URL: ${APP_URL}
         NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
         NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
         NEXT_PUBLIC_LIVEKIT_URL: ${PUBLIC_LIVEKIT_WS_URL}
     # systemd-resolved on the host intermittently SERVFAILs long hostnames
     # (supabase.co) via docker's embedded DNS — pin public resolvers instead.
@@ -108,6 +110,7 @@ services:
         NEXT_PUBLIC_APP_URL: ${APP_URL}
         NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
         NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
         NEXT_PUBLIC_LIVEKIT_URL: ${PUBLIC_LIVEKIT_WS_URL}
     dns:
       - 1.1.1.1
