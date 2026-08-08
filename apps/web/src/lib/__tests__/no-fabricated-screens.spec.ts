@@ -96,6 +96,66 @@ function hasDataSource(file: string, depth = 3, seen = new Set<string>()): boole
 /** A spinner that resolves on a timer, with nothing behind it. */
 const FAKES_A_LOAD = /setTimeout\([\s\S]{0,80}?setLoading\(false\)/;
 
+/**
+ * Every route under /app that renders a page — not just the ones in the nav.
+ *
+ * The nav is a subset, and checking only the subset means a screen is audited
+ * at the moment it becomes visible rather than at the moment it is written.
+ */
+/**
+ * Screens that simulate a network request and render invented numbers.
+ *
+ * Found on 2026-08-08 while auditing 39 unreachable screens for nav entries —
+ * one step before the exact mistake the gate above now prevents. All three
+ * were outside the nav, which is the only reason nobody had been misled: the
+ * detector could already recognise them, it was just never pointed at
+ * anything but nav destinations.
+ *
+ *   /app/growth                    900ms fake timer. "+24.5% Revenue Growth",
+ *                                  "$2,840 Lifetime Value", "18 referrals this
+ *                                  month". 325 lines, no data import at all.
+ *   /app/document-intelligence     700ms fake timer, "94%". KeyCortexDocument
+ *                                  Service exists — AND TWO KEY TOOLS NAME
+ *                                  THIS AS THEIR MANUAL EQUIVALENT, so KEY
+ *                                  currently offers document work whose manual
+ *                                  path is a mockup.
+ *   /app/storefront-intelligence   800ms fake timer, "3,847", "$8,420",
+ *                                  "$29.60". storefront-conversion.service.ts
+ *                                  exists.
+ *
+ * Listed, not fixed, because each is a decision — wire it to the service that
+ * already exists, or delete it — and three of those is a separate piece of
+ * work from stopping a fourth. The list may only shrink.
+ */
+const KNOWN_FABRICATED = [
+  '/app/document-intelligence',
+  '/app/growth',
+  '/app/storefront-intelligence',
+];
+
+/** Every route whose page fakes a load and has no data behind it. */
+function fabricatedRoutes(): string[] {
+  return allRoutes().filter((route) => {
+    if (STATIC_BY_DESIGN[route]) return false;
+    const page = pageFor(route);
+    if (!page) return false;
+    return FAKES_A_LOAD.test(fs.readFileSync(page, 'utf8')) && !hasDataSource(page);
+  });
+}
+
+function allRoutes(): string[] {
+  const found: string[] = [];
+  const walk = (dir: string, route: string) => {
+    if (fs.existsSync(path.join(dir, 'page.tsx'))) found.push(route);
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.isDirectory() || entry.name.startsWith('_') || entry.name === '__tests__') continue;
+      walk(path.join(dir, entry.name), `${route}/${entry.name}`);
+    }
+  };
+  walk(path.join(APP_DIR, 'app'), '/app');
+  return found.sort();
+}
+
 describe('no nav-linked screen fabricates data', () => {
   const destinations = navDestinations();
 
@@ -130,6 +190,56 @@ describe('no nav-linked screen fabricates data', () => {
     expect(
       undocumented,
       `no data source and no entry in STATIC_BY_DESIGN: ${undocumented.join(', ')}`,
+    ).toEqual([]);
+  });
+
+  it('no screen ANYWHERE fakes a loading state, linked or not', () => {
+    // The gate above only ever looked at nav destinations, which means a
+    // fabricated screen was caught the moment somebody LINKED it. That is
+    // backwards: you find out you built a fake dashboard by shipping it.
+    //
+    // It is not hypothetical. Three of these were sitting outside the nav with
+    // the detector above already able to recognise them:
+    //
+    //   /app/growth                    900ms fake timer, "+24.5%", "$2,840"
+    //   /app/document-intelligence     700ms fake timer, "94%"
+    //   /app/storefront-intelligence   800ms fake timer, "3,847", "$8,420"
+    //
+    // All three were found while auditing 39 unreachable screens for nav
+    // entries — i.e. one step before the exact mistake this now prevents.
+    // An unreachable fake is harmless; a linked one is a business decision
+    // made on invented numbers.
+    const unexpected = fabricatedRoutes().filter((r) => !KNOWN_FABRICATED.includes(r));
+
+    expect(
+      unexpected,
+      'these simulate a network request and render invented numbers. Wire them ' +
+        'to real data or delete them: ' + unexpected.join(', '),
+    ).toEqual([]);
+  });
+
+  it('a fabricated screen is never given a nav entry', () => {
+    // The assertion that actually protects anyone. An unreachable fake is
+    // inert; a linked one puts invented numbers in front of somebody deciding
+    // what to do with their business. This was one step from happening — all
+    // three were found mid-audit of 39 unreachable screens for nav entries.
+    const linked = fabricatedRoutes().filter((r) => navDestinations().includes(r));
+
+    expect(
+      linked,
+      `${linked.join(', ')} renders invented numbers and is now in the nav. ` +
+        'A user cannot tell it from a real dashboard.',
+    ).toEqual([]);
+  });
+
+  it('the fabricated list does not outlive the fabrication', () => {
+    // If one gets wired to real data, its entry here becomes a lie about the
+    // codebase — and the next person reads the list as current.
+    const fixed = KNOWN_FABRICATED.filter((r) => !fabricatedRoutes().includes(r));
+
+    expect(
+      fixed,
+      `${fixed.join(', ')} no longer fabricates — remove it from KNOWN_FABRICATED.`,
     ).toEqual([]);
   });
 

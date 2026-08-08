@@ -45,8 +45,15 @@
  *   deliberately-unlinked     a redirect shim or re-export; a forwarding
  *                             address, not a destination
  *   todo-connect              a real screen with no door. THIS IS WORK, not an
- *                             exemption. 39 entries today (was 47 — eight finance screens connected 2026-08-07); the number should
- *                             only go down.
+ *                             exemption. 33 entries today (was 47, then 39);
+ *                             the number should only go down.
+ *   fabricated-do-not-link    a screen that simulates a network request and
+ *                             renders invented numbers. Connecting it is the
+ *                             WRONG fix — see no-fabricated-screens.spec.ts,
+ *                             which fails if one reaches the nav. It needed
+ *                             its own reason because 'todo-connect' reads as
+ *                             an instruction to open the door, and three of
+ *                             these were sitting in that list.
  *
  * Adding a page without a nav entry now requires writing down which of those it
  * is, which is the whole point.
@@ -58,7 +65,11 @@ import path from 'node:path';
 const WEB_SRC = path.join(__dirname, '..', '..');
 const APP = path.join(WEB_SRC, 'app', 'app');
 
-type Reason = `detail-route-of:${string}` | 'deliberately-unlinked' | 'todo-connect';
+type Reason =
+  | `detail-route-of:${string}`
+  | 'deliberately-unlinked'
+  | 'todo-connect'
+  | 'fabricated-do-not-link';
 
 /**
  * Every /app route with no nav path to it, and why.
@@ -87,7 +98,7 @@ const ORPHANED_BY_DESIGN: Record<string, Reason> = {
   "/app/crm/duplicates":                 'todo-connect',
   "/app/crm/intake":                     'deliberately-unlinked',
   "/app/crm/network":                    'todo-connect',
-  "/app/document-intelligence":          'todo-connect',
+  "/app/document-intelligence":          'fabricated-do-not-link',
   "/app/documents":                      'deliberately-unlinked',
   "/app/documents/[instanceId]":         'detail-route-of:/app/documents',
   "/app/finance/accounts":               'deliberately-unlinked',
@@ -96,12 +107,12 @@ const ORPHANED_BY_DESIGN: Record<string, Reason> = {
   "/app/finance/cashflow":               'deliberately-unlinked',
   "/app/finance/credit-notes":           'todo-connect',
   "/app/finance/exchange-rates":         'todo-connect',
-  "/app/finance/expenses":               'todo-connect',
+  "/app/finance/expenses":               'deliberately-unlinked',
   "/app/finance/journal":                'deliberately-unlinked',
-  "/app/finance/reports":                'todo-connect',
-  "/app/finance/revenue":                'todo-connect',
+  "/app/finance/reports":                'deliberately-unlinked',
+  "/app/finance/revenue":                'deliberately-unlinked',
   "/app/governance-flow":                'todo-connect',
-  "/app/growth":                         'todo-connect',
+  "/app/growth":                         'fabricated-do-not-link',
   "/app/inbox":                          'deliberately-unlinked',
   "/app/inbox/intake":                   'todo-connect',
   "/app/key-flows":                      'todo-connect',
@@ -130,7 +141,7 @@ const ORPHANED_BY_DESIGN: Record<string, Reason> = {
   "/app/retainers":                      'todo-connect',
   "/app/sales-team":                     'todo-connect',
   "/app/schedule/calendar":              'deliberately-unlinked',
-  "/app/storefront-intelligence":        'todo-connect',
+  "/app/storefront-intelligence":        'fabricated-do-not-link',
   "/app/time-tracking":                  'todo-connect',
   "/app/trash":                          'todo-connect',
   "/app/whatsapp":                       'todo-connect',
