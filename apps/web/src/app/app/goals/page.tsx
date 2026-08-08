@@ -121,7 +121,12 @@ export default function GoalsPage() {
     if (!businessId) return;
     setGeneratingGoalId(goalId);
     try {
-      const res = await apiPostSimple(`/api/v1/cortex/goals/${goalId}/plans`, {});
+      // businessId is now REQUIRED by the endpoint. 121df93b scoped the goal
+      // lookup — POST goals/:goalId/plans has no :businessId in its path, so it
+      // previously resolved the goal id against every business — and the server
+      // 400s without it. This call posted an empty body, so shipping that fix
+      // without this line breaks "Generate Plan" outright.
+      const res = await apiPostSimple(`/api/v1/cortex/goals/${goalId}/plans`, { businessId });
       if (!res.error) {
         toast.success("Plan generated");
         loadGoalDetails(goalId);
