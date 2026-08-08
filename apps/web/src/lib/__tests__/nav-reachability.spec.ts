@@ -45,8 +45,9 @@
  *   deliberately-unlinked     a redirect shim or re-export; a forwarding
  *                             address, not a destination
  *   todo-connect              a real screen with no door. THIS IS WORK, not an
- *                             exemption. 33 entries today (was 47, then 39);
- *                             the number should only go down.
+ *                             exemption. 7 entries today (47 -> 39 -> 33 ->
+ *                             7; 29 doors opened 2026-08-08). The number
+ *                             should only go down.
  *   fabricated-do-not-link    a screen that simulates a network request and
  *                             renders invented numbers. Connecting it is the
  *                             WRONG fix — see no-fabricated-screens.spec.ts,
@@ -78,35 +79,21 @@ type Reason =
  * shows exactly which door opened or closed.
  */
 const ORPHANED_BY_DESIGN: Record<string, Reason> = {
-  "/app/accounting":                     'todo-connect',
-  "/app/assets":                         'todo-connect',
-  "/app/assets/[id]":                    'detail-route-of:/app/assets',
-  "/app/automations":                    'todo-connect',
   "/app/blueprint":                      'deliberately-unlinked',
   "/app/briefing":                       'deliberately-unlinked',
-  "/app/change-orders":                  'todo-connect',
   "/app/communicate/campaigns":          'deliberately-unlinked',
   "/app/continental-ops/delivery-notes": 'todo-connect',
   "/app/continental-ops/goods-receipts": 'todo-connect',
   "/app/continental-ops/receipts":       'todo-connect',
   "/app/continental-ops/stock-counts":   'todo-connect',
   "/app/control-tower":                  'deliberately-unlinked',
-  "/app/crm/accounts":                   'todo-connect',
-  "/app/crm/accounts/[accountId]":       'detail-route-of:/app/crm/accounts',
-  "/app/crm/dashboard":                  'todo-connect',
-  "/app/crm/data-quality":               'todo-connect',
-  "/app/crm/duplicates":                 'todo-connect',
   "/app/crm/intake":                     'deliberately-unlinked',
-  "/app/crm/network":                    'todo-connect',
   "/app/document-intelligence":          'fabricated-do-not-link',
   "/app/documents":                      'deliberately-unlinked',
   "/app/documents/[instanceId]":         'detail-route-of:/app/documents',
   "/app/finance/accounts":               'deliberately-unlinked',
-  "/app/finance/actions":                'todo-connect',
-  "/app/finance/bank-rules":             'todo-connect',
+  "/app/finance/actions":                'detail-route-of:/app/money',
   "/app/finance/cashflow":               'deliberately-unlinked',
-  "/app/finance/credit-notes":           'todo-connect',
-  "/app/finance/exchange-rates":         'todo-connect',
   "/app/finance/expenses":               'deliberately-unlinked',
   "/app/finance/journal":                'deliberately-unlinked',
   "/app/finance/reports":                'deliberately-unlinked',
@@ -115,10 +102,7 @@ const ORPHANED_BY_DESIGN: Record<string, Reason> = {
   "/app/growth":                         'fabricated-do-not-link',
   "/app/inbox":                          'deliberately-unlinked',
   "/app/inbox/intake":                   'todo-connect',
-  "/app/key-flows":                      'todo-connect',
-  "/app/key-flows/[rolekey]":            'detail-route-of:/app/key-flows',
   "/app/keyflow-command":                'deliberately-unlinked',
-  "/app/marketing-flow":                 'todo-connect',
   "/app/money":                          'deliberately-unlinked',
   // The expanded finance action list, reached from the "See all" link on the
   // money hub's panel — which truncates to five. Not in nav on purpose: it is
@@ -129,22 +113,10 @@ const ORPHANED_BY_DESIGN: Record<string, Reason> = {
   "/app/money/revenue":                  'deliberately-unlinked',
   "/app/onboarding":                     'todo-connect',
   "/app/onboarding/business-os":         'deliberately-unlinked',
-  "/app/operations":                     'todo-connect',
-  "/app/operations-flow":                'todo-connect',
   "/app/plans":                          'deliberately-unlinked',
   "/app/plans/[planId]":                 'detail-route-of:/app/plans',
-  "/app/portal":                         'todo-connect',
-  "/app/procurement":                    'todo-connect',
-  "/app/procurement/[requestId]":        'detail-route-of:/app/procurement',
-  "/app/procurement/new":                'todo-connect',
-  "/app/procurement/suppliers":          'todo-connect',
-  "/app/retainers":                      'todo-connect',
-  "/app/sales-team":                     'todo-connect',
   "/app/schedule/calendar":              'deliberately-unlinked',
   "/app/storefront-intelligence":        'fabricated-do-not-link',
-  "/app/time-tracking":                  'todo-connect',
-  "/app/trash":                          'todo-connect',
-  "/app/whatsapp":                       'todo-connect',
   "/app/work/projects":                  'deliberately-unlinked',
   "/app/workflows":                      'deliberately-unlinked',
 };
