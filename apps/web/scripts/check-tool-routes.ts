@@ -212,6 +212,10 @@ const CROSS_DOMAIN_ROUTES: Record<string, string> = {
   segment_contacts: 'segments are built from the contacts list',
   queue_campaign: 'campaign scheduling is the marketing screen',
   send_message_with_approval: 'outbound messaging is composed in marketing',
+  comms_send_broadcast: 'outbound messaging is composed in marketing — same reason as above',
+  // KEY's own chat is where a custom instruction is actually given. There is no
+  // "custom logic" screen and inventing one would be worse than saying this.
+  execute_custom_logic: 'a bespoke instruction is issued in chat, not on a screen',
   apply_storefront_recommendation: 'storefront recommendations are applied in Store',
   enable_flow_with_approval: 'flows are enabled from the automations screen',
   update_status_with_confirmation: 'bulk status changes are made on the contacts list',
@@ -259,7 +263,24 @@ const WRITE_FAMILIES = new Set(['execute', 'crud', 'organize']);
  * to silence the gate. If this list grows without a matching plan to build the
  * screen, the rule has been abandoned rather than applied.
  */
-const MANUAL_PARITY_EXEMPTIONS: Record<string, string> = {};
+const MANUAL_PARITY_EXEMPTIONS: Record<string, string> = {
+  // The procurement mutations live on the REQUEST DETAIL route, reached by
+  // clicking a row on this list. That is genuinely how a person does it: open
+  // the request, then select a vendor / issue the PO / acknowledge / fulfil.
+  //
+  // canWrite() walks imports, and Next routing is not an import — a list page
+  // does not import its own detail page — so the gate cannot see a sibling
+  // route reached by navigation. The parity is real; the import graph is the
+  // wrong instrument for it. Pointing these at '/app/procurement/[requestId]'
+  // instead would be worse: that is not a URL a person can be sent to.
+  procurement_update_request: 'mutations are on the request detail, opened from this list',
+  procurement_submit_for_review: 'mutations are on the request detail, opened from this list',
+  procurement_select_vendor: 'mutations are on the request detail, opened from this list',
+  procurement_issue_po: 'mutations are on the request detail, opened from this list',
+  procurement_acknowledge_vendor: 'mutations are on the request detail, opened from this list',
+  procurement_mark_fulfilled: 'mutations are on the request detail, opened from this list',
+  procurement_mark_invoiced: 'mutations are on the request detail, opened from this list',
+};
 
 /**
  * The gate checks itself, on every run.
@@ -441,7 +462,7 @@ function resolvePage(appDir: string, route: string, hops = 0): string | null {
  * /app/accounting, a screen with no write path, and watching it pass.
  */
 const MUTATION_NAME =
-  /^(create|update|delete|archive|publish|approve|send|cancel|assign|mark|resolve|submit|verify|remove|revoke|restore|import|generate)[A-Z]/;
+  /^(create|update|delete|archive|publish|approve|send|cancel|assign|mark|resolve|submit|verify|remove|revoke|restore|import|generate|merge|take|record|apply|execute|refund|void|reconcile|fulfill|issue|acknowledge)[A-Z]/;
 
 /**
  * The generic writers. This app writes two ways — a named helper

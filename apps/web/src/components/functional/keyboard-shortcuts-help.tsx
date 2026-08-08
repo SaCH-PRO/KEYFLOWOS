@@ -11,6 +11,7 @@ const SHORTCUT_GROUPS = [
     category: "Navigation",
     items: [
       { keys: ["⌘", "K"], description: "Command palette" },
+      { keys: ["⇧", "K"], description: "Module launcher" },
       { keys: ["⌘", "J"], description: "Talk to KEY" },
       { keys: ["⌘", "H"], description: "Go to Cockpit" },
       { keys: ["Esc"], description: "Close overlays / go back" },

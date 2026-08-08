@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   KeyChatProvider,
   useKeyChat,
@@ -20,12 +20,21 @@ interface KeyOnboardingChatViewProps {
 
 const ONBOARDING_SESSION_ID = "onboarding";
 
+// Cards from the legacy dense wizard still advance with "genesis"/"genome";
+// the step API only accepts the slim funnel values.
+const LEGACY_ADVANCE_MAP: Record<string, ApiOnboardingStep> = {
+  genesis: "intake",
+  genome: "configure",
+};
+
 function OnboardingChatInner({ step, goToStep }: KeyOnboardingChatViewProps) {
   const chat = useKeyChat();
-  const { sendMessage, stop, confirmAction } = useKeyChatActions();
+  const { sendMessage, stop, confirmAction, selectSession } = useKeyChatActions();
   const seededRef = useRef(false);
+  const [restored, setRestored] = useState(false);
 
-  // Keep the chat context pinned to onboarding for this session.
+  // Keep the chat context pinned to onboarding for this session, and restore
+  // the pinned conversation so a reload/resume doesn't restart it.
   useEffect(() => {
     chat.setCurrentModule("onboarding");
     chat.setPageContext({
@@ -37,7 +46,21 @@ function OnboardingChatInner({ step, goToStep }: KeyOnboardingChatViewProps) {
     });
     chat.setActiveSessionId(ONBOARDING_SESSION_ID);
 
-    if (!seededRef.current && chat.messages.length === 0) {
+    void selectSession(ONBOARDING_SESSION_ID).finally(() => setRestored(true));
+
+    return () => {
+      chat.setCurrentModule(undefined);
+      chat.setPageContext(undefined);
+      chat.setActiveSessionId(null);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Seed the welcome only for a genuinely fresh funnel — never re-greet a
+  // resumed session or offer a backward step to a user past "welcome".
+  useEffect(() => {
+    if (!restored || seededRef.current) return;
+    if (chat.messages.length === 0 && step === "welcome") {
       seededRef.current = true;
       chat.appendMessage({
         id: nanoid(),
@@ -51,14 +74,8 @@ function OnboardingChatInner({ step, goToStep }: KeyOnboardingChatViewProps) {
         },
       });
     }
-
-    return () => {
-      chat.setCurrentModule(undefined);
-      chat.setPageContext(undefined);
-      chat.setActiveSessionId(null);
-    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [restored, chat.messages.length, step]);
 
   // Sync the page step into chat context so the orchestrator sees it.
   useEffect(() => {
@@ -71,11 +88,18 @@ function OnboardingChatInner({ step, goToStep }: KeyOnboardingChatViewProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step]);
 
-  const handleAdvance = async (nextStep: ApiOnboardingStep) => {
+  const handleAdvance = async (rawStep: ApiOnboardingStep) => {
+    // Cards from the legacy dense wizard still advance with "genesis"/"genome";
+    // the step API only accepts the slim funnel values.
+    const nextStep = LEGACY_ADVANCE_MAP[rawStep as string] ?? rawStep;
+    // "complete" is persisted by markOnboardingComplete itself; saveStep
+    // rejects it, and the completion card redirects shortly after anyway.
+    if (nextStep === "complete") return;
     await goToStep(nextStep);
-    if (nextStep !== "complete") {
-      await sendMessage("Next step");
-    }
+    await sendMessage(
+      "The user just finished this onboarding step. Present the card for the next step.",
+      { silent: true },
+    );
   };
 
   return (

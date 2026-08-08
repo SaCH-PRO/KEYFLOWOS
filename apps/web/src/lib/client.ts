@@ -2661,6 +2661,7 @@ export async function bootstrapIdentity(input: {
   avatarUrl?: string;
   company?: string;
   referralCode?: string;
+  identities?: unknown[];
 }): Promise<BootstrapIdentityResult> {
   try {
     const res = await fetchWithAuthRetry(`${API_BASE}/identity/bootstrap`, {

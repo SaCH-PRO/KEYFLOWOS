@@ -53,9 +53,31 @@ export function configureNestApp(app: INestApplication): void {
     }),
   );
 
+  // CORS allow-list. `allowedCorsOrigins()` already encapsulates the full
+  // env-driven precedence chain (APP_URL / NEXT_PUBLIC_SITE_URL / PUBLIC_BASE_URL
+  // / CORS_ALLOWED_ORIGINS / localhost), so app-bootstrap
+  // doesn't need to know anything about specific hosting providers.
+  const allowedOrigins = allowedCorsOrigins();
+
+  const isProduction = process.env.NODE_ENV === 'production';
+
+  app.enableCors({
+    origin: isProduction
+      ? allowedOrigins
+      : (_origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+          callback(null, true);
+        },
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    credentials: true,
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-business-id'],
+  });
+
   // Rate limit everything EXCEPT the top-level health/readiness endpoints
   // — load balancers and the workflow waitForPort probe must always be
   // able to hit them. Dev environments can raise the ceiling via env.
+  // NOTE: must run AFTER enableCors — a 429 from this middleware would
+  // otherwise reach the browser without CORS headers and surface as a
+  // misleading "Failed to fetch" network error instead of a readable 429.
   const rateLimitMax = parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '200', 10);
   app.use(
     rateLimit({
@@ -71,14 +93,6 @@ export function configureNestApp(app: INestApplication): void {
       skip: (req) => req.path === '/healthz' || req.path === '/readyz',
     }),
   );
-
-  // CORS allow-list. `allowedCorsOrigins()` already encapsulates the full
-  // env-driven precedence chain (APP_URL / NEXT_PUBLIC_SITE_URL / PUBLIC_BASE_URL
-  // / CORS_ALLOWED_ORIGINS / localhost), so app-bootstrap
-  // doesn't need to know anything about specific hosting providers.
-  const allowedOrigins = allowedCorsOrigins();
-
-  const isProduction = process.env.NODE_ENV === 'production';
 
   // Public widget routes (storefront, bookings, payments, webhooks) must be
   // accessible from any origin because they are embedded in third-party sites.
@@ -104,17 +118,6 @@ export function configureNestApp(app: INestApplication): void {
       }
     }
     next();
-  });
-
-  app.enableCors({
-    origin: isProduction
-      ? allowedOrigins
-      : (_origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
-          callback(null, true);
-        },
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    credentials: true,
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-business-id'],
   });
 
   // Request timeout: abort connections that hang longer than 60s.

@@ -101,14 +101,14 @@ describe('AiUsageService', () => {
   });
 
   describe('Rate limiting', () => {
-    it('allows calls under the 30/minute limit', () => {
-      for (let i = 0; i < 29; i++) {
+    it('allows calls under the 120/minute limit', () => {
+      for (let i = 0; i < 119; i++) {
         expect(() => service.checkRateLimit('biz-1')).not.toThrow();
       }
     });
 
-    it('throws 429 when 30 calls/minute exceeded', () => {
-      for (let i = 0; i < 30; i++) {
+    it('throws 429 when 120 calls/minute exceeded', () => {
+      for (let i = 0; i < 120; i++) {
         service.checkRateLimit('biz-1');
       }
 
@@ -124,7 +124,7 @@ describe('AiUsageService', () => {
     });
 
     it('tracks rate limits per business independently', () => {
-      for (let i = 0; i < 30; i++) {
+      for (let i = 0; i < 120; i++) {
         service.checkRateLimit('biz-1');
       }
 
@@ -132,7 +132,7 @@ describe('AiUsageService', () => {
     });
 
     it('resets rate limit after 60 seconds elapse', () => {
-      for (let i = 0; i < 30; i++) {
+      for (let i = 0; i < 120; i++) {
         service.checkRateLimit('biz-1');
       }
 
@@ -428,7 +428,7 @@ describe('AiUsageService', () => {
     });
 
     it('checks rate limit before credit check', async () => {
-      for (let i = 0; i < 30; i++) {
+      for (let i = 0; i < 120; i++) {
         service.checkRateLimit('biz-1');
       }
 

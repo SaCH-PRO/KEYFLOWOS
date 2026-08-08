@@ -181,10 +181,13 @@ export function KeyActivityFeed({
     void fetchActivities();
   }, [fetchActivities]);
 
-  /* Polling for real-time updates */
+  /* Polling for real-time updates (paused while the tab is hidden) */
   useEffect(() => {
     if (!autoRefresh || !businessId) return;
-    const interval = setInterval(fetchActivities, 15000);
+    const interval = setInterval(() => {
+      if (document.hidden) return;
+      fetchActivities();
+    }, 15000);
     return () => clearInterval(interval);
   }, [autoRefresh, businessId, fetchActivities]);
 

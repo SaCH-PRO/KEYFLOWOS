@@ -1,0 +1,18 @@
+# KEYFLOWOS production edge — automatic HTTPS via Caddy.
+# DNS needed: A records for keyflowos.com, api.keyflowos.com, livekit.keyflowos.com → VPS IP.
+
+{$DOMAIN} {
+    encode zstd gzip
+    reverse_proxy web:5000
+}
+
+{$API_DOMAIN} {
+    encode zstd gzip
+    reverse_proxy api:3001
+}
+
+# LiveKit signalling (WebSocket). RTC media flows over UDP/TCP 7881-7882
+# directly to the VPS — open those ports in the firewall too.
+{$LIVEKIT_DOMAIN} {
+    reverse_proxy livekit:7880
+}

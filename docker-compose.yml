@@ -8,9 +8,10 @@
 #   pnpm dev                   # from repo root
 #
 # Brings up:
-#   db     — PostgreSQL 16
-#   redis  — Redis 7 (BullMQ job queues)
-#   minio  — S3-compatible object storage
+#   db      — PostgreSQL 16 (pgvector-enabled)
+#   redis   — Redis 7 (BullMQ job queues)
+#   minio   — S3-compatible object storage
+#   docling — document parse layer for the ingestion pipeline (AP/contracts)
 #
 # Production-grade deploys should swap these for managed services.
 # See DEPLOYMENT.md for platform-specific guides.
@@ -75,7 +76,92 @@ services:
       timeout: 5s
       retries: 5
 
+  # Document parse layer for the ingestion pipeline (AP invoices, receipts,
+  # contracts). CPU-only; the server talks to it over DOCLING_URL.
+  docling:
+    image: quay.io/docling-project/docling-serve:latest
+    restart: unless-stopped
+    environment:
+      DOCLING_SERVE_ENABLE_UI: "false"
+      DOCLING_SERVE_MAX_SYNC_WAIT: "120"
+    ports:
+      - "5001:5001"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5001/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+
+  # Real-time audio/video for KEY voice (in-app full-duplex voice chat,
+  # concurrent rooms, human handoff). Dev keys only — production deploys
+  # should use LiveKit Cloud or a properly secured self-hosted server.
+  livekit:
+    image: livekit/livekit-server:v1.9.12
+    restart: unless-stopped
+    command: --config /etc/livekit.yaml
+    volumes:
+      - ./infrastructure/livekit.yaml:/etc/livekit.yaml:ro
+    ports:
+      - "7880:7880"     # HTTP API + WebSocket signalling
+      - "7881:7881"     # RTC over TCP (fallback)
+      - "7882:7882/udp" # RTC over UDP
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:7880/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  # Customer support desk — KEY is the L1 agent via an agent-bot webhook
+  # (apps/server chatwoot module). Shares our Postgres (own database) and
+  # Redis (db index 5). First-time setup:
+  #   docker compose run --rm chatwoot bundle exec rails db:chatwoot_prepare
+  #   bash scripts/chatwoot-setup.sh
+  chatwoot: &chatwoot
+    image: chatwoot/chatwoot:latest
+    restart: unless-stopped
+    # rm stale puma pidfile first — an unclean stop (docker restart, WSL
+    # shutdown) otherwise deadlocks Rails boot with "A server is already
+    # running (pid: 1 ...)".
+    command: sh -c "rm -f /app/tmp/pids/server.pid && bundle exec rails s -p 3000 -b 0.0.0.0"
+    environment:
+      RAILS_ENV: production
+      NODE_ENV: production
+      SECRET_KEY_BASE: keyflow_dev_chatwoot_secret_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      FRONTEND_URL: http://localhost:3100
+      FORCE_SSL: "false"
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      POSTGRES_USERNAME: keyflow
+      POSTGRES_PASSWORD: keyflow
+      POSTGRES_DATABASE: chatwoot
+      REDIS_URL: redis://redis:6379/5
+      RAILS_MAX_THREADS: "5"
+      RAILS_LOG_TO_STDOUT: "true"
+      # Allow webhooks to private hosts (our API on host.docker.internal) —
+      # Chatwoot's SSRF guard (SafeFetch) rejects them by default in production.
+      SAFE_FETCH_ALLOW_PRIVATE_NETWORK: "true"
+    ports:
+      - "3100:3000"
+    volumes:
+      - keyflow_chatwoot:/app/storage
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  chatwoot-worker:
+    <<: *chatwoot
+    command: bundle exec sidekiq -C config/sidekiq.yml
+    ports: []
+    depends_on:
+      chatwoot:
+        condition: service_started
+
 volumes:
   keyflow_db:
   keyflow_redis:
   keyflow_minio:
+  keyflow_chatwoot:

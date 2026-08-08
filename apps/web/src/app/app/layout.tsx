@@ -8,6 +8,7 @@ import { NotesProvider } from "@/components/keyflow/notes-context";
 import { KeyflowNotesDrawer } from "@/components/keyflow/keyflow-notes-drawer";
 import { NotesQueryParamTrigger } from "@/components/keyflow/notes-query-param-trigger";
 import { GuideProvider } from "@/contexts/guide-context";
+import { GenomeProvider } from "@/contexts/genome-context";
 import { PlanLimitDialog } from "@/components/ui/upgrade-prompt";
 import { KeyflowOSStoreDrawer } from "@/components/keyflowos-store-drawer";
 
@@ -15,24 +16,29 @@ import { CelebrationListener } from "@/components/ui/celebration-listener";
 import { GenomeIntegrityBanner } from "@/components/genome-integrity-banner";
 import { RequireAuth } from "@/components/require-auth";
 import { KeyAgent } from "@/components/key";
-import { KeyChatBubble, KeyChatProvider } from "@/components/key/chat";
+import { KeyChatProvider } from "@/components/key/chat";
+import { KeyChatBubbleV2 } from "@/components/key/chat/key-chat-bubble-v2";
 import { DesktopSidebar } from "@/components/layout/desktop-sidebar";
 import { AppHeader } from "@/components/layout/app-header";
 import { MobileDrawer } from "@/components/layout/mobile-drawer";
-import { MobileBottomNav } from "@/components/layout/mobile-bottom-nav";
+import { MobileBottomNavV2 } from "@/components/layout/mobile-bottom-nav-v2";
 import { useAppLayout } from "@/hooks/use-app-layout";
 import { useGenomeGate } from "@/hooks/use-genome-gate";
 import { useKeyboardShortcuts, useRouteKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 import { PageTransition } from "@/components/transitions/page-transition";
-import { KeyContextualSuggestions } from "@/components/functional/key-contextual-suggestions";
 import { KeyboardShortcutsHelp } from "@/components/functional/keyboard-shortcuts-help";
 import { MobileGestureProvider } from "@/components/functional/mobile-gesture-provider";
-import { ComposeFab } from "@/components/email/compose-fab";
 import { TtsProvider } from "@/components/tts";
 
 function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const layout = useAppLayout();
   const isOnboardingRoute = layout.pathname.startsWith("/app/onboarding");
+  // Restored during the 2026-08 fork close. integration/2026-07-consolidation
+  // replaced this with GenomeProvider, but that context only fetches — it has no
+  // redirect and no blocking render, so taking its side dropped the gate outright
+  // and left this hook orphaned with zero consumers. The two are orthogonal:
+  // GenomeProvider supplies genome data, useGenomeGate decides whether the app
+  // may render at all. Both are kept.
   const genomeGate = useGenomeGate();
   useKeyboardShortcuts();
   useRouteKeyboardShortcuts();
@@ -129,23 +135,24 @@ function AppLayoutInner({ children }: { children: React.ReactNode }) {
         handleLogout={layout.handleLogout}
       />
 
-      <MobileBottomNav
+      <MobileBottomNavV2
         pathname={layout.pathname}
         mobileDrawerOpen={layout.mobileDrawerOpen}
         setMobileDrawerOpen={layout.setMobileDrawerOpen}
         notifOpen={layout.notifOpen}
         setNotifOpen={layout.setNotifOpen}
         unreadCount={layout.unreadCount}
+        visibleOperateSections={layout.visibleOperateSections}
+        visibleBuildSections={layout.visibleBuildSections}
+        visibleMoreNav={layout.visibleMoreNav}
       />
 
       <PlanLimitDialog planLimit={layout.planLimitHit} onClose={layout.clearPlanLimit} />
       <KeyflowOSStoreDrawer open={layout.kfStoreOpen} onClose={() => layout.setKfStoreOpen(false)} />
       {!isOnboardingRoute && <KeyAgent currentModule={layout.copilotModule} />}
-      {!isOnboardingRoute && <KeyChatBubble />}
-      {!isOnboardingRoute && <KeyContextualSuggestions />}
+      {!isOnboardingRoute && <KeyChatBubbleV2 />}
       <KeyboardShortcutsHelp />
       <CelebrationListener />
-      <ComposeFab />
 
     </div>
     </MobileGestureProvider>
@@ -163,7 +170,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 <NotesQueryParamTrigger />
                 <TtsProvider>
                   <KeyChatProvider>
-                    <AppLayoutInner>{children}</AppLayoutInner>
+                    <GenomeProvider>
+                      <AppLayoutInner>{children}</AppLayoutInner>
+                    </GenomeProvider>
                   </KeyChatProvider>
                 </TtsProvider>
                 <KeyflowNotesDrawer />

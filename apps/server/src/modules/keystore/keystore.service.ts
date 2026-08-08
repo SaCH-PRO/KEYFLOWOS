@@ -30,6 +30,22 @@ import type {
 
 @Injectable()
 export class KeystoreService {
+  /**
+   * Resolve the business an authenticated user belongs to. The keystore
+   * routes carry no :businessId param, so tenant scope comes from the
+   * caller's membership — never from self-asserted input.
+   */
+  async businessIdForUser(userId: string): Promise<string> {
+    const membership = await db.membership.findFirst({
+      where: { userId },
+      orderBy: { createdAt: 'asc' },
+    });
+    if (!membership) {
+      throw new ForbiddenException('No business membership for this account');
+    }
+    return membership.businessId;
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════
   // Categories
   // ═══════════════════════════════════════════════════════════════════════════

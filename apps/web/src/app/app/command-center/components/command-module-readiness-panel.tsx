@@ -1,7 +1,7 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { ShieldAlert, ShieldCheck, ArrowRight } from "lucide-react";
+import { openKey } from "@/components/key";
 import { EmptyState } from "@/components/ui/empty-state";
 import type { CommandCenterModuleReadiness } from "@/lib/api/business-command-center";
 
@@ -28,8 +28,6 @@ function readinessTone(score: number, automationAllowed: boolean) {
 }
 
 export function CommandModuleReadinessPanel({ modules }: CommandModuleReadinessPanelProps) {
-  const router = useRouter();
-
   const sorted = [...modules].sort((a, b) => {
     if (a.automationAllowed !== b.automationAllowed) return a.automationAllowed ? 1 : -1;
     if (a.readinessScore !== b.readinessScore) return a.readinessScore - b.readinessScore;
@@ -60,7 +58,7 @@ export function CommandModuleReadinessPanel({ modules }: CommandModuleReadinessP
           description="Complete your Business Genome so KEY can score module readiness."
           actionLabel="Populate Genome"
           actionIcon={ArrowRight}
-          onAction={() => router.push("/app/profile?tab=business-genome")}
+          onAction={() => openKey({ mode: "onboarding" })}
           variant="inline"
         />
       ) : (
@@ -91,7 +89,7 @@ export function CommandModuleReadinessPanel({ modules }: CommandModuleReadinessP
       )}
 
       <button
-        onClick={() => router.push("/app/profile?tab=business-genome")}
+        onClick={() => openKey({ mode: "onboarding" })}
         className="inline-flex items-center gap-1 text-[10px] font-medium text-[hsl(var(--kf-accent1))] hover:text-[hsl(var(--kf-accent1))]/80 transition-colors"
       >
         Review missing facts <ArrowRight className="w-3 h-3" />

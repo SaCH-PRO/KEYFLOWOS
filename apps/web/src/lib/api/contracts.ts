@@ -145,17 +145,6 @@ export type UpdateContractInput = Partial<CreateContractInput>;
 /** A single party as accepted by create/update. Fields beyond role+name are optional. */
 export type ContractPartyInput = NonNullable<CreateContractInput["parties"]>[number];
 
-/** Source descriptor for {@link extractContractTerms}. */
-export interface ExtractContractTermsInput {
-  sourceAssetId?: string;
-  sourceDocumentInstanceId?: string;
-  sourceDriveFileId?: string;
-  url?: string;
-  base64Content?: string;
-  filename?: string;
-  mimeType?: string;
-}
-
 function buildQueryString(filters?: ContractFilters): string {
   const params = new URLSearchParams();
   if (!filters) return "";
@@ -221,6 +210,17 @@ export async function deleteContract(
   return apiDelete<{ deleted: boolean }>(
     `/contracts/businesses/${encodeURIComponent(businessId)}/${encodeURIComponent(contractId)}`,
   );
+}
+
+/** Source descriptor for {@link extractContractTerms}. */
+export interface ExtractContractTermsInput {
+  sourceAssetId?: string;
+  sourceDocumentInstanceId?: string;
+  sourceDriveFileId?: string;
+  url?: string;
+  base64Content?: string;
+  filename?: string;
+  mimeType?: string;
 }
 
 export async function extractContractTerms(

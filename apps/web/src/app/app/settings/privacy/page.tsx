@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Shield, Save, Loader2, AlertCircle, History } from "lucide-react";
+import { Shield, Save, Loader2, AlertCircle, History, Lock } from "lucide-react";
 import { toast } from "sonner";
 import { apiGet, apiPatch } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
@@ -200,6 +200,25 @@ export default function PrivacySettingsPage() {
 </div>
           </div>
         )}
+      </div>
+
+      <div className="rounded-2xl border border-border/50 bg-card/40 p-5 space-y-3">
+        <div className="flex items-center gap-2">
+          <Lock className="w-4 h-4 text-muted-foreground" />
+          <h3 className="text-sm font-semibold">Security data retention</h3>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          KEYFLOWOS receives Google security event notifications (RISC) when a linked Google Account
+          changes state, for example if sessions are revoked or an account is disabled. These
+          notifications contain only a Google identifier, the event type, and a timestamp — no
+          passwords, messages, or files.
+        </p>
+        <p className="text-xs text-muted-foreground">
+          Security events are stored for up to 90 days so we can protect accounts and audit session
+          actions, then automatically deleted. You may request erasure of your security event history
+          at any time by contacting your workspace admin or support; admins can also erase a user’s
+          RISC history from the admin panel.
+        </p>
       </div>
     </div>
   );

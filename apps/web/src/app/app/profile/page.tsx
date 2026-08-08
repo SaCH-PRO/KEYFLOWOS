@@ -103,6 +103,15 @@ export default function ProfileSettingsPage() {
   const router = useRouter();
   const { setCurrentMeta } = useNavigationContext();
   const rawTab = searchParams.get("tab") || "overview";
+
+  // Redirect the base Business Genome tab to the new consolidated hub.
+  // Deep links with a specific section still render inside the profile tab.
+  useEffect(() => {
+    if (rawTab === "business-genome" && !searchParams.get("section")) {
+      router.replace("/app/genome");
+    }
+  }, [rawTab, searchParams, router]);
+
   const initialTab = mapLegacyTab(rawTab);
 
   const [loading, setLoading] = useState(true);

@@ -130,6 +130,8 @@ export class GenomeFactService {
         sourceEntityId: input.sourceEntityId ?? null,
         updatedAt: now,
         ...(input.verificationStatus && { verificationStatus: input.verificationStatus }),
+        // Verified facts get a freshness anchor for the decay lifecycle.
+        ...(input.verificationStatus === 'USER_VERIFIED' && { lastVerifiedAt: now }),
         ...(input.confidenceScore !== undefined && { confidenceScore: input.confidenceScore }),
       },
       create: {
@@ -189,6 +191,20 @@ export class GenomeFactService {
         ...(filters?.verificationStatus ? { verificationStatus: filters.verificationStatus } : {}),
       },
       orderBy: { createdAt: 'desc' },
+    });
+
+    return rows.map(toDomain);
+  }
+
+  /**
+   * Highest-confidence facts for prompt injection — what KEY should treat as
+   * its working knowledge about the business.
+   */
+  async listTopFacts(businessId: string, limit = 30): Promise<GenomeFactData[]> {
+    const rows = await this.prisma.client.genomeFact.findMany({
+      where: { businessId },
+      orderBy: [{ confidenceScore: 'desc' }, { updatedAt: 'desc' }],
+      take: limit,
     });
 
     return rows.map(toDomain);

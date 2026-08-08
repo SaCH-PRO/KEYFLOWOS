@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -8,6 +8,7 @@ import { AiOversightService } from './ai-oversight.service';
 import { AiUsageService } from './ai-usage.service';
 import { CrmService } from '../crm/crm.service';
 import { CommerceService } from '../commerce/commerce.service';
+import { DocumentParsingService } from '../ingestion/document-parsing.service';
 
 export interface DocumentExtractionRequest {
   businessId: string;
@@ -136,7 +137,7 @@ export class DocumentIntelligenceService {
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Inject(ModelGatewayService) private readonly gateway: ModelGatewayService,
     @Inject(AiExecutionLogService) private readonly executionLog: AiExecutionLogService,
-    @Inject(AiOversightService) private readonly governance: AiOversightService,
+    @Inject(forwardRef(() => AiOversightService)) private readonly governance: AiOversightService,
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
     @Inject(ModuleRef) private readonly moduleRef: ModuleRef,
   ) {}
@@ -146,6 +147,9 @@ export class DocumentIntelligenceService {
   }
   private getCommerce() {
     return this.moduleRef.get(CommerceService, { strict: false });
+  }
+  private getDocling() {
+    return this.moduleRef.get(DocumentParsingService, { strict: false });
   }
 
   async extractFromDocument(req: DocumentExtractionRequest): Promise<DocumentExtractionResult> {
@@ -227,25 +231,50 @@ Respond ONLY with valid JSON in this exact shape:
     try {
         const messages: any[] = [{ role: 'system', content: systemPrompt }];
 
-      // Use GPT-4o vision when image data is available
-      const hasVisionData = req.url || req.base64Content;
-      if (hasVisionData && (req.mimeType.startsWith('image/') || req.mimeType === 'application/pdf')) {
-        const imageUrl = req.base64Content
-          ? `data:${req.mimeType};base64,${req.base64Content}`
-          : req.url;
+      // Parse layer first: docling-serve converts PDFs/office docs to clean
+      // Markdown + tables, which beats shoving a whole PDF at vision.
+      let parsed: { markdown: string; tablesAsText: string[]; pageCount: number | null } | null = null;
+      if (req.base64Content && (req.mimeType === 'application/pdf' || req.mimeType.includes('officedocument') || req.mimeType.includes('msword'))) {
+        try {
+          parsed = await this.getDocling().parse(
+            Buffer.from(req.base64Content, 'base64'),
+            req.filename,
+            req.mimeType,
+          );
+        } catch (err) {
+          this.logger.warn(`docling parse failed for ${req.filename}: ${(err as Error).message}`);
+        }
+      }
 
+      if (parsed) {
+        const tableSection = parsed.tablesAsText.length
+          ? `\n\nTABLES (as parsed):\n${parsed.tablesAsText.join('\n---\n')}`
+          : '';
         messages.push({
           role: 'user',
-          content: [
-            { type: 'text', text: `${context}\n\nAnalyze this document and extract structured data.` },
-            { type: 'image_url', image_url: { url: imageUrl, detail: 'high' } },
-          ],
+          content: `${context}${parsed.pageCount ? ` (${parsed.pageCount} pages)` : ''}\n\nDOCUMENT CONTENT (parsed):\n${parsed.markdown.slice(0, 12000)}${tableSection}\n\nAnalyze this document and extract structured data.`,
         });
       } else {
-        messages.push({
-          role: 'user',
-          content: `${context}\n\n${req.url ? `Document URL: ${req.url}` : 'Document content available for analysis.'}`,
-        });
+        // Use GPT-4o vision when image data is available
+        const hasVisionData = req.url || req.base64Content;
+        if (hasVisionData && (req.mimeType.startsWith('image/') || req.mimeType === 'application/pdf')) {
+          const imageUrl = req.base64Content
+            ? `data:${req.mimeType};base64,${req.base64Content}`
+            : req.url;
+
+          messages.push({
+            role: 'user',
+            content: [
+              { type: 'text', text: `${context}\n\nAnalyze this document and extract structured data.` },
+              { type: 'image_url', image_url: { url: imageUrl, detail: 'high' } },
+            ],
+          });
+        } else {
+          messages.push({
+            role: 'user',
+            content: `${context}\n\n${req.url ? `Document URL: ${req.url}` : 'Document content available for analysis.'}`,
+          });
+        }
       }
 
       const response = await this.aiUsage.trackAndComplete(

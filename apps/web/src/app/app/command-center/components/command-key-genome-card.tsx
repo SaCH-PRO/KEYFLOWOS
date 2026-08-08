@@ -1,7 +1,7 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { Dna, ArrowRight, AlertTriangle } from "lucide-react";
+import { openKey } from "@/components/key";
 import type { CommandCenterKeyGenome } from "@/lib/api/business-command-center";
 
 interface CommandKeyGenomeCardProps {
@@ -25,7 +25,6 @@ function Metric({ label, value, tone }: { label: string; value: number; tone?: "
 }
 
 export function CommandKeyGenomeCard({ keyGenome }: CommandKeyGenomeCardProps) {
-  const router = useRouter();
   const hasFacts = keyGenome.sections.length > 0;
 
   const overallTone = keyGenome.overall >= 70 ? "success" : keyGenome.overall >= 40 ? "warning" : "danger";
@@ -119,7 +118,7 @@ export function CommandKeyGenomeCard({ keyGenome }: CommandKeyGenomeCardProps) {
       )}
 
       <button
-        onClick={() => router.push("/app/profile?tab=business-genome")}
+        onClick={() => openKey({ mode: "onboarding" })}
         className="inline-flex items-center gap-1 text-[10px] font-medium text-[hsl(var(--kf-accent1))] hover:text-[hsl(var(--kf-accent1))]/80 transition-colors"
       >
         {hasFacts ? "Improve Genome" : "Populate Genome"} <ArrowRight className="w-3 h-3" />

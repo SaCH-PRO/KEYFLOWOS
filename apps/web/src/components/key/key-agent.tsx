@@ -7,11 +7,15 @@ import { toast } from "sonner";
 import { CommandPalette } from "@/components/command-palette";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { transcribeKeyflowSpeech } from "@/lib/client";
-import { apiGet } from "@/lib/api";
-import { useKeyChat, KeyChatPanel, type CopilotModule } from "@/components/key/chat";
-import type { BlueprintData } from "@/lib/blueprint-types";
+import { useKeyChat, KeyChatPanel, useKeyChatActions, type CopilotModule } from "@/components/key/chat";
+import { fetchOnboardingState } from "@/lib/api/onboarding-concierge";
+import { nanoid } from "@/components/key/chat/utils";
+import { useTts } from "@/components/tts";
+import { pickRecorderMimeType, createSilenceMonitor } from "@/components/key/chat/voice-utils";
+import { VoiceConversation } from "@/components/key/chat/voice-conversation";
+import { openGenomeConversation } from "@/components/key/chat/open-genome-conversation";
 
-export type KeyMode = "chat" | "voice" | "palette";
+export type KeyMode = "chat" | "voice" | "palette" | "onboarding";
 
 export interface OpenKeyDetail {
   mode?: KeyMode;
@@ -40,7 +44,9 @@ function isInputElement(el: EventTarget | null): boolean {
 }
 
 export function KeyAgent({ currentModule }: KeyAgentProps) {
-  const { setOpen, setInput, setCurrentModule, setPageContext } = useKeyChat();
+  const { messages, open, status, setOpen, setInput, setCurrentModule, setPageContext, setActiveSessionId, appendMessage } = useKeyChat();
+  const { sendMessage } = useKeyChatActions();
+  const { state: ttsState } = useTts();
   const [paletteOpen, setPaletteOpen] = useState(false);
 
   // Push-to-talk state
@@ -53,10 +59,22 @@ export function KeyAgent({ currentModule }: KeyAgentProps) {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
+  const monitorStopRef = useRef<(() => void) | null>(null);
 
   const businessId = getStoredBusinessId() ?? "";
 
   const close = useCallback(() => setOpen(false), [setOpen]);
+
+  // Open the built-in Business Genome onboarding conversation inside the
+  // native chat panel — the one continuous genome thread, shared with every
+  // other surface via openGenomeConversation.
+  const openGenomeOnboardingConversation = useCallback(() => {
+    openGenomeConversation(
+      { messages, setCurrentModule, setPageContext, setActiveSessionId, appendMessage, setOpen },
+      sendMessage,
+      { surface: "drawer" },
+    );
+  }, [appendMessage, messages, sendMessage, setActiveSessionId, setCurrentModule, setOpen, setPageContext]);
 
   // Handle global open-key events
   useEffect(() => {
@@ -66,6 +84,10 @@ export function KeyAgent({ currentModule }: KeyAgentProps) {
         setPaletteOpen(true);
         return;
       }
+      if (detail.mode === "onboarding") {
+        openGenomeOnboardingConversation();
+        return;
+      }
       setOpen(true);
       if (detail.prompt) setInput(detail.prompt);
       setCurrentModule(detail.module ?? currentModule);
@@ -73,7 +95,7 @@ export function KeyAgent({ currentModule }: KeyAgentProps) {
     };
     window.addEventListener(KEY_OPEN_EVENT, handler);
     return () => window.removeEventListener(KEY_OPEN_EVENT, handler);
-  }, [currentModule, setCurrentModule, setInput, setOpen, setPageContext]);
+  }, [currentModule, openGenomeOnboardingConversation, setCurrentModule, setInput, setOpen, setPageContext]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -90,6 +112,7 @@ export function KeyAgent({ currentModule }: KeyAgentProps) {
       } else if (e.key === "Escape") {
         close();
         setPaletteOpen(false);
+        VoiceConversation.stop();
       }
     };
     window.addEventListener("keydown", handler);
@@ -109,49 +132,67 @@ export function KeyAgent({ currentModule }: KeyAgentProps) {
     return () => window.removeEventListener("kf:open-copilot", legacyOpenCopilot);
   }, [setCurrentModule, setInput, setOpen, setPageContext]);
 
-  // Auto-open KEY once per session when the Business Genome is incomplete
+  // Single post-sign-in genome nudge: once per session, if the Business
+  // Genome still needs work, open the native chat panel with the built-in
+  // onboarding conversation. Never redirects; fails open on fetch errors.
+  // HOME ONLY — auto-opening the panel over working pages (Key Connect,
+  // finance, CRM) covers the UI the user came for.
   useEffect(() => {
     if (!businessId) return;
     const alreadyPrompted = sessionStorage.getItem("kf:genome-auto-prompt");
     if (alreadyPrompted === "1") return;
+    if (typeof window !== "undefined" && window.location.pathname !== "/app/command-center") return;
 
     let cancelled = false;
     const timer = setTimeout(() => {
-      apiGet<BlueprintData>(`/blueprint/businesses/${businessId}`)
+      fetchOnboardingState(businessId)
         .then(({ data }) => {
           if (cancelled || !data) return;
-          if (data.completeness < 100) {
+          const needsGenome = !data.onboardingComplete || !data.threePillarMet;
+          if (needsGenome) {
             sessionStorage.setItem("kf:genome-auto-prompt", "1");
-            setOpen(true);
-            setInput(
-              "Hi KEY! Can you help me complete my Business Genome? Tell me what's missing and ask me one question at a time.",
-            );
+            openGenomeOnboardingConversation();
           }
         })
         .catch(() => {
-          // ignore — don't block the app if blueprint check fails
+          // ignore — a failed status check must never block or redirect the app
         });
-    }, 2500);
+    }, 2000);
 
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [businessId, setInput, setOpen]);
+  }, [businessId, openGenomeOnboardingConversation]);
 
-  // Push-to-talk handlers
+  // Push-to-talk handlers — voice turns end on silence and send immediately.
+  const stopPttRecording = useCallback(() => {
+    monitorStopRef.current?.();
+    monitorStopRef.current = null;
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+    }
+    mediaRecorderRef.current = null;
+    setPttRecording(false);
+  }, []);
+
   const startPttRecording = useCallback(async () => {
     if (!businessId) return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
-      const mr = new MediaRecorder(stream, { mimeType: "audio/webm" });
+      const mimeType = pickRecorderMimeType();
+      const mr = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
       chunksRef.current = [];
       mr.ondataavailable = (e) => {
         if (e.data.size > 0) chunksRef.current.push(e.data);
       };
       mr.onstop = async () => {
-        const audioBlob = new Blob(chunksRef.current, { type: "audio/webm" });
+        monitorStopRef.current?.();
+        monitorStopRef.current = null;
+        const audioBlob = new Blob(chunksRef.current, { type: mimeType ?? "audio/webm" });
         streamRef.current?.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
         if (audioBlob.size < 200) {
@@ -164,6 +205,7 @@ export function KeyAgent({ currentModule }: KeyAgentProps) {
         setPttActive(false);
         if (tx.error) {
           toast.error(tx.error);
+          VoiceConversation.stop();
           return;
         }
         const text = tx.data?.text?.trim();
@@ -171,24 +213,64 @@ export function KeyAgent({ currentModule }: KeyAgentProps) {
           toast.info("Didn't catch that. Try again.");
           return;
         }
-        setInput(text);
+        // Voice-first: send now, keep the conversation loop alive.
+        VoiceConversation.start();
         setOpen(true);
+        void sendMessage(text);
       };
       mediaRecorderRef.current = mr;
       mr.start();
       setPttRecording(true);
-    } catch {
-      toast.error("Microphone access denied");
+      monitorStopRef.current = createSilenceMonitor(stream, {
+        onSilence: () => stopPttRecording(),
+        onNoSpeech: () => {
+          toast.info("Didn't hear anything — try again.");
+          VoiceConversation.stop();
+          stopPttRecording();
+        },
+      });
+    } catch (err) {
+      if (err instanceof DOMException && (err.name === "NotAllowedError" || err.name === "SecurityError")) {
+        toast.error("Microphone access denied");
+      } else {
+        toast.error("Voice recording isn't supported in this browser");
+      }
       setPttActive(false);
       pttActiveRef.current = false;
     }
-  }, [businessId, setInput, setOpen]);
+  }, [businessId, sendMessage, setOpen, stopPttRecording]);
 
-  const stopPttRecording = useCallback(() => {
-    mediaRecorderRef.current?.stop();
-    mediaRecorderRef.current = null;
-    setPttRecording(false);
-  }, []);
+  // Hands-free conversation loop: when KEY finishes speaking (or the turn
+  // ends, if auto-speak is off), re-open the mic while voice mode is active.
+  const prevTtsPlayingRef = useRef(false);
+  const prevChatStatusRef = useRef(status);
+
+  useEffect(() => {
+    if (ttsState.muted) VoiceConversation.stop();
+    if (!open) VoiceConversation.stop();
+  }, [ttsState.muted, open]);
+
+  useEffect(() => {
+    const wasPlaying = prevTtsPlayingRef.current;
+    prevTtsPlayingRef.current = ttsState.playing;
+    const prevStatus = prevChatStatusRef.current;
+    prevChatStatusRef.current = status;
+
+    const ttsFinished = wasPlaying && !ttsState.playing;
+    const silentTurnFinished = !ttsState.autoSpeak && prevStatus === "streaming" && status === "idle";
+    if (!ttsFinished && !silentTurnFinished) return;
+    if (!VoiceConversation.isActive()) return;
+    if (ttsState.muted || !open || status !== "idle") {
+      VoiceConversation.stop();
+      return;
+    }
+    const timer = setTimeout(() => {
+      if (VoiceConversation.isActive() && !mediaRecorderRef.current) {
+        void startPttRecording();
+      }
+    }, 450);
+    return () => clearTimeout(timer);
+  }, [ttsState.playing, ttsState.muted, ttsState.autoSpeak, open, status, startPttRecording]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

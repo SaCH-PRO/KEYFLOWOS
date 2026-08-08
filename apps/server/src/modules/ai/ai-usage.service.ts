@@ -79,6 +79,12 @@ export const FEATURE_TASK_MAP: Record<string, TaskCategory> = {
   simulate: 'reasoning',
   chat: 'general',
   profile_interview: 'extraction',
+  // Both arrived with integration/2026-07-consolidation and spend money without
+  // declaring what kind of work they are, so they fell through to 'general' and
+  // were billed at gpt-4o rates that nobody chose. Both pull structured fields
+  // out of free text, which is what 'extraction' already covers.
+  genome_extraction: 'extraction',
+  contract_clause_extract: 'extraction',
   strategic_dashboard: 'reasoning',
   revenue_forecast: 'reasoning',
   profitability: 'reasoning',
@@ -193,7 +199,10 @@ export const FEATURE_TASK_MAP: Record<string, TaskCategory> = {
 export class AiUsageService {
   private readonly logger = new Logger(AiUsageService.name);
 
-  private readonly RATE_LIMIT_PER_MINUTE = 30;
+  // Per-business AI-call ceiling per minute. Chat is the product's main
+  // interface and each turn can involve several AI calls (reply, tools,
+  // background extraction), so the ceiling needs conversational headroom.
+  private readonly RATE_LIMIT_PER_MINUTE = 120;
   private readonly rateLimitMap = new Map<string, number[]>();
   private rateLimitCleanupTimer: ReturnType<typeof setInterval>;
 

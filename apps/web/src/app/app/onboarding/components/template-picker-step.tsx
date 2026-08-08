@@ -43,7 +43,7 @@ export function TemplatePickerStep({ onComplete }: TemplatePickerStepProps) {
     fetchConciergeTemplatePreview(businessId, selected).then(({ data }) => {
       if (data) setPreview(data);
     });
-  }, [selected]);
+  }, [businessId, selected]);
 
   const handleConfirm = async () => {
     if (!businessId || !selected) return;

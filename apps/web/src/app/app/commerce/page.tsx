@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import {
   FileText,
@@ -13,6 +12,10 @@ import {
   Send,
   Repeat,
   LayoutDashboard,
+  Store,
+  Calendar,
+  CreditCard,
+  Inbox,
 } from "lucide-react";
 
 import { useNavigationContext } from "@/lib/navigation-context";
@@ -23,23 +26,23 @@ import { ListPageSkeleton } from "@/components/ui/skeleton";
 import { WorkspaceError } from "@/components/ui/workspace-error";
 import { MobileActionSheet, type MobileActionSheetItem } from "@/components/ui/mobile-action-sheet";
 import { type RecordDetailEntity } from "@/components/ui/record-detail-drawer";
+import { FlowQuickLauncher } from "@/components/layout/flow-quick-launcher";
+import type { ModuleLauncherSection } from "@/components/ui/module-launcher-sheet";
 
 import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-shortcuts";
 import { useModuleEvent } from "@/hooks/use-module-events";
 /* AI centralized in Cockpit */
 import { usePlan } from "@/hooks/use-plan";
 
-import { formatCurrencyCompact } from "@/lib/currency";
-
 import { useCommerceShell } from "./hooks/use-commerce-shell";
 import { useBillingWorkspace } from "./hooks/use-billing-workspace";
 import { useCommerceOverview } from "./hooks/use-commerce-overview";
-import { useFinancialSummary } from "./hooks/use-financial-summary";
 import { useActionQueue } from "./hooks/use-action-queue";
 import { FinancePipeline } from "../finance/components/finance-pipeline";
 import { RevenueComposer } from "../finance/components/revenue-composer";
 import RecurringPanel from "./recurring/recurring-panel";
 import { CommerceOverviewTab } from "./components/commerce-overview-tab";
+import { CommerceKpiStrip } from "./components/commerce-kpi-strip";
 import { TabFrame } from "./components/tab-frame";
 import { RevenueRecordDrawer } from "./components/revenue-record-drawer";
 import { CommerceBanners } from "./components/commerce-banners";
@@ -56,6 +59,38 @@ const REVENUE_TABS: { key: RevenueTabKey; label: string; icon: React.ElementType
 ];
 
 const VALID_TABS = new Set<RevenueTabKey>(REVENUE_TABS.map((t) => t.key));
+
+function CommerceQuickLauncher() {
+  const sections: ModuleLauncherSection[] = [
+    {
+      id: "commerce",
+      label: "Commerce",
+      items: [
+        { id: "storefront", label: "Storefront", icon: Store, href: "/app/store", tone: "violet" },
+        { id: "events", label: "Events", icon: Calendar, href: "/app/events", tone: "teal" },
+        { id: "gateway", label: "Gateway", icon: CreditCard, href: "/app/commerce/gateway", tone: "mint" },
+        { id: "inbox", label: "Inbox", icon: Inbox, href: "/app/data-inbox", tone: "default" },
+      ],
+    },
+    {
+      id: "money",
+      label: "Money",
+      items: [
+        { id: "financial-flow", label: "Financial Flow", icon: TrendingUp, href: "/app/financial-flow", tone: "gold" },
+        { id: "expenses", label: "Expenses", icon: DollarSign, href: "/app/expenses", tone: "rose" },
+        { id: "reports", label: "Reports", icon: FileText, href: "/app/finance/reports", tone: "sky" },
+      ],
+    },
+  ];
+
+  return (
+    <FlowQuickLauncher
+      title="Commerce Modules"
+      subtitle="Storefront, events, payments, and money"
+      sections={sections}
+    />
+  );
+}
 
 export default function CommercePage() {
   const _router = useRouter();
@@ -171,7 +206,6 @@ export default function CommercePage() {
     ),
   );
 
-  const financialSummary = useFinancialSummary(invoices, quotes);
   const _actionQueue = useActionQueue(invoices, quotes, businessCurrency, handleTabChange, openRecordDrawer);
 
   const mobileSheetItems = useMemo<MobileActionSheetItem[]>(
@@ -290,9 +324,11 @@ export default function CommercePage() {
       activeTab={activeTab}
       onTabChange={(k) => handleTabChange(k)}
       tabLayoutId="revenue-tabs"
+      tabVariant="pill"
       /* AI centralized in Cockpit */
       headerRight={
         <div className="flex items-center gap-2">
+          <CommerceQuickLauncher />
           <CommerceHeaderRight revenuePulse={overview.revenuePulse} />
           <RevenueActionMenu
             onNewInvoice={() => { handleTabChange("pipeline"); billing.setTriggerNewInvoice((n: number) => n + 1); }}
@@ -314,20 +350,13 @@ export default function CommercePage() {
         />
       }
       metricStrip={
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm" data-walkthrough="commerce-kpi">
-          {[
-            { label: "Outstanding", value: formatCurrencyCompact(financialSummary.outstanding, businessCurrency), color: financialSummary.outstanding > 0 ? "text-amber-400" : "text-muted-foreground" },
-            { label: "Overdue", value: formatCurrencyCompact(financialSummary.overdue, businessCurrency), color: financialSummary.overdue > 0 ? "text-red-400" : "text-muted-foreground" },
-            { label: "Collected", value: formatCurrencyCompact(financialSummary.collectedThisMonth, businessCurrency), color: "text-emerald-400" },
-            { label: "Drafts", value: String(financialSummary.draftCount), color: financialSummary.draftCount > 0 ? "text-foreground" : "text-muted-foreground" },
-            { label: "Quotes", value: String(financialSummary.pendingQuotes), color: financialSummary.pendingQuotes > 0 ? "text-foreground" : "text-muted-foreground" },
-          ].map((stat, _i) => (
-            <span key={stat.label} className="flex items-center gap-1.5 text-muted-foreground">
-              <span className="text-xs">{stat.label}:</span>
-              <span className={cn("text-xs font-semibold", stat.color)}>{stat.value}</span>
-            </span>
-          ))}
-        </div>
+        <CommerceKpiStrip
+          businessId={businessId}
+          invoices={invoices}
+          quotes={quotes}
+          products={shell.products}
+          currency={businessCurrency}
+        />
       }
     >
       {/* AI insights centralized in Cockpit */}

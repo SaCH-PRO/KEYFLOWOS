@@ -33,6 +33,9 @@ import { safeFromParam } from "@/lib/safe-redirect";
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? (typeof window !== "undefined" ? window.location.origin : "");
+/** Placeholder env values (your-project.supabase.co) would navigate the user into a dead end. */
+const SUPABASE_CONFIGURED =
+  !!SUPABASE_URL && !!SUPABASE_ANON_KEY && !SUPABASE_URL.includes("your-project");
 
 async function signInWithGoogle() {
   if (!SUPABASE_URL) return;
@@ -115,6 +118,7 @@ export default function LoginForm() {
       if (!email.trim()) { setError("Enter your email address."); return; }
       setLoading(true);
       try {
+        if (!SUPABASE_CONFIGURED) throw new Error("Email password reset isn't configured yet — ask your admin for a password reset.");
         await supabaseResetPassword(email.trim());
         setResetSent(true);
       } catch (err: unknown) {
@@ -387,7 +391,7 @@ export default function LoginForm() {
                   </button>
                 )}
 
-                {mode === "login" && (
+                {mode === "login" && SUPABASE_CONFIGURED && (
                   <>
                     <div className="flex items-center gap-3 my-1">
                       <div className="flex-1 h-px bg-white/[0.06]" />
@@ -406,14 +410,16 @@ export default function LoginForm() {
                       </svg>
                       Continue with Google
                     </button>
-
-                    <p className="text-center text-sm text-[hsl(30_10%_55%)]">
-                      New to KeyFlowOS?{" "}
-                      <Link href="/auth/signup" className="font-medium text-[hsl(24_95%_53%)] hover:text-[hsl(24_95%_63%)] transition-colors">
-                        Create your workspace
-                      </Link>
-                    </p>
                   </>
+                )}
+
+                {mode === "login" && (
+                  <p className="text-center text-sm text-[hsl(30_10%_55%)]">
+                    New to KeyFlowOS?{" "}
+                    <Link href="/auth/signup" className="font-medium text-[hsl(24_95%_53%)] hover:text-[hsl(24_95%_63%)] transition-colors">
+                      Create your workspace
+                    </Link>
+                  </p>
                 )}
               </form>
             )}

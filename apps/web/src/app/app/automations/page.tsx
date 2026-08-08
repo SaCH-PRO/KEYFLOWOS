@@ -75,7 +75,10 @@ export default function FlowsPage() {
       setPlaybooks(pbRes.data ?? []);
       setWorkflows(wfRes.data ?? []);
 
-      const actItems = actRes.data ?? [];
+      // Typed ActivityItem[], but a body of another shape makes this an object
+      // and `.filter` throws inside the promise — an unhandled rejection rather
+      // than a render error, which a mount check never sees.
+      const actItems = Array.isArray(actRes.data) ? actRes.data : [];
       const executionActions = new Set(["executed", "failed", "skipped"]);
       const execItems = actItems.filter((i) => executionActions.has(i.action));
       const success = execItems.filter((i) => i.tone === "success" || i.action === "executed").length;

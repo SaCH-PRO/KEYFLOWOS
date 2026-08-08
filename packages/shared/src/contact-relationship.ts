@@ -96,7 +96,7 @@ export function normalizeRelationshipHealthThresholds(
     const v = typeof n === 'number' && Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
     return v;
   };
-  let hot = clean(merged.hot, DEFAULT_RELATIONSHIP_HEALTH_THRESHOLDS.hot);
+  const hot = clean(merged.hot, DEFAULT_RELATIONSHIP_HEALTH_THRESHOLDS.hot);
   let warm = clean(merged.warm, DEFAULT_RELATIONSHIP_HEALTH_THRESHOLDS.warm);
   let cold = clean(merged.cold, DEFAULT_RELATIONSHIP_HEALTH_THRESHOLDS.cold);
   const atRiskClientDays = clean(

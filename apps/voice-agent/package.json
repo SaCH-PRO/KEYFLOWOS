@@ -1,0 +1,24 @@
+{
+  "name": "@keyflow/voice-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "KEY voice agent worker — joins LiveKit rooms and holds full-duplex voice conversations via the OpenAI Realtime API",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "dev": "tsx src/main.ts dev",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@keyflow/db": "workspace:*",
+    "@livekit/agents": "^1.0.0",
+    "@livekit/agents-plugin-openai": "^1.0.0",
+    "dotenv": "^16.5.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.31",
+    "tsx": "^4.20.6",
+    "typescript": "^5.4.5"
+  }
+}

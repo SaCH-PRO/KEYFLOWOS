@@ -77,6 +77,8 @@ const ROUTE_ROLE_MAP: Record<string, BusinessRole> = {
   '/app/evidence': 'operations',
   '/app/approvals': 'operations',
   '/app/assets': 'operations',
+  '/app/procurement': 'operations',
+  '/app/structure': 'operations',
   // Support
   '/app/tickets': 'support',
   '/app/inbox': 'support',
@@ -113,6 +115,7 @@ const ITEM_TYPE_ROLE_MAP: Record<string, BusinessRole> = {
   evidence: 'operations',
   approvalRequest: 'operations',
   asset: 'operations',
+  procurementRequest: 'operations',
   ticket: 'support',
   thread: 'support',
 };
@@ -122,7 +125,7 @@ const ROLE_SWITCH_KEYWORDS: Record<BusinessRole, RegExp> = {
   sales: /\b(lead|deal|pipeline|proposal|follow.up|convert|opportunity|prospect|quote me|price for|how much for|interested in buying)\b/i,
   finance: /\b(invoice|payment|overdue|bill|revenue|expense|cash|pricing|cost|refund|pay|owed|balance|send me an invoice)\b/i,
   support: /\b(complaint|help|ticket|issue|problem|refund|return|warranty|not working|broken|dissatisfied|unhappy)\b/i,
-  operations: /\b(book|schedule|appointment|calendar|slot|reschedule|no.show|availability|staff|task|project|milestone|deadline|when can i come)\b/i,
+  operations: /\b(book|schedule|appointment|calendar|slot|reschedule|no.show|availability|staff|task|project|milestone|deadline|when can i come|purchase order|procurement|vendor|supplier|buy new|order supplies|need to order)\b/i,
   marketing: /\b(campaign|email blast|newsletter|social|seo|content|ad|promotion|post|review|instagram|facebook)\b/i,
   general: /\b(overview|summary|status|how is everything|what's happening|business health|dashboard)\b/i,
   operator: /\b(execute|run|do it|process|handle|complete|finish|work on|take care of|operate)\b/i,
@@ -181,6 +184,9 @@ const ROLE_DEFINITIONS: Record<BusinessRole, RoleDefinition> = {
     description: 'Qualifies leads, manages pipeline, creates quotes, follows up on proposals, converts opportunities',
     tone: 'warm, persuasive, confident, relationship-focused',
     priorities: ['Convert leads to customers', 'Follow up on stale quotes', 'Upsell existing customers', 'Fill calendar with bookings'],
+    // Merge: main's side kept. integration widened this role's approvedTools;
+    // those additions are deliberately NOT taken here — see the note at the
+    // head of this file. Widening a role is a product decision, not a merge one.
     approvedTools: ['update_business_blueprint', 'crm_*', 'deals_*', 'inventory_list_stock', 'inventory_low_stock_alerts', 'contracts_list', 'contracts_get', 'payments_list_transactions', 'payments_search_transactions', 'payments_create_link', 'commerce_create_quote', 'commerce_create_invoice', 'commerce_update_invoice', 'commerce_send_invoice', 'bookings_*', 'draft_followup_message', 'create_followup_queue', 'tag_contact', 'segment_contacts', 'send_message_with_approval', 'calendar_*', 'finance_customer_balance', 'fetch_*', 'documents_search', 'store_list_products', 'store_list_recent_orders', 'marketplace_list_listings', 'marketplace_list_orders'],
     blockedTools: ['commerce_delete_invoice', 'bookings_cancel_booking', 'crm_delete_contact', 'projects_delete_task', 'deals_delete'],
     maxRiskTier: 2,
@@ -202,7 +208,10 @@ const ROLE_DEFINITIONS: Record<BusinessRole, RoleDefinition> = {
     description: 'Manages invoices, tracks payments, monitors cash flow, sends reminders, handles collections',
     tone: 'friendly but precise, clear about numbers, and always respectful',
     priorities: ['Collect overdue invoices', 'Monitor cash flow', 'Reconcile accounts', 'Track expenses', 'Send payment reminders'],
-    approvedTools: ['update_business_blueprint', 'commerce_*', 'expenses_*', 'payments_*', 'reconcile_*', 'reports_generate', 'contracts_list', 'contracts_get', 'contracts_stats', 'inventory_list_stock', 'inventory_summary', 'inventory_list_purchase_orders', 'deals_list', 'deals_get', 'deals_forecast', 'deals_pipeline_velocity', 'draft_payment_reminder', 'send_message_with_approval', 'fetch_*', 'create_task', 'finance_*', 'calendar_*', 'documents_search', 'delegation_payment_recovery'],
+    // Merge: main's side kept. integration widened this role's approvedTools;
+    // those additions are deliberately NOT taken here — see the note at the
+    // head of this file. Widening a role is a product decision, not a merge one.
+    approvedTools: ['update_business_blueprint', 'commerce_*', 'expenses_*', 'payments_*', 'reconcile_*', 'reports_generate', 'contracts_list', 'contracts_get', 'contracts_stats', 'inventory_list_stock', 'inventory_summary', 'inventory_list_purchase_orders', 'deals_list', 'deals_get', 'deals_forecast', 'deals_pipeline_velocity', 'draft_payment_reminder', 'send_message_with_approval', 'fetch_*', 'create_task', 'finance_*', 'calendar_*', 'documents_search', 'delegation_payment_recovery', 'payroll_*', 'sequence_*'],
     blockedTools: ['commerce_delete_invoice', 'crm_delete_contact', 'projects_delete_task'],
     maxRiskTier: 2,
     autonomyLevel: 3,
@@ -243,7 +252,10 @@ const ROLE_DEFINITIONS: Record<BusinessRole, RoleDefinition> = {
     description: 'Manages scheduling, inventory, staff, tasks, ensures business runs smoothly day-to-day',
     tone: 'efficient, organized, direct, action-oriented',
     priorities: ['Fill calendar gaps', 'Manage staff schedules', 'Track inventory levels', 'Complete tasks on time', 'Optimize workflows'],
-    approvedTools: ['people_assign_task', 'update_business_blueprint', 'bookings_*', 'projects_*', 'inventory_*', 'contracts_*', 'goals_list', 'goals_get', 'deals_list', 'deals_get', 'deals_forecast', 'deals_pipeline_velocity', 'create_task', 'tag_contact', 'fetch_*', 'content_*', 'call_*', 'evidence_*', 'approval_*', 'drive_*', 'calendar_*', 'time_*', 'helpdesk_*', 'finance_list_action_items', 'documents_search', 'automations_*', 'delegation_*', 'draft_project_update', 'enable_flow_with_approval', 'update_status_with_confirmation', 'apply_storefront_recommendation', 'store_list_products', 'store_list_recent_orders', 'marketplace_list_listings', 'marketplace_list_orders'],
+    // Merge: main's side kept. integration widened this role's approvedTools;
+    // those additions are deliberately NOT taken here — see the note at the
+    // head of this file. Widening a role is a product decision, not a merge one.
+    approvedTools: ['people_assign_task', 'update_business_blueprint', 'bookings_*', 'projects_*', 'inventory_*', 'contracts_*', 'goals_list', 'goals_get', 'deals_list', 'deals_get', 'deals_forecast', 'deals_pipeline_velocity', 'create_task', 'tag_contact', 'fetch_*', 'content_*', 'call_*', 'evidence_*', 'approval_*', 'drive_*', 'calendar_*', 'time_*', 'helpdesk_*', 'finance_list_action_items', 'documents_search', 'automations_*', 'delegation_*', 'draft_project_update', 'enable_flow_with_approval', 'update_status_with_confirmation', 'apply_storefront_recommendation', 'store_list_products', 'store_list_recent_orders', 'marketplace_list_listings', 'marketplace_list_orders', 'procurement_*', 'structure_*', 'comms_*', 'inbox_*', 'performance_*', 'contract_extract_terms', 'contract_extract_clauses', 'contract_list_tags', 'contract_create_tag'],
     blockedTools: ['commerce_delete_invoice', 'crm_delete_contact'],
     maxRiskTier: 2,
     autonomyLevel: 3,
@@ -264,7 +276,10 @@ const ROLE_DEFINITIONS: Record<BusinessRole, RoleDefinition> = {
     description: 'Manages campaigns, social media, content, SEO, lead generation, brand presence',
     tone: 'creative, engaging, brand-conscious, data-driven',
     priorities: ['Grow email list', 'Increase social engagement', 'Improve SEO rankings', 'Generate leads', 'Nurture existing contacts'],
-    approvedTools: ['update_business_blueprint', 'marketing_*', 'social_*', 'deals_list', 'deals_forecast', 'fetch_*', 'sync_seo_pages', 'draft_campaign_bundle', 'draft_storefront_copy', 'generate_content_brief', 'segment_contacts', 'tag_contact', 'queue_campaign', 'content_*', 'drive_*', 'calendar_*', 'documents_search', 'community_list_posts', 'apply_storefront_recommendation', 'delegation_lead_reactivation'],
+    // Merge: main's side kept. integration widened this role's approvedTools;
+    // those additions are deliberately NOT taken here — see the note at the
+    // head of this file. Widening a role is a product decision, not a merge one.
+    approvedTools: ['update_business_blueprint', 'marketing_*', 'social_*', 'deals_list', 'deals_forecast', 'fetch_*', 'sync_seo_pages', 'draft_campaign_bundle', 'draft_storefront_copy', 'generate_content_brief', 'segment_contacts', 'tag_contact', 'queue_campaign', 'content_*', 'drive_*', 'calendar_*', 'documents_search', 'community_list_posts', 'apply_storefront_recommendation', 'delegation_lead_reactivation', 'seo_*'],
     blockedTools: ['content_upload_deliverables', 'content_deliver_request'],
     maxRiskTier: 2,
     autonomyLevel: 2,
@@ -285,8 +300,26 @@ const ROLE_DEFINITIONS: Record<BusinessRole, RoleDefinition> = {
     description: 'General-purpose assistant for queries, summaries, and cross-role coordination',
     tone: 'warm, helpful, and conversational — like a knowledgeable friend who is always happy to help',
     priorities: ['Answer questions accurately', 'Summarize business health', 'Coordinate between roles', 'Execute user requests'],
+    // main's approvedTools kept. `general` is the role the web pins on EVERY
+    // chat request, so it is the widest blast radius in this file.
+    //
+    // Deliberately NOT taking integration's list. Two entries in it are the
+    // reason: `mcp__*` (a wildcard over remote MCP tools) and
+    // `execute_custom_logic` — model-authored JavaScript that runs in an E2B
+    // microVM only when E2B_API_KEY and PUBLIC_API_URL are set, and otherwise
+    // falls back to a LOCAL spawned child process. Granting that to the default
+    // role for every user is not a tradeoff worth making silently. If it is
+    // wanted, it should arrive as its own reviewed change.
     approvedTools: ['inbox_brief', 'inbox_mark_resolved', 'people_assign_task', 'update_business_blueprint', 'present_onboarding_card', 'save_onboarding_step', 'fetch_*', 'crm_*', 'deals_*', 'inventory_*', 'payments_*', 'reconcile_*', 'contracts_*', 'reports_generate', 'goals_*', 'commerce_*', 'bookings_*', 'projects_*', 'expenses_*', 'calendar_*', 'time_*', 'helpdesk_*', 'content_*', 'call_*', 'evidence_*', 'approval_*', 'drive_*', 'documents_*', 'finance_*', 'marketing_*', 'social_*', 'store_*', 'marketplace_*', 'automations_*', 'delegation_*', 'draft_*', 'create_task', 'create_followup_queue', 'tag_contact', 'segment_contacts', 'send_message_with_approval', 'queue_campaign', 'keyflow_create_note', 'sync_seo_pages', 'generate_content_brief', 'apply_storefront_recommendation', 'enable_flow_with_approval', 'update_status_with_confirmation', 'community_list_posts'],
     blockedTools: ['commerce_delete_invoice', 'crm_delete_contact', 'bookings_cancel_booking', 'marketing_send_campaign', 'social_publish_post', 'content_create_request', 'content_assign_request', 'content_transition_status', 'call_create_task', 'approval_create_request', 'projects_delete_task', 'commerce_send_invoice'],
+    // FORCED BACK TO 1. This line is OUTSIDE the conflict markers above, so the
+    // merge silently took integration's 2 — the fork point and main both say 1.
+    // Nothing in a conflict review would have shown it.
+    //
+    // It matters because applyRoleCeiling (ai-oversight.service.ts) clamps
+    // maxAutoTier to this value, so raising it from 1 to 2 widens the
+    // auto-execute band for the role attached to every user message. Raising it
+    // may well be right — but as a decision, not as a merge artifact.
     maxRiskTier: 1,
     autonomyLevel: 1,
     checkIntervalMinutes: 0,
@@ -306,7 +339,10 @@ const ROLE_DEFINITIONS: Record<BusinessRole, RoleDefinition> = {
     description: 'AI worker that executes tasks across all modules — creates content, logs calls, submits evidence, manages approvals, and drives workflows end-to-end',
     tone: 'efficient and reliable, but warm and clear when confirming what you have done',
     priorities: ['Execute assigned tasks autonomously', 'Move content through production pipeline', 'Log call outcomes and schedule follow-ups', 'Submit and verify evidence', 'Create and manage approval requests', 'Create Drive folders and documents'],
-    approvedTools: ['inbox_brief', 'inbox_mark_resolved', 'people_assign_task', 'update_business_blueprint', 'content_*', 'call_*', 'evidence_*', 'approval_*', 'drive_*', 'crm_*', 'deals_*', 'inventory_*', 'payments_*', 'contracts_*', 'reports_generate', 'goals_*', 'bookings_*', 'projects_*', 'create_task', 'tag_contact', 'fetch_*', 'expenses_*', 'documents_*', 'keyflow_create_note', 'calendar_*', 'time_*', 'helpdesk_*', 'finance_*', 'commerce_update_invoice', 'commerce_update_product', 'commerce_send_invoice', 'marketing_update_campaign', 'social_update_post', 'automations_*', 'delegation_*', 'store_*', 'marketplace_*', 'update_status_with_confirmation', 'enable_flow_with_approval'],
+    // Merge: main's side kept. integration widened this role's approvedTools;
+    // those additions are deliberately NOT taken here — see the note at the
+    // head of this file. Widening a role is a product decision, not a merge one.
+    approvedTools: ['inbox_brief', 'inbox_mark_resolved', 'people_assign_task', 'update_business_blueprint', 'content_*', 'call_*', 'evidence_*', 'approval_*', 'drive_*', 'crm_*', 'deals_*', 'inventory_*', 'payments_*', 'contracts_*', 'reports_generate', 'goals_*', 'bookings_*', 'projects_*', 'create_task', 'tag_contact', 'fetch_*', 'expenses_*', 'documents_*', 'keyflow_create_note', 'calendar_*', 'time_*', 'helpdesk_*', 'finance_*', 'commerce_update_invoice', 'commerce_update_product', 'commerce_send_invoice', 'marketing_update_campaign', 'social_update_post', 'automations_*', 'delegation_*', 'store_*', 'marketplace_*', 'update_status_with_confirmation', 'enable_flow_with_approval', 'execute_custom_logic'],
     blockedTools: ['commerce_delete_invoice', 'crm_delete_contact', 'bookings_cancel_booking', 'marketing_send_campaign', 'social_publish_post', 'content_upload_deliverables', 'content_deliver_request'],
     maxRiskTier: 3,
     autonomyLevel: 3,

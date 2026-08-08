@@ -39,6 +39,80 @@ export class SocialController {
    * Public webhook verification for Facebook / Instagram.
    * Meta sends a GET with hub.mode=subscribe, hub.verify_token, hub.challenge.
    */
+  /**
+   * SHARED multi-tenant endpoint — Meta allows ONE callback URL per app, so
+   * every connected page's events arrive here and are routed to the business
+   * whose SocialConnection owns the payload's page ID. The scoped
+   * /webhook/:businessId route remains for direct/legacy use.
+   */
+  @Get('webhook')
+  verifySharedWebhook(
+    @Query('hub.mode') hubMode?: string,
+    @Query('hub.verify_token') hubVerifyToken?: string,
+    @Query('hub.challenge') hubChallenge?: string,
+  ) {
+    const expectedToken = process.env.META_SOCIAL_VERIFY_TOKEN;
+    if (!expectedToken) {
+      throw new ForbiddenException('Webhook verify token not configured');
+    }
+    if (hubMode === 'subscribe' && hubVerifyToken === expectedToken) {
+      return hubChallenge;
+    }
+    throw new ForbiddenException('Invalid verify token');
+  }
+
+  @Post('webhook')
+  async sharedSocialWebhook(
+    @Body() body: {
+      entry?: Array<{
+        id?: string | number;
+        messaging?: Array<{ recipient?: { id?: string | number } }>;
+      }>;
+    },
+    @Query('hub.mode') hubMode?: string,
+    @Query('hub.verify_token') hubVerifyToken?: string,
+    @Query('hub.challenge') hubChallenge?: string,
+    @Req() req?: RawBodyRequest,
+  ) {
+    if (hubMode === 'subscribe' && hubVerifyToken) {
+      const expectedToken = process.env.META_SOCIAL_VERIFY_TOKEN;
+      if (expectedToken && hubVerifyToken === expectedToken) {
+        return hubChallenge;
+      }
+      return { error: 'Invalid verify token' };
+    }
+
+    this.assertMetaSignature(req);
+
+    const pageId =
+      body?.entry?.[0]?.id ?? body?.entry?.[0]?.messaging?.[0]?.recipient?.id ?? null;
+    if (!pageId) {
+      return { success: true, routed: false, reason: 'no page id in payload' };
+    }
+
+    const connection = await this.prisma.client.socialConnection.findFirst({
+      where: { platformId: String(pageId), platform: { in: ['FACEBOOK', 'INSTAGRAM'] } },
+      select: { businessId: true },
+    });
+    if (!connection) {
+      this.logger.warn(`Shared social webhook: no connection for page ${pageId}`);
+      return { success: true, routed: false, reason: 'page not connected' };
+    }
+
+    const headers = (req?.headers ?? {}) as Record<string, unknown>;
+    const result = await this.ingestion.receiveInbound(connection.businessId, body);
+    const response = { success: true, routed: true, ...result };
+    await this.webhookLogger.log({
+      businessId: connection.businessId,
+      connectorType: 'meta_social',
+      payload: body,
+      headers,
+      statusCode: 200,
+      responseBody: JSON.stringify(response),
+    });
+    return response;
+  }
+
   @Get('webhook/:businessId')
   async verifyWebhook(
     @Param('businessId') businessId: string,

@@ -287,23 +287,32 @@ export class FinanceIntelligenceService {
    */
   private async detectSlowPayer(businessId: string, now: Date): Promise<Detection[]> {
     const thirtyAgo = new Date(now.getTime() - 30 * MS_DAY);
-    const grouped = await this.prisma.client.invoice.groupBy({
-      by: ['contactId'],
+    // NOTE: was invoice.groupBy({ by: ['contactId'], take: 100 }) — groupBy+take
+    // fails with P2019 through the soft-delete extension (injected orderBy on a
+    // non-grouped field). findMany + in-memory aggregation is drift-proof here;
+    // the >30d-overdue set is small.
+    const overdue = await this.prisma.client.invoice.findMany({
       where: {
         businessId,
         deletedAt: null,
         status: 'OVERDUE',
         dueDate: { lt: thirtyAgo },
       },
-      _count: { _all: true },
-      _sum: { total: true },
-      take: 100,
+      select: { contactId: true, total: true },
+      take: 500,
     });
-    const filtered = (grouped as Array<{
-      contactId: string | null;
-      _count: { _all: number };
-      _sum: { total: number | null };
-    }>).filter((g) => g._count._all > 2).slice(0, 10);
+    const byContact = new Map<string | null, { count: number; total: number }>();
+    for (const inv of overdue) {
+      const agg = byContact.get(inv.contactId) ?? { count: 0, total: 0 };
+      agg.count += 1;
+      agg.total += Number(inv.total ?? 0);
+      byContact.set(inv.contactId, agg);
+    }
+    const filtered = [...byContact.entries()]
+      .map(([contactId, agg]) => ({ contactId, count: agg.count, total: agg.total }))
+      .filter((g) => g.count > 2)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
     const out: Detection[] = [];
     for (const g of filtered) {
       if (!g.contactId) continue;
@@ -313,17 +322,16 @@ export class FinanceIntelligenceService {
       });
       const name =
         (c?.displayName ?? `${c?.firstName ?? ''} ${c?.lastName ?? ''}`.trim()) || c?.email || 'Customer';
-      const total = Number(g._sum.total ?? 0);
       out.push({
         kind: 'SLOW_PAYER',
-        severity: g._count._all >= 5 ? 'CRITICAL' : 'WARNING',
+        severity: g.count >= 5 ? 'CRITICAL' : 'WARNING',
         title: `Slow payer: ${name}`,
-        body: `${name} has ${g._count._all} invoices more than 30 days overdue, totalling ${total.toFixed(2)}.`,
+        body: `${name} has ${g.count} invoices more than 30 days overdue, totalling ${g.total.toFixed(2)}.`,
         entityType: 'contact',
         entityId: g.contactId,
         recommendedAction: `/app/crm/contacts/${g.contactId}?action=remind`,
-        amount: total,
-        evidence: { overdueCount: g._count._all, overdueTotal: total },
+        amount: g.total,
+        evidence: { overdueCount: g.count, overdueTotal: g.total },
       });
     }
     return out;

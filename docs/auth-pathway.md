@@ -185,3 +185,19 @@ code ever runs. None of these are secrets, only URIs.
 - `AuthMiddleware` log `Token provided but Supabase verification
   failed` ⇒ the access token is expired or signed by a different
   Supabase project than `SUPABASE_URL` points at.
+
+## Cross-Account Protection (RISC)
+
+Google can push security event tokens to `POST /webhooks/risc`. The
+endpoint is public (Google has no KeyFlowOS bearer token); token
+authenticity is verified with Google's JWKS inside `RiscService`.
+
+- Google `sub` → local user mapping is stored in `UserIdentity` during
+  OAuth bootstrap (`/identity/bootstrap`).
+- `sessions-revoked` / `tokens-revoked` / `account-disabled` trigger
+  local session deletion + a Supabase global sign-out.
+- Every event is deduplicated by `jti` and written to `risc_events`
+  and `auth_audit_logs`.
+
+See `docs/development/risc-setup.md` for GCP configuration and the
+`pnpm configure:risc` registration script.

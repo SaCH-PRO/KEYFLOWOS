@@ -20,6 +20,27 @@ import { AiAdvisorService } from './ai-advisor.service';
 import { AiUsageService } from './ai-usage.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
 import { AiOversightService } from './ai-oversight.service';
+import { ConversationGenomeExtractorService } from './conversation-genome-extractor.service';
+import { FinanceAccountsService } from '../finance/finance-accounts.service';
+import { BankMatchingService } from '../finance/bank-matching.service';
+import { FinanceCoaService } from '../finance/finance-coa.service';
+import { PostingService } from '../finance/posting.service';
+import { ContractsService } from '../contracts/contracts.service';
+import { ContractClauseService } from '../contracts/contract-clause.service';
+import { CommunicationsService } from '../communications/communications.service';
+import { KeyInboxService } from '../key-inbox/key-inbox.service';
+import { McpClientManagerService } from '../mcp/mcp-client-manager.service';
+import { isMcpToolName } from '../mcp/mcp.types';
+import { CodeExecutorService } from './code-executor.service';
+import type { JobRoleEnvelope } from '../structure/job-role-policy.service';
+import { JobRolePolicyService } from '../structure/job-role-policy.service';
+import { PayrollService } from '../payroll/payroll.service';
+import { StaffPerformanceService } from '../staff-performance/staff-performance.service';
+import { CrmSequenceService } from '../crm/crm-sequence.service';
+import { CrmDealsService } from '../crm/crm-deals.service';
+import { CrmDuplicateDetectionService } from '../crm/crm-duplicate-detection.service';
+import { SocialAnalyticsService } from '../social/social-analytics.service';
+import { GenomeFactService } from '../business-genome/key-genome/genome-fact.service';
 import { BusinessGraphService } from './business-graph.service';
 import { PlannerService } from './planner.service';
 import { getOpenAiToolDefinitions, getToolByName, RiskLevel, ToolFamily, wrapToolResult, FlowTool, CORTEX_TOOL_BRIDGE, isCortexBridgedTool } from './flow-tool-registry';
@@ -41,16 +62,13 @@ import { CallScriptService } from '../call-tasks/call-script.service';
 import { EvidenceService } from '../evidence/evidence.service';
 import { MarketplaceService } from '../marketplace/marketplace.service';
 import { PaymentsOpsService } from '../payments/payments-ops.service';
-import { ContractsService } from '../contracts/contracts.service';
 import { ReportsService } from '../reports/reports.service';
 import { KeyCortexPlannerService } from '../key-cortex/key-cortex-planner.service';
-import { CrmDealsService } from '../crm/crm-deals.service';
 import { DealForecastService } from '../crm/deal-forecast.service';
 import { DealVelocityService } from '../crm/deal-velocity.service';
 import { SeoService } from '../seo/seo.service';
 import { SeoContentService } from '../seo/seo-content.service';
 import { ReceivablesService } from '../finance/receivables.service';
-import { BankMatchingService } from '../finance/bank-matching.service';
 import { StatementSourceService } from '../finance/statement-source.service';
 import { ApprovalRequestService } from '../approvals/approval-request.service';
 import { GoogleDriveService } from '../google-drive/google-drive.service';
@@ -69,6 +87,7 @@ import {
 } from '../key-cortex/cognitive-triage.service';
 import { UnifiedMemoryRetrievalService } from '../key-cortex/unified-memory-retrieval.service';
 import { KeyCortexConsciousnessService } from '../key-cortex/key-cortex-consciousness.service';
+import { ProcurementService } from '../procurement/procurement.service';
 
 
 export interface FlowAttachment {
@@ -95,6 +114,7 @@ export interface FlowToolCall {
   name: string;
   arguments: Record<string, any>;
   riskLevel: RiskLevel;
+  description?: string;
 }
 
 export interface FlowToolResult {
@@ -197,6 +217,8 @@ export interface FlowPageContext {
   recent?: Array<{ label: string; href?: string; at?: string }>;
   notes?: Array<{ title?: string; body: string }>;
   hints?: string[];
+  /** Position-scoped governance envelope (staff positions talking to KEY). */
+  jobRoleEnvelope?: JobRoleEnvelope;
 }
 
 function formatPageContextSection(ctx?: FlowPageContext): string {
@@ -354,13 +376,15 @@ export class FlowOrchestratorService {
     @Inject(AiAdvisorService) private readonly advisor: AiAdvisorService,
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
     @Inject(AiExecutionLogService) private readonly executionLog: AiExecutionLogService,
-    @Inject(AiOversightService) private readonly governance: AiOversightService,
+    @Inject(forwardRef(() => AiOversightService)) private readonly governance: AiOversightService,
     @Inject(BusinessGraphService) private readonly businessGraph: BusinessGraphService,
     @Inject(forwardRef(() => PlannerService)) private readonly planner: PlannerService,
     @Inject(AiMemoryService) private readonly memory: AiMemoryService,
     @Inject(ModelGatewayService) private readonly gateway: ModelGatewayService,
     @Inject(CatalogService) private readonly catalog: CatalogService,
     @Inject(BlueprintService) private readonly blueprint: BlueprintService,
+    @Inject(GenomeFactService) private readonly genomeFacts: GenomeFactService,
+    @Inject(ConversationGenomeExtractorService) private readonly genomeExtractor: ConversationGenomeExtractorService,
     @Inject(AiMessageSenderService) private readonly messageSender: AiMessageSenderService,
     @Inject(SemanticMemoryService) private readonly semanticMemory: SemanticMemoryService,
     @Inject(RoleEngineService) private readonly roleEngine: RoleEngineService,
@@ -435,6 +459,54 @@ export class FlowOrchestratorService {
   private getApprovalRequest() {
     return this.moduleRef.get(ApprovalRequestService, { strict: false });
   }
+  private getFinanceAccounts() {
+    return this.moduleRef.get(FinanceAccountsService, { strict: false });
+  }
+  private getFinanceCoa() {
+    return this.moduleRef.get(FinanceCoaService, { strict: false });
+  }
+  private getPosting() {
+    return this.moduleRef.get(PostingService, { strict: false });
+  }
+  private getContractClauses() {
+    return this.moduleRef.get(ContractClauseService, { strict: false });
+  }
+  private getHelpdeskService() {
+    return this.moduleRef.get(HelpdeskService, { strict: false });
+  }
+  private getCommunications() {
+    return this.moduleRef.get(CommunicationsService, { strict: false });
+  }
+  private getKeyInbox() {
+    return this.moduleRef.get(KeyInboxService, { strict: false });
+  }
+  private getMcp() {
+    return this.moduleRef.get(McpClientManagerService, { strict: false });
+  }
+  private getCodeExecutor() {
+    return this.moduleRef.get(CodeExecutorService, { strict: false });
+  }
+  private getJobRolePolicy() {
+    return this.moduleRef.get(JobRolePolicyService, { strict: false });
+  }
+  private getPayroll() {
+    return this.moduleRef.get(PayrollService, { strict: false });
+  }
+  private getStaffPerformance() {
+    return this.moduleRef.get(StaffPerformanceService, { strict: false });
+  }
+  private getCrmSequences() {
+    return this.moduleRef.get(CrmSequenceService, { strict: false });
+  }
+  private getCrmDeals() {
+    return this.moduleRef.get(CrmDealsService, { strict: false });
+  }
+  private getCrmDuplicates() {
+    return this.moduleRef.get(CrmDuplicateDetectionService, { strict: false });
+  }
+  private getSocialAnalytics() {
+    return this.moduleRef.get(SocialAnalyticsService, { strict: false });
+  }
   private getDrive() {
     return this.moduleRef.get(GoogleDriveService, { strict: false });
   }
@@ -461,6 +533,9 @@ export class FlowOrchestratorService {
   }
   private getProjects() {
     return this.moduleRef.get(ProjectsService, { strict: false });
+  }
+  private getProcurement() {
+    return this.moduleRef.get(ProcurementService, { strict: false });
   }
   private getActivityLog() {
     return this.moduleRef.get(ActivityLogService, { strict: false });
@@ -757,11 +832,11 @@ export class FlowOrchestratorService {
     }
 
     return (
-      '\n[PRIORITY DIRECTIVE — BUSINESS GENOME ONBOARDING]\n' +
-      `The Business Genome is only ${ctx.completeness}% complete. Until it reaches 100%, your FIRST priority in every turn is to collect missing business facts. ` +
-      'When the user shares ANY concrete business fact (industry, revenue model, ideal customer, goals, constraints, brand voice, budget, time commitment, etc.), ' +
-      'STOP and call the update_business_blueprint tool with a patch containing that fact BEFORE doing anything else. Do NOT use commerce, CRM, marketing, or finance tools when a blueprint fact is present. ' +
-      'If they have not shared a fact, ask ONE concise follow-up question to fill the next missing section in this order: identity, operatingModel, constraints, goals, brand, customerModel, financials, workflowModel, aiPreferences. ' +
+      '\n[PRIORITY DIRECTIVE — BUSINESS GENOME CONVERSATION]\n' +
+      `The Business Genome is ${ctx.completeness}% complete. This is one continuous conversation that keeps building the genome — never restart it, never re-ask.\n` +
+      'HOW TO TALK: You are a sharp, warm co-founder, not an intake form. Acknowledge what the user just said with something specific (a number, a name, why it matters), connect it to what you already know, then ask the ONE next most valuable question in natural language. No rigid field order, no interrogation cadence, no "please tell me X" boilerplate. Vary your phrasing.\n' +
+      'WHAT YOU KNOW: The Business Genome facts section below lists everything you already know. NEVER ask about facts that are already there — build on them. If the user corrects an existing fact, update it.\n' +
+      'WHEN THE USER SHARES ANY concrete business fact (industry, revenue model, pricing, ideal customer, goals, constraints, brand voice, budget, time commitment, team, etc.), STOP and call the update_business_blueprint tool with a patch containing that fact BEFORE doing anything else. Do NOT use commerce, CRM, marketing, or finance tools when a blueprint fact is present.\n' +
       'Never ask for passwords, API keys, or bank details.\n'
     );
   }
@@ -882,6 +957,13 @@ export class FlowOrchestratorService {
   private async buildBlueprintSection(businessId: string): Promise<string> {
     const ctx = await this.blueprint.getBlueprintContext(businessId);
     if (!ctx) return '';
+    // LLM-written blueprint patches don't always preserve array shapes —
+    // never let a malformed list field kill the whole turn.
+    const asStringList = (v: unknown): string | null => {
+      if (Array.isArray(v) && v.length > 0) return v.map(String).join('; ');
+      if (typeof v === 'string' && v.trim()) return v;
+      return null;
+    };
     const lines: string[] = ['', 'Business Blueprint (operating DNA):'];
     lines.push(`- Completeness: ${ctx.completeness}%`);
     if (ctx.summary) lines.push(`- Summary: ${ctx.summary}`);
@@ -890,7 +972,8 @@ export class FlowOrchestratorService {
     if (ctx.operatingModel.revenueModel) lines.push(`- Revenue model: ${ctx.operatingModel.revenueModel}`);
     if (ctx.operatingModel.deliveryMode) lines.push(`- Delivery mode: ${ctx.operatingModel.deliveryMode}`);
     if (ctx.goals.northStar) lines.push(`- North star: ${ctx.goals.northStar}`);
-    if (ctx.goals.ninetyDayGoals?.length) lines.push(`- 90-day goals: ${ctx.goals.ninetyDayGoals.join('; ')}`);
+    const ninetyDayGoals = asStringList(ctx.goals.ninetyDayGoals);
+    if (ninetyDayGoals) lines.push(`- 90-day goals: ${ninetyDayGoals}`);
     if (ctx.constraints.budgetRange) lines.push(`- Budget: ${ctx.constraints.budgetRange}`);
     if (ctx.constraints.timeCommitment) lines.push(`- Time commitment: ${ctx.constraints.timeCommitment}`);
     if (ctx.brand.voice) lines.push(`- Brand voice: ${ctx.brand.voice}`);
@@ -899,8 +982,9 @@ export class FlowOrchestratorService {
     if (ctx.legalProfile?.recommendedEntityType) {
       lines.push(`- Recommended entity type: ${ctx.legalProfile.recommendedEntityType}`);
     }
-    if (ctx.registrationProfile?.missingRegistrationSteps?.length) {
-      lines.push(`- Missing registration steps: ${ctx.registrationProfile.missingRegistrationSteps.join('; ')}`);
+    const missingSteps = asStringList(ctx.registrationProfile?.missingRegistrationSteps);
+    if (missingSteps) {
+      lines.push(`- Missing registration steps: ${missingSteps}`);
     }
     if (ctx.projectionProfile?.runwayMonths) {
       lines.push(`- Cash runway: ${ctx.projectionProfile.runwayMonths} months`);
@@ -908,13 +992,100 @@ export class FlowOrchestratorService {
     if (ctx.riskProfile?.riskScore) {
       lines.push(`- Business risk score: ${ctx.riskProfile.riskScore}/100`);
     }
-    if (ctx.executionRoadmap?.today?.length) {
-      lines.push(`- Today's priorities: ${ctx.executionRoadmap.today.join('; ')}`);
+    const today = asStringList(ctx.executionRoadmap?.today);
+    if (today) {
+      lines.push(`- Today's priorities: ${today}`);
     }
     if (ctx.complianceProfile?.complianceScore !== undefined) {
       lines.push(`- Compliance score: ${ctx.complianceProfile.complianceScore}%`);
     }
+
+    // Genome facts — KEY's working knowledge about the business, synced from
+    // every blueprint write. Additive only: never block the prompt on them.
+    try {
+      const facts = await this.genomeFacts.listTopFacts(businessId, 30);
+      if (facts.length > 0) {
+        const factLines = facts.map((f) => {
+          const raw = typeof f.value?.raw === 'string' ? f.value.raw : JSON.stringify(f.value?.raw ?? '');
+          const value = raw.length > 80 ? `${raw.slice(0, 77)}…` : raw;
+          const statusLabel = String(f.verificationStatus) === 'USER_VERIFIED'
+            ? 'verified'
+            : String(f.verificationStatus) === 'STALE'
+              ? 'stale'
+              : 'unverified';
+          return `- [${f.section}] ${f.domain}.${f.field}: ${value} (${statusLabel})`;
+        });
+        return '\n' + lines.join('\n') + '\n\nBusiness Genome facts (working knowledge):\n' + factLines.join('\n');
+      }
+    } catch {
+      // facts are additive; the blueprint summary above is the baseline
+    }
     return '\n' + lines.join('\n');
+  }
+
+  /**
+   * Selects tool definitions for a chat request. Providers cap the tools
+   * array (OpenAI: 128) and the registry has outgrown it, so when the
+   * candidate set is too large we rank tools by relevance to the current
+   * request (message + page context) and keep the top 128 — a general
+   * conversation keeps its most plausible tools instead of 400ing.
+   */
+  private async selectToolsForRequest(
+    businessId: string,
+    detectedRole: BusinessRole | undefined,
+    contextText: string,
+    envelope?: JobRoleEnvelope,
+  ): Promise<ReturnType<typeof getOpenAiToolDefinitions>> {
+    const all = getOpenAiToolDefinitions();
+    let candidates: ReturnType<typeof getOpenAiToolDefinitions>;
+    if (envelope) {
+      // Position-scoped: the envelope's patterns decide, not department roles.
+      const policy = this.getJobRolePolicy();
+      candidates = all.filter((t) => policy.isToolAllowed(envelope, t.function.name));
+    } else {
+      candidates =
+        detectedRole && detectedRole !== 'general'
+          ? all.filter((t) => this.roleEngine.isToolAllowed(detectedRole, t.function.name))
+          : all;
+    }
+
+    // Append bridged MCP tools (allowlisted remote servers) for this business
+    // when the role is permitted to use them.
+    try {
+      if (this.getMcp().isConfigured() && (!detectedRole || this.roleEngine.isToolAllowed(detectedRole, 'mcp__x'))) {
+        const bridged = await this.getMcp().listBridgedTools(businessId);
+        const mcpDefs = bridged.map((t) => ({
+          type: 'function' as const,
+          function: {
+            name: t.bridgedName,
+            description: `[${t.serverName}] ${t.description}`,
+            parameters: t.inputSchema,
+          },
+        }));
+        candidates = [...candidates, ...mcpDefs] as ReturnType<typeof getOpenAiToolDefinitions>;
+      }
+    } catch (err) {
+      this.logger.warn(`MCP tool listing failed (non-fatal): ${(err as Error).message}`);
+    }
+
+    const MAX_TOOLS = 128;
+    if (candidates.length <= MAX_TOOLS) return candidates;
+
+    const tokens = new Set(
+      contextText
+        .toLowerCase()
+        .split(/[^a-z0-9]+/)
+        .filter((w) => w.length > 2),
+    );
+    const scored = candidates.map((t, index) => {
+      let score = 0;
+      for (const part of t.function.name.split('_')) {
+        if (part.length > 2 && tokens.has(part)) score += 1;
+      }
+      return { t, score, index };
+    });
+    scored.sort((a, b) => (b.score - a.score) || (a.index - b.index));
+    return scored.slice(0, MAX_TOOLS).map((s) => s.t);
   }
 
   /**
@@ -1219,7 +1390,7 @@ ${triage.standingContext}`;
         return { reply: 'Got it — I cancelled that action. Let me know if there\'s anything else you\'d like to do.' };
       }
       if (pendingConfirmation.toolName && pendingConfirmation.toolArgs) {
-        const confirmDecision = await this.governance.evaluate(businessId, pendingConfirmation.toolName, undefined, detectedRole);
+        const confirmDecision = await this.governance.evaluate(businessId, pendingConfirmation.toolName, undefined, detectedRole, pageContext?.jobRoleEnvelope);
         if (!confirmDecision.allowed) {
           return {
             reply: `This action is blocked: ${confirmDecision.reason}`,
@@ -1332,7 +1503,7 @@ ${triage.standingContext}`;
 
       const governanceChecks = await Promise.all(
         toolCalls.map(async (tc) => {
-          const decision = await this.governance.evaluate(businessId, tc.name, undefined, detectedRole);
+          const decision = await this.governance.evaluate(businessId, tc.name, undefined, detectedRole, pageContext?.jobRoleEnvelope);
           return { tc, decision };
         }),
       );
@@ -1721,7 +1892,9 @@ ${triage.standingContext}`;
 
         if (chunk.type === 'content_delta' && chunk.content) {
           fullContent += chunk.content;
-          yield { type: 'content_delta', content: chunk.content };
+          // Yield cumulative content so clients can render with replace
+          // semantics (raw provider deltas are fragments).
+          yield { type: 'content_delta', content: fullContent };
         }
 
         if (chunk.type === 'tool_call_delta' && chunk.toolCall) {
@@ -1780,6 +1953,7 @@ ${triage.standingContext}`;
           name: acc.name,
           arguments: JSON.parse(acc.arguments || '{}'),
           riskLevel: tool?.riskLevel ?? 'low',
+          description: this.describeToolCall(acc.name, JSON.parse(acc.arguments || '{}')),
         });
       }
 
@@ -1787,7 +1961,7 @@ ${triage.standingContext}`;
 
       const governanceChecks = await Promise.all(
         toolCalls.map(async (tc) => {
-          const decision = await this.governance.evaluate(businessId, tc.name, undefined, detectedRole);
+          const decision = await this.governance.evaluate(businessId, tc.name, undefined, detectedRole, pageContext?.jobRoleEnvelope);
           return { tc, decision };
         }),
       );
@@ -1926,7 +2100,10 @@ ${triage.standingContext}`;
       for await (const chunk of followUpStream) {
         if (chunk.type === 'content_delta' && chunk.content) {
           followUpContent += chunk.content;
-          yield { type: 'content_delta', content: chunk.content };
+          // Cumulative, continuing from the pre-tool text so the client
+          // can keep rendering with replace semantics.
+          const combined = fullContent ? `${fullContent}\n\n${followUpContent}` : followUpContent;
+          yield { type: 'content_delta', content: combined };
         }
       }
 
@@ -2059,7 +2236,23 @@ ${triage.standingContext}`;
     }
   }
 
+  /**
+   * Public tool-execution entry point for non-chat surfaces (voice bridge,
+   * webhooks). Wraps the same executor + envelope the chat path uses.
+   */
+  async executeToolByName(
+    businessId: string,
+    toolName: string,
+    args: Record<string, any>,
+  ): Promise<unknown> {
+    return this.executeToolAction(businessId, toolName, args);
+  }
+
   private async executeToolAction(businessId: string, toolName: string, args: Record<string, any>): Promise<any> {
+    // Bridged MCP tools route to the allowlisted remote server.
+    if (isMcpToolName(toolName)) {
+      return this.getMcp().callTool(toolName, args);
+    }
     switch (toolName) {
       case 'update_business_blueprint': {
         const patch = args.patch as Record<string, Record<string, unknown>>;
@@ -3916,6 +4109,62 @@ ${triage.standingContext}`;
         return this.getSeo().syncPageInventory(businessId);
       }
 
+      case 'seo_apply_remediation': {
+        const issue = await this.prisma.client.seoIssue.findFirst({
+          where: { id: args.issueId, businessId },
+        });
+        if (!issue) throw new Error('SEO issue not found');
+        const resolution = args.resolution ?? 'fixed';
+
+        let pageUpdated = false;
+        const applied: Record<string, string> = {};
+
+        if (resolution === 'fixed' && issue.pageUrl) {
+          const page = await this.prisma.client.seoPage.findFirst({
+            where: { businessId, OR: [{ url: issue.pageUrl }, { path: issue.pageUrl }] },
+          });
+          if (page) {
+            let { metaTitle, metaDescription, h1 } = args as { metaTitle?: string; metaDescription?: string; h1?: string };
+            // LLM-draft missing meta when the issue is meta-related and nothing explicit was supplied
+            const isMetaIssue = /meta|title|description|h1|heading/i.test(`${issue.issueType} ${issue.category} ${issue.title}`);
+            if (isMetaIssue && !metaTitle && !metaDescription && !h1) {
+              const draft = await this.aiUsage.callAi({
+                businessId,
+                feature: 'flow_seo_remediation',
+                messages: [
+                  { role: 'system', content: `You are an SEO specialist. A page has this issue: "${issue.title}" (${issue.description ?? issue.category}).\nPage path: ${page.path}\nCurrent title: ${page.metaTitle ?? page.title ?? 'none'}\nCurrent meta description: ${page.metaDescription ?? 'none'}\nCurrent H1: ${page.h1 ?? 'none'}\nTarget keyword: ${issue.keyword ?? 'n/a'}\nRecommendation: ${issue.recommendation ?? 'n/a'}\n\nRespond ONLY with valid JSON: {"metaTitle":"... (max 60 chars)","metaDescription":"... (max 155 chars)","h1":"..."}. Omit keys that are already fine.` },
+                  { role: 'user', content: 'Draft the corrected meta tags.' },
+                ],
+                maxTokens: 400,
+                temperature: 0.4,
+                outputCategory: 'marketing',
+              });
+              try {
+                const jsonMatch = draft.content.match(/\{[\s\S]*\}/);
+                const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
+                metaTitle = parsed.metaTitle ?? undefined;
+                metaDescription = parsed.metaDescription ?? undefined;
+                h1 = parsed.h1 ?? undefined;
+              } catch { /* fall through with no meta changes */ }
+            }
+            const data: Record<string, string> = {};
+            if (metaTitle) { data.metaTitle = metaTitle; applied.metaTitle = metaTitle; }
+            if (metaDescription) { data.metaDescription = metaDescription; applied.metaDescription = metaDescription; }
+            if (h1) { data.h1 = h1; applied.h1 = h1; }
+            if (Object.keys(data).length > 0) {
+              await this.prisma.client.seoPage.update({ where: { id: page.id }, data });
+              pageUpdated = true;
+            }
+          }
+        }
+
+        const updated = await this.prisma.client.seoIssue.update({
+          where: { id: issue.id },
+          data: { status: resolution === 'dismissed' ? 'dismissed' : 'resolved', resolvedAt: new Date() },
+        });
+        return { issueId: issue.id, status: updated.status, pageUpdated, applied };
+      }
+
       case 'generate_content_brief': {
         // The tool's family is 'draft' and it drafted nothing: a bare row was
         // written with raw Prisma and the message told the user to go generate
@@ -4284,6 +4533,370 @@ ${triage.standingContext}`;
           ledgerDelta: aging.ledgerDelta,
         };
       }
+      case 'finance_list_bank_accounts': {
+        const accounts = await this.getFinanceAccounts().list(businessId);
+        return { accounts };
+      }
+      case 'finance_auto_match_bank': {
+        const result = await this.getBankMatching().autoMatch(businessId, args.accountId, {
+          sinceDate: args.sinceDate ? new Date(args.sinceDate) : null,
+          untilDate: args.untilDate ? new Date(args.untilDate) : null,
+        });
+        return result;
+      }
+      case 'finance_list_coa': {
+        const accounts = await this.getFinanceCoa().list(businessId);
+        return { accounts };
+      }
+      case 'finance_create_coa_account': {
+        const account = await this.getFinanceCoa().create(businessId, {
+          code: args.code,
+          name: args.name,
+          type: args.type,
+          parentId: args.parentId ?? null,
+        });
+        return { id: account.id, code: (account as { code?: string }).code };
+      }
+      case 'finance_list_bills': {
+        const bills = await this.getExpenses().listExpenses(businessId, {
+          status: 'BILL',
+          limit: args.limit ?? 50,
+        });
+        return { bills };
+      }
+      case 'finance_create_bill': {
+        const bill = await this.getExpenses().createExpense({
+          businessId,
+          description: args.description,
+          amount: args.amount,
+          currency: args.currency,
+          dueDate: args.dueDate,
+          vendor: args.vendor,
+          notes: args.notes,
+          contactId: args.contactId,
+          status: 'BILL',
+        });
+        return { id: bill.id, status: bill.status };
+      }
+      case 'finance_pay_bill': {
+        const bill = await this.getExpenses().markBillPaid({
+          businessId,
+          expenseId: args.billId,
+          paymentMethod: args.paymentMethod,
+          paidAt: args.paidAt,
+        });
+        return { id: bill.id, status: bill.status };
+      }
+      case 'finance_view_payables': {
+        const [aging, vendors] = await Promise.all([
+          this.getExpenses().getPayablesAging(businessId),
+          this.getExpenses().getVendorBalances(businessId),
+        ]);
+        return { aging, vendors };
+      }
+      case 'finance_post_journal_entry': {
+        const result = await this.getPosting().post({
+          businessId,
+          type: args.type,
+          date: new Date(args.date),
+          amount: args.amount,
+          currency: args.currency,
+          description: args.description,
+          entries: (args.entries as Array<{ accountId: string; debit?: number; credit?: number; memo?: string }>).map(
+            (e) => ({ accountId: e.accountId, debit: e.debit, credit: e.credit, memo: e.memo }),
+          ),
+        });
+        return result;
+      }
+      // === CONTRACTS / LEGAL ===
+      case 'contract_extract_terms': {
+        const contract = await this.getContracts().extractTermsFromDocument(businessId, args.contractId, {
+          sourceAssetId: args.sourceAssetId,
+          sourceDocumentInstanceId: args.sourceDocumentInstanceId,
+          sourceDriveFileId: args.sourceDriveFileId,
+        });
+        return { contract };
+      }
+      case 'contract_list_tags': {
+        const tags = await this.getContracts().listTags(businessId);
+        return { tags };
+      }
+      case 'contract_create_tag': {
+        const tag = await this.getContracts().createTag(businessId, args.name, args.color);
+        return { id: tag.id, name: tag.name };
+      }
+      case 'contract_extract_clauses': {
+        const result = await this.getContractClauses().extractClauses(businessId, args.contractId, {
+          url: args.url,
+        });
+        return result;
+      }
+      // === SUPPORT & COMMS ===
+      case 'helpdesk_reply_to_ticket': {
+        const message = await this.getHelpdeskService().replyToTicket(businessId, args.ticketId, args.body, {
+          channel: args.channel,
+        });
+        return { id: message.id, ticketId: args.ticketId };
+      }
+      case 'helpdesk_draft_reply': {
+        const ticket = await this.prisma.client.supportTicket.findFirst({
+          where: { id: args.ticketId, businessId, deletedAt: null },
+          include: { contact: { select: { firstName: true, lastName: true, companyName: true } } },
+        });
+        if (!ticket) throw new Error('Ticket not found');
+        const thread = await this.getHelpdeskService().listTicketMessages(businessId, args.ticketId);
+        const threadCtx = thread
+          .slice(-10)
+          .map((m: any) => `[${m.direction ?? m.authorType ?? 'msg'}] ${m.body}`)
+          .join('\n') || 'No messages yet.';
+        const customerName = ticket.contact
+          ? `${ticket.contact.firstName ?? ''} ${ticket.contact.lastName ?? ''}`.trim() || 'the customer'
+          : 'the customer';
+        const tone = args.tone ?? 'professional';
+        const result = await this.aiUsage.callAi({
+          businessId,
+          feature: 'flow_draft_ticket_reply',
+          messages: [
+            { role: 'system', content: `You are a support agent. Draft a ${tone} reply to ${customerName} for this ticket.\nTitle: ${ticket.title}\nDescription: ${ticket.description ?? 'N/A'}\nPriority: ${ticket.priority}\nThread:\n${threadCtx}\n\nRespond ONLY with the reply body text — no subject line, no placeholders like [Your Name], sign off as the support team.` },
+            { role: 'user', content: `Draft the ${tone} reply.` },
+          ],
+          maxTokens: 600,
+          temperature: 0.5,
+          outputCategory: 'messages',
+        });
+        return { body: result.content.trim(), ticketTitle: ticket.title, ticketId: args.ticketId };
+      }
+      case 'helpdesk_delete_ticket': {
+        // deleteTicket returns { success }. Report what the service said rather
+        // than asserting deleted:true back from our own arguments.
+        const deletion = await this.getHelpdeskService().deleteTicket(businessId, args.ticketId);
+        return { id: args.ticketId, deleted: deletion.success };
+      }
+      case 'comms_send_broadcast': {
+        const result = await this.getCommunications().sendBroadcast({
+          businessId,
+          segment: args.segment,
+          channel: args.channel,
+          body: args.body,
+          templateId: args.templateId,
+        });
+        return result;
+      }
+      case 'inbox_reply_thread': {
+        const result = await this.getKeyInbox().addReply(businessId, args.threadId, args.body, undefined, {
+          mode: 'send',
+        });
+        return { sent: result.sendResult?.success ?? true, messageId: result.message?.id };
+      }
+      case 'inbox_update_thread_status': {
+        const thread = await this.getKeyInbox().updateThread(businessId, args.threadId, {
+          status: args.status,
+          priority: args.priority,
+        });
+        return { id: thread.id, status: thread.status };
+      }
+      // === CRM / SALES & MISC ===
+      case 'crm_list_deals': {
+        const deals = await this.prisma.client.deal.findMany({
+          where: { businessId, ...(args.stageId ? { stageId: args.stageId } : {}) },
+          take: args.limit ?? 25,
+          orderBy: { updatedAt: 'desc' },
+        });
+        return { deals };
+      }
+      case 'crm_update_deal': {
+        const deal = await this.getCrmDeals().updateDeal({
+          businessId,
+          dealId: args.dealId,
+          title: args.title,
+          value: args.value ?? undefined,
+          companyName: args.companyName,
+          ownerUserId: args.ownerUserId,
+          description: args.description,
+        });
+        return { id: deal.id, title: deal.title };
+      }
+      case 'crm_move_deal_stage': {
+        const deal = await this.getCrmDeals().moveStage({
+          businessId,
+          dealId: args.dealId,
+          stageId: args.stageId,
+        });
+        return { id: deal.id, stageId: deal.stageId };
+      }
+      case 'crm_find_duplicates': {
+        return this.getCrmDuplicates().findCandidatesScoped({
+          businessId,
+          minConfidence: args.minConfidence ?? 0.6,
+          limit: args.limit ?? 20,
+        });
+      }
+      case 'crm_merge_preview': {
+        const preview = await this.getCrmDuplicates().preview({
+          businessId,
+          primaryId: args.primaryId,
+          duplicateId: args.duplicateId,
+        });
+        return { preview };
+      }
+      case 'crm_merge_execute': {
+        const result = await this.getCrm().mergeContacts({
+          businessId,
+          primaryId: args.primaryId,
+          duplicateId: args.duplicateId,
+          fieldOverrides: args.fieldOverrides,
+          actorType: 'key',
+        });
+        return { result };
+      }
+      case 'social_get_analytics': {
+        const overview = await this.getSocialAnalytics().getAnalyticsOverview(businessId);
+        return { overview };
+      }
+      case 'bookings_mark_no_show': {
+        const booking = await this.getBookings().updateBookingStatus(businessId, args.bookingId, 'NO_SHOW');
+        return { id: booking.id, status: booking.status };
+      }
+      case 'projects_get_budget': {
+        const budget = await this.getProjects().getProjectBudget(args.projectId, businessId);
+        return { budget };
+      }
+      case 'projects_get_timeline': {
+        const timeline = await this.getProjects().getProjectTimeline(args.projectId, businessId);
+        return { timeline };
+      }
+      case 'time_update_entry': {
+        const entry = await this.getTimeEntry().update(args.entryId, businessId, {
+          durationMinutes: args.durationMinutes,
+          description: args.notes,
+          billable: args.billable,
+        });
+        return { id: entry.id };
+      }
+      case 'time_mark_billed': {
+        const result = await this.getTimeEntry().markAsBilled(args.entryIds, businessId, args.invoiceId);
+        return { updated: (result as { count?: number }).count ?? (Array.isArray(result) ? result.length : 0) };
+      }
+      case 'commerce_convert_quote': {
+        const invoice = await this.getCommerce().convertQuoteToInvoice({
+          quoteId: args.quoteId,
+          businessId,
+        });
+        return { invoiceId: (invoice as { id: string }).id };
+      }
+      case 'execute_custom_logic': {
+        const result = await this.getCodeExecutor().execute({
+          businessId,
+          code: args.code,
+          inputs: args.inputs,
+          innerToolExecutor: (bizId, name, toolArgs) => this.executeToolByName(bizId, name, toolArgs),
+        });
+        return result;
+      }
+      // === PAYROLL ===
+      case 'payroll_list_rates': {
+        const rates = await this.getPayroll().listRates(businessId);
+        return { rates };
+      }
+      case 'payroll_set_rate': {
+        const rate = await this.getPayroll().setRate(businessId, {
+          assignmentId: args.assignmentId,
+          amount: args.amount,
+          currency: args.currency,
+          periodType: args.periodType,
+        });
+        return { id: rate.id, amount: Number(rate.amount) };
+      }
+      case 'payroll_generate_run': {
+        const run = await this.getPayroll().generateRun(
+          businessId,
+          new Date(args.periodStart),
+          new Date(args.periodEnd),
+          { notes: args.notes },
+        );
+        return { id: run.id, totalGross: Number(run.totalGross), itemCount: run.itemCount };
+      }
+      case 'payroll_list_runs': {
+        const runs = await this.getPayroll().listRuns(businessId, { status: args.status, limit: args.limit });
+        return { runs };
+      }
+      case 'payroll_get_run': {
+        const run = await this.getPayroll().getRun(businessId, args.runId);
+        return { run };
+      }
+      case 'payroll_approve_run': {
+        const run = await this.getPayroll().approveRun(businessId, args.runId);
+        return { id: run.id, status: run.status };
+      }
+      case 'payroll_mark_paid': {
+        const run = await this.getPayroll().markRunPaid(businessId, args.runId);
+        return { id: run.id, status: run.status };
+      }
+      // === STAFF PERFORMANCE ===
+      case 'performance_scorecard': {
+        return this.getStaffPerformance().computeScorecard(
+          businessId,
+          args.assignmentId,
+          new Date(args.periodStart),
+          new Date(args.periodEnd),
+        );
+      }
+      case 'performance_team_summary': {
+        const cards = await this.getStaffPerformance().teamSummary(
+          businessId,
+          new Date(args.periodStart),
+          new Date(args.periodEnd),
+        );
+        return { cards };
+      }
+      case 'performance_take_snapshot': {
+        const snap = await this.getStaffPerformance().takeSnapshot(
+          businessId,
+          args.assignmentId,
+          new Date(args.periodStart),
+          new Date(args.periodEnd),
+        );
+        return { id: snap.id, overallScore: snap.overallScore };
+      }
+      case 'performance_trend': {
+        const trend = await this.getStaffPerformance().trend(businessId, args.assignmentId, args.limit);
+        return { trend };
+      }
+      // === SEQUENCES / DUNNING ===
+      case 'sequence_list': {
+        const sequences = await this.getCrmSequences().listSequences(businessId);
+        return { sequences };
+      }
+      case 'sequence_create': {
+        const sequence = await this.getCrmSequences().createSequence(businessId, {
+          name: args.name,
+          description: args.description,
+          status: args.status,
+          steps: args.steps,
+        });
+        return { id: sequence.id, name: sequence.name };
+      }
+      case 'sequence_enroll': {
+        const result = await this.getCrmSequences().enrollContacts(businessId, args.sequenceId, args.contactIds);
+        return result;
+      }
+      case 'sequence_enroll_overdue': {
+        const result = await this.getCrmSequences().enrollOverdueContacts(businessId, args.sequenceId, {
+          minDaysOverdue: args.minDaysOverdue,
+          limit: args.limit,
+        });
+        return result;
+      }
+      case 'sequence_unenroll': {
+        const result = await this.getCrmSequences().unenrollContact(businessId, args.enrollmentId);
+        return { id: args.enrollmentId, ...(typeof result === 'object' ? result : {}) };
+      }
+      case 'sequence_pause_resume': {
+        const sequence = await this.getCrmSequences().updateSequence(businessId, args.sequenceId, {
+          status: args.status,
+        });
+        return { id: sequence.id, status: sequence.status };
+      }
       case 'finance_customer_balance': {
         const [invoicedAgg, paidAgg, invoices] = await Promise.all([
           this.prisma.client.invoice.aggregate({
@@ -4331,8 +4944,9 @@ ${triage.standingContext}`;
           dueDate: args.dueDate ? new Date(args.dueDate).toISOString() : undefined,
           priority: args.priority,
           isCompleted: args.isCompleted,
+          assigneeId: args.assigneeId,
         });
-        return { id: task.id, title: task.title };
+        return { id: task.id, title: task.title, assigneeId: (task as any).assigneeId ?? args.assigneeId };
       }
       case 'projects_delete_task': {
         await this.getProjects().deleteTask(businessId, args.taskId);
@@ -4521,6 +5135,142 @@ ${triage.standingContext}`;
         };
       }
 
+      // ----------------------------------------------------------------
+      //  PROCUREMENT
+      // ----------------------------------------------------------------
+      case 'procurement_list_requests': {
+        const requests = await this.getProcurement().list(businessId);
+        return { requests, count: requests.length };
+      }
+
+      case 'procurement_get_request': {
+        const request = await this.getProcurement().get(businessId, args.requestId);
+        return { request };
+      }
+
+      case 'procurement_list_suppliers': {
+        const suppliers = await this.getProcurement().listSuppliers(businessId);
+        return { suppliers };
+      }
+
+      case 'procurement_get_stats': {
+        return this.getProcurement().getStats(businessId);
+      }
+
+      case 'procurement_create_request': {
+        const request = await this.getProcurement().create(
+          businessId,
+          {
+            userPrompt: args.userPrompt,
+            priority: args.priority,
+            estimatedBudget: args.estimatedBudget,
+          },
+          'key_ai',
+        );
+        return { id: request.id, request };
+      }
+
+      case 'procurement_update_request': {
+        const request = await this.getProcurement().update(businessId, args.requestId, {
+          priority: args.priority,
+          internalNotes: args.internalNotes,
+        });
+        return { id: request.id };
+      }
+
+      case 'procurement_submit_for_review': {
+        const request = await this.getProcurement().submitForReview(businessId, args.requestId);
+        return { id: request.id, status: request.status };
+      }
+
+      case 'procurement_select_vendor': {
+        const request = await this.getProcurement().selectVendor(businessId, args.requestId, args.supplierConnectionId);
+        return { id: request.id, supplierConnectionId: request.supplierConnectionId };
+      }
+
+      case 'procurement_issue_po': {
+        const result = await this.getProcurement().issuePO(businessId, args.requestId, 'key_ai');
+        return { id: result.id, purchaseOrder: result.purchaseOrder };
+      }
+
+      case 'procurement_acknowledge_vendor': {
+        const request = await this.getProcurement().acknowledgeVendor(businessId, args.requestId);
+        return { id: request.id, status: request.status };
+      }
+
+      case 'procurement_mark_fulfilled': {
+        const request = await this.getProcurement().markFulfilled(businessId, args.requestId);
+        return { id: request.id, status: request.status };
+      }
+
+      case 'procurement_mark_invoiced': {
+        const request = await this.getProcurement().markInvoiced(businessId, args.requestId);
+        return { id: request.id, status: request.status };
+      }
+
+      // ----------------------------------------------------------------
+      //  STRUCTURE (org chart / delegation)
+      // ----------------------------------------------------------------
+      case 'structure_get_org_tree': {
+        return this.getStructure().getOrgTree(businessId);
+      }
+
+      case 'structure_list_org_units': {
+        const units = await this.getStructure().listOrgUnits(businessId);
+        return { units, count: units.length };
+      }
+
+      case 'structure_list_job_roles': {
+        const roles = await this.getStructure().listJobRoles(businessId);
+        return { roles, count: roles.length };
+      }
+
+      case 'structure_list_assignments': {
+        const assignments = await this.getStructure().listAssignments(businessId);
+        return { assignments, count: assignments.length };
+      }
+
+      case 'structure_find_person': {
+        const matches = await this.getStructure().findPeople(businessId, {
+          jobRoleName: args.jobRoleName,
+          orgUnitName: args.orgUnitName,
+          personName: args.personName,
+        });
+        return { matches, count: matches.length };
+      }
+
+      case 'structure_list_delegation_rules': {
+        const rules = await this.getStructure().listDelegationRules(businessId);
+        return { rules, count: rules.length };
+      }
+
+      case 'structure_get_stats': {
+        return this.getStructure().getStats(businessId);
+      }
+
+      case 'structure_create_delegation_rule': {
+        const rule = await this.getStructure().createDelegationRule(businessId, {
+          delegatorId: args.delegatorId,
+          delegateId: args.delegateId,
+          scope: args.scope,
+          maxTier: args.maxTier,
+          activeUntil: args.activeUntil,
+          reason: args.reason,
+        });
+        return { id: rule.id, rule };
+      }
+
+      case 'structure_update_delegation_rule': {
+        const rule = await this.getStructure().updateDelegationRule(businessId, args.ruleId, {
+          scope: args.scope,
+          maxTier: args.maxTier,
+          activeUntil: args.activeUntil,
+          reason: args.reason,
+          isActive: args.isActive,
+        });
+        return { id: rule.id, rule };
+      }
+
       default:
         // Bridged organ tools, before we give up. These are declared as
         // FlowTools so they inherit role, route and tier gating, but the work
@@ -4660,7 +5410,9 @@ ${triage.standingContext}`;
       case 'finance_list_action_items':
         return 'List finance action items';
       case 'projects_update_task':
-        return `Update project task ${args.taskId}`;
+        return args.assigneeId !== undefined
+          ? `Reassign project task ${args.taskId} to ${args.assigneeId || 'unassigned'}`
+          : `Update project task ${args.taskId}`;
       case 'projects_delete_task':
         return `Delete project task ${args.taskId}`;
       case 'commerce_update_invoice':
@@ -4673,6 +5425,10 @@ ${triage.standingContext}`;
         return `Update campaign ${args.campaignId}`;
       case 'social_update_post':
         return `Update social post ${args.postId}`;
+      case 'structure_create_delegation_rule':
+        return `Create delegation rule: let position ${args.delegateId} act for ${args.delegatorId} on "${args.scope}" up to tier ${args.maxTier}`;
+      case 'structure_update_delegation_rule':
+        return `Update delegation rule ${args.ruleId}`;
       default:
         return `Execute ${toolName.replace(/_/g, ' ')}`;
     }
@@ -4901,6 +5657,19 @@ ${triage.standingContext}`;
       // else's conversation.
       update: { messages: messages as any, updatedAt: new Date() },
     });
+
+    // Every conversation feeds the genome: extract durable business facts
+    // from the fresh turn into pending genome signals. Fire-and-forget —
+    // extraction must never block or break a turn.
+    const lastUser = [...messages].reverse().find((m) => m.role === 'user');
+    const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
+    if (lastUser?.content && lastAssistant?.content) {
+      this.genomeExtractor
+        .extractFromTurn(businessId, lastUser.content, lastAssistant.content)
+        .catch((err: unknown) => {
+          this.logger.warn(`Genome extraction failed for ${businessId}: ${err instanceof Error ? err.message : String(err)}`);
+        });
+    }
   }
 
   async listSessions(businessId: string, userId?: string) {

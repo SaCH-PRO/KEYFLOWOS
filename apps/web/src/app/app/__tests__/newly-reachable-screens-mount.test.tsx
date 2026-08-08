@@ -25,6 +25,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, cleanup } from '@testing-library/react';
+import { GenomeProvider } from '@/contexts/genome-context';
 
 /* ── Everything a page reaches for that jsdom does not have ─────────────── */
 
@@ -97,6 +98,15 @@ const NEWLY_REACHABLE: Array<[string, () => Promise<{ default: React.ComponentTy
   ['/app/trash', () => import('../trash/page')],
   // Reached from the money hub's "See all"
   ['/app/money/actions', () => import('../money/actions/page')],
+  // Opened by the fork close rather than by bec5a501. These five arrive from
+  // integration/2026-07-consolidation, which shipped them with no nav entry on
+  // either branch, so nothing had ever mounted them. /app/procurement came from
+  // exactly there and threw on an empty response — same origin, same gate.
+  ['/app/commerce/gateway', () => import('../commerce/gateway/page')],
+  ['/app/events', () => import('../events/page')],
+  ['/app/genome', () => import('../genome/page')],
+  ['/app/payroll', () => import('../payroll/page')],
+  ['/app/performance', () => import('../performance/page')],
 ];
 
 let realFetch: typeof globalThis.fetch;
@@ -107,15 +117,19 @@ beforeEach(() => {
   // a screen that breaks for every new business.
   //
   // ONE STUB CANNOT MATCH EVERY ENDPOINT. Some return a bare array, some
-  // `{ items: [] }`. This body satisfies both readings badly on purpose —
-  // /app/automations logs `actItems.filter is not a function` against it,
-  // because `.data` arrives as this object rather than the array its endpoint
-  // really returns (activity.service.ts listForBusiness → findMany). That is a
-  // stub artefact, not a defect; it was checked before being left here.
+  // `{ items: [] }`. This body satisfies both readings badly on purpose, and
+  // that turned out to be the useful part: /app/automations did
+  // `actRes.data ?? []` and then `.filter`, which throws on any body that is
+  // not an array. It is guarded now (Array.isArray).
   //
-  // The consequence to keep in mind: this proves screens MOUNT, not that they
-  // handle their real payloads. A shape mismatch that throws during render
-  // would be caught; one a screen swallows, as here, would not.
+  // THE LIMITATION THAT FOUND EXPOSED. That failure happened inside load(),
+  // after render() had already returned — so the mount assertion PASSED and
+  // vitest failed the run on an unhandled rejection instead. This gate catches
+  // synchronous throws, not asynchronous ones. A screen can mount, satisfy
+  // every assertion here, and still crash a tick later.
+  //
+  // So: this proves screens MOUNT. It does not prove they survive their own
+  // data loading, and it does not prove anything about what they render.
   globalThis.fetch = vi.fn(async () => ({
     ok: true,
     status: 200,
@@ -139,8 +153,9 @@ describe('every newly-reachable screen mounts', () => {
   it('covers every door opened in bec5a501', () => {
     // If a nav entry is added without a line here, this count drifts and the
     // next person notices. 25 nav entries; procurement contributes three
-    // routes and money/actions arrives from the See-all fix.
-    expect(NEWLY_REACHABLE.length).toBeGreaterThanOrEqual(26);
+    // routes and money/actions arrives from the See-all fix. Plus the five the
+    // fork close linked in from integration/2026-07-consolidation.
+    expect(NEWLY_REACHABLE.length).toBeGreaterThanOrEqual(31);
   });
 
   for (const [route, load] of NEWLY_REACHABLE) {
@@ -151,7 +166,21 @@ describe('every newly-reachable screen mounts', () => {
 
       // The assertion is deliberately weak: mounting is the thing the nav
       // entry newly causes, and a throw here is a white screen for the user.
-      expect(() => render(<Page />), `${route} throws on mount`).not.toThrow();
+      //
+      // Rendered inside GenomeProvider because app/app/layout.tsx wraps every
+      // /app/* page in it. A bare render made /app/genome throw "useGenome must
+      // be used within a GenomeProvider" — a page that mounts perfectly well in
+      // the real tree. That is the false death this file's sibling gate warns
+      // about: it would have sent someone to fix working code.
+      expect(
+        () =>
+          render(
+            <GenomeProvider>
+              <Page />
+            </GenomeProvider>,
+          ),
+        `${route} throws on mount`,
+      ).not.toThrow();
     });
   }
 });

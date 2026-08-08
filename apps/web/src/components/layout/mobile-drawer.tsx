@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
@@ -33,6 +33,12 @@ interface MobileDrawerProps {
   isAdminUser: boolean;
   setKfStoreOpen: React.Dispatch<React.SetStateAction<boolean>>;
   handleLogout: () => void;
+}
+
+function triggerHaptic() {
+  if (typeof navigator !== "undefined" && "vibrate" in navigator) {
+    navigator.vibrate(12);
+  }
 }
 
 function MobileSection({
@@ -141,6 +147,15 @@ export function MobileDrawer({
   handleLogout,
 }: MobileDrawerProps) {
   const [moreExpanded, setMoreExpanded] = useState(false);
+
+  useEffect(() => {
+    const handler = () => {
+      triggerHaptic();
+      setMobileDrawerOpen(true);
+    };
+    window.addEventListener("kf:mobile-drawer-open", handler);
+    return () => window.removeEventListener("kf:mobile-drawer-open", handler);
+  }, [setMobileDrawerOpen]);
 
   if (!mobileDrawerOpen) return null;
 

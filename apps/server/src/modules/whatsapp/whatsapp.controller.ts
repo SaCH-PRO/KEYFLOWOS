@@ -5,6 +5,7 @@ import { WhatsAppService, type WhatsAppConfig } from './whatsapp.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { WebhookIngressLoggerService } from '../../core/connectors/webhook-ingress-logger.service';
+import { PrismaService } from '../../core/prisma/prisma.service';
 
 interface RawBodyRequest extends Request {
   rawBody?: Buffer;
@@ -51,6 +52,7 @@ export class WhatsAppController {
   constructor(
     @Inject(WhatsAppService) private readonly service: WhatsAppService,
     @Inject(WebhookIngressLoggerService) private readonly webhookLogger: WebhookIngressLoggerService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -86,6 +88,113 @@ export class WhatsAppController {
   }
 
   // ─── Public webhook for inbound messages (verified by provider signature) ───
+
+  // ─── Public webhook for inbound messages (verified by provider signature) ───
+
+  /**
+   * SHARED multi-tenant endpoint — Meta allows ONE callback URL per app, so
+   * every business's WhatsApp messages arrive here and are routed to the
+   * business whose config owns the payload's phone_number_id. The scoped
+   * /webhook/:businessId route remains for direct/legacy use.
+   */
+  @Get('webhook')
+  verifySharedWebhook(
+    @Query('hub.mode') hubMode?: string,
+    @Query('hub.verify_token') hubVerifyToken?: string,
+    @Query('hub.challenge') hubChallenge?: string,
+  ) {
+    const expectedToken = process.env.WHATSAPP_VERIFY_TOKEN;
+    if (!expectedToken) {
+      throw new ForbiddenException('Webhook verify token not configured');
+    }
+    if (hubMode === 'subscribe' && hubVerifyToken === expectedToken) {
+      return hubChallenge;
+    }
+    throw new ForbiddenException('Invalid verify token');
+  }
+
+  @Post('webhook')
+  async sharedWebhook(
+    @Body() body: WhatsAppWebhookBody,
+    @Query('hub.mode') hubMode?: string,
+    @Query('hub.verify_token') hubVerifyToken?: string,
+    @Query('hub.challenge') hubChallenge?: string,
+    @Req() req?: RawBodyRequest,
+  ) {
+    if (hubMode === 'subscribe' && hubVerifyToken) {
+      const expectedToken = process.env.WHATSAPP_VERIFY_TOKEN;
+      if (expectedToken && hubVerifyToken === expectedToken) {
+        return hubChallenge;
+      }
+      return { error: 'Invalid verify token' };
+    }
+
+    const parsed = this.parseInboundPayload(body);
+    if (!parsed?.from) {
+      return { success: false, error: 'Unrecognized WhatsApp webhook payload' };
+    }
+    if (parsed.provider === 'meta') {
+      this.assertMetaSignature(req);
+    }
+
+    const phoneNumberId = (body as unknown as {
+      entry?: Array<{ changes?: Array<{ value?: { metadata?: { phone_number_id?: string } } }> }>;
+    }).entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id;
+    if (!phoneNumberId) {
+      return { success: true, routed: false, reason: 'no phone_number_id in payload' };
+    }
+
+    const business = await this.prisma.client.business.findFirst({
+      where: { metaData: { path: ['whatsapp', 'phoneNumberId'], equals: String(phoneNumberId) } },
+      select: { id: true },
+    });
+    if (!business) {
+      return { success: true, routed: false, reason: 'phone number not connected' };
+    }
+
+    const headers = (req?.headers ?? {}) as Record<string, unknown>;
+    const result = await this.service.receiveInbound(business.id, {
+      from: parsed.from,
+      body: parsed.body,
+      externalId: parsed.externalId,
+      senderName: parsed.senderName,
+      provider: parsed.provider,
+      rawPayload: body as unknown as Record<string, unknown>,
+      receivedAt: parsed.receivedAt,
+    });
+    const response = { success: true, routed: true, contactId: result.contactId, isNew: result.isNew };
+    await this.webhookLogger.log({
+      businessId: business.id,
+      connectorType: 'whatsapp',
+      payload: body,
+      headers,
+      statusCode: 200,
+      responseBody: JSON.stringify(response),
+    });
+    return response;
+  }
+
+  /**
+   * Meta webhook verification handshake. Meta issues a GET with hub.mode,
+   * hub.verify_token and hub.challenge before delivering any messages.
+   * Fails closed when WHATSAPP_VERIFY_TOKEN is not configured.
+   */
+  @Get('webhook/:businessId')
+  verifyWebhook(
+    @Param('businessId') businessId: string,
+    @Query('hub.mode') hubMode?: string,
+    @Query('hub.verify_token') hubVerifyToken?: string,
+    @Query('hub.challenge') hubChallenge?: string,
+  ) {
+    const expectedToken = process.env.WHATSAPP_VERIFY_TOKEN;
+    if (!expectedToken) {
+      throw new ForbiddenException('Webhook verify token not configured');
+    }
+    if (hubMode === 'subscribe' && hubVerifyToken === expectedToken) {
+      return hubChallenge;
+    }
+    throw new ForbiddenException('Invalid verify token');
+  }
 
   @Post('webhook/:businessId')
   async webhook(

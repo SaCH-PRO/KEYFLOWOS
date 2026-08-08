@@ -21,12 +21,23 @@ export function useKeyStatus() {
     return () => window.removeEventListener("kf:key-state", handler);
   }, []);
 
-  // Poll for real API state
+  // Poll for real API state — visibility-aware with idle backoff so an open
+  // tab never hammers the API (was a fixed 5s interval on two endpoints).
   useEffect(() => {
     const businessId = getStoredBusinessId();
     if (!businessId) return;
 
+    let delay = 5000;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let cancelled = false;
+
     const poll = async () => {
+      if (cancelled) return;
+      if (document.hidden) {
+        // Tab hidden: do no work, just check again later.
+        timer = setTimeout(poll, delay);
+        return;
+      }
       try {
         const [cmdRes, flowRes] = await Promise.all([
           fetchCommandItems(businessId, { status: "OPEN", limit: 1 }),
@@ -37,20 +48,28 @@ export function useKeyStatus() {
         const sessions = Array.isArray(flowRes.data) ? flowRes.data : [];
         const runningFlows = sessions.filter((s) => s.status === "RUNNING").length;
 
+        let next: KeyPresenceState = "idle";
         setState((prev) => {
-          if (prev === "active") return prev;
-          if (runningFlows > 0) return "processing";
-          if (pendingCount > 0) return "suggestion";
-          return "idle";
+          if (prev === "active") { next = prev; return prev; }
+          if (runningFlows > 0) next = "processing";
+          else if (pendingCount > 0) next = "suggestion";
+          return next;
         });
+
+        // Back off while quiet (5s → up to 30s), snap back fast when busy.
+        delay = next === "idle" ? Math.min(Math.round(delay * 1.5), 30000) : 5000;
       } catch {
-        // silently fail
+        // silently fail — also back off so an error loop can't hammer either
+        delay = Math.min(Math.round(delay * 1.5), 30000);
       }
+      if (!cancelled) timer = setTimeout(poll, delay);
     };
 
     poll();
-    const interval = setInterval(poll, 5000);
-    return () => clearInterval(interval);
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
   }, []);
 
   // Listen for typing activity

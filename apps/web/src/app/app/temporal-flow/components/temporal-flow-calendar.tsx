@@ -66,6 +66,7 @@ export function TemporalFlowCalendar() {
           <button
             onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1))}
             className="p-1.5 rounded-md hover:bg-muted"
+            aria-label="Previous month"
           >
             <ChevronLeft className="w-4 h-4" />
           </button>
@@ -78,6 +79,7 @@ export function TemporalFlowCalendar() {
           <button
             onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1))}
             className="p-1.5 rounded-md hover:bg-muted"
+            aria-label="Next month"
           >
             <ChevronRight className="w-4 h-4" />
           </button>

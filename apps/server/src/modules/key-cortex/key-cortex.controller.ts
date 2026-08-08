@@ -57,6 +57,7 @@ import {
   IsArray,
   IsBoolean,
   IsIn,
+  IsInt,
   IsNumber,
   IsObject,
   IsOptional,
@@ -511,8 +512,10 @@ class SandboxExecuteDto {
   language?: 'typescript' | 'javascript' | 'python' | 'json' | 'sql';
   @IsString()
   businessId: string;
+  // @IsInt rather than @IsNumber: a timeout in milliseconds is an integer, and
+  // this is the stricter of the two sides.
   @IsOptional()
-  @IsNumber()
+  @IsInt()
   timeoutMs?: number;
   @IsOptional()
   @IsObject()

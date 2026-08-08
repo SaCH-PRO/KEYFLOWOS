@@ -2,9 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { Megaphone, Mail, PenTool, Share2, Target, ArrowRight, Plus, Loader2, Trash2 } from "lucide-react";
+import { motion } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { FlowShell } from "@/components/layout/flow-shell";
+import { FlowQuickLauncher } from "@/components/layout/flow-quick-launcher";
+import type { ModuleLauncherSection } from "@/components/ui/module-launcher-sheet";
 import { fetchCampaignPlans, createCampaignPlan, deleteCampaignPlan, type CampaignPlan } from "@/lib/api/marketing";
 
 export default function MarketingFlowPage() {
@@ -62,6 +65,28 @@ export default function MarketingFlowPage() {
     { label: "Offers", href: "/app/marketing", icon: Target, desc: "Promotions and lead capture" },
   ];
 
+  const launcherSections: ModuleLauncherSection[] = [
+    {
+      id: "channels",
+      label: "Channels",
+      items: [
+        { id: "campaigns", label: "Campaigns", icon: Mail, href: "/app/marketing", tone: "violet" },
+        { id: "content", label: "Content", icon: PenTool, href: "/app/content-ops", tone: "orange" },
+        { id: "social", label: "Social", icon: Share2, href: "/app/social", tone: "sky" },
+        { id: "offers", label: "Offers", icon: Target, href: "/app/marketing", tone: "gold" },
+      ],
+    },
+    {
+      id: "audience",
+      label: "Audience",
+      items: [
+        { id: "contacts", label: "Contacts", icon: Mail, href: "/app/crm/contacts", tone: "teal" },
+        { id: "sequences", label: "Sequences", icon: Share2, href: "/app/crm/sequences", tone: "mint" },
+        { id: "events", label: "Events", icon: Target, href: "/app/events", tone: "rose" },
+      ],
+    },
+  ];
+
   const statusColors: Record<string, string> = {
     DRAFT: "bg-slate-500/10 text-slate-600",
     ACTIVE: "bg-emerald-500/10 text-emerald-600",
@@ -75,10 +100,29 @@ export default function MarketingFlowPage() {
       subtitle="Create demand. Campaigns, content, and lead capture."
       icon={Megaphone}
       activeFlowId="marketing"
+      headerActions={
+        <FlowQuickLauncher
+          title="Marketing Modules"
+          subtitle="Channels and audience tools"
+          sections={launcherSections}
+        />
+      }
     >
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {sections.map((s) => (
-          <button key={s.label} onClick={() => router.push(s.href)} className="kf-card kf-radius-lg p-4 text-left hover:shadow-md transition-all group">
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.35, ease: "easeOut" }}
+        className="grid grid-cols-1 md:grid-cols-2 gap-3"
+      >
+        {sections.map((s, idx) => (
+          <motion.button
+            key={s.label}
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: idx * 0.05, duration: 0.25 }}
+            onClick={() => router.push(s.href)}
+            className="kf-card kf-radius-lg p-4 text-left hover:shadow-md transition-all group"
+          >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 kf-radius-lg flex items-center justify-center" style={{ background: "hsl(var(--kf-accent1) / 0.1)" }}>
@@ -91,9 +135,9 @@ export default function MarketingFlowPage() {
               </div>
               <ArrowRight className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors" />
             </div>
-          </button>
+          </motion.button>
         ))}
-      </div>
+      </motion.div>
 
       {/* Campaign Plans */}
       <div className="space-y-2 pt-2">

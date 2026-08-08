@@ -171,9 +171,20 @@ export class KeyGenomeController {
     @Param('businessId') businessId: string,
     @Body() body?: GenerateGenomeRecommendationsInput,
   ) {
+    // Spread FIRST. businessId must be the guarded @Param, never a value the
+    // request body chose for itself.
+    //
+    // GenerateGenomeRecommendationsInput is an `interface`
+    // (key-genome.types.ts:378), not a decorated DTO class. It therefore erases
+    // to Object, the global ValidationPipe({whitelist:true}) skips native
+    // metatypes and strips nothing, and a body carrying businessId arrived here
+    // intact — then won, because it was spread last.
+    //
+    // The sweep in b53eef9e missed this: its gate matches `...` followed by a
+    // BARE identifier, and this spread is parenthesised.
     return this.recommendationService.generateRecommendations({
-      businessId,
       ...(body ?? {}),
+      businessId,
     });
   }
 

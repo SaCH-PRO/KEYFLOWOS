@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Store } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import Image from "next/image";
+import { cn } from "@/lib/utils";
 import { useReturnNavigation } from "@/lib/use-return-navigation";
 import { ResumePrompt } from "@/components/ui/resume-task-system";
 import { useNavigationContext } from "@/lib/navigation-context";
@@ -12,12 +13,16 @@ import { useKeyboardShortcuts, type ShortcutGroup } from "@/hooks/use-keyboard-s
 import { WorkspaceError } from "@/components/ui/workspace-error";
 import { NotesTrigger } from "@/components/keyflow/notes-trigger";
 import { PageNotesMount } from "@/components/keyflow/page-notes-mount";
+import { Surface } from "@/components/ui-v2/surface";
+import { Badge } from "@/components/ui-v2/badge";
+import { Button } from "@/components/ui-v2/button";
+import { EmptyState } from "@/components/ui-v2/empty-state";
 import { useStoreAiHub } from "./hooks/use-store-ai-hub";
 import { useStoreData } from "./hooks/use-store-data";
 import { StoreSkeleton } from "./components/store-skeleton";
 import { StoreHeaderActions } from "./components/store-header-actions";
+import { StoreTabs } from "./components/store-tabs";
 import { VIEW_TABS, type TabKey } from "./components/store-types";
-import { EmptyState } from "@/components/ui/empty-state";
 import { OverviewMode } from "./components/overview-mode";
 import { DesignMode } from "./components/design-mode";
 import { MerchandisingMode } from "./components/merchandising-mode";
@@ -53,7 +58,6 @@ export default function StorePage() {
     if (initRef.current) return;
     const p = searchParams.get("tab");
     if (p && TAB_KEYS.includes(p as TabKey)) {
-       
       setActiveTab(p as TabKey);
       initRef.current = true;
     }
@@ -157,7 +161,7 @@ export default function StorePage() {
       <div className="relative rounded-2xl overflow-hidden" style={{ border: `1px solid ${pc}20` }}>
         {coverImage ? (
           <div className="absolute inset-0">
-            <Image src={coverImage} alt="" className="w-full h-full object-cover"  fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
+            <Image src={coverImage} alt="" className="w-full h-full object-cover" fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
             <div className="absolute inset-0" style={{ background: `linear-gradient(135deg, hsl(var(--kf-background)/0.92) 0%, hsl(var(--kf-background)/0.82) 100%)` }} />
             <div className="absolute inset-0" style={{ background: `linear-gradient(135deg, ${pc}10 0%, transparent 60%)` }} />
           </div>
@@ -170,75 +174,41 @@ export default function StorePage() {
           <div className="absolute -bottom-12 -left-12 w-48 h-48 rounded-full" style={{ background: `radial-gradient(circle, ${sc}08, transparent 60%)` }} />
         </div>
 
-        <div className="relative px-5 pt-5 pb-4">
+        <Surface variant="glass" className="relative m-4 p-4 border-transparent bg-card/70 backdrop-blur-2xl">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-3.5 min-w-0">
               {logoUrl ? (
-                <div className="h-12 w-12 rounded-2xl flex items-center justify-center flex-shrink-0 overflow-hidden" style={{ border: `2px solid ${pc}30`, boxShadow: `0 4px 16px ${pc}15`, background: "hsl(var(--kf-card))" }}>
-                  <Image src={logoUrl} alt="" className="w-full h-full object-cover"  fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
+                <div className="h-12 w-12 rounded-2xl flex items-center justify-center flex-shrink-0 overflow-hidden border-2 border-primary/20 shadow-sm bg-card">
+                  <Image src={logoUrl} alt="" className="w-full h-full object-cover" fill sizes="(max-width: 768px) 100vw, 50vw" unoptimized />
                 </div>
               ) : (
-                <div className="h-12 w-12 rounded-2xl flex items-center justify-center flex-shrink-0" style={{ background: `linear-gradient(135deg, ${pc}, ${sc})`, boxShadow: `0 4px 16px ${pc}25` }}>
+                <div className="h-12 w-12 rounded-2xl flex items-center justify-center flex-shrink-0 bg-gradient-to-br from-primary to-secondary shadow-md">
                   <Store className="w-5 h-5 text-white" />
                 </div>
               )}
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <h1 className="text-lg font-bold tracking-tight truncate" style={{ color: "hsl(var(--kf-foreground))" }}>{storeName}</h1>
-                  <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold flex-shrink-0" style={{
-                    background: s.storeEnabled ? "hsl(var(--kf-success)/0.12)" : "hsl(var(--kf-warning)/0.12)",
-                    color: s.storeEnabled ? "hsl(var(--kf-success))" : "hsl(var(--kf-warning))",
-                  }}>
-                    <div className="w-1.5 h-1.5 rounded-full" style={{
-                      background: s.storeEnabled ? "hsl(var(--kf-success))" : "hsl(var(--kf-warning))",
-                      boxShadow: s.storeEnabled ? "0 0 6px hsl(var(--kf-success)/0.4)" : "none",
-                    }} />
-                    {s.storeEnabled ? "Live" : "Draft"}
-                  </div>
+                  <h1 className="font-display text-title font-bold tracking-tight truncate text-foreground">{storeName}</h1>
+                  <Badge variant="status" color={s.storeEnabled ? "mint" : "orange"}>
+                    <span className="flex items-center gap-1.5">
+                      <span className={cn("w-1.5 h-1.5 rounded-full", s.storeEnabled ? "bg-mint" : "bg-primary")} />
+                      {s.storeEnabled ? "Live" : "Draft"}
+                    </span>
+                  </Badge>
                   <NotesTrigger pageKey="store" variant="header" />
                 </div>
-                <p className="text-xs mt-0.5 truncate" style={{ color: "hsl(var(--kf-muted-foreground))" }}>
+                <p className="text-caption mt-0.5 truncate text-muted-foreground">
                   {s.storeEnabled && s.getPublicBookingUrl() ? s.getPublicBookingUrl().replace("https://", "") : "Presence Studio — your storefront workspace"}
                 </p>
               </div>
             </div>
             <StoreHeaderActions storeEnabled={s.storeEnabled} publicUrl={s.getPublicBookingUrl()} onToggleEnabled={s.toggleStoreEnabled} />
           </div>
-        </div>
+        </Surface>
       </div>
 
       <div data-walkthrough="store-setup">
-        <div className="relative rounded-2xl overflow-hidden" style={{ background: "hsl(var(--kf-card))", border: "1px solid hsl(var(--kf-border)/0.35)" }}>
-          <div className="flex items-center overflow-x-auto scrollbar-none p-1 gap-0.5">
-            {VIEW_TABS.map(({ key, label, icon: Icon }) => {
-              const isActive = activeTab === key;
-              return (
-                <button
-                  key={key}
-                  onClick={() => handleTabChange(key)}
-                  className="relative flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-medium transition-all whitespace-nowrap min-h-[40px] flex-shrink-0"
-                  style={{ color: isActive ? "hsl(var(--kf-foreground))" : "hsl(var(--kf-muted-foreground))" }}
-                  aria-selected={isActive}
-                  role="tab"
-                >
-                  {isActive && (
-                    <motion.div
-                      layoutId="studio-active-mode"
-                      className="absolute inset-0 rounded-xl"
-                      style={{ background: `${pc}12`, border: `1px solid ${pc}25`, boxShadow: `0 2px 8px ${pc}10` }}
-                      transition={{ type: "spring", bounce: 0.12, duration: 0.38 }}
-                    />
-                  )}
-                  <Icon className="w-3.5 h-3.5 relative z-10 flex-shrink-0" style={isActive ? { color: pc } : undefined} />
-                  <span className="relative z-10">{label}</span>
-                  {isActive && (
-                    <div className="absolute bottom-0.5 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full relative z-10" style={{ background: pc }} />
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        </div>
+        <StoreTabs activeView={activeTab} onViewChange={handleTabChange} />
       </div>
 
       {s.commerceProducts.length === 0 && s.services.length === 0 && (
@@ -248,10 +218,16 @@ export default function StorePage() {
           description="Add products or services to start selling online. Your customers will see them on your public booking page."
           actionLabel="Add Product"
           onAction={() => handleTabChange("catalog")}
-          secondaryAction={{ label: "Design Store", onClick: () => handleTabChange("design") }}
-          tip="Start with your most popular service. You can always add more later."
-          iconColor="hsl(var(--kf-accent1))"
-        />
+        >
+          <div className="mt-4 flex flex-col items-center gap-3">
+            <Button variant="soft" onClick={() => handleTabChange("design")}>
+              Design Store
+            </Button>
+            <p className="text-caption text-muted-foreground max-w-xs">
+              Start with your most popular service. You can always add more later.
+            </p>
+          </div>
+        </EmptyState>
       )}
 
       <div className="touch-pan-y">

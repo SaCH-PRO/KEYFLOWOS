@@ -107,6 +107,8 @@ model User {
   phone            String?
   avatarUrl        String? @map("avatar_url")
   role             String  @default("USER") // USER | SUPER_ADMIN
+  /// Free-form user-level settings / security flags.
+  metaData         Json?   @default("{}") @map("meta_data")
   referralCode     String? @unique @map("referral_code")
   referredByUserId String? @map("referred_by_user_id")
   referredBy       User?   @relation("UserReferrals", fields: [referredByUserId], references: [id])
@@ -114,6 +116,7 @@ model User {
 
   businesses Membership[]
   sessions   Session[]
+  identities UserIdentity[]
 
   aiExecutionLogs       AiExecutionLog[]   @relation("UserAiExecutionLogs")
   aiApprovalItems       AiApprovalItem[]   @relation("UserAiApprovalItems")
@@ -124,6 +127,25 @@ model User {
   pushSubscriptions     PushSubscription[]
 
   @@map("users")
+}
+
+/// External identity-provider links for a user. Primarily used to map
+/// Google Account IDs (`sub`) to local users for Cross-Account Protection
+/// (RISC) security event handling.
+model UserIdentity {
+  id               String   @id @default(cuid())
+  userId           String   @map("user_id")
+  provider         String // e.g. google
+  providerSubject  String   @map("provider_subject") // the IdP's stable user id (Google sub)
+  email            String?
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerSubject])
+  @@index([userId])
+  @@map("user_identities")
 }
 
 model Business {
@@ -291,6 +313,7 @@ model Business {
   crossModuleWorkflows         CrossModuleWorkflow[]
   scheduledAgentJobs           ScheduledAgentJob[]
   customerNotificationLogs     CustomerNotificationLog[]
+  events                       Event[]
   apiKeys                      ApiKey[]
   guidanceProfile              BusinessGuidanceProfile?
   guidanceAssessments          GuidanceAssessment[]
@@ -301,6 +324,10 @@ model Business {
   jobRoles                     JobRole[]
   orgAssignments               OrgAssignment[]
   delegationRules              DelegationRule[]
+  payRates                     PayRate[]
+  payrollRuns                  PayrollRun[]
+  payrollItems                 PayrollItem[]
+  staffPerformanceSnapshots    StaffPerformanceSnapshot[]
   businessRules                BusinessRule[]
   businessSignals              BusinessSignal[]
   healthSnapshots              BusinessHealthSnapshot[]
@@ -707,6 +734,95 @@ model Business {
   @@map("businesses")
 }
 
+// Events & Ticketing
+model Event {
+  id            String   @id @default(cuid())
+  businessId    String   @map("business_id")
+  name          String
+  description   String?  @db.Text
+  startsAt      DateTime @map("starts_at")
+  endsAt        DateTime? @map("ends_at")
+  timezone      String   @default("UTC")
+  location      String?
+  isPublished   Boolean  @default(false) @map("is_published")
+  coverImageUrl String?  @map("cover_image_url")
+  status        String   @default("DRAFT") // DRAFT, PUBLISHED, CANCELLED, COMPLETED
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  business    Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  ticketTypes EventTicketType[]
+  attendees   EventAttendee[]
+  checkIns    EventCheckIn[]
+
+  @@index([businessId])
+  @@index([status])
+  @@index([startsAt])
+  @@map("events")
+}
+
+model EventTicketType {
+  id           String    @id @default(cuid())
+  eventId      String    @map("event_id")
+  name         String
+  description  String?   @db.Text
+  price        Decimal   @default(0) @db.Decimal(12, 2)
+  currency     String    @default("USD")
+  quantity     Int?
+  quantitySold Int       @default(0) @map("quantity_sold")
+  salesStartAt DateTime? @map("sales_start_at")
+  salesEndAt   DateTime? @map("sales_end_at")
+  isActive     Boolean   @default(true) @map("is_active")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  event     Event           @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  attendees EventAttendee[]
+
+  @@index([eventId])
+  @@map("event_ticket_types")
+}
+
+model EventAttendee {
+  id           String   @id @default(cuid())
+  eventId      String   @map("event_id")
+  ticketTypeId String?  @map("ticket_type_id")
+  businessId   String   @map("business_id")
+  email        String
+  name         String?
+  phone        String?
+  status       String   @default("REGISTERED") // REGISTERED, CANCELLED, CHECKED_IN, REFUNDED
+  paymentId    String?  @map("payment_id")
+  checkedInAt  DateTime? @map("checked_in_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  event      Event            @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  ticketType EventTicketType? @relation(fields: [ticketTypeId], references: [id], onDelete: SetNull)
+  checkIns   EventCheckIn[]
+
+  @@unique([eventId, email])
+  @@index([businessId])
+  @@index([status])
+  @@map("event_attendees")
+}
+
+model EventCheckIn {
+  id          String   @id @default(cuid())
+  eventId     String   @map("event_id")
+  attendeeId  String   @map("attendee_id")
+  checkedInAt DateTime @default(now()) @map("checked_in_at")
+  checkedInBy String?  @map("checked_in_by")
+  notes       String?  @db.Text
+
+  event    Event         @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  attendee EventAttendee @relation(fields: [attendeeId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, attendeeId])
+  @@index([eventId])
+  @@map("event_check_ins")
+}
+
 // Phase 7: Business Genome — Business Asset Registry
 model BusinessAsset {
   id         String   @id @default(cuid())
@@ -755,6 +871,9 @@ model Contract {
 
   retentionPolicy String?   @map("retention_policy")
   retentionUntil  DateTime? @map("retention_until")
+
+  /** CUAD-style clause analysis output (labels, presence, summaries, source anchors). */
+  clauseAnalysis Json? @map("clause_analysis")
 
   notes String?
 
@@ -2175,9 +2294,31 @@ model OrgAssignment {
   businessId String   @map("business_id")
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
-  membershipId  String          @map("membership_id")
-  membership    Membership      @relation(fields: [membershipId], references: [id], onDelete: Cascade)
-  userId        String          @map("user_id") // denormalized for quick lookups
+  // A position is filled by EITHER a full logged-in team member (membershipId/userId)
+  // OR a contact-only staff record (contactName/contactPhone/contactEmail) for people
+  // who won't use the app but still need to receive delegated work and approvals —
+  // e.g. front-desk or floor staff reached over WhatsApp/SMS. Exactly one path must
+  // be populated; enforced in StructureService, not at the DB level.
+  membershipId String?     @map("membership_id")
+  membership   Membership? @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  userId       String?     @map("user_id") // denormalized for quick lookups, membership path only
+
+  isContactOnly Boolean @default(false) @map("is_contact_only")
+  contactName   String? @map("contact_name")
+  contactEmail  String? @map("contact_email")
+  contactPhone  String? @map("contact_phone") // normalized E.164, used for inbound WhatsApp/SMS routing
+
+  // Which channel to reach this position on for real-time delegation/approval pings.
+  preferredChannel String @default("whatsapp") @map("preferred_channel") // whatsapp | sms | email | none
+  // Business-granted permission: if true, a reply on preferredChannel to a pending
+  // approval is auto-parsed as approve/reject instead of just notifying. Defaults to
+  // off — approval still requires opening the app until a business owner opts a
+  // position in via /app/structure.
+  autoApprovalViaReply Boolean @default(false) @map("auto_approval_via_reply")
+  // Persists the KEY chat session id for this position's WhatsApp/SMS conversation
+  // so multi-message exchanges keep context, same as a browser tab would.
+  activeFlowSessionId String? @map("active_flow_session_id")
+
   orgUnitId     String          @map("org_unit_id")
   orgUnit       OrgUnit         @relation(fields: [orgUnitId], references: [id], onDelete: Cascade)
   jobRoleId     String?         @map("job_role_id")
@@ -2190,13 +2331,112 @@ model OrgAssignment {
   startedAt DateTime  @default(now()) @map("started_at")
   endedAt   DateTime? @map("ended_at")
 
+  payRates     PayRate[]
+  payrollItems PayrollItem[]
+  staffPerformanceSnapshots StaffPerformanceSnapshot[]
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@index([businessId, membershipId])
   @@index([businessId, orgUnitId])
   @@index([businessId, userId])
+  @@index([businessId, contactPhone])
   @@map("org_assignments")
+}
+
+model PayRate {
+  id           String        @id @default(cuid())
+  businessId   String        @map("business_id")
+  business     Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  assignmentId String        @map("assignment_id")
+  assignment   OrgAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+
+  amount        Decimal  @db.Decimal(12, 2)
+  currency      String   @default("TTD")
+  periodType    String   @default("hourly") @map("period_type") // hourly | monthly
+  effectiveFrom DateTime @default(now()) @map("effective_from")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([businessId, assignmentId, effectiveFrom])
+  @@index([businessId])
+  @@map("pay_rates")
+}
+
+model PayrollRun {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  periodStart DateTime @map("period_start")
+  periodEnd   DateTime @map("period_end")
+
+  status       String    @default("DRAFT") // DRAFT | APPROVED | PAID | VOID
+  totalGross   Decimal   @default(0) @db.Decimal(14, 2)
+  currency     String    @default("TTD")
+  itemCount    Int       @default(0) @map("item_count")
+  approvedAt   DateTime? @map("approved_at")
+  approvedById String?   @map("approved_by_id")
+  paidAt       DateTime? @map("paid_at")
+  notes        String?
+
+  items PayrollItem[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([businessId, status])
+  @@map("payroll_runs")
+}
+
+model PayrollItem {
+  id           String        @id @default(cuid())
+  runId        String        @map("run_id")
+  run          PayrollRun    @relation(fields: [runId], references: [id], onDelete: Cascade)
+  businessId   String        @map("business_id")
+  business     Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  assignmentId String        @map("assignment_id")
+  assignment   OrgAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+
+  hoursWorked Decimal? @db.Decimal(8, 2) @map("hours_worked")
+  grossPay    Decimal  @db.Decimal(12, 2) @map("gross_pay")
+  currency    String   @default("TTD")
+  notes       String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([runId])
+  @@index([businessId])
+  @@map("payroll_items")
+}
+
+model StaffPerformanceSnapshot {
+  id           String        @id @default(cuid())
+  businessId   String        @map("business_id")
+  business     Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  assignmentId String        @map("assignment_id")
+  assignment   OrgAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+
+  periodStart DateTime @map("period_start")
+  periodEnd   DateTime @map("period_end")
+
+  tasksAssigned            Int      @default(0) @map("tasks_assigned")
+  tasksCompleted           Int      @default(0) @map("tasks_completed")
+  tasksOnTime              Int      @default(0) @map("tasks_on_time")
+  tasksOverdueOpen         Int      @default(0) @map("tasks_overdue_open")
+  hoursWorked              Decimal  @default(0) @db.Decimal(8, 2) @map("hours_worked")
+  expectedHours            Decimal  @default(0) @db.Decimal(8, 2) @map("expected_hours")
+  approvalsHandled         Int      @default(0) @map("approvals_handled")
+  avgApprovalResponseHours Decimal? @db.Decimal(8, 2) @map("avg_approval_response_hours")
+  overallScore             Int      @default(0) @map("overall_score")
+
+  computedAt DateTime @default(now()) @map("computed_at")
+
+  @@unique([businessId, assignmentId, periodStart, periodEnd])
+  @@index([businessId])
+  @@map("staff_performance_snapshots")
 }
 
 model DelegationRule {
@@ -7167,11 +7407,19 @@ model AiApprovalItem {
   // Phase 0: migration pointer to canonical KeyActionProposal
   migratedToProposalId String? @map("migrated_to_proposal_id")
 
+  // Real approval routing — resolved by ApprovalRoutingService from the
+  // business's DelegationRule/OrgAssignment/JobRole data (see structure
+  // module). Not FK-enforced, matching the DelegationRule convention.
+  approverAssignmentId String?   @map("approver_assignment_id") // OrgAssignment id
+  approverMethod       String?   @map("approver_method") // 'delegation_rule' | 'job_role_match' | 'owner_fallback' | 'unresolved'
+  notifiedAt           DateTime? @map("notified_at")
+
   @@index([businessId, status])
   @@index([businessId, createdAt])
   @@index([businessId, correlationId])
   @@index([planId])
   @@index([migratedToProposalId])
+  @@index([businessId, approverAssignmentId])
   @@map("ai_approval_items")
 }
 
@@ -8932,6 +9180,29 @@ model AuthAuditLog {
   @@index([userId, createdAt])
   @@index([ip, createdAt])
   @@map("auth_audit_logs")
+}
+
+/// Cross-Account Protection (RISC) security event token receipt log.
+/// One row per unique `jti`. Used for deduplication, audit, and debugging.
+model RiscEvent {
+  id              String   @id @default(cuid())
+  /// Unique event identifier from the RISC JWT.
+  jti             String   @unique
+  /// RISC event type URI, e.g. https://schemas.openid.net/secevent/risc/event-type/sessions-revoked
+  eventType       String   @map("event_type")
+  /// Google Account identifier (the `sub` claim in the event subject).
+  providerSubject String   @map("provider_subject")
+  userId          String?  @map("user_id")
+  /// Normalized action summary, e.g. sessions_terminated | account_flagged | logged_only
+  actionTaken     String   @map("action_taken")
+  /// Minimal debugging payload (event type, reason if present). NOT a full PII cache.
+  payload         Json?
+  receivedAt      DateTime @default(now()) @map("received_at")
+  processedAt     DateTime @map("processed_at")
+
+  @@index([receivedAt])
+  @@index([providerSubject])
+  @@map("risc_events")
 }
 
 // ---
@@ -11418,6 +11689,10 @@ model KeyInboxThread {
   @@unique([businessId, channel, externalThreadId])
   @@index([businessId, lastMessageAt])
   @@index([businessId, channel])
+  // 20260806120000_merge_omnichannel_inboxes creates key_inbox_threads_contact_id_idx
+  // in SQL but the model never declared it, so `migrate diff` reported drift and a
+  // future `migrate dev` would have generated a migration dropping a live index.
+  @@index([contactId])
   @@map("key_inbox_threads")
 }
 
@@ -12388,10 +12663,28 @@ model HelpdeskTicket {
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")
 
-  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  business Business               @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  messages SupportTicketMessage[]
 
   @@index([businessId, status])
   @@index([businessId, priority])
   @@index([businessId, createdAt])
   @@map("helpdesk_tickets")
+}
+
+model SupportTicketMessage {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  ticketId   String   @map("ticket_id")
+  direction  String   @default("OUTBOUND") @map("direction")
+  channel    String   @default("internal") @map("channel")
+  body       String   @db.Text
+  authorId   String?  @map("author_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  ticket HelpdeskTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId, createdAt])
+  @@index([businessId])
+  @@map("support_ticket_messages")
 }

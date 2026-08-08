@@ -338,7 +338,7 @@ export function GenesisConversation({ onComplete }: GenesisConversationProps) {
           className="flex flex-col sm:flex-row items-center justify-center gap-4 text-xs text-muted-foreground"
         >
           <button
-            onClick={() => (window.location.href = "/app/profile?tab=business-genome")}
+            onClick={() => (window.location.href = "/app/genome")}
             className="flex items-center gap-1.5 hover:text-foreground transition-colors"
           >
             Prefer manual setup?

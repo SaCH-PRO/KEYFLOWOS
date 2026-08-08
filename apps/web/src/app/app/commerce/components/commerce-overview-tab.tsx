@@ -13,6 +13,7 @@ import {
   TrendingUp,
   CheckCircle2,
 } from "lucide-react";
+import { CommerceHub } from "./commerce-hub";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatCurrency, formatCurrencyCompact } from "@/lib/currency";
 import { parseDate } from "@/lib/date-safe";
@@ -437,6 +438,7 @@ export function CommerceOverviewTab({
   return (
     <div className="space-y-5">
       <RevenueHero outstanding={stats.outstanding} collected={stats.collected} overdue={stats.overdue} overdueCount={stats.overdueCount} currency={currency} onNewItem={onNewItem} />
+      <CommerceHub />
       <RevenueAtAGlance quotes={quotes} invoices={invoices} recurring={recurring} currency={currency} />
       <div>
         <div className="flex items-center gap-2 mb-3">

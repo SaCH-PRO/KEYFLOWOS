@@ -41,6 +41,7 @@ interface FlowShellProps {
   children: React.ReactNode;
   activeFlowId: string;
   showBackToCenter?: boolean;
+  headerActions?: React.ReactNode;
 }
 
 export function FlowShell({
@@ -51,6 +52,7 @@ export function FlowShell({
   children,
   activeFlowId,
   showBackToCenter = true,
+  headerActions,
 }: FlowShellProps) {
   const router = useRouter();
   const _pathname = usePathname();
@@ -95,19 +97,22 @@ export function FlowShell({
       </div>
 
       {/* Header */}
-      <div className="flex items-start gap-3">
-        <div
-          className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-          style={{ background: `${accent}15` }}
-        >
-          <Icon className="w-5 h-5" style={{ color: accent }} />
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-3 min-w-0">
+          <div
+            className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+            style={{ background: `${accent}15` }}
+          >
+            <Icon className="w-5 h-5" style={{ color: accent }} />
+          </div>
+          <div className="min-w-0">
+            <h1 className="text-lg font-semibold tracking-tight">{title}</h1>
+            {subtitle && (
+              <p className="text-sm text-muted-foreground mt-0.5">{subtitle}</p>
+            )}
+          </div>
         </div>
-        <div className="min-w-0">
-          <h1 className="text-lg font-semibold tracking-tight">{title}</h1>
-          {subtitle && (
-            <p className="text-sm text-muted-foreground mt-0.5">{subtitle}</p>
-          )}
-        </div>
+        {headerActions && <div className="flex-shrink-0">{headerActions}</div>}
       </div>
 
       {/* Content */}

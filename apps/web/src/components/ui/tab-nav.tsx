@@ -2,6 +2,7 @@
 
 import { useRef, useCallback, useEffect } from "react";
 import { motion } from "framer-motion";
+import { cn } from "@/lib/utils";
 import { RichTooltip } from "@/components/ui/rich-tooltip";
 
 interface TabItem {
@@ -17,9 +18,10 @@ interface TabNavProps {
   activeTab: string;
   onTabChange: (key: string) => void;
   layoutId?: string;
+  variant?: "underline" | "pill";
 }
 
-export function TabNav({ tabs, activeTab, onTabChange, layoutId = "tab-underline" }: TabNavProps) {
+export function TabNav({ tabs, activeTab, onTabChange, layoutId = "tab-underline", variant = "underline" }: TabNavProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   const activeIndex = tabs.findIndex((t) => t.key === activeTab);
@@ -53,14 +55,19 @@ export function TabNav({ tabs, activeTab, onTabChange, layoutId = "tab-underline
     }
   }, [activeTab]);
 
+  const isPill = variant === "pill";
+
   return (
-    <div className="relative border-b border-border mb-4">
+    <div className={cn("relative mb-4", !isPill && "border-b border-border")}>
       <div
         ref={containerRef}
         role="tablist"
         aria-label="Navigation tabs"
         onKeyDown={handleKeyDown}
-        className="flex overflow-x-auto scrollbar-hide gap-0"
+        className={cn(
+          "flex overflow-x-auto scrollbar-hide",
+          isPill ? "gap-1.5 p-1 rounded-xl bg-muted/30 border border-border/30" : "gap-0"
+        )}
       >
         {tabs.map((t) => {
           const Icon = t.icon;
@@ -73,41 +80,48 @@ export function TabNav({ tabs, activeTab, onTabChange, layoutId = "tab-underline
               aria-selected={isActive}
               tabIndex={isActive ? 0 : -1}
               onClick={() => onTabChange(t.key)}
-              className={`group relative flex items-center gap-1.5 whitespace-nowrap flex-shrink-0
-                transition-colors duration-150 outline-none
-                focus-visible:ring-2 focus-visible:ring-[hsl(var(--kf-accent1)/0.4)] focus-visible:ring-inset
-                px-3 py-2
-                kf-text-body font-medium
-                ${isActive
-                  ? "text-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-                }`}
+              className={cn(
+                "group relative flex items-center gap-1.5 whitespace-nowrap flex-shrink-0 outline-none kf-text-body font-medium transition-all duration-200",
+                "focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-inset",
+                isPill
+                  ? cn(
+                      "px-3 py-1.5 rounded-lg border",
+                      isActive
+                        ? "bg-card text-foreground border-border shadow-sm"
+                        : "border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                    )
+                  : cn(
+                      "px-3 py-2",
+                      isActive ? "text-foreground" : "text-muted-foreground hover:text-foreground"
+                    )
+              )}
             >
-              {isActive && (
+              {isActive && !isPill && (
                 <motion.div
                   layoutId={layoutId}
-                  className="absolute inset-x-0 bottom-0 h-[2px]"
-                  style={{ background: "hsl(var(--kf-accent1))" }}
+                  className="absolute inset-x-0 bottom-0 h-[2px] bg-primary"
                   transition={{ type: "spring", bounce: 0.15, duration: 0.35 }}
                 />
               )}
 
               {Icon && (
                 <Icon
-                  className={`w-3.5 h-3.5 flex-shrink-0 transition-colors ${
-                    isActive ? "" : "opacity-60 group-hover:opacity-80"
-                  }`}
-                  style={isActive ? { color: "hsl(var(--kf-accent1))" } : undefined}
+                  className={cn(
+                    "w-3.5 h-3.5 flex-shrink-0 transition-colors",
+                    isActive && "text-primary",
+                    !isPill && !isActive && "opacity-60 group-hover:opacity-80"
+                  )}
                 />
               )}
               <span>{t.label}</span>
               {t.count !== undefined && (
                 <span
-                  className={`kf-text-micro tabular-nums rounded-full px-1.5 py-px ${
+                  className={cn(
+                    "kf-text-micro tabular-nums rounded-full px-1.5 py-px",
                     isActive
-                      ? "bg-[hsl(var(--kf-accent1)/0.1)] text-[hsl(var(--kf-accent1))]"
+                      ? "bg-primary/10 text-primary"
                       : "opacity-50"
-                  }`}
+                  )}
                 >
                   {t.count}
                 </span>

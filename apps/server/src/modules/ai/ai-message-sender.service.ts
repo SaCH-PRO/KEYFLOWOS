@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject, Optional } from '@nestjs/common';
+import { Injectable, Logger, Inject, Optional, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { GmailService } from '../commerce/gmail.service';
@@ -32,7 +32,7 @@ export class AiMessageSenderService {
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Optional() @Inject(GmailService) private readonly gmail: GmailService | undefined,
     @Optional() @Inject(SystemEmailService) private readonly systemEmail: SystemEmailService | undefined,
-    @Optional() @Inject(WhatsAppService) private readonly whatsapp: WhatsAppService | undefined,
+    @Optional() @Inject(forwardRef(() => WhatsAppService)) private readonly whatsapp: WhatsAppService | undefined,
     @Inject(TimelineService) private readonly timeline: TimelineService,
   ) {}
 

@@ -193,8 +193,8 @@ export function CockpitKeyPanel({
             </button>
           </div>
 
-          {/* Suggestion chips */}
-          <div className="flex flex-wrap gap-1.5">
+          {/* Suggestion chips — hidden on small screens where they overlap cards */}
+          <div className="hidden sm:flex flex-wrap gap-1.5">
             {[
               "What should I focus on?",
               "Why is cash slow?",

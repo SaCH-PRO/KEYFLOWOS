@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { Loader2, Dna } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useGenome } from "@/contexts/genome-context";
 import { BlueprintOnboardingChat } from "@/app/app/profile/components/blueprint-onboarding-chat";
-import { getGenome, type GenomeIntegrityResult } from "@/lib/api/business-genome";
 import { getStoredBusinessId } from "@/lib/workspace";
 
 interface GenomeChatStepProps {
@@ -14,23 +13,9 @@ interface GenomeChatStepProps {
 
 export function GenomeChatStep({ onComplete, className }: GenomeChatStepProps) {
   const businessId = getStoredBusinessId();
-  const [genome, setGenome] = useState<GenomeIntegrityResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!businessId) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- async hydration: clears prior error before fetching the genome
-    setError(null);
-    getGenome(businessId)
-      .then(({ data, error: apiError }) => {
-        if (apiError) {
-          setError(apiError);
-          return;
-        }
-        if (data) setGenome(data);
-      })
-      .catch(() => setError("Could not load genome progress."));
-  }, [businessId]);
+  // One shared genome fetch for the whole onboarding tree, with its own
+  // loading/error/refresh — this component no longer owns a private copy.
+  const { genome, loading, error, refresh } = useGenome();
 
   return (
     <div className={cn("flex flex-col lg:flex-row gap-4 h-[70vh] lg:h-[calc(100vh-200px)] max-h-[800px]", className)}>
@@ -54,17 +39,11 @@ export function GenomeChatStep({ onComplete, className }: GenomeChatStepProps) {
         {error ? (
           <div className="rounded-xl border border-destructive/20 bg-destructive/5 p-3 text-xs text-destructive">
             {error}
-            <button
-              onClick={() => {
-                setError(null);
-                setGenome(null);
-              }}
-              className="ml-2 underline"
-            >
+            <button onClick={refresh} className="ml-2 underline">
               Retry
             </button>
           </div>
-        ) : !genome ? (
+        ) : loading || !genome ? (
           <div className="flex items-center gap-2 text-muted-foreground">
             <Loader2 className="w-4 h-4 animate-spin" />
             <span className="text-xs">Loading progress…</span>

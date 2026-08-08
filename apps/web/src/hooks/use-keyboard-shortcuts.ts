@@ -37,6 +37,14 @@ const SHORTCUTS: ShortcutConfig[] = [
     category: "Navigation",
   },
   {
+    key: "K",
+    modifier: "shift",
+    global: true,
+    handler: () => window.dispatchEvent(new CustomEvent("kf:open-module-launcher")),
+    description: "Open module launcher",
+    category: "Navigation",
+  },
+  {
     key: "j",
     modifier: "meta",
     global: true,

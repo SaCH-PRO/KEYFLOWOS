@@ -704,8 +704,8 @@ function initializeForm(contract: Contract | null) {
     expiryDate: contract?.expiryDate ? contract.expiryDate.slice(0, 10) : "",
     renewalDate: contract?.renewalDate ? contract.renewalDate.slice(0, 10) : "",
     renewalType: contract?.renewalType ?? "",
-    renewalNoticeDays: contract?.renewalNoticeDays ?? "",
-    contractValue: contract?.contractValue ?? "",
+    renewalNoticeDays: contract?.renewalNoticeDays != null ? String(contract.renewalNoticeDays) : "",
+    contractValue: contract?.contractValue != null ? String(contract.contractValue) : "",
     currency: contract?.currency ?? "",
     jurisdiction: contract?.jurisdiction ?? "",
     retentionPolicy: contract?.retentionPolicy ?? "",
@@ -716,7 +716,7 @@ function initializeForm(contract: Contract | null) {
 
 function ContractDetail({
   contract,
-  tags,
+  tags: _tags,
   onExtract,
   onAcknowledgeAlert,
   loading,

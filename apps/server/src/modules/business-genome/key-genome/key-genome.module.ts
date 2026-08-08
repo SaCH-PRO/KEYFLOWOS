@@ -30,6 +30,7 @@ import { GenomeOpportunityDetectorService } from './genome-opportunity-detector.
 import { GenomeAutonomyGateService } from './genome-autonomy-gate.service';
 import { GenomeRecommendationOutcomeService } from './genome-recommendation-outcome.service';
 import { GenomeOutcomeLearningService } from './genome-outcome-learning.service';
+import { GenomeDecayService } from './genome-decay.service';
 import { KeyGenomeService } from './key-genome.service';
 
 @Module({
@@ -65,6 +66,7 @@ import { KeyGenomeService } from './key-genome.service';
     GenomeAutonomyGateService,
     GenomeRecommendationOutcomeService,
     GenomeOutcomeLearningService,
+    GenomeDecayService,
     KeyGenomeService,
   ],
   exports: [

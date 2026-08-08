@@ -12,6 +12,7 @@ import {
   readObject,
 } from '../business-genome/key-genome/key-genome.service';
 import { GenomeModuleReadinessService } from '../business-genome/key-genome/genome-module-readiness.service';
+import { KeyGenomeBackfillService } from '../business-genome/key-genome/key-genome-backfill.service';
 import {
   BlueprintBrand,
   BlueprintComplianceProfile,
@@ -157,6 +158,7 @@ export class BlueprintService {
     @Inject(GenomeScoringService) private readonly genomeScoring: GenomeScoringService,
     @Inject(KeyGenomeService) private readonly keyGenome: KeyGenomeService,
     @Inject(GenomeModuleReadinessService) private readonly moduleReadiness: GenomeModuleReadinessService,
+    @Inject(KeyGenomeBackfillService) private readonly genomeBackfill: KeyGenomeBackfillService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
   ) {}
 
@@ -194,7 +196,18 @@ export class BlueprintService {
     const existing = await client.businessBlueprint.findUnique({
       where: { businessId },
     });
-    if (existing) return this.serialize(existing);
+    if (existing) {
+      // One-time lazy migration: businesses whose blueprint predates the fact
+      // kernel get a full reconciliation on first read.
+      if (!existing.lastGenomeSyncAt && !tx) {
+        this.genomeBackfill.backfill(businessId).catch((err: unknown) => {
+          this.logger.warn(
+            `Initial genome fact sync failed for ${businessId}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        });
+      }
+      return this.serialize(existing);
+    }
 
     return this.serialize(await this.seedFromBusiness(businessId, tx));
   }
@@ -301,6 +314,21 @@ export class BlueprintService {
       where: { businessId },
       data: updateData,
     });
+
+    // Keep the GenomeFact kernel in sync with the blueprint: every write path
+    // (chat tool, onboarding, genome chat) reconciles its changed sections so
+    // facts never starve behind the blueprint. Fire-and-forget — a sync
+    // failure must never fail the blueprint update itself.
+    const patchedColumns = SECTION_KEYS.filter(
+      (key) => patch[key] && typeof patch[key] === 'object',
+    );
+    if (patchedColumns.length > 0) {
+      this.genomeBackfill.backfill(businessId, patchedColumns).catch((err: unknown) => {
+        this.logger.warn(
+          `Genome fact sync failed for ${businessId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
+    }
 
     this.emitGenomeUpdated(businessId, 'genome.updated', 'Business Genome updated', {
       executiveReadinessScore: genomeResult.executiveReadinessScore,
