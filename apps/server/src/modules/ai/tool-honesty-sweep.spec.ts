@@ -202,7 +202,12 @@ describe('the class of defect, not just the instances', () => {
 
     expect(senders.length, 'expected some outbound tools to exist').toBeGreaterThan(0);
 
-    const MAIL_PATHS = /getTransactionalEmail|emailService|messageSender|sendCampaign|publishToChannels|getEmailMarketing|approval/i;
+    // getKeyInbox was added when integration/2026-07-consolidation brought the
+    // omnichannel inbox. inbox_reply_thread calls getKeyInbox().addReply(...,
+    // { mode: 'send' }), and addReply delegates to replySender.sendReply — a
+    // real outbound path for WhatsApp/email/SMS. The tool was honest; this list
+    // simply predated the service.
+    const MAIL_PATHS = /getTransactionalEmail|emailService|messageSender|sendCampaign|publishToChannels|getEmailMarketing|getKeyInbox|approval/i;
 
     for (const tool of senders) {
       const start = orchestrator.indexOf(`case '${tool.name}':`);

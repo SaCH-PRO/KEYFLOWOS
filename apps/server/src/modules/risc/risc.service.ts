@@ -387,8 +387,14 @@ async function importJwkKey(jwk: Record<string, unknown>): Promise<VerificationK
   }
 
   // Fallback to jose's importJWK for RSA/EC keys.
+  //
+  // jwk arrives as Record<string, unknown> from the fetched JWKS. jose 5 types
+  // importJWK's first parameter as JWK, where jose 6 accepted the looser shape.
+  // The runtime contract is unchanged — jose validates the members itself and
+  // throws on anything malformed — so this asserts the shape we already fetched
+  // rather than widening what is accepted.
   const { importJWK } = await import('jose');
-  const key = await importJWK(jwk, jwk.alg as string);
+  const key = await importJWK(jwk as unknown as import('jose').JWK, jwk.alg as string);
   if (key instanceof KeyObject || key instanceof CryptoKey) return key;
   return null;
 }

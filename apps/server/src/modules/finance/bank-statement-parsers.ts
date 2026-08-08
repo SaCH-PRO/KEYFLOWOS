@@ -152,7 +152,8 @@ function parseQifDate(raw: string): Date | null {
   const t = raw.trim().replace(/'/g, '/');
   const m = t.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})$/);
   if (!m) return null;
-  let [, a, b, y] = m;
+  const [, a, b, rawYear] = m;
+  let y = rawYear;
   if (y.length === 2) y = (Number(y) >= 70 ? '19' : '20') + y;
   // Day-first unless the first field cannot be a day. Trinidad, like most of
   // the world outside the US, writes DD/MM — and a US export with 12/31 still

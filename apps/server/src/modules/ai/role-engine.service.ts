@@ -211,7 +211,7 @@ const ROLE_DEFINITIONS: Record<BusinessRole, RoleDefinition> = {
     // Merge: main's side kept. integration widened this role's approvedTools;
     // those additions are deliberately NOT taken here — see the note at the
     // head of this file. Widening a role is a product decision, not a merge one.
-    approvedTools: ['update_business_blueprint', 'commerce_*', 'expenses_*', 'payments_*', 'reconcile_*', 'reports_generate', 'contracts_list', 'contracts_get', 'contracts_stats', 'inventory_list_stock', 'inventory_summary', 'inventory_list_purchase_orders', 'deals_list', 'deals_get', 'deals_forecast', 'deals_pipeline_velocity', 'draft_payment_reminder', 'send_message_with_approval', 'fetch_*', 'create_task', 'finance_*', 'calendar_*', 'documents_search', 'delegation_payment_recovery'],
+    approvedTools: ['update_business_blueprint', 'commerce_*', 'expenses_*', 'payments_*', 'reconcile_*', 'reports_generate', 'contracts_list', 'contracts_get', 'contracts_stats', 'inventory_list_stock', 'inventory_summary', 'inventory_list_purchase_orders', 'deals_list', 'deals_get', 'deals_forecast', 'deals_pipeline_velocity', 'draft_payment_reminder', 'send_message_with_approval', 'fetch_*', 'create_task', 'finance_*', 'calendar_*', 'documents_search', 'delegation_payment_recovery', 'payroll_*', 'sequence_*'],
     blockedTools: ['commerce_delete_invoice', 'crm_delete_contact', 'projects_delete_task'],
     maxRiskTier: 2,
     autonomyLevel: 3,
@@ -255,7 +255,7 @@ const ROLE_DEFINITIONS: Record<BusinessRole, RoleDefinition> = {
     // Merge: main's side kept. integration widened this role's approvedTools;
     // those additions are deliberately NOT taken here — see the note at the
     // head of this file. Widening a role is a product decision, not a merge one.
-    approvedTools: ['people_assign_task', 'update_business_blueprint', 'bookings_*', 'projects_*', 'inventory_*', 'contracts_*', 'goals_list', 'goals_get', 'deals_list', 'deals_get', 'deals_forecast', 'deals_pipeline_velocity', 'create_task', 'tag_contact', 'fetch_*', 'content_*', 'call_*', 'evidence_*', 'approval_*', 'drive_*', 'calendar_*', 'time_*', 'helpdesk_*', 'finance_list_action_items', 'documents_search', 'automations_*', 'delegation_*', 'draft_project_update', 'enable_flow_with_approval', 'update_status_with_confirmation', 'apply_storefront_recommendation', 'store_list_products', 'store_list_recent_orders', 'marketplace_list_listings', 'marketplace_list_orders'],
+    approvedTools: ['people_assign_task', 'update_business_blueprint', 'bookings_*', 'projects_*', 'inventory_*', 'contracts_*', 'goals_list', 'goals_get', 'deals_list', 'deals_get', 'deals_forecast', 'deals_pipeline_velocity', 'create_task', 'tag_contact', 'fetch_*', 'content_*', 'call_*', 'evidence_*', 'approval_*', 'drive_*', 'calendar_*', 'time_*', 'helpdesk_*', 'finance_list_action_items', 'documents_search', 'automations_*', 'delegation_*', 'draft_project_update', 'enable_flow_with_approval', 'update_status_with_confirmation', 'apply_storefront_recommendation', 'store_list_products', 'store_list_recent_orders', 'marketplace_list_listings', 'marketplace_list_orders', 'procurement_*', 'structure_*', 'comms_*', 'inbox_*', 'performance_*', 'contract_extract_terms', 'contract_extract_clauses', 'contract_list_tags', 'contract_create_tag'],
     blockedTools: ['commerce_delete_invoice', 'crm_delete_contact'],
     maxRiskTier: 2,
     autonomyLevel: 3,
@@ -279,7 +279,7 @@ const ROLE_DEFINITIONS: Record<BusinessRole, RoleDefinition> = {
     // Merge: main's side kept. integration widened this role's approvedTools;
     // those additions are deliberately NOT taken here — see the note at the
     // head of this file. Widening a role is a product decision, not a merge one.
-    approvedTools: ['update_business_blueprint', 'marketing_*', 'social_*', 'deals_list', 'deals_forecast', 'fetch_*', 'sync_seo_pages', 'draft_campaign_bundle', 'draft_storefront_copy', 'generate_content_brief', 'segment_contacts', 'tag_contact', 'queue_campaign', 'content_*', 'drive_*', 'calendar_*', 'documents_search', 'community_list_posts', 'apply_storefront_recommendation', 'delegation_lead_reactivation'],
+    approvedTools: ['update_business_blueprint', 'marketing_*', 'social_*', 'deals_list', 'deals_forecast', 'fetch_*', 'sync_seo_pages', 'draft_campaign_bundle', 'draft_storefront_copy', 'generate_content_brief', 'segment_contacts', 'tag_contact', 'queue_campaign', 'content_*', 'drive_*', 'calendar_*', 'documents_search', 'community_list_posts', 'apply_storefront_recommendation', 'delegation_lead_reactivation', 'seo_*'],
     blockedTools: ['content_upload_deliverables', 'content_deliver_request'],
     maxRiskTier: 2,
     autonomyLevel: 2,
@@ -342,7 +342,7 @@ const ROLE_DEFINITIONS: Record<BusinessRole, RoleDefinition> = {
     // Merge: main's side kept. integration widened this role's approvedTools;
     // those additions are deliberately NOT taken here — see the note at the
     // head of this file. Widening a role is a product decision, not a merge one.
-    approvedTools: ['inbox_brief', 'inbox_mark_resolved', 'people_assign_task', 'update_business_blueprint', 'content_*', 'call_*', 'evidence_*', 'approval_*', 'drive_*', 'crm_*', 'deals_*', 'inventory_*', 'payments_*', 'contracts_*', 'reports_generate', 'goals_*', 'bookings_*', 'projects_*', 'create_task', 'tag_contact', 'fetch_*', 'expenses_*', 'documents_*', 'keyflow_create_note', 'calendar_*', 'time_*', 'helpdesk_*', 'finance_*', 'commerce_update_invoice', 'commerce_update_product', 'commerce_send_invoice', 'marketing_update_campaign', 'social_update_post', 'automations_*', 'delegation_*', 'store_*', 'marketplace_*', 'update_status_with_confirmation', 'enable_flow_with_approval'],
+    approvedTools: ['inbox_brief', 'inbox_mark_resolved', 'people_assign_task', 'update_business_blueprint', 'content_*', 'call_*', 'evidence_*', 'approval_*', 'drive_*', 'crm_*', 'deals_*', 'inventory_*', 'payments_*', 'contracts_*', 'reports_generate', 'goals_*', 'bookings_*', 'projects_*', 'create_task', 'tag_contact', 'fetch_*', 'expenses_*', 'documents_*', 'keyflow_create_note', 'calendar_*', 'time_*', 'helpdesk_*', 'finance_*', 'commerce_update_invoice', 'commerce_update_product', 'commerce_send_invoice', 'marketing_update_campaign', 'social_update_post', 'automations_*', 'delegation_*', 'store_*', 'marketplace_*', 'update_status_with_confirmation', 'enable_flow_with_approval', 'execute_custom_logic'],
     blockedTools: ['commerce_delete_invoice', 'crm_delete_contact', 'bookings_cancel_booking', 'marketing_send_campaign', 'social_publish_post', 'content_upload_deliverables', 'content_deliver_request'],
     maxRiskTier: 3,
     autonomyLevel: 3,

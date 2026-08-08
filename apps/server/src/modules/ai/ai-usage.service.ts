@@ -79,6 +79,12 @@ export const FEATURE_TASK_MAP: Record<string, TaskCategory> = {
   simulate: 'reasoning',
   chat: 'general',
   profile_interview: 'extraction',
+  // Both arrived with integration/2026-07-consolidation and spend money without
+  // declaring what kind of work they are, so they fell through to 'general' and
+  // were billed at gpt-4o rates that nobody chose. Both pull structured fields
+  // out of free text, which is what 'extraction' already covers.
+  genome_extraction: 'extraction',
+  contract_clause_extract: 'extraction',
   strategic_dashboard: 'reasoning',
   revenue_forecast: 'reasoning',
   profitability: 'reasoning',

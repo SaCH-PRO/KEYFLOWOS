@@ -4552,41 +4552,6 @@ ${triage.standingContext}`;
         return result;
       }
       // === CONTRACTS / LEGAL ===
-      case 'contract_list': {
-        const result = await this.getContracts().listContracts(businessId, {
-          status: args.status,
-          search: args.search,
-          expiringWithinDays: args.expiringWithinDays,
-          limit: args.limit ?? 25,
-        });
-        return result;
-      }
-      case 'contract_get': {
-        const contract = await this.getContracts().getContract(businessId, args.contractId);
-        return { contract };
-      }
-      case 'contract_create': {
-        const contract = await this.getContracts().createContract(businessId, {
-          title: args.title,
-          contractType: args.contractType,
-          status: args.status,
-          effectiveDate: args.startDate,
-          expiryDate: args.endDate,
-          notes: args.notes,
-          ...(args.counterpartyName
-            ? { parties: [{ role: 'counterparty', name: args.counterpartyName }] }
-            : {}),
-        });
-        return { id: contract.id, title: contract.title };
-      }
-      case 'contract_update': {
-        const contract = await this.getContracts().updateContract(businessId, args.contractId, {
-          status: args.status,
-          expiryDate: args.endDate,
-          notes: args.notes,
-        });
-        return { id: contract.id, status: contract.status };
-      }
       case 'contract_extract_terms': {
         const contract = await this.getContracts().extractTermsFromDocument(businessId, args.contractId, {
           sourceAssetId: args.sourceAssetId,
@@ -4594,13 +4559,6 @@ ${triage.standingContext}`;
           sourceDriveFileId: args.sourceDriveFileId,
         });
         return { contract };
-      }
-      case 'contract_get_stats': {
-        return this.getContracts().getStats(businessId);
-      }
-      case 'contract_acknowledge_alert': {
-        await this.getContracts().acknowledgeAlert(businessId, args.alertId);
-        return { id: args.alertId, acknowledged: true };
       }
       case 'contract_list_tags': {
         const tags = await this.getContracts().listTags(businessId);
@@ -4652,8 +4610,10 @@ ${triage.standingContext}`;
         return { body: result.content.trim(), ticketTitle: ticket.title, ticketId: args.ticketId };
       }
       case 'helpdesk_delete_ticket': {
-        await this.getHelpdeskService().deleteTicket(businessId, args.ticketId);
-        return { id: args.ticketId, deleted: true };
+        // deleteTicket returns { success }. Report what the service said rather
+        // than asserting deleted:true back from our own arguments.
+        const deletion = await this.getHelpdeskService().deleteTicket(businessId, args.ticketId);
+        return { id: args.ticketId, deleted: deletion.success };
       }
       case 'comms_send_broadcast': {
         const result = await this.getCommunications().sendBroadcast({
