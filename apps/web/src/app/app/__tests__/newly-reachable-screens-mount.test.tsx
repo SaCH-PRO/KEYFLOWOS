@@ -105,6 +105,17 @@ beforeEach(() => {
   realFetch = globalThis.fetch;
   // The emptiest honest answer. A screen that needs populated data to mount is
   // a screen that breaks for every new business.
+  //
+  // ONE STUB CANNOT MATCH EVERY ENDPOINT. Some return a bare array, some
+  // `{ items: [] }`. This body satisfies both readings badly on purpose —
+  // /app/automations logs `actItems.filter is not a function` against it,
+  // because `.data` arrives as this object rather than the array its endpoint
+  // really returns (activity.service.ts listForBusiness → findMany). That is a
+  // stub artefact, not a defect; it was checked before being left here.
+  //
+  // The consequence to keep in mind: this proves screens MOUNT, not that they
+  // handle their real payloads. A shape mismatch that throws during render
+  // would be caught; one a screen swallows, as here, would not.
   globalThis.fetch = vi.fn(async () => ({
     ok: true,
     status: 200,
