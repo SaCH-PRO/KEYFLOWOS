@@ -19,7 +19,7 @@
 //   10. Internal Helpers
 // ============================================================================
 
-import { Injectable, Logger, InternalServerErrorException, Optional, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Logger, InternalServerErrorException, NotFoundException, Optional, Inject, forwardRef } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { randomUUID } from 'node:crypto';
 
@@ -1401,20 +1401,40 @@ export class KeyCortexExecutorService {
 
   /**
    * Gateway alias: execute the command attached to an already-approved request.
+   *
+   * `businessId` is the CALLER's tenant, taken from their authenticated session,
+   * and is required. It used to be absent: the proposal was fetched by id alone
+   * and the tenant for execution was then read off the fetched row, so the
+   * object supplied its own authority. Combined with the same hole in
+   * KeyCortexApprovalService, a user of business A could approve and then
+   * execute business B's proposal — against B's data, with the activity notice
+   * pushed to A's room so nobody in B saw it.
+   *
+   * Refuse before any execution, and refuse as not-found so this cannot be used
+   * to probe which proposal ids exist in other tenants.
    */
-  async executeApprovedAction(approvalId: string): Promise<ExecutionRecord> {
+  async executeApprovedAction(businessId: string, approvalId: string): Promise<ExecutionRecord> {
     const start = Date.now();
 
     if (this.approvalOrchestrator) {
       try {
         const before = await this.proposalService?.getById(approvalId);
+        if (!before || !businessId || before.businessId !== businessId) {
+          if (before) {
+            this.logger.warn(
+              `[executeApprovedAction] cross-tenant execution refused: business ${businessId} ` +
+                `tried to execute proposal ${approvalId}, which belongs to ${before.businessId}`,
+            );
+          }
+          throw new NotFoundException('Approval proposal not found');
+        }
         const command = (before?.payload?.commandJson ?? {
           businessId: before?.businessId,
           userId: before?.userId,
         }) as ConnectorCommand;
 
         const executed = await this.approvalOrchestrator.executeApproved({
-          businessId: before?.businessId ?? command.businessId,
+          businessId,
           proposalId: approvalId,
           userId: before?.approvedBy ?? undefined,
         });
@@ -1448,11 +1468,23 @@ export class KeyCortexExecutorService {
     if (this.proposalService) {
       try {
         const proposal = await this.proposalService.getById(approvalId);
+        // Same tenant proof as the orchestrator branch above. Both branches
+        // execute, so guarding only one would leave the hole open on whichever
+        // path happened to be wired.
+        if (!proposal || !businessId || proposal.businessId !== businessId) {
+          if (proposal) {
+            this.logger.warn(
+              `[executeApprovedAction] cross-tenant execution refused: business ${businessId} ` +
+                `tried to execute proposal ${approvalId}, which belongs to ${proposal.businessId}`,
+            );
+          }
+          throw new NotFoundException('Approval proposal not found');
+        }
         if (proposal.status !== 'APPROVED') {
           throw new Error(`Proposal ${approvalId} is not approved`);
         }
         const executed = await this.proposalService.execute(
-          proposal.businessId,
+          businessId,
           approvalId,
           proposal.approvedBy ?? undefined,
           true,

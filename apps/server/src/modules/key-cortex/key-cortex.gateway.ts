@@ -319,7 +319,12 @@ export class KeyCortexGateway
     try {
       client.emit('key:status', { status: 'approval_processing', approvalId: data.approvalId });
 
+      // businessId comes from clientInfo — established at connect time and
+      // verified against membership — NEVER from `data`, which the client
+      // controls. approvalId is still client-supplied, which is exactly why the
+      // service must prove it belongs to this business before deciding it.
       const result = await this.approvalService.approveAction(data.approvalId, {
+        businessId: clientInfo.businessId,
         approvedBy: clientInfo.userId,
         approvedAt: new Date(),
       });
@@ -332,7 +337,7 @@ export class KeyCortexGateway
       });
 
       // Execute the approved action
-      await this.executorService.executeApprovedAction(data.approvalId);
+      await this.executorService.executeApprovedAction(clientInfo.businessId, data.approvalId);
 
       client.emit('key:approval_result', {
         approvalId: data.approvalId,
@@ -362,6 +367,7 @@ export class KeyCortexGateway
 
     try {
       const result = await this.approvalService.rejectAction(data.approvalId, {
+        businessId: clientInfo.businessId,
         rejectedBy: clientInfo.userId,
         rejectedAt: new Date(),
         reason: data.reason || 'User rejected',

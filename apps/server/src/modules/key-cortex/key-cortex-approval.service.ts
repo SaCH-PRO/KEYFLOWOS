@@ -78,32 +78,75 @@ export class KeyCortexApprovalService {
     return this.toApprovalRequest(proposal);
   }
 
-  async approve(requestId: string, decidedBy: string, _note?: string): Promise<KeyCortexApprovalRequest> {
-    // The requestId is now the canonical KeyActionProposal id.
-    const proposal = await this.proposalService.getById(requestId).catch(() => null);
-    if (!proposal) {
+  /**
+   * Load a proposal and PROVE it belongs to the caller's business.
+   *
+   * Every decide path below used to do `getById(requestId)` — an unscoped
+   * findUnique (key-action-proposal.service.ts:110) — and then pass
+   * `proposal.businessId` down as the tenant. The scoped write it called into
+   * does compare businessId, but against a value read off the very row being
+   * checked, so the comparison was `row.businessId === row.businessId`. A check
+   * that cannot fail.
+   *
+   * The tenant Prisma extension could not cover for it either: the only caller
+   * is the WebSocket gateway, and TenantInterceptor's AsyncLocalStorage exists
+   * only on the HTTP path, so there was no ambient business to inject.
+   *
+   * NotFound rather than Forbidden, deliberately — a Forbidden confirms the id
+   * exists and turns this into an oracle for enumerating another tenant's
+   * proposal ids.
+   */
+  private async loadWithinBusiness(
+    businessId: string,
+    requestId: string,
+  ): Promise<KeyActionProposalData> {
+    if (!businessId) {
       throw new NotFoundException('Approval request not found');
     }
-    const approved = await this.proposalService.approve(proposal.businessId, requestId, decidedBy);
+    const proposal = await this.proposalService.getById(requestId).catch(() => null);
+    if (!proposal || proposal.businessId !== businessId) {
+      if (proposal) {
+        this.logger.warn(
+          `[Approval] cross-tenant decision refused: business ${businessId} tried to decide ` +
+            `proposal ${requestId}, which belongs to ${proposal.businessId}`,
+        );
+      }
+      throw new NotFoundException('Approval request not found');
+    }
+    return proposal;
+  }
+
+  async approve(
+    businessId: string,
+    requestId: string,
+    decidedBy: string,
+    _note?: string,
+  ): Promise<KeyCortexApprovalRequest> {
+    // The requestId is now the canonical KeyActionProposal id.
+    await this.loadWithinBusiness(businessId, requestId);
+    const approved = await this.proposalService.approve(businessId, requestId, decidedBy);
     return this.toApprovalRequest(approved);
   }
 
-  async reject(requestId: string, decidedBy: string, note?: string): Promise<KeyCortexApprovalRequest> {
-    const proposal = await this.proposalService.getById(requestId).catch(() => null);
-    if (!proposal) {
-      throw new NotFoundException('Approval request not found');
-    }
-    const rejected = await this.proposalService.reject(proposal.businessId, requestId, decidedBy, note);
+  async reject(
+    businessId: string,
+    requestId: string,
+    decidedBy: string,
+    note?: string,
+  ): Promise<KeyCortexApprovalRequest> {
+    await this.loadWithinBusiness(businessId, requestId);
+    const rejected = await this.proposalService.reject(businessId, requestId, decidedBy, note);
     return this.toApprovalRequest(rejected);
   }
 
-  async autoApprove(requestId: string, reason: string): Promise<KeyCortexApprovalRequest> {
-    const proposal = await this.proposalService.getById(requestId).catch(() => null);
-    if (!proposal) {
-      throw new NotFoundException('Approval request not found');
-    }
+  async autoApprove(
+    businessId: string,
+    requestId: string,
+    reason: string,
+  ): Promise<KeyCortexApprovalRequest> {
+    const proposal = await this.loadWithinBusiness(businessId, requestId);
     const approved = await this.proposalService.approve(
-      proposal.businessId,
+      businessId,
       requestId,
       'system_auto_approve',
     );
@@ -111,15 +154,16 @@ export class KeyCortexApprovalService {
     return this.toApprovalRequest(approved);
   }
 
-  async escalate(requestId: string, reason: string): Promise<KeyCortexApprovalRequest> {
-    const proposal = await this.proposalService.getById(requestId).catch(() => null);
-    if (!proposal) {
-      throw new NotFoundException('Approval request not found');
-    }
+  async escalate(
+    businessId: string,
+    requestId: string,
+    reason: string,
+  ): Promise<KeyCortexApprovalRequest> {
+    const proposal = await this.loadWithinBusiness(businessId, requestId);
     // Canonical proposals do not have an escalated status; keep it REJECTED
     // and record the escalation in the failure reason for audit.
     const rejected = await this.proposalService.reject(
-      proposal.businessId,
+      businessId,
       requestId,
       'system_escalation',
       `Escalated: ${reason}`,
@@ -240,20 +284,26 @@ export class KeyCortexApprovalService {
     return true;
   }
 
-  // Gateway-compatible aliases
+  // Gateway-compatible aliases.
+  //
+  // `businessId` is REQUIRED and must come from the caller's authenticated
+  // session — for the WebSocket gateway that is `clients.get(socket.id)
+  // .businessId`, established at connect time and verified against membership.
+  // It must never be read out of the inbound message body, which the client
+  // controls.
   async approveAction(
     requestId: string,
-    opts: { approvedBy: string; approvedAt?: Date; reason?: string },
+    opts: { businessId: string; approvedBy: string; approvedAt?: Date; reason?: string },
   ): Promise<KeyCortexApprovalRequest> {
-    const result = await this.approve(requestId, opts.approvedBy, opts.reason);
+    const result = await this.approve(opts.businessId, requestId, opts.approvedBy, opts.reason);
     return { ...result, actionDescription: result.description || requestId };
   }
 
   async rejectAction(
     requestId: string,
-    opts: { rejectedBy: string; rejectedAt?: Date; reason?: string },
+    opts: { businessId: string; rejectedBy: string; rejectedAt?: Date; reason?: string },
   ): Promise<KeyCortexApprovalRequest> {
-    const result = await this.reject(requestId, opts.rejectedBy, opts.reason);
+    const result = await this.reject(opts.businessId, requestId, opts.rejectedBy, opts.reason);
     return { ...result, actionDescription: result.description || requestId };
   }
 
