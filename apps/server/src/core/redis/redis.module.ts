@@ -27,17 +27,28 @@ import { RedisService } from './redis.service';
  * machine. It only bites where nothing is listening — CI, or a box where Redis
  * is down.
  *
- * THE PART THAT MATTERS MORE THAN CI
- * ----------------------------------
- * A blocking connect means that if Redis is down, the API CANNOT RESTART. Not
- * "background jobs stop" — the whole server fails to come up, during exactly
- * the incident when you are trying to bring it back. lazyConnect turns that
- * into what the docs already promised: the API serves, and the features that
- * need Redis are the ones that suffer.
+ * IT WAS NOT THE EAGER CONNECT, AND lazyConnect ALONE DID NOT FIX IT
+ * ------------------------------------------------------------------
+ * That was the first diagnosis and it was wrong. With lazyConnect added, boot
+ * still never completed in 90 seconds against a dead Redis, because the socket
+ * was merely deferred to the first command — and the first command is the one
+ * that hangs.
+ *
+ * The real mechanism is below, at enableOfflineQueue. In short: a command
+ * issued while Redis is unreachable never settles at all, so
+ * `await this.redis.ping()` in TemporalFlowMemoryQueueService.onModuleInit
+ * (temporal-flow-memory.queue.service.ts:34) parks forever, and every provider
+ * after it in the graph waits behind that one await. Its try/catch was already
+ * written to disable the worker and continue; it had simply never been reached.
+ *
+ * WHY THIS MATTERS MORE THAN CI
+ * ----------------------------
+ * If Redis is down, the API CANNOT RESTART. Not "background jobs stop" — the
+ * whole server fails to come up, during exactly the incident when you are
+ * trying to bring it back.
  *
  * The default URL is KEPT. It is right for local development and matches
- * docker-compose; the defect was never the value, it was connecting eagerly and
- * retrying forever on the way up.
+ * docker-compose; the defect was never the value.
  */
 @Global()
 @Module({
@@ -54,12 +65,57 @@ import { RedisService } from './redis.service';
         }
 
         const client = new IORedis(url, {
+          // BullMQ requires this to be null and checks nothing else
+          // (bullmq redis-connection.js:44,78), so it stays.
           maxRetriesPerRequest: null,
           enableReadyCheck: true,
-          // The whole fix. Construction no longer opens a socket, so a Redis
-          // that is missing or down cannot hold the boot open; the connection
-          // is made on first use and retried in the background from there.
+          // Defers the socket to first use. Necessary but NOT sufficient on its
+          // own — measured, ping() was still pending at 20s with only this.
           lazyConnect: true,
+          // THE LINE THAT ACTUALLY UNBLOCKS BOOT.
+          //
+          // With maxRetriesPerRequest: null and a retryStrategy that always
+          // returns a number, both of ioredis's give-up paths are disabled: it
+          // reconnects forever, so close() never runs, so the command queue is
+          // never flushed with an error (ioredis event_handler.js:187-215).
+          // A command issued while Redis is unreachable therefore sits in the
+          // offline queue and its promise NEVER SETTLES — neither resolving nor
+          // rejecting.
+          //
+          // That is what hung the boot. temporal-flow-memory.queue.service.ts:34
+          // does `await this.redis.ping()` in onModuleInit and wraps it in a
+          // try/catch that logs "Redis unavailable; worker disabled" and
+          // returns — textbook degradation, and unreachable, because the await
+          // never came back. Every provider after it in the module graph waited
+          // behind that one line.
+          //
+          // Measured against a dead port: default options -> still pending at
+          // 15s; with this -> rejects immediately with "Stream isn't writeable".
+          //
+          // APPLIED UNCONDITIONALLY, after measuring both ways.
+          //
+          // The tempting version scopes this to "REDIS_URL unset", on the
+          // reasoning that a configured Redis is meant to be there and
+          // buffering across a brief restart is desirable. Measured, that
+          // version leaves the worse case broken: with REDIS_URL SET and
+          // nothing listening, boot still never completed in 90s.
+          //
+          // And that is the case that matters. An unset variable is a CI or a
+          // fresh checkout. A configured Redis that is down is production
+          // during an incident — the moment you are trying to restart the API
+          // and it refuses to come up because its cache is missing.
+          //
+          // Unconditional, boot completes in 6.7s and prints "Redis
+          // unavailable; temporal flow memory worker disabled" — the
+          // degradation the code was already written for, executing for the
+          // first time.
+          //
+          // The cost is real and accepted: during an outage commands reject
+          // rather than buffering silently until reconnect. That is the point.
+          // Every call site here already wraps Redis work in try/catch built
+          // for a rejection; none of them were built for a promise that never
+          // settles, because nobody writes code for that.
+          enableOfflineQueue: false,
           retryStrategy: (times: number) => {
             const delay = Math.min(times * 50, 2000);
             return delay;
