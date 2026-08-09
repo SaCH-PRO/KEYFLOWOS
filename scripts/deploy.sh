@@ -92,25 +92,61 @@ say "Deploying ${GIT_COMMIT:0:12} — $(git log -1 --format=%s)"
 # escape hatch is explicit and has to be typed on purpose.
 if [ "${DEPLOY_SKIP_CI_CHECK:-0}" = "1" ]; then
   printf 'WARNING: DEPLOY_SKIP_CI_CHECK=1 — deploying %s without checking CI.\n' "${GIT_COMMIT:0:12}"
-elif ! command -v gh >/dev/null 2>&1; then
-  die "gh is not installed, so CI status for ${GIT_COMMIT:0:12} cannot be verified.
-     Install it (https://cli.github.com) and run 'gh auth login', or deploy
-     deliberately unverified with:  DEPLOY_SKIP_CI_CHECK=1 $0 $*"
 else
   say "Checking CI for ${GIT_COMMIT:0:12}"
-  # --jq keeps this to one field; a commit CI has never seen yields an empty
-  # string, which is treated as "not verified" rather than "not failed".
-  CI_STATE="$(gh api "repos/{owner}/{repo}/commits/$GIT_COMMIT/check-runs" \
-      --jq '[.check_runs[] | select(.name == "Run Tests")] | first | .conclusion' 2>/dev/null || true)"
+
+  # curl FIRST, gh only as a fallback.
+  #
+  # The first version required `gh`, which is not on this box and was never
+  # going to be — the runbook's own opening fact is that there is no node on the
+  # host. So the very first real deploy hit "gh is not installed" and the only
+  # way forward was DEPLOY_SKIP_CI_CHECK=1.
+  #
+  # A gate that can only be satisfied by bypassing it does not protect anything.
+  # It teaches the bypass, and the third time someone types that flag they stop
+  # reading what it says. Failing closed was right; requiring a tool the target
+  # environment does not have was not.
+  #
+  # The repository is public, so the check-runs endpoint answers unauthenticated
+  # (verified: HTTP 200). curl is on every box that can pull a Docker image.
+  CI_STATE=""
+  CI_API="https://api.github.com/repos/SaCH-PRO/KEYFLOWOS/commits/$GIT_COMMIT/check-runs"
+  if command -v curl >/dev/null 2>&1; then
+    # No jq either — grep the one field out. Fragile-looking, but the
+    # alternative is another dependency this box does not have.
+    # In the response "conclusion" follows its check-run's "name" about
+    # sixteen comma-fields later, so: split on commas, find the Run Tests
+    # name, take the first conclusion after it. Verified against a real
+    # commit (-> "success") and an all-zero SHA CI has never seen (-> empty,
+    # which refuses rather than guesses).
+    CI_STATE="$(curl -sS -m 20 -H 'Accept: application/vnd.github+json' "$CI_API" 2>/dev/null \
+      | tr ',' '\n' \
+      | grep -A 20 '"name": *"Run Tests"' \
+      | grep -m1 '"conclusion"' \
+      | sed 's/.*"conclusion": *"\([^"]*\)".*/\1/' || true)"
+  fi
+  # A 422 body ("No commit found for SHA") is not a conclusion. Anything that
+  # is not a bare word is treated as unreadable, so the refusal message says
+  # "could not read a result" rather than quoting GitHub's error JSON at someone
+  # who is trying to ship.
+  case "$CI_STATE" in
+    *[!a-z_]*) CI_STATE="" ;;
+  esac
+
+  if [ -z "$CI_STATE" ] && command -v gh >/dev/null 2>&1; then
+    CI_STATE="$(gh api "repos/{owner}/{repo}/commits/$GIT_COMMIT/check-runs"         --jq '[.check_runs[] | select(.name == "Run Tests")] | first | .conclusion' 2>/dev/null || true)"
+  fi
+
   case "$CI_STATE" in
     success)
       say "CI: Run Tests passed"
       ;;
     ''|null)
-      die "no 'Run Tests' check-run found for ${GIT_COMMIT:0:12}.
-     Either CI has not finished, or it never ran for this commit — a skipped job
-     reports nothing at all, which is indistinguishable from a green one here.
-     Wait for it, or:  DEPLOY_SKIP_CI_CHECK=1 $0 $*"
+      die "could not read a 'Run Tests' result for ${GIT_COMMIT:0:12}.
+     Either CI has not finished, it never ran for this commit, or this box
+     cannot reach api.github.com. A skipped job reports nothing at all, which is
+     indistinguishable from a green one here — so this refuses rather than
+     guesses. Wait for CI, or:  DEPLOY_SKIP_CI_CHECK=1 $0 $*"
       ;;
     *)
       die "CI 'Run Tests' concluded '$CI_STATE' for ${GIT_COMMIT:0:12}.
