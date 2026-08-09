@@ -6,21 +6,23 @@
  * forever and fails only when the line is reached — inside a try/catch, in a
  * background pass, at three in the morning.
  *
- * KeyCortexContextV2Service is the reason this exists. All EIGHT of its context
- * getters call methods that do not exist on the services they are cast from:
+ * KeyCortexContextV2Service is the reason this exists, and is now FIXED — the
+ * tense matters, because a gate whose header describes a repaired defect as
+ * present is the same lie it was built to catch.
  *
- *   this.temporal (TemporalFlowMemoryService)  getRecentMemories, getDetectedPatterns
- *   this.inbox    (KeyInboxIntelligenceService) getUnreadThreadCount, getUnreadMessageCount,
- *                                               getUrgentMessages, getThreadsRequiringAction,
- *                                               getAverageResponseTime, getAiSummary
+ * What it was: all eight of its context getters called methods that did not
+ * exist on the services they were cast from. TemporalFlowMemoryService never
+ * had getRecentMemories (that is TemporalAdapterService) or getDetectedPatterns
+ * (that is nothing); KeyInboxIntelligenceService is a reporting service and
+ * never had any of the six inbox methods. Every one threw, hourly, in
+ * production. The rejections were absorbed and KEY reasoned from an empty
+ * context that was then cached to Redis, so the emptiness outlived the failure.
  *
- * Every one throws, every one is caught, and KEY assembles its context with no
- * temporal memory, no inbox, no CRM, no commerce, no bookings, no autopilot, no
- * communications and no device signal. The flagship feature degrades to nothing
- * and reports success. `getRecentMemories` does exist — on TemporalAdapterService,
- * taking an object — and the sibling key-cortex-context-assembly.service.ts
- * injects that adapter and calls it correctly. One context service is right and
- * the other is wrong, and nothing said so for months.
+ * The repair was not method-by-method. Deleting the 47 casts first and letting
+ * tsc enumerate the wreckage turned "find the bugs" into a printed list of 32,
+ * each naming its model and field — 10 wrong Contact columns, 4 impossible
+ * relations, 6 enum casings. That is the technique this gate exists to make
+ * available: a cast is what stops the compiler doing that work for you.
  *
  * THE NEAR-MISS NAMES ARE THE TELL
  * --------------------------------
