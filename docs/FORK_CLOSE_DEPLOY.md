@@ -1,258 +1,217 @@
-# Deploying `merge/fork-close` to production
+# Deploying KEYFLOWOS to production
 
-Written 2026-08-08, after closing the 2026-07-08 fork. Everything here that could
-be verified without touching the server has been. What remains needs the box.
+Written as a plan on 2026-08-08. Rewritten on 2026-08-09, after the deploy, to
+record what actually happened — including the two things the plan got wrong and
+the three hazards it did not know about.
 
-**Read §1 before anything else. It is the step that can lose data.**
+**Status: done.** Production runs `main`. The fork is closed and both branches
+are retired.
 
 ---
 
-## What production is, and what it is about to receive
+## The deploy that happened
 
 | | |
 |---|---|
-| Host | Hetzner VPS `37.27.27.0`, `/opt/keyflowos`, Docker Compose behind Caddy |
-| Running | `origin/hotfix/tenant-security-2026-08` (integration's lineage) |
-| Migration history ends at | `20260722224337_contract_clause_analysis` |
-| Tables | 443 |
-| Deploying | `merge/fork-close` — main + integration, fully merged |
+| When | 2026-08-09 13:33 UTC |
+| Commit | `8394e9529c5e` |
+| From | `hotfix/tenant-security-2026-08` @ `4e1b64a` (26 July, 221 commits behind) |
+| Migrations applied | 6, after recording `0_baseline` as applied |
+| Result | 2,174 routes mapped, zero errors, `/healthz` reporting the built commit |
 
-**Seven** migrations are pending against production. Deploying without §2 fails —
-safely, before traffic, because `deploy.sh` dies on a failed `migrate deploy` —
-but it fails.
-
-> Updated 2026-08-08 after merging main's 8 newer commits (29 nav doors, the
-> fabricated-screen gate, and `20260808140000_bank_transaction_external_id_unique`).
-> The migration set went 13 → 14 and the pending set 6 → 7. Everything below was
-> recomputed against 14; the earlier numbers are dead.
+Verified after: 31 applied migrations, 443 tables, `conversation_threads` and
+`conversation_messages` confirmed dropped via `to_regclass`, the partial
+expression index present, `user_identities` and `risc_events` created, the
+genome gate string in the shipped web bundle, `/` 200 in 175ms.
 
 ---
 
-## 1. The destructive migration — CHECK THIS FIRST
+## What the plan got wrong
 
-`20260806130000_retire_conversation_store` ends with:
+**The baseline did not need regenerating.** The plan said not to carry
+`0_baseline` into the merge because it was generated from `main`'s schema and
+would be stale against the merged one. Measured: `migrate deploy` against a
+virgin database applied all 14 migrations cleanly and produced 443 tables, and
+`migrate diff --to-schema-datamodel` reported **"No difference detected."** The
+migration set already reproduced the merged schema exactly. Nothing was
+regenerated.
 
-```sql
-DROP TABLE IF EXISTS "conversation_messages";
-DROP TABLE IF EXISTS "conversation_threads";
-```
+**The destructive migration destroyed nothing.** `20260806130000_retire_conversation_store`
+drops `conversation_threads` and `conversation_messages`, and neither inbox
+migration contains a single `INSERT` — so the plan flagged possible data loss.
+It held one thread and one message: channel `whatsapp`, number `18685559999`
+(`555` is the reserved fictional prefix), created 2026-07-26 at 18:36 — the day
+of the previous deploy — never resolved in the fourteen days since, on the
+`KEYFLOWOS` business itself. `key_inbox_threads` already held an equivalent
+thread and message for the same business. A smoke test, already duplicated.
 
-Neither that migration nor `20260806120000_merge_omnichannel_inboxes` contains a
-single `INSERT`. **Nothing copies this data into `key_inbox_*` first.** The
-migration also NULLs `message_intakes.thread_id` for every row whose thread is
-not already in `key_inbox_threads`.
-
-On `main` these tables were presumably already dead. On production they were
-written by MessageIntakeOrchestrator, so they may hold live inbox history.
-
-```bash
-ssh root@37.27.27.0
-docker exec keyflowos-db-1 psql -U postgres -d keyflowos -c \
-  "SELECT (SELECT count(*) FROM conversation_threads)  AS threads,
-          (SELECT count(*) FROM conversation_messages) AS messages,
-          (SELECT count(*) FROM message_intakes
-             WHERE thread_id IS NOT NULL
-               AND NOT EXISTS (SELECT 1 FROM key_inbox_threads t
-                                WHERE t.id = message_intakes.thread_id)) AS intakes_to_be_orphaned;"
-```
-
-- **All zero** → proceed to §2.
-- **Any non-zero** → STOP. The deploy discards that history and silently detaches
-  those intakes. Decide deliberately: write a data-migration first, or accept the
-  loss on the record. Do not discover this afterwards.
+Both were only knowable by measuring. Neither was knowable by reading.
 
 ---
 
-## 2. Reconcile the migration history
+## The procedure, as corrected
 
-Production has never seen `0_baseline`. It holds **433 unguarded `CREATE TABLE`
-statements** against a database that already has 443 tables, so `migrate deploy`
-hits `42P07`, records a failed migration, and every future deploy dies on
-`P3009`.
+### 0. Facts about the box you will otherwise discover the hard way
 
-`0_baseline` must be marked applied *without running*. That assertion is only
-true if production's schema already matches what `0_baseline` describes — so
-check before asserting it.
+- **No `node` on the host.** Prisma runs inside the `api` service container:
+  `docker compose --env-file .env.production -f docker-compose.production.yml run --rm -T api pnpm --filter @keyflow/db exec prisma <cmd>`
+- **Migrations are baked into the image at build time** — there is no volume
+  mount. A migration the running image does not contain cannot be resolved
+  against. This is why the build has to happen before the resolve.
+- **`/opt/keyflowos` is a single-branch clone.** A bare `git fetch` fails
+  looking for a long-deleted ref. Always `git fetch origin <branch>`.
+- **Postgres credentials are `keyflow`/`keyflow`, not `postgres`.** Read them
+  with `docker exec keyflowos-db-1 env | grep -E "^POSTGRES_(USER|DB)="` — that
+  pattern deliberately excludes the password.
+- The app container is `keyflowos-api-1`. The compose service is `api`.
 
-### 2a. Back up first, and verify the backup
+### 1. Check what a destructive migration would destroy
+
+Read every pending migration for `DROP TABLE`, `DROP COLUMN` and `UPDATE ... SET
+x = NULL`. For each, count the rows first. Then check whether the data already
+exists in its replacement — that is the question that actually settles it, and
+it is one query.
+
+### 2. Back up, and verify the backup
 
 ```bash
-ssh root@37.27.27.0
-cd /opt/keyflowos
-docker exec keyflowos-db-1 pg_dump -U postgres keyflowos > /root/pre-forkclose-$(date +%F-%H%M%S).sql
-grep -c "^CREATE TABLE" /root/pre-forkclose-*.sql     # expect ~443, not 0
+docker exec keyflowos-db-1 pg_dump -U keyflow keyflow > /root/pre-deploy-$(date +%F-%H%M%S).sql
+grep -c "^CREATE TABLE" /root/pre-deploy-*.sql     # expect ~443, not 0
 ```
 
 A dump that exists is not a dump that worked. The count is the check.
 
-### 2b. Gate: is the delta exactly what is expected?
-
-I built a production-equivalent database locally (only the 8 migrations
-production already has) and diffed it against the merged schema. **This is the
-complete expected delta.** Anything else appearing in production's diff is a
-signal to stop.
-
-```
-[+] Added tables      user_identities, risc_events
-[-] Removed tables    conversation_messages, conversation_threads   <- see §1
-[*] key_inbox_messages   + ai_approved, ai_draft, intent, raw_payload, role, sentiment
-[*] key_inbox_threads    + assigned_role, channel_id, resolved_at
-                         + index (contact_id), + FK (contact_id)
-[*] message_intakes      FK on thread_id dropped and re-added
-[*] risc_events          + unique (jti), + index (received_at), + index (provider_subject)
-[*] user_identities      + index (user_id), + unique (provider, provider_subject), + FK (user_id)
-[*] users                + meta_data
-```
-
-Run the same diff against the real database:
+### 3. Check out the ref, then run the name gate
 
 ```bash
-cd /opt/keyflowos/packages/db
-npx prisma migrate diff \
-  --from-url "$DATABASE_URL" \
-  --to-schema-datamodel ./prisma/schema.prisma
+cd /opt/keyflowos && git fetch origin main && git checkout -B main FETCH_HEAD
 ```
 
-Compare it line by line with the block above. Extra `Removed column`, `Removed
-table` or `Dropped` entries beyond the two conversation tables mean production
-has drifted from what the merged schema expects — stop and bring the output back.
-
-**Two honest limits on that expected block.**
-
-*It is a model of production, not production.* It was produced by applying the 8
-migrations production already has to an empty database. Those 8 descend from
-main's `0_baseline`; production's real schema was built by integration's 24
-migrations. The two are believed equivalent — both land on 443 tables — but that
-is the assumption `migrate resolve` is about to make permanent, which is exactly
-why the diff is run against the real database before recording anything.
-
-*`migrate diff` cannot see partial or expression indexes.* Main's new migration
-creates
-
-```sql
-CREATE UNIQUE INDEX IF NOT EXISTS "bank_transactions_account_external_id_key"
-  ON "bank_transactions" ("account_id", (("rawData"->>'externalId')))
-  WHERE "rawData"->>'externalId' IS NOT NULL;
-```
-
-Prisma's datamodel has no way to express that, so it appears in **neither** the
-expected delta nor `migrate diff` output — before or after it is applied. Confirm
-it landed directly instead:
+If `0_baseline` is pending against a populated database, it will run its 433
+unguarded `CREATE TABLE`s, hit `42P07`, record a failed migration, and block
+every future deploy with P3009. It must be recorded as applied without running —
+but only if that is true. Prove it:
 
 ```bash
-docker exec keyflowos-db-1 psql -U postgres -d keyflowos -c \
+grep -oE '^CREATE TABLE "[^"]+"' packages/db/prisma/migrations/0_baseline/migration.sql \
+  | sed 's/CREATE TABLE "//;s/"$//' | sort -u > /tmp/baseline-tables.txt
+docker exec keyflowos-db-1 psql -U keyflow -d keyflow -tAc \
+  "select table_name from information_schema.tables where table_schema='public'" \
+  | tr -d '\r' | sort -u > /tmp/prod-tables.txt
+comm -23 /tmp/baseline-tables.txt /tmp/prod-tables.txt
+```
+
+Empty output means production contains every table the baseline describes. On
+2026-08-09: 433 of 433 present, production a strict superset at 443.
+
+Validate the extraction before trusting it — run it against a database built
+from the merged migrations, where it should correctly report the two tables
+`retire_conversation_store` drops. A check that cannot report a known absence
+proves nothing about an unknown one.
+
+### 4. Build, then resolve, then deploy
+
+```bash
+export GIT_COMMIT=$(git rev-parse HEAD)
+docker compose --env-file .env.production -f docker-compose.production.yml build api
+docker compose --env-file .env.production -f docker-compose.production.yml run --rm -T api \
+  pnpm --filter @keyflow/db exec prisma migrate resolve --applied 0_baseline
+docker compose --env-file .env.production -f docker-compose.production.yml run --rm -T api \
+  pnpm --filter @keyflow/db exec prisma migrate status
+./scripts/deploy.sh main
+```
+
+Setting `GIT_COMMIT` to the value `deploy.sh` will use means its build hits the
+cache rather than repeating an eight-minute compile.
+
+`migrate status` before the resolve is worth the thirty seconds: it states
+Prisma's own view of the history, and if that disagrees with your analysis, stop.
+Before: "The last common migration is: null". After: the real one.
+
+The 17 rows naming migrations that no longer exist locally are expected — `main`
+squashed them into `0_baseline`, and `migrate deploy` ignores applied rows it
+cannot find.
+
+### 5. Verify
+
+```bash
+curl -s https://api.keyflowos.com/healthz          # commit must be what you built
+docker logs keyflowos-api-1 --since 10m | grep -ciE "Mapped \{"   # routes, not zero
+docker logs keyflowos-api-1 --since 10m | grep -iE "error|fatal"  # want nothing
+```
+
+Then check anything `migrate diff` cannot see. Prisma's datamodel cannot express
+partial or expression indexes, so they appear in neither the expected delta nor
+the diff output, before or after:
+
+```bash
+docker exec keyflowos-db-1 psql -U keyflow -d keyflow -c \
   "\di bank_transactions_account_external_id_key"
 ```
 
-`scripts/prepare-production-db.ps1` automates this, but its gate was calibrated
-for a **one**-migration delta (`flow_sessions.user_id`) and still refers to
-Render. Against this branch it will refuse and invite `-Force`. Prefer the manual
-diff above, or recalibrate the script first.
-
-### 2c. Record the baseline
-
-Only after 2b matches:
-
-```bash
-cd /opt/keyflowos/packages/db
-npx prisma migrate resolve --applied 0_baseline
-npx prisma migrate status        # 0_baseline applied; 6 still pending
-```
-
-The six that remain are meant to run:
-
-```
-20260726160935_add_risc_user_identity
-20260726161845_add_user_metadata
-20260803190000_flow_session_user_scope
-20260806120000_merge_omnichannel_inboxes
-20260806130000_retire_conversation_store        <- the destructive one, see §1
-20260808140000_bank_transaction_external_id_unique
-```
-
-The 17 rows in `_prisma_migrations` naming migrations that no longer exist in the
-repo are expected — main squashed them into `0_baseline`. `migrate deploy`
-ignores unknown applied rows.
-
 ---
 
-## 3. Deploy
+## Hazards discovered on 2026-08-09
 
-```bash
-cd /opt/keyflowos
-./scripts/deploy.sh merge/fork-close
-```
+**Hand-building an image before a deploy breaks rollback tagging.** Building
+`api` by hand took the `:latest` tag off the running container's image; the
+containerd store then collected it, while the container kept serving from layers
+that outlived it. `deploy.sh` inspects the running container for an image ID to
+tag, got a sha256 that no longer resolved, and under `set -euo pipefail` the
+deploy died — at the one step whose entire purpose is making failure survivable.
+`docker commit` could not snapshot it either; the parent content was gone too.
 
-`deploy.sh` backs up, verifies the dump, tags rollback images from the *running*
-containers, migrates before routing traffic, and asserts `/healthz` reports the
-commit it built. It has no migration-reconciliation logic, which is why §2 is a
-separate manual step.
+Fixed in `8394e952`: tagging now reports rather than decides, falls back to
+`docker commit`, and can never abort a deploy. The step is a convenience, and it
+should not be able to stop a deploy it cannot help.
 
----
+**An image tag was never a sufficient rollback anyway.** Once migrations have
+run, the previous build against the new schema is its own kind of broken — the
+old code writes to `conversation_threads`, which no longer exists. A real
+rollback is the dump plus a rebuild from the previous ref.
 
-## 4. Verify
-
-```bash
-# the deployed commit is the one we built, not "unknown"
-curl -s https://<host>/healthz | jq '{commit, status}'
-
-# the genome gate is wired again
-curl -s https://<host>/app | grep -c "Checking your Business Genome"
-
-# tenant isolation: the cross-tenant probe must land in the CALLER's business
-```
-
-Re-run the cross-business write probe used on 2026-08-07. The row must appear in
-the caller's own business, not the target's.
-
-Then fast-forward:
-
-```bash
-git checkout main && git merge --ff-only merge/fork-close && git push origin main
-git push origin --delete integration/2026-07-consolidation hotfix/tenant-security-2026-08
-```
+**Production is single-tenant.** One business, one user, one membership. A
+cross-tenant probe cannot demonstrate anything here; the guard specs on the
+deployed commit are the stronger evidence.
 
 ---
 
 ## Rollback
 
-Before §3: `git checkout main`, nothing has changed.
+Before `deploy.sh` starts containers: nothing has changed. Walk away.
 
-After §3: the `:rollback` image tags `deploy.sh` created, under a minute. If
-migrations already ran, restore the §2a dump — this is the only reason that dump
-must be verified rather than assumed.
+After, code only:
+
+```bash
+docker tag keyflowos-web:rollback keyflowos-web:latest
+docker compose --env-file .env.production -f docker-compose.production.yml up -d web
+```
+
+After, with migrations applied — the real path:
+
+```bash
+git checkout <previous-ref> && export GIT_COMMIT=$(git rev-parse HEAD)
+docker compose --env-file .env.production -f docker-compose.production.yml build api web
+docker compose --env-file .env.production -f docker-compose.production.yml exec -T db \
+  sh -c 'psql -U "$POSTGRES_USER" "$POSTGRES_DB"' < /root/pre-deploy-<stamp>.sql
+docker compose --env-file .env.production -f docker-compose.production.yml up -d api web
+```
+
+Slower than a tag swap. Complete, which a tag swap is not.
 
 ---
 
-## What is already verified, so you do not re-check it
+## Gates that must be green before deploying
 
-| Check | Result |
+| Gate | What it catches |
 |---|---|
-| `pnpm install --frozen-lockfile` | exit 0 |
-| `pnpm typecheck --continue` | 7/7 workspaces, exit 0 |
-| `apps/server` vitest | 357 files, 3,256 tests, exit 0 |
-| `apps/web` vitest | 13 files, 132 tests, exit 0 |
-| Six guard specs | unmodified, passing |
-| `migrate deploy` → empty database | exit 0, 443 tables |
-| `migrate diff` → merged schema | "No difference detected" |
-| `commonjs-compat` | passing — the server can `require()` every dependency |
+| `pnpm typecheck --continue` | the `--continue` matters: turbo stops at the first failure and hides the rest |
+| `apps/server` vitest | 3,304 tests including the boot gate |
+| `apps/web` vitest | mount gate, nav, fabricated screens, tool routes |
+| `pnpm install --frozen-lockfile` | a lockfile override with no `package.json` entry may be load-bearing |
 
-`packages/{db,api,shared,ui}` define no test script; nothing was skipped there.
+`check-tool-routes` used to be a standalone script outside CI, which is how
+twelve broken tool routes reached a green pipeline. It is a spec now.
 
-**Lint is red — 8 errors — and was already red on `main`.** Seven are in files
-byte-identical to main under an identical eslint config; the eighth is in a file
-integration added. Not a merge regression, and not worth changing React effect
-semantics on the eve of a deploy.
-
-## Known, deliberate, not blockers
-
-- `execute_custom_logic` (tier 3, model-authored JS with a local `spawn` fallback
-  when E2B is unconfigured) is reachable by `operator` only. integration had it
-  on `general`, the role attached to every chat request.
-- `KeyContextualSuggestions` and `ComposeFab` lose their components and imports
-  together, as part of integration's V2 chat work. A deliberate drop, unlike the
-  genome gate, whose hook survived orphaned — which is what identified that one
-  as accidental.
-- `/keystore/admin/*` is reachable by any member under both resolutions. Neither
-  side checks an admin or owner role on a controller named `admin`. Pre-existing;
-  worth a follow-up.
+**Never read a build's exit code through a pipe.** `pnpm typecheck | tail`
+returns tail's status. Two runs looked green here that were not.
