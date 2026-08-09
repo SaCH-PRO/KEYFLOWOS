@@ -372,7 +372,10 @@ export function useAppLayout(): AppLayoutState {
 
   const handleLogout = useCallback(async () => {
     try {
-      await apiPost("/identity/logout", {});
+      // apiPost takes ONE options object; apiPatch two lines up is positional.
+      // That asymmetry is the whole bug — TS2554, which skipped every downstream
+      // CI job and blocked the deploy.
+      await apiPost({ path: "/identity/logout", body: {} });
     } catch {
       // Best-effort server-side revocation. Always clear local state so the
       // user is not trapped if the API is unreachable.
