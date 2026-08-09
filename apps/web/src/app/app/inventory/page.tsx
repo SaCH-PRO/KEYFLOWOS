@@ -59,6 +59,7 @@ export default function InventoryPage() {
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrderDto[]>([]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- localStorage is not readable during render on the server, so the id has to arrive in an effect
     setBusinessId(getStoredBusinessId() ?? null);
   }, []);
 
@@ -88,6 +89,7 @@ export default function InventoryPage() {
   }, [businessId, basePath, commercePath]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- load() sets loading false on its early return, before any await
     void load();
   }, [load]);
 

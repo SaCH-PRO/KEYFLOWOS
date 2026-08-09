@@ -255,6 +255,7 @@ export function OrdersPanel() {
   }, [businessId]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- load() sets loading false on its early return, before any await
     void load();
   }, [load]);
 

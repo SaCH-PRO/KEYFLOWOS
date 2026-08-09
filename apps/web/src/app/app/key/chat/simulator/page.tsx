@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
-import { KeyChatProvider, useKeyChat, useKeyChatActions } from "@/components/key/chat";
+import { useState, useCallback, useRef } from "react";
+import { KeyChatProvider, useKeyChat } from "@/components/key/chat";
 import type { OnboardingCardData } from "@/components/key/chat/types";
 import type { FlowPendingConfirmation } from "@/lib/client";
 import { KeyFullChatShell } from "@/components/key/chat/key-full-chat-shell";
@@ -9,8 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { 
   Play, Pause, FastForward, RotateCcw, Bug, 
-  Terminal, Activity, MessageSquare, Dna, Zap,
-  CheckCircle, XCircle, AlertTriangle, Radio
+  Terminal, Activity, MessageSquare, Dna, Zap, XCircle, AlertTriangle, Radio
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 

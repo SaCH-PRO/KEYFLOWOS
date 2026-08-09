@@ -9,7 +9,6 @@ import { getStoredBusinessId } from "@/lib/workspace";
 import { transcribeKeyflowSpeech } from "@/lib/client";
 import { useKeyChat, KeyChatPanel, useKeyChatActions, type CopilotModule } from "@/components/key/chat";
 import { fetchOnboardingState } from "@/lib/api/onboarding-concierge";
-import { nanoid } from "@/components/key/chat/utils";
 import { useTts } from "@/components/tts";
 import { pickRecorderMimeType, createSilenceMonitor } from "@/components/key/chat/voice-utils";
 import { VoiceConversation } from "@/components/key/chat/voice-conversation";

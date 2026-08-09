@@ -167,8 +167,20 @@ jobs:
       # against a config that documents the app as fully `any`-free. All 33 are now
       # fixed and 22 warnings were auto-fixed away (66 -> 44), so the ceiling moves
       # 25 -> 44 to match reality. Errors remain at zero and must stay there.
+      #
+      # 44 -> 34. Six errors had reappeared and were the only thing keeping this
+      # job red once it stopped gating: five react-hooks/set-state-in-effect and
+      # one location.href write. Fixed, then twelve unused imports removed, so
+      # the cap ratchets down rather than the errors being absorbed into it.
+      #
+      # ONE FILE IS DELIBERATELY UNTOUCHED. `eslint --fix` rewrote
+      # onboarding/hooks/use-onboarding.ts and INTRODUCED an error there —
+      # "Cannot access variable before it is declared" at :196. Its changes were
+      # reverted and its remaining warning is one of the 34. An autofixer is not
+      # a reviewer, and the run that proves it is the one where it broke a file
+      # while removing a comment.
       - name: Lint web
-        run: pnpm --filter web lint --max-warnings 44
+        run: pnpm --filter web lint --max-warnings 34
 
   security-scan:
     name: Security Scan

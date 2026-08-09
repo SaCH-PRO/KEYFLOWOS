@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import Link from "next/link";
-import { BrainCircuit, Users, Radar, Fuel as FuelIcon } from "lucide-react";
+import { Users, Fuel as FuelIcon } from "lucide-react";
 import { apiGet } from "@/lib/api";
 import { cn } from "@/lib/utils";
 

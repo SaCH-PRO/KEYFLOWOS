@@ -160,7 +160,16 @@ export function CoreChannelsSection({
     });
     setMetaBusy(null);
     if (res.data?.authUrl) {
-      window.location.href = res.data.authUrl;
+      // assign() rather than `location.href =`. Identical navigation, but the
+      // compiler reads the property write as mutating a value this component
+      // does not own and rejects it; a method call says the same thing in a
+      // form it can reason about.
+      //
+      // The Google branch twenty lines up writes location.href and is NOT
+      // flagged, which is worth knowing rather than tidying: the rule is
+      // reacting to something about this branch specifically, so making them
+      // uniform would hide the asymmetry instead of explaining it.
+      window.location.assign(res.data.authUrl);
     } else {
       toast.error(res.error || "Could not start Meta sign-in");
     }
