@@ -181,6 +181,18 @@ describe('every newly-reachable screen mounts', () => {
           ),
         `${route} throws on mount`,
       ).not.toThrow();
-    });
+      // 20s, not vitest's default 5s. This test asks "does it throw", never "is
+      // it fast", so a wall-clock ceiling can only produce false failures. It
+      // produced one: /app/procurement failed a full run at 5021ms, then passed
+      // in isolation and on two consecutive full runs afterwards. Measured, it
+      // is the slowest mount here and swings 984ms to 1651ms between runs on an
+      // idle machine — a dynamic import of a heavy page plus framer-motion and
+      // recharts. On a loaded CI box that variance reaches 5s.
+      //
+      // A gate that fails for reasons unrelated to what it measures gets
+      // switched off, which is the failure this file's siblings keep warning
+      // about. If a page ever genuinely takes 20s to mount, that is a real
+      // finding and this number should not be raised again.
+    }, 20_000);
   }
 });
