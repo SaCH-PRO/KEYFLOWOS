@@ -73,6 +73,52 @@ GIT_COMMIT="$(git rev-parse HEAD)"
 export GIT_COMMIT
 say "Deploying ${GIT_COMMIT:0:12} — $(git log -1 --format=%s)"
 
+# --- CI gate -----------------------------------------------------------------
+#
+# Nothing on this path used to consult CI. No test ran, no typecheck ran, and no
+# check-run was queried: a red commit, or one CI had never seen, deployed
+# exactly like a green one. docs/FORK_CLOSE_DEPLOY.md carries a table headed
+# "Gates that must be green before deploying" and this script checked none of
+# them — the table was enforced by whoever remembered to read it.
+#
+# That mattered more than it looked. For a full day CI was failing on a lint
+# ceiling, which SKIPPED the test job rather than failing it, so the pipeline
+# rendered grey instead of red while 24 server gates and every security
+# integration suite went unrun. A deploy in that window would have shipped with
+# nothing verified and nothing to say so.
+#
+# Fails closed, including when the tooling is missing. An unavailable checker
+# that waves the deploy through is the same failure one layer down, so the
+# escape hatch is explicit and has to be typed on purpose.
+if [ "${DEPLOY_SKIP_CI_CHECK:-0}" = "1" ]; then
+  printf 'WARNING: DEPLOY_SKIP_CI_CHECK=1 — deploying %s without checking CI.\n' "${GIT_COMMIT:0:12}"
+elif ! command -v gh >/dev/null 2>&1; then
+  die "gh is not installed, so CI status for ${GIT_COMMIT:0:12} cannot be verified.
+     Install it (https://cli.github.com) and run 'gh auth login', or deploy
+     deliberately unverified with:  DEPLOY_SKIP_CI_CHECK=1 $0 $*"
+else
+  say "Checking CI for ${GIT_COMMIT:0:12}"
+  # --jq keeps this to one field; a commit CI has never seen yields an empty
+  # string, which is treated as "not verified" rather than "not failed".
+  CI_STATE="$(gh api "repos/{owner}/{repo}/commits/$GIT_COMMIT/check-runs" \
+      --jq '[.check_runs[] | select(.name == "Run Tests")] | first | .conclusion' 2>/dev/null || true)"
+  case "$CI_STATE" in
+    success)
+      say "CI: Run Tests passed"
+      ;;
+    ''|null)
+      die "no 'Run Tests' check-run found for ${GIT_COMMIT:0:12}.
+     Either CI has not finished, or it never ran for this commit — a skipped job
+     reports nothing at all, which is indistinguishable from a green one here.
+     Wait for it, or:  DEPLOY_SKIP_CI_CHECK=1 $0 $*"
+      ;;
+    *)
+      die "CI 'Run Tests' concluded '$CI_STATE' for ${GIT_COMMIT:0:12}.
+     Fix it, or deploy deliberately with:  DEPLOY_SKIP_CI_CHECK=1 $0 $*"
+      ;;
+  esac
+fi
+
 # --- backup ------------------------------------------------------------------
 say "Backing up the database"
 STAMP="$(date +%F-%H%M%S)"

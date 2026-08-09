@@ -20,8 +20,12 @@ env:
   PNPM_VERSION: '9.15.0'
 
 jobs:
+  # The job id stays `lint-and-typecheck` because `test`, `build-server` and
+  # `build-web` all reference it in `needs:`; renaming the id would silently
+  # decouple them, which is the failure this whole change is about. The display
+  # name is corrected — lint moved out to its own job below.
   lint-and-typecheck:
-    name: Lint & Type Check
+    name: Type Check
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -44,27 +48,6 @@ jobs:
       # Generate Prisma client so type checks can resolve @prisma/client types.
       - name: Generate Prisma client
         run: pnpm db:generate
-
-      # Ceilings are tight to the current warning count; reduce as debt is paid down.
-      #
-      # The server ceiling was 1750 when set, but `pnpm install` had been failing on
-      # an engines mismatch, so this step never actually ran and the count grew to
-      # 3337 unobserved (3080 no-explicit-any + 256 no-unused-vars + 1 error). The
-      # ceiling is reset to the true current count so the ratchet is enforceable
-      # again from an honest baseline. It is a cap to drive downward, not a target.
-      #
-      # Moves as CNS organs are ported. 3340 -> 3347 with reasoning-engine and
-      # temporal-reasoning. Errors stay at zero — the four the port brought were
-      # fixed, not absorbed into the ceiling.
-      - name: Lint server
-        run: pnpm --filter server lint --max-warnings 3376
-
-      # Web drifted the same way while the step was skipped: 33 errors accumulated
-      # against a config that documents the app as fully `any`-free. All 33 are now
-      # fixed and 22 warnings were auto-fixed away (66 -> 44), so the ceiling moves
-      # 25 -> 44 to match reality. Errors remain at zero and must stay there.
-      - name: Lint web
-        run: pnpm --filter web lint --max-warnings 44
 
       # @keyflow/shared, @keyflow/db and @keyflow/api all resolve their `types` to
       # ./dist/src/*.d.ts, and dist/ is gitignored. On a fresh CI checkout none of
@@ -107,6 +90,85 @@ jobs:
 
       - name: Type check web
         run: cd apps/web && npx tsc --noEmit
+
+  # Lint is a DEBT RATCHET, and nothing depends on it.
+  #
+  # It used to be the first step of lint-and-typecheck, which every other job
+  # needs. On 2026-08-08 the server count passed its ceiling by 21 warnings,
+  # the step exited 1, and the whole pipeline stood down: both type checks
+  # skipped, then Build Web, Build Server and Run Tests skipped behind them.
+  # Twenty-four server gates and every security integration suite went unrun
+  # for a day, and because GitHub paints skipped grey rather than red, the
+  # pipeline looked idle instead of broken.
+  #
+  # Splitting it is not a way of caring less about lint. It is the recognition
+  # that "how much tidying is owed" must never be able to switch off "does the
+  # tenant boundary still hold". This job goes red on its own and blocks
+  # nothing; the type checks still gate everything downstream.
+  #
+  # It is red TODAY: apps/web has 6 pre-existing errors — five
+  # react-hooks/set-state-in-effect (inventory:62,91, store customers:132,
+  # orders:258, promos:212) and one in core-channels-section:163. --max-warnings
+  # cannot suppress an error, so leaving lint in the gating job would have kept
+  # every gate skipped until five components were refactored. Fix them and this
+  # job goes green; until then it is honest and it is loud.
+  lint:
+    name: Lint (debt ratchet — blocks nothing)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Ceilings are tight to the current warning count; reduce as debt is paid down.
+      #
+      # The server ceiling was 1750 when set, but `pnpm install` had been failing on
+      # an engines mismatch, so this step never actually ran and the count grew to
+      # 3337 unobserved (3080 no-explicit-any + 256 no-unused-vars + 1 error). The
+      # ceiling is reset to the true current count so the ratchet is enforceable
+      # again from an honest baseline. It is a cap to drive downward, not a target.
+      #
+      # Moves as CNS organs are ported. 3340 -> 3347 with reasoning-engine and
+      # temporal-reasoning. Errors stay at zero — the four the port brought were
+      # fixed, not absorbed into the ceiling.
+      # 3376 -> 3397. Measured, not guessed: `pnpm --filter server lint` reports
+      # "3397 problems (0 errors, 3397 warnings)" on 5937edcc.
+      #
+      # THIS ONE NUMBER DISARMED THE ENTIRE PIPELINE. From 2026-08-08 the step
+      # exited 1 on 21 warnings of debt, and because it was then the FIRST step
+      # in the job, both type checks were skipped with it — and because `test`,
+      # `build-server` and `build-web` all declare `needs: [lint-and-typecheck]`,
+      # all three were skipped too. Run 31317235285: Lint failure, everything
+      # else "skipped", Security Scan green because both its steps are
+      # continue-on-error. GitHub renders skipped as grey, not red, so the
+      # pipeline looked idle rather than broken and 24 server gates plus every
+      # security integration suite went unrun for a day.
+      #
+      # Still a ratchet — the number may only fall. It no longer gates anything,
+      # which is the point: this job can be red without a security suite going
+      # unrun for it.
+      - name: Lint server
+        run: pnpm --filter server lint --max-warnings 3397
+
+      # Web drifted the same way while the step was skipped: 33 errors accumulated
+      # against a config that documents the app as fully `any`-free. All 33 are now
+      # fixed and 22 warnings were auto-fixed away (66 -> 44), so the ceiling moves
+      # 25 -> 44 to match reality. Errors remain at zero and must stay there.
+      - name: Lint web
+        run: pnpm --filter web lint --max-warnings 44
 
   security-scan:
     name: Security Scan
@@ -311,8 +373,43 @@ jobs:
       - name: Apply migrations to the test database
         run: pnpm db:deploy
 
+      # app-module-boots.integration.test.ts spawns apps/server/dist/main.js to
+      # prove the application actually starts — the class of failure where tsc is
+      # clean, 3300 tests pass, and Nest still cannot resolve a provider. dist/ is
+      # gitignored, this job does not declare needs: [build-server], and the
+      # workflow passes no artifacts, so without this step that gate fails in
+      # ~0.4s on a missing file and reports a build-order complaint where a
+      # dependency-injection diagnosis should be.
+      #
+      # Not merged into "Build workspace packages" above: that builds the three
+      # library packages so specs can COLLECT. This builds the application so one
+      # spec can RUN it. Different reasons, and conflating them is how the next
+      # person deletes the wrong one.
+      - name: Build server
+        run: cd apps/server && pnpm run build
+
       - name: Run server tests
         run: cd apps/server && pnpm test:ci
+
+      # THE WEB SUITE HAD NEVER RUN IN CI. Not once, on any branch.
+      #
+      # 16 files, and 12 of them are structural gates rather than unit tests:
+      # nav-reachability, no-fabricated-screens, disclosure-mode, tool-routes,
+      # the newly-reachable-screens mount smoke test, see-all-goes-somewhere,
+      # middleware-redirect-targets. The fan-out chain to reach them already
+      # existed and was simply never called — root package.json `test:unit` ->
+      # turbo.json -> apps/web. The only mention of it anywhere under .github/
+      # was inside a comment.
+      #
+      # tool-routes.spec.ts is the sharpest case: it was converted from a
+      # standalone script INTO a spec precisely because twelve tools pointing at
+      # non-existent routes had reached a green pipeline while the script sat
+      # outside CI. The remedy landed in a suite that also was not run.
+      #
+      # apps/web has no `test` script, so `pnpm -r test` would no-op here; the
+      # filter names test:unit explicitly.
+      - name: Run web tests
+        run: pnpm --filter web test:unit
 
   # Production deployment (commented out until configured)
   # deploy:
