@@ -9,6 +9,9 @@ interface JwtPayload {
   user_metadata?: Record<string, unknown>;
   exp?: number;
   iat?: number;
+  nbf?: number;
+  iss?: string;
+  aud?: string | string[];
   [key: string]: unknown;
 }
 
@@ -48,6 +51,14 @@ export class SupabaseAuthService {
     const [header, body, signature] = parts;
 
     try {
+      const headerJson = JSON.parse(
+        Buffer.from(header, 'base64url').toString('utf8'),
+      ) as { alg?: string };
+      if (headerJson.alg !== 'HS256') {
+        this.logger.debug('Local JWT verification: unsupported algorithm');
+        return null;
+      }
+
       const expectedSignature = createHmac('sha256', secret)
         .update(`${header}.${body}`)
         .digest('base64url');
@@ -66,6 +77,26 @@ export class SupabaseAuthService {
       const nowSeconds = Math.floor(Date.now() / 1000);
       if (typeof payload.exp === 'number' && payload.exp < nowSeconds) {
         this.logger.debug('Local JWT verification: token expired');
+        return null;
+      }
+      if (typeof payload.nbf === 'number' && payload.nbf > nowSeconds) {
+        this.logger.debug('Local JWT verification: token not yet valid');
+        return null;
+      }
+      if (typeof payload.iat === 'number' && payload.iat > nowSeconds + 60) {
+        this.logger.debug('Local JWT verification: issued-at in the future');
+        return null;
+      }
+
+      const expectedIss = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+      if (expectedIss && payload.iss && payload.iss !== expectedIss) {
+        this.logger.debug('Local JWT verification: issuer mismatch');
+        return null;
+      }
+
+      const expectedAud = 'authenticated';
+      if (payload.aud && payload.aud !== expectedAud) {
+        this.logger.debug('Local JWT verification: audience mismatch');
         return null;
       }
 
@@ -116,6 +147,17 @@ export class SupabaseAuthService {
       this.logger.debug(`Supabase auth error: ${error.message}`);
       return null;
     }
-    return data?.user ?? null;
+    const user = data?.user;
+    if (!user) return null;
+
+    // Reject tokens for banned or disabled accounts even when Supabase returns
+    // a valid user object. The `banned_at` field is set by Supabase when an
+    // account is disabled in the auth dashboard.
+    if ((user as User & { banned_at?: string | null }).banned_at) {
+      this.logger.debug('Supabase auth: user is banned');
+      return null;
+    }
+
+    return user;
   }
 }

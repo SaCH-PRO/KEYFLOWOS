@@ -2,7 +2,12 @@ import { describe, it, expect, vi } from 'vitest';
 import type { Request, Response } from 'express';
 import { AuthMiddleware } from './auth.middleware';
 
-function makeMiddleware(supabaseUser?: { id: string; email?: string } | null, role = 'USER') {
+function makeMiddleware(
+  supabaseUser?: { id: string; email?: string } | null,
+  role = 'USER',
+  deletedAt: Date | null = null,
+  bannedAt: Date | null = null,
+) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test mock
   const supabaseAuth: any = {
     getUserFromToken: vi.fn().mockResolvedValue(supabaseUser ?? null),
@@ -11,7 +16,7 @@ function makeMiddleware(supabaseUser?: { id: string; email?: string } | null, ro
   const prisma: any = {
     client: {
       user: {
-        findUnique: vi.fn().mockResolvedValue({ role }),
+        findUnique: vi.fn().mockResolvedValue({ role, deletedAt, bannedAt }),
       },
     },
   };
@@ -50,7 +55,7 @@ describe('AuthMiddleware (post-bypass-removal)', () => {
     expect(supabaseAuth.getUserFromToken).toHaveBeenCalledWith('real-jwt-here');
     expect(prisma.client.user.findUnique).toHaveBeenCalledWith({
       where: { id: 'user_real' },
-      select: { role: true },
+      select: { role: true, deletedAt: true, bannedAt: true },
     });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inspecting augmented Request
     expect((req as any).user).toEqual({
@@ -83,7 +88,7 @@ describe('AuthMiddleware (post-bypass-removal)', () => {
     expect((req as any).user).toBeUndefined();
   });
 
-  it('falls back to role=USER if the Prisma lookup fails', async () => {
+  it('does not attach a user if the Prisma lookup fails', async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test mock
     const supabaseAuth: any = {
       getUserFromToken: vi.fn().mockResolvedValue({ id: 'u1', email: 'a@b.com' }),
@@ -99,7 +104,43 @@ describe('AuthMiddleware (post-bypass-removal)', () => {
     const req = makeReq({ headers: { authorization: 'Bearer t' } });
     await mw.use(req, res, next);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inspecting augmented Request
-    expect((req as any).user).toEqual({ id: 'u1', email: 'a@b.com', role: 'USER' });
+    expect((req as any).user).toBeUndefined();
+  });
+
+  it('does not attach a deleted user', async () => {
+    const { mw } = makeMiddleware({ id: 'u1', email: 'a@b.com' }, 'USER', new Date());
+    const req = makeReq({ headers: { authorization: 'Bearer t' } });
+    await mw.use(req, res, next);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inspecting augmented Request
+    expect((req as any).user).toBeUndefined();
+  });
+
+  it('does not attach a banned user', async () => {
+    const { mw } = makeMiddleware({ id: 'u1', email: 'a@b.com' }, 'USER', null, new Date());
+    const req = makeReq({ headers: { authorization: 'Bearer t' } });
+    await mw.use(req, res, next);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inspecting augmented Request
+    expect((req as any).user).toBeUndefined();
+  });
+
+  it('does not attach a revoked user', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test mock
+    const supabaseAuth: any = {
+      getUserFromToken: vi.fn().mockResolvedValue({ id: 'u1', email: 'a@b.com' }),
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test mock
+    const prisma: any = {
+      client: {
+        user: { findUnique: vi.fn().mockResolvedValue({ role: 'USER', deletedAt: null, bannedAt: null }) },
+      },
+    };
+    const mockRedis = { get: vi.fn().mockResolvedValue('1'), set: () => Promise.resolve('OK') } as any;
+    const mw = new AuthMiddleware(supabaseAuth, prisma, mockRedis);
+    const req = makeReq({ headers: { authorization: 'Bearer t' } });
+    await mw.use(req, res, next);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inspecting augmented Request
+    expect((req as any).user).toBeUndefined();
+    expect(mockRedis.get).toHaveBeenCalledWith('auth:revoked:user:u1');
   });
 
   it('ignores legacy dev sentinel tokens (no special handling)', async () => {

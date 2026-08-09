@@ -14,6 +14,16 @@ import { AuthGuard } from '../src/core/auth/auth.guard';
 import { BusinessGuard } from '../src/core/auth/business.guard';
 import { OptionalAuthGuard } from '../src/core/auth/optional-auth.guard';
 import { ModuleScopeGuard } from '../src/core/auth/module-scope.guard';
+import { SupabaseAdminService } from '../src/core/auth/supabase-admin.service';
+import { REDIS_CLIENT } from '../src/core/redis/redis.constants';
+
+/**
+ * Logout dependencies. Functional stubs, not `{}` — identity.controller.ts
+ * swallows failures from both so an empty object would let a broken logout look
+ * like a passing one. See the longer note in identity.e2e.test.ts.
+ */
+const supabaseAdminStub = { signOut: async () => undefined };
+const redisStub = { setex: async () => 'OK', set: async () => 'OK', get: async () => null, del: async () => 0 };
 
 /**
  * Smoke test for the new server-driven signup + resend-verification
@@ -42,6 +52,8 @@ describe('Identity signup endpoints', () => {
         { provide: AiUsageService, useValue: {} },
         { provide: AuthSecurityService, useValue: authSecMock },
         { provide: PrismaService, useValue: { client: {} } },
+        { provide: SupabaseAdminService, useValue: supabaseAdminStub },
+        { provide: REDIS_CLIENT, useValue: redisStub },
       ],
     })
       .overrideGuard(AuthGuard)
@@ -144,6 +156,8 @@ describe('Identity login endpoint', () => {
         { provide: AiUsageService, useValue: {} },
         { provide: AuthSecurityService, useValue: authSecMock },
         { provide: PrismaService, useValue: { client: {} } },
+        { provide: SupabaseAdminService, useValue: supabaseAdminStub },
+        { provide: REDIS_CLIENT, useValue: redisStub },
       ],
     })
       .overrideGuard(AuthGuard).useValue({ canActivate: () => true })
@@ -249,6 +263,8 @@ describe('Identity me endpoint (auth gate)', () => {
         { provide: AiUsageService, useValue: {} },
         { provide: AuthSecurityService, useValue: { enforce: vi.fn(async () => undefined), audit: vi.fn(async () => undefined) } },
         { provide: PrismaService, useValue: { client: {} } },
+        { provide: SupabaseAdminService, useValue: supabaseAdminStub },
+        { provide: REDIS_CLIENT, useValue: redisStub },
       ],
     })
       .overrideGuard(AuthGuard).useValue(guardImpl)

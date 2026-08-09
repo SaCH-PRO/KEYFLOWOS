@@ -99,20 +99,24 @@ enum ContractAlertType {
 // MODULE 1: IDENTITY & ACCOUNTS
 // ---
 model User {
-  id               String  @id @default(cuid()) // Corresponds to Supabase auth.users.id
-  email            String  @unique
+  id               String    @id @default(cuid()) // Corresponds to Supabase auth.users.id
+  email            String    @unique
   name             String?
-  firstName        String? @map("first_name")
-  lastName         String? @map("last_name")
+  firstName        String?   @map("first_name")
+  lastName         String?   @map("last_name")
   phone            String?
-  avatarUrl        String? @map("avatar_url")
-  role             String  @default("USER") // USER | SUPER_ADMIN
+  avatarUrl        String?   @map("avatar_url")
+  role             String    @default("USER") // USER | SUPER_ADMIN
   /// Free-form user-level settings / security flags.
-  metaData         Json?   @default("{}") @map("meta_data")
-  referralCode     String? @unique @map("referral_code")
-  referredByUserId String? @map("referred_by_user_id")
-  referredBy       User?   @relation("UserReferrals", fields: [referredByUserId], references: [id])
-  referralsMade    User[]  @relation("UserReferrals")
+  metaData         Json?     @default("{}") @map("meta_data")
+  referralCode     String?   @unique @map("referral_code")
+  referredByUserId String?   @map("referred_by_user_id")
+  referredBy       User?     @relation("UserReferrals", fields: [referredByUserId], references: [id])
+  referralsMade    User[]    @relation("UserReferrals")
+  /// Set when the user is soft-deleted locally. Blocks authentication.
+  deletedAt        DateTime? @map("deleted_at")
+  /// Set when the user is banned/suspended. Blocks authentication.
+  bannedAt         DateTime? @map("banned_at")
 
   businesses Membership[]
   sessions   Session[]

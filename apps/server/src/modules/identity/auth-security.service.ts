@@ -6,7 +6,8 @@ export type AuthEvent =
   | 'login_success'
   | 'login_failure'
   | 'resend_verification'
-  | 'rate_limited';
+  | 'rate_limited'
+  | 'logout';
 
 export type AuthOutcome = 'success' | 'failure' | 'rate_limited' | 'error';
 

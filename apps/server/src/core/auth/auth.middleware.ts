@@ -60,10 +60,20 @@ export class AuthMiddleware implements NestMiddleware {
     try {
       const user = await this.getSupabaseAuth().getUserFromToken(token);
       if (user?.id) {
+        const localUser = await this.resolveLocalUser(user.id);
+        if (!localUser) {
+          this.logger.warn(
+            { userId: user.id },
+            'Token valid but local user is deleted, banned, or revoked — rejecting',
+          );
+          next();
+          return;
+        }
         // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Express request augmentation; unified user contract elsewhere
-        (req as any).user = await this.attachRole(user.id, user.email);
+        (req as any).user = { id: user.id, email: user.email, role: localUser.role };
         this.logger.debug(
-          `Attached user from supabase: id=${user.id} email=${user.email ?? 'n/a'}`,
+          { userId: user.id },
+          'Attached user from supabase',
         );
       } else {
         // Fallback: try admin local-auth token (HMAC-JWT signed with ADMIN_JWT_SECRET)
@@ -72,10 +82,11 @@ export class AuthMiddleware implements NestMiddleware {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           (req as any).user = adminUser;
           this.logger.debug(
-            `Attached user from admin token: id=${adminUser.id} email=${adminUser.email}`,
+            { userId: adminUser.id },
+            'Attached user from admin token',
           );
         } else {
-          this.logger.warn('Token provided but Supabase verification failed — rejecting');
+          this.logger.warn('Bearer token provided but verification failed');
         }
       }
     } catch (err: any) {
@@ -85,21 +96,30 @@ export class AuthMiddleware implements NestMiddleware {
     next();
   }
 
-  private async attachRole(userId: string, email?: string | null) {
-    let role = 'USER';
-    try {
-      if (this.prisma?.client) {
-        const dbUser = await this.prisma.client.user.findUnique({
-          where: { id: userId },
-          select: { role: true },
-        });
-        if (dbUser?.role) {
-          role = dbUser.role;
-        }
-      }
-    } catch (lookupErr) {
-      this.logger.debug(`Role lookup failed: ${(lookupErr as Error).message}`);
+  private async resolveLocalUser(userId: string) {
+    if (!this.prisma?.client) {
+      return null;
     }
-    return { id: userId, email, role };
+
+    try {
+      const dbUser = await this.prisma.client.user.findUnique({
+        where: { id: userId },
+        select: { role: true, deletedAt: true, bannedAt: true },
+      });
+
+      if (!dbUser || dbUser.deletedAt || dbUser.bannedAt) {
+        return null;
+      }
+
+      const revoked = await this.redis.get(`auth:revoked:user:${userId}`);
+      if (revoked) {
+        return null;
+      }
+
+      return dbUser;
+    } catch (lookupErr) {
+      this.logger.debug(`Local user lookup failed: ${(lookupErr as Error).message}`);
+      return null;
+    }
   }
 }

@@ -13,6 +13,7 @@ import { PrismaService } from '../src/core/prisma/prisma.service';
 import { AuthMiddleware } from '../src/core/auth/auth.middleware';
 import { SupabaseAuthService } from '../src/core/auth/supabase-auth.service';
 import { REDIS_CLIENT } from '../src/core/redis/redis.constants';
+import { SupabaseAdminService } from '../src/core/auth/supabase-admin.service';
 
 // Server-side leg of the Google sign-in callback flow (task #310).
 // Exercises the real AuthMiddleware -> AuthGuard -> POST /identity/bootstrap
@@ -58,7 +59,14 @@ describe('Auth callback -> /identity/bootstrap (server middleware path)', () => 
         { provide: BusinessContextService, useValue: {} },
         { provide: AiUsageService, useValue: {} },
         { provide: AuthSecurityService, useValue: { enforce: vi.fn(async () => undefined), audit: vi.fn(async () => undefined) } },
-        { provide: REDIS_CLIENT, useValue: { get: vi.fn(async () => null), set: vi.fn(async () => 'OK') } },
+        // `get` returning null is the not-revoked path: AuthMiddleware reads
+        // `auth:revoked:user:<id>` on every request, and this suite exercises
+        // the real middleware. The revoked path is covered by
+        // auth.middleware.spec.ts:126.
+        { provide: REDIS_CLIENT, useValue: { get: vi.fn(async () => null), set: vi.fn(async () => 'OK'), setex: vi.fn(async () => 'OK') } },
+        // Logout dependency. Functional, not `{}` — the controller swallows its
+        // failures. See identity.e2e.test.ts.
+        { provide: SupabaseAdminService, useValue: { signOut: vi.fn(async () => undefined) } },
       ],
     }).compile();
 

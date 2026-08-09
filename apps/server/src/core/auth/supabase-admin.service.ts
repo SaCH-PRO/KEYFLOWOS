@@ -97,6 +97,29 @@ export class SupabaseAdminService {
   }
 
   /**
+   * Revoke all sessions for a user. This invalidates every access and
+   * refresh token issued by Supabase for the user. Call this during logout
+   * and after security events (password change, RISC account-hijacking,
+   * admin ban). Swallows errors but returns whether the call succeeded.
+   */
+  async signOut(userId: string, scope: 'global' | 'local' | 'others' = 'global'): Promise<boolean> {
+    try {
+      const client = this.getClient();
+      const { error } = await client.auth.admin.signOut(userId, scope);
+      if (error) {
+        this.logger.warn(`signOut(${userId}, ${scope}) failed: ${error.message}`);
+        return false;
+      }
+      return true;
+    } catch (err: any) {
+      this.logger.warn(
+        `signOut(${userId}) threw: ${err instanceof Error ? err.message : err}`,
+      );
+      return false;
+    }
+  }
+
+  /**
    * Best-effort delete of an auth user. Used to roll back a half-created
    * signup when subsequent steps (link generation, email send) fail, so
    * the user can retry signup cleanly instead of bouncing off `email_taken`.

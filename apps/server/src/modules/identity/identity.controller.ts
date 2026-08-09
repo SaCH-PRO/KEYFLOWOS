@@ -6,6 +6,7 @@ import {
   Get,
   Headers,
   Inject,
+  Logger,
   Param,
   Patch,
   Post,
@@ -25,6 +26,9 @@ import { BusinessContextService } from './business-context.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
+import { SupabaseAdminService } from '../../core/auth/supabase-admin.service';
+import { Redis } from 'ioredis';
+import { REDIS_CLIENT } from '../../core/redis/redis.constants';
 import { CreateBusinessDto } from './dto/create-business.dto';
 import { UpdateBusinessDto } from './dto/update-business.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -39,6 +43,8 @@ import { PROFILE_COMPLETENESS_FIELDS, COMPLETENESS_TIERS } from './profile-compl
 
 @Controller('identity')
 export class IdentityController {
+  private readonly logger = new Logger(IdentityController.name);
+
   constructor(
     @Inject(IdentityService) private readonly identity: IdentityService,
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
@@ -46,6 +52,8 @@ export class IdentityController {
     @Inject(IdentitySignupService) private readonly signupSvc: IdentitySignupService,
     @Inject(AuthSecurityService) private readonly authSec: AuthSecurityService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(SupabaseAdminService) private readonly supabaseAdmin: SupabaseAdminService,
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
   ) {}
 
   /**
@@ -253,6 +261,41 @@ export class IdentityController {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Server-driven logout. Revokes all Supabase sessions for the user and
+   * sets a short-lived Redis revocation marker so that any in-flight access
+   * tokens are rejected by AuthMiddleware until they naturally expire.
+   * Audits the event and swallows external failures so the client can always
+   * clear its own storage.
+   */
+  @UseGuards(AuthGuard)
+  @Post('logout')
+  async logout(@CurrentUser() user: AuthenticatedUser, @Req() req: Request) {
+    const userId = user?.id;
+    if (!userId) throw new UnauthorizedException('Missing authenticated user');
+
+    try {
+      await this.supabaseAdmin.signOut(userId, 'global');
+    } catch (err: any) {
+      this.logger.warn(`Supabase signOut failed for ${userId}: ${err instanceof Error ? err.message : err}`);
+    }
+
+    // Revoke in-flight tokens for up to 24 hours. Access tokens are typically
+    // 1-hour JWTs; this window covers the maximum plausible clock skew plus
+    // any long-lived cached token.
+    try {
+      await this.redis.setex(`auth:revoked:user:${userId}`, 86400, '1');
+    } catch (err: any) {
+      this.logger.warn(`Redis revocation set failed for ${userId}: ${err instanceof Error ? err.message : err}`);
+    }
+
+    const ip = this.clientIp(req);
+    const ua = this.clientUa(req);
+    await this.authSec.audit({ event: 'logout', outcome: 'success', email: user.email ?? '', userId, ip, userAgent: ua });
+
+    return { status: 'logged_out' };
   }
 
   @UseGuards(AuthGuard)

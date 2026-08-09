@@ -14,6 +14,29 @@ import { AuthGuard } from '../src/core/auth/auth.guard';
 import { BusinessGuard } from '../src/core/auth/business.guard';
 import { OptionalAuthGuard } from '../src/core/auth/optional-auth.guard';
 import { ModuleScopeGuard } from '../src/core/auth/module-scope.guard';
+import { SupabaseAdminService } from '../src/core/auth/supabase-admin.service';
+import { REDIS_CLIENT } from '../src/core/redis/redis.constants';
+
+/**
+ * IdentityController gained SupabaseAdminService and REDIS_CLIENT for the
+ * server-driven logout endpoint. app.module resolves both, so the real server
+ * boots and the boot gate stays green — only the hand-rolled test modules here
+ * and in identity-signup / auth-callback-bootstrap went stale.
+ *
+ * The stubs are functional rather than `{}` on purpose. identity.controller.ts
+ * wraps both calls in try/catch and swallows the error deliberately, so a client
+ * can always clear its own storage. An `{}` stub therefore does not fail — the
+ * TypeError is caught, logged at warn, and logout returns `{ status:
+ * 'logged_out' }` having revoked nothing. Anything asserting on that response
+ * would pass while the session stayed alive.
+ */
+const supabaseAdminStub = { signOut: async () => undefined };
+const redisStub = {
+  setex: async () => 'OK',
+  set: async () => 'OK',
+  get: async () => null, // no revocation marker — the not-revoked path
+  del: async () => 0,
+};
 
 const identityServiceMock = {
   items: [] as any[],
@@ -41,6 +64,8 @@ describe('Identity e2e', () => {
         { provide: AiUsageService, useValue: {} },
         { provide: AuthSecurityService, useValue: { enforce: async () => undefined, audit: async () => undefined } },
         { provide: PrismaService, useValue: { client: {} } },
+        { provide: SupabaseAdminService, useValue: supabaseAdminStub },
+        { provide: REDIS_CLIENT, useValue: redisStub },
       ],
     })
       .overrideGuard(AuthGuard)

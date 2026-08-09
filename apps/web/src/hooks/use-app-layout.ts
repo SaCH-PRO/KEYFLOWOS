@@ -15,7 +15,7 @@ import {
   getCachedBusiness,
   isSuperAdmin,
 } from "@/lib/workspace";
-import { apiGet, apiPatch } from "@/lib/api";
+import { apiGet, apiPatch, apiPost } from "@/lib/api";
 import {
   getDisclosureMode,
   setDisclosureMode as persistDisclosureMode,
@@ -370,7 +370,13 @@ export function useAppLayout(): AppLayoutState {
     setUnreadCount(0);
   }, []);
 
-  const handleLogout = useCallback(() => {
+  const handleLogout = useCallback(async () => {
+    try {
+      await apiPost("/identity/logout", {});
+    } catch {
+      // Best-effort server-side revocation. Always clear local state so the
+      // user is not trapped if the API is unreachable.
+    }
     clearStoredBusinessId();
     router.push("/auth/login");
   }, [router]);
