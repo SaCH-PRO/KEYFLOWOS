@@ -37,8 +37,30 @@
  * emitted decorator metadata, the real module graph — instead of a harness's
  * approximation of it.
  *
- * It runs against dist/, so it needs a build first. That is deliberate: in CI
- * the build precedes the tests, and a stale dist is itself worth failing on.
+ * IT RUNS AGAINST dist/, AND CI DOES NOT BUILD IT
+ * ------------------------------------------------
+ * This header used to claim "in CI the build precedes the tests". That was
+ * false when it was written and is still false: the `test` job
+ * (ci-cd.yml:284-315) runs checkout, install, db:generate, a build of the three
+ * WORKSPACE PACKAGES, db:deploy, then tests. It never builds apps/server.
+ * dist/ is gitignored, `needs:` excludes build-server, and the workflow has no
+ * artifact upload/download — so dist/main.js cannot exist in that job and this
+ * gate fails in about 0.4s on a missing file, every run, saying nothing about
+ * dependency injection.
+ *
+ * It has not actually run yet: the whole `test` job has been SKIPPED since
+ * 2026-08-08, because lint exits 1 on 3397 warnings against a 3376 ceiling and
+ * every downstream job needs it. So this is a trap already set, not one that
+ * has sprung.
+ *
+ * Fix is one step in the test job, before the test step:
+ *
+ *     - name: Build server
+ *       run: cd apps/server && pnpm run build
+ *
+ * Deliberately NOT skipped-when-missing. A gate that quietly stands down when
+ * its precondition is absent is the disease this file was written to treat —
+ * it would go green in CI forever while measuring nothing.
  */
 import path from 'node:path';
 import { existsSync } from 'node:fs';
@@ -120,7 +142,11 @@ describe('the built server starts', () => {
   it('dist exists — build before running this', () => {
     expect(
       existsSync(ENTRY),
-      'dist/main.js is missing. Run `pnpm build` first; this gate measures what ships.',
+      'dist/main.js is missing, so the boot was never measured. ' +
+        'Locally: run `pnpm build` in apps/server first. ' +
+        'In CI: the test job does not build the server — add a "Build server" step ' +
+        'before the test step (see this file header). This failure is a BUILD-ORDER ' +
+        'problem, not a dependency-injection one: do not go hunting for a DI bug.',
     ).toBe(true);
   });
 
