@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject, forwardRef } from '@nestjs/common';
 import { ConnectorCommand, ConnectorResult } from '../key-cortex-connector.types';
 import { connectorOk, connectorFail } from '../key-cortex-connector.utils';
 import { PrismaService } from '../../../core/prisma/prisma.service';
@@ -15,7 +15,7 @@ import { DelegationLoopService } from '../../autopilot/delegation-loop.service';
 export class AutopilotAdapterService {
   constructor(
     private readonly autopilot: AutopilotService,
-    private readonly loops: DelegationLoopService,
+    @Inject(forwardRef(() => DelegationLoopService)) private readonly loops: DelegationLoopService,
     private readonly prisma: PrismaService,
   ) {}
 

@@ -91,7 +91,7 @@ export class DepartmentReadinessService {
     // class reference is undefined when this decorator's metadata is emitted,
     // so Nest cannot resolve index [4] and the whole app refuses to boot.
     @Inject(forwardRef(() => GenomeRecommendationService))
-    private readonly recommendations: GenomeRecommendationService,
+    @Inject(forwardRef(() => GenomeRecommendationService)) private readonly recommendations: GenomeRecommendationService,
     private readonly memory: GenomeMemoryService,
   ) {}
 

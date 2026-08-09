@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject, Optional, OnModuleInit, OnModuleDestroy, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, Inject, Optional, OnModuleInit, OnModuleDestroy, NotFoundException, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiOversightService } from '../ai/ai-oversight.service';
 import { AiMemoryService } from '../ai/ai-memory.service';
@@ -97,7 +97,10 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(AiOversightService) private readonly governance: AiOversightService,
+    // AiOversightService is provided by AiModule, but the class reference is
+    // undefined here at decoration time — autopilot and ai import each other.
+    // @Inject(X) with X undefined fails exactly like no decorator at all.
+    @Inject(forwardRef(() => AiOversightService)) @Inject(forwardRef(() => AiOversightService)) private readonly governance: AiOversightService,
     @Inject(AiMemoryService) private readonly memory: AiMemoryService,
     @Inject(AiExecutionLogService) private readonly executionLog: AiExecutionLogService,
     @Inject(TransactionalEmailService) private readonly emailService: TransactionalEmailService,

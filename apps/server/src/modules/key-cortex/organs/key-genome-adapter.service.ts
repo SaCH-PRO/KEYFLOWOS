@@ -5,7 +5,7 @@
  * into KEY's peripheral nervous system.
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { BlueprintService } from '../../blueprint/blueprint.service';
 import { DnaSectionKey } from '../../blueprint/blueprint.types';
 import { GenomeSignalService } from '../../business-genome/key-genome/genome-signal.service';
@@ -30,6 +30,7 @@ export class KeyGenomeAdapterService extends KeyOrganAdapter {
   constructor(
     private readonly blueprint: BlueprintService,
     private readonly signalService: GenomeSignalService,
+    @Inject(forwardRef(() => GenomeRecommendationService))
     private readonly recommendationService: GenomeRecommendationService,
     private readonly factService: GenomeFactService,
     private readonly readinessService: GenomeModuleReadinessService,

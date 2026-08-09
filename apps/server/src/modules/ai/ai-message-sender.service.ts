@@ -32,7 +32,7 @@ export class AiMessageSenderService {
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Optional() @Inject(GmailService) private readonly gmail: GmailService | undefined,
     @Optional() @Inject(SystemEmailService) private readonly systemEmail: SystemEmailService | undefined,
-    @Optional() @Inject(forwardRef(() => WhatsAppService)) private readonly whatsapp: WhatsAppService | undefined,
+    @Optional() @Inject(forwardRef(() => WhatsAppService)) @Inject(forwardRef(() => WhatsAppService)) private readonly whatsapp: WhatsAppService | undefined,
     @Inject(TimelineService) private readonly timeline: TimelineService,
   ) {}
 

@@ -29,13 +29,7 @@
 //  └─────────┘
 // ═══════════════════════════════════════════════════════════════════════════════
 
-import {
-  Injectable,
-  Logger,
-  OnModuleInit,
-  forwardRef,
-  Inject,
-} from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, forwardRef, Inject } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { KeyCortexEventService } from './key-cortex-event.service';
 import { ModelGatewayService } from '../ai/model-gateway.service';
@@ -198,7 +192,7 @@ export class KeyCortexConsciousnessService implements OnModuleInit {
     // Appended, not inserted: several specs construct this service
     // positionally, and inserting mid-list silently shifts every argument
     // after the insertion point.
-    private readonly interoception: KeyCortexInteroceptionService,
+    @Inject(forwardRef(() => KeyCortexInteroceptionService)) private readonly interoception: KeyCortexInteroceptionService,
     private readonly endocrine: KeyCortexEndocrineService,
   ) {}
 

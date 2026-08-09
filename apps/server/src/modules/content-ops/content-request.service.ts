@@ -43,7 +43,7 @@ export class ContentRequestService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly emitter: EventEmitter2,
-    @Inject(forwardRef(() => ApprovalRequestService)) private readonly approvals: ApprovalRequestService,
+    @Inject(forwardRef(() => ApprovalRequestService)) @Inject(forwardRef(() => ApprovalRequestService)) private readonly approvals: ApprovalRequestService,
     @Optional() @Inject(ContentInvoiceService) private readonly contentInvoice?: ContentInvoiceService,
   ) {}
 

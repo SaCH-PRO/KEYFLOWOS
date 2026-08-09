@@ -1,4 +1,4 @@
-import { Injectable, Inject, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Inject, Logger, NotFoundException, BadRequestException, forwardRef } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import type { ContractStatus, ContractAlertType, Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -32,7 +32,7 @@ export class ContractsService {
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(DocumentIntelligenceService) private readonly docIntel: DocumentIntelligenceService,
+    @Inject(forwardRef(() => DocumentIntelligenceService)) private readonly docIntel: DocumentIntelligenceService,
   ) {}
 
   async listContracts(businessId: string, filters: ContractListFilters = {}) {

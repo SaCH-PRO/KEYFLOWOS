@@ -8,7 +8,7 @@
  * organs expose their capabilities; the brain sees one unified tool surface.
  */
 
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Inject, forwardRef } from '@nestjs/common';
 import { KeyCortexToolRegistryService } from './key-cortex-tool-registry.service';
 import type { IKeyOrganAdapter } from './organs/key-organ-adapter.interface';
 import { KeyCortexSafeDatabaseService } from './key-cortex-safe-database.service';
@@ -23,13 +23,13 @@ export class KeyCortexOrganRegistrarService implements OnModuleInit {
   private readonly logger = new Logger(KeyCortexOrganRegistrarService.name);
 
   constructor(
-    private readonly registry: KeyCortexToolRegistryService,
-    private readonly temporalFlowAdapter: TemporalFlowAdapterService,
-    private readonly keyInboxAdapter: KeyInboxAdapterService,
-    private readonly keyGenomeAdapter: KeyGenomeAdapterService,
-    private readonly storelinkAdapter: StorelinkAdapterService,
-    private readonly keyConnectorAdapter: KeyConnectorAdapterService,
-    private readonly safeDatabase: KeyCortexSafeDatabaseService,
+    @Inject(forwardRef(() => KeyCortexToolRegistryService)) private readonly registry: KeyCortexToolRegistryService,
+    @Inject(forwardRef(() => TemporalFlowAdapterService)) private readonly temporalFlowAdapter: TemporalFlowAdapterService,
+    @Inject(forwardRef(() => KeyInboxAdapterService)) private readonly keyInboxAdapter: KeyInboxAdapterService,
+    @Inject(forwardRef(() => KeyGenomeAdapterService)) private readonly keyGenomeAdapter: KeyGenomeAdapterService,
+    @Inject(forwardRef(() => StorelinkAdapterService)) private readonly storelinkAdapter: StorelinkAdapterService,
+    @Inject(forwardRef(() => KeyConnectorAdapterService)) private readonly keyConnectorAdapter: KeyConnectorAdapterService,
+    @Inject(forwardRef(() => KeyCortexSafeDatabaseService)) private readonly safeDatabase: KeyCortexSafeDatabaseService,
   ) {}
 
   /**

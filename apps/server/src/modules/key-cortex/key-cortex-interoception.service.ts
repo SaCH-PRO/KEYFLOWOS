@@ -23,7 +23,7 @@
  *     that a degradation is noticed within one interaction.
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { KeyCortexOrganRegistrarService } from './key-cortex-organ-registrar.service';
 import type { KeyOrganState } from './organs/key-organ-adapter.interface';
 
@@ -75,7 +75,7 @@ export class KeyCortexInteroceptionService {
   /** In-flight background warms, so concurrent cold reads share one fan-out. */
   private readonly warming = new Map<string, Promise<unknown>>();
 
-  constructor(private readonly registrar: KeyCortexOrganRegistrarService) {}
+  constructor(@Inject(forwardRef(() => KeyCortexOrganRegistrarService)) private readonly registrar: KeyCortexOrganRegistrarService) {}
 
   /**
    * Sense the current state of every organ.

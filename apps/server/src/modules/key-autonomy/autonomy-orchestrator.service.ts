@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { AiOversightService } from '../ai/ai-oversight.service';
 import { GenomeAutonomyGateService } from '../business-genome/key-genome/genome-autonomy-gate.service';
@@ -40,7 +40,7 @@ export class AutonomyOrchestratorService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly aiOversight: AiOversightService,
+    @Inject(forwardRef(() => AiOversightService)) private readonly aiOversight: AiOversightService,
     private readonly genomeGate: GenomeAutonomyGateService,
     private readonly actionPolicy: KeyActionPolicyService,
     private readonly genomePolicy: KeyActionGenomePolicyService,

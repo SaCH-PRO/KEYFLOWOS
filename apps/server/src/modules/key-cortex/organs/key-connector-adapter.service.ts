@@ -5,7 +5,7 @@
  * Delegates internal module actions to KeyCortexConnectorService.
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { KeyConnectorService } from '../../key-connector/key-connector.service';
 import { KeyCortexConnectorService } from '../key-cortex-connector.service';
 import { KeyOrganAdapter } from './key-organ-adapter.interface';
@@ -24,7 +24,7 @@ export class KeyConnectorAdapterService extends KeyOrganAdapter {
 
   constructor(
     private readonly keyConnector: KeyConnectorService,
-    private readonly cortexConnector: KeyCortexConnectorService,
+    @Inject(forwardRef(() => KeyCortexConnectorService)) private readonly cortexConnector: KeyCortexConnectorService,
     eventBus: KeyCortexEventBusService,
   ) {
     super();

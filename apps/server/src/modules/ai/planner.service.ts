@@ -73,7 +73,7 @@ export class PlannerService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
     @Inject(BusinessGraphService) private readonly businessGraph: BusinessGraphService,
-    @Inject(forwardRef(() => AiOversightService)) private readonly governance: AiOversightService,
+    @Inject(forwardRef(() => AiOversightService)) @Inject(forwardRef(() => AiOversightService)) private readonly governance: AiOversightService,
     @Inject(AiMemoryService) private readonly memory: AiMemoryService,
     @Inject(BlueprintService) private readonly blueprint: BlueprintService,
   ) {}

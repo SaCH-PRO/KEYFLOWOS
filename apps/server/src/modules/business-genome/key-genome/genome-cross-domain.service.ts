@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject, forwardRef } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../core/prisma/prisma.service';
 import { FinanceGenomeService } from './finance-genome.service';
@@ -67,10 +67,11 @@ const DOMAIN_KEYS: GenomeCrossDomainDomainKey[] = [
 export class GenomeCrossDomainService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly financeGenome: FinanceGenomeService,
-    private readonly customerSalesGenome: CustomerSalesGenomeService,
-    private readonly operationsGenome: OperationsGenomeService,
-    private readonly marketingGenome: MarketingGenomeService,
+    @Inject(forwardRef(() => FinanceGenomeService))
+    @Inject(forwardRef(() => FinanceGenomeService)) private readonly financeGenome: FinanceGenomeService,
+    @Inject(forwardRef(() => CustomerSalesGenomeService)) private readonly customerSalesGenome: CustomerSalesGenomeService,
+    @Inject(forwardRef(() => OperationsGenomeService)) private readonly operationsGenome: OperationsGenomeService,
+    @Inject(forwardRef(() => MarketingGenomeService)) private readonly marketingGenome: MarketingGenomeService,
     private readonly memory: GenomeMemoryService,
     private readonly departments: GenomeDepartmentService,
   ) {}

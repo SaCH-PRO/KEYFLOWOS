@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, Inject, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import {
   AiMessageSenderService,
@@ -90,7 +90,7 @@ export class CommunicationsService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly messageSender: AiMessageSenderService,
+    @Inject(forwardRef(() => AiMessageSenderService)) private readonly messageSender: AiMessageSenderService,
     private readonly deliveryQueue: DeliveryQueueService,
     private readonly outboundContent: OutboundContentService,
     private readonly inbox: KeyInboxService,

@@ -137,7 +137,7 @@ export class DocumentIntelligenceService {
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Inject(ModelGatewayService) private readonly gateway: ModelGatewayService,
     @Inject(AiExecutionLogService) private readonly executionLog: AiExecutionLogService,
-    @Inject(forwardRef(() => AiOversightService)) private readonly governance: AiOversightService,
+    @Inject(forwardRef(() => AiOversightService)) @Inject(forwardRef(() => AiOversightService)) private readonly governance: AiOversightService,
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
     @Inject(ModuleRef) private readonly moduleRef: ModuleRef,
   ) {}

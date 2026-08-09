@@ -6,7 +6,7 @@
  * were extracted into focused services during Phase 0.7.
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import {
   ModuleName,
   ModuleCapability,
@@ -45,14 +45,14 @@ export class KeyCortexConnectorService {
 
   constructor(
     private readonly registry: KeyCortexCapabilityRegistryService,
-    private readonly contextAssembly: KeyCortexContextAssemblyService,
+    @Inject(forwardRef(() => KeyCortexContextAssemblyService)) private readonly contextAssembly: KeyCortexContextAssemblyService,
     private readonly crm: CrmAdapterService,
     private readonly commerce: CommerceAdapterService,
     private readonly bookings: BookingsAdapterService,
     private readonly content: ContentAdapterService,
-    private readonly communications: CommunicationsAdapterService,
+    @Inject(forwardRef(() => CommunicationsAdapterService)) private readonly communications: CommunicationsAdapterService,
     private readonly flow: FlowAdapterService,
-    private readonly autopilot: AutopilotAdapterService,
+    @Inject(forwardRef(() => AutopilotAdapterService)) private readonly autopilot: AutopilotAdapterService,
     private readonly temporal: TemporalAdapterService,
     private readonly inbox: InboxAdapterService,
     private readonly notifications: NotificationsAdapterService,
@@ -61,7 +61,7 @@ export class KeyCortexConnectorService {
     private readonly social: SocialAdapterService,
     private readonly finance: FinanceAdapterService,
     private readonly analytics: AnalyticsAdapterService,
-    private readonly intelligence: IntelligenceAdapterService,
+    @Inject(forwardRef(() => IntelligenceAdapterService)) private readonly intelligence: IntelligenceAdapterService,
     private readonly settings: SettingsAdapterService,
     private readonly bridge: KeyCortexBridgeAdapterService,
   ) {

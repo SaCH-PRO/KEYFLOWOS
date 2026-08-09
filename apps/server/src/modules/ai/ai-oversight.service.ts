@@ -48,7 +48,7 @@ export class AiOversightService {
     @Inject(forwardRef(() => AiExecutionLogService)) private readonly logService: AiExecutionLogService,
     @Inject(forwardRef(() => AiMemoryService)) private readonly memoryService: AiMemoryService,
     @Inject(RoleEngineService) private readonly roleEngine: RoleEngineService,
-    @Inject(ApprovalRoutingService) private readonly approvalRouting: ApprovalRoutingService,
+    @Inject(forwardRef(() => ApprovalRoutingService)) private readonly approvalRouting: ApprovalRoutingService,
     @Inject(JobRolePolicyService) private readonly jobRolePolicy: JobRolePolicyService,
   ) {}
 

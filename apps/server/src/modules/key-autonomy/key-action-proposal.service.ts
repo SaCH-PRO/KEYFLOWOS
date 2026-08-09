@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException, forwardRef } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -27,7 +27,7 @@ export class KeyActionProposalService {
     @Inject(KeyActionPolicyService) private readonly policy: KeyActionPolicyService,
     @Inject(KeyActionExecutorService) private readonly executor: KeyActionExecutorService,
     @Inject(KeyActionGenomePolicyService) private readonly genomePolicy: KeyActionGenomePolicyService,
-    @Inject(AutonomyOrchestratorService) private readonly autonomyOrchestrator: AutonomyOrchestratorService,
+    @Inject(forwardRef(() => AutonomyOrchestratorService)) private readonly autonomyOrchestrator: AutonomyOrchestratorService,
   ) {}
 
   async create(

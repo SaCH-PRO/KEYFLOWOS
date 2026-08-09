@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject, forwardRef } from '@nestjs/common';
 import { GenomeCrossDomainService } from './genome-cross-domain.service';
 import { GenomeMemoryService } from './genome-memory.service';
 import { GenomeRecommendationService } from './genome-recommendation.service';
@@ -50,7 +50,9 @@ function isHealthyEnough(risk: GenomeCrossDomainRiskLevel): boolean {
 @Injectable()
 export class GenomeOpportunityDetectorService {
   constructor(
+    @Inject(forwardRef(() => GenomeCrossDomainService))
     private readonly crossDomain: GenomeCrossDomainService,
+    @Inject(forwardRef(() => GenomeRecommendationService))
     private readonly recommendations: GenomeRecommendationService,
     private readonly memory: GenomeMemoryService,
   ) {}

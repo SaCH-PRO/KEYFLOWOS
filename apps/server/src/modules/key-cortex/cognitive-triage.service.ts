@@ -1,4 +1,4 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Logger, Optional, Inject, forwardRef } from '@nestjs/common';
 import type { TaskCategory } from '../ai/model-gateway.service';
 import { AdaptiveRouterService, type QueryDimensions } from './adaptive-router.service';
 import { KeyCortexEndocrineService } from './key-cortex-endocrine.service';
@@ -89,7 +89,7 @@ export class CognitiveTriageService {
   constructor(
     @Optional() private readonly router?: AdaptiveRouterService,
     @Optional() private readonly endocrine?: KeyCortexEndocrineService,
-    @Optional() private readonly interoception?: KeyCortexInteroceptionService,
+    @Optional() @Inject(forwardRef(() => KeyCortexInteroceptionService)) private readonly interoception?: KeyCortexInteroceptionService,
     // APPENDED, never inserted. The specs construct this service positionally
     // (`new CognitiveTriageService(router, endocrine, intero)`), so adding a
     // parameter in the middle silently feeds each stub into the wrong slot —

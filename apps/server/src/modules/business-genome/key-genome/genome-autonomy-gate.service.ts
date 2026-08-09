@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject, forwardRef } from '@nestjs/common';
 import { GenomeCrossDomainService } from './genome-cross-domain.service';
 import { GenomeFactService } from './genome-fact.service';
 import { GenomeMemoryService } from './genome-memory.service';
@@ -106,6 +106,7 @@ function clamp(value: number, min = 0, max = 1): number {
 @Injectable()
 export class GenomeAutonomyGateService {
   constructor(
+    @Inject(forwardRef(() => GenomeCrossDomainService))
     private readonly crossDomain: GenomeCrossDomainService,
     private readonly readiness: GenomeModuleReadinessService,
     private readonly facts: GenomeFactService,

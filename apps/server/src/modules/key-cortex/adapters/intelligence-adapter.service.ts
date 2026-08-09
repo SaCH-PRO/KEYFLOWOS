@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject, forwardRef } from '@nestjs/common';
 import { ConnectorCommand, ConnectorResult } from '../key-cortex-connector.types';
 import { connectorOk, connectorFail } from '../key-cortex-connector.utils';
 import { BusinessIntelligenceService } from '../../intelligence/business-intelligence.service';
@@ -11,7 +11,7 @@ export class IntelligenceAdapterService {
   constructor(
     private readonly businessIntelligence: BusinessIntelligenceService,
     private readonly growth: GrowthIntelligenceService,
-    private readonly commandCenter: BusinessCommandCenterService,
+    @Inject(forwardRef(() => BusinessCommandCenterService)) private readonly commandCenter: BusinessCommandCenterService,
     private readonly analytics: AnalyticsEngineService,
   ) {}
 

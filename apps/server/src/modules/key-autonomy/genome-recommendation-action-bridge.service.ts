@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, Inject, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { GenomeRecommendationService } from '../business-genome/key-genome/genome-recommendation.service';
 import { GenomeExperimentService } from '../business-genome/key-genome/genome-experiment.service';
@@ -27,6 +27,7 @@ interface ActionPlanMapping {
 export class GenomeRecommendationActionBridgeService {
   constructor(
     private readonly prisma: PrismaService,
+    @Inject(forwardRef(() => GenomeRecommendationService))
     private readonly recommendations: GenomeRecommendationService,
     private readonly experiments: GenomeExperimentService,
     private readonly proposals: KeyActionProposalService,

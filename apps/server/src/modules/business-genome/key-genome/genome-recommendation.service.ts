@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Inject, forwardRef } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../core/prisma/prisma.service';
 import { GenomeSignalService } from './genome-signal.service';
@@ -142,7 +142,8 @@ export class GenomeRecommendationService {
     private readonly experimentService: GenomeExperimentService,
     private readonly memory: GenomeMemoryService,
     private readonly outcomeLearning: OutcomeLearningService,
-    private readonly outcomeService: GenomeRecommendationOutcomeService,
+    @Inject(forwardRef(() => GenomeRecommendationOutcomeService))
+    @Inject(forwardRef(() => GenomeRecommendationOutcomeService)) private readonly outcomeService: GenomeRecommendationOutcomeService,
   ) {}
 
   async createRecommendation(

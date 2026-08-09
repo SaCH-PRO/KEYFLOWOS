@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject, forwardRef } from '@nestjs/common';
 import { GenomeCrossDomainService } from './genome-cross-domain.service';
 import { GenomeMemoryService } from './genome-memory.service';
 import { GenomeRecommendationService } from './genome-recommendation.service';
@@ -122,7 +122,9 @@ function buildRankReason(
 @Injectable()
 export class GenomeRecommendationRankerService {
   constructor(
+    @Inject(forwardRef(() => GenomeRecommendationService))
     private readonly recommendations: GenomeRecommendationService,
+    @Inject(forwardRef(() => GenomeCrossDomainService))
     private readonly crossDomain: GenomeCrossDomainService,
     private readonly memory: GenomeMemoryService,
     private readonly outcomeLearning: GenomeOutcomeLearningService,

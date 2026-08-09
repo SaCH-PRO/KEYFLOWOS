@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject, forwardRef } from '@nestjs/common';
 import {
   KeyActionProposalService,
 } from '../key-autonomy/key-action-proposal.service';
@@ -65,7 +65,7 @@ export interface ExecuteInput {
 @Injectable()
 export class KeyCortexApprovalOrchestratorService {
   constructor(
-    private readonly proposalService: KeyActionProposalService,
+    @Inject(forwardRef(() => KeyActionProposalService)) private readonly proposalService: KeyActionProposalService,
     private readonly audit: KeyCortexAuditService,
   ) {}
 

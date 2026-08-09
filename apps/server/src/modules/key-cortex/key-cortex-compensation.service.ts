@@ -1,4 +1,4 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Logger, Optional, Inject, forwardRef } from '@nestjs/common';
 import { BookingStatus } from '@prisma/client';
 import { CrmService } from '../crm/crm.service';
 import { CommerceService } from '../commerce/commerce.service';
@@ -35,8 +35,7 @@ export class KeyCortexCompensationService {
     private readonly autopilotService?: AutopilotService,
     @Optional()
     private readonly replySender?: KeyInboxReplySenderService,
-    @Optional()
-    private readonly communicationsService?: CommunicationsService,
+    @Optional() @Inject(forwardRef(() => CommunicationsService)) private readonly communicationsService?: CommunicationsService,
     @Optional()
     private readonly timeline?: TimelineService,
   ) {

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject, forwardRef } from '@nestjs/common';
 import { ConnectorCommand, ConnectorResult } from '../key-cortex-connector.types';
 import { connectorOk, connectorFail } from '../key-cortex-connector.utils';
 import {
@@ -20,7 +20,7 @@ import {
  */
 @Injectable()
 export class CommunicationsAdapterService {
-  constructor(private readonly communications: CommunicationsService) {}
+  constructor(@Inject(forwardRef(() => CommunicationsService)) private readonly communications: CommunicationsService) {}
 
   async sendMessage(input: SendMessageInput) {
     return this.communications.sendMessage(input);

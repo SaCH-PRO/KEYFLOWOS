@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, forwardRef } from '@nestjs/common';
 import { BusinessIntelligenceService } from '../intelligence/business-intelligence.service';
 import { KeyExecutiveModeService } from '../intelligence/key-executive-mode.service';
 import { KeyActionProposalService } from '../key-autonomy/key-action-proposal.service';
@@ -82,8 +82,7 @@ export class BusinessCommandCenterService {
     private readonly intelligence: BusinessIntelligenceService,
     @Inject(KeyExecutiveModeService)
     private readonly keyModes: KeyExecutiveModeService,
-    @Inject(KeyActionProposalService)
-    private readonly keyAutonomy: KeyActionProposalService,
+    @Inject(forwardRef(() => KeyActionProposalService)) private readonly keyAutonomy: KeyActionProposalService,
     @Inject(TemporalFlowService)
     private readonly temporal: TemporalFlowService,
     @Inject(GenomeEvolutionService)

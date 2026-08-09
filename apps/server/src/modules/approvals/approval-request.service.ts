@@ -36,7 +36,7 @@ export class ApprovalRequestService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly emitter: EventEmitter2,
     @Inject(forwardRef(() => KeyCortexApprovalOrchestratorService))
-    private readonly proposalOrchestrator?: KeyCortexApprovalOrchestratorService,
+    @Inject(forwardRef(() => KeyCortexApprovalOrchestratorService)) private readonly proposalOrchestrator?: KeyCortexApprovalOrchestratorService,
   ) {}
 
   async createRequest(input: CreateApprovalRequestInput) {

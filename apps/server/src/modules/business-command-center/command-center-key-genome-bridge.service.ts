@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject, forwardRef } from '@nestjs/common';
 import { GenomeAutonomyGateService } from '../business-genome/key-genome/genome-autonomy-gate.service';
 import { GenomeCrossDomainService } from '../business-genome/key-genome/genome-cross-domain.service';
 import { GenomeOpportunityDetectorService } from '../business-genome/key-genome/genome-opportunity-detector.service';
@@ -16,6 +16,7 @@ const UNSAFE_BLOCK_LIMIT = 3;
 @Injectable()
 export class CommandCenterKeyGenomeBridgeService {
   constructor(
+    @Inject(forwardRef(() => GenomeCrossDomainService))
     private readonly crossDomain: GenomeCrossDomainService,
     private readonly ranker: GenomeRecommendationRankerService,
     private readonly opportunityDetector: GenomeOpportunityDetectorService,

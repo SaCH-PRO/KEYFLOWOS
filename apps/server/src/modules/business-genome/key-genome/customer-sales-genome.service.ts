@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject, forwardRef } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../core/prisma/prisma.service';
 import { GenomeFinancialMetricService } from './genome-financial-metric.service';
@@ -194,9 +194,11 @@ export class CustomerSalesGenomeService {
     private readonly segments: GenomeCustomerSegmentService,
     private readonly motions: GenomeSalesMotionService,
     private readonly signals: GenomeSignalService,
-    private readonly recommendations: GenomeRecommendationService,
+    @Inject(forwardRef(() => GenomeRecommendationService))
+    @Inject(forwardRef(() => GenomeRecommendationService)) private readonly recommendations: GenomeRecommendationService,
     private readonly memory: GenomeMemoryService,
-    private readonly departmentReadiness: DepartmentReadinessService,
+    @Inject(forwardRef(() => DepartmentReadinessService))
+    @Inject(forwardRef(() => DepartmentReadinessService)) private readonly departmentReadiness: DepartmentReadinessService,
   ) {}
 
   async computeCustomerSalesSnapshot(

@@ -1,4 +1,4 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Logger, Optional, Inject, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { KeyCortexCompensationService } from './key-cortex-compensation.service';
 
@@ -35,8 +35,7 @@ export class KeyCortexSagaService {
 
   constructor(
     private readonly prisma: PrismaService,
-    @Optional()
-    private readonly compensation?: KeyCortexCompensationService,
+    @Optional() @Inject(forwardRef(() => KeyCortexCompensationService)) private readonly compensation?: KeyCortexCompensationService,
   ) {}
 
   async start(ctx: SagaContext) {

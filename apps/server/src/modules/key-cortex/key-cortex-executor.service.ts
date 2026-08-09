@@ -19,14 +19,7 @@
 //   10. Internal Helpers
 // ============================================================================
 
-import {
-  Injectable,
-  Logger,
-  InternalServerErrorException,
-  Optional,
-  Inject,
-  forwardRef,
-} from '@nestjs/common';
+import { Injectable, Logger, InternalServerErrorException, Optional, Inject, forwardRef } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { randomUUID } from 'node:crypto';
 
@@ -150,7 +143,7 @@ export class KeyCortexExecutorService {
   private approvalCleanupInterval?: NodeJS.Timeout;
 
   constructor(
-    private readonly connector: KeyCortexConnectorService,
+    @Inject(forwardRef(() => KeyCortexConnectorService)) private readonly connector: KeyCortexConnectorService,
     private readonly prisma: PrismaService,
     private readonly eventEmitter: EventEmitter2,
     private readonly autonomyGate: GenomeAutonomyGateService,
@@ -169,11 +162,9 @@ export class KeyCortexExecutorService {
     // phantom-injection failure this repo already has a spec for; booting is
     // not the same as working.
     @Inject(forwardRef(() => AutonomyOrchestratorService))
-    private readonly autonomyOrchestrator?: AutonomyOrchestratorService,
-    @Optional()
-    private readonly proposalService?: KeyActionProposalService,
-    @Optional()
-    private readonly approvalOrchestrator?: KeyCortexApprovalOrchestratorService,
+    @Inject(forwardRef(() => AutonomyOrchestratorService)) private readonly autonomyOrchestrator?: AutonomyOrchestratorService,
+    @Optional() @Inject(forwardRef(() => KeyActionProposalService)) private readonly proposalService?: KeyActionProposalService,
+    @Optional() @Inject(forwardRef(() => KeyCortexApprovalOrchestratorService)) private readonly approvalOrchestrator?: KeyCortexApprovalOrchestratorService,
   ) {
     // Start periodic cleanup of stale pending approvals (Fix 2)
     this.approvalCleanupInterval = setInterval(() => {

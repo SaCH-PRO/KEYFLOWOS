@@ -88,7 +88,7 @@ export class GenomeRecommendationOutcomeService {
   constructor(
     private readonly prisma: PrismaService,
     @Inject(forwardRef(() => GenomeCrossDomainService))
-    private readonly crossDomain: GenomeCrossDomainService,
+    @Inject(forwardRef(() => GenomeCrossDomainService)) private readonly crossDomain: GenomeCrossDomainService,
     private readonly outcomeLearning: GenomeOutcomeLearningService,
   ) {}
 

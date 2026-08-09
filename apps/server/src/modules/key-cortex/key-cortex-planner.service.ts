@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, Optional, Inject } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, Optional, Inject, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { PlannerService } from '../ai/planner.service';
 import { AiUsageService } from '../ai/ai-usage.service';
@@ -65,16 +65,14 @@ export class KeyCortexPlannerService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly planner: PlannerService,
-    private readonly executor: KeyCortexExecutorService,
-    private readonly saga: KeyCortexSagaService,
+    @Inject(forwardRef(() => PlannerService)) private readonly planner: PlannerService,
+    @Inject(forwardRef(() => KeyCortexExecutorService)) private readonly executor: KeyCortexExecutorService,
+    @Inject(forwardRef(() => KeyCortexSagaService)) private readonly saga: KeyCortexSagaService,
     @Optional()
     @Inject(AiUsageService)
     private readonly aiUsage?: AiUsageService,
     // APPENDED, never inserted — specs here construct positionally.
-    @Optional()
-    @Inject(KeyCortexCompensationService)
-    private readonly compensation?: KeyCortexCompensationService,
+    @Optional() @Inject(forwardRef(() => KeyCortexCompensationService)) private readonly compensation?: KeyCortexCompensationService,
   ) {}
 
   async createGoal(businessId: string, input: CreateGoalInput) {

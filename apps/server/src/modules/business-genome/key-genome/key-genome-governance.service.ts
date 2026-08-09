@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../../../core/prisma/prisma.service';
 import { GenomeSignalService } from './genome-signal.service';
 import { GenomeRecommendationService } from './genome-recommendation.service';
@@ -52,6 +52,7 @@ export class KeyGenomeGovernanceService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly signals: GenomeSignalService,
+    @Inject(forwardRef(() => GenomeRecommendationService))
     private readonly recommendations: GenomeRecommendationService,
     private readonly experiments: GenomeExperimentService,
     private readonly readiness: GenomeModuleReadinessService,

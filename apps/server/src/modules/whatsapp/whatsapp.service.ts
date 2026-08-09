@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { EntityResolutionService } from '../../core/connectors/entity-resolution.service';
@@ -68,7 +68,7 @@ export class WhatsAppService {
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Inject(EntityResolutionService) private readonly entityResolution: EntityResolutionService,
     @Inject(KeyInboxService) private readonly keyInbox: KeyInboxService,
-    @Inject(StaffChatBridgeService) private readonly staffChat: StaffChatBridgeService,
+    @Inject(forwardRef(() => StaffChatBridgeService)) private readonly staffChat: StaffChatBridgeService,
   ) {}
 
   async receiveInbound(businessId: string, payload: WhatsAppInboundPayload) {

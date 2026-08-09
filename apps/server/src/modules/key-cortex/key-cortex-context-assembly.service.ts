@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import {
   ModuleName,
   ModuleContextSlice,
@@ -38,10 +38,10 @@ export class KeyCortexContextAssemblyService {
     private readonly crm: CrmAdapterService,
     private readonly commerce: CommerceAdapterService,
     private readonly bookings: BookingsAdapterService,
-    private readonly communications: CommunicationsAdapterService,
+    @Inject(forwardRef(() => CommunicationsAdapterService)) private readonly communications: CommunicationsAdapterService,
     private readonly content: ContentAdapterService,
     private readonly flow: FlowAdapterService,
-    private readonly autopilot: AutopilotAdapterService,
+    @Inject(forwardRef(() => AutopilotAdapterService)) private readonly autopilot: AutopilotAdapterService,
     private readonly temporal: TemporalAdapterService,
     private readonly inbox: InboxAdapterService,
     private readonly notifications: NotificationsAdapterService,
@@ -49,7 +49,7 @@ export class KeyCortexContextAssemblyService {
     private readonly activity: ActivityAdapterService,
     private readonly finance: FinanceAdapterService,
     private readonly analytics: AnalyticsAdapterService,
-    private readonly intelligence: IntelligenceAdapterService,
+    @Inject(forwardRef(() => IntelligenceAdapterService)) private readonly intelligence: IntelligenceAdapterService,
     private readonly settings: SettingsAdapterService,
   ) {}
 

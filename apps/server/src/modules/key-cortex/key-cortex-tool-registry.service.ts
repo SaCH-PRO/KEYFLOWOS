@@ -12,7 +12,7 @@
  * - Execution is audited and wrapped with uniform error handling.
  */
 
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Injectable, Logger, Optional, Inject, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { KeyAutonomySafetyService } from '../key-autonomy/key-autonomy-safety.service';
 import { KeyActionProposalService } from '../key-autonomy/key-action-proposal.service';
@@ -120,21 +120,19 @@ export class KeyCortexToolRegistryService {
     private readonly prisma: PrismaService,
     private readonly safety: KeyAutonomySafetyService,
     private readonly idempotency: KeyIdempotencyService,
-    private readonly saga: KeyCortexSagaService,
+    @Inject(forwardRef(() => KeyCortexSagaService)) private readonly saga: KeyCortexSagaService,
     @Optional()
     private readonly learning?: KeyCortexLearningService,
     @Optional()
     private readonly auditService?: KeyCortexAuditService,
     @Optional()
     private readonly eventBus?: KeyCortexEventBusService,
-    @Optional()
-    private readonly proposals?: KeyActionProposalService,
+    @Optional() @Inject(forwardRef(() => KeyActionProposalService)) private readonly proposals?: KeyActionProposalService,
     // APPENDED, never inserted. Every spec in this repo constructs services
     // positionally, so adding a parameter mid-list silently shifts every
     // argument after it — which is how peekBody stopped being called once
     // already, with no symptom other than a feature quietly not happening.
-    @Optional()
-    private readonly compensation?: KeyCortexCompensationService,
+    @Optional() @Inject(forwardRef(() => KeyCortexCompensationService)) private readonly compensation?: KeyCortexCompensationService,
   ) {}
 
   // ========================================================================
