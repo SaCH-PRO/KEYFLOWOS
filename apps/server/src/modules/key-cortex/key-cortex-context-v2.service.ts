@@ -8,14 +8,12 @@
  */
 
 import { Injectable, Logger } from '@nestjs/common';
+// BookingStatus is an enum in the schema. Every status here was written as a
+// lowercase string literal, which Prisma rejects at runtime — invisible while
+// `prisma.client` was cast to `any`.
+import { BookingStatus } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { RedisService } from '../../core/redis/redis.service';
-import { CrmService } from '../crm/crm.service';
-import { CommerceService } from '../commerce/commerce.service';
-import { BookingsService } from '../bookings/bookings.service';
-import { AutopilotService } from '../autopilot/autopilot.service';
-import { TemporalFlowMemoryService } from '../temporal-flow/temporal-flow-memory.service';
-import { KeyInboxIntelligenceService } from '../key-inbox/key-inbox-intelligence.service';
 import { InvoiceStatus } from '@prisma/client';
 import { subDays, subWeeks, subMonths, startOfMonth, startOfWeek, startOfDay, endOfDay, format } from 'date-fns';
 
@@ -257,6 +255,17 @@ export interface ContextDiff {
   alertsTriggered: number;
 }
 
+/**
+ * Contact has no `name` column. Every caller that shows one selects the same
+ * trio — displayName, firstName, lastName — so the fallback order is written
+ * once here rather than at each of the six sites that needed it.
+ */
+function contactDisplayName(c: { displayName?: string | null; firstName?: string | null; lastName?: string | null } | null | undefined): string {
+  if (!c) return 'Unknown';
+  const full = [c.firstName, c.lastName].filter(Boolean).join(' ').trim();
+  return c.displayName?.trim() || full || 'Unknown';
+}
+
 /* ─────────────────────────── Service ─────────────────────────── */
 
 @Injectable()
@@ -264,15 +273,16 @@ export class KeyCortexContextV2Service {
   private readonly logger = new Logger(KeyCortexContextV2Service.name);
   private readonly CACHE_TTL = 120; // 2 minutes
 
+  // Six services used to be injected here and none of them was ever called —
+  // crm, commerce, bookings and autopilot were already dead; temporal and inbox
+  // became dead when the calls to their non-existent methods were replaced with
+  // real queries. This service reads Prisma directly and always has.
+  //
+  // They are not free. Each was an edge in the module graph, and this module is
+  // one of the four cycles that made the server fail to boot on 2026-08-09.
   constructor(
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
-    private readonly crm: CrmService,
-    private readonly commerce: CommerceService,
-    private readonly bookings: BookingsService,
-    private readonly autopilot: AutopilotService,
-    private readonly temporal: TemporalFlowMemoryService,
-    private readonly inbox: KeyInboxIntelligenceService,
   ) {}
 
   /* ─────── Full Context Assembly ─────── */
@@ -370,28 +380,34 @@ export class KeyCortexContextV2Service {
 
       const [totalContacts, newLeads, hotLeadsRaw, overdueTasksRaw, recentActivityRaw, leadStages] =
         await Promise.all([
-          (this.prisma.client as any).contact.count({ where: { businessId } }),
-          (this.prisma.client as any).contact.count({
+          this.prisma.client.contact.count({ where: { businessId } }),
+          this.prisma.client.contact.count({
             where: { businessId, createdAt: { gte: weekStart } },
           }),
-          (this.prisma.client as any).contact.findMany({
+          this.prisma.client.contact.findMany({
             where: {
               businessId,
               status: 'lead',
-              score: { gte: 70 },
+              leadScore: { gte: 70 },
             },
-            orderBy: { score: 'desc' },
+            orderBy: { leadScore: 'desc' },
             take: 10,
+            // Contact has no `name`, `score` or `stage`. The real fields are
+            // firstName/lastName/displayName, leadScore and pipelineStage —
+            // the trio is what every other caller selects (calendar.service,
+            // accounting.controller, revenue-reporting).
             select: {
               id: true,
-              name: true,
+              firstName: true,
+              lastName: true,
+              displayName: true,
               email: true,
-              score: true,
-              lastActivityAt: true,
-              stage: true,
+              leadScore: true,
+              lastInteractionAt: true,
+              pipelineStage: true,
             },
           }),
-          (this.prisma.client as any).crmTask.findMany({
+          this.prisma.client.crmTask.findMany({
             where: {
               businessId,
               dueDate: { lt: new Date() },
@@ -400,33 +416,34 @@ export class KeyCortexContextV2Service {
             orderBy: { dueDate: 'asc' },
             take: 10,
             include: {
-              contact: { select: { name: true } },
+              contact: { select: { firstName: true, lastName: true, displayName: true } },
             },
           }),
-          (this.prisma.client as any).crmActivity.findMany({
+          this.prisma.client.crmActivity.findMany({
             where: { businessId },
             orderBy: { createdAt: 'desc' },
             take: 10,
             include: {
-              contact: { select: { name: true } },
+              contact: { select: { firstName: true, lastName: true, displayName: true } },
             },
           }),
-          (this.prisma.client as any).contact.groupBy({
-            by: ['stage'],
+          // `stage` is not a Contact field; the pipeline column is pipelineStage.
+          this.prisma.client.contact.groupBy({
+            by: ['pipelineStage'],
             where: { businessId, status: 'lead' },
-            _count: { stage: true },
+            _count: { pipelineStage: true },
           }),
         ]);
 
       // Calculate conversion rate
-      const convertedThisMonth = await (this.prisma.client as any).contact.count({
+      const convertedThisMonth = await this.prisma.client.contact.count({
         where: {
           businessId,
           status: 'customer',
           createdAt: { gte: monthStart },
         },
       });
-      const leadsCreatedThisMonth = await (this.prisma.client as any).contact.count({
+      const leadsCreatedThisMonth = await this.prisma.client.contact.count({
         where: {
           businessId,
           status: 'lead',
@@ -440,18 +457,20 @@ export class KeyCortexContextV2Service {
       return {
         totalContacts,
         newLeadsThisWeek: newLeads,
+        // The OUTPUT shape (name/score/stage) is the contract these callers
+        // read; only the source columns change.
         hotLeads: hotLeadsRaw.map((l: any) => ({
           id: l.id,
-          name: l.name || 'Unknown',
+          name: contactDisplayName(l),
           email: l.email || '',
-          score: l.score || 0,
-          lastActivity: l.lastActivityAt || new Date(),
-          stage: l.stage || 'new',
+          score: l.leadScore ?? 0,
+          lastActivity: l.lastInteractionAt || new Date(),
+          stage: l.pipelineStage || 'new',
         })),
         overdueTasks: overdueTasksRaw.map((t: any) => ({
           id: t.id,
           title: t.title,
-          contactName: t.contact?.name || 'Unknown',
+          contactName: contactDisplayName(t.contact),
           dueDate: t.dueDate,
           priority: t.priority || 'medium',
         })),
@@ -459,10 +478,10 @@ export class KeyCortexContextV2Service {
           type: a.type,
           description: a.description || '',
           timestamp: a.createdAt,
-          contactName: a.contact?.name || 'Unknown',
+          contactName: contactDisplayName(a.contact),
         })),
         leadStages: leadStages.reduce((acc: any, s: any) => {
-          acc[s.stage || 'unknown'] = s._count.stage;
+          acc[s.pipelineStage || 'unknown'] = s._count.pipelineStage;
           return acc;
         }, {} as Record<string, number>),
         conversionRateThisMonth: conversionRate,
@@ -491,49 +510,52 @@ export class KeyCortexContextV2Service {
         totalPaid,
         totalBilled,
       ] = await Promise.all([
-        (this.prisma.client as any).invoice.findMany({
+        this.prisma.client.invoice.findMany({
           where: {
             businessId,
             createdAt: { gte: monthStart },
           },
           select: { total: true },
         }),
-        (this.prisma.client as any).invoice.findMany({
+        this.prisma.client.invoice.findMany({
           where: {
             businessId,
             createdAt: { gte: weekStart },
           },
           select: { total: true },
         }),
-        (this.prisma.client as any).invoice.findMany({
+        this.prisma.client.invoice.findMany({
           where: {
             businessId,
             createdAt: { gte: today },
           },
           select: { total: true },
         }),
-        (this.prisma.client as any).invoice.findMany({
+        this.prisma.client.invoice.findMany({
           where: {
             businessId,
             status: { in: [InvoiceStatus.SENT, InvoiceStatus.PENDING, InvoiceStatus.PARTIAL] },
           },
           include: {
-            contact: { select: { name: true } },
+            contact: { select: { firstName: true, lastName: true, displayName: true } },
           },
           orderBy: { dueDate: 'asc' },
         }),
-        (this.prisma.client as any).payment.findMany({
+        this.prisma.client.payment.findMany({
           where: {
             businessId,
             createdAt: { gte: subDays(new Date(), 7) },
           },
+          // Payment's only relation is `invoice`; the contact hangs off that.
           include: {
-            contact: { select: { name: true } },
+            invoice: {
+              select: { contact: { select: { firstName: true, lastName: true, displayName: true } } },
+            },
           },
           orderBy: { createdAt: 'desc' },
           take: 10,
         }),
-        (this.prisma.client as any).invoiceItem.groupBy({
+        this.prisma.client.invoiceItem.groupBy({
           by: ['productId'],
           where: {
             invoice: { businessId, createdAt: { gte: monthStart } },
@@ -542,11 +564,11 @@ export class KeyCortexContextV2Service {
           orderBy: { _sum: { total: 'desc' } },
           take: 5,
         }),
-        (this.prisma.client as any).payment.aggregate({
+        this.prisma.client.payment.aggregate({
           where: { businessId, status: 'completed' },
           _sum: { amount: true },
         }),
-        (this.prisma.client as any).invoice.aggregate({
+        this.prisma.client.invoice.aggregate({
           where: { businessId },
           _sum: { total: true },
         }),
@@ -573,7 +595,7 @@ export class KeyCortexContextV2Service {
       // Resolve top product names
       const productIds = topProducts.map((p: any) => p.productId).filter(Boolean);
       const products = productIds.length
-        ? await (this.prisma.client as any).product.findMany({
+        ? await this.prisma.client.product.findMany({
             where: { id: { in: productIds } },
             select: { id: true, name: true },
           })
@@ -591,7 +613,7 @@ export class KeyCortexContextV2Service {
           overdueTotal,
           invoices: overdueInvoices.slice(0, 10).map((i: any) => ({
             id: i.id,
-            contactName: i.contact?.name || 'Unknown',
+            contactName: contactDisplayName(i.contact),
             amount: i.total || 0,
             dueDate: i.dueDate || new Date(),
             status: i.status,
@@ -600,7 +622,7 @@ export class KeyCortexContextV2Service {
         },
         recentPayments: recentPayments.map((p: any) => ({
           id: p.id,
-          contactName: p.contact?.name || 'Unknown',
+          contactName: contactDisplayName(p.invoice?.contact),
           amount: p.amount || 0,
           date: p.createdAt,
           method: p.method || 'unknown',
@@ -632,30 +654,30 @@ export class KeyCortexContextV2Service {
 
       const [upcomingAppointments, todayAppts, weekAppts, completedWeek, noShowsWeek, noShowsMonth] =
         await Promise.all([
-          (this.prisma.client as any).booking.findMany({
+          this.prisma.client.booking.findMany({
             where: {
               businessId,
               startTime: { gte: now },
-              status: { notIn: ['cancelled', 'no_show'] },
+              status: { notIn: [BookingStatus.CANCELLED, BookingStatus.NO_SHOW] },
             },
             orderBy: { startTime: 'asc' },
             take: 10,
             include: {
-              contact: { select: { name: true } },
+              contact: { select: { firstName: true, lastName: true, displayName: true } },
               service: { select: { name: true, duration: true, price: true } },
             },
           }),
-          (this.prisma.client as any).booking.findMany({
+          this.prisma.client.booking.findMany({
             where: {
               businessId,
               startTime: { gte: todayStart, lte: todayEnd },
             },
             include: {
-              contact: { select: { name: true } },
+              contact: { select: { firstName: true, lastName: true, displayName: true } },
               service: { select: { name: true, duration: true, price: true } },
             },
           }),
-          (this.prisma.client as any).booking.findMany({
+          this.prisma.client.booking.findMany({
             where: {
               businessId,
               startTime: { gte: weekStart },
@@ -664,25 +686,25 @@ export class KeyCortexContextV2Service {
               service: { select: { price: true } },
             },
           }),
-          (this.prisma.client as any).booking.count({
+          this.prisma.client.booking.count({
             where: {
               businessId,
               startTime: { gte: weekStart },
-              status: 'completed',
+              status: BookingStatus.COMPLETED,
             },
           }),
-          (this.prisma.client as any).booking.count({
+          this.prisma.client.booking.count({
             where: {
               businessId,
               startTime: { gte: weekStart },
-              status: 'no_show',
+              status: BookingStatus.NO_SHOW,
             },
           }),
-          (this.prisma.client as any).booking.count({
+          this.prisma.client.booking.count({
             where: {
               businessId,
               startTime: { gte: startOfMonth(now) },
-              status: 'no_show',
+              status: BookingStatus.NO_SHOW,
             },
           }),
         ]);
@@ -707,7 +729,7 @@ export class KeyCortexContextV2Service {
       return {
         upcomingAppointments: upcomingAppointments.map((a: any) => ({
           id: a.id,
-          contactName: a.contact?.name || 'Unknown',
+          contactName: contactDisplayName(a.contact),
           service: a.service?.name || 'Unknown',
           date: a.startTime,
           duration: a.service?.duration || 0,
@@ -741,13 +763,13 @@ export class KeyCortexContextV2Service {
       const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
 
       const [sent, received, campaigns, conversations] = await Promise.all([
-        (this.prisma.client as any).message.count({
+        this.prisma.client.message.count({
           where: { businessId, direction: 'outbound', createdAt: { gte: weekStart } },
         }),
-        (this.prisma.client as any).message.count({
+        this.prisma.client.message.count({
           where: { businessId, direction: 'inbound', createdAt: { gte: weekStart } },
         }),
-        (this.prisma.client as any).campaign.findMany({
+        this.prisma.client.campaign.findMany({
           where: {
             businessId,
             status: { in: ['running', 'scheduled'] },
@@ -762,9 +784,11 @@ export class KeyCortexContextV2Service {
             clickCount: true,
           },
         }),
-        (this.prisma.client as any).conversation.count({
+        // Conversation is a business-to-business thread: both participants are
+        // Businesses, so there is no businessId column to filter on.
+        this.prisma.client.conversation.count({
           where: {
-            businessId,
+            OR: [{ participantAId: businessId }, { participantBId: businessId }],
             updatedAt: { gte: subDays(new Date(), 1) },
           },
         }),
@@ -786,7 +810,7 @@ export class KeyCortexContextV2Service {
       });
 
       const totalSent = sent || 1;
-      const responded = await (this.prisma.client as any).message.count({
+      const responded = await this.prisma.client.message.count({
         where: {
           businessId,
           direction: 'inbound',
@@ -818,7 +842,7 @@ export class KeyCortexContextV2Service {
 
       const [activeTasks, delegatedToday, completedToday, pendingApprovals, workflows] =
         await Promise.all([
-          (this.prisma.client as any).autopilotTask.findMany({
+          this.prisma.client.autopilotTask.findMany({
             where: {
               businessId,
               status: { in: ['pending', 'in_progress'] },
@@ -829,32 +853,32 @@ export class KeyCortexContextV2Service {
               id: true,
               title: true,
               status: true,
-              assignee: true,
+              executedBy: true,
               priority: true,
               dueDate: true,
             },
           }),
-          (this.prisma.client as any).autopilotTask.count({
+          this.prisma.client.autopilotTask.count({
             where: {
               businessId,
-              source: 'delegation_loop',
+              category: 'delegation_loop',
               createdAt: { gte: todayStart },
             },
           }),
-          (this.prisma.client as any).autopilotTask.count({
+          this.prisma.client.autopilotTask.count({
             where: {
               businessId,
               status: 'completed',
-              completedAt: { gte: todayStart },
+              executedAt: { gte: todayStart },
             },
           }),
-          (this.prisma.client as any).autopilotTask.count({
+          this.prisma.client.autopilotTask.count({
             where: {
               businessId,
               status: 'awaiting_approval',
             },
           }),
-          (this.prisma.client as any).workflow.findMany({
+          this.prisma.client.workflow.findMany({
             where: {
               businessId,
               status: 'active',
@@ -867,14 +891,14 @@ export class KeyCortexContextV2Service {
       const efficiency = Math.round((completedToday / totalTasks) * 100);
 
       // Automation rate = tasks created by automation vs manually
-      const automatedTasks = await (this.prisma.client as any).autopilotTask.count({
+      const automatedTasks = await this.prisma.client.autopilotTask.count({
         where: {
           businessId,
-          source: { in: ['workflow', 'automation', 'delegation_loop'] },
+          category: { in: ['workflow', 'automation', 'delegation_loop'] },
           createdAt: { gte: subDays(new Date(), 30) },
         },
       });
-      const totalTasksMonth = await (this.prisma.client as any).autopilotTask.count({
+      const totalTasksMonth = await this.prisma.client.autopilotTask.count({
         where: {
           businessId,
           createdAt: { gte: subDays(new Date(), 30) },
@@ -886,7 +910,7 @@ export class KeyCortexContextV2Service {
           id: t.id,
           title: t.title,
           status: t.status,
-          assignee: t.assignee || 'Unassigned',
+          assignee: t.executedBy || 'Unassigned',
           priority: t.priority || 'medium',
           dueDate: t.dueDate || new Date(),
         })),
@@ -910,25 +934,47 @@ export class KeyCortexContextV2Service {
 
   async getTemporalContext(businessId: string): Promise<TemporalContext> {
     try {
+      // TemporalFlowMemoryService has no getRecentMemories or getDetectedPatterns
+      // — those names belong to TemporalAdapterService and to nothing at all
+      // respectively. Read the model directly, as the rest of this file does.
+      //
+      // "Patterns" were never stored; they are derived here by grouping memories
+      // on `type`, which is what a detected pattern actually is in this schema:
+      // a recurring kind of memory, with a count, an average confidence and a
+      // first/last sighting.
       const [memories, patterns] = await Promise.all([
-        (this.temporal as any).getRecentMemories(businessId, 20),
-        (this.temporal as any).getDetectedPatterns(businessId, 10),
+        this.prisma.client.temporalFlowMemory.findMany({
+          where: { businessId },
+          orderBy: { createdAt: 'desc' },
+          take: 20,
+          select: { id: true, content: true, type: true, confidence: true, createdAt: true },
+        }),
+        this.prisma.client.temporalFlowMemory.groupBy({
+          by: ['type'],
+          where: { businessId },
+          _count: { type: true },
+          _avg: { confidence: true },
+          _min: { createdAt: true },
+          _max: { createdAt: true },
+          orderBy: { _count: { type: 'desc' } },
+          take: 10,
+        }),
       ]);
 
       return {
-        recentMemories: (memories || []).map((m: Record<string, unknown>) => ({
-          id: (m.id as string) || '',
-          content: (m.content as string) || '',
-          type: (m.type as string) || 'memory',
-          importance: (m.importance as number) || 0,
-          createdAt: new Date((m.createdAt as string) || Date.now()),
+        recentMemories: memories.map((m) => ({
+          id: m.id,
+          content: m.content ?? '',
+          type: m.type ?? 'memory',
+          importance: m.confidence ?? 0,
+          createdAt: m.createdAt,
         })),
-        patternsDetected: (patterns || []).map((p: Record<string, unknown>) => ({
-          pattern: (p.pattern as string) || '',
-          frequency: (p.frequency as number) || 0,
-          confidence: (p.confidence as number) || 0,
-          firstSeen: new Date((p.firstSeen as string) || Date.now()),
-          lastSeen: new Date((p.lastSeen as string) || Date.now()),
+        patternsDetected: patterns.map((p) => ({
+          pattern: p.type ?? '',
+          frequency: p._count.type,
+          confidence: p._avg.confidence ?? 0,
+          firstSeen: p._min.createdAt ?? new Date(),
+          lastSeen: p._max.createdAt ?? new Date(),
         })),
         contextWindow: 20,
       };
@@ -942,31 +988,59 @@ export class KeyCortexContextV2Service {
 
   async getInboxContext(businessId: string): Promise<InboxContext> {
     try {
-      const [unreadThreads, unreadMsgs, urgentMsgs, threadsNeedingAction, avgResponse] =
-        await Promise.all([
-          (this.inbox as any).getUnreadThreadCount(businessId),
-          (this.inbox as any).getUnreadMessageCount(businessId),
-          (this.inbox as any).getUrgentMessages(businessId, 5),
-          (this.inbox as any).getThreadsRequiringAction(businessId),
-          (this.inbox as any).getAverageResponseTime(businessId),
-        ]);
+      // KeyInboxIntelligenceService is a REPORTING service — generateReport,
+      // listReports, getLatestReport. None of the six methods called here have
+      // ever existed on it. Read the inbox models directly.
+      //
+      // "Unread" is not a column in this schema. The honest equivalents:
+      //   unreadThreads          threads still OPEN
+      //   unreadMessages         inbound messages on those OPEN threads
+      //   threadsRequiringAction threads WAITING, i.e. waiting on us
+      const [openThreads, waitingThreads, inboundOnOpen, urgent, forResponse] = await Promise.all([
+        this.prisma.client.keyInboxThread.count({ where: { businessId, status: 'OPEN' } }),
+        this.prisma.client.keyInboxThread.count({ where: { businessId, status: 'WAITING' } }),
+        this.prisma.client.keyInboxMessage.count({
+          where: { businessId, direction: 'INBOUND', thread: { status: 'OPEN' } },
+        }),
+        this.prisma.client.keyInboxThread.findMany({
+          where: { businessId, status: { not: 'DONE' }, aiUrgency: { in: ['high', 'urgent', 'critical'] } },
+          orderBy: { lastMessageAt: 'desc' },
+          take: 5,
+          select: {
+            id: true, subject: true, channel: true, aiSummary: true,
+            aiUrgency: true, priority: true, lastMessageAt: true, createdAt: true,
+          },
+        }),
+        this.prisma.client.keyInboxThread.findMany({
+          where: { businessId, lastInboundAt: { not: null }, lastOutboundAt: { not: null } },
+          orderBy: { lastMessageAt: 'desc' },
+          take: 100,
+          select: { lastInboundAt: true, lastOutboundAt: true },
+        }),
+      ]);
 
-      const aiSummary = await (this.inbox as any).getAiSummary(businessId);
+      // Average reply latency in minutes, over threads we have actually answered.
+      const gaps = forResponse
+        .map((t) => (t.lastOutboundAt!.getTime() - t.lastInboundAt!.getTime()) / 60000)
+        .filter((mins) => mins > 0);
+      const avgResponse = gaps.length ? Math.round(gaps.reduce((a, b) => a + b, 0) / gaps.length) : 0;
 
       return {
-        unreadThreads: unreadThreads || 0,
-        unreadMessages: unreadMsgs || 0,
-        urgentMessages: (urgentMsgs || []).map((m: Record<string, unknown>) => ({
-          id: (m.id as string) || '',
-          subject: (m.subject as string) || 'No subject',
-          sender: (m.sender as string) || 'Unknown',
-          preview: (m.preview as string) || '',
-          receivedAt: new Date((m.receivedAt as string) || Date.now()),
-          priority: (m.priority as string) || 'medium',
+        unreadThreads: openThreads,
+        unreadMessages: inboundOnOpen,
+        urgentMessages: urgent.map((t) => ({
+          id: t.id,
+          subject: t.subject || 'No subject',
+          sender: t.channel || 'Unknown',
+          preview: (t.aiSummary || '').slice(0, 160),
+          receivedAt: t.lastMessageAt ?? t.createdAt,
+          priority: t.aiUrgency || String(t.priority ?? 'medium'),
         })),
-        aiSummary: aiSummary || 'No summary available',
-        threadsRequiringAction: threadsNeedingAction || 0,
-        avgResponseTime: avgResponse || 0,
+        aiSummary: urgent[0]?.aiSummary
+          ? `${urgent.length} urgent thread(s). Most recent: ${urgent[0].aiSummary}`
+          : `${openThreads} open, ${waitingThreads} awaiting reply.`,
+        threadsRequiringAction: waitingThreads,
+        avgResponseTime: avgResponse,
       };
     } catch (error: any) {
       this.logger.error(`[getInboxContext] Error for ${businessId}: ${error.message}`);
@@ -985,7 +1059,7 @@ export class KeyCortexContextV2Service {
 
   async getGenomeContext(businessId: string): Promise<GenomeContext> {
     try {
-      const genome = await (this.prisma.client as any).businessGenome.findUnique({
+      const genome = await this.prisma.client.businessGenome.findUnique({
         where: { businessId },
       });
 
@@ -1031,18 +1105,19 @@ export class KeyCortexContextV2Service {
       const since = subDays(new Date(), 7);
 
       const [assets, pendingCount, entities, commands] = await Promise.all([
-        (this.prisma.client as any).mediaAsset.findMany({
+        // This used to `include: { visualIntake: true }`, which Prisma rejects:
+        // MediaAsset declares no relations at all, and VisualIntake links back
+        // by a plain mediaAssetId string. The intent was right and the mechanism
+        // was impossible, so the join is done below with a second query.
+        this.prisma.client.mediaAsset.findMany({
           where: { businessId, createdAt: { gte: since } },
           orderBy: { createdAt: 'desc' },
           take: 10,
-          include: {
-            visualIntake: true,
-          },
         }),
-        (this.prisma.client as any).visualIntake.count({
+        this.prisma.client.visualIntake.count({
           where: { businessId, status: { in: ['PENDING', 'PROCESSED'] } },
         }),
-        (this.prisma.client as any).extractedEntity.findMany({
+        this.prisma.client.extractedEntity.findMany({
           where: {
             businessId,
             entityType: { in: ['business_card', 'contact'] },
@@ -1050,9 +1125,8 @@ export class KeyCortexContextV2Service {
           },
           orderBy: { createdAt: 'desc' },
           take: 10,
-          include: { mediaAsset: { select: { id: true } } },
         }),
-        (this.prisma.client as any).commandItem.findMany({
+        this.prisma.client.commandItem.findMany({
           where: {
             businessId,
             sourceModule: 'DEVICE',
@@ -1064,11 +1138,23 @@ export class KeyCortexContextV2Service {
         }),
       ]);
 
+      // The join Prisma could not express: VisualIntake carries detectedType and
+      // points at MediaAsset by a plain string id.
+      const intakes = assets.length
+        ? await this.prisma.client.visualIntake.findMany({
+            where: { businessId, mediaAssetId: { in: assets.map((a) => a.id) } },
+            select: { mediaAssetId: true, detectedType: true },
+          })
+        : [];
+      const detectedTypeByAsset = new Map(
+        intakes.filter((i) => i.mediaAssetId).map((i) => [i.mediaAssetId as string, i.detectedType]),
+      );
+
       return {
         recentCaptures: (assets || []).map((a: any) => ({
           id: a.id,
           mediaType: a.mediaType ?? 'unknown',
-          detectedType: a.visualIntake?.detectedType ?? null,
+          detectedType: detectedTypeByAsset.get(a.id) ?? a.linkedEntityType ?? null,
           status: a.status ?? 'unknown',
           createdAt: a.createdAt,
           publicUrl: a.publicUrl ?? null,
@@ -1240,7 +1326,7 @@ export class KeyCortexContextV2Service {
 
     try {
       // New leads since
-      newLeads += await (this.prisma.client as any).contact.count({
+      newLeads += await this.prisma.client.contact.count({
         where: { businessId, createdAt: { gte: since }, status: 'lead' },
       });
       if (newLeads > 0) {
@@ -1254,7 +1340,7 @@ export class KeyCortexContextV2Service {
       }
 
       // New payments since
-      const payments = await (this.prisma.client as any).payment.findMany({
+      const payments = await this.prisma.client.payment.findMany({
         where: { businessId, createdAt: { gte: since }, status: 'completed' },
         select: { amount: true },
       });
@@ -1271,7 +1357,7 @@ export class KeyCortexContextV2Service {
       }
 
       // New tasks since
-      newTasks += await (this.prisma.client as any).autopilotTask.count({
+      newTasks += await this.prisma.client.autopilotTask.count({
         where: { businessId, createdAt: { gte: since } },
       });
       if (newTasks > 0) {
@@ -1285,7 +1371,7 @@ export class KeyCortexContextV2Service {
       }
 
       // New messages since
-      newMessages += await (this.prisma.client as any).message.count({
+      newMessages += await this.prisma.client.message.count({
         where: { businessId, createdAt: { gte: since } },
       });
       if (newMessages > 0) {
@@ -1299,7 +1385,7 @@ export class KeyCortexContextV2Service {
       }
 
       // Overdue invoices check
-      const newlyOverdue = await (this.prisma.client as any).invoice.count({
+      const newlyOverdue = await this.prisma.client.invoice.count({
         where: {
           businessId,
           dueDate: { gte: since, lt: new Date() },
@@ -1317,7 +1403,7 @@ export class KeyCortexContextV2Service {
       }
 
       // New bookings since
-      const newBookings = await (this.prisma.client as any).booking.count({
+      const newBookings = await this.prisma.client.booking.count({
         where: { businessId, createdAt: { gte: since } },
       });
       if (newBookings > 0) {
@@ -1331,11 +1417,11 @@ export class KeyCortexContextV2Service {
       }
 
       // Cancelled bookings since
-      const cancelledBookings = await (this.prisma.client as any).booking.count({
+      const cancelledBookings = await this.prisma.client.booking.count({
         where: {
           businessId,
           updatedAt: { gte: since },
-          status: 'cancelled',
+          status: BookingStatus.CANCELLED,
         },
       });
       if (cancelledBookings > 0) {

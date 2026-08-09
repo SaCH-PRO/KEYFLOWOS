@@ -135,14 +135,16 @@ const KNOWN_BROKEN = [
   // was never built, and that is worth knowing. Distinguishing it matters: the
   // other twelve throw when reached, this one does not.
   'modules/key-cortex/key-cortex-compensation.service.ts replySender.markAsDraft',
-  'modules/key-cortex/key-cortex-context-v2.service.ts temporal.getRecentMemories',
-  'modules/key-cortex/key-cortex-context-v2.service.ts temporal.getDetectedPatterns',
-  'modules/key-cortex/key-cortex-context-v2.service.ts inbox.getUnreadThreadCount',
-  'modules/key-cortex/key-cortex-context-v2.service.ts inbox.getUnreadMessageCount',
-  'modules/key-cortex/key-cortex-context-v2.service.ts inbox.getUrgentMessages',
-  'modules/key-cortex/key-cortex-context-v2.service.ts inbox.getThreadsRequiringAction',
-  'modules/key-cortex/key-cortex-context-v2.service.ts inbox.getAverageResponseTime',
-  'modules/key-cortex/key-cortex-context-v2.service.ts inbox.getAiSummary',
+  // FIXED — all eight context-v2 entries are gone. TemporalFlowMemoryService
+  // never had getRecentMemories or getDetectedPatterns (the first belongs to
+  // TemporalAdapterService, the second to nothing), and KeyInboxIntelligence is
+  // a reporting service that never had any of the six inbox methods. Both
+  // getters now query TemporalFlowMemory and KeyInboxThread/Message directly and
+  // typecheck with no cast at all, which is the proof the shapes are real.
+  //
+  // They were not silent: all eight threw hourly in production, and
+  // Promise.allSettled in getFullContext swallowed every rejection, so KEY
+  // reasoned with an empty context and cached it to Redis.
   // FIXED — both getEventLog calls now use getEventChain(correlationId), and
   // typecheck without a cast, which is the proof the method and the shapes are
   // real. Removed from this list rather than left as decoration.

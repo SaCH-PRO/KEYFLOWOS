@@ -2,19 +2,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { KeyCortexContextV2Service } from './key-cortex-context-v2.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { RedisService } from '../../core/redis/redis.service';
-import { CrmService } from '../crm/crm.service';
-import { CommerceService } from '../commerce/commerce.service';
-import { BookingsService } from '../bookings/bookings.service';
-import { AutopilotService } from '../autopilot/autopilot.service';
-import { TemporalFlowMemoryService } from '../temporal-flow/temporal-flow-memory.service';
-import { KeyInboxIntelligenceService } from '../key-inbox/key-inbox-intelligence.service';
 
 describe('KeyCortexContextV2Service device slice', () => {
   let service: KeyCortexContextV2Service;
   let prisma: {
     client: {
       mediaAsset: { findMany: ReturnType<typeof vi.fn> };
-      visualIntake: { count: ReturnType<typeof vi.fn> };
+      visualIntake: { count: ReturnType<typeof vi.fn>; findMany: ReturnType<typeof vi.fn> };
       extractedEntity: { findMany: ReturnType<typeof vi.fn> };
       commandItem: { findMany: ReturnType<typeof vi.fn> };
     };
@@ -24,7 +18,7 @@ describe('KeyCortexContextV2Service device slice', () => {
     prisma = {
       client: {
         mediaAsset: { findMany: vi.fn() },
-        visualIntake: { count: vi.fn() },
+        visualIntake: { count: vi.fn(), findMany: vi.fn() },
         extractedEntity: { findMany: vi.fn() },
         commandItem: { findMany: vi.fn() },
       },
@@ -50,10 +44,13 @@ describe('KeyCortexContextV2Service device slice', () => {
         status: 'PROCESSED',
         publicUrl: 'https://example.com/a1',
         createdAt: new Date(),
-        visualIntake: { detectedType: 'business_card' },
       },
     ]);
     prisma.client.visualIntake.count.mockResolvedValue(2);
+    // detectedType is resolved by a second query keyed on mediaAssetId.
+    prisma.client.visualIntake.findMany.mockResolvedValue([
+      { mediaAssetId: 'a1', detectedType: 'business_card' },
+    ]);
     prisma.client.extractedEntity.findMany.mockResolvedValue([
       {
         id: 'e1',
