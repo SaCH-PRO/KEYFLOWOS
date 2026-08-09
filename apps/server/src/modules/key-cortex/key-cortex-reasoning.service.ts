@@ -849,9 +849,30 @@ Example: ["Can you break that down by month?", "Create a task for this", "What a
 
       if (this.eventService) {
         try {
-          eventLog = await (this.eventService as any).getEventLog(decisionId);
+          // Identical defect to key-cortex-interaction.service.ts — the same
+          // explainDecision body appears in both files, and both called a
+          // getEventLog() that KeyCortexEventService has never had. Fixing one
+          // and not the other would leave a copy of the bug behind.
+          //
+          // getEventChain(correlationId) is the real method; the fallback below
+          // confirms decisionId is a correlationId by querying cortexSession
+          // for exactly that.
+          const chain = await this.eventService.getEventChain(decisionId);
+          eventLog = chain.map((e) => ({
+            step: `${e.eventType}:${e.action}`,
+            timestamp: e.createdAt,
+            data: {
+              subjectType: e.subjectType,
+              subjectId: e.subjectId,
+              actorType: e.actorType,
+              actorId: e.actorId,
+              source: e.source,
+              ...(e.before ? { before: e.before } : {}),
+              ...(e.after ? { after: e.after } : {}),
+            },
+          }));
         } catch {
-          // Event service may not have this decision
+          // A decision with no recorded events is normal, not an error.
         }
       }
 

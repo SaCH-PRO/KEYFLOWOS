@@ -127,6 +127,13 @@ export function findBrokenCastCalls(): CastCall[] {
  * This list may only SHRINK. Every entry is a call that throws when reached.
  */
 const KNOWN_BROKEN = [
+  // NOT A CRASH — a capability probe. The call site tests
+  // `typeof (this.replySender as any).markAsDraft === 'function'` first, so it
+  // never throws; the method has never existed, the probe is always false, and
+  // it falls through to the documented soft-delete fallback. Listed anyway
+  // because the "prefer" branch is unreachable code describing a feature that
+  // was never built, and that is worth knowing. Distinguishing it matters: the
+  // other twelve throw when reached, this one does not.
   'modules/key-cortex/key-cortex-compensation.service.ts replySender.markAsDraft',
   'modules/key-cortex/key-cortex-context-v2.service.ts temporal.getRecentMemories',
   'modules/key-cortex/key-cortex-context-v2.service.ts temporal.getDetectedPatterns',
@@ -136,9 +143,28 @@ const KNOWN_BROKEN = [
   'modules/key-cortex/key-cortex-context-v2.service.ts inbox.getThreadsRequiringAction',
   'modules/key-cortex/key-cortex-context-v2.service.ts inbox.getAverageResponseTime',
   'modules/key-cortex/key-cortex-context-v2.service.ts inbox.getAiSummary',
-  'modules/key-cortex/key-cortex-interaction.service.ts eventService.getEventLog',
+  // FIXED — both getEventLog calls now use getEventChain(correlationId), and
+  // typecheck without a cast, which is the proof the method and the shapes are
+  // real. Removed from this list rather than left as decoration.
+  //
+  // THE TWO BELOW ARE NOT RENAMES, AND ARE DELIBERATELY NOT GUESSED AT.
+  //
+  //   proactive.shouldAct(businessId) -> {shouldAct, suggestions}
+  //     KeyProactiveEngineService has evaluateProactiveActions(), which takes NO
+  //     arguments and returns triggers for EVERY business. Adapting it would
+  //     mean evaluating the whole estate on every chat turn to answer a question
+  //     about one business. The per-business method was never written.
+  //
+  //   insight.generateInsights(businessId, query, modules)
+  //     KeyCortexInsightService has analyzeRevenue, analyzeCashFlow,
+  //     analyzePipeline, generateRecommendations, generateBusinessReport — no
+  //     query-and-modules entry point. This one is reached from an HTTP
+  //     controller, so the endpoint has always thrown into its own try.
+  //
+  // Both are "the API was never built", not "the name is wrong". Building them
+  // is a product decision and inventing a plausible adaptation here would be
+  // the same mistake that produced the original casts.
   'modules/key-cortex/key-cortex-query-pipeline.service.ts proactive.shouldAct',
-  'modules/key-cortex/key-cortex-reasoning.service.ts eventService.getEventLog',
   'modules/key-cortex/key-cortex.controller.ts insight.generateInsights',
 ];
 
