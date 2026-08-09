@@ -593,8 +593,36 @@ export class ModelGatewayService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     private readonly llmCost: LLMCostService,
   ) {
+    // A MISSING KEY MUST NOT TAKE THE WHOLE SERVER DOWN.
+    //
+    // The OpenAI SDK throws from its own constructor when apiKey is undefined.
+    // Because this runs in a Nest constructor, that throw is not "AI features
+    // are unavailable" — it is UndefinedDependencyException at boot and no
+    // route is ever mapped. Rotate the key wrong, or deploy to an environment
+    // that has not been given it, and the entire API is down.
+    //
+    // That contradicts everything around it. BYOK below warns and sets a flag;
+    // `providerClients` twenty lines down records `configured: !!<each key>`
+    // for all six providers precisely so an absent one degrades. Only this line
+    // was fatal.
+    //
+    // Found by app-module-boots.integration.test.ts on the first CI run that
+    // ever executed it (run 31319406645): 3303 of 3306 tests passed and the
+    // server still would not start. Nothing else in the suite could have said
+    // so — every AI test mocks this gateway.
+    //
+    // The sentinel keeps construction total. It should never reach a request:
+    // `configured` is false, so dispatch skips the provider. If something ever
+    // bypasses that check the call fails with OpenAI's own 401, which is a
+    // recoverable request error rather than a dead process.
+    const openaiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+    if (!openaiKey) {
+      this.logger.warn(
+        'AI_INTEGRATIONS_OPENAI_API_KEY not set — the OpenAI provider will report unconfigured and be skipped during dispatch',
+      );
+    }
     this.openai = new OpenAI({
-      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+      apiKey: openaiKey ?? 'openai-api-key-not-configured',
       baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
     });
 
