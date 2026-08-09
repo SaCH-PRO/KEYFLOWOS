@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject, forwardRef } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { GenomeDepartmentService } from './genome-department.service';
 import { GenomeModuleReadinessService } from './genome-module-readiness.service';
@@ -86,6 +86,11 @@ export class DepartmentReadinessService {
     private readonly scoring: GenomeScoringService,
     private readonly readiness: GenomeModuleReadinessService,
     private readonly signals: GenomeSignalService,
+    // 5-file import cycle: genome-recommendation -> ...-outcome ->
+    // cross-domain -> finance-genome -> department-readiness -> back here. The
+    // class reference is undefined when this decorator's metadata is emitted,
+    // so Nest cannot resolve index [4] and the whole app refuses to boot.
+    @Inject(forwardRef(() => GenomeRecommendationService))
     private readonly recommendations: GenomeRecommendationService,
     private readonly memory: GenomeMemoryService,
   ) {}

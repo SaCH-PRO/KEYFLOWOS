@@ -24,6 +24,8 @@ import {
   Logger,
   InternalServerErrorException,
   Optional,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { randomUUID } from 'node:crypto';
@@ -152,6 +154,21 @@ export class KeyCortexExecutorService {
     private readonly prisma: PrismaService,
     private readonly eventEmitter: EventEmitter2,
     private readonly autonomyGate: GenomeAutonomyGateService,
+    // KeyCortexModule and KeyAutonomyModule import each other with forwardRef,
+    // so this file and autonomy-orchestrator.service.ts form a circular FILE
+    // import — and at the moment this decorator's metadata is emitted, the
+    // class reference is still undefined. Nest then sees `?` at index [4],
+    // which is TypeScript syntax it cannot read, and refuses to boot the whole
+    // application: "Nest can't resolve dependencies of KeyCortexExecutorService
+    // (..., ?, +, +)".
+    //
+    // @Inject(forwardRef(...)) defers resolution to injection time, which is
+    // the point of forwardRef. @Optional() alone would also boot — and would
+    // silently bind undefined, disabling the autonomy gate on every executed
+    // action while the guard at :233 quietly took the other branch. That is the
+    // phantom-injection failure this repo already has a spec for; booting is
+    // not the same as working.
+    @Inject(forwardRef(() => AutonomyOrchestratorService))
     private readonly autonomyOrchestrator?: AutonomyOrchestratorService,
     @Optional()
     private readonly proposalService?: KeyActionProposalService,
