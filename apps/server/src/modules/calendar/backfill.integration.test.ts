@@ -179,20 +179,39 @@ async function seed() {
 
 async function cleanup() {
   if (!businessId) return;
-  await db.calendarEvent.deleteMany({ where: { businessId } });
-  await db.recurringInvoice.deleteMany({ where: { businessId } });
-  await db.projectTask.deleteMany({ where: { businessId } });
-  await db.project.deleteMany({ where: { businessId } });
-  await db.quote.deleteMany({ where: { businessId } });
-  await db.invoice.deleteMany({ where: { businessId } });
-  await db.contactTask.deleteMany({ where: { businessId } });
-  await db.emailCampaign.deleteMany({ where: { businessId } });
-  await db.socialPost.deleteMany({ where: { businessId } });
-  await db.booking.deleteMany({ where: { businessId } });
-  if (serviceId) await db.service.deleteMany({ where: { id: serviceId } });
-  await db.contact.deleteMany({ where: { businessId } });
-  await db.business.deleteMany({ where: { id: businessId } });
-  if (userId) await db.user.deleteMany({ where: { id: userId } });
+  // RAW SQL THROUGHOUT, NOT deleteMany.
+  //
+  // Ten of the models below are registered with the soft-delete extension
+  // (packages/db/src/client.ts:19-34), so deleteMany on them is rewritten into
+  // an UPDATE that sets deletedAt. This teardown reported success and left every
+  // one of those rows in place — the next run's seed then matched the survivors,
+  // and an upsert with an empty `update` leaves deletedAt set, so the seed did
+  // nothing and the failures pointed at the service instead of at the fixture.
+  //
+  // Converted wholesale rather than only the ten, so the delete ORDER is
+  // preserved in one place: children before parents, business last but for the
+  // user. Mixing raw SQL with deleteMany would keep the ordering correct only by
+  // accident.
+  const scoped = (table: string) => `DELETE FROM ${table} WHERE business_id = '${businessId}'`;
+  const statements = [
+    scoped('calendar_events'),
+    scoped('recurring_invoices'),
+    scoped('project_tasks'),
+    scoped('projects'),
+    scoped('quotes'),
+    scoped('invoices'),
+    scoped('contact_tasks'),
+    scoped('email_campaigns'),
+    scoped('social_posts'),
+    scoped('bookings'),
+    ...(serviceId ? [`DELETE FROM services WHERE id = '${serviceId}'`] : []),
+    scoped('contacts'),
+    `DELETE FROM businesses WHERE id = '${businessId}'`,
+    ...(userId ? [`DELETE FROM users WHERE id = '${userId}'`] : []),
+  ];
+  for (const sql of statements) {
+    try { await db.$executeRawUnsafe(sql); } catch { /* best-effort */ }
+  }
   await db.$disconnect();
 }
 

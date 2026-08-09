@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject, forwardRef, ForbiddenException, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef, ForbiddenException, NotFoundException, BadRequestException, ServiceUnavailableException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
 import { AiMemoryService } from './ai-memory.service';
@@ -26,6 +26,14 @@ export interface AutonomySettings {
   autonomyLevel: number;
   approvedTools: string[];
   approvalTimeoutHours: number;
+  /**
+   * True when the settings could not be READ, as opposed to not existing.
+   *
+   * The two are not the same and were previously indistinguishable: a business
+   * that has never configured governance and a business whose settings lookup
+   * just threw both produced DEFAULT_AUTONOMY, with empty blocklists.
+   */
+  degraded?: boolean;
 }
 
 const DEFAULT_AUTONOMY: AutonomySettings = {
@@ -229,6 +237,9 @@ export class AiOversightService {
   }
 
   async getAutonomySettings(businessId: string): Promise<AutonomySettings> {
+    // Set by either catch below. Distinguishes "the stores said no policy" from
+    // "the stores could not be asked", which decides fail-open vs fail-closed.
+    let readFailed = false;
     // Try typed AutopilotSettings first
     try {
       const typed = await this.prisma.client.autopilotSettings.findUnique({
@@ -245,8 +256,23 @@ export class AiOversightService {
           approvalTimeoutHours: typed.approvalTimeoutHours,
         };
       }
-    } catch {
-      /* table may not exist yet */
+    } catch (err: unknown) {
+      // Was: `catch { /* table may not exist yet */ }`. The comment named ONE
+      // cause and the catch swallowed every other — a dropped connection, a
+      // timeout, an exhausted pool — then fell through to DEFAULT_AUTONOMY,
+      // whose blockedTools and blockedModules are EMPTY.
+      //
+      // evaluate() enforces the blocklist from this object (:140, :145). So a
+      // transient database error silently lifted a business's explicit tool and
+      // module bans, and demoted 'restricted'/'advisory' — "suggest, never
+      // execute" — to 'assisted', which reaches the auto-approval ladder.
+      //
+      // A governance gate that fails OPEN. The rate limiter three directories
+      // away documents the opposite and is right.
+      readFailed = true;
+      this.logger.error(
+        `[autonomy] could not read AutopilotSettings for ${businessId}: ${(err as Error).message}`,
+      );
     }
 
     // Fallback to AiMemory
@@ -258,9 +284,26 @@ export class AiOversightService {
         const parsed = JSON.parse(memory.value);
         return { ...DEFAULT_AUTONOMY, ...parsed };
       }
-    } catch {
-      /* intentionally empty */
+    } catch (err: unknown) {
+      readFailed = true;
+      this.logger.error(
+        `[autonomy] could not read AiMemory settings for ${businessId}: ${(err as Error).message}`,
+      );
     }
+
+    if (readFailed) {
+      // FAIL CLOSED. Not knowing the policy is not the same as there being no
+      // policy, and acting outside a business's stated limits is worse than not
+      // acting. 'restricted' makes evaluate() refuse every tool with a stated
+      // reason (:151), which surfaces as a blocked action rather than as an
+      // unpoliced one.
+      //
+      // Reaching here means both stores threw — not that neither had a row.
+      // A business that has genuinely never configured governance still falls
+      // through to DEFAULT_AUTONOMY below, exactly as before.
+      return { ...DEFAULT_AUTONOMY, mode: 'restricted', maxAutoTier: 1, degraded: true };
+    }
+
     return { ...DEFAULT_AUTONOMY };
   }
 
@@ -285,7 +328,29 @@ export class AiOversightService {
     }
 
     const current = await this.getAutonomySettings(businessId);
+
+    // REFUSE TO WRITE ON TOP OF A FAILED READ.
+    //
+    // This is a read-modify-write: it merges `updates` over whatever the read
+    // returned and upserts the result. When the read silently fell back to
+    // DEFAULT_AUTONOMY, an admin toggling ONE unrelated setting persisted empty
+    // blockedTools and blockedModules over their real configuration — and that
+    // is permanent. The transient database error lasts seconds; the erased
+    // policy lasts until someone notices the AI is doing things it was told not
+    // to, and there is nothing in the record to say why.
+    //
+    // Failing the request is recoverable. Silently destroying the policy is not.
+    if (current.degraded) {
+      throw new ServiceUnavailableException(
+        'AI governance settings could not be read, so they cannot be safely updated. ' +
+          'Retry once the database is reachable — writing now would overwrite your ' +
+          'blocked tools and modules with defaults.',
+      );
+    }
+
     const merged = { ...current, ...updates };
+    // Never persist the marker itself; it describes one read, not the policy.
+    delete (merged as { degraded?: boolean }).degraded;
 
     if (typeof merged.maxAutoTier !== 'number' || merged.maxAutoTier < 1 || merged.maxAutoTier > 4) {
       merged.maxAutoTier = Math.max(1, Math.min(4, Number(merged.maxAutoTier) || 1)) as RiskTier;

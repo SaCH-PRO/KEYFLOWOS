@@ -72,9 +72,19 @@ describe('tenant isolation extension (real database)', () => {
 
   afterAll(async () => {
     ambient = undefined;
-    await db.taxRate.deleteMany({ where: { id: { startsWith: P } } });
-    await db.business.deleteMany({ where: { id: { startsWith: P } } });
-    await db.user.deleteMany({ where: { id: { startsWith: P } } });
+    // Business is in the soft-delete extension's model list
+    // (packages/db/src/client.ts:19-34), so `db.business.deleteMany` becomes an
+    // UPDATE setting deletedAt — the cleanup reports success and the row
+    // survives. Measured: zz_tse_bizA and zz_tse_bizB were both still present
+    // with deleted_at set. Raw SQL runs underneath the extension, which is what
+    // the other integration suites here already do.
+    for (const sql of [
+      `DELETE FROM tax_rates WHERE id LIKE '${P}%'`,
+      `DELETE FROM businesses WHERE id LIKE '${P}%'`,
+      `DELETE FROM users WHERE id LIKE '${P}%'`,
+    ]) {
+      try { await db.$executeRawUnsafe(sql); } catch { /* best-effort */ }
+    }
     await db.$disconnect();
   });
 

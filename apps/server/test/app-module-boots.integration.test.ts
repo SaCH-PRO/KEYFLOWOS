@@ -37,30 +37,21 @@
  * emitted decorator metadata, the real module graph — instead of a harness's
  * approximation of it.
  *
- * IT RUNS AGAINST dist/, AND CI DOES NOT BUILD IT
- * ------------------------------------------------
- * This header used to claim "in CI the build precedes the tests". That was
- * false when it was written and is still false: the `test` job
- * (ci-cd.yml:284-315) runs checkout, install, db:generate, a build of the three
- * WORKSPACE PACKAGES, db:deploy, then tests. It never builds apps/server.
- * dist/ is gitignored, `needs:` excludes build-server, and the workflow has no
- * artifact upload/download — so dist/main.js cannot exist in that job and this
- * gate fails in about 0.4s on a missing file, every run, saying nothing about
- * dependency injection.
+ * IT RUNS AGAINST dist/, AND CI NOW BUILDS IT
+ * --------------------------------------------
+ * This header twice said something false about CI, which is worth recording in
+ * a file whose whole subject is claims that are not checked.
  *
- * It has not actually run yet: the whole `test` job has been SKIPPED since
- * 2026-08-08, because lint exits 1 on 3397 warnings against a 3376 ceiling and
- * every downstream job needs it. So this is a trap already set, not one that
- * has sprung.
- *
- * Fix is one step in the test job, before the test step:
- *
- *     - name: Build server
- *       run: cd apps/server && pnpm run build
+ * First it claimed "in CI the build precedes the tests" when nothing built the
+ * server. Then it described that gap as open after it had been closed. The
+ * `test` job now runs `cd apps/server && pnpm run build` immediately before the
+ * tests (ci-cd.yml), so dist/main.js exists when this runs.
  *
  * Deliberately NOT skipped-when-missing. A gate that quietly stands down when
- * its precondition is absent is the disease this file was written to treat —
- * it would go green in CI forever while measuring nothing.
+ * its precondition is absent is the disease this file was written to treat — it
+ * would go green forever while measuring nothing. If dist is missing the first
+ * assertion fails and says so, naming a build-order problem rather than a
+ * dependency-injection one.
  */
 import path from 'node:path';
 import { existsSync } from 'node:fs';
@@ -75,7 +66,27 @@ const ENTRY = path.join(SERVER_DIR, 'dist', 'main.js');
 
 /** A port nothing else in this repo uses, so a stray dev server cannot mask it. */
 const PORT = '3994';
-const BUDGET_MS = 90_000;
+
+/**
+ * IDLE timeout, not a total one — the distinction is the whole point.
+ *
+ * The first version allowed 90 seconds in total. That was fine until the suite
+ * grew to 370 files: vitest runs them in parallel, this test spawns an entire
+ * Nest application into that contention, and a boot measured at 9.4s alone took
+ * longer than 90s under load. The gate failed in the full run and passed in
+ * isolation — flaky, which is worse than absent, because it teaches people to
+ * re-run rather than to read.
+ *
+ * A bigger number would only move the threshold. The real signal is that a boot
+ * which is merely SLOW keeps producing output, while one that is STUCK — the
+ * failure this exists to catch — goes silent. So the clock resets on every line
+ * received, and only silence counts against it.
+ *
+ * The hard cap remains as a backstop for a process that chatters forever
+ * without ever starting.
+ */
+const IDLE_MS = 45_000;
+const HARD_CAP_MS = 300_000;
 
 interface BootResult {
   started: boolean;
@@ -104,16 +115,28 @@ function bootServer(): Promise<BootResult> {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      clearTimeout(hardCap);
       child.kill();
       resolve({ ...r, output });
     };
 
-    const timer = setTimeout(
-      () => finish({ started: false, diagnosis: `no decisive signal within ${BUDGET_MS}ms` }),
-      BUDGET_MS,
+    // Reset on every line: silence is the signal, not elapsed time.
+    let timer: NodeJS.Timeout;
+    const armIdle = () => {
+      clearTimeout(timer);
+      timer = setTimeout(
+        () => finish({ started: false, diagnosis: `no output for ${IDLE_MS}ms — the boot is stuck, not slow` }),
+        IDLE_MS,
+      );
+    };
+    armIdle();
+    const hardCap = setTimeout(
+      () => finish({ started: false, diagnosis: `still talking but never started after ${HARD_CAP_MS}ms` }),
+      HARD_CAP_MS,
     );
 
     const read = (buf: Buffer) => {
+      armIdle();
       // Nest's logger colours its output, so `ERROR [ExceptionHandler]` arrives
       // with escape codes wedged between the words. Matching the raw stream
       // found nothing and the gate reported a 90s timeout — "slow" where the
@@ -163,6 +186,6 @@ describe('the built server starts', () => {
           result.output.split('\n').slice(-6).join('\n'),
       ).toBe(true);
     },
-    BUDGET_MS + 30_000,
+    HARD_CAP_MS + 30_000,
   );
 });

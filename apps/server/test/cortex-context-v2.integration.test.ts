@@ -114,9 +114,27 @@ describe('KeyCortexContextV2Service (real database)', () => {
 
   afterAll(async () => {
     ambient = undefined;
-    await db.contact.deleteMany({ where: { businessId: BIZ } });
-    await db.business.deleteMany({ where: { id: BIZ } });
-    await db.user.deleteMany({ where: { id: OWNER } });
+    // RAW SQL, NOT deleteMany. Contact and Business are both in the soft-delete
+    // extension's model list (packages/db/src/client.ts:19-34), so
+    // `db.contact.deleteMany` is rewritten into an UPDATE that sets deletedAt.
+    // The cleanup reports success and the row stays.
+    //
+    // That is not merely untidy. The next run's upsert MATCHES the surviving
+    // row, and an upsert whose `update` is empty leaves deletedAt set — so the
+    // seed silently does nothing from the second run onward and the test fails
+    // for a reason that has nothing to do with the code under test.
+    //
+    // Measured before this change: zz_ctxv2_biz was still in `businesses` with
+    // deleted_at set, alongside zz_tse_bizA and zz_tse_bizB from the sibling
+    // suite. Raw SQL goes under the extension, which is why the other ten
+    // integration tests here already clean up this way.
+    for (const sql of [
+      `DELETE FROM contacts WHERE business_id = '${BIZ}'`,
+      `DELETE FROM businesses WHERE id = '${BIZ}'`,
+      `DELETE FROM users WHERE id = '${OWNER}'`,
+    ]) {
+      try { await db.$executeRawUnsafe(sql); } catch { /* best-effort */ }
+    }
   });
 
   const getters = [
