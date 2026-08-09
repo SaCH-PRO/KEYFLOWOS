@@ -339,9 +339,41 @@ jobs:
           --health-timeout 5s
           --health-retries 10
 
+      # Redis, because the boot test starts the real server and the real server
+      # wants BullMQ. Without it, app-module-boots sat for its full 90 seconds
+      # and reported "no decisive signal" while the log filled with connection
+      # attempts to 127.0.0.1:6379 — a diagnosis about missing infrastructure
+      # where a dependency-injection answer was wanted.
+      #
+      # This is CI matching the deployed topology, not a workaround: redis is a
+      # first-class service in docker-compose.production.yml (REDIS_URL:
+      # redis://redis:6379) exactly as postgres is, and a boot test is worth
+      # little if it boots into an environment production never has.
+      #
+      # It does NOT settle the separate question below. env.ts:66 declares
+      # REDIS_URL optional and :168 warns "not set — BullMQ background jobs will
+      # fail to start", so the stated contract is that the server degrades
+      # without Redis. It does not; it hangs. That is a real defect of the same
+      # shape as the OpenAI key one, and giving CI a Redis does not fix it — it
+      # just stops that bug standing in front of this gate.
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
     env:
       DATABASE_URL: postgresql://keyflow:keyflow@localhost:5432/keyflowos
       DIRECT_URL: postgresql://keyflow:keyflow@localhost:5432/keyflowos
+      # Named explicitly rather than left to a default. Something was already
+      # reaching 127.0.0.1:6379 with REDIS_URL unset, which is how the hang was
+      # found; being explicit means the boot test fails for reasons about the
+      # application rather than about what an unset variable falls back to.
+      REDIS_URL: redis://localhost:6379
 
     steps:
       - name: Checkout
