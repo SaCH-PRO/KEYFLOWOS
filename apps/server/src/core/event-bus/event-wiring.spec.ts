@@ -7,10 +7,14 @@
  * "shipped". It is the silent-zero failure again, one layer up from the
  * statement sweep.
  *
- * ELEVEN ALREADY EXIST. They are listed below rather than fixed here, because
- * each one is a product decision — emit the event, or delete the listener and
- * stop advertising the automation — and making eleven of those decisions is
- * not the same task as stopping the twelfth from appearing.
+ * TEN REMAIN, down from eleven. They are listed below rather than fixed in one
+ * go, because each is a product decision — emit the event, or delete the
+ * listener and stop advertising the automation — and making ten of those is not
+ * the same task as stopping the eleventh from appearing.
+ *
+ * crm.deal.won was the first removed: both win paths in crm-deals.service now
+ * emit it, so a customer who has bought stops being chased by the sequence
+ * that was selling to them.
  *
  * WHY THE COUNT IS NOT THE ONE ANYONE QUOTED BEFORE
  * -------------------------------------------------
@@ -48,10 +52,10 @@ const KNOWN_DEAD = [
   // deleted booking never reaches the calendar listener that would tidy up.
   'booking.deleted',
 
-  // The deal pipeline has no won-event. crm-sequence-scheduler waits on it to
-  // stop sequences against a customer who has already bought — so a won deal
-  // keeps being nurtured.
-  'crm.deal.won',
+  // crm.deal.won was here. Both win paths in crm-deals.service now emit it
+  // (moveStage and winDeal, with bulkMoveStage delegating to the first), so the
+  // sequence scheduler's conversion handler finally runs and a customer who has
+  // bought stops being nurtured.
 
   // The realtime layer. Seven listeners in key-cortex-realtime.service push
   // these to the browser, and nothing on the server raises them. Note the
@@ -129,9 +133,25 @@ describe('every listener has something that can trigger it', () => {
   });
 
   it('a listener never counts as its own emitter', () => {
-    // `@OnEvent('crm.deal.won', { async: true })` survived a strip that
-    // required the closing paren immediately after the string, so the listener
-    // proved itself alive and the whole exercise reported 2 dead instead of 11.
-    expect(wiring.dead).toContain('crm.deal.won');
+    // `@OnEvent('crm.deal.won', { async: true })` survived a strip that required
+    // the closing paren immediately after the string, so the listener proved
+    // itself alive and the whole exercise reported 2 dead instead of 11.
+    //
+    // That event is now emitted, so it can no longer serve as the canary — a
+    // detector test pinned to a specific defect stops working the moment the
+    // defect is fixed, which is a design flaw in the test rather than a reason
+    // to leave the bug. The canary is now the PROPERTY: at least one listener
+    // whose decorator carries trailing arguments must still be seen as dead.
+    // Any of booking.deleted, key.alert or key.suggestion qualifies today.
+    const withTrailingArgs = ['booking.deleted', 'key.alert', 'key.suggestion'];
+    const stillDetected = withTrailingArgs.filter((e) => wiring.dead.includes(e));
+
+    expect(
+      stillDetected.length,
+      'No listener declared as @OnEvent(name, { async: true }) is being reported ' +
+        'dead. Either they were all fixed — in which case pick a new canary — or ' +
+        'the decorator strip has regressed and every such listener is now ' +
+        'silently proving itself alive.',
+    ).toBeGreaterThan(0);
   });
 });

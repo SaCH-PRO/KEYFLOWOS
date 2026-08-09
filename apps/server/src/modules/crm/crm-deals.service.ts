@@ -328,6 +328,17 @@ export class CrmDealsService {
       await this.timeline.logEvent(input.businessId, deal.contactId, CONTACT_EVENT.DEAL_WON, {
         dealId: deal.id, title: deal.title, value: deal.value, currency: deal.currency,
       }, { actorType: 'USER', actorId: input.actorId, source: 'crm' });
+      // The timeline write above is a DATABASE ROW; this is the bus. They are
+      // not the same thing, and only the bus reaches
+      // crm-sequence-scheduler.service.ts:564, whose @OnEvent('crm.deal.won')
+      // calls markConversionForContact — the thing that stops a nurture
+      // sequence chasing someone who has already bought.
+      //
+      // Nothing has ever emitted this event. The listener has been waiting
+      // since it was written, so every won deal kept receiving its sequence.
+      // `crm.deal.stage_changed` fires just above and is NOT a substitute: it
+      // fires for every stage move, and no listener treats it as a conversion.
+      this.emitDealWon({ businessId: input.businessId, deal, value: deal.value, currency: deal.currency });
     } else if (newStatus === 'LOST' && deal.status !== 'LOST') {
       await this.timeline.logEvent(input.businessId, deal.contactId, CONTACT_EVENT.DEAL_LOST, {
         dealId: deal.id, title: deal.title, value: deal.value, currency: deal.currency,
@@ -339,6 +350,36 @@ export class CrmDealsService {
     }
 
     return updated;
+  }
+
+  /**
+   * Announce a won deal on the bus.
+   *
+   * One helper rather than two literals, because the two win paths drifting
+   * apart is the likelier bug than either being wrong on its own: the listener
+   * reads `contactId`, and a payload that omitted it from one path would fail
+   * silently on exactly half the wins.
+   *
+   * bulkMoveStage needs nothing — it delegates to moveStage, so its wins are
+   * announced there.
+   */
+  private emitDealWon(args: {
+    businessId: string;
+    deal: { id: string; contactId: string | null; title: string };
+    value: unknown;
+    currency: unknown;
+  }) {
+    this.events.emit('crm.deal.won', {
+      businessId: args.businessId,
+      dealId: args.deal.id,
+      // The field the sequence scheduler actually reads. Nullable on Deal, and
+      // the listener already guards for that — a deal with no contact has no
+      // sequence to stop.
+      contactId: args.deal.contactId,
+      title: args.deal.title,
+      value: args.value,
+      currency: args.currency,
+    });
   }
 
   async bulkMoveStage(input: { businessId: string; dealIds: string[]; stageId: string; actorId?: string }) {
@@ -398,6 +439,10 @@ export class CrmDealsService {
     this.events.emit('crm.deal.stage_changed', {
       businessId: input.businessId, dealId: deal.id, contactId: deal.contactId, toStageId: stage.id, newStatus: 'WON',
     });
+    // The explicit "mark this won" path. moveStage() is the other one, and both
+    // must emit or the conversion is recorded for some wins and not others —
+    // which is worse than never recording it, because the gap looks like data.
+    this.emitDealWon({ businessId: input.businessId, deal, value: updated.value, currency: updated.currency });
     return updated;
   }
 
