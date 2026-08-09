@@ -86,13 +86,34 @@ printf '    %s (%s tables, %s)\n' "$BACKUP" "$TABLES" "$(du -h "$BACKUP" | cut -
 
 # --- rollback tags -----------------------------------------------------------
 # Tag what is RUNNING before the build steals the :latest tag from it.
+# The image ID a container was created from is not guaranteed to still resolve.
+# Build the service image by hand and the old one loses its tag; the containerd
+# store then collects it, while the container keeps running quite happily on
+# layers that outlive it. On 2026-08-09 `docker tag` was handed a sha256 that no
+# longer existed and, under `set -e`, took the whole deploy down — at the one
+# step whose entire purpose is making failure survivable. `docker commit` was no
+# use either: the parent content was already gone.
+#
+# So this step now reports rather than decides. A missing rollback image is
+# worth knowing about; it is not worth refusing to deploy over, because the
+# rollback that matters after migrations have run is the database dump plus a
+# rebuild from the previous ref, and no image tag was ever going to supply that.
 say "Tagging the current images for rollback"
 for svc in $SERVICES; do
   cid="$(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" ps -q "$svc" 2>/dev/null || true)"
-  if [ -n "$cid" ]; then
-    img="$(docker inspect "$cid" --format '{{.Image}}')"
-    docker tag "$img" "keyflowos-${svc}:rollback"
+  [ -n "$cid" ] || { printf '    %s is not running — nothing to tag\n' "$svc"; continue; }
+
+  img="$(docker inspect "$cid" --format '{{.Image}}' 2>/dev/null || true)"
+
+  if [ -n "$img" ] && docker image inspect "$img" >/dev/null 2>&1 \
+     && docker tag "$img" "keyflowos-${svc}:rollback" 2>/dev/null; then
     printf '    keyflowos-%s:rollback -> %s\n' "$svc" "${img:7:12}"
+  elif docker commit "$cid" "keyflowos-${svc}:rollback" >/dev/null 2>&1; then
+    printf '    keyflowos-%s:rollback <- committed from the running container\n' "$svc"
+  else
+    printf '    WARNING: no rollback image for %s — its source image is gone.\n' "$svc"
+    printf '             To roll back: git checkout <previous ref>, rebuild, and\n'
+    printf '             restore the dump above. Slower, but complete.\n'
   fi
 done
 
