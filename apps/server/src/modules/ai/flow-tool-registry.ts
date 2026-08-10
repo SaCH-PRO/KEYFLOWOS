@@ -3179,6 +3179,186 @@ export const FLOW_TOOLS: FlowTool[] = [
   // ================================================================
   //  FINANCE FAMILY — L1 Read / L2 Organize
   // ================================================================
+
+  // ── The ledger's own reports ────────────────────────────────────────────
+  //
+  // LedgerReportingService exposes eight reports and KEY could reach two of
+  // them — getArAging and getApAging, via finance_view_receivables and
+  // finance_view_payables. The other six had no tool, so the most ordinary
+  // questions an owner asks ("how did we do last quarter", "what's our cash
+  // position", "how much tax do we owe") had no answer from the ledger.
+  //
+  // These wrap the service the Finance screens already read, rather than
+  // recomputing anything. That is deliberate and it is the lesson from
+  // finance_view_receivables, which used to reimplement AR aging inline and
+  // therefore quoted KEY a figure derived differently from the one on screen,
+  // with no way to notice when the two disagreed.
+  //
+  // All six are `read`/tier 1: they compute nothing and change nothing.
+  {
+    name: 'finance_profit_and_loss',
+    description:
+      'Profit & loss statement for a date range — income and expense totals by account, plus net profit. Uses the business\'s accounting basis.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/finance/reports',
+    parameters: {
+      type: 'object',
+      properties: {
+        from: { type: 'string', description: 'Start of the period, ISO date' },
+        to: { type: 'string', description: 'End of the period, ISO date' },
+        basis: { type: 'string', description: "'accrual' (default) or 'cash'" },
+      },
+      required: ['from', 'to'],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'P&L report',
+      fields: {
+        currency: { type: 'string', description: 'Reporting currency' },
+        totalIncome: { type: 'number', description: 'Total income for the period' },
+        totalExpenses: { type: 'number', description: 'Total expenses for the period' },
+        netProfit: { type: 'number', description: 'Income minus expenses' },
+        income: { type: 'array', description: 'Income lines by account' },
+        expenses: { type: 'array', description: 'Expense lines by account' },
+      },
+    },
+  },
+  {
+    name: 'finance_cashflow',
+    description:
+      'Cash flow for a date range — inflow, outflow and net movement, broken down by cash account.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/finance/reports',
+    parameters: {
+      type: 'object',
+      properties: {
+        from: { type: 'string', description: 'Start of the period, ISO date' },
+        to: { type: 'string', description: 'End of the period, ISO date' },
+        basis: { type: 'string', description: "'accrual' (default) or 'cash'" },
+      },
+      required: ['from', 'to'],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'Cash flow report',
+      fields: {
+        currency: { type: 'string', description: 'Reporting currency' },
+        totalInflow: { type: 'number', description: 'Cash in' },
+        totalOutflow: { type: 'number', description: 'Cash out' },
+        netCashflow: { type: 'number', description: 'Net movement' },
+        byAccount: { type: 'array', description: 'Per-account inflow/outflow/net' },
+      },
+    },
+  },
+  {
+    name: 'finance_balance_sheet',
+    description:
+      'Balance sheet as at a date — assets, liabilities and equity with their account lines.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/finance/reports',
+    parameters: {
+      type: 'object',
+      properties: {
+        asOfDate: { type: 'string', description: 'ISO date to report as at (default today)' },
+      },
+      required: [],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'Balance sheet',
+      fields: {
+        currency: { type: 'string', description: 'Reporting currency' },
+        assets: { type: 'object', description: 'Total and lines' },
+        liabilities: { type: 'object', description: 'Total and lines' },
+        equity: { type: 'object', description: 'Total and lines' },
+      },
+    },
+  },
+  {
+    name: 'finance_tax_summary',
+    description:
+      'Tax summary for a date range — taxable revenue, tax collected and tax paid on purchases, reconciled against invoice tax fields.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/finance/reports',
+    parameters: {
+      type: 'object',
+      properties: {
+        from: { type: 'string', description: 'Start of the period, ISO date' },
+        to: { type: 'string', description: 'End of the period, ISO date' },
+      },
+      required: ['from', 'to'],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'Tax summary',
+      fields: {
+        currency: { type: 'string', description: 'Reporting currency' },
+        netRevenue: { type: 'number', description: 'Taxable sales for the period' },
+        taxCollected: { type: 'number', description: 'Tax collected on sales' },
+        taxPaid: { type: 'number', description: 'Input tax on purchases' },
+      },
+    },
+  },
+  {
+    name: 'finance_revenue_breakdown',
+    description:
+      'Revenue for a date range broken down by one dimension: customer, product, service or source.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/finance/reports',
+    parameters: {
+      type: 'object',
+      properties: {
+        dimension: { type: 'string', description: "One of: customer, product, service, source" },
+        from: { type: 'string', description: 'Start of the period, ISO date' },
+        to: { type: 'string', description: 'End of the period, ISO date' },
+      },
+      required: ['dimension', 'from', 'to'],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'Revenue by dimension',
+      fields: {
+        dimension: { type: 'string', description: 'The dimension requested' },
+        rows: { type: 'array', description: 'One row per member of the dimension, with its total' },
+      },
+    },
+  },
+  {
+    name: 'finance_expense_breakdown',
+    description:
+      'Expenses for a date range broken down by one dimension: vendor, category or project.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/finance/reports',
+    parameters: {
+      type: 'object',
+      properties: {
+        dimension: { type: 'string', description: 'One of: vendor, category, project' },
+        from: { type: 'string', description: 'Start of the period, ISO date' },
+        to: { type: 'string', description: 'End of the period, ISO date' },
+      },
+      required: ['dimension', 'from', 'to'],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'Expenses by dimension',
+      fields: {
+        dimension: { type: 'string', description: 'The dimension requested' },
+        rows: { type: 'array', description: 'One row per member of the dimension, with its total' },
+      },
+    },
+  },
   {
     name: 'finance_view_receivables',
     description: 'View accounts receivable aging report — outstanding invoices grouped by overdue buckets.',

@@ -69,6 +69,7 @@ import { DealVelocityService } from '../crm/deal-velocity.service';
 import { SeoService } from '../seo/seo.service';
 import { SeoContentService } from '../seo/seo-content.service';
 import { ReceivablesService } from '../finance/receivables.service';
+import { LedgerReportingService } from '../reports/ledger-reporting.service';
 import { StatementSourceService } from '../finance/statement-source.service';
 import { ApprovalRequestService } from '../approvals/approval-request.service';
 import { GoogleDriveService } from '../google-drive/google-drive.service';
@@ -449,6 +450,53 @@ export class FlowOrchestratorService {
   }
   private getReceivables() {
     return this.moduleRef.get(ReceivablesService, { strict: false });
+  }
+  private getLedgerReporting() {
+    return this.moduleRef.get(LedgerReportingService, { strict: false });
+  }
+
+  /**
+   * Parse and VALIDATE a report period.
+   *
+   * The failure this exists to prevent is silent, not loud. `new Date('last
+   * quarter')` is Invalid Date; passed into a Prisma range filter it matches no
+   * rows and the report comes back all zeros. A P&L of zero does not read as an
+   * error — it reads as a business that earned nothing, and KEY would say so
+   * with a straight face.
+   *
+   * So: reject anything unparseable by name, and reject a backwards range,
+   * which returns the same convincing zeros.
+   */
+  private parseReportRange(rawFrom: unknown, rawTo: unknown): { from: Date; to: Date } {
+    const from = new Date(String(rawFrom));
+    const to = new Date(String(rawTo));
+
+    if (Number.isNaN(from.getTime())) {
+      throw new Error(
+        `'from' is not a date I can read: ${JSON.stringify(rawFrom)}. Use an ISO date like 2026-01-01.`,
+      );
+    }
+    if (Number.isNaN(to.getTime())) {
+      throw new Error(
+        `'to' is not a date I can read: ${JSON.stringify(rawTo)}. Use an ISO date like 2026-03-31.`,
+      );
+    }
+    if (from > to) {
+      throw new Error(
+        `The period runs backwards: 'from' (${from.toISOString()}) is after 'to' (${to.toISOString()}). ` +
+          'That would report zero for everything.',
+      );
+    }
+    return { from, to };
+  }
+
+  /** Accounting basis, defaulting to accrual as LedgerReportingService does. */
+  private parseBasis(raw: unknown): 'accrual' | 'cash' {
+    const basis = String(raw ?? 'accrual').toLowerCase();
+    if (basis !== 'accrual' && basis !== 'cash') {
+      throw new Error(`basis must be 'accrual' or 'cash' — got ${JSON.stringify(raw)}`);
+    }
+    return basis;
   }
   private getBankMatching() {
     return this.moduleRef.get(BankMatchingService, { strict: false });
@@ -4507,6 +4555,77 @@ ${triage.standingContext}`;
       }
 
       // === FINANCE ===
+      // ── The ledger's own reports ─────────────────────────────────────────
+      //
+      // Each of these returns what LedgerReportingService returned. None
+      // recomputes anything, for the reason spelled out under
+      // finance_view_receivables below: a handler that reimplements the maths
+      // gives KEY a figure derived differently from the one on the Finance
+      // screen, and nothing notices when they disagree.
+      //
+      // Dates are parsed and VALIDATED here rather than passed through. `new
+      // Date('last quarter')` is Invalid Date, and Prisma turns that into a
+      // range query that silently matches nothing — a report of zero, which
+      // reads exactly like a business that earned nothing.
+      case 'finance_profit_and_loss': {
+        const { from, to } = this.parseReportRange(args.from, args.to);
+        return this.getLedgerReporting().getPnl(businessId, from, to, this.parseBasis(args.basis));
+      }
+
+      case 'finance_cashflow': {
+        const { from, to } = this.parseReportRange(args.from, args.to);
+        return this.getLedgerReporting().getCashflow(businessId, from, to, this.parseBasis(args.basis));
+      }
+
+      case 'finance_balance_sheet': {
+        const asOf = args.asOfDate ? new Date(args.asOfDate) : new Date();
+        if (Number.isNaN(asOf.getTime())) {
+          throw new Error(`asOfDate is not a date I can read: ${JSON.stringify(args.asOfDate)}`);
+        }
+        return this.getLedgerReporting().getBalanceSheet(businessId, asOf);
+      }
+
+      case 'finance_tax_summary': {
+        const { from, to } = this.parseReportRange(args.from, args.to);
+        return this.getLedgerReporting().getTaxSummary(businessId, from, to);
+      }
+
+      case 'finance_revenue_breakdown': {
+        const { from, to } = this.parseReportRange(args.from, args.to);
+        const allowed = ['customer', 'product', 'service', 'source'] as const;
+        const dimension = String(args.dimension ?? '').toLowerCase();
+        if (!(allowed as readonly string[]).includes(dimension)) {
+          throw new Error(
+            `finance_revenue_breakdown dimension must be one of ${allowed.join(', ')} — got ${JSON.stringify(args.dimension)}`,
+          );
+        }
+        const rows = await this.getLedgerReporting().getRevenueBy(
+          businessId,
+          dimension as (typeof allowed)[number],
+          from,
+          to,
+        );
+        return { dimension, rows };
+      }
+
+      case 'finance_expense_breakdown': {
+        const { from, to } = this.parseReportRange(args.from, args.to);
+        const allowed = ['vendor', 'category', 'project'] as const;
+        const dimension = String(args.dimension ?? '').toLowerCase();
+        if (!(allowed as readonly string[]).includes(dimension)) {
+          throw new Error(
+            `finance_expense_breakdown dimension must be one of ${allowed.join(', ')} — got ${JSON.stringify(args.dimension)}`,
+          );
+        }
+        const rows = await this.getLedgerReporting().getExpenseBy(
+          businessId,
+          dimension as (typeof allowed)[number],
+          from,
+          to,
+        );
+        return { dimension, rows };
+      }
+
       case 'finance_view_receivables': {
         // The aging maths used to be reimplemented here over raw invoice rows.
         // ReceivablesService.getAging (receivables.service.ts:220) is what the
