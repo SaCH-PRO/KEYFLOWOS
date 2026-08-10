@@ -141,6 +141,115 @@ describe('tenant isolation extension (real database)', () => {
     expect(rows.map((r) => r.businessId)).toEqual([BIZ_A]);
   });
 
+  /**
+   * The five operations the extension does NOT hook.
+   *
+   * client.ts:238-240 says so in a comment — "create, createMany, upsert,
+   * aggregate and groupBy are not hooked, so this extension cannot scope them —
+   * do not reason as though it can." These tests turn that comment into a
+   * measurement, because a comment cannot fail.
+   *
+   * Counted in apps/server/src on 2026-08-09: upsert 154 call sites, aggregate
+   * 165, groupBy 100, createMany 22. Widening BUSINESS_ID_MODELS does nothing
+   * for any of them — the models are already in the set, the operations are not
+   * in the extension.
+   */
+  describe('operations the extension does not hook', () => {
+    it('upsert under A cannot reach B\'s row by its bare id', async () => {
+      await asTenant(BIZ_A, () =>
+        db.taxRate.upsert({
+          where: { id: `${P}rateB` },
+          update: { name: 'hijacked-by-upsert' },
+          create: { id: `${P}rateB`, businessId: BIZ_A, name: 'created', rate: 1 },
+        }),
+      ).catch(() => undefined); // a throw is an acceptable outcome; a write is not
+
+      const row = await asTenant(undefined, () =>
+        db.taxRate.findUnique({ where: { id: `${P}rateB` } }),
+      );
+      // The assertion is on B's ROW, not on whether the call threw. An upsert
+      // that throws after writing would still have corrupted B.
+      // Restore before asserting, so a RED run does not cascade into the tests
+      // below — they read B's name too, and a corrupted fixture would report
+      // four failures for one defect.
+      const observed = { name: row!.name, businessId: row!.businessId };
+      await asTenant(undefined, () =>
+        db.taxRate.update({ where: { id: `${P}rateB` }, data: { name: `${P}rateB-name` } }),
+      ).catch(() => undefined);
+
+      expect(observed.name, "business A rewrote B's row through upsert").toBe(`${P}rateB-name`);
+      expect(observed.businessId, "B's row changed tenant").toBe(BIZ_B);
+    });
+
+    it('upsert under A still updates A\'s own row', async () => {
+      // Negative control. Without it the test above also passes against an
+      // extension that breaks upsert entirely.
+      await asTenant(BIZ_A, () =>
+        db.taxRate.upsert({
+          where: { id: `${P}rateA` },
+          update: { name: `${P}rateA-updated` },
+          create: { id: `${P}rateA`, businessId: BIZ_A, name: 'created', rate: 1 },
+        }),
+      );
+
+      const row = await asTenant(undefined, () =>
+        db.taxRate.findUnique({ where: { id: `${P}rateA` } }),
+      );
+      expect(row!.name).toBe(`${P}rateA-updated`);
+
+      // restore, so ordering between tests cannot matter
+      await asTenant(undefined, () =>
+        db.taxRate.update({ where: { id: `${P}rateA` }, data: { name: `${P}rateA-name` } }),
+      );
+    });
+
+    it('aggregate under A does not sum B\'s rows', async () => {
+      const agg = await asTenant(BIZ_A, () =>
+        db.taxRate.aggregate({
+          where: { id: { startsWith: P } },
+          _count: { _all: true },
+        }),
+      );
+      expect(agg._count._all, 'the aggregate counted both businesses').toBe(1);
+    });
+
+    it('groupBy under A does not return B\'s group', async () => {
+      const groups = await asTenant(BIZ_A, () =>
+        db.taxRate.groupBy({
+          by: ['businessId'],
+          where: { id: { startsWith: P } },
+        }),
+      );
+      expect(groups.map((g) => g.businessId), 'B appeared in the grouping').toEqual([BIZ_A]);
+    });
+
+    it('create under A cannot plant a row in B', async () => {
+      const planted = `${P}planted`;
+      // No .catch() and no `?? BIZ_A` fallback. The first version of this test
+      // had both, and it would have passed if the create had simply thrown or
+      // never happened — asserting nothing about isolation. A test that passes
+      // when the operation does not occur is the failure mode this whole file
+      // exists to catch.
+      await asTenant(BIZ_A, () =>
+        db.taxRate.create({
+          data: { id: planted, businessId: BIZ_B, name: 'planted', rate: 1 },
+        }),
+      );
+
+      const row = await asTenant(undefined, () =>
+        db.taxRate.findUnique({ where: { id: planted } }),
+      );
+      // Remove it before asserting — otherwise a red run leaves a third row
+      // behind and the __skipTenantIsolation test below fails for the wrong
+      // reason. (It did, the first time this ran.)
+      const landedIn = row?.businessId;
+      await db.$executeRawUnsafe(`DELETE FROM tax_rates WHERE id = '${planted}'`).catch(() => undefined);
+
+      expect(landedIn, 'the row was never created — this test proved nothing').toBeTruthy();
+      expect(landedIn, 'A created a row inside B').toBe(BIZ_A);
+    });
+  });
+
   describe('__skipTenantIsolation', () => {
     it('reaches across businesses, which is the whole point', async () => {
       const rows = await asTenant(BIZ_A, () =>

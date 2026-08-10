@@ -198,10 +198,71 @@ function tenantOperationAllowed(model: string): boolean {
   return !!businessId && BUSINESS_ID_MODELS.has(model);
 }
 
-/** One shape for all ten hooked operations; strips the marker on every route. */
+/** Shape of a `$allModels` query hook, for the three Prisma does not type. */
+type HookParams = {
+  model: string;
+  args: unknown;
+  query: (a: never) => Promise<unknown>;
+};
+
+/** One shape for the where-injecting operations; strips the marker on every route. */
 function scoped(model: string, args: unknown): unknown {
   if (!tenantOperationAllowed(model) || skipRequested(args)) return stripSkipFlag(args);
   return withTenantWhere(args as Record<string, unknown>, activeBusinessId()!);
+}
+
+/**
+ * Force a row being written into the caller's tenant, overriding whatever
+ * businessId the caller supplied.
+ *
+ * MEASURED, NOT ASSUMED. Against a real database, with business A's context
+ * active, `taxRate.create({ data: { businessId: BIZ_B, ... } })` created the row
+ * inside B. The caller named the tenant and the extension had no opinion.
+ *
+ * A nested `business: { connect: { id } }` and a scalar `businessId` are
+ * mutually exclusive in Prisma — supplying both is a validation error. Three
+ * call sites in apps/server use the relation form, so those are left alone
+ * rather than broken. They are not thereby scoped; the relation form can still
+ * name a foreign business, and that is a service-layer concern.
+ */
+function withBusinessId(data: unknown, businessId: string): unknown {
+  if (!data || typeof data !== 'object') return data;
+  if (Array.isArray(data)) return data.map((row) => withBusinessId(row, businessId));
+  if ('business' in (data as Record<string, unknown>)) return data;
+  return { ...(data as Record<string, unknown>), businessId };
+}
+
+/** create / createMany: the row lands in the caller's tenant, whatever it asked for. */
+function scopedCreate(model: string, args: unknown): unknown {
+  if (!tenantOperationAllowed(model) || skipRequested(args)) return stripSkipFlag(args);
+  const a = (args ?? {}) as Record<string, unknown>;
+  return { ...a, data: withBusinessId(a.data, activeBusinessId()!) };
+}
+
+/**
+ * upsert: scope the lookup AND force the created row into the caller's tenant.
+ *
+ * Both halves are required, and for different reasons.
+ *
+ * The `where` injection is what closes the hole: measured against a real
+ * database, `taxRate.upsert({ where: { id: <B's id> }, update: {...} })` under
+ * business A's context REWROTE B's row. 154 call sites had that shape.
+ *
+ * The `create` injection is what keeps the fix from being worse than the bug.
+ * A `where` that no longer matches does not make Prisma throw — it makes Prisma
+ * take the create branch. Without forcing the tenant there, a refused
+ * cross-tenant update would quietly become a cross-tenant INSERT, which is the
+ * same breach wearing a different verb.
+ */
+function scopedUpsert(model: string, args: unknown): unknown {
+  if (!tenantOperationAllowed(model) || skipRequested(args)) return stripSkipFlag(args);
+  const businessId = activeBusinessId()!;
+  const a = (args ?? {}) as Record<string, unknown>;
+  return {
+    ...a,
+    where: { ...((a.where as Record<string, unknown>) ?? {}), businessId },
+    create: withBusinessId(a.create, businessId),
+  };
 }
 
 /**
@@ -236,9 +297,23 @@ export function skipTenantIsolation<T extends object>(args: T): T {
  * to SEE the foreign row in order to reject it. Scoping such a query does not
  * harden it, it deletes the control and leaves a misleading error in its place.
  *
- * These ten are the ONLY intercepted operations. create, createMany, upsert,
- * aggregate and groupBy are not hooked, so this extension cannot scope them —
- * do not reason as though it can.
+ * FIFTEEN operations are intercepted. The previous ten were the five finds,
+ * count, update, updateMany, delete and deleteMany; create, createMany, upsert,
+ * aggregate and groupBy were not, and the comment here said so — which is why
+ * "add the model to BUSINESS_ID_MODELS" was never the whole fix. The models
+ * were already in the set. The operations were not in the extension.
+ *
+ * All five were measured leaking against a real database on 2026-08-09, under
+ * business A's context, at 441 call sites in apps/server:
+ *
+ *   upsert    (154)  rewrote B's row by its bare id          — cross-tenant WRITE
+ *   create     (22)  planted a row inside B                  — cross-tenant WRITE
+ *   aggregate (165)  counted both tenants                    — disclosure
+ *   groupBy   (100)  returned B's group                      — disclosure
+ *
+ * What this still does NOT cover, stated so nobody reads more into it:
+ * createManyAndReturn, and any write whose tenant is named through a nested
+ * `business: { connect: ... }` relation rather than the scalar column.
  */
 const tenantIsolationExtension = Prisma.defineExtension({
   query: {
@@ -273,14 +348,75 @@ const tenantIsolationExtension = Prisma.defineExtension({
       async deleteMany({ model, args, query }) {
         return query(scoped(model, args) as never);
       },
+      async aggregate({ model, args, query }) {
+        return query(scoped(model, args) as never);
+      },
+      async groupBy({ model, args, query }) {
+        return query(scoped(model, args) as never);
+      },
     },
   },
 });
 
+/**
+ * The three write operations, hooked PER MODEL.
+ *
+ * WHY NOT $allModels
+ *
+ * Prisma 6.19 types `query.$allModels` with exactly THIRTEEN operation keys —
+ * the five finds, update, updateMany, updateManyAndReturn, delete, deleteMany,
+ * aggregate, groupBy and count. Every one carries a `where`. A `create` key is
+ * rejected outright:
+ *
+ *   TS2353: Object literal may only specify known properties,
+ *           and 'create' does not exist in type '{ $allOperations?: ... }'
+ *
+ * (The first error was TS7031, implicit-any on the destructured parameters,
+ * which reads like Prisma merely failing to infer. Annotating them revealed the
+ * real one. The parameters were untyped because the KEY was invalid.)
+ *
+ * WHY NOT $allOperations EITHER — THE PART THAT COST A BOOT
+ *
+ * `$allModels.$allOperations` accepts them at runtime; all four leaking tests
+ * went green with it. It also STOPPED THE SERVER FROM BOOTING. Measured, with a
+ * negative control: chained, `node dist/main.js` produced no output for 45s and
+ * the boot gate failed; unchained and rebuilt, the same binary reached listening
+ * in 34.5s. It wraps every operation on all 428 models, and the cost of building
+ * that lands at startup.
+ *
+ * Nothing else in the suite could see it. tsc was clean and 3,355 tests passed
+ * against a build that never serves a request — which is the sentence
+ * app-module-boots.integration.test.ts exists to be able to print.
+ *
+ * WHAT THIS DOES INSTEAD
+ *
+ * Names each model explicitly, exactly as middleware/token-encryption.ts does
+ * (`query: { business: { create } }`) — per-model extensions accept the full
+ * operation set. Built from BUSINESS_ID_MODELS, so it covers the 77 models that
+ * have a businessId and no others, and adding a model to that set widens the
+ * write scoping automatically rather than silently leaving it behind.
+ */
+function delegateName(model: string): string {
+  return model[0].toLowerCase() + model.slice(1);
+}
+
+const tenantWriteIsolationExtension = Prisma.defineExtension({
+  query: Object.fromEntries(
+    [...BUSINESS_ID_MODELS].map((model) => [
+      delegateName(model),
+      {
+        create: ({ args, query }: HookParams) => query(scopedCreate(model, args) as never),
+        createMany: ({ args, query }: HookParams) => query(scopedCreate(model, args) as never),
+        upsert: ({ args, query }: HookParams) => query(scopedUpsert(model, args) as never),
+      },
+    ]),
+  ),
+} as never);
+
 // Create and configure Prisma client with soft delete extension
 // If adapter is null (no DATABASE_URL), the client still works for type-generation
 // but will throw on actual queries — which is the correct fail-fast behavior.
-export const db = new PrismaClient({ adapter }).$extends(softDeleteExtension).$extends(defaultTakeExtension).$extends(tenantIsolationExtension).$extends(tokenEncryptionExtension);
+export const db = new PrismaClient({ adapter }).$extends(softDeleteExtension).$extends(defaultTakeExtension).$extends(tenantIsolationExtension).$extends(tenantWriteIsolationExtension).$extends(tokenEncryptionExtension);
 
 /**
  * Health-check the database connection.
