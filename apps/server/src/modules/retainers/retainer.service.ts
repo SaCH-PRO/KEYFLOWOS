@@ -126,8 +126,20 @@ export class RetainerService {
 
     const hoursUsed = data.hoursUsed ?? 0;
     const hoursBilled = Math.min(hoursUsed, retainer.includedHours ?? hoursUsed);
-    const amountBilled = data.amountBilled ?? (hoursUsed > (retainer.includedHours ?? 0)
-      ? (hoursUsed - (retainer.includedHours ?? 0)) * (retainer.monthlyAmount / (retainer.includedHours ?? 1))
+
+    // DIVISION BY ZERO. `retainer.includedHours ?? 1` only substitutes 1 when
+    // includedHours is null or undefined — and 0 is neither. A retainer created
+    // with includedHours: 0 therefore divided by zero, producing Infinity, and
+    // Infinity was written to amountBilled on a BILLING record.
+    //
+    // The nullish case is fine and separately meaningful: no included hours
+    // agreed, so every hour is overage at the full monthly rate. Zero included
+    // hours means the same thing, so it takes the same path rather than a
+    // special case.
+    const included = retainer.includedHours ?? 0;
+    const perHourRate = included > 0 ? retainer.monthlyAmount / included : retainer.monthlyAmount;
+    const amountBilled = data.amountBilled ?? (hoursUsed > included
+      ? (hoursUsed - included) * perHourRate
       : 0);
 
     return this.prisma.client.retainerPeriod.create({

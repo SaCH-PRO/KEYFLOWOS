@@ -73,6 +73,7 @@ import { LedgerReportingService } from '../reports/ledger-reporting.service';
 import { AssetService } from '../assets/asset.service';
 import { SupplierService } from '../supplier/supplier.service';
 import { GovernanceService } from '../governance/governance.service';
+import { RetainerService } from '../retainers/retainer.service';
 
 /**
  * The risk register's fixed vocabularies, mirroring
@@ -475,6 +476,27 @@ export class FlowOrchestratorService {
   }
   private getGovernance() {
     return this.moduleRef.get(GovernanceService, { strict: false });
+  }
+  private getRetainers() {
+    return this.moduleRef.get(RetainerService, { strict: false });
+  }
+
+  /**
+   * Parse one date, or refuse by name.
+   *
+   * Same family as parseReportRange, on a write instead of a read. A model
+   * writing `startDate: 'next month'` produces Invalid Date, and Prisma stores
+   * that as NULL or throws depending on the column — either way an agreement or
+   * billing period with no date, which nothing downstream can total or sort.
+   */
+  private requireDate(raw: unknown, field: string): Date {
+    const date = new Date(String(raw));
+    if (Number.isNaN(date.getTime())) {
+      throw new Error(
+        `${field} is not a date I can read: ${JSON.stringify(raw)}. Use an ISO date like 2026-01-01.`,
+      );
+    }
+    return date;
   }
 
   /**
@@ -4632,6 +4654,89 @@ ${triage.standingContext}`;
       }
 
       // === FINANCE ===
+      // ── Retainers ────────────────────────────────────────────────────────
+      //
+      // The service is well guarded and these handlers lean on it rather than
+      // repeating it: create() cross-checks contactId against the business
+      // (RetainerAgreement.contactId is a bare String column with NO Prisma
+      // relation, so there is no FK to fall back on), and updatePeriod() does
+      // the same for invoiceId.
+      //
+      // What the service cannot check is a date, because by the time it has one
+      // it is already a Date. `new Date('next month')` is Invalid Date, and
+      // Prisma writes that as NULL or throws depending on the column — either
+      // way a billing period with no start, which nothing downstream can total.
+      case 'retainers_list': {
+        const retainers = await this.getRetainers().list(businessId);
+        return { retainers };
+      }
+
+      case 'retainers_get':
+        return this.getRetainers().findById(args.retainerId, businessId);
+
+      case 'retainers_summary':
+        return this.getRetainers().getSummary(businessId);
+
+      case 'retainers_create': {
+        const startDate = this.requireDate(args.startDate, 'startDate');
+        const endDate = args.endDate === undefined ? undefined : this.requireDate(args.endDate, 'endDate');
+        if (endDate && endDate < startDate) {
+          throw new Error('endDate is before startDate — the agreement would end before it began');
+        }
+        return this.getRetainers().create({
+          businessId,
+          contactId: args.contactId,
+          name: args.name,
+          monthlyAmount: args.monthlyAmount,
+          startDate,
+          endDate,
+          includedHours: args.includedHours,
+          rolloverHours: args.rolloverHours,
+          rolloverCap: args.rolloverCap,
+        });
+      }
+
+      case 'retainers_update': {
+        const patch: Record<string, unknown> = {};
+        for (const field of ['name', 'monthlyAmount', 'includedHours', 'rolloverHours', 'rolloverCap', 'status']) {
+          if (args[field] !== undefined) patch[field] = args[field];
+        }
+        if (args.startDate !== undefined) patch.startDate = this.requireDate(args.startDate, 'startDate');
+        if (args.endDate !== undefined) patch.endDate = this.requireDate(args.endDate, 'endDate');
+        if (!Object.keys(patch).length) {
+          throw new Error('retainers_update was given nothing to change');
+        }
+        return this.getRetainers().update(args.retainerId, businessId, patch);
+      }
+
+      case 'retainers_log_period': {
+        const periodStart = this.requireDate(args.periodStart, 'periodStart');
+        const periodEnd = this.requireDate(args.periodEnd, 'periodEnd');
+        if (periodEnd < periodStart) {
+          throw new Error('periodEnd is before periodStart — that period covers no time at all');
+        }
+        // amountBilled is NOT accepted from the caller. The service derives it
+        // from the agreement's included hours and monthly fee; letting a model
+        // supply it would let KEY invent a billing figure and have the record
+        // agree with it.
+        return this.getRetainers().createPeriod(args.retainerId, businessId, {
+          periodStart,
+          periodEnd,
+          hoursUsed: args.hoursUsed,
+        });
+      }
+
+      case 'retainers_update_period': {
+        const patch: Record<string, unknown> = {};
+        for (const field of ['hoursUsed', 'status', 'invoiceId']) {
+          if (args[field] !== undefined) patch[field] = args[field];
+        }
+        if (!Object.keys(patch).length) {
+          throw new Error('retainers_update_period was given nothing to change');
+        }
+        return this.getRetainers().updatePeriod(args.periodId, args.retainerId, businessId, patch);
+      }
+
       // ── Governance: the risk register ────────────────────────────────────
       //
       // CreateRiskDto validates severity, likelihood and status with

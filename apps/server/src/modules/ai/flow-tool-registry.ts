@@ -3177,6 +3177,200 @@ export const FLOW_TOOLS: FlowTool[] = [
   },
 
   // ================================================================
+  //  RETAINERS — recurring agreements and the hours that bill against them
+  // ================================================================
+  //
+  // RetainerService has eight methods, a controller and a writable 157-line
+  // screen, and no tools. So KEY could not say who is on retainer, how many of
+  // this month's included hours are gone, or which periods are still unbilled —
+  // the questions that decide whether a retainer is profitable.
+  //
+  // NO DELETE TOOL. delete() is a hard delete of a revenue agreement and takes
+  // its periods with it. Ending a retainer is a STATUS, exactly as with risks;
+  // the billing history is the part worth keeping.
+  {
+    name: 'retainers_list',
+    description: 'List retainer agreements with their periods, most recent first.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/retainers',
+    parameters: { type: 'object', properties: {}, required: [] },
+    outputSchema: {
+      type: 'object',
+      description: 'Retainers',
+      fields: { retainers: { type: 'array', description: 'Agreements with their periods' } },
+    },
+  },
+  {
+    name: 'retainers_get',
+    description: 'Get one retainer agreement by id, including its billing periods.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/retainers',
+    parameters: {
+      type: 'object',
+      properties: { retainerId: { type: 'string', description: 'Retainer agreement ID' } },
+      required: ['retainerId'],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'The retainer',
+      fields: {
+        id: { type: 'string', description: 'Retainer ID' },
+        name: { type: 'string', description: 'Agreement name' },
+        monthlyAmount: { type: 'number', description: 'Monthly fee' },
+        includedHours: { type: 'number', description: 'Hours included per period' },
+      },
+    },
+  },
+  {
+    name: 'retainers_summary',
+    description: 'How many retainers exist, how many are active, and total retainer revenue.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/retainers',
+    parameters: { type: 'object', properties: {}, required: [] },
+    outputSchema: {
+      type: 'object',
+      description: 'Retainer summary',
+      fields: {
+        total: { type: 'number', description: 'All retainers' },
+        active: { type: 'number', description: 'Active retainers' },
+        totalRevenue: { type: 'number', description: 'Combined monthly value' },
+      },
+    },
+  },
+  {
+    name: 'retainers_create',
+    description:
+      'Create a retainer agreement for a contact. The contact must belong to this business.',
+    family: 'crud',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/retainers',
+    changedEntities: ['retainerAgreement'],
+    parameters: {
+      type: 'object',
+      properties: {
+        contactId: { type: 'string', description: 'Contact this retainer is for' },
+        name: { type: 'string', description: 'Agreement name' },
+        monthlyAmount: { type: 'number', description: 'Monthly fee' },
+        startDate: { type: 'string', description: 'ISO date the agreement starts' },
+        endDate: { type: 'string', description: 'ISO date it ends, if fixed-term' },
+        includedHours: { type: 'number', description: 'Hours included per period. Omit or 0 means every hour is overage.' },
+        rolloverHours: { type: 'boolean', description: 'Whether unused hours roll over' },
+        rolloverCap: { type: 'number', description: 'Maximum hours that can roll over' },
+      },
+      required: ['contactId', 'name', 'monthlyAmount', 'startDate'],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'The retainer created',
+      fields: {
+        id: { type: 'string', description: 'Retainer ID' },
+        name: { type: 'string', description: 'Agreement name' },
+        monthlyAmount: { type: 'number', description: 'Monthly fee' },
+      },
+    },
+  },
+  {
+    name: 'retainers_update',
+    description:
+      'Update a retainer agreement — change the fee, included hours, term, or set its status. This is how a retainer is ended; retainers are never deleted.',
+    family: 'crud',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/retainers',
+    changedEntities: ['retainerAgreement'],
+    parameters: {
+      type: 'object',
+      properties: {
+        retainerId: { type: 'string', description: 'Retainer agreement ID' },
+        name: { type: 'string', description: 'New name' },
+        monthlyAmount: { type: 'number', description: 'New monthly fee' },
+        startDate: { type: 'string', description: 'New ISO start date' },
+        endDate: { type: 'string', description: 'New ISO end date' },
+        includedHours: { type: 'number', description: 'New included hours' },
+        rolloverHours: { type: 'boolean', description: 'Whether unused hours roll over' },
+        rolloverCap: { type: 'number', description: 'Maximum rollover hours' },
+        status: { type: 'string', description: 'Agreement status, e.g. ACTIVE, PAUSED, ENDED' },
+      },
+      required: ['retainerId'],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'The updated retainer',
+      fields: {
+        id: { type: 'string', description: 'Retainer ID' },
+        status: { type: 'string', description: 'Status after the change' },
+      },
+    },
+  },
+  {
+    name: 'retainers_log_period',
+    description:
+      'Open a billing period on a retainer and record the hours used. Hours billed and any overage amount are calculated from the agreement, not supplied.',
+    family: 'organize',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/retainers',
+    changedEntities: ['retainerPeriod'],
+    parameters: {
+      type: 'object',
+      properties: {
+        retainerId: { type: 'string', description: 'Retainer agreement ID' },
+        periodStart: { type: 'string', description: 'ISO date the period starts' },
+        periodEnd: { type: 'string', description: 'ISO date the period ends' },
+        hoursUsed: { type: 'number', description: 'Hours consumed in the period' },
+      },
+      required: ['retainerId', 'periodStart', 'periodEnd'],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'The period recorded',
+      fields: {
+        id: { type: 'string', description: 'Period ID' },
+        hoursUsed: { type: 'number', description: 'Hours recorded' },
+        hoursBilled: { type: 'number', description: 'Hours billed within the allowance' },
+        amountBilled: { type: 'number', description: 'Overage amount calculated from the agreement' },
+      },
+    },
+  },
+  {
+    name: 'retainers_update_period',
+    description:
+      'Update a retainer billing period — correct the hours used, change its status, or attach the invoice it was billed on. The invoice must belong to this business.',
+    family: 'organize',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/retainers',
+    changedEntities: ['retainerPeriod'],
+    parameters: {
+      type: 'object',
+      properties: {
+        retainerId: { type: 'string', description: 'Retainer agreement ID' },
+        periodId: { type: 'string', description: 'Billing period ID' },
+        hoursUsed: { type: 'number', description: 'Corrected hours used' },
+        status: { type: 'string', description: 'Period status' },
+        invoiceId: { type: 'string', description: 'Invoice this period was billed on' },
+      },
+      required: ['retainerId', 'periodId'],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'The updated period',
+      fields: {
+        id: { type: 'string', description: 'Period ID' },
+        hoursUsed: { type: 'number', description: 'Hours after the change' },
+        invoiceId: { type: 'string', description: 'Attached invoice, if any' },
+      },
+    },
+  },
+
+  // ================================================================
   //  GOVERNANCE — the risk register
   // ================================================================
   //
