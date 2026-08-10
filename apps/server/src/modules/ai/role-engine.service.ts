@@ -203,6 +203,21 @@ const ROLE_BASELINE_TOOLS = new Set<string>([
   // it is blind. Summarising and closing threads is inbox WORK and stays with
   // the roles that run one.
   'inbox_list_threads',
+  // What the business owes, and recording that it has been met.
+  //
+  // Baseline rather than per-role because an obligation is not a department's
+  // property: the salon's rebook, the accountant's return and the AP clerk's
+  // supplier payment are the same row with the same clock, and a hat that
+  // cannot see what is owed is not specialised, it is working blind — the same
+  // argument as the contact lookup above.
+  //
+  // The WRITE is here too, and the tier gate is what makes that safe rather
+  // than generous: command_discharge_obligation is tier 2, so the roles capped
+  // at tier 1 (general, executive) have it in scope and still cannot fire it
+  // unattended. Scope and authority are separate questions, and this is the
+  // file where scope is answered.
+  'command_list_due_obligations',
+  'command_discharge_obligation',
   'inbox_read_thread',
   // Record: never destructive, always attributable
   'keyflow_create_note',

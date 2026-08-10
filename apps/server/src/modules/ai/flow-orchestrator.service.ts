@@ -14,6 +14,7 @@ import { FlowService } from '../flow/flow.service';
 import { ExpensesService } from '../expenses/expenses.service';
 import { TimeEntryService } from '../time-tracking/time-entry.service';
 import { HelpdeskService } from '../helpdesk/helpdesk.service';
+import { CommandService } from '../command/command.service';
 import { CalendarQueryService } from '../calendar/calendar-query.service';
 import { KeyflowNotesService } from '../keyflow-command/keyflow-notes.service';
 import { AiAdvisorService } from './ai-advisor.service';
@@ -673,6 +674,16 @@ export class FlowOrchestratorService {
   }
   private getHelpdeskService() {
     return this.moduleRef.get(HelpdeskService, { strict: false });
+  }
+  /**
+   * CommandModule owns `command_items` and is a REAL import of AiModule
+   * (ai.module.ts, no forwardRef), so this resolves without the cycle that
+   * forces the strict:false reach-ins elsewhere in this file. Routed through
+   * the service rather than touching prisma directly because the obligation
+   * ledger has exactly one owner — see command/obligation.listener.ts.
+   */
+  private getCommandService() {
+    return this.moduleRef.get(CommandService, { strict: false });
   }
   private getCommunications() {
     return this.moduleRef.get(CommunicationsService, { strict: false });
@@ -4745,6 +4756,36 @@ ${triage.standingContext}`;
       }
 
       // === HELPDESK ===
+      case 'command_list_due_obligations': {
+        const due = await this.getCommandService().findDue(businessId, {
+          windowDays: args.windowDays as number | undefined,
+          includeOverdue: args.includeOverdue as boolean | undefined,
+          limit: args.limit as number | undefined,
+        });
+        return due;
+      }
+
+      case 'command_discharge_obligation': {
+        const id = String(args.obligationId ?? '');
+        if (!id) throw new Error('obligationId is required');
+
+        // The WRITE lives in CommandService.discharge, not here. command_items
+        // already has sixteen writers across twelve modules; this handler is
+        // not going to be the seventeenth. discharge() also scopes by
+        // businessId via findOne, so a foreign id cannot be discharged here.
+        const out = await this.getCommandService().discharge(
+          businessId,
+          id,
+          (args.dischargeRef as string | undefined) ?? 'command_discharge_obligation',
+        );
+        return {
+          id: out.id,
+          title: out.title,
+          dischargedAt: out.dischargedAt,
+          alreadyDischarged: out.alreadyDischarged,
+        };
+      }
+
       case 'helpdesk_list_tickets': {
         const where: any = { businessId, deletedAt: null };
         if (args.status) where.status = args.status;

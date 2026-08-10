@@ -5890,6 +5890,100 @@ export const FLOW_TOOLS: FlowTool[] = [
     outputSchema: { type: 'object', description: 'Updated delegation rule', fields: { id: { type: 'string', description: 'Rule ID' }, rule: { type: 'object', description: 'Full rule record' } } },
   },
 
+  // ================================================================
+  //  OBLIGATIONS — what this business owes, and by when
+  // ================================================================
+  //
+  // An obligation is something the business OWES someone by a date: rebook the
+  // client six weeks after their cut, file the return by the 20th, chase the
+  // invoice that went past due. They live on CommandItem with kind='OBLIGATION'
+  // and are raised by producers over work.obligation.raised — see
+  // packages/shared/src/work-events.ts for why that is an event and not a
+  // second table.
+  //
+  // The endpoint and the listener shipped before these tools did, which meant
+  // "what do I owe this week" was answerable over HTTP and not by KEY. That is
+  // the wrong way round for this product.
+  //
+  // NAMED `command_*`, NOT `obligations_*`. The manual equivalent is
+  // /app/command-center, which is the screen that already has complete /
+  // dismiss / snooze / approve / execute / assign / reopen wired — and
+  // tool-route-audit's crossDomain check requires a write tool's domain prefix
+  // to appear in its route. `obligations_discharge -> /app/command-center`
+  // would have failed it and needed a CROSS_DOMAIN_ROUTES exemption to explain
+  // away a mismatch that is really just a naming choice. CommandModule owns the
+  // table; the tools take its name.
+  //
+  // NO CREATE TOOL. Obligations are RAISED BY PRODUCERS that know a fact —
+  // a booking completed, a period closed, an invoice aged. A tool letting KEY
+  // invent one would put rows in the ledger that correspond to nothing that
+  // happened, and "what do I owe" stops being answerable from the business's
+  // own events. If KEY should raise an obligation, the module that knows the
+  // fact should emit the event.
+  {
+    name: 'command_list_due_obligations',
+    description:
+      'What the business owes and by when — obligations due within a window, oldest first, including anything already overdue. Use for "what is due this week", "what am I behind on", "what do I owe".',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/command-center',
+    parameters: {
+      type: 'object',
+      properties: {
+        windowDays: { type: 'number', description: 'How many days ahead to look. Defaults to 7.' },
+        includeOverdue: {
+          type: 'boolean',
+          description: 'Include obligations already past due. Defaults to true.',
+        },
+        limit: { type: 'number', description: 'Maximum obligations to return. Defaults to 100.' },
+      },
+      required: [],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'Obligations due in the window',
+      fields: {
+        window: { type: 'object', description: 'The from/to/days actually applied' },
+        total: { type: 'number', description: 'How many are due' },
+        overdueCount: { type: 'number', description: 'How many of those are already late' },
+        items: {
+          type: 'array',
+          description: 'Obligations, oldest due date first, each with owedToLabel, dueAt, overdue and daysUntilDue',
+        },
+      },
+    },
+  },
+  {
+    name: 'command_discharge_obligation',
+    description:
+      'Record that an obligation has been met — the rebook was booked, the return was filed, the invoice was chased. Marks it discharged so it leaves the due list.',
+    family: 'organize',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/command-center',
+    parameters: {
+      type: 'object',
+      properties: {
+        obligationId: { type: 'string', description: 'The obligation (command item) id' },
+        dischargeRef: {
+          type: 'string',
+          description: 'What discharged it — a tool name, an invoice id, or a short note',
+        },
+      },
+      required: ['obligationId'],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'The discharged obligation',
+      fields: {
+        id: { type: 'string', description: 'Obligation id' },
+        title: { type: 'string', description: 'What was owed' },
+        dischargedAt: { type: 'string', description: 'When it was recorded as met' },
+      },
+    },
+  },
+
 ];
 
 /**

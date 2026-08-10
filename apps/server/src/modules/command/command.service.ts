@@ -137,6 +137,58 @@ export class CommandService {
    * is overdue, computed here. Storing it would need a sweep that flips rows,
    * which is a timer, and this product has 52 of those and no leader election.
    */
+  /**
+   * Record that an obligation has been met.
+   *
+   * Lives HERE, not in the tool handler that calls it, and that placement is
+   * the whole point. `command_items` already has sixteen writers across twelve
+   * modules — which is how one table acquired twelve opinions about its own
+   * status vocabulary — and the obligation work exists to stop that spreading.
+   * A write from `flow-orchestrator` would have been the seventeenth, added by
+   * the same change that argued producers should emit rather than write.
+   *
+   * Distinct from `complete()`, which is a person ticking something off.
+   * Discharged means the thing owed actually happened, and `dischargeRef` names
+   * what did it — a tool name, an invoice id, a short note.
+   */
+  async discharge(businessId: string, id: string, dischargeRef?: string) {
+    const item = await this.findOne(businessId, id);
+
+    if (item.kind !== 'OBLIGATION') {
+      // Refusing rather than quietly succeeding. Discharging a SUGGESTION would
+      // record that the business met a commitment it never had.
+      throw new BadRequestException(
+        `"${item.title}" is a suggestion, not an obligation — there is nothing to discharge. Complete or dismiss it instead.`,
+      );
+    }
+
+    // Idempotent: discharging twice is not an error, and returning the first
+    // discharge is more useful than throwing at a caller who cannot tell the
+    // difference between "already done" and "failed".
+    if (item.dischargedAt) {
+      return { ...item, alreadyDischarged: true };
+    }
+
+    const now = new Date();
+    const updated = await this.prisma.client.commandItem.update({
+      where: { id: item.id },
+      data: {
+        status: 'COMPLETED',
+        dischargedAt: now,
+        completedAt: now,
+        dischargeRef: dischargeRef ?? 'manual',
+      },
+    });
+
+    this.realtime.emit({
+      businessId,
+      type: 'command.updated',
+      payload: { id: updated.id, title: updated.title, status: updated.status },
+    });
+
+    return { ...updated, alreadyDischarged: false };
+  }
+
   async findDue(
     businessId: string,
     opts: { windowDays?: number; includeOverdue?: boolean; limit?: number; now?: Date } = {},
