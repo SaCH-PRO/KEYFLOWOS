@@ -3177,6 +3177,175 @@ export const FLOW_TOOLS: FlowTool[] = [
   },
 
   // ================================================================
+  //  SUPPLIERS — sourcing, landed cost and margin
+  // ================================================================
+  //
+  // Distinct from procurement_*, which handles vendor REQUESTS (raise a
+  // requisition, select a vendor, issue a PO). SupplierService is the sourcing
+  // side: connections to dropship and wholesale suppliers, their catalogues,
+  // landed-cost profiles and margin history. Twenty-four methods, a controller,
+  // and no tools — so KEY could raise a purchase order but could not say what a
+  // product costs to land or what margin it earns.
+  //
+  // FOUR CAPABILITIES DELIBERATELY HAVE NO TOOL:
+  //
+  //   getDecryptedCredentials   returns supplier API secrets. A tool for it
+  //                             hands credentials to a model that writes them
+  //                             into a chat transcript. Never.
+  //   create/updateConnection   both take a `credentials` object. Establishing
+  //                             a supplier integration is a human action at a
+  //                             settings screen, not something KEY types.
+  //   importAndNormalizeProduct takes a normalizer FUNCTION as an argument.
+  //                             KEY cannot supply a function, so the tool could
+  //                             never be called — the schedule_action rule.
+  //   every delete*             removes connections, products and variants with
+  //                             cascading effects on live listings.
+  {
+    name: 'suppliers_list_connections',
+    description:
+      'List active supplier connections — who we source from, how many products each carries, and connection health. Credentials are never returned.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/procurement',
+    parameters: {
+      type: 'object',
+      properties: {
+        page: { type: 'number', description: 'Page number, 1-based' },
+        pageSize: { type: 'number', description: 'Results per page, max 100' },
+      },
+      required: [],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'Supplier connections',
+      fields: {
+        data: { type: 'array', description: 'The connections' },
+        total: { type: 'number', description: 'Total active connections' },
+      },
+    },
+  },
+  {
+    name: 'suppliers_get_connection',
+    description: 'Get one supplier connection by id. Credentials are never returned.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/procurement',
+    parameters: {
+      type: 'object',
+      properties: { connectionId: { type: 'string', description: 'Supplier connection ID' } },
+      required: ['connectionId'],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'The connection',
+      fields: {
+        id: { type: 'string', description: 'Connection ID' },
+        displayName: { type: 'string', description: 'Supplier name' },
+        connectionHealth: { type: 'string', description: 'Health status' },
+      },
+    },
+  },
+  {
+    name: 'suppliers_list_products',
+    description: "List a supplier's catalogue — what we could source from them.",
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/procurement',
+    parameters: {
+      type: 'object',
+      properties: {
+        connectionId: { type: 'string', description: 'Supplier connection ID' },
+        availability: { type: 'string', description: 'Filter by availability, e.g. in_stock' },
+        page: { type: 'number', description: 'Page number, 1-based' },
+        pageSize: { type: 'number', description: 'Results per page, max 100' },
+      },
+      required: ['connectionId'],
+    },
+    outputSchema: {
+      type: 'object',
+      description: "The supplier's products",
+      fields: {
+        data: { type: 'array', description: 'Supplier products' },
+        total: { type: 'number', description: 'Total in the catalogue' },
+      },
+    },
+  },
+  {
+    name: 'suppliers_get_cost_profile',
+    description:
+      'Landed cost profile for one of our products — what it actually costs us once supplier price, shipping and fees are counted.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/store',
+    parameters: {
+      type: 'object',
+      properties: { productId: { type: 'string', description: 'Our product ID' } },
+      required: ['productId'],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'Cost profile, or null if none has been recorded',
+      fields: { productId: { type: 'string', description: 'The product' } },
+    },
+  },
+  {
+    name: 'suppliers_get_margins',
+    description:
+      'Margin history for one of our products — how the gap between cost and price has moved over time.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/store',
+    parameters: {
+      type: 'object',
+      properties: {
+        productId: { type: 'string', description: 'Our product ID' },
+        limit: { type: 'number', description: 'How many snapshots, most recent first (default 20)' },
+      },
+      required: ['productId'],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'Margin snapshots',
+      fields: { snapshots: { type: 'array', description: 'Most recent first' } },
+    },
+  },
+  {
+    name: 'suppliers_create_product_from_supplier',
+    description:
+      "Create one of our sellable products from an item in a supplier's catalogue, optionally overriding name, price, category or fulfilment model.",
+    family: 'crud',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/store',
+    changedEntities: ['product'],
+    parameters: {
+      type: 'object',
+      properties: {
+        supplierProductId: { type: 'string', description: 'The supplier catalogue item ID' },
+        name: { type: 'string', description: 'Override the product name' },
+        price: { type: 'number', description: 'Override the sell price' },
+        category: { type: 'string', description: 'Override the category' },
+        fulfillmentModel: { type: 'string', description: 'Override the fulfilment model' },
+      },
+      required: ['supplierProductId'],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'The product created',
+      fields: {
+        id: { type: 'string', description: 'New product ID' },
+        name: { type: 'string', description: 'Product name' },
+        price: { type: 'number', description: 'Sell price' },
+      },
+    },
+  },
+
+  // ================================================================
   //  ASSETS — the brand library KEY could not open
   // ================================================================
   //

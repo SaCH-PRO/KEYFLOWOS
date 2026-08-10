@@ -71,6 +71,7 @@ import { SeoContentService } from '../seo/seo-content.service';
 import { ReceivablesService } from '../finance/receivables.service';
 import { LedgerReportingService } from '../reports/ledger-reporting.service';
 import { AssetService } from '../assets/asset.service';
+import { SupplierService } from '../supplier/supplier.service';
 import { StatementSourceService } from '../finance/statement-source.service';
 import { ApprovalRequestService } from '../approvals/approval-request.service';
 import { GoogleDriveService } from '../google-drive/google-drive.service';
@@ -457,6 +458,9 @@ export class FlowOrchestratorService {
   }
   private getAssets() {
     return this.moduleRef.get(AssetService, { strict: false });
+  }
+  private getSuppliers() {
+    return this.moduleRef.get(SupplierService, { strict: false });
   }
 
   /**
@@ -4597,6 +4601,70 @@ ${triage.standingContext}`;
       }
 
       // === FINANCE ===
+      // ── Suppliers ────────────────────────────────────────────────────────
+      //
+      // Unlike AssetService, every method here takes businessId FIRST and
+      // scopes internally (findFirst on { id, businessId }, throwing
+      // NotFoundException on a miss), so these handlers pass it through rather
+      // than re-checking. The credential stripping is also the service's:
+      // getSupplierConnection(s) return `{ ...row, credentials: undefined }`,
+      // which is why no tool here has to remember to redact.
+      case 'suppliers_list_connections':
+        return this.getSuppliers().getSupplierConnections(
+          businessId,
+          args.page ?? 1,
+          args.pageSize ?? 50,
+        );
+
+      case 'suppliers_get_connection':
+        return this.getSuppliers().getSupplierConnection(businessId, args.connectionId);
+
+      case 'suppliers_list_products':
+        return this.getSuppliers().getSupplierProducts(
+          businessId,
+          args.connectionId,
+          args.page ?? 1,
+          args.pageSize ?? 50,
+          args.availability ? { availability: args.availability } : undefined,
+        );
+
+      case 'suppliers_get_cost_profile': {
+        // findUnique returns null when no profile has been recorded. Returning
+        // a bare null tells the model nothing it can say back to a person, and
+        // "no cost profile" is a different answer from "cost is zero".
+        const profile = await this.getSuppliers().getProductCostProfile(
+          businessId,
+          args.productId,
+        );
+        return profile ?? { productId: args.productId, costProfile: null };
+      }
+
+      case 'suppliers_get_margins': {
+        const snapshots = await this.getSuppliers().getMarginSnapshots(
+          businessId,
+          args.productId,
+          args.limit ?? 20,
+        );
+        return { productId: args.productId, snapshots };
+      }
+
+      case 'suppliers_create_product_from_supplier': {
+        // Overrides are built explicitly rather than spread from args: spreading
+        // would forward supplierProductId and any stray key into the override
+        // object, and createProductFromSupplierProduct writes what it is given.
+        const overrides: { name?: string; price?: number; category?: string; fulfillmentModel?: string } = {};
+        if (args.name !== undefined) overrides.name = args.name;
+        if (args.price !== undefined) overrides.price = args.price;
+        if (args.category !== undefined) overrides.category = args.category;
+        if (args.fulfillmentModel !== undefined) overrides.fulfillmentModel = args.fulfillmentModel;
+
+        return this.getSuppliers().createProductFromSupplier(
+          businessId,
+          args.supplierProductId,
+          Object.keys(overrides).length ? overrides : undefined,
+        );
+      }
+
       // ── Assets ───────────────────────────────────────────────────────────
       //
       // Every AssetService method below takes a BARE id: getAsset(id),
