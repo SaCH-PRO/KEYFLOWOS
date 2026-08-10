@@ -19,6 +19,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ModelGatewayService, SELECTABLE_PROVIDERS } from './model-gateway.service';
+import { LangfuseService } from './langfuse.service';
 
 /** Runs the real resolveStrategy against a stub instance. */
 function resolve(instance: unknown, request: any, mode: string, preferences: any) {
@@ -238,7 +239,7 @@ describe('the choice is offered, and its state is honest', () => {
     //
     // Asserted through the public health surface rather than by reading the
     // literals, so the next provider added is covered by construction.
-    const gateway = new ModelGatewayService({} as never, {} as never);
+    const gateway = new ModelGatewayService({} as never, {} as never, new LangfuseService());
     const health = gateway.getProviderHealth();
     const reported = health.map((h) => h.provider);
 
@@ -251,7 +252,7 @@ describe('the choice is offered, and its state is honest', () => {
     // The metrics entry has to EXIST, not merely be reachable once traffic
     // flows — which is the difference between an undefined map lookup and a
     // zeroed record.
-    const gateway = new ModelGatewayService({} as never, {} as never);
+    const gateway = new ModelGatewayService({} as never, {} as never, new LangfuseService());
     const google = gateway.getProviderHealth().find((h) => h.provider === 'google');
 
     expect(google).toBeDefined();

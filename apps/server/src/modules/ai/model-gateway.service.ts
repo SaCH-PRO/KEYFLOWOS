@@ -4,6 +4,7 @@ import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'crypt
 import OpenAI from 'openai';
 import { validateOutputContract, type ContractType } from './ai-output-contracts';
 import { LLMCostService } from './llm-cost.service';
+import { LangfuseService } from './langfuse.service';
 
 export type AiProvider = 'openai' | 'anthropic' | 'xai' | 'kimi' | 'google' | 'native' | 'opensource';
 
@@ -592,6 +593,7 @@ export class ModelGatewayService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     private readonly llmCost: LLMCostService,
+    private readonly langfuse: LangfuseService,
   ) {
     // A MISSING KEY MUST NOT TAKE THE WHOLE SERVER DOWN.
     //
@@ -846,6 +848,21 @@ export class ModelGatewayService {
       fallbackUsed: response.fallbackUsed,
       metadata: { contractType: request.expectedContract },
     });
+
+    this.langfuse.traceLlmCall({
+      businessId: request.businessId,
+      provider: response.provider,
+      model: response.model,
+      taskCategory: request.taskCategory,
+      promptTokens: response.usage.promptTokens,
+      completionTokens: response.usage.completionTokens,
+      totalTokens: response.usage.totalTokens,
+      totalCost: response.usage.estimatedCost,
+      latencyMs: response.latencyMs,
+      fallbackUsed: response.fallbackUsed,
+      contractType: request.expectedContract ?? null,
+      source: 'complete',
+    });
   }
 
   private async recordCostFromStream(
@@ -871,6 +888,21 @@ export class ModelGatewayService {
       latencyMs,
       fallbackUsed,
       metadata: { source: 'stream', contractType: request.expectedContract },
+    });
+
+    this.langfuse.traceLlmCall({
+      businessId: request.businessId,
+      provider,
+      model,
+      taskCategory: request.taskCategory,
+      promptTokens: usage.promptTokens,
+      completionTokens: usage.completionTokens,
+      totalTokens: usage.totalTokens,
+      totalCost: usage.estimatedCost,
+      latencyMs,
+      fallbackUsed,
+      contractType: request.expectedContract ?? null,
+      source: 'stream',
     });
   }
 
