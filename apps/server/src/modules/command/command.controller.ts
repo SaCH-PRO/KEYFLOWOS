@@ -8,6 +8,7 @@ import { CreateCommandItemDto } from './dto/create-command-item.dto';
 import { UpdateCommandItemDto } from './dto/update-command-item.dto';
 import { ListCommandItemsDto } from './dto/list-command-items.dto';
 import { ListDueObligationsDto } from './dto/list-due-obligations.dto';
+import { DischargeObligationDto } from './dto/discharge-obligation.dto';
 import { BulkCommandItemsDto } from './dto/bulk-command-items.dto';
 
 @Controller('command/businesses/:businessId')
@@ -119,6 +120,27 @@ export class CommandController {
     @Param('id') id: string,
   ) {
     return this.commandService.complete(businessId, id);
+  }
+
+  /**
+   * Record that an obligation has been met.
+   *
+   * Distinct from `complete`, which is a person ticking something off a list.
+   * Discharged means the thing owed actually happened, and `dischargeRef` names
+   * what did it. Both remove the row from "what is due"; only this one leaves a
+   * record of why.
+   *
+   * It exists because KEY has `command_discharge_obligation` and manual parity
+   * is not optional here — anything KEY can change, a person must be able to
+   * change too, or the guarantee that KEY is optional stops being true.
+   */
+  @Post('items/:id/discharge')
+  async discharge(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+    @Body() body: DischargeObligationDto,
+  ) {
+    return this.commandService.discharge(businessId, id, body?.dischargeRef);
   }
 
   @Post('items/:id/assign')

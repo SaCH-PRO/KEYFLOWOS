@@ -37,6 +37,32 @@ export interface CommandItemListResponse {
   total: number;
 }
 
+/**
+ * An obligation is a CommandItem the business OWES someone by a date, as
+ * opposed to a SUGGESTION, which is something KEY thinks would be a good idea.
+ * Same table, same screen, same verbs — separated by `kind` so that "what do I
+ * owe this week" is never padded with advice.
+ */
+export interface DueObligation extends CommandItem {
+  kind: string;
+  owedToType: string | null;
+  owedToId: string | null;
+  owedToLabel: string | null;
+  seriesId: string | null;
+  dischargedAt: string | null;
+  dischargeRef: string | null;
+  /** Computed server-side against `now`, not stored — there is no sweep flipping rows. */
+  overdue: boolean;
+  daysUntilDue: number | null;
+}
+
+export interface DueObligationsResponse {
+  window: { from: string; to: string; days: number };
+  total: number;
+  overdueCount: number;
+  items: DueObligation[];
+}
+
 export interface CommandSummary {
   open: number;
   waitingApproval: number;
@@ -58,6 +84,47 @@ export async function fetchCommandItems(
   if (filters?.offset) params.set("offset", String(filters.offset));
   const query = params.toString() ? `?${params.toString()}` : "";
   return apiGet<CommandItemListResponse>(`/command/businesses/${businessId}/items${query}`);
+}
+
+/**
+ * What the business owes, and by when.
+ *
+ * Ordered by due date, oldest first — `fetchCommandItems` sorts by
+ * priority/urgency because it answers "what should I look at", and this answers
+ * a question about time. Overdue rows are included by default: a due list that
+ * hides what was due last week is worse than useless, because those are the
+ * ones that cost money.
+ */
+export async function fetchDueObligations(
+  businessId: string,
+  filters?: { windowDays?: number; includeOverdue?: boolean; limit?: number },
+): Promise<{ data: DueObligationsResponse | null; error: string | null }> {
+  const params = new URLSearchParams();
+  if (filters?.windowDays !== undefined) params.set("windowDays", String(filters.windowDays));
+  if (filters?.includeOverdue !== undefined) {
+    params.set("includeOverdue", String(filters.includeOverdue));
+  }
+  if (filters?.limit !== undefined) params.set("limit", String(filters.limit));
+  const query = params.toString() ? `?${params.toString()}` : "";
+  return apiGet<DueObligationsResponse>(
+    `/command/businesses/${businessId}/items/due${query}`,
+  );
+}
+
+/**
+ * Record that an obligation was met. The manual equivalent of KEY's
+ * `command_discharge_obligation` — anything KEY can do, a person must be able
+ * to do from a screen.
+ */
+export async function dischargeObligation(
+  businessId: string,
+  id: string,
+  dischargeRef?: string,
+) {
+  return apiPost<CommandItem>({
+    path: `/command/businesses/${businessId}/items/${id}/discharge`,
+    body: { dischargeRef: dischargeRef ?? "manual" },
+  });
 }
 
 export async function fetchCommandItem(businessId: string, id: string) {

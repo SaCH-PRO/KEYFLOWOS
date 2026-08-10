@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { openKey, KeyAwarenessPanel, KeyNoticedStream } from "@/components/key";
 import {
   LayoutDashboard,
+  CalendarClock,
   Loader2,
   AlertTriangle,
   RefreshCw,
@@ -40,8 +41,10 @@ import {
   dismissCommandItem,
   snoozeCommandItem,
   reopenCommandItem,
+  dischargeObligation,
   type CommandItem,
 } from "@/lib/api/command";
+import { DueObligationsPanel } from "./components/due-obligations-panel";
 import { CommandQueueV2 } from "@/components/command/command-queue-v2";
 import { CommandHealthStripV2 } from "./components-v2/command-health-strip-v2";
 import { CommandSummaryCardV2 } from "./components-v2/command-summary-card-v2";
@@ -229,6 +232,15 @@ export default function CommandCenterPage() {
     await loadQueue();
   };
 
+  const handleDischarge = async (id: string) => {
+    if (!businessId) return;
+    await dischargeObligation(businessId, id, "manual");
+    // The queue reads the same table, so a discharged obligation has to leave
+    // both lists — refreshing only the panel would show it gone in one place
+    // and present in the other.
+    await loadQueue();
+  };
+
   if (loading) {
     return (
       <WorkspaceShell icon={LayoutDashboard} title="Business Command Center" subtitle="Your operating cockpit">
@@ -291,6 +303,13 @@ export default function CommandCenterPage() {
           <KeyBriefingCardV2 briefing={snapshot.briefing} />
           <GovernanceSummaryCardV2 governance={snapshot.governance} />
         </div>
+
+        {/* What is OWED, before what is suggested. The queue below sorts by
+            priority and answers "what should I look at"; this sorts by date and
+            answers "what do I owe". Different questions, same table. */}
+        <CommandSection icon={CalendarClock} title="Due this week">
+          <DueObligationsPanel businessId={businessId} onDischarge={handleDischarge} />
+        </CommandSection>
 
         <CommandSection icon={LayoutDashboard} title={`Command Queue (${queueTotal})`}>
           <CommandQueueV2
