@@ -74,6 +74,80 @@ const SOCIAL_ENCRYPTED_FIELDS = new Set([
   'refreshToken',
 ]);
 
+/**
+ * Fields on ChannelConnection that should be encrypted at rest.
+ *
+ * WHY THIS WAS ADDED, AND WHAT IT WAS LEAKING
+ *
+ * channel-connection.service.ts:277 and :291 read a SocialConnection and copy
+ * `sc.token` and `sc.refreshToken` onto a ChannelConnection. Those SocialConnection
+ * values are encrypted at rest — so the read below DECRYPTED them, and the write
+ * then stored the plaintext in a table this extension did not cover.
+ *
+ * The same secret, protected in one table and in cleartext in another, put there
+ * by our own sync. Anyone with a database dump had the tokens regardless of the
+ * encryption on the other side.
+ *
+ * ChannelConnection.token is never a lookup key (measured: zero
+ * `findUnique/findFirst ... where: { token }` call sites), which is what makes
+ * encrypting it safe — see the note on the bearer-link tokens below.
+ */
+const CHANNEL_ENCRYPTED_FIELDS = new Set([
+  'token',
+  'refreshToken',
+]);
+
+/**
+ * Fields on Webhook that should be encrypted at rest.
+ *
+ * `secret` is the HMAC signing key for outbound webhook deliveries
+ * (webhook-dispatcher.service.ts:265). It is loaded by webhook id and used to
+ * sign; it is never itself a lookup key.
+ */
+const WEBHOOK_ENCRYPTED_FIELDS = new Set(['secret']);
+
+/**
+ * WHAT IS DELIBERATELY NOT ENCRYPTED HERE, AND WHY IT IS NOT AN OVERSIGHT
+ *
+ * PortalAccess.token, PaymentLink.token and ContactExportJob.token are all
+ * looked up BY VALUE — `findUnique({ where: { token } })` — because they are
+ * bearer links handed to a customer.
+ *
+ * encryptToken uses AES-256-GCM with a RANDOM IV, so the same plaintext
+ * produces different ciphertext every time. Encrypting a column that is then
+ * searched by equality does not merely fail to help; it breaks the lookup
+ * silently — the query finds nothing and the customer's link stops working with
+ * no error anywhere.
+ *
+ * Protecting those needs a different control: store a hash, look up by hash,
+ * and show the token once at issue. That is a schema change, a migration and a
+ * change to how links are issued, so it is not smuggled in here.
+ *
+ * ApiKey already does exactly that — it stores `hashedKey` and a `prefix`. It is
+ * the model to copy when those three are done.
+ */
+
+function encryptWith(fields: Set<string>, data: Record<string, unknown>): Record<string, unknown> {
+  const result = { ...data };
+  for (const key of Object.keys(result)) {
+    if (fields.has(key) && typeof result[key] === 'string') {
+      result[key] = encryptToken(result[key] as string);
+    }
+  }
+  return result;
+}
+
+function decryptWith<T>(fields: Set<string>, data: T): T {
+  if (!data || typeof data !== 'object') return data;
+  const result = { ...(data as Record<string, unknown>) };
+  for (const key of Object.keys(result)) {
+    if (fields.has(key) && typeof result[key] === 'string') {
+      result[key] = decryptToken(result[key] as string);
+    }
+  }
+  return result as T;
+}
+
 function encryptBusinessData(data: Record<string, unknown>): Record<string, unknown> {
   const result = { ...data };
   for (const key of Object.keys(result)) {
@@ -192,6 +266,72 @@ export const tokenEncryptionExtension = Prisma.defineExtension({
       async findMany({ args, query }) {
         const results = await query(args);
         return results.map(decryptSocialData);
+      },
+    },
+    channelConnection: {
+      async create({ args, query }) {
+        if (args.data) {
+          args = { ...args, data: encryptWith(CHANNEL_ENCRYPTED_FIELDS, args.data as Record<string, unknown>) as any };
+        }
+        return decryptWith(CHANNEL_ENCRYPTED_FIELDS, await query(args));
+      },
+      async update({ args, query }) {
+        if (args.data) {
+          args = { ...args, data: encryptWith(CHANNEL_ENCRYPTED_FIELDS, args.data as Record<string, unknown>) as any };
+        }
+        return decryptWith(CHANNEL_ENCRYPTED_FIELDS, await query(args));
+      },
+      async upsert({ args, query }) {
+        if (args.create) {
+          args = { ...args, create: encryptWith(CHANNEL_ENCRYPTED_FIELDS, args.create as Record<string, unknown>) as any };
+        }
+        if (args.update) {
+          args = { ...args, update: encryptWith(CHANNEL_ENCRYPTED_FIELDS, args.update as Record<string, unknown>) as any };
+        }
+        return decryptWith(CHANNEL_ENCRYPTED_FIELDS, await query(args));
+      },
+      async findUnique({ args, query }) {
+        return decryptWith(CHANNEL_ENCRYPTED_FIELDS, await query(args));
+      },
+      async findFirst({ args, query }) {
+        return decryptWith(CHANNEL_ENCRYPTED_FIELDS, await query(args));
+      },
+      async findMany({ args, query }) {
+        const results = await query(args);
+        return results.map((r) => decryptWith(CHANNEL_ENCRYPTED_FIELDS, r));
+      },
+    },
+    webhook: {
+      async create({ args, query }) {
+        if (args.data) {
+          args = { ...args, data: encryptWith(WEBHOOK_ENCRYPTED_FIELDS, args.data as Record<string, unknown>) as any };
+        }
+        return decryptWith(WEBHOOK_ENCRYPTED_FIELDS, await query(args));
+      },
+      async update({ args, query }) {
+        if (args.data) {
+          args = { ...args, data: encryptWith(WEBHOOK_ENCRYPTED_FIELDS, args.data as Record<string, unknown>) as any };
+        }
+        return decryptWith(WEBHOOK_ENCRYPTED_FIELDS, await query(args));
+      },
+      async upsert({ args, query }) {
+        if (args.create) {
+          args = { ...args, create: encryptWith(WEBHOOK_ENCRYPTED_FIELDS, args.create as Record<string, unknown>) as any };
+        }
+        if (args.update) {
+          args = { ...args, update: encryptWith(WEBHOOK_ENCRYPTED_FIELDS, args.update as Record<string, unknown>) as any };
+        }
+        return decryptWith(WEBHOOK_ENCRYPTED_FIELDS, await query(args));
+      },
+      async findUnique({ args, query }) {
+        return decryptWith(WEBHOOK_ENCRYPTED_FIELDS, await query(args));
+      },
+      async findFirst({ args, query }) {
+        return decryptWith(WEBHOOK_ENCRYPTED_FIELDS, await query(args));
+      },
+      async findMany({ args, query }) {
+        const results = await query(args);
+        return results.map((r) => decryptWith(WEBHOOK_ENCRYPTED_FIELDS, r));
       },
     },
   },
