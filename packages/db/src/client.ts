@@ -134,6 +134,14 @@ const BUSINESS_ID_MODELS = new Set([
   'RevenueAction', 'RevenueAttribution', 'Subscription', 'TaxLiability',
   'TaxRate',
 
+  // ── Batch 1 of the unscoped-ledger reduction, 2026-08-09 ─────────────────
+  // Each verified individually, not by the scanner: seven have ZERO findUnique
+  // call sites, and BusinessSetting's single one already keys on businessId, so
+  // scoping injects the value it already had. None is reachable by a global
+  // external key — the lookup that would otherwise become a silent null.
+  'BusinessSetting', 'BusinessSnapshot', 'BusinessHealthSnapshot', 'AiUsageLog',
+  'ActivityLog', 'AutonomyVerdict', 'AiQualitySignal', 'BusinessSignal',
+
   // ── Deliberately NOT added: Payment, MarketplaceOrder ──────────────────────
   // Their lookups live in handleStripeWebhook / handlePaypalWebhook /
   // handleWipayCallback and resolve rows by a GLOBAL provider key
