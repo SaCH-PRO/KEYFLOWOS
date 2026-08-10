@@ -1,0 +1,54 @@
+# StackHawk HawkScan configuration for KEYFLOW OS.
+# Docs: https://docs.stackhawk.com/hawkscan/configuration/
+#
+# Dark by default. The CI job that runs this (.github/workflows/hawkscan.yml)
+# only executes the scan when the HAWK_API_KEY repo secret is present, so this
+# file is inert until you activate it — see docs/SECURITY_DAST_SETUP.md.
+#
+# No account-specific id is committed: applicationId is read from an env var,
+# supplied in CI from the HAWK_APP_ID secret.
+app:
+  applicationId: ${HAWK_APP_ID}
+  env: Development
+  # The NestJS API. The workflow boots the server, waits on GET /healthz, then
+  # hands this host to HawkScan.
+  host: http://localhost:3001
+
+  # COVERAGE CAVEAT: the API root returns plain text with no links, and the app
+  # ships no OpenAPI/GraphQL spec, so the spider alone can only reach routes it
+  # discovers by crawling — i.e. very little of the real surface. For full
+  # API-surface coverage, generate an OpenAPI document (e.g. @nestjs/swagger at
+  # /openapi.json) and point HawkScan at it. Left commented because it depends on
+  # adding that endpoint to the server — tracked in docs/SECURITY_DAST_SETUP.md
+  # ("Making coverage real"):
+  # openApiConf:
+  #   path: http://localhost:3001/openapi.json
+  #   type: URL
+
+  # The scanner must never trip KEY's outbound-effect surface. /healthz/events
+  # is a long-lived SSE stream that would hang the spider; webhook ingress paths
+  # accept signed external payloads and must not be fuzzed.
+  excludePaths:
+    - '/healthz/events'
+    # Match webhook ingress at ANY depth: top-level (/webhooks, /webhooks/risc,
+    # /webhooks/forms/:businessId/:type) and nested (/payments/stripe/webhook,
+    # /social/webhook/:businessId). The optional leading-segment group is what
+    # makes the top-level routes match — a required inner slash would miss them.
+    - '^(.*/)?webhooks?(/.*)?$'
+
+  # First pass is UNAUTHENTICATED: it exercises the public surface (booking
+  # pages, storefront, cart, invoice-pay, health/readiness) with no token. To
+  # scan behind Supabase auth later, uncomment and supply a disposable test-user
+  # JWT via the HAWK_TEST_JWT secret — never a real user's token.
+  # authentication:
+  #   loggedInIndicator: '\"authenticated\":true'
+  #   tokenAuthorization:
+  #     type: HEADER
+  #     value: 'Authorization: Bearer ${HAWK_TEST_JWT}'
+
+hawk:
+  spider:
+    base: true
+    ajax: false
+  # Give the API time to finish booting under CI contention before scanning.
+  startupTimeoutMinutes: 3
