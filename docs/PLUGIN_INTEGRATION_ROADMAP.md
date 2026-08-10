@@ -2,7 +2,7 @@
 
 _How the available claude.ai plugin catalog maps onto KEYFLOW OS, and the order we should adopt them in._
 
-Status: **Phase 1 (Langfuse) and Phase 2 (GrowthBook) shipped** on `claude/plugin-integration-improvements-wzdpex`; Phases 3–4 scoped below.
+Status: **Phase 1 (Langfuse), Phase 2 (GrowthBook), and Phase 3 (StackHawk/Vanta scaffolding) shipped**; Phase 4 scoped below.
 
 ---
 
@@ -64,15 +64,20 @@ So the highest-value plugins are the ones filling a **real gap**, not re-impleme
 
 ---
 
-### Phase 3 — StackHawk + Vanta: security & compliance
+### Phase 3 — StackHawk + Vanta: security & compliance ✅ SHIPPED (scaffolding)
 
-**Gap it fills:** `SECURITY.md` exists but security posture is docs-only. KEYFLOW OS handles money + PII, so this is trust/enterprise-readiness, not polish.
+**Gap it fills:** the `Security Scan` CI job is **static only** — `pnpm audit` (CVEs) + `trufflehog` (secrets). Nothing runs the app, so an auth bypass, IDOR, or reflected injection in a live route is invisible. KEYFLOW OS handles money + PII, so this is trust/enterprise-readiness.
 
-**Integration points:**
-- **StackHawk (DAST):** add a `hawkscan` job to `.github/workflows` that scans the running app (spin up `docker-compose.yml`, point HawkScan at the web + API). Gate PRs on new high-severity findings only, to avoid noise on day one.
-- **Vanta:** compliance monitoring/evidence collection — largely org/config setup rather than code; wire the integrations Vanta needs (cloud, CI, repo) and track SOC2-style controls.
+**What shipped:**
+- **`stackhawk.yml`** — HawkScan config targeting the NestJS API (`:3001`), excluding the SSE stream and webhook-ingress paths (never fuzz those); unauthenticated first-pass with a ready-to-fill Supabase-auth block.
+- **`.github/workflows/hawkscan.yml`** — a **dark-by-default** DAST workflow that boots the app exactly like the `Run Tests` job (Postgres + Redis + real migrations), waits on `/healthz`, then runs HawkScan. Same contract as Langfuse/GrowthBook: absent `HAWK_API_KEY` ⇒ the guard short-circuits and it passes as a no-op, so it can't turn branch-protected `main` red. It's a **separate workflow** (not a job in `ci-cd.yml`) so an external-account scan can never break the required checks.
+- **`docs/SECURITY_DAST_SETUP.md`** — activation steps for StackHawk (secrets, baseline, soft→required gate) and Vanta.
 
-**Effort:** StackHawk M (CI wiring), Vanta S–M (mostly config). **Risk:** low; findings inform, they don't block until we choose to gate.
+**Vanta** is configuration, not code (connect cloud/GitHub/DB/identity; map controls to the branch protection, required checks, Sentry, secret scanning, and the DAST gate this repo already has). The Vanta MCP plugin is enabled, so an agent can query control status once the account is connected. Documented in the setup guide.
+
+**To turn it on:** add `HAWK_API_KEY` + `HAWK_APP_ID` repo secrets. Starts as a soft gate (reports, doesn't block); flip `continue-on-error: false` and add `HawkScan` to the required checks once the baseline is triaged.
+
+**Risk:** low — dormant until credentials exist, and isolated from the required-check pipeline.
 
 ---
 
@@ -104,7 +109,7 @@ Plugins that would add *new user-facing capability* rather than harden internals
 
 1. **Langfuse** ✅ — see what KEY is actually doing before changing anything else.
 2. **GrowthBook** ✅ — safety net in place; every subsequent integration ships behind a flag.
-3. **StackHawk + Vanta** — trust/enterprise-readiness while the surface is still small.
+3. **StackHawk + Vanta** ✅ — trust/enterprise-readiness while the surface is still small.
 4. **CRM enrichment** — first clear user-facing win, built on the integration-hub.
 
 Each phase is independently shippable and dark-by-default, so we can stop, reorder, or parallelize at any point.

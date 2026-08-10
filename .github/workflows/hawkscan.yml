@@ -1,0 +1,170 @@
+# Dynamic application security testing (DAST) for KEYFLOW OS via StackHawk HawkScan.
+#
+# This is the missing half of the security surface. ci-cd.yml's "Security Scan"
+# job does SCA (pnpm audit) and secret scanning (trufflehog) — both STATIC. It
+# never exercises the running app, so an auth bypass, an IDOR, or a reflected
+# injection in a live route is invisible to it. HawkScan boots the API and
+# attacks it, which is the only way those show up.
+#
+# DARK BY DEFAULT. The scan runs only when the HAWK_API_KEY repo secret exists;
+# without it the guard short-circuits and every heavy step is skipped, so the
+# job goes green as a no-op. That keeps this safe to merge into a branch-
+# protected main today and activate later — see docs/SECURITY_DAST_SETUP.md.
+#
+# SEPARATE WORKFLOW, not a job in ci-cd.yml, on purpose: ci-cd.yml carries the
+# required status checks, and a scan that needs an external account must not be
+# able to turn those red. Promote this to a required check only after it has run
+# green with real credentials.
+name: DAST (HawkScan)
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: hawkscan-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '20.18.1'
+  PNPM_VERSION: '9.15.0'
+
+jobs:
+  dast:
+    name: HawkScan
+    runs-on: ubuntu-latest
+
+    # Same topology as ci-cd.yml's "Run Tests" job — the app needs a real DB and
+    # Redis to boot (PrismaService retries, BullMQ connects), so a scan needs
+    # them too. pgvector/pg16 matches docker-compose.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: keyflow
+          POSTGRES_DB: keyflowos
+          # Trust auth (no password) so the repo carries no connection-string
+          # password literal for secret scanners to flag. CI-only; localhost.
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U keyflow"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://keyflow@localhost:5432/keyflowos
+      DIRECT_URL: postgresql://keyflow@localhost:5432/keyflowos
+      REDIS_URL: redis://localhost:6379
+      NODE_ENV: test
+      # JWT_SECRET / BYOK_ENCRYPTION_SECRET / CREDENTIALS_ENCRYPTION_KEY are NOT
+      # set here — hardcoding secret-shaped literals trips secret scanners even
+      # when they're throwaways. They're generated per run in "Start the API".
+      # The real activation switches. Absent HAWK_API_KEY => the whole scan skips.
+      HAWK_API_KEY: ${{ secrets.HAWK_API_KEY }}
+      HAWK_APP_ID: ${{ secrets.HAWK_APP_ID }}
+
+    steps:
+      - name: Guard — is DAST configured?
+        id: guard
+        run: |
+          if [ -z "$HAWK_API_KEY" ]; then
+            echo "HAWK_API_KEY not set — DAST is dormant. Add the secret to activate (docs/SECURITY_DAST_SETUP.md)."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        if: steps.guard.outputs.run == 'true'
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        if: steps.guard.outputs.run == 'true'
+        uses: pnpm/action-setup@v3
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node
+        if: steps.guard.outputs.run == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        if: steps.guard.outputs.run == 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        if: steps.guard.outputs.run == 'true'
+        run: pnpm --filter @keyflow/db db:generate
+
+      - name: Build workspace packages + server
+        if: steps.guard.outputs.run == 'true'
+        run: |
+          pnpm turbo run build --filter=@keyflow/db --filter=@keyflow/shared --filter=@keyflow/api
+          cd apps/server && pnpm run build
+
+      - name: Apply migrations
+        if: steps.guard.outputs.run == 'true'
+        run: pnpm --filter @keyflow/db exec prisma migrate deploy
+
+      - name: Start the API
+        if: steps.guard.outputs.run == 'true'
+        env:
+          PORT: '3001'
+        run: |
+          # Ephemeral, generated per run — nothing secret-shaped is committed.
+          # A fresh CI database holds no encrypted data, so random keys are fine;
+          # real values live only in the deployment environment.
+          export JWT_SECRET="$(openssl rand -hex 24)"
+          export BYOK_ENCRYPTION_SECRET="$(openssl rand -hex 24)"
+          export CREDENTIALS_ENCRYPTION_KEY="$(openssl rand -hex 24)"
+          node apps/server/dist/main.js &
+          echo "SERVER_PID=$!" >> "$GITHUB_ENV"
+
+      - name: Wait for /healthz
+        if: steps.guard.outputs.run == 'true'
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:3001/healthz >/dev/null 2>&1; then
+              echo "API is up."; exit 0
+            fi
+            sleep 2
+          done
+          echo "API did not become healthy in time." >&2
+          exit 1
+
+      - name: Run HawkScan
+        if: steps.guard.outputs.run == 'true'
+        uses: stackhawk/hawkscan-action@v2
+        # Soft gate to start: surface findings without failing the build. Flip to
+        # false (and make this a required check) once the baseline is triaged.
+        continue-on-error: true
+        with:
+          apiKey: ${{ secrets.HAWK_API_KEY }}
+          configurationFiles: stackhawk.yml
+        env:
+          HAWK_APP_ID: ${{ secrets.HAWK_APP_ID }}
+          # Consumed by the (commented) authentication block in stackhawk.yml.
+          # Secrets are not auto-exposed to the action env, so map it explicitly;
+          # it's empty until you add the secret, which is fine for the
+          # unauthenticated first pass.
+          HAWK_TEST_JWT: ${{ secrets.HAWK_TEST_JWT }}
+
+      - name: Stop the API
+        if: always() && steps.guard.outputs.run == 'true'
+        run: '[ -n "$SERVER_PID" ] && kill "$SERVER_PID" || true'
