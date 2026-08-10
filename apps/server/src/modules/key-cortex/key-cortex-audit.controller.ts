@@ -32,15 +32,39 @@ export class KeyCortexAuditController {
     return { suites: this.evalHarness.getSuiteNames() };
   }
 
+  /**
+   * Run the eval harness. NOT business-scoped, despite the route.
+   *
+   * The businessId in the path is there because this controller is mounted
+   * under a per-business prefix, and it is the guard's input — it is NOT an
+   * input to the eval. `EvalHarnessService.runAll()` and `runSuite()` take no
+   * businessId and read no tenant data; they exercise the autonomy
+   * orchestrator against a hardcoded synthetic `eval_biz`.
+   *
+   * This used to return `{ businessId, results, allPass }`, which read as "your
+   * business's eval results" for a run the businessId had no effect on. That is
+   * the fabricated-scope shape this codebase keeps finding — the response
+   * describes something that did not happen, and no caller could tell. It is
+   * not a tenant leak (nothing crosses, because nothing tenant-scoped is read),
+   * which is precisely why it would have survived a security review and gone on
+   * misleading whoever wired a UI to it.
+   *
+   * `scope: 'synthetic'` is the honest answer. Verified safe to change: this
+   * endpoint has zero callers in apps/web and apps/server.
+   */
   @Post('eval/run')
   async runEval(
-    @Param('businessId') businessId: string,
+    @Param('businessId') _businessId: string,
     @Body() body: { suite?: string },
   ) {
     const results = body.suite
       ? [await this.evalHarness.runSuite(body.suite)]
       : await this.evalHarness.runAll();
-    return { businessId, results, allPass: results.every((r) => r.failed === 0) };
+    return {
+      scope: 'synthetic' as const,
+      results,
+      allPass: results.every((r) => r.failed === 0),
+    };
   }
 
   @Get('audit/decisions')

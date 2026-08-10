@@ -7998,7 +7998,15 @@ model CommandItem {
   @@index([businessId, category, status])
   @@index([businessId, sourceModule, sourceId])
   /// "What is due this week" — the query this whole thing exists to answer.
-  @@index([businessId, status, dueAt])
+  ///
+  /// (businessId, kind, dueAt) and NOT (businessId, status, dueAt), which is
+  /// what shipped first and did not work. findDue filters status with NOT IN:
+  /// a negative predicate cannot be an index seek, so Postgres stops using the
+  /// index at that column and the dueAt RANGE sitting behind it is unreachable
+  /// — leaving an index that serves only businessId while looking like it
+  /// serves the whole query. `kind` is the equality match ('OBLIGATION'), so
+  /// putting it second makes dueAt a real ordered range scan.
+  @@index([businessId, kind, dueAt])
   @@index([businessId, seriesId])
   @@map("command_items")
 }
