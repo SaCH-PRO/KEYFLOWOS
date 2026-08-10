@@ -1,7 +1,8 @@
-import { Injectable, Logger, NotFoundException, Inject } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ForbiddenException, Inject } from '@nestjs/common';
 import { PrismaService } from '../../../core/prisma/prisma.service';
 import { CrmService } from '../crm.service';
 import { contactWhereWithId } from '../crm.helpers';
+import { resolveCrmAccess } from '../crm-permissions.helper';
 import { ApolloEnrichmentProvider } from './apollo-enrichment.provider';
 import type { EnrichmentProvider } from './enrichment-provider';
 
@@ -16,6 +17,7 @@ const RECENT_MS = 7 * 24 * 60 * 60 * 1000;
 export type EnrichmentStatus =
   | 'not_configured'
   | 'skipped_recent'
+  | 'provider_error'
   | 'no_match'
   | 'no_new_data'
   | 'enriched';
@@ -78,6 +80,12 @@ export class ContactEnrichmentService {
       throw new NotFoundException('Contact not found');
     }
 
+    // Enforce the SAME contact-level edit permission CrmService.updateContact
+    // enforces, up front — before we spend a paid lookup or stamp any metadata.
+    // Otherwise a member with crm:write but edit-scope owned/none could reach the
+    // direct stamp below and mutate another contact's custom (and its cooldown).
+    await this.assertCanEdit(input.businessId, input.contactId, input.actorUserId);
+
     const custom = (contact.custom as Record<string, unknown> | null) ?? {};
     const meta = custom.enrichment as { lastRunAt?: string } | undefined;
     if (!input.force && meta?.lastRunAt) {
@@ -87,7 +95,7 @@ export class ContactEnrichmentService {
       }
     }
 
-    const result = await provider.enrich({
+    const outcome = await provider.enrich({
       email: contact.email,
       firstName: contact.firstName,
       lastName: contact.lastName,
@@ -95,24 +103,40 @@ export class ContactEnrichmentService {
       domain: domainFromEmail(contact.email),
     });
 
-    if (!result) {
+    // A transient failure must NOT be cooled down — no stamp, so the next call
+    // retries. Only a genuine miss earns the 7-day guard.
+    if (outcome.status === 'error') {
+      return { status: 'provider_error', provider: provider.key, filled: [] };
+    }
+    if (outcome.status === 'no_match') {
       await this.stampAttempt(input.businessId, input.contactId, custom, provider.key, []);
       return { status: 'no_match', provider: provider.key, filled: [] };
     }
 
-    // Fill blanks only.
+    // Re-read immediately before deciding what to write: the provider call took
+    // network time, during which a user or import may have filled a field. The
+    // patch must be computed from the CURRENT row, not the pre-request snapshot,
+    // so enrichment stays strictly additive.
+    const fresh = await this.prisma.client.contact.findFirst({
+      where: contactWhereWithId(input.businessId, input.contactId),
+    });
+    if (!fresh) {
+      throw new NotFoundException('Contact not found');
+    }
+    const freshCustom = (fresh.custom as Record<string, unknown> | null) ?? {};
+
     const patch: Partial<Record<MappableField, string>> = {};
     const filled: MappableField[] = [];
     for (const field of MAPPABLE_FIELDS) {
-      const incoming = result[field];
-      if (incoming && isBlank(contact[field])) {
+      const incoming = outcome.result[field];
+      if (incoming && isBlank(fresh[field])) {
         patch[field] = incoming;
         filled.push(field);
       }
     }
 
     if (filled.length === 0) {
-      await this.stampAttempt(input.businessId, input.contactId, custom, provider.key, []);
+      await this.stampAttempt(input.businessId, input.contactId, freshCustom, provider.key, []);
       return { status: 'no_new_data', provider: provider.key, filled: [] };
     }
 
@@ -122,12 +146,12 @@ export class ContactEnrichmentService {
       actorUserId: input.actorUserId,
       ...patch,
       custom: {
-        ...custom,
+        ...freshCustom,
         enrichment: {
           provider: provider.key,
           lastRunAt: new Date().toISOString(),
           filled,
-          raw: result.raw ?? null,
+          raw: outcome.result.raw ?? null,
         },
       },
     });
@@ -139,9 +163,39 @@ export class ContactEnrichmentService {
   }
 
   /**
+   * Mirror of the contact-level edit check inside CrmService.updateContact: an
+   * owner/super-admin may edit anything; otherwise edit-scope 'none' is denied
+   * and 'owned' is limited to contacts the actor owns or has shared. Enforced
+   * here so the direct-write stamp paths carry the same guarantee as the CRM
+   * service. No actor (system/internal call) skips the check, exactly as
+   * updateContact does.
+   */
+  private async assertCanEdit(businessId: string, contactId: string, actorUserId?: string): Promise<void> {
+    if (!actorUserId) return;
+    const access = await resolveCrmAccess(this.prisma, businessId, actorUserId);
+    if (access.isOwner || access.isSuperAdmin) return;
+    if (access.editScope === 'none') {
+      throw new ForbiddenException('You do not have permission to edit contacts');
+    }
+    if (access.editScope === 'owned') {
+      const owned = await this.prisma.client.contact.findFirst({
+        where: {
+          ...contactWhereWithId(businessId, contactId),
+          OR: [{ ownerId: actorUserId }, { shares: { some: { userId: actorUserId } } }],
+        },
+        select: { id: true },
+      });
+      if (!owned) {
+        throw new ForbiddenException('You can only edit contacts you own');
+      }
+    }
+  }
+
+  /**
    * Record that we tried — even on a miss — so the recent-guard can skip a
    * repeat lookup. Written directly (no field change to route through the CRM
-   * service) since this is provenance metadata, not contact data.
+   * service) since this is provenance metadata, not contact data. Access is
+   * already enforced up front by assertCanEdit before this is reached.
    */
   private async stampAttempt(
     businessId: string,

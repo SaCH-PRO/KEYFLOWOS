@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import type { EnrichmentProvider, EnrichmentQuery, EnrichmentResult } from './enrichment-provider';
+import type { EnrichmentProvider, EnrichmentQuery, ProviderOutcome } from './enrichment-provider';
 
 interface ApolloPerson {
   id?: string;
@@ -40,15 +40,16 @@ export class ApolloEnrichmentProvider implements EnrichmentProvider {
     }
   }
 
-  async enrich(query: EnrichmentQuery): Promise<EnrichmentResult | null> {
-    if (!this.enabled) return null;
+  async enrich(query: EnrichmentQuery): Promise<ProviderOutcome> {
+    if (!this.enabled) return { status: 'error' };
 
     // Apollo needs something to match on. An email is by far the strongest
     // signal; a bare name with no company would match noise, so require at
-    // least one meaningful identifier.
+    // least one meaningful identifier. Nothing to ask with is a genuine miss,
+    // not an error — waiting won't make an identifier appear.
     const hasName = !!(query.firstName || query.lastName);
     if (!query.email && !(hasName && (query.companyName || query.domain))) {
-      return null;
+      return { status: 'no_match' };
     }
 
     try {
@@ -69,27 +70,33 @@ export class ApolloEnrichmentProvider implements EnrichmentProvider {
         signal: AbortSignal.timeout(this.timeoutMs),
       });
 
+      // Non-2xx is a transient/operational failure, not a determination that the
+      // person is absent — report it as an error so it isn't cooled down.
       if (!res.ok) {
         this.logger.warn(`Apollo people/match returned ${res.status}`);
-        return null;
+        return { status: 'error' };
       }
 
       const data = (await res.json()) as { person?: ApolloPerson | null };
       const person = data.person;
-      if (!person) return null;
+      if (!person) return { status: 'no_match' };
 
       return {
-        jobTitle: person.title ?? undefined,
-        companyName: person.organization?.name ?? undefined,
-        industry: person.organization?.industry ?? undefined,
-        city: person.city ?? undefined,
-        state: person.state ?? undefined,
-        country: person.country ?? undefined,
-        raw: person.id ? { apolloPersonId: person.id } : undefined,
+        status: 'match',
+        result: {
+          jobTitle: person.title ?? undefined,
+          companyName: person.organization?.name ?? undefined,
+          industry: person.organization?.industry ?? undefined,
+          city: person.city ?? undefined,
+          state: person.state ?? undefined,
+          country: person.country ?? undefined,
+          raw: person.id ? { apolloPersonId: person.id } : undefined,
+        },
       };
     } catch (err: unknown) {
+      // Timeout, DNS, socket, malformed JSON — all transient.
       this.logger.warn(`Apollo enrich failed: ${err instanceof Error ? err.message : String(err)}`);
-      return null;
+      return { status: 'error' };
     }
   }
 }

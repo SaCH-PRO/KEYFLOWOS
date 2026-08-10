@@ -34,6 +34,17 @@ export interface EnrichmentResult {
   raw?: Record<string, unknown>;
 }
 
+/**
+ * Discriminated so the caller can tell a *genuine* miss (the person isn't in the
+ * provider's data) from a *transient* failure (timeout, 429/5xx, bad JSON). That
+ * distinction matters: a miss earns a cooldown, an error must not — else one
+ * provider outage suppresses enrichment for the whole cooldown window.
+ */
+export type ProviderOutcome =
+  | { status: 'match'; result: EnrichmentResult }
+  | { status: 'no_match' }
+  | { status: 'error' };
+
 export interface EnrichmentProvider {
   /** Stable identifier stamped into enrichment provenance. */
   readonly key: string;
@@ -44,9 +55,9 @@ export interface EnrichmentProvider {
    */
   readonly enabled: boolean;
   /**
-   * Resolve a contact. MUST NOT throw and MUST return null on no-match, a bad
-   * response, or any error — enrichment is best-effort and never breaks the
-   * request that triggered it.
+   * Resolve a contact. MUST NOT throw — every failure is reported as
+   * `{ status: 'error' }` so enrichment is best-effort and never breaks the
+   * request that triggered it, while still being distinguishable from a miss.
    */
-  enrich(query: EnrichmentQuery): Promise<EnrichmentResult | null>;
+  enrich(query: EnrichmentQuery): Promise<ProviderOutcome>;
 }
