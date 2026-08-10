@@ -55,7 +55,7 @@ import { BlueprintService } from '../blueprint/blueprint.service';
 import { AiMessageSenderService } from './ai-message-sender.service';
 import { SemanticMemoryService } from './semantic-memory.service';
 import { ObjectStorageService } from '../../core/object-storage';
-import { RoleEngineService, BusinessRole, RoleDetectionContext } from './role-engine.service';
+import { RoleEngineService, BusinessRole, RoleDetectionContext, CrewResolution } from './role-engine.service';
 import { ContentRequestService } from '../content-ops/content-request.service';
 import { CallLogService } from '../call-tasks/call-log.service';
 import { CallScriptService } from '../call-tasks/call-script.service';
@@ -1232,7 +1232,7 @@ export class FlowOrchestratorService {
    */
   private async selectToolsForRequest(
     businessId: string,
-    detectedRole: BusinessRole | undefined,
+    crew: readonly BusinessRole[],
     contextText: string,
     envelope?: JobRoleEnvelope,
   ): Promise<ReturnType<typeof getOpenAiToolDefinitions>> {
@@ -1242,31 +1242,37 @@ export class FlowOrchestratorService {
       // Position-scoped: the envelope's patterns decide, not department roles.
       const policy = this.getJobRolePolicy();
       candidates = all.filter((t) => policy.isToolAllowed(envelope, t.function.name));
+    } else if (crew.length) {
+      // The `detectedRole !== 'general'` special case is gone, and its removal
+      // is the single biggest NARROWING in this change. A general turn used to
+      // fall through to `all` — advertising every tool in the registry,
+      // unclamped, and relying on the gate to refuse them one at a time. That
+      // is literally the defect role-tool-reachability.spec.ts was written
+      // about. A general crew is ['general'], so it now advertises exactly
+      // general's allowlist: strictly fewer tools, and not one change at the
+      // gate.
+      candidates = all.filter((t) => this.roleEngine.crewAllows(crew, t.function.name));
     } else {
-      candidates =
-        detectedRole && detectedRole !== 'general'
-          ? all.filter((t) => this.roleEngine.isToolAllowed(detectedRole, t.function.name))
-          : all;
+      candidates = all;
     }
 
-    // Append bridged MCP tools (allowlisted remote servers) for this business
-    // when the role is permitted to use them.
-    try {
-      if (this.getMcp().isConfigured() && (!detectedRole || this.roleEngine.isToolAllowed(detectedRole, 'mcp__x'))) {
-        const bridged = await this.getMcp().listBridgedTools(businessId);
-        const mcpDefs = bridged.map((t) => ({
-          type: 'function' as const,
-          function: {
-            name: t.bridgedName,
-            description: `[${t.serverName}] ${t.description}`,
-            parameters: t.inputSchema,
-          },
-        }));
-        candidates = [...candidates, ...mcpDefs] as ReturnType<typeof getOpenAiToolDefinitions>;
-      }
-    } catch (err) {
-      this.logger.warn(`MCP tool listing failed (non-fatal): ${(err as Error).message}`);
-    }
+    // MCP IS DELIBERATELY NOT BRIDGED HERE. See the comment below — this is a
+    // landmine, not an omission.
+    //
+    // The bridging block that used to sit at this point awaited
+    // `listBridgedTools` inline with CONNECT_TIMEOUT_MS = 10_000, so a dead or
+    // slow MCP server added up to ten seconds to EVERY chat turn. That has been
+    // harmless only because this whole method had zero callers — it was dead
+    // code, and the cost was never paid. Wiring the method up without removing
+    // this would have activated a ten-second stall on the hot path as a side
+    // effect of a role-scoping change, and it would have looked like the model
+    // being slow.
+    //
+    // MCP tool listing belongs behind a Redis-cached table refreshed by a
+    // worker (capability-map item #23), not behind a synchronous connect on the
+    // request path. Until that exists, bridged tools are not advertised. No
+    // capability is lost that anyone had: MCP_REMOTE_SERVERS is empty in
+    // .env.example and `isConfigured()` is false in every environment today.
 
     const MAX_TOOLS = 128;
     if (candidates.length <= MAX_TOOLS) return candidates;
@@ -1300,6 +1306,35 @@ export class FlowOrchestratorService {
     conversationHistory: FlowMessage[],
     pageContext?: FlowPageContext,
   ): Promise<BusinessRole> {
+    return (await this.resolveTurnAuthority(businessId, message, conversationHistory, pageContext))
+      .primary;
+  }
+
+  /**
+   * Staff the turn, rather than pick one hat for it.
+   *
+   * Identical detection context to `inferRole` — same route, same focused item,
+   * same sign-off scan for stickiness — resolved through `resolveCrew` instead
+   * of `detectRoleFromContext`. `.primary` is bit-for-bit what `inferRole`
+   * returned before, which is why `inferRole` is now one line on top of this
+   * rather than a second copy of the setup.
+   */
+  private async resolveTurnAuthority(
+    businessId: string,
+    message: string,
+    conversationHistory: FlowMessage[],
+    pageContext?: FlowPageContext,
+  ): Promise<CrewResolution> {
+    return this.roleEngine.resolveCrew(
+      this.buildRoleDetectionContext(message, conversationHistory, pageContext),
+    );
+  }
+
+  private buildRoleDetectionContext(
+    message: string,
+    conversationHistory: FlowMessage[],
+    pageContext?: FlowPageContext,
+  ): RoleDetectionContext {
     // Extract previous role from conversation history (look for role in assistant messages)
     let previousRole: BusinessRole | undefined;
     for (let i = conversationHistory.length - 1; i >= 0; i--) {
@@ -1326,7 +1361,7 @@ export class FlowOrchestratorService {
       }
     }
 
-    const detectionCtx: RoleDetectionContext = {
+    return {
       route: pageContext?.route,
       focusedItemType: pageContext?.focusedItem?.type,
       message,
@@ -1337,8 +1372,6 @@ export class FlowOrchestratorService {
         hints: pageContext.hints,
       } : undefined,
     };
-
-    return this.roleEngine.detectRoleFromContext(detectionCtx);
   }
 
   /**
@@ -1479,8 +1512,16 @@ export class FlowOrchestratorService {
     const enrichedMessage = attachmentContext ? `${message}\n\n${attachmentContext}` : message;
 
     const result = await (async (): Promise<FlowResponse> => {
-    // Auto-detect role if not explicitly provided
-    const detectedRole = role ?? await this.inferRole(businessId, enrichedMessage, conversationHistory, pageContext);
+    // Staff the turn if roles were not explicitly provided.
+    //
+    // An explicit `role` argument still pins the turn to exactly that hat — a
+    // one-member crew — so every caller that names a role keeps today's
+    // behaviour precisely.
+    const authority: CrewResolution = role
+      ? { primary: role, crew: [role], scores: {} as Record<BusinessRole, number> }
+      : await this.resolveTurnAuthority(businessId, enrichedMessage, conversationHistory, pageContext);
+    const detectedRole = authority.primary;
+    const crew = authority.crew;
 
     const canProceed = await this.aiUsage.checkCredits(businessId, 2);
     if (!canProceed.allowed) {
@@ -1523,10 +1564,20 @@ export class FlowOrchestratorService {
     const triage: TriageVerdict | null =
       this.getTriage()?.triage(businessId, message, Boolean(attachments?.length)) ?? null;
 
+    // The menu the model is shown, resolved once for this turn.
+    const selectedTools = await this.selectToolsForRequest(
+      businessId,
+      crew,
+      `${enrichedMessage}\n${pageContext?.route ?? ''}`,
+      pageContext?.jobRoleEnvelope,
+    );
+
     let systemPrompt: string;
     if (detectedRole && detectedRole !== 'general') {
       const businessContext = onboardingDirective + contextSnapshot + memorySection + semanticMemorySection + pageContextSection + blueprintSection;
-      systemPrompt = this.roleEngine.getSystemPromptForRole(detectedRole, businessContext, onboardingDirective)
+      // getSystemPromptForCrew falls through to getSystemPromptForRole for a
+      // single-member crew, so a one-hat turn produces the same bytes it did.
+      systemPrompt = this.roleEngine.getSystemPromptForCrew(crew, businessContext, onboardingDirective)
         .replace('{{CURRENT_DATE}}', currentDateForPrompt());
     } else {
       systemPrompt = FLOW_SYSTEM_PROMPT
@@ -1590,7 +1641,7 @@ ${triage.standingContext}`;
         return { reply: 'Got it — I cancelled that action. Let me know if there\'s anything else you\'d like to do.' };
       }
       if (pendingConfirmation.toolName && pendingConfirmation.toolArgs) {
-        const confirmDecision = await this.governance.evaluate(businessId, pendingConfirmation.toolName, undefined, detectedRole, pageContext?.jobRoleEnvelope);
+        const confirmDecision = await this.governance.evaluate(businessId, pendingConfirmation.toolName, undefined, crew, pageContext?.jobRoleEnvelope);
         if (!confirmDecision.allowed) {
           return {
             reply: `This action is blocked: ${confirmDecision.reason}`,
@@ -1662,11 +1713,11 @@ ${triage.standingContext}`;
           // CognitiveTriageService.categoryFor deliberately refuses to reroute
           // the model, for reasons documented there, and this does not
           // contradict it.
-          tools: triage?.tier === 'reflex'
-            ? undefined
-            : detectedRole && detectedRole !== 'general'
-              ? getOpenAiToolDefinitions().filter((t) => this.roleEngine.isToolAllowed(detectedRole, t.function.name))
-              : getOpenAiToolDefinitions(),
+          // One selector, not a filter copy-pasted into two turn paths. This
+          // expression existed identically here and in the streaming path, and
+          // both ignored selectToolsForRequest — which is why the 128-tool cap
+          // and the envelope-aware menu inside it had never once run.
+          tools: triage?.tier === 'reflex' ? undefined : selectedTools,
           toolChoice: triage?.tier === 'reflex' ? undefined : 'auto',
           // Content-driven for the first time. taskCategory is deliberately
           // NOT overridden — see CognitiveTriageService.categoryFor.
@@ -1703,7 +1754,7 @@ ${triage.standingContext}`;
 
       const governanceChecks = await Promise.all(
         toolCalls.map(async (tc) => {
-          const decision = await this.governance.evaluate(businessId, tc.name, undefined, detectedRole, pageContext?.jobRoleEnvelope);
+          const decision = await this.governance.evaluate(businessId, tc.name, undefined, crew, pageContext?.jobRoleEnvelope);
           return { tc, decision };
         }),
       );
@@ -1850,8 +1901,16 @@ ${triage.standingContext}`;
     const attachmentContext = await this.buildAttachmentContext(businessId, attachments);
     const enrichedMessage = attachmentContext ? `${message}\n\n${attachmentContext}` : message;
 
-    // Auto-detect role if not explicitly provided
-    const detectedRole = role ?? await this.inferRole(businessId, enrichedMessage, conversationHistory, pageContext);
+    // Staff the turn if roles were not explicitly provided.
+    //
+    // An explicit `role` argument still pins the turn to exactly that hat — a
+    // one-member crew — so every caller that names a role keeps today's
+    // behaviour precisely.
+    const authority: CrewResolution = role
+      ? { primary: role, crew: [role], scores: {} as Record<BusinessRole, number> }
+      : await this.resolveTurnAuthority(businessId, enrichedMessage, conversationHistory, pageContext);
+    const detectedRole = authority.primary;
+    const crew = authority.crew;
 
     try {
       this.aiUsage.checkRateLimit(businessId);
@@ -1900,10 +1959,20 @@ ${triage.standingContext}`;
     const triage: TriageVerdict | null =
       this.getTriage()?.triage(businessId, message, Boolean(attachments?.length)) ?? null;
 
+    // The menu the model is shown, resolved once for this turn.
+    const selectedTools = await this.selectToolsForRequest(
+      businessId,
+      crew,
+      `${enrichedMessage}\n${pageContext?.route ?? ''}`,
+      pageContext?.jobRoleEnvelope,
+    );
+
     let systemPrompt: string;
     if (detectedRole && detectedRole !== 'general') {
       const businessContext = onboardingDirective + contextSnapshot + memorySection + semanticMemorySection + pageContextSection + blueprintSection;
-      systemPrompt = this.roleEngine.getSystemPromptForRole(detectedRole, businessContext, onboardingDirective)
+      // getSystemPromptForCrew falls through to getSystemPromptForRole for a
+      // single-member crew, so a one-hat turn produces the same bytes it did.
+      systemPrompt = this.roleEngine.getSystemPromptForCrew(crew, businessContext, onboardingDirective)
         .replace('{{CURRENT_DATE}}', currentDateForPrompt());
     } else {
       systemPrompt = FLOW_SYSTEM_PROMPT
@@ -2066,11 +2135,11 @@ ${triage.standingContext}`;
           // CognitiveTriageService.categoryFor deliberately refuses to reroute
           // the model, for reasons documented there, and this does not
           // contradict it.
-          tools: triage?.tier === 'reflex'
-            ? undefined
-            : detectedRole && detectedRole !== 'general'
-              ? getOpenAiToolDefinitions().filter((t) => this.roleEngine.isToolAllowed(detectedRole, t.function.name))
-              : getOpenAiToolDefinitions(),
+          // One selector, not a filter copy-pasted into two turn paths. This
+          // expression existed identically here and in the streaming path, and
+          // both ignored selectToolsForRequest — which is why the 128-tool cap
+          // and the envelope-aware menu inside it had never once run.
+          tools: triage?.tier === 'reflex' ? undefined : selectedTools,
           toolChoice: triage?.tier === 'reflex' ? undefined : 'auto',
           // Content-driven for the first time. taskCategory is deliberately
           // NOT overridden — see CognitiveTriageService.categoryFor.
@@ -2161,7 +2230,7 @@ ${triage.standingContext}`;
 
       const governanceChecks = await Promise.all(
         toolCalls.map(async (tc) => {
-          const decision = await this.governance.evaluate(businessId, tc.name, undefined, detectedRole, pageContext?.jobRoleEnvelope);
+          const decision = await this.governance.evaluate(businessId, tc.name, undefined, crew, pageContext?.jobRoleEnvelope);
           return { tc, decision };
         }),
       );

@@ -145,7 +145,14 @@ describe('role authority caps business authority', () => {
     const fn = src.slice(src.indexOf('  async evaluate('));
     const body = fn.slice(0, fn.indexOf('\n  private '));
 
-    expect(body).toMatch(/applyRoleCeiling\(businessSettings, role\)/);
+    // The clamp is now per-TOOL against the hats that grant it, rather than
+    // once per turn against the hat that won — so the expression this looks for
+    // changed from applyRoleCeiling(businessSettings, role) to the crew form.
+    // The PROPERTY is identical and is the only reason this test exists:
+    // evaluate must USE the clamped settings, not compute and discard them.
+    // applyCrewCeiling is a fold of applyRoleCeiling (see its comment), so the
+    // seven assertions around this one still exercise the code that runs.
+    expect(body).toMatch(/applyCrewCeiling\(businessSettings, crew, toolName\)/);
     // and the clamped value is what the tier checks read
     expect(body).toMatch(/settings\.autonomyLevel/);
     expect(body).toMatch(/settings\.maxAutoTier/);
@@ -202,7 +209,13 @@ describe('role stickiness covers every role', () => {
   it('is driven off getAllRoles, not a hardcoded list of five', () => {
     // The literal array named only sales/finance/support/operations/marketing,
     // so operator and executive could never persist across a turn.
-    const fn = orchestrator.slice(orchestrator.indexOf('private async inferRole('));
+    //
+    // The scan moved out of inferRole and into buildRoleDetectionContext when
+    // the turn started resolving a crew rather than a single role: inferRole is
+    // now one line returning `.primary` of that resolution, and both it and
+    // resolveTurnAuthority build their context here. Same code, one caller
+    // deeper — so this reads the function that actually holds it.
+    const fn = orchestrator.slice(orchestrator.indexOf('private buildRoleDetectionContext('));
     const body = fn.slice(0, fn.indexOf('\n  }'));
 
     expect(body).toMatch(/this\.roleEngine\.getAllRoles\(\)/);

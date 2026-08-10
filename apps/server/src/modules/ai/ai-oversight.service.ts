@@ -65,6 +65,18 @@ export class AiOversightService {
    *
    * Returns a copy — mutating the cached business settings would leak one
    * role's ceiling into every subsequent request for that business.
+   *
+   * The pre-approved list is a
+   * BUSINESS-level grant that short-circuits straight to auto-execute without
+   * consulting the role, which made the ceiling inert for precisely the tools
+   * most likely to be used: DefaultTriggersService seeds approvedTools with
+   * commerce_create_invoice, crm_create_contact and eight more, so the
+   * Executive Advisor — maxRiskTier 1, "never execute operational actions
+   * without explicit approval" — would auto-execute all of them. A grant the
+   * business made cannot exceed the authority of the hat KEY is wearing.
+   * Entries above the ceiling are dropped rather than the list being cleared,
+   * so a junior role keeps the low-risk grants and loses only what it was never
+   * trusted with.
    */
   private applyRoleCeiling(settings: AutonomySettings, role: BusinessRole): AutonomySettings {
     const def = this.roleEngine.getRoleDefinition(role);
@@ -74,22 +86,55 @@ export class AiOversightService {
       ...settings,
       maxAutoTier: Math.min(settings.maxAutoTier, def.maxRiskTier) as RiskTier,
       autonomyLevel: Math.min(settings.autonomyLevel, def.autonomyLevel),
-      // The pre-approved list is a BUSINESS-level grant, and it short-circuits
-      // straight to auto-execute without consulting the role. That made the
-      // whole role ceiling inert for precisely the tools most likely to be
-      // used: DefaultTriggersService seeds approvedTools with
-      // commerce_create_invoice, crm_create_contact and eight more, so the
-      // Executive Advisor — maxRiskTier 1, "never execute operational actions
-      // without explicit approval" — would auto-execute all of them.
-      //
-      // A grant the business made cannot exceed the authority of the hat KEY is
-      // currently wearing. Entries above the role's tier are dropped rather
-      // than the list being cleared, so a junior role keeps the low-risk grants
-      // and loses only what it was never trusted with.
       approvedTools: (settings.approvedTools ?? []).filter(
         (t) => this.getToolTier(t) <= def.maxRiskTier,
       ),
     };
+  }
+
+  /**
+   * The crew form: clamp to the hats that actually grant THIS TOOL, rather than
+   * to whichever hat happened to win the turn.
+   *
+   * Returns null when NO member grants it, which is the scope refusal — that
+   * distinction has to survive, because "no hat covers this" and "a hat covers
+   * it at a lower tier" are different answers and only the first is a refusal.
+   *
+   * IT IS A FOLD OF `applyRoleCeiling`, AND THAT IS EXACT, NOT APPROXIMATE.
+   * Clamping to role A and then to role B leaves min(min(s, A), B) = min(s, A, B)
+   * on both numeric fields, and filtering approvedTools by A's tier and then by
+   * B's is filtering by the lower of the two. So folding the existing
+   * single-role clamp over the grantors IS the minimum over grantors. Written
+   * as a fold rather than a fresh Math.min so that there is exactly ONE
+   * description in this file of what a role ceiling does — a second copy would
+   * be free to drift from the first, and the seven assertions in
+   * key-identity-and-authority.spec.ts would then be testing the copy that no
+   * longer runs.
+   *
+   * MIN OVER GRANTORS, NEVER MAX. This is the line the whole design rests on.
+   * Max would mean that adding a permissive role to a crew RAISES the
+   * auto-execute band for a tool a strict role also grants — escalation by crew
+   * composition, which is a privilege-escalation primitive dressed as a
+   * convenience. Min means crew membership can add SCOPE and can only ever
+   * lower the BAND.
+   *
+   * For a one-element crew this is a single `applyRoleCeiling` call, which is
+   * the non-regression proof for every caller still passing one role.
+   */
+  private applyCrewCeiling(
+    settings: AutonomySettings,
+    crew: readonly BusinessRole[],
+    toolName: string,
+  ): { settings: AutonomySettings; grantedBy: BusinessRole[]; ceiling: RiskTier } | null {
+    const grantedBy = this.roleEngine.grantorsOf(crew, toolName);
+    if (grantedBy.length === 0) return null;
+
+    const clamped = grantedBy.reduce((acc, role) => this.applyRoleCeiling(acc, role), settings);
+    const ceiling = Math.min(
+      ...grantedBy.map((r) => this.roleEngine.getRoleDefinition(r)?.maxRiskTier ?? 4),
+    ) as RiskTier;
+
+    return { grantedBy, ceiling, settings: clamped };
   }
 
   getToolTier(toolName: string): RiskTier {
@@ -111,9 +156,13 @@ export class AiOversightService {
     businessId: string,
     toolName: string,
     mode?: string,
-    role?: BusinessRole,
+    // Widened, not changed: a single role still means what it always meant.
+    // Every existing call site compiles and behaves identically, because a
+    // one-element crew reduces to applyRoleCeiling exactly.
+    role?: BusinessRole | readonly BusinessRole[],
     envelope?: JobRoleEnvelope,
   ): Promise<GovernanceDecision> {
+    const crew: readonly BusinessRole[] = Array.isArray(role) ? role : role ? [role as BusinessRole] : [];
     const tier = this.getToolTier(toolName);
     const businessSettings = await this.getAutonomySettings(businessId);
 
@@ -129,7 +178,11 @@ export class AiOversightService {
     //
     // Always the MINIMUM of the two. Selecting a role can restrict KEY; it can
     // never be used to escalate past the business's own ceiling.
-    const settings = role ? this.applyRoleCeiling(businessSettings, role) : businessSettings;
+    //
+    // Crew form: the clamp is per TOOL, against the hats that grant that tool,
+    // rather than per turn against one hat. See applyCrewCeiling.
+    const applied = crew.length ? this.applyCrewCeiling(businessSettings, crew, toolName) : null;
+    const settings = applied?.settings ?? businessSettings;
 
     const blocked = { allowed: false, requiresQuickConfirm: false, requiresFormalApproval: false, requiresAdminApproval: false, tier };
 
@@ -141,8 +194,17 @@ export class AiOversightService {
       if (tier > envelope.maxRiskTier) {
         return { ...blocked, reason: `Tool "${toolName}" (tier ${tier}) exceeds the ${envelope.jobRoleName} position's tier (${envelope.maxRiskTier})` };
       }
-    } else if (role && !this.roleEngine.isToolAllowed(role, toolName)) {
-      return { ...blocked, reason: `Tool "${toolName}" is not available to the ${role} role` };
+    } else if (crew.length && !applied) {
+      // No hat in the crew grants it. Names the crew, because "not available to
+      // the operations role" was misleading the moment a turn could wear more
+      // than one.
+      return {
+        ...blocked,
+        reason:
+          crew.length === 1
+            ? `Tool "${toolName}" is not available to the ${crew[0]} role`
+            : `No active role covers "${toolName}" — KEY is wearing ${crew.join(', ')}`,
+      };
     }
 
     if (settings.blockedTools.includes(toolName)) {

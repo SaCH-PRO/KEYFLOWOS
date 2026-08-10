@@ -58,8 +58,18 @@ describe('reflex sends no tools', () => {
 
   it('still sends tools on standard and deliberate', () => {
     // The saving must not become a capability loss. Only reflex is excluded.
+    //
+    // The non-reflex branch used to inline `getOpenAiToolDefinitions()` here,
+    // in two places, and both ignored selectToolsForRequest — which is why the
+    // 128-tool cap inside it had never run. It now hands over `selectedTools`,
+    // so this checks the whole path rather than the presence of one call:
+    // non-reflex must attach the selected menu, AND that menu must come from
+    // the selector. Grepping for the old literal would now pass on a hard-coded
+    // empty array.
     const attach = src.slice(src.indexOf('tools: triage?.tier'));
-    expect(attach.slice(0, 400)).toMatch(/getOpenAiToolDefinitions\(\)/);
+    expect(attach.slice(0, 400)).toMatch(/:\s*selectedTools/);
+    expect(src).toMatch(/const selectedTools = await this\.selectToolsForRequest\(/);
+    expect(src).toMatch(/const all = getOpenAiToolDefinitions\(\);/);
   });
 });
 

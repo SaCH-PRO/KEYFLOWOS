@@ -29,6 +29,38 @@ export interface RoleContext {
   recentActivity: Array<{ action: string; timestamp: Date; success: boolean }>;
 }
 
+/**
+ * The roles staffed for one turn, primary first.
+ *
+ * `scores` is carried rather than discarded so "why did KEY wear that hat" is a
+ * value you can log and assert on, instead of eight regexes re-run against a
+ * message nobody kept.
+ */
+export interface CrewResolution {
+  primary: BusinessRole;
+  /** Primary first, then by descending score. Never empty. */
+  crew: readonly BusinessRole[];
+  scores: Readonly<Record<BusinessRole, number>>;
+}
+
+/**
+ * Frozen traversal order for crew assembly.
+ *
+ * Deliberately a literal and not `Object.keys(ROLE_DEFINITIONS)`: crew
+ * membership breaks ties by this order, and two replicas that disagreed about
+ * it would staff different crews for the same request. `role-crew.spec.ts`
+ * asserts it stays a permutation of the eight roles.
+ */
+const ROLE_ORDER: readonly BusinessRole[] = Object.freeze([
+  'sales', 'finance', 'support', 'operations', 'marketing', 'general', 'operator', 'executive',
+] as const);
+
+/** One switch-keyword hit. Below this a role's score is noise, not a signal. */
+const CREW_FLOOR = 2;
+
+/** Primary plus at most two colleagues. */
+const MAX_CREW = 3;
+
 export interface RoleDetectionContext {
   /** Current page route, e.g. /app/invoices */
   route?: string;
@@ -449,6 +481,19 @@ export class RoleEngineService {
    * what they're looking at, what they said, and conversation history.
    */
   async detectRoleFromContext(ctx: RoleDetectionContext): Promise<BusinessRole> {
+    return this.argmax(await this.scoreRoles(ctx));
+  }
+
+  /**
+   * The scorer, lifted verbatim out of `detectRoleFromContext`.
+   *
+   * Nothing in the body below changed — same signals, same weights, same order.
+   * It was extracted because the numbers it produces were being thrown away:
+   * the old code computed all eight and returned one, on every single request.
+   * Staffing a turn with more than one role is therefore not a new capability,
+   * it is a `return` statement that was narrower than the function.
+   */
+  private async scoreRoles(ctx: RoleDetectionContext): Promise<Record<BusinessRole, number>> {
     const scores: Record<BusinessRole, number> = {
       sales: 0, finance: 0, support: 0, operations: 0, marketing: 0, general: 0, operator: 0,
       executive: 0,
@@ -513,7 +558,19 @@ export class RoleEngineService {
       }
     }
 
-    // Pick the highest scoring role
+    return scores;
+  }
+
+  /**
+   * The winner-take-all pick, also lifted verbatim.
+   *
+   * Same seed (`scores.general`), same strict `>`, same `Object.entries`
+   * traversal — so ties still resolve to whichever role comes first in the
+   * literal, exactly as before. `detectRoleFromContext` returning bit-for-bit
+   * what it used to is the whole safety argument for this refactor, and
+   * `role-crew.spec.ts` asserts it against the old inline implementation.
+   */
+  private argmax(scores: Record<BusinessRole, number>): BusinessRole {
     let bestRole: BusinessRole = 'general';
     let bestScore = scores.general;
     for (const [role, score] of Object.entries(scores)) {
@@ -522,8 +579,84 @@ export class RoleEngineService {
         bestRole = role as BusinessRole;
       }
     }
-
     return bestRole;
+  }
+
+  /**
+   * Staff the turn.
+   *
+   * "The client cancelled — refund them and release their booking slot" is one
+   * sentence, and no single hat in the eight can execute it. Scored, it comes
+   * out operations 6, support 2, finance 2 — so `operations` wins, and
+   * `operations` has `bookings_*` but no `payments_*`. Route it to support
+   * instead and you get a role whose `blockedTools` contains
+   * `bookings_cancel_booking` and which has no refund tool either. That is what
+   * "structurally impossible" meant: not a missing tool, a missing hat.
+   *
+   * Three clauses, and every one of them narrows rather than widens:
+   *
+   * (A) `general` is a fallback, never a colleague. Its maxRiskTier is 1, so as
+   *     a crew member it would clamp every multi-role turn to tier 1 (the
+   *     ceiling is a MIN over grantors), and its allowlist is broad enough to
+   *     make the crew meaningless. When general is primary the crew is just
+   *     [general] and behaviour is exactly today's.
+   *
+   * (B) CREW_FLOOR = 2 is one switch-keyword hit. A role that scored zero never
+   *     joins, so an unrelated department cannot be recruited by noise.
+   *
+   * (C) No member may out-rank the primary. This one is load-bearing:
+   *     ROLE_SWITCH_KEYWORDS.operator matches "do it", a phrase in half of all
+   *     real messages, and `operator`'s allowlist includes
+   *     `execute_custom_logic`. Without (C), "refund them, do it" quietly
+   *     recruits the most powerful role in the product.
+   *
+   * Deterministic and I/O-free apart from the scorer, so two replicas given the
+   * same request resolve the same crew. ROLE_ORDER is a frozen literal rather
+   * than Object.keys for that reason.
+   */
+  async resolveCrew(ctx: RoleDetectionContext): Promise<CrewResolution> {
+    const scores = await this.scoreRoles(ctx);
+    const primary = this.argmax(scores);
+
+    if (primary === 'general') {
+      return { primary, crew: ['general'], scores };
+    }
+
+    const ceiling = ROLE_DEFINITIONS[primary].maxRiskTier;
+    const others = ROLE_ORDER.filter(
+      (r) =>
+        r !== primary &&
+        r !== 'general' &&
+        scores[r] >= CREW_FLOOR &&
+        ROLE_DEFINITIONS[r].maxRiskTier <= ceiling,
+    ).sort(
+      (a, b) => scores[b] - scores[a] || ROLE_ORDER.indexOf(a) - ROLE_ORDER.indexOf(b),
+    );
+
+    return { primary, crew: [primary, ...others.slice(0, MAX_CREW - 1)], scores };
+  }
+
+  /**
+   * Which crew members grant this tool, in crew order. Empty means out of scope.
+   *
+   * Per-member `grants ∧ ¬blocks`, deliberately NOT "union of grants minus
+   * union of blocks". `general.blockedTools` contains `bookings_cancel_booking`,
+   * `commerce_send_invoice` and `marketing_send_campaign` — those are statements
+   * about general's own authority, not business-wide prohibitions, and every one
+   * of them is granted by some specialist. A union-veto would make a crew
+   * strictly weaker than its weakest member, which is both wrong and exactly the
+   * thing that would kill the worked example.
+   *
+   * This is already the predicate `role-tool-reachability.spec.ts` uses to
+   * define an orphaned tool, so the two agree by construction.
+   */
+  grantorsOf(crew: readonly BusinessRole[], toolName: string): BusinessRole[] {
+    return crew.filter((r) => this.isToolAllowed(r, toolName));
+  }
+
+  /** The crew allows a tool iff SOME member allows it on its own terms. */
+  crewAllows(crew: readonly BusinessRole[], toolName: string): boolean {
+    return this.grantorsOf(crew, toolName).length > 0;
   }
 
   async detectRoleFromMessage(businessId: string, messageBody: string, channel?: string): Promise<BusinessRole> {
@@ -644,6 +777,40 @@ RULES:
 3. Autonomy level: ${def.autonomyLevel}
 4. Always greet with: "${def.greeting}"
 5. Always sign off with: "${def.signOff}"`;
+  }
+
+  /**
+   * The primary's prompt, plus one paragraph naming the other hats.
+   *
+   * `getSystemPromptForRole` above is untouched, byte for byte — it is called
+   * directly by `key-identity-and-authority.spec.ts`, and the crew prompt is
+   * built ON it rather than replacing it, so the identity assertions there keep
+   * describing the thing that actually ships.
+   *
+   * A single-member crew returns the primary's prompt unchanged, so every
+   * existing turn produces the same bytes it did before.
+   *
+   * The appended sentence about judgement is not decoration. The model is being
+   * told it may reach for another department's tools, and without it the
+   * natural reading of "you are also wearing Finance Manager" is that the
+   * turn's authority is now the widest of the hats. It is the narrowest: the
+   * ceiling is a MIN over the roles that actually grant each tool
+   * (ai-oversight.applyCrewCeiling), computed per call, not per turn.
+   */
+  getSystemPromptForCrew(
+    crew: readonly BusinessRole[],
+    businessContext: string,
+    onboardingDirective = '',
+  ): string {
+    const [primary, ...rest] = crew;
+    const base = this.getSystemPromptForRole(primary, businessContext, onboardingDirective);
+    if (rest.length === 0) return base;
+
+    const names = rest.map((r) => ROLE_DEFINITIONS[r].name).join(', ');
+    return `${base}
+
+ALSO WEARING: ${names}.
+You may use their tools in this turn. Each action is still judged against the hat that grants it — the widest hat does not raise the others.`;
   }
 
   async recordRoleAction(businessId: string, role: BusinessRole, action: string, success: boolean): Promise<void> {
