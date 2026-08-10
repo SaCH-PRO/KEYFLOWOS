@@ -259,23 +259,65 @@ describe('the class of defect, not just the instances', () => {
     };
 
     const offenders: string[] = [];
+    const scanned: string[] = [];
 
-    for (const match of src.matchAll(/case '([a-z0-9_]+)': \{/g)) {
-      const name = match[1];
+    /**
+     * BOTH case forms, and that distinction is the whole reason this gate was
+     * green while the defects it names were live.
+     *
+     * The original pattern was /case '([a-z0-9_]+)': \{/ — it required a brace.
+     * Measured 2026-08-09 inside executeToolAction: 237 handlers open a block
+     * and 95 do not, written as
+     *
+     *     case 'content_deliver_request':
+     *       await this.getContentRequest().deliver(args.requestId);
+     *       return { requestId: args.requestId, status: 'DELIVERED' };
+     *
+     * Every one of those 95 was INVISIBLE. The list of missed handlers is not
+     * incidental — it is call_log_outcome, content_submit_for_review,
+     * content_deliver_request, content_assign_request, content_transition_status,
+     * content_upload_deliverables and evidence_verify: exactly the seven this
+     * spec was written to catch, and exactly the seven that had to be found by
+     * reading source instead.
+     *
+     * A gate whose predicate is right and whose SCOPE is wrong reports success
+     * for work it never did — the same defect as the tools it is auditing.
+     */
+    const caseStarts = [...src.matchAll(/^([ \t]*)case '([a-z0-9_]+)':[ \t]*(\{?)[ \t]*$/gm)];
+
+    for (let c = 0; c < caseStarts.length; c++) {
+      const match = caseStarts[c];
+      const [, indent, name, brace] = match;
+      const from = match.index ?? 0;
       if (VOID_WRITES[name]) continue;
 
-      // Brace-match the case body. A fixed-size window bleeds into the next
-      // case and reports handlers that are fine.
-      let depth = 0;
-      let end = match.end ?? src.length;
-      for (let i = (match.index ?? 0) + match[0].length - 1; i < src.length; i++) {
-        if (src[i] === '{') depth++;
-        else if (src[i] === '}' && --depth === 0) {
-          end = i + 1;
-          break;
+      let end: number;
+      if (brace === '{') {
+        // Brace-match. A fixed-size window bleeds into the next case and
+        // reports handlers that are fine.
+        let depth = 0;
+        end = src.length;
+        for (let i = from + match[0].length - 1; i < src.length; i++) {
+          if (src[i] === '{') depth++;
+          else if (src[i] === '}' && --depth === 0) {
+            end = i + 1;
+            break;
+          }
         }
+      } else {
+        // Braceless: the body runs to the next case/default at any indent, or
+        // to the end of the switch.
+        const rest = src.slice(from + match[0].length);
+        const next = rest.search(new RegExp(`^[ \\t]*(case '|default:)`, 'm'));
+        end = next === -1 ? src.length : from + match[0].length + next;
       }
-      const body = src.slice((match.index ?? 0), end);
+      const body = src.slice(from, end);
+
+      // Fall-through: `case 'a':` immediately followed by `case 'b': {` shares
+      // b's block and is audited there, not here.
+      if (/^\s*case '/.test(body.slice(match[0].length))) continue;
+      scanned.push(name);
+      void indent;
 
       // A service or prisma call whose result is never bound to anything.
       if (!/^\s+await this\.(get[A-Z]\w*\(\)|prisma)/m.test(body)) continue;
@@ -292,6 +334,33 @@ describe('the class of defect, not just the instances', () => {
       if (!fromLocals.length) {
         offenders.push(`${name} -> {${last.trim().replace(/\s+/g, ' ').slice(0, 60)}}`);
       }
+    }
+
+    // The gate's own negative control. Without it, a regex that stops matching
+    // leaves `offenders` empty and this test passes having examined nothing —
+    // which is the same defect as a tool reporting success for work it did not
+    // do, committed by the auditor.
+    //
+    // Named handlers rather than a count, deliberately. A threshold like
+    // `scanned.length > 250` is a shape, and it would keep passing while the
+    // scan drifted onto the wrong switch — this file slices from
+    // `executeToolAction` to EOF, so it also sweeps the description switch
+    // further down, and a count cannot tell those apart. These seven are the
+    // handlers the sweep exists for; if any goes missing, the scope broke.
+    for (const required of [
+      'commerce_send_invoice',
+      'content_deliver_request',
+      'content_submit_for_review',
+      'content_upload_deliverables',
+      'call_log_outcome',
+      'evidence_verify',
+      'sync_seo_pages',
+    ]) {
+      expect(
+        scanned,
+        `${required} is no longer being scanned — the sweep's scope broke, and ` +
+          'an empty offender list now means nothing',
+      ).toContain(required);
     }
 
     expect(
