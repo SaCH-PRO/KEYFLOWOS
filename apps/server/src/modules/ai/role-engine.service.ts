@@ -255,7 +255,13 @@ const ROLE_DEFINITIONS: Record<BusinessRole, RoleDefinition> = {
     // Merge: main's side kept. integration widened this role's approvedTools;
     // those additions are deliberately NOT taken here — see the note at the
     // head of this file. Widening a role is a product decision, not a merge one.
-    approvedTools: ['people_assign_task', 'update_business_blueprint', 'bookings_*', 'projects_*', 'inventory_*', 'contracts_*', 'goals_list', 'goals_get', 'deals_list', 'deals_get', 'deals_forecast', 'deals_pipeline_velocity', 'create_task', 'tag_contact', 'fetch_*', 'content_*', 'call_*', 'evidence_*', 'approval_*', 'drive_*', 'calendar_*', 'time_*', 'helpdesk_*', 'finance_list_action_items', 'documents_search', 'automations_*', 'delegation_*', 'draft_project_update', 'enable_flow_with_approval', 'update_status_with_confirmation', 'apply_storefront_recommendation', 'store_list_products', 'store_list_recent_orders', 'marketplace_list_listings', 'marketplace_list_orders', 'procurement_*', 'structure_*', 'comms_*', 'inbox_*', 'performance_*', 'contract_extract_terms', 'contract_extract_clauses', 'contract_list_tags', 'contract_create_tag'],
+    approvedTools: ['people_assign_task', 'update_business_blueprint', 'bookings_*', 'projects_*', 'inventory_*', 'contracts_*', 'goals_list', 'goals_get', 'deals_list', 'deals_get', 'deals_forecast', 'deals_pipeline_velocity', 'create_task', 'tag_contact', 'fetch_*', 'content_*', 'call_*', 'evidence_*', 'approval_*', 'drive_*', 'calendar_*', 'time_*', 'helpdesk_*', 'finance_list_action_items', 'documents_search', 'automations_*', 'delegation_*', 'draft_project_update', 'enable_flow_with_approval', 'update_status_with_confirmation', 'apply_storefront_recommendation', 'store_list_products', 'store_list_recent_orders', 'marketplace_list_listings', 'marketplace_list_orders', 'procurement_*', 'structure_*', 'comms_*', 'inbox_*', 'performance_*', 'contract_extract_terms', 'contract_extract_clauses', 'contract_list_tags', 'contract_create_tag', 'assets_*'],
+    // assets_delete is deliberately NOT blocked here, unlike on general and
+    // marketing. Something has to be able to delete an asset, and blocking a
+    // destructive tool at the ROLE layer for every role does not add safety —
+    // it makes the TIER layer unreachable, which is the exact defect
+    // role-tool-reachability.spec.ts was written about. Operations owns the
+    // library day to day; tier 3 means the deletion still goes to approval.
     blockedTools: ['commerce_delete_invoice', 'crm_delete_contact'],
     maxRiskTier: 2,
     autonomyLevel: 3,
@@ -279,8 +285,12 @@ const ROLE_DEFINITIONS: Record<BusinessRole, RoleDefinition> = {
     // Merge: main's side kept. integration widened this role's approvedTools;
     // those additions are deliberately NOT taken here — see the note at the
     // head of this file. Widening a role is a product decision, not a merge one.
-    approvedTools: ['update_business_blueprint', 'marketing_*', 'social_*', 'deals_list', 'deals_forecast', 'fetch_*', 'sync_seo_pages', 'draft_campaign_bundle', 'draft_storefront_copy', 'generate_content_brief', 'segment_contacts', 'tag_contact', 'queue_campaign', 'content_*', 'drive_*', 'calendar_*', 'documents_search', 'community_list_posts', 'apply_storefront_recommendation', 'delegation_lead_reactivation', 'seo_*'],
-    blockedTools: ['content_upload_deliverables', 'content_deliver_request'],
+    approvedTools: ['update_business_blueprint', 'marketing_*', 'social_*', 'deals_list', 'deals_forecast', 'fetch_*', 'sync_seo_pages', 'draft_campaign_bundle', 'draft_storefront_copy', 'generate_content_brief', 'segment_contacts', 'tag_contact', 'queue_campaign', 'content_*', 'drive_*', 'calendar_*', 'documents_search', 'community_list_posts', 'apply_storefront_recommendation', 'delegation_lead_reactivation', 'seo_*', 'assets_*'],
+    // assets_delete is a HARD delete — Asset is not in the soft-delete set, so
+    // there is no undo. Marketing owns the brand library and should be able to
+    // find, tag, rename and refile it; destroying it is not part of getting the
+    // word out.
+    blockedTools: ['content_upload_deliverables', 'content_deliver_request', 'assets_delete'],
     maxRiskTier: 2,
     autonomyLevel: 2,
     checkIntervalMinutes: 240,
@@ -310,8 +320,11 @@ const ROLE_DEFINITIONS: Record<BusinessRole, RoleDefinition> = {
     // falls back to a LOCAL spawned child process. Granting that to the default
     // role for every user is not a tradeoff worth making silently. If it is
     // wanted, it should arrive as its own reviewed change.
-    approvedTools: ['inbox_brief', 'inbox_mark_resolved', 'people_assign_task', 'update_business_blueprint', 'present_onboarding_card', 'save_onboarding_step', 'fetch_*', 'crm_*', 'deals_*', 'inventory_*', 'payments_*', 'reconcile_*', 'contracts_*', 'reports_generate', 'goals_*', 'commerce_*', 'bookings_*', 'projects_*', 'expenses_*', 'calendar_*', 'time_*', 'helpdesk_*', 'content_*', 'call_*', 'evidence_*', 'approval_*', 'drive_*', 'documents_*', 'finance_*', 'marketing_*', 'social_*', 'store_*', 'marketplace_*', 'automations_*', 'delegation_*', 'draft_*', 'create_task', 'create_followup_queue', 'tag_contact', 'segment_contacts', 'send_message_with_approval', 'queue_campaign', 'keyflow_create_note', 'sync_seo_pages', 'generate_content_brief', 'apply_storefront_recommendation', 'enable_flow_with_approval', 'update_status_with_confirmation', 'community_list_posts'],
-    blockedTools: ['commerce_delete_invoice', 'crm_delete_contact', 'bookings_cancel_booking', 'marketing_send_campaign', 'social_publish_post', 'content_create_request', 'content_assign_request', 'content_transition_status', 'call_create_task', 'approval_create_request', 'projects_delete_task', 'commerce_send_invoice'],
+    approvedTools: ['inbox_brief', 'inbox_mark_resolved', 'people_assign_task', 'update_business_blueprint', 'present_onboarding_card', 'save_onboarding_step', 'fetch_*', 'crm_*', 'deals_*', 'inventory_*', 'payments_*', 'reconcile_*', 'contracts_*', 'reports_generate', 'goals_*', 'commerce_*', 'bookings_*', 'projects_*', 'expenses_*', 'calendar_*', 'time_*', 'helpdesk_*', 'content_*', 'call_*', 'evidence_*', 'approval_*', 'drive_*', 'documents_*', 'finance_*', 'marketing_*', 'social_*', 'store_*', 'marketplace_*', 'automations_*', 'delegation_*', 'draft_*', 'create_task', 'create_followup_queue', 'tag_contact', 'segment_contacts', 'send_message_with_approval', 'queue_campaign', 'keyflow_create_note', 'sync_seo_pages', 'generate_content_brief', 'apply_storefront_recommendation', 'enable_flow_with_approval', 'update_status_with_confirmation', 'community_list_posts', 'assets_*'],
+    // assets_delete joins the other deletes below. `general` is the role the
+    // web pins on EVERY chat request, so it is the widest blast radius in this
+    // file, and Asset has no soft delete to recover from.
+    blockedTools: ['commerce_delete_invoice', 'crm_delete_contact', 'bookings_cancel_booking', 'marketing_send_campaign', 'social_publish_post', 'content_create_request', 'content_assign_request', 'content_transition_status', 'call_create_task', 'approval_create_request', 'projects_delete_task', 'commerce_send_invoice', 'assets_delete'],
     // FORCED BACK TO 1. This line is OUTSIDE the conflict markers above, so the
     // merge silently took integration's 2 — the fork point and main both say 1.
     // Nothing in a conflict review would have shown it.

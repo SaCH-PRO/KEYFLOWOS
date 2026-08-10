@@ -3177,6 +3177,200 @@ export const FLOW_TOOLS: FlowTool[] = [
   },
 
   // ================================================================
+  //  ASSETS — the brand library KEY could not open
+  // ================================================================
+  //
+  // AssetService has nine methods, a nine-route controller and two screens
+  // (/app/assets and /app/assets/[id]). It had zero tools, so KEY could not
+  // name a single logo, find the brand kit, or tell anyone which image was
+  // already used in a campaign.
+  //
+  // TWO METHODS DELIBERATELY HAVE NO TOOL:
+  //
+  //   createAsset  requires url, storageKey AND uploadedBy. KEY has no bytes.
+  //                A tool for it would be one KEY cannot honestly fulfil, and
+  //                the standing rule here is that such a tool gets removed
+  //                rather than advertised — see schedule_action in
+  //                tool-honesty-sweep.spec.ts. Uploading stays a UI action.
+  //
+  //   trackUsage   records that an asset was used somewhere. KEY does not
+  //                attach assets through this path, so calling it would write
+  //                a usage record for something that never happened. That is
+  //                the fabrication class this codebase keeps finding.
+  {
+    name: 'assets_list',
+    description:
+      'List brand and media assets — filter by type, folder, tag, or a name search.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/assets',
+    parameters: {
+      type: 'object',
+      properties: {
+        type: { type: 'string', description: 'Asset type filter, e.g. image, video, document' },
+        folder: { type: 'string', description: 'Folder name filter' },
+        tag: { type: 'string', description: 'Single tag to filter by' },
+        search: { type: 'string', description: 'Substring match on the asset name' },
+        limit: { type: 'number', description: 'Max results (default 25)' },
+        offset: { type: 'number', description: 'Skip this many, for paging' },
+      },
+      required: [],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'Matching assets',
+      fields: {
+        assets: { type: 'array', description: 'The assets found' },
+        total: { type: 'number', description: 'Total matching, ignoring paging' },
+      },
+    },
+  },
+  {
+    name: 'assets_get',
+    description: 'Get one asset by id — name, type, folder, tags, url and usage count.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/assets',
+    parameters: {
+      type: 'object',
+      properties: { assetId: { type: 'string', description: 'Asset ID' } },
+      required: ['assetId'],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'The asset',
+      fields: {
+        id: { type: 'string', description: 'Asset ID' },
+        name: { type: 'string', description: 'Asset name' },
+        type: { type: 'string', description: 'Asset type' },
+        url: { type: 'string', description: 'Where the file lives' },
+        tags: { type: 'array', description: 'Tags on the asset' },
+        usageCount: { type: 'number', description: 'Times it has been used' },
+      },
+    },
+  },
+  {
+    name: 'assets_list_folders',
+    description: 'List the folders assets are organised into.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/assets',
+    parameters: { type: 'object', properties: {}, required: [] },
+    outputSchema: {
+      type: 'object',
+      description: 'Folders',
+      fields: { folders: { type: 'array', description: 'Folder names' } },
+    },
+  },
+  {
+    name: 'assets_tag',
+    description: 'Add tags to an asset. Existing tags are kept.',
+    family: 'organize',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/assets',
+    changedEntities: ['asset'],
+    parameters: {
+      type: 'object',
+      properties: {
+        assetId: { type: 'string', description: 'Asset ID' },
+        tags: { type: 'array', description: 'Tags to add' },
+      },
+      required: ['assetId', 'tags'],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'Updated asset',
+      fields: {
+        id: { type: 'string', description: 'Asset ID' },
+        tags: { type: 'array', description: 'Tags after the change' },
+      },
+    },
+  },
+  {
+    name: 'assets_untag',
+    description: 'Remove tags from an asset. Tags not listed are kept.',
+    family: 'organize',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/assets',
+    changedEntities: ['asset'],
+    parameters: {
+      type: 'object',
+      properties: {
+        assetId: { type: 'string', description: 'Asset ID' },
+        tags: { type: 'array', description: 'Tags to remove' },
+      },
+      required: ['assetId', 'tags'],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'Updated asset',
+      fields: {
+        id: { type: 'string', description: 'Asset ID' },
+        tags: { type: 'array', description: 'Tags after the change' },
+      },
+    },
+  },
+  {
+    name: 'assets_update',
+    description:
+      'Rename an asset, move it to another folder, replace its tags, or change its permissions. Does not touch the file itself.',
+    family: 'crud',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/assets',
+    changedEntities: ['asset'],
+    parameters: {
+      type: 'object',
+      properties: {
+        assetId: { type: 'string', description: 'Asset ID' },
+        name: { type: 'string', description: 'New name' },
+        type: { type: 'string', description: 'New type' },
+        folder: { type: 'string', description: 'Folder to move it to' },
+        tags: { type: 'array', description: 'REPLACES all tags. Use assets_tag to add without replacing.' },
+        permissions: { type: 'string', description: 'New permissions value' },
+      },
+      required: ['assetId'],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'Updated asset',
+      fields: {
+        id: { type: 'string', description: 'Asset ID' },
+        name: { type: 'string', description: 'Name after the change' },
+        folder: { type: 'string', description: 'Folder after the change' },
+      },
+    },
+  },
+  {
+    name: 'assets_delete',
+    description:
+      'Permanently delete an asset record. This is NOT a soft delete and there is no undo — Asset is not in the soft-delete set, so the row is gone.',
+    family: 'crud',
+    riskLevel: 'high',
+    riskTier: 3 as RiskTier,
+    manualEquivalentRoute: '/app/assets',
+    changedEntities: ['asset'],
+    parameters: {
+      type: 'object',
+      properties: { assetId: { type: 'string', description: 'Asset ID' } },
+      required: ['assetId'],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'What was deleted',
+      fields: {
+        id: { type: 'string', description: 'Deleted asset ID' },
+        name: { type: 'string', description: 'Name of what was deleted' },
+      },
+    },
+  },
+
+  // ================================================================
   //  FINANCE FAMILY — L1 Read / L2 Organize
   // ================================================================
 
@@ -3195,6 +3389,16 @@ export const FLOW_TOOLS: FlowTool[] = [
   // with no way to notice when the two disagreed.
   //
   // All six are `read`/tier 1: they compute nothing and change nothing.
+  //
+  // The route is `/app/reports`, NOT `/app/finance/reports`. The latter is what
+  // the Finance nav still links, and next.config redirects it here permanently
+  // (next.config.ts, `/app/finance/reports` -> `/app/reports`). A tool that
+  // names the pre-redirect path sends a user to a 308 and describes a screen by
+  // a name it no longer has; `tool-route-audit.ts` fails the build for exactly
+  // that, and it was right to. The destination is the same screen either way —
+  // `/app/reports` mounts BooksReportView, whose six kinds (books-pnl,
+  // books-cashflow, books-balance-sheet, books-ar-aging, books-ap-aging,
+  // books-tax) are these reports — so this is a rename, not a repoint.
   {
     name: 'finance_profit_and_loss',
     description:
@@ -3202,7 +3406,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'read',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
-    manualEquivalentRoute: '/app/finance/reports',
+    manualEquivalentRoute: '/app/reports',
     parameters: {
       type: 'object',
       properties: {
@@ -3232,7 +3436,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'read',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
-    manualEquivalentRoute: '/app/finance/reports',
+    manualEquivalentRoute: '/app/reports',
     parameters: {
       type: 'object',
       properties: {
@@ -3261,7 +3465,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'read',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
-    manualEquivalentRoute: '/app/finance/reports',
+    manualEquivalentRoute: '/app/reports',
     parameters: {
       type: 'object',
       properties: {
@@ -3287,7 +3491,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'read',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
-    manualEquivalentRoute: '/app/finance/reports',
+    manualEquivalentRoute: '/app/reports',
     parameters: {
       type: 'object',
       properties: {
@@ -3314,7 +3518,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'read',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
-    manualEquivalentRoute: '/app/finance/reports',
+    manualEquivalentRoute: '/app/reports',
     parameters: {
       type: 'object',
       properties: {
@@ -3340,7 +3544,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'read',
     riskLevel: 'low',
     riskTier: 1 as RiskTier,
-    manualEquivalentRoute: '/app/finance/reports',
+    manualEquivalentRoute: '/app/reports',
     parameters: {
       type: 'object',
       properties: {

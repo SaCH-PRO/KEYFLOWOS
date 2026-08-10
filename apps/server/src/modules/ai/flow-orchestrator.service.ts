@@ -70,6 +70,7 @@ import { SeoService } from '../seo/seo.service';
 import { SeoContentService } from '../seo/seo-content.service';
 import { ReceivablesService } from '../finance/receivables.service';
 import { LedgerReportingService } from '../reports/ledger-reporting.service';
+import { AssetService } from '../assets/asset.service';
 import { StatementSourceService } from '../finance/statement-source.service';
 import { ApprovalRequestService } from '../approvals/approval-request.service';
 import { GoogleDriveService } from '../google-drive/google-drive.service';
@@ -453,6 +454,47 @@ export class FlowOrchestratorService {
   }
   private getLedgerReporting() {
     return this.moduleRef.get(LedgerReportingService, { strict: false });
+  }
+  private getAssets() {
+    return this.moduleRef.get(AssetService, { strict: false });
+  }
+
+  /**
+   * Load an asset and PROVE it belongs to the business this tool call is for.
+   *
+   * AssetService.getAsset takes a bare id and cannot check a tenant. The Prisma
+   * extension does cover Asset on the HTTP path, but that is ambient: it
+   * depends on TenantInterceptor's AsyncLocalStorage being live, and this
+   * session already found a caller that arrives without it. Checking here does
+   * not depend on where the call came from.
+   *
+   * NotFound rather than Forbidden — a Forbidden confirms the id exists and
+   * turns the tool into an oracle for enumerating another business's asset ids.
+   */
+  private async assetWithinBusiness(businessId: string, assetId: unknown) {
+    if (typeof assetId !== 'string' || !assetId) {
+      throw new Error('assetId is required');
+    }
+    const asset = await this.getAssets().getAsset(assetId);
+    if (!asset || asset.businessId !== businessId) {
+      throw new NotFoundException('Asset not found');
+    }
+    return asset;
+  }
+
+  /**
+   * Tags arrive from a model, so `tags` can be a string, null, or an array with
+   * numbers in it. `['a', 1]` reaching Prisma's String[] throws a validation
+   * error the owner reads as "something went wrong"; a bare string silently
+   * spreads into characters on some paths.
+   */
+  private requireStringArray(raw: unknown, field: string): string[] {
+    if (!Array.isArray(raw) || raw.some((t) => typeof t !== 'string')) {
+      throw new Error(
+        `${field} must be an array of strings — got ${JSON.stringify(raw)}`,
+      );
+    }
+    return raw as string[];
   }
 
   /**
@@ -4555,6 +4597,74 @@ ${triage.standingContext}`;
       }
 
       // === FINANCE ===
+      // ── Assets ───────────────────────────────────────────────────────────
+      //
+      // Every AssetService method below takes a BARE id: getAsset(id),
+      // updateAsset(id, ...), tagAsset(id, ...), deleteAsset(id). None of them
+      // takes a businessId, so none of them can check one.
+      //
+      // Today the tenant Prisma extension covers that — Asset is in
+      // BUSINESS_ID_MODELS and tools execute on the HTTP path, where
+      // TenantInterceptor's AsyncLocalStorage is live. But that is ambient
+      // protection, and this session already found what happens when a caller
+      // arrives without it: the WebSocket approval path had no tenant context
+      // and a bare-id lookup let one business decide another's proposal.
+      //
+      // So these verify ownership explicitly, against the businessId the tool
+      // call was made for. Belt and braces on a read; on delete it is the only
+      // thing standing between a wrong id and a permanently destroyed row.
+      case 'assets_list': {
+        const assets = await this.getAssets().listAssets(businessId, {
+          type: args.type,
+          folder: args.folder,
+          tag: args.tag,
+          search: args.search,
+          limit: args.limit ?? 25,
+          offset: args.offset ?? 0,
+        });
+        return assets;
+      }
+
+      case 'assets_get':
+        return this.assetWithinBusiness(businessId, args.assetId);
+
+      case 'assets_list_folders': {
+        const folders = await this.getAssets().getFolders(businessId);
+        return { folders };
+      }
+
+      case 'assets_tag': {
+        await this.assetWithinBusiness(businessId, args.assetId);
+        const tags = this.requireStringArray(args.tags, 'tags');
+        return this.getAssets().tagAsset(args.assetId, tags);
+      }
+
+      case 'assets_untag': {
+        await this.assetWithinBusiness(businessId, args.assetId);
+        const tags = this.requireStringArray(args.tags, 'tags');
+        return this.getAssets().untagAsset(args.assetId, tags);
+      }
+
+      case 'assets_update': {
+        await this.assetWithinBusiness(businessId, args.assetId);
+        return this.getAssets().updateAsset(args.assetId, {
+          name: args.name,
+          type: args.type,
+          folder: args.folder,
+          tags: args.tags === undefined ? undefined : this.requireStringArray(args.tags, 'tags'),
+          permissions: args.permissions,
+        });
+      }
+
+      case 'assets_delete': {
+        // Read the name BEFORE deleting: afterwards there is nothing to read,
+        // and "deleted asset_abc123" tells the owner nothing about what they
+        // just lost. Asset is not in the soft-delete set, so this is final.
+        const asset = await this.assetWithinBusiness(businessId, args.assetId);
+        await this.getAssets().deleteAsset(args.assetId);
+        return { id: asset.id, name: asset.name, deleted: true };
+      }
+
       // ── The ledger's own reports ─────────────────────────────────────────
       //
       // Each of these returns what LedgerReportingService returned. None
