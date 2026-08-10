@@ -33,6 +33,15 @@ export class LangfuseService {
     process.env.LANGFUSE_BASE_URL || 'https://cloud.langfuse.com'
   ).replace(/\/+$/, '');
 
+  /**
+   * Per-request wall-clock bound. Because ingestion is unawaited and one fires
+   * per completion, an endpoint that accepts connections but never responds
+   * would otherwise let pending requests — and their sockets — pile up without
+   * limit. The abort caps each one so a slow Langfuse can never leak resources
+   * into KEY.
+   */
+  private readonly timeoutMs = Number(process.env.LANGFUSE_TIMEOUT_MS) || 5000;
+
   /** True only when both keys are present; drives the no-op path everywhere else. */
   readonly enabled: boolean;
 
@@ -122,6 +131,7 @@ export class LangfuseService {
           Authorization: `Basic ${auth}`,
         },
         body: JSON.stringify({ batch }),
+        signal: AbortSignal.timeout(this.timeoutMs),
       });
       // 207 is Langfuse's partial-success code and is expected/fine.
       if (!res.ok && res.status !== 207) {

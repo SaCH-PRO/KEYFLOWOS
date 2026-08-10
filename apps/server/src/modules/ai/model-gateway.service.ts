@@ -832,6 +832,25 @@ export class ModelGatewayService {
     request: GatewayRequest,
     response: GatewayResponse,
   ): Promise<void> {
+    // Trace FIRST, then cost. recordCost() awaits a DB write that can reject
+    // (e.g. a database outage) — and that is precisely when we most want the
+    // trace. Emitting it before the await means a cost-write failure, caught by
+    // this method's outer .catch, can never swallow the trace with it.
+    this.langfuse.traceLlmCall({
+      businessId: request.businessId,
+      provider: response.provider,
+      model: response.model,
+      taskCategory: request.taskCategory,
+      promptTokens: response.usage.promptTokens,
+      completionTokens: response.usage.completionTokens,
+      totalTokens: response.usage.totalTokens,
+      totalCost: response.usage.estimatedCost,
+      latencyMs: response.latencyMs,
+      fallbackUsed: response.fallbackUsed,
+      contractType: request.expectedContract ?? null,
+      source: 'complete',
+    });
+
     await this.llmCost.recordCost({
       businessId: request.businessId,
       sessionId: null,
@@ -848,21 +867,6 @@ export class ModelGatewayService {
       fallbackUsed: response.fallbackUsed,
       metadata: { contractType: request.expectedContract },
     });
-
-    this.langfuse.traceLlmCall({
-      businessId: request.businessId,
-      provider: response.provider,
-      model: response.model,
-      taskCategory: request.taskCategory,
-      promptTokens: response.usage.promptTokens,
-      completionTokens: response.usage.completionTokens,
-      totalTokens: response.usage.totalTokens,
-      totalCost: response.usage.estimatedCost,
-      latencyMs: response.latencyMs,
-      fallbackUsed: response.fallbackUsed,
-      contractType: request.expectedContract ?? null,
-      source: 'complete',
-    });
   }
 
   private async recordCostFromStream(
@@ -873,6 +877,23 @@ export class ModelGatewayService {
     latencyMs: number,
     fallbackUsed: boolean,
   ): Promise<void> {
+    // Trace before the cost write, for the same reason as the buffered path: a
+    // recordCost() rejection must not take the trace down with it.
+    this.langfuse.traceLlmCall({
+      businessId: request.businessId,
+      provider,
+      model,
+      taskCategory: request.taskCategory,
+      promptTokens: usage.promptTokens,
+      completionTokens: usage.completionTokens,
+      totalTokens: usage.totalTokens,
+      totalCost: usage.estimatedCost,
+      latencyMs,
+      fallbackUsed,
+      contractType: request.expectedContract ?? null,
+      source: 'stream',
+    });
+
     await this.llmCost.recordCost({
       businessId: request.businessId,
       sessionId: null,
@@ -888,21 +909,6 @@ export class ModelGatewayService {
       latencyMs,
       fallbackUsed,
       metadata: { source: 'stream', contractType: request.expectedContract },
-    });
-
-    this.langfuse.traceLlmCall({
-      businessId: request.businessId,
-      provider,
-      model,
-      taskCategory: request.taskCategory,
-      promptTokens: usage.promptTokens,
-      completionTokens: usage.completionTokens,
-      totalTokens: usage.totalTokens,
-      totalCost: usage.estimatedCost,
-      latencyMs,
-      fallbackUsed,
-      contractType: request.expectedContract ?? null,
-      source: 'stream',
     });
   }
 
