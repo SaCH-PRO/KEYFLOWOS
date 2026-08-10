@@ -121,60 +121,60 @@ describe('BUSINESS_ID_MODELS describes reality', () => {
  */
 const ACKNOWLEDGED_UNSCOPED = new Set([
   
-  'AgentTrigger', 'AiMemory', 
+  'AiMemory', 
   
   'ApiKey',
-  'AuthorityGrant', 'AutomationFlow',
+  'AuthorityGrant', 
   'AutonomyDailyActionCount', 'AutonomyDailySpend',
   'AutopilotSettings',
-  'AutopilotTask', 'BotAgent', 'BotConversationState',
+  'BotAgent', 'BotConversationState',
   'BusinessAutonomyProfile', 'BusinessBlueprint',
-  'BusinessConstitutionVersion', 'BusinessGenome', 
+  'BusinessGenome', 
   'BusinessGuidanceProfile', 
   'BusinessReputation',
   
   'CalendarSyncConflict',
   'CampaignBriefing', 'ChannelAccount',
   'ChannelConnection', 'ChannelDestination', 
-  'CognitionSession', 'Cohort',
+  'CognitionSession', 
   
   
   'ConnectorAccount', 
   
   'ContactChannelStat', 
   'ContactExportJob', 'ContactExternalMapping', 'ContactForgetRequest',
-  'ContactImport', 'ContactInsightSnapshot', 'ContactList',
-  'ContactMomentum', 
-  'ContactNote', 'ContactReadState',
+  'ContactInsightSnapshot', 
   
-  'ContactSyncAudit', 'ContactTask', 
+  
+  
+  'ContactSyncAudit', 
   'ConversationAIInsight', 'Course',
-  'CourseEnrollment', 
-  'CrossModuleWorkflow', 
-  'CustomerJourney', 
+  
+  
+  
   
   'DriveIntakeFile',
   'DriveSyncCursor', 
-  'EventAttendee', 'ExternalObjectMap',
-  'FinanceActionItem', 'FlowDefinition',
+  'ExternalObjectMap',
+  'FinanceActionItem', 
   'FlowRun',
   'FlowSession', 
   
   
   'GenomeDepartment', 
-  'GenomeExperiment', 'GenomeFact',
-  'GenomeGrowthChannel',
-  'GenomeMemoryEvent', 'GenomeModuleReadiness',
   
-  'GenomeRecommendation', 'GenomeRecommendationOutcome', 
-  'GenomeSignal', 'GoogleFormMapping',
+  'GenomeGrowthChannel',
+  
+  
+  
+  
   
   'IdempotencyKey', 'IngestionItem', 
-  'IntegrationConnection', 'IntegrationSyncRun', 'InteractionIntent',
+  'IntegrationConnection', 'IntegrationSyncRun', 
   'InventoryStock', 
-  'KeyActionProposal', 
+  
   'KeyCallSession', 
-  'KeyEvolutionLog', 'KeyInboxMessage',
+  
   
   
   
@@ -182,29 +182,29 @@ const ACKNOWLEDGED_UNSCOPED = new Set([
   'MarketStrategy',
   'MarketplaceOrder', 
   'Membership',
-  'Message', 'MessageIntake',
+  'MessageIntake',
   
   
-  'OutboundContent', 
+  
   'Payment', 
   'PortalAccess', 
   'PresenceInsightSnapshot', 
   
-  'PromoCode', 'PromptVariant',
-  'PublicVisitor', 
-  'PushSubscription', 'QualificationJourney', 
+  'PromoCode', 
   
-  'ResponseDraft', 
+  'PushSubscription', 
   
-  'SavedBusiness', 
+  
+  
+  
   'SeoKeyword', 'SeoPage', 
   'SitePageDraft',
-  'SitePagePublished', 'SocialConnection', 
+  'SocialConnection', 
   
   'SupplierConnection',
   'SyncJob',
   
-  'TemporalFlowMemory', 
+  
   'ToolOutcomeScore', 
   'ValueConstraint', 
   'VoiceSession', 'Webhook',

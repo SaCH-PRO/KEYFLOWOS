@@ -191,6 +191,30 @@ const BUSINESS_ID_MODELS = new Set([
   'TimeEntry', 'TriggerDefinition', 'UserFeedback', 'VisualIntake',
   'Warehouse', 'WhatsAppContact', 'WonLostReason', 'Workflow',
 
+  // ── Batch 3 of the unscoped-ledger reduction, 2026-08-09 ─────────────────
+  // Every findUnique on these keys on `id`, on `businessId`, or on a compound
+  // unique whose name already carries the tenant (businessId_date_actionType,
+  // courseId_businessId). Injecting businessId there is a no-op, so none can
+  // become the silent null that Prisma 6.19 produces for an extra scalar in a
+  // WhereUniqueInput.
+  //
+  // Still held back, and these are the real ones: lookups by an EXTERNAL key —
+  // ContactExportJob(token), DriveIntakeFile(driveFileId), IngestionItem and
+  // MessageIntake(externalId), PromoCode(code), PushSubscription(endpoint),
+  // SitePageDraft(previewToken), WhatsAppMessage(wamid), Membership(userId).
+  // Some of the remaining 21 will prove safe on reading — AiMemory's category
+  // and key are nested inside businessId_category_key — but that needs eyes.
+  'AgentTrigger', 'AutomationFlow', 'AutopilotTask', 'BusinessConstitutionVersion',
+  'Cohort', 'ContactImport', 'ContactList', 'ContactMomentum',
+  'ContactNote', 'ContactReadState', 'ContactTask', 'CourseEnrollment',
+  'CrossModuleWorkflow', 'CustomerJourney', 'EventAttendee', 'FlowDefinition',
+  'GenomeExperiment', 'GenomeFact', 'GenomeMemoryEvent', 'GenomeModuleReadiness',
+  'GenomeRecommendation', 'GenomeRecommendationOutcome', 'GenomeSignal', 'GoogleFormMapping',
+  'InteractionIntent', 'KeyActionProposal', 'KeyEvolutionLog', 'KeyInboxMessage',
+  'Message', 'OutboundContent', 'PromptVariant', 'PublicVisitor',
+  'QualificationJourney', 'ResponseDraft', 'SavedBusiness', 'SitePagePublished',
+  'TemporalFlowMemory',
+
   // ── Deliberately NOT added: Payment, MarketplaceOrder ──────────────────────
   // Their lookups live in handleStripeWebhook / handlePaypalWebhook /
   // handleWipayCallback and resolve rows by a GLOBAL provider key
