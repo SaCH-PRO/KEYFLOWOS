@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
 import { ModelGatewayService, SELECTABLE_PROVIDERS, type GatewayRequest, type AiProvider, type AiMode, type TaskCategory } from './model-gateway.service';
 import { LLMCostService } from './llm-cost.service';
+import { LangfuseService } from './langfuse.service';
 
 const mockPrismaClient = {
   aiMemory: {
@@ -43,7 +44,7 @@ function setTestEnv(overrides: Record<string, string | null> = {}) {
 
 function createService(envOverrides: Record<string, string | null> = {}): ModelGatewayService {
   setTestEnv(envOverrides);
-  return new ModelGatewayService(mockPrisma as any, mockLLMCostService);
+  return new ModelGatewayService(mockPrisma as any, mockLLMCostService, new LangfuseService());
 }
 
 function baseRequest(overrides: Partial<GatewayRequest> = {}): GatewayRequest {

@@ -28,6 +28,7 @@ import { BlueprintOnboardingController } from './blueprint-onboarding.controller
 import { WorkspaceRecommendationsService } from './workspace-recommendations.service';
 import { ModelGatewayService } from './model-gateway.service';
 import { LLMCostService } from './llm-cost.service';
+import { LangfuseService } from './langfuse.service';
 import { BusinessMatchingService } from './business-matching.service';
 import { MatchRefreshSchedulerService } from './match-refresh-scheduler.service';
 import { PrismaModule } from '../../core/prisma/prisma.module';
@@ -100,6 +101,7 @@ import { AiApprovalsService } from './ai-approvals.service';
     AiListener,
     ModelGatewayService,
     LLMCostService,
+    LangfuseService,
     AiAdvisorService,
     AiUsageService,
     AiUsageAlertSchedulerService,
