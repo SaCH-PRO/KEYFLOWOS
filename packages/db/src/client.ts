@@ -142,6 +142,55 @@ const BUSINESS_ID_MODELS = new Set([
   'BusinessSetting', 'BusinessSnapshot', 'BusinessHealthSnapshot', 'AiUsageLog',
   'ActivityLog', 'AutonomyVerdict', 'AiQualitySignal', 'BusinessSignal',
 
+  // ── Batch 2 of the unscoped-ledger reduction, 2026-08-09 ─────────────────
+  // Criterion: ZERO findUnique call sites anywhere in apps/server/src, so no
+  // unique lookup exists that an injected businessId could turn into a silent
+  // null. Deferred from this batch, for individual review: anything resolved
+  // BEFORE a tenant is known or by an external key — ApiKey, AuthorityGrant,
+  // Channel*/Connection*/Account*, tokens, credentials, webhooks, sync state.
+  // What remains is findFirst/findMany gaining the tenant filter, which is the
+  // point, and update/delete failing across tenants, which is also the point.
+  'Activity', 'AgentMessage', 'AiMemoryEmbedding', 'AiPlanResult',
+  'AiSuggestionEvent', 'AiUsageAlert', 'AttributionResult', 'AutomationOutcome',
+  'AutonomyRule', 'BusinessAsset', 'BusinessGoal', 'BusinessMatch',
+  'BusinessPlan', 'BusinessProfileVersion', 'BusinessRule', 'BusinessTemplateUsage',
+  'Campaign', 'CognitionMemory', 'CognitiveEvent', 'CohortMember',
+  'CommercialDocumentTemplate', 'CommunityComment', 'CommunityNotification', 'CommunityPost',
+  'Competitor', 'ConnectorActivityLog', 'ConnectorAuditLog', 'ConnectorHealthLog',
+  'ConsentRecord', 'ContactAuditEntry', 'ContactDataIssue', 'ContactEvent',
+  'ContactMedia', 'ContactMomentumSnapshot', 'ContactPlaybook', 'ContactRelationship',
+  'ContactSavedView', 'ContactShare', 'ContentBrief', 'ContractTag',
+  'CrmActivity', 'CrmSequence', 'CrmTask', 'CustomFieldDefinition',
+  'CustomsDeclaration', 'DelegationLoop', 'DelegationLoopRun', 'DelegationRule',
+  'DeliveryNote', 'Document', 'DocumentChangeLog', 'EmailCampaignContact',
+  'Event', 'ExchangeRate', 'ExtractedEntity', 'FlowExecution',
+  'FlowRoleSubscription', 'FlowSignal', 'FulfillmentRoute', 'GeneratedDocument',
+  'GenomeChatMessage', 'GenomeContentStrategy', 'GenomeCrossDomainSnapshot', 'GenomeCustomerSalesSnapshot',
+  'GenomeCustomerSegment', 'GenomeDeliveryCapability', 'GenomeEvidence', 'GenomeEvolutionProposal',
+  'GenomeFinanceSnapshot', 'GenomeFinancialMetric', 'GenomeMarketingSnapshot', 'GenomeOperationalProcess',
+  'GenomeOperationsSnapshot', 'GenomeOutcomeLearningWindow', 'GenomeSalesMotion', 'GoodsReceipt',
+  'GrowthInsight', 'GuidanceAssessment', 'HelpdeskTicket', 'IntakeSubmission',
+  'JobRole', 'JourneyInstance', 'JourneyTouchpoint', 'KeyAgentConfig',
+  'KeyCortexTriggerRule', 'KeyDocument', 'KeyInboxInsight', 'KeyInteractionFeedback',
+  'KeyTuningLog', 'KeyUserPreferences', 'KeyVoicePreference', 'KeyflowNote',
+  'KeystoreServiceCategory', 'KeystoreServiceListing', 'KeystoreServiceOrder', 'KnowledgeSource',
+  'LandingPage', 'Lead', 'LeadForm', 'LeadFormSubmission',
+  'MarketplaceListing', 'MatchFeedback', 'MaturityScore', 'MediaAsset',
+  'MergeOperation', 'MomentumRecommendation', 'NetworkEdge', 'NetworkNode',
+  'OrgAssignment', 'OrgStandard', 'OrgUnit', 'OutboundCampaign',
+  'OutputTemplate', 'PayRate', 'PayrollItem', 'PayrollRun',
+  'PresenceDailyStat', 'ProcurementRequest', 'ProductEvent', 'ProductReview',
+  'ProjectPlan', 'ProjectTemplate', 'Projection', 'PublicEvent',
+  'PublicVisitorEvent', 'Receipt', 'Reconciliation', 'RelationshipInsightDismissal',
+  'Reminder', 'Report', 'RetainerAgreement', 'ReviewTask',
+  'SagaExecution', 'SandboxExecutionLog', 'ScheduledAgentJob', 'SeoIssue',
+  'SequenceAttribution', 'Shipment', 'ShippingZone', 'SocialEngagement',
+  'StaffPerformanceSnapshot', 'StockCount', 'StockMovement', 'StorefrontConversionDaily',
+  'SubscriptionPayment', 'SupportTicket', 'SupportTicketMessage', 'Tag',
+  'Task', 'TeamActivityLog', 'TemporalFlowEvent', 'TimeCostEntry',
+  'TimeEntry', 'TriggerDefinition', 'UserFeedback', 'VisualIntake',
+  'Warehouse', 'WhatsAppContact', 'WonLostReason', 'Workflow',
+
   // ── Deliberately NOT added: Payment, MarketplaceOrder ──────────────────────
   // Their lookups live in handleStripeWebhook / handlePaypalWebhook /
   // handleWipayCallback and resolve rows by a GLOBAL provider key
