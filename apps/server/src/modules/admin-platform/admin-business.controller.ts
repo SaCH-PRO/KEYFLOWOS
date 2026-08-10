@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { AdminGuard } from '../../core/auth/admin.guard';
+import { GdprPurgeService } from './gdpr-purge.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 @Controller('api/admin/businesses')
@@ -19,6 +20,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 export class AdminBusinessController {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(GdprPurgeService) private readonly gdprPurge: GdprPurgeService,
   ) {}
 
   @Get()
@@ -79,23 +81,25 @@ export class AdminBusinessController {
     };
   }
 
+  /**
+   * GDPR Article 17 erasure. IRREVERSIBLE.
+   *
+   * This used to set `deletedAt` on seven models, null six columns on Business,
+   * and return "Business data purged per GDPR request." Nothing was erased: a
+   * soft delete is a flag, the rows stayed, and the tenant set covers 302
+   * models — messages, call logs, documents, bank transactions, payments and
+   * cortex memories were all untouched, with their personal data intact.
+   *
+   * A false sentence about a legal obligation is worse than no endpoint, since
+   * someone answered a data-subject request with it.
+   *
+   * GdprPurgeService does the real thing and then ASKS THE DATABASE whether it
+   * worked, throwing if any row survives. The response reports what was
+   * removed instead of asserting that something was.
+   */
   @Post(':businessId/gdpr-delete')
   async gdprDelete(@Param('businessId') businessId: string) {
     if (!businessId) throw new BadRequestException('Business ID is required');
-    const business = await this.prisma.client.business.findUnique({ where: { id: businessId } });
-    if (!business) throw new BadRequestException('Business not found');
-
-    const now = new Date();
-    await this.prisma.client.contact.updateMany({ where: { businessId }, data: { deletedAt: now } });
-    await this.prisma.client.account.updateMany({ where: { businessId }, data: { deletedAt: now } });
-    await this.prisma.client.invoice.updateMany({ where: { businessId }, data: { deletedAt: now } });
-    await this.prisma.client.booking.updateMany({ where: { businessId }, data: { deletedAt: now } });
-
-    await this.prisma.client.expense.updateMany({ where: { businessId }, data: { deletedAt: now } });
-    await this.prisma.client.socialPost.updateMany({ where: { businessId }, data: { deletedAt: now } });
-    await this.prisma.client.automationFlow.updateMany({ where: { businessId }, data: { deletedAt: now } });
-    await this.prisma.client.business.update({ where: { id: businessId }, data: { name: '[DELETED]', slug: null, email: null, phone: null, website: null, address: null } });
-
-    return { success: true, message: 'Business data purged per GDPR request.' };
+    return this.gdprPurge.purgeBusiness(businessId);
   }
 }
