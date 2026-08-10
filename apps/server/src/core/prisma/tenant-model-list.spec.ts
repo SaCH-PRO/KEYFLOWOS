@@ -180,14 +180,12 @@ const ACKNOWLEDGED_UNSCOPED = new Set([
   
   'LLMProviderCost', 
   'MarketStrategy',
-  'MarketplaceOrder', 
   'Membership',
   'MessageIntake',
   
   
   
-  'Payment', 
-  'PortalAccess', 
+  'PortalAccess',
   'PresenceInsightSnapshot', 
   
   'PromoCode', 
@@ -265,5 +263,21 @@ describe('the unscoped set may only shrink', () => {
   it('nothing is both scoped and acknowledged as unscoped', () => {
     const both = [...ACKNOWLEDGED_UNSCOPED].filter((m) => listed.has(m));
     expect(both, 'scoped models must be removed from the ledger when they are fixed').toEqual([]);
+  });
+
+  it('the two ledgers are disjoint', () => {
+    // The other three checks compare a ledger against the SCHEMA. Nothing
+    // compared the ledgers to each other, so Payment and MarketplaceOrder sat
+    // in both from the day NEVER_SCOPE was introduced: counted as debt still
+    // owed AND as work that must never be done. That inflated the remaining
+    // figure by two and left the status of those two models unreadable —
+    // exactly the ambiguity the shrink-only gate exists to prevent.
+    const both = [...ACKNOWLEDGED_UNSCOPED].filter((m) => NEVER_SCOPE.has(m));
+    expect(
+      both,
+      'these are in both ACKNOWLEDGED_UNSCOPED (debt still owed) and NEVER_SCOPE ' +
+        '(must never be scoped). A model has one status or the other, never both — ' +
+        'remove it from ACKNOWLEDGED_UNSCOPED.',
+    ).toEqual([]);
   });
 });
