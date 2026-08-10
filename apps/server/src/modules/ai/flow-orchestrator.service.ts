@@ -74,6 +74,7 @@ import { AssetService } from '../assets/asset.service';
 import { SupplierService } from '../supplier/supplier.service';
 import { GovernanceService } from '../governance/governance.service';
 import { RetainerService } from '../retainers/retainer.service';
+import { PortalService } from '../portal/portal.service';
 
 /**
  * The risk register's fixed vocabularies, mirroring
@@ -479,6 +480,58 @@ export class FlowOrchestratorService {
   }
   private getRetainers() {
     return this.moduleRef.get(RetainerService, { strict: false });
+  }
+  private getPortal() {
+    return this.moduleRef.get(PortalService, { strict: false });
+  }
+
+  /**
+   * Strip the portal token and answer the question it was being used to answer.
+   *
+   * The token is a bearer credential: whoever holds it can read that contact's
+   * invoices, projects and bookings without logging in. `delete row.token` on
+   * its own would leave the model saying "access exists" with no way to tell a
+   * live grant from an expired or revoked one, so the useful part is restated
+   * as a boolean the model can act on.
+   *
+   * Written as an allowlist, not a delete. A future column named `secret` or
+   * `signingKey` would survive a blocklist and would not survive this.
+   */
+  private redactPortalAccess(row: Record<string, unknown>) {
+    const expiresAt = row.expiresAt instanceof Date ? row.expiresAt : new Date(String(row.expiresAt));
+    const live = row.enabled === true && expiresAt.getTime() > Date.now();
+    return {
+      id: row.id,
+      contactId: row.contactId,
+      enabled: row.enabled,
+      settings: row.settings,
+      expiresAt: row.expiresAt,
+      lastAccessedAt: row.lastAccessedAt ?? null,
+      accessCount: row.accessCount ?? 0,
+      hasLiveLink: live,
+      createdAt: row.createdAt,
+    };
+  }
+
+  /**
+   * The four portal permissions, taken by name and required to be booleans.
+   *
+   * Anything else is dropped rather than stored. A model writing `docs: true`
+   * or `invoices: 'yes'` would otherwise persist a key the portal never reads —
+   * KEY reports "documents access enabled", the settings row grows a field
+   * nothing checks, and the customer still sees nothing.
+   */
+  private portalSettingsFrom(args: Record<string, unknown>): Record<string, boolean> {
+    const settings: Record<string, boolean> = {};
+    for (const key of ['invoices', 'projects', 'bookings', 'documents']) {
+      const value = args[key];
+      if (value === undefined) continue;
+      if (typeof value !== 'boolean') {
+        throw new Error(`${key} must be true or false — got ${JSON.stringify(value)}`);
+      }
+      settings[key] = value;
+    }
+    return settings;
   }
 
   /**
@@ -4654,6 +4707,48 @@ ${triage.standingContext}`;
       }
 
       // === FINANCE ===
+      // ── Portal ───────────────────────────────────────────────────────────
+      //
+      // Every PortalService method returns the raw row, token included, and
+      // /app/portal shows it on purpose — it builds `/portal/{token}` so staff
+      // can copy the link and send it. Correct for a screen; the person asking
+      // is the person sending.
+      //
+      // Not correct for a tool. A token that passes through a model lands in
+      // the transcript, in keyCortexMemory rows and in later prompt context,
+      // where it is durable and quotable. redactPortalAccess strips it on every
+      // path and reports whether a live link exists instead.
+      case 'portal_list_access': {
+        const rows = await this.getPortal().list(businessId);
+        return { access: rows.map((r) => this.redactPortalAccess(r)) };
+      }
+
+      case 'portal_grant_access': {
+        const settings = this.portalSettingsFrom(args);
+        const granted = await this.getPortal().createAccess(
+          businessId,
+          args.contactId,
+          Object.keys(settings).length ? settings : undefined,
+        );
+        return this.redactPortalAccess(granted);
+      }
+
+      case 'portal_revoke_access': {
+        const revoked = await this.getPortal().revoke(args.accessId, businessId);
+        return this.redactPortalAccess(revoked);
+      }
+
+      case 'portal_update_settings': {
+        const settings = this.portalSettingsFrom(args);
+        if (!Object.keys(settings).length) {
+          throw new Error(
+            'portal_update_settings was given nothing to change — set at least one of invoices, projects, bookings, documents',
+          );
+        }
+        const updated = await this.getPortal().updateSettings(args.accessId, businessId, settings);
+        return this.redactPortalAccess(updated);
+      }
+
       // ── Retainers ────────────────────────────────────────────────────────
       //
       // The service is well guarded and these handlers lean on it rather than

@@ -3177,6 +3177,130 @@ export const FLOW_TOOLS: FlowTool[] = [
   },
 
   // ================================================================
+  //  PORTAL — customer access, without handing out the key
+  // ================================================================
+  //
+  // PortalService grants a contact a link to their own invoices, projects,
+  // bookings and documents. Six methods, a controller and a writable screen,
+  // and no tools.
+  //
+  // THE TOKEN IS A BEARER CREDENTIAL AND KEY NEVER SEES IT.
+  //
+  // Every method returns the raw row, token included, and /app/portal shows it
+  // deliberately — it builds `/portal/{token}` so staff can copy the link and
+  // send it. That is correct for a screen: the person asking is the person
+  // sending.
+  //
+  // It is not correct for a tool. A token that passes through a model lands in
+  // the chat transcript, in keyCortexMemory rows, and in later prompt context,
+  // where it is durable, searchable and quotable. So the handlers strip it and
+  // report whether a live link exists instead, and portal-tools.spec.ts asserts
+  // that over the whole orchestrator.
+  //
+  // NO TOOL FOR findByToken (the public validation path — it takes a token as
+  // INPUT, so a tool for it is a tool for guessing) OR recordAccess (audit
+  // bookkeeping for a visit KEY did not make).
+  {
+    name: 'portal_list_access',
+    description:
+      'List which contacts have customer-portal access, what each can see, and whether their link is live. Access tokens are never returned.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/portal',
+    parameters: { type: 'object', properties: {}, required: [] },
+    outputSchema: {
+      type: 'object',
+      description: 'Portal access grants',
+      fields: {
+        access: { type: 'array', description: 'One entry per contact, without tokens' },
+      },
+    },
+  },
+  {
+    name: 'portal_grant_access',
+    description:
+      'Give a contact access to the customer portal, or refresh their existing access. Choose what they can see. The link itself is on /app/portal — this tool never returns the token.',
+    family: 'crud',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/portal',
+    changedEntities: ['portalAccess'],
+    parameters: {
+      type: 'object',
+      properties: {
+        contactId: { type: 'string', description: 'Contact to grant access to' },
+        invoices: { type: 'boolean', description: 'Can see their invoices' },
+        projects: { type: 'boolean', description: 'Can see their projects' },
+        bookings: { type: 'boolean', description: 'Can see their bookings' },
+        documents: { type: 'boolean', description: 'Can see their documents' },
+      },
+      required: ['contactId'],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'The access granted, without the token',
+      fields: {
+        id: { type: 'string', description: 'Portal access ID' },
+        contactId: { type: 'string', description: 'Contact ID' },
+        hasLiveLink: { type: 'boolean', description: 'Whether a usable link exists' },
+        expiresAt: { type: 'string', description: 'When the link stops working' },
+      },
+    },
+  },
+  {
+    name: 'portal_revoke_access',
+    description: "Turn off a contact's customer-portal access. Their link stops working immediately.",
+    family: 'crud',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/portal',
+    changedEntities: ['portalAccess'],
+    parameters: {
+      type: 'object',
+      properties: { accessId: { type: 'string', description: 'Portal access ID' } },
+      required: ['accessId'],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'The revoked access',
+      fields: {
+        id: { type: 'string', description: 'Portal access ID' },
+        hasLiveLink: { type: 'boolean', description: 'False once revoked' },
+      },
+    },
+  },
+  {
+    name: 'portal_update_settings',
+    description:
+      'Change what a contact can see in the customer portal. Only invoices, projects, bookings and documents can be set.',
+    family: 'crud',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/portal',
+    changedEntities: ['portalAccess'],
+    parameters: {
+      type: 'object',
+      properties: {
+        accessId: { type: 'string', description: 'Portal access ID' },
+        invoices: { type: 'boolean', description: 'Can see their invoices' },
+        projects: { type: 'boolean', description: 'Can see their projects' },
+        bookings: { type: 'boolean', description: 'Can see their bookings' },
+        documents: { type: 'boolean', description: 'Can see their documents' },
+      },
+      required: ['accessId'],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'The updated access',
+      fields: {
+        id: { type: 'string', description: 'Portal access ID' },
+        settings: { type: 'object', description: 'What the contact can now see' },
+      },
+    },
+  },
+
+  // ================================================================
   //  RETAINERS — recurring agreements and the hours that bill against them
   // ================================================================
   //
