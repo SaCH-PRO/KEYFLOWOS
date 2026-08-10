@@ -215,7 +215,42 @@ const BUSINESS_ID_MODELS = new Set([
   'QualificationJourney', 'ResponseDraft', 'SavedBusiness', 'SitePagePublished',
   'TemporalFlowMemory',
 
-  // ── Deliberately NOT added: Payment, MarketplaceOrder ──────────────────────
+  // ── Batch 4, 2026-08-09 ───────────────────────────────────────────────────
+  // Twenty models on a stronger test than batch 3 used.
+  //
+  // Batch 3 asked "does any findUnique key on a global unique". That question
+  // is necessary and it is not sufficient, and Membership is the proof: every
+  // one of its unique lookups keys on `id`, so a key-shape test clears it —
+  // while `membership.findMany({ where: { userId } })` in
+  // cross-business-intelligence.service.ts:62 means "every business this user
+  // belongs to", and the extension injects businessId into findMany just as
+  // readily as into findUnique. Scoped, that query returns exactly one row and
+  // the multi-business feature quietly stops working.
+  // identity.service.ts:769 is worse: `updateMany({ where: { userId: oldId } })`
+  // re-points a merged account's memberships across EVERY business, and scoped
+  // it silently merges one.
+  //
+  // So the test applied here is the whole intercepted surface — all fifteen
+  // operations, not the five unique ones — and the bar is that EVERY call site
+  // in apps/server already names businessId in its own `where`. Where that
+  // holds, injection is provably a no-op: it re-states a predicate the caller
+  // already wrote. Nothing can become a silent null because nothing changes.
+  //
+  // Six of the twenty have zero call sites today (BotAgent,
+  // BotConversationState, ConnectorAccount, ExternalObjectMap,
+  // WebhookDeliveryLog, and ChannelAccount's single one). Those are listed
+  // precisely BECAUSE they have no callers: an unlisted model is unscoped by
+  // default, so the first query anyone writes against them inherits no
+  // protection at all. Listing them now costs nothing and closes that door.
+  'AutonomyDailyActionCount', 'AutonomyDailySpend', 'AutopilotSettings',
+  'BotAgent', 'BotConversationState', 'BusinessAutonomyProfile',
+  'BusinessBlueprint', 'BusinessGenome', 'BusinessGuidanceProfile',
+  'ChannelAccount', 'ConnectorAccount', 'ContactSyncAudit',
+  'DriveSyncCursor', 'ExternalObjectMap', 'IdempotencyKey',
+  'LLMProviderCost', 'MarketStrategy', 'ToolOutcomeScore',
+  'Webhook', 'WebhookDeliveryLog',
+
+  // ── Deliberately NOT added: Payment, MarketplaceOrder, WebhookEvent ────────
   // Their lookups live in handleStripeWebhook / handlePaypalWebhook /
   // handleWipayCallback and resolve rows by a GLOBAL provider key
   // (`payment.findUnique({ where: { providerPaymentId } })`), deriving the
@@ -231,6 +266,14 @@ const BUSINESS_ID_MODELS = new Set([
   // If you are here to "finish the list", this is the reason it is not
   // finished. Scoping the money path needs the webhook to resolve its business
   // explicitly, not an entry in this set.
+  //
+  // WebhookEvent joined them 2026-08-09, for the same reason one layer out. Its
+  // unique is `@@unique([provider, providerEventId])` — no businessId in it —
+  // and that key exists to make a provider's redelivery idempotent. It has zero
+  // call sites in apps/server today, which is exactly why it is easy to get
+  // wrong: it looks like the six harmless empty ones added above, and it is the
+  // opposite. The first handler written against it will be a webhook resolving
+  // a row it cannot yet attribute to a business.
 ]);
 
 

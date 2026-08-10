@@ -102,9 +102,10 @@ describe('BUSINESS_ID_MODELS describes reality', () => {
  * with a businessId is unscoped by default and nothing fails. Verified on
  * 2026-08-09 by adding one and watching this file pass.
  *
- * Measured when this was written: 347 models carry a businessId, 77 are scoped,
- * 270 are these. That is 78% of tenant-bearing models relying on an explicit
- * `where: { businessId }` at every call site rather than on the extension.
+ * When this was written: 347 models carry a businessId, 77 were scoped, 270
+ * were these. Now: 302 scoped, 42 here, 3 in NEVER_SCOPE. The three numbers sum
+ * to 347 exactly, and the assertions below are what keep them summing — a model
+ * has one status, never two and never none.
  *
  * WHY IT IS NOT SIMPLY EMPTIED. Adding a model here injects businessId into
  * findUnique, and Prisma 6.19 ACCEPTS an extra scalar in a WhereUniqueInput
@@ -114,100 +115,56 @@ describe('BUSINESS_ID_MODELS describes reality', () => {
  * return null SILENTLY: no error, no log, no provider retry. Emptying this list
  * in one commit would create 270 chances of that, and every test would pass.
  *
- * SO: this list may only SHRINK, one reviewed model at a time, after checking
- * that model has no findUnique by a global key. The assertion below enforces
- * the direction — it fails when a NEW unscoped model appears, which is the case
- * nothing caught before.
+ * SO: this list may only SHRINK, one reviewed model at a time.
+ *
+ * AND THE TEST FOR "REVIEWED" IS NOT THE OBVIOUS ONE. The natural question is
+ * "does any findUnique key on a global unique". That is necessary and it is not
+ * sufficient. Membership is the counter-example: every one of its unique lookups
+ * keys on `id`, so a key-shape test clears it — while
+ * `membership.findMany({ where: { userId } })` means "every business this user
+ * belongs to", and the extension injects businessId into findMany exactly as
+ * readily. The right question covers all fifteen intercepted operations: does
+ * EVERY call site already name businessId in its own `where`? Where it does,
+ * injection re-states a predicate the caller already wrote and can change
+ * nothing. Where it does not, a human reads it before it moves.
  */
 const ACKNOWLEDGED_UNSCOPED = new Set([
-  
-  'AiMemory', 
-  
+  'AiMemory',
   'ApiKey',
-  'AuthorityGrant', 
-  'AutonomyDailyActionCount', 'AutonomyDailySpend',
-  'AutopilotSettings',
-  'BotAgent', 'BotConversationState',
-  'BusinessAutonomyProfile', 'BusinessBlueprint',
-  'BusinessGenome', 
-  'BusinessGuidanceProfile', 
+  'AuthorityGrant',
   'BusinessReputation',
-  
   'CalendarSyncConflict',
-  'CampaignBriefing', 'ChannelAccount',
-  'ChannelConnection', 'ChannelDestination', 
-  'CognitionSession', 
-  
-  
-  'ConnectorAccount', 
-  
-  'ContactChannelStat', 
+  'CampaignBriefing',
+  'ChannelConnection', 'ChannelDestination',
+  'CognitionSession',
+  'ContactChannelStat',
   'ContactExportJob', 'ContactExternalMapping', 'ContactForgetRequest',
-  'ContactInsightSnapshot', 
-  
-  
-  
-  'ContactSyncAudit', 
+  'ContactInsightSnapshot',
   'ConversationAIInsight', 'Course',
-  
-  
-  
-  
   'DriveIntakeFile',
-  'DriveSyncCursor', 
-  'ExternalObjectMap',
-  'FinanceActionItem', 
+  'FinanceActionItem',
   'FlowRun',
-  'FlowSession', 
-  
-  
-  'GenomeDepartment', 
-  
+  'FlowSession',
+  'GenomeDepartment',
   'GenomeGrowthChannel',
-  
-  
-  
-  
-  
-  'IdempotencyKey', 'IngestionItem', 
-  'IntegrationConnection', 'IntegrationSyncRun', 
-  'InventoryStock', 
-  
-  'KeyCallSession', 
-  
-  
-  
-  
-  'LLMProviderCost', 
-  'MarketStrategy',
+  'IngestionItem',
+  'IntegrationConnection', 'IntegrationSyncRun',
+  'InventoryStock',
+  'KeyCallSession',
   'Membership',
   'MessageIntake',
-  
-  
-  
   'PortalAccess',
-  'PresenceInsightSnapshot', 
-  
-  'PromoCode', 
-  
-  'PushSubscription', 
-  
-  
-  
-  
-  'SeoKeyword', 'SeoPage', 
+  'PresenceInsightSnapshot',
+  'PromoCode',
+  'PushSubscription',
+  'SeoKeyword', 'SeoPage',
   'SitePageDraft',
-  'SocialConnection', 
-  
+  'SocialConnection',
   'SupplierConnection',
   'SyncJob',
-  
-  
-  'ToolOutcomeScore', 
-  'ValueConstraint', 
-  'VoiceSession', 'Webhook',
-  'WebhookDeliveryLog', 'WebhookEvent', 
-  'WhatsAppMessage', 
+  'ValueConstraint',
+  'VoiceSession',
+  'WhatsAppMessage',
 ]);
 
 /** Models whose businessId column exists but which must never be scoped. */
@@ -216,6 +173,13 @@ const NEVER_SCOPE = new Set([
   // See the note above the exclusion in client.ts — scoping these turns a
   // taken payment into a silent null.
   'Payment', 'MarketplaceOrder',
+  // Same shape, found 2026-08-09 while clearing batch 4. WebhookEvent's unique
+  // is @@unique([provider, providerEventId]) — a provider's own redelivery key,
+  // with no businessId in it. It has no call sites yet, which made it look like
+  // the harmless empty models scoped in that batch; it is their opposite. Debt
+  // that must never be paid belongs here, not in the ledger above, so that the
+  // remaining count means "work still owed" and nothing else.
+  'WebhookEvent',
 ]);
 
 describe('the unscoped set may only shrink', () => {
