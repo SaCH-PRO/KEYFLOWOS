@@ -9,6 +9,7 @@ import {
   BookingNoShowPayload,
   BookingRescheduledPayload,
 } from '../../core/event-bus/events.types';
+import { WORK_OBLIGATION_RAISED, type ObligationRaisedPayload } from '@keyflow/shared';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmService } from '../crm/crm.service';
 import { CommerceService } from '../commerce/commerce.service';
@@ -27,6 +28,32 @@ interface DayHours {
 type BusinessHoursMap = Record<string, DayHours>;
 
 const REMINDER_CHECK_INTERVAL_MS = 5 * 60 * 1000;
+
+/**
+ * Placeholder until BusinessGenome carries a per-business rebook interval.
+ * Named as a constant rather than buried inline so the day it moves, grep finds
+ * exactly one site.
+ */
+const REBOOK_AFTER_DAYS = 42;
+
+/**
+ * Structural, not `BookingWithRelations`.
+ *
+ * The completion path hands this helper a booking selected with a NARROW
+ * contact (`id, firstName, lastName, email, phone`), so demanding the full
+ * relation type would force a widening cast at the only call site — and a cast
+ * there would silently accept a future caller whose select is narrower still.
+ * Naming exactly the four fields used means the compiler checks the contract
+ * rather than the shape.
+ */
+type RebookableBooking = {
+  id: string;
+  contactId: string | null;
+  startTime: Date | null;
+  endTime: Date | null;
+  contact?: { firstName: string | null; lastName: string | null } | null;
+  service?: { name: string } | null;
+};
 
 type BookingWithRelations = Prisma.BookingGetPayload<{
   include: { contact: true; service: true };
@@ -168,6 +195,65 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  /**
+   * A finished appointment is a rebook this business owes the client.
+   *
+   * The first producer on the obligation contract, and chosen because it is the
+   * most ordinary thing a small business forgets: the cut is done, the client
+   * is happy, and nobody books the next one. A salon's rebook and an
+   * accountant's VAT return are the same row on the same clock, and this is the
+   * cheap half of proving that.
+   *
+   * REBOOK_AFTER_DAYS is hard-coded, and that is a deliberate, temporary lie
+   * about how this should work. The right source is the genome — a barber's
+   * interval is three weeks, a dentist's is six months, and the business itself
+   * knows which it is. Until BusinessGenome carries a default clock, 42 days is
+   * a stated placeholder rather than a silent one.
+   *
+   * Fire-and-forget: emit() on EventEmitter2 is synchronous dispatch to
+   * listeners that return promises nobody awaits, so a slow or failing listener
+   * cannot make marking a booking complete fail. The listener owns its own
+   * errors; see obligation.listener.ts.
+   */
+  private raiseRebookObligation(businessId: string, booking: RebookableBooking): void {
+    if (!booking.contactId) return;
+
+    const completedAt = booking.endTime ?? booking.startTime ?? new Date();
+    const dueAt = new Date(completedAt.getTime() + REBOOK_AFTER_DAYS * 24 * 60 * 60 * 1000);
+    // Contact has firstName/lastName, no `name`. Falling back to a generic
+    // noun rather than rendering "Rebook null" or "Rebook undefined".
+    const label = [booking.contact?.firstName, booking.contact?.lastName]
+      .filter(Boolean)
+      .join(' ')
+      .trim();
+    const who = label || 'this client';
+    const what = booking.service?.name?.trim();
+
+    const payload: ObligationRaisedPayload = {
+      businessId,
+      // The five-tuple. sourceId is the BOOKING, not the contact: a rebook is
+      // owed once per completed appointment, and keying on the contact would
+      // make every visit overwrite the last one's obligation.
+      sourceModule: 'bookings',
+      sourceType: 'booking',
+      sourceId: booking.id,
+      actionType: 'REBOOK',
+      title: what ? `Rebook ${who} for ${what}` : `Rebook ${who}`,
+      description: `Their last appointment completed ${completedAt.toISOString().slice(0, 10)}.`,
+      category: 'SALES',
+      dueAt,
+      owedToType: 'CONTACT',
+      owedToId: booking.contactId,
+      owedToLabel: label || null,
+      contactId: booking.contactId,
+      entityType: 'booking',
+      entityId: booking.id,
+      priority: 55,
+    };
+
+    this.events.emit(WORK_OBLIGATION_RAISED, payload);
+  }
+
   async updateBookingStatus(businessId: string, bookingId: string, status: BookingStatus) {
     const booking = await this.prisma.client.booking.findFirst({
       where: { id: bookingId, businessId, deletedAt: null },
@@ -224,6 +310,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
         actorType: 'USER',
         source: 'bookings',
       });
+      this.raiseRebookObligation(businessId, updated);
       await this.autoGenerateInvoiceForCompletedBooking(updated, businessId);
     }
 

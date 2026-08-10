@@ -7965,6 +7965,31 @@ model CommandItem {
   snoozedUntil     DateTime? @map("snoozed_until")
   completedAt      DateTime? @map("completed_at")
   dismissedAt      DateTime? @map("dismissed_at")
+
+  /// SUGGESTION | OBLIGATION.
+  /// A suggestion is something KEY thinks would be a good idea. An obligation
+  /// is something this business OWES someone by a date. They belong in one
+  /// table — same surface, same clock, same complete/dismiss/snooze verbs —
+  /// but "what is due this week" must never answer with advice, so the two are
+  /// separable by a column rather than by a second table.
+  kind             String    @default("SUGGESTION")
+
+  /// Who it is owed to. The label is a SNAPSHOT taken when the obligation was
+  /// raised, so the due list renders without fanning out to four tables per
+  /// row, and a later rename does not rewrite history.
+  owedToType       String?   @map("owed_to_type")
+  owedToId         String?   @map("owed_to_id")
+  owedToLabel      String?   @map("owed_to_label")
+
+  /// Set when this occurrence was materialised from a recurring series.
+  seriesId         String?   @map("series_id")
+
+  /// Discharged = the thing owed actually happened. Distinct from completedAt,
+  /// which means a person ticked it off. dischargeRef names what did it — a
+  /// tool name, an invoice id, 'manual'.
+  dischargedAt     DateTime? @map("discharged_at")
+  dischargeRef     String?   @map("discharge_ref")
+
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
 
@@ -7972,6 +7997,9 @@ model CommandItem {
   @@index([businessId, status, priority])
   @@index([businessId, category, status])
   @@index([businessId, sourceModule, sourceId])
+  /// "What is due this week" — the query this whole thing exists to answer.
+  @@index([businessId, status, dueAt])
+  @@index([businessId, seriesId])
   @@map("command_items")
 }
 

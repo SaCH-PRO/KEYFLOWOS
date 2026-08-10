@@ -7,6 +7,7 @@ import { CommandSchedulerService } from './command-scheduler.service';
 import { CreateCommandItemDto } from './dto/create-command-item.dto';
 import { UpdateCommandItemDto } from './dto/update-command-item.dto';
 import { ListCommandItemsDto } from './dto/list-command-items.dto';
+import { ListDueObligationsDto } from './dto/list-due-obligations.dto';
 import { BulkCommandItemsDto } from './dto/bulk-command-items.dto';
 
 @Controller('command/businesses/:businessId')
@@ -31,6 +32,25 @@ export class CommandController {
       ownerType: query.ownerType,
       limit: query.limit,
       offset: query.offset,
+    });
+  }
+
+  /**
+   * "What is due this week."
+   *
+   * Declared BEFORE `items/:id` on purpose — Nest matches routes in
+   * declaration order, and `due` under a sibling path would be shadowed the
+   * moment anyone moved it below a `:id` parameter route.
+   */
+  @Get('items/due')
+  async due(
+    @Param('businessId') businessId: string,
+    @Query() query: ListDueObligationsDto,
+  ) {
+    return this.commandService.findDue(businessId, {
+      windowDays: query.windowDays,
+      includeOverdue: query.includeOverdue,
+      limit: query.limit,
     });
   }
 

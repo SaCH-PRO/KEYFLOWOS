@@ -114,6 +114,67 @@ export class CommandService {
     return item;
   }
 
+  /**
+   * "What is due this week."
+   *
+   * Ordered by dueAt, oldest first, so the answer opens on what is already
+   * late rather than on what scored highest. That is the one ordering
+   * decision in here and it is deliberate: `findMany` above sorts by
+   * priority/urgency because it answers "what should I look at", and a
+   * business asking what is DUE is asking a question about time.
+   *
+   * OBLIGATIONS ONLY. `kind: 'OBLIGATION'` is what keeps advice out of the
+   * answer. Every pre-existing row in this table is a SUGGESTION — something
+   * KEY thought would be a good idea — and "what do I owe this week" must not
+   * be padded with them, or the number stops meaning anything and people stop
+   * reading it.
+   *
+   * SNOOZED ROWS ARE EXCLUDED UNTIL THEY WAKE. Snoozing is a promise the
+   * product already made through /app/command-center; an obligation that
+   * reappears the moment it is snoozed breaks it.
+   *
+   * OVERDUE IS NOT A STORED STATE. Anything with dueAt < now and no discharge
+   * is overdue, computed here. Storing it would need a sweep that flips rows,
+   * which is a timer, and this product has 52 of those and no leader election.
+   */
+  async findDue(
+    businessId: string,
+    opts: { windowDays?: number; includeOverdue?: boolean; limit?: number; now?: Date } = {},
+  ) {
+    const now = opts.now ?? new Date();
+    const windowDays = Math.min(Math.max(opts.windowDays ?? 7, 1), 365);
+    const until = new Date(now.getTime() + windowDays * 24 * 60 * 60 * 1000);
+    const includeOverdue = opts.includeOverdue ?? true;
+
+    const items = await this.prisma.client.commandItem.findMany({
+      where: {
+        businessId,
+        kind: 'OBLIGATION',
+        status: { notIn: ['COMPLETED', 'DISMISSED', 'EXECUTED', 'FAILED'] },
+        dischargedAt: null,
+        dueAt: includeOverdue ? { lte: until } : { gte: now, lte: until },
+        OR: [{ snoozedUntil: null }, { snoozedUntil: { lte: now } }],
+      },
+      orderBy: [{ dueAt: 'asc' }, { priority: 'desc' }],
+      take: Math.min(opts.limit ?? 100, 500),
+    });
+
+    const overdue = items.filter((i) => i.dueAt !== null && i.dueAt < now);
+    return {
+      window: { from: now.toISOString(), to: until.toISOString(), days: windowDays },
+      total: items.length,
+      overdueCount: overdue.length,
+      items: items.map((i) => ({
+        ...i,
+        overdue: i.dueAt !== null && i.dueAt < now,
+        daysUntilDue:
+          i.dueAt === null
+            ? null
+            : Math.round((i.dueAt.getTime() - now.getTime()) / (24 * 60 * 60 * 1000)),
+      })),
+    };
+  }
+
   async update(businessId: string, id: string, dto: UpdateCommandItemDto) {
     const existing = await this.findOne(businessId, id);
     const item = await this.prisma.client.commandItem.update({
