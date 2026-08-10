@@ -2,7 +2,7 @@
 
 _How the available claude.ai plugin catalog maps onto KEYFLOW OS, and the order we should adopt them in._
 
-Status: **Phase 1 (Langfuse), Phase 2 (GrowthBook), and Phase 3 (StackHawk/Vanta scaffolding) shipped**; Phase 4 scoped below.
+Status: **All four phases shipped** — Phase 1 (Langfuse), Phase 2 (GrowthBook), Phase 3 (StackHawk/Vanta scaffolding), Phase 4 (CRM enrichment). Follow-ups noted per phase.
 
 ---
 
@@ -81,15 +81,19 @@ So the highest-value plugins are the ones filling a **real gap**, not re-impleme
 
 ---
 
-### Phase 4 — CRM contact enrichment (Apollo / Lusha / ZoomInfo / Common Room)
+### Phase 4 — CRM contact enrichment (Apollo / Lusha / ZoomInfo / Common Room) ✅ SHIPPED
 
-**Gap it fills:** the Money → Contacts CRM stores contacts but doesn't enrich them (company, title, verified email, firmographics).
+**Gap it fills:** the CRM stored contacts but never enriched them (company, title, industry, location).
 
-**Integration point:** the existing `integration-hub` module (`apps/server/src/modules/integration-hub`) is the natural home. Add an enrichment provider interface with one concrete adapter first (recommend **Apollo** for breadth), invoked on contact create/update and exposed as a manual "enrich" action.
+**What shipped** (`apps/server/src/modules/crm/enrichment/`):
+- **`EnrichmentProvider`** interface + **`ApolloEnrichmentProvider`** adapter — provider-agnostic by design, so Lusha/ZoomInfo drop in as sibling classes. Apollo talks to `people/match` over HTTP, dark-by-default on `APOLLO_API_KEY`, and never throws (null on miss/error/timeout).
+- **`ContactEnrichmentService`** — two rules: **never overwrite** (fills blank fields only, so enrichment can only add, never contradict), and **go through the real write path** (`CrmService.updateContact`, so normalisation, access control, timeline events and cache invalidation all fire). A `custom.enrichment` stamp records every attempt so a recent-guard spares repeat paid lookups (7-day window, `force` overrides).
+- **`POST crm/businesses/:businessId/contacts/:contactId/enrich`** — manual action under the existing CRM guard stack (Auth + Business + module-scope `crm:write`).
+- Env: `APOLLO_API_KEY`, `APOLLO_BASE_URL`, `APOLLO_TIMEOUT_MS`. Tests cover no-op-when-unconfigured, fill-blanks-only (never overwrites), no-new-data, recent-skip, and no-match.
 
-**Design notes:** respect BYOK-style credential storage (the app already encrypts provider creds); rate-limit and cache enrichment results; make the provider swappable so Lusha/ZoomInfo can be added behind the same interface.
+**Follow-ups:** auto-enrich on contact create, **gated behind a GrowthBook flag** (Phase 2) so rollout is per-business; store the Apollo key as an encrypted `integration-hub` connection for true BYOK instead of a single env key; add Lusha/ZoomInfo adapters.
 
-**Effort:** M. **Risk:** medium (external data quality, cost per lookup, PII handling — coordinate with Phase 3).
+**Risk:** low as shipped — dark-by-default, additive-only, manual trigger.
 
 ---
 
@@ -110,6 +114,6 @@ Plugins that would add *new user-facing capability* rather than harden internals
 1. **Langfuse** ✅ — see what KEY is actually doing before changing anything else.
 2. **GrowthBook** ✅ — safety net in place; every subsequent integration ships behind a flag.
 3. **StackHawk + Vanta** ✅ — trust/enterprise-readiness while the surface is still small.
-4. **CRM enrichment** — first clear user-facing win, built on the integration-hub.
+4. **CRM enrichment** ✅ — first clear user-facing win.
 
 Each phase is independently shippable and dark-by-default, so we can stop, reorder, or parallelize at any point.
