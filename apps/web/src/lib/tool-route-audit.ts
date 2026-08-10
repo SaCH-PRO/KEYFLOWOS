@@ -232,6 +232,9 @@ const CROSS_DOMAIN_ROUTES: Record<string, string> = {
   drive_create_folder: 'Drive folders are created from content-ops delivery',
   drive_create_document: 'Drive docs are created from content-ops delivery',
   commerce_update_product: 'products are edited in the Store catalog',
+  // A supplier catalogue item becomes one of OUR sellable products — that lives
+  // in the Store catalog, same domain as commerce_update_product above.
+  suppliers_create_product_from_supplier: 'a sellable product is created in the Store catalog',
 
   // The five delegation loops are configured as automations.
   delegation_payment_recovery: 'delegation loops are automations',
@@ -281,6 +284,17 @@ const MANUAL_PARITY_EXEMPTIONS: Record<string, string> = {
   procurement_acknowledge_vendor: 'mutations are on the request detail, opened from this list',
   procurement_mark_fulfilled: 'mutations are on the request detail, opened from this list',
   procurement_mark_invoiced: 'mutations are on the request detail, opened from this list',
+
+  // Unlike procurement above, this exemption is NOT "the write exists on a route
+  // the import graph can't see" — it is a genuine gap. /app/governance-flow is
+  // read-only today (it fetches a risk summary and renders counts), and no
+  // risk-write screen exists anywhere in the app, so KEY can log/update a risk
+  // a human currently cannot. Exempted deliberately, with a plan of record:
+  // SaCH-PRO/KEYFLOWOS#59 tracks building the risk register write UI, after
+  // which these two entries must be removed. This is the reviewed exception the
+  // header describes, not a silencing.
+  governance_log_risk: 'no manual risk-write screen yet — tracked in #59, build the register UI then remove',
+  governance_update_risk: 'no manual risk-write screen yet — tracked in #59, build the register UI then remove',
 };
 
 /**
