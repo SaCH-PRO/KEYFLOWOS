@@ -3177,6 +3177,153 @@ export const FLOW_TOOLS: FlowTool[] = [
   },
 
   // ================================================================
+  //  GOVERNANCE — the risk register
+  // ================================================================
+  //
+  // GovernanceService keeps the business risk register: title, category,
+  // severity, likelihood, owner, mitigation, status. Six methods, six routes,
+  // and /app/governance-flow renders its summary. KEY could not see a single
+  // risk or log one.
+  //
+  // NO DELETE TOOL, DELIBERATELY. BusinessRisk is not in the soft-delete set,
+  // so deleteRisk is final — and a risk register's whole value is its history.
+  // "This risk is handled" is a STATUS (MITIGATED / CLOSED / ACCEPTED), not an
+  // erasure. Closing through governance_update_risk keeps the record of what
+  // was once feared and what was done about it; deleting throws that away and
+  // reads identically in the summary count.
+  {
+    name: 'governance_list_risks',
+    description:
+      'List business risks, most severe first. Filter by status (OPEN, MITIGATED, CLOSED, ACCEPTED) or by category.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/governance-flow',
+    parameters: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', description: 'OPEN, MITIGATED, CLOSED or ACCEPTED' },
+        category: { type: 'string', description: 'Category to filter by' },
+      },
+      required: [],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'Risks',
+      fields: { risks: { type: 'array', description: 'Most severe first' } },
+    },
+  },
+  {
+    name: 'governance_get_risk',
+    description: 'Get one business risk by id, including its mitigation plan and owner.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/governance-flow',
+    parameters: {
+      type: 'object',
+      properties: { riskId: { type: 'string', description: 'Risk ID' } },
+      required: ['riskId'],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'The risk',
+      fields: {
+        id: { type: 'string', description: 'Risk ID' },
+        title: { type: 'string', description: 'Risk title' },
+        severity: { type: 'string', description: 'LOW, MEDIUM, HIGH or CRITICAL' },
+        status: { type: 'string', description: 'Current status' },
+        mitigation: { type: 'string', description: 'What is being done about it' },
+      },
+    },
+  },
+  {
+    name: 'governance_risk_summary',
+    description: 'How many risks are open, broken down by severity.',
+    family: 'read',
+    riskLevel: 'low',
+    riskTier: 1 as RiskTier,
+    manualEquivalentRoute: '/app/governance-flow',
+    parameters: { type: 'object', properties: {}, required: [] },
+    outputSchema: {
+      type: 'object',
+      description: 'Open risk summary',
+      fields: {
+        open: { type: 'number', description: 'Count of OPEN risks' },
+        bySeverity: { type: 'array', description: 'Open counts per severity' },
+      },
+    },
+  },
+  {
+    name: 'governance_log_risk',
+    description:
+      'Record a new business risk. Severity must be LOW, MEDIUM, HIGH or CRITICAL. Status defaults to OPEN.',
+    family: 'crud',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/governance-flow',
+    changedEntities: ['businessRisk'],
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Short name for the risk, max 200 characters' },
+        category: { type: 'string', description: 'Category, e.g. financial, operational, legal' },
+        severity: { type: 'string', description: 'LOW, MEDIUM, HIGH or CRITICAL' },
+        description: { type: 'string', description: 'What the risk is' },
+        likelihood: { type: 'string', description: 'RARE, UNLIKELY, POSSIBLE, LIKELY or ALMOST_CERTAIN' },
+        status: { type: 'string', description: 'OPEN (default), MITIGATED, CLOSED or ACCEPTED' },
+        mitigation: { type: 'string', description: 'What is being done about it' },
+        ownerId: { type: 'string', description: 'User ID who owns this risk' },
+      },
+      required: ['title', 'category', 'severity'],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'The risk recorded',
+      fields: {
+        id: { type: 'string', description: 'Risk ID' },
+        title: { type: 'string', description: 'Risk title' },
+        severity: { type: 'string', description: 'Severity as stored' },
+        status: { type: 'string', description: 'Status as stored' },
+      },
+    },
+  },
+  {
+    name: 'governance_update_risk',
+    description:
+      'Update a business risk — record a mitigation, reassign it, change severity, or close it by setting status to MITIGATED, CLOSED or ACCEPTED. This is how a risk is retired; risks are never deleted.',
+    family: 'crud',
+    riskLevel: 'medium',
+    riskTier: 2 as RiskTier,
+    manualEquivalentRoute: '/app/governance-flow',
+    changedEntities: ['businessRisk'],
+    parameters: {
+      type: 'object',
+      properties: {
+        riskId: { type: 'string', description: 'Risk ID' },
+        title: { type: 'string', description: 'New title' },
+        category: { type: 'string', description: 'New category' },
+        severity: { type: 'string', description: 'LOW, MEDIUM, HIGH or CRITICAL' },
+        likelihood: { type: 'string', description: 'RARE, UNLIKELY, POSSIBLE, LIKELY or ALMOST_CERTAIN' },
+        status: { type: 'string', description: 'OPEN, MITIGATED, CLOSED or ACCEPTED' },
+        description: { type: 'string', description: 'New description' },
+        mitigation: { type: 'string', description: 'What is being done about it' },
+        ownerId: { type: 'string', description: 'User ID who owns this risk' },
+      },
+      required: ['riskId'],
+    },
+    outputSchema: {
+      type: 'object',
+      description: 'The updated risk',
+      fields: {
+        id: { type: 'string', description: 'Risk ID' },
+        status: { type: 'string', description: 'Status after the change' },
+        severity: { type: 'string', description: 'Severity after the change' },
+      },
+    },
+  },
+
+  // ================================================================
   //  SUPPLIERS — sourcing, landed cost and margin
   // ================================================================
   //

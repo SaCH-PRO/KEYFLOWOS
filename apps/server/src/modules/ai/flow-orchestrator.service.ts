@@ -72,6 +72,17 @@ import { ReceivablesService } from '../finance/receivables.service';
 import { LedgerReportingService } from '../reports/ledger-reporting.service';
 import { AssetService } from '../assets/asset.service';
 import { SupplierService } from '../supplier/supplier.service';
+import { GovernanceService } from '../governance/governance.service';
+
+/**
+ * The risk register's fixed vocabularies, mirroring
+ * governance/dto/create-risk.dto.ts. Duplicated rather than imported because
+ * the DTO's copies are decorator arguments, not exported values —
+ * governance-tools.spec.ts reads that file and fails if these drift apart.
+ */
+const RISK_SEVERITIES = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const;
+const RISK_STATUSES = ['OPEN', 'MITIGATED', 'CLOSED', 'ACCEPTED'] as const;
+const RISK_LIKELIHOODS = ['RARE', 'UNLIKELY', 'POSSIBLE', 'LIKELY', 'ALMOST_CERTAIN'] as const;
 import { StatementSourceService } from '../finance/statement-source.service';
 import { ApprovalRequestService } from '../approvals/approval-request.service';
 import { GoogleDriveService } from '../google-drive/google-drive.service';
@@ -461,6 +472,26 @@ export class FlowOrchestratorService {
   }
   private getSuppliers() {
     return this.moduleRef.get(SupplierService, { strict: false });
+  }
+  private getGovernance() {
+    return this.moduleRef.get(GovernanceService, { strict: false });
+  }
+
+  /**
+   * Reject a value outside a fixed set, by name, before it reaches the column.
+   *
+   * The DTO's `@IsIn` does not protect this path — class-validator runs from
+   * Nest's ValidationPipe on the HTTP route, and a tool handler calls the
+   * service directly. Without this, an invented enum is written successfully
+   * and only shows up as a row the UI cannot sort and a bucket nobody reads.
+   */
+  private requireOneOf(value: unknown, allowed: readonly string[], field: string): string {
+    if (typeof value !== 'string' || !allowed.includes(value)) {
+      throw new Error(
+        `${field} must be one of ${allowed.join(', ')} — got ${JSON.stringify(value)}`,
+      );
+    }
+    return value;
   }
 
   /**
@@ -4601,6 +4632,69 @@ ${triage.standingContext}`;
       }
 
       // === FINANCE ===
+      // ── Governance: the risk register ────────────────────────────────────
+      //
+      // CreateRiskDto validates severity, likelihood and status with
+      // class-validator @IsIn. NONE OF THAT RUNS HERE. class-validator fires
+      // from Nest's ValidationPipe on the HTTP path; a tool handler calls the
+      // service directly, so `severity: 'catastrophic'` would be written
+      // straight into the column.
+      //
+      // It would not throw either. The screen sorts by severity and the summary
+      // groups by it, so an invented value becomes a row nothing can render and
+      // a bucket nobody looks at — a risk logged and effectively lost. So the
+      // enums are checked here, against the same lists the DTO uses;
+      // governance-tools.spec.ts reads the DTO and fails if the two drift.
+      case 'governance_list_risks': {
+        if (args.status !== undefined) this.requireOneOf(args.status, RISK_STATUSES, 'status');
+        const risks = await this.getGovernance().findRisks(businessId, {
+          status: args.status,
+          category: args.category,
+        });
+        return { risks };
+      }
+
+      case 'governance_get_risk':
+        return this.getGovernance().findOneRisk(businessId, args.riskId);
+
+      case 'governance_risk_summary':
+        return this.getGovernance().summary(businessId);
+
+      case 'governance_log_risk': {
+        this.requireOneOf(args.severity, RISK_SEVERITIES, 'severity');
+        if (args.likelihood !== undefined) this.requireOneOf(args.likelihood, RISK_LIKELIHOODS, 'likelihood');
+        if (args.status !== undefined) this.requireOneOf(args.status, RISK_STATUSES, 'status');
+
+        return this.getGovernance().createRisk(businessId, {
+          title: args.title,
+          category: args.category,
+          severity: args.severity,
+          description: args.description,
+          likelihood: args.likelihood,
+          status: args.status ?? 'OPEN',
+          mitigation: args.mitigation,
+          ownerId: args.ownerId,
+        });
+      }
+
+      case 'governance_update_risk': {
+        if (args.severity !== undefined) this.requireOneOf(args.severity, RISK_SEVERITIES, 'severity');
+        if (args.likelihood !== undefined) this.requireOneOf(args.likelihood, RISK_LIKELIHOODS, 'likelihood');
+        if (args.status !== undefined) this.requireOneOf(args.status, RISK_STATUSES, 'status');
+
+        // Built key by key rather than spread: updateRisk applies every field
+        // that is `!== undefined`, so forwarding riskId or a key the model
+        // invented would write it onto the row.
+        const patch: Record<string, unknown> = {};
+        for (const field of ['title', 'category', 'severity', 'likelihood', 'status', 'description', 'mitigation', 'ownerId']) {
+          if (args[field] !== undefined) patch[field] = args[field];
+        }
+        if (!Object.keys(patch).length) {
+          throw new Error('governance_update_risk was given nothing to change');
+        }
+        return this.getGovernance().updateRisk(businessId, args.riskId, patch);
+      }
+
       // ── Suppliers ────────────────────────────────────────────────────────
       //
       // Unlike AssetService, every method here takes businessId FIRST and
