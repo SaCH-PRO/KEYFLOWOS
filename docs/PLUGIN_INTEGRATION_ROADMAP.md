@@ -2,7 +2,7 @@
 
 _How the available claude.ai plugin catalog maps onto KEYFLOW OS, and the order we should adopt them in._
 
-Status: **Phase 1 (Langfuse) shipped** on `claude/plugin-integration-improvements-wzdpex`; Phases 2–4 scoped below.
+Status: **Phase 1 (Langfuse) and Phase 2 (GrowthBook) shipped** on `claude/plugin-integration-improvements-wzdpex`; Phases 3–4 scoped below.
 
 ---
 
@@ -46,17 +46,21 @@ So the highest-value plugins are the ones filling a **real gap**, not re-impleme
 
 ---
 
-### Phase 2 — GrowthBook: feature flags & experimentation
+### Phase 2 — GrowthBook: dynamic flags & experimentation ✅ SHIPPED
 
-**Gap it fills:** no flag system exists (nothing in `.env.example`, no flag client). We ship features across Cockpit / Workspaces / Studio with no safe kill-switch or A/B path.
+**Gap it fills:** the repo already has `modules/feature-flags` — a **DB-backed nav gate** (static "coming soon" toggles with per-email bypass, operator-edited). What it *can't* do is a dynamic rollout: enable a change for 10% of businesses, flip it off without a deploy, target by plan/country, or run an A/B test. GrowthBook is that layer, and it complements the existing service rather than replacing it.
 
-**Integration points:**
-- Server: a small `FeatureFlagService` (SDK or the GrowthBook HTTP API) resolving flags by `businessId` — mirror the `LangfuseService` env-gated, no-op-when-unconfigured pattern so it's safe to merge dark.
-- Web: `apps/web` provider + hook for client-gated UI; server-evaluated flags for API/route gating.
+**What shipped:**
+- `apps/server/src/core/growthbook/growthbook.service.ts` — `GrowthBookService` wrapping the `GrowthBookClient` (multi-user server client: one shared instance, per-request `UserContext`). `isEnabled(key, ctx, fallback)` and `getValue(key, fallback, ctx)`, keyed by `businessId` (GrowthBook's `id` hash attribute → deterministic percentage rollouts).
+- Same dark-by-default contract as Langfuse/Sentry: env-gated on `GROWTHBOOK_CLIENT_KEY`, and **every flag resolves to the caller's fallback** when disabled, unloaded, or unknown — a missing config can only mean "the safe default", never a crash or an accidental on. GrowthBook init failure degrades to fallbacks; it never blocks boot.
+- Global `GrowthBookModule` registered in `app.module.ts` (mirrors `core/sentry`); `GROWTHBOOK_CLIENT_KEY` + `GROWTHBOOK_API_HOST` in `.env.example`.
+- Tests: `growthbook.service.spec.ts` (disabled/no-network, boolean + typed eval, unknown→fallback, deterministic bucketing).
 
-**First flags to define:** gate each new plugin integration (including the Phase 3/4 work below) behind a flag so rollout is per-business and reversible.
+**Named distinctly on purpose:** `GrowthBookService` (dynamic) vs. the existing `FeatureFlagsService` (static nav gate) so the two never collide. Use GrowthBook for rollouts/experiments; keep the DB service for operator nav toggles.
 
-**Effort:** M. **Risk:** low (additive, dark by default).
+**To turn it on:** set `GROWTHBOOK_CLIENT_KEY` (SDK client key, not a personal API key). **First flags to define:** gate each new plugin integration (Phase 3/4) behind a GrowthBook flag so rollout is per-business and reversible.
+
+**Follow-up:** a web-side provider/hook in `apps/web` for client-gated UI (server evaluation shipped; client evaluation is the natural next step).
 
 ---
 
@@ -99,7 +103,7 @@ Plugins that would add *new user-facing capability* rather than harden internals
 ## Adoption order (recommended)
 
 1. **Langfuse** ✅ — see what KEY is actually doing before changing anything else.
-2. **GrowthBook** — get the safety net in place; every subsequent integration ships behind a flag.
+2. **GrowthBook** ✅ — safety net in place; every subsequent integration ships behind a flag.
 3. **StackHawk + Vanta** — trust/enterprise-readiness while the surface is still small.
 4. **CRM enrichment** — first clear user-facing win, built on the integration-hub.
 
