@@ -2511,6 +2511,7 @@ model Contact {
   notesInternal         String?   @map("notes_internal")
   ageGroup              String?   @map("age_group")
   relationshipType      String?   @map("relationship_type")
+  pricingTier           String    @default("RETAIL") @map("pricing_tier")
   pipelineStage         String?   @map("pipeline_stage")
   relationshipHealth    String?   @map("relationship_health")
   lastContactedAt       DateTime? @map("last_contacted_at")
@@ -3452,6 +3453,7 @@ model Product {
   costProfile         ProductCostProfile?
   marginSnapshots     MarginSnapshot[]
   resourceDownloads   ResourceDownload[]
+  tierPrices          ProductTierPrice[]
 
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
@@ -3459,6 +3461,25 @@ model Product {
 
   @@index([businessId])
   @@map("products")
+}
+
+/// Per-product, per-customer-tier price override.
+/// The RETAIL price is `Product.price`; non-retail tiers (e.g. WHOLESALE for
+/// distributors) store an override row here. Resolved by PricingService when a
+/// quote/invoice line references a product but carries no explicit unit price.
+model ProductTierPrice {
+  id         String   @id @default(cuid())
+  businessId String   @map("business_id")
+  productId  String   @map("product_id")
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  tier       String
+  price      Float
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@unique([productId, tier])
+  @@index([businessId])
+  @@map("product_tier_prices")
 }
 
 model Quote {

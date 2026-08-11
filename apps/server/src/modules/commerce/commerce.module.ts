@@ -6,6 +6,7 @@ import { CommerceInsightsController } from './commerce-insights.controller';
 import { FinancialCopilotController } from './financial-copilot.controller';
 import { RecurringInvoiceController } from './recurring-invoice.controller';
 import { CommerceService } from './commerce.service';
+import { PricingService } from './pricing.service';
 import { CommerceStatsService } from './commerce-stats.service';
 import { InvoiceWorkflowService } from './invoice-workflow.service';
 import { InvoiceOverdueScheduler } from './invoice-overdue.scheduler';
@@ -83,6 +84,7 @@ import type { NotificationsModule as NotificationsModuleType } from '../notifica
   controllers: [CommerceController, AccountingController, CommerceAiController, CommerceInsightsController, FinancialCopilotController, RecurringInvoiceController, RevenueActionController, RevenueReportingController, RevenueIntelligenceController, LeverageController, DocumentTemplateController, DriveIntakeController],
   providers: [
     CommerceService,
+    PricingService,
     CommerceStatsService,
     InvoiceWorkflowService,
     InvoiceOverdueScheduler,
@@ -124,6 +126,7 @@ import type { NotificationsModule as NotificationsModuleType } from '../notifica
   ],
   exports: [
     CommerceService,
+    PricingService,
     CommerceStatsService,
     InvoiceWorkflowService,
     RecurringInvoiceService,

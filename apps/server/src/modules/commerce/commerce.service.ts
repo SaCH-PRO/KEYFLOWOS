@@ -20,6 +20,7 @@ import { InvoiceWorkflowService, InvoiceStatus } from './invoice-workflow.servic
 import { CatalogService } from '../catalog/catalog.service';
 import { PublicEventsService } from '../public-events/public-events.service';
 import { RevenuePostingService } from '../finance/revenue-posting.service';
+import { PricingService } from './pricing.service';
 import { isSystemActor, KEY_SYSTEM_ACTOR_ID } from '../../core/auth/system-actor';
 
 @Injectable()
@@ -35,6 +36,7 @@ export class CommerceService {
     @Inject(CatalogService) private readonly catalog: CatalogService,
     @Inject(PublicEventsService) private readonly publicEvents: PublicEventsService,
     @Inject(RevenuePostingService) private readonly revenuePosting: RevenuePostingService,
+    @Inject(PricingService) private readonly pricing: PricingService,
   ) {}
 
   /**
@@ -177,7 +179,7 @@ export class CommerceService {
   async createInvoice(input: {
     businessId: string;
     contactId?: string;
-    items: { description: string; quantity: number; unitPrice: number; productId?: string; total?: number }[];
+    items: { description: string; quantity: number; unitPrice?: number; productId?: string; total?: number }[];
     currency?: string;
     dueDate?: Date | string;
     taxRate?: number;
@@ -190,7 +192,10 @@ export class CommerceService {
     total?: number;
   }) {
     this.validateTaxAndDiscount(input.taxRate, input.discountValue, input.discountType);
-    const calculatedSubtotal = input.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+    // Tier pricing: price product lines from the contact's tier when no explicit
+    // unitPrice is supplied (explicit prices are honoured as manual overrides).
+    const items = await this.pricing.resolveLineItems(input.businessId, input.contactId ?? null, input.items);
+    const calculatedSubtotal = items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
     const subtotal = input.subtotal ?? calculatedSubtotal;
     const taxRate = input.taxRate ?? 0;
     const calculatedTaxAmount = (calculatedSubtotal * taxRate) / 100;
@@ -218,11 +223,11 @@ export class CommerceService {
       currency: input.currency ?? 'TTD',
       notes: input.notes ?? null,
       items: {
-        create: input.items.map((item) => ({
+        create: items.map((item) => ({
           description: item.description,
           quantity: item.quantity,
           unitPrice: item.unitPrice,
-          total: item.total ?? item.quantity * item.unitPrice,
+          total: item.total,
         })),
       },
     };
@@ -1081,7 +1086,7 @@ export class CommerceService {
   async createQuote(input: {
     businessId: string;
     contactId: string;
-    items: { description: string; quantity: number; unitPrice: number; productId?: string; total?: number }[];
+    items: { description: string; quantity: number; unitPrice?: number; productId?: string; total?: number }[];
     currency?: string;
     expiryDate?: Date | string;
     taxRate?: number;
@@ -1091,7 +1096,10 @@ export class CommerceService {
     quoteNumber?: string;
   }) {
     this.validateTaxAndDiscount(input.taxRate, input.discountValue, input.discountType);
-    const subtotal = input.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+    // Tier pricing: lines without an explicit unitPrice are priced from the
+    // product at the contact's tier (wholesale/distributor vs retail).
+    const items = await this.pricing.resolveLineItems(input.businessId, input.contactId, input.items);
+    const subtotal = items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
     const taxRate = input.taxRate ?? 0;
     const taxAmount = subtotal * taxRate / 100;
     const discountValue = input.discountValue ?? 0;
@@ -1119,11 +1127,11 @@ export class CommerceService {
         currency: input.currency ?? 'TTD',
         notes: input.notes ?? null,
         items: {
-          create: input.items.map((item) => ({
+          create: items.map((item) => ({
             description: item.description,
             quantity: item.quantity,
             unitPrice: item.unitPrice,
-            total: item.total ?? item.quantity * item.unitPrice,
+            total: item.total,
             productId: item.productId ?? null,
           })),
         },
