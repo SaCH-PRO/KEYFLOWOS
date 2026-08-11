@@ -2,6 +2,8 @@ import {
   BadRequestException,
   Body,
   Controller,
+  ForbiddenException,
+  Logger,
   Post,
   Query,
   Req,
@@ -25,6 +27,8 @@ function baseUrl(): string {
 
 @Controller('api/v1/cortex/phone')
 export class PhoneVoiceController {
+  private readonly logger = new Logger(PhoneVoiceController.name);
+
   /**
    * Twilio inbound-call webhook. Answers with TwiML that connects the call
    * to the realtime voice bridge. Configure the number's voice webhook to:
@@ -69,9 +73,51 @@ export class PhoneVoiceController {
     return { callSid: call.sid, status: call.status, to: dto.to };
   }
 
+  /**
+   * Verify the call really came from Twilio — and REFUSE when we cannot tell.
+   *
+   * This used to read:
+   *
+   *     const token = process.env.TWILIO_AUTH_TOKEN;
+   *     if (!token) return; // dev convenience; production must configure the token
+   *
+   * Nothing enforced that comment. Measured 2026-08-10: `.env.production`
+   * contains no TWILIO_* variables at all, so on the live server the check
+   * returned immediately and `POST /cortex/phone/inbound?businessId=<anything>`
+   * was completely unauthenticated — accepting an attacker-supplied tenant id
+   * and answering with TwiML carrying the voice-bridge WebSocket URL for that
+   * business.
+   *
+   * An unconfigured verifier that accepts everything is worse than no endpoint,
+   * because the route looks protected in review: there IS a signature check,
+   * and it is called on the first line. This is the same failure the CI gate in
+   * scripts/deploy.sh was fixed for — "an unavailable checker that waves the
+   * deploy through is the same failure one layer down" — so it takes the same
+   * shape: fail closed, and make the escape hatch explicit enough that nobody
+   * sets it by accident.
+   *
+   * PHONE_VOICE_ALLOW_UNVERIFIED=1 restores the old behaviour for local work
+   * against a tunnel, where Twilio's signature is computed over a URL the
+   * server cannot reconstruct. It logs every time it is used, because a
+   * bypass nobody can see is how this started.
+   */
   private assertValidTwilioSignature(req: Request) {
     const token = process.env.TWILIO_AUTH_TOKEN;
-    if (!token) return; // dev convenience; production must configure the token
+
+    if (!token) {
+      if (process.env.PHONE_VOICE_ALLOW_UNVERIFIED === '1') {
+        this.logger.warn(
+          'PHONE_VOICE_ALLOW_UNVERIFIED=1 — accepting an UNVERIFIED inbound call webhook. ' +
+            'Never set this in production.',
+        );
+        return;
+      }
+      throw new ForbiddenException(
+        'Inbound voice webhook rejected: TWILIO_AUTH_TOKEN is not configured, so this ' +
+          'request cannot be verified as coming from Twilio.',
+      );
+    }
+
     const signature = req.headers['x-twilio-signature'] as string | undefined;
     const url = `${baseUrl()}${req.originalUrl}`;
     const valid = twilio.validateRequest(token, signature ?? '', url, req.body as Record<string, unknown>);
