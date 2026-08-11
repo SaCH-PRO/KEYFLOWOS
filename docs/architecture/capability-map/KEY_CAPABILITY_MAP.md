@@ -2,7 +2,7 @@
 
 > **Auto-generated** by `generate.js` from the two authoritative capability sources in the repo. Do not hand-edit — regenerate instead (`node docs/architecture/capability-map/generate.js`).
 
-Projected from **278 governed flow tools** (`ai/flow-tool-registry.ts`) and **207 declared cortex capabilities** (`key-cortex/key-cortex-capability-registry.service.ts`) onto a **12-domain** business-function taxonomy.
+Projected from **282 governed flow tools** (`ai/flow-tool-registry.ts`) and **207 declared cortex capabilities** (`key-cortex/key-cortex-capability-registry.service.ts`) onto a **12-domain** business-function taxonomy.
 
 **Coverage: 100% declared · 47% active.** Every target capability a complete business OS needs is now *declared* in the model (32/32). **15** are **active** (a real tool covers them today); **17** are **planned** — declared with a full build spec (mode, risk tier, what they compose from, UI surface, evaluator gate) but not yet executable. "Active" is the honest executable-today number; "declared" means the model is complete.
 
@@ -26,18 +26,18 @@ This file is the human-readable view of `key-capability-map.seed.json`, the seed
 
 ## Coverage summary
 
-Across **12 domains**: 🟢 211 agentic · 🔵 226 assisted · 🟡 45 assisted+approval · 🔴 3 human-gated (across 485 live capabilities).
+Across **12 domains**: 🟢 212 agentic · 🔵 228 assisted · 🟡 46 assisted+approval · 🔴 3 human-gated (across 489 live capabilities).
 
 | Domain | Tools | Cortex caps | UI surfaces | Active | Planned | Declared | Mode mix |
 |---|--:|--:|--:|:--:|:--:|:--:|---|
 | **Sales & CRM** | 42 | 17 | 3 | 2/3 | 1 | 100% | 🔵 32 🟢 19 🟡 8 |
 | **Marketing & Content** | 32 | 22 | 3 | 2/3 | 1 | 100% | 🔵 28 🟢 16 🟡 8 🔴 2 |
-| **Commerce & Fulfillment** | 45 | 15 | 5 | 1/3 | 2 | 100% | 🟢 28 🔵 27 🟡 5 |
-| **Finance & Accounting** | 35 | 10 | 4 | 3/4 | 1 | 100% | 🟢 23 🔵 20 🟡 2 |
+| **Commerce & Fulfillment** | 47 | 15 | 5 | 1/3 | 2 | 100% | 🟢 29 🔵 28 🟡 5 |
+| **Finance & Accounting** | 36 | 10 | 4 | 3/4 | 1 | 100% | 🟢 23 🔵 20 🟡 3 |
 | **Operations & Delivery** | 45 | 36 | 5 | 1/2 | 1 | 100% | 🔵 41 🟢 34 🟡 5 🔴 1 |
 | **Scheduling & Bookings** | 10 | 22 | 2 | 2/2 | 0 | 100% | 🔵 20 🟢 11 🟡 1 |
 | **Support & Communications** | 13 | 38 | 3 | 2/3 | 1 | 100% | 🟢 23 🔵 23 🟡 5 |
-| **Legal, Contracts & Governance** | 27 | 0 | 6 | 2/3 | 1 | 100% | 🟢 15 🔵 10 🟡 2 |
+| **Legal, Contracts & Governance** | 28 | 0 | 6 | 2/3 | 1 | 100% | 🟢 15 🔵 11 🟡 2 |
 | **Analytics & Strategy** | 18 | 37 | 6 | 0/3 | 3 | 100% | 🟢 33 🔵 19 🟡 3 |
 | **People & HR** | 4 | 0 | 1 | 0/3 | 3 | 100% | 🟡 3 🔵 1 |
 | **Assets & Documents** | 7 | 0 | 1 | 0/2 | 2 | 100% | 🟢 5 🔵 1 🟡 1 |
@@ -198,7 +198,7 @@ Every gap is now a **declared capability with a spec**. This is the concrete bui
 
 ### Commerce & Fulfillment
 
-45 tools · 15 cortex capabilities · **1/3 active**, 2 planned
+47 tools · 15 cortex capabilities · **1/3 active**, 2 planned
 
 **UI surfaces:** `/app/commerce` · `/app/inventory` · `/app/marketplace` · `/app/procurement` · `/app/store`
 
@@ -210,7 +210,7 @@ Every gap is now a **declared capability with a spec**. This is the concrete bui
 | Dynamic pricing | 🧩 planned | 🔴 Human-gated | T4 · composes `fetch_revenue_risk`… · /app/commerce |
 | Supplier risk scoring | 🧩 planned | 🟢 Agentic | T1 · composes `procurement_get_request`… · /app/procurement |
 
-<details><summary>45 governed tools</summary>
+<details><summary>47 governed tools</summary>
 
 | Tool | Family | Tier | Mode | Manual route |
 |---|---|:--:|---|---|
@@ -234,6 +234,7 @@ Every gap is now a **declared capability with a spec**. This is the concrete bui
 | `suppliers_get_cost_profile` | read | 1 | 🟢 Agentic | `/app/store` |
 | `suppliers_get_margins` | read | 1 | 🟢 Agentic | `/app/store` |
 | `suppliers_list_connections` | read | 1 | 🟢 Agentic | `/app/procurement` |
+| `suppliers_list_products` | read | 1 | 🟢 Agentic | `/app/procurement` |
 | `commerce_convert_quote` | organize | 2 | 🔵 Assisted | `/app/commerce` |
 | `commerce_create_invoice` | crud | 2 | 🔵 Assisted | `/app/commerce` |
 | `commerce_create_product` | crud | 1 | 🔵 Assisted | `/app/commerce` |
@@ -255,6 +256,7 @@ Every gap is now a **declared capability with a spec**. This is the concrete bui
 | `procurement_select_vendor` | crud | 2 | 🔵 Assisted | `/app/procurement` |
 | `procurement_submit_for_review` | execute | 2 | 🔵 Assisted | `/app/procurement` |
 | `procurement_update_request` | crud | 2 | 🔵 Assisted | `/app/procurement` |
+| `suppliers_create_product_from_supplier` | crud | 2 | 🔵 Assisted | `/app/store` |
 | `apply_storefront_recommendation` | execute | 3 | 🟡 Assisted + Approval | `/app/store` |
 | `commerce_delete_invoice` | crud | 3 | 🟡 Assisted + Approval | `/app/commerce` |
 | `commerce_send_invoice` | execute | 3 | 🟡 Assisted + Approval | `/app/commerce` |
@@ -264,7 +266,7 @@ Every gap is now a **declared capability with a spec**. This is the concrete bui
 
 ### Finance & Accounting
 
-35 tools · 10 cortex capabilities · **3/4 active**, 1 planned
+36 tools · 10 cortex capabilities · **3/4 active**, 1 planned
 
 **UI surfaces:** `/app/expenses` · `/app/finance` · `/app/payments` · `/app/retainers`
 
@@ -277,7 +279,7 @@ Every gap is now a **declared capability with a spec**. This is the concrete bui
 | Multi-currency / FX handling | ✅ active | 🔵 Assisted | covered by `update_business_blueprint` |
 | Tax filing preparation | 🧩 planned | 🔴 Human-gated | T4 · composes `finance_list_action_items`… · /app/finance |
 
-<details><summary>35 governed tools</summary>
+<details><summary>36 governed tools</summary>
 
 | Tool | Family | Tier | Mode | Manual route |
 |---|---|:--:|---|---|
@@ -316,6 +318,7 @@ Every gap is now a **declared capability with a spec**. This is the concrete bui
 | `retainers_update_period` | organize | 2 | 🔵 Assisted | `/app/retainers` |
 | `finance_pay_bill` | execute | 3 | 🟡 Assisted + Approval | `/app/finance` |
 | `finance_post_journal_entry` | organize | 3 | 🟡 Assisted + Approval | `/app/finance` |
+| `payments_refund_charge` | execute | 3 | 🟡 Assisted + Approval | `/app/payments` |
 
 </details>
 
@@ -450,7 +453,7 @@ Every gap is now a **declared capability with a spec**. This is the concrete bui
 
 ### Legal, Contracts & Governance
 
-27 tools · 0 cortex capabilities · **2/3 active**, 1 planned
+28 tools · 0 cortex capabilities · **2/3 active**, 1 planned
 
 **UI surfaces:** `/app/approvals` · `/app/contracts` · `/app/document-intelligence` · `/app/evidence` · `/app/governance-flow` · `/app/portal`
 
@@ -462,7 +465,7 @@ Every gap is now a **declared capability with a spec**. This is the concrete bui
 | Obligation extraction & tracking | ✅ active | 🟢 Agentic | covered by `command_list_due_obligations` |
 | Renewal-risk analysis | 🧩 planned | 🟢 Agentic | T1 · composes `contract_extract_clauses`… · /app/contracts |
 
-<details><summary>27 governed tools</summary>
+<details><summary>28 governed tools</summary>
 
 | Tool | Family | Tier | Mode | Manual route |
 |---|---|:--:|---|---|
@@ -490,6 +493,7 @@ Every gap is now a **declared capability with a spec**. This is the concrete bui
 | `governance_log_risk` | crud | 2 | 🔵 Assisted | `/app/governance-flow` |
 | `governance_update_risk` | crud | 2 | 🔵 Assisted | `/app/governance-flow` |
 | `portal_grant_access` | crud | 2 | 🔵 Assisted | `/app/portal` |
+| `portal_revoke_access` | crud | 2 | 🔵 Assisted | `/app/portal` |
 | `portal_update_settings` | crud | 2 | 🔵 Assisted | `/app/portal` |
 | `approval_decide_step` | execute | 3 | 🟡 Assisted + Approval | `/app/approvals` |
 | `contracts_delete` | crud | 3 | 🟡 Assisted + Approval | `/app/contracts` |

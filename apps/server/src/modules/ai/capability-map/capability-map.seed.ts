@@ -1070,11 +1070,11 @@ export const CAPABILITY_MAP_SEED: CapabilityModel = {
     {
       "id": "commerce",
       "label": "Commerce & Fulfillment",
-      "toolCount": 45,
+      "toolCount": 47,
       "capCount": 15,
       "modeCounts": {
-        "agentic": 28,
-        "assisted": 27,
+        "agentic": 29,
+        "assisted": 28,
         "assisted_approval": 5
       },
       "uiSurfaces": [
@@ -1375,6 +1375,15 @@ export const CAPABILITY_MAP_SEED: CapabilityModel = {
           "fullRoute": "/app/procurement"
         },
         {
+          "name": "suppliers_list_products",
+          "description": "List a supplier's catalogue — what we could source from them.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/procurement",
+          "fullRoute": "/app/procurement"
+        },
+        {
           "name": "suppliers_get_cost_profile",
           "description": "Landed cost profile for one of our products — what it actually costs us once supplier price, shipping and fees are counted.",
           "family": "read",
@@ -1389,6 +1398,15 @@ export const CAPABILITY_MAP_SEED: CapabilityModel = {
           "family": "read",
           "riskTier": 1,
           "mode": "agentic",
+          "route": "/app/store",
+          "fullRoute": "/app/store"
+        },
+        {
+          "name": "suppliers_create_product_from_supplier",
+          "description": "Create one of our sellable products from an item in a supplier's catalogue, optionally overriding name, price, category or fulfilment model.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
           "route": "/app/store",
           "fullRoute": "/app/store"
         },
@@ -1648,12 +1666,12 @@ export const CAPABILITY_MAP_SEED: CapabilityModel = {
     {
       "id": "finance",
       "label": "Finance & Accounting",
-      "toolCount": 35,
+      "toolCount": 36,
       "capCount": 10,
       "modeCounts": {
         "agentic": 23,
         "assisted": 20,
-        "assisted_approval": 2
+        "assisted_approval": 3
       },
       "uiSurfaces": [
         "/app/expenses",
@@ -1775,6 +1793,15 @@ export const CAPABILITY_MAP_SEED: CapabilityModel = {
           "family": "organize",
           "riskTier": 2,
           "mode": "assisted",
+          "route": "/app/payments",
+          "fullRoute": "/app/payments"
+        },
+        {
+          "name": "payments_refund_charge",
+          "description": "Refund a charge, in full or in part. This sends money OUT of the business and cannot be undone by any other tool — confirm the charge id and the amount with the owner before calling it. Use payments_search_transactions to find the charge first.",
+          "family": "execute",
+          "riskTier": 3,
+          "mode": "assisted_approval",
           "route": "/app/payments",
           "fullRoute": "/app/payments"
         },
@@ -3553,11 +3580,11 @@ export const CAPABILITY_MAP_SEED: CapabilityModel = {
     {
       "id": "legal_gov",
       "label": "Legal, Contracts & Governance",
-      "toolCount": 27,
+      "toolCount": 28,
       "capCount": 0,
       "modeCounts": {
         "agentic": 15,
-        "assisted": 10,
+        "assisted": 11,
         "assisted_approval": 2
       },
       "uiSurfaces": [
@@ -3758,6 +3785,15 @@ export const CAPABILITY_MAP_SEED: CapabilityModel = {
         {
           "name": "portal_grant_access",
           "description": "Give a contact access to the customer portal, or refresh their existing access. Choose what they can see. The link itself is on /app/portal — this tool never returns the token.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/portal",
+          "fullRoute": "/app/portal"
+        },
+        {
+          "name": "portal_revoke_access",
+          "description": "Turn off a contact's customer-portal access. Their link stops working immediately.",
           "family": "crud",
           "riskTier": 2,
           "mode": "assisted",
@@ -4676,7 +4712,7 @@ export const CAPABILITY_MAP_SEED: CapabilityModel = {
   ],
   "summary": {
     "domains": 12,
-    "flowTools": 278,
+    "flowTools": 282,
     "cortexCapabilities": 207,
     "targetsTotal": 32,
     "targetsActive": 15,
@@ -4684,9 +4720,9 @@ export const CAPABILITY_MAP_SEED: CapabilityModel = {
     "activeCoveragePct": 47,
     "declaredCoveragePct": 100,
     "modeCounts": {
-      "agentic": 211,
-      "assisted": 226,
-      "assisted_approval": 45,
+      "agentic": 212,
+      "assisted": 228,
+      "assisted_approval": 46,
       "human_gated": 3
     }
   }

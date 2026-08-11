@@ -37,16 +37,60 @@ const OUT = process.env.OUT_DIR || __dirname;
 const SERVER_SEED_TS = path.join(REPO, 'apps/server/src/modules/ai/capability-map/capability-map.seed.ts');
 
 // ───────────────────────────────────────────────────────────── extract
+/**
+ * Parse FLOW_TOOLS.
+ *
+ * BOTH QUOTE STYLES, AND A COUNT CHECK.
+ *
+ * The original regex accepted only SINGLE-quoted descriptions. A tool whose
+ * description contains an apostrophe is written with double quotes —
+ *
+ *   description: "Turn off a contact's customer-portal access…",
+ *
+ * — and was silently dropped. Four were, when this was audited:
+ * payments_refund_charge, portal_revoke_access, suppliers_list_products and
+ * suppliers_create_product_from_supplier. 282 declared, 278 parsed, no warning.
+ *
+ * A capability map that quietly omits capabilities is the one failure this
+ * artifact cannot afford, so the miscount now throws rather than under-reports.
+ * The count is taken from a deliberately dumber pattern — a bare `name:` line —
+ * so the check does not share the assumption it is checking.
+ */
+const STR = String.raw`(?:'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)")`;
+/**
+ * Whitespace, and any line comments in between. The fields of a tool are not
+ * always adjacent — payments_refund_charge carries four lines of comment
+ * between `riskLevel` and `riskTier` explaining why it is tier 3, and a
+ * strictly-consecutive pattern dropped it for that.
+ */
+const GAP = String.raw`(?:\s|\/\/[^\n]*)*`;
+
 function extractTools() {
   const src = fs.readFileSync(AI, 'utf8');
   const body = src.slice(src.indexOf('export const FLOW_TOOLS'));
-  const re = /name:\s*'((?:[^'\\]|\\.)*)',\s*\n\s*description:\s*'((?:[^'\\]|\\.)*)',\s*\n\s*family:\s*'(\w+)',\s*\n\s*riskLevel:\s*'(\w+)',\s*\n\s*riskTier:\s*(\d)/g;
+  const re = new RegExp(
+    String.raw`name:\s*${STR},${GAP}description:\s*${STR},${GAP}family:\s*'(\w+)',${GAP}riskLevel:\s*'(\w+)',${GAP}riskTier:\s*(\d)`,
+    'g',
+  );
   const ms = [...body.matchAll(re)];
-  return ms.map((m, i) => {
+  const tools = ms.map((m, i) => {
     const chunk = body.slice(m.index, i + 1 < ms.length ? ms[i + 1].index : body.length);
     const route = chunk.match(/manualEquivalentRoute:\s*'((?:[^'\\]|\\.)*)'/);
-    return { name: m[1], description: m[2].replace(/\\'/g, "'"), family: m[3], riskLevel: m[4], riskTier: Number(m[5]), route: route ? route[1] : '/app' };
+    const name = m[1] !== undefined ? m[1] : m[2];
+    const description = (m[3] !== undefined ? m[3] : m[4]).replace(/\\'/g, "'").replace(/\\"/g, '"');
+    return { name, description, family: m[5], riskLevel: m[6], riskTier: Number(m[7]), route: route ? route[1] : '/app' };
   });
+
+  const declared = [...body.matchAll(/^\s*name: '[a-z0-9_]+',$/gm)].length;
+  if (tools.length !== declared) {
+    const got = new Set(tools.map((t) => t.name));
+    const missed = [...body.matchAll(/^\s*name: '([a-z0-9_]+)',$/gm)].map((m) => m[1]).filter((n) => !got.has(n));
+    throw new Error(
+      `FLOW_TOOLS parse is incomplete: ${declared} declared, ${tools.length} parsed. ` +
+        `Missing: ${missed.join(', ')}. Fix the extractor — do NOT let the map under-report.`,
+    );
+  }
+  return tools;
 }
 function extractCaps() {
   const src = fs.readFileSync(CORTEX, 'utf8');
