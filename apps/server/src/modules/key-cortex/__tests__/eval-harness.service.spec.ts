@@ -65,4 +65,23 @@ describe('EvalHarnessService', () => {
     expect(harness.getSuiteNames()).toContain('autonomy-consistency');
     expect(harness.getSuiteNames()).toContain('memory-retrieval-precision');
   });
+
+  it('fails closed when the services under test are not wired', async () => {
+    // No dependencies injected: a quality gate must FAIL, not silently pass,
+    // when the thing it is supposed to check is absent.
+    const harness = new EvalHarnessService();
+
+    const results = await harness.runAll();
+    expect(results.length).toBeGreaterThan(0);
+    // every suite whose assertions depend on an unwired service must report failures
+    expect(results.some((r) => r.failed > 0)).toBe(true);
+    expect(await harness.allPass()).toBe(false);
+
+    // the failure reason must name the missing dependency, not look like a pass
+    const errors = results
+      .flatMap((r) => r.assertions)
+      .filter((a) => !a.passed)
+      .map((a) => a.error ?? '');
+    expect(errors.some((e) => e.includes('fail-closed') && e.includes('not wired'))).toBe(true);
+  });
 });

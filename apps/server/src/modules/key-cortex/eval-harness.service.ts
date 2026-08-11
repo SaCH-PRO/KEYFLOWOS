@@ -39,6 +39,10 @@ export interface EvalSuiteResult {
  * Runs deterministic, versioned test suites that measure autonomy consistency,
  * memory retrieval precision, explanation quality, planning correctness, and
  * value alignment.
+ *
+ * Fail-closed: the services under test are @Optional() at the DI boundary. When
+ * one is not wired, its assertions FAIL (throw) rather than silently passing —
+ * a quality gate must never green-light on the absence of the thing it checks.
  */
 @Injectable()
 export class EvalHarnessService {
@@ -133,7 +137,7 @@ export class EvalHarnessService {
         {
           name: 'identical inputs yield identical allowed/requiresApproval values',
           run: async () => {
-            if (!this.autonomyOrchestrator) return { deterministic: true };
+            if (!this.autonomyOrchestrator) throw new Error('fail-closed: AutonomyOrchestratorService not wired');
             const businessId = 'eval_biz';
             const actionKey = 'crm.create_lead';
             const params = { name: 'Test' };
@@ -151,7 +155,7 @@ export class EvalHarnessService {
         {
           name: 'verdict contains a non-empty reason',
           run: async () => {
-            if (!this.autonomyOrchestrator) return { hasReason: true };
+            if (!this.autonomyOrchestrator) throw new Error('fail-closed: AutonomyOrchestratorService not wired');
             const verdict = await this.autonomyOrchestrator.evaluateAction(
               'eval_biz',
               'workflow.create_task',
@@ -172,7 +176,7 @@ export class EvalHarnessService {
         {
           name: 'retrieval returns an array with rank scores',
           run: async () => {
-            if (!this.unifiedMemory) return { ok: true };
+            if (!this.unifiedMemory) throw new Error('fail-closed: UnifiedMemoryRetrievalService not wired');
             const fragments = await this.unifiedMemory.retrieveContext('eval_biz', {
               query: 'quarterly revenue',
               limit: 5,
@@ -194,7 +198,7 @@ export class EvalHarnessService {
         {
           name: 'verdict includes a rule trace array',
           run: async () => {
-            if (!this.autonomyOrchestrator) return { hasTrace: true };
+            if (!this.autonomyOrchestrator) throw new Error('fail-closed: AutonomyOrchestratorService not wired');
             const verdict = await this.autonomyOrchestrator.evaluateAction(
               'eval_biz',
               'workflow.create_task',
@@ -217,7 +221,7 @@ export class EvalHarnessService {
         {
           name: 'dealbreaker action is flagged as a conflict',
           run: async () => {
-            if (!this.constitutionValues) return { conflict: true };
+            if (!this.constitutionValues) throw new Error('fail-closed: ConstitutionValuesService not wired');
             const check = await this.constitutionValues.checkAction(
               'eval_biz',
               'send_email',
@@ -238,7 +242,7 @@ export class EvalHarnessService {
         {
           name: 'goal decomposition produces at least one step',
           run: async () => {
-            if (!this.planner) return { hasSteps: true };
+            if (!this.planner) throw new Error('fail-closed: KeyCortexPlannerService not wired');
             const plan = await this.planner.generatePlan('eval_biz', {
               objective: 'send invoice to customer',
             });

@@ -17,6 +17,7 @@ import { BusinessGraphService } from './business-graph.service';
 import { AiOversightService } from './ai-oversight.service';
 import { ApprovalRoutingService } from './approval-routing.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
+import { CapabilityModelService } from './capability-map/capability-map.service';
 import { IntentParserService } from './intent-parser.service';
 import { PlannerService } from './planner.service';
 import { AiMemoryService } from './ai-memory.service';
@@ -114,6 +115,7 @@ import { AiApprovalsService } from './ai-approvals.service';
     ApprovalRoutingService,
     AiApprovalsService,
     AiExecutionLogService,
+    CapabilityModelService,
     IntentParserService,
     PlannerService,
     AiMemoryService,
@@ -174,6 +176,7 @@ import { AiApprovalsService } from './ai-approvals.service';
     AiOversightService,
     ApprovalRoutingService,
     AiExecutionLogService,
+    CapabilityModelService,
     IntentParserService,
     PlannerService,
     AiMemoryService,

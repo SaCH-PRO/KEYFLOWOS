@@ -1,0 +1,4726 @@
+{
+  "domains": [
+    {
+      "id": "sales_crm",
+      "label": "Sales & CRM",
+      "toolCount": 42,
+      "capCount": 17,
+      "modeCounts": {
+        "agentic": 19,
+        "assisted": 32,
+        "assisted_approval": 8
+      },
+      "uiSurfaces": [
+        "/app/call-tasks",
+        "/app/crm",
+        "/app/onboarding"
+      ],
+      "targetsTotal": 3,
+      "targetsActive": 2,
+      "targetsPlanned": 1,
+      "targets": [
+        {
+          "label": "Web lead enrichment / prospecting",
+          "status": "planned",
+          "mode": "agentic",
+          "riskTier": 1,
+          "uiSurface": "/app/crm",
+          "requiredTools": [
+            "crm_find_duplicates",
+            "crm_list_deals",
+            "crm_merge_preview"
+          ],
+          "evaluator": "Source-provenance + dedupe checks; enrichment-accuracy sample BLOCKING",
+          "coveredBy": null,
+          "why": "Fill thin inbound leads with firmographic + contact data before outreach."
+        },
+        {
+          "label": "Predictive lead scoring",
+          "status": "active",
+          "mode": "assisted_approval",
+          "riskTier": null,
+          "uiSurface": "/app/crm",
+          "requiredTools": [],
+          "evaluator": null,
+          "coveredBy": "crm_merge_execute",
+          "why": "Rank leads by conversion likelihood so effort goes where it pays."
+        },
+        {
+          "label": "Sales pipeline forecasting",
+          "status": "active",
+          "mode": "agentic",
+          "riskTier": null,
+          "uiSurface": "/app/crm",
+          "requiredTools": [],
+          "evaluator": null,
+          "coveredBy": "deals_forecast",
+          "why": "Project pipeline to closed revenue with confidence bounds."
+        }
+      ],
+      "tools": [
+        {
+          "name": "fetch_client_health",
+          "description": "Analyze client engagement health — stale leads, at-risk clients, top spenders, and engagement gaps.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/crm",
+          "fullRoute": "/app/crm/contacts"
+        },
+        {
+          "name": "tag_contact",
+          "description": "Add one or more tags to a contact for segmentation purposes.",
+          "family": "organize",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/crm",
+          "fullRoute": "/app/crm/contacts"
+        },
+        {
+          "name": "segment_contacts",
+          "description": "Filter contacts into a named segment based on status, tag, or spending criteria. Returns matching contacts for the segment.",
+          "family": "organize",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/crm",
+          "fullRoute": "/app/crm/contacts"
+        },
+        {
+          "name": "update_status_with_confirmation",
+          "description": "Bulk-update statuses for contacts or invoices. Requires confirmation due to broad impact.",
+          "family": "execute",
+          "riskTier": 3,
+          "mode": "assisted_approval",
+          "route": "/app/crm",
+          "fullRoute": "/app/crm/contacts"
+        },
+        {
+          "name": "crm_search_contacts",
+          "description": "Search for contacts by name, email, or phone number.",
+          "family": "crud",
+          "riskTier": 1,
+          "mode": "assisted",
+          "route": "/app/crm",
+          "fullRoute": "/app/crm/contacts"
+        },
+        {
+          "name": "crm_create_contact",
+          "description": "Create a new contact in the CRM.",
+          "family": "crud",
+          "riskTier": 1,
+          "mode": "assisted",
+          "route": "/app/crm",
+          "fullRoute": "/app/crm/contacts"
+        },
+        {
+          "name": "crm_update_contact",
+          "description": "Update an existing contact's information.",
+          "family": "crud",
+          "riskTier": 1,
+          "mode": "assisted",
+          "route": "/app/crm",
+          "fullRoute": "/app/crm/contacts"
+        },
+        {
+          "name": "crm_add_note",
+          "description": "Add a note to a contact's timeline.",
+          "family": "crud",
+          "riskTier": 1,
+          "mode": "assisted",
+          "route": "/app/crm",
+          "fullRoute": "/app/crm/contacts"
+        },
+        {
+          "name": "crm_add_task",
+          "description": "Add a task for a contact.",
+          "family": "crud",
+          "riskTier": 1,
+          "mode": "assisted",
+          "route": "/app/crm",
+          "fullRoute": "/app/crm/contacts"
+        },
+        {
+          "name": "crm_delete_contact",
+          "description": "Delete (soft-delete) a contact from the CRM.",
+          "family": "crud",
+          "riskTier": 3,
+          "mode": "assisted_approval",
+          "route": "/app/crm",
+          "fullRoute": "/app/crm/contacts"
+        },
+        {
+          "name": "crm_list_contacts",
+          "description": "List contacts with optional filters.",
+          "family": "crud",
+          "riskTier": 1,
+          "mode": "assisted",
+          "route": "/app/crm",
+          "fullRoute": "/app/crm/contacts"
+        },
+        {
+          "name": "deals_list",
+          "description": "List and filter sales deals — by status, stage, owner, value range, expected close date or free text. Use this to see the pipeline, find deals closing soon, or spot the biggest open opportunities.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/crm",
+          "fullRoute": "/app/crm/deals"
+        },
+        {
+          "name": "deals_get",
+          "description": "Get one deal in full, including its stage and the contact it belongs to.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/crm",
+          "fullRoute": "/app/crm/deals"
+        },
+        {
+          "name": "deals_list_stages",
+          "description": "List the pipeline stages for this business, in order, with their category (OPEN, WON or LOST). Call this before moving a deal so you have a real stage id.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/crm",
+          "fullRoute": "/app/crm/deals"
+        },
+        {
+          "name": "deals_forecast",
+          "description": "Weighted pipeline forecast — expected revenue over a window, based on deal value and stage win rates. Use this to answer \"what is likely to close\" rather than \"what is open\".",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/crm",
+          "fullRoute": "/app/crm/deals"
+        },
+        {
+          "name": "deals_pipeline_velocity",
+          "description": "How fast deals move — average time in each stage, and where deals are stalling. Use this to explain why the pipeline is slow, not just how big it is.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/crm",
+          "fullRoute": "/app/crm/deals"
+        },
+        {
+          "name": "deals_create",
+          "description": "Create a new deal against a contact. If no stage is given the first open stage is used.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/crm",
+          "fullRoute": "/app/crm/deals"
+        },
+        {
+          "name": "deals_update",
+          "description": "Update a deal — value, title, expected close date, probability, owner or notes. To change the stage use deals_move_stage; to close it use deals_mark_won or deals_mark_lost.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/crm",
+          "fullRoute": "/app/crm/deals"
+        },
+        {
+          "name": "deals_move_stage",
+          "description": "Move a deal to a different pipeline stage. Call deals_list_stages first to get a valid stage id. Moving into a WON or LOST stage closes the deal.",
+          "family": "organize",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/crm",
+          "fullRoute": "/app/crm/deals"
+        },
+        {
+          "name": "deals_mark_won",
+          "description": "Mark a deal as won. Records the close date and the actual value. This is a real revenue event — confirm the amount before calling it.",
+          "family": "execute",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/crm",
+          "fullRoute": "/app/crm/deals"
+        },
+        {
+          "name": "deals_mark_lost",
+          "description": "Mark a deal as lost, with the reason. Losing a deal is how the pipeline stays honest — record it rather than leaving it open.",
+          "family": "execute",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/crm",
+          "fullRoute": "/app/crm/deals"
+        },
+        {
+          "name": "deals_delete",
+          "description": "Soft-delete a deal. Prefer deals_mark_lost — a lost deal is pipeline history worth keeping, a deleted one is not.",
+          "family": "crud",
+          "riskTier": 3,
+          "mode": "assisted_approval",
+          "route": "/app/crm",
+          "fullRoute": "/app/crm/deals"
+        },
+        {
+          "name": "call_list_tasks",
+          "description": "List call logs/tasks for the business with optional filters for status, caller, contact, and date range.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/call-tasks",
+          "fullRoute": "/app/call-tasks"
+        },
+        {
+          "name": "call_create_task",
+          "description": "Create a scheduled call task for a contact with script, notes, and optional link to an existing task.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/call-tasks",
+          "fullRoute": "/app/call-tasks"
+        },
+        {
+          "name": "call_log_outcome",
+          "description": "Log the outcome of a completed call — reached, no_answer, voicemail, wrong_number, callback_requested, not_interested.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/call-tasks",
+          "fullRoute": "/app/call-tasks"
+        },
+        {
+          "name": "call_generate_script",
+          "description": "Generate an AI-powered call script for a contact/call log based on their deals, invoices, bookings, and recent activity.",
+          "family": "draft",
+          "riskTier": 1,
+          "mode": "assisted",
+          "route": "/app/call-tasks",
+          "fullRoute": "/app/call-tasks"
+        },
+        {
+          "name": "call_schedule_followup",
+          "description": "Create a follow-up task from a completed call (e.g. callback_requested → schedule new call).",
+          "family": "organize",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/call-tasks",
+          "fullRoute": "/app/call-tasks"
+        },
+        {
+          "name": "finance_customer_balance",
+          "description": "Get the balance for a specific customer (total paid, total invoiced, outstanding).",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/crm",
+          "fullRoute": "/app/crm/contacts"
+        },
+        {
+          "name": "crm_list_deals",
+          "description": "List pipeline deals with stage and value.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/crm",
+          "fullRoute": "/app/crm/deals"
+        },
+        {
+          "name": "crm_update_deal",
+          "description": "Update a deal (title, value, company, owner, description).",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/crm",
+          "fullRoute": "/app/crm/deals"
+        },
+        {
+          "name": "crm_move_deal_stage",
+          "description": "Move a deal to a different pipeline stage.",
+          "family": "organize",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/crm",
+          "fullRoute": "/app/crm/deals"
+        },
+        {
+          "name": "crm_find_duplicates",
+          "description": "Find duplicate contact candidates in the CRM.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/crm",
+          "fullRoute": "/app/crm/duplicates"
+        },
+        {
+          "name": "crm_merge_preview",
+          "description": "Preview what merging a duplicate contact into a primary contact would move (before executing).",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/crm",
+          "fullRoute": "/app/crm/duplicates"
+        },
+        {
+          "name": "crm_merge_execute",
+          "description": "Execute a contact merge: consolidates tags, lead score, and linked records from the duplicate into the primary contact, then retires the duplicate. Irreversible — always run crm_merge_preview first and confirm with the user.",
+          "family": "execute",
+          "riskTier": 3,
+          "mode": "assisted_approval",
+          "route": "/app/crm",
+          "fullRoute": "/app/crm/duplicates"
+        },
+        {
+          "name": "sequence_list",
+          "description": "List outreach sequences (cadences) with enrollment counts.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/crm",
+          "fullRoute": "/app/crm/sequences"
+        },
+        {
+          "name": "sequence_create",
+          "description": "Create an outreach sequence (a cadence of timed steps: email, whatsapp, sms, call, or wait).",
+          "family": "organize",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/crm",
+          "fullRoute": "/app/crm/sequences"
+        },
+        {
+          "name": "sequence_enroll",
+          "description": "Enroll contacts into a sequence (starts the cadence for them).",
+          "family": "execute",
+          "riskTier": 3,
+          "mode": "assisted_approval",
+          "route": "/app/crm",
+          "fullRoute": "/app/crm/sequences"
+        },
+        {
+          "name": "sequence_enroll_overdue",
+          "description": "Collections dunning: enroll every contact with an overdue invoice into a sequence.",
+          "family": "execute",
+          "riskTier": 3,
+          "mode": "assisted_approval",
+          "route": "/app/crm",
+          "fullRoute": "/app/crm/sequences"
+        },
+        {
+          "name": "sequence_unenroll",
+          "description": "Remove a contact from a sequence (stops their cadence).",
+          "family": "organize",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/crm",
+          "fullRoute": "/app/crm/sequences"
+        },
+        {
+          "name": "sequence_pause_resume",
+          "description": "Pause or resume a sequence.",
+          "family": "organize",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/crm",
+          "fullRoute": "/app/crm/sequences"
+        },
+        {
+          "name": "present_onboarding_card",
+          "description": "Use this tool when the user is on the onboarding page and you want to show a structured, interactive card instead of asking open-ended questions. Pick the card that matches the next onboarding milestone: welcome, profile-identity, genesis-idea, operating-model, brand-goals, financials, ownership-legal, operations, market-strategy, risk-compliance-roadmap, genesis-questions, readiness-dashboard, template-picker, payments-storefront-contacts, or completion-gate. If unsure, use cardType \"next\" and the system will choose based on the business setup state.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/onboarding",
+          "fullRoute": "/app/onboarding"
+        },
+        {
+          "name": "save_onboarding_step",
+          "description": "Persist the current onboarding milestone step on the server. Use this when the user has completed the work for a milestone and should advance.",
+          "family": "organize",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/onboarding",
+          "fullRoute": "/app/onboarding"
+        }
+      ],
+      "capabilities": [
+        {
+          "name": "create_contact",
+          "description": "Create a new contact (lead, prospect, or customer).",
+          "module": "crm",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "get_contact",
+          "description": "Retrieve full details of a single contact by ID.",
+          "module": "crm",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "update_contact",
+          "description": "Update fields on an existing contact.",
+          "module": "crm",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "delete_contact",
+          "description": "Permanently delete a contact and associated data.",
+          "module": "crm",
+          "requiresApproval": true,
+          "mode": "assisted_approval"
+        },
+        {
+          "name": "list_contacts",
+          "description": "List contacts with optional filtering.",
+          "module": "crm",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "add_task",
+          "description": "Add a task to a contact record.",
+          "module": "crm",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "complete_task",
+          "description": "Mark a task as completed.",
+          "module": "crm",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "add_note",
+          "description": "Append a note to a contact timeline.",
+          "module": "crm",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "add_tag",
+          "description": "Attach one or more tags to a contact.",
+          "module": "crm",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "update_status",
+          "description": "Change the pipeline status of a contact.",
+          "module": "crm",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "log_event",
+          "description": "Log a custom event against a contact timeline.",
+          "module": "crm",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "merge_contacts",
+          "description": "Merge two duplicate contacts into one master record.",
+          "module": "crm",
+          "requiresApproval": true,
+          "mode": "assisted_approval"
+        },
+        {
+          "name": "get_contact_timeline",
+          "description": "Retrieve chronological activity timeline for a contact.",
+          "module": "crm",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "count_contacts",
+          "description": "Count contacts matching a filter.",
+          "module": "crm",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "get_tasks",
+          "description": "List open tasks for a contact or across the business.",
+          "module": "crm",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_recent_contacts",
+          "description": "Fetch contacts created or updated recently.",
+          "module": "crm",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "search_contacts",
+          "description": "Full-text search across contact fields.",
+          "module": "crm",
+          "requiresApproval": false,
+          "mode": "agentic"
+        }
+      ]
+    },
+    {
+      "id": "marketing",
+      "label": "Marketing & Content",
+      "toolCount": 32,
+      "capCount": 22,
+      "modeCounts": {
+        "assisted": 28,
+        "assisted_approval": 8,
+        "human_gated": 2,
+        "agentic": 16
+      },
+      "uiSurfaces": [
+        "/app/content-ops",
+        "/app/marketing",
+        "/app/seo"
+      ],
+      "targetsTotal": 3,
+      "targetsActive": 2,
+      "targetsPlanned": 1,
+      "targets": [
+        {
+          "label": "Campaign attribution / ROI",
+          "status": "active",
+          "mode": "agentic",
+          "riskTier": null,
+          "uiSurface": "/app/seo",
+          "requiredTools": [],
+          "evaluator": null,
+          "coveredBy": "fetch_seo_revenue_attribution",
+          "why": "Tie spend to conversions across channels."
+        },
+        {
+          "label": "Audience segmentation",
+          "status": "active",
+          "mode": "assisted",
+          "riskTier": null,
+          "uiSurface": "/app/crm",
+          "requiredTools": [],
+          "evaluator": null,
+          "coveredBy": "tag_contact",
+          "why": "Group contacts for targeted messaging."
+        },
+        {
+          "label": "Ad-spend optimization",
+          "status": "planned",
+          "mode": "assisted_approval",
+          "riskTier": 3,
+          "uiSurface": "/app/marketing",
+          "requiredTools": [
+            "social_get_analytics",
+            "comms_send_broadcast",
+            "draft_campaign_bundle"
+          ],
+          "evaluator": "Backtest reallocation vs 90d ROAS; budget-cap + policy BLOCKING",
+          "coveredBy": null,
+          "why": "Close the loop from spend to conversion; reallocation moves budget so it stays approval-gated."
+        }
+      ],
+      "tools": [
+        {
+          "name": "draft_followup_message",
+          "description": "Draft a follow-up message for a contact based on their history and engagement status.",
+          "family": "draft",
+          "riskTier": 1,
+          "mode": "assisted",
+          "route": "/app/marketing",
+          "fullRoute": "/app/marketing"
+        },
+        {
+          "name": "draft_campaign_bundle",
+          "description": "Draft a complete campaign bundle — subject line, email body, and CTA — for a given objective.",
+          "family": "draft",
+          "riskTier": 1,
+          "mode": "assisted",
+          "route": "/app/marketing",
+          "fullRoute": "/app/marketing"
+        },
+        {
+          "name": "queue_campaign",
+          "description": "Queue an existing draft campaign for scheduled sending at a specified time.",
+          "family": "execute",
+          "riskTier": 3,
+          "mode": "assisted_approval",
+          "route": "/app/marketing",
+          "fullRoute": "/app/marketing"
+        },
+        {
+          "name": "send_message_with_approval",
+          "description": "Send a message to a contact (email/WhatsApp). Requires approval for Tier 3+.",
+          "family": "execute",
+          "riskTier": 3,
+          "mode": "assisted_approval",
+          "route": "/app/marketing",
+          "fullRoute": "/app/marketing"
+        },
+        {
+          "name": "marketing_create_campaign",
+          "description": "Create a new email marketing campaign (draft).",
+          "family": "crud",
+          "riskTier": 1,
+          "mode": "assisted",
+          "route": "/app/marketing",
+          "fullRoute": "/app/marketing"
+        },
+        {
+          "name": "marketing_send_campaign",
+          "description": "Send an existing email campaign to contacts.",
+          "family": "execute",
+          "riskTier": 4,
+          "mode": "human_gated",
+          "route": "/app/marketing",
+          "fullRoute": "/app/marketing"
+        },
+        {
+          "name": "marketing_list_campaigns",
+          "description": "List email marketing campaigns.",
+          "family": "crud",
+          "riskTier": 1,
+          "mode": "assisted",
+          "route": "/app/marketing",
+          "fullRoute": "/app/marketing"
+        },
+        {
+          "name": "social_create_post",
+          "description": "Create a new social media post (draft or scheduled).",
+          "family": "crud",
+          "riskTier": 1,
+          "mode": "assisted",
+          "route": "/app/marketing",
+          "fullRoute": "/app/marketing"
+        },
+        {
+          "name": "social_publish_post",
+          "description": "Publish a social media post immediately.",
+          "family": "execute",
+          "riskTier": 4,
+          "mode": "human_gated",
+          "route": "/app/marketing",
+          "fullRoute": "/app/marketing"
+        },
+        {
+          "name": "social_list_posts",
+          "description": "List social media posts.",
+          "family": "crud",
+          "riskTier": 1,
+          "mode": "assisted",
+          "route": "/app/marketing",
+          "fullRoute": "/app/marketing"
+        },
+        {
+          "name": "fetch_seo_dashboard",
+          "description": "Get the SEO dashboard: pages indexed, tracked keywords, ranking trends, open issues, top traffic, and revenue from organic search.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/seo",
+          "fullRoute": "/app/seo"
+        },
+        {
+          "name": "fetch_seo_keywords",
+          "description": "List tracked SEO keywords with current ranking, position changes, trend (improving/declining/stable), and clicks.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/seo",
+          "fullRoute": "/app/seo"
+        },
+        {
+          "name": "fetch_seo_issues",
+          "description": "Show open SEO issues — missing titles, missing meta descriptions, thin content, indexing problems — sorted by severity.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/seo",
+          "fullRoute": "/app/seo"
+        },
+        {
+          "name": "fetch_content_gaps",
+          "description": "Detect content gaps — keywords with high opportunity (no page targeting them, ranking on page 2-3, or high impressions with low CTR).",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/seo",
+          "fullRoute": "/app/seo"
+        },
+        {
+          "name": "fetch_seo_revenue_attribution",
+          "description": "Show revenue attributed to organic search traffic — top revenue pages, total organic sessions, conversion rate, and revenue.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/seo",
+          "fullRoute": "/app/seo"
+        },
+        {
+          "name": "sync_seo_pages",
+          "description": "Crawl the storefront to refresh the SEO page inventory and re-detect issues. Safe and idempotent.",
+          "family": "organize",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/seo",
+          "fullRoute": "/app/seo"
+        },
+        {
+          "name": "seo_apply_remediation",
+          "description": "Fix an open SEO issue: applies meta title/description/H1 updates to the affected page (LLM-drafted from page + keyword context when not supplied) and marks the issue resolved. Use fetch_seo_issues to find candidates.",
+          "family": "organize",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/seo",
+          "fullRoute": "/app/seo"
+        },
+        {
+          "name": "generate_content_brief",
+          "description": "Generate an AI-powered SEO content brief for a target keyword — outline, meta tags, search intent, internal links.",
+          "family": "draft",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/seo",
+          "fullRoute": "/app/seo"
+        },
+        {
+          "name": "content_list_requests",
+          "description": "List content requests for the business with optional status filter. Returns pipeline items with status, priority, due date, and assignees.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/content-ops",
+          "fullRoute": "/app/content-ops"
+        },
+        {
+          "name": "content_get_request",
+          "description": "Get a single content request by ID with full details including status history, assigned team members, and delivery package.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/content-ops",
+          "fullRoute": "/app/content-ops"
+        },
+        {
+          "name": "content_create_request",
+          "description": "Create a new content request — blog post, social content, email, video script, flyer, etc. Sets status to DRAFT.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/content-ops",
+          "fullRoute": "/app/content-ops"
+        },
+        {
+          "name": "content_assign_request",
+          "description": "Assign a content request to team members and transition status to ASSIGNED.",
+          "family": "organize",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/content-ops",
+          "fullRoute": "/app/content-ops"
+        },
+        {
+          "name": "content_transition_status",
+          "description": "Transition a content request to a new status (e.g. DRAFT → SUBMITTED → ASSIGNED → IN_PRODUCTION → INTERNAL_REVIEW → USER_REVIEW → APPROVED → UPLOADED_TO_DRIVE → DELIVERED).",
+          "family": "organize",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/content-ops",
+          "fullRoute": "/app/content-ops"
+        },
+        {
+          "name": "content_submit_for_review",
+          "description": "Submit a content request for internal review (transitions IN_PRODUCTION → INTERNAL_REVIEW).",
+          "family": "organize",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/content-ops",
+          "fullRoute": "/app/content-ops"
+        },
+        {
+          "name": "content_upload_deliverables",
+          "description": "Upload deliverable file IDs to a content request (requires APPROVED status). Transitions to UPLOADED_TO_DRIVE.",
+          "family": "execute",
+          "riskTier": 3,
+          "mode": "assisted_approval",
+          "route": "/app/content-ops",
+          "fullRoute": "/app/content-ops"
+        },
+        {
+          "name": "content_deliver_request",
+          "description": "Mark a content request as delivered (requires UPLOADED_TO_DRIVE status). Final step in the pipeline.",
+          "family": "execute",
+          "riskTier": 3,
+          "mode": "assisted_approval",
+          "route": "/app/content-ops",
+          "fullRoute": "/app/content-ops"
+        },
+        {
+          "name": "drive_create_folder",
+          "description": "Create a folder in Google Drive for the business. Returns the folder ID.",
+          "family": "organize",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/content-ops",
+          "fullRoute": "/app/content-ops"
+        },
+        {
+          "name": "drive_create_document",
+          "description": "Create a Google Doc in Drive for the business. Returns the document ID.",
+          "family": "organize",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/content-ops",
+          "fullRoute": "/app/content-ops"
+        },
+        {
+          "name": "comms_send_broadcast",
+          "description": "Broadcast a message to a customer segment over email, WhatsApp, or SMS.",
+          "family": "execute",
+          "riskTier": 3,
+          "mode": "assisted_approval",
+          "route": "/app/marketing",
+          "fullRoute": "/app/marketing"
+        },
+        {
+          "name": "social_get_analytics",
+          "description": "Social media analytics overview: followers, engagement, and post performance across connected platforms.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/marketing",
+          "fullRoute": "/app/marketing"
+        },
+        {
+          "name": "marketing_update_campaign",
+          "description": "Update an email campaign name, subject, body, or scheduled send date.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/marketing",
+          "fullRoute": "/app/marketing"
+        },
+        {
+          "name": "social_update_post",
+          "description": "Update a social post content or scheduled time.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/marketing",
+          "fullRoute": "/app/marketing"
+        }
+      ],
+      "capabilities": [
+        {
+          "name": "create_post",
+          "description": "Create a new content post or article.",
+          "module": "content",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "schedule_post",
+          "description": "Schedule an existing draft post for future publication.",
+          "module": "content",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "publish_post",
+          "description": "Immediately publish a draft post.",
+          "module": "content",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "create_campaign",
+          "description": "Create an email marketing campaign.",
+          "module": "content",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "send_campaign",
+          "description": "Dispatch an email campaign to its segment.",
+          "module": "content",
+          "requiresApproval": true,
+          "mode": "assisted_approval"
+        },
+        {
+          "name": "generate_content",
+          "description": "Use AI to generate a content draft.",
+          "module": "content",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "update_post",
+          "description": "Edit an existing post.",
+          "module": "content",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "delete_post",
+          "description": "Remove a post permanently.",
+          "module": "content",
+          "requiresApproval": true,
+          "mode": "assisted_approval"
+        },
+        {
+          "name": "get_content_calendar",
+          "description": "Retrieve scheduled posts for a date range.",
+          "module": "content",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_campaign_performance",
+          "description": "Fetch open/click metrics for a campaign.",
+          "module": "content",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_recent_posts",
+          "description": "List recently created or published posts.",
+          "module": "content",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_drafts",
+          "description": "List all unpublished draft posts.",
+          "module": "content",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "connect_account",
+          "description": "Link a social media account.",
+          "module": "social",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "disconnect_account",
+          "description": "Unlink a connected social account.",
+          "module": "social",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "schedule_social_post",
+          "description": "Queue a post for a social platform.",
+          "module": "social",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "publish_now",
+          "description": "Immediately publish to a social platform.",
+          "module": "social",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "reply_to_comment",
+          "description": "Respond to a comment on a social post.",
+          "module": "social",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "delete_social_post",
+          "description": "Remove a published social post.",
+          "module": "social",
+          "requiresApproval": true,
+          "mode": "assisted_approval"
+        },
+        {
+          "name": "get_connected_accounts",
+          "description": "List linked social media accounts.",
+          "module": "social",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_scheduled_posts",
+          "description": "View upcoming scheduled social posts.",
+          "module": "social",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_engagement_stats",
+          "description": "Aggregate engagement metrics.",
+          "module": "social",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_follower_growth",
+          "description": "Track follower/subscriber growth over time.",
+          "module": "social",
+          "requiresApproval": false,
+          "mode": "agentic"
+        }
+      ]
+    },
+    {
+      "id": "commerce",
+      "label": "Commerce & Fulfillment",
+      "toolCount": 47,
+      "capCount": 15,
+      "modeCounts": {
+        "agentic": 29,
+        "assisted": 28,
+        "assisted_approval": 5
+      },
+      "uiSurfaces": [
+        "/app/commerce",
+        "/app/inventory",
+        "/app/marketplace",
+        "/app/procurement",
+        "/app/store"
+      ],
+      "targetsTotal": 3,
+      "targetsActive": 1,
+      "targetsPlanned": 2,
+      "targets": [
+        {
+          "label": "Demand forecasting / reorder point",
+          "status": "active",
+          "mode": "agentic",
+          "riskTier": null,
+          "uiSurface": "/app/inventory",
+          "requiredTools": [],
+          "evaluator": null,
+          "coveredBy": "inventory_low_stock_alerts",
+          "why": "Forecast demand and trigger reorders before stockout."
+        },
+        {
+          "label": "Dynamic pricing",
+          "status": "planned",
+          "mode": "human_gated",
+          "riskTier": 4,
+          "uiSurface": "/app/commerce",
+          "requiredTools": [
+            "fetch_revenue_risk",
+            "commerce_convert_quote",
+            "commerce_create_invoice"
+          ],
+          "evaluator": "Margin-floor + price-change policy BLOCKING; human sign-off",
+          "coveredBy": null,
+          "why": "Margin/velocity-aware pricing directly affects revenue; must stay human-decided."
+        },
+        {
+          "label": "Supplier risk scoring",
+          "status": "planned",
+          "mode": "agentic",
+          "riskTier": 1,
+          "uiSurface": "/app/procurement",
+          "requiredTools": [
+            "procurement_get_request",
+            "procurement_get_stats",
+            "procurement_list_requests"
+          ],
+          "evaluator": "Score reproducibility; source-provenance check",
+          "coveredBy": null,
+          "why": "Score vendors on reliability/financials before commitment."
+        }
+      ],
+      "tools": [
+        {
+          "name": "fetch_revenue_risk",
+          "description": "Identify revenue risk indicators — overdue invoices, declining trends, concentration risk, and cash flow alerts.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/commerce",
+          "fullRoute": "/app/commerce"
+        },
+        {
+          "name": "fetch_storefront_quality",
+          "description": "Assess public storefront readiness — product completeness, missing descriptions, pricing gaps, and SEO signals.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/store",
+          "fullRoute": "/app/store"
+        },
+        {
+          "name": "draft_payment_reminder",
+          "description": "Draft a payment reminder message for an overdue or upcoming invoice.",
+          "family": "draft",
+          "riskTier": 1,
+          "mode": "assisted",
+          "route": "/app/commerce",
+          "fullRoute": "/app/commerce"
+        },
+        {
+          "name": "draft_storefront_copy",
+          "description": "Draft compelling storefront product/service description copy.",
+          "family": "draft",
+          "riskTier": 1,
+          "mode": "assisted",
+          "route": "/app/store",
+          "fullRoute": "/app/store"
+        },
+        {
+          "name": "apply_storefront_recommendation",
+          "description": "Apply AI-generated recommendations to storefront products (update descriptions, prices, categories).",
+          "family": "execute",
+          "riskTier": 3,
+          "mode": "assisted_approval",
+          "route": "/app/store",
+          "fullRoute": "/app/store"
+        },
+        {
+          "name": "inventory_list_stock",
+          "description": "List stock on hand — quantity per product per warehouse. Use this to answer \"how many do we have\" and \"where is it\".",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/inventory",
+          "fullRoute": "/app/inventory"
+        },
+        {
+          "name": "inventory_summary",
+          "description": "Total stock value, unit counts and warehouse breakdown. The whole-inventory picture rather than a per-product one.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/inventory",
+          "fullRoute": "/app/inventory"
+        },
+        {
+          "name": "inventory_low_stock_alerts",
+          "description": "Products at or below their reorder point, and what is at risk of going out of stock. Use this to decide what to buy.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/inventory",
+          "fullRoute": "/app/inventory"
+        },
+        {
+          "name": "inventory_list_movements",
+          "description": "Recent stock movements — every adjustment, transfer and receipt with its reason code and note. This is the audit trail for \"why did the count change\".",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/inventory",
+          "fullRoute": "/app/inventory"
+        },
+        {
+          "name": "inventory_list_warehouses",
+          "description": "List active warehouses with their stock. Call this before a transfer so you have real warehouse ids.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/inventory",
+          "fullRoute": "/app/inventory"
+        },
+        {
+          "name": "inventory_adjust_stock",
+          "description": "Change the quantity of one stock record, with a reason. Positive adds, negative removes. Writes a StockMovement so the change is auditable — never adjust to \"correct\" a number without knowing why it moved.",
+          "family": "organize",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/inventory",
+          "fullRoute": "/app/inventory"
+        },
+        {
+          "name": "inventory_transfer_stock",
+          "description": "Move stock of one product between two warehouses. Call inventory_list_warehouses first for the ids.",
+          "family": "organize",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/inventory",
+          "fullRoute": "/app/inventory"
+        },
+        {
+          "name": "inventory_list_purchase_orders",
+          "description": "List purchase orders raised with suppliers, optionally by status. Use this to see what stock is on its way.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/inventory",
+          "fullRoute": "/app/inventory"
+        },
+        {
+          "name": "inventory_create_purchase_order",
+          "description": "Raise a purchase order with a supplier. Totals are computed from the line items.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/inventory",
+          "fullRoute": "/app/inventory"
+        },
+        {
+          "name": "inventory_advance_purchase_order",
+          "description": "Move a purchase order to its next state. RECEIVED is the one that matters — it is what brings the stock onto the books.",
+          "family": "execute",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/inventory",
+          "fullRoute": "/app/inventory"
+        },
+        {
+          "name": "commerce_create_invoice",
+          "description": "Create a new invoice for a contact.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/commerce",
+          "fullRoute": "/app/commerce"
+        },
+        {
+          "name": "commerce_list_invoices",
+          "description": "List invoices with optional status filter.",
+          "family": "crud",
+          "riskTier": 1,
+          "mode": "assisted",
+          "route": "/app/commerce",
+          "fullRoute": "/app/commerce"
+        },
+        {
+          "name": "commerce_mark_invoice_paid",
+          "description": "Mark an invoice as paid.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/commerce",
+          "fullRoute": "/app/commerce"
+        },
+        {
+          "name": "commerce_create_product",
+          "description": "Create a new product or service in the catalog.",
+          "family": "crud",
+          "riskTier": 1,
+          "mode": "assisted",
+          "route": "/app/commerce",
+          "fullRoute": "/app/commerce"
+        },
+        {
+          "name": "commerce_create_quote",
+          "description": "Create a quote for a contact.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/commerce",
+          "fullRoute": "/app/commerce"
+        },
+        {
+          "name": "commerce_delete_invoice",
+          "description": "Delete an invoice.",
+          "family": "crud",
+          "riskTier": 3,
+          "mode": "assisted_approval",
+          "route": "/app/commerce",
+          "fullRoute": "/app/commerce"
+        },
+        {
+          "name": "marketplace_list_listings",
+          "description": "List this business’s marketplace listings with status, pricing, and stock.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/marketplace",
+          "fullRoute": "/app/marketplace"
+        },
+        {
+          "name": "marketplace_list_orders",
+          "description": "List this business’s recent marketplace orders with totals and fulfilment state.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/marketplace",
+          "fullRoute": "/app/marketplace"
+        },
+        {
+          "name": "store_list_products",
+          "description": "List products in the storefront/store with pricing and active status. Does NOT include stock levels — stock lives in InventoryStock and is not joined here.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/store",
+          "fullRoute": "/app/store"
+        },
+        {
+          "name": "store_list_recent_orders",
+          "description": "List recent storefront/commerce orders (paid invoices act as orders) with totals.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/store",
+          "fullRoute": "/app/store"
+        },
+        {
+          "name": "suppliers_list_connections",
+          "description": "List active supplier connections — who we source from, how many products each carries, and connection health. Credentials are never returned.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/procurement",
+          "fullRoute": "/app/procurement"
+        },
+        {
+          "name": "suppliers_get_connection",
+          "description": "Get one supplier connection by id. Credentials are never returned.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/procurement",
+          "fullRoute": "/app/procurement"
+        },
+        {
+          "name": "suppliers_list_products",
+          "description": "List a supplier's catalogue — what we could source from them.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/procurement",
+          "fullRoute": "/app/procurement"
+        },
+        {
+          "name": "suppliers_get_cost_profile",
+          "description": "Landed cost profile for one of our products — what it actually costs us once supplier price, shipping and fees are counted.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/store",
+          "fullRoute": "/app/store"
+        },
+        {
+          "name": "suppliers_get_margins",
+          "description": "Margin history for one of our products — how the gap between cost and price has moved over time.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/store",
+          "fullRoute": "/app/store"
+        },
+        {
+          "name": "suppliers_create_product_from_supplier",
+          "description": "Create one of our sellable products from an item in a supplier's catalogue, optionally overriding name, price, category or fulfilment model.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/store",
+          "fullRoute": "/app/store"
+        },
+        {
+          "name": "commerce_convert_quote",
+          "description": "Convert an accepted quote into an invoice.",
+          "family": "organize",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/commerce",
+          "fullRoute": "/app/commerce"
+        },
+        {
+          "name": "commerce_update_invoice",
+          "description": "Update an existing invoice (status, due date, notes). Does NOT modify line items.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/commerce",
+          "fullRoute": "/app/commerce"
+        },
+        {
+          "name": "commerce_update_product",
+          "description": "Update a product name, price, description, category, or active status.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/store",
+          "fullRoute": "/app/store"
+        },
+        {
+          "name": "commerce_send_invoice",
+          "description": "Send an invoice to the customer via email (marks status as SENT).",
+          "family": "execute",
+          "riskTier": 3,
+          "mode": "assisted_approval",
+          "route": "/app/commerce",
+          "fullRoute": "/app/commerce"
+        },
+        {
+          "name": "procurement_list_requests",
+          "description": "List procurement requests for the business, most recent first.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/procurement",
+          "fullRoute": "/app/procurement"
+        },
+        {
+          "name": "procurement_get_request",
+          "description": "Get full detail on a single procurement request, including its brief and recommended packages.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/procurement",
+          "fullRoute": "/app/procurement"
+        },
+        {
+          "name": "procurement_list_suppliers",
+          "description": "List active connected suppliers/vendors available to fulfill a procurement request.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/procurement",
+          "fullRoute": "/app/procurement/suppliers"
+        },
+        {
+          "name": "procurement_get_stats",
+          "description": "Get procurement spend and pipeline stats: totals by status, priority, category, average and total budget, pending approvals.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/procurement",
+          "fullRoute": "/app/procurement"
+        },
+        {
+          "name": "procurement_create_request",
+          "description": "Create a new procurement request describing a business need in plain language (e.g. \"need a new POS printer\", \"want a branding refresh\"). Generates an interpreted category and recommended packages.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/procurement",
+          "fullRoute": "/app/procurement/new"
+        },
+        {
+          "name": "procurement_update_request",
+          "description": "Update a procurement request's priority, internal notes, or brief. Does not change approval status.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/procurement",
+          "fullRoute": "/app/procurement"
+        },
+        {
+          "name": "procurement_submit_for_review",
+          "description": "Submit a draft procurement request for business-owner review and approval. Generates a summary brief. Does NOT approve it — a human must still approve or reject.",
+          "family": "execute",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/procurement",
+          "fullRoute": "/app/procurement"
+        },
+        {
+          "name": "procurement_select_vendor",
+          "description": "Select which connected supplier/vendor will fulfill an approved procurement request.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/procurement",
+          "fullRoute": "/app/procurement"
+        },
+        {
+          "name": "procurement_issue_po",
+          "description": "Issue a purchase order to the selected vendor for an approved procurement request. This commits the business to the purchase — requires a vendor to already be selected.",
+          "family": "execute",
+          "riskTier": 3,
+          "mode": "assisted_approval",
+          "route": "/app/procurement",
+          "fullRoute": "/app/procurement"
+        },
+        {
+          "name": "procurement_acknowledge_vendor",
+          "description": "Record that the vendor has acknowledged/confirmed the purchase order.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/procurement",
+          "fullRoute": "/app/procurement"
+        },
+        {
+          "name": "procurement_mark_fulfilled",
+          "description": "Mark a procurement request as fulfilled once the order has arrived / the work is delivered.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/procurement",
+          "fullRoute": "/app/procurement"
+        },
+        {
+          "name": "procurement_mark_invoiced",
+          "description": "Mark a procurement request as invoiced once the supplier has sent their invoice.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/procurement",
+          "fullRoute": "/app/procurement"
+        }
+      ],
+      "capabilities": [
+        {
+          "name": "create_invoice",
+          "description": "Generate a new invoice for a contact.",
+          "module": "commerce",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "send_invoice",
+          "description": "Deliver an existing invoice via email.",
+          "module": "commerce",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "get_invoice",
+          "description": "Retrieve a single invoice by ID.",
+          "module": "commerce",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "list_invoices",
+          "description": "List invoices with optional filters.",
+          "module": "commerce",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "create_product",
+          "description": "Add a new product or service to the catalog.",
+          "module": "commerce",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "get_product",
+          "description": "Fetch a product by ID or SKU.",
+          "module": "commerce",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "create_order",
+          "description": "Create a new sales order.",
+          "module": "commerce",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "process_payment",
+          "description": "Record or process a payment against an invoice.",
+          "module": "commerce",
+          "requiresApproval": true,
+          "mode": "assisted_approval"
+        },
+        {
+          "name": "create_quote",
+          "description": "Generate a price quote for a prospect.",
+          "module": "commerce",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "send_quote",
+          "description": "Email a quote to the prospect.",
+          "module": "commerce",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "get_revenue_summary",
+          "description": "Aggregate revenue for a date range.",
+          "module": "commerce",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_outstanding_invoices",
+          "description": "Fetch unpaid or overdue invoices.",
+          "module": "commerce",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_product_catalog",
+          "description": "List all active products and services.",
+          "module": "commerce",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_payment_history",
+          "description": "Retrieve recorded payments for a contact or invoice.",
+          "module": "commerce",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_quote_status",
+          "description": "Check the status of a quote.",
+          "module": "commerce",
+          "requiresApproval": false,
+          "mode": "agentic"
+        }
+      ]
+    },
+    {
+      "id": "finance",
+      "label": "Finance & Accounting",
+      "toolCount": 36,
+      "capCount": 10,
+      "modeCounts": {
+        "agentic": 23,
+        "assisted": 20,
+        "assisted_approval": 3
+      },
+      "uiSurfaces": [
+        "/app/expenses",
+        "/app/finance",
+        "/app/payments",
+        "/app/retainers"
+      ],
+      "targetsTotal": 4,
+      "targetsActive": 3,
+      "targetsPlanned": 1,
+      "targets": [
+        {
+          "label": "Cash-flow forecasting",
+          "status": "active",
+          "mode": "agentic",
+          "riskTier": null,
+          "uiSurface": "/app/commerce",
+          "requiredTools": [],
+          "evaluator": null,
+          "coveredBy": "fetch_revenue_risk",
+          "why": "Project runway and cash position forward."
+        },
+        {
+          "label": "Dunning / collections sequencing",
+          "status": "active",
+          "mode": "assisted_approval",
+          "riskTier": null,
+          "uiSurface": "/app/crm",
+          "requiredTools": [],
+          "evaluator": null,
+          "coveredBy": "sequence_enroll_overdue",
+          "why": "Chase overdue invoices on a compliant cadence."
+        },
+        {
+          "label": "Multi-currency / FX handling",
+          "status": "active",
+          "mode": "assisted",
+          "riskTier": null,
+          "uiSurface": "/app/blueprint",
+          "requiredTools": [],
+          "evaluator": null,
+          "coveredBy": "update_business_blueprint",
+          "why": "Handle non-home-currency invoices and settlement."
+        },
+        {
+          "label": "Tax filing preparation",
+          "status": "planned",
+          "mode": "human_gated",
+          "riskTier": 4,
+          "uiSurface": "/app/finance",
+          "requiredTools": [
+            "finance_list_action_items",
+            "finance_list_bank_accounts",
+            "finance_list_bills"
+          ],
+          "evaluator": "Reconciliation ties to ledger; human + accountant sign-off",
+          "coveredBy": null,
+          "why": "Assemble filings; submission stays human-gated by law."
+        }
+      ],
+      "tools": [
+        {
+          "name": "fetch_expense_pressure",
+          "description": "Analyze expense trends — month-over-month growth, category breakdown, budget pressure, and savings opportunities.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/expenses",
+          "fullRoute": "/app/expenses"
+        },
+        {
+          "name": "payments_list_gateways",
+          "description": "List payment gateways, whether each is connected, and what each supports (transactions, payment links, refunds). Call this before creating a link or issuing a refund — gateways differ and an unconnected one will reject the call.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/payments",
+          "fullRoute": "/app/payments"
+        },
+        {
+          "name": "payments_list_transactions",
+          "description": "List charges and refunds across every connected gateway, newest first. Use this to answer \"did that payment come in\".",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/payments",
+          "fullRoute": "/app/payments"
+        },
+        {
+          "name": "payments_search_transactions",
+          "description": "Find a payment by customer name, email, amount, charge id or invoice id. Use this to locate the charge id a refund needs.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/payments",
+          "fullRoute": "/app/payments"
+        },
+        {
+          "name": "payments_list_links",
+          "description": "List active payment links across connected gateways.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/payments",
+          "fullRoute": "/app/payments"
+        },
+        {
+          "name": "payments_create_link",
+          "description": "Create a payment link a customer can pay through. This does not move money by itself — it creates a way for someone to send it.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/payments",
+          "fullRoute": "/app/payments"
+        },
+        {
+          "name": "payments_revoke_link",
+          "description": "Revoke a payment link so it can no longer be paid.",
+          "family": "organize",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/payments",
+          "fullRoute": "/app/payments"
+        },
+        {
+          "name": "payments_refund_charge",
+          "description": "Refund a charge, in full or in part. This sends money OUT of the business and cannot be undone by any other tool — confirm the charge id and the amount with the owner before calling it. Use payments_search_transactions to find the charge first.",
+          "family": "execute",
+          "riskTier": 3,
+          "mode": "assisted_approval",
+          "route": "/app/payments",
+          "fullRoute": "/app/payments"
+        },
+        {
+          "name": "reconcile_list_unmatched",
+          "description": "List bank lines that have not been matched to a ledger entry yet, for one account. This is the \"what still needs looking at\" list after a statement import.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/finance",
+          "fullRoute": "/app/finance/reconciliation"
+        },
+        {
+          "name": "reconcile_run_auto_match",
+          "description": "Run automatic matching for an account: pair imported bank lines against ledger entries by amount, date proximity and reference. Reports how many matched and how many are still open. Safe to run repeatedly.",
+          "family": "organize",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/finance",
+          "fullRoute": "/app/finance/reconciliation"
+        },
+        {
+          "name": "reconcile_match_line",
+          "description": "Match one specific bank line to one specific ledger transaction, when the automatic pass could not decide. Use reconcile_list_unmatched to get the bank line id first.",
+          "family": "organize",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/finance",
+          "fullRoute": "/app/finance/reconciliation"
+        },
+        {
+          "name": "reconcile_list_statement_sources",
+          "description": "Show where each bank account gets its statements from automatically — a Google Drive folder, a Gmail search, or nothing — and when each was last swept. Use this to answer \"is this account importing on its own yet?\".",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/finance",
+          "fullRoute": "/app/finance/reconciliation"
+        },
+        {
+          "name": "reconcile_connect_statement_source",
+          "description": "Point a bank account at a Google Drive folder or a Gmail search so its statements import themselves nightly. The folder id comes from the Drive URL; the Gmail query is ordinary Gmail search syntax such as \"from:republicbank.com\". Sets one account only — a source belongs to exactly one account, because guessing which account a statement belongs to would post it to the wrong ledger.",
+          "family": "execute",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/finance",
+          "fullRoute": "/app/finance/reconciliation"
+        },
+        {
+          "name": "reconcile_sweep_statements",
+          "description": "Fetch and import any new statements waiting in an account's configured Drive folder or Gmail search, without waiting for the nightly run. This reads Drive or Gmail — it does not contact the bank. Finding nothing is a normal result, not a failure.",
+          "family": "execute",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/finance",
+          "fullRoute": "/app/finance/reconciliation"
+        },
+        {
+          "name": "expenses_list",
+          "description": "List recent expenses with vendor, amount, and category.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/expenses",
+          "fullRoute": "/app/expenses"
+        },
+        {
+          "name": "expenses_create",
+          "description": "Record a new business expense.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/expenses",
+          "fullRoute": "/app/expenses"
+        },
+        {
+          "name": "retainers_list",
+          "description": "List retainer agreements with their periods, most recent first.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/retainers",
+          "fullRoute": "/app/retainers"
+        },
+        {
+          "name": "retainers_get",
+          "description": "Get one retainer agreement by id, including its billing periods.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/retainers",
+          "fullRoute": "/app/retainers"
+        },
+        {
+          "name": "retainers_summary",
+          "description": "How many retainers exist, how many are active, and total retainer revenue.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/retainers",
+          "fullRoute": "/app/retainers"
+        },
+        {
+          "name": "retainers_create",
+          "description": "Create a retainer agreement for a contact. The contact must belong to this business.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/retainers",
+          "fullRoute": "/app/retainers"
+        },
+        {
+          "name": "retainers_update",
+          "description": "Update a retainer agreement — change the fee, included hours, term, or set its status. This is how a retainer is ended; retainers are never deleted.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/retainers",
+          "fullRoute": "/app/retainers"
+        },
+        {
+          "name": "retainers_log_period",
+          "description": "Open a billing period on a retainer and record the hours used. Hours billed and any overage amount are calculated from the agreement, not supplied.",
+          "family": "organize",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/retainers",
+          "fullRoute": "/app/retainers"
+        },
+        {
+          "name": "retainers_update_period",
+          "description": "Update a retainer billing period — correct the hours used, change its status, or attach the invoice it was billed on. The invoice must belong to this business.",
+          "family": "organize",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/retainers",
+          "fullRoute": "/app/retainers"
+        },
+        {
+          "name": "finance_view_receivables",
+          "description": "View accounts receivable aging report — outstanding invoices grouped by overdue buckets.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/finance",
+          "fullRoute": "/app/finance"
+        },
+        {
+          "name": "finance_list_action_items",
+          "description": "List finance action items (AI-detected anomalies, cashflow risks, missing receipts, etc.).",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/finance",
+          "fullRoute": "/app/finance"
+        },
+        {
+          "name": "finance_list_bank_accounts",
+          "description": "List connected financial/bank accounts with balances.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/finance",
+          "fullRoute": "/app/finance"
+        },
+        {
+          "name": "finance_auto_match_bank",
+          "description": "Auto-match unmatched bank transactions against ledger entries (receipts/payments) for a bank account.",
+          "family": "organize",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/finance",
+          "fullRoute": "/app/finance"
+        },
+        {
+          "name": "finance_list_coa",
+          "description": "List the chart of accounts for the business.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/finance",
+          "fullRoute": "/app/finance"
+        },
+        {
+          "name": "finance_create_coa_account",
+          "description": "Create a new account in the chart of accounts.",
+          "family": "organize",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/finance",
+          "fullRoute": "/app/finance"
+        },
+        {
+          "name": "finance_list_bills",
+          "description": "List vendor bills (accounts payable) with status.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/finance",
+          "fullRoute": "/app/finance"
+        },
+        {
+          "name": "finance_create_bill",
+          "description": "Record a vendor bill (an expense to pay later).",
+          "family": "organize",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/finance",
+          "fullRoute": "/app/finance"
+        },
+        {
+          "name": "finance_pay_bill",
+          "description": "Mark a vendor bill as paid (records the payment).",
+          "family": "execute",
+          "riskTier": 3,
+          "mode": "assisted_approval",
+          "route": "/app/finance",
+          "fullRoute": "/app/finance"
+        },
+        {
+          "name": "finance_view_payables",
+          "description": "View accounts payable aging — outstanding bills grouped by overdue buckets, plus vendor balances.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/finance",
+          "fullRoute": "/app/finance"
+        },
+        {
+          "name": "finance_post_journal_entry",
+          "description": "Post a balanced double-entry journal entry (debits and credits must sum to the entry amount).",
+          "family": "organize",
+          "riskTier": 3,
+          "mode": "assisted_approval",
+          "route": "/app/finance",
+          "fullRoute": "/app/finance"
+        },
+        {
+          "name": "payroll_list_runs",
+          "description": "List payroll runs with status and totals.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/finance",
+          "fullRoute": "/app/finance"
+        },
+        {
+          "name": "payroll_get_run",
+          "description": "Get a payroll run with per-staff line items (hours worked, gross pay).",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/finance",
+          "fullRoute": "/app/finance"
+        }
+      ],
+      "capabilities": [
+        {
+          "name": "record_expense",
+          "description": "Log a business expense.",
+          "module": "finance",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "create_budget",
+          "description": "Set a spending budget for a category.",
+          "module": "finance",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "update_budget",
+          "description": "Modify an existing budget.",
+          "module": "finance",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "delete_expense",
+          "description": "Remove an expense record.",
+          "module": "finance",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "categorize_transaction",
+          "description": "Assign a category to an uncategorized transaction.",
+          "module": "finance",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "generate_pnl",
+          "description": "Generate a profit and loss statement.",
+          "module": "finance",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "get_expense_summary",
+          "description": "Aggregate expenses by category for a period.",
+          "module": "finance",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_budget_status",
+          "description": "Check budget utilization vs limits.",
+          "module": "finance",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_cashflow",
+          "description": "Cash flow projection and history.",
+          "module": "finance",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_financial_health",
+          "description": "Overall financial health score and metrics.",
+          "module": "finance",
+          "requiresApproval": false,
+          "mode": "agentic"
+        }
+      ]
+    },
+    {
+      "id": "operations",
+      "label": "Operations & Delivery",
+      "toolCount": 45,
+      "capCount": 36,
+      "modeCounts": {
+        "agentic": 34,
+        "assisted": 41,
+        "human_gated": 1,
+        "assisted_approval": 5
+      },
+      "uiSurfaces": [
+        "/app/automations",
+        "/app/blueprint",
+        "/app/projects",
+        "/app/structure",
+        "/app/time-tracking"
+      ],
+      "targetsTotal": 2,
+      "targetsActive": 1,
+      "targetsPlanned": 1,
+      "targets": [
+        {
+          "label": "Capacity / resource planning",
+          "status": "active",
+          "mode": "agentic",
+          "riskTier": null,
+          "uiSurface": "/app/bookings",
+          "requiredTools": [],
+          "evaluator": null,
+          "coveredBy": "fetch_schedule_health",
+          "why": "Match staff/resource capacity to committed work."
+        },
+        {
+          "label": "SLA monitoring",
+          "status": "planned",
+          "mode": "agentic",
+          "riskTier": 1,
+          "uiSurface": "/app/projects",
+          "requiredTools": [
+            "fetch_project_status",
+            "projects_get_budget",
+            "projects_get_timeline"
+          ],
+          "evaluator": "Breach-threshold unit tests; false-positive ceiling",
+          "coveredBy": null,
+          "why": "Catch SLA breach risk before it happens."
+        }
+      ],
+      "tools": [
+        {
+          "name": "fetch_project_status",
+          "description": "Get delivery status across all projects — health scores, overdue milestones, at-risk deliverables.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/projects",
+          "fullRoute": "/app/projects"
+        },
+        {
+          "name": "draft_project_update",
+          "description": "Draft a project status update message suitable for sharing with the client.",
+          "family": "draft",
+          "riskTier": 1,
+          "mode": "assisted",
+          "route": "/app/projects",
+          "fullRoute": "/app/projects"
+        },
+        {
+          "name": "create_task",
+          "description": "Create a task for a contact. Use this for follow-up tasks, reminders, or action items.",
+          "family": "organize",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/projects",
+          "fullRoute": "/app/projects"
+        },
+        {
+          "name": "create_followup_queue",
+          "description": "Bulk-create follow-up tasks for all stale contacts (leads with no activity in N days).",
+          "family": "organize",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/automations",
+          "fullRoute": "/app/automations"
+        },
+        {
+          "name": "enable_flow_with_approval",
+          "description": "Enable an automation flow/playbook. Requires approval as it activates automated actions.",
+          "family": "execute",
+          "riskTier": 4,
+          "mode": "human_gated",
+          "route": "/app/automations",
+          "fullRoute": "/app/automations"
+        },
+        {
+          "name": "automations_create_playbook",
+          "description": "Create a new automation playbook.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/automations",
+          "fullRoute": "/app/automations"
+        },
+        {
+          "name": "automations_list_playbooks",
+          "description": "List automation playbooks.",
+          "family": "crud",
+          "riskTier": 1,
+          "mode": "assisted",
+          "route": "/app/automations",
+          "fullRoute": "/app/automations"
+        },
+        {
+          "name": "automations_toggle_playbook",
+          "description": "Enable or disable an automation playbook.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/automations",
+          "fullRoute": "/app/automations"
+        },
+        {
+          "name": "delegation_payment_recovery",
+          "description": "Scan overdue invoices and create escalating payment recovery tasks with reminders.",
+          "family": "execute",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/automations",
+          "fullRoute": "/app/automations"
+        },
+        {
+          "name": "delegation_lead_reactivation",
+          "description": "Identify stale leads and create re-engagement tasks with lifecycle stage updates.",
+          "family": "execute",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/automations",
+          "fullRoute": "/app/automations"
+        },
+        {
+          "name": "delegation_post_purchase",
+          "description": "Send thank-you messages, review requests, and cross-sell prompts after purchases.",
+          "family": "execute",
+          "riskTier": 1,
+          "mode": "assisted",
+          "route": "/app/automations",
+          "fullRoute": "/app/automations"
+        },
+        {
+          "name": "delegation_booking_prep",
+          "description": "Send preparation reminders before appointments and follow-up messages after completion.",
+          "family": "execute",
+          "riskTier": 1,
+          "mode": "assisted",
+          "route": "/app/automations",
+          "fullRoute": "/app/automations"
+        },
+        {
+          "name": "delegation_weekly_hygiene",
+          "description": "Clean up stale data, flag overdue items, incomplete profiles, and automation gaps.",
+          "family": "organize",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/automations",
+          "fullRoute": "/app/automations"
+        },
+        {
+          "name": "projects_list",
+          "description": "List active projects with health, progress, and overdue counts.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/projects",
+          "fullRoute": "/app/projects"
+        },
+        {
+          "name": "projects_list_tasks",
+          "description": "List tasks for a project (or across projects) with due dates and completion state.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/projects",
+          "fullRoute": "/app/projects"
+        },
+        {
+          "name": "projects_create_task",
+          "description": "Create a new task on a project.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/projects",
+          "fullRoute": "/app/projects"
+        },
+        {
+          "name": "projects_complete_task",
+          "description": "Mark a project task as completed.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/projects",
+          "fullRoute": "/app/projects"
+        },
+        {
+          "name": "time_start_timer",
+          "description": "Start a time tracking timer for a task or project. Creates an open time entry.",
+          "family": "organize",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/time-tracking",
+          "fullRoute": "/app/time-tracking"
+        },
+        {
+          "name": "time_stop_timer",
+          "description": "Stop the currently running timer and record the duration.",
+          "family": "organize",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/time-tracking",
+          "fullRoute": "/app/time-tracking"
+        },
+        {
+          "name": "time_log_entry",
+          "description": "Log a completed time entry manually (e.g. after-the-fact logging).",
+          "family": "organize",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/time-tracking",
+          "fullRoute": "/app/time-tracking"
+        },
+        {
+          "name": "projects_get_budget",
+          "description": "Get a project budget vs actuals breakdown.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/projects",
+          "fullRoute": "/app/projects"
+        },
+        {
+          "name": "projects_get_timeline",
+          "description": "Get a project timeline with milestones.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/projects",
+          "fullRoute": "/app/projects"
+        },
+        {
+          "name": "time_update_entry",
+          "description": "Edit a logged time entry (duration, notes, billable).",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/time-tracking",
+          "fullRoute": "/app/time-tracking"
+        },
+        {
+          "name": "time_mark_billed",
+          "description": "Mark time entries as billed (linked to an invoice).",
+          "family": "organize",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/time-tracking",
+          "fullRoute": "/app/time-tracking"
+        },
+        {
+          "name": "payroll_list_rates",
+          "description": "List current pay rates per staff position (latest effective rate per assignment).",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/structure",
+          "fullRoute": "/app/structure"
+        },
+        {
+          "name": "performance_scorecard",
+          "description": "Compute a staff member's performance scorecard for a period: on-time task completion, hours utilization, approval responsiveness, and an overall score (0-100).",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/structure",
+          "fullRoute": "/app/structure"
+        },
+        {
+          "name": "performance_team_summary",
+          "description": "Performance scorecards for every active staff position over a period, ranked by overall score.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/structure",
+          "fullRoute": "/app/structure"
+        },
+        {
+          "name": "performance_trend",
+          "description": "Get a staff member's performance trend from saved snapshots (recent periods first).",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/structure",
+          "fullRoute": "/app/structure"
+        },
+        {
+          "name": "projects_update_task",
+          "description": "Update a project task title, due date, priority, completion status, or reassign it to a different user or staff member (e.g. to rebalance workload when someone is overloaded).",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/projects",
+          "fullRoute": "/app/projects"
+        },
+        {
+          "name": "projects_delete_task",
+          "description": "Soft-delete a project task.",
+          "family": "crud",
+          "riskTier": 3,
+          "mode": "assisted_approval",
+          "route": "/app/projects",
+          "fullRoute": "/app/projects"
+        },
+        {
+          "name": "update_business_blueprint",
+          "description": "ALWAYS use this tool first when the user shares any business fact while the Business Genome is incomplete. Update the Business Blueprint (Business Genome) with structured facts learned during conversation. Wrap all section updates under a single \"patch\" key. Supported sections: identity (name, industry, archetype, country), operatingModel (revenueModel, deliveryMode, serviceArea, channels, teamSize, capacity), goals (northStar, ninetyDayGoals, twelveMonthGoals), constraints (budgetRange, timeCommitment, riskTolerance), brand (voice, tone, valueProps, doNotSay), customerModel (idealCustomer, segments, painPoints), financials (currency, pricingModel, avgTicket, monthlyTarget), projectionProfile (startupCapital, startupCosts, monthlyFixedCosts, variableCostPercent), legalProfile (country, recommendedEntityType, regulatedIndustry), registrationProfile (companiesRegistryStatus, birStatus, nisEmployerStatus, vatStatus, businessBankStatus), ownershipProfile (hasPartners, owners), marketProfile (targetGeography, marketCategory, marketStage, trends, barriersToEntry), offerArchitecture (coreOffer, offerLadder, pricingTiers, upsells), salesSystem (salesChannels, pipelineStages), marketingSystem (channels, contentPillars, launchPlan), operationsSystem (coreWorkflows, dailyChecklist, weeklyChecklist, fulfillmentProcess, customerSupportProcess, vendorProcess), riskProfile (financialRisks, legalRisks, marketRisks, operationalRisks, founderRisks, mitigationPlan), complianceProfile (complianceItems), executionRoadmap (today, sevenDayPlan, thirtyDayPlan), workflowModel, aiPreferences. Example call arguments: {\"patch\": {\"identity\": {\"industry\": \"software\"}, \"operatingModel\": {\"revenueModel\": \"subscription\"}}}.",
+          "family": "crud",
+          "riskTier": 1,
+          "mode": "assisted",
+          "route": "/app/blueprint",
+          "fullRoute": "/app/blueprint"
+        },
+        {
+          "name": "people_list",
+          "description": "List the people who work in this business — accounts and bookable staff — with job role, org unit, who they report to, skills and weekly capacity. Use this before assigning work, or to answer questions about who does what. Does not include pay.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/structure",
+          "fullRoute": "/app/structure"
+        },
+        {
+          "name": "people_workload",
+          "description": "See who is carrying what right now — open task counts per person against their weekly capacity, plus how many open tasks nobody owns. Use this to answer \"who is free\", \"who is overloaded\", or before deciding who should take on new work.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/structure",
+          "fullRoute": "/app/structure"
+        },
+        {
+          "name": "people_org_chart",
+          "description": "Get the organisational structure — units, job roles, reporting lines and active delegation rules. Use this to understand hierarchy, or to find who manages a team.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/structure",
+          "fullRoute": "/app/structure"
+        },
+        {
+          "name": "people_recommend_assignee",
+          "description": "Rank who should take on a piece of work, scored on current workload, recent completion rate and skill match against their past tasks. Returns candidates with a stated reason. Recommends — it does not assign.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/structure",
+          "fullRoute": "/app/structure"
+        },
+        {
+          "name": "people_assign_task",
+          "description": "Assign an existing task to a person. Requires the exact assignableId from people_list or people_recommend_assignee — never guess it from a name. Replaces any current assignee on that task.",
+          "family": "execute",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/projects",
+          "fullRoute": "/app/projects"
+        },
+        {
+          "name": "structure_get_org_tree",
+          "description": "Get the full org chart tree — org units/departments/branches with their hierarchy and active staff assignments.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/structure",
+          "fullRoute": "/app/structure"
+        },
+        {
+          "name": "structure_list_org_units",
+          "description": "List all org units (departments, branches, divisions, teams, warehouses) for the business.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/structure",
+          "fullRoute": "/app/structure"
+        },
+        {
+          "name": "structure_list_job_roles",
+          "description": "List all job roles/positions defined for the business, including their hierarchy level and default approval tier.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/structure",
+          "fullRoute": "/app/structure"
+        },
+        {
+          "name": "structure_list_assignments",
+          "description": "List active staff assignments — who holds which position, in which org unit, and who they report to. Includes both full-account team members and contact-only staff.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/structure",
+          "fullRoute": "/app/structure"
+        },
+        {
+          "name": "structure_find_person",
+          "description": "Find who holds a specific position, works in a specific org unit, or look up a person by name — e.g. \"who's the bookkeeper?\", \"who works in Marketing?\", \"who does Maria report to?\". Provide at least one filter.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/structure",
+          "fullRoute": "/app/structure"
+        },
+        {
+          "name": "structure_list_delegation_rules",
+          "description": "List active delegation rules — which positions have been granted authority to act/approve on behalf of another position.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/structure",
+          "fullRoute": "/app/structure"
+        },
+        {
+          "name": "structure_get_stats",
+          "description": "Get org-structure stats: counts of org units, job roles, active assignments, and active delegation rules.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/structure",
+          "fullRoute": "/app/structure"
+        },
+        {
+          "name": "structure_create_delegation_rule",
+          "description": "Create a delegation rule granting one position (OrgAssignment) authority to approve/act on behalf of another for a scope of actions, up to a maximum risk tier. This is a governance-sensitive change and requires explicit human confirmation.",
+          "family": "crud",
+          "riskTier": 3,
+          "mode": "assisted_approval",
+          "route": "/app/structure",
+          "fullRoute": "/app/structure"
+        },
+        {
+          "name": "structure_update_delegation_rule",
+          "description": "Update an existing delegation rule (scope, max tier, expiry, or active status). Governance-sensitive — requires explicit human confirmation.",
+          "family": "crud",
+          "riskTier": 3,
+          "mode": "assisted_approval",
+          "route": "/app/structure",
+          "fullRoute": "/app/structure"
+        }
+      ],
+      "capabilities": [
+        {
+          "name": "create_automation",
+          "description": "Build a new automation flow.",
+          "module": "flow",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "enable_automation",
+          "description": "Activate a paused automation.",
+          "module": "flow",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "disable_automation",
+          "description": "Pause an active automation.",
+          "module": "flow",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "trigger_flow",
+          "description": "Manually fire a flow for a given contact.",
+          "module": "flow",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "delete_automation",
+          "description": "Permanently remove an automation.",
+          "module": "flow",
+          "requiresApproval": true,
+          "mode": "assisted_approval"
+        },
+        {
+          "name": "update_automation",
+          "description": "Edit an existing automation.",
+          "module": "flow",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "clone_automation",
+          "description": "Duplicate an automation as a starting point.",
+          "module": "flow",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "run_test",
+          "description": "Execute a dry-run of a flow for validation.",
+          "module": "flow",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "get_flow_status",
+          "description": "Check whether a flow is active and get run stats.",
+          "module": "flow",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "list_automations",
+          "description": "List all automations with optional filter.",
+          "module": "flow",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_flow_runs",
+          "description": "Retrieve execution history for a flow.",
+          "module": "flow",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_flow_analytics",
+          "description": "Aggregate analytics across all flows.",
+          "module": "flow",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_tasks",
+          "description": "List autopilot-managed tasks.",
+          "module": "autopilot",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "create_task",
+          "description": "Create a new autopilot task.",
+          "module": "autopilot",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "approve_task",
+          "description": "Approve a task waiting for human sign-off.",
+          "module": "autopilot",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "reject_task",
+          "description": "Reject a pending task.",
+          "module": "autopilot",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "enable_loop",
+          "description": "Activate a recurring delegation loop.",
+          "module": "autopilot",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "disable_loop",
+          "description": "Pause a recurring delegation loop.",
+          "module": "autopilot",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "complete_task",
+          "description": "Mark an autopilot task as finished.",
+          "module": "autopilot",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "create_loop",
+          "description": "Define a new recurring delegation loop.",
+          "module": "autopilot",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "get_loop_status",
+          "description": "Check status and next-run time of a loop.",
+          "module": "autopilot",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "list_loops",
+          "description": "List all delegation loops.",
+          "module": "autopilot",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_task_history",
+          "description": "Retrieve completed task history.",
+          "module": "autopilot",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_governance_report",
+          "description": "Fetch autopilot governance and audit report.",
+          "module": "autopilot",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "create_project",
+          "description": "Create a new project.",
+          "module": "projects",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "add_task",
+          "description": "Add a task to a project.",
+          "module": "projects",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "update_task",
+          "description": "Edit a project task.",
+          "module": "projects",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "complete_task",
+          "description": "Mark a project task as done.",
+          "module": "projects",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "delete_project",
+          "description": "Remove a project and its tasks.",
+          "module": "projects",
+          "requiresApproval": true,
+          "mode": "assisted_approval"
+        },
+        {
+          "name": "add_milestone",
+          "description": "Add a milestone to a project timeline.",
+          "module": "projects",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "complete_milestone",
+          "description": "Mark a milestone as achieved.",
+          "module": "projects",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "archive_project",
+          "description": "Archive a completed project.",
+          "module": "projects",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "get_projects",
+          "description": "List projects with optional filters.",
+          "module": "projects",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_project_details",
+          "description": "Fetch full project with tasks and milestones.",
+          "module": "projects",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_overdue_tasks",
+          "description": "List overdue tasks across projects.",
+          "module": "projects",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_project_timeline",
+          "description": "Visual timeline of project milestones and tasks.",
+          "module": "projects",
+          "requiresApproval": false,
+          "mode": "agentic"
+        }
+      ]
+    },
+    {
+      "id": "scheduling",
+      "label": "Scheduling & Bookings",
+      "toolCount": 10,
+      "capCount": 22,
+      "modeCounts": {
+        "agentic": 11,
+        "assisted": 20,
+        "assisted_approval": 1
+      },
+      "uiSurfaces": [
+        "/app/bookings",
+        "/app/calendar"
+      ],
+      "targetsTotal": 2,
+      "targetsActive": 2,
+      "targetsPlanned": 0,
+      "targets": [
+        {
+          "label": "No-show prediction",
+          "status": "active",
+          "mode": "agentic",
+          "riskTier": null,
+          "uiSurface": "/app/bookings",
+          "requiredTools": [],
+          "evaluator": null,
+          "coveredBy": "fetch_schedule_health",
+          "why": "Predict likely no-shows to overbook or confirm proactively."
+        },
+        {
+          "label": "Smart rescheduling",
+          "status": "active",
+          "mode": "assisted",
+          "riskTier": null,
+          "uiSurface": "/app/bookings",
+          "requiredTools": [],
+          "evaluator": null,
+          "coveredBy": "bookings_reschedule_booking",
+          "why": "Rebook conflicts without double-booking."
+        }
+      ],
+      "tools": [
+        {
+          "name": "fetch_schedule_health",
+          "description": "Analyze calendar utilization — upcoming gaps, overbookings, no-show risk, and capacity metrics.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/bookings",
+          "fullRoute": "/app/bookings"
+        },
+        {
+          "name": "bookings_create_booking",
+          "description": "Create a new booking/appointment for a contact. Requires confirmation before execution.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/bookings",
+          "fullRoute": "/app/bookings"
+        },
+        {
+          "name": "bookings_list_bookings",
+          "description": "List upcoming bookings.",
+          "family": "crud",
+          "riskTier": 1,
+          "mode": "assisted",
+          "route": "/app/bookings",
+          "fullRoute": "/app/bookings"
+        },
+        {
+          "name": "bookings_reschedule_booking",
+          "description": "Reschedule an existing booking to a new time.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/bookings",
+          "fullRoute": "/app/bookings"
+        },
+        {
+          "name": "bookings_cancel_booking",
+          "description": "Cancel an existing booking.",
+          "family": "crud",
+          "riskTier": 3,
+          "mode": "assisted_approval",
+          "route": "/app/bookings",
+          "fullRoute": "/app/bookings"
+        },
+        {
+          "name": "bookings_list_services",
+          "description": "List all available services for booking.",
+          "family": "crud",
+          "riskTier": 1,
+          "mode": "assisted",
+          "route": "/app/bookings",
+          "fullRoute": "/app/bookings"
+        },
+        {
+          "name": "calendar_list_events",
+          "description": "List calendar events for the business with optional date range, module, and status filters.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/calendar",
+          "fullRoute": "/app/calendar"
+        },
+        {
+          "name": "calendar_create_event",
+          "description": "Create a general calendar event (meeting, reminder, milestone, etc.).",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/calendar",
+          "fullRoute": "/app/calendar"
+        },
+        {
+          "name": "calendar_check_conflicts",
+          "description": "Check for scheduling conflicts in a given time range. Returns overlapping events if any.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/calendar",
+          "fullRoute": "/app/calendar"
+        },
+        {
+          "name": "bookings_mark_no_show",
+          "description": "Mark a booking as a no-show (customer did not arrive).",
+          "family": "organize",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/bookings",
+          "fullRoute": "/app/bookings"
+        }
+      ],
+      "capabilities": [
+        {
+          "name": "create_booking",
+          "description": "Schedule a new appointment.",
+          "module": "bookings",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "cancel_booking",
+          "description": "Cancel an existing appointment.",
+          "module": "bookings",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "reschedule_booking",
+          "description": "Move an appointment to a new time slot.",
+          "module": "bookings",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "confirm_booking",
+          "description": "Confirm a pending booking.",
+          "module": "bookings",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "add_service",
+          "description": "Add a new bookable service.",
+          "module": "bookings",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "update_service",
+          "description": "Modify an existing service.",
+          "module": "bookings",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "set_availability",
+          "description": "Define when a staff member or resource is available.",
+          "module": "bookings",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "block_time",
+          "description": "Block out time (break, time-off, buffer).",
+          "module": "bookings",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "get_availability",
+          "description": "Find open appointment slots for a service and date range.",
+          "module": "bookings",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_upcoming_bookings",
+          "description": "List confirmed bookings in a date range.",
+          "module": "bookings",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_services",
+          "description": "List all bookable services.",
+          "module": "bookings",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_staff_schedule",
+          "description": "Retrieve schedule for a staff member.",
+          "module": "bookings",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "store_memory",
+          "description": "Persist a memory entry for later recall.",
+          "module": "temporal",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "recall_memory",
+          "description": "Fetch a specific memory by key.",
+          "module": "temporal",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "delete_memory",
+          "description": "Remove a memory entry.",
+          "module": "temporal",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "update_memory",
+          "description": "Overwrite an existing memory.",
+          "module": "temporal",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "tag_memory",
+          "description": "Attach tags to a memory for better discoverability.",
+          "module": "temporal",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "consolidate_memories",
+          "description": "Merge related short-term memories into a long-term summary.",
+          "module": "temporal",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "search_memories",
+          "description": "Search memories by key, tag, or semantic similarity.",
+          "module": "temporal",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_timeline",
+          "description": "Reconstruct a chronological timeline of events.",
+          "module": "temporal",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_memory_stats",
+          "description": "Get memory storage statistics.",
+          "module": "temporal",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_recent_memories",
+          "description": "List recently stored memories.",
+          "module": "temporal",
+          "requiresApproval": false,
+          "mode": "agentic"
+        }
+      ]
+    },
+    {
+      "id": "support",
+      "label": "Support & Communications",
+      "toolCount": 13,
+      "capCount": 38,
+      "modeCounts": {
+        "agentic": 23,
+        "assisted": 23,
+        "assisted_approval": 5
+      },
+      "uiSurfaces": [
+        "/app/community",
+        "/app/helpdesk",
+        "/app/key-inbox"
+      ],
+      "targetsTotal": 3,
+      "targetsActive": 2,
+      "targetsPlanned": 1,
+      "targets": [
+        {
+          "label": "Sentiment / escalation detection",
+          "status": "active",
+          "mode": "assisted",
+          "riskTier": null,
+          "uiSurface": "/app/automations",
+          "requiredTools": [],
+          "evaluator": null,
+          "coveredBy": "delegation_payment_recovery",
+          "why": "Flag angry/at-risk conversations for fast handling."
+        },
+        {
+          "label": "Auto-triage & routing",
+          "status": "active",
+          "mode": "assisted",
+          "riskTier": null,
+          "uiSurface": "/app/key-inbox",
+          "requiredTools": [],
+          "evaluator": null,
+          "coveredBy": "inbox_update_thread_status",
+          "why": "Route tickets to the right queue automatically."
+        },
+        {
+          "label": "KB answer synthesis",
+          "status": "planned",
+          "mode": "agentic",
+          "riskTier": 1,
+          "uiSurface": "/app/helpdesk",
+          "requiredTools": [
+            "helpdesk_list_tickets",
+            "helpdesk_create_ticket",
+            "helpdesk_delete_ticket"
+          ],
+          "evaluator": "Groundedness/citation check; hallucination guard BLOCKING",
+          "coveredBy": null,
+          "why": "Deflect support volume with grounded, cited answers."
+        }
+      ],
+      "tools": [
+        {
+          "name": "community_list_posts",
+          "description": "List recent community posts visible to this business.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/community",
+          "fullRoute": "/app/community"
+        },
+        {
+          "name": "helpdesk_list_tickets",
+          "description": "List support tickets with optional status and priority filters.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/helpdesk",
+          "fullRoute": "/app/helpdesk"
+        },
+        {
+          "name": "helpdesk_create_ticket",
+          "description": "Create a support ticket for a contact or general issue.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/helpdesk",
+          "fullRoute": "/app/helpdesk"
+        },
+        {
+          "name": "helpdesk_update_ticket",
+          "description": "Update a support ticket status, priority, or assignment.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/helpdesk",
+          "fullRoute": "/app/helpdesk"
+        },
+        {
+          "name": "helpdesk_reply_to_ticket",
+          "description": "Reply to a customer on a support ticket (records the outbound message on the ticket thread).",
+          "family": "organize",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/helpdesk",
+          "fullRoute": "/app/helpdesk"
+        },
+        {
+          "name": "helpdesk_draft_reply",
+          "description": "Draft a suggested reply for a support ticket, grounded in the ticket details and thread history. Returns text for review ONLY — nothing is sent (use helpdesk_reply_to_ticket to send).",
+          "family": "draft",
+          "riskTier": 1,
+          "mode": "assisted",
+          "route": "/app/helpdesk",
+          "fullRoute": "/app/helpdesk"
+        },
+        {
+          "name": "helpdesk_delete_ticket",
+          "description": "Soft-delete a support ticket (spam, test, or duplicate). The ticket disappears from all lists and counts. Irreversible from chat.",
+          "family": "execute",
+          "riskTier": 3,
+          "mode": "assisted_approval",
+          "route": "/app/helpdesk",
+          "fullRoute": "/app/helpdesk"
+        },
+        {
+          "name": "inbox_reply_thread",
+          "description": "Send a reply inside an omnichannel inbox thread (WhatsApp/email/SMS) to the customer.",
+          "family": "execute",
+          "riskTier": 3,
+          "mode": "assisted_approval",
+          "route": "/app/key-inbox",
+          "fullRoute": "/app/key-inbox"
+        },
+        {
+          "name": "inbox_update_thread_status",
+          "description": "Update an inbox thread status or priority (triage, escalate, close).",
+          "family": "organize",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/key-inbox",
+          "fullRoute": "/app/key-inbox"
+        },
+        {
+          "name": "inbox_list_threads",
+          "description": "List inbox threads across every connected channel, filtered by channel, status, priority or detected intent. Use this to see what has come in and what still needs an answer.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/key-inbox",
+          "fullRoute": "/app/key-inbox"
+        },
+        {
+          "name": "inbox_read_thread",
+          "description": "Read one inbox thread in full, including its messages. Use after inbox_list_threads to see what was actually said before replying or acting.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/key-inbox",
+          "fullRoute": "/app/key-inbox"
+        },
+        {
+          "name": "inbox_brief",
+          "description": "Generate an intelligence brief over the inbox — what is waiting, what looks urgent, and what patterns are showing up across threads.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/key-inbox",
+          "fullRoute": "/app/key-inbox"
+        },
+        {
+          "name": "inbox_mark_resolved",
+          "description": "Mark an inbox thread as done. Only after the underlying request has actually been handled.",
+          "family": "organize",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/key-inbox",
+          "fullRoute": "/app/key-inbox"
+        }
+      ],
+      "capabilities": [
+        {
+          "name": "send_message",
+          "description": "Send a message via the chosen channel.",
+          "module": "communications",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "send_whatsapp",
+          "description": "Send a WhatsApp message to a contact.",
+          "module": "communications",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "send_email",
+          "description": "Send an email to a contact.",
+          "module": "communications",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "create_template",
+          "description": "Create a reusable message template.",
+          "module": "communications",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "get_conversation",
+          "description": "Retrieve message thread with a contact.",
+          "module": "communications",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "send_broadcast",
+          "description": "Send a message to a segment or tag group.",
+          "module": "communications",
+          "requiresApproval": true,
+          "mode": "assisted_approval"
+        },
+        {
+          "name": "mark_read",
+          "description": "Mark conversation messages as read.",
+          "module": "communications",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "archive_conversation",
+          "description": "Archive a completed conversation.",
+          "module": "communications",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "send_reply",
+          "description": "Reply within an existing conversation thread.",
+          "module": "communications",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "delete_template",
+          "description": "Remove a message template.",
+          "module": "communications",
+          "requiresApproval": true,
+          "mode": "assisted_approval"
+        },
+        {
+          "name": "get_unread_count",
+          "description": "Count unread messages across all conversations.",
+          "module": "communications",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_recent_conversations",
+          "description": "List recently active conversations.",
+          "module": "communications",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_templates",
+          "description": "List saved message templates.",
+          "module": "communications",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_delivery_status",
+          "description": "Check delivery/read receipts for a message.",
+          "module": "communications",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_conversation_analytics",
+          "description": "Aggregate conversation metrics for a period.",
+          "module": "communications",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_threads",
+          "description": "Retrieve conversation threads with filtering.",
+          "module": "inbox",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "send_reply",
+          "description": "Reply within a thread.",
+          "module": "inbox",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "classify_message",
+          "description": "Classify a message by intent and priority.",
+          "module": "inbox",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "close_thread",
+          "description": "Mark a thread as resolved and archive it.",
+          "module": "inbox",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "snooze_thread",
+          "description": "Defer a thread to a later time.",
+          "module": "inbox",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "assign_thread",
+          "description": "Assign a thread to a team member.",
+          "module": "inbox",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "get_intelligence_report",
+          "description": "Generate an AI analysis of a conversation thread.",
+          "module": "inbox",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "merge_threads",
+          "description": "Combine duplicate threads from the same contact.",
+          "module": "inbox",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "get_unread_threads",
+          "description": "Count unread or unhandled threads.",
+          "module": "inbox",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_thread_details",
+          "description": "Fetch full message history of a thread.",
+          "module": "inbox",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_inbox_summary",
+          "description": "High-level inbox metrics dashboard.",
+          "module": "inbox",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_classification_stats",
+          "description": "Message classification distribution.",
+          "module": "inbox",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_response_times",
+          "description": "Average response time analytics.",
+          "module": "inbox",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "send_notification",
+          "description": "Send an in-app push notification.",
+          "module": "notifications",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "create_alert",
+          "description": "Create a persistent alert or reminder.",
+          "module": "notifications",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "dismiss_alert",
+          "description": "Mark an alert as acknowledged.",
+          "module": "notifications",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "send_digest",
+          "description": "Send a summary digest email to users.",
+          "module": "notifications",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "update_preferences",
+          "description": "Update notification channel preferences.",
+          "module": "notifications",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "broadcast_alert",
+          "description": "Send an alert to all business users.",
+          "module": "notifications",
+          "requiresApproval": true,
+          "mode": "assisted_approval"
+        },
+        {
+          "name": "get_alerts",
+          "description": "List active alerts with optional filtering.",
+          "module": "notifications",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_notification_history",
+          "description": "Retrieve past notifications sent.",
+          "module": "notifications",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_user_preferences",
+          "description": "Fetch notification preferences for a user.",
+          "module": "notifications",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_alert_stats",
+          "description": "Alert volume and resolution statistics.",
+          "module": "notifications",
+          "requiresApproval": false,
+          "mode": "agentic"
+        }
+      ]
+    },
+    {
+      "id": "legal_gov",
+      "label": "Legal, Contracts & Governance",
+      "toolCount": 28,
+      "capCount": 0,
+      "modeCounts": {
+        "agentic": 15,
+        "assisted": 11,
+        "assisted_approval": 2
+      },
+      "uiSurfaces": [
+        "/app/approvals",
+        "/app/contracts",
+        "/app/document-intelligence",
+        "/app/evidence",
+        "/app/governance-flow",
+        "/app/portal"
+      ],
+      "targetsTotal": 3,
+      "targetsActive": 2,
+      "targetsPlanned": 1,
+      "targets": [
+        {
+          "label": "Contract redlining / clause-risk analysis",
+          "status": "active",
+          "mode": "agentic",
+          "riskTier": null,
+          "uiSurface": "/app/contracts",
+          "requiredTools": [],
+          "evaluator": null,
+          "coveredBy": "contract_extract_clauses",
+          "why": "Surface risky clauses against a playbook."
+        },
+        {
+          "label": "Obligation extraction & tracking",
+          "status": "active",
+          "mode": "agentic",
+          "riskTier": null,
+          "uiSurface": "/app/command-center",
+          "requiredTools": [],
+          "evaluator": null,
+          "coveredBy": "command_list_due_obligations",
+          "why": "Pull obligations and deadlines out of contracts."
+        },
+        {
+          "label": "Renewal-risk analysis",
+          "status": "planned",
+          "mode": "agentic",
+          "riskTier": 1,
+          "uiSurface": "/app/contracts",
+          "requiredTools": [
+            "contract_extract_clauses",
+            "contract_extract_terms",
+            "contract_list_tags"
+          ],
+          "evaluator": "Backtest vs historical renew/churn outcomes",
+          "coveredBy": null,
+          "why": "Flag contracts at churn/renewal risk early."
+        }
+      ],
+      "tools": [
+        {
+          "name": "contracts_list",
+          "description": "List contracts, filtered by status, free text, or how soon they expire. Use expiringWithinDays to answer \"what renews soon\" — that is what a contract register is for.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/contracts",
+          "fullRoute": "/app/contracts"
+        },
+        {
+          "name": "contracts_get",
+          "description": "Get one contract in full — parties, extracted terms, versions and alerts.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/contracts",
+          "fullRoute": "/app/contracts"
+        },
+        {
+          "name": "contracts_stats",
+          "description": "Contract portfolio summary — counts by status, total value, and what is coming up for renewal.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/contracts",
+          "fullRoute": "/app/contracts"
+        },
+        {
+          "name": "contracts_create",
+          "description": "Record a contract. Set expiryDate and renewalNoticeDays so the renewal alerts can fire — a contract with no dates is a document, not a register entry.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/contracts",
+          "fullRoute": "/app/contracts"
+        },
+        {
+          "name": "contracts_update",
+          "description": "Update a contract — status, dates, value or notes.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/contracts",
+          "fullRoute": "/app/contracts"
+        },
+        {
+          "name": "contracts_acknowledge_alert",
+          "description": "Acknowledge a contract renewal or expiry alert, so it stops being outstanding.",
+          "family": "organize",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/contracts",
+          "fullRoute": "/app/contracts"
+        },
+        {
+          "name": "contracts_delete",
+          "description": "Delete a contract. Prefer contracts_update to TERMINATED or ARCHIVED — a contract that existed is a fact about the business, and the register is evidence.",
+          "family": "crud",
+          "riskTier": 3,
+          "mode": "assisted_approval",
+          "route": "/app/contracts",
+          "fullRoute": "/app/contracts"
+        },
+        {
+          "name": "documents_list",
+          "description": "List recent documents (contracts, proposals, etc.) with status.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/document-intelligence",
+          "fullRoute": "/app/document-intelligence"
+        },
+        {
+          "name": "documents_search",
+          "description": "Search documents by title.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/document-intelligence",
+          "fullRoute": "/app/document-intelligence"
+        },
+        {
+          "name": "evidence_list",
+          "description": "List evidence records for the business with optional type filter.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/evidence",
+          "fullRoute": "/app/evidence"
+        },
+        {
+          "name": "evidence_submit",
+          "description": "Submit evidence (photo, file, document, etc.) linked to a task, approval, or contact.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/evidence",
+          "fullRoute": "/app/evidence"
+        },
+        {
+          "name": "evidence_verify",
+          "description": "Verify a submitted evidence record (mark as verified).",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/evidence",
+          "fullRoute": "/app/evidence"
+        },
+        {
+          "name": "approval_list",
+          "description": "List approval requests for the business with optional status and type filters.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/approvals",
+          "fullRoute": "/app/approvals"
+        },
+        {
+          "name": "approval_create_request",
+          "description": "Create an approval request (quote discount, expense, content delivery, refund, etc.) with multi-step approver chain.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/approvals",
+          "fullRoute": "/app/approvals"
+        },
+        {
+          "name": "approval_decide_step",
+          "description": "Approve or reject the current step of an approval request. Advances to next step or finalizes the request.",
+          "family": "execute",
+          "riskTier": 3,
+          "mode": "assisted_approval",
+          "route": "/app/approvals",
+          "fullRoute": "/app/approvals"
+        },
+        {
+          "name": "portal_list_access",
+          "description": "List which contacts have customer-portal access, what each can see, and whether their link is live. Access tokens are never returned.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/portal",
+          "fullRoute": "/app/portal"
+        },
+        {
+          "name": "portal_grant_access",
+          "description": "Give a contact access to the customer portal, or refresh their existing access. Choose what they can see. The link itself is on /app/portal — this tool never returns the token.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/portal",
+          "fullRoute": "/app/portal"
+        },
+        {
+          "name": "portal_revoke_access",
+          "description": "Turn off a contact's customer-portal access. Their link stops working immediately.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/portal",
+          "fullRoute": "/app/portal"
+        },
+        {
+          "name": "portal_update_settings",
+          "description": "Change what a contact can see in the customer portal. Only invoices, projects, bookings and documents can be set.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/portal",
+          "fullRoute": "/app/portal"
+        },
+        {
+          "name": "governance_list_risks",
+          "description": "List business risks, most severe first. Filter by status (OPEN, MITIGATED, CLOSED, ACCEPTED) or by category.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/governance-flow",
+          "fullRoute": "/app/governance-flow"
+        },
+        {
+          "name": "governance_get_risk",
+          "description": "Get one business risk by id, including its mitigation plan and owner.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/governance-flow",
+          "fullRoute": "/app/governance-flow"
+        },
+        {
+          "name": "governance_risk_summary",
+          "description": "How many risks are open, broken down by severity.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/governance-flow",
+          "fullRoute": "/app/governance-flow"
+        },
+        {
+          "name": "governance_log_risk",
+          "description": "Record a new business risk. Severity must be LOW, MEDIUM, HIGH or CRITICAL. Status defaults to OPEN.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/governance-flow",
+          "fullRoute": "/app/governance-flow"
+        },
+        {
+          "name": "governance_update_risk",
+          "description": "Update a business risk — record a mitigation, reassign it, change severity, or close it by setting status to MITIGATED, CLOSED or ACCEPTED. This is how a risk is retired; risks are never deleted.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/governance-flow",
+          "fullRoute": "/app/governance-flow"
+        },
+        {
+          "name": "contract_extract_terms",
+          "description": "Run AI term extraction on a contract source document and apply the results to the contract record.",
+          "family": "read",
+          "riskTier": 2,
+          "mode": "agentic",
+          "route": "/app/contracts",
+          "fullRoute": "/app/contracts"
+        },
+        {
+          "name": "contract_list_tags",
+          "description": "List contract tags/labels.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/contracts",
+          "fullRoute": "/app/contracts"
+        },
+        {
+          "name": "contract_create_tag",
+          "description": "Create a contract tag/label.",
+          "family": "organize",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/contracts",
+          "fullRoute": "/app/contracts"
+        },
+        {
+          "name": "contract_extract_clauses",
+          "description": "Run a 41-label CUAD clause analysis on a contract's source document: which standard clauses are present (with summaries + source snippets) and which critical ones are missing.",
+          "family": "read",
+          "riskTier": 2,
+          "mode": "agentic",
+          "route": "/app/contracts",
+          "fullRoute": "/app/contracts"
+        }
+      ],
+      "capabilities": []
+    },
+    {
+      "id": "analytics",
+      "label": "Analytics & Strategy",
+      "toolCount": 18,
+      "capCount": 37,
+      "modeCounts": {
+        "agentic": 33,
+        "assisted": 19,
+        "assisted_approval": 3
+      },
+      "uiSurfaces": [
+        "/app/command-center",
+        "/app/goals",
+        "/app/key",
+        "/app/keyflow-command",
+        "/app/performance",
+        "/app/reports"
+      ],
+      "targetsTotal": 3,
+      "targetsActive": 0,
+      "targetsPlanned": 3,
+      "targets": [
+        {
+          "label": "Anomaly detection",
+          "status": "planned",
+          "mode": "agentic",
+          "riskTier": 1,
+          "uiSurface": "/app/reports",
+          "requiredTools": [
+            "finance_balance_sheet",
+            "finance_cashflow",
+            "finance_expense_breakdown"
+          ],
+          "evaluator": "Precision/recall on labelled anomalies; alert-noise ceiling",
+          "coveredBy": null,
+          "why": "Surface metric anomalies with no human watching dashboards."
+        },
+        {
+          "label": "Natural-language KPI Q&A",
+          "status": "planned",
+          "mode": "agentic",
+          "riskTier": 1,
+          "uiSurface": "/app/reports",
+          "requiredTools": [
+            "finance_balance_sheet",
+            "finance_cashflow",
+            "finance_expense_breakdown"
+          ],
+          "evaluator": "Query-to-metric accuracy suite; refuse-when-unknown check BLOCKING",
+          "coveredBy": null,
+          "why": "Ask the business a question in plain language."
+        },
+        {
+          "label": "Cohort / retention analysis",
+          "status": "planned",
+          "mode": "agentic",
+          "riskTier": 1,
+          "uiSurface": "/app/reports",
+          "requiredTools": [
+            "finance_balance_sheet",
+            "finance_cashflow",
+            "finance_expense_breakdown"
+          ],
+          "evaluator": "Cohort-definition reproducibility; retention-math tie-out",
+          "coveredBy": null,
+          "why": "Measure retention by cohort over time."
+        }
+      ],
+      "tools": [
+        {
+          "name": "fetch_business_summary",
+          "description": "Get an overall business health snapshot including revenue, contacts, bookings, expenses, and momentum score.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/keyflow-command",
+          "fullRoute": "/app/keyflow-command"
+        },
+        {
+          "name": "reports_generate",
+          "description": "Generate a business report over a date range — executive summary, P&L, revenue, expenses or client portfolio. Returns the computed figures together with a written analysis.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/reports",
+          "fullRoute": "/app/reports"
+        },
+        {
+          "name": "goals_list",
+          "description": "List business goals, optionally by status.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/goals",
+          "fullRoute": "/app/goals"
+        },
+        {
+          "name": "goals_get",
+          "description": "Get one goal with the plans that have been built from it.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/goals",
+          "fullRoute": "/app/goals"
+        },
+        {
+          "name": "goals_create",
+          "description": "Set a business goal. Give it a target date and a priority so it can be ranked against the others.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/goals",
+          "fullRoute": "/app/goals"
+        },
+        {
+          "name": "goals_create_plan",
+          "description": "Decompose a goal into a concrete plan of steps. This PROPOSES the plan — it does not run it. Executing a plan stays with a human on the goals screen.",
+          "family": "organize",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/goals",
+          "fullRoute": "/app/goals"
+        },
+        {
+          "name": "goals_delete",
+          "description": "Delete a goal and the plans attached to it.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/goals",
+          "fullRoute": "/app/goals"
+        },
+        {
+          "name": "keyflow_create_note",
+          "description": "Attach a note to any module item (booking, contact, invoice, project, etc.) using its type and id. Useful when the operator says \"add a note to X\".",
+          "family": "crud",
+          "riskTier": 1,
+          "mode": "assisted",
+          "route": "/app/keyflow-command",
+          "fullRoute": "/app/keyflow-command"
+        },
+        {
+          "name": "finance_profit_and_loss",
+          "description": "Profit & loss statement for a date range — income and expense totals by account, plus net profit. Uses the business's accounting basis.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/reports",
+          "fullRoute": "/app/reports"
+        },
+        {
+          "name": "finance_cashflow",
+          "description": "Cash flow for a date range — inflow, outflow and net movement, broken down by cash account.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/reports",
+          "fullRoute": "/app/reports"
+        },
+        {
+          "name": "finance_balance_sheet",
+          "description": "Balance sheet as at a date — assets, liabilities and equity with their account lines.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/reports",
+          "fullRoute": "/app/reports"
+        },
+        {
+          "name": "finance_tax_summary",
+          "description": "Tax summary for a date range — taxable revenue, tax collected and tax paid on purchases, reconciled against invoice tax fields.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/reports",
+          "fullRoute": "/app/reports"
+        },
+        {
+          "name": "finance_revenue_breakdown",
+          "description": "Revenue for a date range broken down by one dimension: customer, product, service or source.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/reports",
+          "fullRoute": "/app/reports"
+        },
+        {
+          "name": "finance_expense_breakdown",
+          "description": "Expenses for a date range broken down by one dimension: vendor, category or project.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/reports",
+          "fullRoute": "/app/reports"
+        },
+        {
+          "name": "execute_custom_logic",
+          "description": "Write and run a small JavaScript snippet to accomplish a task no dedicated tool covers (calculations, multi-step data transforms, one-off reports). The snippet runs in a sandbox with an `api` object: `await api.callTool(name, args)` calls any tier 1-2 KEY tool, `api.log(...)` prints output. Return the final answer as the snippet value. Max 10 tool calls, 15s limit.",
+          "family": "execute",
+          "riskTier": 3,
+          "mode": "assisted_approval",
+          "route": "/app/key",
+          "fullRoute": "/app/key/chat"
+        },
+        {
+          "name": "performance_take_snapshot",
+          "description": "Persist a performance snapshot for a staff member over a period (enables trend history).",
+          "family": "organize",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/performance",
+          "fullRoute": "/app/performance"
+        },
+        {
+          "name": "command_list_due_obligations",
+          "description": "What the business owes and by when — obligations due within a window, oldest first, including anything already overdue. Use for \"what is due this week\", \"what am I behind on\", \"what do I owe\".",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/command-center",
+          "fullRoute": "/app/command-center"
+        },
+        {
+          "name": "command_discharge_obligation",
+          "description": "Record that an obligation has been met — the rebook was booked, the return was filed, the invoice was chased. Marks it discharged so it leaves the due list.",
+          "family": "organize",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/command-center",
+          "fullRoute": "/app/command-center"
+        }
+      ],
+      "capabilities": [
+        {
+          "name": "get_dna",
+          "description": "Retrieve the full business DNA profile.",
+          "module": "genome",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_stage",
+          "description": "Get the current growth stage assessment.",
+          "module": "genome",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_readiness",
+          "description": "Check readiness scores for specific initiatives.",
+          "module": "genome",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "update_dna",
+          "description": "Manually update a DNA dimension score.",
+          "module": "genome",
+          "requiresApproval": true,
+          "mode": "assisted_approval"
+        },
+        {
+          "name": "trigger_assessment",
+          "description": "Run a full genome reassessment.",
+          "module": "genome",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "get_dna_history",
+          "description": "Historical DNA score changes.",
+          "module": "genome",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_benchmark",
+          "description": "Compare DNA against industry benchmarks.",
+          "module": "genome",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_recommendations",
+          "description": "Get strategic recommendations based on DNA.",
+          "module": "genome",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_growth_trajectory",
+          "description": "Projected growth path based on current DNA.",
+          "module": "genome",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_dna_breakdown",
+          "description": "Detailed per-dimension breakdown with gaps.",
+          "module": "genome",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "analyze_sentiment",
+          "description": "Run sentiment analysis on a conversation or text.",
+          "module": "intelligence",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "detect_opportunities",
+          "description": "Scan contacts for revenue opportunities.",
+          "module": "intelligence",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "generate_forecast",
+          "description": "Predict future metric values.",
+          "module": "intelligence",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "run_comprehensive_analysis",
+          "description": "Run a full business intelligence analysis.",
+          "module": "intelligence",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "get_churn_risk",
+          "description": "Identify contacts at risk of churning.",
+          "module": "intelligence",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_opportunity_pipeline",
+          "description": "View current opportunity pipeline with confidence scores.",
+          "module": "intelligence",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_sentiment_trends",
+          "description": "Track sentiment trends over time.",
+          "module": "intelligence",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_forecast_accuracy",
+          "description": "Compare past forecasts to actuals.",
+          "module": "intelligence",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "create_dashboard",
+          "description": "Build a custom analytics dashboard.",
+          "module": "analytics",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "create_report",
+          "description": "Generate a one-time or recurring report.",
+          "module": "analytics",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "create_funnel",
+          "description": "Define a conversion funnel.",
+          "module": "analytics",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "track_event",
+          "description": "Record a custom analytics event.",
+          "module": "analytics",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "export_report",
+          "description": "Export a report to CSV/PDF.",
+          "module": "analytics",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "get_dashboard",
+          "description": "Fetch a dashboard with current data.",
+          "module": "analytics",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_funnel_conversion",
+          "description": "Compute conversion rate for a funnel.",
+          "module": "analytics",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_cohort_retention",
+          "description": "Calculate cohort retention matrix.",
+          "module": "analytics",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_kpis",
+          "description": "Fetch core business KPIs.",
+          "module": "analytics",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_trend",
+          "description": "Time-series trend for a specific metric.",
+          "module": "analytics",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "log_activity",
+          "description": "Record a custom activity event.",
+          "module": "activity",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "log_bulk_activity",
+          "description": "Record multiple activity events at once.",
+          "module": "activity",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "create_audit_note",
+          "description": "Attach a manual audit note to an entity.",
+          "module": "activity",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "export_audit_log",
+          "description": "Export audit trail for compliance.",
+          "module": "activity",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "delete_old_logs",
+          "description": "Purge activity logs older than a retention threshold.",
+          "module": "activity",
+          "requiresApproval": true,
+          "mode": "assisted_approval"
+        },
+        {
+          "name": "get_activity",
+          "description": "Query activity log with filters.",
+          "module": "activity",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_recent",
+          "description": "Fetch the most recent activity across the business.",
+          "module": "activity",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_activity_stats",
+          "description": "Aggregate activity statistics.",
+          "module": "activity",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_user_activity",
+          "description": "Activity performed by a specific user.",
+          "module": "activity",
+          "requiresApproval": false,
+          "mode": "agentic"
+        }
+      ]
+    },
+    {
+      "id": "people_hr",
+      "label": "People & HR",
+      "toolCount": 4,
+      "capCount": 0,
+      "modeCounts": {
+        "assisted": 1,
+        "assisted_approval": 3
+      },
+      "uiSurfaces": [
+        "/app/payroll"
+      ],
+      "targetsTotal": 3,
+      "targetsActive": 0,
+      "targetsPlanned": 3,
+      "targets": [
+        {
+          "label": "Payroll tax filing",
+          "status": "planned",
+          "mode": "human_gated",
+          "riskTier": 4,
+          "uiSurface": "/app/payroll",
+          "requiredTools": [
+            "payroll_approve_run",
+            "payroll_generate_run",
+            "payroll_mark_paid"
+          ],
+          "evaluator": "Withholding recomputation matches; human + compliance sign-off",
+          "coveredBy": null,
+          "why": "Thinnest domain; compliance-heavy, submission human-gated."
+        },
+        {
+          "label": "Performance-review synthesis",
+          "status": "planned",
+          "mode": "assisted",
+          "riskTier": 2,
+          "uiSurface": "/app/performance",
+          "requiredTools": [
+            "command_list_due_obligations",
+            "fetch_business_summary",
+            "finance_balance_sheet"
+          ],
+          "evaluator": "Bias/fairness screen; source-attribution check",
+          "coveredBy": null,
+          "why": "Aggregate performance signals into review drafts a human edits."
+        },
+        {
+          "label": "PTO / shift optimization",
+          "status": "planned",
+          "mode": "assisted",
+          "riskTier": 2,
+          "uiSurface": "/app/structure",
+          "requiredTools": [
+            "payroll_list_rates",
+            "people_list",
+            "people_org_chart"
+          ],
+          "evaluator": "Coverage-constraint satisfaction; labour-rule check",
+          "coveredBy": null,
+          "why": "Balance coverage against staff availability."
+        }
+      ],
+      "tools": [
+        {
+          "name": "payroll_set_rate",
+          "description": "Set a staff member's pay rate (hourly or monthly salary).",
+          "family": "organize",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/payroll",
+          "fullRoute": "/app/payroll"
+        },
+        {
+          "name": "payroll_generate_run",
+          "description": "Generate a draft payroll run for a period: hourly staff get logged billable hours × rate, salaried staff get their monthly rate.",
+          "family": "execute",
+          "riskTier": 3,
+          "mode": "assisted_approval",
+          "route": "/app/payroll",
+          "fullRoute": "/app/payroll"
+        },
+        {
+          "name": "payroll_approve_run",
+          "description": "Approve a draft payroll run (locks it for payment).",
+          "family": "execute",
+          "riskTier": 3,
+          "mode": "assisted_approval",
+          "route": "/app/payroll",
+          "fullRoute": "/app/payroll"
+        },
+        {
+          "name": "payroll_mark_paid",
+          "description": "Mark an approved payroll run as paid.",
+          "family": "execute",
+          "riskTier": 3,
+          "mode": "assisted_approval",
+          "route": "/app/payroll",
+          "fullRoute": "/app/payroll"
+        }
+      ],
+      "capabilities": []
+    },
+    {
+      "id": "assets",
+      "label": "Assets & Documents",
+      "toolCount": 7,
+      "capCount": 0,
+      "modeCounts": {
+        "agentic": 5,
+        "assisted": 1,
+        "assisted_approval": 1
+      },
+      "uiSurfaces": [
+        "/app/assets"
+      ],
+      "targetsTotal": 2,
+      "targetsActive": 0,
+      "targetsPlanned": 2,
+      "targets": [
+        {
+          "label": "Asset depreciation / lifecycle",
+          "status": "planned",
+          "mode": "assisted",
+          "riskTier": 2,
+          "uiSurface": "/app/assets",
+          "requiredTools": [
+            "assets_get",
+            "assets_list",
+            "assets_list_folders"
+          ],
+          "evaluator": "Depreciation schedule matches method; ledger tie-out",
+          "coveredBy": null,
+          "why": "Track book value and lifecycle events."
+        },
+        {
+          "label": "License-renewal tracking",
+          "status": "planned",
+          "mode": "agentic",
+          "riskTier": 1,
+          "uiSurface": "/app/assets",
+          "requiredTools": [
+            "assets_get",
+            "assets_list",
+            "assets_list_folders"
+          ],
+          "evaluator": "Renewal-date extraction accuracy; reminder-lead-time check",
+          "coveredBy": null,
+          "why": "Never miss a license/contract renewal."
+        }
+      ],
+      "tools": [
+        {
+          "name": "assets_list",
+          "description": "List brand and media assets — filter by type, folder, tag, or a name search.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/assets",
+          "fullRoute": "/app/assets"
+        },
+        {
+          "name": "assets_get",
+          "description": "Get one asset by id — name, type, folder, tags, url and usage count.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/assets",
+          "fullRoute": "/app/assets"
+        },
+        {
+          "name": "assets_list_folders",
+          "description": "List the folders assets are organised into.",
+          "family": "read",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/assets",
+          "fullRoute": "/app/assets"
+        },
+        {
+          "name": "assets_tag",
+          "description": "Add tags to an asset. Existing tags are kept.",
+          "family": "organize",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/assets",
+          "fullRoute": "/app/assets"
+        },
+        {
+          "name": "assets_untag",
+          "description": "Remove tags from an asset. Tags not listed are kept.",
+          "family": "organize",
+          "riskTier": 1,
+          "mode": "agentic",
+          "route": "/app/assets",
+          "fullRoute": "/app/assets"
+        },
+        {
+          "name": "assets_update",
+          "description": "Rename an asset, move it to another folder, replace its tags, or change its permissions. Does not touch the file itself.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/assets",
+          "fullRoute": "/app/assets"
+        },
+        {
+          "name": "assets_delete",
+          "description": "Permanently delete an asset record. This is NOT a soft delete and there is no undo — Asset is not in the soft-delete set, so the row is gone.",
+          "family": "crud",
+          "riskTier": 3,
+          "mode": "assisted_approval",
+          "route": "/app/assets",
+          "fullRoute": "/app/assets"
+        }
+      ],
+      "capabilities": []
+    },
+    {
+      "id": "admin",
+      "label": "Admin & Settings",
+      "toolCount": 0,
+      "capCount": 10,
+      "modeCounts": {
+        "assisted": 4,
+        "assisted_approval": 2,
+        "agentic": 4
+      },
+      "uiSurfaces": [],
+      "targetsTotal": 1,
+      "targetsActive": 0,
+      "targetsPlanned": 1,
+      "targets": [
+        {
+          "label": "Anomalous-access / audit alerting",
+          "status": "planned",
+          "mode": "agentic",
+          "riskTier": 1,
+          "uiSurface": "/app/settings",
+          "requiredTools": [
+            "approval_list",
+            "assets_get",
+            "assets_list"
+          ],
+          "evaluator": "Detection precision on known-bad patterns; alert-noise ceiling",
+          "coveredBy": null,
+          "why": "Detect unusual admin access; security posture."
+        }
+      ],
+      "tools": [],
+      "capabilities": [
+        {
+          "name": "update_business_profile",
+          "description": "Update core business information.",
+          "module": "settings",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "update_branding",
+          "description": "Update brand colors, logo, and email templates.",
+          "module": "settings",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "add_team_member",
+          "description": "Invite a new user to the business.",
+          "module": "settings",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "remove_team_member",
+          "description": "Revoke a user's access.",
+          "module": "settings",
+          "requiresApproval": true,
+          "mode": "assisted_approval"
+        },
+        {
+          "name": "update_role",
+          "description": "Change a team member's permission role.",
+          "module": "settings",
+          "requiresApproval": true,
+          "mode": "assisted_approval"
+        },
+        {
+          "name": "configure_integration",
+          "description": "Enable or configure a third-party integration.",
+          "module": "settings",
+          "requiresApproval": false,
+          "mode": "assisted"
+        },
+        {
+          "name": "get_business_profile",
+          "description": "Fetch current business profile settings.",
+          "module": "settings",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_team_members",
+          "description": "List all team members and their roles.",
+          "module": "settings",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_integrations",
+          "description": "List configured third-party integrations.",
+          "module": "settings",
+          "requiresApproval": false,
+          "mode": "agentic"
+        },
+        {
+          "name": "get_permissions",
+          "description": "Get role-based permission matrix.",
+          "module": "settings",
+          "requiresApproval": false,
+          "mode": "agentic"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "domains": 12,
+    "flowTools": 282,
+    "cortexCapabilities": 207,
+    "targetsTotal": 32,
+    "targetsActive": 15,
+    "targetsPlanned": 17,
+    "activeCoveragePct": 47,
+    "declaredCoveragePct": 100,
+    "modeCounts": {
+      "agentic": 212,
+      "assisted": 228,
+      "assisted_approval": 46,
+      "human_gated": 3
+    }
+  }
+}

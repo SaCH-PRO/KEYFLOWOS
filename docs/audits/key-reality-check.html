@@ -1,0 +1,238 @@
+<title>KEY Reality Check</title>
+<style>
+  :root{
+    --bg:#F3F3F7;--surface:#FFFFFF;--surface-2:#FAFAFC;--surface-3:#F1F1F6;--border:#E4E4EC;--border-strong:#D3D3DE;
+    --ink:#1A1A24;--ink-soft:#54546A;--ink-faint:#8888A0;--accent:#4F46E5;--accent-soft:#EEEDFC;
+    --good:#15A34A;--good-bg:#E7F6ED;--warn:#C2740A;--warn-bg:#FBF0DD;--bad:#D92D20;--bad-bg:#FBE9E7;
+    --shadow:0 1px 2px rgba(20,20,40,.05),0 8px 24px -12px rgba(20,20,40,.14);
+    --mono:ui-monospace,"SF Mono","SFMono-Regular","JetBrains Mono","Cascadia Code",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  :root:not([data-theme="light"]){@media (prefers-color-scheme:dark){
+    --bg:#0D0D13;--surface:#15151E;--surface-2:#1A1A25;--surface-3:#20202E;--border:#282836;--border-strong:#36364A;
+    --ink:#E9E9F2;--ink-soft:#A2A2BC;--ink-faint:#66667E;--accent:#8983FF;--accent-soft:#211F3A;
+    --good:#34D399;--good-bg:#0F2A20;--warn:#FBBF24;--warn-bg:#2E2410;--bad:#F87171;--bad-bg:#2E1614;
+    --shadow:0 1px 2px rgba(0,0,0,.3),0 12px 32px -14px rgba(0,0,0,.6);
+  }}
+  :root[data-theme="dark"]{
+    --bg:#0D0D13;--surface:#15151E;--surface-2:#1A1A25;--surface-3:#20202E;--border:#282836;--border-strong:#36364A;
+    --ink:#E9E9F2;--ink-soft:#A2A2BC;--ink-faint:#66667E;--accent:#8983FF;--accent-soft:#211F3A;
+    --good:#34D399;--good-bg:#0F2A20;--warn:#FBBF24;--warn-bg:#2E2410;--bad:#F87171;--bad-bg:#2E1614;
+    --shadow:0 1px 2px rgba(0,0,0,.3),0 12px 32px -14px rgba(0,0,0,.6);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.55;-webkit-font-smoothing:antialiased;font-size:15px}
+  .wrap{max-width:1000px;margin:0 auto;padding:clamp(20px,4vw,56px) clamp(16px,4vw,40px) 96px}
+  .eyebrow{font-family:var(--mono);font-size:11.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint)}
+  h1{font-size:clamp(30px,5vw,48px);line-height:1.02;letter-spacing:-.03em;margin:.35em 0 .25em;text-wrap:balance;font-weight:680}
+  h1 .key{color:var(--accent)}
+  .lede{color:var(--ink-soft);max-width:70ch;font-size:15.5px}
+  .lede b{color:var(--ink)}
+  header{display:flex;justify-content:space-between;align-items:flex-start;gap:24px;flex-wrap:wrap}
+  .toggle{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-soft);background:var(--surface);border:1px solid var(--border);border-radius:999px;padding:7px 14px;cursor:pointer;white-space:nowrap}
+  .toggle:hover{border-color:var(--border-strong);color:var(--ink)}
+  .toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  h2{font-size:13px;font-family:var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);margin:48px 0 18px;font-weight:600;display:flex;align-items:center;gap:12px}
+  h2::after{content:"";height:1px;background:var(--border);flex:1}
+
+  /* two-score */
+  .scores{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:34px}
+  @media(max-width:620px){.scores{grid-template-columns:1fr}}
+  .sc{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:22px 24px;box-shadow:var(--shadow);position:relative;overflow:hidden}
+  .sc.is::before,.sc.claims::before{content:"";position:absolute;inset:0 auto 0 0;width:4px}
+  .sc.is::before{background:var(--good)}
+  .sc.claims::before{background:var(--bad)}
+  .sc .cap{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-faint)}
+  .sc .val{font-family:var(--mono);font-size:clamp(38px,7vw,54px);font-weight:600;letter-spacing:-.02em;line-height:1;margin:10px 0 4px;font-variant-numeric:tabular-nums}
+  .sc.is .val{color:var(--good)}
+  .sc.claims .val{color:var(--bad)}
+  .sc .val small{font-size:.42em;color:var(--ink-faint)}
+  .sc .desc{font-size:13.5px;color:var(--ink-soft);margin-top:6px}
+  .gap-note{font-family:var(--mono);font-size:12px;color:var(--ink-soft);text-align:center;margin-top:14px}
+  .gap-note b{color:var(--ink)}
+
+  .callout{background:var(--accent-soft);border:1px solid color-mix(in srgb,var(--accent) 25%,transparent);border-radius:12px;padding:16px 19px;margin:22px 0 0;font-size:14.5px;color:var(--ink-soft)}
+  .callout b{color:var(--ink)}
+
+  /* claim cards */
+  .claims-list{display:flex;flex-direction:column;gap:10px}
+  .cc{background:var(--surface);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow);overflow:hidden;display:grid;grid-template-columns:6px 1fr}
+  .cc .stripe{width:6px}
+  .cc.good .stripe{background:var(--good)}.cc.warn .stripe{background:var(--warn)}.cc.bad .stripe{background:var(--bad)}
+  .cc .in{padding:15px 18px}
+  .cc .top{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+  .cc .claim{font-weight:640;font-size:15px;flex:1;min-width:200px}
+  .vpill{font-family:var(--mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;padding:3px 10px;border-radius:999px;color:#fff;white-space:nowrap}
+  .cc.good .vpill{background:var(--good)}.cc.warn .vpill{background:var(--warn)}.cc.bad .vpill{background:var(--bad)}
+  .cc .reality{font-size:13.5px;color:var(--ink-soft)}
+  .cc .reality b{color:var(--ink)}
+  .cc .ev{font-family:var(--mono);font-size:11px;color:var(--ink-faint);margin-top:8px}
+  .cc .ev code{background:var(--surface-3);padding:.05em .4em;border-radius:4px}
+
+  /* subsystem bars */
+  .bars{background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow);padding:8px 20px}
+  .bar{display:grid;grid-template-columns:200px 1fr 34px;align-items:center;gap:14px;padding:11px 0;border-bottom:1px solid var(--border)}
+  .bar:last-child{border-bottom:0}
+  @media(max-width:560px){.bar{grid-template-columns:1fr 30px;grid-template-areas:"n s" "t t";gap:6px 10px}.bar .nm{grid-area:n}.bar .track{grid-area:t}.bar .num{grid-area:s}}
+  .bar .nm{font-size:13.5px;font-weight:560}
+  .bar .track{height:9px;background:var(--surface-3);border-radius:5px;overflow:hidden}
+  .bar .track>span{display:block;height:100%;border-radius:5px}
+  .bar .num{font-family:var(--mono);font-size:13px;font-weight:600;text-align:right;font-variant-numeric:tabular-nums}
+  .g5{background:var(--good)}.g4{background:var(--good)}.g3{background:var(--warn)}.g2{background:var(--bad)}
+
+  /* two-col lists */
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:680px){.cols{grid-template-columns:1fr}}
+  .col{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px;box-shadow:var(--shadow)}
+  .col.good{border-top:3px solid var(--good)}.col.bad{border-top:3px solid var(--bad)}
+  .col h3{font-size:13px;font-family:var(--mono);letter-spacing:.06em;text-transform:uppercase;margin:0 0 12px;color:var(--ink-soft)}
+  .col ol{margin:0;padding-left:20px;font-size:13.5px;color:var(--ink-soft)}
+  .col li{margin-bottom:8px}
+  .col li b{color:var(--ink)}
+
+  /* recs */
+  .recs{counter-reset:r;display:flex;flex-direction:column;gap:9px}
+  .rec{background:var(--surface);border:1px solid var(--border);border-radius:11px;padding:14px 16px 14px 52px;position:relative;box-shadow:var(--shadow);font-size:14px;color:var(--ink-soft)}
+  .rec::before{counter-increment:r;content:counter(r);position:absolute;left:14px;top:13px;width:26px;height:26px;border-radius:8px;background:var(--accent);color:#fff;font-family:var(--mono);font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:center}
+  .rec b{color:var(--ink)}
+
+  footer{margin-top:52px;padding-top:24px;border-top:1px solid var(--border);color:var(--ink-faint);font-size:12.5px}
+  footer b{color:var(--ink-soft)}
+  footer code{font-family:var(--mono);font-size:.9em}
+  @media(prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+<div class="wrap">
+  <header>
+    <div>
+      <div class="eyebrow">KeyFlowOS · Critical Assessment</div>
+      <h1><span class="key">KEY</span> Reality Check</h1>
+      <p class="lede">The product's vision measured against its running code. Two independent evidence passes — the vision/audit docs, and ~120k LOC of the <code>ai</code>/<code>key-cortex</code>/<code>key-autonomy</code> source — cross-checked, with the most severe safety claims re-verified by hand at current HEAD. <b>Bottom line: a real, competently-built governed co-pilot wearing an over-ambitious neuro-biological costume.</b></p>
+    </div>
+    <button class="toggle" id="tg" aria-label="Toggle colour theme">&#9680; Theme</button>
+  </header>
+
+  <div class="scores">
+    <div class="sc is">
+      <div class="cap">As what it actually is</div>
+      <div class="val">7<small>/10</small></div>
+      <div class="desc">A governed operations co-pilot: real model gateway, ~282 wired tools, tiered governance that fails closed. Matches the repo's own audit (backend 7/10).</div>
+    </div>
+    <div class="sc claims">
+      <div class="cap">As what the vision sells</div>
+      <div class="val">3<small>/10</small></div>
+      <div class="desc">An "autonomous, conscious digital employee that runs a business." Autonomy is bounded &amp; human-gated; cognition is a read-only side-door; self-improvement loops are open.</div>
+    </div>
+  </div>
+  <div class="gap-note">The distance between those two numbers <b>is the finding.</b></div>
+
+  <div class="callout"><b>Fair-rating note:</b> the codebase is <b>actively hardening</b> — several scary audit-doc findings are already fixed at HEAD (SQL-injection in semantic memory now parameterized; <code>SafetyShell.check()</code> now wired). A credible rating reads the code, not stale audits.</div>
+
+  <h2>Claim vs. reality</h2>
+  <div class="claims-list">
+    <div class="cc good"><div class="stripe"></div><div class="in">
+      <div class="top"><span class="claim">Tiered risk / approval governance is enforced</span><span class="vpill">Confirmed</span></div>
+      <div class="reality"><b>True — and the strongest area.</b> Every tool call awaits <code>governance.evaluate()</code> before running; <b>blocked</b> short-circuits with no execution; a settings-read error returns <b>restricted</b> (fails closed), with a test proving it.</div>
+      <div class="ev"><code>flow-orchestrator.ts:1766</code> · <code>ai-oversight.ts:321</code> · <code>ai-oversight-fails-closed.spec.ts</code></div>
+    </div></div>
+    <div class="cc good"><div class="stripe"></div><div class="in">
+      <div class="top"><span class="claim">Prior SQL-injection in semantic memory</span><span class="vpill">Remediated</span></div>
+      <div class="reality">Now uses parameterized <code>$executeRaw</code>/<code>$queryRaw</code> tagged templates, not the <code>…Unsafe</code> variants the audit flagged. Verified at HEAD.</div>
+      <div class="ev"><code>semantic-memory.service.ts:42, 88, 138</code></div>
+    </div></div>
+    <div class="cc warn"><div class="stripe"></div><div class="in">
+      <div class="top"><span class="claim">Autonomous "digital employee" — runs a full week of ops</span><span class="vpill">Aspirational</span></div>
+      <div class="reality">Their own acceptance test is <b>Phase 5, weeks 59–72 — unbuilt.</b> Capability assessment concedes "architecture is not capability… cannot yet wholly replace most human employees." No measured escalation baseline.</div>
+      <div class="ev">KEY_MIND_SOUL_EVOLUTION_MASTER_PLAN.md §1 · KEY_CAPABILITIES_ASSESSMENT.md</div>
+    </div></div>
+    <div class="cc warn"><div class="stripe"></div><div class="in">
+      <div class="top"><span class="claim">"Consciousness" — 8 cognition layers on every message</span><span class="vpill">Overstated</span></div>
+      <div class="reality">Real code, but <b>one production caller</b>, gated to non-action read-only queries, "returns actions as PROPOSALS, never executions." In-file comments claiming "runs on every message" oversell; the cortex's own <code>/chat</code> never touches it.</div>
+      <div class="ev"><code>key-cortex-consciousness.service.ts</code> called at <code>flow-orchestrator.ts:823</code> (deliberate)</div>
+    </div></div>
+    <div class="cc warn"><div class="stripe"></div><div class="in">
+      <div class="top"><span class="claim">Safety shell / kill-switch / rollback containment</span><span class="vpill">Half-real</span></div>
+      <div class="reality"><code>safetyShell.check()</code> <b>is now wired</b> into the autonomy executor (older "never invoked" audits are stale). But <code>rollback()</code> still logs only — its own error string: "cannot compensate: no handler is wired."</div>
+      <div class="ev"><code>key-action-executor.ts:31</code> · <code>safety-shell.service.ts:113</code></div>
+    </div></div>
+    <div class="cc warn"><div class="stripe"></div><div class="in">
+      <div class="top"><span class="claim">Self-improving — ingests &amp; applies knowledge within 24h</span><span class="vpill">Loops open</span></div>
+      <div class="reality"><code>evolution</code> persists real learning/tuning tables. But <code>knowledge-ingestion</code> is <b>INERT</b> ("records URL, does not fetch"), value-learning "not wired beyond eval harness." "The loops exist on paper but are not closed in production" — their words.</div>
+      <div class="ev">CAPABILITY_MAP.md §1.5 · KEY_CAPABILITIES_ASSESSMENT.md §3.9</div>
+    </div></div>
+    <div class="cc warn"><div class="stripe"></div><div class="in">
+      <div class="top"><span class="claim">Multi-agent orchestration / organ adapters / crew</span><span class="vpill">Overstated</span></div>
+      <div class="reality">"Crew" is deterministic per-role scoring feeding <b>one</b> LLM pass; the agent bus is a Prisma message table + in-memory subscriptions. <b>No independent agents.</b></div>
+      <div class="ev"><code>role-engine.service.ts</code> · <code>agent-bus.service.ts</code></div>
+    </div></div>
+    <div class="cc warn"><div class="stripe"></div><div class="in">
+      <div class="top"><span class="claim">137 unified KEY tools, zero orphans</span><span class="vpill">Mixed</span></div>
+      <div class="reality">Better and worse: <b>~282</b> real tools wired to real services (bigger). But <b>two duplicated AI stacks</b>, 25/29 organ tools unbridged, 12 domains with zero tools. "Unified" is false — they coexist, not compose.</div>
+      <div class="ev"><code>flow-tool-registry.ts</code> (6083 L) + <code>key-cortex</code> registries; bridge wires only 4 tools</div>
+    </div></div>
+    <div class="cc bad"><div class="stripe"></div><div class="in">
+      <div class="top"><span class="claim">Immutable values + ethics veto govern actions</span><span class="vpill">Decorative</span></div>
+      <div class="reality">By the repo's own measurement, ethics denies <b>0 of 78 write tools</b>; hard vetoes match substrings no registered tool contains — "<b>unreachable by construction</b>." Left unwired to avoid "the appearance of an ethical gate."</div>
+      <div class="ev">CAPABILITY_MAP.md §1.9 · <code>key-cortex-ethics.service.ts</code></div>
+    </div></div>
+    <div class="cc bad"><div class="stripe"></div><div class="in">
+      <div class="top"><span class="claim">"KEY 10/10 upgrade delivered"</span><span class="vpill">Contradicted</span></div>
+      <div class="reality">The repo's <b>own</b> audit three days later: backend <b>7/10</b>, features <b>5/10</b>, security <b>5/10</b>.</div>
+      <div class="ev">KEY_10_ROADMAP_v2.md vs. KEY_AUDIT_REPORT.md</div>
+    </div></div>
+  </div>
+
+  <h2>Subsystem health · 1 = vaporware, 5 = solid</h2>
+  <div class="bars">
+    <div class="bar"><span class="nm">Governance / approvals</span><span class="track"><span class="g5" style="width:100%"></span></span><span class="num">5</span></div>
+    <div class="bar"><span class="nm">Tool layer</span><span class="track"><span class="g4" style="width:80%"></span></span><span class="num">4</span></div>
+    <div class="bar"><span class="nm">Sandbox</span><span class="track"><span class="g4" style="width:80%"></span></span><span class="num">4</span></div>
+    <div class="bar"><span class="nm">Tests</span><span class="track"><span class="g4" style="width:80%"></span></span><span class="num">4</span></div>
+    <div class="bar"><span class="nm">Orchestration</span><span class="track"><span class="g3" style="width:60%"></span></span><span class="num">3</span></div>
+    <div class="bar"><span class="nm">Memory</span><span class="track"><span class="g3" style="width:60%"></span></span><span class="num">3</span></div>
+    <div class="bar"><span class="nm">Autonomy / self-improvement</span><span class="track"><span class="g3" style="width:60%"></span></span><span class="num">3</span></div>
+    <div class="bar"><span class="nm">Cortex cognition (bio-services)</span><span class="track"><span class="g2" style="width:40%"></span></span><span class="num">2</span></div>
+    <div class="bar"><span class="nm">Multi-agent / bus</span><span class="track"><span class="g2" style="width:40%"></span></span><span class="num">2</span></div>
+    <div class="bar"><span class="nm">Evaluator / quality gate</span><span class="track"><span class="g2" style="width:40%"></span></span><span class="num">2</span></div>
+  </div>
+
+  <h2>The honest split</h2>
+  <div class="cols">
+    <div class="col good">
+      <h3>✓ Genuinely impresses</h3>
+      <ol>
+        <li><b>Fail-closed governance</b> at the one point that matters, with a test proving the failure mode.</li>
+        <li><b>Real multi-provider model gateway</b> — OpenAI SDK + Anthropic REST + Ollama + BYOK + streaming.</li>
+        <li><b>Real code sandbox</b> — E2B + local backends, hard timeouts.</li>
+        <li><b>Genuine tool breadth</b> — 389-case executor over ~282 Prisma-backed tools, each with a CI-enforced manual route.</li>
+        <li><b>Engineering honesty</b> — near-zero TODOs, candid comments, an audit culture that actively remediates.</li>
+      </ol>
+    </div>
+    <div class="col bad">
+      <h3>✗ Most overstated</h3>
+      <ol>
+        <li><b>Cognition theatre</b> — "consciousness on every request" is a read-only, executor-free side-door.</li>
+        <li><b>Ethics veto</b> — decorative by the repo's own measurement (0/78).</li>
+        <li><b>Multi-agent</b> — pub/sub + deterministic crew scoring, not autonomous agents.</li>
+        <li><b>Evaluator</b> — a quality gate that <b>passes when unwired</b> (fails open on a missing dep).</li>
+        <li><b>Two full cognition stacks</b> duplicated, bridged by 4 tools — sold as one unified brain.</li>
+      </ol>
+    </div>
+  </div>
+
+  <h2>Highest-leverage fixes</h2>
+  <div class="recs">
+    <div class="rec"><b>Consolidate the two stacks.</b> The single biggest structural liability — two orchestrators, planners, registries, memories, approvals, sandboxes that coexist rather than compose. Pick the seam before building anything new.</div>
+    <div class="rec"><b>Test the 6,586-line orchestrator god-service.</b> It <i>is</i> the product and has no dedicated spec. Add record/replay end-to-end tests for the govern→execute→feedback path.</div>
+    <div class="rec"><b>Make the evaluator fail closed.</b> <code>return { deterministic: true }</code> on a missing dependency is backwards for a safety gate — invert all five checks.</div>
+    <div class="rec"><b>Finish containment or stop claiming it.</b> Wire <code>rollback()</code> handlers, or relabel the "safety shell" as the advisory logger it currently is.</div>
+    <div class="rec"><b>Retire or gate the cognition marketing.</b> Either put the cortex on a real governed execution path, or relabel it the deliberation aid it is. The "consciousness/soul" language undermines the credible engineering under it.</div>
+    <div class="rec"><b>Reconcile the docs.</b> Date-stamp or delete "10/10 delivered" — contradicted by the repo's own audit, it corrodes trust in every other claim.</div>
+  </div>
+
+  <footer>
+    <p><b>Method.</b> Two independent evidence passes (vision/audit docs + source), cross-checked; top safety/security claims re-verified by hand at current HEAD. All findings trace to <code>file:line</code>. Full write-up: <code>docs/audits/KEY_EFFECTIVENESS_RATING.md</code>. This is an assessment of code and claims as of the current commit — the codebase is moving, so re-run against HEAD.</p>
+  </footer>
+</div>
+<script>
+  document.getElementById('tg').onclick=function(){var r=document.documentElement,c=r.getAttribute('data-theme');var n=c?(c==='dark'?'light':'dark'):(matchMedia('(prefers-color-scheme:dark)').matches?'light':'dark');r.setAttribute('data-theme',n);};
+</script>
