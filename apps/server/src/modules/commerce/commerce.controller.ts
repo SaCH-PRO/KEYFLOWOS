@@ -1,7 +1,9 @@
-import { Body, Controller, Delete, ForbiddenException, Get, Inject, Logger, Param, Patch, Post, Query, Req, Res, UseGuards, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { Body, Controller, Delete, ForbiddenException, Get, Inject, Logger, Param, Patch, Post, Put, Query, Req, Res, UseGuards, UseInterceptors, UploadedFile } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Request, Response } from 'express';
 import { CommerceService } from './commerce.service';
+import { PricingService } from './pricing.service';
+import { SetProductTierPriceDto, SetContactPricingTierDto } from './dto/tier-pricing.dto';
 import { CommerceVisionService } from './commerce-vision.service';
 import { StoreReadinessService } from './store-readiness.service';
 import { PaymentEvidenceService } from './payment-evidence.service';
@@ -32,6 +34,7 @@ export class CommerceController {
 
   constructor(
     @Inject(CommerceService) private readonly commerce: CommerceService,
+    @Inject(PricingService) private readonly pricing: PricingService,
     @Inject(InvoiceReceiptBuilderService) private readonly receipts: InvoiceReceiptBuilderService,
     @Inject(GmailService) private readonly gmail: GmailService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -122,6 +125,44 @@ export class CommerceController {
     @Param('productId') productId: string,
   ) {
     return this.commerce.deleteProduct(businessId, productId);
+  }
+
+  // ── Tiered pricing (distributor/wholesale vs retail) ──────────────────────
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
+  @Get('businesses/:businessId/products/:productId/tier-prices')
+  listTierPrices(
+    @Param('businessId') businessId: string,
+    @Param('productId') productId: string,
+  ) {
+    return this.pricing.listTierPrices(businessId, productId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
+  @UseInterceptors(TeamAuditInterceptor)
+  @AuditAction('revenue', 'product_tier_price_set', 'product')
+  @Put('businesses/:businessId/products/:productId/tier-prices')
+  setTierPrice(
+    @Param('businessId') businessId: string,
+    @Param('productId') productId: string,
+    @Body() body: SetProductTierPriceDto,
+  ) {
+    return this.pricing.setTierPrice(businessId, productId, body.tier, body.price);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
+  @UseInterceptors(TeamAuditInterceptor)
+  @AuditAction('revenue', 'contact_pricing_tier_set', 'contact')
+  @Patch('businesses/:businessId/contacts/:contactId/pricing-tier')
+  setContactPricingTier(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+    @Body() body: SetContactPricingTierDto,
+  ) {
+    return this.pricing.setContactTier(businessId, contactId, body.tier);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

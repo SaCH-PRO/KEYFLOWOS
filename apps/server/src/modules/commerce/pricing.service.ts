@@ -113,6 +113,14 @@ export class PricingService {
     if (tier === DEFAULT_PRICING_TIER) {
       throw new Error('RETAIL price lives on the product — set Product.price, not a tier override');
     }
+    // Tenant safety: the product must belong to this business.
+    const product = await this.prisma.client.product.findFirst({
+      where: { id: productId, businessId },
+      select: { id: true },
+    });
+    if (!product) {
+      throw new Error(`Product ${productId} not found for business ${businessId}`);
+    }
     return this.prisma.client.productTierPrice.upsert({
       where: { productId_tier: { productId, tier } },
       create: { businessId, productId, tier, price },
@@ -130,9 +138,15 @@ export class PricingService {
 
   /** Assign a contact to a pricing tier (e.g. mark a distributor WHOLESALE). */
   async setContactTier(businessId: string, contactId: string, tier: string) {
-    return this.prisma.client.contact.update({
-      where: { id: contactId },
+    // Tenant-safe update: scope by businessId so a caller cannot retier another
+    // tenant's contact.
+    const res = await this.prisma.client.contact.updateMany({
+      where: { id: contactId, businessId },
       data: { pricingTier: tier },
     });
+    if (res.count === 0) {
+      throw new Error(`Contact ${contactId} not found for business ${businessId}`);
+    }
+    return { id: contactId, pricingTier: tier };
   }
 }

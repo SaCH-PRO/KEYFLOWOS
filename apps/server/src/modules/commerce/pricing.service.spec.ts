@@ -12,7 +12,7 @@ describe('PricingService', () => {
         upsert: ReturnType<typeof vi.fn>;
         findMany: ReturnType<typeof vi.fn>;
       };
-      contact: { findFirst: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn> };
+      contact: { findFirst: ReturnType<typeof vi.fn>; updateMany: ReturnType<typeof vi.fn> };
     };
   };
 
@@ -21,7 +21,7 @@ describe('PricingService', () => {
       client: {
         product: { findFirst: vi.fn() },
         productTierPrice: { findUnique: vi.fn(), upsert: vi.fn(), findMany: vi.fn() },
-        contact: { findFirst: vi.fn(), update: vi.fn() },
+        contact: { findFirst: vi.fn(), updateMany: vi.fn() },
       },
     };
     service = new PricingService(prisma as unknown as PrismaService);
@@ -107,13 +107,37 @@ describe('PricingService', () => {
       await expect(service.setTierPrice('biz', 'prod', 'RETAIL', 10)).rejects.toThrow(/RETAIL/);
     });
 
-    it('upserts a non-retail tier price', async () => {
+    it('upserts a non-retail tier price when the product belongs to the business', async () => {
+      prisma.client.product.findFirst.mockResolvedValue({ id: 'prod' });
       prisma.client.productTierPrice.upsert.mockResolvedValue({ id: 'x', tier: 'WHOLESALE', price: 70 });
       const row = await service.setTierPrice('biz', 'prod', 'WHOLESALE', 70);
       expect(row.price).toBe(70);
       expect(prisma.client.productTierPrice.upsert).toHaveBeenCalledWith(
         expect.objectContaining({ where: { productId_tier: { productId: 'prod', tier: 'WHOLESALE' } } }),
       );
+    });
+
+    it('refuses to set a tier price for a product in another business', async () => {
+      prisma.client.product.findFirst.mockResolvedValue(null);
+      await expect(service.setTierPrice('biz', 'foreign', 'WHOLESALE', 70)).rejects.toThrow(/not found/);
+      expect(prisma.client.productTierPrice.upsert).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('setContactTier', () => {
+    it('retiers a contact scoped to the business', async () => {
+      prisma.client.contact.updateMany.mockResolvedValue({ count: 1 });
+      const res = await service.setContactTier('biz', 'c1', 'WHOLESALE');
+      expect(res).toEqual({ id: 'c1', pricingTier: 'WHOLESALE' });
+      expect(prisma.client.contact.updateMany).toHaveBeenCalledWith({
+        where: { id: 'c1', businessId: 'biz' },
+        data: { pricingTier: 'WHOLESALE' },
+      });
+    });
+
+    it('throws when the contact is not in the business (cross-tenant guard)', async () => {
+      prisma.client.contact.updateMany.mockResolvedValue({ count: 0 });
+      await expect(service.setContactTier('biz', 'foreign', 'WHOLESALE')).rejects.toThrow(/not found/);
     });
   });
 });
