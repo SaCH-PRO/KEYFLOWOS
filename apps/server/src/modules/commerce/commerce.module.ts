@@ -49,6 +49,7 @@ import { FinanceModule } from '../finance/finance.module';
 import { PublicEventsModule } from '../public-events/public-events.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { AiModule } from '../ai/ai.module';
+import { TimeTrackingModule } from '../time-tracking/time-tracking.module';
 import { CatalogModule } from '../catalog/catalog.module';
 import { PlanLimitGuard } from '../subscriptions/plan-limit.guard';
 import { DocumentTemplateModule } from './document-template/document-template.module';
@@ -67,6 +68,11 @@ import type { NotificationsModule as NotificationsModuleType } from '../notifica
     forwardRef(() => FinanceModule),
     PublicEventsModule,
     SubscriptionsModule,
+    // A leaf (imports: [PrismaModule]) and it does not import commerce, so
+    // this edge points strictly downward and closes no cycle. Time -> invoice
+    // is the join the capability map calls out: both legs existed and nothing
+    // in commerce or projects read timeEntry.
+    TimeTrackingModule,
     forwardRef(() => AiModule),
     CatalogModule,
     forwardRef(() => FinanceModule),

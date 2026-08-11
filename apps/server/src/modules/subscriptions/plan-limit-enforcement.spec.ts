@@ -6,12 +6,27 @@
  * for FREE / FLOW / KEYFLOW. Read off a plan and enforced anywhere:
  *
  *   aiCreditsPerMonth   ai-usage.service.ts
- *   bookingsPerMonth    bookings.controller.ts    (via checkLimit)
- *   products            commerce.controller.ts    (via checkLimit)
+ *   bookingsPerMonth    bookings.controller.ts   (checkLimit + @RequirePlanLimit)
+ *   products            commerce.controller.ts   (checkLimit + @RequirePlanLimit)
+ *   contacts            @RequirePlanLimit
+ *   invoicesPerMonth    @RequirePlanLimit
+ *   automations         @RequirePlanLimit (3 routes)
  *
- * Three of twenty-five. The other twenty-two are advertised and enforce
- * nothing: a FREE account may hold ten thousand contacts, run unlimited
- * automations and connect webhooks it is told it cannot have.
+ * Six of twenty-five. The other nineteen are advertised and enforce nothing:
+ * a FREE account may add unlimited staff, connect webhooks its plan forbids,
+ * and run marketplace listings it is told it cannot have.
+ *
+ * THE COUNT WAS WRONG FOUR TIMES BEFORE IT WAS RIGHT, and that is the more
+ * useful finding. Bare-word matching said 13. Direct `limits.X` reads said 1.
+ * Adding the checkLimit indirection said 3. Finding @RequirePlanLimit said 6 —
+ * but a regex pairing bug had mapped `warehouses -> automations`, dropping
+ * automations from the enforced set; and seven cases read the limit through
+ * `(limits as any).x`, which an earlier pattern missed entirely.
+ *
+ * Enforcement here happens THREE ways — a direct plan read, a checkLimit call,
+ * and a decorator — and any count of "how many limits bite" is wrong until all
+ * three are found, with no way to know when you are done. That is worth
+ * remembering the next time a number in this repo looks authoritative.
  *
  * AND THE ENFORCEMENT IS ALREADY WRITTEN. `SubscriptionsService.checkLimit`
  * implements FOURTEEN resources — contacts, staff, products, bookings,
@@ -49,11 +64,10 @@ const SRC = join(__dirname, '..', '..');
  * different layer.
  */
 const UNENFORCED_ACKNOWLEDGED = new Set<string>([
-  // checkLimit implements these; nothing calls it for them.
-  'contacts',
-  'invoicesPerMonth',
+  // checkLimit implements these; nothing calls it for them. contacts,
+  // invoicesPerMonth and automations were on this list until the
+  // @RequirePlanLimit decorator was found — they are gated on a route.
   'staffMembers',
-  'automations',
   'socialPosts',
   'marketplaceListings',
   'warehouses',
@@ -112,11 +126,24 @@ function resourceToLimitKey(): Map<string, string> {
   const body = src.slice(at, src.indexOf('\n  async ', at + 10));
   const map = new Map<string, string>();
 
-  // case 'bookings': { ... const limit = limits.bookingsPerMonth;
-  for (const m of body.matchAll(
-    /case\s+'([a-z_]+)'\s*:[\s\S]{0,400}?limits\s*\??\.\s*(\w+)/g,
-  )) {
-    map.set(m[1], m[2]);
+  // SPLIT ON CASE BOUNDARIES, then read each segment. Do not try to pair
+  // `case 'x'` with a following `limits.y` in one expression: a single regex
+  // with /g advances lastIndex past each match, so a case whose body has no
+  // `limits.` within range lets the NEXT case's read pair with the wrong key.
+  // Measured — that produced `warehouses -> automations`, which silently
+  // dropped `automations` from the enforced set entirely and left it on the
+  // unenforced ledger while it was gated on three routes.
+  const segments = body.split(/case\s+'/).slice(1);
+  for (const seg of segments) {
+    const name = /^([a-z_]+)'/.exec(seg)?.[1];
+    if (!name) continue;
+    // Only within THIS case — stop at the next one.
+    const upto = seg.split(/\n\s*case\s+'/)[0];
+    // `limits.x`, `limits?.x`, and `(limits as any).x` — seven of the fourteen
+    // cases use the cast form, and a pattern that missed it reported them as
+    // reading no limit at all.
+    const limit = /\(?limits(?:\s+as\s+\w+)?\)?\s*\??\.\s*(\w+)/.exec(upto)?.[1];
+    if (limit) map.set(name, limit);
   }
   return map;
 }
@@ -142,6 +169,25 @@ function enforcedLimits(): Set<string> {
   const byResource = resourceToLimitKey();
   for (const s of sources) {
     for (const m of s.matchAll(/checkLimit\(\s*[^,]+,\s*['"]([a-z_]+)['"]\s*\)/g)) {
+      const limitKey = byResource.get(m[1]);
+      if (limitKey) found.add(limitKey);
+    }
+  }
+
+  // (c) Gated declaratively by @RequirePlanLimit('<resource>') + PlanLimitGuard,
+  //     which calls the same checkLimit.
+  //
+  //     THE THIRD MECHANISM, and the third time this measurement was wrong.
+  //     Bare-word matching said 13 of 25. Direct `limits.X` reads said 1. Adding
+  //     the checkLimit indirection said 3. Only after finding the decorator does
+  //     it say 6 — and contacts, invoicesPerMonth and automations had all been
+  //     listed as unenforced debt when they are gated on a route.
+  //
+  //     Worth stating what that pattern means: when a system has three ways to
+  //     do something, any count of "how many do it" is wrong until you have
+  //     found all three, and there is no way to know you have.
+  for (const s of sources) {
+    for (const m of s.matchAll(/@RequirePlanLimit\(\s*['"]([a-z_]+)['"]\s*\)/g)) {
       const limitKey = byResource.get(m[1]);
       if (limitKey) found.add(limitKey);
     }
