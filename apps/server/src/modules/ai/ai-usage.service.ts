@@ -1,7 +1,7 @@
 import { Inject, Injectable, Logger, ForbiddenException, HttpException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
-import { AI_CREDIT_COSTS, AI_OVERAGE_RATE_TTD, AI_OVERAGE_RATE_USD } from '../subscriptions/plans';
+import { AI_CREDIT_COSTS, AI_OVERAGE_RATE_TTD, AI_OVERAGE_RATE_USD, isBillableAiFeature } from '../subscriptions/plans';
 import { OutputCategory, ResolvedTemplate, injectQualityDirectives, validateAiOutput, buildQualityDirectiveSuffix } from './ai-quality';
 import { OutputTemplateService } from './output-template.service';
 import { ModelGatewayService, TaskCategory, GatewayMessage, BudgetStatus, AiProvider, GatewayRequest, GatewayResponse, StreamChunk } from './model-gateway.service';
@@ -289,13 +289,7 @@ export class AiUsageService {
 
     const creditCost = AI_CREDIT_COSTS[feature] || 1;
 
-    const canProceed = await this.checkCredits(businessId, creditCost);
-    if (!canProceed.allowed) {
-      throw new ForbiddenException(
-        `AI credit limit reached. You've used ${canProceed.used}/${canProceed.limit} credits this month. ` +
-        `Upgrade your plan for more AI credits.`,
-      );
-    }
+    await this.assertCreditsFor(businessId, feature, creditCost);
 
     let messages = options.messages;
     let resolvedTemplate: ResolvedTemplate | null = null;
@@ -417,6 +411,35 @@ export class AiUsageService {
     }
   }
 
+  /**
+   * The one place an AI call is allowed or refused.
+   *
+   * Replaces six identical check-and-throw blocks. They were identical, which
+   * is exactly why they were worth collapsing: the system-work exemption below
+   * had to be added in six places or none, and "or none" is how a rule becomes
+   * true in five of six call paths and nobody notices.
+   *
+   * SYSTEM WORK IS NOT CHECKED AT ALL, not merely not counted. Excluding
+   * indexing from the allowance while still BLOCKING it on that allowance would
+   * be the worst of both: the customer is not charged for embeddings, and their
+   * search index quietly stops updating the moment they run out of credits —
+   * degrading the product for a reason that has nothing to do with what they
+   * bought. There is nothing to enforce against a pool the work does not spend.
+   *
+   * @throws ForbiddenException when a billable feature has no allowance left.
+   */
+  async assertCreditsFor(businessId: string, feature: string, creditCost: number): Promise<void> {
+    if (!isBillableAiFeature(feature)) return;
+
+    const verdict = await this.checkCredits(businessId, creditCost);
+    if (verdict.allowed) return;
+
+    throw new ForbiddenException(
+      `AI credit limit reached. You've used ${verdict.used}/${verdict.limit} credits this month. ` +
+        `Upgrade your plan for more AI credits.`,
+    );
+  }
+
   async checkCredits(businessId: string, creditsNeeded = 1): Promise<{
     allowed: boolean;
     used: number;
@@ -439,6 +462,14 @@ export class AiUsageService {
       where: {
         businessId,
         createdAt: { gte: startOfMonth },
+        // Only what the customer actually asked for. Work the product does on
+        // its own behalf — indexing, genome extraction, background scans — is
+        // recorded for cost visibility and does not spend their allowance.
+        //
+        // Measured before this existed: 184 of 243 credits in a month were
+        // `semantic_embedding`, so KEYFLOW's own indexing exhausted the plan
+        // and locked the owner out of the features they were paying for.
+        billable: true,
       },
       _sum: { creditsUsed: true },
     });
@@ -653,13 +684,7 @@ export class AiUsageService {
     this.checkRateLimit(businessId);
 
     const creditCost = AI_CREDIT_COSTS[feature] || 1;
-    const canProceed = await this.checkCredits(businessId, creditCost);
-    if (!canProceed.allowed) {
-      throw new ForbiddenException(
-        `AI credit limit reached. You've used ${canProceed.used}/${canProceed.limit} credits this month. ` +
-        `Upgrade your plan for more AI credits.`,
-      );
-    }
+    await this.assertCreditsFor(businessId, feature, creditCost);
 
     const taskCategory = this.resolveTaskCategory(feature, request.taskCategory);
     const startTime = Date.now();
@@ -720,13 +745,7 @@ export class AiUsageService {
     this.checkRateLimit(businessId);
 
     const creditCost = AI_CREDIT_COSTS[feature] || 1;
-    const canProceed = await this.checkCredits(businessId, creditCost);
-    if (!canProceed.allowed) {
-      throw new ForbiddenException(
-        `AI credit limit reached. You've used ${canProceed.used}/${canProceed.limit} credits this month. ` +
-        `Upgrade your plan for more AI credits.`,
-      );
-    }
+    await this.assertCreditsFor(businessId, feature, creditCost);
 
     const taskCategory = this.resolveTaskCategory(feature, request.taskCategory);
     const startTime = Date.now();
@@ -803,13 +822,7 @@ export class AiUsageService {
     this.checkRateLimit(businessId);
 
     const creditCost = AI_CREDIT_COSTS[feature] || 1;
-    const canProceed = await this.checkCredits(businessId, creditCost);
-    if (!canProceed.allowed) {
-      throw new ForbiddenException(
-        `AI credit limit reached. You've used ${canProceed.used}/${canProceed.limit} credits this month. ` +
-        `Upgrade your plan for more AI credits.`,
-      );
-    }
+    await this.assertCreditsFor(businessId, feature, creditCost);
 
     const startTime = Date.now();
     const client = new OpenAI({
@@ -872,13 +885,7 @@ export class AiUsageService {
     this.checkRateLimit(businessId);
 
     const creditCost = AI_CREDIT_COSTS[feature] || 1;
-    const canProceed = await this.checkCredits(businessId, creditCost);
-    if (!canProceed.allowed) {
-      throw new ForbiddenException(
-        `AI credit limit reached. You've used ${canProceed.used}/${canProceed.limit} credits this month. ` +
-        `Upgrade your plan for more AI credits.`,
-      );
-    }
+    await this.assertCreditsFor(businessId, feature, creditCost);
 
     const startTime = Date.now();
     const client = new OpenAI({
@@ -958,13 +965,7 @@ export class AiUsageService {
     this.checkRateLimit(businessId);
 
     const creditCost = AI_CREDIT_COSTS[feature] || 1;
-    const canProceed = await this.checkCredits(businessId, creditCost);
-    if (!canProceed.allowed) {
-      throw new ForbiddenException(
-        `AI credit limit reached. You've used ${canProceed.used}/${canProceed.limit} credits this month. ` +
-        `Upgrade your plan for more AI credits.`,
-      );
-    }
+    await this.assertCreditsFor(businessId, feature, creditCost);
 
     const startTime = Date.now();
     const client = new OpenAI({
@@ -1052,9 +1053,15 @@ export class AiUsageService {
     businessId: string,
     creditCost: number,
   ): Promise<void> {
+    // Classified HERE, at the single write site, rather than by each caller.
+    // Every track* method funnels through this function, so a new AI feature
+    // cannot be added to the product and silently land in the customer's
+    // allowance because its author did not know the distinction existed.
+    const billable = isBillableAiFeature(data.feature);
+
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        await this.prisma.client.aiUsageLog.create({ data: data as any });
+        await this.prisma.client.aiUsageLog.create({ data: { ...data, billable } as any });
         await this.checkAlertThresholds(businessId, creditCost);
         return;
       } catch (err: any) {

@@ -4727,6 +4727,13 @@ model AiUsageLog {
   totalTokens      Int     @default(0) @map("total_tokens")
   estimatedCost    Float   @default(0) @map("estimated_cost")
   creditsUsed      Int     @default(1) @map("credits_used")
+  /// Does this call count against the customer's monthly AI allowance?
+  ///
+  /// Stored rather than derived from `feature` at query time, because overage
+  /// is billed (AI_OVERAGE_RATE_TTD) and a past invoice must not change when
+  /// someone edits SYSTEM_AI_FEATURES. The classification is frozen at the
+  /// moment the call happened.
+  billable         Boolean @default(true)
   latencyMs        Int?    @map("latency_ms")
   fallbackUsed     Boolean @default(false) @map("fallback_used")
   fallbackProvider String? @map("fallback_provider")
@@ -4738,6 +4745,9 @@ model AiUsageLog {
 
   @@index([businessId, createdAt])
   @@index([businessId, feature])
+  /// The allowance query: businessId + billable + createdAt, run before every
+  /// AI call in the product.
+  @@index([businessId, billable, createdAt])
   @@index([businessId, provider])
   @@index([userId, createdAt])
   @@map("ai_usage_logs")
