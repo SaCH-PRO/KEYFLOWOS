@@ -267,7 +267,7 @@ export const FEATURE_REGISTRY: FeatureDefinition[] = [
   { key: 'calendar_sync', label: 'Google Calendar Sync', description: 'Sync with Google Calendar', category: 'bookings', type: 'boolean', limitKey: 'calendarSync', tiers: { FREE: false, FLOW: true, KEYFLOW: true } },
   { key: 'social_posts', label: 'Social Posts', description: 'Monthly social media posts', category: 'marketing', type: 'limit', limitKey: 'socialPosts', tiers: { FREE: 0, FLOW: 20, KEYFLOW: 'Unlimited' }, billable: true },
   { key: 'email_campaigns', label: 'Email Campaigns', description: 'Monthly email campaigns', category: 'marketing', type: 'limit', limitKey: 'emailCampaigns', tiers: { FREE: 0, FLOW: 10, KEYFLOW: 'Unlimited' }, billable: true },
-  { key: 'ai_credits', label: 'AI Credits', description: 'Monthly AI credits for all AI features', category: 'ai', type: 'limit', limitKey: 'aiCreditsPerMonth', tiers: { FREE: 250, FLOW: 3000, KEYFLOW: 'Unlimited' }, billable: true },
+  { key: 'ai_credits', label: 'AI Credits', description: 'Monthly AI credits for all AI features', category: 'ai', type: 'limit', limitKey: 'aiCreditsPerMonth', tiers: { FREE: 50, FLOW: 500, KEYFLOW: 'Unlimited' }, billable: true },
   { key: 'ai_suggestions', label: 'AI Business Advisor', description: 'AI-powered insights & suggestions', category: 'ai', type: 'boolean', limitKey: 'aiSuggestions', tiers: { FREE: false, FLOW: true, KEYFLOW: true } },
   { key: 'automations', label: 'Playbook Automations', description: 'Event-driven automation rules', category: 'ai', type: 'limit', limitKey: 'automations', tiers: { FREE: 0, FLOW: 5, KEYFLOW: 'Unlimited' }, billable: true },
   { key: 'staff', label: 'Staff Members', description: 'Team members & roles', category: 'operations', type: 'limit', limitKey: 'staffMembers', tiers: { FREE: 1, FLOW: 5, KEYFLOW: 'Unlimited' }, billable: true },
@@ -297,14 +297,23 @@ export const FEATURE_REGISTRY: FeatureDefinition[] = [
  *   a single question. Measured: production burned 243 credits against an
  *   allowance of 10, and 184 of them were embeddings.
  *
- * Excluding system work (which is the real fix) leaves ~59 billable credits for
- * that month of genuine use — chat turns, briefings, TTS. So the honest FREE
- * allowance for "try the product" is a few hundred, not ten, and FLOW has to
- * comfortably cover a working month for a small business.
+ * Excluding system work — which is the real fix — leaves ~56 billable credits
+ * for that month of genuine use: chat turns, briefings, TTS.
  *
- * These are a starting calibration, deliberately in ONE place and deliberately
- * generous rather than clever: a free tier nobody can finish a first session on
- * is a broken signup, not a pricing strategy. Change them here.
+ * FREE 10 -> 50, FLOW 100 -> 500, anchored on that measurement rather than on
+ * taste. 50 credits is 25 chat turns at 2 credits each, which is a real trial;
+ * 10 was five turns, and only if the customer saved nothing.
+ *
+ * THE FIRST ATTEMPT WAS 250/3000 AND A TEST REFUSED IT. plan-limits.spec.ts
+ * asserts FREE stays at or under 50, with a comment explaining that the bound
+ * exists "so that raising every tier at once cannot quietly reintroduce this".
+ * That is a deliberate business constraint, and the correct response to a guard
+ * catching you is to respect it, not to widen it to fit the number you had
+ * already typed. The same spec also caught that the advertised string
+ * ('10 AI credits/month') had not moved with the limit — a plan that promises
+ * one number and grants another.
+ *
+ * Change them here, and expect that spec to have an opinion.
  */
 export const PLANS: Record<string, PlanDefinition> = {
   FREE: {
@@ -319,7 +328,7 @@ export const PLANS: Record<string, PlanDefinition> = {
       '10 bookings per month',
       '1 staff member',
       '10 products/services',
-      '10 AI credits/month',
+      '50 AI credits/month',
       'Basic CRM',
       'Public booking page',
     ],
@@ -340,7 +349,7 @@ export const PLANS: Record<string, PlanDefinition> = {
       // getActiveSubscription falls back to PLANS.FREE for any business with no
       // subscription row or an expired trial, so this was the default ceiling
       // for every unpaid account in the system.
-      aiCreditsPerMonth: 250,
+      aiCreditsPerMonth: 50,
       aiSuggestions: false,
       customBranding: false,
       prioritySupport: false,
@@ -374,7 +383,7 @@ export const PLANS: Record<string, PlanDefinition> = {
       '100 bookings per month',
       '5 staff members',
       '100 products/services',
-      '100 AI credits/month',
+      '500 AI credits/month',
       'AI business advisor',
       'Quotes & proposals',
       '5 automations',
@@ -391,7 +400,7 @@ export const PLANS: Record<string, PlanDefinition> = {
       staffMembers: 5,
       products: 100,
       automations: 5,
-      aiCreditsPerMonth: 3000,
+      aiCreditsPerMonth: 500,
       aiSuggestions: true,
       customBranding: true,
       prioritySupport: false,

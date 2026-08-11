@@ -180,6 +180,27 @@ export const FEATURE_TASK_MAP: Record<string, TaskCategory> = {
   key_flow_interpret: 'classification',
   key_delegation_interpret: 'classification',
   key_calendar_interpret: 'classification',
+
+  // ── Unmapped, and therefore billed at the top model rate ──────────────────
+  //
+  // Found 2026-08-10 by reading production rather than the code. A feature
+  // absent from this map resolves to 'general', and DEFAULT_ROUTING_TABLE sends
+  // 'general' to gpt-4o — the most expensive model available. Measured there:
+  //
+  //   financial_weekly_briefing   2 calls   1,741 tokens/call   gpt-4o
+  //   revenue_briefing            2 calls     422 tokens/call   gpt-4o
+  //
+  // Both are summarisation. gpt-4o vs gpt-4o-mini is roughly 12x on input and
+  // 9x on output, so this costs nothing in behaviour and removes the premium.
+  //
+  // The other three below appear in the usage table and in NO map at all, which
+  // is how they escaped ai-usage-feature-coverage.spec.ts: they are recorded
+  // through a path that does not go via trackAndComplete.
+  financial_weekly_briefing: 'summarization',
+  revenue_briefing: 'summarization',
+  flow_seo_remediation: 'reasoning',
+  flow_draft_ticket_reply: 'content-generation',
+  crm_conversation_analyze: 'analysis',
   key_inbox_classify: 'classification',
 
   key_inbox_intelligence: 'analysis',

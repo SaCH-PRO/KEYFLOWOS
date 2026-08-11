@@ -117,11 +117,24 @@ describe('AI credit billing — what counts against the allowance', () => {
     await seedUsage('revenue_briefing', 2, true);
 
     const billable = await billableCreditsThisMonth();
+
+    // 243 credits of recorded usage become 56 chargeable ones. THAT is the fix:
+    // the exemption, not the limit.
     expect(billable).toBe(56);
-    expect(
-      billable,
-      'the month that locked production out must now fit inside FREE',
-    ).toBeLessThan(PLANS.FREE.limits.aiCreditsPerMonth);
+    expect(billable / 243).toBeLessThan(0.25);
+
+    // Deliberately NOT asserting that 56 fits inside FREE.
+    //
+    // The first version of this test did, and it failed once FREE settled at 50
+    // — which was the test being wrong, not the plan. A free tier is not meant
+    // to absorb a full month of real business usage; if it did it would not be
+    // a free tier. What broke production was being locked out after ten
+    // EMBEDDINGS, before asking a single question, and that is fixed here by
+    // 184 of these rows no longer counting at all.
+    //
+    // Whether 56 should fit in 50 is a pricing question with a real answer
+    // either way, and it is not this file's to settle.
+    expect(billable).toBeLessThan(243);
   });
 
   it('billable usage still accumulates and can still exhaust a plan', async () => {
@@ -235,7 +248,15 @@ describe('the classification is honest', () => {
     // is a broken signup, not a pricing strategy.
     const chat = AI_CREDIT_COSTS.flow_chat_stream ?? 2;
     const sessions = Math.floor(PLANS.FREE.limits.aiCreditsPerMonth / chat);
-    expect(sessions, 'FREE must afford a meaningful number of chat turns').toBeGreaterThanOrEqual(50);
+    // 20 turns is a trial someone can form an opinion from. The bar was 50
+    // when this was written, which required FREE >= 100 and collided with the
+    // deliberate `FREE <= 50` guard in plan-limits.spec.ts — a number I had
+    // picked, against a constraint someone had reasoned about. The guard wins.
+    //
+    // The floor that actually matters is the one below it: FREE must not be so
+    // small that saving a few notes ends the trial, which is precisely what
+    // ten credits did.
+    expect(sessions, 'FREE must afford a meaningful number of chat turns').toBeGreaterThanOrEqual(20);
     expect(PLANS.FLOW.limits.aiCreditsPerMonth).toBeGreaterThan(
       PLANS.FREE.limits.aiCreditsPerMonth,
     );
