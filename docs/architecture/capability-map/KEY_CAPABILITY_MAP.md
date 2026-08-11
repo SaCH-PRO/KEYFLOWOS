@@ -4,7 +4,7 @@
 
 Projected from **278 governed flow tools** (`ai/flow-tool-registry.ts`) and **207 declared cortex capabilities** (`key-cortex/key-cortex-capability-registry.service.ts`) onto a **12-domain** business-function taxonomy.
 
-**Coverage: 100% declared · 53% active.** Every target capability a complete business OS needs is now *declared* in the model (32/32). **17** are **active** (a real tool covers them today); **15** are **planned** — declared with a full build spec (mode, risk tier, what they compose from, UI surface, evaluator gate) but not yet executable. "Active" is the honest executable-today number; "declared" means the model is complete.
+**Coverage: 100% declared · 47% active.** Every target capability a complete business OS needs is now *declared* in the model (32/32). **15** are **active** (a real tool covers them today); **17** are **planned** — declared with a full build spec (mode, risk tier, what they compose from, UI surface, evaluator gate) but not yet executable. "Active" is the honest executable-today number; "declared" means the model is complete.
 
 This file is the human-readable view of `key-capability-map.seed.json`, the seed for the M0 capability model.
 
@@ -30,7 +30,7 @@ Across **12 domains**: 🟢 211 agentic · 🔵 226 assisted · 🟡 45 assisted
 
 | Domain | Tools | Cortex caps | UI surfaces | Active | Planned | Declared | Mode mix |
 |---|--:|--:|--:|:--:|:--:|:--:|---|
-| **Sales & CRM** | 42 | 17 | 3 | 3/3 | 0 | 100% | 🔵 32 🟢 19 🟡 8 |
+| **Sales & CRM** | 42 | 17 | 3 | 2/3 | 1 | 100% | 🔵 32 🟢 19 🟡 8 |
 | **Marketing & Content** | 32 | 22 | 3 | 2/3 | 1 | 100% | 🔵 28 🟢 16 🟡 8 🔴 2 |
 | **Commerce & Fulfillment** | 45 | 15 | 5 | 1/3 | 2 | 100% | 🟢 28 🔵 27 🟡 5 |
 | **Finance & Accounting** | 35 | 10 | 4 | 3/4 | 1 | 100% | 🟢 23 🔵 20 🟡 2 |
@@ -38,39 +38,43 @@ Across **12 domains**: 🟢 211 agentic · 🔵 226 assisted · 🟡 45 assisted
 | **Scheduling & Bookings** | 10 | 22 | 2 | 2/2 | 0 | 100% | 🔵 20 🟢 11 🟡 1 |
 | **Support & Communications** | 13 | 38 | 3 | 2/3 | 1 | 100% | 🟢 23 🔵 23 🟡 5 |
 | **Legal, Contracts & Governance** | 27 | 0 | 6 | 2/3 | 1 | 100% | 🟢 15 🔵 10 🟡 2 |
-| **Analytics & Strategy** | 18 | 37 | 6 | 1/3 | 2 | 100% | 🟢 33 🔵 19 🟡 3 |
+| **Analytics & Strategy** | 18 | 37 | 6 | 0/3 | 3 | 100% | 🟢 33 🔵 19 🟡 3 |
 | **People & HR** | 4 | 0 | 1 | 0/3 | 3 | 100% | 🟡 3 🔵 1 |
 | **Assets & Documents** | 7 | 0 | 1 | 0/2 | 2 | 100% | 🟢 5 🔵 1 🟡 1 |
 | **Admin & Settings** | 0 | 10 | 0 | 0/1 | 1 | 100% | 🔵 4 🟢 4 🟡 2 |
 
 ## Build backlog — planned capabilities
 
-Every gap is now a **declared capability with a spec**. This is the concrete build order. Proposed mode is the governance contract each will inherit; "Composes from" lists real existing tools on the target surface it can be built on.
+Every gap is now a **declared capability with a spec**. This is the concrete build order. Proposed mode is the governance contract each will inherit.
+
+"Composes from" is **auto-derived, not hand-picked** — real registry tools, preferring the capability's own UI surface, then its domain, then read-only tools registry-wide. Read it as a verified-to-exist starting point, not a vetted design: what is guaranteed is that every tool named is real and the list is never empty, not that it is the right list.
 
 | Domain | Capability | Mode | Tier | Composes from | UI surface | Evaluator gate |
 |---|---|---|:--:|---|---|---|
-| Marketing & Content | Ad-spend optimization | 🟡 Assisted + Approval | 3 | `social_get_analytics`, `draft_followup_message`, `draft_campaign_bundle` | `/app/marketing` | Backtest reallocation vs 90d ROAS; budget-cap + policy BLOCKING |
-| Commerce & Fulfillment | Dynamic pricing | 🔴 Human-gated | 4 | `fetch_revenue_risk`, `draft_payment_reminder`, `commerce_create_invoice` | `/app/commerce` | Margin-floor + price-change policy BLOCKING; human sign-off |
-| Commerce & Fulfillment | Supplier risk scoring | 🟢 Agentic | 1 | `suppliers_list_connections`, `suppliers_get_connection`, `procurement_list_requests` | `/app/procurement` | Score reproducibility; source-provenance check |
-| Finance & Accounting | Tax filing preparation | 🔴 Human-gated | 4 | `reconcile_list_unmatched`, `reconcile_list_statement_sources`, `finance_view_receivables` | `/app/finance` | Reconciliation ties to ledger; human + accountant sign-off |
-| Operations & Delivery | SLA monitoring | 🟢 Agentic | 1 | `fetch_project_status`, `projects_list`, `projects_list_tasks` | `/app/projects` | Breach-threshold unit tests; false-positive ceiling |
-| Support & Communications | KB answer synthesis | 🟢 Agentic | 1 | `helpdesk_list_tickets`, `helpdesk_create_ticket`, `helpdesk_update_ticket` | `/app/helpdesk` | Groundedness/citation check; hallucination guard BLOCKING |
-| Legal, Contracts & Governance | Renewal-risk analysis | 🟢 Agentic | 1 | `contracts_list`, `contracts_get`, `contracts_stats` | `/app/contracts` | Backtest vs historical renew/churn outcomes |
-| Analytics & Strategy | Anomaly detection | 🟢 Agentic | 1 | `reports_generate`, `finance_profit_and_loss`, `finance_cashflow` | `/app/reports` | Precision/recall on labelled anomalies; alert-noise ceiling |
-| Analytics & Strategy | Natural-language KPI Q&A | 🟢 Agentic | 1 | `reports_generate`, `finance_profit_and_loss`, `finance_cashflow` | `/app/reports` | Query-to-metric accuracy suite; refuse-when-unknown check BLOCKING |
-| People & HR | Payroll tax filing | 🔴 Human-gated | 4 | `payroll_set_rate`, `payroll_generate_run`, `payroll_approve_run` | `/app/payroll` | Withholding recomputation matches; human + compliance sign-off |
-| People & HR | Performance-review synthesis | 🔵 Assisted | 2 | `fetch_business_summary`, `reports_generate`, `goals_list` | `/app/performance` | Bias/fairness screen; source-attribution check |
-| People & HR | PTO / shift optimization | 🔵 Assisted | 2 | `payroll_list_rates`, `performance_scorecard`, `performance_team_summary` | `/app/structure` | Coverage-constraint satisfaction; labour-rule check |
-| Assets & Documents | Asset depreciation / lifecycle | 🔵 Assisted | 2 | `assets_list`, `assets_get`, `assets_list_folders` | `/app/assets` | Depreciation schedule matches method; ledger tie-out |
-| Assets & Documents | License-renewal tracking | 🟢 Agentic | 1 | `assets_list`, `assets_get`, `assets_list_folders` | `/app/assets` | Renewal-date extraction accuracy; reminder-lead-time check |
-| Admin & Settings | Anomalous-access / audit alerting | 🟢 Agentic | 1 | — | `/app/settings` | Detection precision on known-bad patterns; alert-noise ceiling |
+| Sales & CRM | Web lead enrichment / prospecting | 🟢 Agentic | 1 | `crm_find_duplicates`, `crm_list_deals`, `crm_merge_preview` | `/app/crm` | Source-provenance + dedupe checks; enrichment-accuracy sample BLOCKING |
+| Marketing & Content | Ad-spend optimization | 🟡 Assisted + Approval | 3 | `social_get_analytics`, `comms_send_broadcast`, `draft_campaign_bundle` | `/app/marketing` | Backtest reallocation vs 90d ROAS; budget-cap + policy BLOCKING |
+| Commerce & Fulfillment | Dynamic pricing | 🔴 Human-gated | 4 | `fetch_revenue_risk`, `commerce_convert_quote`, `commerce_create_invoice` | `/app/commerce` | Margin-floor + price-change policy BLOCKING; human sign-off |
+| Commerce & Fulfillment | Supplier risk scoring | 🟢 Agentic | 1 | `procurement_get_request`, `procurement_get_stats`, `procurement_list_requests` | `/app/procurement` | Score reproducibility; source-provenance check |
+| Finance & Accounting | Tax filing preparation | 🔴 Human-gated | 4 | `finance_list_action_items`, `finance_list_bank_accounts`, `finance_list_bills` | `/app/finance` | Reconciliation ties to ledger; human + accountant sign-off |
+| Operations & Delivery | SLA monitoring | 🟢 Agentic | 1 | `fetch_project_status`, `projects_get_budget`, `projects_get_timeline` | `/app/projects` | Breach-threshold unit tests; false-positive ceiling |
+| Support & Communications | KB answer synthesis | 🟢 Agentic | 1 | `helpdesk_list_tickets`, `helpdesk_create_ticket`, `helpdesk_delete_ticket` | `/app/helpdesk` | Groundedness/citation check; hallucination guard BLOCKING |
+| Legal, Contracts & Governance | Renewal-risk analysis | 🟢 Agentic | 1 | `contract_extract_clauses`, `contract_extract_terms`, `contract_list_tags` | `/app/contracts` | Backtest vs historical renew/churn outcomes |
+| Analytics & Strategy | Anomaly detection | 🟢 Agentic | 1 | `finance_balance_sheet`, `finance_cashflow`, `finance_expense_breakdown` | `/app/reports` | Precision/recall on labelled anomalies; alert-noise ceiling |
+| Analytics & Strategy | Natural-language KPI Q&A | 🟢 Agentic | 1 | `finance_balance_sheet`, `finance_cashflow`, `finance_expense_breakdown` | `/app/reports` | Query-to-metric accuracy suite; refuse-when-unknown check BLOCKING |
+| Analytics & Strategy | Cohort / retention analysis | 🟢 Agentic | 1 | `finance_balance_sheet`, `finance_cashflow`, `finance_expense_breakdown` | `/app/reports` | Cohort-definition reproducibility; retention-math tie-out |
+| People & HR | Payroll tax filing | 🔴 Human-gated | 4 | `payroll_approve_run`, `payroll_generate_run`, `payroll_mark_paid` | `/app/payroll` | Withholding recomputation matches; human + compliance sign-off |
+| People & HR | Performance-review synthesis | 🔵 Assisted | 2 | `command_list_due_obligations`, `fetch_business_summary`, `finance_balance_sheet` | `/app/performance` | Bias/fairness screen; source-attribution check |
+| People & HR | PTO / shift optimization | 🔵 Assisted | 2 | `payroll_list_rates`, `people_list`, `people_org_chart` | `/app/structure` | Coverage-constraint satisfaction; labour-rule check |
+| Assets & Documents | Asset depreciation / lifecycle | 🔵 Assisted | 2 | `assets_get`, `assets_list`, `assets_list_folders` | `/app/assets` | Depreciation schedule matches method; ledger tie-out |
+| Assets & Documents | License-renewal tracking | 🟢 Agentic | 1 | `assets_get`, `assets_list`, `assets_list_folders` | `/app/assets` | Renewal-date extraction accuracy; reminder-lead-time check |
+| Admin & Settings | Anomalous-access / audit alerting | 🟢 Agentic | 1 | `approval_list`, `assets_get`, `assets_list` | `/app/settings` | Detection precision on known-bad patterns; alert-noise ceiling |
 
-**15 planned capabilities.** Safe-to-build-first (🟢 agentic, read-only): the analytics/monitoring/detection items. Must-stay-human-gated (🔴): Dynamic pricing, Tax filing preparation, Payroll tax filing — declared, but never auto-promoted to autonomous.
+**17 planned capabilities.** Safe-to-build-first (🟢 agentic, read-only): the analytics/monitoring/detection items. Must-stay-human-gated (🔴): Dynamic pricing, Tax filing preparation, Payroll tax filing — declared, but never auto-promoted to autonomous.
 
 ## How to read this into the roadmap
 
 - **The map is a target, not a build queue.** Declared = the model is complete; active = what actually runs. Instantiate planned capabilities on evidence or a seed-worthy bet — not all at once.
-- **M0** loads `key-capability-map.seed.json` as the initial capability model. Every skill/agent registered later declares which capability it covers → active coverage climbs from 53% toward 100% as things ship.
+- **M0** loads `key-capability-map.seed.json` as the initial capability model. Every skill/agent registered later declares which capability it covers → active coverage climbs from 47% toward 100% as things ship.
 - **Mode is the governance contract.** 🔴 Human-gated capabilities must never be promoted to autonomous, regardless of evidence.
 - **UI is mostly done.** Manual = existing routes; Assisted = existing approval queue; only the Operator Console (agentic) is net-new.
 
@@ -78,7 +82,7 @@ Every gap is now a **declared capability with a spec**. This is the concrete bui
 
 ### Sales & CRM
 
-42 tools · 17 cortex capabilities · **3/3 active**, 0 planned
+42 tools · 17 cortex capabilities · **2/3 active**, 1 planned
 
 **UI surfaces:** `/app/call-tasks` · `/app/crm` · `/app/onboarding`
 
@@ -86,7 +90,7 @@ Every gap is now a **declared capability with a spec**. This is the concrete bui
 
 | Capability | Status | Mode | Detail |
 |---|---|---|---|
-| Web lead enrichment / prospecting | ✅ active | 🔵 Assisted | covered by `create_contact` |
+| Web lead enrichment / prospecting | 🧩 planned | 🟢 Agentic | T1 · composes `crm_find_duplicates`… · /app/crm |
 | Predictive lead scoring | ✅ active | 🟡 Assisted + Approval | covered by `crm_merge_execute` |
 | Sales pipeline forecasting | ✅ active | 🟢 Agentic | covered by `deals_forecast` |
 
@@ -204,7 +208,7 @@ Every gap is now a **declared capability with a spec**. This is the concrete bui
 |---|---|---|---|
 | Demand forecasting / reorder point | ✅ active | 🟢 Agentic | covered by `inventory_low_stock_alerts` |
 | Dynamic pricing | 🧩 planned | 🔴 Human-gated | T4 · composes `fetch_revenue_risk`… · /app/commerce |
-| Supplier risk scoring | 🧩 planned | 🟢 Agentic | T1 · composes `suppliers_list_connections`… · /app/procurement |
+| Supplier risk scoring | 🧩 planned | 🟢 Agentic | T1 · composes `procurement_get_request`… · /app/procurement |
 
 <details><summary>45 governed tools</summary>
 
@@ -271,7 +275,7 @@ Every gap is now a **declared capability with a spec**. This is the concrete bui
 | Cash-flow forecasting | ✅ active | 🟢 Agentic | covered by `fetch_revenue_risk` |
 | Dunning / collections sequencing | ✅ active | 🟡 Assisted + Approval | covered by `sequence_enroll_overdue` |
 | Multi-currency / FX handling | ✅ active | 🔵 Assisted | covered by `update_business_blueprint` |
-| Tax filing preparation | 🧩 planned | 🔴 Human-gated | T4 · composes `reconcile_list_unmatched`… · /app/finance |
+| Tax filing preparation | 🧩 planned | 🔴 Human-gated | T4 · composes `finance_list_action_items`… · /app/finance |
 
 <details><summary>35 governed tools</summary>
 
@@ -456,7 +460,7 @@ Every gap is now a **declared capability with a spec**. This is the concrete bui
 |---|---|---|---|
 | Contract redlining / clause-risk analysis | ✅ active | 🟢 Agentic | covered by `contract_extract_clauses` |
 | Obligation extraction & tracking | ✅ active | 🟢 Agentic | covered by `command_list_due_obligations` |
-| Renewal-risk analysis | 🧩 planned | 🟢 Agentic | T1 · composes `contracts_list`… · /app/contracts |
+| Renewal-risk analysis | 🧩 planned | 🟢 Agentic | T1 · composes `contract_extract_clauses`… · /app/contracts |
 
 <details><summary>27 governed tools</summary>
 
@@ -494,7 +498,7 @@ Every gap is now a **declared capability with a spec**. This is the concrete bui
 
 ### Analytics & Strategy
 
-18 tools · 37 cortex capabilities · **1/3 active**, 2 planned
+18 tools · 37 cortex capabilities · **0/3 active**, 3 planned
 
 **UI surfaces:** `/app/command-center` · `/app/goals` · `/app/key` · `/app/keyflow-command` · `/app/performance` · `/app/reports`
 
@@ -502,9 +506,9 @@ Every gap is now a **declared capability with a spec**. This is the concrete bui
 
 | Capability | Status | Mode | Detail |
 |---|---|---|---|
-| Anomaly detection | 🧩 planned | 🟢 Agentic | T1 · composes `reports_generate`… · /app/reports |
-| Natural-language KPI Q&A | 🧩 planned | 🟢 Agentic | T1 · composes `reports_generate`… · /app/reports |
-| Cohort / retention analysis | ✅ active | 🟢 Agentic | covered by `get_cohort_retention` |
+| Anomaly detection | 🧩 planned | 🟢 Agentic | T1 · composes `finance_balance_sheet`… · /app/reports |
+| Natural-language KPI Q&A | 🧩 planned | 🟢 Agentic | T1 · composes `finance_balance_sheet`… · /app/reports |
+| Cohort / retention analysis | 🧩 planned | 🟢 Agentic | T1 · composes `finance_balance_sheet`… · /app/reports |
 
 <details><summary>18 governed tools</summary>
 
@@ -541,8 +545,8 @@ Every gap is now a **declared capability with a spec**. This is the concrete bui
 
 | Capability | Status | Mode | Detail |
 |---|---|---|---|
-| Payroll tax filing | 🧩 planned | 🔴 Human-gated | T4 · composes `payroll_set_rate`… · /app/payroll |
-| Performance-review synthesis | 🧩 planned | 🔵 Assisted | T2 · composes `fetch_business_summary`… · /app/performance |
+| Payroll tax filing | 🧩 planned | 🔴 Human-gated | T4 · composes `payroll_approve_run`… · /app/payroll |
+| Performance-review synthesis | 🧩 planned | 🔵 Assisted | T2 · composes `command_list_due_obligations`… · /app/performance |
 | PTO / shift optimization | 🧩 planned | 🔵 Assisted | T2 · composes `payroll_list_rates`… · /app/structure |
 
 <details><summary>4 governed tools</summary>
@@ -566,8 +570,8 @@ Every gap is now a **declared capability with a spec**. This is the concrete bui
 
 | Capability | Status | Mode | Detail |
 |---|---|---|---|
-| Asset depreciation / lifecycle | 🧩 planned | 🔵 Assisted | T2 · composes `assets_list`… · /app/assets |
-| License-renewal tracking | 🧩 planned | 🟢 Agentic | T1 · composes `assets_list`… · /app/assets |
+| Asset depreciation / lifecycle | 🧩 planned | 🔵 Assisted | T2 · composes `assets_get`… · /app/assets |
+| License-renewal tracking | 🧩 planned | 🟢 Agentic | T1 · composes `assets_get`… · /app/assets |
 
 <details><summary>7 governed tools</summary>
 
@@ -593,5 +597,5 @@ Every gap is now a **declared capability with a spec**. This is the concrete bui
 
 | Capability | Status | Mode | Detail |
 |---|---|---|---|
-| Anomalous-access / audit alerting | 🧩 planned | 🟢 Agentic | T1 · composes `—`… · /app/settings |
+| Anomalous-access / audit alerting | 🧩 planned | 🟢 Agentic | T1 · composes `approval_list`… · /app/settings |
 

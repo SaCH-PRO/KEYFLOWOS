@@ -19,18 +19,22 @@ export const CAPABILITY_MAP_SEED: CapabilityModel = {
         "/app/onboarding"
       ],
       "targetsTotal": 3,
-      "targetsActive": 3,
-      "targetsPlanned": 0,
+      "targetsActive": 2,
+      "targetsPlanned": 1,
       "targets": [
         {
           "label": "Web lead enrichment / prospecting",
-          "status": "active",
-          "mode": "assisted",
-          "riskTier": null,
-          "uiSurface": null,
-          "requiredTools": [],
-          "evaluator": null,
-          "coveredBy": "create_contact",
+          "status": "planned",
+          "mode": "agentic",
+          "riskTier": 1,
+          "uiSurface": "/app/crm",
+          "requiredTools": [
+            "crm_find_duplicates",
+            "crm_list_deals",
+            "crm_merge_preview"
+          ],
+          "evaluator": "Source-provenance + dedupe checks; enrichment-accuracy sample BLOCKING",
+          "coveredBy": null,
           "why": "Fill thin inbound leads with firmographic + contact data before outreach."
         },
         {
@@ -608,7 +612,7 @@ export const CAPABILITY_MAP_SEED: CapabilityModel = {
           "uiSurface": "/app/marketing",
           "requiredTools": [
             "social_get_analytics",
-            "draft_followup_message",
+            "comms_send_broadcast",
             "draft_campaign_bundle"
           ],
           "evaluator": "Backtest reallocation vs 90d ROAS; budget-cap + policy BLOCKING",
@@ -1103,7 +1107,7 @@ export const CAPABILITY_MAP_SEED: CapabilityModel = {
           "uiSurface": "/app/commerce",
           "requiredTools": [
             "fetch_revenue_risk",
-            "draft_payment_reminder",
+            "commerce_convert_quote",
             "commerce_create_invoice"
           ],
           "evaluator": "Margin-floor + price-change policy BLOCKING; human sign-off",
@@ -1117,8 +1121,8 @@ export const CAPABILITY_MAP_SEED: CapabilityModel = {
           "riskTier": 1,
           "uiSurface": "/app/procurement",
           "requiredTools": [
-            "suppliers_list_connections",
-            "suppliers_get_connection",
+            "procurement_get_request",
+            "procurement_get_stats",
             "procurement_list_requests"
           ],
           "evaluator": "Score reproducibility; source-provenance check",
@@ -1701,9 +1705,9 @@ export const CAPABILITY_MAP_SEED: CapabilityModel = {
           "riskTier": 4,
           "uiSurface": "/app/finance",
           "requiredTools": [
-            "reconcile_list_unmatched",
-            "reconcile_list_statement_sources",
-            "finance_view_receivables"
+            "finance_list_action_items",
+            "finance_list_bank_accounts",
+            "finance_list_bills"
           ],
           "evaluator": "Reconciliation ties to ledger; human + accountant sign-off",
           "coveredBy": null,
@@ -2141,8 +2145,8 @@ export const CAPABILITY_MAP_SEED: CapabilityModel = {
           "uiSurface": "/app/projects",
           "requiredTools": [
             "fetch_project_status",
-            "projects_list",
-            "projects_list_tasks"
+            "projects_get_budget",
+            "projects_get_timeline"
           ],
           "evaluator": "Breach-threshold unit tests; false-positive ceiling",
           "coveredBy": null,
@@ -3151,7 +3155,7 @@ export const CAPABILITY_MAP_SEED: CapabilityModel = {
           "requiredTools": [
             "helpdesk_list_tickets",
             "helpdesk_create_ticket",
-            "helpdesk_update_ticket"
+            "helpdesk_delete_ticket"
           ],
           "evaluator": "Groundedness/citation check; hallucination guard BLOCKING",
           "coveredBy": null,
@@ -3597,9 +3601,9 @@ export const CAPABILITY_MAP_SEED: CapabilityModel = {
           "riskTier": 1,
           "uiSurface": "/app/contracts",
           "requiredTools": [
-            "contracts_list",
-            "contracts_get",
-            "contracts_stats"
+            "contract_extract_clauses",
+            "contract_extract_terms",
+            "contract_list_tags"
           ],
           "evaluator": "Backtest vs historical renew/churn outcomes",
           "coveredBy": null,
@@ -3872,8 +3876,8 @@ export const CAPABILITY_MAP_SEED: CapabilityModel = {
         "/app/reports"
       ],
       "targetsTotal": 3,
-      "targetsActive": 1,
-      "targetsPlanned": 2,
+      "targetsActive": 0,
+      "targetsPlanned": 3,
       "targets": [
         {
           "label": "Anomaly detection",
@@ -3882,9 +3886,9 @@ export const CAPABILITY_MAP_SEED: CapabilityModel = {
           "riskTier": 1,
           "uiSurface": "/app/reports",
           "requiredTools": [
-            "reports_generate",
-            "finance_profit_and_loss",
-            "finance_cashflow"
+            "finance_balance_sheet",
+            "finance_cashflow",
+            "finance_expense_breakdown"
           ],
           "evaluator": "Precision/recall on labelled anomalies; alert-noise ceiling",
           "coveredBy": null,
@@ -3897,9 +3901,9 @@ export const CAPABILITY_MAP_SEED: CapabilityModel = {
           "riskTier": 1,
           "uiSurface": "/app/reports",
           "requiredTools": [
-            "reports_generate",
-            "finance_profit_and_loss",
-            "finance_cashflow"
+            "finance_balance_sheet",
+            "finance_cashflow",
+            "finance_expense_breakdown"
           ],
           "evaluator": "Query-to-metric accuracy suite; refuse-when-unknown check BLOCKING",
           "coveredBy": null,
@@ -3907,13 +3911,17 @@ export const CAPABILITY_MAP_SEED: CapabilityModel = {
         },
         {
           "label": "Cohort / retention analysis",
-          "status": "active",
+          "status": "planned",
           "mode": "agentic",
-          "riskTier": null,
-          "uiSurface": null,
-          "requiredTools": [],
-          "evaluator": null,
-          "coveredBy": "get_cohort_retention",
+          "riskTier": 1,
+          "uiSurface": "/app/reports",
+          "requiredTools": [
+            "finance_balance_sheet",
+            "finance_cashflow",
+            "finance_expense_breakdown"
+          ],
+          "evaluator": "Cohort-definition reproducibility; retention-math tie-out",
+          "coveredBy": null,
           "why": "Measure retention by cohort over time."
         }
       ],
@@ -4366,9 +4374,9 @@ export const CAPABILITY_MAP_SEED: CapabilityModel = {
           "riskTier": 4,
           "uiSurface": "/app/payroll",
           "requiredTools": [
-            "payroll_set_rate",
+            "payroll_approve_run",
             "payroll_generate_run",
-            "payroll_approve_run"
+            "payroll_mark_paid"
           ],
           "evaluator": "Withholding recomputation matches; human + compliance sign-off",
           "coveredBy": null,
@@ -4381,9 +4389,9 @@ export const CAPABILITY_MAP_SEED: CapabilityModel = {
           "riskTier": 2,
           "uiSurface": "/app/performance",
           "requiredTools": [
+            "command_list_due_obligations",
             "fetch_business_summary",
-            "reports_generate",
-            "goals_list"
+            "finance_balance_sheet"
           ],
           "evaluator": "Bias/fairness screen; source-attribution check",
           "coveredBy": null,
@@ -4397,8 +4405,8 @@ export const CAPABILITY_MAP_SEED: CapabilityModel = {
           "uiSurface": "/app/structure",
           "requiredTools": [
             "payroll_list_rates",
-            "performance_scorecard",
-            "performance_team_summary"
+            "people_list",
+            "people_org_chart"
           ],
           "evaluator": "Coverage-constraint satisfaction; labour-rule check",
           "coveredBy": null,
@@ -4469,8 +4477,8 @@ export const CAPABILITY_MAP_SEED: CapabilityModel = {
           "riskTier": 2,
           "uiSurface": "/app/assets",
           "requiredTools": [
-            "assets_list",
             "assets_get",
+            "assets_list",
             "assets_list_folders"
           ],
           "evaluator": "Depreciation schedule matches method; ledger tie-out",
@@ -4484,8 +4492,8 @@ export const CAPABILITY_MAP_SEED: CapabilityModel = {
           "riskTier": 1,
           "uiSurface": "/app/assets",
           "requiredTools": [
-            "assets_list",
             "assets_get",
+            "assets_list",
             "assets_list_folders"
           ],
           "evaluator": "Renewal-date extraction accuracy; reminder-lead-time check",
@@ -4581,7 +4589,11 @@ export const CAPABILITY_MAP_SEED: CapabilityModel = {
           "mode": "agentic",
           "riskTier": 1,
           "uiSurface": "/app/settings",
-          "requiredTools": [],
+          "requiredTools": [
+            "approval_list",
+            "assets_get",
+            "assets_list"
+          ],
           "evaluator": "Detection precision on known-bad patterns; alert-noise ceiling",
           "coveredBy": null,
           "why": "Detect unusual admin access; security posture."
@@ -4667,9 +4679,9 @@ export const CAPABILITY_MAP_SEED: CapabilityModel = {
     "flowTools": 278,
     "cortexCapabilities": 207,
     "targetsTotal": 32,
-    "targetsActive": 17,
-    "targetsPlanned": 15,
-    "activeCoveragePct": 53,
+    "targetsActive": 15,
+    "targetsPlanned": 17,
+    "activeCoveragePct": 47,
     "declaredCoveragePct": 100,
     "modeCounts": {
       "agentic": 211,

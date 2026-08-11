@@ -193,13 +193,45 @@ function buildModel() {
   const caps = extractCaps();
   const allItems = [...tools.map(t => ({ name: t.name, text: (t.name + ' ' + t.description).toLowerCase(), mode: toolMode(t), route: t.route })),
                     ...caps.map(c => ({ name: c.name, text: (c.name + ' ' + c.description).toLowerCase(), mode: capMode(c), route: null }))];
-  const haystack = allItems.map(i => i.text).join(' \n ');
+  /**
+   * ACTIVE IS DECIDED AGAINST THE EXECUTION SUBSTRATE ONLY.
+   *
+   * This used to match against `allItems` — flow tools AND cortex capabilities
+   * merged into one haystack. ADR-0001, on this same branch, says "Flow is the
+   * execution substrate, Cortex is advisory" — so a target whose only match was
+   * a cortex entry got marked `active` while nothing could actually run it.
+   *
+   * Two shipped that way:
+   *   Web lead enrichment / prospecting -> create_contact
+   *   Cohort / retention analysis       -> get_cohort_retention
+   * Both exist ONLY in key-cortex-capability-registry.service.ts. They lifted
+   * the headline from 47% to 53%, which is the one number the whole artifact
+   * exists to state honestly.
+   *
+   * Cortex still feeds the per-domain mode counts and capability census below;
+   * it just no longer decides whether something is executable today.
+   */
+  const executable = allItems.filter(i => i.route !== null);
+  const haystack = executable.map(i => i.text).join(' \n ');
 
+  /**
+   * Tools a planned capability composes from. MUST NOT come back empty.
+   *
+   * The first version returned [] whenever nothing routed to the spec's UI
+   * surface, and "Anomalous-access / audit alerting" (uiSurface /app/settings)
+   * shipped with `requiredTools: []` — a "full build spec" missing the single
+   * field that says what it would be built out of.
+   *
+   * Three deterministic widening steps: the exact surface, then the domain,
+   * then the registry's read-only tools as a floor. The completeness guard
+   * below rejects an empty result, so this has to actually find something.
+   */
   const suggestTools = (surface) => {
     let pool = tools.filter(t => routePrefix(t.route) === surface);
     if (pool.length < 2) pool = pool.concat(tools.filter(t => domainForRoute(t.route) === domainForRoute(surface) && routePrefix(t.route) !== surface));
+    if (pool.length < 2) pool = pool.concat(tools.filter(t => t.family === 'read'));
     pool = [...new Map(pool.map(t => [t.name, t])).values()];
-    pool.sort((a, b) => (a.family === 'read' ? 0 : 1) - (b.family === 'read' ? 0 : 1));
+    pool.sort((a, b) => (a.family === 'read' ? 0 : 1) - (b.family === 'read' ? 0 : 1) || a.name.localeCompare(b.name));
     return pool.slice(0, 3).map(t => t.name);
   };
 
@@ -215,7 +247,9 @@ function buildModel() {
       const spec = PLANNED_SPECS[label];
       if (!active && !spec) missingSpec.push(label);
       if (active) {
-        const covering = allItems.find(i => kws.some(k => i.text.includes(k)));
+        // `executable`, not `allItems` — coveredBy must name something that can
+        // actually run, or "active" is a claim the substrate cannot honour.
+        const covering = executable.find(i => kws.some(k => i.text.includes(k)));
         return { label, status: 'active', mode: covering ? covering.mode : 'assisted', riskTier: null, uiSurface: covering && covering.route ? routePrefix(covering.route) : null, requiredTools: [], evaluator: null, coveredBy: covering ? covering.name : null, why: WHY[label] || '' };
       }
       return { label, status: 'planned', mode: spec.mode, riskTier: spec.riskTier, uiSurface: spec.uiSurface, requiredTools: suggestTools(spec.uiSurface), evaluator: spec.evaluator, coveredBy: null, why: WHY[label] || '' };
@@ -234,6 +268,38 @@ function buildModel() {
   }
 
   if (missingSpec.length) throw new Error('PLANNED target(s) without a build spec — add to PLANNED_SPECS: ' + missingSpec.join(', '));
+
+  /**
+   * The guard above only checked that a PLANNED_SPECS *entry existed*. It never
+   * looked at what was in it — and `requiredTools` is not read from the spec at
+   * all, it is derived by suggestTools(). So a planned capability could ship
+   * with an empty toolset and this file would still claim every planned item
+   * carries "a full build spec: mode, risk tier, the actual existing tools it
+   * composes from, UI surface, and a deterministic evaluator gate".
+   *
+   * One did. This checks the five fields that sentence promises, on the built
+   * object rather than on the spec, because the built object is what ships.
+   *
+   * Actives are checked too: an active target with no coveredBy is a target
+   * nothing was found for, which would be a bug in the keyword match rather
+   * than a real capability.
+   */
+  const REQUIRED_PLANNED_FIELDS = ['mode', 'riskTier', 'uiSurface', 'evaluator'];
+  const incomplete = [];
+  for (const d of model.domains) {
+    for (const t of d.targets) {
+      if (t.status === 'planned') {
+        const missing = REQUIRED_PLANNED_FIELDS.filter(f => t[f] === null || t[f] === undefined || t[f] === '');
+        if (!Array.isArray(t.requiredTools) || t.requiredTools.length === 0) missing.push('requiredTools');
+        if (missing.length) incomplete.push(`${t.label} [${missing.join(', ')}]`);
+      } else if (!t.coveredBy) {
+        incomplete.push(`${t.label} [active but coveredBy is null]`);
+      }
+    }
+  }
+  if (incomplete.length) {
+    throw new Error('Target(s) with an incomplete spec — 100% declared would be a fiction:\n  ' + incomplete.join('\n  '));
+  }
 
   const sum = (f) => model.domains.reduce((s, d) => s + f(d), 0);
   const totalTargets = sum(d => d.targetsTotal), totalActive = sum(d => d.targetsActive), totalPlanned = sum(d => d.targetsPlanned);
@@ -296,7 +362,9 @@ function writeMarkdown(model) {
   p();
   p('## Build backlog — planned capabilities');
   p();
-  p('Every gap is now a **declared capability with a spec**. This is the concrete build order. Proposed mode is the governance contract each will inherit; "Composes from" lists real existing tools on the target surface it can be built on.');
+  p('Every gap is now a **declared capability with a spec**. This is the concrete build order. Proposed mode is the governance contract each will inherit.');
+  p();
+  p('"Composes from" is **auto-derived, not hand-picked** — real registry tools, preferring the capability\'s own UI surface, then its domain, then read-only tools registry-wide. Read it as a verified-to-exist starting point, not a vetted design: what is guaranteed is that every tool named is real and the list is never empty, not that it is the right list.');
   p();
   p('| Domain | Capability | Mode | Tier | Composes from | UI surface | Evaluator gate |');
   p('|---|---|---|:--:|---|---|---|');
