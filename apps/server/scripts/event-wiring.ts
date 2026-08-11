@@ -39,6 +39,8 @@
  */
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { existsSync } from 'node:fs';
+import * as path from 'node:path';
 
 const SRC = join(__dirname, '..', 'src');
 
@@ -60,6 +62,14 @@ export interface EventWiring {
    * dead — a human has to look. NOT gated, precisely because it is a maybe.
    */
   unverified: string[];
+  /**
+   * `@OnEvent(SOMETHING)` where SOMETHING is a name this script cannot resolve
+   * to a string. Not a death and not a life — a BLIND SPOT, surfaced so it
+   * cannot be one silently. This bucket exists because @OnEvent(CONSTANT) was
+   * invisible to the listener scan, so a dead listener passed the gate by not
+   * being counted at all.
+   */
+  unresolvedListeners: string[];
   /** Appears nowhere but the @OnEvent waiting for it. Cannot fire. */
   dead: string[];
   emittedLiterals: number;
@@ -131,8 +141,38 @@ function emitArgumentText(src: string): string {
   return out.join('\n');
 }
 
+/**
+ * `EXPORTED_CONST -> 'its.string.value'`, for resolving @OnEvent(CONSTANT) and
+ * emit(CONSTANT).
+ *
+ * Built from @keyflow/shared and from the server tree, because an event name
+ * declared once and referenced by symbol is the pattern that should be
+ * ENCOURAGED — it is how `work.obligation.raised` avoids the rename drift this
+ * whole file exists to catch — and it was the one shape the analyser could not
+ * see.
+ */
+function buildEventConstants(files: string[]): Map<string, string> {
+  const out = new Map<string, string>();
+  const sources = [...files];
+  const shared = path.join(SRC, '..', '..', '..', 'packages', 'shared', 'src');
+  if (existsSync(shared)) sources.push(...walk(shared));
+
+  for (const file of sources) {
+    const src = readFileSync(file, 'utf8');
+    for (const m of src.matchAll(
+      /export\s+const\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*(?::[^=]+)?=\s*['"`]([a-zA-Z][a-zA-Z0-9_.]*)['"`]/g,
+    )) {
+      if (EVENT_NAME.test(m[2])) out.set(m[1], m[2]);
+    }
+  }
+  return out;
+}
+
 export function analyseEventWiring(): EventWiring {
   const files = walk(SRC);
+  const EVENT_CONSTANTS = buildEventConstants(files);
+  /** @OnEvent(SOMETHING) where SOMETHING is a name this cannot resolve. */
+  const unresolvedListeners = new Set<string>();
 
   const listeners = new Set<string>();
   /** Event-shaped literals sitting inside an emit call — strong evidence. */
@@ -157,12 +197,38 @@ export function analyseEventWiring(): EventWiring {
       listeners.add(m[1]);
     }
 
+    // …and what is waited for by NAME rather than by literal.
+    //
+    // This pattern was invisible for as long as it existed. The scan above
+    // matches @OnEvent( followed by a QUOTE, so `@OnEvent(WORK_OBLIGATION_RAISED)`
+    // was not judged live — it was never seen as a listener at all, and the
+    // gate passed by measuring nothing. That is the same shape as the honesty
+    // sweep that could not see a braceless handler and the tenant gate that
+    // could not see an unscoped model: the check was fine, its input was short.
+    //
+    // Constants are resolved against exported string literals (see
+    // EVENT_CONSTANTS). One that cannot be resolved is NOT quietly dropped —
+    // it goes to `unresolvedListeners`, which the spec asserts is empty, so the
+    // failure mode is a loud "I cannot see this" rather than a silent pass.
+    for (const m of src.matchAll(/@OnEvent\(\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*[,)]/g)) {
+      const resolved = EVENT_CONSTANTS.get(m[1]);
+      if (resolved) listeners.add(resolved);
+      else unresolvedListeners.add(m[1]);
+    }
+
     // Strip @OnEvent decorators before looking for emits. The trailing [^)]*
     // matters: `@OnEvent('crm.deal.won', { async: true })` survived an earlier
     // version that required the paren immediately after the string, so the
     // listener's own name counted as proof something emitted it. A listener
     // cannot be its own emitter.
-    const withoutListeners = src.replace(/@OnEvent\(\s*['"`][^'"`]+['"`][^)]*\)/g, '@OnEvent(_)');
+    // Both decorator forms are stripped. The constant form has to be, for the
+    // same reason the literal form does — a listener cannot be its own emitter —
+    // and leaving it in was measurably wrong: with the emit deleted,
+    // `@OnEvent(WORK_OBLIGATION_SETTLED)` resolved to a name in emit-scanned
+    // text and kept a genuinely dead listener looking alive.
+    const withoutListeners = src
+      .replace(/@OnEvent\(\s*['"`][^'"`]+['"`][^)]*\)/g, '@OnEvent(_)')
+      .replace(/@OnEvent\(\s*[A-Za-z_$][A-Za-z0-9_$]*[^)]*\)/g, '@OnEvent(_)');
 
     // Weak evidence: the name is written down somewhere that is not a listener.
     for (const m of withoutListeners.matchAll(/['"`]([a-zA-Z][a-zA-Z0-9_.]*)['"`]/g)) {
@@ -175,6 +241,33 @@ export function analyseEventWiring(): EventWiring {
     for (const m of emitText.matchAll(/['"`]([a-zA-Z][a-zA-Z0-9_.]*)['"`]/g)) {
       if (EVENT_NAME.test(m[1])) literals.add(m[1]);
     }
+
+    // emit(CONSTANT, payload) is a real emit and must count as one.
+    //
+    // Resolving listeners without also resolving emitters would be worse than
+    // resolving neither: `@OnEvent(WORK_OBLIGATION_RAISED)` would become
+    // visible while `emit(WORK_OBLIGATION_RAISED, payload)` stayed invisible,
+    // and the gate would report a FALSE DEATH on a live event. This file's own
+    // header says why that is the dangerous direction — it sends someone to
+    // "fix" working code, and the fix is a duplicate emit.
+    for (const m of emitText.matchAll(/\b([A-Za-z_$][A-Za-z0-9_$]*)\b/g)) {
+      const resolved = EVENT_CONSTANTS.get(m[1]);
+      if (resolved) literals.add(resolved);
+    }
+
+    // NOT fed into `anyMention`, and that asymmetry is deliberate.
+    //
+    // The weak-evidence bucket asks "is this string written down anywhere",
+    // which is meaningful for a LITERAL: someone typed 'invoice.sent' for a
+    // reason. It is meaningless for a SYMBOL. `WORK_OBLIGATION_SETTLED` appears
+    // in its own declaration, in every import statement, and in the @OnEvent
+    // waiting for it — so resolving symbols into anyMention would mean a
+    // constant-named event can NEVER be reported dead, which is the failure this
+    // whole change set out to fix.
+    //
+    // Measured, not reasoned: with the emit deleted, the first version of this
+    // still reported work.obligation.settled as alive. Symbols count only in an
+    // emit position, above.
 
     // Template emits: emit(`content_request.${newStatus}`) and
     // emitEvent(id, `agent.message.${topic}`).
@@ -204,7 +297,15 @@ export function analyseEventWiring(): EventWiring {
     dead.push(event);
   }
 
-  return { live, dynamic, unverified, dead, emittedLiterals: literals.size, listeners: listeners.size };
+  return {
+    live,
+    dynamic,
+    unverified,
+    dead,
+    unresolvedListeners: [...unresolvedListeners].sort(),
+    emittedLiterals: literals.size,
+    listeners: listeners.size,
+  };
 }
 
 if (require.main === module) {

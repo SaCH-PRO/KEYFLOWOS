@@ -96,6 +96,29 @@ describe('every listener has something that can trigger it', () => {
     ).toEqual([]);
   });
 
+  it('every @OnEvent resolves to an event name the analyser can read', () => {
+    // The blind spot that let a dead listener through.
+    //
+    // The listener scan matched `@OnEvent(` followed by a QUOTE, so
+    // `@OnEvent(WORK_OBLIGATION_RAISED)` was not judged live — it was never
+    // seen as a listener at all, and this file passed by measuring nothing.
+    // Same shape as the honesty sweep that could not see a braceless handler
+    // and the tenant gate that could not see an unscoped model: the check was
+    // fine, its input was short.
+    //
+    // Constants are resolved now. One that CANNOT be resolved lands here rather
+    // than being dropped, so the next unreadable form fails loudly instead of
+    // silently shrinking what the gate covers.
+    expect(
+      wiring.unresolvedListeners,
+      'These @OnEvent decorators name something this analyser cannot resolve to ' +
+        'an event string, so their events are invisible to the dead-listener ' +
+        'check and could never be reported. Declare the name as an exported ' +
+        'string const (the @keyflow/shared pattern), or teach event-wiring.ts ' +
+        'to read this form — do not leave it unseen.',
+    ).toEqual([]);
+  });
+
   it('the known-dead list does not outlive the problem', () => {
     // If an event here starts being emitted, the entry is stale and the next
     // person reads it as a live defect. Shrinking this list is progress and
