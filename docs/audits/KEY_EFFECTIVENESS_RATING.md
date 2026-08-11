@@ -46,7 +46,7 @@ The distance between those two numbers **is the finding.**
 | Tool layer | **4** | ~282 real tools, 389-case dispatch to real Prisma services; sprawl + no orchestrator test dock a point. |
 | Sandbox | **4** | `code-executor` real (child_process + E2B + hard timeout); cortex sandbox weaker (regex blocklist). |
 | Tests | **4** | ~1800 behavioural specs, several exemplary — but the two largest critical files are untested; no real end-to-end LLM test. |
-| Orchestration | **3** | Real and wired, but a **6586-line god-service** with 71 lazy lookups and **zero dedicated tests**; duplicated across two stacks. |
+| Orchestration | **3** | Real and wired, but a **6640-line god-service** with 71 lazy lookups; duplicated across two stacks. No spec is *named* for it, but **28 specs exercise it** and **41% of its 282 handler cases (115) are named in one** — see the correction below. |
 | Memory | **3** | Real Prisma-backed, but 4 overlapping services across stacks; semantic layer thin. |
 | Autonomy / self-improvement | **3** | Real learning/tuning tables + gateway use, but typed `any` and the feedback→behaviour loop is shallow / not closed. |
 | Cortex cognition (bio-services) | **2** | Real code, reachable only via one narrow read-only side-door; comments overstate reach; `efferent-bridge`/`dream` inert. |
@@ -81,10 +81,51 @@ The distance between those two numbers **is the finding.**
 ## Recommendations (highest leverage first)
 
 1. **Consolidate the two stacks (M0).** The single biggest structural liability — two orchestrators, planners, tool registries, memories, approvals, sandboxes that coexist rather than compose. Pick the seam before building anything new on top.
-2. **Test the 6586-line orchestrator god-service.** It *is* the product and has no dedicated spec. Add end-to-end LLM-loop tests (record/replay) for the govern→execute→feedback path.
-3. **Make the evaluator fail *closed*.** `return { deterministic: true }` on a missing dependency is exactly backwards for a safety gate — invert all five.
-4. **Finish containment or stop claiming it.** Wire `rollback()` handlers (or mark the capability planned/human-gated) so the "safety shell" is not a containment primitive that only logs.
+2. **Close the orchestrator's untested tail.** It *is* the product. 167 of its 282 handler cases are named in no spec at all; `handler-coverage-ratchet.spec.ts` now measures that and stops it regressing. Add end-to-end LLM-loop tests (record/replay) for the govern→execute→feedback path.
+3. ~~**Make the evaluator fail *closed*.**~~ **DONE** (`4b74c873`) — six assertions that returned a passing sentinel on a missing dependency now throw. Verified the runner counts a throw as a failure, so it genuinely fails closed rather than throwing into a swallow.
+4. **Finish containment or stop claiming it.** Wire `rollback()` handlers (or mark the capability planned/human-gated) so the "safety shell" is not a containment primitive that only logs. Re-verified at HEAD: still unwired — but it now *refuses to report success*, logging "REFUSING to report success for N compensating action(s) — none were executed", which is the honest failure mode.
 5. **Retire or gate the cognition marketing.** Either put the cortex on a real execution path with governance, or relabel it as the advisory deliberation aid it currently is. The "consciousness/soul" language actively undermines the credible engineering underneath.
 6. **Reconcile the doc set.** Delete or date-stamp `KEY_10_ROADMAP_v2.md`'s "10/10 delivered" — it is contradicted by the repo's own audit and corrodes trust in every other claim.
 
 **Net:** KEY is a genuinely capable, honestly-built co-pilot that would be *more* impressive if it stopped describing itself as a conscious digital employee. The engineering deserves better marketing than the marketing gives the engineering.
+
+---
+
+## Corrections after independent re-verification (2026-08-11)
+
+The original rating flagged that some claim-level numbers came from the repo's
+own audit docs rather than a fresh check. Those were re-run against `HEAD`.
+Recorded here rather than silently edited, because a rating that quietly
+rewrites itself is worth no more than the docs it criticises.
+
+**Held up, verified directly:**
+
+- **The ethics veto is unreachable by construction.** `KeyCortexEthicsService`
+  has exactly one injection site — `key-cortex-consciousness.service.ts:181`.
+  Consciousness is reached only via `shouldDeliberate`
+  (`flow-orchestrator.service.ts:785`), which returns `false` for any message
+  matching an action verb (`create|send|update|delete|book|pay|refund|…`).
+  Neither the orchestrator nor `AiOversightService` ever calls `ethics.`. So
+  every write is excluded from the only path that reaches it. The guard is
+  *deliberate* — routing actions there would produce reasoning and execute
+  nothing — but the consequence stands.
+- **`rollback()` is still unwired.** Confirmed at
+  `safety-shell.service.ts:113`.
+- **Two registries, and the cost is real.** `flow-tool-registry.ts` (282 tools)
+  and `key-cortex-capability-registry.service.ts` (207 capabilities). The
+  capability map itself counted two targets as *active* on the strength of
+  cortex-only entries — an artifact built to measure honesty, tripped by the
+  duplication it documents.
+
+**Corrected:**
+
+- **"Zero dedicated tests" for the orchestrator was wrong.** No spec is *named*
+  for it, but 28 exercise it, and 115 of its 282 handler cases are named in at
+  least one. The honest figure is **41%**, an upper bound — being named in a
+  spec is not the same as being exercised. "Zero" is unactionable; a percentage
+  is a backlog, and it is now ratcheted.
+- **"5 fail-open checks" was 6**, and all six are fixed.
+
+**Still second-hand, not re-verified:** the "0 of 78 write tools denied" count
+and "25/29 organ tools unbridged". The mechanism behind the first is confirmed
+above; the exact denominators are not.
