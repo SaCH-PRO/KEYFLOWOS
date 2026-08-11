@@ -147,10 +147,23 @@ From `docs/audits/KEY_CAPABILITIES_ASSESSMENT.md` and `docs/KEY_CAPACITY_MAP.md`
   Genuinely absent, verified by negative search: **booking waitlist / staff reassignment**
   (no tool matches `waitlist`), **staff availability / capacity** (no tool matches
   `availab|capacity`), and **paid social / ads execution** (only `draft_campaign_bundle` —
-  drafting, with no execution path). **Voice telephony is unresolved here** and is
-  deliberately not called either way: the `call_*` tools are call *tasks and scripts*, not
-  telephony execution, and distinguishing those needs someone to open the LiveKit worker
-  rather than grep a tool list.
+  drafting, with no execution path).
+
+  **Voice telephony — RESOLVED 2026-08-10, and the answer is neither "built" nor
+  "missing".** It was left open here on the grounds that a grep could not settle it; the
+  code was then opened. Two sites genuinely place calls through Twilio:
+  `key-cortex-phone.service.ts:222` (full outbound session — TwiML, status callbacks,
+  recording) and `phone-voice.controller.ts:72`. The backend can make a phone call.
+
+  It is unreachable by anything. **No KEY tool places a call** — the five `call_*` tools
+  are `list_tasks`, `create_task`, `log_outcome`, `generate_script`, `schedule_followup`,
+  all call *admin*, and there is no `voice`, `phone` or `dial` tool at all. There is **no
+  web surface** either. And production carries no `TWILIO_*` variables, so nothing could
+  dial today regardless.
+
+  So this is not a greenfield gap — it is the capability map's own recurring finding one
+  more time: **capability without reachability.** The build item is a tool and a screen
+  over code that already works, not a telephony integration.
 
   Note the source doc is stale in the same place — `KEY_CAPACITY_MAP.md` still says
   "payroll and staff-performance tracking remain real gaps" as of its 2026-07-20 entry.
@@ -309,6 +322,14 @@ it reported "0 tools" for ticket reply when `helpdesk_reply_to_ticket` exists, a
 substring collisions elsewhere. The table above comes from parsing `name:` fields out of the
 registry and matching them explicitly. **Do not re-derive these with a regex count**; parse
 the names. The tool total is **282**, not the 245 quoted in `CAPABILITY_MAP_2026-08-09.md`.
+
+That warning needed applying twice more before this document was finished. Resolving the
+voice question, `/call_|voice|phone|dial/` returned `commerce_create_invoice` — because
+"in**voice**" contains "voice" — and a signature-coverage sweep for `createHmac|verify...`
+reported four webhook controllers as unprotected when two of them verify through wrappers
+named `assertValidTwilioSignature` and `handleWebhook(raw, authHeader)`. Both looked like
+findings. Anchor the pattern (`/^call_/`) and read the file; a substring match over
+identifiers is evidence of nothing.
 
 **What was NOT checked**, and so should not be treated as verified: the 77/97 capacity
 scorecard itself (this only checked the 20 tasks called partial or missing, not the 77
