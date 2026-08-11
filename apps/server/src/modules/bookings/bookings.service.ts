@@ -9,7 +9,12 @@ import {
   BookingNoShowPayload,
   BookingRescheduledPayload,
 } from '../../core/event-bus/events.types';
-import { WORK_OBLIGATION_RAISED, type ObligationRaisedPayload } from '@keyflow/shared';
+import {
+  WORK_OBLIGATION_RAISED,
+  WORK_OBLIGATION_SETTLED,
+  type ObligationRaisedPayload,
+  type ObligationSettledPayload,
+} from '@keyflow/shared';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmService } from '../crm/crm.service';
 import { CommerceService } from '../commerce/commerce.service';
@@ -252,6 +257,29 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     };
 
     this.events.emit(WORK_OBLIGATION_RAISED, payload);
+  }
+
+  /**
+   * A new booking for this client settles the rebook we owed them.
+   *
+   * The other half of `raiseRebookObligation`, and without it the loop never
+   * closes: a completed appointment raises a REBOOK keyed on THAT appointment's
+   * id, and this booking has no idea which prior appointment it fulfils — only
+   * who it is for. So it settles BY PARTY. See ObligationSettledPayload.
+   *
+   * Missing until an audit found it. The listener existed with no emitter,
+   * which made it a dead listener, and the visible symptom would have been a
+   * "due this week" list slowly filling with rebooks that had already happened.
+   */
+  private settleRebookObligation(businessId: string, contactId: string | null, bookingId: string): void {
+    if (!contactId) return;
+    const payload: ObligationSettledPayload = {
+      businessId,
+      actionType: 'REBOOK',
+      owedToId: contactId,
+      dischargeRef: `booking:${bookingId}`,
+    };
+    this.events.emit(WORK_OBLIGATION_SETTLED, payload);
   }
 
   async updateBookingStatus(businessId: string, bookingId: string, status: BookingStatus) {
@@ -707,6 +735,10 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       eventName: 'booking.created',
     };
     this.events.emit('booking.created', payload);
+    // Closes the rebook loop: this booking settles the REBOOK we owed
+    // this client. Settles BY PARTY, because a new booking knows who it
+    // is for and not which completed appointment made a rebook owed.
+    this.settleRebookObligation(booking.businessId, booking.contactId, booking.id);
     // Log contact event for CRM timeline
     if (booking.contactId) {
       await this.crm.logContactEvent({
@@ -967,6 +999,10 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     };
     this.logger.debug(`Emitting booking.created for booking=${booking.id} business=${booking.businessId}`);
     this.events.emit('booking.created', payload);
+    // Closes the rebook loop: this booking settles the REBOOK we owed
+    // this client. Settles BY PARTY, because a new booking knows who it
+    // is for and not which completed appointment made a rebook owed.
+    this.settleRebookObligation(booking.businessId, booking.contactId, booking.id);
     if (booking.contactId) {
       await this.publicEvents.logStorefrontEvent({
         businessId: booking.businessId,

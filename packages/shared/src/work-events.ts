@@ -105,13 +105,27 @@ export interface ObligationRaisedPayload {
   requiresApproval?: boolean;
 }
 
+/**
+ * Two ways to say an obligation is met, because producers know two different
+ * things.
+ *
+ * BY FIVE-TUPLE — the producer knows exactly which obligation it discharged.
+ * BY PARTY (`owedToId` + `actionType`, no `sourceId`) — the producer knows only
+ * WHO it settled for. A rebooking is the motivating case: it knows the contact,
+ * but not the id of the completed appointment that made a rebook owed, so it
+ * cannot name the five-tuple that raised the obligation. Without this second
+ * form the rebook obligation stays open after the client is actually rebooked,
+ * and the due list fills with work that genuinely happened.
+ */
 export interface ObligationSettledPayload {
   businessId: string;
-  /** The same five-tuple that raised it. */
-  sourceModule: string;
-  sourceType: string;
-  sourceId: string;
   actionType: string;
+  /** The five-tuple form. Omit `sourceId` to settle by party instead. */
+  sourceModule?: string;
+  sourceType?: string;
+  sourceId?: string;
+  /** The by-party form: settles every open obligation of this actionType owed to them. */
+  owedToId?: string | null;
   /** What discharged it — a tool name, a route, 'manual', an invoice id. */
   dischargeRef?: string | null;
 }

@@ -337,6 +337,61 @@ describe('the obligation clock (real database)', () => {
     expect(b?.dischargedAt).toBeInstanceOf(Date);
   });
 
+  // ── 5b. The loop actually closes ──────────────────────────────────────────
+  it('rebooking the client settles the rebook, without knowing which appointment raised it', async () => {
+    // The bug this pins. A completed appointment raises REBOOK keyed on THAT
+    // appointment's id. The new booking knows only the CONTACT — it cannot name
+    // the five-tuple — so before the by-party settle existed, the obligation
+    // stayed open after the client was genuinely rebooked and the due list
+    // filled with work that had already happened.
+    await listener.onRaised(raised({ sourceId: `${P}oldbooking` }));
+    expect((await service.findDue(BIZ_A, { now, windowDays: 7 })).items).toHaveLength(1);
+
+    // Exactly what bookings.service emits on booking.created: no sourceId.
+    await listener.onSettled({
+      businessId: BIZ_A,
+      actionType: 'REBOOK',
+      owedToId: CONTACT_A,
+      dischargeRef: 'booking:new-one',
+    });
+
+    const row = (await db.commandItem.findMany({ where: { businessId: BIZ_A } }))[0];
+    expect(row.dischargedAt).toBeInstanceOf(Date);
+    expect(row.dischargeRef).toBe('booking:new-one');
+    expect((await service.findDue(BIZ_A, { now, windowDays: 7 })).items).toHaveLength(0);
+  });
+
+  it('settling by party does not discharge a different kind of obligation to the same person', async () => {
+    // Rebooking someone does not settle the invoice you owe them a chase on.
+    await listener.onRaised(raised({ sourceId: `${P}bk_r`, actionType: 'REBOOK' }));
+    await listener.onRaised(
+      raised({ sourceId: `${P}inv_c`, actionType: 'CHASE_PAYMENT', title: 'Chase Priya' }),
+    );
+
+    await listener.onSettled({
+      businessId: BIZ_A,
+      actionType: 'REBOOK',
+      owedToId: CONTACT_A,
+      dischargeRef: 'booking:x',
+    });
+
+    const open = await service.findDue(BIZ_A, { now, windowDays: 7 });
+    expect(open.items.map((i) => i.actionType)).toEqual(['CHASE_PAYMENT']);
+  });
+
+  it('settling by party cannot reach another business', async () => {
+    await listener.onRaised(raised({ sourceId: `${P}bk_a` }));
+    await listener.onRaised(raised({ businessId: BIZ_B, sourceId: `${P}bk_b` }));
+
+    // Same contact id, same actionType, different tenant.
+    await listener.onSettled({ businessId: BIZ_B, actionType: 'REBOOK', owedToId: CONTACT_A });
+
+    expect((await db.commandItem.findFirst({ where: { businessId: BIZ_A } }))?.dischargedAt).toBeNull();
+    expect(
+      (await db.commandItem.findFirst({ where: { businessId: BIZ_B } }))?.dischargedAt,
+    ).toBeInstanceOf(Date);
+  });
+
   // ── 6. Refusing a partial tuple ───────────────────────────────────────────
   it('refuses an obligation with no clock, rather than storing one that can never be due', async () => {
     await listener.onRaised({ ...raised(), dueAt: undefined as never });

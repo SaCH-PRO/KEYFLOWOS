@@ -115,8 +115,20 @@ export class ObligationListener {
     }
   }
 
+  /**
+   * Settle by the five-tuple, when the producer knows exactly which obligation
+   * it discharged.
+   *
+   * Not every producer does. A rebooking knows the CONTACT it is for, not the
+   * id of the completed appointment that made a rebook owed — see
+   * `onSettledForParty` below, which is the shape that case needs.
+   */
   @OnEvent(WORK_OBLIGATION_SETTLED)
   async onSettled(payload: ObligationSettledPayload): Promise<void> {
+    if (payload?.owedToId && !payload.sourceId) {
+      await this.onSettledForParty(payload);
+      return;
+    }
     if (
       !payload?.businessId ||
       !payload.sourceModule ||
@@ -155,6 +167,52 @@ export class ObligationListener {
       });
     } catch (err) {
       this.logger.error(`obligation.settled failed: ${(err as Error).message}`);
+    }
+  }
+
+  /**
+   * Settle every open obligation of one kind owed to one party.
+   *
+   * THE CASE THIS EXISTS FOR, AND THE BUG IT CLOSES. A completed appointment
+   * raises a REBOOK obligation keyed on THAT appointment's id. When the client
+   * is actually rebooked, the new booking knows the contact but has no idea
+   * which prior appointment made a rebook owed — so the five-tuple settle above
+   * cannot express it, and without this the obligation stays open forever. The
+   * due list would fill with rebooks that genuinely happened, which is worse
+   * than not having the list: it teaches people the list is wrong.
+   *
+   * Found by auditing my own work, not by a test. Nothing emitted
+   * work.obligation.settled at all, so `onSettled` was a dead listener — the
+   * exact class this repo already tracks ten of — and the event-wiring gate did
+   * not catch it because it does not cover `work.obligation.*`.
+   *
+   * Scoped by businessId AND owedToId AND actionType, and only OPEN,
+   * undischarged rows. It deliberately does not touch obligations of another
+   * kind owed to the same party: rebooking someone does not settle the invoice
+   * you owe them a chase on.
+   */
+  private async onSettledForParty(payload: ObligationSettledPayload): Promise<void> {
+    if (!payload.businessId || !payload.owedToId || !payload.actionType) return;
+    try {
+      const now = new Date();
+      await this.prisma.client.commandItem.updateMany({
+        where: {
+          businessId: payload.businessId,
+          kind: 'OBLIGATION',
+          actionType: payload.actionType,
+          owedToId: payload.owedToId,
+          dischargedAt: null,
+          status: { notIn: ['COMPLETED', 'DISMISSED', 'EXECUTED', 'FAILED'] },
+        },
+        data: {
+          status: 'COMPLETED',
+          dischargedAt: now,
+          completedAt: now,
+          dischargeRef: payload.dischargeRef ?? null,
+        },
+      });
+    } catch (err) {
+      this.logger.error(`obligation.settled (by party) failed: ${(err as Error).message}`);
     }
   }
 
