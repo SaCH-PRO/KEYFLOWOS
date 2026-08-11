@@ -101,6 +101,7 @@ const contactSchema = z.object({
   notesInternal: z.string().nullable().optional(),
   ageGroup: z.string().nullable().optional(),
   relationshipType: z.string().nullable().optional(),
+  pricingTier: z.string().nullable().optional(),
   pipelineStage: z.string().nullable().optional(),
   relationshipHealth: z.string().nullable().optional(),
   lastContactedAt: z.string().nullable().optional(),
@@ -274,6 +275,14 @@ export type ContactEvent = z.infer<typeof eventSchema>;
 export type ContactNote = z.infer<typeof noteSchema>;
 export type ContactTask = Omit<z.infer<typeof taskSchema>, "contact"> & { contact?: Contact | null };
 export type Product = z.infer<typeof productSchema>;
+export const tierPriceSchema = z.object({
+  id: z.string(),
+  productId: z.string().optional(),
+  businessId: z.string().optional(),
+  tier: z.string(),
+  price: z.number(),
+}).passthrough();
+export type TierPrice = z.infer<typeof tierPriceSchema>;
 export type Booking = z.infer<typeof bookingSchema>;
 export type InvoiceItem = {
   id: string;
@@ -2003,6 +2012,40 @@ export async function createProduct(input: {
 
   if (res.data) return res;
   return { data: null, error: res.error ?? "Failed to create product" };
+}
+
+// ── Tiered pricing (distributor/wholesale vs retail) ───────────────────────
+
+/** List a product's tier price overrides (RETAIL lives on the product itself). */
+export async function fetchProductTierPrices(productId: string, businessId: string = DEFAULT_BUSINESS_ID) {
+  return apiGetSimple<TierPrice[]>(
+    `/commerce/businesses/${encodeURIComponent(businessId)}/products/${encodeURIComponent(productId)}/tier-prices`,
+  );
+}
+
+/** Set (or update) a product's price for a non-retail tier, e.g. WHOLESALE. */
+export async function upsertProductTierPrice(
+  productId: string,
+  tier: string,
+  price: number,
+  businessId: string = DEFAULT_BUSINESS_ID,
+) {
+  return apiPut<TierPrice>(
+    `/commerce/businesses/${encodeURIComponent(businessId)}/products/${encodeURIComponent(productId)}/tier-prices`,
+    { tier, price },
+  );
+}
+
+/** Assign a contact to a pricing tier (e.g. mark a distributor WHOLESALE). */
+export async function updateContactPricingTier(
+  contactId: string,
+  tier: string,
+  businessId: string = DEFAULT_BUSINESS_ID,
+) {
+  return apiPatch<{ id: string; pricingTier: string }>(
+    `/commerce/businesses/${encodeURIComponent(businessId)}/contacts/${encodeURIComponent(contactId)}/pricing-tier`,
+    { tier },
+  );
 }
 
 export async function updateProduct(input: {

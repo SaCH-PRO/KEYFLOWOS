@@ -33,6 +33,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import type { ContactDetailData } from "./contact-detail";
 import { getContactAgeGroupLabel } from "@/lib/crm-constants";
 import { ContactCustomFields } from "./contact-custom-fields";
+import { ContactPricingTier } from "./contact-pricing-tier";
 
 function buildMapsUrl(parts: Array<string | null | undefined>): string {
   const query = parts.filter(Boolean).join(", ");
@@ -496,6 +497,11 @@ export function ContactDetailInfo({
                     .map((line, i) => (<div key={i}>{line}</div>))}
                 </div>
               )}
+              <ContactPricingTier
+                contactId={contact.id}
+                initialTier={(contact as { pricingTier?: string | null }).pricingTier}
+                onChanged={onContactUpdated}
+              />
               {customFieldValues && customFieldValues.length > 0 && (
                 <div className="space-y-2">
                   <ContactCustomFields values={typedValuesRecord} readOnly />

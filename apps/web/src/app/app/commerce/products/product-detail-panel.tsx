@@ -36,6 +36,7 @@ import type { Product } from "@/lib/client";
 import { fetchProductCostProfile, updateProductCostProfile } from "@/lib/client";
 import { formatCurrency } from "@/lib/currency";
 import { PRODUCT_CATEGORY_CONFIG, type ProductForm } from "../components/commerce-types";
+import { ProductWholesalePrice } from "./product-wholesale-price";
 import Image from "next/image";
 import { toast } from "sonner";
 
@@ -567,6 +568,8 @@ export const ProductDetailPanel = React.memo(function ProductDetailPanel({
                     <Pencil className="w-3 h-3" /> Edit Cost Profile
                   </button>
                 )}
+
+                <ProductWholesalePrice product={product} />
 
                 <div className="grid grid-cols-3 gap-2 pt-1 border-t border-border/20">
                   <StatCard icon={TrendingUp} label="Revenue" value={formatCurrency(totalRevenue, displayCurrency)} accent="text-emerald-400" />
