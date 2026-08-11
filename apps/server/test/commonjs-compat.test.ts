@@ -116,8 +116,23 @@ describe('CommonJS compatibility of server dependencies', () => {
 
   it('every imported package can be require()d', () => {
     const offenders: string[] = [];
+    const packages = [...importedPackages()].sort();
 
-    for (const name of [...importedPackages()].sort()) {
+    // Prove the scan saw the codebase before trusting it found no offenders.
+    //
+    // `walk(SRC)` returns [] if SRC moves or its filters stop matching, and
+    // then `importedPackages()` is empty, `offenders` is empty, and this passes
+    // having checked nothing. This is the gate that stands between the repo and
+    // an unbootable server — `jose` came one lockfile edit from shipping and
+    // `uuid@14` actually did — so it is the last one that should be able to
+    // report all-clear by looking at an empty set.
+    expect(
+      packages.length,
+      'no imported packages found — the source walk is broken, and this check ' +
+        'is inspecting nothing',
+    ).toBeGreaterThan(20);
+
+    for (const name of packages) {
       const manifest = manifestOf(name);
       if (!manifest) continue; // unresolvable here (types-only, optional peer)
       if (!isRequireable(manifest)) {
@@ -133,7 +148,13 @@ describe('CommonJS compatibility of server dependencies', () => {
   it('does not import the ESM-only uuid package', () => {
     // Specific guard for the regression that took the server down. node:crypto's
     // randomUUID is a drop-in for the bare uuidv4() call sites this repo uses.
-    const importers = walk(SRC).filter((f) =>
+    const files = walk(SRC);
+    expect(
+      files.length,
+      'no source files walked — an empty tree makes this pass without checking',
+    ).toBeGreaterThan(100);
+
+    const importers = files.filter((f) =>
       /(?:from|require\()\s*['"]uuid['"]/.test(readFileSync(f, 'utf8')),
     );
     expect(importers).toEqual([]);

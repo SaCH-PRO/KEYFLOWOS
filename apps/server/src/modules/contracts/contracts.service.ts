@@ -1,6 +1,8 @@
 import { Injectable, Inject, Logger, NotFoundException, BadRequestException, forwardRef } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import type { ContractStatus, ContractAlertType, Prisma } from '@prisma/client';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { WORK_OBLIGATION_SETTLED, type ObligationSettledPayload } from '@keyflow/shared';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { DocumentIntelligenceService, DocumentExtractionResult } from '../ai/document-intelligence.service';
 import type { CreateContractDto } from './dto/create-contract.dto';
@@ -33,6 +35,7 @@ export class ContractsService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(forwardRef(() => DocumentIntelligenceService)) private readonly docIntel: DocumentIntelligenceService,
+    @Inject(EventEmitter2) private readonly events: EventEmitter2,
   ) {}
 
   async listContracts(businessId: string, filters: ContractListFilters = {}) {
@@ -239,7 +242,45 @@ export class ContractsService {
     });
 
     await this.regenerateAlerts(businessId, contractId);
+    this.settleRenewalIfResolved(businessId, contractId, dto.status);
     return this.getContract(businessId, updated.id);
+  }
+
+  /**
+   * A renewal that has been decided is no longer owed.
+   *
+   * The other half of ContractRenewalSweep. Without it the sweep is a producer
+   * with no settler: a contract renewed or terminated in March keeps its
+   * obligation open, "due this week" fills with decisions already taken, and
+   * people stop believing the list. That exact defect shipped once already in
+   * this codebase — the rebook obligation had no settler until an audit found
+   * it — so it is written here in the same commit as the producer.
+   *
+   * Fire-and-forget, like the raise: emit() dispatches to listeners whose
+   * promises nobody awaits, so a slow listener cannot make updating a contract
+   * fail. The listener owns its errors.
+   */
+  private settleRenewalIfResolved(
+    businessId: string,
+    contractId: string,
+    status?: ContractStatus,
+  ): void {
+    // Only a status change settles it. Editing the title does not.
+    if (!status) return;
+    // RENEWAL_DUE means the decision is still outstanding — that is the state
+    // the obligation exists to represent, so it must not settle it.
+    const resolved: ContractStatus[] = ['ACTIVE', 'EXPIRED', 'TERMINATED', 'ARCHIVED'];
+    if (!resolved.includes(status)) return;
+
+    const payload: ObligationSettledPayload = {
+      businessId,
+      sourceModule: 'contracts',
+      sourceType: 'contract',
+      sourceId: contractId,
+      actionType: 'CONTRACT_RENEWAL',
+      dischargeRef: `contract:${status.toLowerCase()}`,
+    };
+    this.events.emit(WORK_OBLIGATION_SETTLED, payload);
   }
 
   async deleteContract(businessId: string, contractId: string) {

@@ -5,6 +5,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 
+import { TimeEntryService } from '../src/modules/time-tracking/time-entry.service';
 import { CommerceController } from '../src/modules/commerce/commerce.controller';
 import { CommerceService } from '../src/modules/commerce/commerce.service';
 import { RecurringInvoiceService } from '../src/modules/commerce/recurring-invoice.service';
@@ -135,6 +136,10 @@ describe('Commerce public quote e2e', () => {
         { provide: EventEmitter2, useValue: events },
         { provide: CrmService, useValue: crm },
         { provide: SubscriptionsService, useValue: { checkLimit: vi.fn() } },
+        // CommerceController gained this when invoices/from-time was added.
+        // Stubbed rather than real: this suite exercises the public quote
+        // path and never touches time entries.
+        { provide: TimeEntryService, useValue: { invoiceUnbilledTime: vi.fn() } },
         { provide: CommerceStatsService, useValue: statsCache },
         { provide: InvoiceWorkflowService, useValue: {} },
         { provide: CatalogService, useValue: {} },

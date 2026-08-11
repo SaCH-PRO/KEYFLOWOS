@@ -1,6 +1,8 @@
 import { Body, Controller, Delete, ForbiddenException, Get, Inject, Logger, Param, Patch, Post, Query, Req, Res, UseGuards, UseInterceptors, UploadedFile } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Request, Response } from 'express';
+import { InvoiceFromTimeDto } from './dto/invoice-from-time.dto';
+import { TimeEntryService } from '../time-tracking/time-entry.service';
 import { CommerceService } from './commerce.service';
 import { CommerceVisionService } from './commerce-vision.service';
 import { StoreReadinessService } from './store-readiness.service';
@@ -32,6 +34,7 @@ export class CommerceController {
 
   constructor(
     @Inject(CommerceService) private readonly commerce: CommerceService,
+    @Inject(TimeEntryService) private readonly timeEntries: TimeEntryService,
     @Inject(InvoiceReceiptBuilderService) private readonly receipts: InvoiceReceiptBuilderService,
     @Inject(GmailService) private readonly gmail: GmailService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -423,6 +426,34 @@ export class CommerceController {
   @UseInterceptors(TeamAuditInterceptor)
   @AuditAction('revenue', 'invoice_created', 'invoice')
   @RequirePlanLimit('invoices')
+  /**
+   * Invoice everything unbilled on a project.
+   *
+   * Lives in commerce rather than time-tracking so the module edge points
+   * downward: TimeTrackingModule is a leaf (`imports: [PrismaModule]`) and does
+   * not import commerce, so commerce -> time-tracking closes no cycle. The
+   * reverse would have needed a forwardRef, and this server already carries 68
+   * of those.
+   *
+   * The service takes `createInvoice` as an argument rather than injecting
+   * CommerceService, which is what keeps time-tracking a leaf at all.
+   */
+  @Post('businesses/:businessId/invoices/from-time')
+  invoiceUnbilledTime(
+    @Param('businessId') businessId: string,
+    @Body() body: InvoiceFromTimeDto,
+  ) {
+    return this.timeEntries.invoiceUnbilledTime(businessId, {
+      projectId: body.projectId,
+      contactId: body.contactId,
+      currency: body.currency,
+      dueDate: body.dueDate,
+      taxRate: body.taxRate,
+      notes: body.notes,
+      createInvoice: (args) => this.commerce.createInvoice(args),
+    });
+  }
+
   @Post('businesses/:businessId/invoices')
   createInvoice(
     @Param('businessId') businessId: string,

@@ -317,6 +317,148 @@ export class TimeEntryService {
     });
   }
 
+  /**
+   * "Invoice everything unbilled on this project."
+   *
+   * THE JOIN THAT WAS MISSING. Both legs already existed and had never been
+   * connected: `markAsBilled` writes `billed` and `invoiceId`, `TimeEntry`
+   * carries `hourlyRate` and an `invoice` relation, and `@@index([businessId,
+   * billable, billed])` is exactly the index this query wants — while nothing
+   * in `commerce` or `projects` read `timeEntry` at all. Tracked hours and
+   * issued invoices were two halves of a sentence nobody had written.
+   *
+   * It is one of the instructions no incumbent can execute: Harvest cannot post
+   * an invoice, Xero cannot see the timer, and neither can be made to.
+   *
+   * REFUSES RATHER THAN INVOICING NOTHING. An empty selection throws instead of
+   * producing a zero-total invoice and reporting success — a "sent" invoice for
+   * no work is the fabricated-success shape this codebase keeps finding, and it
+   * would reach a customer.
+   *
+   * ENTRIES WITH NO RATE ARE REFUSED, NOT SILENTLY ZEROED. `hourlyRate` is
+   * nullable, and billing an hour at an implicit £0 is how time disappears:
+   * the entry is marked billed, the invoice is short, and the hours can never
+   * be recovered because `billed` is now true.
+   *
+   * ON ATOMICITY, stated because it is a real limitation. The invoice is
+   * created and the entries are marked in two steps, not one transaction —
+   * `createInvoice` owns tax, discount and numbering and does not accept a
+   * transaction client. So the count is VERIFIED: if the number of entries
+   * marked does not equal the number selected, this throws naming the invoice,
+   * because the alternative is hours that look unbilled and have already been
+   * charged. `markAsBilled` filters on `billed: false`, so a retry cannot
+   * double-mark.
+   */
+  async invoiceUnbilledTime(
+    businessId: string,
+    input: {
+      projectId?: string;
+      contactId?: string;
+      currency?: string;
+      dueDate?: Date | string;
+      taxRate?: number;
+      notes?: string;
+      createInvoice: (args: {
+        businessId: string;
+        contactId?: string;
+        items: { description: string; quantity: number; unitPrice: number }[];
+        currency?: string;
+        dueDate?: Date | string;
+        taxRate?: number;
+        notes?: string;
+      }) => Promise<{ id: string; invoiceNumber?: string; total?: number }>;
+    },
+  ) {
+    const entries = await this.prisma.client.timeEntry.findMany({
+      where: {
+        businessId,
+        billable: true,
+        billed: false,
+        ...(input.projectId ? { projectId: input.projectId } : {}),
+        durationMinutes: { not: null },
+      },
+      orderBy: { startTime: 'asc' },
+      include: { task: { select: { title: true } }, project: { select: { name: true } } },
+    });
+
+    if (entries.length === 0) {
+      throw new BadRequestException(
+        input.projectId
+          ? 'No unbilled billable time on this project.'
+          : 'No unbilled billable time for this business.',
+      );
+    }
+
+    const unrated = entries.filter((e) => e.hourlyRate === null || e.hourlyRate === undefined);
+    if (unrated.length > 0) {
+      throw new BadRequestException(
+        `${unrated.length} of ${entries.length} time entries have no hourly rate. ` +
+          'Set a rate on them, or mark them non-billable — billing them at zero would ' +
+          'mark the hours as billed and make them unrecoverable.',
+      );
+    }
+
+    // One line per task, so the invoice reads the way the work happened rather
+    // than as an undifferentiated block of hours.
+    const byLine = new Map<string, { minutes: number; rate: number }>();
+    for (const e of entries) {
+      const label =
+        e.task?.title ??
+        e.description ??
+        (e.project?.name ? `${e.project.name} — time` : 'Billable time');
+      const existing = byLine.get(label);
+      const minutes = e.durationMinutes ?? 0;
+      if (existing && existing.rate === e.hourlyRate) {
+        existing.minutes += minutes;
+      } else if (existing) {
+        // Same label at a different rate is a genuinely different line.
+        byLine.set(`${label} (@ ${e.hourlyRate})`, { minutes, rate: e.hourlyRate! });
+      } else {
+        byLine.set(label, { minutes, rate: e.hourlyRate! });
+      }
+    }
+
+    const items = [...byLine.entries()].map(([description, { minutes, rate }]) => ({
+      description,
+      // Two decimals of an hour. Rounding per LINE rather than per entry keeps
+      // the invoice total within a cent of the hours actually worked.
+      quantity: Math.round((minutes / 60) * 100) / 100,
+      unitPrice: rate,
+    }));
+
+    const invoice = await input.createInvoice({
+      businessId,
+      contactId: input.contactId,
+      items,
+      currency: input.currency,
+      dueDate: input.dueDate,
+      taxRate: input.taxRate,
+      notes: input.notes,
+    });
+
+    const ids = entries.map((e) => e.id);
+    const marked = await this.markAsBilled(ids, businessId, invoice.id);
+
+    if (marked.count !== ids.length) {
+      // The silent-zero class, caught rather than logged. updateMany reports a
+      // count and this is the only place that reads it.
+      throw new BadRequestException(
+        `Invoice ${invoice.invoiceNumber ?? invoice.id} was created, but only ` +
+          `${marked.count} of ${ids.length} time entries were marked billed. Those ` +
+          'hours are now invoiced and still look unbilled — void the invoice or ' +
+          'reconcile the entries before invoicing this project again.',
+      );
+    }
+
+    return {
+      invoiceId: invoice.id,
+      invoiceNumber: invoice.invoiceNumber,
+      entriesBilled: marked.count,
+      totalMinutes: entries.reduce((s, e) => s + (e.durationMinutes ?? 0), 0),
+      lineItems: items,
+    };
+  }
+
   private calculateDuration(start: Date, end?: Date | null): number | null {
     if (!end) return null;
     return Math.round((end.getTime() - start.getTime()) / 1000 / 60);
