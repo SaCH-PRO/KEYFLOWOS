@@ -4,14 +4,16 @@
 
 Projected from **278 governed flow tools** (`ai/flow-tool-registry.ts`) and **207 declared cortex capabilities** (`key-cortex/key-cortex-capability-registry.service.ts`) onto a **12-domain** business-function taxonomy.
 
-This file is three artifacts in one: a **coverage map** (what KEY can do, by domain), a **mode assignment** (manual vs assisted vs agentic, per capability), and a **gap register** (what a complete business OS still needs). Seed for the M0 capability model — `key-capability-map.seed.json` is the machine-loadable form.
+**Coverage: 100% declared · 53% active.** Every target capability a complete business OS needs is now *declared* in the model (32/32). **17** are **active** (a real tool covers them today); **15** are **planned** — declared with a full build spec (mode, risk tier, what they compose from, UI surface, evaluator gate) but not yet executable. "Active" is the honest executable-today number; "declared" means the model is complete.
+
+This file is the human-readable view of `key-capability-map.seed.json`, the seed for the M0 capability model.
 
 ## What this answers
 
-- **Do we cover the whole business?** Coverage by domain, below.
-- **Manual, smart, or AI — per capability?** The *mode* is **derived, not chosen**: from each tool's `family` + `riskTier` (+ cortex `requiresApproval`). Money movement, destructive, and irreversible actions pin to **Human-gated** by rule — "KEY may create intelligence, but not authority."
+- **Do we cover the whole business?** 100% declared; per-domain active/planned split below.
+- **Manual, smart, or AI — per capability?** The *mode* is **derived, not chosen** — from `family` + `riskTier` (+ cortex `requiresApproval`) for active items, and pinned per spec for planned ones. Money movement, destructive, and irreversible actions stay **Human-gated** by rule — "KEY may create intelligence, but not authority."
 - **What integration + UI does each mode imply?** See the legend. The **manual UI already exists** for every tool via its CI-enforced `manualEquivalentRoute`; assisted reuses the existing approval queue; only agentic needs the new Operator Console.
-- **What's missing?** The gap register — curated target capabilities with no covering tool or capability anywhere in either registry.
+- **What still needs building?** The **build backlog** — every planned capability with its spec.
 
 ## Mode legend — derived, governance-bounded
 
@@ -22,55 +24,53 @@ This file is three artifacts in one: a **coverage map** (what KEY can do, by dom
 | 🟡 **Assisted + Approval** | AI proposes, execution gated | Approval queue (`AiApprovalItem`) | Product screen + approval queue |
 | 🔴 **Human-gated** | Money / destructive / irreversible | Manual execution; AI proposes only | Product screen (human decision) |
 
-**Derivation rules** (`generate.js`): `read` family → 🟢 Agentic · `organize`@tier1 → 🟢 · tier 4 → 🔴 Human-gated · tier 3 or cortex `requiresApproval` → 🟡 Assisted+Approval · everything else (`draft`/`crud`/`execute`@tier1-2) → 🔵 Assisted.
-
 ## Coverage summary
 
-Across **12 domains**: 🟢 211 agentic · 🔵 226 assisted · 🟡 45 assisted+approval · 🔴 3 human-gated. Target-capability coverage: **17/32 (53%)**.
+Across **12 domains**: 🟢 211 agentic · 🔵 226 assisted · 🟡 45 assisted+approval · 🔴 3 human-gated (across 485 live capabilities).
 
-| Domain | Tools | Cortex caps | UI surfaces | Target coverage | Mode mix |
-|---|--:|--:|--:|:--:|---|
-| **Sales & CRM** | 42 | 17 | 3 | 3/3 | 🔵 32 🟢 19 🟡 8 |
-| **Marketing & Content** | 32 | 22 | 3 | 2/3 | 🔵 28 🟢 16 🟡 8 🔴 2 |
-| **Commerce & Fulfillment** | 45 | 15 | 5 | 1/3 | 🟢 28 🔵 27 🟡 5 |
-| **Finance & Accounting** | 35 | 10 | 4 | 3/4 | 🟢 23 🔵 20 🟡 2 |
-| **Operations & Delivery** | 45 | 36 | 5 | 1/2 | 🔵 41 🟢 34 🟡 5 🔴 1 |
-| **Scheduling & Bookings** | 10 | 22 | 2 | 2/2 | 🔵 20 🟢 11 🟡 1 |
-| **Support & Communications** | 13 | 38 | 3 | 2/3 | 🟢 23 🔵 23 🟡 5 |
-| **Legal, Contracts & Governance** | 27 | 0 | 6 | 2/3 | 🟢 15 🔵 10 🟡 2 |
-| **Analytics & Strategy** | 18 | 37 | 6 | 1/3 | 🟢 33 🔵 19 🟡 3 |
-| **People & HR** | 4 | 0 | 1 | 0/3 | 🟡 3 🔵 1 |
-| **Assets & Documents** | 7 | 0 | 1 | 0/2 | 🟢 5 🔵 1 🟡 1 |
-| **Admin & Settings** | 0 | 10 | 0 | 0/1 | 🔵 4 🟢 4 🟡 2 |
+| Domain | Tools | Cortex caps | UI surfaces | Active | Planned | Declared | Mode mix |
+|---|--:|--:|--:|:--:|:--:|:--:|---|
+| **Sales & CRM** | 42 | 17 | 3 | 3/3 | 0 | 100% | 🔵 32 🟢 19 🟡 8 |
+| **Marketing & Content** | 32 | 22 | 3 | 2/3 | 1 | 100% | 🔵 28 🟢 16 🟡 8 🔴 2 |
+| **Commerce & Fulfillment** | 45 | 15 | 5 | 1/3 | 2 | 100% | 🟢 28 🔵 27 🟡 5 |
+| **Finance & Accounting** | 35 | 10 | 4 | 3/4 | 1 | 100% | 🟢 23 🔵 20 🟡 2 |
+| **Operations & Delivery** | 45 | 36 | 5 | 1/2 | 1 | 100% | 🔵 41 🟢 34 🟡 5 🔴 1 |
+| **Scheduling & Bookings** | 10 | 22 | 2 | 2/2 | 0 | 100% | 🔵 20 🟢 11 🟡 1 |
+| **Support & Communications** | 13 | 38 | 3 | 2/3 | 1 | 100% | 🟢 23 🔵 23 🟡 5 |
+| **Legal, Contracts & Governance** | 27 | 0 | 6 | 2/3 | 1 | 100% | 🟢 15 🔵 10 🟡 2 |
+| **Analytics & Strategy** | 18 | 37 | 6 | 1/3 | 2 | 100% | 🟢 33 🔵 19 🟡 3 |
+| **People & HR** | 4 | 0 | 1 | 0/3 | 3 | 100% | 🟡 3 🔵 1 |
+| **Assets & Documents** | 7 | 0 | 1 | 0/2 | 2 | 100% | 🟢 5 🔵 1 🟡 1 |
+| **Admin & Settings** | 0 | 10 | 0 | 0/1 | 1 | 100% | 🔵 4 🟢 4 🟡 2 |
 
-## Gap register
+## Build backlog — planned capabilities
 
-Curated target capabilities a complete business OS should cover, keyword-checked against **every** tool and capability in both registries. Only *unmatched* targets are listed — the concrete "build or synthesize" backlog. Proposed mode is what the capability *would* take once built.
+Every gap is now a **declared capability with a spec**. This is the concrete build order. Proposed mode is the governance contract each will inherit; "Composes from" lists real existing tools on the target surface it can be built on.
 
-| Domain | Missing capability | Proposed mode | Why it matters |
-|---|---|---|---|
-| Marketing & Content | Ad-spend optimization | 🟢 Agentic | Close the loop from spend to conversion; agentic reallocation. |
-| Commerce & Fulfillment | Dynamic pricing | 🔴 Human-gated | Margin/velocity-aware pricing; high-risk so gated. |
-| Commerce & Fulfillment | Supplier risk scoring | 🟢 Agentic | Score vendors on reliability before commitment. |
-| Finance & Accounting | Tax filing preparation | 🔴 Human-gated | Assemble filings; execution stays human-gated by law. |
-| Operations & Delivery | SLA monitoring | 🟢 Agentic | Catch breach risk before it happens. |
-| Support & Communications | KB answer synthesis | 🟢 Agentic | Deflect support volume with grounded answers. |
-| Legal, Contracts & Governance | Renewal-risk analysis | 🟢 Agentic | Flag contracts at churn/renewal risk early. |
-| Analytics & Strategy | Anomaly detection | 🟢 Agentic | Surface metric anomalies with no human watching. |
-| Analytics & Strategy | Natural-language KPI Q&A | 🟢 Agentic | Ask the business a question in plain language. |
-| People & HR | Payroll tax filing | 🔴 Human-gated | Thinnest domain; compliance-heavy. |
-| People & HR | Performance-review synthesis | 🟢 Agentic | Aggregate signals into review drafts. |
-| People & HR | PTO / shift optimization | 🟢 Agentic | Balance coverage against staff availability. |
-| Assets & Documents | Asset depreciation / lifecycle | 🔵 Assisted | Track book value and lifecycle events. |
-| Assets & Documents | License-renewal tracking | 🟢 Agentic | Never miss a renewal. |
-| Admin & Settings | Anomalous-access / audit alerting | 🟢 Agentic | Detect unusual admin access. |
+| Domain | Capability | Mode | Tier | Composes from | UI surface | Evaluator gate |
+|---|---|---|:--:|---|---|---|
+| Marketing & Content | Ad-spend optimization | 🟡 Assisted + Approval | 3 | `social_get_analytics`, `draft_followup_message`, `draft_campaign_bundle` | `/app/marketing` | Backtest reallocation vs 90d ROAS; budget-cap + policy BLOCKING |
+| Commerce & Fulfillment | Dynamic pricing | 🔴 Human-gated | 4 | `fetch_revenue_risk`, `draft_payment_reminder`, `commerce_create_invoice` | `/app/commerce` | Margin-floor + price-change policy BLOCKING; human sign-off |
+| Commerce & Fulfillment | Supplier risk scoring | 🟢 Agentic | 1 | `suppliers_list_connections`, `suppliers_get_connection`, `procurement_list_requests` | `/app/procurement` | Score reproducibility; source-provenance check |
+| Finance & Accounting | Tax filing preparation | 🔴 Human-gated | 4 | `reconcile_list_unmatched`, `reconcile_list_statement_sources`, `finance_view_receivables` | `/app/finance` | Reconciliation ties to ledger; human + accountant sign-off |
+| Operations & Delivery | SLA monitoring | 🟢 Agentic | 1 | `fetch_project_status`, `projects_list`, `projects_list_tasks` | `/app/projects` | Breach-threshold unit tests; false-positive ceiling |
+| Support & Communications | KB answer synthesis | 🟢 Agentic | 1 | `helpdesk_list_tickets`, `helpdesk_create_ticket`, `helpdesk_update_ticket` | `/app/helpdesk` | Groundedness/citation check; hallucination guard BLOCKING |
+| Legal, Contracts & Governance | Renewal-risk analysis | 🟢 Agentic | 1 | `contracts_list`, `contracts_get`, `contracts_stats` | `/app/contracts` | Backtest vs historical renew/churn outcomes |
+| Analytics & Strategy | Anomaly detection | 🟢 Agentic | 1 | `reports_generate`, `finance_profit_and_loss`, `finance_cashflow` | `/app/reports` | Precision/recall on labelled anomalies; alert-noise ceiling |
+| Analytics & Strategy | Natural-language KPI Q&A | 🟢 Agentic | 1 | `reports_generate`, `finance_profit_and_loss`, `finance_cashflow` | `/app/reports` | Query-to-metric accuracy suite; refuse-when-unknown check BLOCKING |
+| People & HR | Payroll tax filing | 🔴 Human-gated | 4 | `payroll_set_rate`, `payroll_generate_run`, `payroll_approve_run` | `/app/payroll` | Withholding recomputation matches; human + compliance sign-off |
+| People & HR | Performance-review synthesis | 🔵 Assisted | 2 | `fetch_business_summary`, `reports_generate`, `goals_list` | `/app/performance` | Bias/fairness screen; source-attribution check |
+| People & HR | PTO / shift optimization | 🔵 Assisted | 2 | `payroll_list_rates`, `performance_scorecard`, `performance_team_summary` | `/app/structure` | Coverage-constraint satisfaction; labour-rule check |
+| Assets & Documents | Asset depreciation / lifecycle | 🔵 Assisted | 2 | `assets_list`, `assets_get`, `assets_list_folders` | `/app/assets` | Depreciation schedule matches method; ledger tie-out |
+| Assets & Documents | License-renewal tracking | 🟢 Agentic | 1 | `assets_list`, `assets_get`, `assets_list_folders` | `/app/assets` | Renewal-date extraction accuracy; reminder-lead-time check |
+| Admin & Settings | Anomalous-access / audit alerting | 🟢 Agentic | 1 | — | `/app/settings` | Detection precision on known-bad patterns; alert-noise ceiling |
 
-**15 gaps** across 10 domains. Thinnest domains: **People & HR**, **Assets & Documents**, **Admin & Settings**.
+**15 planned capabilities.** Safe-to-build-first (🟢 agentic, read-only): the analytics/monitoring/detection items. Must-stay-human-gated (🔴): Dynamic pricing, Tax filing preparation, Payroll tax filing — declared, but never auto-promoted to autonomous.
 
 ## How to read this into the roadmap
 
-- **The map is a target, not a build queue.** Preload the *map* to 100%; preload *tools* broadly (already done). Instantiate *skills/agents* only for seed-worthy bets or accumulated evidence.
-- **M0** loads `key-capability-map.seed.json` as the initial capability model. Every skill/agent registered later declares which capability id(s) it covers → coverage becomes computable and self-reported.
+- **The map is a target, not a build queue.** Declared = the model is complete; active = what actually runs. Instantiate planned capabilities on evidence or a seed-worthy bet — not all at once.
+- **M0** loads `key-capability-map.seed.json` as the initial capability model. Every skill/agent registered later declares which capability it covers → active coverage climbs from 53% toward 100% as things ship.
 - **Mode is the governance contract.** 🔴 Human-gated capabilities must never be promoted to autonomous, regardless of evidence.
 - **UI is mostly done.** Manual = existing routes; Assisted = existing approval queue; only the Operator Console (agentic) is net-new.
 
@@ -78,9 +78,17 @@ Curated target capabilities a complete business OS should cover, keyword-checked
 
 ### Sales & CRM
 
-Dominant mode: 🔵 **Assisted** · 42 tools · 17 cortex capabilities
+42 tools · 17 cortex capabilities · **3/3 active**, 0 planned
 
 **UI surfaces:** `/app/call-tasks` · `/app/crm` · `/app/onboarding`
+
+**Target capabilities:**
+
+| Capability | Status | Mode | Detail |
+|---|---|---|---|
+| Web lead enrichment / prospecting | ✅ active | 🔵 Assisted | covered by `create_contact` |
+| Predictive lead scoring | ✅ active | 🟡 Assisted + Approval | covered by `crm_merge_execute` |
+| Sales pipeline forecasting | ✅ active | 🟢 Agentic | covered by `deals_forecast` |
 
 <details><summary>42 governed tools</summary>
 
@@ -133,11 +141,17 @@ Dominant mode: 🔵 **Assisted** · 42 tools · 17 cortex capabilities
 
 ### Marketing & Content
 
-Dominant mode: 🔵 **Assisted** · 32 tools · 22 cortex capabilities
+32 tools · 22 cortex capabilities · **2/3 active**, 1 planned
 
 **UI surfaces:** `/app/content-ops` · `/app/marketing` · `/app/seo`
 
-**Gaps:** ⛔ Ad-spend optimization
+**Target capabilities:**
+
+| Capability | Status | Mode | Detail |
+|---|---|---|---|
+| Campaign attribution / ROI | ✅ active | 🟢 Agentic | covered by `fetch_seo_revenue_attribution` |
+| Audience segmentation | ✅ active | 🔵 Assisted | covered by `tag_contact` |
+| Ad-spend optimization | 🧩 planned | 🟡 Assisted + Approval | T3 · composes `social_get_analytics`… · /app/marketing |
 
 <details><summary>32 governed tools</summary>
 
@@ -180,11 +194,17 @@ Dominant mode: 🔵 **Assisted** · 32 tools · 22 cortex capabilities
 
 ### Commerce & Fulfillment
 
-Dominant mode: 🟢 **Agentic** · 45 tools · 15 cortex capabilities
+45 tools · 15 cortex capabilities · **1/3 active**, 2 planned
 
 **UI surfaces:** `/app/commerce` · `/app/inventory` · `/app/marketplace` · `/app/procurement` · `/app/store`
 
-**Gaps:** ⛔ Dynamic pricing · ⛔ Supplier risk scoring
+**Target capabilities:**
+
+| Capability | Status | Mode | Detail |
+|---|---|---|---|
+| Demand forecasting / reorder point | ✅ active | 🟢 Agentic | covered by `inventory_low_stock_alerts` |
+| Dynamic pricing | 🧩 planned | 🔴 Human-gated | T4 · composes `fetch_revenue_risk`… · /app/commerce |
+| Supplier risk scoring | 🧩 planned | 🟢 Agentic | T1 · composes `suppliers_list_connections`… · /app/procurement |
 
 <details><summary>45 governed tools</summary>
 
@@ -240,11 +260,18 @@ Dominant mode: 🟢 **Agentic** · 45 tools · 15 cortex capabilities
 
 ### Finance & Accounting
 
-Dominant mode: 🟢 **Agentic** · 35 tools · 10 cortex capabilities
+35 tools · 10 cortex capabilities · **3/4 active**, 1 planned
 
 **UI surfaces:** `/app/expenses` · `/app/finance` · `/app/payments` · `/app/retainers`
 
-**Gaps:** ⛔ Tax filing preparation
+**Target capabilities:**
+
+| Capability | Status | Mode | Detail |
+|---|---|---|---|
+| Cash-flow forecasting | ✅ active | 🟢 Agentic | covered by `fetch_revenue_risk` |
+| Dunning / collections sequencing | ✅ active | 🟡 Assisted + Approval | covered by `sequence_enroll_overdue` |
+| Multi-currency / FX handling | ✅ active | 🔵 Assisted | covered by `update_business_blueprint` |
+| Tax filing preparation | 🧩 planned | 🔴 Human-gated | T4 · composes `reconcile_list_unmatched`… · /app/finance |
 
 <details><summary>35 governed tools</summary>
 
@@ -290,11 +317,16 @@ Dominant mode: 🟢 **Agentic** · 35 tools · 10 cortex capabilities
 
 ### Operations & Delivery
 
-Dominant mode: 🔵 **Assisted** · 45 tools · 36 cortex capabilities
+45 tools · 36 cortex capabilities · **1/2 active**, 1 planned
 
 **UI surfaces:** `/app/automations` · `/app/blueprint` · `/app/projects` · `/app/structure` · `/app/time-tracking`
 
-**Gaps:** ⛔ SLA monitoring
+**Target capabilities:**
+
+| Capability | Status | Mode | Detail |
+|---|---|---|---|
+| Capacity / resource planning | ✅ active | 🟢 Agentic | covered by `fetch_schedule_health` |
+| SLA monitoring | 🧩 planned | 🟢 Agentic | T1 · composes `fetch_project_status`… · /app/projects |
 
 <details><summary>45 governed tools</summary>
 
@@ -350,9 +382,16 @@ Dominant mode: 🔵 **Assisted** · 45 tools · 36 cortex capabilities
 
 ### Scheduling & Bookings
 
-Dominant mode: 🔵 **Assisted** · 10 tools · 22 cortex capabilities
+10 tools · 22 cortex capabilities · **2/2 active**, 0 planned
 
 **UI surfaces:** `/app/bookings` · `/app/calendar`
+
+**Target capabilities:**
+
+| Capability | Status | Mode | Detail |
+|---|---|---|---|
+| No-show prediction | ✅ active | 🟢 Agentic | covered by `fetch_schedule_health` |
+| Smart rescheduling | ✅ active | 🔵 Assisted | covered by `bookings_reschedule_booking` |
 
 <details><summary>10 governed tools</summary>
 
@@ -373,11 +412,17 @@ Dominant mode: 🔵 **Assisted** · 10 tools · 22 cortex capabilities
 
 ### Support & Communications
 
-Dominant mode: 🟢 **Agentic** · 13 tools · 38 cortex capabilities
+13 tools · 38 cortex capabilities · **2/3 active**, 1 planned
 
 **UI surfaces:** `/app/community` · `/app/helpdesk` · `/app/key-inbox`
 
-**Gaps:** ⛔ KB answer synthesis
+**Target capabilities:**
+
+| Capability | Status | Mode | Detail |
+|---|---|---|---|
+| Sentiment / escalation detection | ✅ active | 🔵 Assisted | covered by `delegation_payment_recovery` |
+| Auto-triage & routing | ✅ active | 🔵 Assisted | covered by `inbox_update_thread_status` |
+| KB answer synthesis | 🧩 planned | 🟢 Agentic | T1 · composes `helpdesk_list_tickets`… · /app/helpdesk |
 
 <details><summary>13 governed tools</summary>
 
@@ -401,11 +446,17 @@ Dominant mode: 🟢 **Agentic** · 13 tools · 38 cortex capabilities
 
 ### Legal, Contracts & Governance
 
-Dominant mode: 🟢 **Agentic** · 27 tools · 0 cortex capabilities
+27 tools · 0 cortex capabilities · **2/3 active**, 1 planned
 
 **UI surfaces:** `/app/approvals` · `/app/contracts` · `/app/document-intelligence` · `/app/evidence` · `/app/governance-flow` · `/app/portal`
 
-**Gaps:** ⛔ Renewal-risk analysis
+**Target capabilities:**
+
+| Capability | Status | Mode | Detail |
+|---|---|---|---|
+| Contract redlining / clause-risk analysis | ✅ active | 🟢 Agentic | covered by `contract_extract_clauses` |
+| Obligation extraction & tracking | ✅ active | 🟢 Agentic | covered by `command_list_due_obligations` |
+| Renewal-risk analysis | 🧩 planned | 🟢 Agentic | T1 · composes `contracts_list`… · /app/contracts |
 
 <details><summary>27 governed tools</summary>
 
@@ -443,11 +494,17 @@ Dominant mode: 🟢 **Agentic** · 27 tools · 0 cortex capabilities
 
 ### Analytics & Strategy
 
-Dominant mode: 🟢 **Agentic** · 18 tools · 37 cortex capabilities
+18 tools · 37 cortex capabilities · **1/3 active**, 2 planned
 
 **UI surfaces:** `/app/command-center` · `/app/goals` · `/app/key` · `/app/keyflow-command` · `/app/performance` · `/app/reports`
 
-**Gaps:** ⛔ Anomaly detection · ⛔ Natural-language KPI Q&A
+**Target capabilities:**
+
+| Capability | Status | Mode | Detail |
+|---|---|---|---|
+| Anomaly detection | 🧩 planned | 🟢 Agentic | T1 · composes `reports_generate`… · /app/reports |
+| Natural-language KPI Q&A | 🧩 planned | 🟢 Agentic | T1 · composes `reports_generate`… · /app/reports |
+| Cohort / retention analysis | ✅ active | 🟢 Agentic | covered by `get_cohort_retention` |
 
 <details><summary>18 governed tools</summary>
 
@@ -476,11 +533,17 @@ Dominant mode: 🟢 **Agentic** · 18 tools · 37 cortex capabilities
 
 ### People & HR
 
-Dominant mode: 🟡 **Assisted + Approval** · 4 tools · 0 cortex capabilities
+4 tools · 0 cortex capabilities · **0/3 active**, 3 planned
 
 **UI surfaces:** `/app/payroll`
 
-**Gaps:** ⛔ Payroll tax filing · ⛔ Performance-review synthesis · ⛔ PTO / shift optimization
+**Target capabilities:**
+
+| Capability | Status | Mode | Detail |
+|---|---|---|---|
+| Payroll tax filing | 🧩 planned | 🔴 Human-gated | T4 · composes `payroll_set_rate`… · /app/payroll |
+| Performance-review synthesis | 🧩 planned | 🔵 Assisted | T2 · composes `fetch_business_summary`… · /app/performance |
+| PTO / shift optimization | 🧩 planned | 🔵 Assisted | T2 · composes `payroll_list_rates`… · /app/structure |
 
 <details><summary>4 governed tools</summary>
 
@@ -495,11 +558,16 @@ Dominant mode: 🟡 **Assisted + Approval** · 4 tools · 0 cortex capabilities
 
 ### Assets & Documents
 
-Dominant mode: 🟢 **Agentic** · 7 tools · 0 cortex capabilities
+7 tools · 0 cortex capabilities · **0/2 active**, 2 planned
 
 **UI surfaces:** `/app/assets`
 
-**Gaps:** ⛔ Asset depreciation / lifecycle · ⛔ License-renewal tracking
+**Target capabilities:**
+
+| Capability | Status | Mode | Detail |
+|---|---|---|---|
+| Asset depreciation / lifecycle | 🧩 planned | 🔵 Assisted | T2 · composes `assets_list`… · /app/assets |
+| License-renewal tracking | 🧩 planned | 🟢 Agentic | T1 · composes `assets_list`… · /app/assets |
 
 <details><summary>7 governed tools</summary>
 
@@ -517,9 +585,13 @@ Dominant mode: 🟢 **Agentic** · 7 tools · 0 cortex capabilities
 
 ### Admin & Settings
 
-Dominant mode: 🔵 **Assisted** · 0 tools · 10 cortex capabilities
+0 tools · 10 cortex capabilities · **0/1 active**, 1 planned
 
 **UI surfaces:** _(cortex-only, no dedicated flow tools)_
 
-**Gaps:** ⛔ Anomalous-access / audit alerting
+**Target capabilities:**
+
+| Capability | Status | Mode | Detail |
+|---|---|---|---|
+| Anomalous-access / audit alerting | 🧩 planned | 🟢 Agentic | T1 · composes `—`… · /app/settings |
 
