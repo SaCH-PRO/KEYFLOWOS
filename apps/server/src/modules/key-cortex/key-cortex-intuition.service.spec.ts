@@ -114,4 +114,83 @@ describe('KeyCortexIntuitionService', () => {
       expect(svc).toBeDefined();
     });
   });
+
+  /**
+   * A cron that only logs on failure is a cron you cannot prove ran.
+   *
+   * scheduledIntuitionScan used to log nothing on success, and the only other
+   * trace it leaves is a keyCortexMemory row it writes ONLY when it finds
+   * something. So after a production deploy, "did the hourly job fire" was
+   * unanswerable: zero weak_signal rows means either the job is broken or the
+   * businesses are quiet, and those need different responses.
+   *
+   * Measured on 2026-08-10 against production immediately after a deploy — the
+   * check came back 0 and could not distinguish the two. That is what this
+   * fixes.
+   */
+  describe('the hourly scan is observable', () => {
+    function withLogger(businesses: string[]) {
+      const { service: svc } = makeService();
+      const logged: string[] = [];
+      (svc as unknown as { logger: unknown }).logger = {
+        log: (m: string) => logged.push(m),
+        error: (m: string) => logged.push(`ERROR ${m}`),
+        warn: () => {},
+        debug: () => {},
+        verbose: () => {},
+      };
+      (svc as unknown as { findAllActiveBusinesses: () => Promise<string[]> }).findAllActiveBusinesses =
+        async () => businesses;
+      return { svc, logged };
+    }
+
+    it('reports a completed scan even when it finds nothing', async () => {
+      // The load-bearing case. A quiet hour must print a line, because silence
+      // is what made a broken cron look like a quiet one.
+      const { svc, logged } = withLogger(['biz_1', 'biz_2']);
+      (svc as unknown as { detectWeakSignals: () => Promise<unknown[]> }).detectWeakSignals =
+        async () => [];
+
+      await svc.scheduledIntuitionScan();
+
+      const line = logged.find((m) => m.includes('[intuition] scheduled scan complete'));
+      expect(line, 'the scan ran and said nothing').toBeTruthy();
+      expect(line).toMatch(/2 businesses/);
+      expect(line).toMatch(/0 signals recorded/);
+    });
+
+    it('reports the number of signals it actually recorded', async () => {
+      // Not the number it found, and not a constant — the count it persisted.
+      const { svc, logged } = withLogger(['biz_1']);
+      (svc as unknown as { detectWeakSignals: () => Promise<unknown[]> }).detectWeakSignals =
+        async () => [{ a: 1 }, { b: 2 }, { c: 3 }];
+      (svc as unknown as { recordSignals: () => Promise<void> }).recordSignals = async () => {};
+
+      await svc.scheduledIntuitionScan();
+
+      expect(logged.find((m) => m.includes('scheduled scan complete'))).toMatch(
+        /3 signals recorded/,
+      );
+    });
+
+    it('counts a failing business without abandoning the run', async () => {
+      // One tenant throwing must not stop the other, and must still be counted
+      // in the summary rather than only appearing as a stray error line.
+      const { svc, logged } = withLogger(['biz_ok', 'biz_bad']);
+      (svc as unknown as { detectWeakSignals: (b: string) => Promise<unknown[]> }).detectWeakSignals =
+        async (businessId: string) => {
+          if (businessId === 'biz_bad') throw new Error('boom');
+          return [{ a: 1 }];
+        };
+      (svc as unknown as { recordSignals: () => Promise<void> }).recordSignals = async () => {};
+
+      await svc.scheduledIntuitionScan();
+
+      const line = logged.find((m) => m.includes('scheduled scan complete'))!;
+      expect(line).toMatch(/2 businesses/);
+      expect(line).toMatch(/1 signals recorded/);
+      expect(line).toMatch(/1 failed/);
+      expect(logged.some((m) => m.startsWith('ERROR')), 'the failure was swallowed').toBe(true);
+    });
+  });
 });

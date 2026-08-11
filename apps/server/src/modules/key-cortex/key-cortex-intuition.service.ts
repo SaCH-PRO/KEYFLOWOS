@@ -524,18 +524,47 @@ export class KeyCortexIntuitionService {
    */
   @Cron(CronExpression.EVERY_HOUR)
   async scheduledIntuitionScan(): Promise<void> {
+    // WHY THIS LOGS ON SUCCESS AND NOT ONLY ON FAILURE
+    //
+    // It used to log only in the catch. A scan that ran and found nothing was
+    // therefore indistinguishable from a scan that never ran at all — and the
+    // only other trace it leaves is a keyCortexMemory row, which it writes ONLY
+    // when it finds something.
+    //
+    // That made "did the hourly job fire in production" unanswerable. Verifying
+    // the cortex repair after a deploy meant counting weak_signal rows, and a
+    // zero there has two readings: the job is broken, or the businesses are
+    // quiet. Those need different responses and the evidence could not tell
+    // them apart.
+    //
+    // So the scan now says it ran, how many businesses it covered, and how many
+    // signals it recorded. A quiet hour prints zero signals across N businesses,
+    // which is a different line from silence.
+    const startedAt = Date.now();
     const businesses = await this.findAllActiveBusinesses();
+    let recorded = 0;
+    let failed = 0;
+
     for (const businessId of businesses) {
       await this.detectWeakSignals(businessId)
         // The whole point of the scan. This previously DISCARDED its return
         // value: every ten minutes, for every active business, KEY computed
         // weak signals at real database cost and told nobody. 1,887 lines of
         // detection with no output is not intuition, it is a load generator.
-        .then((signals) => this.recordSignals(businessId, signals))
-        .catch((err) =>
-          this.logger.error(`Scheduled intuition scan failed for ${businessId}: ${err instanceof Error ? err.message : String(err)}`),
-        );
+        .then(async (signals) => {
+          await this.recordSignals(businessId, signals);
+          recorded += signals.length;
+        })
+        .catch((err) => {
+          failed += 1;
+          this.logger.error(`Scheduled intuition scan failed for ${businessId}: ${err instanceof Error ? err.message : String(err)}`);
+        });
     }
+
+    this.logger.log(
+      `[intuition] scheduled scan complete: ${businesses.length} businesses, ` +
+        `${recorded} signals recorded, ${failed} failed, ${Date.now() - startedAt}ms`,
+    );
   }
 
   /**
