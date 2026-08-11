@@ -97,6 +97,19 @@ describe('KEY Cortex stub-detection guard', () => {
 
   it('has no placeholder handlers in organ adapters', () => {
     const files = tsFilesIn(ORGANS_DIR);
+
+    // Prove the scan had something to scan.
+    //
+    // `tsFilesIn` ends in `catch { return []; }`, so if ORGANS_DIR is renamed,
+    // moved, or emptied, this returns no files, `allViolations` is `[]`, and
+    // the assertion below passes while inspecting nothing. A guard against
+    // stubs is a poor thing to leave able to become a stub.
+    expect(
+      files.length,
+      `no .service.ts files found under ${ORGANS_DIR} — this test would pass ` +
+        'by scanning nothing. The directory has probably moved.',
+    ).toBeGreaterThan(0);
+
     const allViolations = files.flatMap((f) => scanFile(f, placeholderPatterns));
     expect(allViolations).toEqual([]);
   });
