@@ -40,7 +40,7 @@ Evidence-based, ordered by **safety first** (fewest external consumers → most)
 
 | # | Item | Flow winner | Cortex twin | Live consumers of the twin | Class | Effort | Risk |
 |---|---|---|---|---|---|---|---|
-| 1 | **Sandbox** | `code-executor` (E2B+local) | `key-cortex-sandbox` | `key-cortex.controller.ts:773` (typed `any`), only | Deprecate → route to `code-executor` | S | Low |
+| 1 | **Sandbox** | `code-executor` (E2B+local) | `key-cortex-sandbox` | `key-cortex.controller.ts` — 5 endpoints: `sandbox/generate`, `/execute`, `/auto`, `/templates`, `/apply` | **Unify the *isolation backend* onto `code-executor` (stronger than the cortex regex-blocklist); keep cortex's codegen/template layer on top.** Not a swap — cortex-sandbox has surface `code-executor` lacks. | M | Med |
 | 2 | **Tool registry** | `flow-tool-registry` | `key-cortex-tool-registry` | Flow + cortex internals; **already proxies FLOW names** | Make cortex registry a thin adapter; single source = `FLOW_TOOLS` | S–M | Low |
 | 3 | **Capability catalog** | `capability-map` seed | `key-cortex-capability-registry` | `key-cortex-connector.service.ts` only | Reconcile into the M0 capability model; keep as advisory read | S | Low |
 | 4 | **Executor** | `plan-executor` / orchestrator | `key-cortex-executor` + `saga-executor` | cortex reasoning, gateway, command-execution | Route execution through Flow; keep saga-compensation *concept* | M | Med |
@@ -48,7 +48,9 @@ Evidence-based, ordered by **safety first** (fewest external consumers → most)
 | 6 | **Approvals** | `ai-oversight` (fails closed) | `key-cortex-approval-orchestrator` | `ai.controller`, `pro-auto-monitor`, `approvals/approval-request`, cortex controller | Single verdict source = `ai-oversight`; approval-orchestrator becomes a proposal-*router* only | L | High |
 | 7 | **Memory** | `ai-memory` + `semantic-memory` | `key-cortex-memory` + `unified-memory-*` | cortex internals | One retrieval interface; dedupe writers; keep richer retrieval behind it | M | Med |
 
-**Sequencing rationale:** items 1–3 are near-zero-consumer and reduce surface immediately. Item 6 (approvals) is last: it has the most consumers and touches the governance gate, so it moves only once 1–5 have shrunk the cortex execution surface. Item 5 must preserve the live cortex `/chat` behaviour — migrate the endpoint, don't drop it.
+**Sequencing rationale:** items 2–3 are near-zero-consumer and reduce surface immediately, so they now lead. Item 1 (sandbox) turned out larger than first scoped — the cortex sandbox exposes a codegen/template layer (`generate`/`auto`/`templates`/`apply`) beyond `code-executor`'s execute-only surface — so it is a *backend unification behind the existing endpoints*, not a deprecation. Item 6 (approvals) is last: it has the most consumers and touches the governance gate, so it moves only once the others have shrunk the cortex execution surface. Item 5 must preserve the live cortex `/chat` behaviour — migrate the endpoint, don't drop it.
+
+**Recommended first PR:** item 2 (tool-registry adapter) — lowest risk, and the cortex registry *already* resolves FLOW tool names, so collapsing to a single source of truth is mostly deletion of a parallel catalog, not new behaviour. Then item 3, then a CI import-boundary guard (invariant 5).
 
 ## Consequences
 
