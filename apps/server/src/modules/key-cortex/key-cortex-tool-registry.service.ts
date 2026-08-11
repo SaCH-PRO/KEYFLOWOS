@@ -1,10 +1,17 @@
 /**
- * KEY Cortex — Canonical Tool Registry
+ * KEY Cortex — Organ Tool Registry
  *
- * The single source of truth for every action/tool KEY can execute.
- * Organs, muscles, and modules register tools here at boot time.
- * The reasoning brain queries this registry to decide what KEY can do,
- * and the executor invokes tools through this registry.
+ * The runtime registry for cortex ORGAN tools: organs, muscles, and modules
+ * register handlers here at boot, and the cortex executor invokes them.
+ *
+ * NOTE (ADR-0001 — Flow is the execution substrate): despite the historical
+ * "single source of truth" wording, this is NOT the canonical catalogue of
+ * everything KEY can do. That is `FLOW_TOOLS` in
+ * `apps/server/src/modules/ai/flow-tool-registry.ts`, governed by `ai-oversight`.
+ * This registry is being consolidated behind Flow (see the migration ledger in
+ * `docs/architecture/ADR-0001-flow-is-the-execution-substrate.md`): its organ
+ * tools are reached from Flow via CORTEX_TOOL_BRIDGE, and new tools belong in
+ * FLOW_TOOLS, not here.
  *
  * Design principles:
  * - One registry, many adapters (organs register tools at module init).
