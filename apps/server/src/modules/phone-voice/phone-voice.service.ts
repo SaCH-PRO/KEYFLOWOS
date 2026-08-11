@@ -129,8 +129,36 @@ export class PhoneVoiceService implements OnModuleInit {
                 if (text.trim()) (ctx.transcript as CallContext['transcript']).push({ role, text });
               },
               onFunctionCall: async (name, _callId, argsJson) => {
-                let args: Record<string, unknown> = {};
-                try { args = JSON.parse(argsJson); } catch { /* keep empty */ }
+                // Unparseable arguments must NOT become an empty object.
+                //
+                // This used to be `try { args = JSON.parse(argsJson) } catch {}`
+                // with args pre-set to `{}`, so a malformed tool call from the
+                // model ran the tool anyway, with nothing in it — ON A LIVE
+                // CUSTOMER CALL. bookings_create_booking with `{}` maps to a
+                // booking with no contactName and no startTime;
+                // helpdesk_create_ticket with `{}` opens a blank ticket. The
+                // caller hears "done".
+                //
+                // `{ error }` is what this handler already returns for an
+                // unknown tool, and the realtime session feeds it back to the
+                // model — so the model can ask again or tell the caller it did
+                // not catch that, which is the honest outcome.
+                let args: Record<string, unknown>;
+                try {
+                  const parsed = JSON.parse(argsJson);
+                  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+                    throw new Error('tool arguments were not a JSON object');
+                  }
+                  args = parsed as Record<string, unknown>;
+                } catch (err) {
+                  this.logger.warn(
+                    `Refusing ${name} on ${ctx.callSid}: unparseable tool arguments — ` +
+                      `${err instanceof Error ? err.message : String(err)}`,
+                  );
+                  return {
+                    error: `Could not read the arguments for ${name}. Nothing was done. Please call it again with valid JSON.`,
+                  };
+                }
                 return this.executeVoiceTool(businessId, name, args, ctx as CallContext);
               },
               onError: (message) => this.logger.warn(`Realtime error on ${ctx.callSid}: ${message}`),
