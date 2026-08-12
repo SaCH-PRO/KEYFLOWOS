@@ -27,9 +27,11 @@ which is the part most likely to save you time.
 | `@Injectable` services | **722** | `grep -rl '@Injectable()' apps/server/src --include=*.ts \| grep -v spec \| wc -l` |
 | KEY tools | **286** | parse `name:` out of `flow-tool-registry.ts` (do **not** grep-count) |
 | Web pages | **251** | `find apps/web/src/app -name page.tsx \| wc -l` |
-| Migrations | **18** | `ls packages/db/prisma/migrations \| grep -c '^2'` |
-| Spec/test files | **399** | `find apps/server/{src,test} -name '*.spec.ts' -o -name '*.test.ts'` |
-| Server tests | **3,626**, 0 skipped | `cd apps/server && npx vitest run` |
+| Migrations | **19** | `find packages/db/prisma/migrations -name migration.sql \| wc -l` |
+| Spec/test files | **400** | `find apps/server/{src,test} -name '*.spec.ts' -o -name '*.test.ts'` |
+| Server tests | **3,652**, 0 skipped | `cd apps/server && npx vitest run` |
+| Web tests | **180** in 17 files | `cd apps/web && npx vitest run` |
+| Tests in `packages/*` | **0** | none of the four packages has a test script |
 | Routes mapped at boot | **2,179** | `docker logs keyflowos-api-1 \| grep -c 'Mapped {'` |
 | `@Cron` jobs | **27** | `grep -r '@Cron(' apps/server/src` |
 | `setInterval` schedulers | **52** | `grep -r 'setInterval(' apps/server/src` |
@@ -120,6 +122,12 @@ week, in both directions, and every one looked plausible.
    real figure was 6. A pattern for `/call_|voice|phone|dial/` returned
    `commerce_create_invoice`, because "in**voice**" contains "voice". Anchor the
    pattern (`/^call_/`) and parse structure where you can.
+
+   This file shipped with the same bug in its own migration count. `ls
+   migrations | grep -c '^2'` returned 18, because it filtered on the timestamp
+   prefix and `0_baseline` does not have one. Prisma said 19. Count the thing
+   that defines the item — `migration.sql` — not the names that usually look
+   right.
 
 2. **Find every mechanism before counting.** Plan limits are enforced three
    ways; provider reachability has four (injection, framework decorators,

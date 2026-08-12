@@ -358,7 +358,7 @@ export default function AccountingPage() {
           <div className="text-sm kf-text-muted-foreground space-y-2">
             <p>Push every contact who has at least one invoice to {provider ? PROVIDER_LABEL[provider] : "your provider"} as a customer record.</p>
             <p>Already-synced customers are updated in place using their stored external id.</p>
-            <Link href="/app/contacts" className="kf-btn-secondary h-8 px-3 text-xs inline-flex items-center gap-1 w-fit">
+            <Link href="/app/crm/contacts" className="kf-btn-secondary h-8 px-3 text-xs inline-flex items-center gap-1 w-fit">
               Manage contacts
             </Link>
           </div>
