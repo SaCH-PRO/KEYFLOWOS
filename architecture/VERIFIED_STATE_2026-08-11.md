@@ -57,6 +57,39 @@ Prisma 6.19 accepts an extra scalar in a `WhereUniqueInput` rather than
 rejecting it — so scoping them returns `null` silently: no error, no log, no
 provider retry. A taken payment, unrecorded.
 
+## The tRPC surface is mounted but unreachable
+
+`packages/api` is 2,154 lines and 82 procedures, wired into `AppModule` as
+`TrpcModule`. None of it can be called. The middleware is mounted with
+`.forRoutes({ path: '/trpc', method: RequestMethod.ALL })`, which matches that
+path exactly and nothing beneath it. Measured against production:
+
+| Request | Response |
+|---|---|
+| `GET /trpc` | tRPC's own `No "query"-procedure on path "trpc"` |
+| `GET /trpc/social.listConnections` | Nest 404 — never reaches tRPC |
+
+The first proves the handler is installed; the second proves no procedure is
+addressable. `packages/*` has **no test script at all**, so nothing said so.
+
+**This mattered.** `social.listConnections` took a client-supplied `businessId`
+and ran `findMany` on it with no access check — and none of the usual protection
+applies on this path: the tenant AsyncLocalStorage is filled by an
+`APP_INTERCEPTOR`, which needs a controller, and `/trpc` is middleware;
+`SocialConnection` is not in `BUSINESS_ID_MODELS`; and `token-encryption.ts`
+*decrypts* on `findMany`. Any authenticated user naming any business would have
+received its live Facebook, Instagram, LinkedIn and Twitter tokens. The only
+thing preventing it was the broken mount — so a routing fix, by someone with no
+reason to think they were touching security, would have shipped it.
+
+Fixed, and `trpc.module.spec.ts` now fails if any procedure takes a `businessId`
+without `assertBusinessAccess`. Mounting the router is still a product decision;
+the gate is what makes it a safe one.
+
+Ten more procedures (all of `key-connector.ts`) call `assertBusinessRole`, which
+reads `ctx.business` — populated from `req.business`, which nothing in
+`apps/server` assigns. They fail closed for every caller.
+
 ## Money and cost
 
 | | Value |
