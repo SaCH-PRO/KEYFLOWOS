@@ -131,7 +131,7 @@ export function ContactSyncSettings({ businessId, type }: ContactSyncSettingsPro
     const [statusRes, recentRes, teamRes] = await Promise.all([
       apiGet<ContactStatus>(`/connect/businesses/${businessId}/${apiPrefix}/status`),
       apiGet<RecentContact[]>(`/connect/businesses/${businessId}/${apiPrefix}/recent?limit=25`),
-      apiGet<TeamMember[] | { members?: TeamMember[] }>(`/businesses/${businessId}/team`),
+      apiGet<TeamMember[] | { members?: TeamMember[] }>(`/identity/businesses/${businessId}/team`),
     ]);
     if (statusRes.error) setError(statusRes.error);
     if (statusRes.data) {

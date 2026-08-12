@@ -145,7 +145,7 @@ export function BusinessTimeline({ businessId, compact = false, limit = 50 }: Bu
 
   useEffect(() => {
     let cancelled = false;
-    apiGet<ActivityItem[]>(`/flow/businesses/${businessId}/activity?limit=${limit}`)
+    apiGet<ActivityItem[]>(`/api/flows/businesses/${businessId}/activity?limit=${limit}`)
       .then((res) => {
         if (!cancelled && Array.isArray(res.data)) {
           setItems(res.data);

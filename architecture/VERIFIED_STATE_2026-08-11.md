@@ -110,14 +110,31 @@ Those three clusters — 16 client calls, the whole webhook settings UI, the KEY
 agent config screen and every call-task action — are fixed. Each corrected path
 was re-probed and now returns 401.
 
-**Ten more are confirmed 404 and left alone**, because the fix is a judgement
-about which side is right and some may be unbuilt features rather than typos:
-`/businesses/:id/team`, `/expenses/businesses/:id`,
-`/flow/businesses/:id/cockpit`, `/flow/businesses/:id/search`,
-`/whatsapp/businesses/:id/status`, `/whatsapp/businesses/:id/templates`,
-`/device/businesses/:id/voice-preferences`,
-`/device/businesses/:id/voice-sessions`, `/connect/businesses/:id/:provider/status`,
-`/commerce/businesses/:id/recurring-invoices/:id/history`.
+A second pass resolved seven more the same way — every one turned out to be a
+controller prefix the client had never carried, not a missing feature:
+
+| Client called | Server serves |
+|---|---|
+| `/businesses/:id/team` | `/identity/businesses/:id/team` |
+| `/flow/businesses/:id/{cockpit,activity,search,cross-module-workflows}` | `/api/flows/businesses/:id/…` |
+| `/flow/businesses/:id/flow/execute-plan/:planId` | `/ai/businesses/:id/flow/…` |
+| `/device/businesses/:id/voice-{sessions,preferences}` | `/api/device/businesses/:id/…` |
+
+There are **two** flow controllers — `modules/flow` at `api/flows` and
+`modules/ai/flow.controller.ts` at `ai` — so a single find-and-replace over
+`/flow/businesses/` would have sent the chat family to the wrong one. The `team`
+call was wrong in exactly one file; every other call site already had the prefix.
+
+22 client calls fixed across both passes; the unmatched set went 41 → 19.
+
+**Three are genuinely unbuilt** — no such route under any prefix:
+`/whatsapp/businesses/:id/{status,templates}`,
+`/commerce/businesses/:id/recurring-invoices/:id/history`,
+`/connect/businesses/:id/:provider/status`.
+
+One caveat on method: probing only proves GET routes. A POST-only route answers
+404 to a GET whether or not it exists, so `execute-plan` was resolved from source
+and confirmed through a GET sibling under the same controller.
 
 **No gate ships for this.** The static comparison reached 27 remaining
 candidates, and probing showed 5 of 18 were false alarms — a client path with a

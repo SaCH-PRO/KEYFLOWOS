@@ -3904,7 +3904,7 @@ const cockpitSummarySchema = z.object({
 export async function fetchCockpitSummary(businessId?: string) {
   const bid = businessId ?? DEFAULT_BUSINESS_ID;
   return apiGet(
-    `/flow/businesses/${encodeURIComponent(bid)}/cockpit`,
+    `/api/flows/businesses/${encodeURIComponent(bid)}/cockpit`,
     cockpitSummarySchema,
   );
 }
@@ -4678,7 +4678,7 @@ export async function fetchActivityFeed(
   if (opts?.limit) params.set("limit", String(opts.limit));
   if (opts?.cursor) params.set("cursor", opts.cursor);
   const qs = params.toString();
-  const path = `/flow/businesses/${encodeURIComponent(businessId)}/activity${qs ? `?${qs}` : ""}`;
+  const path = `/api/flows/businesses/${encodeURIComponent(businessId)}/activity${qs ? `?${qs}` : ""}`;
   return apiGetSimple<ActivityItem[]>(path);
 }
 
@@ -4692,7 +4692,7 @@ export type UniversalSearchResult = {
 
 export async function universalSearch(businessId: string, query: string): Promise<ApiResult<UniversalSearchResult>> {
   return apiGetSimple<UniversalSearchResult>(
-    `/flow/businesses/${encodeURIComponent(businessId)}/search?q=${encodeURIComponent(query)}`,
+    `/api/flows/businesses/${encodeURIComponent(businessId)}/search?q=${encodeURIComponent(query)}`,
   );
 }
 
@@ -6022,7 +6022,7 @@ export async function approveAiPlan(businessId: string, planId: string): Promise
 
 export async function executeFlowPlan(businessId: string, planId: string): Promise<ApiResult<{ planId: string; status: string; stepsExecuted: number; stepsFailed: number; stepsSkipped: number }>> {
   return apiPost<{ planId: string; status: string; stepsExecuted: number; stepsFailed: number; stepsSkipped: number }>({
-    path: `/flow/businesses/${encodeURIComponent(businessId)}/flow/execute-plan/${encodeURIComponent(planId)}`,
+    path: `/ai/businesses/${encodeURIComponent(businessId)}/flow/execute-plan/${encodeURIComponent(planId)}`,
     body: {},
   });
 }
@@ -9732,7 +9732,7 @@ export type CrossModuleWorkflow = {
 export async function fetchCrossModuleWorkflows(businessId?: string): Promise<ApiResult<CrossModuleWorkflow[]>> {
   const bid = businessId ?? DEFAULT_BUSINESS_ID;
   return apiGet(
-    `/flow/businesses/${encodeURIComponent(bid)}/cross-module-workflows`,
+    `/api/flows/businesses/${encodeURIComponent(bid)}/cross-module-workflows`,
     z.array(z.object({
       key: z.string(),
       name: z.string(),
@@ -10833,7 +10833,7 @@ export async function fetchVoiceSessions(
   if (opts?.offset) params.set('offset', String(opts.offset));
   const qs = params.toString();
   return apiGetSimple<{ items: VoiceSession[]; total: number }>(
-    `/device/businesses/${encodeURIComponent(businessId)}/voice-sessions${qs ? `?${qs}` : ''}`,
+    `/api/device/businesses/${encodeURIComponent(businessId)}/voice-sessions${qs ? `?${qs}` : ''}`,
   );
 }
 
@@ -10842,7 +10842,7 @@ export async function createVoiceSession(
   mode?: string,
 ): Promise<ApiResult<VoiceSession>> {
   return apiPost<VoiceSession>({
-    path: `/device/businesses/${encodeURIComponent(businessId)}/voice-sessions`,
+    path: `/api/device/businesses/${encodeURIComponent(businessId)}/voice-sessions`,
     body: { mode: mode ?? 'push_to_talk' },
   });
 }
@@ -10854,7 +10854,7 @@ export async function endVoiceSession(
   summary?: string,
 ): Promise<ApiResult<VoiceSession>> {
   return apiPatch<VoiceSession>(
-    `/device/businesses/${encodeURIComponent(businessId)}/voice-sessions/${encodeURIComponent(sessionId)}/end`,
+    `/api/device/businesses/${encodeURIComponent(businessId)}/voice-sessions/${encodeURIComponent(sessionId)}/end`,
     { transcript, summary },
   );
 }
@@ -10883,7 +10883,7 @@ export async function fetchVoicePreferences(
   if (userId) params.set('userId', userId);
   const qs = params.toString();
   return apiGetSimple<VoicePreference[]>(
-    `/device/businesses/${encodeURIComponent(businessId)}/voice-preferences${qs ? `?${qs}` : ''}`,
+    `/api/device/businesses/${encodeURIComponent(businessId)}/voice-preferences${qs ? `?${qs}` : ''}`,
   );
 }
 
@@ -10903,7 +10903,7 @@ export async function saveVoicePreference(
   },
 ): Promise<ApiResult<VoicePreference>> {
   return apiPost<VoicePreference>({
-    path: `/device/businesses/${encodeURIComponent(businessId)}/voice-preferences`,
+    path: `/api/device/businesses/${encodeURIComponent(businessId)}/voice-preferences`,
     body,
   });
 }
