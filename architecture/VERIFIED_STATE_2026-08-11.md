@@ -90,6 +90,45 @@ Ten more procedures (all of `key-connector.ts`) call `assertBusinessRole`, which
 reads `ctx.business` — populated from `req.business`, which nothing in
 `apps/server` assigns. They fail closed for every caller.
 
+## How the server is entered
+
+| Entry point | Count | Tenant context? |
+|---|---:|---|
+| `@Controller` classes | 170 | — |
+| HTTP route handlers | 2,177 | yes, via `TenantInterceptor` |
+| `@OnEvent` listeners | 352 | **no** |
+| `setInterval` timers | 52 | **no** |
+| `@Cron` jobs | 27 | **no** |
+| tRPC procedures | 82 | **no** — and unreachable, see above |
+| BullMQ `@Processor` | 0 | queues are used, but not via that decorator |
+
+431 of those entry points are off the HTTP path, where `activeBusinessId()` is
+undefined and the Prisma extension is inert. Every one of them must pass an
+explicit `where: { businessId }`.
+
+**There is no `APP_GUARD`.** `grep APP_GUARD apps/server/src` returns nothing:
+authentication is opted into per controller or per handler, 1,025 times. The
+default for a new route is public, and forgetting the decorator produces a
+working endpoint and no warning. 227 of 2,177 handlers (10.4%) across 54
+controllers have no `AuthGuard`; each is deliberate and leans on something else
+— a webhook signature, a one-time execution token, an opaque share token, an
+inline super-admin assertion. `public-surface.spec.ts` holds that set so the
+228th arrives as a failing test.
+
+That is the shape the one real vulnerability took:
+`POST /api/v1/cortex/phone/inbound` was live and unauthenticated because its
+controller guarded one of its two handlers and the other trusted a Twilio
+signature check that returned `true` when no signing key was configured — which
+was the case in production.
+
+**Count handlers, not files.** "Does this controller mention AuthGuard" reports
+phone-voice as guarded, and would have missed that. Getting this number right
+took four attempts — 87, 298, 1,153, 227 — and each intermediate answer looked
+plausible. The 1,153 came from a regex that had picked up a literal backspace
+character during an edit, so it matched nothing and every controller read as
+unguarded. The spec now pins key-cortex at 0 and phone-voice at 1 before
+trusting its own output.
+
 ## One `enc:v1:` marker, four key schedules
 
 | Implementation | Salt | Refuses to run in prod without a key |
