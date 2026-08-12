@@ -1,5 +1,44 @@
 # Architecture Risks
 
+> **VERIFIED AGAINST THE CODE 2026-08-11 — R3 and R21 below are STALE, and R21's
+> remediation advice is now actively dangerous. Read this before acting on either.**
+>
+> Measured, re-derivable with `grep -c '^model ' packages/db/prisma/schema.prisma`
+> and by parsing `BUSINESS_ID_MODELS` out of `packages/db/src/client.ts`:
+>
+> | | doc says | actual 2026-08-11 |
+> |---|---|---|
+> | models with `businessId` | 337 | **348** |
+> | scoped by the extension | 77 (~23%) | **303 (87%)** |
+> | unlisted / backlog | ~260 | **42 acknowledged + 3 never-scope** |
+> | Prisma models total | ~439 | **440** |
+>
+> The extension also now intercepts **fifteen** operations, not ten: `create`,
+> `createMany`, `upsert`, `aggregate` and `groupBy` were added, which is the
+> specific omission R3 describes.
+>
+> **DO NOT scope `Payment` or `MarketplaceOrder`, which both rows list as
+> backlog.** They are resolved by a GLOBAL provider key in
+> `handleStripeWebhook` / `handlePaypalWebhook`, which derive the business FROM
+> the row because a webhook cannot know it beforehand. Prisma 6.19 accepts an
+> extra scalar in a `WhereUniqueInput` rather than rejecting it — measured, with
+> a negative control — so scoping them would turn a taken payment into a silent
+> `null`: no error, no log, no provider retry. They are in a deliberate
+> `NEVER_SCOPE` set with that reasoning recorded in `client.ts`.
+>
+> Of the models these rows name as missing, seven are now scoped:
+> `KeyActionProposal`, `EventAttendee`, `TemporalFlowMemory`,
+> `SubscriptionPayment`, `Webhook`, `ActivityLog`, and `Task`. Still genuinely
+> unscoped and on the acknowledged ledger: `Membership`, `ApiKey`,
+> `SocialConnection` — each for a stated reason (`Membership.userId` lookups are
+> business-agnostic by design; the others resolve by external key).
+>
+> The live ledger is `ACKNOWLEDGED_UNSCOPED` in
+> `apps/server/src/core/prisma/tenant-model-list.spec.ts`, which is gated to
+> shrink only. Trust that file over this one.
+
+
+
 This document records critical, high, medium, and low risks identified during baseline cartography and the August 2026 security/tenant/privacy audit. It should be reviewed and updated after significant changes.
 
 ## Risk Registry

@@ -90,4 +90,4 @@ See `architecture/event-registry.yaml` for the full list of 276 event names.
 
 ## Database Dependency
 
-Nearly every module depends on `@keyflow/db` either directly or through `PrismaService`. The Prisma schema (`packages/db/prisma/schema.prisma`) is the single source of truth for ~439 models. Tenant isolation is applied transparently by the client extension in `packages/db/src/client.ts`.
+Nearly every module depends on `@keyflow/db` either directly or through `PrismaService`. The Prisma schema (`packages/db/prisma/schema.prisma`) is the single source of truth for ~440 models (verified 2026-08-11). Tenant isolation is applied transparently by the client extension in `packages/db/src/client.ts`.

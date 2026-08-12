@@ -1,5 +1,26 @@
 # Security / Tenant Isolation / Privacy Audit — KEYFLOWOS
 
+> **VERIFIED 2026-08-11 — the tenant-coverage row below is stale.** Measured:
+> 348 models carry `businessId`, **303 are scoped (87%)**, 42 are on an
+> acknowledged shrink-only ledger and 3 are deliberately never scoped. The row
+> says 77 of 337 (~23%) and calls 260 models a backlog.
+>
+> **Its remediation advice is dangerous in one specific way: do not scope
+> `Payment` or `MarketplaceOrder`.** Both are resolved by a global provider key
+> in webhooks that have no tenant context, and Prisma 6.19 accepts an extra
+> scalar in a `WhereUniqueInput` instead of rejecting it — so scoping them turns
+> a taken payment into a silent `null` with no error, no log and no provider
+> retry. That reasoning is recorded beside a `NEVER_SCOPE` set in
+> `packages/db/src/client.ts`.
+>
+> Of the models named here as high-risk and missing, `ApiKey`, `Membership` and
+> `SocialConnection` are genuinely still unscoped, each for a stated reason;
+> `Webhook`, `KeyActionProposal` and the rest are now scoped. The authority is
+> `tenant-model-list.spec.ts`, which fails the build when a new model appears in
+> neither ledger.
+
+
+
 **Scope:** Authentication, authorization, session/cookie management, OAuth/PKCE, token handling, tenant isolation in Prisma/extensions/controllers/WebSocket/background jobs, GDPR contact erasure, audit/PII logging, and object-storage privacy.
 
 **Date:** 2026-08-09

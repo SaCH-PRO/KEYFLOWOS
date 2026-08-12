@@ -1,0 +1,151 @@
+# Verified state — 2026-08-11
+
+Every number here was re-derived from the tree on this date, and every row
+carries the command that produced it. Nothing is copied from another document.
+
+**Why this file exists.** Numbers in this repository drift faster than the prose
+around them, and the drift is not harmless: `architecture-risks.md` rates
+"tenant isolation covers ~23% of business-scoped tables" as **Critical** and
+advises backfilling `Payment` and `MarketplaceOrder` — a recommendation that
+would today cause an outage, against a figure that is now 87%. A stale number in
+a risk register is worse than no number, because it is acted on.
+
+**Re-derive rather than quote.** If you are about to cite a figure from here in
+a plan, run its command first. Four separate documents in this repo were found
+wrong on their headline numbers this week, and in three cases the *first*
+re-measurement was wrong too — see "How to measure this codebase" at the bottom,
+which is the part most likely to save you time.
+
+---
+
+## Shape
+
+| Measure | Value | Command |
+|---|---:|---|
+| Prisma models | **440** | `grep -c '^model ' packages/db/prisma/schema.prisma` |
+| Server modules | **110** | `ls apps/server/src/modules \| wc -l` |
+| `@Injectable` services | **722** | `grep -rl '@Injectable()' apps/server/src --include=*.ts \| grep -v spec \| wc -l` |
+| KEY tools | **286** | parse `name:` out of `flow-tool-registry.ts` (do **not** grep-count) |
+| Web pages | **251** | `find apps/web/src/app -name page.tsx \| wc -l` |
+| Migrations | **18** | `ls packages/db/prisma/migrations \| grep -c '^2'` |
+| Spec/test files | **399** | `find apps/server/{src,test} -name '*.spec.ts' -o -name '*.test.ts'` |
+| Server tests | **3,626**, 0 skipped | `cd apps/server && npx vitest run` |
+| Routes mapped at boot | **2,179** | `docker logs keyflowos-api-1 \| grep -c 'Mapped {'` |
+| `@Cron` jobs | **27** | `grep -r '@Cron(' apps/server/src` |
+| `setInterval` schedulers | **52** | `grep -r 'setInterval(' apps/server/src` |
+
+`CAPABILITY_MAP_2026-08-09.md` says 245 tools and 439 models. Both have moved.
+
+## Tenant isolation — the number most often quoted wrong
+
+| | Value |
+|---|---:|
+| Models carrying `businessId` | **348** |
+| Scoped by the extension | **303 (87%)** |
+| Acknowledged unscoped (debt, shrink-only) | **42** |
+| Never to be scoped (deliberate) | **3** |
+
+303 + 42 + 3 = 348 exactly, and `tenant-model-list.spec.ts` fails the build if
+that stops being a partition. It also fails when a new `businessId` model
+appears in neither ledger, which is the case nothing caught before.
+
+**`Payment`, `MarketplaceOrder` and `WebhookEvent` must never be scoped.** Each
+is resolved by a global provider key in a webhook with no tenant context, and
+Prisma 6.19 accepts an extra scalar in a `WhereUniqueInput` rather than
+rejecting it — so scoping them returns `null` silently: no error, no log, no
+provider retry. A taken payment, unrecorded.
+
+## Money and cost
+
+| | Value |
+|---|---:|
+| Plan limits declared | **25** |
+| Plan limits actually enforced | **6** |
+| AI credits recorded (production, all time) | 503 |
+| AI spend (production, all time) | $0.4889 |
+| Share of cost from `flow_chat_stream` | **73%** (4% of credits) |
+| Share of credits from `semantic_embedding` | **74%** (0% of cost) |
+| Tool schemas per turn, unfiltered | ~32,000 tokens |
+| Tool schemas after crew filter + 128 cap | ~14,000 tokens |
+
+Enforcement happens **three** ways — a direct plan read, a `checkLimit` call,
+and the `@RequirePlanLimit` decorator — and any count is wrong until all three
+are found. See `plan-limit-enforcement.spec.ts`.
+
+## Known-dead, and deliberately so
+
+| Thing | Count | Gate |
+|---|---:|---|
+| Dead event listeners | 10 | `event-wiring.spec.ts` |
+| Unreachable `@Injectable` providers | 8 | `unreachable-provider.spec.ts` |
+| Unpriced AI features | 43 | `ai-credit-billing.integration.test.ts` |
+| Unenforced plan limits | 19 | `plan-limit-enforcement.spec.ts` |
+
+Each has a shrink-only ledger. None of these lists says the items are
+acceptable; they say a **new** one cannot be added silently.
+
+Two of the eight unreachable providers are safety middleware that never runs:
+`RequestTimeoutInterceptor` (no request timeout is enforced anywhere) and
+`IdempotencyInterceptor` (no HTTP-level replay protection). Wiring either
+changes live behaviour and is a product decision.
+
+## Build and test
+
+| | Before | After |
+|---|---:|---:|
+| Unit suite wall time | 232s | **41s** |
+| `collect` (aggregate) | 1,134s | 149s |
+
+`pool: 'threads'` was measured at **452s — twice as slow** as the baseline on 8
+cores and Windows. It is the first optimisation everyone tries; do not retry it
+without measuring.
+
+CI runs `vitest run` against the default config, so the speedup is local only
+until the pipeline splits `test:unit` from `test:integration`.
+
+**Two spec files depend on execution order** and pass only because the default
+file order suits them: `calendar.controller.spec.ts` and
+`storefront-intelligence.service.spec.ts`. They fail under `sequence.shuffle`
+with isolation on or off, and pass alone.
+
+---
+
+## How to measure this codebase
+
+The part worth reading. Eight measurements were wrong on the first attempt this
+week, in both directions, and every one looked plausible.
+
+1. **Parse, do not grep-count.** `grep -c` over identifiers matched every
+   variable named `contacts` and reported 13 of 25 plan limits enforced; the
+   real figure was 6. A pattern for `/call_|voice|phone|dial/` returned
+   `commerce_create_invoice`, because "in**voice**" contains "voice". Anchor the
+   pattern (`/^call_/`) and parse structure where you can.
+
+2. **Find every mechanism before counting.** Plan limits are enforced three
+   ways; provider reachability has four (injection, framework decorators,
+   `@UseGuards` attachment, global `APP_INTERCEPTOR`). A count is wrong until
+   all are known, and there is no signal telling you that you are done. A
+   reachability check missing the third reported `AuthGuard` — 1,026 decorator
+   uses — as dead.
+
+3. **A green gate may be measuring nothing.** Five gates here were passing while
+   blind: the honesty sweep could not see a braceless handler, the tenant gate
+   could not see an unscoped model, the event-wiring gate could not see
+   `@OnEvent(CONSTANT)`, the cost meter reported $0 for 80% of calls, and
+   `check-tool-routes` proved parity with the wrong evidence.
+   `gate-vacuity.spec.ts` now fails any tree-walking gate that asserts "no
+   findings" without asserting its input was non-empty.
+
+4. **Run the negative control.** Not "does the test pass" but "does it fail on
+   the defect it names, and on nothing else". Four controls this week fired on
+   the wrong assertion or did not fire at all, including one where the edit
+   silently failed to apply because the file uses CRLF.
+
+5. **Separate your variables.** Two spec files appeared to prove `isolate:false`
+   unsafe; running the same shuffle *with* isolation showed the order-dependence
+   was already there. One more variable and a correct fix would have been
+   discarded.
+
+6. **`dist` can hang rather than fail.** A stale build was silently 18 files
+   behind and the server hung before Nest printed anything — indistinguishable
+   from a dependency-injection failure. Rebuild before trusting the boot gate.

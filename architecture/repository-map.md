@@ -150,7 +150,7 @@ This document is a baseline cartography of the KEYFLOWOS monorepo. It combines a
 |------|----------------|-------|
 | `packages/db/src/client.ts` | Extended Prisma client: tenant isolation, soft delete, pagination, token encryption | Data access |
 | `packages/db/src/index.ts` | Public barrel export | Public API surface |
-| `packages/db/prisma/schema.prisma` | Single source of truth (~439 models) | Data schema |
+| `packages/db/prisma/schema.prisma` | Single source of truth (~440 models (verified 2026-08-11)) | Data schema |
 | `packages/api/src/root.ts` | Composes all tRPC sub-routers | API composition root |
 | `packages/api/src/trpc.ts` | tRPC init + public/protected/superAdmin procedures | API framework |
 | `packages/shared/src/index.ts` | Barrel export for shared domain constants | Shared kernel |
