@@ -110,12 +110,22 @@ export function normalizeRelationshipHealthThresholds(
 }
 
 /**
- * Pure function used by both the scheduler and tests.
+ * Pure function used by both the scheduler and tests. The tests live in
+ * apps/server/src/modules/crm/relationship-health.spec.ts — this package has no
+ * runner of its own, and that sentence was aspirational until they were written.
+ *
  * Given the days since last contact (or `null` if never contacted) and the
  * contact's CRM `status`, returns the auto-computed relationship health value.
  *
  * Returns `null` when there isn't enough information to decide (e.g. brand-new
  * contact created today with no recorded interactions).
+ *
+ * NOTE: that null case is currently unreachable in production.
+ * crm-relationship-health.service.ts's healthFor() passes
+ * `lastContactedAt ?? createdAt`, so a contact nobody has ever spoken to is
+ * measured from its creation date and reads HOT on day one — while the at-risk
+ * list on the same service reports its daysSinceLastContact as null. Pinned in
+ * the spec above; reconciling the two changes what a stored HOT means.
  */
 export function computeRelationshipHealth(
   daysSinceLastContact: number | null,
