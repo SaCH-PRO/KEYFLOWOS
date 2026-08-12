@@ -90,6 +90,42 @@ Ten more procedures (all of `key-connector.ts`) call `assertBusinessRole`, which
 reads `ctx.business` — populated from `req.business`, which nothing in
 `apps/server` assigns. They fail closed for every caller.
 
+## One `enc:v1:` marker, four key schedules
+
+| Implementation | Salt | Refuses to run in prod without a key |
+|---|---|:--:|
+| `core/crypto/token-crypto.ts` | `keyflow-token-salt-v1` | yes |
+| `packages/db/.../token-encryption.ts` | `keyflow-token-salt-v1` | **no** |
+| `core/connectors/connector-credentials.service.ts` | `connector-credentials-salt` | yes |
+| `modules/supplier/credentials.util.ts` | `supplier-credentials-salt` | yes |
+| `packages/api/src/lib/credentials.ts` | `supplier-credentials-salt` | yes |
+
+Separate salts for separate data is fine. Separate salts behind **one** version
+marker is not: a stored value starting `enc:v1:` cannot be attributed to the key
+that produced it, and the only reason the scheme works is that each
+implementation happens to own storage no other one touches. Nothing asserted
+that, and it had already been broken once —
+`modules/google-drive/token-crypto.util.ts` encrypted `Business.driveAccessToken`
+under a *fifth* salt while `packages/db` encrypted the same column under its own.
+Verified by running the compiled modules against each other: the reader throws
+`Unsupported state or unable to authenticate data`, which names neither the salt
+nor the file. It was dead code — its last importer went in `736bafdf` — so it was
+deleted. `token-crypto.spec.ts` now fails if a new implementation appears or a
+salt moves.
+
+Two things are recorded rather than changed, both needing a decision:
+
+- **`packages/db` has no production guard.** With none of
+  `CONNECTOR_CREDENTIALS_KEY` / `CREDENTIALS_ENCRYPTION_KEY` / `JWT_SECRET` set,
+  it encrypts under a key derived from a string in this repository. The other
+  four refuse to start. Adding the throw turns a silent weakness into a failed
+  boot, so it needs a deploy that sets the key first.
+- **`core/crypto` reads `DRIVE_TOKEN_ENCRYPTION_SECRET`; `packages/db` does
+  not**, though they share a salt and are meant to agree. Set that variable
+  alone and they derive different keys — confirmed by execution. They do not
+  collide today because `core/crypto`'s only caller (whatsapp) encrypts fields
+  inside a JSON blob while the extension handles scalar columns.
+
 ## Money and cost
 
 | | Value |

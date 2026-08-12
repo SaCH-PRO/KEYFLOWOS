@@ -218,7 +218,11 @@ const bookingSchema = z.object({
   }).nullable().optional(),
 });
 
-const bookingWaitlistEntrySchema = z.object({
+// Exported, like the other schemas callers may want to validate against. The 83
+// module-private ones are all nested inside another schema, so they are used as
+// values somewhere; this one is only ever fed to z.infer, which is what made it
+// the single unused-variable warning that put the lint ratchet over its limit.
+export const bookingWaitlistEntrySchema = z.object({
   id: z.string(),
   businessId: z.string(),
   contactId: z.string(),

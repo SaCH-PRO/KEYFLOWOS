@@ -52,7 +52,18 @@ export default function WaitlistPanel({ businessId, services, staff }: WaitlistP
   }, [businessId, statusFilter]);
 
   useEffect(() => {
-    load();
+    // `load` sets state on its first line, so calling it straight from the
+    // effect body re-renders before paint — react-hooks/set-state-in-effect.
+    // Deferring by a microtask also fixes a real bug: switching the filter
+    // twice quickly left whichever request finished last on screen, which is
+    // not necessarily the one that was asked for. The flag drops the stale one.
+    let cancelled = false;
+    void Promise.resolve().then(() => {
+      if (!cancelled) return load();
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [load]);
 
   async function handleConvert(entryId: string) {
