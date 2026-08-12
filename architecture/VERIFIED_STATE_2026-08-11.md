@@ -127,10 +127,25 @@ call was wrong in exactly one file; every other call site already had the prefix
 
 22 client calls fixed across both passes; the unmatched set went 41 → 19.
 
-**Three are genuinely unbuilt** — no such route under any prefix:
-`/whatsapp/businesses/:id/{status,templates}`,
-`/commerce/businesses/:id/recurring-invoices/:id/history`,
-`/connect/businesses/:id/:provider/status`.
+**The remaining 19 were classified individually.** Eleven are artefacts of the
+comparison, not defects: a client path with a literal where the server has a
+parameter (`/businesses/me/providers`, `/businesses/system/templates`), or a
+variable provider segment (`/connect/businesses/:id/${apiPrefix}/status`, where
+`apiPrefix` is `contacts` or `outlook-contacts` — both confirmed 401). Two are
+POST/PATCH-only and cannot be settled by probe.
+
+**Six are real, and they are missing features rather than wrong paths.** The
+WhatsApp manage drawer
+(`app/app/key-connect/components/whatsapp/whatsapp-manage-drawer.tsx`) calls
+`/status`, `/conversations`, `/conversations/:id`, `/templates` and `/messages`.
+The server's WhatsApp controller has only `config`, `send`, `test` and webhooks
+— so the entire drawer is inert. `/messages` is not `/send` under another name:
+the client posts `{to, body, scheduledAt}` and `/send` takes `{to, message}`
+with no scheduling. Also missing:
+`/commerce/businesses/:id/recurring-invoices/:id/history`.
+
+Building those endpoints is a product decision, so nothing here was changed for
+them.
 
 One caveat on method: probing only proves GET routes. A POST-only route answers
 404 to a GET whether or not it exists, so `execute-plan` was resolved from source
