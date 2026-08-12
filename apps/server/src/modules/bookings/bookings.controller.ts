@@ -2,12 +2,16 @@ import { BadRequestException, Body, Controller, ForbiddenException, Get, Inject,
 import { Response } from 'express';
 import { BookingStatus } from '@prisma/client';
 import { BookingsService } from './bookings.service';
+import { BookingWaitlistService } from './booking-waitlist.service';
 import { CalendarService } from './calendar.service';
 import { BookingOptimizerService } from './booking-optimizer.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { UpdateBookingDto } from './dto/update-booking.dto';
+import { CreateWaitlistEntryDto } from './dto/create-waitlist-entry.dto';
+import { OfferWaitlistSlotDto } from './dto/offer-waitlist-slot.dto';
+import { WaitlistQueryDto } from './dto/waitlist-query.dto';
 import { PlanLimitGuard, RequirePlanLimit } from '../subscriptions/plan-limit.guard';
 import { PublicCreateBookingDto } from './dto/public-create-booking.dto';
 import { appUrl } from '../../core/config/runtime-urls';
@@ -22,6 +26,7 @@ import { sanitizeRequired, sanitizeString } from '../../core/utils/sanitize';
 export class BookingsController {
   constructor(
     @Inject(BookingsService) private readonly bookings: BookingsService,
+    @Inject(BookingWaitlistService) private readonly waitlist: BookingWaitlistService,
     @Inject(CalendarService) private readonly calendar: CalendarService,
     @Inject(BookingOptimizerService) private readonly optimizer: BookingOptimizerService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -338,6 +343,91 @@ export class BookingsController {
       where: { staffId, staff: { businessId, deletedAt: null } },
       orderBy: { dayOfWeek: 'asc' },
     });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/waitlist')
+  listWaitlist(
+    @Param('businessId') businessId: string,
+    @Query() query: WaitlistQueryDto,
+  ) {
+    return this.waitlist.listWaitlist(businessId, query);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/waitlist')
+  addToWaitlist(
+    @Param('businessId') businessId: string,
+    @Body() body: CreateWaitlistEntryDto,
+  ) {
+    return this.waitlist.addToWaitlist({
+      businessId,
+      contactId: body.contactId,
+      serviceId: body.serviceId,
+      preferredStaffId: body.preferredStaffId,
+      preferredDateFrom: body.preferredDateFrom,
+      preferredDateTo: body.preferredDateTo,
+      preferredTimeOfDay: body.preferredTimeOfDay,
+      notes: body.notes,
+    });
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/waitlist/:entryId/offer')
+  offerWaitlistSlot(
+    @Param('businessId') businessId: string,
+    @Param('entryId') entryId: string,
+    @Body() body: OfferWaitlistSlotDto,
+  ) {
+    return this.waitlist.offerSlot(
+      entryId,
+      {
+        startTime: new Date(body.startTime),
+        endTime: new Date(body.endTime),
+        serviceId: body.serviceId ?? '',
+        staffId: body.staffId ?? null,
+      },
+      'USER',
+    );
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/waitlist/:entryId/convert')
+  convertWaitlistEntry(
+    @Param('businessId') businessId: string,
+    @Param('entryId') entryId: string,
+  ) {
+    return this.waitlist.convertWaitlistEntry(businessId, entryId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/waitlist/:entryId/cancel')
+  cancelWaitlistEntry(
+    @Param('businessId') businessId: string,
+    @Param('entryId') entryId: string,
+  ) {
+    return this.waitlist.cancelWaitlistEntry(businessId, entryId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/waitlist/matches')
+  previewWaitlistMatches(
+    @Param('businessId') businessId: string,
+    @Query('startTime') startTime: string,
+    @Query('endTime') endTime: string,
+    @Query('serviceId') serviceId: string,
+    @Query('staffId') staffId?: string,
+  ) {
+    return this.waitlist.previewMatchesForSlot(
+      businessId,
+      {
+        startTime: new Date(startTime),
+        endTime: new Date(endTime),
+        serviceId,
+        staffId: staffId ?? null,
+      },
+      { limit: 10 },
+    );
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

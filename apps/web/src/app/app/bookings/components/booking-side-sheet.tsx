@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { X, CalendarDays } from "lucide-react";
+import { X, CalendarDays, Clock } from "lucide-react";
 import type { Service, StaffMember, Contact } from "./bookings-types";
 import BookingForm from "./booking-form";
 import { useIsMobile } from "@/hooks/use-is-mobile";
@@ -27,6 +27,8 @@ interface BookingSideSheetProps {
   defaultTime?: string;
   defaultContactId?: string;
   saving?: boolean;
+  showWaitlistOption?: boolean;
+  onAddToWaitlist?: () => void;
 }
 
 export default function BookingSideSheet({
@@ -41,6 +43,8 @@ export default function BookingSideSheet({
   defaultTime,
   defaultContactId,
   saving,
+  showWaitlistOption,
+  onAddToWaitlist,
 }: BookingSideSheetProps) {
   const isMobile = useIsMobile();
   const router = useRouter();
@@ -139,6 +143,18 @@ export default function BookingSideSheet({
               defaultContactId={defaultContactId}
               saving={saving}
             />
+            {showWaitlistOption && onAddToWaitlist && (
+              <div className="px-4 pb-4 pt-1">
+                <button
+                  onClick={onAddToWaitlist}
+                  disabled={saving}
+                  className="w-full kf-btn-secondary inline-flex items-center justify-center gap-2 text-[11px]"
+                >
+                  <Clock className="w-3.5 h-3.5" />
+                  Add to waitlist instead
+                </button>
+              </div>
+            )}
           </div>
         </motion.div>
       ) : (
@@ -193,6 +209,18 @@ export default function BookingSideSheet({
               defaultContactId={defaultContactId}
               saving={saving}
             />
+            {showWaitlistOption && onAddToWaitlist && (
+              <div className="px-4 pb-4 pt-1">
+                <button
+                  onClick={onAddToWaitlist}
+                  disabled={saving}
+                  className="w-full kf-btn-secondary inline-flex items-center justify-center gap-2 text-[11px]"
+                >
+                  <Clock className="w-3.5 h-3.5" />
+                  Add to waitlist instead
+                </button>
+              </div>
+            )}
           </div>
         </motion.div>
       )}

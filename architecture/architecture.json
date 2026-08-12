@@ -1,0 +1,1399 @@
+{
+  "meta": {
+    "schema": "codebase-architect/v1",
+    "generated": "2026-08-11T03:45:00Z",
+    "source": "baseline exploration output + inventory.py + dependency_scan.py",
+    "root": "C:/Users/sachd/Downloads/KEYFLOWOS"
+  },
+  "nodes": [
+    {
+      "id": "apps/server",
+      "type": "app",
+      "label": "NestJS API server"
+    },
+    {
+      "id": "apps/web",
+      "type": "app",
+      "label": "Next.js App Router frontend"
+    },
+    {
+      "id": "apps/voice-agent",
+      "type": "app",
+      "label": "LiveKit + OpenAI Realtime voice worker"
+    },
+    {
+      "id": "@keyflow/db",
+      "type": "package",
+      "label": "Prisma client + schema"
+    },
+    {
+      "id": "@keyflow/api",
+      "type": "package",
+      "label": "tRPC routers"
+    },
+    {
+      "id": "@keyflow/shared",
+      "type": "package",
+      "label": "Shared domain constants"
+    },
+    {
+      "id": "@keyflow/ui",
+      "type": "package",
+      "label": "Shared React UI kit"
+    },
+    {
+      "id": "server:main.ts",
+      "type": "file",
+      "label": "API bootstrap"
+    },
+    {
+      "id": "server:app.module.ts",
+      "type": "file",
+      "label": "Root NestJS module"
+    },
+    {
+      "id": "server:app-bootstrap.ts",
+      "type": "file",
+      "label": "Express middleware setup"
+    },
+    {
+      "id": "server:trpc.module.ts",
+      "type": "file",
+      "label": "tRPC Express adapter"
+    },
+    {
+      "id": "server:auth.middleware.ts",
+      "type": "file",
+      "label": "Global auth middleware"
+    },
+    {
+      "id": "server:tenant.interceptor.ts",
+      "type": "file",
+      "label": "Tenant context interceptor"
+    },
+    {
+      "id": "server:prisma.service.ts",
+      "type": "file",
+      "label": "Prisma service wrapper"
+    },
+    {
+      "id": "server:model-gateway.service.ts",
+      "type": "file",
+      "label": "LLM gateway"
+    },
+    {
+      "id": "server:key-cortex.module.ts",
+      "type": "file",
+      "label": "Key Cortex module root"
+    },
+    {
+      "id": "server:business-event.queue.ts",
+      "type": "file",
+      "label": "Business event BullMQ queue"
+    },
+    {
+      "id": "server:payments.service.ts",
+      "type": "file",
+      "label": "Payment processing"
+    },
+    {
+      "id": "server:livekit.service.ts",
+      "type": "file",
+      "label": "LiveKit voice service"
+    },
+    {
+      "id": "server:webhooks.controller.ts",
+      "type": "file",
+      "label": "Webhook ingress"
+    },
+    {
+      "id": "web:layout.tsx",
+      "type": "file",
+      "label": "Root layout"
+    },
+    {
+      "id": "web:app/layout.tsx",
+      "type": "file",
+      "label": "Authenticated app shell"
+    },
+    {
+      "id": "web:middleware.ts",
+      "type": "file",
+      "label": "Edge auth middleware"
+    },
+    {
+      "id": "web:api.ts",
+      "type": "file",
+      "label": "Typed REST fetch wrappers"
+    },
+    {
+      "id": "web:client.ts",
+      "type": "file",
+      "label": "Legacy monolithic API client"
+    },
+    {
+      "id": "web:module-launcher-sheet.tsx",
+      "type": "file",
+      "label": "Global module launcher"
+    },
+    {
+      "id": "web:key-live-voice.tsx",
+      "type": "file",
+      "label": "LiveKit voice UI"
+    },
+    {
+      "id": "db:client.ts",
+      "type": "file",
+      "label": "Extended Prisma client"
+    },
+    {
+      "id": "db:schema.prisma",
+      "type": "file",
+      "label": "Prisma schema (~439 models)"
+    },
+    {
+      "id": "db:token-encryption.ts",
+      "type": "file",
+      "label": "Token encryption extension"
+    },
+    {
+      "id": "db:soft-delete.ts",
+      "type": "file",
+      "label": "Soft delete extension"
+    },
+    {
+      "id": "api:root.ts",
+      "type": "file",
+      "label": "tRPC app router"
+    },
+    {
+      "id": "api:trpc.ts",
+      "type": "file",
+      "label": "tRPC procedures and context"
+    },
+    {
+      "id": "api:crm.router.ts",
+      "type": "file",
+      "label": "CRM tRPC router"
+    },
+    {
+      "id": "api:commerce.router.ts",
+      "type": "file",
+      "label": "Commerce tRPC router"
+    },
+    {
+      "id": "api:bookings.router.ts",
+      "type": "file",
+      "label": "Bookings tRPC router"
+    },
+    {
+      "id": "server:booking-waitlist.service.ts",
+      "type": "file",
+      "label": "Booking waitlist queue and slot matching"
+    },
+    {
+      "id": "server:booking-waitlist.listener.ts",
+      "type": "file",
+      "label": "Booking waitlist event listener"
+    },
+    {
+      "id": "web:waitlist-panel.tsx",
+      "type": "file",
+      "label": "Booking waitlist UI panel"
+    },
+    {
+      "id": "module:identity",
+      "type": "module",
+      "label": "Identity & access"
+    },
+    {
+      "id": "module:crm",
+      "type": "module",
+      "label": "CRM"
+    },
+    {
+      "id": "module:commerce",
+      "type": "module",
+      "label": "Commerce"
+    },
+    {
+      "id": "module:finance",
+      "type": "module",
+      "label": "Finance / accounting"
+    },
+    {
+      "id": "module:bookings",
+      "type": "module",
+      "label": "Bookings & calendar"
+    },
+    {
+      "id": "module:key-cortex",
+      "type": "module",
+      "label": "Key Cortex (AI context/reasoning)"
+    },
+    {
+      "id": "module:ai",
+      "type": "module",
+      "label": "AI platform (gateway, tools, MCP)"
+    },
+    {
+      "id": "module:key-autonomy",
+      "type": "module",
+      "label": "Key autonomy"
+    },
+    {
+      "id": "module:business-genome",
+      "type": "module",
+      "label": "Business genome"
+    },
+    {
+      "id": "module:business-genesis",
+      "type": "module",
+      "label": "Business genesis / onboarding"
+    },
+    {
+      "id": "module:communications",
+      "type": "module",
+      "label": "Communications"
+    },
+    {
+      "id": "module:connectors",
+      "type": "module",
+      "label": "Connector framework"
+    },
+    {
+      "id": "module:business-events",
+      "type": "module",
+      "label": "Business event log"
+    },
+    {
+      "id": "entity:Business",
+      "type": "entity",
+      "label": "Tenant root"
+    },
+    {
+      "id": "entity:Contact",
+      "type": "entity",
+      "label": "CRM contact"
+    },
+    {
+      "id": "entity:Deal",
+      "type": "entity",
+      "label": "CRM deal"
+    },
+    {
+      "id": "entity:Invoice",
+      "type": "entity",
+      "label": "Commerce invoice"
+    },
+    {
+      "id": "entity:Booking",
+      "type": "entity",
+      "label": "Booking"
+    },
+    {
+      "id": "entity:BookingWaitlistEntry",
+      "type": "entity",
+      "label": "Booking waitlist entry"
+    },
+    {
+      "id": "entity:AiMemory",
+      "type": "entity",
+      "label": "AI memory"
+    },
+    {
+      "id": "entity:BusinessBlueprint",
+      "type": "entity",
+      "label": "Business blueprint"
+    },
+    {
+      "id": "integration:Supabase",
+      "type": "external_integration",
+      "label": "Supabase Auth"
+    },
+    {
+      "id": "integration:OpenAI",
+      "type": "external_integration",
+      "label": "OpenAI"
+    },
+    {
+      "id": "integration:Stripe",
+      "type": "external_integration",
+      "label": "Stripe"
+    },
+    {
+      "id": "integration:PayPal",
+      "type": "external_integration",
+      "label": "PayPal"
+    },
+    {
+      "id": "integration:LiveKit",
+      "type": "external_integration",
+      "label": "LiveKit"
+    },
+    {
+      "id": "integration:Redis",
+      "type": "external_integration",
+      "label": "Redis"
+    },
+    {
+      "id": "integration:PostgreSQL",
+      "type": "external_integration",
+      "label": "PostgreSQL + pgvector"
+    },
+    {
+      "id": "integration:GoogleOAuth",
+      "type": "external_integration",
+      "label": "Google OAuth / Drive / Gmail / Calendar"
+    },
+    {
+      "id": "integration:WhatsApp",
+      "type": "external_integration",
+      "label": "WhatsApp / Meta"
+    },
+    {
+      "id": "path:auth",
+      "type": "execution_path",
+      "label": "Auth request flow"
+    },
+    {
+      "id": "path:onboarding",
+      "type": "execution_path",
+      "label": "Onboarding / genesis flow"
+    },
+    {
+      "id": "path:key-chat",
+      "type": "execution_path",
+      "label": "KEY chat / voice flow"
+    },
+    {
+      "id": "path:payment",
+      "type": "execution_path",
+      "label": "Payment / invoice flow"
+    },
+    {
+      "id": "path:business-event",
+      "type": "execution_path",
+      "label": "Business event audit flow"
+    },
+    {
+      "id": "path:booking-waitlist",
+      "type": "execution_path",
+      "label": "Booking waitlist offer flow"
+    },
+    {
+      "id": "event:booking.waitlist.added",
+      "type": "event",
+      "label": "booking.waitlist.added"
+    },
+    {
+      "id": "event:booking.waitlist.slot_offered",
+      "type": "event",
+      "label": "booking.waitlist.slot_offered"
+    },
+    {
+      "id": "event:booking.waitlist.converted",
+      "type": "event",
+      "label": "booking.waitlist.converted"
+    },
+    {
+      "id": "event:booking.waitlist.cancelled",
+      "type": "event",
+      "label": "booking.waitlist.cancelled"
+    },
+    {
+      "id": "risk:R1",
+      "type": "risk",
+      "label": "forwardRef cycles AI/Cortex/Commerce/CRM",
+      "severity": "critical"
+    },
+    {
+      "id": "risk:R2",
+      "type": "risk",
+      "label": "key-cortex oversized module",
+      "severity": "critical"
+    },
+    {
+      "id": "risk:R3",
+      "type": "risk",
+      "label": "Tenant isolation create/upsert not intercepted",
+      "severity": "high"
+    },
+    {
+      "id": "risk:R4",
+      "type": "risk",
+      "label": "No tenant context in workers/cron/webhooks",
+      "severity": "high"
+    },
+    {
+      "id": "risk:R7",
+      "type": "risk",
+      "label": "Legacy web client.ts alongside new wrappers",
+      "severity": "medium"
+    },
+    {
+      "id": "risk:R8",
+      "type": "risk",
+      "label": "157 orphaned /app routes",
+      "severity": "medium"
+    }
+  ],
+  "edges": [
+    {
+      "source": "apps/server",
+      "target": "@keyflow/api",
+      "type": "imports"
+    },
+    {
+      "source": "apps/server",
+      "target": "@keyflow/db",
+      "type": "imports"
+    },
+    {
+      "source": "apps/server",
+      "target": "@keyflow/shared",
+      "type": "imports"
+    },
+    {
+      "source": "apps/web",
+      "target": "@keyflow/ui",
+      "type": "imports"
+    },
+    {
+      "source": "apps/web",
+      "target": "@keyflow/shared",
+      "type": "imports"
+    },
+    {
+      "source": "apps/voice-agent",
+      "target": "@keyflow/db",
+      "type": "imports"
+    },
+    {
+      "source": "@keyflow/api",
+      "target": "@keyflow/db",
+      "type": "imports"
+    },
+    {
+      "source": "server:main.ts",
+      "target": "server:app.module.ts",
+      "type": "imports"
+    },
+    {
+      "source": "server:main.ts",
+      "target": "server:app-bootstrap.ts",
+      "type": "calls"
+    },
+    {
+      "source": "server:main.ts",
+      "target": "db:client.ts",
+      "type": "calls"
+    },
+    {
+      "source": "server:app.module.ts",
+      "target": "server:trpc.module.ts",
+      "type": "imports"
+    },
+    {
+      "source": "server:app.module.ts",
+      "target": "server:auth.middleware.ts",
+      "type": "imports"
+    },
+    {
+      "source": "server:app.module.ts",
+      "target": "server:tenant.interceptor.ts",
+      "type": "imports"
+    },
+    {
+      "source": "server:trpc.module.ts",
+      "target": "api:root.ts",
+      "type": "imports"
+    },
+    {
+      "source": "server:auth.middleware.ts",
+      "target": "integration:Supabase",
+      "type": "calls"
+    },
+    {
+      "source": "server:tenant.interceptor.ts",
+      "target": "db:client.ts",
+      "type": "calls"
+    },
+    {
+      "source": "server:prisma.service.ts",
+      "target": "@keyflow/db",
+      "type": "imports"
+    },
+    {
+      "source": "server:model-gateway.service.ts",
+      "target": "integration:OpenAI",
+      "type": "calls"
+    },
+    {
+      "source": "server:key-cortex.module.ts",
+      "target": "module:ai",
+      "type": "depends_on"
+    },
+    {
+      "source": "server:key-cortex.module.ts",
+      "target": "module:crm",
+      "type": "depends_on"
+    },
+    {
+      "source": "server:key-cortex.module.ts",
+      "target": "module:commerce",
+      "type": "depends_on"
+    },
+    {
+      "source": "server:key-cortex.module.ts",
+      "target": "module:bookings",
+      "type": "depends_on"
+    },
+    {
+      "source": "server:business-event.queue.ts",
+      "target": "integration:Redis",
+      "type": "calls"
+    },
+    {
+      "source": "server:payments.service.ts",
+      "target": "integration:Stripe",
+      "type": "calls"
+    },
+    {
+      "source": "server:payments.service.ts",
+      "target": "integration:PayPal",
+      "type": "calls"
+    },
+    {
+      "source": "server:livekit.service.ts",
+      "target": "integration:LiveKit",
+      "type": "calls"
+    },
+    {
+      "source": "server:webhooks.controller.ts",
+      "target": "integration:Stripe",
+      "type": "handles"
+    },
+    {
+      "source": "web:app/layout.tsx",
+      "target": "web:middleware.ts",
+      "type": "depends_on"
+    },
+    {
+      "source": "web:app/layout.tsx",
+      "target": "path:auth",
+      "type": "involves"
+    },
+    {
+      "source": "web:api.ts",
+      "target": "apps/server",
+      "type": "calls"
+    },
+    {
+      "source": "web:client.ts",
+      "target": "apps/server",
+      "type": "calls"
+    },
+    {
+      "source": "web:key-live-voice.tsx",
+      "target": "integration:LiveKit",
+      "type": "calls"
+    },
+    {
+      "source": "web:key-live-voice.tsx",
+      "target": "path:key-chat",
+      "type": "involves"
+    },
+    {
+      "source": "db:client.ts",
+      "target": "integration:PostgreSQL",
+      "type": "calls"
+    },
+    {
+      "source": "db:client.ts",
+      "target": "db:token-encryption.ts",
+      "type": "extends"
+    },
+    {
+      "source": "db:client.ts",
+      "target": "db:soft-delete.ts",
+      "type": "extends"
+    },
+    {
+      "source": "db:schema.prisma",
+      "target": "entity:Business",
+      "type": "defines"
+    },
+    {
+      "source": "db:schema.prisma",
+      "target": "entity:Contact",
+      "type": "defines"
+    },
+    {
+      "source": "db:schema.prisma",
+      "target": "entity:Invoice",
+      "type": "defines"
+    },
+    {
+      "source": "db:schema.prisma",
+      "target": "entity:Booking",
+      "type": "defines"
+    },
+    {
+      "source": "db:schema.prisma",
+      "target": "entity:BookingWaitlistEntry",
+      "type": "defines"
+    },
+    {
+      "source": "db:schema.prisma",
+      "target": "entity:AiMemory",
+      "type": "defines"
+    },
+    {
+      "source": "db:schema.prisma",
+      "target": "entity:BusinessBlueprint",
+      "type": "defines"
+    },
+    {
+      "source": "api:root.ts",
+      "target": "api:crm.router.ts",
+      "type": "composes"
+    },
+    {
+      "source": "api:root.ts",
+      "target": "api:commerce.router.ts",
+      "type": "composes"
+    },
+    {
+      "source": "api:root.ts",
+      "target": "api:bookings.router.ts",
+      "type": "composes"
+    },
+    {
+      "source": "api:crm.router.ts",
+      "target": "module:crm",
+      "type": "implements"
+    },
+    {
+      "source": "api:commerce.router.ts",
+      "target": "module:commerce",
+      "type": "implements"
+    },
+    {
+      "source": "api:bookings.router.ts",
+      "target": "module:bookings",
+      "type": "implements"
+    },
+    {
+      "source": "server:booking-waitlist.service.ts",
+      "target": "module:bookings",
+      "type": "belongs_to"
+    },
+    {
+      "source": "server:booking-waitlist.listener.ts",
+      "target": "module:bookings",
+      "type": "belongs_to"
+    },
+    {
+      "source": "server:booking-waitlist.service.ts",
+      "target": "entity:BookingWaitlistEntry",
+      "type": "touches"
+    },
+    {
+      "source": "server:booking-waitlist.service.ts",
+      "target": "entity:Booking",
+      "type": "touches"
+    },
+    {
+      "source": "server:booking-waitlist.listener.ts",
+      "target": "server:booking-waitlist.service.ts",
+      "type": "calls"
+    },
+    {
+      "source": "server:booking-waitlist.service.ts",
+      "target": "event:booking.waitlist.added",
+      "type": "emits"
+    },
+    {
+      "source": "server:booking-waitlist.service.ts",
+      "target": "event:booking.waitlist.slot_offered",
+      "type": "emits"
+    },
+    {
+      "source": "server:booking-waitlist.service.ts",
+      "target": "event:booking.waitlist.converted",
+      "type": "emits"
+    },
+    {
+      "source": "server:booking-waitlist.service.ts",
+      "target": "event:booking.waitlist.cancelled",
+      "type": "emits"
+    },
+    {
+      "source": "web:waitlist-panel.tsx",
+      "target": "module:bookings",
+      "type": "belongs_to"
+    },
+    {
+      "source": "module:identity",
+      "target": "integration:Supabase",
+      "type": "calls"
+    },
+    {
+      "source": "module:crm",
+      "target": "entity:Contact",
+      "type": "touches"
+    },
+    {
+      "source": "module:crm",
+      "target": "entity:Deal",
+      "type": "touches"
+    },
+    {
+      "source": "module:commerce",
+      "target": "entity:Invoice",
+      "type": "touches"
+    },
+    {
+      "source": "module:bookings",
+      "target": "entity:Booking",
+      "type": "touches"
+    },
+    {
+      "source": "module:key-cortex",
+      "target": "module:ai",
+      "type": "depends_on"
+    },
+    {
+      "source": "module:key-cortex",
+      "target": "module:crm",
+      "type": "depends_on"
+    },
+    {
+      "source": "module:key-cortex",
+      "target": "module:commerce",
+      "type": "depends_on"
+    },
+    {
+      "source": "module:key-cortex",
+      "target": "module:bookings",
+      "type": "depends_on"
+    },
+    {
+      "source": "module:key-cortex",
+      "target": "entity:AiMemory",
+      "type": "touches"
+    },
+    {
+      "source": "module:ai",
+      "target": "integration:OpenAI",
+      "type": "calls"
+    },
+    {
+      "source": "module:business-genome",
+      "target": "entity:BusinessBlueprint",
+      "type": "touches"
+    },
+    {
+      "source": "module:business-genesis",
+      "target": "module:business-genome",
+      "type": "depends_on"
+    },
+    {
+      "source": "module:connectors",
+      "target": "integration:GoogleOAuth",
+      "type": "calls"
+    },
+    {
+      "source": "module:connectors",
+      "target": "integration:WhatsApp",
+      "type": "calls"
+    },
+    {
+      "source": "module:business-events",
+      "target": "integration:Redis",
+      "type": "calls"
+    },
+    {
+      "source": "path:auth",
+      "target": "server:auth.middleware.ts",
+      "type": "involves"
+    },
+    {
+      "source": "path:auth",
+      "target": "integration:Supabase",
+      "type": "involves"
+    },
+    {
+      "source": "path:onboarding",
+      "target": "module:business-genesis",
+      "type": "involves"
+    },
+    {
+      "source": "path:onboarding",
+      "target": "module:business-genome",
+      "type": "involves"
+    },
+    {
+      "source": "path:key-chat",
+      "target": "module:key-cortex",
+      "type": "involves"
+    },
+    {
+      "source": "path:key-chat",
+      "target": "server:livekit.service.ts",
+      "type": "involves"
+    },
+    {
+      "source": "path:payment",
+      "target": "module:commerce",
+      "type": "involves"
+    },
+    {
+      "source": "path:payment",
+      "target": "server:payments.service.ts",
+      "type": "involves"
+    },
+    {
+      "source": "path:business-event",
+      "target": "server:business-event.queue.ts",
+      "type": "involves"
+    },
+    {
+      "source": "risk:R1",
+      "target": "module:key-cortex",
+      "type": "has_risk"
+    },
+    {
+      "source": "risk:R1",
+      "target": "module:ai",
+      "type": "has_risk"
+    },
+    {
+      "source": "risk:R1",
+      "target": "module:commerce",
+      "type": "has_risk"
+    },
+    {
+      "source": "risk:R1",
+      "target": "module:crm",
+      "type": "has_risk"
+    },
+    {
+      "source": "risk:R2",
+      "target": "module:key-cortex",
+      "type": "has_risk"
+    },
+    {
+      "source": "risk:R3",
+      "target": "db:client.ts",
+      "type": "has_risk"
+    },
+    {
+      "source": "risk:R4",
+      "target": "server:business-event.queue.ts",
+      "type": "has_risk"
+    },
+    {
+      "source": "risk:R7",
+      "target": "web:client.ts",
+      "type": "has_risk"
+    },
+    {
+      "source": "risk:R8",
+      "target": "apps/web",
+      "type": "has_risk"
+    }
+  ],
+  "risks": [
+    {
+      "id": "R3",
+      "severity": "high",
+      "category": "Data / Tenant Isolation",
+      "title": "Tenant isolation Prisma extension does not intercept create/createMany/upsert/aggregate/groupBy and covers only 77 of 337 businessId-bearing models",
+      "evidence": [
+        "packages/db/src/client.ts:81-153 \u2014 BUSINESS_ID_MODELS contains 77 entries",
+        "packages/db/src/client.ts:234-278 \u2014 extension hooks only ten operations and omits writes",
+        "packages/db/prisma/schema.prisma \u2014 schema scan shows 337 models define businessId String"
+      ],
+      "fix": "Extend extension to reject/rewrite businessId on create/createMany/upsert or add CI lint/spec; generate BUSINESS_ID_MODELS from schema and backfill high-risk tables."
+    },
+    {
+      "id": "R4",
+      "severity": "high",
+      "category": "Data / Tenant Isolation",
+      "title": "Cron, BullMQ workers, WebSocket handlers, and webhooks run without tenant context; WebSocket approvals and TemporalFlowMemory updates are cross-tenant",
+      "evidence": [
+        "apps/server/src/core/tenant/tenant.interceptor.ts:13-31 \u2014 HTTP-only interceptor",
+        "apps/server/src/modules/ai/queue.service.ts:60-87 \u2014 BullMQ workers without tenant context",
+        "apps/server/src/modules/key-cortex/key-cortex.gateway.ts:232-347 \u2014 WebSocket handlers without tenant context; lines 308-347 approve/reject without clientInfo.businessId",
+        "packages/db/src/client.ts:121-127 \u2014 comment documenting unprotected paths",
+        "apps/server/src/modules/temporal-flow/temporal-flow-memory.service.ts:130-150 \u2014 updates memory by id only"
+      ],
+      "fix": "Provide runWithTenant wrapper for background/edge handlers; validate clientInfo.businessId in WebSocket handlers; add KeyActionProposal and TemporalFlowMemory to BUSINESS_ID_MODELS."
+    },
+    {
+      "id": "R16",
+      "severity": "critical",
+      "category": "Cryptography / Data Leak",
+      "title": "OAuth, bank, social, and channel access/refresh tokens stored in plaintext at rest",
+      "evidence": [
+        "packages/db/prisma/schema.prisma:506-565 \u2014 Business token columns",
+        "packages/db/prisma/schema.prisma:3823-3824 \u2014 SocialConnection.token / refreshToken plaintext",
+        "packages/db/prisma/schema.prisma:3874-3875 \u2014 ChannelConnection.token / refreshToken plaintext",
+        "packages/db/prisma/schema.prisma:10061 \u2014 BankConnection.accessToken plaintext",
+        "apps/server/src/core/connectors/google-suite.service.ts:193-196",
+        "apps/server/src/modules/connect/microsoft-oauth.service.ts:108-116",
+        "apps/server/src/modules/social/social-connections.service.ts:61-113",
+        "apps/server/src/modules/finance/bank-connection.service.ts:68-69"
+      ],
+      "fix": "Encrypt all token columns using existing AES-256-GCM utilities; backfill plaintext rows; decrypt only at the service boundary."
+    },
+    {
+      "id": "R17",
+      "severity": "critical",
+      "category": "Session Management",
+      "title": "Supabase JWT local verification never checks revocation or user state",
+      "evidence": [
+        "apps/server/src/core/auth/supabase-auth.service.ts:101-120 \u2014 returns user from verifyLocal without calling Supabase",
+        "apps/server/src/core/auth/auth.middleware.ts:88-104 \u2014 only looks up role, no status/banned check",
+        "packages/db/prisma/schema.prisma:101-130 \u2014 User model has no status/bannedAt/deletedAt"
+      ],
+      "fix": "Remove local verification or add a Redis revocation cache; add bannedAt/status column and check it in AuthMiddleware."
+    },
+    {
+      "id": "R18",
+      "severity": "critical",
+      "category": "Authentication / Audit",
+      "title": "Password reset and change flows are handled client-side against Supabase, bypassing backend controls",
+      "evidence": [
+        "apps/web/src/app/auth/login/login-form.tsx:33-34, 53-64 \u2014 calls /auth/v1/recover directly",
+        "apps/web/src/app/auth/reset-password/page.tsx:13-17 \u2014 client-side policy only",
+        "apps/web/src/app/app/profile/components/security-section.tsx:79-105 \u2014 calls /auth/v1/user directly",
+        "apps/server/src/modules/identity/password-policy.service.ts \u2014 only invoked at signup"
+      ],
+      "fix": "Add server endpoints that apply AuthSecurityService rate limits, AuthAuditLog, and PasswordPolicyService."
+    },
+    {
+      "id": "R19",
+      "severity": "critical",
+      "category": "Authorization / Middleware Bypass",
+      "title": "Admin console routes (/admin/*) have no server-side gate",
+      "evidence": [
+        "apps/web/src/middleware.ts:143-145 \u2014 matcher only /app/:path*",
+        "apps/web/src/app/admin/layout.tsx:40-62 \u2014 client-side useEffect auth check"
+      ],
+      "fix": "Extend middleware to gate /admin/:path* and add server-side admin auth check in admin/layout.tsx."
+    },
+    {
+      "id": "R20",
+      "severity": "critical",
+      "category": "Tenant Isolation / Authorization",
+      "title": "KEY Cortex WebSocket key:approve/key:reject handlers can approve/execute another tenant's action proposals",
+      "evidence": [
+        "apps/server/src/modules/key-cortex/key-cortex.gateway.ts:308-347",
+        "apps/server/src/modules/key-cortex/key-cortex-approval.service.ts:81-98",
+        "apps/server/src/modules/key-autonomy/key-action-proposal.service.ts:110-116",
+        "packages/db/src/client.ts:81-153 \u2014 KeyActionProposal not in BUSINESS_ID_MODELS"
+      ],
+      "fix": "Pass and validate clientInfo.businessId against proposal; add KeyActionProposal to BUSINESS_ID_MODELS; remove unscoped getById."
+    },
+    {
+      "id": "R21",
+      "severity": "critical",
+      "category": "Tenant Isolation / Misconfiguration",
+      "title": "Tenant isolation extension covers only ~23% of business-scoped tables",
+      "evidence": [
+        "packages/db/src/client.ts:81-153 \u2014 BUSINESS_ID_MODELS contains 77 entries",
+        "packages/db/prisma/schema.prisma \u2014 337 models define businessId String",
+        "Missing examples: KeyActionProposal, Event, EventAttendee, TemporalFlowMemory, Payment, MarketplaceOrder, SubscriptionPayment, Membership, ApiKey, SocialConnection, Webhook, Task, Message, Document, Lead, Campaign, HelpdeskTicket, ActivityLog"
+      ],
+      "fix": "Generate BUSINESS_ID_MODELS from schema; backfill high-risk tables first."
+    },
+    {
+      "id": "R22",
+      "severity": "critical",
+      "category": "Privacy / Data Deletion",
+      "title": "GDPR hard-purge fails for contacts with invoices, quotes, bookings, or recurring invoices",
+      "evidence": [
+        "apps/server/src/modules/crm/privacy/contact-privacy.service.ts:448-523",
+        "migration.sql:10481, 10496, 10532, 10745 \u2014 ON DELETE NO ACTION FKs"
+      ],
+      "fix": "Delete or anonymize financial rows before tx.contact.delete(); test all four child types."
+    },
+    {
+      "id": "R23",
+      "severity": "critical",
+      "category": "Privacy / Audit",
+      "title": "GDPR purge leaves full PII snapshots in BusinessEvent",
+      "evidence": [
+        "apps/server/src/modules/business-events/business-event.service.ts:24-60",
+        "apps/server/src/modules/key-autonomy/action-audit.service.ts:81-113",
+        "apps/server/src/modules/key-cortex/key-cortex-audit.service.ts:26-55",
+        "apps/server/src/modules/business-events/business-event.interceptor.ts:94-99"
+      ],
+      "fix": "Scrub BusinessEvent rows by subject/contact id during purge, or route all writes through safeRedactedSnapshot()."
+    },
+    {
+      "id": "R24",
+      "severity": "critical",
+      "category": "Privacy / Data Deletion",
+      "title": "MediaAsset and ContactMedia files survive contact erasure",
+      "evidence": [
+        "packages/db/prisma/schema.prisma:11191-11215 \u2014 MediaAsset contactId without FK",
+        "packages/db/prisma/schema.prisma:3299-3313 \u2014 ContactMedia lacks cascade",
+        "migration.sql:10460 \u2014 contact_media_contact_id_fkey ON DELETE SET NULL",
+        "apps/server/src/modules/crm/privacy/contact-privacy.service.ts:448-523"
+      ],
+      "fix": "Delete MediaAsset/ContactMedia rows and their S3 objects before deleting the contact."
+    },
+    {
+      "id": "R25",
+      "severity": "critical",
+      "category": "Privacy / Data Deletion",
+      "title": "SET-NULL child tables retain contact PII after purge",
+      "evidence": [
+        "migration.sql:10292, 10301, 10583, 10655, 11384 \u2014 ON DELETE SET NULL FKs",
+        "apps/server/src/modules/crm/privacy/contact-privacy.service.ts:448-523"
+      ],
+      "fix": "Delete or anonymize message_intakes, ingestion_items, whatsapp_contacts, support_tickets, financial_transactions rows as part of purgeOne."
+    },
+    {
+      "id": "R26",
+      "severity": "high",
+      "category": "Authentication / OAuth",
+      "title": "Google and Microsoft OAuth flows do not use PKCE",
+      "evidence": [
+        "apps/server/src/core/connectors/google-suite.service.ts:109-127",
+        "apps/server/src/modules/connect/microsoft-oauth.service.ts:43-58"
+      ],
+      "fix": "Add code_challenge_method=S256 + code_challenge; store code_verifier keyed by signed state."
+    },
+    {
+      "id": "R27",
+      "severity": "high",
+      "category": "Authorization",
+      "title": "Keystore admin endpoints allow any business member to manage listings and orders",
+      "evidence": [
+        "apps/server/src/modules/keystore/keystore-admin.controller.ts:28-30",
+        "Admin operation endpoints at lines 35, 42, 56, 64, 79, 94, 111, 119, 128, 144"
+      ],
+      "fix": "Add ModuleScopeGuard with @RequireModuleScope('storefront','admin') or restrict to OWNER/ADMIN."
+    },
+    {
+      "id": "R28",
+      "severity": "high",
+      "category": "Authorization",
+      "title": "API keys can be created and revoked by any business member",
+      "evidence": [
+        "apps/server/src/modules/api-keys/api-keys.controller.ts:10-34",
+        "create accepts body.scopes ?? [] without caller permission validation"
+      ],
+      "fix": "Restrict API key management to OWNER/ADMIN and/or validate requested scopes subset of caller scopes."
+    },
+    {
+      "id": "R29",
+      "severity": "high",
+      "category": "Session Management",
+      "title": "Regular user logout does not invalidate server-side sessions",
+      "evidence": [
+        "apps/web/src/hooks/use-app-layout.ts:373-376",
+        "apps/web/src/lib/workspace.ts:259-271"
+      ],
+      "fix": "Add POST /identity/logout calling Supabase Admin signOut(userId,'global') and invoke from handleLogout."
+    },
+    {
+      "id": "R30",
+      "severity": "high",
+      "category": "Session Management",
+      "title": "Admin auth has no logout flow and leaves 24-hour cookies behind",
+      "evidence": [
+        "apps/web/src/app/admin/login/page.tsx:43-50",
+        "No callers to POST /api/admin/auth/logout in apps/web/src"
+      ],
+      "fix": "Add admin logout UI calling backend logout and clearing localStorage/cookies."
+    },
+    {
+      "id": "R31",
+      "severity": "high",
+      "category": "Session Management / Cookie Security",
+      "title": "Session cookies are non-HttpOnly, JavaScript-accessible, and long-lived",
+      "evidence": [
+        "apps/web/src/lib/workspace.ts:11, 18-27 \u2014 kf_token cookie via document.cookie, Max-Age 7 days",
+        "apps/web/src/app/admin/login/page.tsx:48 \u2014 kf_admin_token via document.cookie",
+        "Refresh token stored only in localStorage"
+      ],
+      "fix": "Move to HttpOnly Secure SameSite=Lax server-set cookies; remove refresh token from localStorage."
+    },
+    {
+      "id": "R32",
+      "severity": "high",
+      "category": "Cryptography / Authentication",
+      "title": "Local JWT verification ignores standard claims (iss, aud, iat, nbf) and header algorithm",
+      "evidence": [
+        "apps/server/src/core/auth/supabase-auth.service.ts:41-77 \u2014 verifies only signature and exp"
+      ],
+      "fix": "Validate alg === 'HS256', require iss/aud match Supabase project, reject future nbf."
+    },
+    {
+      "id": "R33",
+      "severity": "high",
+      "category": "Tenant Isolation / Data Corruption",
+      "title": "TemporalFlowMemory.updateMemory can overwrite another tenant's temporal memory",
+      "evidence": [
+        "apps/server/src/modules/temporal-flow/temporal-flow-memory.service.ts:130-150",
+        "apps/server/src/modules/key-cortex/adapters/temporal-adapter.service.ts:58-89",
+        "packages/db/src/client.ts:81-153 \u2014 TemporalFlowMemory not in BUSINESS_ID_MODELS"
+      ],
+      "fix": "Enforce businessId in service; add TemporalFlowMemory to BUSINESS_ID_MODELS."
+    },
+    {
+      "id": "R34",
+      "severity": "high",
+      "category": "Privacy / Audit",
+      "title": "ContactAuditEntry retains IP, user agent, and actor email after GDPR purge",
+      "evidence": [
+        "apps/server/src/modules/crm/privacy/contact-privacy.service.ts:471-480",
+        "apps/server/src/modules/crm/privacy/contact-privacy.controller.ts:81-82, 125-127"
+      ],
+      "fix": "Null ip/userAgent during scrub; store only stable actor user id."
+    },
+    {
+      "id": "R35",
+      "severity": "high",
+      "category": "Privacy / Access Control",
+      "title": "Contact export can access soft-deleted and forget-pending contacts",
+      "evidence": [
+        "apps/server/src/modules/crm/privacy/contact-privacy.service.ts:539-560 (line 543)",
+        "apps/server/src/modules/crm/privacy/contact-privacy.controller.ts:69-87"
+      ],
+      "fix": "Reject export if contact.deletedAt is not null; redact audit snapshots in bundle."
+    },
+    {
+      "id": "R36",
+      "severity": "high",
+      "category": "Privacy / Audit",
+      "title": "Service-side audit/event writes bypass centralized secret redaction",
+      "evidence": [
+        "apps/server/src/core/security/redaction.ts:13-76",
+        "apps/server/src/modules/key-autonomy/action-audit.service.ts:89-108",
+        "apps/server/src/modules/key-cortex/key-cortex-audit.service.ts:26-55",
+        "apps/server/src/modules/business-events/business-event.interceptor.ts:30-92 \u2014 redaction only on HTTP paths"
+      ],
+      "fix": "Apply safeRedactedSnapshot() inside BusinessEventService.emit() and ContactAuditService.write()."
+    },
+    {
+      "id": "R37",
+      "severity": "high",
+      "category": "Privacy / Audit",
+      "title": "AI execution logs store raw tool payloads without redaction",
+      "evidence": [
+        "apps/server/src/modules/ai/ai-execution-log.service.ts:82-101",
+        "apps/server/src/modules/ai/ai-execution-log.service.ts:169-180 \u2014 sanitizePayload only truncates"
+      ],
+      "fix": "Run payloads through deepRedact() before storing."
+    },
+    {
+      "id": "R38",
+      "severity": "high",
+      "category": "Privacy / Data Retention",
+      "title": "No retention cleanup for export jobs, notification logs, activity logs, or sessions",
+      "evidence": [
+        "apps/server/src/modules/crm/privacy/contact-privacy.service.ts:188-200 \u2014 ContactExportJob created, no cleanup",
+        "apps/server/src/modules/notifications/transactional-email.service.ts:262-293 \u2014 customerNotificationLog, no cleanup",
+        "apps/server/src/core/interceptors/team-audit.interceptor.ts:44 \u2014 TeamActivityLog, no cleanup",
+        "apps/server/src/modules/risc/risc.service.ts:318, 371 \u2014 Session purged only on RISC/user deletion"
+      ],
+      "fix": "Add cron-driven retention worker with configurable windows and S3 cleanup."
+    },
+    {
+      "id": "R39",
+      "severity": "high",
+      "category": "Audit",
+      "title": "Security audit's checkEnvSecrets is broken and never flags the Supabase service-role key",
+      "evidence": [
+        "apps/server/src/modules/security-audit/security-audit.service.ts:119-126"
+      ],
+      "fix": "Correct the ternary to evaluate key length/environment."
+    },
+    {
+      "id": "R40",
+      "severity": "high",
+      "category": "Secrets in Code",
+      "title": "Hardcoded development password and native-AI fallback API key in source",
+      "evidence": [
+        "apps/server/src/core/seed/seed.service.ts:58 \u2014 DEV_PASSWORD = 'keyflowdev123'",
+        "apps/server/src/modules/ai/model-gateway.service.ts:1452, 2423 \u2014 'native-key' fallback"
+      ],
+      "fix": "Randomize dev password at first seed; remove 'native-key' fallback."
+    },
+    {
+      "id": "R41",
+      "severity": "high",
+      "category": "Authentication / Cryptography",
+      "title": "Admin HMAC-JWT uses millisecond exp and lacks iss/aud claims",
+      "evidence": [
+        "apps/server/src/core/auth/admin-token.util.ts:65-82"
+      ],
+      "fix": "Issue standard JWTs with exp in seconds plus iss/aud and validate them."
+    },
+    {
+      "id": "R42",
+      "severity": "high",
+      "category": "Misconfiguration / RISC",
+      "title": "RISC receiver endpoint exists but is not registered with Google",
+      "evidence": [
+        "apps/server/src/modules/risc/risc.controller.ts",
+        "apps/server/src/modules/risc/risc.service.ts \u2014 ingestion only",
+        "No calls to Google's RISC Configuration Admin API"
+      ],
+      "fix": "Add boot-time registration using the service account to subscribe RISC_RECEIVER_URL."
+    },
+    {
+      "id": "R43",
+      "severity": "high",
+      "category": "Misconfiguration / Reliability",
+      "title": "AuthMiddleware DI fallback can create a stale, unconfigured auth verifier",
+      "evidence": [
+        "apps/server/src/core/auth/auth.middleware.ts:37-46"
+      ],
+      "fix": "Remove fallback; fail fast at boot if SupabaseAuthService cannot be injected; add DI integration test."
+    },
+    {
+      "id": "R44",
+      "severity": "medium",
+      "category": "Authentication / OAuth",
+      "title": "Social OAuth flows use in-memory sessions and lack PKCE",
+      "evidence": [
+        "apps/server/src/modules/social/social.controller.ts:351-377 \u2014 random hex state, no PKCE except Twitter",
+        "apps/server/src/modules/social/social-connections.service.ts:14 \u2014 oauthSessions = new Map()"
+      ],
+      "fix": "Use signed+HMAC state, store state/PKCE in Redis, add PKCE to all flows."
+    },
+    {
+      "id": "R45",
+      "severity": "medium",
+      "category": "Cryptography / OAuth",
+      "title": "Google/Microsoft OAuth state nonces are generated with Math.random()",
+      "evidence": [
+        "apps/server/src/core/connectors/google-suite.service.ts:112",
+        "apps/server/src/modules/connect/microsoft-oauth.service.ts:45"
+      ],
+      "fix": "Use randomBytes(16).toString('hex') or randomUUID() for the nonce."
+    },
+    {
+      "id": "R46",
+      "severity": "medium",
+      "category": "Misconfiguration / Rate Limiting",
+      "title": "PublicRateLimitGuard retains the latent fail-open bug that RateLimitGuard fixed",
+      "evidence": [
+        "apps/server/src/core/guards/public-rate-limit.guard.ts:42"
+      ],
+      "fix": "Apply the same error-inspection logic used in RateLimitGuard."
+    },
+    {
+      "id": "R47",
+      "severity": "medium",
+      "category": "Session Management",
+      "title": "fetchWithAuthRetry does not trigger global logout after a final 401",
+      "evidence": [
+        "apps/web/src/lib/api.ts:297-315"
+      ],
+      "fix": "Emit kf:unauthorized when refresh fails, matching the typed wrappers."
+    },
+    {
+      "id": "R48",
+      "severity": "medium",
+      "category": "Authentication",
+      "title": "AuthMiddleware swallows invalid bearer tokens and continues as anonymous",
+      "evidence": [
+        "apps/server/src/core/auth/auth.middleware.ts:60-86",
+        "apps/server/src/core/auth/auth.middleware.ts:81-85 \u2014 logs debug only"
+      ],
+      "fix": "Set req.authFailed flag when a token was provided but invalid; log invalid attempts at warn."
+    },
+    {
+      "id": "R49",
+      "severity": "medium",
+      "category": "Tenant Isolation / Input Validation",
+      "title": "TenantInterceptor trusts client-supplied businessId from body/query",
+      "evidence": [
+        "apps/server/src/core/tenant/tenant.interceptor.ts:16",
+        "apps/server/src/core/auth/business.guard.ts:21"
+      ],
+      "fix": "Derive tenant only from URL params in TenantInterceptor; require BusinessGuard on every business-scoped route."
+    },
+    {
+      "id": "R50",
+      "severity": "medium",
+      "category": "Tenant Isolation / Information Disclosure",
+      "title": "KeyCortexApprovalOrchestrator.executeApproved performs an unscoped read for audit",
+      "evidence": [
+        "apps/server/src/modules/key-cortex/key-cortex-approval-orchestrator.service.ts:201-241"
+      ],
+      "fix": "Use scoped proposalService.get(businessId, proposalId) for the pre-execution snapshot."
+    },
+    {
+      "id": "R51",
+      "severity": "medium",
+      "category": "Privacy / Access Control",
+      "title": "Public contact-export download endpoint lacks rate limiting",
+      "evidence": [
+        "apps/server/src/modules/crm/privacy/contact-privacy.controller.ts:89-107"
+      ],
+      "fix": "Add @UseGuards(PublicRateLimitGuard) and @PublicRateLimit(...) to the download handler."
+    },
+    {
+      "id": "R52",
+      "severity": "medium",
+      "category": "Privacy / Consent",
+      "title": "ConsentRecord lacks unique constraint per contact/channel/type",
+      "evidence": [
+        "apps/server/src/modules/communications/consent.service.ts:26-50",
+        "packages/db/prisma/schema.prisma:11155-11171"
+      ],
+      "fix": "Add unique constraint and upsert on status change; add updatedAt column."
+    },
+    {
+      "id": "R53",
+      "severity": "medium",
+      "category": "Privacy / Consent",
+      "title": "Transactional email ignores soft-deleted contacts",
+      "evidence": [
+        "apps/server/src/modules/notifications/transactional-email.service.ts:327-344"
+      ],
+      "fix": "Add deletedAt: null to the contact lookup in the send gate."
+    },
+    {
+      "id": "R54",
+      "severity": "medium",
+      "category": "Privacy / Access Control",
+      "title": "Forget request/cancel does not validate contact deletion state",
+      "evidence": [
+        "apps/server/src/modules/crm/privacy/contact-privacy.service.ts:298-409"
+      ],
+      "fix": "Record deletion source and restrict cancellation/restoration to forget flow; reject exports of deleted contacts."
+    },
+    {
+      "id": "R55",
+      "severity": "medium",
+      "category": "Privacy / Logging",
+      "title": "AuthMiddleware writes user email to debug logs",
+      "evidence": [
+        "apps/server/src/core/auth/auth.middleware.ts:65-76"
+      ],
+      "fix": "Log only user id; never log email."
+    },
+    {
+      "id": "R56",
+      "severity": "medium",
+      "category": "Privacy / Misconfiguration",
+      "title": "Object storage uploads do not enforce private ACL or encryption",
+      "evidence": [
+        "apps/server/src/core/object-storage/objectStorage.ts:284-288, 307-314",
+        "apps/server/src/modules/crm/privacy/contact-privacy.service.ts:170-186"
+      ],
+      "fix": "Add ACL: 'private' and ServerSideEncryption: 'AES256' (or KMS) to all PutObjectCommand calls; enforce bucket policy."
+    }
+  ]
+}

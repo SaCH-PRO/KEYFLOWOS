@@ -93,6 +93,29 @@ export class BookingNoShowPayload {
   markedAt!: Date;
 }
 
+export class BookingWaitlistAddedPayload {
+  entry!: { id: string; businessId: string; contactId: string; serviceId: string; status: string };
+  businessId!: string;
+}
+
+export class BookingWaitlistSlotOfferedPayload {
+  entry!: { id: string; status: string; offeredBookingId: string | null };
+  booking!: Booking;
+  businessId!: string;
+  actorType!: 'SYSTEM' | 'USER';
+}
+
+export class BookingWaitlistConvertedPayload {
+  entry!: { id: string; status: string };
+  booking!: Booking;
+  businessId!: string;
+}
+
+export class BookingWaitlistCancelledPayload {
+  entry!: { id: string; status: string };
+  businessId!: string;
+}
+
 export class BookingInvoiceCreatedPayload {
   booking!: Booking;
   invoice!: Invoice;
@@ -677,6 +700,10 @@ export interface KeyFlowEventMap {
   'booking.cancelled': BookingCancelledPayload;
   'booking.rescheduled': BookingRescheduledPayload;
   'booking.no_show': BookingNoShowPayload;
+  'booking.waitlist.added': BookingWaitlistAddedPayload;
+  'booking.waitlist.slot_offered': BookingWaitlistSlotOfferedPayload;
+  'booking.waitlist.converted': BookingWaitlistConvertedPayload;
+  'booking.waitlist.cancelled': BookingWaitlistCancelledPayload;
   'booking.invoice_created': BookingInvoiceCreatedPayload;
   'recurring_invoice.created': RecurringInvoiceCreatedPayload;
   'recurring_invoice.updated': RecurringInvoiceUpdatedPayload;

@@ -82,7 +82,7 @@ const BUSINESS_ID_MODELS = new Set([
   'BusinessEvent', 'Evidence', 'ContentRequest',
   'ContentDeliveryPackage', 'CallLog', 'ApprovalRequest', 
   'Asset', 'Contact', 'Account', 'Deal', 'Invoice', 'Quote', 'Product',
-  'Service', 'Booking', 'StaffMember', 'Project', 'ProjectTask', 'Expense',
+  'Service', 'Booking', 'BookingWaitlistEntry', 'StaffMember', 'Project', 'ProjectTask', 'Expense',
   'SocialPost', 'EmailCampaign', 'DocumentInstance', 'Site', 'CalendarEvent',
   'ConnectorStatus', 'Automation', 
   'OutboundDelivery', 'CommandItem',

@@ -248,6 +248,7 @@ model Business {
   quotes                       Quote[]
   products                     Product[]
   bookings                     Booking[]
+  bookingWaitlistEntries       BookingWaitlistEntry[]
   contactEvents                ContactEvent[]
   publicVisitorEvents          PublicVisitorEvent[]
   publicEvents                 PublicEvent[]
@@ -2534,6 +2535,7 @@ model Contact {
   quotes                  Quote[]
   invoices                Invoice[]
   bookings                Booking[]
+  bookingWaitlistEntries  BookingWaitlistEntry[]
   events                  ContactEvent[]
   notes                   ContactNote[]
   tasks                   ContactTask[]
@@ -3700,6 +3702,7 @@ model StaffMember {
 
   services       Service[]
   bookings       Booking[]
+  bookingWaitlistEntries BookingWaitlistEntry[]
   availabilities Availability[]
 
   createdAt DateTime  @default(now()) @map("created_at")
@@ -3725,6 +3728,7 @@ model Service {
   business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
   bookings Booking[]
+  bookingWaitlistEntries BookingWaitlistEntry[]
   staff    StaffMember[] // Staff who can perform this service
 
   // Storefront → Revenue gating (S2). Determines whether a booking
@@ -3804,6 +3808,7 @@ model Booking {
   locationLatLng  Json?     @map("location_lat_lng")
   calendarEventId String?   @map("calendar_event_id")
   reminderSentAt  DateTime? @map("reminder_sent_at")
+  offeredWaitlistEntries BookingWaitlistEntry[] @relation("WaitlistOfferedBooking")
 
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
@@ -3813,6 +3818,38 @@ model Booking {
   @@index([businessId, contactId])
   @@index([businessId, orgUnitId])
   @@map("bookings")
+}
+
+model BookingWaitlistEntry {
+  id                String      @id @default(cuid())
+  businessId        String      @map("business_id")
+  business          Business    @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  contactId         String      @map("contact_id")
+  contact           Contact     @relation(fields: [contactId], references: [id], onDelete: NoAction)
+  serviceId         String      @map("service_id")
+  service           Service     @relation(fields: [serviceId], references: [id], onDelete: NoAction)
+  preferredStaffId  String?     @map("preferred_staff_id")
+  preferredStaff    StaffMember? @relation(fields: [preferredStaffId], references: [id], onDelete: SetNull)
+
+  status            String      @default("WAITING") // WAITING | OFFERED | CONVERTED | EXPIRED | CANCELLED
+  preferredDateFrom DateTime?   @map("preferred_date_from")
+  preferredDateTo   DateTime?   @map("preferred_date_to")
+  preferredTimeOfDay String?    @map("preferred_time_of_day") // morning | afternoon | evening
+  notes             String?
+  offeredBookingId  String?     @map("offered_booking_id")
+  offeredBooking    Booking?    @relation("WaitlistOfferedBooking", fields: [offeredBookingId], references: [id], onDelete: SetNull)
+  offeredAt         DateTime?   @map("offered_at")
+  convertedAt       DateTime?   @map("converted_at")
+
+  createdAt         DateTime    @default(now()) @map("created_at")
+  updatedAt         DateTime    @updatedAt @map("updated_at")
+  deletedAt         DateTime?   @map("deleted_at")
+
+  @@index([businessId, status, createdAt])
+  @@index([businessId, serviceId, status])
+  @@index([businessId, contactId, status])
+  @@index([businessId, preferredStaffId, status])
+  @@map("booking_waitlist_entries")
 }
 
 // ---

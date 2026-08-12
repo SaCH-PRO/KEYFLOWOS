@@ -14,11 +14,22 @@ import { PlanLimitGuard } from '../subscriptions/plan-limit.guard';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { TimelineModule } from '../timeline/timeline.module';
 import { BookingNoShowListener } from './booking-no-show.listener';
+import { BookingWaitlistService } from './booking-waitlist.service';
+import { BookingWaitlistListener } from './booking-waitlist.listener';
 
 @Module({
   imports: [CrmModule, PublicEventsModule, CommerceModule, SubscriptionsModule, AiModule, NotificationsModule, TimelineModule],
   controllers: [BookingsController, BookingsAiController],
-  providers: [BookingsService, BookingsAiService, CalendarService, BookingOptimizerService, PlanLimitGuard, BookingNoShowListener],
-  exports: [BookingsService, BookingsAiService, CalendarService, BookingOptimizerService],
+  providers: [
+    BookingsService,
+    BookingsAiService,
+    CalendarService,
+    BookingOptimizerService,
+    PlanLimitGuard,
+    BookingNoShowListener,
+    BookingWaitlistService,
+    BookingWaitlistListener,
+  ],
+  exports: [BookingsService, BookingsAiService, CalendarService, BookingOptimizerService, BookingWaitlistService],
 })
 export class BookingsModule {}

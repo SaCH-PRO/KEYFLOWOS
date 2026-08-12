@@ -5,6 +5,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmService } from '../crm/crm.service';
 import { CommerceService } from '../commerce/commerce.service';
 import { BookingsService } from '../bookings/bookings.service';
+import { BookingWaitlistService } from '../bookings/booking-waitlist.service';
 import { ProjectsService } from '../projects/projects.service';
 import { ActivityLogService } from '../activity/activity.service';
 import { EmailMarketingService } from '../email-marketing/email-marketing.service';
@@ -741,6 +742,9 @@ export class FlowOrchestratorService {
   }
   private getBookings() {
     return this.moduleRef.get(BookingsService, { strict: false });
+  }
+  private getWaitlist() {
+    return this.moduleRef.get(BookingWaitlistService, { strict: false });
   }
   private getProjects() {
     return this.moduleRef.get(ProjectsService, { strict: false });
@@ -3253,6 +3257,44 @@ ${triage.standingContext}`;
       case 'bookings_cancel_booking': {
         const updated = await this.getBookings().updateBookingStatus(businessId, args.bookingId, 'CANCELLED');
         return { booking: updated, id: updated.id };
+      }
+
+      case 'bookings_add_to_waitlist': {
+        const entry = await this.getWaitlist().addToWaitlist({
+          businessId,
+          contactId: args.contactId,
+          serviceId: args.serviceId,
+          preferredStaffId: args.preferredStaffId,
+          preferredDateFrom: args.preferredDateFrom,
+          preferredDateTo: args.preferredDateTo,
+          preferredTimeOfDay: args.preferredTimeOfDay,
+          notes: args.notes,
+        });
+        return { entry, id: entry.id, contactName: entry.contact.displayName || `${entry.contact.firstName} ${entry.contact.lastName}` };
+      }
+
+      case 'bookings_list_waitlist': {
+        const result = await this.getWaitlist().listWaitlist(businessId, {
+          status: args.status,
+          serviceId: args.serviceId,
+          contactId: args.contactId,
+        });
+        return { items: result.items, total: result.total };
+      }
+
+      case 'bookings_offer_waitlist_slot': {
+        const result = await this.getWaitlist().offerSlot(args.entryId, {
+          startTime: new Date(args.startTime),
+          endTime: new Date(args.endTime),
+          serviceId: args.serviceId,
+          staffId: args.staffId ?? null,
+        });
+        return { entryId: result.entry.id, bookingId: result.booking.id, booking: result.booking };
+      }
+
+      case 'bookings_cancel_waitlist_entry': {
+        const cancelled = await this.getWaitlist().cancelWaitlistEntry(businessId, args.entryId);
+        return { success: true, entryId: cancelled.id, status: cancelled.status };
       }
 
       case 'marketing_list_campaigns': {
@@ -6042,6 +6084,12 @@ ${triage.standingContext}`;
         return `Delete invoice (ID: ${args.invoiceId})`;
       case 'bookings_cancel_booking':
         return `Cancel booking (ID: ${args.bookingId})`;
+      case 'bookings_add_to_waitlist':
+        return `Add contact ${args.contactId} to waitlist for service ${args.serviceId}`;
+      case 'bookings_offer_waitlist_slot':
+        return `Offer waitlist entry ${args.entryId} the slot ${args.startTime}`;
+      case 'bookings_cancel_waitlist_entry':
+        return `Cancel waitlist entry ${args.entryId}`;
       case 'marketing_send_campaign':
         return `Send email campaign (ID: ${args.campaignId}) to all eligible contacts`;
       case 'social_publish_post':
@@ -6149,6 +6197,12 @@ ${triage.standingContext}`;
         return `Post published.`;
       case 'bookings_cancel_booking':
         return `Booking cancelled.`;
+      case 'bookings_add_to_waitlist':
+        return `Added ${result?.contactName ?? 'contact'} to the waitlist (entry ${result?.id ?? ''}).`;
+      case 'bookings_offer_waitlist_slot':
+        return `Offered slot to waitlist entry ${result?.entryId ?? ''} (booking ${result?.bookingId ?? ''}).`;
+      case 'bookings_cancel_waitlist_entry':
+        return `Waitlist entry ${result?.entryId ?? ''} cancelled.`;
       case 'crm_delete_contact':
         return `Contact deleted.`;
       case 'create_task':

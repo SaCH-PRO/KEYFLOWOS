@@ -218,6 +218,46 @@ const bookingSchema = z.object({
   }).nullable().optional(),
 });
 
+const bookingWaitlistEntrySchema = z.object({
+  id: z.string(),
+  businessId: z.string(),
+  contactId: z.string(),
+  serviceId: z.string(),
+  preferredStaffId: z.string().nullable().optional(),
+  status: z.string(),
+  preferredDateFrom: z.string().nullable().optional(),
+  preferredDateTo: z.string().nullable().optional(),
+  preferredTimeOfDay: z.string().nullable().optional(),
+  notes: z.string().nullable().optional(),
+  offeredBookingId: z.string().nullable().optional(),
+  offeredAt: z.string().nullable().optional(),
+  convertedAt: z.string().nullable().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  deletedAt: z.string().nullable().optional(),
+  contact: z.object({
+    id: z.string(),
+    firstName: z.string().nullable().optional(),
+    lastName: z.string().nullable().optional(),
+    displayName: z.string().nullable().optional(),
+  }).nullable().optional(),
+  service: z.object({
+    id: z.string(),
+    name: z.string(),
+    duration: z.number(),
+  }).nullable().optional(),
+  preferredStaff: z.object({
+    id: z.string(),
+    name: z.string(),
+  }).nullable().optional(),
+  offeredBooking: z.object({
+    id: z.string(),
+    startTime: z.string(),
+    endTime: z.string(),
+    status: z.string(),
+  }).nullable().optional(),
+});
+
 const invoiceSummarySchema = z.object({
   id: z.string(),
   status: z.string(),
@@ -275,6 +315,7 @@ export type ContactNote = z.infer<typeof noteSchema>;
 export type ContactTask = Omit<z.infer<typeof taskSchema>, "contact"> & { contact?: Contact | null };
 export type Product = z.infer<typeof productSchema>;
 export type Booking = z.infer<typeof bookingSchema>;
+export type BookingWaitlistEntry = z.infer<typeof bookingWaitlistEntrySchema>;
 export type InvoiceItem = {
   id: string;
   description: string;
@@ -2080,6 +2121,81 @@ export async function createBooking(input: {
 
   if (res.data) return res;
   return { data: null, error: res.error ?? "Failed to create booking" };
+}
+
+export async function fetchWaitlist(businessId?: string, filters?: { status?: string; serviceId?: string; contactId?: string }) {
+  const bId = businessId ?? DEFAULT_BUSINESS_ID;
+  const params = new URLSearchParams();
+  if (filters?.status) params.set('status', filters.status);
+  if (filters?.serviceId) params.set('serviceId', filters.serviceId);
+  if (filters?.contactId) params.set('contactId', filters.contactId);
+  const query = params.toString();
+  return apiGet<{ items: BookingWaitlistEntry[]; total: number }>(
+    `/bookings/businesses/${encodeURIComponent(bId)}/waitlist${query ? `?${query}` : ''}`,
+  );
+}
+
+export async function addToWaitlist(input: {
+  businessId?: string;
+  contactId: string;
+  serviceId: string;
+  preferredStaffId?: string;
+  preferredDateFrom?: string;
+  preferredDateTo?: string;
+  preferredTimeOfDay?: string;
+  notes?: string;
+}) {
+  const bId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<BookingWaitlistEntry>({
+    path: `/bookings/businesses/${encodeURIComponent(bId)}/waitlist`,
+    body: {
+      contactId: input.contactId,
+      serviceId: input.serviceId,
+      preferredStaffId: input.preferredStaffId ?? undefined,
+      preferredDateFrom: input.preferredDateFrom ?? undefined,
+      preferredDateTo: input.preferredDateTo ?? undefined,
+      preferredTimeOfDay: input.preferredTimeOfDay ?? undefined,
+      notes: input.notes ?? undefined,
+    },
+  });
+}
+
+export async function offerWaitlistSlot(
+  entryId: string,
+  input: {
+    businessId?: string;
+    startTime: string;
+    endTime: string;
+    serviceId: string;
+    staffId?: string;
+  },
+) {
+  const bId = input.businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<{ entryId: string; bookingId: string }>({
+    path: `/bookings/businesses/${encodeURIComponent(bId)}/waitlist/${encodeURIComponent(entryId)}/offer`,
+    body: {
+      startTime: input.startTime,
+      endTime: input.endTime,
+      serviceId: input.serviceId,
+      staffId: input.staffId ?? undefined,
+    },
+  });
+}
+
+export async function convertWaitlistEntry(entryId: string, businessId?: string) {
+  const bId = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<{ entryId: string; bookingId: string }>({
+    path: `/bookings/businesses/${encodeURIComponent(bId)}/waitlist/${encodeURIComponent(entryId)}/convert`,
+    body: {},
+  });
+}
+
+export async function cancelWaitlistEntry(entryId: string, businessId?: string) {
+  const bId = businessId ?? DEFAULT_BUSINESS_ID;
+  return apiPost<{ success: boolean }>({
+    path: `/bookings/businesses/${encodeURIComponent(bId)}/waitlist/${encodeURIComponent(entryId)}/cancel`,
+    body: {},
+  });
 }
 
 export async function rescheduleBooking(bookingId: string, startTime: string, businessId?: string) {

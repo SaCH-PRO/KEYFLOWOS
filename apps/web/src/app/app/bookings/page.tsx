@@ -11,6 +11,7 @@ import {
   Link2,
   BarChart3,
   Megaphone,
+  Clock,
 } from "lucide-react";
 import {
   Booking,
@@ -34,6 +35,7 @@ import {
   fetchScheduleHealth,
   getBusinessById,
   fetchOrgUnits,
+  addToWaitlist,
   OrgUnit,
 } from "@/lib/client";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
@@ -58,6 +60,7 @@ import { ScheduleHints } from "./components/schedule-hints";
 import ScheduleFilters from "./components/schedule-filters";
 import CatalogCapacityTab from "./components/catalog-capacity-tab";
 import PerformanceView from "./components/performance-view";
+import WaitlistPanel from "./components/waitlist-panel";
 import { NotesTrigger } from "@/components/keyflow/notes-trigger";
 import { ShareLinkModal } from "@/components/ui/share-link-modal";
 import { SetupModeBanner } from "@/components/ui/setup-mode-banner";
@@ -71,6 +74,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 
 const TABS: { key: Tab; label: string; icon: React.ElementType; tooltip?: string }[] = [
   { key: "schedule", label: "Schedule", icon: Calendar, tooltip: "View and manage upcoming bookings. Filter by status, date, or service." },
+  { key: "waitlist", label: "Waitlist", icon: Clock, tooltip: "Contacts waiting for a freed booking slot." },
   { key: "performance", label: "Performance", icon: BarChart3, tooltip: "Booking analytics, utilization trends, service demand, and AI insights." },
   { key: "catalog", label: "Setup", icon: Briefcase, tooltip: "Configure bookable services, staff availability, and capacity limits." },
 ];
@@ -147,6 +151,14 @@ export default function BookingsPage() {
 
   const [staffForm, setStaffForm] = useState({ name: "", email: "" });
   const [businessHoursSet, setBusinessHoursSet] = useState(false);
+  const [pendingWaitlistData, setPendingWaitlistData] = useState<{
+    contactId: string;
+    serviceId: string;
+    staffId: string;
+    startTime: string;
+    endTime: string;
+    notes?: string;
+  } | null>(null);
 
   const ai = useBookingsAiHub();
   const intelligence = useGraphIntelligence({ businessId, module: "bookings" });
@@ -154,7 +166,7 @@ export default function BookingsPage() {
   const handleBookingsAiAction = useCallback((actionKey: string) => {
     if (actionKey.startsWith("switch_tab:")) {
       const t = actionKey.replace("switch_tab:", "");
-      if (["schedule", "performance", "catalog"].includes(t)) {
+      if (["schedule", "waitlist", "performance", "catalog"].includes(t)) {
         setTab(t as Tab);
         moduleEvents.emit("module:tab_changed", "bookings", { tab: t });
       }
@@ -175,8 +187,9 @@ export default function BookingsPage() {
       groupName: "Bookings",
       shortcuts: [
         { key: "1", action: () => handleTabChange("schedule"), description: "Schedule tab" },
-        { key: "2", action: () => handleTabChange("performance"), description: "Performance tab" },
-        { key: "3", action: () => handleTabChange("catalog"), description: "Setup tab" },
+        { key: "2", action: () => handleTabChange("waitlist"), description: "Waitlist tab" },
+        { key: "3", action: () => handleTabChange("performance"), description: "Performance tab" },
+        { key: "4", action: () => handleTabChange("catalog"), description: "Setup tab" },
         { key: "n", action: () => setShowCreateBooking(true), description: "New booking" },
         { key: "r", action: () => void loadData(), description: "Refresh data" },
         { key: "Escape", action: () => {
@@ -306,7 +319,29 @@ export default function BookingsPage() {
         locationPlaceId: data.locationPlaceId || undefined,
         locationLatLng: data.locationLatLng || undefined,
       });
-      if (error) { setFormError(error); return; }
+      if (error) {
+        const lower = error.toLowerCase();
+        const isConflict =
+          lower.includes("conflict") ||
+          lower.includes("unavailable") ||
+          lower.includes("outside") ||
+          lower.includes("closed") ||
+          lower.includes("not available");
+        if (isConflict) {
+          setPendingWaitlistData({
+            contactId: data.contactId,
+            serviceId: data.serviceId,
+            staffId: data.staffId,
+            startTime,
+            endTime,
+            notes: data.notes,
+          });
+          setFormError(`${error} You can add this request to the waitlist instead.`);
+        } else {
+          setFormError(error);
+        }
+        return;
+      }
       if (result) {
         if (bookingTaskIdRef.current) { markTaskCompleted(bookingTaskIdRef.current); bookingTaskIdRef.current = null; }
         await loadData();
@@ -330,6 +365,34 @@ export default function BookingsPage() {
         } else {
           setBanner({ text: "Booking created successfully!", type: "success" });
         }
+      }
+    } finally {
+      setBookingSaving(false);
+    }
+  }
+
+  async function handleAddToWaitlistFromConflict() {
+    if (!businessId || !pendingWaitlistData) return;
+    setBookingSaving(true);
+    try {
+      const start = new Date(pendingWaitlistData.startTime);
+      const res = await addToWaitlist({
+        businessId,
+        contactId: pendingWaitlistData.contactId,
+        serviceId: pendingWaitlistData.serviceId,
+        preferredStaffId: pendingWaitlistData.staffId,
+        preferredDateFrom: start.toISOString(),
+        preferredDateTo: pendingWaitlistData.endTime,
+        notes: pendingWaitlistData.notes,
+      });
+      if (res.data) {
+        setBanner({ text: "Added to waitlist. We'll offer the first matching freed slot.", type: "success" });
+        setShowCreateBooking(false);
+        setPendingWaitlistData(null);
+        setFormError(null);
+        setTab("waitlist");
+      } else {
+        setFormError(res.error ?? "Failed to add to waitlist");
       }
     } finally {
       setBookingSaving(false);
@@ -737,6 +800,13 @@ export default function BookingsPage() {
               scheduleHealth={scheduleHealth}
             />
           )}
+          {tab === "waitlist" && businessId && (
+            <WaitlistPanel
+              businessId={businessId}
+              services={services}
+              staff={staff}
+            />
+          )}
           {tab === "catalog" && (
             <div data-walkthrough="bookings-catalog">
             <CatalogCapacityTab
@@ -765,11 +835,13 @@ export default function BookingsPage() {
             staff={staff}
             contacts={contacts}
             onSubmit={handleCreateBooking}
-            onClose={() => { setShowCreateBooking(false); setPrefillDate(undefined); setPrefillTime(undefined); setPrefillContactId(undefined); setFormError(null); }}
+            onClose={() => { setShowCreateBooking(false); setPrefillDate(undefined); setPrefillTime(undefined); setPrefillContactId(undefined); setFormError(null); setPendingWaitlistData(null); }}
             formError={formError}
             defaultDate={prefillDate}
             defaultTime={prefillTime}
             defaultContactId={prefillContactId}
+            showWaitlistOption={!!pendingWaitlistData}
+            onAddToWaitlist={handleAddToWaitlistFromConflict}
             saving={bookingSaving}
           />
         )}

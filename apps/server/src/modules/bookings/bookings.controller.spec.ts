@@ -4,6 +4,7 @@ import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BookingsController } from './bookings.controller';
 import { BookingsService } from './bookings.service';
+import { BookingWaitlistService } from './booking-waitlist.service';
 import { CalendarService } from './calendar.service';
 import { BookingOptimizerService } from './booking-optimizer.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
@@ -72,6 +73,17 @@ describe('BookingsController — Google Calendar two-way editing', () => {
             publicCreateBooking: vi.fn(),
             getReminderSettings: vi.fn(),
             updateReminderSettings: vi.fn(),
+          },
+        },
+        {
+          provide: BookingWaitlistService,
+          useValue: {
+            addToWaitlist: vi.fn(),
+            listWaitlist: vi.fn(),
+            offerSlot: vi.fn(),
+            convertWaitlistEntry: vi.fn(),
+            cancelWaitlistEntry: vi.fn(),
+            previewMatchesForSlot: vi.fn(),
           },
         },
         {

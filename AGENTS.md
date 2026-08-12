@@ -123,3 +123,38 @@ git commit --amend --no-edit
 - Legacy `/app/profile?tab=business-genome` (without a `section`) redirects to `/app/genome`.
 - Deep links with `?section=...` still render the advanced panels inside the profile tab for now.
 - Navigation links in Command Center, Strategy/Build menus, onboarding, and KEY autonomy now point to `/app/genome`.
+
+# Codebase Architect Policy
+
+This repository uses the `codebase-architect` agent skill. The skill lives in `.agents/skills/codebase-architect/` and the canonical architecture memory lives in `/architecture/`.
+
+## Rule: MAP BEFORE MODIFYING
+
+For any significant change — adding/removing/renaming a module, service, controller, router, package, public interface, domain event, external integration, or Prisma entity — consult or update the architecture memory first. Significant changes must not be made from memory alone.
+
+## Architecture Memory
+
+- `/architecture/system-overview.md` — high-level system, stack, entry points.
+- `/architecture/repository-map.md` — directory tree and per-file responsibilities.
+- `/architecture/dependency-map.md` — major import/dependency relationships.
+- `/architecture/execution-paths.md` — major execution pathways.
+- `/architecture/data-model.md` — database entities and key data flows.
+- `/architecture/module-registry.md` — proposed domain modules.
+- `/architecture/architecture-risks.md` — ranked risks and hotspots.
+- `/architecture/target-architecture.md` — target direction.
+- `/architecture/migration-plan.md` — living migration plan.
+- `/architecture/architecture.json` — machine-readable graph.
+
+## Deterministic Scanners
+
+Use the provided Python scripts to keep the map accurate:
+
+- `.agents/skills/codebase-architect/scripts/inventory.py`
+- `.agents/skills/codebase-architect/scripts/dependency_scan.py`
+
+Both scripts use the standard library only, exclude build/vendor/runtime artifacts, and emit deterministic JSON.
+
+## Update Discipline
+
+After any architecture-affecting change, re-run the scanners and update the relevant `/architecture/` documents. The map must reflect the code.
+
