@@ -90,6 +90,44 @@ Ten more procedures (all of `key-connector.ts`) call `assertBusinessRole`, which
 reads `ctx.business` — populated from `req.business`, which nothing in
 `apps/server` assigns. They fail closed for every caller.
 
+## The web client calls API paths that do not exist
+
+Nothing checks that the paths in `apps/web/src/lib` match the server's routes.
+They are strings on both sides, so a renamed resource or a dropped controller
+prefix compiles, ships, and 404s.
+
+Confirmed against production by probing unauthenticated — **401 means the route
+exists and wants a token, 404 means there is no such route**. Controls behaved
+correctly (`/webhooks/health` → 200, `/definitely/not/a/route` → 404):
+
+| Client called | Result | Server actually serves |
+|---|:--:|---|
+| `/businesses/:id/call-tasks` | 404 | `/businesses/:id/calls` |
+| `/businesses/:id/webhooks` | 404 | `/webhooks/businesses/:id/webhooks` |
+| `/ai/businesses/:id/agent-config` | 404 | `/ai/businesses/:id/ai/agent-config` |
+
+Those three clusters — 16 client calls, the whole webhook settings UI, the KEY
+agent config screen and every call-task action — are fixed. Each corrected path
+was re-probed and now returns 401.
+
+**Ten more are confirmed 404 and left alone**, because the fix is a judgement
+about which side is right and some may be unbuilt features rather than typos:
+`/businesses/:id/team`, `/expenses/businesses/:id`,
+`/flow/businesses/:id/cockpit`, `/flow/businesses/:id/search`,
+`/whatsapp/businesses/:id/status`, `/whatsapp/businesses/:id/templates`,
+`/device/businesses/:id/voice-preferences`,
+`/device/businesses/:id/voice-sessions`, `/connect/businesses/:id/:provider/status`,
+`/commerce/businesses/:id/recurring-invoices/:id/history`.
+
+**No gate ships for this.** The static comparison reached 27 remaining
+candidates, and probing showed 5 of 18 were false alarms — a client path with a
+literal in a dynamic position (`/businesses/me/providers`,
+`/businesses/system/templates`) does not match the server's `:businessId`. A
+28% false-positive rate would get the gate disabled inside a week, and a
+disabled gate is worse than none. The measurement lives in the session
+scratchpad; making it trustworthy means resolving literal-vs-parameter segments,
+not lowering the bar.
+
 ## How the server is entered
 
 | Entry point | Count | Tenant context? |

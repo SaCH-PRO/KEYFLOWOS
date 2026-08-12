@@ -8252,13 +8252,13 @@ export interface WebhookConfig {
   createdAt: string;
 }
 export async function fetchWebhooks(businessId: string): Promise<ApiResult<WebhookConfig[]>> {
-  return apiGetSimple<WebhookConfig[]>(`/businesses/${encodeURIComponent(businessId)}/webhooks`);
+  return apiGetSimple<WebhookConfig[]>(`/webhooks/businesses/${encodeURIComponent(businessId)}/webhooks`);
 }
 export async function createWebhook(businessId: string, data: { url: string; events: string[]; name?: string }): Promise<ApiResult<WebhookConfig>> {
-  return apiPost<WebhookConfig>({ path: `/businesses/${encodeURIComponent(businessId)}/webhooks`, body: data });
+  return apiPost<WebhookConfig>({ path: `/webhooks/businesses/${encodeURIComponent(businessId)}/webhooks`, body: data });
 }
 export async function deleteWebhook(businessId: string, webhookId: string): Promise<ApiResult<void>> {
-  return apiDelete<void>(`/businesses/${encodeURIComponent(businessId)}/webhooks/${webhookId}`);
+  return apiDelete<void>(`/webhooks/businesses/${encodeURIComponent(businessId)}/webhooks/${webhookId}`);
 }
 export interface WebhookDeliveryLog {
   id: string;
@@ -8274,13 +8274,13 @@ export interface WebhookDeliveryLog {
   timestamp: string;
 }
 export async function testWebhook(businessId: string, webhookId: string): Promise<ApiResult<WebhookDeliveryLog>> {
-  return apiPost<WebhookDeliveryLog>({ path: `/businesses/${encodeURIComponent(businessId)}/webhooks/${webhookId}/test`, body: {} });
+  return apiPost<WebhookDeliveryLog>({ path: `/webhooks/businesses/${encodeURIComponent(businessId)}/webhooks/${webhookId}/test`, body: {} });
 }
 export async function fetchWebhookDeliveries(businessId: string, webhookId: string, limit = 20): Promise<ApiResult<WebhookDeliveryLog[]>> {
-  return apiGetSimple<WebhookDeliveryLog[]>(`/businesses/${encodeURIComponent(businessId)}/webhooks/${webhookId}/deliveries?limit=${limit}`);
+  return apiGetSimple<WebhookDeliveryLog[]>(`/webhooks/businesses/${encodeURIComponent(businessId)}/webhooks/${webhookId}/deliveries?limit=${limit}`);
 }
 export async function toggleWebhook(businessId: string, webhookId: string, isActive: boolean): Promise<ApiResult<{ success: boolean; isActive: boolean }>> {
-  return apiPost<{ success: boolean; isActive: boolean }>({ path: `/businesses/${encodeURIComponent(businessId)}/webhooks/${webhookId}/toggle`, body: { isActive } });
+  return apiPost<{ success: boolean; isActive: boolean }>({ path: `/webhooks/businesses/${encodeURIComponent(businessId)}/webhooks/${webhookId}/toggle`, body: { isActive } });
 }
 
 // ---
@@ -14136,20 +14136,20 @@ export async function fetchCallLogs(
   if (opts?.status) params.set("status", opts.status);
   if (opts?.date) params.set("date", opts.date);
   return apiGetSimple<CallLog[]>(
-    `/businesses/${encodeURIComponent(businessId)}/call-tasks?${params.toString()}`
+    `/businesses/${encodeURIComponent(businessId)}/calls?${params.toString()}`
   );
 }
 
 export async function fetchScheduledCalls(businessId: string, date?: string) {
   const params = date ? `?date=${encodeURIComponent(date)}` : "";
   return apiGetSimple<CallLog[]>(
-    `/businesses/${encodeURIComponent(businessId)}/call-tasks/scheduled${params}`
+    `/businesses/${encodeURIComponent(businessId)}/calls/scheduled/today${params}`
   );
 }
 
 export async function fetchCallLog(businessId: string, callId: string) {
   return apiGetSimple<CallLog>(
-    `/businesses/${encodeURIComponent(businessId)}/call-tasks/${encodeURIComponent(callId)}`
+    `/businesses/${encodeURIComponent(businessId)}/calls/${encodeURIComponent(callId)}`
   );
 }
 
@@ -14168,7 +14168,7 @@ export async function createCallTask(
   }
 ) {
   return apiPostSimple<CallLog>(
-    `/businesses/${encodeURIComponent(businessId)}/call-tasks`,
+    `/businesses/${encodeURIComponent(businessId)}/calls`,
     data
   );
 }
@@ -14185,7 +14185,7 @@ export async function completeCallTask(
   }
 ) {
   return apiPostSimple<CallLog>(
-    `/businesses/${encodeURIComponent(businessId)}/call-tasks/${encodeURIComponent(callId)}/complete`,
+    `/businesses/${encodeURIComponent(businessId)}/calls/${encodeURIComponent(callId)}/complete`,
     data
   );
 }
@@ -14221,7 +14221,7 @@ export async function createFollowUpCallTask(
   script?: string
 ) {
   return apiPostSimple<CallLog>(
-    `/businesses/${encodeURIComponent(businessId)}/call-tasks/${encodeURIComponent(callId)}/follow-up`,
+    `/businesses/${encodeURIComponent(businessId)}/calls/${encodeURIComponent(callId)}/follow-up`,
     { scheduledAt, script }
   );
 }
@@ -14237,14 +14237,14 @@ export async function updateCallTask(
   }>
 ) {
   return apiPatch<CallLog>(
-    `/businesses/${encodeURIComponent(businessId)}/call-tasks/${encodeURIComponent(callId)}`,
+    `/businesses/${encodeURIComponent(businessId)}/calls/${encodeURIComponent(callId)}`,
     data
   );
 }
 
 export async function deleteCallTask(businessId: string, callId: string) {
   return apiDelete<CallLog>(
-    `/businesses/${encodeURIComponent(businessId)}/call-tasks/${encodeURIComponent(callId)}`
+    `/businesses/${encodeURIComponent(businessId)}/calls/${encodeURIComponent(callId)}`
   );
 }
 

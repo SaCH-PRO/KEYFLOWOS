@@ -18,9 +18,9 @@ export interface KeyAgentConfig {
 }
 
 export async function fetchAgentConfig(businessId: string) {
-  return apiGet<KeyAgentConfig>(`/ai/businesses/${businessId}/agent-config`);
+  return apiGet<KeyAgentConfig>(`/ai/businesses/${businessId}/ai/agent-config`);
 }
 
 export async function updateAgentConfig(businessId: string, body: Partial<KeyAgentConfig>) {
-  return apiPut<KeyAgentConfig>(`/ai/businesses/${businessId}/agent-config`, body);
+  return apiPut<KeyAgentConfig>(`/ai/businesses/${businessId}/ai/agent-config`, body);
 }
