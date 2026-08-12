@@ -82,6 +82,15 @@ const mockAiUsage = {
 describe('StorefrontIntelligenceService', () => {
   beforeEach(() => {
     process.env.PRESENCE_INSIGHTS_AI = '0'; // force template-only path
+    // `failingGateway` is a module-level spy shared by every test in this file,
+    // and one of them deliberately calls it. Without clearing the history,
+    // `expect(failingGateway.complete).not.toHaveBeenCalled()` below is really
+    // asserting "the test that calls it has not run yet" — true in the default
+    // order, false under sequence.shuffle.
+    //
+    // clearAllMocks, not resetAllMocks: the gateway's mockImplementation is what
+    // makes it fail on demand, and reset would strip it.
+    vi.clearAllMocks();
   });
 
   it('regenerate returns deterministic snapshot with template narrative when AI is disabled', async () => {

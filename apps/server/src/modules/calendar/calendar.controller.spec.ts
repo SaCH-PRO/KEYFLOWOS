@@ -1,7 +1,7 @@
 import { Test } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CalendarController } from './calendar.controller';
 import { CalendarQueryService } from './calendar-query.service';
@@ -292,7 +292,23 @@ describe('CalendarController', () => {
     });
     app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
     await app.init();
+  });
 
+  /**
+   * Reseeded per test, not once.
+   *
+   * These three events were pushed in beforeAll, and `DELETE /events/evt_content`
+   * further down soft-deletes one of them. In the default file order the agenda
+   * test runs first and sees three; under sequence.shuffle the delete can run
+   * first and it sees two. The suite was green only because vitest happened to
+   * order it favourably — `expect(res.body.events).toHaveLength(3)` was really
+   * asserting "no earlier test has mutated the fixture yet".
+   *
+   * The Nest app stays in beforeAll because building it per test is the
+   * expensive part; only the data resets.
+   */
+  beforeEach(() => {
+    prismaMock.events.length = 0;
     prismaMock.events.push(
       makeEvent({
         id: 'evt_booking',
