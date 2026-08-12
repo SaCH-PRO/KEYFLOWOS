@@ -28,8 +28,8 @@ which is the part most likely to save you time.
 | KEY tools | **286** | parse `name:` out of `flow-tool-registry.ts` (do **not** grep-count) |
 | Web pages | **251** | `find apps/web/src/app -name page.tsx \| wc -l` |
 | Migrations | **19** | `find packages/db/prisma/migrations -name migration.sql \| wc -l` |
-| Spec/test files | **400** | `find apps/server/{src,test} -name '*.spec.ts' -o -name '*.test.ts'` |
-| Server tests | **3,652**, 0 skipped | `cd apps/server && npx vitest run` |
+| Spec/test files | **405** | `find apps/server/{src,test} -name '*.spec.ts' -o -name '*.test.ts'` |
+| Server tests | **3,694**, 0 skipped | `cd apps/server && npx vitest run` |
 | Web tests | **180** in 17 files | `cd apps/web && npx vitest run` |
 | Tests in `packages/*` | **0** | none of the four packages has a test script |
 | Routes mapped at boot | **2,179** | `docker logs keyflowos-api-1 \| grep -c 'Mapped {'` |
@@ -283,10 +283,21 @@ without measuring.
 CI runs `vitest run` against the default config, so the speedup is local only
 until the pipeline splits `test:unit` from `test:integration`.
 
-**Two spec files depend on execution order** and pass only because the default
-file order suits them: `calendar.controller.spec.ts` and
-`storefront-intelligence.service.spec.ts`. They fail under `sequence.shuffle`
-with isolation on or off, and pass alone.
+**Both order-dependent specs are fixed and `sequence.shuffle` is now on** for the
+unit config. `calendar.controller.spec.ts` seeded three fixture events once in
+`beforeAll` while a later test soft-deleted one, so `toHaveLength(3)` meant "the
+delete test has not run yet". `storefront-intelligence.service.spec.ts` shared a
+module-level spy that one test deliberately calls, so `not.toHaveBeenCalled()`
+meant the same thing. Neither was caused by `isolate: false` — both failed with
+isolation on.
+
+Five consecutive shuffled runs pass; removing the calendar reseed fails 6/6. A
+shuffled failure is reproducible: vitest prints `Running tests with seed "<n>"`
+and `--sequence.seed=<n>` replays it. **Quote the seed when reporting one.**
+
+This affects `pnpm test:unit` only. CI runs `vitest run` against the default
+config, which is untouched — shuffling that would reorder integration tests
+sharing one live Postgres, which is a larger question.
 
 ---
 
