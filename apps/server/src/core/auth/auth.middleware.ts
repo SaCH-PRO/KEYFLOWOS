@@ -96,28 +96,71 @@ export class AuthMiddleware implements NestMiddleware {
     next();
   }
 
-  private async resolveLocalUser(userId: string) {
+  /**
+   * Decide whether a Supabase-verified token may be attached to the request.
+   *
+   * NO LOCAL ROW IS NOT THE SAME AS A REVOKED USER, AND CONFLATING THEM BROKE
+   * EVERY NEW SIGNUP.
+   *
+   * The version that shipped in 7d6fd587 rejected on `!dbUser`. That looks
+   * right and is not, because of the order things happen in:
+   *
+   *   1. POST /identity/signup       creates the SUPABASE user, and no local row
+   *   2. POST /identity/bootstrap    creates the local row
+   *
+   * Step 2 needs an attached user to get past AuthGuard, and step 2 is the only
+   * thing that creates the row the middleware was demanding. So a brand-new
+   * account could never complete: bootstrap answered 401 "Authentication
+   * required", the signup page surfaced that error and returned, and the user
+   * was stranded on the form with a working account they could not reach.
+   *
+   * Measured in production: signup logged `success / reason: session` at
+   * 17:52:45 while the browser showed "authentication required" — the server
+   * and the screen disagreeing, which is the defect class this codebase keeps
+   * producing.
+   *
+   * The predecessor (`attachRole`) got this right by accident: it read the row
+   * only to pick up a role and defaulted to USER when there was none.
+   *
+   * So the three states are now distinguished:
+   *
+   *   row absent          -> a user who has not bootstrapped yet. ATTACH, role
+   *                          USER. They can reach bootstrap and nothing else
+   *                          meaningful, since every business-scoped route
+   *                          needs a membership they do not have yet.
+   *   row deleted/banned  -> REJECT.
+   *   revocation marker   -> REJECT, whether or not a row exists — checked
+   *                          first, so a purged-then-revoked user cannot slip
+   *                          through the absent-row branch.
+   */
+  private async resolveLocalUser(userId: string): Promise<{ role: string } | null> {
     if (!this.prisma?.client) {
       return null;
     }
 
     try {
-      const dbUser = await this.prisma.client.user.findUnique({
-        where: { id: userId },
-        select: { role: true, deletedAt: true, bannedAt: true },
-      });
-
-      if (!dbUser || dbUser.deletedAt || dbUser.bannedAt) {
-        return null;
-      }
-
+      // Revocation is checked BEFORE the row lookup on purpose: it must apply
+      // to the no-row case too, or logging out would stop protecting a user
+      // whose row was later hard-deleted.
       const revoked = await this.redis.get(`auth:revoked:user:${userId}`);
       if (revoked) {
         return null;
       }
 
-      return dbUser;
+      const dbUser = await this.prisma.client.user.findUnique({
+        where: { id: userId },
+        select: { role: true, deletedAt: true, bannedAt: true },
+      });
+
+      if (dbUser && (dbUser.deletedAt || dbUser.bannedAt)) {
+        return null;
+      }
+
+      // No row yet — the bootstrap case. Default role, exactly as attachRole did.
+      return { role: dbUser?.role ?? 'USER' };
     } catch (lookupErr) {
+      // Fail closed. A Redis or database outage rejects rather than waves
+      // everyone through.
       this.logger.debug(`Local user lookup failed: ${(lookupErr as Error).message}`);
       return null;
     }

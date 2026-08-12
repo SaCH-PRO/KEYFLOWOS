@@ -143,6 +143,61 @@ describe('AuthMiddleware (post-bypass-removal)', () => {
     expect(mockRedis.get).toHaveBeenCalledWith('auth:revoked:user:u1');
   });
 
+  /**
+   * The bug this suite failed to catch, and the reason it failed to catch it.
+   *
+   * `makeMiddleware` above always resolves findUnique to a row. So every test
+   * here ran as an already-bootstrapped user, and the one case that matters for
+   * signup — NO ROW YET — was never exercised. 7d6fd587 rejected on `!dbUser`
+   * and shipped green.
+   *
+   * In production that meant: signup creates the Supabase user, the client calls
+   * /identity/bootstrap to create the local row, the middleware rejects because
+   * there is no local row, and bootstrap is the only thing that creates one.
+   * Every new account was stranded on the signup form, looking at
+   * "Authentication required", with a working login it never learned about.
+   */
+  describe('a user who has not bootstrapped yet', () => {
+    function withNoLocalRow(revoked: string | null = null) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test mock
+      const supabaseAuth: any = {
+        getUserFromToken: vi.fn().mockResolvedValue({ id: 'new_user', email: 'new@b.com' }),
+      };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- test mock
+      const prisma: any = { client: { user: { findUnique: vi.fn().mockResolvedValue(null) } } };
+      const redis = { get: vi.fn().mockResolvedValue(revoked), set: () => Promise.resolve('OK') } as any;
+      return new AuthMiddleware(supabaseAuth, prisma, redis);
+    }
+
+    it('is attached, so it can reach /identity/bootstrap', async () => {
+      const mw = withNoLocalRow();
+      const req = makeReq({ headers: { authorization: 'Bearer t' } });
+      await mw.use(req, res, next);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inspecting augmented Request
+      const user = (req as any).user;
+      expect(user, 'a brand-new account cannot bootstrap, so it cannot sign up').toBeTruthy();
+      expect(user.id).toBe('new_user');
+    });
+
+    it('gets the default role, not an elevated one', async () => {
+      const mw = withNoLocalRow();
+      const req = makeReq({ headers: { authorization: 'Bearer t' } });
+      await mw.use(req, res, next);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inspecting augmented Request
+      expect((req as any).user.role).toBe('USER');
+    });
+
+    it('is STILL rejected when the token has been revoked', async () => {
+      // The absent-row branch must not become a way around logout. Revocation
+      // is checked before the row lookup precisely so this holds.
+      const mw = withNoLocalRow('1');
+      const req = makeReq({ headers: { authorization: 'Bearer t' } });
+      await mw.use(req, res, next);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- inspecting augmented Request
+      expect((req as any).user, 'a revoked token was accepted because no row existed').toBeUndefined();
+    });
+  });
+
   it('ignores legacy dev sentinel tokens (no special handling)', async () => {
     // The middleware just forwards the token to Supabase; sentinel tokens
     // will fail Supabase verification and result in no user attached.
