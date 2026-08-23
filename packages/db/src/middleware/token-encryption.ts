@@ -8,11 +8,32 @@ function getCrypto() {
   return crypto;
 }
 
+// The precedence chain, named once. getDerivedKey() and any external witness
+// (the diagnostics key-source check) must agree on which env var is in force;
+// a second hand-written copy of this order silently drifts, and the crypto
+// production guard is gated on that witness reading `pass`.
+const KEY_ENV_CHAIN = [
+  'CONNECTOR_CREDENTIALS_KEY',
+  'CREDENTIALS_ENCRYPTION_KEY',
+  'JWT_SECRET',
+] as const;
+
+export type TokenEncryptionKeyVar = (typeof KEY_ENV_CHAIN)[number];
+
+/**
+ * Which env var this module's key derivation actually consults right now, or
+ * null when none is set (the in-repo dev fallback). Derived from the SAME
+ * chain getDerivedKey() uses, so a witness can never name a variable the
+ * encryption layer no longer honors.
+ */
+export function tokenEncryptionKeySource(): TokenEncryptionKeyVar | null {
+  return KEY_ENV_CHAIN.find((k) => process.env[k]) ?? null;
+}
+
 function getDerivedKey(): Buffer {
-  const secret =
-    process.env.CONNECTOR_CREDENTIALS_KEY ||
-    process.env.CREDENTIALS_ENCRYPTION_KEY ||
-    process.env.JWT_SECRET;
+  const secret = tokenEncryptionKeySource()
+    ? process.env[tokenEncryptionKeySource() as TokenEncryptionKeyVar]
+    : undefined;
   if (!secret) {
     const { scryptSync } = getCrypto();
     return scryptSync('dev-only-local-key-not-for-production', 'keyflow-token-salt-v1', 32);

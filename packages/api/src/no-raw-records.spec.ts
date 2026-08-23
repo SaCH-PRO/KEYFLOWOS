@@ -67,6 +67,41 @@ function tsFiles(dir: string): string[] {
   return out;
 }
 
+/**
+ * Blank out // and block comments, preserving string contents and byte
+ * offsets (comments become spaces, not deletions). Without this, a
+ * commented-out `select:` inside a call's argument span reads as a real
+ * select — silently acknowledging a leak in the gate built to catch leaks —
+ * and a commented-out query invents a phantom call site. Offsets are
+ * preserved so the model/method regex still points at real code.
+ */
+function stripComments(src: string): string {
+  const out = src.split('');
+  let state: 'code' | 'sq' | 'dq' | 'tpl' | 'line' | 'block' = 'code';
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i];
+    const n = i + 1 < src.length ? src[i + 1] : '';
+    if (state === 'code') {
+      if (c === '/' && n === '/') { state = 'line'; out[i] = out[i + 1] = ' '; i++; continue; }
+      if (c === '/' && n === '*') { state = 'block'; out[i] = out[i + 1] = ' '; i++; continue; }
+      if (c === "'") state = 'sq';
+      else if (c === '"') state = 'dq';
+      else if (c === '`') state = 'tpl';
+      continue;
+    }
+    if (state === 'line') { if (c === '\n') state = 'code'; else out[i] = ' '; continue; }
+    if (state === 'block') {
+      if (c === '*' && n === '/') { state = 'code'; out[i] = out[i + 1] = ' '; i++; }
+      else if (c !== '\n') out[i] = ' ';
+      continue;
+    }
+    // inside a string literal
+    if (c === '\\') { i++; continue; }
+    if ((state === 'sq' && c === "'") || (state === 'dq' && c === '"') || (state === 'tpl' && c === '`')) state = 'code';
+  }
+  return out.join('');
+}
+
 /** Capture a call's argument span by depth counting, string-aware. */
 function argSpan(src: string, openParen: number): string {
   let depth = 0;
@@ -94,7 +129,7 @@ function scan(): { sites: CallSite[]; filesScanned: number } {
   const sites: CallSite[] = [];
   const files = tsFiles(SRC);
   for (const f of files) {
-    const src = fs.readFileSync(f, 'utf8');
+    const src = stripComments(fs.readFileSync(f, 'utf8'));
     const rel = path.relative(SRC, f).split(path.sep).join('/');
     const offendersPerKey: Record<string, number> = {};
     const re = new RegExp(`\\.(${SECRET_MODELS.join('|')})\\.(${METHODS.join('|')})\\s*\\(`, 'g');
@@ -147,5 +182,27 @@ describe('no raw secret-model records cross the tRPC boundary', () => {
       'acknowledged entries that are no longer select-less (fixed or deleted) — remove them ' +
         'so the ledger keeps meaning what it says',
     ).toEqual([]);
+  });
+
+  it('a commented-out select: does not satisfy the gate (comment-strip control)', () => {
+    // The masked-leak case: a select-less query whose only `select:` sits in a
+    // comment. Before stripComments this read as covered. detect() reproduces
+    // scan()'s per-call logic on a synthetic source.
+    const detect = (call: string) => {
+      const clean = stripComments(call);
+      const re = /\.(socialConnection)\.(findMany)\s*\(/g;
+      const m = re.exec(clean)!;
+      return /\bselect\s*:/.test(argSpan(clean, re.lastIndex - 1));
+    };
+    expect(detect('ctx.db.socialConnection.findMany({ where: { businessId } })')).toBe(false);
+    expect(detect('ctx.db.socialConnection.findMany({ /* select: {id:true} later */ where: { businessId } })')).toBe(false);
+    expect(detect('ctx.db.socialConnection.findMany({ where: { businessId }, // select: pending\n })')).toBe(false);
+    // A real select still passes — the control must not over-correct.
+    expect(detect('ctx.db.socialConnection.findMany({ select: { id: true }, where: { businessId } })')).toBe(true);
+  });
+
+  it('a commented-out query is not counted as a call site', () => {
+    const clean = stripComments('// const x = ctx.db.business.findMany({ where: {} })');
+    expect(/\.business\.findMany\s*\(/.test(clean)).toBe(false);
   });
 });

@@ -1,5 +1,6 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { tokenEncryptionKeySource } from '@keyflow/db';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { QueueService } from '../ai/queue.service';
 import { BusinessEventQueueService } from '../business-events/business-event.queue';
@@ -250,13 +251,12 @@ export class DiagnosticsService {
    */
   async checkTokenEncryptionKeySource(): Promise<CheckResult> {
     const start = Date.now();
-    const source = process.env.CONNECTOR_CREDENTIALS_KEY
-      ? 'CONNECTOR_CREDENTIALS_KEY'
-      : process.env.CREDENTIALS_ENCRYPTION_KEY
-        ? 'CREDENTIALS_ENCRYPTION_KEY'
-        : process.env.JWT_SECRET
-          ? 'JWT_SECRET'
-          : null;
+    // Ask the encryption layer which key it actually derives from — never a
+    // second copy of the precedence chain. A witness that could name a
+    // different variable than getDerivedKey() consults would greenlight the
+    // production guard on false evidence, the exact failure the sequencing
+    // exists to avoid.
+    const source = tokenEncryptionKeySource();
     const prod = process.env.NODE_ENV === 'production';
     return {
       name: 'Token Encryption Key Source',

@@ -59,6 +59,37 @@ function readScripts(pkgDir: string): Record<string, string> {
   return JSON.parse(fs.readFileSync(p, 'utf8')).scripts ?? {};
 }
 
+/**
+ * The pnpm --filter map, DERIVED from the workspace instead of hard-coded.
+ * A hard-coded map fails the inverse way this gate is supposed to work: add a
+ * real package, document it truthfully (`pnpm --filter @keyflow/ui test`), and
+ * a stale map calls the TRUE claim false — breeding the reflexive ignore
+ * markers the header warns about. Reading pnpm-workspace.yaml's globs keeps
+ * the gate tracking the workspace, not a snapshot of it. Each package is
+ * addressable by both its package.json `name` and its directory basename,
+ * because docs use both forms (`--filter server`, `--filter @keyflow/db`).
+ */
+function workspaceFilterMap(): Record<string, Record<string, string>> {
+  const wsRaw = fs.readFileSync(path.join(REPO, 'pnpm-workspace.yaml'), 'utf8');
+  const globs = [...wsRaw.matchAll(/^\s*-\s*['"]?([^'"\n]+?)['"]?\s*$/gm)].map((m) => m[1]);
+  const map: Record<string, Record<string, string>> = {};
+  for (const glob of globs) {
+    const base = glob.replace(/\/\*$/, '');
+    const baseDir = path.join(REPO, base);
+    if (!glob.endsWith('/*') || !fs.existsSync(baseDir)) continue;
+    for (const entry of fs.readdirSync(baseDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const pkgJson = path.join(baseDir, entry.name, 'package.json');
+      if (!fs.existsSync(pkgJson)) continue;
+      const pkg = JSON.parse(fs.readFileSync(pkgJson, 'utf8'));
+      const scripts = pkg.scripts ?? {};
+      if (pkg.name) map[pkg.name] = scripts;
+      map[entry.name] = scripts; // directory basename form
+    }
+  }
+  return map;
+}
+
 describe('the DOC_DEBT ledger is well-formed and names no ghosts', () => {
   const { rows, raw } = parseLedger();
 
@@ -93,13 +124,7 @@ describe('gated docs make only true mechanical claims', () => {
   const rootScripts = readScripts('.');
   const serverScripts = readScripts('apps/server');
   const webScripts = readScripts('apps/web');
-  const filterable: Record<string, Record<string, string>> = {
-    server: serverScripts,
-    web: webScripts,
-    '@keyflow/shared': readScripts('packages/shared'),
-    '@keyflow/db': readScripts('packages/db'),
-    '@keyflow/api': readScripts('packages/api'),
-  };
+  const filterable = workspaceFilterMap();
 
   const docs = GATED_DOCS.map((d) => ({ doc: d, text: fs.readFileSync(path.join(REPO, d), 'utf8') }));
 

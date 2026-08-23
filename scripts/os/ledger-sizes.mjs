@@ -30,21 +30,49 @@ const LEDGERS = [
   { name: 'web.known_fabricated', file: 'apps/web/src/lib/__tests__/no-fabricated-screens.spec.ts', constant: 'KNOWN_FABRICATED', kind: 'strings', direction: 'shrink' },
   { name: 'trpc.unchecked', file: 'apps/server/src/trpc.module.spec.ts', constant: 'ACKNOWLEDGED_UNCHECKED', kind: 'record-keys', direction: 'shrink' },
   { name: 'ai.handler_coverage_floor_pct', file: 'apps/server/src/modules/ai/handler-coverage-ratchet.spec.ts', constant: 'FLOOR_PCT', kind: 'number', direction: 'grow' },
+  // Markdown-table ledgers (kind 'md-rows'): the row count of the one table in
+  // the file. STATE.md's ledger table claims every row derives from THIS
+  // command, so the two newest ledgers must be measured here or the
+  // monotonicity check is blind to exactly the ledgers most likely to churn.
+  { name: 'docs.debt', file: 'architecture/os/state/DOC_DEBT.md', header: '| doc | false claim | disproving command | disposition |', kind: 'md-rows', direction: 'shrink' },
+  { name: 'routes.parity_absent', file: 'architecture/os/state/ROUTE_PARITY.md', header: '| path | client source | recorded |', kind: 'md-rows', direction: 'shrink' },
 ];
+
+// Count data rows of the single markdown table whose header line matches.
+// A table with N `|`-delimited cells produces rows with N+1 pieces after a
+// bare split; we accept any line that starts with `|`, sits after the header,
+// and is not the `---` separator.
+function countMarkdownRows(src, header) {
+  const lines = src.split(/\r?\n/);
+  const headerIdx = lines.findIndex((l) => l.trim() === header.trim());
+  if (headerIdx === -1) throw new Error(`table header not found: ${header}`);
+  let count = 0;
+  for (let i = headerIdx + 1; i < lines.length; i++) {
+    const t = lines[i].trim();
+    if (!t.startsWith('|')) break; // table ended
+    if (/^\|[\s|:-]+\|$/.test(t)) continue; // separator row
+    count++;
+  }
+  return count;
+}
 
 const results = [];
 const errors = [];
 for (const l of LEDGERS) {
   try {
     const src = readFileSync(resolve(ROOT, l.file), 'utf8');
-    const init = extractInitializer(src, l.constant);
     let value;
-    if (l.kind === 'strings') value = stringLiterals(init).length;
-    else if (l.kind === 'record-sum') value = recordNumericValues(init).reduce((a, b) => a + b, 0);
-    else if (l.kind === 'record-keys') value = recordKeyCount(init);
-    else if (l.kind === 'number') value = Number(init.trim());
-    if (!Number.isFinite(value)) throw new Error(`non-numeric result for ${l.constant}`);
-    results.push({ name: l.name, file: l.file, constant: l.constant, direction: l.direction, value });
+    if (l.kind === 'md-rows') {
+      value = countMarkdownRows(src, l.header);
+    } else {
+      const init = extractInitializer(src, l.constant);
+      if (l.kind === 'strings') value = stringLiterals(init).length;
+      else if (l.kind === 'record-sum') value = recordNumericValues(init).reduce((a, b) => a + b, 0);
+      else if (l.kind === 'record-keys') value = recordKeyCount(init);
+      else if (l.kind === 'number') value = Number(init.trim());
+    }
+    if (!Number.isFinite(value)) throw new Error(`non-numeric result for ${l.name}`);
+    results.push({ name: l.name, file: l.file, constant: l.constant ?? l.header, direction: l.direction, value });
   } catch (e) {
     errors.push(`${l.name}: ${e.message}`);
   }
