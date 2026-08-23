@@ -22,7 +22,10 @@ if (IS_LOCALHOST) {
 
   const SHELL_CACHE = 'kf-shell-v3';
   const STATIC_CACHE = 'kf-static-v3';
-  const API_CACHE = 'kf-api-v3';
+  // Bumped v3 -> v4 so the activate handler below deletes the previous cache,
+  // which may already hold authenticated responses stored before the
+  // credentialed-request check above existed.
+  const API_CACHE = 'kf-api-v4';
 
 const DB_NAME = 'kf-sync-queue';
 const DB_STORE = 'requests';
@@ -249,8 +252,30 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  /* API GET → network-first with cache fallback */
+  /* API GET → network-first with cache fallback.
+   *
+   * A CREDENTIALED RESPONSE IS NEVER STORED. Cache Storage here is keyed by URL
+   * with no auth dimension (nothing sets or honours Vary), the fallback is
+   * served after a 5s network timeout, and nothing purges kf-api-* on logout in
+   * production — both wipes (app/layout.tsx and hooks/use-service-worker.ts)
+   * are gated to localhost. Storing an authenticated GET therefore means the
+   * next person to use this browser can be handed the previous user's data.
+   *
+   * `cache: "no-store"` on the client fetch does NOT prevent this. That flag
+   * governs the HTTP cache; cache.put() below is an explicit Cache Storage
+   * write on a different layer, and runs regardless.
+   *
+   * This was masked on one client path by a `_t=${Date.now()}` cache-buster,
+   * which made every URL unique so cache.match() could never hit. That was
+   * never protection: 62 authenticated call sites (fetchWithAuthRetry and raw
+   * fetch) never carried it and were always cacheable. Removing the buster
+   * widened an existing hole rather than opening one, and the hole belongs
+   * closed here rather than papered over with unique URLs.
+   */
   if (isApiRequest(url)) {
+    if (request.headers.get('authorization')) {
+      return; /* untouched: straight to the network, never stored */
+    }
     event.respondWith(networkFirstWithTimeout(request, API_CACHE, 5000));
     return;
   }
