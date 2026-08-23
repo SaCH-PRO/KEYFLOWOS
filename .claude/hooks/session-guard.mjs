@@ -236,11 +236,141 @@ const DESTRUCTIVE = [
   },
 ];
 
+/**
+ * Every live claim held by someone else, as { path -> {session, at} }.
+ */
+function foreignClaims(me) {
+  const now = Date.now();
+  const map = new Map();
+  for (const s of loadSessions()) {
+    if (s.sessionId === me) continue;
+    for (const [path, at] of Object.entries(s.claims || {})) {
+      if (now - (Date.parse(at) || 0) > CLAIM_TTL_MS) continue;
+      if (!map.has(path)) map.set(path, { session: s, at });
+    }
+  }
+  return map;
+}
+
+function describeHolder(h) {
+  const mins = Math.max(1, Math.round((Date.now() - Date.parse(h.at)) / 60000));
+  const who = h.session.label
+    ? `${h.session.label} (${h.session.sessionId.slice(0, 8)})`
+    : h.session.sessionId.slice(0, 8);
+  return `${who}, ${mins}m ago`;
+}
+
+/**
+ * Tokens from a command that could name a file.
+ *
+ * Deliberately loose. Correctness does not depend on parsing paths properly,
+ * because a token only matters if it MATCHES AN EXISTING CLAIM — `git checkout
+ * main` yields the token "main", which no claim will ever match. That keeps the
+ * false-positive rate at essentially zero without a real shell parser.
+ */
+function candidatePaths(cmd) {
+  return cmd
+    .split(/\s+/)
+    .map((t) => t.replace(/^["']|["']$/g, ''))
+    .filter((t) => t && t !== '--' && !t.startsWith('-'))
+    .map(normPath)
+    .filter(Boolean);
+}
+
+/** A claim is hit if a token equals it, or names a directory containing it. */
+function claimsHitBy(tokens, claims) {
+  const hits = [];
+  for (const [path, holder] of claims) {
+    for (const t of tokens) {
+      if (t === path || path.startsWith(`${t}/`)) {
+        hits.push({ path, holder });
+        break;
+      }
+    }
+  }
+  return hits;
+}
+
+/**
+ * Commands that revert or delete specific paths.
+ *
+ * This is the shape that actually caused the 2026-08-23 loss: not a repo-global
+ * sweep, but `git checkout -- <two paths>` followed by `rm -f <one path>`, run
+ * by a session that saw unexplained edits in its tree and reasonably concluded
+ * one of its own agents had gone wrong. Scoped commands, correct instincts,
+ * work destroyed anyway — because nothing told it another session owned those
+ * files. That is exactly what a claim can tell it.
+ */
+const PATH_TARGETED = [
+  { test: (c) => /\bgit\s+checkout\s+.*--\s+\S/.test(c) || /\bgit\s+checkout\s+--\s+\S/.test(c), verb: 'discard local changes to' },
+  { test: (c) => /\bgit\s+restore\b/.test(c), verb: 'discard local changes to' },
+  { test: (c) => /\bgit\s+clean\b.*-[a-z]*f/.test(c), verb: 'delete untracked' },
+  { test: (c) => /(^|[\s;&|])rm\s/.test(c), verb: 'delete' },
+  { test: (c) => /(^|[\s;&|])mv\s/.test(c), verb: 'move/overwrite' },
+];
+
+/**
+ * Commands that stage or commit the WHOLE tree.
+ *
+ * `git add -A` in a repo with a dozen live sessions does not stage your work —
+ * it stages everyone's, and the next commit carries it under your message. This
+ * has already happened twice here, once absorbing an entire unrelated feature
+ * into a docs commit.
+ */
+const BROAD_STAGING = [
+  { test: (c) => /\bgit\s+add\s+(-A\b|--all\b|\.(\s|$))/.test(c), what: 'git add -A / git add .' },
+  { test: (c) => /\bgit\s+commit\b[^|;]*\s-[a-zA-Z]*a/.test(c), what: 'git commit -a' },
+];
+
 function modeBash(input) {
   const cmd = String(input?.tool_input?.command || '');
   if (!cmd) allow();
   if (/KF_SESSION_GUARD=off/.test(cmd)) allow();
 
+  const me = String(input.session_id || 'unknown');
+
+  /* --- targeted revert/delete of a file someone else is holding --------- */
+  if (PATH_TARGETED.some((r) => { try { return r.test(cmd); } catch { return false; } })) {
+    const claims = foreignClaims(me);
+    if (claims.size) {
+      const hits = claimsHitBy(candidatePaths(cmd), claims);
+      if (hits.length) {
+        const verb = PATH_TARGETED.find((r) => r.test(cmd)).verb;
+        const lines = hits.map((h) => `    ${h.path}\n        held by ${describeHolder(h.holder)}`).join('\n');
+        ask(
+          `This command would ${verb} ${hits.length} file(s) another LIVE session is working on:\n\n${lines}\n\n` +
+            `On 2026-08-23 exactly this — a scoped \`git checkout --\` plus \`rm -f\` — destroyed a finished, ` +
+            `tested change, because the session running it had no way to know another session owned those ` +
+            `files. It looked like stray edits from its own agents.\n\n` +
+            `Message that session first (ListAgents / SendMessage). Approve only if you are sure the work is yours.`,
+        );
+      }
+    }
+  }
+
+  /* --- staging the whole tree in a shared repo -------------------------- */
+  if (BROAD_STAGING.some((r) => { try { return r.test(cmd); } catch { return false; } })) {
+    const claims = foreignClaims(me);
+    const dirty = dirtyFiles().map(normPath);
+    const foreign = [];
+    for (const [path, holder] of claims) {
+      if (dirty.some((d) => d === path || path.startsWith(`${d}/`))) foreign.push({ path, holder });
+    }
+    if (foreign.length) {
+      const what = BROAD_STAGING.find((r) => r.test(cmd)).what;
+      const lines = foreign.slice(0, 10).map((h) => `    ${h.path}  (${describeHolder(h.holder)})`).join('\n');
+      const more = foreign.length > 10 ? `\n    ...and ${foreign.length - 10} more` : '';
+      ask(
+        `${what} would stage ${foreign.length} file(s) that belong to another LIVE session:\n\n${lines}${more}\n\n` +
+          `Their work would be committed under your message. This has already happened twice in this repo ` +
+          `today — one commit absorbed an unrelated feature into a docs change.\n\n` +
+          `Stage your own paths explicitly instead:\n    git add <your paths>\n\n` +
+          `Approve only if you intend to commit their work too.`,
+      );
+    }
+  }
+
+  /* --- repo-global destructive git -------------------------------------- */
   const rule = DESTRUCTIVE.find((r) => {
     try { return r.test(cmd); } catch { return false; }
   });

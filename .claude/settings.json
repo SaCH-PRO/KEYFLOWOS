@@ -29,7 +29,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "f=$(cat); case \"$f\" in *git*) printf '%s' \"$f\" | node \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/session-guard.mjs\" bash ;; *) printf '{}' ;; esac",
+            "command": "f=$(cat); case \"$f\" in *git*|*rm*|*mv*) printf '%s' \"$f\" | node \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/session-guard.mjs\" bash ;; *) printf '{}' ;; esac",
             "timeout": 20,
             "statusMessage": "Checking cross-session safety"
           }

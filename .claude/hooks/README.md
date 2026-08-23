@@ -8,14 +8,25 @@ directory holds the machinery that stops them destroying each other's work.
 On 2026-08-23 a session finished and verified a change — an edit to
 `apps/web/src/lib/api.ts` plus a new passing test file — and both silently
 vanished mid-run. `git status` came back clean, as though the work had never
-happened. It was only noticed because a test started failing for an impossible
-reason.
+happened. Another session's untracked `probe-*.js` scripts went the same way.
 
-The cause is structural, not careless: **repo-global git commands act on the
-whole tree and cannot tell whose work they are discarding.** `git stash`,
-`git checkout -- .`, `git clean -fd` and `git reset --hard` each take out every
-dirty file in the repository, including thirteen other sessions' in-progress
-work. Nothing warns either side.
+**The cause was not a careless repo-global sweep.** The session responsible had
+launched a mapping workflow, saw unexplained source edits appear in a tree it
+believed only its own agents were touching, reasonably concluded one had gone
+wrong, and ran:
+
+```
+git checkout -- apps/web/src/lib/api.ts apps/web/src/lib/__tests__/api-refresh-retry.test.ts
+rm -f apps/web/src/lib/__tests__/api-get-dedupe.test.ts
+```
+
+Scoped paths. Correct instincts. Work destroyed anyway — because **nothing could
+tell it another session owned those files.** That is the gap this guard closes,
+and it is why the claim registry matters more than the command blocklist.
+
+A third harm mode showed up the same afternoon: `git add -A` in a repo with a
+dozen live sessions does not stage your work, it stages everyone's. It happened
+twice, once absorbing an entire unrelated feature into a docs commit.
 
 ## What is enforced
 
@@ -23,20 +34,30 @@ work. Nothing warns either side.
 
 | Guard | Trigger | Decision |
 |---|---|---|
+| Targeted revert/delete of a peer's file | `git checkout -- <path>` / `git restore <path>` / `git clean -f <path>` / `rm` / `mv` naming a file (or parent dir) another live session claims | **ask**, naming the holder — *this is the vector that caused the incident* |
+| Whole-tree staging | `git add -A` / `git add .` / `git commit -a` while a peer's file is dirty | **ask**, listing whose work would be swept in |
 | Repo-global destructive git | `git stash` / `checkout -- .` / `restore .` / `clean -f` / `reset --hard` / `checkout -f`, **and** the tree is dirty | **deny**, naming the scoped command to use instead |
 | File claim conflict | Another live session edited this exact file in the last 30 min | **ask**, naming the holder |
 
-Both are automatic. Claims are recorded on every write, so nothing has to be
+All automatic. Claims are recorded on every write, so nothing has to be
 declared — a protocol that relies on sessions remembering to announce
 themselves is a protocol that fails.
 
+The path checks work by matching command tokens **against existing claims**, not
+by parsing paths properly. `git checkout main` yields the token `main`, which no
+claim will ever match, so the false-positive rate stays near zero without a
+shell parser.
+
 ### What is deliberately NOT blocked
 
-`git stash push -- <paths>`, `git checkout -- <path>`, `git clean -f -- <path>`,
-`git reset --soft`, `stash list/show/pop/apply/drop`, branch checkouts, and every
-non-git command. Verified against 23 ordinary git commands with zero false
-positives. A guard that blocks normal work gets switched off, and a switched-off
-guard protects nothing.
+`git stash push -- <paths>`, scoped `git checkout -- <unclaimed path>`,
+`git clean -f -- <path>`, `git reset --soft`, `stash list/show/pop/apply/drop`,
+branch checkouts, `git add <explicit paths>`, `git commit -m`, deleting your own
+claimed files, `rm -rf node_modules`, and every non-git command.
+
+Verified across **39 cases** — 19 for the claim-aware checks and 20 regression
+cases for the repo-global rules — with zero false positives. A guard that blocks
+normal work gets switched off, and a switched-off guard protects nothing.
 
 ## Escape hatch
 
