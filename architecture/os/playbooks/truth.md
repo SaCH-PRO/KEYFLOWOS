@@ -31,11 +31,12 @@ journal/**`. Anything else → PR. Push rejected → rebase once, else PR.
    - Green with 0 skipped → continue.
    - Any failure or ANY skip → journal (quote the shuffle seed line), open
      issue `truth: main is red`, **stop**. Never fix a red main in this cycle.
-4. Regenerate (all four families, in place):
+4. Regenerate (all four families, in place; `PY` is `python3` on Linux/cloud,
+   `py -3` on Windows):
    - `node scripts/architecture/generate-registries.js`
    - `node docs/architecture/capability-map/generate.js`
-   - `py -3 .agents/skills/codebase-architect/scripts/inventory.py > architecture/inventory.json`
-   - `py -3 .agents/skills/codebase-architect/scripts/dependency_scan.py > architecture/dependencies.json`
+   - `$PY .agents/skills/codebase-architect/scripts/inventory.py > architecture/inventory.json`
+   - `$PY .agents/skills/codebase-architect/scripts/dependency_scan.py > architecture/dependencies.json`
    (The scanners print to stdout — forgetting the redirection "succeeds" while
    writing nothing.)
 5. Re-derive `architecture/os/state/STATE.md`: run the Command column of every

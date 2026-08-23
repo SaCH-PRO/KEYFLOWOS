@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/session-guard.mjs\" start",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/session-guard.mjs\" end",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=$(cat); case \"$f\" in *git*) printf '%s' \"$f\" | node \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/session-guard.mjs\" bash ;; *) printf '{}' ;; esac",
+            "timeout": 20,
+            "statusMessage": "Checking cross-session safety"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/session-guard.mjs\" edit",
+            "timeout": 20,
+            "statusMessage": "Checking file claims"
+          }
+        ]
+      }
+    ]
+  }
+}

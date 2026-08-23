@@ -49,3 +49,7 @@ screenshot-home.png
 # Agent worktrees — transient, never part of the repo
 .claude/worktrees/
 *.tsbuildinfo
+
+# Cross-session guard runtime state (machine-local; see .claude/hooks/README.md)
+.claude/coordination/
+.claude/settings.local.json
