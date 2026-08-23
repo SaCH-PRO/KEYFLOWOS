@@ -23,10 +23,10 @@ timestamp.
 | KEY tools | 286 | 286 | `node scripts/os/count-flow-tools.mjs` |
 | Web pages | 251 | 251 | `find apps/web/src/app -name page.tsx \| wc -l` |
 | Migrations | 19 | 19 | `find packages/db/prisma/migrations -name migration.sql \| wc -l` |
-| Spec/test files (server) | **406** | 405 | `find apps/server/src apps/server/test -name '*.spec.ts' -o -name '*.test.ts' \| wc -l` |
-| Server tests passing | — | 3,694 (0 skipped) | `cd apps/server && npx vitest run` (skip = failure) |
-| Web tests passing | — | 180 in 17 files | `cd apps/web && npx vitest run` |
-| Tests in `packages/*` | 0 | 0 | package.json test scripts in packages/* |
+| Spec/test files (server) | **408** | 405 | `find apps/server/src apps/server/test -name '*.spec.ts' -o -name '*.test.ts' \| wc -l` |
+| Server tests passing | — (unit config: 3,388 in 353 files, 0 skipped) | 3,694 (0 skipped) | `cd apps/server && npx vitest run` (full run needs DB; skip = failure) |
+| Web tests passing | **190 in 18 files** | 180 in 17 files | `cd apps/web && npx vitest run` |
+| Tests in `packages/*` | **10 in 2 files** (db 7, api 3) | 0 | `pnpm --filter @keyflow/db --filter @keyflow/api test:unit` |
 | Routes mapped at boot | — | 2,179 | `docker logs keyflowos-api-1 \| grep -c 'Mapped {'` (runtime only) |
 | `@Cron` jobs | 27 | 27 | `grep -r '@Cron(' apps/server/src \| wc -l` |
 | `setInterval` schedulers | 52 | 52 | `grep -r 'setInterval(' apps/server/src \| wc -l` |
