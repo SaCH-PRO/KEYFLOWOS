@@ -385,8 +385,20 @@ const fallbackInvoices: Invoice[] = DEMO_MODE_ENABLED
 
 async function apiGet<T>(path: string, schema?: z.ZodSchema<T>, fallback?: T, opts?: { signal?: AbortSignal }): Promise<ApiResult<T>> {
   try {
-    const sep = path.includes("?") ? "&" : "?";
-    const url = `${API_BASE}${path}${sep}_t=${Date.now()}`;
+    // No `_t=${Date.now()}` cache-buster, for the same reason it was removed
+    // from apiGet in ./api.ts: `cache: "no-store"` already prevents any HTTP
+    // cache reuse, and the service worker (public/sw.js) is network-first for
+    // API GETs so responses stay fresh regardless. A unique URL per request
+    // only meant the worker's offline `cache.match(request)` could never hit,
+    // which left the offline fallback dead and grew kf-api-v3 without bound.
+    // This helper serves 94 GET call sites and was missed when ./api.ts was
+    // fixed, so half the app kept busting the cache.
+    //
+    // Deliberately NOT given ./api.ts's in-flight coalescing: this apiGet
+    // validates through a Zod schema per call and returns a different result
+    // shape, so sharing a response between callers needs its own thought.
+    // Freshness behaviour is aligned; request sharing is not.
+    const url = `${API_BASE}${path}`;
     let res = await fetch(url, { headers: getAuthHeaders(), cache: "no-store", signal: opts?.signal });
     if (res.status === 401) {
       const refreshed = await refreshAccessToken();
