@@ -175,6 +175,29 @@ function normPath(p) {
 /* git helpers                                                         */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Files currently in the index.
+ *
+ * The index is SHARED between every session in this working tree. `git add`
+ * from one session and a plain `git commit` from another — no -a, no add -A —
+ * commits the first session's files under the second's message. Verified: commit
+ * 35f42129 ("the truth playbook runs on Linux too") contains one intended file
+ * plus four belonging to another session that had merely staged them, and none
+ * of the dozen other dirty files a repo-global add would have taken.
+ */
+function stagedFiles() {
+  try {
+    const out = execFileSync('git', ['diff', '--cached', '--name-only'], {
+      cwd: REPO,
+      encoding: 'utf8',
+      timeout: 5000,
+    });
+    return out.split('\n').map((s) => s.trim()).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 function dirtyFiles() {
   try {
     const out = execFileSync('git', ['status', '--porcelain'], {
@@ -343,6 +366,33 @@ function modeBash(input) {
             `tested change, because the session running it had no way to know another session owned those ` +
             `files. It looked like stray edits from its own agents.\n\n` +
             `Message that session first (ListAgents / SendMessage). Approve only if you are sure the work is yours.`,
+        );
+      }
+    }
+  }
+
+  /* --- committing a shared index that holds someone else's files -------- */
+  if (/\bgit\s+commit\b/.test(cmd)) {
+    const claims = foreignClaims(me);
+    if (claims.size) {
+      const staged = stagedFiles().map(normPath);
+      const foreign = [];
+      for (const [path, holder] of claims) {
+        if (staged.some((s) => s === path || path.startsWith(`${s}/`))) foreign.push({ path, holder });
+      }
+      if (foreign.length) {
+        const lines = foreign.slice(0, 10).map((h) => `    ${h.path}  (${describeHolder(h.holder)})`).join('\n');
+        const more = foreign.length > 10 ? `\n    ...and ${foreign.length - 10} more` : '';
+        const paths = foreign.slice(0, 10).map((h) => h.path).join(' ');
+        ask(
+          `The index already holds ${foreign.length} file(s) staged by another LIVE session:\n\n${lines}${more}\n\n` +
+            `The git index is SHARED across every session in this working tree. A plain \`git commit\` ` +
+            `commits the WHOLE index — not just the paths you added — so their work would land under your ` +
+            `message. This is not hypothetical: 35f42129 committed one intended file plus four another ` +
+            `session had merely staged.\n\n` +
+            `Check what you are about to commit:\n    git diff --cached --name-only\n\n` +
+            `Evict what is not yours:\n    git reset -- ${paths}\n\n` +
+            `Approve only if you intend to commit their work too.`,
         );
       }
     }
