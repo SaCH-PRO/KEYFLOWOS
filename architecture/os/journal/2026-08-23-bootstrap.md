@@ -41,3 +41,12 @@ outcome: corrected
   Diffing regenerated output against the committed baseline measures drift
   (which was real) and says nothing about generator stability. Hash two
   consecutive runs.
+- **public-surface.spec.ts reads class guards only between the Controller
+  decorator and the class keyword.** A UseGuards placed ABOVE the Controller
+  decorator is invisible to it — Nest accepts either order, the parser only
+  one. Guarding diagnostics stayed green-but-wrong until the decorators were
+  reordered. Convention: Controller decorator first, then guards.
+- **Comments that quote decorator-call syntax break the same parser.** An
+  explanatory comment containing the literal Controller-decorator text made
+  `search()` anchor inside the comment and report 6 open handlers instead
+  of 0. Prose in code must not look like the code the gates parse.

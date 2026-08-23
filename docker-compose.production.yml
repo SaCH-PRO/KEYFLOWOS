@@ -58,6 +58,15 @@ services:
       NEXT_PUBLIC_LIVEKIT_URL: ${PUBLIC_LIVEKIT_WS_URL}
       NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
       NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+    # Node's global fetch — the images ship no curl/wget. Catches a HUNG
+    # process, which `restart: unless-stopped` alone cannot (it only sees
+    # exits).
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5000/api/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
     depends_on:
       - api
 
@@ -92,6 +101,12 @@ services:
       LIVEKIT_WS_URL: ${PUBLIC_LIVEKIT_WS_URL}
       CHATWOOT_URL: http://chatwoot:3000
       CHATWOOT_API_PUBLIC_URL: ${PUBLIC_API_URL}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
     depends_on:
       db:
         condition: service_healthy
@@ -123,6 +138,11 @@ services:
       LIVEKIT_URL: ${PUBLIC_LIVEKIT_WS_URL}
       LIVEKIT_WS_URL: ${PUBLIC_LIVEKIT_WS_URL}
       OPENAI_API_KEY: ${AI_INTEGRATIONS_OPENAI_API_KEY}
+    # No healthcheck: the worker exposes no HTTP surface, so a hung (not
+    # crashed) worker is undetectable from here. Crashes already restart via
+    # tini + `restart: unless-stopped`. Hang detection needs a health port in
+    # apps/voice-agent first — do not fake one with a bare `node -e` that
+    # would prove only that node can start.
     depends_on:
       - livekit
 

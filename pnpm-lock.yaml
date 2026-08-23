@@ -543,6 +543,10 @@ importers:
       zod:
         specifier: ^3.24.0
         version: 3.25.76
+    devDependencies:
+      vitest:
+        specifier: ^2.1.1
+        version: 2.1.9(@edge-runtime/vm@3.2.0)(@types/node@25.9.3)(jsdom@29.1.1(@noble/hashes@1.8.0))(terser@5.47.1)
 
   packages/db:
     dependencies:
@@ -565,6 +569,9 @@ importers:
       prisma:
         specifier: ^6.19.0
         version: 6.19.2(typescript@5.9.3)
+      vitest:
+        specifier: ^2.1.1
+        version: 2.1.9(@edge-runtime/vm@3.2.0)(@types/node@25.9.3)(jsdom@29.1.1(@noble/hashes@1.8.0))(terser@5.47.1)
 
   packages/shared: {}
 

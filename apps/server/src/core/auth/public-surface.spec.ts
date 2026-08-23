@@ -125,7 +125,6 @@ const ACKNOWLEDGED_PUBLIC: Record<string, number> = {
   'modules/crm/crm-google.controller.ts': 1,
   'modules/crm/privacy/contact-privacy.controller.ts': 1,
   'modules/device/device.controller.ts': 13,
-  'modules/diagnostics/diagnostics.controller.ts': 7,
   'modules/directory/directory.controller.ts': 2,
   'modules/documents/documents.controller.ts': 3,
   'modules/education/education.controller.ts': 2,

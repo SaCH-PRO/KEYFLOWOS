@@ -58,8 +58,8 @@ human decision. Any wrong-direction move: do NOT update the row; open a
 | providers.unreachable | apps/server/src/core/config/unreachable-provider.spec.ts | shrink | 8 | 8 |
 | billing.unpriced | apps/server/src/modules/subscriptions/plans.ts | shrink | 43 | 43 |
 | billing.unenforced_limits | apps/server/src/modules/subscriptions/plan-limit-enforcement.spec.ts | shrink | 19 | 19 |
-| auth.public_handlers | apps/server/src/core/auth/public-surface.spec.ts | shrink | 227 | 227 |
-| auth.public_controllers | apps/server/src/core/auth/public-surface.spec.ts | shrink | 54 | 54 |
+| auth.public_handlers | apps/server/src/core/auth/public-surface.spec.ts | shrink | 220 | 227 (diagnostics controller guard-normalized 2026-08-23) |
+| auth.public_controllers | apps/server/src/core/auth/public-surface.spec.ts | shrink | 53 | 54 |
 | web.known_fabricated | apps/web/src/lib/__tests__/no-fabricated-screens.spec.ts | shrink | 1 | 1 |
 | trpc.unchecked | apps/server/src/trpc.module.spec.ts | shrink | 0 | 0 |
 | ai.handler_coverage_floor_pct | apps/server/src/modules/ai/handler-coverage-ratchet.spec.ts | grow | 39 | 39 |

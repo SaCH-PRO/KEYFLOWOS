@@ -100,11 +100,17 @@ export class BusinessEventQueueService implements OnModuleInit, OnModuleDestroy 
     await this.anomaly.inspect(data);
   }
 
-  async getHealth(): Promise<{ queueDepth: number; workerStatus: string }> {
+  async getHealth(): Promise<{ queueDepth: number; failedCount: number; workerStatus: string }> {
     const waiting = await this.queue.getWaitingCount();
     const delayed = await this.queue.getDelayedCount();
+    // There is no dead-letter queue; failed jobs sit in removeOnFail's 7-day
+    // retention window with only a stdout log line. Surfacing the count here
+    // is the stopgap that lets the uptime monitor and the audit cycle see
+    // them before the window silently expires.
+    const failed = await this.queue.getFailedCount();
     return {
       queueDepth: waiting + delayed,
+      failedCount: failed,
       workerStatus: this.worker ? 'running' : 'stopped',
     };
   }
