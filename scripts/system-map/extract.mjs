@@ -560,10 +560,31 @@ export function localPathConsts(src) {
   return map;
 }
 
-/** Names that denote an origin rather than a path prefix. */
-const BASE_URL_NAME = /(?:API|BASE|URL|ORIGIN|HOST|ENDPOINT)/i;
+/**
+ * Names that denote an ORIGIN (dropping it leaves the real path) rather than a
+ * path PREFIX (dropping it leaves a meaningless tail).
+ *
+ * The first version of this was /(?:API|BASE|URL|ORIGIN|HOST|ENDPOINT)/i, which
+ * matches `basePath` — a variable holding `/marketplace/businesses/${id}`.
+ * Every call built on it was silently reduced to its tail (`/inventory/summary`)
+ * and reported as an endpoint the server does not serve. Nine working calls on
+ * one screen, condemned by a substring.
+ *
+ * So: SCREAMING_SNAKE constants naming a base, or camelCase ending in a word
+ * that means "origin". `basePath` ends in Path and is correctly excluded.
+ */
+const BASE_URL_NAME = /^[A-Z0-9_]*(?:API|BASE|URL|ORIGIN|HOST|ENDPOINT)[A-Z0-9_]*$|(?:Url|URL|Origin|Host|Endpoint|BaseUrl)$/;
 
-/** Substitute a leading `${ident}` from local consts, up to a few hops. */
+/**
+ * Substitute a leading `${ident}` from local consts, up to a few hops.
+ *
+ * Returns whether the leading interpolation was left UNRESOLVED. That matters:
+ * `apiGet(\`${basePath}/inventory\`)` where basePath is a React PROP cannot be
+ * resolved here, and dropping it yields the fragment `/inventory` — which
+ * matches no server route and reads as a broken call, when the real path is
+ * `/marketplace/businesses/:id/inventory` and works fine. A fragment is not
+ * evidence of a defect, so callers must be able to tell the two apart.
+ */
 function expandLeading(raw, consts) {
   let s = raw;
   for (let i = 0; i < 4; i++) {
@@ -571,31 +592,50 @@ function expandLeading(raw, consts) {
     const m = /^\$\{\s*([A-Za-z_$][\w$]*)\s*(\([^{}]*\))?\s*\}/.exec(s);
     if (!m) break;
     const name = m[1];
-    if (consts.has(name)) s = consts.get(name) + s.slice(m[0].length);
-    else if (BASE_URL_NAME.test(name)) s = s.slice(m[0].length); // an origin — drop it
-    else break; // unknown identifier: leave it, norm() will treat it as a base
+    if (consts.has(name)) {
+      s = consts.get(name) + s.slice(m[0].length);
+      continue;
+    }
+    if (BASE_URL_NAME.test(name)) {
+      s = s.slice(m[0].length); // an origin — dropping it yields the real path
+      continue;
+    }
+    return { text: s.slice(m[0].length), unresolved: true };
   }
-  return s;
+  return { text: s, unresolved: false };
 }
 
-/** API paths the web app requests. */
+/**
+ * API paths the web app requests, as `{ path, fragment }`.
+ *
+ * `fragment: true` means the leading `${…}` could not be resolved (a prop, an
+ * import, a field) so `path` is only the TAIL of the real URL. Such a row can
+ * never be matched against server routes and must not be reported as a missing
+ * endpoint.
+ */
 export function webCalls(src) {
   const out = [];
   const consts = localPathConsts(src);
+  const add = (raw) => {
+    const { text, unresolved } = expandLeading(raw, consts);
+    const path = norm(text);
+    if (path) out.push({ path, fragment: unresolved });
+  };
   // apiGet<T>(`/x/y`) | apiPost({ path: `/x/y` }) | apiFetch("/x")
   // The trailing [A-Za-z]* matters: ./api is imported under aliases —
   // `apiGet as apiGetSimple`, `apiPostSimple` — and client.ts alone calls
   // apiGetSimple 257 times. Anchoring on the bare names measured none of them.
   const re1 = /\bapi(?:Get|Post|Put|Patch|Delete|Fetch)[A-Za-z]*\s*(?:<[^>]*>)?\s*\(\s*\{?\s*(?:path\s*:\s*)?(?:'([^']+)'|"([^"]+)"|`([^`]+)`)/g;
   let m;
-  while ((m = re1.exec(src))) out.push(norm(expandLeading(m[1] ?? m[2] ?? m[3], consts)));
+  while ((m = re1.exec(src))) add(m[1] ?? m[2] ?? m[3]);
   // fetch(`${API_BASE}/x/y`) and friends
   const re2 = /fetch\(\s*(?:`([^`]+)`|'([^']+)'|"([^"]+)")/g;
   while ((m = re2.exec(src))) {
     const raw = m[1] ?? m[2] ?? m[3];
-    if (/^\$\{[^}]*\}\//.test(raw) || raw.startsWith('/')) out.push(norm(expandLeading(raw, consts)));
+    if (/^\$\{[^}]*\}\//.test(raw) || raw.startsWith('/')) add(raw);
   }
-  return dedupe(out.filter(Boolean));
+  const seen = new Set();
+  return out.filter((c) => (seen.has(c.path) ? false : seen.add(c.path)));
 }
 
 /**

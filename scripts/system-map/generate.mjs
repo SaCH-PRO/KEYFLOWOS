@@ -138,12 +138,39 @@ const nextRoutes = new Set(
     .map((p) => p.replace(/\[\.{3}[^\]]+\]|\[[^\]]+\]/g, ':param')),
 );
 
+/**
+ * Segment-wise match where `:param` on EITHER side matches any one segment.
+ *
+ * A path can interpolate mid-way — `/connect/businesses/${id}/${apiPrefix}/status`,
+ * where apiPrefix is "contacts" or "outlook-contacts" — and both server routes
+ * exist. Normalizing collapses that to `:param`, which no longer equals the
+ * literal segment, so an exact-match check calls a working screen broken.
+ *
+ * A loose match is NOT proof the call resolves; it only means the shape exists.
+ * Those are reported UNVERIFIED rather than as defects, because a false death
+ * sends someone to fix working code.
+ */
+function looselyMatches(callPath, routePath) {
+  const a = callPath.split('/');
+  const b = routePath.split('/');
+  if (a.length !== b.length) return false;
+  return a.every((seg, k) => seg === b[k] || seg === ':param' || b[k] === ':param');
+}
+
 const callRows = [];
 for (const [f, i] of info) {
-  for (const p of i.webCalls) {
+  for (const call of i.webCalls) {
+    const p = call.path;
     const n = X.normRoute(p);
     const servedByNext = nextRoutes.has(n) || [...nextRoutes].some((r) => n.startsWith(r + '/'));
     const matches = servedByNext ? [] : serverPaths.get(n) || [];
+    const loose =
+      // NOTE: webCalls() returns paths that are ALREADY normalized, so testing
+      // the raw text for `${` here never fired — the interpolation is long gone
+      // by this point and shows up as `:param`.
+      !servedByNext && !matches.length && n.includes(':param')
+        ? routeRows.filter((r) => looselyMatches(n, r.normalized_path))
+        : [];
     const anyMounted = matches.some((m) => m.mounted === 'TRUE');
     const external = X.isExternalPath(n);
     callRows.push({
@@ -154,15 +181,19 @@ for (const [f, i] of info) {
       server_route_exists: matches.length ? 'TRUE' : 'FALSE',
       server_route_mounted: matches.length ? (anyMounted ? 'TRUE' : 'FALSE') : '',
       matched_controller: matches.map((m) => m.controller).filter((v, k, a) => a.indexOf(v) === k).join(' '),
+      loose_match: loose.length ? loose.map((r) => r.path).slice(0, 3).join(' ') : '',
+      path_fragment: call.fragment ? 'TRUE' : '',
       status: external
         ? 'EXTERNAL'
         : servedByNext
           ? 'NEXT_ROUTE_HANDLER'
-          : !matches.length
-            ? 'NO_SERVER_ROUTE'
-            : anyMounted
+          : matches.length
+            ? anyMounted
               ? 'OK'
-              : 'ROUTE_NOT_MOUNTED',
+              : 'ROUTE_NOT_MOUNTED'
+            : loose.length || call.fragment
+              ? 'UNVERIFIED'
+              : 'NO_SERVER_ROUTE',
     });
   }
 }
@@ -197,11 +228,11 @@ for (const [f, i] of info) {
     push(f, `model:${model}`, X.isWrite(op) ? 'writes-model' : 'reads-model', `${model}.${op}()`);
   }
   // web -> server
-  for (const p of i.webCalls) {
-    const n = X.normRoute(p);
+  for (const call of i.webCalls) {
+    const n = X.normRoute(call.path);
     const matches = serverPaths.get(n) || [];
-    if (matches.length) push(f, matches[0].controller_file, 'http-call', p);
-    else push(f, `route:${n}`, 'http-call-unresolved', p, 'medium');
+    if (matches.length) push(f, matches[0].controller_file, 'http-call', call.path);
+    else push(f, `route:${n}`, 'http-call-unresolved', call.path, call.fragment ? 'low' : 'medium');
   }
 }
 
@@ -348,7 +379,7 @@ const tables = [
   ['routes.csv', routeRows, ['method', 'path', 'normalized_path', 'handler', 'controller', 'controller_file', 'module', 'declaring_module', 'mounted', 'guards', 'guard_count', 'scopes', 'body_auth_check', 'unguarded']],
   ['models.csv', modelRows, ['model', 'has_businessId', 'indexed_on_businessId', 'field_count', 'relation_count', 'reader_modules', 'writer_modules', 'accessed_by_module_count', 'unreferenced']],
   ['events.csv', eventRows, ['event', 'emitter_count', 'listener_count', 'status', 'matched_by_pattern', 'emitters', 'listeners']],
-  ['web-api-calls.csv', callRows, ['caller_file', 'requested_path', 'normalized_path', 'external', 'server_route_exists', 'server_route_mounted', 'matched_controller', 'status']],
+  ['web-api-calls.csv', callRows, ['caller_file', 'requested_path', 'normalized_path', 'external', 'server_route_exists', 'server_route_mounted', 'matched_controller', 'loose_match', 'path_fragment', 'status']],
 ];
 
 for (const [name, rows, headers] of tables) {

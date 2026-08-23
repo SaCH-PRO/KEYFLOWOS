@@ -4,7 +4,7 @@ path,workspace,module,kind,lines,classes,imports_count,injects_count,fan_in,rout
 .agents/skills/remotion-best-practices/rules/assets/charts-bar-chart.tsx,(root),,component,174,,2,0,0,0,,,,,TRUE
 .agents/skills/remotion-best-practices/rules/assets/text-animations-typewriter.tsx,(root),,component,101,,1,0,0,0,,,,,TRUE
 .agents/skills/remotion-best-practices/rules/assets/text-animations-word-highlight.tsx,(root),,component,104,,3,0,0,0,,,,,TRUE
-.claude/hooks/session-guard.mjs,(root),,mjs,544,,3,0,0,0,,,,,TRUE
+.claude/hooks/session-guard.mjs,(root),,mjs,593,,4,0,0,0,,,,,TRUE
 apps/server/api/index.ts,apps/server,,ts,31,,6,0,0,0,,,,,TRUE
 apps/server/eslint.config.mjs,apps/server,,mjs,24,,3,0,0,0,,,,,TRUE
 apps/server/scripts/event-wiring.ts,apps/server,,ts,326,,4,0,1,0,,,,,FALSE
@@ -30,13 +30,14 @@ apps/server/src/core/auth/supabase-auth.service.ts,apps/server,core/auth,service
 apps/server/src/core/auth/system-actor.ts,apps/server,core/auth,ts,54,,0,0,3,0,,,,,FALSE
 apps/server/src/core/auth/tenant-body-override.spec.ts,apps/server,core/auth,spec,134,,3,0,0,0,,,,,FALSE
 apps/server/src/core/config/cast-call-integrity.spec.ts,apps/server,core/config,spec,212,,3,0,0,0,,,,,FALSE
-apps/server/src/core/config/doc-debt-ledger.spec.ts,apps/server,core/config,spec,170,,3,0,0,0,,,,,FALSE
+apps/server/src/core/config/doc-debt-ledger.spec.ts,apps/server,core/config,spec,195,,3,0,0,0,,,,,FALSE
 apps/server/src/core/config/env.guard.spec.ts,apps/server,core/config,spec,27,,2,0,0,0,,,,,FALSE
 apps/server/src/core/config/env.ts,apps/server,core/config,ts,217,,1,0,2,0,,,,,FALSE
 apps/server/src/core/config/fixture-cleanup-integrity.spec.ts,apps/server,core/config,spec,107,,3,0,0,0,,,,,FALSE
 apps/server/src/core/config/gate-vacuity.spec.ts,apps/server,core/config,spec,157,,3,0,0,0,,,,,FALSE
 apps/server/src/core/config/route-parity-ledger.spec.ts,apps/server,core/config,spec,96,,3,0,0,0,,,,,FALSE
 apps/server/src/core/config/runtime-urls.ts,apps/server,core/config,ts,115,,0,0,16,0,,,,,FALSE
+apps/server/src/core/config/session-guard.spec.ts,apps/server,core/config,spec,373,,5,0,0,0,,,,,FALSE
 apps/server/src/core/config/test-config-coverage.spec.ts,apps/server,core/config,spec,142,,3,0,0,0,,,,,FALSE
 apps/server/src/core/config/test-coverage-gating.spec.ts,apps/server,core/config,spec,115,,3,0,0,0,,,,,FALSE
 apps/server/src/core/config/unreachable-provider.spec.ts,apps/server,core/config,spec,191,,3,0,0,0,,,,,FALSE
@@ -124,7 +125,7 @@ apps/server/src/core/security/sanitize-business.ts,apps/server,core/security,ts,
 apps/server/src/core/security/timing-safe-equal.spec.ts,apps/server,core/security,spec,27,,2,0,0,0,,,,,FALSE
 apps/server/src/core/security/timing-safe-equal.ts,apps/server,core/security,ts,20,,1,0,9,0,,,,,FALSE
 apps/server/src/core/seed/seed.module.ts,apps/server,core/seed,nest-module,11,SeedModule,4,0,1,0,,,,,FALSE
-apps/server/src/core/seed/seed.service.ts,apps/server,core/seed,service,593,SeedService,6,3,1,0,,,,user documentCategory documentType impactRule businessTemplate course cohort,FALSE
+apps/server/src/core/seed/seed.service.ts,apps/server,core/seed,service,605,SeedService,6,3,1,0,,,,user documentCategory documentType impactRule businessTemplate course cohort,FALSE
 apps/server/src/core/sentry/sentry.module.ts,apps/server,core/sentry,nest-module,44,SentryModule,2,0,1,0,,,,,FALSE
 apps/server/src/core/tenant/tenant-context.ts,apps/server,core/tenant,ts,29,,1,0,2,0,,,,,FALSE
 apps/server/src/core/tenant/tenant.interceptor.ts,apps/server,core/tenant,interceptor,33,TenantInterceptor,3,0,1,0,,,,,FALSE
@@ -252,7 +253,7 @@ apps/server/src/modules/ai/llm-cost.service.spec.ts,apps/server,ai,spec,150,,2,0
 apps/server/src/modules/ai/llm-cost.service.ts,apps/server,ai,service,166,LLMCostService,3,1,6,0,,,,lLMProviderCost,FALSE
 apps/server/src/modules/ai/match-refresh-scheduler.service.ts,apps/server,ai,service,46,MatchRefreshSchedulerService,2,1,1,0,,,,,FALSE
 apps/server/src/modules/ai/model-gateway.service.spec.ts,apps/server,ai,spec,858,,4,0,0,0,,,,,FALSE
-apps/server/src/modules/ai/model-gateway.service.ts,apps/server,ai,service,3021,ModelGatewayService,7,3,93,0,,,,aiUsageLog aiMemory,FALSE
+apps/server/src/modules/ai/model-gateway.service.ts,apps/server,ai,service,3031,ModelGatewayService,7,3,93,0,,,,aiUsageLog aiMemory,FALSE
 apps/server/src/modules/ai/model-pricing.spec.ts,apps/server,ai,spec,120,,3,0,0,0,,,,,FALSE
 apps/server/src/modules/ai/morning-briefing.service.ts,apps/server,ai,service,543,MorningBriefingService,8,7,3,0,briefing.generated plan.approved,,,autopilotSettings aiPlan aiPlanStep invoice quote contact booking projectTask aiApprovalItem aiExecutionLog,FALSE
 apps/server/src/modules/ai/obligation-tools.spec.ts,apps/server,ai,spec,181,,6,0,0,0,,,,,FALSE
@@ -622,8 +623,9 @@ apps/server/src/modules/commerce/quote-email.template.ts,apps/server,commerce,ts
 apps/server/src/modules/commerce/quote-notifications.listener.ts,apps/server,commerce,listener,219,QuoteNotificationsListener,6,2,1,0,,quote.viewed quote.accepted quote.rejected,,business user,FALSE
 apps/server/src/modules/commerce/quote-stale.listener.ts,apps/server,commerce,listener,83,QuoteStaleListener,4,1,1,0,,quote.stale,,aiApprovalItem,FALSE
 apps/server/src/modules/commerce/quote-stale.scheduler.ts,apps/server,commerce,ts,88,QuoteStaleScheduler,3,2,1,0,,,,quote,FALSE
-apps/server/src/modules/commerce/recurring-invoice.controller.ts,apps/server,commerce,controller,103,RecurringInvoiceController,6,1,1,7,,,,,FALSE
-apps/server/src/modules/commerce/recurring-invoice.service.ts,apps/server,commerce,service,334,RecurringInvoiceService,4,3,4,0,recurring_invoice.created recurring_invoice.updated recurring_invoice.paused recurring_invoice.resumed recurring_invoice.cancelled recurring_invoice.due recurring_invoice.generated invoice.created recurring_invoice.failed,,,recurringInvoice invoice,FALSE
+apps/server/src/modules/commerce/recurring-invoice-history.spec.ts,apps/server,commerce,spec,101,,3,0,0,0,,,,,FALSE
+apps/server/src/modules/commerce/recurring-invoice.controller.ts,apps/server,commerce,controller,112,RecurringInvoiceController,6,1,1,8,,,,,FALSE
+apps/server/src/modules/commerce/recurring-invoice.service.ts,apps/server,commerce,service,373,RecurringInvoiceService,4,3,5,0,recurring_invoice.created recurring_invoice.updated recurring_invoice.paused recurring_invoice.resumed recurring_invoice.cancelled recurring_invoice.due recurring_invoice.generated invoice.created recurring_invoice.failed,,,recurringInvoice invoice,FALSE
 apps/server/src/modules/commerce/revenue-action.controller.ts,apps/server,commerce,controller,114,RevenueActionController,5,2,1,6,,,,business,FALSE
 apps/server/src/modules/commerce/revenue-action.service.ts,apps/server,commerce,service,1078,RevenueActionService,7,4,9,0,revenue_action.created revenue_action.completed,invoice.overdue quote.stale quote.sent store_order.routing_failed quote.accepted invoice.paid payment.failed,,invoice business revenueAction quote recurringInvoice customerNotificationLog contact payment,FALSE
 apps/server/src/modules/commerce/revenue-attribution.service.ts,apps/server,commerce,service,297,RevenueAttributionService,3,1,9,0,,,,revenueAttribution invoice booking marketplaceOrder,FALSE
@@ -832,7 +834,7 @@ apps/server/src/modules/device/device.service.ts,apps/server,device,service,630,
 apps/server/src/modules/device/visual-classifier.service.ts,apps/server,device,service,208,VisualClassifierService,1,0,3,0,,,,,FALSE
 apps/server/src/modules/diagnostics/diagnostics.controller.ts,apps/server,diagnostics,controller,79,DiagnosticsController,4,1,1,7,,,,,FALSE
 apps/server/src/modules/diagnostics/diagnostics.module.ts,apps/server,diagnostics,nest-module,15,DiagnosticsModule,6,0,2,0,,,,,FALSE
-apps/server/src/modules/diagnostics/diagnostics.service.ts,apps/server,diagnostics,service,1078,DiagnosticsService,5,4,5,0,,,,contact invoice booking business aiUsageLog automation payment notification emailCampaign socialConnection contactEvent service,FALSE
+apps/server/src/modules/diagnostics/diagnostics.service.ts,apps/server,diagnostics,service,1078,DiagnosticsService,6,4,5,0,,,,contact invoice booking business aiUsageLog automation payment notification emailCampaign socialConnection contactEvent service,FALSE
 apps/server/src/modules/directory/directory.controller.ts,apps/server,directory,controller,134,DirectoryController,2,0,1,2,,,,,FALSE
 apps/server/src/modules/directory/directory.module.ts,apps/server,directory,nest-module,8,DirectoryModule,2,0,1,0,,,,,FALSE
 apps/server/src/modules/documents/document-blueprints.ts,apps/server,documents,ts,462,,0,0,1,0,,,,,FALSE
@@ -1747,7 +1749,7 @@ apps/web/eslint.config.mjs,apps/web,,mjs,74,,4,0,0,0,,,,,TRUE
 apps/web/next.config.ts,apps/web,,ts,321,,4,0,0,0,,,,,TRUE
 apps/web/playwright.config.ts,apps/web,,ts,47,,1,0,0,0,,,,,TRUE
 apps/web/postcss.config.mjs,apps/web,,mjs,9,,0,0,0,0,,,,,TRUE
-apps/web/public/sw.js,apps/web,,js,391,,0,0,0,0,,,,,TRUE
+apps/web/public/sw.js,apps/web,,js,416,,0,0,0,0,,,,,TRUE
 apps/web/public/widgets/v1/loader.js,apps/web,,js,149,,0,0,0,0,,,,,TRUE
 apps/web/scripts/check-tool-routes.ts,apps/web,,ts,37,,1,0,0,0,,,,,TRUE
 apps/web/sentry.client.config.ts,apps/web,,ts,17,,1,0,0,0,,,,,TRUE
@@ -2015,7 +2017,7 @@ apps/web/src/app/app/commerce/products/product-form-modal.tsx,apps/web,,componen
 apps/web/src/app/app/commerce/products/product-import-modal.tsx,apps/web,,component,898,,7,0,1,0,,,,,FALSE
 apps/web/src/app/app/commerce/products/products-panel.tsx,apps/web,,component,759,,15,0,0,0,,,,,TRUE
 apps/web/src/app/app/commerce/quotes/quotes-panel.tsx,apps/web,,component,1403,,32,0,1,0,,,,,FALSE
-apps/web/src/app/app/commerce/recurring/recurring-panel.tsx,apps/web,,component,919,,14,0,2,0,,,,,FALSE
+apps/web/src/app/app/commerce/recurring/recurring-panel.tsx,apps/web,,component,927,,14,0,2,0,,,,,FALSE
 apps/web/src/app/app/commerce/templates/page.tsx,apps/web,,page,154,,7,0,0,0,,,,,TRUE
 apps/web/src/app/app/commerce/utils/commerce-slots.ts,apps/web,,ts,37,,2,0,2,0,,,,,FALSE
 apps/web/src/app/app/commerce/utils/commerce-utils.ts,apps/web,,ts,57,,0,0,20,0,,,,,FALSE
@@ -2725,7 +2727,7 @@ apps/web/src/app/auth/callback/page.tsx,apps/web,,page,337,,7,0,1,0,,,,,FALSE
 apps/web/src/app/auth/login/error.tsx,apps/web,,component,8,,1,0,0,0,,,,,TRUE
 apps/web/src/app/auth/login/loading.tsx,apps/web,,component,7,,1,0,0,0,,,,,TRUE
 apps/web/src/app/auth/login/login-form.tsx,apps/web,,component,436,,8,0,1,0,,,,,FALSE
-apps/web/src/app/auth/login/page.tsx,apps/web,,page,36,,2,0,0,0,,,,,TRUE
+apps/web/src/app/auth/login/page.tsx,apps/web,,page,41,,2,0,0,0,,,,,TRUE
 apps/web/src/app/auth/motion-shim.tsx,apps/web,,component,42,,1,0,1,0,,,,,FALSE
 apps/web/src/app/auth/reset-password/error.tsx,apps/web,,component,8,,1,0,0,0,,,,,TRUE
 apps/web/src/app/auth/reset-password/loading.tsx,apps/web,,component,7,,1,0,0,0,,,,,TRUE
@@ -3110,6 +3112,7 @@ apps/web/src/lib/__tests__/middleware-redirect-targets.spec.ts,apps/web,,spec,16
 apps/web/src/lib/__tests__/nav-destinations.spec.ts,apps/web,,spec,138,,3,0,0,0,,,,,FALSE
 apps/web/src/lib/__tests__/nav-reachability.spec.ts,apps/web,,spec,213,,3,0,0,0,,,,,FALSE
 apps/web/src/lib/__tests__/no-fabricated-screens.spec.ts,apps/web,,spec,422,,3,0,0,0,,,,,FALSE
+apps/web/src/lib/__tests__/sw-credentialed-cache.test.ts,apps/web,,spec,179,,3,0,0,0,,,,,FALSE
 apps/web/src/lib/__tests__/tool-routes.spec.ts,apps/web,,spec,70,,2,0,0,0,,,,,FALSE
 apps/web/src/lib/__tests__/username-availability.test.ts,apps/web,,spec,129,,2,0,0,0,,,,,FALSE
 apps/web/src/lib/api-base.ts,apps/web,,ts,15,,0,0,0,0,,,,,TRUE
@@ -3162,7 +3165,7 @@ apps/web/src/lib/api/temporal-flow.ts,apps/web,,ts,198,,1,0,0,0,,,,,TRUE
 apps/web/src/lib/blueprint-types.ts,apps/web,,ts,535,,0,0,0,0,,,,,TRUE
 apps/web/src/lib/change-orders.ts,apps/web,,ts,57,,1,0,0,0,,,,,TRUE
 apps/web/src/lib/channel-icons.ts,apps/web,,ts,66,,1,0,0,0,,,,,TRUE
-apps/web/src/lib/client.ts,apps/web,,ts,15017,,4,0,1,0,,,,,FALSE
+apps/web/src/lib/client.ts,apps/web,,ts,15051,,4,0,1,0,,,,,FALSE
 apps/web/src/lib/commerce-status.ts,apps/web,,ts,48,,0,0,0,0,,,,,TRUE
 apps/web/src/lib/contacts-db.ts,apps/web,,ts,107,,1,0,1,0,,,,contacts,FALSE
 apps/web/src/lib/contacts-export.ts,apps/web,,ts,349,,2,0,0,0,,,,,TRUE
@@ -3293,7 +3296,7 @@ packages/api/eslint.config.mjs,packages/api,,mjs,23,,3,0,0,0,,,,,TRUE
 packages/api/src/context.ts,packages/api,,ts,15,,2,0,0,0,,,,,TRUE
 packages/api/src/lib/access.ts,packages/api,,ts,89,,2,0,8,0,,,,business,FALSE
 packages/api/src/lib/credentials.ts,packages/api,,ts,51,,1,0,0,0,,,,,TRUE
-packages/api/src/no-raw-records.spec.ts,packages/api,,spec,152,,3,0,0,0,,,,,FALSE
+packages/api/src/no-raw-records.spec.ts,packages/api,,spec,209,,3,0,0,0,,,,socialConnection business,FALSE
 packages/api/src/root.ts,packages/api,,ts,33,,14,0,0,0,,,,,TRUE
 packages/api/src/routers/admin.ts,packages/api,,ts,40,,2,0,1,0,,,,,FALSE
 packages/api/src/routers/automation.ts,packages/api,,ts,18,,3,0,1,0,,,,,FALSE
@@ -3316,11 +3319,11 @@ packages/db/fix-tag-backfill.ts,packages/db,,ts,50,,1,0,0,0,,,,,TRUE
 packages/db/prisma.config.ts,packages/db,,ts,5,,1,0,0,0,,,,,TRUE
 packages/db/prisma/seed.ts,packages/db,,ts,276,,1,0,0,0,,,,businessTemplate course cohort,TRUE
 packages/db/restore-tags-column.ts,packages/db,,ts,16,,1,0,0,0,,,,,TRUE
-packages/db/src/client.ts,packages/db,,ts,568,,5,0,6,0,,,,,FALSE
+packages/db/src/client.ts,packages/db,,ts,570,,5,0,6,0,,,,,FALSE
 packages/db/src/index.ts,packages/db,,ts,2,,0,0,0,0,,,,,TRUE
 packages/db/src/middleware/soft-delete.ts,packages/db,,ts,114,,1,0,1,0,,,,,FALSE
 packages/db/src/middleware/token-encryption.spec.ts,packages/db,,spec,104,,2,0,0,0,,,,,FALSE
-packages/db/src/middleware/token-encryption.ts,packages/db,,ts,339,,2,0,2,0,,,,,FALSE
+packages/db/src/middleware/token-encryption.ts,packages/db,,ts,360,,2,0,2,0,,,,,FALSE
 packages/db/src/test-soft-delete.ts,packages/db,,ts,76,,1,0,0,0,,,,business contact,TRUE
 packages/db/src/types/pg.d.ts,packages/db,,ts,2,,0,0,0,0,,,,,TRUE
 packages/db/vitest.config.ts,packages/db,,ts,12,,1,0,0,0,,,,,TRUE
@@ -3386,15 +3389,15 @@ scripts/fix-unused-caught-errors.mjs,(root),,mjs,60,,1,0,0,0,,,,,TRUE
 scripts/fix-unused-vars.mjs,(root),,mjs,64,,1,0,0,0,,,,,TRUE
 scripts/get-business-whatsapp.ts,(root),,ts,16,,1,0,0,0,,,,business,TRUE
 scripts/os/count-flow-tools.mjs,(root),,mjs,48,,4,0,0,0,,,,,TRUE
-scripts/os/ledger-sizes.mjs,(root),,mjs,65,,4,0,0,0,,,,,TRUE
+scripts/os/ledger-sizes.mjs,(root),,mjs,93,,4,0,0,0,,,,,TRUE
 scripts/os/lib.mjs,(root),,mjs,155,,0,0,0,0,,,,,TRUE
 scripts/os/probe-routes.mjs,(root),,mjs,123,,4,0,0,0,,,,,TRUE
 scripts/revert-problematic-renames.mjs,(root),,mjs,36,,1,0,0,0,,,,,TRUE
 scripts/set-business-whatsapp-mock.ts,(root),,ts,19,,1,0,0,0,,,,business,TRUE
 scripts/split-client.mjs,(root),,mjs,171,,10,0,0,0,,,,,TRUE
 scripts/system-map/build-xlsx.mjs,(root),,mjs,170,,4,0,0,0,,,,,TRUE
-scripts/system-map/extract.mjs,(root),,mjs,683,,3,0,0,0,,,,,TRUE
-scripts/system-map/generate.mjs,(root),,mjs,390,,3,0,0,0,,,,,TRUE
+scripts/system-map/extract.mjs,(root),,mjs,723,,3,0,0,0,,,,,TRUE
+scripts/system-map/generate.mjs,(root),,mjs,421,,3,0,0,0,,,,,TRUE
 scripts/test-ai-approval.ts,(root),,ts,41,,1,0,0,0,,,,business aiApprovalItem,TRUE
 scripts/verify-jose.ts,(root),,ts,16,,1,0,0,0,,,,,TRUE
 scripts/verify-patch2-runtime.ts,(root),,ts,167,,2,0,0,0,,,,,TRUE
