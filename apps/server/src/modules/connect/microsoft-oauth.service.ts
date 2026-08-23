@@ -1,6 +1,6 @@
 import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
 import { timingSafeStringEqual } from '../../core/security/timing-safe-equal';
-import { createHmac } from 'crypto';
+import { createHmac, randomBytes } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ConnectorActivityService } from '../../core/connectors/connector-activity.service';
 
@@ -42,7 +42,11 @@ export class MicrosoftOAuthService {
     }
     const state: OAuthState = {
       businessId,
-      nonce: Math.random().toString(36).slice(2),
+      // Math.random() is not a cryptographic source and its output is
+      // predictable from prior draws in V8. The state is HMAC-signed, so the
+      // nonce is defence in depth rather than the only control — but a
+      // guessable nonce makes distinct states guessable too.
+      nonce: randomBytes(16).toString('hex'),
       exp: Date.now() + 10 * 60 * 1000,
     };
     const signed = this.signState(state);

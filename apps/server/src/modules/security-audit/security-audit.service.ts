@@ -118,9 +118,33 @@ export class SecurityAuditService {
 
   private checkEnvSecrets(): SecurityCheck {
     const env = process.env;
+    const isProd = (env.NODE_ENV ?? '').includes('prod');
+    const serviceRoleKey = (env.SUPABASE_SERVICE_ROLE_KEY ?? '').trim();
+    const anonKey = (env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '').trim();
+
+    // The Supabase entry here used to read:
+    //
+    //   env.SUPABASE_SERVICE_ROLE_KEY && !env.NODE_ENV?.includes('prod') ? null : null
+    //
+    // Both branches are `null`, so this check could never contribute a finding
+    // however the environment was configured. It reported "no obvious secret
+    // configuration issues detected" unconditionally — a green light that
+    // could not turn red, which is worse than no check because it is trusted.
+    //
+    // What it must NOT do is flag the mere presence of the key outside
+    // production: main.ts requires SUPABASE_SERVICE_ROLE_KEY for signup in
+    // every environment, so that would fire on every developer machine and the
+    // whole audit would be ignored. These three conditions are things that are
+    // actually wrong.
     const exposed = [
       env.AI_INTEGRATIONS_OPENAI_API_KEY && env.AI_INTEGRATIONS_OPENAI_API_KEY.length < 20 ? 'AI_INTEGRATIONS_OPENAI_API_KEY appears short/weak' : null,
-      env.SUPABASE_SERVICE_ROLE_KEY && !env.NODE_ENV?.includes('prod') ? null : null,
+      // A real service-role key is a JWT and is far longer than this; anything
+      // shorter is truncated or a placeholder.
+      serviceRoleKey && serviceRoleKey.length < 40 ? 'SUPABASE_SERVICE_ROLE_KEY appears short/weak' : null,
+      // Copy-paste error: either the server has no elevated access, or the key
+      // shipped to browsers is the privileged one.
+      serviceRoleKey && anonKey && serviceRoleKey === anonKey ? 'SUPABASE_SERVICE_ROLE_KEY is identical to the public anon key' : null,
+      isProd && !serviceRoleKey ? 'SUPABASE_SERVICE_ROLE_KEY is not set in production' : null,
       env.DATABASE_URL?.includes('@localhost') ? 'DATABASE_URL points to localhost' : null,
     ].filter(Boolean) as string[];
 

@@ -39,7 +39,34 @@ export class PublicRateLimitGuard implements CanActivate {
       const pipeline = this.redis.pipeline();
       pipeline.zremrangebyscore(key, 0, windowStart);
       pipeline.zcard(key);
-      const [, [, count]] = await pipeline.exec() as [unknown, [null, number]];
+
+      // Identical reasoning to RateLimitGuard, which fixed this first — see the
+      // long comment there. pipeline.exec() RESOLVES when its commands fail,
+      // returning [error, value] pairs with the failure in slot 0. This used to
+      // destructure straight past that slot:
+      //
+      //   const [, [, count]] = await pipeline.exec() as [unknown, [null, number]]
+      //
+      // During an outage that left `count` undefined, and `undefined >= limit`
+      // is false, so the limit check silently passed. The request was still
+      // refused — but by the zadd below rejecting, not by anything here. The
+      // policy therefore depended on statement order rather than error
+      // handling, and this guard covers the UNAUTHENTICATED surface, where
+      // failing open is worst.
+      const results = await pipeline.exec();
+      if (!results) {
+        throw new Error('Redis pipeline returned no result');
+      }
+      const commandError = results.find(([err]) => err)?.[0];
+      if (commandError) {
+        throw commandError;
+      }
+      const count = results[1]?.[1];
+      if (typeof count !== 'number') {
+        // A non-numeric count means the store did not answer. Treating it as
+        // zero is the failure mode this whole comment exists to prevent.
+        throw new Error(`Rate-limit count unavailable (received ${typeof count})`);
+      }
 
       if (count >= opts.limit) {
         throw new HttpException(

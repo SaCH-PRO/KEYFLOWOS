@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
+import { randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { SupabaseAdminService } from '../../core/auth/supabase-admin.service';
 import { IdentityService } from '../../modules/identity/identity.service';
@@ -55,7 +56,14 @@ export class SeedService implements OnApplicationBootstrap {
   private async seedDevUser() {
     if (process.env.NODE_ENV !== 'development') return;
     const DEV_EMAIL = 'dev@keyflow.local';
-    const DEV_PASSWORD = 'keyflowdev123';
+    // Generated per seed rather than committed to source. This runs only in
+    // development, and only when the dev user does not already exist, so the
+    // value below is printed exactly once in the banner at the end of this
+    // method — that log line is the only place it appears.
+    //
+    // KEYFLOW_DEV_PASSWORD pins it for anyone who would rather not read the
+    // boot log every time they reset their database.
+    const DEV_PASSWORD = process.env.KEYFLOW_DEV_PASSWORD?.trim() || randomBytes(18).toString('base64url');
     try {
       // Skip if Supabase admin is not configured
       if (!this.supabaseAdmin.isConfigured()) {

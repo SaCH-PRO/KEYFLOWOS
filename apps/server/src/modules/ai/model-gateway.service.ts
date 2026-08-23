@@ -1487,7 +1487,11 @@ export class ModelGatewayService {
     request: GatewayRequest,
     byokKey?: string,
   ): AsyncGenerator<StreamChunk> {
-    const apiKey = byokKey || process.env.NATIVE_AI_API_KEY || 'native-key';
+    // No placeholder fallback: a missing key used to become the literal string
+    // 'native-key', which the provider rejected as an auth error somewhere
+    // downstream. Failing here names the actual problem.
+    const apiKey = byokKey || process.env.NATIVE_AI_API_KEY;
+    if (!apiKey) throw new Error('Native AI API key not configured (set NATIVE_AI_API_KEY or supply a BYOK key)');
     const baseURL = process.env.KEYFLOW_NATIVE_AI_URL || process.env.NATIVE_AI_BASE_URL;
     if (!baseURL) throw new Error('Native AI base URL not configured');
 
@@ -2458,7 +2462,11 @@ export class ModelGatewayService {
     request: GatewayRequest,
     byokKey?: string,
   ): Promise<Omit<GatewayResponse, 'provider' | 'model' | 'latencyMs' | 'fallbackUsed' | 'fallbackProvider'>> {
-    const apiKey = byokKey || process.env.NATIVE_AI_API_KEY || 'native-key';
+    // No placeholder fallback: a missing key used to become the literal string
+    // 'native-key', which the provider rejected as an auth error somewhere
+    // downstream. Failing here names the actual problem.
+    const apiKey = byokKey || process.env.NATIVE_AI_API_KEY;
+    if (!apiKey) throw new Error('Native AI API key not configured (set NATIVE_AI_API_KEY or supply a BYOK key)');
     const baseURL = process.env.KEYFLOW_NATIVE_AI_URL || process.env.NATIVE_AI_BASE_URL;
     if (!baseURL) throw new Error('Native AI base URL not configured');
 
