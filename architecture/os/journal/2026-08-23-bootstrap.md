@@ -50,6 +50,21 @@ outcome: corrected
   explanatory comment containing the literal Controller-decorator text made
   `search()` anchor inside the comment and report 6 open handlers instead
   of 0. Prose in code must not look like the code the gates parse.
+- **The review's top finding had the right defect and the wrong history.**
+  The sw.js authenticated-cache leak was reported as introduced by removing
+  the `_t` cache-buster; re-derivation (by the fixing session, 98fdb231)
+  showed 62 authenticated call sites never carried `_t`, so the leak
+  pre-existed and the removal only widened it from 62 paths to all of them.
+  Two lessons: a masked defect reads as an introduced one from the diff
+  alone — check whether the "old behavior" actually held on every path
+  before calling a change a regression; and the fixer's framing beat the
+  reviewer's because they fixed at the layer that STORES (credentialed
+  requests bypass Cache Storage; cache version bumped to evict poisoned
+  entries) instead of restoring the mask. Related root cause on their side,
+  worth a playbook line: they had verified the wrong PROPERTY — freshness
+  (network-first + no-store) instead of storage (cache.put is a different
+  layer no-store does not govern). Name the property at risk before
+  verifying anything.
 - **Explicit `git add <path>` does not make a commit surgical — the INDEX is
   shared.** 35f42129 was `git add <one playbook> && git commit`, and it swept
   four files a concurrent session had staged (their guard hooks + a
