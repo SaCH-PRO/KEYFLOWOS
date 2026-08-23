@@ -1,4 +1,4 @@
-import { Body, Controller, ForbiddenException, Get, HttpException, Inject, Logger, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, ForbiddenException, Get, HttpException, Inject, Logger, NotFoundException, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { WhatsAppService, type WhatsAppConfig } from './whatsapp.service';
@@ -85,6 +85,64 @@ export class WhatsAppController {
     const config = await this.service.getConfig(businessId);
     if (!config) return { success: false, error: 'Not configured' };
     return { success: true, provider: config.provider };
+  }
+
+  // ─── Manage drawer ─────────────────────────────────────────────────────
+  //
+  // whatsapp-manage-drawer.tsx has been calling these five routes since it was
+  // written; none of them existed, so every panel in it failed. The response
+  // shapes below are the drawer's own interfaces — returning the array/object
+  // directly, not wrapped in `{ data }`, because that is what it reads.
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/status')
+  async getStatus(@Param('businessId') businessId: string) {
+    return this.service.getStatus(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/conversations')
+  async listConversations(
+    @Param('businessId') businessId: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.service.listConversations(businessId, limit ? Number(limit) : undefined);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/conversations/:conversationId')
+  async getConversation(
+    @Param('businessId') businessId: string,
+    @Param('conversationId') conversationId: string,
+  ) {
+    const conversation = await this.service.getConversation(businessId, conversationId);
+    if (!conversation) throw new NotFoundException('Conversation not found');
+    return conversation;
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Get('businesses/:businessId/templates')
+  async listTemplates(@Param('businessId') businessId: string) {
+    return this.service.listTemplates(businessId);
+  }
+
+  @UseGuards(AuthGuard, BusinessGuard)
+  @Post('businesses/:businessId/messages')
+  async sendFromDrawer(
+    @Param('businessId') businessId: string,
+    @Body()
+    body: {
+      toPhone?: string;
+      contactId?: string;
+      body?: string;
+      templateName?: string;
+      templateLanguage?: string;
+      templateParams?: string[];
+      scheduledAt?: string;
+    },
+  ) {
+    if (!body?.toPhone) throw new BadRequestException('toPhone is required');
+    return this.service.sendFromDrawer(businessId, { ...body, toPhone: body.toPhone });
   }
 
   // ─── Public webhook for inbound messages (verified by provider signature) ───
