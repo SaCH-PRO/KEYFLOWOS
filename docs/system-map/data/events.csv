@@ -1,0 +1,323 @@
+event,emitter_count,listener_count,status,matched_by_pattern,emitters,listeners
+a.b,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/business-events/business-event.service.spec.ts,
+a.c,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/business-events/business-event.service.spec.ts,
+a.d,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/business-events/business-event.service.spec.ts,
+action.*,1,0,OK,TRUE,apps/server/src/modules/key-cortex/key-cortex-actions.service.ts,
+action.blocked,2,1,OK,,apps/server/src/modules/ai/action-dispatcher.service.ts apps/server/src/modules/ai/graph-actions.controller.ts,apps/server/src/modules/ai/ai.listener.ts
+action.executed,3,1,OK,,apps/server/src/modules/ai/action-dispatcher.service.ts apps/server/src/modules/ai/graph-actions.controller.ts apps/server/src/modules/ai/queue.service.ts,apps/server/src/modules/ai/ai.listener.ts
+action.failed,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/ai/queue.service.ts,
+action.undone,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/ai/undo.service.ts,
+agent.message,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/ai/agent-bus.service.ts,
+agent.message.*,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/ai/agent-bus.service.ts,
+agent.state_changed,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/ai/agent-state-machine.service.ts,
+app.event,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/temporal-flow/temporal-flow.service.spec.ts,
+approval.auto_approved,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/approvals/approval-request.service.ts,
+approval.cancelled,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/approvals/approval-request.service.ts,
+approval.created,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/approvals/approval-request.service.ts,
+approval.delegated,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/approvals/approval-request.service.ts,
+approval.escalated,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/approvals/approval-request.service.ts,
+approval.step_*d,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/approvals/approval-request.service.ts,
+asset.created,2,0,EMITTED_NO_LISTENER,,apps/server/src/modules/assets/asset.service.ts apps/server/src/modules/business-assets/business-assets.service.ts,
+asset.deleted,2,0,EMITTED_NO_LISTENER,,apps/server/src/modules/assets/asset.service.ts apps/server/src/modules/business-assets/business-assets.service.ts,
+asset.expiring_soon,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/business-assets/business-assets.service.ts,
+asset.tagged,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/assets/asset.service.ts,
+asset.updated,2,0,EMITTED_NO_LISTENER,,apps/server/src/modules/assets/asset.service.ts apps/server/src/modules/business-assets/business-assets.service.ts,
+asset.used,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/assets/asset.service.ts,
+autopilot.task.auto_executed,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/autopilot/delegation-loop.service.ts,
+autopilot.task.created,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/autopilot/delegation-loop.service.ts,
+bill.created,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/expenses/expenses.service.ts,
+bill.paid,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/expenses/expenses.service.ts,
+booking.cancelled,1,8,OK,,apps/server/src/modules/bookings/bookings.service.ts,apps/server/src/modules/ai/ai.listener.ts apps/server/src/modules/bookings/booking-no-show.listener.ts apps/server/src/modules/bookings/booking-waitlist.listener.ts apps/server/src/modules/calendar/listeners/bookings.listener.ts apps/server/src/modules/flow/activity-event.listener.ts apps/server/src/modules/flow/cross-module-agent.service.ts apps/server/src/modules/flow/flow.listener.ts apps/server/src/modules/growth-intelligence/journey-listener.service.ts
+booking.completed,1,11,OK,,apps/server/src/modules/bookings/bookings.service.ts,apps/server/src/modules/ai/ai.listener.ts apps/server/src/modules/bookings/booking-optimizer.service.ts apps/server/src/modules/calendar/listeners/bookings.listener.ts apps/server/src/modules/conversion/referral-reward.service.ts apps/server/src/modules/conversion/review-solicitation.service.ts apps/server/src/modules/flow/activity-event.listener.ts apps/server/src/modules/flow/cross-module-agent.service.ts apps/server/src/modules/flow/flow.listener.ts apps/server/src/modules/growth-intelligence/journey-listener.service.ts apps/server/src/modules/projects/project-revenue.listener.ts apps/server/src/modules/webhooks/webhook-dispatcher.service.ts
+booking.confirmed,1,7,OK,,apps/server/src/modules/bookings/bookings.service.ts,apps/server/src/modules/ai/ai.listener.ts apps/server/src/modules/calendar/listeners/bookings.listener.ts apps/server/src/modules/flow/activity-event.listener.ts apps/server/src/modules/flow/automation-executor.service.ts apps/server/src/modules/flow/flow.listener.ts apps/server/src/modules/growth-intelligence/journey-listener.service.ts apps/server/src/modules/webhooks/webhook-dispatcher.service.ts
+booking.created,3,9,OK,,apps/server/src/modules/bookings/bookings.service.ts apps/server/test/ai.listener.test.ts packages/api/src/routers/bookings.ts,apps/server/src/modules/ai/ai.listener.ts apps/server/src/modules/calendar/listeners/bookings.listener.ts apps/server/src/modules/flow/activity-event.listener.ts apps/server/src/modules/flow/automation-executor.service.ts apps/server/src/modules/flow/flow.listener.ts apps/server/src/modules/gamification/gamification.listener.ts apps/server/src/modules/growth-intelligence/journey-listener.service.ts apps/server/src/modules/webhooks/webhook-dispatcher.service.ts apps/server/src/modules/whatsapp/whatsapp-notifications.listener.ts
+booking.deleted,0,1,LISTENED_NEVER_EMITTED,,,apps/server/src/modules/calendar/listeners/bookings.listener.ts
+booking.invoice_created,1,1,OK,,apps/server/src/modules/bookings/bookings.service.ts,apps/server/src/modules/crm/revenue-event.listener.ts
+booking.no_show,1,2,OK,,apps/server/src/modules/bookings/bookings.service.ts,apps/server/src/modules/bookings/booking-no-show.listener.ts apps/server/src/modules/flow/flow.listener.ts
+booking.rescheduled,1,7,OK,,apps/server/src/modules/bookings/bookings.service.ts,apps/server/src/modules/ai/ai.listener.ts apps/server/src/modules/bookings/booking-waitlist.listener.ts apps/server/src/modules/calendar/listeners/bookings.listener.ts apps/server/src/modules/flow/activity-event.listener.ts apps/server/src/modules/flow/cross-module-agent.service.ts apps/server/src/modules/flow/flow.listener.ts apps/server/src/modules/growth-intelligence/journey-listener.service.ts
+booking.waitlist.added,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/bookings/booking-waitlist.service.ts,
+booking.waitlist.cancelled,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/bookings/booking-waitlist.service.ts,
+booking.waitlist.converted,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/bookings/booking-waitlist.service.ts,
+booking.waitlist.slot_offered,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/bookings/booking-waitlist.service.ts,
+briefing.generated,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/ai/morning-briefing.service.ts,
+business_event.anomaly_detected,1,2,OK,,apps/server/src/modules/business-events/business-event-anomaly.service.ts,apps/server/src/modules/event-stream/event-stream.service.ts apps/server/src/modules/key-cortex/key-cortex-immune.service.ts
+business_event.created,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/business-events/business-event.service.ts,
+calendar_event.actions_suggested,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/calendar/calendar-action-intelligence.service.ts,
+calendar_event.created,3,1,OK,,apps/server/src/core/connectors/implementations/google-calendar.connector.ts apps/server/src/modules/calendar/listeners/connector.listener.ts apps/server/test/calendar-action-intelligence.smoke.test.ts,apps/server/src/modules/calendar/listeners/connector.listener.ts
+calendar_event.updated,3,1,OK,,apps/server/src/core/connectors/implementations/google-calendar.connector.ts apps/server/src/modules/calendar/listeners/connector.listener.ts apps/server/test/calendar-action-intelligence.smoke.test.ts,apps/server/src/modules/calendar/listeners/connector.listener.ts
+calendar.event,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/temporal-flow/temporal-flow.service.spec.ts,
+call_log.completed,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/call-tasks/call-log.service.ts,
+call_log.created,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/call-tasks/call-log.service.ts,
+call_log.created_from_next_action,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/call-tasks/call-log.service.ts,
+call_log.deleted,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/call-tasks/call-log.service.ts,
+call_log.follow_up_created,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/call-tasks/call-log.service.ts,
+call_log.updated,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/call-tasks/call-log.service.ts,
+campaign.briefing_generated,1,1,OK,,apps/server/src/modules/email-marketing/campaign-intelligence.service.ts,apps/server/src/modules/ai/ai.listener.ts
+campaign.created,1,2,OK,,apps/server/src/modules/email-marketing/email-marketing.service.ts,apps/server/src/modules/ai/ai.listener.ts apps/server/src/modules/calendar/listeners/marketing.listener.ts
+campaign.sent,4,3,OK,,apps/server/src/core/connectors/implementations/klaviyo.connector.ts apps/server/src/core/connectors/implementations/mailchimp.connector.ts apps/server/src/modules/email-marketing/email-marketing.service.ts apps/server/test/ai.listener.test.ts,apps/server/src/modules/ai/ai.listener.ts apps/server/src/modules/calendar/listeners/marketing.listener.ts apps/server/src/modules/flow/cross-module-agent.service.ts
+catalog.product.created,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/catalog/catalog.service.ts,
+catalog.product.deleted,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/catalog/catalog.service.ts,
+catalog.product.updated,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/catalog/catalog.service.ts,
+catalog.service.created,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/catalog/catalog.service.ts,
+catalog.service.deleted,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/catalog/catalog.service.ts,
+catalog.service.updated,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/catalog/catalog.service.ts,
+command.assigned,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/command/command.service.ts,
+command.bulk_completed,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/command/command.service.ts,
+command.bulk_dismissed,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/command/command.service.ts,
+command.completed,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/command/command.service.ts,
+command.created,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/command/command.service.ts,
+command.updated,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/command/command.service.ts,
+connector.connected,1,1,OK,,apps/server/src/core/connectors/connector-registry.service.ts,apps/server/src/core/connectors/connector-activity.service.ts
+connector.disconnected,1,1,OK,,apps/server/src/core/connectors/connector-registry.service.ts,apps/server/src/core/connectors/connector-activity.service.ts
+connector.error,1,1,OK,,apps/server/src/core/connectors/connector-registry.service.ts,apps/server/src/core/connectors/connector-activity.service.ts
+connector.smoke_tested,1,0,EMITTED_NO_LISTENER,,apps/server/src/core/connectors/connector-registry.service.ts,
+connector.synced,1,2,OK,,apps/server/src/core/connectors/connector-registry.service.ts,apps/server/src/core/connectors/connector-activity.service.ts apps/server/src/modules/connect/google-forms-mapping.service.ts
+connector.tested,1,0,EMITTED_NO_LISTENER,,apps/server/src/core/connectors/connector-registry.service.ts,
+constitution.version_archived,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/business-genome/constitution-version.service.ts,
+constitution.version_generated,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/business-genome/constitution-version.service.ts,
+contact_task.completed,1,1,OK,,apps/server/src/modules/crm/crm-timeline.service.ts,apps/server/src/modules/calendar/listeners/crm.listener.ts
+contact_task.created,1,1,OK,,apps/server/src/modules/crm/crm-timeline.service.ts,apps/server/src/modules/calendar/listeners/crm.listener.ts
+contact_task.deleted,1,1,OK,,apps/server/src/modules/crm/crm-timeline.service.ts,apps/server/src/modules/calendar/listeners/crm.listener.ts
+contact_task.reopened,1,1,OK,,apps/server/src/modules/crm/crm-timeline.service.ts,apps/server/src/modules/calendar/listeners/crm.listener.ts
+contact_task.rescheduled,1,1,OK,,apps/server/src/modules/crm/crm-timeline.service.ts,apps/server/src/modules/calendar/listeners/crm.listener.ts
+contact_task.updated,1,1,OK,,apps/server/src/modules/crm/crm-timeline.service.ts,apps/server/src/modules/calendar/listeners/crm.listener.ts
+contact.created,3,6,OK,,apps/server/src/core/connectors/entity-resolution.service.ts apps/server/src/modules/business-events/business-event.service.spec.ts apps/server/src/modules/crm/crm.service.ts,apps/server/src/modules/ai/ai.listener.ts apps/server/src/modules/flow/activity-event.listener.ts apps/server/src/modules/flow/automation-executor.service.ts apps/server/src/modules/flow/flow.listener.ts apps/server/src/modules/growth-intelligence/journey-listener.service.ts apps/server/src/modules/webhooks/webhook-dispatcher.service.ts
+contact.deleted,1,2,OK,,apps/server/src/modules/crm/crm.service.ts,apps/server/src/modules/ai/ai.listener.ts apps/server/src/modules/flow/flow.listener.ts
+contact.imported,1,4,OK,,apps/server/src/modules/crm/crm-google.service.ts,apps/server/src/modules/ai/ai.listener.ts apps/server/src/modules/flow/activity-event.listener.ts apps/server/src/modules/flow/flow.listener.ts apps/server/src/modules/growth-intelligence/journey-listener.service.ts
+contact.lifecycle_updated,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/autopilot/delegation-loop.service.ts,
+contact.merge_reverted,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/crm/crm.service.ts,
+contact.merged,1,4,OK,,apps/server/src/modules/crm/crm.service.ts,apps/server/src/modules/ai/ai.listener.ts apps/server/src/modules/flow/activity-event.listener.ts apps/server/src/modules/flow/flow.listener.ts apps/server/src/modules/webhooks/webhook-dispatcher.service.ts
+contact.next_action_cleared,1,1,OK,,apps/server/src/modules/crm/crm.service.ts,apps/server/src/modules/calendar/listeners/crm.listener.ts
+contact.next_action_set,1,1,OK,,apps/server/src/modules/crm/crm.service.ts,apps/server/src/modules/calendar/listeners/crm.listener.ts
+contact.updated,1,6,OK,,apps/server/src/modules/crm/crm.service.ts,apps/server/src/modules/ai/ai.listener.ts apps/server/src/modules/connect/contact-sync.service.ts apps/server/src/modules/flow/activity-event.listener.ts apps/server/src/modules/flow/automation-executor.service.ts apps/server/src/modules/flow/flow.listener.ts apps/server/src/modules/webhooks/webhook-dispatcher.service.ts
+content_calendar.gap_detected,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/social/social-gap-detector.service.ts,
+content_request.*,1,0,OK,TRUE,apps/server/src/modules/content-ops/content-request.service.ts,
+content_request.approved,0,1,OK,TRUE,,apps/server/src/modules/event-stream/event-stream.service.ts
+content_request.assigned,0,1,OK,TRUE,,apps/server/src/modules/event-stream/event-stream.service.ts
+content_request.cancelled,0,1,OK,TRUE,,apps/server/src/modules/event-stream/event-stream.service.ts
+content_request.created,1,1,OK,,apps/server/src/modules/content-ops/content-request.service.ts,apps/server/src/modules/event-stream/event-stream.service.ts
+content_request.delivered,1,1,OK,,apps/server/src/modules/content-ops/content-request.service.ts,apps/server/src/modules/event-stream/event-stream.service.ts
+content_request.in_production,0,1,OK,TRUE,,apps/server/src/modules/event-stream/event-stream.service.ts
+content_request.internal_review,0,1,OK,TRUE,,apps/server/src/modules/event-stream/event-stream.service.ts
+content_request.submitted,0,1,OK,TRUE,,apps/server/src/modules/event-stream/event-stream.service.ts
+content_request.updated,1,1,OK,,apps/server/src/modules/content-ops/content-request.service.ts,apps/server/src/modules/event-stream/event-stream.service.ts
+content_request.uploaded_to_drive,1,1,OK,,apps/server/src/modules/content-ops/content-request.service.ts,apps/server/src/modules/event-stream/event-stream.service.ts
+content_request.user_review,0,1,OK,TRUE,,apps/server/src/modules/event-stream/event-stream.service.ts
+content.delivered,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/content-ops/content-request.service.ts,
+content.delivered_invoiced,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/content-ops/content-invoice.service.ts,
+content.failed,1,1,OK,,apps/server/src/modules/communications/delivery-queue.service.ts,apps/server/src/modules/ai/ai.listener.ts
+content.published,1,1,OK,,apps/server/src/modules/communications/delivery-queue.service.ts,apps/server/src/modules/ai/ai.listener.ts
+conversation.handled,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/ai/conversational-ai.service.ts,
+conversation.message_received,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/ai/unified-inbox.service.ts,
+conversation.thread_created,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/ai/unified-inbox.service.ts,
+cortex.action_executed,2,0,EMITTED_NO_LISTENER,,apps/server/src/modules/key-cortex/key-cortex-lifecycle.service.ts apps/server/src/modules/key-cortex/key-cortex-safe-database.service.ts,
+cortex.command_status_changed,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/key-cortex/key-cortex-lifecycle.service.ts,
+cortex.monitor.created,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/key-cortex/key-cortex-monitor-v2.service.ts,
+cortex.monitor.manual_run,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/key-cortex/key-cortex-monitor-v2.service.ts,
+cortex.monitor.toggled,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/key-cortex/key-cortex-monitor-v2.service.ts,
+cortex.monitor.updated,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/key-cortex/key-cortex-monitor-v2.service.ts,
+cortex.session_started,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/key-cortex/key-cortex-lifecycle.service.ts,
+cortex.turn_completed,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/key-cortex/key-cortex-lifecycle.service.ts,
+cortex.turn_failed,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/key-cortex/key-cortex-lifecycle.service.ts,
+cortex.turn_started,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/key-cortex/key-cortex-lifecycle.service.ts,
+crm.contact_event.logged,2,4,OK,,apps/server/src/modules/crm/crm-communication.service.ts apps/server/src/modules/crm/crm-timeline.service.ts,apps/server/src/modules/crm/best-channel.listener.ts apps/server/src/modules/crm/contact-insight.listener.ts apps/server/src/modules/crm/deal-intelligence-scheduler.service.ts apps/server/src/modules/crm/sequence-attribution.listener.ts
+crm.contact_insight.recomputed,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/crm/contact-insight.service.ts,
+crm.conversation.analyzed,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/crm/conversation-ai.service.ts,
+crm.deal.created,1,2,OK,,apps/server/src/modules/crm/crm-deals.service.ts,apps/server/src/modules/crm/contact-insight.listener.ts apps/server/src/modules/crm/deal-intelligence-scheduler.service.ts
+crm.deal.stage_changed,1,1,OK,,apps/server/src/modules/crm/crm-deals.service.ts,apps/server/src/modules/crm/deal-intelligence-scheduler.service.ts
+crm.deal.won,1,1,OK,,apps/server/src/modules/crm/crm-deals.service.ts,apps/server/src/modules/crm/crm-sequence-scheduler.service.ts
+deal.updated,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/crm/crm-deals.service.ts,
+delegation_loop.approval_required,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/autopilot/delegation-loop.service.ts,
+delegation_loop.blocked,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/autopilot/delegation-loop.service.ts,
+delegation_loop.completed,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/autopilot/delegation-loop.service.ts,
+delegation_loop.failed,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/autopilot/delegation-loop.service.ts,
+delegation_loop.started,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/autopilot/delegation-loop.service.ts,
+delegation_loop.trust_degraded,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/autopilot/delegation-loop.service.ts,
+delegation_loop.trust_elevated,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/autopilot/delegation-loop.service.ts,
+delivery.clicked,1,1,OK,,apps/server/src/modules/communications/delivery-queue.service.ts,apps/server/src/modules/crm/crm-sequence-scheduler.service.ts
+delivery.completed,1,1,OK,,apps/server/src/modules/communications/delivery-queue.service.ts,apps/server/src/modules/ai/ai.listener.ts
+delivery.failed,1,1,OK,,apps/server/src/modules/communications/delivery-queue.service.ts,apps/server/src/modules/ai/ai.listener.ts
+delivery.opened,1,1,OK,,apps/server/src/modules/communications/delivery-queue.service.ts,apps/server/src/modules/crm/crm-sequence-scheduler.service.ts
+document.extracted,1,1,OK,,apps/server/src/modules/ai/document-intelligence.service.ts,apps/server/src/modules/contracts/contracts.service.ts
+email_campaign.cancelled,1,1,OK,,apps/server/src/modules/email-marketing/email-marketing.service.ts,apps/server/src/modules/calendar/listeners/marketing.listener.ts
+email_campaign.created,1,1,OK,,apps/server/src/modules/email-marketing/email-marketing.service.ts,apps/server/src/modules/calendar/listeners/marketing.listener.ts
+email_campaign.deleted,1,1,OK,,apps/server/src/modules/email-marketing/email-marketing.service.ts,apps/server/src/modules/calendar/listeners/marketing.listener.ts
+email_campaign.scheduled,1,1,OK,,apps/server/src/modules/email-marketing/email-marketing.service.ts,apps/server/src/modules/calendar/listeners/marketing.listener.ts
+email_campaign.sent,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/email-marketing/email-marketing.service.ts,
+email_campaign.updated,1,1,OK,,apps/server/src/modules/email-marketing/email-marketing.service.ts,apps/server/src/modules/calendar/listeners/marketing.listener.ts
+email.received,0,1,LISTENED_NEVER_EMITTED,,,apps/server/src/modules/connect/signature-parser.service.ts
+entity.resolved,14,1,OK,,apps/server/src/core/connectors/implementations/form-platform.base.ts apps/server/src/core/connectors/implementations/gmail.connector.ts apps/server/src/core/connectors/implementations/google-calendar.connector.ts apps/server/src/core/connectors/implementations/klaviyo.connector.ts apps/server/src/core/connectors/implementations/mailchimp.connector.ts apps/server/src/core/connectors/implementations/meta-social.connector.ts apps/server/src/core/connectors/implementations/paypal.connector.ts apps/server/src/core/connectors/implementations/quickbooks.connector.ts apps/server/src/core/connectors/implementations/social-platform.base.ts apps/server/src/core/connectors/implementations/stripe.connector.ts apps/server/src/core/connectors/implementations/whatsapp.connector.ts apps/server/src/core/connectors/implementations/wipay.connector.ts apps/server/src/core/connectors/implementations/xero.connector.ts apps/server/src/modules/whatsapp/whatsapp.service.ts,apps/server/src/modules/growth-intelligence/journey-listener.service.ts
+evidence.deleted,1,1,OK,,apps/server/src/modules/evidence/evidence.service.ts,apps/server/src/modules/event-stream/event-stream.service.ts
+evidence.submitted,1,1,OK,,apps/server/src/modules/evidence/evidence.service.ts,apps/server/src/modules/event-stream/event-stream.service.ts
+evidence.verified,1,1,OK,,apps/server/src/modules/evidence/evidence.service.ts,apps/server/src/modules/event-stream/event-stream.service.ts
+expense.created,1,2,OK,,apps/server/src/modules/expenses/expenses.service.ts,apps/server/src/modules/ai/ai.listener.ts apps/server/src/modules/flow/flow.listener.ts
+file.synced,1,0,EMITTED_NO_LISTENER,,apps/server/src/core/connectors/implementations/google-drive.connector.ts,
+file.uploaded,2,1,OK,,apps/server/src/core/connectors/implementations/google-drive.connector.ts apps/server/src/modules/ai/connector-intelligence.service.ts,apps/server/src/modules/commerce/drive-intake.listener.ts
+flow.node_changed,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/flow/flow-runner.service.ts,
+flow.run_completed,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/flow/flow-runner.service.ts,
+flow.run_failed,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/flow/flow-runner.service.ts,
+flow.run_started,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/flow/flow-runner.service.ts,
+form.submitted,2,1,OK,,apps/server/src/core/connectors/implementations/form-platform.base.ts apps/server/src/modules/ai/connector-intelligence.service.ts,apps/server/src/modules/growth-intelligence/journey-listener.service.ts
+genome_evolution.proposal_approved,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/business-genome/genome-evolution.service.ts,
+genome_evolution.proposal_edited,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/business-genome/genome-evolution.service.ts,
+genome_evolution.proposal_rejected,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/business-genome/genome-evolution.service.ts,
+genome.integrity_changed,1,1,OK,,apps/server/src/modules/blueprint/blueprint.service.ts,apps/server/src/modules/business-genome/genome-integrity-change.listener.ts
+genome.section_updated,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/blueprint/blueprint.service.ts,
+genome.updated,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/blueprint/blueprint.service.ts,
+goal.achieved,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/ai/goal-tracker.service.ts,
+goal.created,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/ai/goal-tracker.service.ts,
+goal.deleted,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/ai/goal-tracker.service.ts,
+goal.updated,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/ai/goal-tracker.service.ts,
+graph.cache_invalidated,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/ai/ai.listener.ts,
+ingestion.item.received,1,1,OK,,apps/server/src/modules/ai/connector-intelligence.service.ts,apps/server/src/modules/ingestion/ingestion.listener.ts
+inventory.*,1,0,OK,TRUE,apps/server/src/modules/site/store-order.service.ts,
+inventory.low,1,2,OK,,apps/server/src/modules/marketplace/fulfillment-routing.service.ts,apps/server/src/modules/ai/ai.listener.ts apps/server/src/modules/marketplace/commerce-integration.service.ts
+inventory.out,1,2,OK,,apps/server/src/modules/marketplace/fulfillment-routing.service.ts,apps/server/src/modules/ai/ai.listener.ts apps/server/src/modules/marketplace/commerce-integration.service.ts
+invoice.created,2,4,OK,,apps/server/src/modules/commerce/commerce.service.ts apps/server/src/modules/commerce/recurring-invoice.service.ts,apps/server/src/modules/calendar/listeners/commerce.listener.ts apps/server/src/modules/crm/revenue-event.listener.ts apps/server/src/modules/flow/activity-event.listener.ts apps/server/src/modules/whatsapp/whatsapp-notifications.listener.ts
+invoice.deleted,1,1,OK,,apps/server/src/modules/commerce/commerce.service.ts,apps/server/src/modules/calendar/listeners/commerce.listener.ts
+invoice.due_date_changed,1,1,OK,,apps/server/src/modules/commerce/commerce.service.ts,apps/server/src/modules/calendar/listeners/commerce.listener.ts
+invoice.overdue,3,9,OK,,apps/server/src/modules/autopilot/delegation-loop.service.ts apps/server/src/modules/flow-signal/flow-signal.service.spec.ts apps/server/src/modules/temporal-flow/temporal-flow.service.spec.ts,apps/server/src/modules/ai/ai.listener.ts apps/server/src/modules/calendar/listeners/commerce.listener.ts apps/server/src/modules/commerce/revenue-action.service.ts apps/server/src/modules/crm/revenue-event.listener.ts apps/server/src/modules/flow/activity-event.listener.ts apps/server/src/modules/flow/automation-executor.service.ts apps/server/src/modules/flow/flow.listener.ts apps/server/src/modules/notifications/notifications-revenue.listener.ts apps/server/src/modules/webhooks/webhook-dispatcher.service.ts
+invoice.paid,4,19,OK,,apps/server/src/modules/commerce/invoice-workflow.service.ts apps/server/src/modules/key-cortex/opportunity-signal-reachability.spec.ts apps/server/test/ai.listener.test.ts packages/api/src/routers/commerce.ts,apps/server/src/modules/ai/ai.listener.ts apps/server/src/modules/calendar/listeners/commerce.listener.ts apps/server/src/modules/commerce/invoice-receipt.listener.ts apps/server/src/modules/commerce/margin-on-payment.listener.ts apps/server/src/modules/commerce/revenue-action.service.ts apps/server/src/modules/commerce/storefront-invoice-attribution.listener.ts apps/server/src/modules/conversion/referral-reward.service.ts apps/server/src/modules/conversion/review-solicitation.service.ts apps/server/src/modules/crm/contact-insight.listener.ts apps/server/src/modules/crm/crm-network.service.ts apps/server/src/modules/crm/revenue-event.listener.ts apps/server/src/modules/flow/activity-event.listener.ts apps/server/src/modules/flow/automation-executor.service.ts apps/server/src/modules/flow/flow.listener.ts apps/server/src/modules/gamification/gamification.listener.ts apps/server/src/modules/growth-intelligence/journey-listener.service.ts apps/server/src/modules/projects/project-revenue.listener.ts apps/server/src/modules/webhooks/webhook-dispatcher.service.ts apps/server/src/modules/whatsapp/whatsapp-notifications.listener.ts
+invoice.payment_failed,0,1,LISTENED_NEVER_EMITTED,,,apps/server/src/modules/calendar/listeners/commerce.listener.ts
+invoice.payment_recorded,1,1,OK,,apps/server/src/modules/commerce/invoice-workflow.service.ts,apps/server/src/modules/calendar/listeners/commerce.listener.ts
+invoice.payment_reminder_sent,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/commerce/commerce.service.ts,
+invoice.reminder_failed,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/commerce/commerce.service.ts,
+invoice.sent,0,7,LISTENED_NEVER_EMITTED,,,apps/server/src/modules/ai/ai.listener.ts apps/server/src/modules/calendar/listeners/commerce.listener.ts apps/server/src/modules/crm/revenue-event.listener.ts apps/server/src/modules/flow/activity-event.listener.ts apps/server/src/modules/flow/automation-executor.service.ts apps/server/src/modules/flow/flow.listener.ts apps/server/src/modules/webhooks/webhook-dispatcher.service.ts
+invoice.updated,1,1,OK,,apps/server/src/modules/commerce/commerce.service.ts,apps/server/src/modules/calendar/listeners/commerce.listener.ts
+invoice.void,0,1,LISTENED_NEVER_EMITTED,,,apps/server/src/modules/calendar/listeners/commerce.listener.ts
+journey.started,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/ai/journey-orchestrator.service.ts,
+key_action.blocked,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/key-autonomy/action-audit.service.ts,
+key_action.executed,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/key-autonomy/action-audit.service.ts,
+key_action.failed,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/key-autonomy/action-audit.service.ts,
+key_inbox.action_confirmed,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/key-inbox/key-inbox.controller.ts,
+key_inbox.action_executed,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/key-inbox/key-inbox.controller.ts,
+key_inbox.actions_suggested,2,1,OK,,apps/server/src/modules/key-inbox/key-inbox-temporal-emitter.service.ts apps/server/src/modules/temporal-flow/temporal-flow-key-inbox.listener.ts,apps/server/src/modules/temporal-flow/temporal-flow-key-inbox.listener.ts
+key_inbox.brief_generated,2,1,OK,,apps/server/src/modules/key-inbox/key-inbox-temporal-emitter.service.ts apps/server/src/modules/temporal-flow/temporal-flow-key-inbox.listener.ts,apps/server/src/modules/temporal-flow/temporal-flow-key-inbox.listener.ts
+key_inbox.genome_signal_detected,2,2,OK,,apps/server/src/modules/key-inbox/key-inbox-temporal-emitter.service.ts apps/server/src/modules/temporal-flow/temporal-flow-key-inbox.listener.ts,apps/server/src/modules/key-cortex/organs/key-inbox-adapter.service.ts apps/server/src/modules/temporal-flow/temporal-flow-key-inbox.listener.ts
+key_inbox.intelligence_generated,2,1,OK,,apps/server/src/modules/key-inbox/key-inbox-temporal-emitter.service.ts apps/server/src/modules/temporal-flow/temporal-flow-key-inbox.listener.ts,apps/server/src/modules/temporal-flow/temporal-flow-key-inbox.listener.ts
+key_inbox.message_analyzed,2,1,OK,,apps/server/src/modules/key-inbox/key-inbox-temporal-emitter.service.ts apps/server/src/modules/temporal-flow/temporal-flow-key-inbox.listener.ts,apps/server/src/modules/temporal-flow/temporal-flow-key-inbox.listener.ts
+key_inbox.message_received,2,3,OK,,apps/server/src/modules/key-inbox/key-inbox-temporal-emitter.service.ts apps/server/src/modules/temporal-flow/temporal-flow-key-inbox.listener.ts,apps/server/src/modules/key-cortex/organs/key-inbox-adapter.service.ts apps/server/src/modules/key-cortex/organs/temporal-flow-adapter.service.ts apps/server/src/modules/temporal-flow/temporal-flow-key-inbox.listener.ts
+key_inbox.opportunity_detected,2,2,OK,,apps/server/src/modules/key-inbox/key-inbox-temporal-emitter.service.ts apps/server/src/modules/temporal-flow/temporal-flow-key-inbox.listener.ts,apps/server/src/modules/key-cortex/organs/temporal-flow-adapter.service.ts apps/server/src/modules/temporal-flow/temporal-flow-key-inbox.listener.ts
+key_inbox.reply_drafted,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/key-inbox/key-inbox-reply-sender.service.ts,
+key_inbox.reply_failed,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/key-inbox/key-inbox-reply-sender.service.ts,
+key_inbox.reply_sent,1,1,OK,,apps/server/src/modules/key-inbox/key-inbox-reply-sender.service.ts,apps/server/src/modules/key-cortex/organs/key-inbox-adapter.service.ts
+key_inbox.risk_detected,2,2,OK,,apps/server/src/modules/key-inbox/key-inbox-temporal-emitter.service.ts apps/server/src/modules/temporal-flow/temporal-flow-key-inbox.listener.ts,apps/server/src/modules/key-cortex/organs/temporal-flow-adapter.service.ts apps/server/src/modules/temporal-flow/temporal-flow-key-inbox.listener.ts
+key_inbox.trend_detected,2,1,OK,,apps/server/src/modules/key-inbox/key-inbox-temporal-emitter.service.ts apps/server/src/modules/temporal-flow/temporal-flow-key-inbox.listener.ts,apps/server/src/modules/temporal-flow/temporal-flow-key-inbox.listener.ts
+key.action.approved,1,1,OK,,apps/server/src/modules/key-autonomy/key-action-proposal.service.ts,apps/server/src/modules/ai/plan-executor.service.ts
+key.action.blocked_by_autonomy,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/key-autonomy/key-action-proposal.service.ts,
+key.action.blocked_by_genome,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/key-autonomy/key-action-proposal.service.ts,
+key.action.cancelled,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/key-autonomy/key-action-proposal.service.ts,
+key.action.create_task,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/key-autonomy/key-action-executor.service.ts,
+key.action.executed,1,1,OK,,apps/server/src/modules/key-autonomy/key-action-proposal.service.ts,apps/server/src/modules/key-cortex/key-cortex-realtime.service.ts
+key.action.executing,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/key-autonomy/key-action-proposal.service.ts,
+key.action.failed,1,1,OK,,apps/server/src/modules/key-autonomy/key-action-proposal.service.ts,apps/server/src/modules/key-cortex/key-cortex-realtime.service.ts
+key.action.genome_risk_confirmed,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/key-autonomy/key-action-proposal.service.ts,
+key.action.proposed,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/key-autonomy/key-action-proposal.service.ts,
+key.action.rejected,1,1,OK,,apps/server/src/modules/key-autonomy/key-action-proposal.service.ts,apps/server/src/modules/ai/plan-executor.service.ts
+key.alert,0,1,LISTENED_NEVER_EMITTED,,,apps/server/src/modules/key-cortex/key-cortex-realtime.service.ts
+key.approval.requested,0,1,LISTENED_NEVER_EMITTED,,,apps/server/src/modules/key-cortex/key-cortex-realtime.service.ts
+key.approval.resolved,0,1,LISTENED_NEVER_EMITTED,,,apps/server/src/modules/key-cortex/key-cortex-realtime.service.ts
+key.chat.completed,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/key-cortex/key-cortex.gateway.ts,
+key.cortex.approval.required,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/key-cortex/key-cortex-executor.service.ts,
+key.cortex.batch.completed,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/key-cortex/key-cortex-executor.service.ts,
+key.cortex.batch.started,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/key-cortex/key-cortex-executor.service.ts,
+key.cortex.execution.completed,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/key-cortex/key-cortex-executor.service.ts,
+key.cortex.execution.rollback,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/key-cortex/key-cortex-executor.service.ts,
+key.cortex.execution.started,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/key-cortex/key-cortex-executor.service.ts,
+key.genome.signal_merged,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/business-genome/key-genome/genome-signal.service.ts,
+key.health.update,0,1,LISTENED_NEVER_EMITTED,,,apps/server/src/modules/key-cortex/key-cortex-realtime.service.ts
+key.insight.generated,0,1,LISTENED_NEVER_EMITTED,,,apps/server/src/modules/key-cortex/key-cortex-realtime.service.ts
+key.reasoning.chunk,0,1,LISTENED_NEVER_EMITTED,,,apps/server/src/modules/key-cortex/key-cortex-realtime.service.ts
+key.stats.requested,0,1,LISTENED_NEVER_EMITTED,,,apps/server/src/modules/key-cortex/key-cortex-realtime.service.ts
+key.suggestion,0,1,LISTENED_NEVER_EMITTED,,,apps/server/src/modules/key-cortex/key-cortex-realtime.service.ts
+lead_form.created,1,1,OK,,apps/server/src/modules/lead-forms/lead-forms.service.ts,apps/server/src/modules/ai/ai.listener.ts
+lead_form.submitted,2,4,OK,,apps/server/src/core/connectors/implementations/form-platform.base.ts apps/server/src/modules/lead-forms/lead-forms.service.ts,apps/server/src/modules/ai/ai.listener.ts apps/server/src/modules/flow/cross-module-agent.service.ts apps/server/src/modules/growth-intelligence/journey-listener.service.ts apps/server/src/modules/key-cortex/organs/storelink-adapter.service.ts
+lead.created,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/key-cortex/__tests__/key-cortex-event-bus.service.spec.ts,
+manager.alert_detected,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/ai/capacity-insight.service.ts,
+manager.chase_notice,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/ai/chaser.service.ts,
+manager.overload_detected,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/ai/capacity-insight.service.ts,
+manager.task_rebalanced,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/ai/task-rebalancer.service.ts,
+memory.stored,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/ai/semantic-memory.service.ts,
+message.intake.received,3,1,OK,,apps/server/src/modules/ai/connector-intelligence.service.ts apps/server/src/modules/communications/inbound-communications.service.ts apps/server/src/modules/whatsapp/whatsapp.service.ts,apps/server/src/modules/communications/message-intake.listener.ts
+message.received,5,3,OK,,apps/server/src/core/connectors/implementations/gmail.connector.ts apps/server/src/core/connectors/implementations/social-platform.base.ts apps/server/src/core/connectors/implementations/whatsapp.connector.ts apps/server/src/modules/communications/inbound-communications.service.ts apps/server/src/modules/whatsapp/whatsapp.service.ts,apps/server/src/modules/crm/conversation-ai.service.ts apps/server/src/modules/crm/crm-sequence-scheduler.service.ts apps/server/src/modules/growth-intelligence/journey-listener.service.ts
+message.sent,3,0,EMITTED_NO_LISTENER,,apps/server/src/core/connectors/implementations/gmail.connector.ts apps/server/src/core/connectors/implementations/whatsapp.connector.ts apps/server/src/modules/ai/ai-message-sender.service.ts,
+notification.send,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/key-cortex/key-cortex-flow-studio.service.ts,
+pattern.detected,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/ai/pattern-detector.service.ts,
+payment.failed,3,3,OK,,apps/server/src/core/connectors/implementations/paypal.connector.ts apps/server/src/core/connectors/implementations/stripe.connector.ts apps/server/src/core/connectors/implementations/wipay.connector.ts,apps/server/src/modules/commerce/revenue-action.service.ts apps/server/src/modules/crm/revenue-event.listener.ts apps/server/src/modules/flow/flow.listener.ts
+payment.received,6,4,OK,,apps/server/src/core/connectors/implementations/paypal.connector.ts apps/server/src/core/connectors/implementations/quickbooks.connector.ts apps/server/src/core/connectors/implementations/stripe.connector.ts apps/server/src/core/connectors/implementations/wipay.connector.ts apps/server/src/core/connectors/implementations/xero.connector.ts apps/server/src/modules/key-cortex/opportunity-signal-reachability.spec.ts,apps/server/src/modules/crm/revenue-event.listener.ts apps/server/src/modules/flow/flow.listener.ts apps/server/src/modules/growth-intelligence/journey-listener.service.ts apps/server/src/modules/notifications/notifications-revenue.listener.ts
+plan.approved,4,1,OK,,apps/server/src/modules/ai/agent-trigger.service.ts apps/server/src/modules/ai/ai.controller.ts apps/server/src/modules/ai/journey-orchestrator.service.ts apps/server/src/modules/ai/morning-briefing.service.ts,apps/server/src/modules/ai/plan-executor.service.ts
+plan.executed,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/ai/plan-executor.service.ts,
+plan.replan_required,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/ai/feedback-loop.service.ts,
+plan.stalled,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/ai/agent-health.service.ts,
+post.published,2,5,OK,,apps/server/src/modules/social/social.service.ts apps/server/test/ai.listener.test.ts,apps/server/src/modules/ai/ai.listener.ts apps/server/src/modules/calendar/listeners/marketing.listener.ts apps/server/src/modules/flow/automation-executor.service.ts apps/server/src/modules/gamification/gamification.listener.ts apps/server/src/modules/webhooks/webhook-dispatcher.service.ts
+preorder.delayed,1,2,OK,,apps/server/src/modules/marketplace/marketplace.service.ts,apps/server/src/modules/ai/ai.listener.ts apps/server/src/modules/marketplace/commerce-integration.service.ts
+product.created,1,3,OK,,apps/server/src/modules/catalog/catalog.service.ts,apps/server/src/modules/ai/ai.listener.ts apps/server/src/modules/flow/cross-module-agent.service.ts apps/server/src/modules/gamification/gamification.listener.ts
+product.deactivated,1,1,OK,,apps/server/src/modules/catalog/catalog.service.ts,apps/server/src/modules/ai/ai.listener.ts
+product.updated,1,2,OK,,apps/server/src/modules/catalog/catalog.service.ts,apps/server/src/modules/ai/ai.listener.ts apps/server/src/modules/flow/cross-module-agent.service.ts
+project_plan.materialized,1,1,OK,,apps/server/src/modules/projects/project-plan-executor.service.ts,apps/server/src/modules/projects/project-plan.listener.ts
+project_task.completed,1,1,OK,,apps/server/src/modules/projects/projects.service.ts,apps/server/src/modules/calendar/listeners/projects.listener.ts
+project_task.created,1,1,OK,,apps/server/src/modules/projects/projects.service.ts,apps/server/src/modules/calendar/listeners/projects.listener.ts
+project_task.deleted,1,1,OK,,apps/server/src/modules/projects/projects.service.ts,apps/server/src/modules/calendar/listeners/projects.listener.ts
+project_task.rescheduled,1,1,OK,,apps/server/src/modules/projects/projects.service.ts,apps/server/src/modules/calendar/listeners/projects.listener.ts
+project_task.updated,1,1,OK,,apps/server/src/modules/projects/projects.service.ts,apps/server/src/modules/calendar/listeners/projects.listener.ts
+project.completed,1,1,OK,,apps/server/src/modules/projects/projects.service.ts,apps/server/src/modules/calendar/listeners/projects.listener.ts
+project.created,1,1,OK,,apps/server/src/modules/projects/projects.service.ts,apps/server/src/modules/calendar/listeners/projects.listener.ts
+project.deleted,1,1,OK,,apps/server/src/modules/projects/projects.service.ts,apps/server/src/modules/calendar/listeners/projects.listener.ts
+project.status_advanced,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/projects/project-revenue.listener.ts,
+project.updated,1,1,OK,,apps/server/src/modules/projects/projects.service.ts,apps/server/src/modules/calendar/listeners/projects.listener.ts
+purchaseOrder.received,1,2,OK,,apps/server/src/modules/marketplace/fulfillment-routing.service.ts,apps/server/src/modules/ai/ai.listener.ts apps/server/src/modules/marketplace/commerce-integration.service.ts
+quote.accepted,1,4,OK,,apps/server/src/modules/commerce/commerce.service.ts,apps/server/src/modules/commerce/quote-notifications.listener.ts apps/server/src/modules/commerce/revenue-action.service.ts apps/server/src/modules/crm/revenue-event.listener.ts apps/server/src/modules/flow/activity-event.listener.ts
+quote.converted,1,6,OK,,apps/server/src/modules/commerce/commerce.service.ts,apps/server/src/modules/ai/ai.listener.ts apps/server/src/modules/calendar/listeners/commerce.listener.ts apps/server/src/modules/crm/revenue-event.listener.ts apps/server/src/modules/flow/activity-event.listener.ts apps/server/src/modules/flow/cross-module-agent.service.ts apps/server/src/modules/growth-intelligence/journey-listener.service.ts
+quote.created,2,5,OK,,apps/server/src/modules/commerce/commerce.service.ts apps/server/test/ai.listener.test.ts,apps/server/src/modules/ai/ai.listener.ts apps/server/src/modules/calendar/listeners/commerce.listener.ts apps/server/src/modules/crm/revenue-event.listener.ts apps/server/src/modules/flow/activity-event.listener.ts apps/server/src/modules/growth-intelligence/journey-listener.service.ts
+quote.deleted,1,1,OK,,apps/server/src/modules/commerce/commerce.service.ts,apps/server/src/modules/calendar/listeners/commerce.listener.ts
+quote.expiry_changed,1,1,OK,,apps/server/src/modules/commerce/commerce.service.ts,apps/server/src/modules/calendar/listeners/commerce.listener.ts
+quote.rejected,1,3,OK,,apps/server/src/modules/commerce/commerce.service.ts,apps/server/src/modules/commerce/quote-notifications.listener.ts apps/server/src/modules/crm/revenue-event.listener.ts apps/server/src/modules/flow/activity-event.listener.ts
+quote.sent,1,9,OK,,apps/server/src/modules/commerce/commerce.service.ts,apps/server/src/modules/ai/ai.listener.ts apps/server/src/modules/calendar/listeners/commerce.listener.ts apps/server/src/modules/commerce/revenue-action.service.ts apps/server/src/modules/crm/revenue-event.listener.ts apps/server/src/modules/flow/activity-event.listener.ts apps/server/src/modules/flow/cross-module-agent.service.ts apps/server/src/modules/flow/flow.listener.ts apps/server/src/modules/growth-intelligence/journey-listener.service.ts apps/server/src/modules/notifications/notifications-revenue.listener.ts
+quote.stale,1,3,OK,,apps/server/src/modules/commerce/commerce.service.ts,apps/server/src/modules/commerce/quote-stale.listener.ts apps/server/src/modules/commerce/revenue-action.service.ts apps/server/src/modules/crm/revenue-event.listener.ts
+quote.updated,1,1,OK,,apps/server/src/modules/commerce/commerce.service.ts,apps/server/src/modules/calendar/listeners/commerce.listener.ts
+quote.viewed,1,2,OK,,apps/server/src/modules/commerce/commerce.service.ts,apps/server/src/modules/commerce/quote-notifications.listener.ts apps/server/src/modules/crm/revenue-event.listener.ts
+recurring_invoice.cancelled,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/commerce/recurring-invoice.service.ts,
+recurring_invoice.created,1,2,OK,,apps/server/src/modules/commerce/recurring-invoice.service.ts,apps/server/src/modules/calendar/listeners/commerce.listener.ts apps/server/src/modules/crm/revenue-event.listener.ts
+recurring_invoice.deleted,0,2,LISTENED_NEVER_EMITTED,,,apps/server/src/modules/calendar/listeners/commerce.listener.ts apps/server/src/modules/crm/revenue-event.listener.ts
+recurring_invoice.due,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/commerce/recurring-invoice.service.ts,
+recurring_invoice.failed,1,1,OK,,apps/server/src/modules/commerce/recurring-invoice.service.ts,apps/server/src/modules/crm/revenue-event.listener.ts
+recurring_invoice.generated,1,2,OK,,apps/server/src/modules/commerce/recurring-invoice.service.ts,apps/server/src/modules/calendar/listeners/commerce.listener.ts apps/server/src/modules/crm/revenue-event.listener.ts
+recurring_invoice.paused,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/commerce/recurring-invoice.service.ts,
+recurring_invoice.resumed,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/commerce/recurring-invoice.service.ts,
+recurring_invoice.updated,1,2,OK,,apps/server/src/modules/commerce/recurring-invoice.service.ts,apps/server/src/modules/calendar/listeners/commerce.listener.ts apps/server/src/modules/crm/revenue-event.listener.ts
+relationship_health.changed,0,1,LISTENED_NEVER_EMITTED,,,apps/server/src/modules/crm/contact-insight.listener.ts
+revenue_action.completed,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/commerce/revenue-action.service.ts,
+revenue_action.created,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/commerce/revenue-action.service.ts,
+role.action_executed,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/ai/role-engine.service.ts,
+seo.content_brief_created,1,1,OK,,apps/server/src/modules/seo/seo-content.service.ts,apps/server/src/modules/seo/seo.listener.ts
+seo.issue_detected,1,1,OK,,apps/server/src/modules/seo/seo.service.ts,apps/server/src/modules/seo/seo.listener.ts
+seo.ranking_drop,1,1,OK,,apps/server/src/modules/seo/seo.service.ts,apps/server/src/modules/seo/seo.listener.ts
+seo.sync_completed,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/seo/seo.service.ts,
+sequence.step_due,1,3,OK,,apps/server/src/modules/crm/crm-sequence-scheduler.service.ts,apps/server/src/modules/ai/ai.listener.ts apps/server/src/modules/crm/contact-insight.listener.ts apps/server/src/modules/flow/flow.listener.ts
+sequence.step_failed,1,2,OK,,apps/server/src/modules/crm/crm-sequence-scheduler.service.ts,apps/server/src/modules/ai/ai.listener.ts apps/server/src/modules/flow/flow.listener.ts
+shopify.customers_synced,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/shopify/shopify.service.ts,
+shopify.orders_synced,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/shopify/shopify.service.ts,
+shopify.products_synced,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/shopify/shopify.service.ts,
+social_post.created,1,1,OK,,apps/server/src/modules/social/social.service.ts,apps/server/src/modules/calendar/listeners/marketing.listener.ts
+social_post.deleted,1,1,OK,,apps/server/src/modules/social/social.service.ts,apps/server/src/modules/calendar/listeners/marketing.listener.ts
+social_post.published,2,0,EMITTED_NO_LISTENER,,apps/server/src/core/connectors/implementations/meta-social.connector.ts apps/server/src/core/connectors/implementations/social-platform.base.ts,
+social_post.scheduled,1,1,OK,,apps/server/src/modules/social/social.service.ts,apps/server/src/modules/calendar/listeners/marketing.listener.ts
+social_post.updated,1,1,OK,,apps/server/src/modules/social/social.service.ts,apps/server/src/modules/calendar/listeners/marketing.listener.ts
+social.engagement_received,3,1,OK,,apps/server/src/core/connectors/implementations/meta-social.connector.ts apps/server/src/core/connectors/implementations/social-platform.base.ts apps/server/src/modules/ai/connector-intelligence.service.ts,apps/server/src/modules/growth-intelligence/journey-listener.service.ts
+social.scheduled.dispatched,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/social/social-scheduler.service.ts,
+something.unlisted,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/key-cortex/opportunity-signal-reachability.spec.ts,
+store_order.cancelled,1,4,OK,,apps/server/src/modules/marketplace/marketplace.service.ts,apps/server/src/modules/ai/ai.listener.ts apps/server/src/modules/calendar/listeners/orders.listener.ts apps/server/src/modules/marketplace/commerce-integration.service.ts apps/server/src/modules/webhooks/webhook-dispatcher.service.ts
+store_order.created,2,4,OK,,apps/server/src/modules/marketplace/marketplace.service.ts apps/server/src/modules/site/store-order.service.ts,apps/server/src/modules/ai/ai.listener.ts apps/server/src/modules/calendar/listeners/orders.listener.ts apps/server/src/modules/marketplace/commerce-integration.service.ts apps/server/src/modules/webhooks/webhook-dispatcher.service.ts
+store_order.delivered,1,4,OK,,apps/server/src/modules/marketplace/marketplace.service.ts,apps/server/src/modules/ai/ai.listener.ts apps/server/src/modules/calendar/listeners/orders.listener.ts apps/server/src/modules/marketplace/commerce-integration.service.ts apps/server/src/modules/webhooks/webhook-dispatcher.service.ts
+store_order.fulfillment_routed,1,1,OK,,apps/server/src/modules/marketplace/store-order-routing.listener.ts,apps/server/src/modules/crm/revenue-event.listener.ts
+store_order.paid,2,7,OK,,apps/server/src/modules/marketplace/marketplace.service.ts apps/server/src/modules/site/store-order.service.ts,apps/server/src/modules/ai/ai.listener.ts apps/server/src/modules/calendar/listeners/orders.listener.ts apps/server/src/modules/crm/revenue-event.listener.ts apps/server/src/modules/growth-intelligence/journey-listener.service.ts apps/server/src/modules/marketplace/commerce-integration.service.ts apps/server/src/modules/marketplace/store-order-routing.listener.ts apps/server/src/modules/webhooks/webhook-dispatcher.service.ts
+store_order.refunded,2,4,OK,,apps/server/src/modules/marketplace/marketplace.service.ts apps/server/src/modules/site/store-order.service.ts,apps/server/src/modules/ai/ai.listener.ts apps/server/src/modules/calendar/listeners/orders.listener.ts apps/server/src/modules/crm/revenue-event.listener.ts apps/server/src/modules/marketplace/commerce-integration.service.ts
+store_order.routing_failed,1,2,OK,,apps/server/src/modules/marketplace/store-order-routing.listener.ts,apps/server/src/modules/commerce/revenue-action.service.ts apps/server/src/modules/crm/revenue-event.listener.ts
+store_order.shipped,1,4,OK,,apps/server/src/modules/marketplace/marketplace.service.ts,apps/server/src/modules/ai/ai.listener.ts apps/server/src/modules/calendar/listeners/orders.listener.ts apps/server/src/modules/marketplace/commerce-integration.service.ts apps/server/src/modules/webhooks/webhook-dispatcher.service.ts
+storefront.order_created,0,1,LISTENED_NEVER_EMITTED,,,apps/server/src/modules/key-cortex/organs/storelink-adapter.service.ts
+supportTicket.created,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/helpdesk/helpdesk.service.ts,
+task.assigned,1,1,OK,,apps/server/src/modules/task-assignments/task-assignment.service.ts,apps/server/src/modules/event-stream/event-stream.service.ts
+task.transferred,1,1,OK,,apps/server/src/modules/task-assignments/task-assignment.service.ts,apps/server/src/modules/event-stream/event-stream.service.ts
+task.unassigned,1,1,OK,,apps/server/src/modules/task-assignments/task-assignment.service.ts,apps/server/src/modules/event-stream/event-stream.service.ts
+tool.executed,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/key-cortex/key-cortex-tool-registry.service.ts,
+whatsapp.lead.detected,1,0,EMITTED_NO_LISTENER,,apps/server/src/modules/temporal-flow/temporal-flow.service.spec.ts,

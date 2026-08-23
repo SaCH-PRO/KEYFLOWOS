@@ -1,0 +1,441 @@
+model,has_businessId,indexed_on_businessId,field_count,relation_count,reader_modules,writer_modules,accessed_by_module_count,unreferenced
+User,FALSE,,25,7,(root) admin-analytics admin-auth admin-platform ai commerce core/auth core/seed crm documents google-drive identity key-cortex projects risc task-assignments,apps/server calendar core/seed identity risc,18,FALSE
+UserIdentity,FALSE,,8,1,risc,identity,2,FALSE
+Business,FALSE,,432,38,(root) admin-analytics admin-platform ai analytics apps/server apps/voice-agent autopilot blueprint bookings business-genesis calendar commerce communications community connect conversion core/auth core/connectors crm diagnostics documents email-marketing finance gamification google-drive growth-intelligence identity intelligence key-cortex marketplace momentum notifications onboarding-concierge os packages/api payments projects public-events reports security-audit seo site social whatsapp,(root) apps/server autopilot bookings business-genesis calendar commerce connect conversion core/connectors crm finance gamification google-drive identity marketplace notifications onboarding-concierge packages/api packages/db seo site templates whatsapp,47,FALSE
+Event,TRUE,TRUE,17,1,events packages/api,events packages/api,2,FALSE
+EventTicketType,FALSE,,15,1,events packages/api,events packages/api,2,FALSE
+EventAttendee,TRUE,TRUE,15,2,events packages/api payments,events packages/api,3,FALSE
+EventCheckIn,FALSE,,8,2,,events packages/api,2,FALSE
+BusinessAsset,TRUE,TRUE,15,1,business-assets,business-assets,1,FALSE
+Contract,TRUE,TRUE,29,1,contracts,contracts,1,FALSE
+ContractParty,TRUE,TRUE,13,1,,contracts,1,FALSE
+ContractTerm,TRUE,TRUE,9,1,,contracts,1,FALSE
+ContractVersion,TRUE,TRUE,11,1,,contracts,1,FALSE
+ContractAlert,TRUE,TRUE,9,1,contracts,contracts,1,FALSE
+ContractTag,TRUE,TRUE,7,1,contracts,contracts,1,FALSE
+ContractTagOnContract,FALSE,,5,2,,contracts,1,FALSE
+TemporalFlowEvent,TRUE,TRUE,33,1,temporal-flow,temporal-flow,1,FALSE
+FlowSignal,TRUE,TRUE,27,1,flow-signal,flow-signal,1,FALSE
+FlowRoleSubscription,TRUE,TRUE,12,1,,,0,TRUE
+TemporalFlowMemory,TRUE,TRUE,13,1,key-cortex temporal-flow,temporal-flow,2,FALSE
+GenomeEvolutionProposal,TRUE,TRUE,16,1,business-genome key-cortex,business-genome key-cortex,2,FALSE
+GenomeFact,TRUE,TRUE,24,1,business-genome,business-genome,1,FALSE
+GenomeEvidence,TRUE,TRUE,12,2,business-genome,business-genome,1,FALSE
+GenomeSignal,TRUE,TRUE,17,1,business-genome,business-genome,1,FALSE
+GenomeModuleReadiness,TRUE,TRUE,13,1,business-genome,business-genome,1,FALSE
+GenomeRecommendation,TRUE,TRUE,19,1,business-genome key-cortex,business-genome key-autonomy,3,FALSE
+GenomeRecommendationOutcome,TRUE,TRUE,25,1,business-genome,business-genome key-cortex,2,FALSE
+GenomeOutcomeLearningWindow,TRUE,TRUE,6,1,,business-genome,1,FALSE
+GenomeExperiment,TRUE,TRUE,15,1,business-genome,business-genome,1,FALSE
+GenomeDepartment,TRUE,TRUE,21,1,business-genome,business-genome,1,FALSE
+GenomeMemoryEvent,TRUE,TRUE,18,1,business-genome key-cortex,business-genome,2,FALSE
+GenomeFinancialMetric,TRUE,TRUE,15,1,business-genome,business-genome,1,FALSE
+GenomeFinanceSnapshot,TRUE,TRUE,27,1,business-genome,business-genome,1,FALSE
+GenomeCustomerSegment,TRUE,TRUE,21,1,business-genome,business-genome,1,FALSE
+GenomeSalesMotion,TRUE,TRUE,21,1,business-genome,business-genome,1,FALSE
+GenomeCustomerSalesSnapshot,TRUE,TRUE,26,1,business-genome,business-genome,1,FALSE
+GenomeOperationalProcess,TRUE,TRUE,27,1,business-genome,business-genome,1,FALSE
+GenomeDeliveryCapability,TRUE,TRUE,24,1,business-genome,business-genome,1,FALSE
+GenomeOperationsSnapshot,TRUE,TRUE,22,1,business-genome,business-genome,1,FALSE
+GenomeGrowthChannel,TRUE,TRUE,19,1,business-genome,business-genome,1,FALSE
+GenomeContentStrategy,TRUE,TRUE,14,1,business-genome,business-genome,1,FALSE
+GenomeMarketingSnapshot,TRUE,TRUE,17,1,business-genome,business-genome,1,FALSE
+GenomeCrossDomainSnapshot,TRUE,TRUE,14,1,business-genome,business-genome,1,FALSE
+BusinessConstitutionVersion,TRUE,TRUE,17,1,business-genome,business-genome,1,FALSE
+KeyActionProposal,TRUE,TRUE,42,0,business-genome key-autonomy,key-autonomy,2,FALSE
+MarketStrategy,TRUE,TRUE,11,1,business-genesis,business-genesis,1,FALSE
+Competitor,TRUE,TRUE,10,1,business-genesis,business-genesis,1,FALSE
+DriveSyncCursor,TRUE,TRUE,8,1,,ai,1,FALSE
+DriveIntakeFile,TRUE,TRUE,17,1,ai commerce contracts ingestion,ai commerce ingestion,4,FALSE
+MessageIntake,TRUE,TRUE,25,3,communications,communications,1,FALSE
+IngestionItem,TRUE,TRUE,30,2,ingestion,ingestion,1,FALSE
+Membership,TRUE,TRUE,12,2,ai apps/server commerce core/auth crm identity key-cortex keystore security-audit structure task-assignments,ai apps/server identity structure,11,FALSE
+TeamActivityLog,TRUE,TRUE,11,0,finance identity key-cortex,ai core/interceptors finance identity,5,FALSE
+Session,FALSE,,4,1,,identity risc,2,FALSE
+PushSubscription,TRUE,TRUE,9,1,push-notifications,push-notifications,1,FALSE
+OrgUnit,TRUE,TRUE,19,3,structure,structure,1,FALSE
+JobRole,TRUE,TRUE,12,1,key-cortex structure,structure,2,FALSE
+OrgAssignment,TRUE,TRUE,28,6,ai payroll staff-performance structure,structure,4,FALSE
+PayRate,TRUE,TRUE,11,2,payroll,payroll,1,FALSE
+PayrollRun,TRUE,TRUE,16,1,payroll,payroll,1,FALSE
+PayrollItem,TRUE,TRUE,12,3,,,0,TRUE
+StaffPerformanceSnapshot,TRUE,TRUE,17,2,staff-performance,staff-performance,1,FALSE
+DelegationRule,TRUE,TRUE,13,1,ai structure,structure,2,FALSE
+Contact,TRUE,TRUE,119,4,actions ai analytics apps/server autopilot bookings calendar call-tasks commerce communications connect conversion core/connectors crm diagnostics email-marketing expenses finance flow gamification growth-intelligence identity intelligence key-cortex lead-forms marketplace momentum notifications onboarding-concierge os packages/api packages/db people-flow portal public-events reports retainers security-audit shopify site subscriptions trash,apps/server autopilot calendar commerce connect conversion core/connectors crm device email-marketing flow key-inbox lead-forms onboarding-concierge packages/api packages/db public-events shopify site trash,44,FALSE
+CustomFieldDefinition,TRUE,TRUE,15,0,crm,crm,1,FALSE
+ContactCustomFieldValue,FALSE,,8,2,crm,crm,1,FALSE
+Tag,TRUE,TRUE,7,0,,,0,TRUE
+ContactTag,FALSE,,4,2,,,0,TRUE
+Account,TRUE,TRUE,17,1,crm trash,crm trash,2,FALSE
+DealStage,TRUE,TRUE,13,1,crm,crm,1,FALSE
+Deal,TRUE,TRUE,39,5,ai analytics crm intelligence os people-flow trash,crm key-cortex trash,8,FALSE
+ContactRelationship,TRUE,TRUE,11,2,crm,crm,1,FALSE
+ContactShare,TRUE,TRUE,8,2,,,0,TRUE
+ContactDataIssue,TRUE,TRUE,15,2,crm,crm,1,FALSE
+WonLostReason,TRUE,TRUE,12,1,crm,crm,1,FALSE
+ContactExternalMapping,TRUE,TRUE,8,1,connect core/connectors crm,connect core/connectors crm,3,FALSE
+ContactSyncAudit,TRUE,TRUE,10,0,connect,connect,1,FALSE
+CalendarSyncConflict,TRUE,TRUE,17,1,bookings calendar core/connectors,bookings,3,FALSE
+CalendarEvent,TRUE,TRUE,32,1,ai calendar key-cortex,calendar key-cortex,3,FALSE
+ConnectorStatus,TRUE,TRUE,17,0,ai apps/server connect core/connectors ingestion shopify,connect core/connectors shopify,6,FALSE
+WebhookDeliveryLog,TRUE,TRUE,10,0,apps/server,core/connectors,2,FALSE
+ConnectorActivityLog,TRUE,TRUE,10,0,core/connectors,core/connectors,1,FALSE
+ContactEvent,TRUE,TRUE,11,2,ai commerce communications crm diagnostics flow growth-intelligence momentum packages/api,communications crm,9,FALSE
+ContactReadState,TRUE,TRUE,7,0,crm,crm,1,FALSE
+ContactChannelStat,TRUE,TRUE,14,2,crm,crm,1,FALSE
+ConversationAIInsight,TRUE,TRUE,16,2,crm,crm,1,FALSE
+ContactInsightSnapshot,TRUE,TRUE,12,2,crm,crm,1,FALSE
+ContactNote,TRUE,TRUE,9,2,ai crm key-cortex packages/api,crm packages/api,4,FALSE
+ContactTask,TRUE,TRUE,17,2,ai calendar crm evidence flow identity intelligence keyflow-command marketplace packages/api people-flow task-assignments,apps/server calendar call-tasks crm key-inbox packages/api public-events,16,FALSE
+ContactImport,TRUE,TRUE,15,1,crm,crm,1,FALSE
+ContactImportContact,FALSE,,9,2,crm,crm,1,FALSE
+ContactMedia,TRUE,TRUE,9,2,crm,crm,1,FALSE
+ContactPlaybook,TRUE,TRUE,11,2,crm,crm,1,FALSE
+ContactList,TRUE,TRUE,12,0,crm,crm,1,FALSE
+MergeOperation,TRUE,TRUE,14,0,crm,crm,1,FALSE
+ContactSavedView,TRUE,TRUE,9,0,crm,crm,1,FALSE
+ContactListMember,FALSE,,6,2,crm,crm,1,FALSE
+Product,TRUE,TRUE,39,1,ai blueprint catalog commerce community conversion email-marketing finance flow gamification google-drive identity intelligence key-cortex marketplace onboarding-concierge packages/api reports seo shopify site subscriptions supplier trash,catalog packages/api,24,FALSE
+Quote,TRUE,TRUE,30,2,ai analytics blueprint calendar command commerce connect crm finance flow gamification intelligence os public-events trash,calendar commerce connect crm trash,15,FALSE
+QuoteItem,FALSE,,9,2,commerce,commerce,1,FALSE
+Invoice,TRUE,TRUE,45,7,(root) actions ai analytics autopilot blueprint bookings calendar change-orders command commerce communications continental-ops conversion core/connectors crm diagnostics email-marketing expenses finance flow gamification growth-intelligence identity intelligence key-cortex marketplace momentum onboarding-concierge os payments portal public-events reports retainers site subscriptions time-tracking trash webhooks,apps/server autopilot calendar commerce conversion core/connectors crm finance marketplace onboarding-concierge packages/api site trash,42,FALSE
+InvoiceItem,FALSE,,9,2,ai commerce expenses finance flow key-cortex,commerce,6,FALSE
+Payment,TRUE,TRUE,17,1,(root) commerce communications core/connectors crm diagnostics finance intelligence key-cortex payments reports,commerce payments site,12,FALSE
+WebhookEvent,TRUE,TRUE,6,0,,commerce,1,FALSE
+GeneratedDocument,TRUE,TRUE,9,0,,,0,TRUE
+PaymentLink,TRUE,TRUE,8,1,commerce finance public-events,commerce,3,FALSE
+StaffMember,TRUE,TRUE,14,1,ai bookings commerce conversion crm flow key-cortex projects structure subscriptions task-assignments temporal trash,ai apps/server bookings trash,14,FALSE
+Service,TRUE,TRUE,20,1,ai bookings catalog commerce conversion crm diagnostics email-marketing expenses flow identity key-cortex seo site trash,apps/server calendar catalog,17,FALSE
+Availability,FALSE,,6,1,bookings key-cortex,bookings key-cortex,2,FALSE
+Skill,FALSE,,7,0,ai,ai,1,FALSE
+Booking,TRUE,TRUE,29,8,actions ai analytics autopilot blueprint bookings calendar command commerce communications core/connectors crm diagnostics email-marketing flow gamification growth-intelligence identity intelligence key-cortex keyflow-command momentum os packages/api portal reports site subscriptions temporal trash,apps/server bookings calendar crm packages/api trash,31,FALSE
+BookingWaitlistEntry,TRUE,TRUE,21,5,apps/server bookings,bookings,2,FALSE
+SocialConnection,TRUE,TRUE,14,1,apps/server communications content core/connectors diagnostics key-cortex packages/api social,apps/server content core/connectors social,8,FALSE
+SocialPost,TRUE,TRUE,17,1,ai calendar email-marketing flow gamification key-cortex social subscriptions trash,apps/server calendar content marketplace social trash,12,FALSE
+ChannelConnection,TRUE,TRUE,17,1,communications flow,communications,2,FALSE
+ChannelDestination,TRUE,TRUE,14,1,communications,communications,1,FALSE
+OutboundContent,TRUE,TRUE,18,2,communications content,communications content flow,3,FALSE
+OutboundVariant,FALSE,,11,1,communications,communications flow,2,FALSE
+OutboundDelivery,TRUE,TRUE,25,3,communications crm,communications flow,3,FALSE
+DeliveryEvent,FALSE,,11,1,communications,communications,1,FALSE
+WhatsAppContact,TRUE,TRUE,12,2,ai crm whatsapp,crm whatsapp,3,FALSE
+WhatsAppMessage,TRUE,TRUE,20,2,ai crm whatsapp,ai whatsapp,3,FALSE
+SocialEngagement,TRUE,TRUE,14,1,ai,content key-cortex social,4,FALSE
+Automation,TRUE,TRUE,13,1,ai automation diagnostics flow gamification key-cortex subscriptions,automation flow key-cortex,7,FALSE
+CrossModuleWorkflow,TRUE,TRUE,10,1,flow,flow,1,FALSE
+ScheduledAgentJob,TRUE,TRUE,12,1,conversion flow marketplace,conversion flow marketplace,3,FALSE
+Activity,TRUE,TRUE,24,1,ai automation blueprint,activity site,5,FALSE
+Project,TRUE,TRUE,27,2,ai blueprint calendar change-orders commerce expenses flow intelligence key-cortex keyflow-command marketplace os projects reports temporal time-tracking trash,calendar flow marketplace projects trash,17,FALSE
+ProjectTask,TRUE,TRUE,23,2,ai calendar command evidence intelligence keyflow-command os projects staff-performance task-assignments temporal time-tracking trash,calendar projects trash,13,FALSE
+TimeEntry,TRUE,TRUE,19,4,payroll staff-performance time-tracking,time-tracking,3,FALSE
+ProjectTemplate,TRUE,TRUE,7,2,flow projects,projects,2,FALSE
+ProjectPlan,TRUE,TRUE,21,4,projects,projects,1,FALSE
+ProjectPlanEvent,FALSE,,27,1,projects,projects,1,FALSE
+SupportTicket,TRUE,TRUE,17,4,ai helpdesk,apps/voice-agent helpdesk,3,FALSE
+Site,TRUE,TRUE,8,1,intelligence packages/api trash,trash,3,FALSE
+AutopilotTask,TRUE,TRUE,22,1,autopilot commerce crm key-cortex keyflow-command task-assignments,autopilot commerce seo,7,FALSE
+DelegationLoop,TRUE,TRUE,16,1,ai autopilot key-cortex,autopilot key-cortex,3,FALSE
+DelegationLoopRun,TRUE,TRUE,15,2,autopilot,autopilot,1,FALSE
+Notification,TRUE,TRUE,9,1,bookings commerce core/connectors diagnostics notifications,commerce flow marketplace,7,FALSE
+CustomerNotificationLog,TRUE,TRUE,14,1,commerce flow notifications,notifications,3,FALSE
+Subscription,TRUE,TRUE,17,1,site subscriptions,subscriptions,2,FALSE
+SubscriptionPayment,TRUE,TRUE,15,1,subscriptions,subscriptions,1,FALSE
+AiUsageLog,TRUE,TRUE,20,1,ai apps/server diagnostics subscriptions,ai apps/server,4,FALSE
+AiUsageAlert,TRUE,TRUE,7,0,ai,ai,1,FALSE
+ExpenseCategory,TRUE,TRUE,13,2,ai commerce expenses finance reports,expenses finance templates,6,FALSE
+Expense,TRUE,TRUE,31,4,(root) ai blueprint command commerce expenses finance identity intelligence marketplace os projects reports subscriptions trash,expenses trash,15,FALSE
+RecurringExpense,TRUE,TRUE,31,2,expenses,expenses,1,FALSE
+DeliveryNote,TRUE,TRUE,16,2,continental-ops,continental-ops,1,FALSE
+GoodsReceipt,TRUE,TRUE,14,2,continental-ops,continental-ops,1,FALSE
+StockCount,TRUE,TRUE,11,1,continental-ops,continental-ops,1,FALSE
+Receipt,TRUE,TRUE,15,2,continental-ops,continental-ops,1,FALSE
+ExpenseBudget,TRUE,TRUE,12,2,ai expenses finance key-cortex,expenses,4,FALSE
+RecurringInvoice,TRUE,TRUE,24,2,ai calendar commerce crm trash,calendar commerce crm trash,5,FALSE
+EmailCampaign,TRUE,TRUE,20,1,ai blueprint calendar commerce diagnostics email-marketing flow subscriptions trash,calendar communications email-marketing flow trash,10,FALSE
+CampaignBriefing,TRUE,TRUE,17,1,email-marketing identity,email-marketing,2,FALSE
+EmailCampaignContact,TRUE,TRUE,12,2,email-marketing flow,communications email-marketing flow,3,FALSE
+LeadForm,TRUE,TRUE,13,1,connect core/connectors email-marketing lead-forms site subscriptions trash,core/connectors lead-forms trash,7,FALSE
+GoogleFormMapping,TRUE,TRUE,16,1,connect,connect,1,FALSE
+LeadFormSubmission,TRUE,TRUE,10,2,ai connect core/connectors email-marketing growth-intelligence lead-forms site,connect core/connectors lead-forms,7,FALSE
+BusinessTemplate,FALSE,,12,0,core/seed packages/db templates,core/seed packages/db templates,3,FALSE
+BusinessTemplateUsage,TRUE,TRUE,6,2,,templates,1,FALSE
+LandingPage,TRUE,TRUE,12,1,trash,trash,1,FALSE
+Course,TRUE,FALSE,16,1,core/seed education packages/db,core/seed education packages/db,3,FALSE
+CourseEnrollment,TRUE,TRUE,10,2,education,education,1,FALSE
+Cohort,TRUE,FALSE,11,1,community core/seed packages/db,community core/seed packages/db,3,FALSE
+CohortMember,TRUE,TRUE,7,2,community,community,1,FALSE
+CommunityPost,TRUE,TRUE,14,1,ai community trash,community trash,3,FALSE
+CommunityComment,TRUE,FALSE,9,2,trash,community trash,2,FALSE
+NetworkConnection,FALSE,,7,2,ai community,community,2,FALSE
+Endorsement,FALSE,,8,2,community,community,1,FALSE
+Conversation,FALSE,,9,2,community key-cortex,community,2,FALSE
+DirectMessage,FALSE,,8,2,community,community,1,FALSE
+CollaborationRequest,FALSE,,12,2,community,community,1,FALSE
+CommunityNotification,TRUE,TRUE,11,1,community,community,1,FALSE
+MatchFeedback,TRUE,TRUE,10,2,ai,ai,1,FALSE
+RelationshipInsightDismissal,TRUE,TRUE,9,2,ai,ai,1,FALSE
+Webhook,TRUE,TRUE,10,1,subscriptions webhooks,webhooks,2,FALSE
+MarketplaceListing,TRUE,TRUE,29,2,ai marketplace subscriptions,marketplace,3,FALSE
+FulfillmentRoute,TRUE,TRUE,26,8,marketplace,marketplace,1,FALSE
+ShippingZone,TRUE,TRUE,15,1,marketplace site,marketplace,2,FALSE
+Warehouse,TRUE,TRUE,14,1,google-drive marketplace site subscriptions,marketplace,4,FALSE
+InventoryStock,TRUE,TRUE,13,3,catalog finance google-drive marketplace site,continental-ops google-drive marketplace site,6,FALSE
+StockMovement,TRUE,TRUE,12,1,marketplace,continental-ops google-drive marketplace site,4,FALSE
+MarketplaceOrder,TRUE,TRUE,31,2,ai calendar commerce marketplace payments portal public-events shopify site,marketplace public-events shopify site,9,FALSE
+MarketplaceOrderItem,FALSE,,11,2,marketplace site,,2,FALSE
+Shipment,TRUE,TRUE,23,2,marketplace,marketplace,1,FALSE
+CustomsDeclaration,TRUE,TRUE,22,1,marketplace,marketplace,1,FALSE
+PreOrder,TRUE,TRUE,21,2,marketplace,marketplace,1,FALSE
+PurchaseOrder,TRUE,TRUE,29,2,(root) continental-ops marketplace,marketplace procurement,4,FALSE
+CrmSequence,TRUE,TRUE,11,1,crm intelligence,crm,2,FALSE
+CrmSequenceEnrollment,FALSE,,13,2,crm,crm,1,FALSE
+SequenceAttribution,TRUE,TRUE,13,1,crm,crm,1,FALSE
+ContactMomentum,TRUE,TRUE,15,1,crm momentum,crm momentum,2,FALSE
+ContactMomentumSnapshot,TRUE,TRUE,13,1,crm momentum,crm momentum,2,FALSE
+MomentumRecommendation,TRUE,TRUE,21,1,crm momentum,crm momentum,2,FALSE
+ApiKey,TRUE,TRUE,11,1,api-keys,api-keys,1,FALSE
+BusinessPlan,TRUE,TRUE,10,1,ai,ai,1,FALSE
+BusinessGuidanceProfile,TRUE,TRUE,29,1,(root) identity,identity,2,FALSE
+BusinessIdentityProfile,FALSE,,12,1,,,0,TRUE
+FounderProfile,FALSE,,14,1,,,0,TRUE
+OfferProfile,FALSE,,16,1,,,0,TRUE
+CustomerProfile,FALSE,,18,1,,,0,TRUE
+RevenueProfile,FALSE,,16,1,,,0,TRUE
+FinanceProfile,FALSE,,19,1,,,0,TRUE
+OperationsProfile,FALSE,,17,1,,,0,TRUE
+ComplianceGuidanceProfile,FALSE,,16,1,,,0,TRUE
+GrowthProfile,FALSE,,17,1,,,0,TRUE
+GoalsProfile,FALSE,,16,1,,,0,TRUE
+SalesProfile,FALSE,,18,1,,,0,TRUE
+MarketingStrategyProfile,FALSE,,18,1,,,0,TRUE
+PeopleProfile,FALSE,,18,1,,,0,TRUE
+TechnologyProfile,FALSE,,18,1,,,0,TRUE
+PartnershipsProfile,FALSE,,16,1,,,0,TRUE
+IntellectualPropertyProfile,FALSE,,17,1,,,0,TRUE
+AssessmentResult,FALSE,,14,1,,,0,TRUE
+GuidanceAssessment,TRUE,TRUE,13,3,,,0,TRUE
+GuidanceRecommendation,FALSE,,25,2,,,0,TRUE
+RoadmapItem,FALSE,,22,2,,,0,TRUE
+ProgressSnapshot,FALSE,,11,1,,,0,TRUE
+PromoCode,TRUE,TRUE,15,1,commerce site,site,2,FALSE
+ProductReview,TRUE,TRUE,12,0,site,site,1,FALSE
+BusinessProfileVersion,TRUE,TRUE,10,1,business-genesis documents,business-genesis documents,2,FALSE
+DocumentCategory,FALSE,,11,0,core/seed documents,core/seed,2,FALSE
+DocumentType,FALSE,,23,1,business-genesis core/seed documents,core/seed,3,FALSE
+DocumentTemplate,FALSE,,14,1,,,0,TRUE
+DocumentClause,FALSE,,15,1,,,0,TRUE
+ClauseVariant,FALSE,,11,1,,,0,TRUE
+DocumentInstance,TRUE,TRUE,29,4,ai business-genesis contracts documents identity intelligence,business-genesis documents identity,6,FALSE
+DocumentVersion,FALSE,,17,1,documents,business-genesis documents,2,FALSE
+DocumentSection,FALSE,,19,1,documents,business-genesis documents,2,FALSE
+DocumentChangeLog,TRUE,TRUE,14,2,,documents,1,FALSE
+ReviewTask,TRUE,TRUE,14,2,documents,documents,1,FALSE
+ImpactRule,FALSE,,8,1,core/seed documents identity,core/seed,3,FALSE
+OrgStandard,TRUE,TRUE,8,1,documents,documents,1,FALSE
+OutputTemplate,TRUE,TRUE,14,1,ai,ai,1,FALSE
+IntakeSubmission,TRUE,TRUE,15,1,site,site,1,FALSE
+QualificationJourney,TRUE,TRUE,23,1,site,site,1,FALSE
+FlowSession,TRUE,TRUE,7,1,ai key-cortex,ai,2,FALSE
+SupplierConnection,TRUE,TRUE,15,1,packages/api procurement supplier,packages/api supplier,3,FALSE
+SupplierProduct,FALSE,,16,1,packages/api supplier,packages/api supplier,2,FALSE
+SupplierVariant,FALSE,,11,1,supplier,supplier,1,FALSE
+ProductVariant,FALSE,,13,1,packages/api supplier,packages/api supplier,2,FALSE
+ProductSourceLink,FALSE,,15,2,commerce marketplace packages/api supplier,packages/api supplier,4,FALSE
+ProductCostProfile,FALSE,,14,1,finance packages/api supplier,commerce packages/api supplier,4,FALSE
+MarginSnapshot,FALSE,,15,1,commerce packages/api supplier,commerce supplier,3,FALSE
+AiExecutionLog,TRUE,TRUE,28,2,ai key-cortex,ai identity,3,FALSE
+AiApprovalItem,TRUE,TRUE,30,3,(root) ai command commerce communications os staff-performance structure,(root) ai commerce identity,9,FALSE
+AutopilotSettings,TRUE,TRUE,17,1,(root) ai key-autonomy,(root) ai,3,FALSE
+BusinessAutonomyProfile,TRUE,TRUE,10,1,key-autonomy,key-autonomy,1,FALSE
+AutonomyDailySpend,TRUE,TRUE,8,1,key-autonomy,key-autonomy,1,FALSE
+AutonomyDailyActionCount,TRUE,TRUE,8,1,key-autonomy,key-autonomy,1,FALSE
+IdempotencyKey,TRUE,TRUE,10,1,key-cortex,key-cortex,1,FALSE
+SagaExecution,TRUE,TRUE,11,1,,key-cortex,1,FALSE
+SagaStep,FALSE,,13,1,key-cortex,key-cortex,1,FALSE
+AiGoal,TRUE,TRUE,12,1,key-cortex,key-cortex,1,FALSE
+AiPlanResult,TRUE,FALSE,9,2,,key-cortex,1,FALSE
+KeyCortexTriggerRule,TRUE,TRUE,11,1,key-cortex,key-cortex,1,FALSE
+ToolOutcomeScore,TRUE,TRUE,10,1,key-autonomy key-cortex,key-cortex,2,FALSE
+PromptVariant,TRUE,TRUE,11,1,,,0,TRUE
+AuthorityGrant,TRUE,TRUE,12,1,ai key-autonomy,ai,2,FALSE
+AutonomyRule,TRUE,TRUE,12,1,key-autonomy,,1,FALSE
+AutonomyVerdict,TRUE,TRUE,14,1,key-cortex,key-autonomy,2,FALSE
+KeyCortexMemory,TRUE,TRUE,13,1,finance key-cortex,finance key-cortex,2,FALSE
+CognitiveEvent,TRUE,TRUE,9,1,key-cortex,key-cortex,1,FALSE
+ValueConstraint,TRUE,TRUE,10,1,key-cortex,key-cortex,1,FALSE
+KnowledgeSource,TRUE,TRUE,10,1,key-cortex,key-cortex,1,FALSE
+AgentTrigger,TRUE,TRUE,13,1,(root) ai,(root) ai,2,FALSE
+AgentMessage,TRUE,TRUE,9,0,ai,ai,1,FALSE
+RevenueAction,TRUE,TRUE,20,1,commerce finance site,commerce finance site,3,FALSE
+CommandItem,TRUE,TRUE,40,1,admin-analytics apps/server command finance intelligence key-cortex site,apps/server command finance intelligence site,7,FALSE
+FinanceActionItem,TRUE,TRUE,20,1,ai commerce finance,finance,3,FALSE
+KeyflowNote,TRUE,TRUE,12,1,keyflow-command,keyflow-command,1,FALSE
+AiMemory,TRUE,TRUE,11,1,(root) ai key-cortex,ai key-cortex,3,FALSE
+AiMemoryEmbedding,TRUE,TRUE,9,1,,,0,TRUE
+AiPlan,TRUE,TRUE,24,3,ai key-cortex,ai identity key-cortex,3,FALSE
+BusinessMatch,TRUE,TRUE,12,2,ai,ai,1,FALSE
+AiPlanStep,FALSE,,23,1,ai,ai key-cortex,2,FALSE
+JourneyInstance,TRUE,TRUE,12,2,ai,ai,1,FALSE
+BusinessGoal,TRUE,TRUE,19,1,ai projects,ai,2,FALSE
+CommunityQuoteRequest,FALSE,,17,2,community,community,1,FALSE
+CommunityReferral,FALSE,,14,2,community,community,1,FALSE
+CommunityCollaboration,FALSE,,16,2,community,community,1,FALSE
+BusinessMessage,FALSE,,10,2,ai community,community,2,FALSE
+SavedBusiness,TRUE,TRUE,7,2,community,community,1,FALSE
+CommunityReview,FALSE,,16,2,community,community,1,FALSE
+BusinessReputation,TRUE,TRUE,22,1,community,community,1,FALSE
+Opportunity,FALSE,,22,1,community trash,community trash,2,FALSE
+OpportunityApplication,FALSE,,14,2,community,community,1,FALSE
+PartnerProgram,FALSE,,19,2,community,community,1,FALSE
+ProfileView,FALSE,,7,2,community,community,1,FALSE
+NetworkActivity,FALSE,,11,1,community,community,1,FALSE
+ResourceDownload,FALSE,,9,2,community,community,1,FALSE
+AiSuggestionEvent,TRUE,TRUE,11,2,ai,ai,1,FALSE
+SeoPage,TRUE,TRUE,29,1,ai seo,ai seo,2,FALSE
+SeoKeyword,TRUE,TRUE,22,2,ai seo,seo,2,FALSE
+RankingSnapshot,FALSE,,11,2,seo,seo,1,FALSE
+SeoIssue,TRUE,TRUE,17,1,ai seo,ai seo,2,FALSE
+ContentBrief,TRUE,TRUE,25,1,ai seo,seo,2,FALSE
+CustomerJourney,TRUE,TRUE,27,2,crm growth-intelligence,crm growth-intelligence,2,FALSE
+JourneyTouchpoint,TRUE,TRUE,22,3,crm growth-intelligence,crm growth-intelligence,2,FALSE
+AttributionResult,TRUE,TRUE,16,1,growth-intelligence,growth-intelligence,1,FALSE
+GrowthInsight,TRUE,TRUE,25,1,analytics growth-intelligence,analytics growth-intelligence,2,FALSE
+AuthRateLimit,FALSE,,3,0,,identity,1,FALSE
+BusinessBlueprint,TRUE,TRUE,45,1,(root) apps/voice-agent blueprint business-genome key-autonomy key-cortex phone-voice,(root) blueprint business-genome,7,FALSE
+GenomeChatMessage,TRUE,TRUE,6,0,business-genesis,business-genesis,1,FALSE
+FeatureFlag,FALSE,,8,0,feature-flags,feature-flags,1,FALSE
+AuthAuditLog,FALSE,,10,0,identity,identity,1,FALSE
+RiscEvent,FALSE,,9,0,risc,risc,1,FALSE
+ContactAuditEntry,TRUE,TRUE,17,2,crm,crm,1,FALSE
+ContactExportJob,TRUE,TRUE,16,2,crm,crm,1,FALSE
+SitePageDraft,TRUE,TRUE,11,1,site,site,1,FALSE
+SitePagePublished,TRUE,TRUE,10,1,site,site,1,FALSE
+ContactForgetRequest,TRUE,TRUE,13,2,crm,crm,1,FALSE
+RevenueAttribution,TRUE,TRUE,21,1,commerce,commerce,1,FALSE
+TimeCostEntry,TRUE,TRUE,16,0,commerce,commerce,1,FALSE
+StorefrontConversionDaily,TRUE,TRUE,15,1,site,site,1,FALSE
+PublicVisitorEvent,TRUE,TRUE,11,1,conversion public-events site,public-events,3,FALSE
+PublicEvent,TRUE,TRUE,16,1,public-events site,public-events,2,FALSE
+PublicVisitor,TRUE,TRUE,11,1,public-events,public-events,1,FALSE
+PresenceInsightSnapshot,TRUE,TRUE,12,1,site,site,1,FALSE
+PresenceDailyStat,TRUE,TRUE,10,1,public-events site,public-events,2,FALSE
+FinancialAccount,TRUE,TRUE,21,2,ai finance intelligence os,apps/server finance,5,FALSE
+ChartOfAccount,TRUE,TRUE,19,4,finance os reports,apps/server finance,4,FALSE
+FinancialTransaction,TRUE,TRUE,25,4,(root) expenses finance reports,expenses finance,4,FALSE
+LedgerEntry,TRUE,TRUE,14,3,finance os reports,expenses finance,4,FALSE
+BankTransaction,TRUE,TRUE,15,2,ai apps/server finance,apps/server finance,3,FALSE
+Reconciliation,TRUE,TRUE,16,2,finance,finance,1,FALSE
+TaxLiability,TRUE,TRUE,20,3,finance intelligence reports,finance,3,FALSE
+TaxRate,TRUE,TRUE,12,3,apps/server finance,apps/server finance,2,FALSE
+BankRule,TRUE,TRUE,14,3,finance,finance,1,FALSE
+RecurringJournalEntry,TRUE,TRUE,17,1,finance,finance,1,FALSE
+CreditNote,TRUE,TRUE,15,2,finance,finance,1,FALSE
+AccountingPeriod,TRUE,TRUE,13,1,finance,finance,1,FALSE
+BankConnection,TRUE,TRUE,14,2,apps/server finance,apps/server finance,2,FALSE
+ExchangeRate,TRUE,TRUE,9,1,finance,finance,1,FALSE
+FixedAsset,TRUE,TRUE,17,1,finance,finance,1,FALSE
+CommercialDocumentTemplate,TRUE,TRUE,10,1,,,0,TRUE
+KeyCommand,TRUE,TRUE,19,1,ai,ai,1,FALSE
+ProcurementRequest,TRUE,TRUE,22,1,,,0,TRUE
+BusinessEvent,TRUE,TRUE,22,1,(root) admin-platform analytics business-events key-cortex,business-events device flow key-cortex,7,FALSE
+Evidence,TRUE,TRUE,16,1,ai evidence,evidence,2,FALSE
+TaskAssignment,FALSE,,9,0,ai apps/server task-assignments,crm projects task-assignments,5,FALSE
+ContentRequest,TRUE,TRUE,28,2,ai content-ops,content-ops,2,FALSE
+ContentDeliveryPackage,TRUE,TRUE,13,1,ai content-ops,content-ops,2,FALSE
+CallLog,TRUE,TRUE,16,1,ai call-tasks,call-tasks,2,FALSE
+ApprovalRequest,TRUE,TRUE,16,1,ai approvals key-cortex,approvals,3,FALSE
+ApprovalStep,FALSE,,10,1,,approvals,1,FALSE
+Asset,TRUE,TRUE,17,1,assets contracts intelligence,assets,3,FALSE
+ProjectMilestone,FALSE,,12,1,projects,projects,1,FALSE
+RetainerAgreement,TRUE,TRUE,15,1,retainers,change-orders retainers,2,FALSE
+RetainerPeriod,FALSE,,12,1,retainers,retainers,1,FALSE
+PortalAccess,TRUE,TRUE,12,1,portal,portal,1,FALSE
+ChangeOrder,FALSE,,15,1,change-orders,change-orders,1,FALSE
+BusinessEntityLink,TRUE,TRUE,12,1,,,0,TRUE
+BusinessRisk,TRUE,TRUE,15,1,governance,governance,1,FALSE
+CashReserveBucket,TRUE,TRUE,11,1,finance,,1,FALSE
+WorkflowTemplate,TRUE,TRUE,11,1,,,0,TRUE
+WorkflowRun,TRUE,TRUE,12,1,,,0,TRUE
+SopDocument,TRUE,TRUE,10,1,intelligence,,1,FALSE
+MarketingCampaignPlan,TRUE,TRUE,15,1,,,0,TRUE
+BusinessInitiative,TRUE,TRUE,13,1,,,0,TRUE
+BusinessRule,TRUE,TRUE,14,1,intelligence,intelligence,1,FALSE
+BusinessSignal,TRUE,TRUE,19,1,intelligence,intelligence,1,FALSE
+BusinessHealthSnapshot,TRUE,TRUE,9,1,intelligence,intelligence key-cortex,2,FALSE
+IntegrationProvider,FALSE,,12,0,admin-analytics integration-hub,integration-hub,2,FALSE
+IntegrationConnection,TRUE,TRUE,14,0,admin-analytics integration-hub key-connector key-cortex packages/api,integration-hub key-connector packages/api,5,FALSE
+IntegrationSyncRun,TRUE,TRUE,12,0,admin-analytics integration-hub,integration-hub,2,FALSE
+ExternalObjectMap,TRUE,TRUE,9,0,,,0,TRUE
+ProductEvent,TRUE,TRUE,10,0,admin-analytics product-analytics,product-analytics,2,FALSE
+UserFeedback,TRUE,TRUE,12,0,admin-analytics product-analytics,product-analytics,2,FALSE
+FeatureUsageDaily,FALSE,,9,0,admin-analytics,product-analytics,2,FALSE
+AiQualitySignal,TRUE,TRUE,10,0,admin-analytics product-analytics,product-analytics,2,FALSE
+ProductExperiment,FALSE,,11,0,,,0,TRUE
+ProductRoadmapInsight,FALSE,,10,0,admin-analytics,,1,FALSE
+NetworkNode,TRUE,TRUE,10,0,,,0,TRUE
+NetworkEdge,TRUE,TRUE,11,0,,,0,TRUE
+ChannelAccount,TRUE,TRUE,12,0,communications,,1,FALSE
+InteractionIntent,TRUE,TRUE,13,0,communications,communications,1,FALSE
+ResponseDraft,TRUE,TRUE,19,0,communications,apps/server communications flow,3,FALSE
+ConsentRecord,TRUE,TRUE,11,0,communications key-cortex security-audit,communications,3,FALSE
+TriggerDefinition,TRUE,TRUE,11,0,communications,communications,1,FALSE
+MediaAsset,TRUE,TRUE,18,0,device key-cortex,apps/server device,3,FALSE
+VisualIntake,TRUE,TRUE,15,0,device key-cortex,device,2,FALSE
+ExtractedEntity,TRUE,TRUE,12,0,device key-cortex,device,2,FALSE
+VoiceSession,TRUE,TRUE,13,0,device livekit,device livekit,2,FALSE
+KeyVoicePreference,TRUE,TRUE,15,0,device,device,1,FALSE
+AutomationFlow,TRUE,TRUE,17,0,analytics flow trash,apps/server flow trash,4,FALSE
+FlowVersion,FALSE,,11,1,flow,flow,1,FALSE
+FlowRun,TRUE,TRUE,18,2,analytics flow,flow,2,FALSE
+FlowRunStep,FALSE,,12,1,flow,flow,1,FALSE
+FlowTemplate,FALSE,,14,0,flow,flow,1,FALSE
+AutomationOutcome,TRUE,TRUE,13,0,,,0,TRUE
+BotAgent,TRUE,TRUE,15,0,,,0,TRUE
+BotConversationState,TRUE,TRUE,13,0,,,0,TRUE
+KeyAgentConfig,TRUE,TRUE,15,0,ai,ai,1,FALSE
+BusinessSnapshot,TRUE,TRUE,41,1,analytics,analytics,1,FALSE
+MaturityScore,TRUE,TRUE,19,1,analytics,analytics,1,FALSE
+Projection,TRUE,TRUE,16,1,analytics,analytics,1,FALSE
+ConnectorAccount,TRUE,TRUE,18,0,,,0,TRUE
+KeyInboxThread,TRUE,TRUE,25,1,(root) ai communications key-cortex key-inbox social temporal-flow,ai apps/server communications key-inbox,8,FALSE
+KeyInboxMessage,TRUE,TRUE,32,1,ai analytics core/connectors ingestion key-cortex key-inbox social whatsapp,ai apps/server communications key-cortex key-inbox,10,FALSE
+KeyInboxInsight,TRUE,TRUE,18,0,key-inbox,apps/server key-inbox,2,FALSE
+ConnectorAuditLog,TRUE,TRUE,9,0,key-connector packages/api,key-connector packages/api,2,FALSE
+KeystoreServiceCategory,TRUE,TRUE,12,1,keystore,,1,FALSE
+KeystoreServiceListing,TRUE,TRUE,23,2,keystore,keystore,1,FALSE
+KeystoreServiceOrder,TRUE,TRUE,28,2,keystore,keystore,1,FALSE
+KeystoreServiceOrderMessage,FALSE,,10,1,,keystore,1,FALSE
+CortexSession,TRUE,TRUE,24,1,key-cortex,,1,FALSE
+CortexActionLog,TRUE,TRUE,19,1,key-cortex,key-cortex,1,FALSE
+KeyDocument,TRUE,TRUE,12,1,,,0,TRUE
+KeyEvolutionLog,TRUE,TRUE,12,1,,key-cortex,1,FALSE
+KeyCallSession,TRUE,TRUE,16,1,,,0,TRUE
+KeyTuningLog,TRUE,TRUE,6,1,,,0,TRUE
+KeyUserPreferences,TRUE,TRUE,14,1,,,0,TRUE
+KeyInteractionFeedback,TRUE,FALSE,12,1,,,0,TRUE
+SandboxExecutionLog,TRUE,TRUE,13,1,,,0,TRUE
+AiApprovalRequest,TRUE,TRUE,17,1,,,0,TRUE
+PromptVersion,FALSE,,9,0,,,0,TRUE
+CognitionMemory,TRUE,TRUE,16,1,key-cortex,key-cortex,1,FALSE
+CognitionSession,TRUE,TRUE,10,1,key-cortex,key-cortex,1,FALSE
+LLMProviderCost,TRUE,TRUE,17,1,ai,ai,1,FALSE
+ConnectorHealthLog,TRUE,TRUE,10,1,key-connector,key-connector,1,FALSE
+SyncJob,TRUE,TRUE,15,1,key-connector,key-connector,1,FALSE
+BusinessSetting,TRUE,TRUE,12,1,key-autonomy,,1,FALSE
+BusinessGenome,TRUE,TRUE,14,1,key-cortex,key-cortex,1,FALSE
+ActivityLog,TRUE,TRUE,8,1,activity,activity,1,FALSE
+Task,TRUE,TRUE,12,1,key-cortex,,1,FALSE
+Message,TRUE,TRUE,13,1,key-cortex,key-cortex,1,FALSE
+FlowDefinition,TRUE,TRUE,19,1,,,0,TRUE
+FlowExecution,TRUE,TRUE,15,2,,,0,TRUE
+Report,TRUE,TRUE,11,1,,,0,TRUE
+Reminder,TRUE,TRUE,10,1,,,0,TRUE
+Workflow,TRUE,TRUE,11,1,key-cortex,,1,FALSE
+Document,TRUE,TRUE,9,1,,,0,TRUE
+Lead,TRUE,TRUE,12,1,key-cortex,,1,FALSE
+Campaign,TRUE,TRUE,11,1,key-cortex,,1,FALSE
+OutboundCampaign,TRUE,TRUE,10,1,content,content,1,FALSE
+CrmTask,TRUE,TRUE,13,2,key-cortex,,1,FALSE
+CrmActivity,TRUE,TRUE,10,2,key-cortex,,1,FALSE
+HelpdeskTicket,TRUE,TRUE,13,1,,,0,TRUE
+SupportTicketMessage,TRUE,TRUE,9,1,helpdesk,helpdesk,1,FALSE
