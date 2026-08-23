@@ -56,7 +56,13 @@ journal/**`. Anything else → PR. Push rejected → rebase once, else PR.
    journal "candidate for removal" (burndown does the removing). A NEW
    provably-false doc claim found along the way → propose the row via PR
    (a growing ledger is reviewed).
-9. Commit + push per the write-target rule. Journal
+9. Commit + push per the write-target rule. **Before every `git commit`, run
+   `git diff --cached --name-only` and confirm it lists exactly your intended
+   paths** — on a shared working tree the index is shared too, and a plain
+   `git commit` sweeps whatever a concurrent session has staged (this
+   happened: 35f42129 swept four of a peer's staged files into a one-file
+   docs commit). Extra staged paths that are not yours: `git reset -- <those
+   paths>` (scoped) before committing. Journal
    (`architecture/os/journal/<date>-truth.md`): actions, deltas, corrections.
 
 ## DONE means

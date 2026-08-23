@@ -55,7 +55,11 @@ Never echo tokens into logs, findings, or commits.
    - Escalation memory: same `check` failing 2 consecutive audit runs →
      issue even at `warn` (mirrors uptime-monitor's 2-failure paging).
 5. Delete processed inbox files in the same commit that records their triage.
-6. Journal (`architecture/os/journal/<date>-audit-<hour>.md`).
+6. Before every `git commit`: `git diff --cached --name-only` must list
+   exactly your intended paths — a shared index sweeps a peer's staged files
+   into your commit otherwise (see truth.md §9). `git reset -- <foreign
+   paths>` first.
+7. Journal (`architecture/os/journal/<date>-audit-<hour>.md`).
 
 ## DONE means
 Inbox empty; every probe has a journaled result (including "unreachable");

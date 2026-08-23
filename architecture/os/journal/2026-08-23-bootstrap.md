@@ -50,3 +50,12 @@ outcome: corrected
   explanatory comment containing the literal Controller-decorator text made
   `search()` anchor inside the comment and report 6 open handlers instead
   of 0. Prose in code must not look like the code the gates parse.
+- **Explicit `git add <path>` does not make a commit surgical — the INDEX is
+  shared.** 35f42129 was `git add <one playbook> && git commit`, and it swept
+  four files a concurrent session had staged (their guard hooks + a
+  .gitignore edit) into a one-file docs commit. `git add -A` was never run;
+  the sweep is what plain `git commit` does to a shared staging area. Rule
+  now in both cycle playbooks: `git diff --cached --name-only` must equal the
+  intended path list before every commit; scoped `git reset -- <foreign
+  paths>` evicts a peer's staged files first. (Cloud routines are immune —
+  isolated clones — but any local session running a playbook is not.)
