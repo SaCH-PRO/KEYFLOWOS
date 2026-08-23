@@ -2845,11 +2845,11 @@ export const CAPABILITY_MAP_SEED: CapabilityModel = {
     {
       "id": "scheduling",
       "label": "Scheduling & Bookings",
-      "toolCount": 10,
+      "toolCount": 14,
       "capCount": 22,
       "modeCounts": {
         "agentic": 11,
-        "assisted": 20,
+        "assisted": 24,
         "assisted_approval": 1
       },
       "uiSurfaces": [
@@ -2934,6 +2934,42 @@ export const CAPABILITY_MAP_SEED: CapabilityModel = {
           "description": "List all available services for booking.",
           "family": "crud",
           "riskTier": 1,
+          "mode": "assisted",
+          "route": "/app/bookings",
+          "fullRoute": "/app/bookings"
+        },
+        {
+          "name": "bookings_add_to_waitlist",
+          "description": "Add a contact to the booking waitlist for a service when the requested slot is unavailable.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/bookings",
+          "fullRoute": "/app/bookings"
+        },
+        {
+          "name": "bookings_list_waitlist",
+          "description": "List booking waitlist entries.",
+          "family": "crud",
+          "riskTier": 1,
+          "mode": "assisted",
+          "route": "/app/bookings",
+          "fullRoute": "/app/bookings"
+        },
+        {
+          "name": "bookings_offer_waitlist_slot",
+          "description": "Offer a freed booking slot to a waitlist entry, creating an UNCONFIRMED placeholder booking.",
+          "family": "crud",
+          "riskTier": 2,
+          "mode": "assisted",
+          "route": "/app/bookings",
+          "fullRoute": "/app/bookings"
+        },
+        {
+          "name": "bookings_cancel_waitlist_entry",
+          "description": "Cancel a booking waitlist entry and any offered placeholder booking.",
+          "family": "crud",
+          "riskTier": 2,
           "mode": "assisted",
           "route": "/app/bookings",
           "fullRoute": "/app/bookings"
@@ -4712,7 +4748,7 @@ export const CAPABILITY_MAP_SEED: CapabilityModel = {
   ],
   "summary": {
     "domains": 12,
-    "flowTools": 282,
+    "flowTools": 286,
     "cortexCapabilities": 207,
     "targetsTotal": 32,
     "targetsActive": 15,
@@ -4721,7 +4757,7 @@ export const CAPABILITY_MAP_SEED: CapabilityModel = {
     "declaredCoveragePct": 100,
     "modeCounts": {
       "agentic": 212,
-      "assisted": 228,
+      "assisted": 232,
       "assisted_approval": 46,
       "human_gated": 3
     }

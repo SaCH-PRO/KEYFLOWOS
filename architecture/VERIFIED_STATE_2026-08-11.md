@@ -1,5 +1,9 @@
 # Verified state — 2026-08-11
 
+> **Superseded for current numbers by `architecture/os/state/STATE.md`**
+> (added 2026-08-23, the one permitted edit to this snapshot). Narrative and
+> the "How to measure this codebase" methodology remain authoritative.
+
 Every number here was re-derived from the tree on this date, and every row
 carries the command that produced it. Nothing is copied from another document.
 

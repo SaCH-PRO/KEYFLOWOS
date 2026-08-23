@@ -2,7 +2,7 @@
 
 > **Auto-generated** by `generate.js` from the two authoritative capability sources in the repo. Do not hand-edit — regenerate instead (`node docs/architecture/capability-map/generate.js`).
 
-Projected from **282 governed flow tools** (`ai/flow-tool-registry.ts`) and **207 declared cortex capabilities** (`key-cortex/key-cortex-capability-registry.service.ts`) onto a **12-domain** business-function taxonomy.
+Projected from **286 governed flow tools** (`ai/flow-tool-registry.ts`) and **207 declared cortex capabilities** (`key-cortex/key-cortex-capability-registry.service.ts`) onto a **12-domain** business-function taxonomy.
 
 **Coverage: 100% declared · 47% active.** Every target capability a complete business OS needs is now *declared* in the model (32/32). **15** are **active** (a real tool covers them today); **17** are **planned** — declared with a full build spec (mode, risk tier, what they compose from, UI surface, evaluator gate) but not yet executable. "Active" is the honest executable-today number; "declared" means the model is complete.
 
@@ -26,7 +26,7 @@ This file is the human-readable view of `key-capability-map.seed.json`, the seed
 
 ## Coverage summary
 
-Across **12 domains**: 🟢 212 agentic · 🔵 228 assisted · 🟡 46 assisted+approval · 🔴 3 human-gated (across 489 live capabilities).
+Across **12 domains**: 🟢 212 agentic · 🔵 232 assisted · 🟡 46 assisted+approval · 🔴 3 human-gated (across 493 live capabilities).
 
 | Domain | Tools | Cortex caps | UI surfaces | Active | Planned | Declared | Mode mix |
 |---|--:|--:|--:|:--:|:--:|:--:|---|
@@ -35,7 +35,7 @@ Across **12 domains**: 🟢 212 agentic · 🔵 228 assisted · 🟡 46 assisted
 | **Commerce & Fulfillment** | 47 | 15 | 5 | 1/3 | 2 | 100% | 🟢 29 🔵 28 🟡 5 |
 | **Finance & Accounting** | 36 | 10 | 4 | 3/4 | 1 | 100% | 🟢 23 🔵 20 🟡 3 |
 | **Operations & Delivery** | 45 | 36 | 5 | 1/2 | 1 | 100% | 🔵 41 🟢 34 🟡 5 🔴 1 |
-| **Scheduling & Bookings** | 10 | 22 | 2 | 2/2 | 0 | 100% | 🔵 20 🟢 11 🟡 1 |
+| **Scheduling & Bookings** | 14 | 22 | 2 | 2/2 | 0 | 100% | 🔵 24 🟢 11 🟡 1 |
 | **Support & Communications** | 13 | 38 | 3 | 2/3 | 1 | 100% | 🟢 23 🔵 23 🟡 5 |
 | **Legal, Contracts & Governance** | 28 | 0 | 6 | 2/3 | 1 | 100% | 🟢 15 🔵 11 🟡 2 |
 | **Analytics & Strategy** | 18 | 37 | 6 | 0/3 | 3 | 100% | 🟢 33 🔵 19 🟡 3 |
@@ -389,7 +389,7 @@ Every gap is now a **declared capability with a spec**. This is the concrete bui
 
 ### Scheduling & Bookings
 
-10 tools · 22 cortex capabilities · **2/2 active**, 0 planned
+14 tools · 22 cortex capabilities · **2/2 active**, 0 planned
 
 **UI surfaces:** `/app/bookings` · `/app/calendar`
 
@@ -400,17 +400,21 @@ Every gap is now a **declared capability with a spec**. This is the concrete bui
 | No-show prediction | ✅ active | 🟢 Agentic | covered by `fetch_schedule_health` |
 | Smart rescheduling | ✅ active | 🔵 Assisted | covered by `bookings_reschedule_booking` |
 
-<details><summary>10 governed tools</summary>
+<details><summary>14 governed tools</summary>
 
 | Tool | Family | Tier | Mode | Manual route |
 |---|---|:--:|---|---|
 | `calendar_check_conflicts` | read | 1 | 🟢 Agentic | `/app/calendar` |
 | `calendar_list_events` | read | 1 | 🟢 Agentic | `/app/calendar` |
 | `fetch_schedule_health` | read | 1 | 🟢 Agentic | `/app/bookings` |
+| `bookings_add_to_waitlist` | crud | 2 | 🔵 Assisted | `/app/bookings` |
+| `bookings_cancel_waitlist_entry` | crud | 2 | 🔵 Assisted | `/app/bookings` |
 | `bookings_create_booking` | crud | 2 | 🔵 Assisted | `/app/bookings` |
 | `bookings_list_bookings` | crud | 1 | 🔵 Assisted | `/app/bookings` |
 | `bookings_list_services` | crud | 1 | 🔵 Assisted | `/app/bookings` |
+| `bookings_list_waitlist` | crud | 1 | 🔵 Assisted | `/app/bookings` |
 | `bookings_mark_no_show` | organize | 2 | 🔵 Assisted | `/app/bookings` |
+| `bookings_offer_waitlist_slot` | crud | 2 | 🔵 Assisted | `/app/bookings` |
 | `bookings_reschedule_booking` | crud | 2 | 🔵 Assisted | `/app/bookings` |
 | `calendar_create_event` | crud | 2 | 🔵 Assisted | `/app/calendar` |
 | `bookings_cancel_booking` | crud | 3 | 🟡 Assisted + Approval | `/app/bookings` |

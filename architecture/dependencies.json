@@ -1346,6 +1346,27 @@
     },
     {
       "resolved": false,
+      "source": "apps/server/src/core/auth/public-surface.spec.ts",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/core/auth/public-surface.spec.ts",
+      "specifier": "node:path",
+      "target": "node:path",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/core/auth/public-surface.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
+      "resolved": false,
       "source": "apps/server/src/core/auth/supabase-admin.service.ts",
       "specifier": "@nestjs/common",
       "target": "@nestjs/common",
@@ -1465,6 +1486,48 @@
     },
     {
       "resolved": false,
+      "source": "apps/server/src/core/config/gate-vacuity.spec.ts",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/core/config/gate-vacuity.spec.ts",
+      "specifier": "node:path",
+      "target": "node:path",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/core/config/gate-vacuity.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/core/config/test-config-coverage.spec.ts",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/core/config/test-config-coverage.spec.ts",
+      "specifier": "node:path",
+      "target": "node:path",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/core/config/test-config-coverage.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
+      "resolved": false,
       "source": "apps/server/src/core/config/test-coverage-gating.spec.ts",
       "specifier": "node:fs",
       "target": "node:fs",
@@ -1480,6 +1543,27 @@
     {
       "resolved": false,
       "source": "apps/server/src/core/config/test-coverage-gating.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/core/config/unreachable-provider.spec.ts",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/core/config/unreachable-provider.spec.ts",
+      "specifier": "node:path",
+      "target": "node:path",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/core/config/unreachable-provider.spec.ts",
       "specifier": "vitest",
       "target": "vitest",
       "type": "external"
@@ -3284,6 +3368,34 @@
       "type": "relative"
     },
     {
+      "resolved": true,
+      "source": "apps/server/src/core/crypto/token-crypto.spec.ts",
+      "specifier": "./token-crypto",
+      "target": "apps/server/src/core/crypto/token-crypto.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/core/crypto/token-crypto.spec.ts",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/core/crypto/token-crypto.spec.ts",
+      "specifier": "node:path",
+      "target": "node:path",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/core/crypto/token-crypto.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
       "resolved": false,
       "source": "apps/server/src/core/crypto/token-crypto.ts",
       "specifier": "crypto",
@@ -3421,6 +3533,27 @@
       "source": "apps/server/src/core/guards/honeypot.guard.ts",
       "specifier": "@nestjs/core",
       "target": "@nestjs/core",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/core/guards/public-rate-limit.guard.spec.ts",
+      "specifier": "@nestjs/common",
+      "target": "@nestjs/common",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/core/guards/public-rate-limit.guard.spec.ts",
+      "specifier": "./public-rate-limit.guard",
+      "target": "apps/server/src/core/guards/public-rate-limit.guard.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/core/guards/public-rate-limit.guard.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
       "type": "external"
     },
     {
@@ -3926,6 +4059,13 @@
       "specifier": "../../modules/identity/identity.service",
       "target": "apps/server/src/modules/identity/identity.service.ts",
       "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/core/seed/seed.service.ts",
+      "specifier": "crypto",
+      "target": "crypto",
+      "type": "external"
     },
     {
       "resolved": false,
@@ -5890,6 +6030,13 @@
     {
       "resolved": true,
       "source": "apps/server/src/modules/ai/ai.module.ts",
+      "specifier": "./capability-map/capability-map.service",
+      "target": "apps/server/src/modules/ai/capability-map/capability-map.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/ai/ai.module.ts",
       "specifier": "./capacity-insight.service",
       "target": "apps/server/src/modules/ai/capacity-insight.service.ts",
       "type": "relative"
@@ -6564,6 +6711,48 @@
       "source": "apps/server/src/modules/ai/calendar-intelligence.service.ts",
       "specifier": "./model-gateway.service",
       "target": "apps/server/src/modules/ai/model-gateway.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/ai/capability-map/capability-map.seed.ts",
+      "specifier": "./capability-map.types",
+      "target": "apps/server/src/modules/ai/capability-map/capability-map.types.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/ai/capability-map/capability-map.service.spec.ts",
+      "specifier": "./capability-map.service",
+      "target": "apps/server/src/modules/ai/capability-map/capability-map.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/ai/capability-map/capability-map.service.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/ai/capability-map/capability-map.service.ts",
+      "specifier": "@nestjs/common",
+      "target": "@nestjs/common",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/ai/capability-map/capability-map.service.ts",
+      "specifier": "./capability-map.seed",
+      "target": "apps/server/src/modules/ai/capability-map/capability-map.seed.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/ai/capability-map/capability-map.service.ts",
+      "specifier": "./capability-map.types",
+      "target": "apps/server/src/modules/ai/capability-map/capability-map.types.ts",
       "type": "relative"
     },
     {
@@ -8009,6 +8198,20 @@
       "type": "external"
     },
     {
+      "resolved": true,
+      "source": "apps/server/src/modules/ai/flow-tool-registry.spec.ts",
+      "specifier": "./flow-tool-registry",
+      "target": "apps/server/src/modules/ai/flow-tool-registry.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/ai/flow-tool-registry.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
       "resolved": false,
       "source": "apps/server/src/modules/ai/flow.controller.ts",
       "specifier": "@nestjs/common",
@@ -8230,6 +8433,27 @@
       "source": "apps/server/src/modules/ai/graph-actions.controller.ts",
       "specifier": "express",
       "target": "express",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/ai/handler-coverage-ratchet.spec.ts",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/ai/handler-coverage-ratchet.spec.ts",
+      "specifier": "node:path",
+      "target": "node:path",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/ai/handler-coverage-ratchet.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
       "type": "external"
     },
     {
@@ -8683,6 +8907,34 @@
     {
       "resolved": false,
       "source": "apps/server/src/modules/ai/ledger-report-tools.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/ai/llm-cost-coverage.spec.ts",
+      "specifier": "./llm-cost.service",
+      "target": "apps/server/src/modules/ai/llm-cost.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/ai/llm-cost-coverage.spec.ts",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/ai/llm-cost-coverage.spec.ts",
+      "specifier": "node:path",
+      "target": "node:path",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/ai/llm-cost-coverage.spec.ts",
       "specifier": "vitest",
       "target": "vitest",
       "type": "external"
@@ -11779,6 +12031,13 @@
       "source": "apps/server/src/modules/bookings/bookings.controller.spec.ts",
       "specifier": "./booking-optimizer.service",
       "target": "apps/server/src/modules/bookings/booking-optimizer.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/bookings/bookings.controller.spec.ts",
+      "specifier": "./booking-waitlist.service",
+      "target": "apps/server/src/modules/bookings/booking-waitlist.service.ts",
       "type": "relative"
     },
     {
@@ -20352,6 +20611,13 @@
     {
       "resolved": true,
       "source": "apps/server/src/modules/commerce/commerce.controller.ts",
+      "specifier": "./dto/invoice-from-time.dto",
+      "target": "apps/server/src/modules/commerce/dto/invoice-from-time.dto.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/commerce/commerce.controller.ts",
       "specifier": "./dto/update-invoice-status.dto",
       "target": "apps/server/src/modules/commerce/dto/update-invoice-status.dto.ts",
       "type": "relative"
@@ -20424,6 +20690,13 @@
       "source": "apps/server/src/modules/commerce/commerce.controller.ts",
       "specifier": "../subscriptions/subscriptions.service",
       "target": "apps/server/src/modules/subscriptions/subscriptions.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/commerce/commerce.controller.ts",
+      "specifier": "../time-tracking/time-entry.service",
+      "target": "apps/server/src/modules/time-tracking/time-entry.service.ts",
       "type": "relative"
     },
     {
@@ -20869,6 +21142,13 @@
     },
     {
       "resolved": true,
+      "source": "apps/server/src/modules/commerce/commerce.module.ts",
+      "specifier": "../time-tracking/time-tracking.module",
+      "target": "apps/server/src/modules/time-tracking/time-tracking.module.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
       "source": "apps/server/src/modules/commerce/commerce.service.ts",
       "specifier": "@keyflow/db",
       "target": "@keyflow/db",
@@ -21227,6 +21507,13 @@
     {
       "resolved": false,
       "source": "apps/server/src/modules/commerce/dto/create-product.dto.ts",
+      "specifier": "class-validator",
+      "target": "class-validator",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/commerce/dto/invoice-from-time.dto.ts",
       "specifier": "class-validator",
       "target": "class-validator",
       "type": "external"
@@ -24830,6 +25117,62 @@
       "type": "relative"
     },
     {
+      "resolved": true,
+      "source": "apps/server/src/modules/contracts/contract-renewal.sweep.spec.ts",
+      "specifier": "@keyflow/shared",
+      "target": "@keyflow/shared",
+      "type": "workspace"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/contracts/contract-renewal.sweep.spec.ts",
+      "specifier": "./contract-renewal.sweep",
+      "target": "apps/server/src/modules/contracts/contract-renewal.sweep.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/contracts/contract-renewal.sweep.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/contracts/contract-renewal.sweep.ts",
+      "specifier": "@keyflow/shared",
+      "target": "@keyflow/shared",
+      "type": "workspace"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/contracts/contract-renewal.sweep.ts",
+      "specifier": "@nestjs/common",
+      "target": "@nestjs/common",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/contracts/contract-renewal.sweep.ts",
+      "specifier": "@nestjs/event-emitter",
+      "target": "@nestjs/event-emitter",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/contracts/contract-renewal.sweep.ts",
+      "specifier": "@nestjs/schedule",
+      "target": "@nestjs/schedule",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/contracts/contract-renewal.sweep.ts",
+      "specifier": "../../core/prisma/prisma.service",
+      "target": "apps/server/src/core/prisma/prisma.service.ts",
+      "type": "relative"
+    },
+    {
       "resolved": false,
       "source": "apps/server/src/modules/contracts/contracts.controller.spec.ts",
       "specifier": "@nestjs/testing",
@@ -24958,6 +25301,13 @@
     {
       "resolved": true,
       "source": "apps/server/src/modules/contracts/contracts.module.ts",
+      "specifier": "./contract-renewal.sweep",
+      "target": "apps/server/src/modules/contracts/contract-renewal.sweep.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/contracts/contracts.module.ts",
       "specifier": "./contracts.controller",
       "target": "apps/server/src/modules/contracts/contracts.controller.ts",
       "type": "relative"
@@ -25010,6 +25360,13 @@
       "specifier": "vitest",
       "target": "vitest",
       "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/contracts/contracts.service.ts",
+      "specifier": "@keyflow/shared",
+      "target": "@keyflow/shared",
+      "type": "workspace"
     },
     {
       "resolved": false,
@@ -25598,6 +25955,20 @@
       "specifier": "./crm.helpers",
       "target": "apps/server/src/modules/crm/crm.helpers.ts",
       "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/crm/contact-taxonomy.spec.ts",
+      "specifier": "@keyflow/shared",
+      "target": "@keyflow/shared",
+      "type": "workspace"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/crm/contact-taxonomy.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
     },
     {
       "resolved": false,
@@ -28432,6 +28803,20 @@
       "source": "apps/server/src/modules/crm/privacy/contact-zip.util.ts",
       "specifier": "node:zlib",
       "target": "node:zlib",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/crm/relationship-health.spec.ts",
+      "specifier": "@keyflow/shared",
+      "target": "@keyflow/shared",
+      "type": "workspace"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/crm/relationship-health.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
       "type": "external"
     },
     {
@@ -33325,13 +33710,6 @@
       "source": "apps/server/src/modules/google-drive/google-drive.service.ts",
       "specifier": "sanitize-html",
       "target": "sanitize-html",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "apps/server/src/modules/google-drive/token-crypto.util.ts",
-      "specifier": "crypto",
-      "target": "crypto",
       "type": "external"
     },
     {
@@ -53733,6 +54111,34 @@
       "type": "relative"
     },
     {
+      "resolved": true,
+      "source": "apps/server/src/modules/subscriptions/plan-limit-enforcement.spec.ts",
+      "specifier": "./plans",
+      "target": "apps/server/src/modules/subscriptions/plans.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/subscriptions/plan-limit-enforcement.spec.ts",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/subscriptions/plan-limit-enforcement.spec.ts",
+      "specifier": "node:path",
+      "target": "node:path",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/subscriptions/plan-limit-enforcement.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
       "resolved": false,
       "source": "apps/server/src/modules/subscriptions/plan-limit.guard.ts",
       "specifier": "@nestjs/common",
@@ -54944,6 +55350,20 @@
       "type": "relative"
     },
     {
+      "resolved": true,
+      "source": "apps/server/src/modules/time-tracking/invoice-unbilled-time.spec.ts",
+      "specifier": "./time-entry.service",
+      "target": "apps/server/src/modules/time-tracking/time-entry.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/time-tracking/invoice-unbilled-time.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
       "resolved": false,
       "source": "apps/server/src/modules/time-tracking/time-entry-tenancy.spec.ts",
       "specifier": "@nestjs/common",
@@ -55854,6 +56274,27 @@
       "type": "external"
     },
     {
+      "resolved": false,
+      "source": "apps/server/src/trpc.module.spec.ts",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/trpc.module.spec.ts",
+      "specifier": "node:path",
+      "target": "node:path",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/trpc.module.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
       "resolved": true,
       "source": "apps/server/src/trpc.module.ts",
       "specifier": "@keyflow/api",
@@ -56593,6 +57034,13 @@
       "source": "apps/server/test/commerce-public-quote.e2e.test.ts",
       "specifier": "../src/modules/subscriptions/subscriptions.service",
       "target": "apps/server/src/modules/subscriptions/subscriptions.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/test/commerce-public-quote.e2e.test.ts",
+      "specifier": "../src/modules/time-tracking/time-entry.service",
+      "target": "apps/server/src/modules/time-tracking/time-entry.service.ts",
       "type": "relative"
     },
     {
@@ -58229,6 +58677,13 @@
     {
       "resolved": false,
       "source": "apps/web/e2e/auth-login.spec.ts",
+      "specifier": "@playwright/test",
+      "target": "@playwright/test",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/web/e2e/auth-signup.spec.ts",
       "specifier": "@playwright/test",
       "target": "@playwright/test",
       "type": "external"
@@ -104043,6 +104498,13 @@
     },
     {
       "resolved": false,
+      "source": "apps/web/src/lib/__tests__/api-get-dedupe.test.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
+      "resolved": false,
       "source": "apps/web/src/lib/__tests__/api-refresh-retry.test.ts",
       "specifier": "vitest",
       "target": "vitest",
@@ -104100,6 +104562,27 @@
     {
       "resolved": false,
       "source": "apps/web/src/lib/__tests__/inventory-reachability.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/web/src/lib/__tests__/link-targets.spec.ts",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/web/src/lib/__tests__/link-targets.spec.ts",
+      "specifier": "node:path",
+      "target": "node:path",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/web/src/lib/__tests__/link-targets.spec.ts",
       "specifier": "vitest",
       "target": "vitest",
       "type": "external"
@@ -105318,6 +105801,13 @@
     {
       "resolved": true,
       "source": "packages/api/src/routers/social.ts",
+      "specifier": "../lib/access",
+      "target": "packages/api/src/lib/access.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "packages/api/src/routers/social.ts",
       "specifier": "../trpc",
       "target": "packages/api/src/trpc.ts",
       "type": "relative"
@@ -106164,6 +106654,62 @@
     },
     {
       "resolved": false,
+      "source": "scripts/os/count-flow-tools.mjs",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/os/count-flow-tools.mjs",
+      "specifier": "node:path",
+      "target": "node:path",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/os/count-flow-tools.mjs",
+      "specifier": "node:url",
+      "target": "node:url",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/os/count-flow-tools.mjs",
+      "specifier": "./lib.mjs",
+      "target": "scripts/os/lib.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/os/ledger-sizes.mjs",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/os/ledger-sizes.mjs",
+      "specifier": "node:path",
+      "target": "node:path",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/os/ledger-sizes.mjs",
+      "specifier": "node:url",
+      "target": "node:url",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/os/ledger-sizes.mjs",
+      "specifier": "./lib.mjs",
+      "target": "scripts/os/lib.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
       "source": "scripts/revert-problematic-renames.mjs",
       "specifier": "fs",
       "target": "fs",
@@ -106196,6 +106742,76 @@
       "specifier": "typescript",
       "target": "typescript",
       "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/system-map/build-xlsx.mjs",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/system-map/build-xlsx.mjs",
+      "specifier": "node:module",
+      "target": "node:module",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/system-map/build-xlsx.mjs",
+      "specifier": "node:path",
+      "target": "node:path",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/system-map/build-xlsx.mjs",
+      "specifier": "./extract.mjs",
+      "target": "scripts/system-map/extract.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/system-map/extract.mjs",
+      "specifier": "node:child_process",
+      "target": "node:child_process",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/system-map/extract.mjs",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/system-map/extract.mjs",
+      "specifier": "node:path",
+      "target": "node:path",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/system-map/generate.mjs",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/system-map/generate.mjs",
+      "specifier": "node:path",
+      "target": "node:path",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/system-map/generate.mjs",
+      "specifier": "./extract.mjs",
+      "target": "scripts/system-map/extract.mjs",
+      "type": "relative"
     },
     {
       "resolved": false,
@@ -106255,8 +106871,8 @@
     }
   ],
   "meta": {
-    "edges": 15179,
-    "nodes": 3695,
+    "edges": 15267,
+    "nodes": 3726,
     "root": "C:/Users/sachd/Downloads/KEYFLOWOS",
     "scanner": "codebase-architect/dependency_scan.py"
   },
@@ -107607,6 +108223,11 @@
     },
     {
       "extension": ".ts",
+      "id": "apps/server/src/core/auth/public-surface.spec.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
       "id": "apps/server/src/core/auth/supabase-admin.service.ts",
       "type": "file"
     },
@@ -107647,12 +108268,27 @@
     },
     {
       "extension": ".ts",
+      "id": "apps/server/src/core/config/gate-vacuity.spec.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
       "id": "apps/server/src/core/config/runtime-urls.ts",
       "type": "file"
     },
     {
       "extension": ".ts",
+      "id": "apps/server/src/core/config/test-config-coverage.spec.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
       "id": "apps/server/src/core/config/test-coverage-gating.spec.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/src/core/config/unreachable-provider.spec.ts",
       "type": "file"
     },
     {
@@ -107892,6 +108528,11 @@
     },
     {
       "extension": ".ts",
+      "id": "apps/server/src/core/crypto/token-crypto.spec.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
       "id": "apps/server/src/core/crypto/token-crypto.ts",
       "type": "file"
     },
@@ -107943,6 +108584,11 @@
     {
       "extension": ".ts",
       "id": "apps/server/src/core/guards/honeypot.guard.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/src/core/guards/public-rate-limit.guard.spec.ts",
       "type": "file"
     },
     {
@@ -108387,6 +109033,26 @@
     },
     {
       "extension": ".ts",
+      "id": "apps/server/src/modules/ai/capability-map/capability-map.seed.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/src/modules/ai/capability-map/capability-map.service.spec.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/src/modules/ai/capability-map/capability-map.service.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/src/modules/ai/capability-map/capability-map.types.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
       "id": "apps/server/src/modules/ai/capacity-insight.service.ts",
       "type": "file"
     },
@@ -108532,6 +109198,11 @@
     },
     {
       "extension": ".ts",
+      "id": "apps/server/src/modules/ai/flow-tool-registry.spec.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
       "id": "apps/server/src/modules/ai/flow-tool-registry.ts",
       "type": "file"
     },
@@ -108553,6 +109224,11 @@
     {
       "extension": ".ts",
       "id": "apps/server/src/modules/ai/graph-actions.controller.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/src/modules/ai/handler-coverage-ratchet.spec.ts",
       "type": "file"
     },
     {
@@ -108648,6 +109324,11 @@
     {
       "extension": ".ts",
       "id": "apps/server/src/modules/ai/ledger-report-tools.spec.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/src/modules/ai/llm-cost-coverage.spec.ts",
       "type": "file"
     },
     {
@@ -110347,6 +111028,11 @@
     },
     {
       "extension": ".ts",
+      "id": "apps/server/src/modules/commerce/dto/invoice-from-time.dto.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
       "id": "apps/server/src/modules/commerce/dto/mark-invoice-paid.dto.ts",
       "type": "file"
     },
@@ -110997,6 +111683,16 @@
     },
     {
       "extension": ".ts",
+      "id": "apps/server/src/modules/contracts/contract-renewal.sweep.spec.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/src/modules/contracts/contract-renewal.sweep.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
       "id": "apps/server/src/modules/contracts/contracts.controller.spec.ts",
       "type": "file"
     },
@@ -111123,6 +111819,11 @@
     {
       "extension": ".ts",
       "id": "apps/server/src/modules/crm/contact-scoring.engine.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/src/modules/crm/contact-taxonomy.spec.ts",
       "type": "file"
     },
     {
@@ -111493,6 +112194,11 @@
     {
       "extension": ".ts",
       "id": "apps/server/src/modules/crm/prompts/nl-search.prompt.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/src/modules/crm/relationship-health.spec.ts",
       "type": "file"
     },
     {
@@ -112253,11 +112959,6 @@
     {
       "extension": ".ts",
       "id": "apps/server/src/modules/google-drive/google-drive.service.ts",
-      "type": "file"
-    },
-    {
-      "extension": ".ts",
-      "id": "apps/server/src/modules/google-drive/token-crypto.util.ts",
       "type": "file"
     },
     {
@@ -115272,6 +115973,11 @@
     },
     {
       "extension": ".ts",
+      "id": "apps/server/src/modules/subscriptions/plan-limit-enforcement.spec.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
       "id": "apps/server/src/modules/subscriptions/plan-limit.guard.ts",
       "type": "file"
     },
@@ -115522,6 +116228,11 @@
     },
     {
       "extension": ".ts",
+      "id": "apps/server/src/modules/time-tracking/invoice-unbilled-time.spec.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
       "id": "apps/server/src/modules/time-tracking/time-entry-tenancy.spec.ts",
       "type": "file"
     },
@@ -115673,6 +116384,11 @@
     {
       "extension": ".ts",
       "id": "apps/server/src/test-meta.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/src/trpc.module.spec.ts",
       "type": "file"
     },
     {
@@ -116003,6 +116719,11 @@
     {
       "extension": ".ts",
       "id": "apps/web/e2e/auth-login.spec.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/web/e2e/auth-signup.spec.ts",
       "type": "file"
     },
     {
@@ -122877,6 +123598,11 @@
     },
     {
       "extension": ".ts",
+      "id": "apps/web/src/lib/__tests__/api-get-dedupe.test.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
       "id": "apps/web/src/lib/__tests__/api-refresh-retry.test.ts",
       "type": "file"
     },
@@ -122893,6 +123619,11 @@
     {
       "extension": ".ts",
       "id": "apps/web/src/lib/__tests__/inventory-reachability.spec.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/web/src/lib/__tests__/link-targets.spec.ts",
       "type": "file"
     },
     {
@@ -123515,6 +124246,11 @@
       "type": "external"
     },
     {
+      "extension": ".js",
+      "id": "docs/architecture/capability-map/generate.js",
+      "type": "file"
+    },
+    {
       "id": "docx",
       "type": "external"
     },
@@ -123667,6 +124403,10 @@
     },
     {
       "id": "node:fs",
+      "type": "external"
+    },
+    {
+      "id": "node:module",
       "type": "external"
     },
     {
@@ -124235,6 +124975,21 @@
     },
     {
       "extension": ".mjs",
+      "id": "scripts/os/count-flow-tools.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/os/ledger-sizes.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/os/lib.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
       "id": "scripts/revert-problematic-renames.mjs",
       "type": "file"
     },
@@ -124246,6 +125001,21 @@
     {
       "extension": ".mjs",
       "id": "scripts/split-client.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/system-map/build-xlsx.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/system-map/extract.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/system-map/generate.mjs",
       "type": "file"
     },
     {

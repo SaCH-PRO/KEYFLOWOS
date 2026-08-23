@@ -108,6 +108,7 @@
     "apps/server/src/modules/admin-auth",
     "apps/server/src/modules/admin-platform",
     "apps/server/src/modules/ai",
+    "apps/server/src/modules/ai/capability-map",
     "apps/server/src/modules/ai/dto",
     "apps/server/src/modules/analytics",
     "apps/server/src/modules/api-keys",
@@ -693,8 +694,15 @@
     "apps/web/src/lib/key-inbox",
     "apps/web/src/lib/types",
     "apps/web/test-results",
+    "apps/web/test-results/auth-signup-Auth-\u2014-sign-up-132b8-ide-the-app-not-on-the-form-chromium",
+    "apps/web/test-results/auth-signup-Auth-\u2014-sign-up-62d98-the-user-on-a-raw-API-error-chromium",
+    "apps/web/test-results/auth-signup-Auth-\u2014-sign-up-950b2-te-not-as-a-generic-failure-chromium",
     "architecture",
+    "architecture/os",
+    "architecture/os/state",
     "docs",
+    "docs/architecture",
+    "docs/architecture/capability-map",
     "docs/archive",
     "docs/audits",
     "docs/audits/connectors",
@@ -707,6 +715,8 @@
     "docs/superpowers",
     "docs/superpowers/plans",
     "docs/superpowers/specs",
+    "docs/system-map",
+    "docs/system-map/data",
     "docs/triage-appendices",
     "infrastructure",
     "packages",
@@ -856,6 +866,7 @@
     "packages/db/prisma/migrations/20260810230000_due_index_on_kind",
     "packages/db/prisma/migrations/20260811030000_ai_usage_billable",
     "packages/db/prisma/migrations/20260811040000_add_booking_waitlist",
+    "packages/db/prisma/migrations/20260823170000_business_id_indexes",
     "packages/db/src",
     "packages/db/src/middleware",
     "packages/db/src/types",
@@ -872,7 +883,9 @@
     "scripts/architecture",
     "scripts/ci",
     "scripts/deploy",
-    "scripts/dev"
+    "scripts/dev",
+    "scripts/os",
+    "scripts/system-map"
   ],
   "files": [
     {
@@ -3689,9 +3702,9 @@
         "express",
         "vitest"
       ],
-      "lines": 157,
+      "lines": 212,
       "path": "apps/server/src/core/auth/auth.middleware.spec.ts",
-      "size_bytes": 7078
+      "size_bytes": 10030
     },
     {
       "exports": [
@@ -3707,9 +3720,9 @@
         "express",
         "ioredis"
       ],
-      "lines": 125,
+      "lines": 168,
       "path": "apps/server/src/core/auth/auth.middleware.ts",
-      "size_bytes": 4600
+      "size_bytes": 6997
     },
     {
       "exports": [
@@ -3797,6 +3810,18 @@
       "lines": 15,
       "path": "apps/server/src/core/auth/optional-auth.guard.ts",
       "size_bytes": 637
+    },
+    {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "node:fs",
+        "node:path",
+        "vitest"
+      ],
+      "lines": 222,
+      "path": "apps/server/src/core/auth/public-surface.spec.ts",
+      "size_bytes": 9745
     },
     {
       "exports": [
@@ -3904,6 +3929,18 @@
       "size_bytes": 4735
     },
     {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "node:fs",
+        "node:path",
+        "vitest"
+      ],
+      "lines": 156,
+      "path": "apps/server/src/core/config/gate-vacuity.spec.ts",
+      "size_bytes": 6909
+    },
+    {
       "exports": [
         "allowedCorsOrigins",
         "apiLink",
@@ -3927,9 +3964,33 @@
         "node:path",
         "vitest"
       ],
+      "lines": 141,
+      "path": "apps/server/src/core/config/test-config-coverage.spec.ts",
+      "size_bytes": 5972
+    },
+    {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "node:fs",
+        "node:path",
+        "vitest"
+      ],
       "lines": 114,
       "path": "apps/server/src/core/config/test-coverage-gating.spec.ts",
       "size_bytes": 5251
+    },
+    {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "node:fs",
+        "node:path",
+        "vitest"
+      ],
+      "lines": 190,
+      "path": "apps/server/src/core/config/unreachable-provider.spec.ts",
+      "size_bytes": 8375
     },
     {
       "exports": [
@@ -4252,9 +4313,9 @@
         "@nestjs/common",
         "crypto"
       ],
-      "lines": 425,
+      "lines": 429,
       "path": "apps/server/src/core/connectors/google-suite.service.ts",
-      "size_bytes": 16546
+      "size_bytes": 16844
     },
     {
       "exports": [],
@@ -4729,6 +4790,19 @@
       "size_bytes": 2609
     },
     {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "./token-crypto",
+        "node:fs",
+        "node:path",
+        "vitest"
+      ],
+      "lines": 172,
+      "path": "apps/server/src/core/crypto/token-crypto.spec.ts",
+      "size_bytes": 8226
+    },
+    {
       "exports": [
         "decryptToken",
         "encryptToken",
@@ -4968,6 +5042,18 @@
       "size_bytes": 1553
     },
     {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "./public-rate-limit.guard",
+        "@nestjs/common",
+        "vitest"
+      ],
+      "lines": 159,
+      "path": "apps/server/src/core/guards/public-rate-limit.guard.spec.ts",
+      "size_bytes": 6664
+    },
+    {
       "exports": [
         "PUBLIC_RATE_LIMIT_KEY",
         "PublicRateLimit",
@@ -4981,9 +5067,9 @@
         "@nestjs/core",
         "ioredis"
       ],
-      "lines": 61,
+      "lines": 88,
       "path": "apps/server/src/core/guards/public-rate-limit.guard.ts",
-      "size_bytes": 2288
+      "size_bytes": 3624
     },
     {
       "exports": [],
@@ -5308,11 +5394,12 @@
         "../../modules/documents/document-taxonomy",
         "../../modules/identity/identity.service",
         "../prisma/prisma.service",
-        "@nestjs/common"
+        "@nestjs/common",
+        "crypto"
       ],
-      "lines": 584,
+      "lines": 592,
       "path": "apps/server/src/core/seed/seed.service.ts",
-      "size_bytes": 26757
+      "size_bytes": 27300
     },
     {
       "exports": [
@@ -6124,9 +6211,9 @@
         "@nestjs/common",
         "openai"
       ],
-      "lines": 1301,
+      "lines": 1322,
       "path": "apps/server/src/modules/ai/ai-usage.service.ts",
-      "size_bytes": 46019
+      "size_bytes": 47127
     },
     {
       "exports": [
@@ -6246,6 +6333,7 @@
         "./business-graph.service",
         "./business-matching.service",
         "./calendar-intelligence.service",
+        "./capability-map/capability-map.service",
         "./capacity-insight.service",
         "./chaser.service",
         "./code-executor.controller",
@@ -6293,9 +6381,9 @@
         "./workspace-recommendations.service",
         "@nestjs/common"
       ],
-      "lines": 221,
+      "lines": 224,
       "path": "apps/server/src/modules/ai/ai.module.ts",
-      "size_bytes": 10549
+      "size_bytes": 10690
     },
     {
       "exports": [],
@@ -6438,6 +6526,64 @@
       "lines": 418,
       "path": "apps/server/src/modules/ai/calendar-intelligence.service.ts",
       "size_bytes": 14541
+    },
+    {
+      "exports": [
+        "CAPABILITY_MAP_SEED"
+      ],
+      "extension": ".ts",
+      "imports": [
+        "./capability-map.types"
+      ],
+      "lines": 4765,
+      "path": "apps/server/src/modules/ai/capability-map/capability-map.seed.ts",
+      "size_bytes": 169943
+    },
+    {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "./capability-map.service",
+        "vitest"
+      ],
+      "lines": 74,
+      "path": "apps/server/src/modules/ai/capability-map/capability-map.service.spec.ts",
+      "size_bytes": 3101
+    },
+    {
+      "exports": [
+        "CapabilityModelService"
+      ],
+      "extension": ".ts",
+      "imports": [
+        "./capability-map.seed",
+        "./capability-map.types",
+        "@nestjs/common"
+      ],
+      "lines": 162,
+      "path": "apps/server/src/modules/ai/capability-map/capability-map.service.ts",
+      "size_bytes": 6633
+    },
+    {
+      "exports": [
+        "CapabilityCortexAction",
+        "CapabilityDomain",
+        "CapabilityMode",
+        "CapabilityModel",
+        "CapabilityModelSummary",
+        "CapabilityTarget",
+        "CapabilityTool",
+        "CoverageMatch",
+        "CoverageResult",
+        "RiskTier",
+        "TargetStatus",
+        "ToolFamily"
+      ],
+      "extension": ".ts",
+      "imports": [],
+      "lines": 123,
+      "path": "apps/server/src/modules/ai/capability-map/capability-map.types.ts",
+      "size_bytes": 4210
     },
     {
       "exports": [
@@ -6961,7 +7107,7 @@
       ],
       "lines": 6640,
       "path": "apps/server/src/modules/ai/flow-orchestrator.service.ts",
-      "size_bytes": 289818
+      "size_bytes": 289862
     },
     {
       "exports": [],
@@ -6975,6 +7121,17 @@
       "lines": 158,
       "path": "apps/server/src/modules/ai/flow-tool-honesty.spec.ts",
       "size_bytes": 6587
+    },
+    {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "./flow-tool-registry",
+        "vitest"
+      ],
+      "lines": 64,
+      "path": "apps/server/src/modules/ai/flow-tool-registry.spec.ts",
+      "size_bytes": 2754
     },
     {
       "exports": [
@@ -7077,6 +7234,18 @@
       "lines": 336,
       "path": "apps/server/src/modules/ai/graph-actions.controller.ts",
       "size_bytes": 13452
+    },
+    {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "node:fs",
+        "node:path",
+        "vitest"
+      ],
+      "lines": 113,
+      "path": "apps/server/src/modules/ai/handler-coverage-ratchet.spec.ts",
+      "size_bytes": 5035
     },
     {
       "exports": [
@@ -7362,6 +7531,19 @@
       "extension": ".ts",
       "imports": [
         "./llm-cost.service",
+        "node:fs",
+        "node:path",
+        "vitest"
+      ],
+      "lines": 98,
+      "path": "apps/server/src/modules/ai/llm-cost-coverage.spec.ts",
+      "size_bytes": 4207
+    },
+    {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "./llm-cost.service",
         "vitest"
       ],
       "lines": 149,
@@ -7371,7 +7553,8 @@
     {
       "exports": [
         "LLMCostService",
-        "RecordCostInput"
+        "RecordCostInput",
+        "TOKEN_COST_PER_1K"
       ],
       "extension": ".ts",
       "imports": [
@@ -7379,9 +7562,9 @@
         "@nestjs/common",
         "@prisma/client"
       ],
-      "lines": 100,
+      "lines": 165,
       "path": "apps/server/src/modules/ai/llm-cost.service.ts",
-      "size_bytes": 3638
+      "size_bytes": 6719
     },
     {
       "exports": [
@@ -7440,9 +7623,9 @@
         "crypto",
         "openai"
       ],
-      "lines": 3012,
+      "lines": 3020,
       "path": "apps/server/src/modules/ai/model-gateway.service.ts",
-      "size_bytes": 106756
+      "size_bytes": 107390
     },
     {
       "exports": [],
@@ -7710,9 +7893,9 @@
         "node:path",
         "vitest"
       ],
-      "lines": 85,
+      "lines": 144,
       "path": "apps/server/src/modules/ai/prompt-cacheability.spec.ts",
-      "size_bytes": 3586
+      "size_bytes": 6847
     },
     {
       "exports": [],
@@ -8928,6 +9111,7 @@
         "../subscriptions/plan-limit.guard",
         "../subscriptions/subscriptions.service",
         "./booking-optimizer.service",
+        "./booking-waitlist.service",
         "./bookings.controller",
         "./bookings.service",
         "./calendar.service",
@@ -8936,9 +9120,9 @@
         "supertest",
         "vitest"
       ],
-      "lines": 266,
+      "lines": 278,
       "path": "apps/server/src/modules/bookings/bookings.controller.spec.ts",
-      "size_bytes": 10076
+      "size_bytes": 10754
     },
     {
       "exports": [
@@ -8972,7 +9156,7 @@
       ],
       "lines": 760,
       "path": "apps/server/src/modules/bookings/bookings.controller.ts",
-      "size_bytes": 27897
+      "size_bytes": 28657
     },
     {
       "exports": [
@@ -9001,7 +9185,7 @@
       ],
       "lines": 35,
       "path": "apps/server/src/modules/bookings/bookings.module.ts",
-      "size_bytes": 1690
+      "size_bytes": 1725
     },
     {
       "exports": [
@@ -11858,9 +12042,9 @@
         "supertest",
         "vitest"
       ],
-      "lines": 571,
+      "lines": 587,
       "path": "apps/server/src/modules/calendar/calendar.controller.spec.ts",
-      "size_bytes": 19475
+      "size_bytes": 20187
     },
     {
       "exports": [
@@ -12827,10 +13011,12 @@
         "../../core/utils/visitor-cookie",
         "../subscriptions/plan-limit.guard",
         "../subscriptions/subscriptions.service",
+        "../time-tracking/time-entry.service",
         "./commerce-vision.service",
         "./commerce.service",
         "./dto/bulk-products.dto",
         "./dto/create-product.dto",
+        "./dto/invoice-from-time.dto",
         "./dto/update-invoice-status.dto",
         "./dto/update-quote-status.dto",
         "./gmail.service",
@@ -12844,9 +13030,9 @@
         "@nestjs/platform-express",
         "express"
       ],
-      "lines": 1429,
+      "lines": 1460,
       "path": "apps/server/src/modules/commerce/commerce.controller.ts",
-      "size_bytes": 53352
+      "size_bytes": 54597
     },
     {
       "exports": [
@@ -12864,6 +13050,7 @@
         "../subscriptions/plan-limit.guard",
         "../subscriptions/subscriptions.module",
         "../task-assignments/task-assignment.module",
+        "../time-tracking/time-tracking.module",
         "./accounting.controller",
         "./commerce-ai.controller",
         "./commerce-ai.service",
@@ -12917,9 +13104,9 @@
         "./weekly-revenue-review.scheduler",
         "@nestjs/common"
       ],
-      "lines": 148,
+      "lines": 154,
       "path": "apps/server/src/modules/commerce/commerce.module.ts",
-      "size_bytes": 7145
+      "size_bytes": 7378
     },
     {
       "exports": [
@@ -13096,6 +13283,18 @@
       "lines": 46,
       "path": "apps/server/src/modules/commerce/dto/create-product.dto.ts",
       "size_bytes": 866
+    },
+    {
+      "exports": [
+        "InvoiceFromTimeDto"
+      ],
+      "extension": ".ts",
+      "imports": [
+        "class-validator"
+      ],
+      "lines": 45,
+      "path": "apps/server/src/modules/commerce/dto/invoice-from-time.dto.ts",
+      "size_bytes": 1184
     },
     {
       "exports": [
@@ -14718,9 +14917,9 @@
         "@nestjs/common",
         "crypto"
       ],
-      "lines": 195,
+      "lines": 199,
       "path": "apps/server/src/modules/connect/microsoft-oauth.service.ts",
-      "size_bytes": 7224
+      "size_bytes": 7522
     },
     {
       "exports": [
@@ -15160,6 +15359,34 @@
       "exports": [],
       "extension": ".ts",
       "imports": [
+        "./contract-renewal.sweep",
+        "@keyflow/shared",
+        "vitest"
+      ],
+      "lines": 136,
+      "path": "apps/server/src/modules/contracts/contract-renewal.sweep.spec.ts",
+      "size_bytes": 5556
+    },
+    {
+      "exports": [
+        "ContractRenewalSweep"
+      ],
+      "extension": ".ts",
+      "imports": [
+        "../../core/prisma/prisma.service",
+        "@keyflow/shared",
+        "@nestjs/common",
+        "@nestjs/event-emitter",
+        "@nestjs/schedule"
+      ],
+      "lines": 157,
+      "path": "apps/server/src/modules/contracts/contract-renewal.sweep.ts",
+      "size_bytes": 6630
+    },
+    {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
         "../../core/auth/auth.guard",
         "../../core/auth/business.guard",
         "../../core/auth/module-scope.guard",
@@ -15199,13 +15426,14 @@
       "imports": [
         "../ai/ai.module",
         "./contract-clause.service",
+        "./contract-renewal.sweep",
         "./contracts.controller",
         "./contracts.service",
         "@nestjs/common"
       ],
-      "lines": 13,
+      "lines": 14,
       "path": "apps/server/src/modules/contracts/contracts.module.ts",
-      "size_bytes": 530
+      "size_bytes": 604
     },
     {
       "exports": [],
@@ -15235,13 +15463,14 @@
         "./dto/create-contract.dto",
         "./dto/extract-contract-terms.dto",
         "./dto/update-contract.dto",
+        "@keyflow/shared",
         "@nestjs/common",
         "@nestjs/event-emitter",
         "@prisma/client"
       ],
-      "lines": 573,
+      "lines": 614,
       "path": "apps/server/src/modules/contracts/contracts.service.ts",
-      "size_bytes": 21734
+      "size_bytes": 23571
     },
     {
       "exports": [
@@ -15572,6 +15801,17 @@
       "lines": 82,
       "path": "apps/server/src/modules/crm/contact-scoring.engine.ts",
       "size_bytes": 3152
+    },
+    {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "@keyflow/shared",
+        "vitest"
+      ],
+      "lines": 130,
+      "path": "apps/server/src/modules/crm/contact-taxonomy.spec.ts",
+      "size_bytes": 6002
     },
     {
       "exports": [
@@ -16879,6 +17119,17 @@
       "lines": 44,
       "path": "apps/server/src/modules/crm/prompts/nl-search.prompt.ts",
       "size_bytes": 1634
+    },
+    {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "@keyflow/shared",
+        "vitest"
+      ],
+      "lines": 128,
+      "path": "apps/server/src/modules/crm/relationship-health.spec.ts",
+      "size_bytes": 6039
     },
     {
       "exports": [],
@@ -19337,20 +19588,6 @@
     },
     {
       "exports": [
-        "decryptToken",
-        "encryptToken",
-        "isTokenEncrypted"
-      ],
-      "extension": ".ts",
-      "imports": [
-        "crypto"
-      ],
-      "lines": 68,
-      "path": "apps/server/src/modules/google-drive/token-crypto.util.ts",
-      "size_bytes": 2407
-    },
-    {
-      "exports": [
         "CreateRiskDto"
       ],
       "extension": ".ts",
@@ -21196,9 +21433,9 @@
         "../eval-harness.service",
         "vitest"
       ],
-      "lines": 68,
+      "lines": 87,
       "path": "apps/server/src/modules/key-cortex/__tests__/eval-harness.service.spec.ts",
-      "size_bytes": 1829
+      "size_bytes": 2707
     },
     {
       "exports": [],
@@ -21464,9 +21701,9 @@
         "path",
         "vitest"
       ],
-      "lines": 103,
+      "lines": 116,
       "path": "apps/server/src/modules/key-cortex/__tests__/stub-detection.guard.spec.ts",
-      "size_bytes": 3354
+      "size_bytes": 3923
     },
     {
       "exports": [],
@@ -22152,9 +22389,9 @@
         "./unified-memory-retrieval.service",
         "@nestjs/common"
       ],
-      "lines": 252,
+      "lines": 256,
       "path": "apps/server/src/modules/key-cortex/eval-harness.service.ts",
-      "size_bytes": 8506
+      "size_bytes": 9016
     },
     {
       "exports": [
@@ -24475,9 +24712,9 @@
         "./key-idempotency.service",
         "@nestjs/common"
       ],
-      "lines": 851,
+      "lines": 858,
       "path": "apps/server/src/modules/key-cortex/key-cortex-tool-registry.service.ts",
-      "size_bytes": 31492
+      "size_bytes": 32786
     },
     {
       "exports": [],
@@ -28090,9 +28327,9 @@
         "./security-audit.service",
         "vitest"
       ],
-      "lines": 91,
+      "lines": 219,
       "path": "apps/server/src/modules/security-audit/security-audit.service.spec.ts",
-      "size_bytes": 3255
+      "size_bytes": 8289
     },
     {
       "exports": [
@@ -28104,9 +28341,9 @@
         "../../core/prisma/prisma.service",
         "@nestjs/common"
       ],
-      "lines": 163,
+      "lines": 187,
       "path": "apps/server/src/modules/security-audit/security-audit.service.ts",
-      "size_bytes": 6627
+      "size_bytes": 8141
     },
     {
       "exports": [
@@ -28448,9 +28685,9 @@
         "./storefront-intelligence.service",
         "vitest"
       ],
-      "lines": 216,
+      "lines": 225,
       "path": "apps/server/src/modules/site/presence/storefront-intelligence.service.spec.ts",
-      "size_bytes": 8848
+      "size_bytes": 9382
     },
     {
       "exports": [
@@ -29200,6 +29437,19 @@
       "size_bytes": 25675
     },
     {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "./plans",
+        "node:fs",
+        "node:path",
+        "vitest"
+      ],
+      "lines": 251,
+      "path": "apps/server/src/modules/subscriptions/plan-limit-enforcement.spec.ts",
+      "size_bytes": 10764
+    },
+    {
       "exports": [
         "PLAN_LIMIT_KEY",
         "PlanLimitGuard",
@@ -29244,9 +29494,9 @@
       ],
       "extension": ".ts",
       "imports": [],
-      "lines": 467,
+      "lines": 476,
       "path": "apps/server/src/modules/subscriptions/plans.ts",
-      "size_bytes": 20901
+      "size_bytes": 21386
     },
     {
       "exports": [
@@ -29948,6 +30198,17 @@
       "extension": ".ts",
       "imports": [
         "./time-entry.service",
+        "vitest"
+      ],
+      "lines": 112,
+      "path": "apps/server/src/modules/time-tracking/invoice-unbilled-time.spec.ts",
+      "size_bytes": 4554
+    },
+    {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "./time-entry.service",
         "@nestjs/common",
         "vitest"
       ],
@@ -29986,9 +30247,9 @@
         "../../core/prisma/prisma.service",
         "@nestjs/common"
       ],
-      "lines": 324,
+      "lines": 466,
       "path": "apps/server/src/modules/time-tracking/time-entry.service.ts",
-      "size_bytes": 12119
+      "size_bytes": 18044
     },
     {
       "exports": [
@@ -30417,6 +30678,18 @@
       "size_bytes": 251
     },
     {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "node:fs",
+        "node:path",
+        "vitest"
+      ],
+      "lines": 211,
+      "path": "apps/server/src/trpc.module.spec.ts",
+      "size_bytes": 8937
+    },
+    {
       "exports": [
         "TrpcModule"
       ],
@@ -30471,9 +30744,9 @@
         "node:path",
         "vitest"
       ],
-      "lines": 283,
+      "lines": 304,
       "path": "apps/server/test/ai-credit-billing.integration.test.ts",
-      "size_bytes": 12495
+      "size_bytes": 13700
     },
     {
       "exports": [],
@@ -30563,9 +30836,9 @@
         "node:path",
         "vitest"
       ],
-      "lines": 362,
+      "lines": 372,
       "path": "apps/server/test/booking-waitlist.integration.test.ts",
-      "size_bytes": 11297
+      "size_bytes": 11523
     },
     {
       "exports": [],
@@ -30676,15 +30949,16 @@
         "../src/modules/public-events/public-events.service",
         "../src/modules/subscriptions/plan-limit.guard",
         "../src/modules/subscriptions/subscriptions.service",
+        "../src/modules/time-tracking/time-entry.service",
         "@nestjs/common",
         "@nestjs/event-emitter",
         "@nestjs/testing",
         "supertest",
         "vitest"
       ],
-      "lines": 333,
+      "lines": 338,
       "path": "apps/server/test/commerce-public-quote.e2e.test.ts",
-      "size_bytes": 12871
+      "size_bytes": 13238
     },
     {
       "exports": [],
@@ -30707,9 +30981,9 @@
         "node:path",
         "vitest"
       ],
-      "lines": 141,
+      "lines": 162,
       "path": "apps/server/test/commonjs-compat.test.ts",
-      "size_bytes": 5699
+      "size_bytes": 6635
     },
     {
       "exports": [],
@@ -31306,9 +31580,9 @@
       "imports": [
         "vitest/config"
       ],
-      "lines": 9,
+      "lines": 68,
       "path": "apps/server/vitest.unit.config.ts",
-      "size_bytes": 175
+      "size_bytes": 3334
     },
     {
       "extension": ".json",
@@ -31379,6 +31653,16 @@
       "lines": 123,
       "path": "apps/web/e2e/auth-login.spec.ts",
       "size_bytes": 4889
+    },
+    {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "@playwright/test"
+      ],
+      "lines": 184,
+      "path": "apps/web/e2e/auth-signup.spec.ts",
+      "size_bytes": 8448
     },
     {
       "exports": [],
@@ -32274,7 +32558,7 @@
       ],
       "lines": 418,
       "path": "apps/web/src/app/app/accounting/page.tsx",
-      "size_bytes": 18646
+      "size_bytes": 18650
     },
     {
       "exports": [
@@ -32956,9 +33240,9 @@
         "react",
         "sonner"
       ],
-      "lines": 234,
+      "lines": 245,
       "path": "apps/web/src/app/app/bookings/components/waitlist-panel.tsx",
-      "size_bytes": 10340
+      "size_bytes": 10881
     },
     {
       "exports": [
@@ -33093,7 +33377,7 @@
       ],
       "lines": 880,
       "path": "apps/web/src/app/app/bookings/page.tsx",
-      "size_bytes": 35842
+      "size_bytes": 36722
     },
     {
       "exports": [
@@ -40673,7 +40957,7 @@
       ],
       "lines": 523,
       "path": "apps/web/src/app/app/key-connect/components/contact-sync-settings.tsx",
-      "size_bytes": 19674
+      "size_bytes": 19683
     },
     {
       "exports": [
@@ -51892,7 +52176,7 @@
       ],
       "lines": 303,
       "path": "apps/web/src/components/timeline/business-timeline.tsx",
-      "size_bytes": 11204
+      "size_bytes": 11209
     },
     {
       "exports": [
@@ -53615,9 +53899,19 @@
       "imports": [
         "vitest"
       ],
-      "lines": 105,
+      "lines": 217,
+      "path": "apps/web/src/lib/__tests__/api-get-dedupe.test.ts",
+      "size_bytes": 7600
+    },
+    {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "vitest"
+      ],
+      "lines": 111,
       "path": "apps/web/src/lib/__tests__/api-refresh-retry.test.ts",
-      "size_bytes": 3951
+      "size_bytes": 4354
     },
     {
       "exports": [],
@@ -53653,6 +53947,18 @@
       "lines": 125,
       "path": "apps/web/src/lib/__tests__/inventory-reachability.spec.ts",
       "size_bytes": 5690
+    },
+    {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "node:fs",
+        "node:path",
+        "vitest"
+      ],
+      "lines": 178,
+      "path": "apps/web/src/lib/__tests__/link-targets.spec.ts",
+      "size_bytes": 7303
     },
     {
       "exports": [],
@@ -53745,9 +54051,9 @@
         "./fetch-with-retry",
         "./workspace"
       ],
-      "lines": 317,
+      "lines": 384,
       "path": "apps/web/src/lib/api.ts",
-      "size_bytes": 12745
+      "size_bytes": 15577
     },
     {
       "exports": [
@@ -54352,7 +54658,7 @@
       ],
       "lines": 26,
       "path": "apps/web/src/lib/api/key-agent.ts",
-      "size_bytes": 722
+      "size_bytes": 728
     },
     {
       "exports": [
@@ -55311,6 +55617,7 @@
         "WorkspaceRecommendation",
         "accountantExportUrl",
         "bestChannelExplainSchema",
+        "bookingWaitlistEntrySchema",
         "calendarEventModuleSchema",
         "calendarEventPrioritySchema",
         "calendarEventSchema",
@@ -55330,9 +55637,9 @@
         "./workspace",
         "zod"
       ],
-      "lines": 15000,
+      "lines": 15004,
       "path": "apps/web/src/lib/client.ts",
-      "size_bytes": 547637
+      "size_bytes": 548029
     },
     {
       "exports": [
@@ -56280,9 +56587,63 @@
     },
     {
       "extension": ".json",
-      "lines": 4,
+      "lines": 8,
       "path": "apps/web/test-results/.last-run.json",
-      "size_bytes": 45
+      "size_bytes": 194
+    },
+    {
+      "extension": ".md",
+      "lines": 284,
+      "path": "apps/web/test-results/auth-signup-Auth-\u2014-sign-up-132b8-ide-the-app-not-on-the-form-chromium/error-context.md",
+      "size_bytes": 13436
+    },
+    {
+      "extension": ".zip",
+      "lines": 0,
+      "path": "apps/web/test-results/auth-signup-Auth-\u2014-sign-up-132b8-ide-the-app-not-on-the-form-chromium/trace.zip",
+      "size_bytes": 2865082
+    },
+    {
+      "extension": ".webm",
+      "lines": 3060,
+      "path": "apps/web/test-results/auth-signup-Auth-\u2014-sign-up-132b8-ide-the-app-not-on-the-form-chromium/video.webm",
+      "size_bytes": 667921
+    },
+    {
+      "extension": ".md",
+      "lines": 264,
+      "path": "apps/web/test-results/auth-signup-Auth-\u2014-sign-up-62d98-the-user-on-a-raw-API-error-chromium/error-context.md",
+      "size_bytes": 12132
+    },
+    {
+      "extension": ".zip",
+      "lines": 0,
+      "path": "apps/web/test-results/auth-signup-Auth-\u2014-sign-up-62d98-the-user-on-a-raw-API-error-chromium/trace.zip",
+      "size_bytes": 3200316
+    },
+    {
+      "extension": ".webm",
+      "lines": 1407,
+      "path": "apps/web/test-results/auth-signup-Auth-\u2014-sign-up-62d98-the-user-on-a-raw-API-error-chromium/video.webm",
+      "size_bytes": 335577
+    },
+    {
+      "extension": ".md",
+      "lines": 249,
+      "path": "apps/web/test-results/auth-signup-Auth-\u2014-sign-up-950b2-te-not-as-a-generic-failure-chromium/error-context.md",
+      "size_bytes": 11162
+    },
+    {
+      "extension": ".zip",
+      "lines": 0,
+      "path": "apps/web/test-results/auth-signup-Auth-\u2014-sign-up-950b2-te-not-as-a-generic-failure-chromium/trace.zip",
+      "size_bytes": 2392390
+    },
+    {
+      "extension": ".webm",
+      "lines": 1832,
+      "path": "apps/web/test-results/auth-signup-Auth-\u2014-sign-up-950b2-te-not-as-a-generic-failure-chromium/video.webm",
+      "size_bytes": 453613
     },
     {
       "extension": ".json",
@@ -56294,7 +56655,7 @@
       "extension": ".tsbuildinfo",
       "lines": 1,
       "path": "apps/web/tsconfig.tsbuildinfo",
-      "size_bytes": 945612
+      "size_bytes": 945920
     },
     {
       "exports": [],
@@ -56326,57 +56687,63 @@
     },
     {
       "extension": ".md",
-      "lines": 79,
-      "path": "architecture/architecture-risks.md",
-      "size_bytes": 27898
-    },
-    {
-      "extension": ".json",
-      "lines": 1299,
-      "path": "architecture/architecture.json",
-      "size_bytes": 42372
-    },
-    {
-      "extension": ".yaml",
-      "lines": 1400,
-      "path": "architecture/capability-registry.yaml",
-      "size_bytes": 32275
+      "lines": 352,
+      "path": "architecture/VERIFIED_STATE_2026-08-11.md",
+      "size_bytes": 18462
     },
     {
       "extension": ".md",
-      "lines": 124,
+      "lines": 118,
+      "path": "architecture/architecture-risks.md",
+      "size_bytes": 29888
+    },
+    {
+      "extension": ".json",
+      "lines": 1399,
+      "path": "architecture/architecture.json",
+      "size_bytes": 45089
+    },
+    {
+      "extension": ".yaml",
+      "lines": 2034,
+      "path": "architecture/capability-registry.yaml",
+      "size_bytes": 44686
+    },
+    {
+      "extension": ".md",
+      "lines": 138,
       "path": "architecture/data-model.md",
-      "size_bytes": 6058
+      "size_bytes": 6741
     },
     {
       "extension": ".yaml",
       "lines": 2425,
       "path": "architecture/data-ownership.yaml",
-      "size_bytes": 54356
+      "size_bytes": 52023
     },
     {
       "extension": ".json",
       "lines": 0,
       "path": "architecture/dependencies.json",
-      "size_bytes": 4132709
+      "size_bytes": 4181406
     },
     {
       "extension": ".md",
       "lines": 93,
       "path": "architecture/dependency-map.md",
-      "size_bytes": 5929
+      "size_bytes": 5858
     },
     {
       "extension": ".yaml",
-      "lines": 1889,
+      "lines": 1917,
       "path": "architecture/event-registry.yaml",
-      "size_bytes": 60027
+      "size_bytes": 59008
     },
     {
       "extension": ".md",
-      "lines": 457,
+      "lines": 494,
       "path": "architecture/execution-paths.md",
-      "size_bytes": 16849
+      "size_bytes": 18482
     },
     {
       "extension": ".json",
@@ -56394,31 +56761,43 @@
       "extension": ".md",
       "lines": 324,
       "path": "architecture/module-registry.md",
-      "size_bytes": 15483
+      "size_bytes": 16159
     },
     {
       "extension": ".yaml",
-      "lines": 922,
+      "lines": 930,
       "path": "architecture/module-registry.yaml",
-      "size_bytes": 19796
+      "size_bytes": 19044
+    },
+    {
+      "extension": ".md",
+      "lines": 124,
+      "path": "architecture/os/OS.md",
+      "size_bytes": 6542
+    },
+    {
+      "extension": ".md",
+      "lines": 83,
+      "path": "architecture/os/state/STATE.md",
+      "size_bytes": 4909
     },
     {
       "extension": ".md",
       "lines": 185,
       "path": "architecture/repository-map.md",
-      "size_bytes": 11564
+      "size_bytes": 11401
     },
     {
       "extension": ".yaml",
-      "lines": 456,
+      "lines": 426,
       "path": "architecture/route-registry.yaml",
-      "size_bytes": 11454
+      "size_bytes": 10201
     },
     {
       "extension": ".md",
-      "lines": 122,
+      "lines": 143,
       "path": "architecture/security-tenant-privacy-audit.md",
-      "size_bytes": 17887
+      "size_bytes": 19003
     },
     {
       "extension": ".md",
@@ -56782,6 +57161,44 @@
     },
     {
       "extension": ".md",
+      "lines": 64,
+      "path": "docs/architecture/ADR-0001-flow-is-the-execution-substrate.md",
+      "size_bytes": 7048
+    },
+    {
+      "extension": ".md",
+      "lines": 609,
+      "path": "docs/architecture/capability-map/KEY_CAPABILITY_MAP.md",
+      "size_bytes": 38764
+    },
+    {
+      "extension": ".md",
+      "lines": 74,
+      "path": "docs/architecture/capability-map/README.md",
+      "size_bytes": 3740
+    },
+    {
+      "exports": [],
+      "extension": ".js",
+      "imports": [],
+      "lines": 728,
+      "path": "docs/architecture/capability-map/generate.js",
+      "size_bytes": 62656
+    },
+    {
+      "extension": ".html",
+      "lines": 226,
+      "path": "docs/architecture/capability-map/key-capability-map.html",
+      "size_bytes": 87788
+    },
+    {
+      "extension": ".json",
+      "lines": 4762,
+      "path": "docs/architecture/capability-map/key-capability-map.seed.json",
+      "size_bytes": 169719
+    },
+    {
+      "extension": ".md",
       "lines": 606,
       "path": "docs/archive/AUDIT_REPORT.md",
       "size_bytes": 29911
@@ -56836,6 +57253,12 @@
     },
     {
       "extension": ".md",
+      "lines": 131,
+      "path": "docs/audits/KEY_EFFECTIVENESS_RATING.md",
+      "size_bytes": 13338
+    },
+    {
+      "extension": ".md",
       "lines": 542,
       "path": "docs/audits/KEY_ROLE_REPLACEABILITY_MATRIX.md",
       "size_bytes": 30576
@@ -56875,6 +57298,12 @@
       "lines": 130,
       "path": "docs/audits/ftue-reaudit-2026-07-02.md",
       "size_bytes": 10019
+    },
+    {
+      "extension": ".html",
+      "lines": 238,
+      "path": "docs/audits/key-reality-check.html",
+      "size_bytes": 20834
     },
     {
       "extension": ".md",
@@ -57393,6 +57822,90 @@
       "size_bytes": 35562
     },
     {
+      "extension": ".md",
+      "lines": 669,
+      "path": "docs/system-map/02-server-core.md",
+      "size_bytes": 75784
+    },
+    {
+      "extension": ".md",
+      "lines": 400,
+      "path": "docs/system-map/03-key-cortex.md",
+      "size_bytes": 68654
+    },
+    {
+      "extension": ".md",
+      "lines": 318,
+      "path": "docs/system-map/04-ai.md",
+      "size_bytes": 66756
+    },
+    {
+      "extension": ".md",
+      "lines": 505,
+      "path": "docs/system-map/05-crm-commerce.md",
+      "size_bytes": 90673
+    },
+    {
+      "extension": ".md",
+      "lines": 337,
+      "path": "docs/system-map/06-business-genome.md",
+      "size_bytes": 73495
+    },
+    {
+      "extension": ".md",
+      "lines": 267,
+      "path": "docs/system-map/07-finance.md",
+      "size_bytes": 63105
+    },
+    {
+      "extension": ".xlsx",
+      "lines": 4219,
+      "path": "docs/system-map/KEYFLOWOS-system-map.xlsx",
+      "size_bytes": 1064637
+    },
+    {
+      "extension": ".csv",
+      "lines": 0,
+      "path": "docs/system-map/data/edges.csv",
+      "size_bytes": 3485525
+    },
+    {
+      "extension": ".csv",
+      "lines": 323,
+      "path": "docs/system-map/data/events.csv",
+      "size_bytes": 55703
+    },
+    {
+      "extension": ".csv",
+      "lines": 3387,
+      "path": "docs/system-map/data/files.csv",
+      "size_bytes": 420656
+    },
+    {
+      "extension": ".csv",
+      "lines": 441,
+      "path": "docs/system-map/data/models.csv",
+      "size_bytes": 32769
+    },
+    {
+      "extension": ".csv",
+      "lines": 131,
+      "path": "docs/system-map/data/modules.csv",
+      "size_bytes": 7135
+    },
+    {
+      "extension": ".csv",
+      "lines": 2178,
+      "path": "docs/system-map/data/routes.csv",
+      "size_bytes": 543454
+    },
+    {
+      "extension": ".csv",
+      "lines": 1232,
+      "path": "docs/system-map/data/web-api-calls.csv",
+      "size_bytes": 206240
+    },
+    {
       "extension": ".txt",
       "lines": 31,
       "path": "docs/triage-appendices/develop-only-commits.txt",
@@ -57734,13 +58247,14 @@
       ],
       "extension": ".ts",
       "imports": [
+        "../lib/access",
         "../trpc",
         "@trpc/server",
         "zod"
       ],
-      "lines": 18,
+      "lines": 48,
       "path": "packages/api/src/routers/social.ts",
-      "size_bytes": 540
+      "size_bytes": 1905
     },
     {
       "exports": [
@@ -58685,6 +59199,12 @@
       "size_bytes": 2422
     },
     {
+      "extension": ".sql",
+      "lines": 22,
+      "path": "packages/db/prisma/migrations/20260823170000_business_id_indexes/migration.sql",
+      "size_bytes": 1412
+    },
+    {
       "extension": ".toml",
       "lines": 3,
       "path": "packages/db/prisma/migrations/migration_lock.toml",
@@ -58692,9 +59212,9 @@
     },
     {
       "extension": ".prisma",
-      "lines": 12777,
+      "lines": 12786,
       "path": "packages/db/prisma/schema.prisma",
-      "size_bytes": 512215
+      "size_bytes": 499864
     },
     {
       "exports": [],
@@ -58732,7 +59252,7 @@
       ],
       "lines": 567,
       "path": "packages/db/src/client.ts",
-      "size_bytes": 29017
+      "size_bytes": 29041
     },
     {
       "exports": [],
@@ -58911,9 +59431,9 @@
       ],
       "extension": ".ts",
       "imports": [],
-      "lines": 187,
+      "lines": 197,
       "path": "packages/shared/src/contact-relationship.ts",
-      "size_bytes": 5821
+      "size_bytes": 6454
     },
     {
       "exports": [],
@@ -59707,6 +60227,46 @@
       "size_bytes": 13120
     },
     {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "./lib.mjs",
+        "node:fs",
+        "node:path",
+        "node:url"
+      ],
+      "lines": 47,
+      "path": "scripts/os/count-flow-tools.mjs",
+      "size_bytes": 1860
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "./lib.mjs",
+        "node:fs",
+        "node:path",
+        "node:url"
+      ],
+      "lines": 64,
+      "path": "scripts/os/ledger-sizes.mjs",
+      "size_bytes": 4326
+    },
+    {
+      "exports": [
+        "extractInitializer",
+        "recordKeyCount",
+        "recordNumericValues",
+        "stringLiterals",
+        "stripComments"
+      ],
+      "extension": ".mjs",
+      "imports": [],
+      "lines": 154,
+      "path": "scripts/os/lib.mjs",
+      "size_bytes": 5125
+    },
+    {
       "extension": ".sh",
       "lines": 87,
       "path": "scripts/post-merge.sh",
@@ -59773,6 +60333,74 @@
       "lines": 107,
       "path": "scripts/start-prod.sh",
       "size_bytes": 4047
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "./extract.mjs",
+        "node:fs",
+        "node:module",
+        "node:path"
+      ],
+      "lines": 143,
+      "path": "scripts/system-map/build-xlsx.mjs",
+      "size_bytes": 6428
+    },
+    {
+      "exports": [
+        "REPO",
+        "classNames",
+        "collapseInterpolations",
+        "controllerPrefix",
+        "cronJobs",
+        "csv",
+        "dedupe",
+        "eventMatches",
+        "eventsEmitted",
+        "eventsHandled",
+        "guardsIn",
+        "imports",
+        "injections",
+        "isExternalPath",
+        "isWrite",
+        "joinRoute",
+        "kindOf",
+        "lineCount",
+        "moduleArray",
+        "normRoute",
+        "prismaModels",
+        "read",
+        "resolveImport",
+        "routes",
+        "scopesIn",
+        "serverModuleOf",
+        "stripComments",
+        "tracked",
+        "webCalls",
+        "workspaceOf"
+      ],
+      "extension": ".mjs",
+      "imports": [
+        "node:child_process",
+        "node:fs",
+        "node:path"
+      ],
+      "lines": 410,
+      "path": "scripts/system-map/extract.mjs",
+      "size_bytes": 14469
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "./extract.mjs",
+        "node:fs",
+        "node:path"
+      ],
+      "lines": 376,
+      "path": "scripts/system-map/generate.mjs",
+      "size_bytes": 16976
     },
     {
       "exports": [],
@@ -59913,14 +60541,14 @@
     "extensions": {
       "": 19,
       ".css": 2,
-      ".csv": 16,
+      ".csv": 23,
       ".example": 1,
-      ".html": 6,
+      ".html": 8,
       ".ico": 1,
-      ".js": 9,
-      ".json": 33,
-      ".md": 429,
-      ".mjs": 14,
+      ".js": 10,
+      ".json": 34,
+      ".md": 445,
+      ".mjs": 20,
       ".patch": 1,
       ".pdf": 1,
       ".pid": 3,
@@ -59930,23 +60558,26 @@
       ".py": 43,
       ".pyc": 2,
       ".sh": 25,
-      ".sql": 140,
+      ".sql": 141,
       ".svg": 6,
       ".template": 1,
       ".toml": 2,
-      ".ts": 2043,
+      ".ts": 2066,
       ".tsbuildinfo": 3,
       ".tsv": 1,
       ".tsx": 1235,
       ".txt": 8,
+      ".webm": 3,
+      ".xlsx": 1,
       ".xsd": 39,
       ".yaml": 10,
-      ".yml": 11
+      ".yml": 11,
+      ".zip": 3
     },
     "root": "C:/Users/sachd/Downloads/KEYFLOWOS",
     "scanner": "codebase-architect/inventory.py",
-    "source_files": 3301,
-    "total_files": 4120,
-    "total_lines": 998552
+    "source_files": 3331,
+    "total_files": 4184,
+    "total_lines": 1038649
   }
 }
