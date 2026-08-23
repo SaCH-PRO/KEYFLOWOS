@@ -454,6 +454,18 @@ export class CommerceController {
     });
   }
 
+  // This is the PRIMARY invoice-creation endpoint and it carried no decorators
+  // at all: no authentication, no tenant check, no scope, no plan limit — while
+  // `invoiceProject` directly above and every other write on this controller
+  // carry the full set. Anyone who could reach the API could mint an invoice
+  // against any businessId, and because PlanLimitGuard was absent here, the
+  // `invoices` plan limit enforced elsewhere could be bypassed by calling this
+  // route instead. Decorators match `invoiceProject` deliberately.
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, PlanLimitGuard)
+  @RequireModuleScope('revenue', 'write')
+  @UseInterceptors(TeamAuditInterceptor)
+  @AuditAction('revenue', 'invoice_created', 'invoice')
+  @RequirePlanLimit('invoices')
   @Post('businesses/:businessId/invoices')
   createInvoice(
     @Param('businessId') businessId: string,

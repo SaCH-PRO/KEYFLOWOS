@@ -116,7 +116,11 @@ const ACKNOWLEDGED_PUBLIC: Record<string, number> = {
   'modules/catalog/catalog.controller.ts': 1,
   'modules/chatwoot/chatwoot.controller.ts': 1,
   'modules/commerce/commerce-ai.controller.ts': 1,
-  'modules/commerce/commerce.controller.ts': 11,
+  // 11 -> 10: POST businesses/:businessId/invoices now carries the same
+  // guards as every other write on this controller. It was the primary
+  // invoice-creation route with no auth, no tenant check and no plan limit,
+  // which also made it a way around RequirePlanLimit('invoices').
+  'modules/commerce/commerce.controller.ts': 10,
   'modules/commerce/leverage.controller.ts': 9,
   'modules/communications/communications.controller.ts': 3,
   'modules/communications/inbound-communications.controller.ts': 2,
