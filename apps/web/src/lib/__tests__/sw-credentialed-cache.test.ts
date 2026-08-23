@@ -21,6 +21,13 @@ import { resolve } from "node:path";
  * never protection — 62 authenticated call sites (fetchWithAuthRetry and raw
  * fetch) never carried it — and relying on unique URLs is not a mechanism. The
  * test drives the real public/sw.js rather than a copy of its logic.
+ *
+ * IF YOU EDIT THE SYNTHETIC GLOBAL: self.location.origin is load-bearing.
+ * sw.js returns early on `url.origin !== self.location.origin`, so omitting
+ * it makes every request bail at that line and every assertion below pass
+ * without reaching the code it exists to test. That is what happened on the
+ * first version of this file, and it was only visible because two OTHER
+ * cases failed against a written-down prediction.
  */
 
 const SW_SOURCE = readFileSync(

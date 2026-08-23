@@ -37,9 +37,15 @@
 
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, unlinkSync, renameSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 
-const REPO = resolve(new URL('../..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'));
+// fileURLToPath, not `.pathname`: a URL pathname keeps percent-encoding, so a
+// checkout under "C:/My Projects/..." resolved to "My%20Projects". The registry
+// directory was then never found, every lookup returned empty, and the guard
+// allowed everything. Silent AND open — the worst failure mode a guard can
+// have, and invisible on any path without a space in it.
+const REPO = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 const REG_DIR = join(REPO, '.claude', 'coordination', 'sessions');
 
 /** A session that has not been seen for this long is treated as gone. */
@@ -48,6 +54,38 @@ const SESSION_STALE_MS = 45 * 60 * 1000;
 const CLAIM_TTL_MS = 30 * 60 * 1000;
 
 const mode = process.argv[2];
+
+/**
+ * Strip git's global options so `git -C . commit` reads as `git commit`.
+ *
+ * Every rule below matches `git <subcommand>` directly, so a global option in
+ * between made the whole command invisible to the guard. `-C` is the one that
+ * matters in practice: it is exactly what a script uses when it is not running
+ * from the repo root.
+ */
+function normalizeGit(cmd) {
+  return cmd.replace(
+    /\bgit((?:\s+(?:-C\s+\S+|-c\s+\S+|--git-dir(?:=|\s+)\S+|--work-tree(?:=|\s+)\S+|--namespace(?:=|\s+)\S+|--no-pager|--no-replace-objects|--literal-pathspecs|--bare|--exec-path=\S+))+)(\s+[a-z])/g,
+    'git$2',
+  );
+}
+
+/**
+ * True when an explicit pathspec follows `git <sub>` — any non-flag token.
+ *
+ * `git clean -fd apps/web/tmp` is ordinary scoped work and must not be refused.
+ * The previous test only recognised a pathspec introduced by `--`, so the far
+ * more common flags-then-path form was denied. A false positive on legitimate
+ * work is precisely what gets a guard switched off.
+ */
+function hasPathspec(cmd, sub) {
+  const m = new RegExp(`\\bgit\\s+${sub}\\b([^;&|]*)`).exec(cmd);
+  if (!m) return false;
+  return m[1]
+    .split(/\s+/)
+    .filter(Boolean)
+    .some((t) => t !== '--' && !t.startsWith('-'));
+}
 
 /* ------------------------------------------------------------------ */
 /* output helpers                                                      */
@@ -242,8 +280,8 @@ const DESTRUCTIVE = [
     scoped: 'git restore -- <your paths>',
   },
   {
-    // `git clean` with a force flag and no pathspec
-    test: (c) => /\bgit\s+clean\b/.test(c) && /-[a-z]*f/.test(c) && !/--\s+\S/.test(c) && !/\bgit\s+clean\s+[^-]\S*/.test(c),
+    // `git clean` with a force flag and NO pathspec at all.
+    test: (c) => /\bgit\s+clean\b/.test(c) && /-[a-z]*f/.test(c) && !hasPathspec(c, 'clean'),
     name: 'git clean -f (whole tree, deletes untracked files)',
     scoped: 'git clean -f -- <your paths>',
   },
@@ -330,6 +368,11 @@ const PATH_TARGETED = [
   { test: (c) => /\bgit\s+clean\b.*-[a-z]*f/.test(c), verb: 'delete untracked' },
   { test: (c) => /(^|[\s;&|])rm\s/.test(c), verb: 'delete' },
   { test: (c) => /(^|[\s;&|])mv\s/.test(c), verb: 'move/overwrite' },
+  // PowerShell is the primary shell on Windows machines, and its delete/move
+  // vocabulary shares nothing with POSIX beyond the rm/mv aliases above. A
+  // guard that only speaks POSIX is decorative on this platform.
+  { test: (c) => /(^|[\s;&|])(Remove-Item|ri|del|erase|rd|rmdir)\s/i.test(c), verb: 'delete' },
+  { test: (c) => /(^|[\s;&|])(Move-Item|mi|move)\s/i.test(c), verb: 'move/overwrite' },
 ];
 
 /**
@@ -346,9 +389,15 @@ const BROAD_STAGING = [
 ];
 
 function modeBash(input) {
-  const cmd = String(input?.tool_input?.command || '');
-  if (!cmd) allow();
-  if (/KF_SESSION_GUARD=off/.test(cmd)) allow();
+  const raw = String(input?.tool_input?.command || '');
+  if (!raw) allow();
+  // Both the Bash and PowerShell tools carry the command here, and $env:X=... is
+  // the PowerShell spelling of the escape hatch.
+  if (/KF_SESSION_GUARD=off|KF_SESSION_GUARD\s*=\s*['"]?off/i.test(raw)) allow();
+
+  // Normalise git's global options up front so every rule below sees
+  // `git <subcommand>` regardless of a -C / --git-dir in between.
+  const cmd = normalizeGit(raw);
 
   const me = String(input.session_id || 'unknown');
 
