@@ -160,6 +160,45 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
     return recurringInvoice;
   }
 
+  /**
+   * Invoices this schedule has actually produced.
+   *
+   * The recurring panel has offered a "history" view since it was written and
+   * called an endpoint that did not exist, so the drawer opened empty every
+   * time. `getRecurringInvoice` already reads the same relation but caps at 10
+   * and is only used for the detail view; history needs the full run.
+   *
+   * Ownership is checked on the SCHEDULE before the invoices are read. Filtering
+   * the invoices by businessId alone would return an empty list for someone
+   * else's schedule id rather than saying it is not theirs, which reads to the
+   * caller as "this schedule has never run".
+   */
+  async listGenerationHistory(businessId: string, id: string) {
+    const schedule = await this.prisma.client.recurringInvoice.findFirst({
+      where: { id, businessId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!schedule) throw new NotFoundException('Recurring invoice not found');
+
+    const invoices = await this.prisma.client.invoice.findMany({
+      where: { businessId, recurringInvoiceId: id },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+      select: {
+        id: true,
+        invoiceNumber: true,
+        status: true,
+        total: true,
+        currency: true,
+        issueDate: true,
+        dueDate: true,
+        paidAt: true,
+        createdAt: true,
+      },
+    });
+    return invoices;
+  }
+
   listRecurringInvoices(businessId: string) {
     return this.prisma.client.recurringInvoice.findMany({
       where: { businessId, deletedAt: null },

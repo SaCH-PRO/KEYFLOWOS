@@ -263,7 +263,11 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
 
   async function handleToggle(id: string) {
     if (!businessId) return;
-    const res = await toggleRecurringInvoice(businessId, id);
+    // The server exposes pause and resume separately, so the caller has to say
+    // which way this is going. The row we already hold is the source of truth.
+    const current = recurring.find((r) => r.id === id);
+    if (!current) return;
+    const res = await toggleRecurringInvoice(businessId, id, current.status === 'ACTIVE');
     if (res.data) {
       setRecurring((prev) => prev.map((r) => (r.id === id ? res.data! : r)));
       emitEvent("billing:schedule_toggled", "commerce", { scheduleId: id, active: res.data.status === 'ACTIVE' });
@@ -813,7 +817,11 @@ export default function RecurringPanel({ businessId, contacts, products, trigger
             toast.info(`All selected schedules are already ${wantActive ? "active" : "paused"}`);
             return;
           }
-          const results = await Promise.all(eligible.map((id) => toggleRecurringInvoice(businessId!, id)));
+          // `eligible` is exactly the set whose state differs from wantActive,
+          // so each is currently the opposite of what is being asked for.
+          const results = await Promise.all(
+            eligible.map((id) => toggleRecurringInvoice(businessId!, id, !wantActive)),
+          );
           setRecurring((prev) =>
             prev.map((r) => {
               const match = results.find((res) => res.data?.id === r.id);

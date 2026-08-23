@@ -73,6 +73,15 @@ export class RecurringInvoiceController {
     return this.service.updateRecurringInvoice({ ...body, id, businessId });
   }
 
+  // The recurring panel's history drawer has always called this path; it was
+  // never served, so the drawer opened empty rather than erroring visibly.
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
+  @Get('businesses/:businessId/recurring-invoices/:id/history')
+  history(@Param('businessId') businessId: string, @Param('id') id: string) {
+    return this.service.listGenerationHistory(businessId, id);
+  }
+
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('revenue', 'write')
   @UseInterceptors(TeamAuditInterceptor)

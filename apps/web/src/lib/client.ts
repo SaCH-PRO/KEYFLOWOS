@@ -5719,11 +5719,45 @@ export async function updateRecurringInvoice(businessId: string, id: string, dat
 export async function deleteRecurringInvoice(businessId: string, id: string): Promise<ApiResult<void>> {
   return apiDelete<void>(`/commerce/businesses/${encodeURIComponent(businessId)}/recurring-invoices/${id}`);
 }
-export async function toggleRecurringInvoice(businessId: string, id: string): Promise<ApiResult<RecurringInvoice>> {
-  return apiPost<RecurringInvoice>({ path: `/commerce/businesses/${encodeURIComponent(businessId)}/recurring-invoices/${id}/toggle`, body: {} });
+/**
+ * Pause or resume a schedule.
+ *
+ * There is no `/toggle` endpoint and there never was — the server exposes the
+ * two transitions explicitly as `/pause` and `/resume`, so every press of this
+ * button 404'd, including the bulk action. The caller passes the CURRENT state
+ * because only it knows which way the toggle is going; inferring it here would
+ * mean an extra round trip and a race with anyone else editing the schedule.
+ */
+export async function toggleRecurringInvoice(
+  businessId: string,
+  id: string,
+  isActive: boolean,
+): Promise<ApiResult<RecurringInvoice>> {
+  const transition = isActive ? 'pause' : 'resume';
+  return apiPost<RecurringInvoice>({
+    path: `/commerce/businesses/${encodeURIComponent(businessId)}/recurring-invoices/${encodeURIComponent(id)}/${transition}`,
+    body: {},
+  });
 }
+
+/**
+ * Cancel a schedule.
+ *
+ * DELETE is the cancel operation — its handler is literally named `cancel`, and
+ * it sets status CANCELLED and returns the updated row rather than removing it.
+ * The old `POST /cancel` path did not exist.
+ *
+ * NOTE, and it is a pre-existing inconsistency this change does not resolve:
+ * `deleteRecurringInvoice` below posts to the SAME endpoint, because the server
+ * has exactly one DELETE route here. So "delete" in the UI also just cancels,
+ * while the panel optimistically drops the row from the list and says
+ * "deleted". The schedule comes back, CANCELLED, on the next load. Fixing that
+ * needs a decision about whether a hard delete should exist at all.
+ */
 export async function cancelRecurringInvoice(businessId: string, id: string): Promise<ApiResult<RecurringInvoice>> {
-  return apiPost<RecurringInvoice>({ path: `/commerce/businesses/${encodeURIComponent(businessId)}/recurring-invoices/${id}/cancel`, body: {} });
+  return apiDelete<RecurringInvoice>(
+    `/commerce/businesses/${encodeURIComponent(businessId)}/recurring-invoices/${encodeURIComponent(id)}`,
+  );
 }
 export async function fetchRecurringGenerationHistory(businessId: string, id: string): Promise<ApiResult<RecurringGenerationEntry[]>> {
   return apiGetSimple<RecurringGenerationEntry[]>(`/commerce/businesses/${encodeURIComponent(businessId)}/recurring-invoices/${id}/history`);
