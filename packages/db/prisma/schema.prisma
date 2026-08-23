@@ -5361,6 +5361,9 @@ model CourseEnrollment {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@unique([courseId, businessId])
+  // The @@unique above leads with courseId, so it cannot serve
+  // findMany({ where: { businessId } }).
+  @@index([businessId])
   @@map("course_enrollments")
 }
 
@@ -5395,6 +5398,9 @@ model CohortMember {
   joinedAt   DateTime @default(now()) @map("joined_at")
 
   @@unique([cohortId, businessId])
+  // The @@unique above leads with cohortId, so it cannot serve
+  // findMany({ where: { businessId } }).
+  @@index([businessId])
   @@map("cohort_members")
 }
 
@@ -5598,6 +5604,9 @@ model Webhook {
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")
   business   Business @relation(fields: [businessId], references: [id])
+  // Dispatch runs `where { businessId, isActive, events }` for every outbound
+  // event, and this model had no index of any kind.
+  @@index([businessId, isActive])
 
   @@map("webhooks")
 }
