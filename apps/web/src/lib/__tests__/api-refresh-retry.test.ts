@@ -17,12 +17,18 @@ vi.mock("@/lib/workspace", () => ({
   refreshAccessToken: () => refreshAccessToken(),
 }));
 
+// A real Response exposes both json() and text(), and they read the same body.
+// This double used to define json() only, so it silently disagreed with the
+// platform: apiGet reads text() (so concurrent callers can each parse their own
+// copy) and got "res.text is not a function" instead of the response.
 function jsonResponse(status: number, body: unknown): Response {
+  const text = JSON.stringify(body);
   return {
     ok: status >= 200 && status < 300,
     status,
     statusText: status === 401 ? "Unauthorized" : "OK",
-    json: async () => body,
+    json: async () => JSON.parse(text) as unknown,
+    text: async () => text,
   } as unknown as Response;
 }
 

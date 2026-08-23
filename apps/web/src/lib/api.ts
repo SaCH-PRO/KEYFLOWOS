@@ -192,18 +192,85 @@ export async function apiPost<T>({ path, body, init }: FetchOptions): Promise<Ap
   }
 }
 
+/**
+ * A response reduced to plain data, so it can be shared between concurrent
+ * callers. Deliberately the raw *text* rather than the parsed object: two
+ * components sharing one request must not share one object graph, or a
+ * `data.items.push(...)` in either is visible in the other. Each caller
+ * re-parses, which costs one JSON.parse and buys back full isolation.
+ */
+type GetSnapshot = { ok: boolean; status: number; statusText: string; text: string };
+
+/**
+ * In-flight GET requests, keyed by URL *and* auth identity.
+ *
+ * Two components mounting together used to issue two identical network
+ * requests; 42 endpoints are fetched from more than one file, so this was the
+ * common case on every screen rather than an edge case. Entries are removed as
+ * soon as the request settles, which makes this pure request coalescing: a
+ * shared response has not arrived yet when it is joined, so it cannot be
+ * stale. No TTL, no invalidation to get wrong.
+ *
+ * The auth header is part of the key because a token swap (user -> admin, or a
+ * re-login as someone else) must never join a request issued as the previous
+ * identity.
+ */
+const inFlightGets = new Map<string, Promise<GetSnapshot>>();
+
+async function readSnapshot(url: string, signal?: AbortSignal): Promise<GetSnapshot> {
+  const res = await fetchWithRefresh(url, {
+    method: "GET",
+    headers: buildHeaders(),
+    // The `_t=${Date.now()}` cache-buster that used to be appended here is
+    // gone. `cache: "no-store"` already prevents any HTTP cache reuse, and the
+    // service worker (public/sw.js) is network-first for API GETs so it stays
+    // fresh regardless. The unique URL was in fact harmful: it meant the
+    // worker's offline `cache.match(request)` could never hit, so the offline
+    // fallback was dead and kf-api-v3 grew without bound.
+    cache: "no-store",
+    signal,
+  });
+  return {
+    ok: res.ok,
+    status: res.status,
+    statusText: res.statusText,
+    text: await res.text().catch(() => ""),
+  };
+}
+
 export async function apiGet<T>(path: string, opts?: { signal?: AbortSignal }): Promise<ApiResponse<T>> {
+  const url = `${API_BASE}${path}`;
   try {
-    const sep = path.includes("?") ? "&" : "?";
-    const url = `${API_BASE}${path}${sep}_t=${Date.now()}`;
-    const res = await fetchWithRefresh(url, {
-      method: "GET",
-      headers: buildHeaders(),
-      cache: "no-store",
-      signal: opts?.signal,
-    });
-    const data: unknown = await res.json().catch(() => null);
-    if (!res.ok) return handleErrorResponse<T>(data, res.statusText, res.status, path);
+    let snapshot: GetSnapshot;
+
+    if (opts?.signal) {
+      // A caller holding an AbortSignal owns this request's lifetime. Joining
+      // it to a shared entry would let its abort cancel an unrelated caller's
+      // request, so signalled reads opt out of coalescing entirely.
+      snapshot = await readSnapshot(url, opts.signal);
+    } else {
+      const key = `${url} ${getAuthHeaders().Authorization ?? ""}`;
+      let shared = inFlightGets.get(key);
+      if (!shared) {
+        // Remove the entry when it settles, however it settles — a rejected
+        // promise left in the map would be replayed to every later caller.
+        shared = readSnapshot(url).finally(() => {
+          inFlightGets.delete(key);
+        });
+        inFlightGets.set(key, shared);
+      }
+      snapshot = await shared;
+    }
+
+    let data: unknown = null;
+    try {
+      data = JSON.parse(snapshot.text) as unknown;
+    } catch {
+      // Empty or non-JSON body — matches the previous `res.json().catch(() => null)`.
+      data = null;
+    }
+
+    if (!snapshot.ok) return handleErrorResponse<T>(data, snapshot.statusText, snapshot.status, path);
     return { data: data as T, error: null };
   } catch (error: unknown) {
     warnUnreachable(error);
