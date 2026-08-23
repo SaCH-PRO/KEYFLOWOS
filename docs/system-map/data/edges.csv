@@ -17380,6 +17380,9 @@ apps/server/src/modules/webhooks/webhooks.module.ts,@nestjs/common,imports-exter
 apps/server/src/modules/webhooks/webhooks.module.ts,apps/server/src/modules/webhooks/webhooks.controller.ts,imports,./webhooks.controller,high
 apps/server/src/modules/webhooks/webhooks.module.ts,apps/server/src/modules/webhooks/webhook-dispatcher.service.ts,imports,./webhook-dispatcher.service,high
 apps/server/src/modules/webhooks/webhooks.module.ts,apps/server/src/modules/commerce/commerce.module.ts,imports,../commerce/commerce.module,high
+apps/server/src/modules/whatsapp/whatsapp-conversations.spec.ts,vitest,imports-external,vitest,high
+apps/server/src/modules/whatsapp/whatsapp-conversations.spec.ts,apps/server/src/modules/whatsapp/whatsapp.service.ts,imports,./whatsapp.service,high
+apps/server/src/modules/whatsapp/whatsapp-conversations.spec.ts,model:whatsAppMessage,writes-model,whatsAppMessage.update(),high
 apps/server/src/modules/whatsapp/whatsapp-notifications.listener.ts,@nestjs/common,imports-external,@nestjs/common,high
 apps/server/src/modules/whatsapp/whatsapp-notifications.listener.ts,@nestjs/event-emitter,imports-external,@nestjs/event-emitter,high
 apps/server/src/modules/whatsapp/whatsapp-notifications.listener.ts,@nestjs/common,imports-external,@nestjs/common,high
@@ -26866,6 +26869,14 @@ scripts/split-client.mjs,fs,imports-external,fs,high
 scripts/split-client.mjs,path,imports-external,path,high
 scripts/split-client.mjs,zod,imports-external,zod,high
 scripts/split-client.mjs,zod,imports-external,zod,high
+scripts/system-map/build-xlsx.mjs,node:fs,imports-external,node:fs,high
+scripts/system-map/build-xlsx.mjs,node:path,imports-external,node:path,high
+scripts/system-map/build-xlsx.mjs,node:module,imports-external,node:module,high
+scripts/system-map/extract.mjs,node:child_process,imports-external,node:child_process,high
+scripts/system-map/extract.mjs,node:fs,imports-external,node:fs,high
+scripts/system-map/extract.mjs,node:path,imports-external,node:path,high
+scripts/system-map/generate.mjs,node:fs,imports-external,node:fs,high
+scripts/system-map/generate.mjs,node:path,imports-external,node:path,high
 scripts/test-ai-approval.ts,@prisma/client,imports-external,@prisma/client,high
 scripts/test-ai-approval.ts,model:business,reads-model,business.findUnique(),high
 scripts/test-ai-approval.ts,model:aiApprovalItem,writes-model,aiApprovalItem.create(),high

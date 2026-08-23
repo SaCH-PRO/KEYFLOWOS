@@ -1652,11 +1652,12 @@ apps/server/src/modules/webhooks/dto/stripe-webhook.dto.ts,apps/server,webhooks,
 apps/server/src/modules/webhooks/webhook-dispatcher.service.ts,apps/server,webhooks,service,355,WebhookDispatcherService,5,1,4,0,,contact.created contact.updated contact.merged booking.created booking.confirmed booking.completed invoice.paid invoice.sent invoice.overdue post.published store_order.created store_order.paid store_order.shipped store_order.delivered store_order.cancelled,,webhook,FALSE
 apps/server/src/modules/webhooks/webhooks.controller.ts,apps/server,webhooks,controller,197,WebhooksController,10,4,2,8,,,,invoice webhook,FALSE
 apps/server/src/modules/webhooks/webhooks.module.ts,apps/server,webhooks,nest-module,13,WebhooksModule,4,0,1,0,,,,,FALSE
+apps/server/src/modules/whatsapp/whatsapp-conversations.spec.ts,apps/server,whatsapp,spec,280,,2,0,0,0,,,,whatsAppMessage,FALSE
 apps/server/src/modules/whatsapp/whatsapp-notifications.listener.ts,apps/server,whatsapp,listener,94,WhatsAppNotificationsListener,5,1,1,0,,booking.created invoice.created invoice.paid,,,FALSE
 apps/server/src/modules/whatsapp/whatsapp.controller.ts,apps/server,whatsapp,controller,435,WhatsAppController,8,3,3,13,,,,business,FALSE
 apps/server/src/modules/whatsapp/whatsapp.module.ts,apps/server,whatsapp,nest-module,17,WhatsAppModule,8,0,3,0,,,,,FALSE
 apps/server/src/modules/whatsapp/whatsapp.service.spec.ts,apps/server,whatsapp,spec,185,,8,1,0,0,,,,keyInboxMessage business,FALSE
-apps/server/src/modules/whatsapp/whatsapp.service.ts,apps/server,whatsapp,service,797,WhatsAppService,10,5,16,0,entity.resolved message.intake.received message.received,,CronExpression.EVERY_MINUTE,business keyInboxMessage whatsAppContact whatsAppMessage,FALSE
+apps/server/src/modules/whatsapp/whatsapp.service.ts,apps/server,whatsapp,service,797,WhatsAppService,10,5,17,0,entity.resolved message.intake.received message.received,,CronExpression.EVERY_MINUTE,business keyInboxMessage whatsAppContact whatsAppMessage,FALSE
 apps/server/src/schema-migration-coverage.spec.ts,apps/server,(server root),spec,127,,3,0,0,0,,,,,FALSE
 apps/server/src/test-meta.ts,apps/server,(server root),ts,13,,1,1,0,0,,,,,TRUE
 apps/server/src/trpc.module.spec.ts,apps/server,(server root),spec,212,,3,0,0,0,,,,,FALSE
@@ -3391,6 +3392,9 @@ scripts/os/probe-routes.mjs,(root),,mjs,123,,4,0,0,0,,,,,TRUE
 scripts/revert-problematic-renames.mjs,(root),,mjs,36,,1,0,0,0,,,,,TRUE
 scripts/set-business-whatsapp-mock.ts,(root),,ts,19,,1,0,0,0,,,,business,TRUE
 scripts/split-client.mjs,(root),,mjs,171,,10,0,0,0,,,,,TRUE
+scripts/system-map/build-xlsx.mjs,(root),,mjs,170,,4,0,0,0,,,,,TRUE
+scripts/system-map/extract.mjs,(root),,mjs,683,,3,0,0,0,,,,,TRUE
+scripts/system-map/generate.mjs,(root),,mjs,390,,3,0,0,0,,,,,TRUE
 scripts/test-ai-approval.ts,(root),,ts,41,,1,0,0,0,,,,business aiApprovalItem,TRUE
 scripts/verify-jose.ts,(root),,ts,16,,1,0,0,0,,,,,TRUE
 scripts/verify-patch2-runtime.ts,(root),,ts,167,,2,0,0,0,,,,,TRUE
