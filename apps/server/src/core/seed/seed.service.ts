@@ -82,6 +82,13 @@ export class SeedService implements OnApplicationBootstrap {
       // Check if dev user exists in Supabase ( orphaned — no local row )
       const existingAuthUser = await this.supabaseAdmin.findUserByEmail(DEV_EMAIL);
       let supabaseUserId: string;
+      // Tracks whether DEV_PASSWORD was actually applied to the account. It is
+      // not when an orphaned Supabase user is reused: there is no admin
+      // password-update call on this path, so the account keeps whatever it
+      // already had. The banner below printed DEV_PASSWORD unconditionally,
+      // which was harmless while that was a fixed constant and became a lie the
+      // moment it started being generated per seed.
+      let passwordApplied = false;
       if (existingAuthUser) {
         supabaseUserId = existingAuthUser.id;
         this.logger.log(`Dev user exists in Supabase auth; reusing id=${supabaseUserId}`);
@@ -94,6 +101,7 @@ export class SeedService implements OnApplicationBootstrap {
           userMetadata: { full_name: 'Dev User', first_name: 'Dev', last_name: 'User' },
         });
         supabaseUserId = newUser.id;
+        passwordApplied = true;
         this.logger.log(`Created dev user in Supabase auth (id=${supabaseUserId})`);
       }
       // Bootstrap Prisma User + Business + Membership
@@ -108,7 +116,11 @@ export class SeedService implements OnApplicationBootstrap {
         `============================================================\n` +
         `  DEV USER READY  \n` +
         `  Email:    ${DEV_EMAIL}\n` +
-        `  Password: ${DEV_PASSWORD}\n` +
+        (passwordApplied
+          ? `  Password: ${DEV_PASSWORD}\n`
+          : `  Password: UNCHANGED — this Supabase account already existed and no\n` +
+            `            password was applied. Delete the auth user (or set\n` +
+            `            KEYFLOW_DEV_PASSWORD and recreate it) to choose one.\n`) +
         `  User ID:  ${user.id}\n` +
         `  Business: ${business.name} (${business.id})\n` +
         `============================================================`,

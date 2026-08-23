@@ -1487,13 +1487,18 @@ export class ModelGatewayService {
     request: GatewayRequest,
     byokKey?: string,
   ): AsyncGenerator<StreamChunk> {
-    // No placeholder fallback: a missing key used to become the literal string
-    // 'native-key', which the provider rejected as an auth error somewhere
-    // downstream. Failing here names the actual problem.
-    const apiKey = byokKey || process.env.NATIVE_AI_API_KEY;
-    if (!apiKey) throw new Error('Native AI API key not configured (set NATIVE_AI_API_KEY or supply a BYOK key)');
+    // Validate the URL FIRST. Reaching this point without one is the real
+    // misconfiguration, and it is what the throw below names.
     const baseURL = process.env.KEYFLOW_NATIVE_AI_URL || process.env.NATIVE_AI_BASE_URL;
     if (!baseURL) throw new Error('Native AI base URL not configured');
+
+    // A self-hosted native endpoint may legitimately require no key, and
+    // isProviderAvailable() treats a bare KEYFLOW_NATIVE_AI_URL as configured.
+    // Throwing on a missing key here contradicted that and broke keyless
+    // self-hosted setups outright — the placeholder was load-bearing for them,
+    // not merely sloppy. Since a URL is now proven present, an absent key means
+    // "this endpoint does not want one" rather than "nobody configured this".
+    const apiKey = byokKey || process.env.NATIVE_AI_API_KEY || 'no-key-required';
 
     const client = new OpenAI({
       apiKey,
@@ -2462,13 +2467,18 @@ export class ModelGatewayService {
     request: GatewayRequest,
     byokKey?: string,
   ): Promise<Omit<GatewayResponse, 'provider' | 'model' | 'latencyMs' | 'fallbackUsed' | 'fallbackProvider'>> {
-    // No placeholder fallback: a missing key used to become the literal string
-    // 'native-key', which the provider rejected as an auth error somewhere
-    // downstream. Failing here names the actual problem.
-    const apiKey = byokKey || process.env.NATIVE_AI_API_KEY;
-    if (!apiKey) throw new Error('Native AI API key not configured (set NATIVE_AI_API_KEY or supply a BYOK key)');
+    // Validate the URL FIRST. Reaching this point without one is the real
+    // misconfiguration, and it is what the throw below names.
     const baseURL = process.env.KEYFLOW_NATIVE_AI_URL || process.env.NATIVE_AI_BASE_URL;
     if (!baseURL) throw new Error('Native AI base URL not configured');
+
+    // A self-hosted native endpoint may legitimately require no key, and
+    // isProviderAvailable() treats a bare KEYFLOW_NATIVE_AI_URL as configured.
+    // Throwing on a missing key here contradicted that and broke keyless
+    // self-hosted setups outright — the placeholder was load-bearing for them,
+    // not merely sloppy. Since a URL is now proven present, an absent key means
+    // "this endpoint does not want one" rather than "nobody configured this".
+    const apiKey = byokKey || process.env.NATIVE_AI_API_KEY || 'no-key-required';
 
     const client = new OpenAI({
       apiKey,
