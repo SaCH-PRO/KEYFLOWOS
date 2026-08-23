@@ -29,6 +29,14 @@ Never echo tokens into logs, findings, or commits.
      else `fail` finding `readyz.status`.
    - `curl -s $PROD_BASE/api/healthz/events` → queue counts; waiting+delayed
      > 200 → `warn`; failed > 0 → `warn` finding `queue.business-events.failed`.
+   - Diagnostics (only if the `ADMIN_BEARER` routine secret is configured —
+     the endpoints sit behind AuthGuard + super-admin):
+     `curl -s -H "Authorization: Bearer $ADMIN_BEARER" $PROD_BASE/api/diagnostics/infrastructure`
+     → any check `fail` → finding named `diagnostics.<check name>`; pay
+     particular attention to `Token Encryption Key Source`, the evidence gate
+     for the pending packages/db prod guard. No secret configured → `info`
+     finding `diagnostics.unprobed` (an unprobed surface is recorded, never
+     assumed healthy).
 2. Route parity: probe every row of
    `architecture/os/state/ROUTE_PARITY.md` § Ledger with
    `node scripts/os/probe-routes.mjs --base $PROD_BASE/api --routes <tmpfile>`.

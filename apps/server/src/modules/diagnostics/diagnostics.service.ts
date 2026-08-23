@@ -237,15 +237,51 @@ export class DiagnosticsService {
     }
   }
 
+  /**
+   * Which key is packages/db token-encryption actually deriving from?
+   *
+   * It is the only enc:v1: implementation with no production guard: with none
+   * of CONNECTOR_CREDENTIALS_KEY / CREDENTIALS_ENCRYPTION_KEY / JWT_SECRET
+   * set, it silently scrypts a literal that lives in this repository. The
+   * planned guard (a boot-time throw) is DELIBERATELY gated on this check
+   * reporting 'pass' in production first — if any prod row was ever encrypted
+   * under the fallback, landing the throw makes it undecryptable with no
+   * error naming the cause. Evidence first, then the guard.
+   */
+  async checkTokenEncryptionKeySource(): Promise<CheckResult> {
+    const start = Date.now();
+    const source = process.env.CONNECTOR_CREDENTIALS_KEY
+      ? 'CONNECTOR_CREDENTIALS_KEY'
+      : process.env.CREDENTIALS_ENCRYPTION_KEY
+        ? 'CREDENTIALS_ENCRYPTION_KEY'
+        : process.env.JWT_SECRET
+          ? 'JWT_SECRET'
+          : null;
+    const prod = process.env.NODE_ENV === 'production';
+    return {
+      name: 'Token Encryption Key Source',
+      status: source ? 'pass' : prod ? 'fail' : 'warn',
+      latencyMs: Date.now() - start,
+      checkedAt: new Date().toISOString(),
+      message: source
+        ? `packages/db token-encryption derives from ${source}`
+        : 'packages/db token-encryption is running on the IN-REPO DEV FALLBACK key',
+      detail: source
+        ? 'Safe to land the production guard once this has read pass in production.'
+        : 'Do NOT land the boot-time guard while this is the state: rows encrypted under the fallback become undecryptable.',
+    };
+  }
+
   async checkInfrastructure(): Promise<CategoryResult> {
-    const [db, supabase, storage, uptime, queues] = await Promise.all([
+    const [db, supabase, storage, uptime, queues, keySource] = await Promise.all([
       this.checkDatabase(),
       this.checkSupabase(),
       this.checkObjectStorage(),
       this.checkServerUptime(),
       this.checkQueues(),
+      this.checkTokenEncryptionKeySource(),
     ]);
-    const checks = [db, supabase, storage, uptime, queues];
+    const checks = [db, supabase, storage, uptime, queues, keySource];
     return {
       category: 'Infrastructure',
       checks,
@@ -904,6 +940,7 @@ export class DiagnosticsService {
       'Supabase Auth': () => this.checkSupabase(),
       'Object Storage': () => this.checkObjectStorage(),
       'Server Uptime & Memory': () => this.checkServerUptime(),
+      'Token Encryption Key Source': () => this.checkTokenEncryptionKeySource(),
       'OpenAI API': () => this.checkOpenAI(),
       'Google OAuth': () => this.checkGoogleOAuth(),
       'PayPal Gateway': () => this.checkPayPal(),
