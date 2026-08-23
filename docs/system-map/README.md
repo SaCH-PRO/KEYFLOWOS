@@ -38,15 +38,15 @@ claimed.** Corrected, with the reason:
 | Claimed | Actually measured | Was → Is |
 |---|---|---|
 | unguarded routes | decorators written *after* the HTTP decorator only — missed `@UseGuards(X) @Patch(…)` and class-level guards above `@Controller` | 609 → 55 |
-| web calls with no server route | five separate false-positive classes (query strings, props, `apiGetSimple` aliases, `@Sse`, Next route handlers) | 166 → 31 |
+| web calls with no server route | seven false-positive classes — the worst was an origin heuristic matching `basePath`, which reduced whole screens to a path tail | 166 → 13 |
 | `apiGet` call sites | `apiGet<` — the generic form only | 26 → 94 |
 | listeners with no emitter | `emit('x')` — missed the `emitEvent(bizId, 'x', …)` wrapper | 30 → 16 |
 
 A comment stripper that ate `if (/^https?:\/\//.test(url)) {` — the regex ends
 in `//` — also swallowed 26 routes from one controller before it was fixed.
 
-Route extraction now matches ground truth exactly: **2,188 decorators found,
-2,188 extracted, zero misses.** That equality is the check worth re-running; a
+Route extraction now matches ground truth exactly: **2,189 decorators found,
+2,189 extracted, zero misses.** That equality is the check worth re-running; a
 gap means the scanner has drifted again.
 
 ## Sheets
@@ -65,9 +65,15 @@ gap means the scanner has drifted again.
 
 ## Open findings
 
-- `key-cortex-realtime.service.ts:185` subscribes to `key.alert` (dot) while
-  the only emit is a Socket.IO `key:alert` (**colon**). That handler cannot fire.
-- 16 listeners have no emitter; 31 web calls hit no server route.
+- Eight of ten handlers in `key-cortex-realtime.service.ts` subscribe to events
+  nothing emits, so most of the websocket forwarding layer is unreachable. The
+  dot/colon split (`key.alert` vs `key:alert`) is NOT the bug — that is the
+  correct two-layer design, internal bus forwarding to a socket channel. The bug
+  is that the bus event is never raised. `apps/server/src/core/event-bus/`
+  `event-wiring.spec.ts` is the ratchet for this, and its analyser is stricter
+  than mine was.
+- 13 web calls hit no server route (3 are test fixtures); 16 more are UNVERIFIED —
+  the shape exists but an unresolved interpolation means it cannot be proven either way.
 - `gamification` is on disk with routes but is not in the module graph. That one
   is deliberate — it is marked `@keyflow:dormant`.
 
