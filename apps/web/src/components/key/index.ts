@@ -3,9 +3,6 @@ export type { KeyMode, OpenKeyDetail } from "./key-agent";
 export { AskKeyButton } from "./ask-key-button";
 export { KeyNoticedStream } from "./key-noticed-stream";
 
-export { KeyActivityFeed } from "./KeyActivityFeed";
-export type { KeyActivityFeedProps, ActivityItem, ActivityStatus, ActivityType } from "./KeyActivityFeed";
-
 export { KeySuggestionCards } from "./KeySuggestionCards";
 
 export { KeyAwarenessPanel } from "./KeyAwarenessPanel";
