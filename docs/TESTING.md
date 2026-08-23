@@ -1,110 +1,77 @@
 # KEYFlowOS Testing Guide
 
-This document defines how tests are organized, how to run them, and how to categorize new tests.
+How tests are organized, how to run them, and how to categorize new ones.
+Every command and path in this document is checked by
+`apps/server/src/core/config/doc-debt-ledger.spec.ts` — if you rename a
+script, this file fails the build until the prose follows.
 
 ---
 
-## Test categories
+## Test categories (apps/server)
 
-Tests in `apps/server` are split into four categories:
+| Category | Pattern | Config | Run |
+|----------|---------|--------|-----|
+| Unit / controller / service | `src/**/*.spec.ts` | `vitest.unit.config.ts` | `pnpm --filter server test:unit` |
+| Smoke | `test/*.smoke.test.ts` | `vitest.smoke.config.ts` | `pnpm --filter server test:smoke` |
+| Integration / e2e | `test/*.integration.test.ts` | `vitest.integration.config.ts` | `pnpm --filter server test:integration` |
+| Everything (what CI runs) | all of the above + plain `test/*.test.ts` | default `vitest.config.ts` (no include filter) | `pnpm --filter server test:ci` |
 
-| Category | Pattern | Purpose | Run command |
-|----------|---------|---------|-------------|
-| Unit / controller / service | `src/**/*.spec.ts` | Fast, deterministic tests with mocked dependencies. | `pnpm test:unit` |
+There is **no flaky/quarantine suite**. A previous version of this document
+described one (`vitest.flaky.config.ts`, `test:flaky`, three quarantined
+files); none of it ever existed in-tree. A flaky test gets fixed or deleted,
+not parked: order-dependence is actively hunted — the unit config runs with
+`sequence.shuffle: true`, and a shuffled failure is reproducible by the seed
+vitest prints (`--sequence.seed=<n>`; quote the seed when reporting one).
 
-Suite config files live in `apps/server/`:
+`test-config-coverage.spec.ts` asserts every test file is claimed by at least
+one config, and `test-coverage-gating.spec.ts` asserts `test:ci` stays
+unfiltered — a new suffix or directory cannot silently drop out of CI.
 
-| Suite | Config |
-|-------|--------|
-| Unit | `vitest.unit.config.ts` |
-| Smoke | `vitest.smoke.config.ts` |
-| Integration | `vitest.integration.config.ts` |
-| Flaky | `vitest.flaky.config.ts` |
+## Web tests (apps/web)
 
-`pnpm test:unit` scans only the `src/` directory, so no `test/` files run.
-| Smoke | `test/*.smoke.test.ts` | Fast end-to-end sanity checks that the operating system routes/modules boot and return expected shapes. | `pnpm test:smoke` |
-| Integration / e2e | `test/*.integration.test.ts` | Tests that exercise multiple modules, the database, or external connectors. Slower and may require environment setup. | `pnpm test:integration` |
-| Flaky / quarantined | `test/*.flaky.test.ts` | Tests with known intermittent failures (timeouts, platform-specific process issues, live connectors). Run separately and do not block CI. | `pnpm test:flaky` |
-
-> Frontend tests currently rely on `pnpm --filter web build` for static type/build correctness. Add component/route tests only if a test framework is already configured.
+Vitest unit/structural specs (jsdom): `pnpm --filter web test:unit`.
+Playwright e2e (not in CI): `pnpm --filter web test:e2e`.
+The structural gates in `apps/web/src/lib/__tests__/` (nav-reachability,
+no-fabricated-screens, tool-routes, …) run in the unit suite.
 
 ---
 
 ## Running tests
 
-### Reliable CI signal
-
 ```bash
-# Run unit + smoke tests (fast, deterministic)
-pnpm test:ci
+# What CI runs for the server (needs Postgres + Redis for integration files)
+pnpm --filter server test:ci
+
+# Fast local loop (src specs only, isolate:false + shuffle, ~41s)
+pnpm --filter server test:unit
+
+# Web
+pnpm --filter web test:unit
 ```
 
-### Individual suites
-
-```bash
-# Unit/service/controller tests only
-pnpm test:unit
-
-# Smoke tests only
-pnpm test:smoke
-
-# Integration/e2e tests only
-pnpm test:integration
-
-# Known flaky tests only
-pnpm test:flaky
-
-# Everything (includes flaky tests; useful for local investigation)
-pnpm test
-```
-
-### Targeted test files
-
-```bash
-# Single file
-pnpm test src/modules/business-command-center/business-command-center.service.spec.ts
-
-# Directory
-pnpm test src/modules/key-inbox/
-```
+A vitest **skip is a failure**: a thrown `beforeAll` reports as "skipped",
+so a green run with skips may have run nothing. `0 skipped` is part of the
+pass criterion everywhere in this repo.
 
 ---
 
 ## Adding a new test
 
-1. Decide the category first.
-2. Use the appropriate file suffix.
-3. Keep unit tests deterministic and free of live network/DB calls when possible.
-4. If a test is flaky, do not leave it in the main suite. Either fix the root cause or quarantine it with a `TODO` comment explaining the issue and linking to a tracking item.
-
----
-
-## Known flaky tests
-
-The following tests are quarantined in the flaky suite:
-
-| File | Reason | Next action |
-|------|--------|-------------|
-| `test/calendar-module.flaky.test.ts` | Timeout / ECONNRESET when exercising Google Calendar connector paths. | Mock connector boundaries and move to integration suite, or freeze time and use deterministic fixtures. |
-| `test/calendar.controller.flaky.test.ts` | Timeout / ECONNRESET in calendar controller integration setup. | Reduce module bootstrap scope; mock Prisma/Redis where appropriate. |
-| `test/keyflow-dev-auth.flaky.test.ts` | Full app boot via `tsx` times out on Windows before guard exits the process. | Split into fast guard-logic unit test + one slower integration boot test. |
-
-Do not add new tests to the flaky suite without a clear remediation plan.
-
----
-
-## Conventions
-
-- Use `vi.fn()` from Vitest for mocks.
-- Prefer factory helpers (`makeController`, `makeService`) over heavy `Test.createTestingModule` for unit tests.
-- Use deterministic fixtures for dates, IDs, and business IDs.
-- Do not assert on exact object identity when order or extra metadata may vary.
-- Keep controller tests focused on request/response mapping and guard behavior, not business logic.
+1. Decide the category first; use the matching suffix and directory.
+2. Keep unit tests deterministic — no live network or DB.
+3. Structural gates (specs that read the tree and enforce an invariant) live
+   in `apps/server/src/core/config/` and must satisfy
+   `gate-vacuity.spec.ts`: a gate that finds nothing must prove it looked
+   (assert your input list was non-empty).
+4. Shrink-only ledgers follow the pattern in
+   `apps/server/src/core/prisma/tenant-model-list.spec.ts`: ledger constant,
+   no-new, no-ghosts, no-stale, and a negative control on every removal.
 
 ---
 
 ## CI expectations
 
-- `pnpm test:ci` must pass before merging.
-- `pnpm test:flaky` failures must be investigated but do not block merges.
-- `pnpm test:integration` failures block merges unless the failure is documented and tracked.
+- The `test` job in `.github/workflows/ci-cd.yml` provisions Postgres
+  (pgvector) + Redis, applies migrations via `db:deploy`, then runs
+  `pnpm --filter server test:ci` and the web unit suite.
+- Integration failures block merges. There is no non-blocking test tier.

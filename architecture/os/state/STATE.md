@@ -63,8 +63,8 @@ human decision. Any wrong-direction move: do NOT update the row; open a
 | web.known_fabricated | apps/web/src/lib/__tests__/no-fabricated-screens.spec.ts | shrink | 1 | 1 |
 | trpc.unchecked | apps/server/src/trpc.module.spec.ts | shrink | 0 | 0 |
 | ai.handler_coverage_floor_pct | apps/server/src/modules/ai/handler-coverage-ratchet.spec.ts | grow | 39 | 39 |
-| docs.debt | architecture/os/state/DOC_DEBT.md | shrink | 3 | — (new 2026-08-23) |
-| routes.parity_absent | architecture/os/state/ROUTE_PARITY.md | shrink | 19 | — (new 2026-08-23) |
+| docs.debt | architecture/os/state/DOC_DEBT.md | shrink | 2 | 3 (docs/TESTING.md fixed 2026-08-23, the first burndown) |
+| routes.parity_absent | architecture/os/state/ROUTE_PARITY.md | shrink | 6 | — (new 2026-08-23; the 6 individually-named missing endpoints of the classified 19) |
 
 ## Generated artifacts freshness
 

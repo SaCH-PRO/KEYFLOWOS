@@ -124,6 +124,18 @@ git commit --amend --no-edit
 - Deep links with `?section=...` still render the advanced panels inside the profile tab for now.
 - Navigation links in Command Center, Strategy/Build menus, onboarding, and KEY autonomy now point to `/app/genome`.
 
+# Operating Layer
+
+This repo runs a self-correcting loop: markdown operating documents under
+`architecture/os/` are cycled by scheduled agents (read state → run gates and
+probes → fix drift → update the docs → reflect). **Before acting as any kind
+of automated cycle, read `architecture/os/OS.md` first** — it defines the doc
+taxonomy, the write matrix, and the NEVER list (notably: a failing gate is
+information; no agent may make a gate pass by editing the gate). Current
+derived numbers live in `architecture/os/state/STATE.md`; re-derive rather
+than quote. Ad-hoc sessions are welcome to update `STATE.md` and append a
+journal entry, but the ledgers under `architecture/os/state/` shrink only.
+
 # Codebase Architect Policy
 
 This repository uses the `codebase-architect` agent skill. The skill lives in `.agents/skills/codebase-architect/` and the canonical architecture memory lives in `/architecture/`.
