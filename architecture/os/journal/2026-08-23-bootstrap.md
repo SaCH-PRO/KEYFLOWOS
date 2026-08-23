@@ -50,6 +50,17 @@ outcome: corrected
   explanatory comment containing the literal Controller-decorator text made
   `search()` anchor inside the comment and report 6 open handlers instead
   of 0. Prose in code must not look like the code the gates parse.
+- **Full-suite counts are unreliable while peer sessions edit the tree.**
+  A full unit run showed test-config-coverage.spec.ts failing (31 > its cap
+  of 30 default-only test files) and 354 collected files; the same command
+  reseeded showed 355 files and a full green (3470/0), and the gate passed in
+  isolation (13/13). The file COUNT itself moved between runs — vitest
+  collection caught apps/server mid-edit while keyflowos-13 and the peer were
+  working. Lesson for the cycles and for me: a suspected failure on the shared
+  tree must be reproduced in isolation and by reseed before it is attributed;
+  the truth cycle avoids this class entirely by running on an isolated clone
+  of origin/main, which is exactly why it does. My four OS-layer fixes were
+  stash-verified independent of the failure and pass on their own.
 - **The review's top finding had the right defect and the wrong history.**
   The sw.js authenticated-cache leak was reported as introduced by removing
   the `_t` cache-buster; re-derivation (by the fixing session, 98fdb231)
