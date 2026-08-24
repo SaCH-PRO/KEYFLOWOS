@@ -198,10 +198,15 @@ export class KeyCortexVoiceService {
     private readonly aiUsageService: AiUsageService,
     private readonly personalityService: KeyCortexPersonalityService,
   ) {
-    const apiKey = process.env.OPENAI_API_KEY;
+    // .env sets AI_INTEGRATIONS_OPENAI_API_KEY; the production container gets
+    // OPENAI_API_KEY instead, because docker-compose.production.yml maps one to
+    // the other. Reading only the bare name meant this worked in production and
+    // was unset locally — surviving on this machine solely because the developer
+    // happened to have OPENAI_API_KEY exported in their shell. Accept either.
+    const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
     if (!apiKey) {
       this.logger.warn(
-        'OPENAI_API_KEY is not set. Voice synthesis and transcription will be unavailable.',
+        'Neither AI_INTEGRATIONS_OPENAI_API_KEY nor OPENAI_API_KEY is set. Voice synthesis and transcription will be unavailable.',
       );
     }
     this.openai = new OpenAI({ apiKey: apiKey ?? 'sk-no-key' });
