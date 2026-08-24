@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, Suspense, useEffect, useMemo, useState } from "react";
 import { Lock, Eye, EyeOff, AlertCircle, CheckCircle2, Loader2, ArrowRight, ShieldCheck } from "lucide-react";
+import { API_BASE } from "@/lib/api";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -90,22 +91,27 @@ function ResetPasswordInner() {
     const localIssue = clientPasswordIssue(password);
     if (localIssue) { setError(localIssue); return; }
     if (password !== confirm) { setError("Passwords don't match."); return; }
-    if (!SUPABASE_URL || !SUPABASE_ANON_KEY || SUPABASE_URL.includes("your-project")) { setError("Authentication is misconfigured. Contact support."); return; }
-
     setStatus("submitting");
     try {
-      const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          apikey: SUPABASE_ANON_KEY,
-          Authorization: `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify({ password }),
+      // Goes through our server rather than PUT-ing straight to Supabase.
+      //
+      // The browser path could only ever enforce the length check above.
+      // Composition rules and the Pwned Passwords lookup live in
+      // PasswordPolicyService on the server, which signup already uses — so
+      // before this, a password refused at signup as breached could be adopted
+      // simply by resetting to it. The server also drops every other session
+      // once the change lands, which the direct call did not.
+      //
+      // clientPasswordIssue() above is kept as immediate feedback, not as the
+      // control. The server re-checks everything and is the thing that decides.
+      const res = await fetch(`${API_BASE}/identity/reset-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accessToken, password }),
       });
       const json = await res.json().catch(() => null);
       if (!res.ok) {
-        const msg = (json?.msg || json?.error_description || json?.message || "Could not update password.") as string;
+        const msg = (json?.message || json?.msg || json?.error_description || "Could not update password.") as string;
         if (/expired|invalid/i.test(msg)) {
           setError("This reset link has expired. Request a new one from the sign-in page.");
           setStatus("invalid");

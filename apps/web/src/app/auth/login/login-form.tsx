@@ -29,6 +29,7 @@ import {
 } from "@/lib/oauth-pkce";
 
 import { safeFromParam } from "@/lib/safe-redirect";
+import { API_BASE } from "@/lib/api";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -50,16 +51,34 @@ async function signInWithGoogle() {
   window.location.href = `${SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirectTo)}&code_challenge=${encodeURIComponent(codeChallenge)}&code_challenge_method=S256`;
 }
 
-async function supabaseResetPassword(email: string) {
-  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) throw new Error("Supabase env vars missing");
-  const res = await fetch(`${SUPABASE_URL}/auth/v1/recover`, {
+/**
+ * Request a password reset THROUGH OUR SERVER, not straight to Supabase.
+ *
+ * This used to POST to `${SUPABASE_URL}/auth/v1/recover` from the browser.
+ * Supabase handled it correctly, so nothing appeared broken — but it made
+ * recovery the one auth flow that never crossed our backend, and so the only
+ * one with no rate limit, no audit row, and no password policy. Login and
+ * signup were moved server-side during Tier 2 hardening; this was missed.
+ *
+ * The server also decides the redirect target now. It was built here from
+ * SITE_URL, which is a client-side value — and the link it decorates carries a
+ * recovery session in its fragment.
+ *
+ * The response is deliberately identical for known and unknown addresses, so
+ * there is nothing here to branch on: any error we surfaced differently would
+ * hand back the account-enumeration oracle the server exists to close.
+ */
+async function requestPasswordReset(email: string) {
+  const res = await fetch(`${API_BASE}/identity/forgot-password`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", apikey: SUPABASE_ANON_KEY },
-    body: JSON.stringify({ email, redirectTo: `${SITE_URL.replace(/\/$/, "")}/auth/reset-password` }),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
   });
   if (!res.ok) {
-    const json = await res.json().catch(() => null);
-    throw new Error(json?.error_description ?? json?.msg ?? "Failed to send reset email");
+    // 429 is the one case worth naming: it is actionable and it is about the
+    // caller, not about whether the address exists.
+    if (res.status === 429) throw new Error("Too many reset requests. Please try again later.");
+    throw new Error("Could not send the reset email. Please try again.");
   }
 }
 
@@ -119,7 +138,7 @@ export default function LoginForm() {
       setLoading(true);
       try {
         if (!SUPABASE_CONFIGURED) throw new Error("Email password reset isn't configured yet — ask your admin for a password reset.");
-        await supabaseResetPassword(email.trim());
+        await requestPasswordReset(email.trim());
         setResetSent(true);
       } catch (err: unknown) {
         setError(err instanceof Error ? err.message : "Failed to send reset email");

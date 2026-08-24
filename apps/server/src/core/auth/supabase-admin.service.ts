@@ -219,6 +219,52 @@ export class SupabaseAdminService {
     );
     return null;
   }
+
+  /**
+   * Ask Supabase to email a password-recovery link.
+   *
+   * Delivery stays with Supabase rather than moving to Resend: the recovery
+   * template and the token that comes back with it are Supabase's, and routing
+   * only the SEND through our own mailer would mean minting our own tokens and
+   * owning their expiry, revocation and replay semantics. What this call adds
+   * is that the request now passes through the server, where it can be rate
+   * limited and audited like every other auth event.
+   *
+   * Returns void deliberately — the caller must not be able to tell a real
+   * address from an unknown one. See resetRequest() in the password service.
+   */
+  async sendRecoveryEmail(email: string, redirectTo: string): Promise<void> {
+    const client = this.getClient();
+    const { error } = await client.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
+      redirectTo,
+    });
+    if (error) {
+      // Logged, not thrown. A failure here is indistinguishable to the caller
+      // from success by design; surfacing it would leak whether the address
+      // exists.
+      this.logger.warn(`sendRecoveryEmail failed: ${error.message}`);
+    }
+  }
+
+  /**
+   * Set a user's password directly.
+   *
+   * Used to complete a recovery once the new password has cleared the server's
+   * policy and breach checks. Doing it through the admin API rather than
+   * letting the browser PUT /auth/v1/user is the whole point: the browser path
+   * cannot be made to run those checks.
+   */
+  async updateUserPassword(userId: string, password: string): Promise<void> {
+    const client = this.getClient();
+    const { error } = await client.auth.admin.updateUserById(userId, { password });
+    if (error) {
+      throw new SupabaseAdminError(
+        `Failed to update password: ${error.message}`,
+        statusOf(error),
+        error,
+      );
+    }
+  }
 }
 
 export class SupabaseAdminError extends Error {

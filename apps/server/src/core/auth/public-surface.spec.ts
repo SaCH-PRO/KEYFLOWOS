@@ -138,7 +138,19 @@ const ACKNOWLEDGED_PUBLIC: Record<string, number> = {
   'modules/flow/flow.controller.ts': 13,
   'modules/gamification/gamification.controller.ts': 1,
   'modules/google-drive/google-drive.controller.ts': 1,
-  'modules/identity/identity.controller.ts': 9,
+  // 9 -> 11: forgot-password and reset-password. Both are necessarily
+  // unauthenticated — the whole premise is a user who cannot sign in — so what
+  // stands in for a guard is stated here rather than assumed:
+  //   forgot-password  rate limited per IP and per email, returns an identical
+  //                    body for known and unknown addresses so it cannot be
+  //                    used to enumerate accounts, and refuses any redirect
+  //                    target outside the configured origins.
+  //   reset-password   the recovery token IS the credential. It is verified
+  //                    before anything else happens, the new password goes
+  //                    through the same PasswordPolicyService signup uses
+  //                    (including the Pwned Passwords lookup), and every other
+  //                    session is dropped on success.
+  'modules/identity/identity.controller.ts': 11,
   'modules/key-connector/key-connector.controller.ts': 10,
   'modules/keystore/keystore-admin.controller.ts': 11,
   'modules/keystore/keystore.controller.ts': 10,

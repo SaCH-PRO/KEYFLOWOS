@@ -19,9 +19,12 @@ import type { Request } from 'express';
 import { IdentityService } from './identity.service';
 import { IdentitySignupService, isEmailVerificationRequired } from './identity-signup.service';
 import { AuthSecurityService } from './auth-security.service';
+import { IdentityPasswordService } from './identity-password.service';
+import { allowedCorsOrigins } from '../../core/config/runtime-urls';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SignupDto, ResendVerificationDto } from './dto/signup.dto';
 import { LoginDto } from './dto/login.dto';
+import { ForgotPasswordDto, ResetPasswordDto } from './dto/password-reset.dto';
 import { BusinessContextService } from './business-context.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
@@ -51,6 +54,7 @@ export class IdentityController {
     @Inject(BusinessContextService) private readonly bizContext: BusinessContextService,
     @Inject(IdentitySignupService) private readonly signupSvc: IdentitySignupService,
     @Inject(AuthSecurityService) private readonly authSec: AuthSecurityService,
+    @Inject(IdentityPasswordService) private readonly passwordSvc: IdentityPasswordService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(SupabaseAdminService) private readonly supabaseAdmin: SupabaseAdminService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
@@ -263,6 +267,106 @@ export class IdentityController {
       verificationRequired: isEmailVerificationRequired(),
       cooldownRemainingMs: result.cooldownRemainingMs,
     };
+  }
+
+  /**
+   * Request a password-recovery email.
+   *
+   * ALWAYS returns the same body. Whether the address has an account, whether
+   * Supabase accepted the send, whether the mail bounced — the response is
+   * identical, because any difference turns this into a free membership oracle.
+   * The audit row records what really happened; the caller learns nothing.
+   *
+   * Rate limited per IP and per email, which recovery previously was not: the
+   * browser called Supabase directly, so this was the one unmetered door on an
+   * otherwise metered surface.
+   */
+  @Post('forgot-password')
+  async forgotPassword(
+    @Body() body: ForgotPasswordDto,
+    @Req() req: Request,
+    @Headers('origin') originHeader?: string,
+  ) {
+    const ip = this.clientIp(req);
+    const ua = this.clientUa(req);
+    const email = body.email.trim().toLowerCase();
+
+    try {
+      await this.authSec.enforce(AuthSecurityService.RULES.FORGOT_IP, ip);
+      await this.authSec.enforce(AuthSecurityService.RULES.FORGOT_EMAIL, email);
+    } catch (rateErr) {
+      await this.authSec.audit({
+        event: 'rate_limited', outcome: 'rate_limited', email, ip, userAgent: ua, reason: 'forgot_password',
+      });
+      throw rateErr;
+    }
+
+    const allowed = allowedCorsOrigins();
+    if (allowed.length === 0) {
+      throw new BadRequestException(
+        'No allowed origin is configured; set APP_URL or NEXT_PUBLIC_SITE_URL before using password recovery',
+      );
+    }
+    // The DEFAULT is built from configured origin, never from the request.
+    // Deriving it from the Origin header or the Host looked convenient and was
+    // wrong: both are supplied by the caller, and this URL decorates a link
+    // that carries a recovery session in its fragment. Trusting the request to
+    // name its own redirect is the open-redirect bug, just spelled politely.
+    const requested = body.redirectTo ?? `${allowed[0].replace(/\/$/, '')}/auth/reset-password`;
+    // Checked even when we built it, because the client may supply one.
+    this.passwordSvc.assertSafeRedirect(requested, allowed);
+
+    await this.passwordSvc.requestReset(email, requested);
+    await this.authSec.audit({
+      event: 'password_reset_requested', outcome: 'success', email, ip, userAgent: ua,
+    });
+
+    return {
+      status: 'sent',
+      message: 'If that email has an account, a reset link is on its way.',
+    };
+  }
+
+  /**
+   * Complete a password reset.
+   *
+   * The recovery token is the only credential, so no guard applies — but the
+   * token is verified inside the service before anything else happens, and the
+   * new password goes through the SAME PasswordPolicyService that signup uses.
+   * That parity is the point of this endpoint existing: the browser path it
+   * replaces enforced a length check and nothing else, so a password rejected
+   * at signup as breached could be adopted by resetting to it.
+   */
+  @Post('reset-password')
+  async resetPassword(@Body() body: ResetPasswordDto, @Req() req: Request) {
+    const ip = this.clientIp(req);
+    const ua = this.clientUa(req);
+
+    try {
+      await this.authSec.enforce(AuthSecurityService.RULES.RESET_IP, ip);
+    } catch (rateErr) {
+      await this.authSec.audit({
+        event: 'rate_limited', outcome: 'rate_limited', ip, userAgent: ua, reason: 'reset_password',
+      });
+      throw rateErr;
+    }
+
+    try {
+      const { userId, email } = await this.passwordSvc.completeReset(body.accessToken, body.password);
+      await this.authSec.audit({
+        event: 'password_reset_completed', outcome: 'success', email, userId, ip, userAgent: ua,
+      });
+      return { status: 'ok', message: 'Password updated. Please sign in.' };
+    } catch (err) {
+      await this.authSec.audit({
+        event: 'password_reset_completed',
+        outcome: 'failure',
+        ip,
+        userAgent: ua,
+        reason: err instanceof Error ? err.message.slice(0, 200) : 'unknown',
+      });
+      throw err;
+    }
   }
 
   private deriveOriginFromRequest(req: Request): string | null {

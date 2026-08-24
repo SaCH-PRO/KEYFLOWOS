@@ -7,7 +7,12 @@ export type AuthEvent =
   | 'login_failure'
   | 'resend_verification'
   | 'rate_limited'
-  | 'logout';
+  | 'logout'
+  // Recovery was invisible to this ledger until it moved server-side: the
+  // browser talked to Supabase directly, so a password change — the single
+  // most security-relevant thing an account can do — left no trace here.
+  | 'password_reset_requested'
+  | 'password_reset_completed';
 
 export type AuthOutcome = 'success' | 'failure' | 'rate_limited' | 'error';
 
@@ -76,6 +81,19 @@ export class AuthSecurityService {
     SIGNUP_EMAIL: { scope: 'signup:email', limit: 3, windowMs: 60 * 60_000 },
     RESEND_IP: { scope: 'resend:ip', limit: 10, windowMs: 60 * 60_000 },
     RESEND_EMAIL: { scope: 'resend:email', limit: 5, windowMs: 60 * 60_000 },
+    // Password recovery had NO limit of any kind, because the browser called
+    // Supabase directly and never touched this server. That made it the one
+    // unmetered door into an otherwise rate-limited surface: an attacker could
+    // enumerate addresses and mail-bomb any of them at Supabase's limits
+    // rather than ours, leaving no entry in our audit trail either.
+    // Deliberately tighter per-email than per-IP: a shared office NAT is a
+    // normal source of several requests, while five recovery mails to one
+    // address in an hour is not something a real person does.
+    FORGOT_IP: { scope: 'forgot:ip', limit: 8, windowMs: 60 * 60_000 },
+    FORGOT_EMAIL: { scope: 'forgot:email', limit: 4, windowMs: 60 * 60_000 },
+    // The completion step is limited too, so a stolen recovery link cannot be
+    // used to grind the password policy for an accepted value.
+    RESET_IP: { scope: 'reset:ip', limit: 10, windowMs: 60 * 60_000 },
   } as const satisfies Record<string, RateLimitRule>;
 
   private lastPruneAt = 0;
