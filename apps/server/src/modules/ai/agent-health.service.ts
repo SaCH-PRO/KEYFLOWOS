@@ -2,6 +2,7 @@ import { Injectable, Logger, OnModuleInit, OnModuleDestroy, Inject } from '@nest
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AiExecutionLogService } from './ai-execution-log.service';
+import { safeInterval } from '../../core/scheduling/safe-interval';
 
 export interface AgentHealthReport {
   businessId: string;
@@ -44,7 +45,7 @@ export class AgentHealthService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
-    this.checkInterval = setInterval(() => this.runHealthChecks(), this.CHECK_MS);
+    this.checkInterval = safeInterval('AgentHealthService', this.CHECK_MS, () => this.runHealthChecks(), this.logger);
     this.logger.log(`Agent health monitoring started every ${this.CHECK_MS}ms`);
   }
 

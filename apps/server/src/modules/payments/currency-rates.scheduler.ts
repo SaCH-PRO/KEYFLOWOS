@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { CurrencyRatesService } from './currency-rates.service';
+import { safeInterval } from '../../core/scheduling/safe-interval';
 
 const REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const STARTUP_DELAY_MS = 30 * 1000;
@@ -21,7 +22,7 @@ export class CurrencyRatesScheduler implements OnModuleInit, OnModuleDestroy {
   onModuleInit(): void {
     this.startupTimeout = setTimeout(() => {
       void this.refresh();
-      this.intervalRef = setInterval(() => void this.refresh(), REFRESH_INTERVAL_MS);
+      this.intervalRef = safeInterval('CurrencyRatesScheduler', REFRESH_INTERVAL_MS, () => this.refresh(), this.logger);
     }, STARTUP_DELAY_MS);
   }
 

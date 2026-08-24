@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { CalendarSyncService } from './calendar-sync.service';
+import { safeInterval } from '../../core/scheduling/safe-interval';
 
 const TICK_INTERVAL_MS = 60 * 60 * 1000; // hourly
 const STARTUP_DELAY_MS = 90 * 1000;
@@ -29,7 +30,7 @@ export class CalendarSyncScheduler implements OnModuleInit, OnModuleDestroy {
     }
     this.startupTimer = setTimeout(() => {
       void this.tick();
-      this.intervalRef = setInterval(() => void this.tick(), TICK_INTERVAL_MS);
+      this.intervalRef = safeInterval('CalendarSyncScheduler', TICK_INTERVAL_MS, () => this.tick(), this.logger);
     }, STARTUP_DELAY_MS);
   }
 

@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { BestChannelService } from './best-channel.service';
+import { safeInterval } from '../../core/scheduling/safe-interval';
 
 const CHECK_INTERVAL_MS = 5 * 60 * 1000;
 const STARTUP_DELAY_MS = 150 * 1000;
@@ -24,7 +25,7 @@ export class BestChannelSchedulerService implements OnModuleInit, OnModuleDestro
   onModuleInit() {
     this.startupTimeout = setTimeout(() => {
       void this.tick();
-      this.intervalRef = setInterval(() => void this.tick(), CHECK_INTERVAL_MS);
+      this.intervalRef = safeInterval('BestChannelSchedulerService', CHECK_INTERVAL_MS, () => this.tick(), this.logger);
     }, STARTUP_DELAY_MS);
     this.logger.log(
       `Nightly best-channel recompute armed for ${TARGET_HOUR_UTC.toString().padStart(2, '0')}:${TARGET_MINUTE_UTC.toString().padStart(2, '0')} UTC`,

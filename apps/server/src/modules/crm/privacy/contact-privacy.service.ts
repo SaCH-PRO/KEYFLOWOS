@@ -22,6 +22,7 @@ import {
   ContactAuditActor,
 } from './contact-audit.service';
 import { buildZip, sha256Hex } from './contact-zip.util';
+import { safeInterval } from '../../../core/scheduling/safe-interval';
 
 const DEFAULT_PURGE_INTERVAL_MS = 30 * 60_000;
 const DEFAULT_GRACE_DAYS = 7;
@@ -65,9 +66,7 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
       this.logger.log('[ContactPrivacy] forget purge scheduler disabled via env');
       return;
     }
-    this.intervalRef = setInterval(() => {
-      void this.runPurgeCycle();
-    }, DEFAULT_PURGE_INTERVAL_MS);
+    this.intervalRef = safeInterval('ContactPrivacyService', DEFAULT_PURGE_INTERVAL_MS, () => this.runPurgeCycle(), this.logger);
     this.logger.log(
       `[ContactPrivacy] forget purge scheduler started (interval=${DEFAULT_PURGE_INTERVAL_MS / 60_000}m)`,
     );

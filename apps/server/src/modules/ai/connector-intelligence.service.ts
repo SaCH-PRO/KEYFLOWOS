@@ -10,6 +10,7 @@ import { AiExecutionLogService } from './ai-execution-log.service';
 import { ConversationalAIService } from './conversational-ai.service';
 import { GoogleDriveService } from '../google-drive/google-drive.service';
 import { ConnectorRegistryService } from '../../core/connectors/connector-registry.service';
+import { safeInterval } from '../../core/scheduling/safe-interval';
 
 interface ScannedFile {
   id: string;
@@ -51,7 +52,7 @@ export class ConnectorIntelligenceService implements OnModuleInit, OnModuleDestr
   ) {}
 
   onModuleInit() {
-    this.scanInterval = setInterval(() => this.scanAllConnectors(), this.SCAN_INTERVAL_MS);
+    this.scanInterval = safeInterval('ConnectorIntelligenceService', this.SCAN_INTERVAL_MS, () => this.scanAllConnectors(), this.logger);
     this.logger.log(`Connector intelligence scanning every ${this.SCAN_INTERVAL_MS}ms`);
     setTimeout(() => this.scanAllConnectors(), 30_000);
   }

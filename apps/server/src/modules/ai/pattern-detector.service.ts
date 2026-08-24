@@ -4,6 +4,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ModelGatewayService } from './model-gateway.service';
 import { AiMemoryService } from './ai-memory.service';
 import { AiUsageService } from './ai-usage.service';
+import { safeInterval } from '../../core/scheduling/safe-interval';
 
 export interface DetectedPattern {
   id: string;
@@ -38,7 +39,7 @@ export class PatternDetectorService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
-    this.scanInterval = setInterval(() => this.runAllScans(), this.SCAN_INTERVAL_MS);
+    this.scanInterval = safeInterval('PatternDetectorService', this.SCAN_INTERVAL_MS, () => this.runAllScans(), this.logger);
     this.logger.log(`Pattern detector scanning every ${this.SCAN_INTERVAL_MS}ms`);
     // Run initial scan after 60s to avoid startup noise
     setTimeout(() => this.runAllScans(), 60_000);

@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nest
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { FinancialCopilotService } from './financial-copilot.service';
 import { SystemEmailService } from '../notifications/system-email.service';
+import { safeInterval } from '../../core/scheduling/safe-interval';
 
 const CHECK_INTERVAL_MS = 60 * 1000;
 const TARGET_HOUR = 7;
@@ -91,9 +92,7 @@ export class FinancialBriefingSchedulerService implements OnModuleInit, OnModule
 
   onModuleInit() {
     this.logger.log('[FinancialBriefingScheduler] Starting — checking every 60s for Monday 7am briefings');
-    this.intervalRef = setInterval(() => {
-      void this.checkAndRunBriefings();
-    }, CHECK_INTERVAL_MS);
+    this.intervalRef = safeInterval('FinancialBriefingSchedulerService', CHECK_INTERVAL_MS, () => this.checkAndRunBriefings(), this.logger);
   }
 
   onModuleDestroy() {

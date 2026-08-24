@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ConnectorRegistryService } from './connector-registry.service';
 import { ConnectorActivityService } from './connector-activity.service';
 import { ConnectorType } from './connector.interface';
+import { safeInterval } from '../scheduling/safe-interval';
 
 const CHECK_INTERVAL_MS = 5 * 60 * 1000;
 const STARTUP_DELAY_MS = 90 * 1000;
@@ -42,7 +43,7 @@ export class ConnectorSyncSchedulerService implements OnModuleInit, OnModuleDest
   onModuleInit() {
     this.startupTimeout = setTimeout(() => {
       void this.tick();
-      this.intervalRef = setInterval(() => void this.tick(), CHECK_INTERVAL_MS);
+      this.intervalRef = safeInterval('ConnectorSyncSchedulerService', CHECK_INTERVAL_MS, () => this.tick(), this.logger);
     }, STARTUP_DELAY_MS);
     this.logger.log(
       `Nightly connector sync scheduler armed for ${TARGET_HOUR_UTC.toString().padStart(2, '0')}:00 UTC (poll every ${CHECK_INTERVAL_MS / 60000} min)`,

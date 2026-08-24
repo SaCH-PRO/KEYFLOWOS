@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { CrmDataQualityService } from './crm-data-quality.service';
+import { safeInterval } from '../../core/scheduling/safe-interval';
 
 const SCAN_INTERVAL_MS = 24 * 60 * 60 * 1000; // nightly
 const STARTUP_DELAY_MS = 60 * 1000;
@@ -27,7 +28,7 @@ export class CrmDataQualityScheduler implements OnModuleInit, OnModuleDestroy {
     }
     this.startupTimer = setTimeout(() => {
       void this.runOnce();
-      this.intervalRef = setInterval(() => void this.runOnce(), SCAN_INTERVAL_MS);
+      this.intervalRef = safeInterval('CrmDataQualityScheduler', SCAN_INTERVAL_MS, () => this.runOnce(), this.logger);
     }, STARTUP_DELAY_MS);
   }
 

@@ -4,6 +4,7 @@ import { ConnectorRegistryService } from './connector-registry.service';
 import { ConnectorActivityService } from './connector-activity.service';
 import { NotificationsService } from '../../modules/notifications/notifications.service';
 import { ConnectorType, ConnectorStatus } from './connector.interface';
+import { safeInterval } from '../scheduling/safe-interval';
 
 const CHECK_INTERVAL_MS = 15 * 60 * 1000;
 const INITIAL_DELAY_MS = 60 * 1000;
@@ -49,7 +50,7 @@ export class ConnectorHealthMonitorService implements OnModuleInit, OnModuleDest
   onModuleInit() {
     this.startupTimeout = setTimeout(() => {
       void this.tick();
-      this.intervalRef = setInterval(() => void this.tick(), CHECK_INTERVAL_MS);
+      this.intervalRef = safeInterval('ConnectorHealthMonitorService', CHECK_INTERVAL_MS, () => this.tick(), this.logger);
     }, INITIAL_DELAY_MS);
     this.logger.log(
       `Connector health monitor scheduled (first run in ${Math.round(

@@ -6,6 +6,7 @@ import { OutputCategory, ResolvedTemplate, injectQualityDirectives, validateAiOu
 import { OutputTemplateService } from './output-template.service';
 import { ModelGatewayService, TaskCategory, GatewayMessage, BudgetStatus, AiProvider, GatewayRequest, GatewayResponse, StreamChunk } from './model-gateway.service';
 import OpenAI from 'openai';
+import { safeInterval } from '../../core/scheduling/safe-interval';
 
 /**
  * responseMode controls quality directive injection and output validation:
@@ -233,7 +234,7 @@ export class AiUsageService {
     @Inject(OutputTemplateService) private readonly outputTemplateService: OutputTemplateService,
     @Inject(ModelGatewayService) private readonly gateway: ModelGatewayService,
   ) {
-    this.rateLimitCleanupTimer = setInterval(() => {
+    this.rateLimitCleanupTimer = safeInterval('AiUsageService.rateLimitCleanup', 60_000, () => {
       const cutoff = Date.now() - 60_000;
       for (const [key, timestamps] of this.rateLimitMap.entries()) {
         const filtered = timestamps.filter(t => t > cutoff);
@@ -243,7 +244,7 @@ export class AiUsageService {
           this.rateLimitMap.set(key, filtered);
         }
       }
-    }, 60_000);
+    }, this.logger);
   }
 
   onModuleDestroy() {

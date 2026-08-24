@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy, NotFoundExce
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AdapterRegistryService } from './adapters/adapter-registry.service';
+import { safeInterval } from '../../core/scheduling/safe-interval';
 
 const POLL_INTERVAL_MS = 30_000;
 const MAX_BATCH_SIZE = 20;
@@ -61,7 +62,7 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
-    this.pollInterval = setInterval(() => this.tick(), POLL_INTERVAL_MS);
+    this.pollInterval = safeInterval('DeliveryQueueService', POLL_INTERVAL_MS, () => this.tick(), this.logger);
     this.logger.log('Delivery queue scheduler started (30s interval)');
   }
 

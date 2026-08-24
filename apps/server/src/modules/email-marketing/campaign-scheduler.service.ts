@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nest
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { EmailMarketingService } from './email-marketing.service';
 import { CampaignIntelligenceService } from './campaign-intelligence.service';
+import { safeInterval } from '../../core/scheduling/safe-interval';
 
 @Injectable()
 export class CampaignSchedulerService implements OnModuleInit, OnModuleDestroy {
@@ -16,8 +17,8 @@ export class CampaignSchedulerService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
-    this.intervalRef = setInterval(() => this.tick(), 60_000);
-    this.briefingIntervalRef = setInterval(() => this.briefingTick(), 10 * 60_000);
+    this.intervalRef = safeInterval('CampaignSchedulerService', 60_000, () => this.tick(), this.logger);
+    this.briefingIntervalRef = safeInterval('CampaignSchedulerService.briefing', 10 * 60_000, () => this.briefingTick(), this.logger);
     this.logger.log('Campaign scheduler started (60s interval, 10min briefing check)');
   }
 

@@ -1,7 +1,8 @@
-import { Injectable, Inject, OnModuleInit, OnModuleDestroy, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Inject, OnModuleInit, OnModuleDestroy, NotFoundException, BadRequestException , Logger} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { PostingService } from './posting.service';
+import { safeInterval } from '../../core/scheduling/safe-interval';
 
 const VALID_FREQUENCIES = ['WEEKLY', 'BIWEEKLY', 'MONTHLY', 'QUARTERLY', 'YEARLY'] as const;
 
@@ -30,6 +31,7 @@ export interface UpdateRecurringJournalEntryInput {
  */
 @Injectable()
 export class RecurringJournalEntryService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(RecurringJournalEntryService.name);
   private timer: ReturnType<typeof setInterval> | null = null;
   private running = false;
 
@@ -39,7 +41,7 @@ export class RecurringJournalEntryService implements OnModuleInit, OnModuleDestr
   ) {}
 
   onModuleInit() {
-    this.timer = setInterval(() => this.tick(), 60 * 60 * 1000); // hourly
+    this.timer = safeInterval('RecurringJournalEntryService', 60 * 60 * 1000, () => this.tick(), this.logger); // hourly
   }
 
   onModuleDestroy() {

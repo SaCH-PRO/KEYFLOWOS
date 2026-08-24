@@ -1,6 +1,7 @@
 import { Injectable, Logger, Inject, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { LandedCostEngine } from './landed-cost-engine.service';
+import { safeInterval } from '../../core/scheduling/safe-interval';
 
 const SNAPSHOT_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const SNAPSHOT_REASON = 'periodic';
@@ -17,9 +18,7 @@ export class MarginSnapshotSchedulerService implements OnModuleInit, OnModuleDes
 
   onModuleInit() {
     this.logger.log('[MarginSnapshotScheduler] Starting — capturing daily margin snapshots');
-    this.intervalRef = setInterval(() => {
-      void this.runSnapshots();
-    }, SNAPSHOT_INTERVAL_MS);
+    this.intervalRef = safeInterval('MarginSnapshotSchedulerService', SNAPSHOT_INTERVAL_MS, () => this.runSnapshots(), this.logger);
   }
 
   onModuleDestroy() {

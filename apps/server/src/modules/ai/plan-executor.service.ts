@@ -10,6 +10,7 @@ import { QueueService } from './queue.service';
 import { AgentStateMachineService, type AgentState } from './agent-state-machine.service';
 import { AutonomyOrchestratorService } from '../key-autonomy/autonomy-orchestrator.service';
 import { KeyActionProposalService } from '../key-autonomy/key-action-proposal.service';
+import { safeInterval } from '../../core/scheduling/safe-interval';
 
 export interface PlanExecutionResult {
   planId: string;
@@ -55,7 +56,7 @@ export class PlanExecutorService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
-    this.pollInterval = setInterval(() => this.tick(), this.POLL_MS);
+    this.pollInterval = safeInterval('PlanExecutorService', this.POLL_MS, () => this.tick(), this.logger);
     this.logger.log(`Plan executor polling started every ${this.POLL_MS}ms`);
   }
 

@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ClientMomentumService } from './client-momentum.service';
+import { safeInterval } from '../../core/scheduling/safe-interval';
 
 const SWEEP_CHECK_INTERVAL_MS = 60 * 1000;
 const TARGET_SWEEP_HOUR = 6;
@@ -18,9 +19,7 @@ export class MomentumSchedulerService implements OnModuleInit, OnModuleDestroy {
 
   onModuleInit() {
     this.logger.log('[MomentumScheduler] Starting scheduler — checking every 60s');
-    this.intervalRef = setInterval(() => {
-      void this.checkAndRunSweeps();
-    }, SWEEP_CHECK_INTERVAL_MS);
+    this.intervalRef = safeInterval('MomentumSchedulerService', SWEEP_CHECK_INTERVAL_MS, () => this.checkAndRunSweeps(), this.logger);
   }
 
   onModuleDestroy() {

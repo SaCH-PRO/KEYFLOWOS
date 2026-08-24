@@ -41,6 +41,7 @@ import { GenomeAutonomyGateService } from '../business-genome/key-genome/genome-
 import { AutonomyOrchestratorService } from '../key-autonomy/autonomy-orchestrator.service';
 import { KeyActionProposalService } from '../key-autonomy/key-action-proposal.service';
 import { KeyCortexApprovalOrchestratorService } from './key-cortex-approval-orchestrator.service';
+import { safeInterval } from '../../core/scheduling/safe-interval';
 
 // ─── Constants ──────────────────────────────────────────────────────────────────
 const EXECUTION_TIMEOUT_MS = 30000;
@@ -167,9 +168,7 @@ export class KeyCortexExecutorService {
     @Optional() @Inject(forwardRef(() => KeyCortexApprovalOrchestratorService)) private readonly approvalOrchestrator?: KeyCortexApprovalOrchestratorService,
   ) {
     // Start periodic cleanup of stale pending approvals (Fix 2)
-    this.approvalCleanupInterval = setInterval(() => {
-      this.cleanupStaleApprovals();
-    }, APPROVAL_CLEANUP_INTERVAL_MS);
+    this.approvalCleanupInterval = safeInterval('KeyCortexExecutorService', APPROVAL_CLEANUP_INTERVAL_MS, () => this.cleanupStaleApprovals(), this.logger);
   }
 
   /**
