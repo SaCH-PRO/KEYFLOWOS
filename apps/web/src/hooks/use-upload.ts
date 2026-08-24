@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react";
 import { API_BASE, getAuthHeaders } from "@/lib/api";
+import { getStoredBusinessId } from "@/lib/workspace";
 
 interface UploadMetadata {
   name: string;
@@ -32,6 +33,21 @@ interface UseUploadOptions {
 const REQUEST_URL_PATH = "/uploads/request-url";
 
 async function requestPresignedUrl(file: File): Promise<UploadResponse> {
+  // BusinessGuard protects this route and reads businessId from params, body or
+  // query — in that order — and throws "businessId is required" when it finds
+  // none. This body carried only the file metadata, so every upload through
+  // this hook returned 403 for anyone who is not a SUPER_ADMIN. That is the
+  // avatar picker, expense receipts and the social composer, all of which
+  // funnel through here by design.
+  //
+  // It stayed invisible because upload-real-surfaces.spec.ts mocks the presign
+  // endpoint: the test drives the real component but never the real guard, so
+  // it passed against a route that always refused.
+  const businessId = getStoredBusinessId();
+  if (!businessId) {
+    throw new Error("No active workspace — cannot upload until a business is selected");
+  }
+
   const response = await fetch(`${API_BASE}${REQUEST_URL_PATH}`, {
     method: "POST",
     headers: {
@@ -39,6 +55,7 @@ async function requestPresignedUrl(file: File): Promise<UploadResponse> {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
+      businessId,
       name: file.name,
       size: file.size,
       contentType: file.type || "application/octet-stream",

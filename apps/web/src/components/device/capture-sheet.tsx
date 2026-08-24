@@ -27,6 +27,7 @@ import {
   type CaptureResult,
 } from "@/lib/api/device";
 import { apiPostSimple } from "@/lib/api";
+import { getStoredBusinessId } from "@/lib/workspace";
 
 interface CaptureSheetProps {
   businessId: string;
@@ -139,10 +140,18 @@ export function CaptureSheet({
 
   const uploadFile = async (file: File, mode: CaptureMode) => {
     // 1. Get presigned upload URL
+    // businessId is required by BusinessGuard on this route — it reads params,
+    // body then query and refuses with "businessId is required" when absent.
+    // Omitting it made every capture 403 for non-SUPER_ADMIN users.
+    const captureBusinessId = getStoredBusinessId();
+    if (!captureBusinessId) {
+      throw new Error("No active workspace — cannot upload until a business is selected");
+    }
     const presignedRes = await apiPostSimple<{
       uploadURL: string;
       objectPath: string;
     }>("/uploads/request-url", {
+      businessId: captureBusinessId,
       name: file.name,
       size: file.size,
       contentType: file.type,

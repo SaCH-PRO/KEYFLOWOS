@@ -105,7 +105,12 @@ function useBusinessProgress(businessId: string | null) {
       settle(apiGet<unknown[]>(`/crm/businesses/${businessId}/contacts?limit=1`)),
       settle(apiGet<unknown[]>(`/commerce/businesses/${businessId}/invoices?limit=1`)),
       settle(apiGet<unknown[]>(`/documents/businesses/${businessId}/instances`)),
-      settle(apiGet<unknown[]>(`/expenses/businesses/${businessId}?limit=1`)),
+      // The list lives at .../expenses; without that segment this 404'd, and
+      // because every probe here is wrapped in settle(), the failure was
+      // swallowed and the card reported "no expenses yet" for businesses that
+      // had them. `limit` is not read by this endpoint — it is left in for
+      // consistency with the probes around it, which do honour it.
+      settle(apiGet<unknown[]>(`/expenses/businesses/${businessId}/expenses?limit=1`)),
       settle(apiGet<unknown[]>(`/projects/businesses/${businessId}?limit=1`)),
       settle(apiGet<unknown[]>(`/bookings/businesses/${businessId}?limit=1`)),
       settle(apiGet<unknown[]>(`/businesses/${businessId}/campaigns?limit=1`)),

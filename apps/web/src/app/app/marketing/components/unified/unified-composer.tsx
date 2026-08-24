@@ -590,19 +590,40 @@ export function UnifiedComposer({
     try {
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        const formData = new FormData();
-        formData.append("file", file);
-
-        const res = await fetch(`${API_BASE}/upload/businesses/${encodeURIComponent(businessId)}/media`, {
+        // There is no POST /upload/businesses/:id/media on the server and there
+        // never was — this posted multipart to a route that does not exist, so
+        // every media attachment failed with a toast and no explanation. The
+        // server offers one upload path: request a presigned URL, then PUT the
+        // file straight to storage. post-composer.tsx already does this through
+        // useUpload; this composer hand-rolled its own and got the shape wrong.
+        const presign = await fetch(`${API_BASE}/uploads/request-url`, {
           method: "POST",
-          headers: getAuthHeaders(),
-          body: formData,
+          headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+          body: JSON.stringify({
+            // Required by BusinessGuard, which refuses the request without it.
+            businessId,
+            name: file.name,
+            size: file.size,
+            contentType: file.type || "application/octet-stream",
+          }),
         });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.url) {
-            setMediaUrls((prev) => [...prev, data.url]);
-          }
+        if (!presign.ok) {
+          toast.error(`Failed to upload ${file.name}`);
+          continue;
+        }
+        const { uploadURL, objectPath } = (await presign.json()) as {
+          uploadURL: string;
+          objectPath: string;
+        };
+        const put = await fetch(uploadURL, {
+          method: "PUT",
+          body: file,
+          headers: { "Content-Type": file.type || "application/octet-stream" },
+        });
+        if (put.ok) {
+          // objectPath is the durable path; uploadURL carries a signature that
+          // expires, so storing it would leave dead links in saved posts.
+          setMediaUrls((prev) => [...prev, objectPath]);
         } else {
           toast.error(`Failed to upload ${file.name}`);
         }
