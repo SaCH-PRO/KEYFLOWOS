@@ -26,6 +26,7 @@ import { SignupDto, ResendVerificationDto } from './dto/signup.dto';
 import { LoginDto } from './dto/login.dto';
 import { ForgotPasswordDto, ResetPasswordDto } from './dto/password-reset.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { BusinessContextService } from './business-context.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
@@ -268,6 +269,64 @@ export class IdentityController {
       verificationRequired: isEmailVerificationRequired(),
       cooldownRemainingMs: result.cooldownRemainingMs,
     };
+  }
+
+  /**
+   * Change the password of a signed-in user.
+   *
+   * AuthGuard establishes WHO. The current password in the body establishes
+   * that the caller is not merely holding a token that leaked — see
+   * IdentityPasswordService.changePassword for why that distinction is the
+   * whole point of this endpoint.
+   *
+   * Rate limited per USER rather than per IP: the identity is already known
+   * here, and an IP key would both punish a shared office and let an attacker
+   * grind the current-password check from rotating addresses.
+   */
+  @UseGuards(AuthGuard)
+  @Post('change-password')
+  async changePassword(
+    @Body() body: ChangePasswordDto,
+    @CurrentUser() user: AuthenticatedUser,
+    @Req() req: Request,
+  ) {
+    if (!user?.id || !user?.email) throw new UnauthorizedException('Missing authenticated user');
+    const ip = this.clientIp(req);
+    const ua = this.clientUa(req);
+
+    try {
+      await this.authSec.enforce(AuthSecurityService.RULES.CHANGE_PASSWORD_USER, user.id);
+    } catch (rateErr) {
+      await this.authSec.audit({
+        event: 'rate_limited', outcome: 'rate_limited', email: user.email, userId: user.id,
+        ip, userAgent: ua, reason: 'change_password',
+      });
+      throw rateErr;
+    }
+
+    try {
+      await this.passwordSvc.changePassword({
+        userId: user.id,
+        email: user.email,
+        currentPassword: body.currentPassword,
+        newPassword: body.newPassword,
+        // The signup service owns credential exchange; passing the function in
+        // keeps the password service free of a dependency on it.
+        verifyCurrent: (email, password) => this.signupSvc.signInWithPassword(email, password),
+      });
+      await this.authSec.audit({
+        event: 'password_changed', outcome: 'success', email: user.email, userId: user.id, ip, userAgent: ua,
+      });
+      return { status: 'ok', message: 'Password updated. Other sessions have been signed out.' };
+    } catch (err) {
+      // Failures matter here: repeated ones mean something is guessing the
+      // current password while holding a valid session token.
+      await this.authSec.audit({
+        event: 'password_changed', outcome: 'failure', email: user.email, userId: user.id,
+        ip, userAgent: ua, reason: err instanceof Error ? err.message.slice(0, 200) : 'unknown',
+      });
+      throw err;
+    }
   }
 
   /**

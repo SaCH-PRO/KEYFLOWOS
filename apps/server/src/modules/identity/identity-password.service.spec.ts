@@ -162,3 +162,98 @@ describe('recovery redirect targets', () => {
     expect(() => svc.assertSafeRedirect('not a url', allowed)).toThrow(BadRequestException);
   });
 });
+
+describe('changing a password while signed in', () => {
+  const base = {
+    userId: 'u1',
+    email: 'person@example.com',
+    currentPassword: 'OldButValid2026!',
+    newPassword: 'BrandNewOne2026!',
+  };
+
+  it('re-authenticates BEFORE running the policy', async () => {
+    // AuthGuard has already run, so this is not about identity — it is about a
+    // token that leaked. Running the policy first would let whoever holds that
+    // token probe which passwords are acceptable, and fire the outbound HIBP
+    // lookup on their behalf, without ever knowing the current password.
+    const order: string[] = [];
+    const { svc, policy } = build({
+      policy: { validate: vi.fn(async () => { order.push('policy'); }) },
+    });
+
+    await svc.changePassword({
+      ...base,
+      verifyCurrent: vi.fn(async () => { order.push('verify'); }),
+    });
+
+    expect(order).toEqual(['verify', 'policy']);
+  });
+
+  it('rejects a wrong current password without touching the policy or the store', async () => {
+    const { svc, policy, admin } = build();
+
+    await expect(
+      svc.changePassword({
+        ...base,
+        verifyCurrent: vi.fn(async () => { throw new Error('invalid_credentials'); }),
+      }),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+
+    expect(policy.validate).not.toHaveBeenCalled();
+    expect(admin.updateUserPassword).not.toHaveBeenCalled();
+  });
+
+  it('does not leak why re-authentication failed', async () => {
+    // "account locked" or "email unverified" would tell someone holding a
+    // session token something about the account they do not already know.
+    const { svc } = build();
+    await expect(
+      svc.changePassword({
+        ...base,
+        verifyCurrent: vi.fn(async () => { throw new Error('Account is locked until 5pm'); }),
+      }),
+    ).rejects.toThrow('Current password is incorrect');
+  });
+
+  it('refuses a no-op change', async () => {
+    const { svc, admin } = build();
+    await expect(
+      svc.changePassword({
+        ...base,
+        newPassword: base.currentPassword,
+        verifyCurrent: vi.fn(async () => undefined),
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(admin.updateUserPassword).not.toHaveBeenCalled();
+  });
+
+  it('runs the same policy signup and reset use', async () => {
+    const { svc, policy } = build();
+    await svc.changePassword({ ...base, verifyCurrent: vi.fn(async () => undefined) });
+    expect(policy.validate).toHaveBeenCalledWith({
+      password: base.newPassword,
+      email: base.email,
+    });
+  });
+
+  it("signs out OTHER sessions, not the caller's own", async () => {
+    // 'global' would invalidate the session of the person who just changed
+    // their password — bouncing them to the login screen for good hygiene.
+    // Recovery uses 'global' because there the current session is the suspect;
+    // here it is the trusted one.
+    const { svc, admin } = build();
+    await svc.changePassword({ ...base, verifyCurrent: vi.fn(async () => undefined) });
+    expect(admin.signOut).toHaveBeenCalledWith('u1', 'others');
+  });
+
+  it('still succeeds when the sign-out sweep fails', async () => {
+    // The password IS changed by then. Throwing would tell the user it failed
+    // and invite a retry against a password that no longer exists.
+    const { svc } = build({
+      admin: { signOut: vi.fn(async () => { throw new Error('supabase timeout'); }) },
+    });
+    await expect(
+      svc.changePassword({ ...base, verifyCurrent: vi.fn(async () => undefined) }),
+    ).resolves.toBeUndefined();
+  });
+});

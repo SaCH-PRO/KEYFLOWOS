@@ -101,7 +101,7 @@ the credential.**
   signs real users out. An office behind one NAT is genuinely dozens of
   refreshes an hour. The real protection is that a refresh token is a
   high-entropy secret, not the ceiling.
-- **Only failures are audited** (`token_refresh_failed`). A success happens once
+- **Only failures are audited** (`token_refresh_failed` · `password_changed`). A success happens once
   an hour per session and would bury the ledger; a failure is an expired, spent,
   or revoked token being presented — which is what a replayed one looks like.
 - Every failure mode returns one indistinguishable error. Expired, already
@@ -117,6 +117,27 @@ the credential.**
 > There is also a short **reuse window** (~10s) in which the previous token still
 > works. That is deliberate on Supabase's side, so two tabs refreshing at once do
 > not lock each other out. Measured against a live project, not assumed.
+
+### Change password — `POST /identity/change-password` *(AuthGuard)*
+
+**Requires the current password even though the caller is already
+authenticated**, and that is the entire point of the endpoint.
+
+An access token is a *bearer* token: whoever holds it is the user until it
+expires. Without re-authentication, a token that leaks once — XSS, a shared
+machine, a log line — becomes **permanent** account takeover, because the holder
+can set a new password and lock the owner out. Demanding the current password
+means a stolen token alone is not enough.
+
+| Control | Detail |
+|---|---|
+| Re-auth first | The current password is verified **before** the policy runs — otherwise a stolen token could probe which passwords are acceptable and fire the HIBP lookup without ever knowing the current one |
+| Uniform failure | "Current password is incorrect" for every re-auth failure. "Account locked" or "unverified" would tell a token-holder something about the account they do not know |
+| Same policy | `PasswordPolicyService`, identical to signup and reset |
+| No no-op | The new password must differ from the current one |
+| Rate limit | 5/hr **per user ID**, not per IP — the identity is already known, and an IP key would punish a shared office while letting an attacker grind from rotating addresses |
+| Sign-out scope | **`others`**, not `global`. A global sweep would invalidate the session of the person who just changed their password. Recovery uses `global` because there the current session is the suspect; here it is the trusted one |
+| Audit | `password_changed`, on success **and** failure — repeated failures mean something is guessing the current password while holding a valid session |
 
 ### Password recovery — `POST /identity/forgot-password` → `POST /identity/reset-password`
 
@@ -152,6 +173,7 @@ Sliding window, backed by Postgres. Exceeding one returns **429** and writes a
 | `FORGOT_IP` / `FORGOT_EMAIL` | 8 / 4 | 1 hr |
 | `RESET_IP` | 10 | 1 hr |
 | `REFRESH_IP` | 120 | 1 hr |
+| `CHANGE_PASSWORD_USER` | 5 | 1 hr *(keyed by user ID)* |
 
 The client IP comes **exclusively** from `req.ip`, so the `TRUST_PROXY` setting in
 `app-bootstrap.ts` is the single place that decides how many `x-forwarded-for`
@@ -166,7 +188,7 @@ around every limit above.
 
 `signup` · `login_success` · `login_failure` · `logout` · `resend_verification` ·
 `rate_limited` · `password_reset_requested` · `password_reset_completed` ·
-`token_refresh_failed`
+`token_refresh_failed` · `password_changed`
 
 Writes are **logged and swallowed** on failure, deliberately: the ledger must never
 be able to take auth down.
@@ -185,9 +207,6 @@ flow in that position.
 
 **No account lockout.** Rate limiting slows an attacker per IP and per email; it
 does not lock an account after N failures.
-
-**Password changes for a signed-in user have no endpoint.** Only recovery can
-change a password.
 
 **Recovery emails are Supabase's templates**, so they do not match the branded
 Resend mail used for verification.

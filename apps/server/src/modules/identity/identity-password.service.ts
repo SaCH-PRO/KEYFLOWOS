@@ -97,6 +97,62 @@ export class IdentityPasswordService {
     return { userId: user.id, email: user.email ?? '' };
   }
 
+  /**
+   * Change the password of a signed-in user.
+   *
+   * WHY THE CURRENT PASSWORD IS REQUIRED even though AuthGuard already ran.
+   * An access token is a bearer token: whoever holds it is the user for as long
+   * as it lives. Without re-authentication, a token that leaks once — XSS, a
+   * shared machine, a log line — becomes PERMANENT account takeover, because
+   * the holder can set a new password and lock the owner out. Demanding the
+   * current password means a stolen token alone is not enough.
+   *
+   * Until now the only way to change a password was to trigger a recovery
+   * email, which is a poor experience for someone already signed in and, worse,
+   * trains people to expect password changes to arrive by email.
+   */
+  async changePassword(args: {
+    userId: string;
+    email: string;
+    currentPassword: string;
+    newPassword: string;
+    /** Verifies the current password. Injected so this service does not depend
+     *  on the signup service, which would be a cycle. */
+    verifyCurrent: (email: string, password: string) => Promise<unknown>;
+  }): Promise<void> {
+    if (args.currentPassword === args.newPassword) {
+      throw new BadRequestException('The new password must be different from the current one');
+    }
+
+    // Re-authenticate FIRST. Running the policy before this would let a caller
+    // holding only a stolen token probe which passwords are acceptable, and
+    // would fire the outbound HIBP lookup on their behalf — the same ordering
+    // mistake the reset flow guards against.
+    try {
+      await args.verifyCurrent(args.email, args.currentPassword);
+    } catch {
+      // Deliberately not the upstream error. Distinguishing "wrong password"
+      // from "account locked" or "unverified" here tells an attacker holding a
+      // session token something about the account they do not already know.
+      throw new UnauthorizedException('Current password is incorrect');
+    }
+
+    await this.policy.validate({ password: args.newPassword, email: args.email });
+    await this.admin.updateUserPassword(args.userId, args.newPassword);
+
+    // 'others', NOT 'global'. A global sign-out would invalidate the session of
+    // the person who just changed their password, bouncing them to the login
+    // screen as a reward for good hygiene. Recovery uses 'global' because there
+    // the current session is the one under suspicion; here it is the trusted one.
+    try {
+      await this.admin.signOut(args.userId, 'others');
+    } catch (err) {
+      this.logger.warn(
+        `Password changed but other-session sign-out failed for ${args.userId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
   /** Reject a redirect that would send a recovery link off-site. */
   assertSafeRedirect(redirectTo: string, allowedOrigins: string[]): void {
     let url: URL;

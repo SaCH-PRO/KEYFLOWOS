@@ -17,7 +17,11 @@ export type AuthEvent =
   // session and would bury the ledger in routine noise; a failed one is the
   // interesting event — an expired, already-rotated, or revoked token being
   // presented, which is what a replayed or stolen token looks like.
-  | 'token_refresh_failed';
+  | 'token_refresh_failed'
+  // Recorded on failure as well as success: repeated failures here mean
+  // something is guessing the CURRENT password while holding a valid session
+  // token, which is a materially different signal from a failed login.
+  | 'password_changed';
 
 export type AuthOutcome = 'success' | 'failure' | 'rate_limited' | 'error';
 
@@ -109,6 +113,12 @@ export class AuthSecurityService {
     // high-entropy secret Supabase rotates on every use — guessing one is not
     // a rate-limiting problem.
     REFRESH_IP: { scope: 'refresh:ip', limit: 120, windowMs: 60 * 60_000 },
+    // Keyed by USER ID, not by IP — this is the only authenticated endpoint in
+    // this list, so the identity is already known and is the thing worth
+    // limiting. An IP key would let an attacker holding one stolen token grind
+    // the current-password check from a rotating address, and would punish an
+    // office where several people change passwords the same afternoon.
+    CHANGE_PASSWORD_USER: { scope: 'change_password:user', limit: 5, windowMs: 60 * 60_000 },
   } as const satisfies Record<string, RateLimitRule>;
 
   private lastPruneAt = 0;
