@@ -79,7 +79,7 @@ human decision. Any wrong-direction move: do NOT update the row; open a
 
 | Check | Last result | At | Command |
 |---|---|---|---|
-| /healthz.commit == origin/main HEAD | commit-drift unavailable — direct egress still blocked (403 on CONNECT keyflowos.com:443); CI fallback confirms prod up (uptime-monitor run 32728514443, success, 2026-08-24T12:42:20Z) but does not expose the deployed commit | 2026-08-24T13:04Z | `curl -s $PROD/api/healthz \| jq .commit` vs `git ls-remote origin main` |
-| /readyz | healthy via CI fallback — uptime-monitor run 32728514443 success at 2026-08-24T12:42:20Z (22 min before this run); direct egress still blocked | 2026-08-24T13:04Z | `curl -s -o /dev/null -w '%{http_code}' $PROD/api/readyz` |
-| /healthz/events queue depth | unavailable — CI fallback exposes no queue metrics; direct egress still blocked | 2026-08-24T13:04Z | `curl -s $PROD/api/healthz/events` |
-| route-parity oracle (6 ledgered paths) | skipped — CI-fallback path has no route-parity substitute (oracle needs direct egress); not filed as blind this run, per playbook | 2026-08-24T13:04Z | `node scripts/os/probe-routes.mjs --base $PROD/api --routes <ledger-paths>` |
+| /healthz.commit == origin/main HEAD | commit-drift now attempted via `deploy-drift.yml` (added today, dca2b02) instead of direct compare — but the workflow has 0 completed runs yet (its only trigger is a daily 08:00 UTC cron; next fire 2026-08-25T08:00Z) → `warn` `deploy-drift.stale`. Direct egress still blocked (403 on CONNECT keyflowos.com:443) | 2026-08-24T19:02Z | `gh run list --repo SaCH-PRO/KEYFLOWOS --workflow deploy-drift.yml --limit 3 --json conclusion,status,createdAt` |
+| /readyz | healthy via CI fallback — uptime-monitor run 32764788315, success at 2026-08-24T18:51:36Z (10 min before this run); direct egress still blocked | 2026-08-24T19:02Z | `curl -s -o /dev/null -w '%{http_code}' $PROD/api/readyz` |
+| /healthz/events queue depth | unavailable — CI fallback exposes no queue metrics; direct egress still blocked | 2026-08-24T19:02Z | `curl -s $PROD/api/healthz/events` |
+| route-parity oracle (6 ledgered paths) | skipped — CI-fallback path has no route-parity substitute (oracle needs direct egress); not filed as blind this run, per playbook | 2026-08-24T19:02Z | `node scripts/os/probe-routes.mjs --base $PROD/api --routes <ledger-paths>` |
