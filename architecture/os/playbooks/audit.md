@@ -18,6 +18,25 @@ journal/**`. This cycle never opens PRs; it opens issues.
 Secrets: `PROD_BASE` (e.g. `https://keyflowos.com`) from routine config.
 Never echo tokens into logs, findings, or commits.
 
+## Environment prerequisite (unresolved 2026-08-24)
+
+The cloud routine's egress must allow `keyflowos.com` and `api.keyflowos.com`.
+It does not today: the 2026-08-24T01:02Z run got `403 Forbidden` on
+`CONNECT keyflowos.com:443` from the session's own egress proxy (confirmed via
+`$HTTPS_PROXY/__agentproxy/status`), so every probe returned unreachable and
+the cycle correctly filed `prod.unreachable`/`probe.oracle-blind` (#64/#65)
+rather than "prod is down" (verified independently: prod was healthy, 200).
+Until this is resolved the audit cycle runs but can confirm nothing about
+production. Two fixes, in preference order:
+1. **Allowlist the two hosts** in the cloud environment's egress settings
+   (a human action in Claude Code cloud config). Keeps this playbook intact.
+2. **Read health from CI instead of probing prod.** The cloud session *can*
+   reach GitHub (it files issues), and `.github/workflows/uptime-monitor.yml`
+   probes prod every 5 min from GitHub's runners. Deriving prod health from
+   that workflow's recent run conclusions (`gh run list --workflow "Uptime
+   monitor"`) needs no prod egress — but first verify `scripts/uptime-monitor.sh`
+   exits non-zero on failure, or the run conclusion won't reflect health.
+
 ## Steps
 
 1. Health triple:

@@ -25,12 +25,31 @@ journal/**`. Anything else → PR. Push rejected → rebase once, else PR.
    touch them; note in journal.
 2. Build (rule 6 — a stale dist hangs rather than fails):
    `pnpm install --frozen-lockfile`, then
+   **`pnpm --filter @keyflow/db db:generate`** — a fresh clone has no
+   `node_modules/.prisma`. `turbo.json` declares this as a build dependency
+   (`build: dependsOn [..., @keyflow/db#db:generate]`), but the explicit
+   `--filter build` invocations below bypass turbo's graph and skip it;
+   omitting it produces `Prisma.ModelName`-missing TS errors that read
+   exactly like a code regression. Then
    `pnpm --filter @keyflow/shared --filter @keyflow/db --filter @keyflow/api build`,
    then `pnpm --filter server build`.
-3. Gate suite: `cd apps/server && npx vitest run`.
+3. Gate suite (DB-free): `cd apps/server && pnpm test:unit`
+   (= `vitest run -c vitest.unit.config.ts`, `src/**/*.spec.ts`). This runs
+   every structural/ledger gate — public-surface, tenant-model-list,
+   gate-vacuity, doc-debt, route-parity, event-wiring, unreachable-provider —
+   none of which touch a database. Do NOT run the bare `npx vitest run`
+   (default config): it also collects `test/**` integration and e2e suites
+   that require Postgres + Redis, which the cloud cycle container does not
+   provide — their `beforeAll` throws and vitest reports it as "skipped",
+   a false red (measured 2026-08-24: 19 files / 5 tests failed / 125 skipped,
+   every one from the absent DB — issue #66). The integration/e2e suite is
+   CI's responsibility; CI provisions pgvector + redis and runs the full
+   config on every push.
    - Green with 0 skipped → continue.
-   - Any failure or ANY skip → journal (quote the shuffle seed line), open
-     issue `truth: main is red`, **stop**. Never fix a red main in this cycle.
+   - Any failure or ANY skip → journal (the unit config runs
+     `sequence.shuffle`, so quote the `Running tests with seed "<n>"` line;
+     `--sequence.seed=<n>` replays it), open issue `truth: main is red`,
+     **stop**. Never fix a red main in this cycle.
 4. Regenerate (all four families, in place; `PY` is `python3` on Linux/cloud,
    `py -3` on Windows):
    - `node scripts/architecture/generate-registries.js`
