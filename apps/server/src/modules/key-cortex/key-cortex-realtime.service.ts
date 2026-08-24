@@ -16,6 +16,7 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { Interval } from '@nestjs/schedule';
 import { KeyCortexGateway } from './key-cortex.gateway';
 import { KeyCortexInsightService } from './key-cortex-insight.service';
+import { runGuarded } from '../../core/scheduling/safe-interval';
 
 // ------------------------------------------------------------------
 // Event payload types
@@ -219,7 +220,17 @@ export class KeyCortexRealtimeService implements OnModuleInit {
   }
 
   /** Periodic health push every 5 minutes — keeps dashboards fresh. */
-  @Interval(300_000) // 5 minutes
+  @Interval(300_000)
+  // Nest's SchedulerOrchestrator mounts @Interval with a raw
+  // `setInterval(target, ms)` — no wrapper — so an async handler that rejects
+  // becomes an unhandled rejection, and main.ts exits(1) on those. (@Cron is
+  // NOT affected: the cron library catches both paths itself. Verified
+  // empirically, not assumed.) The work stays in handlePeriodicHealthPush() so callers and
+  // tests are unchanged; only the scheduled entry point is guarded.
+  handlePeriodicHealthPushTick(): void {
+    runGuarded('KeyCortexRealtimeService', () => this.handlePeriodicHealthPush(), this.logger);
+  }
+
   async handlePeriodicHealthPush() {
     this.logger.debug('Running periodic health push');
 

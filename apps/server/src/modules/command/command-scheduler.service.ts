@@ -3,6 +3,7 @@ import { Inject } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { CommandGeneratorService } from './command-generator.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { runGuarded } from '../../core/scheduling/safe-interval';
 
 @Injectable()
 export class CommandSchedulerService {
@@ -13,7 +14,17 @@ export class CommandSchedulerService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
-  @Interval(60 * 60 * 1000) // Every hour
+  @Interval(60 * 60 * 1000)
+  // Nest's SchedulerOrchestrator mounts @Interval with a raw
+  // `setInterval(target, ms)` — no wrapper — so an async handler that rejects
+  // becomes an unhandled rejection, and main.ts exits(1) on those. (@Cron is
+  // NOT affected: the cron library catches both paths itself. Verified
+  // empirically, not assumed.) The work stays in scheduledScan() so callers and
+  // tests are unchanged; only the scheduled entry point is guarded.
+  scheduledScanTick(): void {
+    runGuarded('CommandSchedulerService', () => this.scheduledScan(), this.logger);
+  }
+
   async scheduledScan() {
     this.logger.log('Starting scheduled command generation scan');
     try {

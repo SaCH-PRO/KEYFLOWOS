@@ -5,6 +5,7 @@ import { RulesService, SYSTEM_RULES } from './rules.service';
 import { SignalsService } from './signals.service';
 import { CommandBridgeService } from './command-bridge.service';
 import { HealthScoreService } from './health-score.service';
+import { runGuarded } from '../../core/scheduling/safe-interval';
 
 @Injectable()
 export class ScheduledScansService implements OnModuleInit {
@@ -22,7 +23,17 @@ export class ScheduledScansService implements OnModuleInit {
     this.logger.log('ScheduledScansService initialized');
   }
 
-  @Interval(1000 * 60 * 30) // every 30 minutes
+  @Interval(1000 * 60 * 30)
+  // Nest's SchedulerOrchestrator mounts @Interval with a raw
+  // `setInterval(target, ms)` — no wrapper — so an async handler that rejects
+  // becomes an unhandled rejection, and main.ts exits(1) on those. (@Cron is
+  // NOT affected: the cron library catches both paths itself. Verified
+  // empirically, not assumed.) The work stays in runAllScans() so callers and
+  // tests are unchanged; only the scheduled entry point is guarded.
+  runAllScansTick(): void {
+    runGuarded('ScheduledScansService', () => this.runAllScans(), this.logger);
+  }
+
   async runAllScans() {
     this.logger.log('Running scheduled business scans...');
     const businesses = await this.prisma.client.business.findMany({

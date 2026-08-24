@@ -2,6 +2,7 @@ import { Injectable, Logger, Inject, OnModuleInit } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { GenomeSignalService } from '../business-genome/key-genome/genome-signal.service';
+import { runGuarded } from '../../core/scheduling/safe-interval';
 
 const PATTERNS = [
   {
@@ -144,6 +145,16 @@ export class TemporalFlowGenomeBridgeService implements OnModuleInit {
    * TemporalFlowMemoryQueueService for higher priority detection.
    */
   @Interval(15 * 60 * 1000)
+  // Nest's SchedulerOrchestrator mounts @Interval with a raw
+  // `setInterval(target, ms)` — no wrapper — so an async handler that rejects
+  // becomes an unhandled rejection, and main.ts exits(1) on those. (@Cron is
+  // NOT affected: the cron library catches both paths itself. Verified
+  // empirically, not assumed.) The work stays in detectPatternsForAll() so callers and
+  // tests are unchanged; only the scheduled entry point is guarded.
+  detectPatternsForAllTick(): void {
+    runGuarded('TemporalFlowGenomeBridgeService', () => this.detectPatternsForAll(), this.logger);
+  }
+
   async detectPatternsForAll(): Promise<void> {
     try {
       const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
