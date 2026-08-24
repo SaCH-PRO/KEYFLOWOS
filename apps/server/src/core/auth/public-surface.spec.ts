@@ -150,7 +150,13 @@ const ACKNOWLEDGED_PUBLIC: Record<string, number> = {
   //                    through the same PasswordPolicyService signup uses
   //                    (including the Pwned Passwords lookup), and every other
   //                    session is dropped on success.
-  'modules/identity/identity.controller.ts': 11,
+  //   refresh          the refresh token IS the credential — the access token
+  //                    that would normally authenticate this call has expired,
+  //                    which is the entire reason the caller is here. Rate
+  //                    limited per IP, and every FAILED exchange is audited
+  //                    (successes are once-an-hour routine and would bury the
+  //                    ledger; a failure is what a replayed token looks like).
+  'modules/identity/identity.controller.ts': 12,
   'modules/key-connector/key-connector.controller.ts': 10,
   'modules/keystore/keystore-admin.controller.ts': 11,
   'modules/keystore/keystore.controller.ts': 10,

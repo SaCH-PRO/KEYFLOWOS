@@ -12,7 +12,12 @@ export type AuthEvent =
   // browser talked to Supabase directly, so a password change — the single
   // most security-relevant thing an account can do — left no trace here.
   | 'password_reset_requested'
-  | 'password_reset_completed';
+  | 'password_reset_completed'
+  // Only FAILURES are recorded. A successful refresh happens once an hour per
+  // session and would bury the ledger in routine noise; a failed one is the
+  // interesting event — an expired, already-rotated, or revoked token being
+  // presented, which is what a replayed or stolen token looks like.
+  | 'token_refresh_failed';
 
 export type AuthOutcome = 'success' | 'failure' | 'rate_limited' | 'error';
 
@@ -94,6 +99,16 @@ export class AuthSecurityService {
     // The completion step is limited too, so a stolen recovery link cannot be
     // used to grind the password policy for an accepted value.
     RESET_IP: { scope: 'reset:ip', limit: 10, windowMs: 60 * 60_000 },
+    // Refresh is DELIBERATELY loose, and the reason is availability rather than
+    // generosity: this sits on the critical path of every signed-in session, so
+    // a limit tuned too tight does not slow an attacker, it signs real users
+    // out. An office behind one NAT is genuinely dozens of refreshes an hour.
+    //
+    // The ceiling is here to bound abuse, not to be a precise control. The
+    // actual protection on this endpoint is that a refresh token is a
+    // high-entropy secret Supabase rotates on every use — guessing one is not
+    // a rate-limiting problem.
+    REFRESH_IP: { scope: 'refresh:ip', limit: 120, windowMs: 60 * 60_000 },
   } as const satisfies Record<string, RateLimitRule>;
 
   private lastPruneAt = 0;

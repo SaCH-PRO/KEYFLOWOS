@@ -90,6 +90,34 @@ Two things, because one is not enough:
    tokens**, which are self-contained JWTs that Supabase cannot recall. Read back
    by `auth.middleware.ts:145`.
 
+### Token refresh — `POST /identity/refresh`
+
+No `AuthGuard`, necessarily: the access token that would authenticate this call
+has expired, which is the whole reason the caller is here. **The refresh token is
+the credential.**
+
+- Rate limited 120/hr per IP — deliberately loose. This is on the critical path
+  of every signed-in session, so a tight limit does not slow an attacker, it
+  signs real users out. An office behind one NAT is genuinely dozens of
+  refreshes an hour. The real protection is that a refresh token is a
+  high-entropy secret, not the ceiling.
+- **Only failures are audited** (`token_refresh_failed`). A success happens once
+  an hour per session and would bury the ledger; a failure is an expired, spent,
+  or revoked token being presented — which is what a replayed one looks like.
+- Every failure mode returns one indistinguishable error. Expired, already
+  rotated, revoked by a logout, never valid: the caller signs in again in all
+  four cases, and telling them apart would tell whoever holds a stolen token
+  which kind they have.
+
+> **Supabase rotates the refresh token on every use, and the client must store
+> what comes back.** Keeping the old value leaves it holding a spent credential,
+> and the next refresh fails looking like an expiry rather than a bug — an
+> intermittent, unreproducible logout.
+>
+> There is also a short **reuse window** (~10s) in which the previous token still
+> works. That is deliberate on Supabase's side, so two tabs refreshing at once do
+> not lock each other out. Measured against a live project, not assumed.
+
 ### Password recovery — `POST /identity/forgot-password` → `POST /identity/reset-password`
 
 Both are **necessarily unauthenticated** — the premise is a user who cannot sign
@@ -123,6 +151,7 @@ Sliding window, backed by Postgres. Exceeding one returns **429** and writes a
 | `RESEND_IP` / `RESEND_EMAIL` | 10 / 5 | 1 hr |
 | `FORGOT_IP` / `FORGOT_EMAIL` | 8 / 4 | 1 hr |
 | `RESET_IP` | 10 | 1 hr |
+| `REFRESH_IP` | 120 | 1 hr |
 
 The client IP comes **exclusively** from `req.ip`, so the `TRUST_PROXY` setting in
 `app-bootstrap.ts` is the single place that decides how many `x-forwarded-for`
@@ -136,7 +165,8 @@ around every limit above.
 `auth_audit_logs`, readable by super-admins at `GET /identity/admin/auth-audit`.
 
 `signup` · `login_success` · `login_failure` · `logout` · `resend_verification` ·
-`rate_limited` · `password_reset_requested` · `password_reset_completed`
+`rate_limited` · `password_reset_requested` · `password_reset_completed` ·
+`token_refresh_failed`
 
 Writes are **logged and swallowed** on failure, deliberately: the ledger must never
 be able to take auth down.
@@ -147,14 +177,9 @@ be able to take auth down.
 
 Stated plainly, because these are the next things to look at.
 
-**Token refresh still goes browser → Supabase directly.**
-`workspace.ts` calls `/auth/v1/token?grant_type=refresh_token`. It never crosses
-this server, so it is not rate limited or audited by us. Lower risk than recovery
-was — it exchanges a token rather than changing a credential — but it is the same
-shape as the gap this document was written after closing.
-
-**Google OAuth is browser → Supabase directly** (`/auth/v1/authorize`), same
-consequence.
+**Google OAuth is browser → Supabase directly** (`/auth/v1/authorize`). It never
+crosses this server, so it is not rate limited or audited here. It is the last
+flow in that position.
 
 **No MFA / TOTP**, and no step-up for sensitive actions.
 

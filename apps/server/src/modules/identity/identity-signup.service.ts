@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { SupabaseAdminService, SupabaseAdminError } from '../../core/auth/supabase-admin.service';
 import { SystemEmailService } from '../notifications/system-email.service';
 import { verificationEmailTemplate } from '../notifications/email-templates';
@@ -364,6 +364,64 @@ export class IdentitySignupService {
       });
     }
     return { accessToken: json.access_token, refreshToken: json.refresh_token, userId: json.user?.id };
+  }
+
+  /**
+   * Exchange a refresh token for a new session.
+   *
+   * Same transport and error shape as signInWithPassword above — they are the
+   * two credential exchanges this server performs, and keeping them adjacent is
+   * what stops one of them quietly acquiring different timeout or error
+   * handling than the other.
+   *
+   * Supabase rotates the refresh token on every use, so the caller MUST store
+   * the returned one. Dropping it leaves the client holding a token that has
+   * already been spent, and the next refresh fails for a reason that looks
+   * like an expiry rather than a bug.
+   */
+  async refreshSession(refreshToken: string) {
+    const url = (process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '').trim();
+    const anon = (process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '').trim();
+    if (!url || !anon) {
+      throw new BadRequestException({
+        code: 'refresh_unavailable',
+        message: 'Session refresh is unavailable.',
+      });
+    }
+    let res: Response;
+    try {
+      res = await fetch(`${url}/auth/v1/token?grant_type=refresh_token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: anon },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+        signal: AbortSignal.timeout(10_000),
+      });
+    } catch {
+      throw new BadRequestException({
+        code: 'refresh_unreachable',
+        message: 'Session service is unreachable right now — please try again.',
+      });
+    }
+    const json = (await res.json().catch(() => null)) as
+      | { access_token?: string; refresh_token?: string; error_description?: string; msg?: string; error?: string }
+      | null;
+
+    if (!res.ok || !json?.access_token) {
+      // Deliberately one message for every failure mode. Expired, already
+      // rotated, revoked by a logout, or never valid — the client's response is
+      // identical in all four cases (sign in again), and distinguishing them
+      // would tell whoever is holding a stolen token which kind they have.
+      throw new UnauthorizedException({
+        code: 'refresh_failed',
+        message: 'Session expired. Please sign in again.',
+      });
+    }
+    return {
+      accessToken: json.access_token,
+      // Supabase does not always rotate; fall back to the presented token so
+      // the caller never stores `undefined` and locks the user out.
+      refreshToken: json.refresh_token ?? refreshToken,
+    };
   }
 
   private translateAndThrow(err: unknown): never {

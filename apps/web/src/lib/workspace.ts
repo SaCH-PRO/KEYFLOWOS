@@ -1,6 +1,10 @@
 "use client";
 
 import { bootstrapIdentity } from "./client";
+// ./api-base rather than ./api: api.ts imports refreshAccessToken from THIS
+// file, so pulling API_BASE from there would close an import cycle and could
+// leave the constant undefined depending on which module initialises first.
+import { getApiBase } from "./api-base";
 
 const BUSINESS_ID_KEY = "kf_business_id";
 const TOKEN_KEY = "kf_token";
@@ -219,7 +223,7 @@ let refreshPromise: Promise<boolean> | null = null;
 export async function refreshAccessToken(): Promise<boolean> {
   if (typeof window === "undefined") return false;
   const refreshToken = getStoredRefreshToken();
-  if (!refreshToken || !SUPABASE_URL || !SUPABASE_ANON_KEY) return false;
+  if (!refreshToken) return false;
 
   if (isRefreshing && refreshPromise) {
     return refreshPromise;
@@ -228,21 +232,26 @@ export async function refreshAccessToken(): Promise<boolean> {
   isRefreshing = true;
   refreshPromise = (async () => {
     try {
-      const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+      // Goes through our server rather than straight to Supabase. Refresh was
+      // the last auth flow that never crossed the backend, so a failed refresh
+      // — an expired, already-spent, or revoked token, which is what a replayed
+      // one looks like — was invisible in the audit ledger.
+      const res = await fetch(`${getApiBase()}/identity/refresh`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          apikey: SUPABASE_ANON_KEY,
-        },
-        body: JSON.stringify({ refresh_token: refreshToken }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refreshToken }),
       });
       const data = await res.json().catch(() => null);
-      if (!res.ok || !data?.access_token) {
+      if (!res.ok || !data?.accessToken) {
         return false;
       }
-      setStoredToken(data.access_token);
-      if (data.refresh_token) {
-        setStoredRefreshToken(data.refresh_token);
+      setStoredToken(data.accessToken);
+      // Supabase ROTATES the refresh token on use, and the server passes the
+      // new one straight through. Keeping the old value here would leave the
+      // client holding a token that has already been spent, and the next
+      // refresh would fail looking like an expiry rather than a bug.
+      if (data.refreshToken) {
+        setStoredRefreshToken(data.refreshToken);
       }
       return true;
     } catch {

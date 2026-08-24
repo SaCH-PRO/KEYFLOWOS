@@ -25,6 +25,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { SignupDto, ResendVerificationDto } from './dto/signup.dto';
 import { LoginDto } from './dto/login.dto';
 import { ForgotPasswordDto, ResetPasswordDto } from './dto/password-reset.dto';
+import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { BusinessContextService } from './business-context.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
@@ -267,6 +268,57 @@ export class IdentityController {
       verificationRequired: isEmailVerificationRequired(),
       cooldownRemainingMs: result.cooldownRemainingMs,
     };
+  }
+
+  /**
+   * Exchange a refresh token for a new session.
+   *
+   * This was the last flow still going browser-to-Supabase directly. Moving it
+   * here is worth less than moving recovery was — refresh trades a token rather
+   * than changing a credential — but it buys two things: a failed refresh now
+   * appears in the audit ledger, and the Supabase URL and anon key stop being
+   * required on this path.
+   *
+   * NO AuthGuard, necessarily: the caller's access token is expired, which is
+   * the entire reason they are here. The refresh token IS the credential.
+   *
+   * Only failures are audited. A success happens once an hour per session and
+   * would drown the ledger; a failure is an expired, spent, or revoked token
+   * being presented, which is what a replayed one looks like.
+   */
+  @Post('refresh')
+  async refresh(@Body() body: RefreshTokenDto, @Req() req: Request) {
+    const ip = this.clientIp(req);
+    const ua = this.clientUa(req);
+
+    try {
+      await this.authSec.enforce(AuthSecurityService.RULES.REFRESH_IP, ip);
+    } catch (rateErr) {
+      await this.authSec.audit({
+        event: 'rate_limited', outcome: 'rate_limited', ip, userAgent: ua, reason: 'refresh',
+      });
+      throw rateErr;
+    }
+
+    try {
+      const session = await this.signupSvc.refreshSession(body.refreshToken);
+      return {
+        status: 'ok',
+        accessToken: session.accessToken,
+        // Supabase rotates on use. The client MUST store this one — keeping the
+        // old value leaves it holding a token that has already been spent.
+        refreshToken: session.refreshToken,
+      };
+    } catch (err) {
+      await this.authSec.audit({
+        event: 'token_refresh_failed',
+        outcome: 'failure',
+        ip,
+        userAgent: ua,
+        reason: err instanceof Error ? err.message.slice(0, 200) : 'unknown',
+      });
+      throw err;
+    }
   }
 
   /**
