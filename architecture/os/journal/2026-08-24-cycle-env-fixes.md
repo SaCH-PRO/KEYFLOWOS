@@ -36,13 +36,28 @@ dependencies the cycles' commands assume.**
   This also realigns the "quote the shuffle seed" instruction, which only the
   unit config actually satisfies (the default config has no shuffle — the truth
   cycle correctly noticed and recorded that mismatch).
-- `audit.md`: documented the egress prerequisite and the two resolution paths
-  (allowlist the hosts, or read health from the uptime-monitor workflow).
+- `audit.md`: **implemented option 2** (a later pass). Step 1 now tries the
+  direct probe and, when egress is blocked, falls back to reading prod health
+  from the `uptime-monitor.yml` workflow's most recent run conclusion via
+  `gh run list` — a path the cloud session already has. Verified the signal is
+  real: `scripts/uptime-monitor.sh` exits 1 only after 2 consecutive failures
+  (debounced), 2 on misconfig, 0 otherwise, and the workflow's recent runs are
+  all `success` at ~11-13 min cadence. The fallback confirms up/down but not
+  prod's commit, so the commit-drift check stays a direct-path-only capability
+  (records `commit-drift.unavailable` when blocked). Route parity is skipped
+  (not failed) on the CI path — the oracle has no CI substitute.
 
 ## Left for the human / follow-up
 
-- The audit egress (allowlist `keyflowos.com` + `api.keyflowos.com` in the
-  cloud env) is a settings action only the account owner can take.
+- The audit egress allowlist (`keyflowos.com` + `api.keyflowos.com` in the
+  cloud env) is a settings action only the account owner can take. It is no
+  longer blocking — the CI fallback makes the audit useful without it — but
+  it is the ONLY path that restores the commit-drift check (prod's deployed
+  commit vs origin/main), which nothing else can observe.
+- The audit routine PROMPT embeds a "shape of the run" summary that still says
+  "probe prod /healthz…"; update it via RemoteTrigger to mention the CI
+  fallback, mirroring the truth-prompt fix, so the routine's embedded summary
+  agrees with the playbook it also tells the agent to follow.
 - The truth routine's PROMPT embeds a summary that also says "run the full gate
   suite (npx vitest run)"; it must be updated via RemoteTrigger to match this
   playbook, or the routine keeps running the DB-dependent config.
