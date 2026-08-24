@@ -79,7 +79,7 @@ human decision. Any wrong-direction move: do NOT update the row; open a
 
 | Check | Last result | At | Command |
 |---|---|---|---|
-| /healthz.commit == origin/main HEAD | unreachable — session egress blocked (403 on CONNECT keyflowos.com:443), 2nd consecutive run, issue #64 still open | 2026-08-24T07:02Z | `curl -s $PROD/api/healthz \| jq .commit` vs `git ls-remote origin main` |
-| /readyz | unreachable — same egress block, 2nd consecutive run, issue #64 still open | 2026-08-24T07:02Z | `curl -s -o /dev/null -w '%{http_code}' $PROD/api/readyz` |
-| /healthz/events queue depth | unreachable — same egress block, 2nd consecutive run, issue #64 still open | 2026-08-24T07:02Z | `curl -s $PROD/api/healthz/events` |
-| route-parity oracle (6 ledgered paths) | BLIND (exit 2) — controls unreachable, same egress block, 2nd consecutive run, issue #65 still open | 2026-08-24T07:02Z | `node scripts/os/probe-routes.mjs --base $PROD/api --routes <ledger-paths>` |
+| /healthz.commit == origin/main HEAD | commit-drift unavailable — direct egress still blocked (403 on CONNECT keyflowos.com:443); CI fallback confirms prod up (uptime-monitor run 32728514443, success, 2026-08-24T12:42:20Z) but does not expose the deployed commit | 2026-08-24T13:04Z | `curl -s $PROD/api/healthz \| jq .commit` vs `git ls-remote origin main` |
+| /readyz | healthy via CI fallback — uptime-monitor run 32728514443 success at 2026-08-24T12:42:20Z (22 min before this run); direct egress still blocked | 2026-08-24T13:04Z | `curl -s -o /dev/null -w '%{http_code}' $PROD/api/readyz` |
+| /healthz/events queue depth | unavailable — CI fallback exposes no queue metrics; direct egress still blocked | 2026-08-24T13:04Z | `curl -s $PROD/api/healthz/events` |
+| route-parity oracle (6 ledgered paths) | skipped — CI-fallback path has no route-parity substitute (oracle needs direct egress); not filed as blind this run, per playbook | 2026-08-24T13:04Z | `node scripts/os/probe-routes.mjs --base $PROD/api --routes <ledger-paths>` |
