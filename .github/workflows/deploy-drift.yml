@@ -1,0 +1,65 @@
+name: Deploy drift
+
+# Alerts when production is running code far behind main — a forgotten deploy.
+# deploy.sh's postmortem is exactly this: prod 221 commits / 11 days behind,
+# carrying a proven exploit, because nobody redeployed. Nothing watched for it.
+#
+# Runs from a GitHub runner, which CAN reach production (unlike the
+# egress-restricted cloud audit cycle), and compares prod's /api/healthz commit
+# to main via the GitHub compare API — no local git history, no prod egress
+# from the cloud. The run CONCLUSION is the signal the audit cycle reads for its
+# commit-drift check: success = current (or within threshold), failure = drifted.
+# Daily cadence because drift is a slow-moving property that only changes on
+# deploy, and a daily run debounces alerts without any state file.
+#
+# Required repository variable:  vars.PROD_BASE_URL  (serves /api/healthz)
+# Optional variables: vars.DRIFT_DAYS (default 7), vars.DRIFT_COMMITS (default 200)
+# Optional secrets:  secrets.UPTIME_SLACK_WEBHOOK_URL, secrets.UPTIME_ALERT_WEBHOOK_URL
+
+on:
+  schedule:
+    - cron: "0 8 * * *"   # daily 08:00 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-drift
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4   # shallow is fine — the compare is server-side
+
+      - name: Check deploy drift
+        env:
+          API_BASE: ${{ vars.PROD_BASE_URL }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          MAIN_REF: main
+          DRIFT_DAYS: ${{ vars.DRIFT_DAYS || '7' }}
+          DRIFT_COMMITS: ${{ vars.DRIFT_COMMITS || '200' }}
+          SLACK_WEBHOOK_URL: ${{ secrets.UPTIME_SLACK_WEBHOOK_URL }}
+          ALERT_WEBHOOK_URL: ${{ secrets.UPTIME_ALERT_WEBHOOK_URL }}
+          MONITOR_LABEL: keyflowos-prod
+        run: |
+          if [ -z "${API_BASE}" ]; then
+            echo "::error::vars.PROD_BASE_URL is not set — cannot check deploy drift." \
+              "Add it under Settings → Secrets and variables → Actions → Variables."
+            exit 1
+          fi
+          rc=0
+          bash scripts/deploy-drift-check.sh || rc=$?
+          # 0 = current, 1 = drifted (fail the run so the audit reads it), 3 =
+          # inconclusive (prod unreachable / compare failed). Inconclusive must
+          # NOT read as drift — prod-down is the uptime monitor's job — so map
+          # it to success with a visible warning.
+          if [ "$rc" = "3" ]; then
+            echo "::warning title=deploy-drift::inconclusive (prod unreachable or compare failed) — not counted as drift"
+            exit 0
+          fi
+          exit "$rc"

@@ -47,6 +47,27 @@ dependencies the cycles' commands assume.**
   (records `commit-drift.unavailable` when blocked). Route parity is skipped
   (not failed) on the CI path — the oracle has no CI substitute.
 
+## Commit-drift restored without egress (deploy-drift.yml)
+
+The one thing the CI health-fallback could not cover was commit-drift (is prod
+running current code?) — the cloud can't read prod's `/healthz.commit`. Closed
+it where both halves ARE available: a new daily workflow `deploy-drift.yml`
+runs on a GitHub runner (which reaches prod), reads prod's healthz commit, and
+compares it to main via the GitHub compare API (`scripts/deploy-drift-check.sh`)
+— no local git history, no prod egress from the cloud. Its run conclusion is
+the signal the audit reads in step 1b (`success` = current, `failure` =
+drifted). Age is the primary threshold (default >7d behind), commit count a
+backstop (>200), because commit count is noisy during active development.
+Verified locally against real prod both ways: alerts at default thresholds,
+silent under generous ones.
+
+**Live finding this surfaced:** prod (`ea9a21fc6dca`) is **~12 days / 52
+commits behind main** — the first undeployed commit dates to 2026-08-12. This
+is deploy.sh's postmortem shape (it was born from prod sitting 221 commits / 11
+days behind). None of today's operating-layer or fix work is deployed. The
+drift workflow will flag this every day until a deploy happens; the deploy
+decision is the human's.
+
 ## Left for the human / follow-up
 
 - The audit egress allowlist (`keyflowos.com` + `api.keyflowos.com` in the

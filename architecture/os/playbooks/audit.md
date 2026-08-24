@@ -36,9 +36,12 @@ zero confirmation from *either* path is still a `fail`.
    GitHub's runners, and its run *conclusion* is a debounced health signal —
    `scripts/uptime-monitor.sh` exits 1 only after 2 consecutive failures, 2 on
    misconfig, 0 otherwise (verified 2026-08-24; recent runs all `success`).
-   Step 1b reads it with `gh run list`. This confirms up/down but NOT prod's
-   deployed commit, so the commit-drift check is unavailable until path 1 is
-   restored.
+   Step 1b reads it with `gh run list`. This confirms up/down; the commit-drift
+   check (is prod on current code?) is restored separately by the
+   `deploy-drift.yml` workflow — it runs on a GitHub runner (which reaches
+   prod), compares prod's healthz commit to main via the compare API, and its
+   daily run conclusion is read in step 1b too. So the CI path is complete and
+   needs no prod egress; path 1 (allowlist) only adds real-time directness.
 
 ## Steps
 
@@ -76,8 +79,15 @@ zero confirmation from *either* path is still a `fail`.
         `warn` `uptime-monitor.misconfig`, citing the run.
       - No `completed` run within 30 min → the watcher itself is dark → `warn`
         `uptime-monitor.stale`.
-      - Commit-drift is unavailable on this path → `info`
-        `commit-drift.unavailable` (journal): restore by allowlisting egress.
+      - Commit-drift via CI: `gh run list --repo <owner/repo> --workflow
+        deploy-drift.yml --limit 3 --json conclusion,status,createdAt`. Most
+        recent `status: completed` run — `conclusion: failure` → prod is behind
+        main beyond threshold → `warn` finding `commit-drift` (cite the run id;
+        `gh run view <id> --log` carries the commit count + days behind);
+        `conclusion: success` → prod current or within threshold → `info`; no
+        completed run in 26h → `warn` `deploy-drift.stale`. This restores the
+        commit-drift check without prod egress — deploy-drift.yml reaches prod
+        from a GitHub runner and the audit reads only its conclusion.
       - `gh` unavailable too → neither path works → `fail` `prod.unreachable`
         (the original blind-probe finding).
 2. Route parity (direct path only — SKIP entirely if step 1 fell back to CI;
