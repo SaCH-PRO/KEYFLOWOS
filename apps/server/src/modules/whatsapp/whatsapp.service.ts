@@ -70,11 +70,14 @@ function countTemplateVariables(t: MetaTemplate): number {
  * The drawer sends template variables as a positional array; Meta and Twilio
  * both take them keyed by their 1-based index.
  */
-function toTemplateData(params?: string[] | null): Record<string, string> | undefined {
-  if (!params || params.length === 0) return undefined;
+function toTemplateData(params?: unknown): Record<string, string> | undefined {
+  // Defensive against a non-array value. templateParams is stored as raw Json
+  // and reaches here from a scheduled row, so a malformed one must not throw
+  // inside the dispatch cron and strand the whole batch.
+  if (!Array.isArray(params) || params.length === 0) return undefined;
   const out: Record<string, string> = {};
   params.forEach((v, i) => {
-    out[String(i + 1)] = v;
+    out[String(i + 1)] = String(v);
   });
   return out;
 }
@@ -565,6 +568,13 @@ export class WhatsAppService {
     if (!input.body?.trim() && !input.templateName) {
       throw new BadRequestException('Either body or templateName is required');
     }
+    // @Body() is inline-typed and never stripped by a validation pipe, so
+    // templateParams can arrive as any JSON. A non-array crashes toTemplateData,
+    // and for a scheduled row that crash lands inside the dispatch cron — reject
+    // it at the door.
+    if (input.templateParams !== undefined && !Array.isArray(input.templateParams)) {
+      throw new BadRequestException('templateParams must be an array of strings');
+    }
 
     const scheduledAt = input.scheduledAt ? new Date(input.scheduledAt) : null;
     if (input.scheduledAt && Number.isNaN(scheduledAt?.getTime())) {
@@ -572,8 +582,22 @@ export class WhatsAppService {
     }
     const isScheduled = !!scheduledAt && scheduledAt.getTime() > Date.now();
 
+    // contactId is body-supplied and must be proven to belong to THIS business
+    // before it is written onto the conversation. Otherwise a caller can link
+    // their conversation to another tenant's Contact (a cross-tenant write), and
+    // the 400-vs-200 difference on a foreign id leaks its existence. Drop an
+    // unowned or unknown id rather than reject it, so no oracle remains.
+    let contactId = input.contactId ?? null;
+    if (contactId) {
+      const owned = await this.prisma.client.contact.findFirst({
+        where: { id: contactId, businessId, deletedAt: null },
+        select: { id: true },
+      });
+      contactId = owned ? contactId : null;
+    }
+
     const conversationId = await this.upsertConversation(businessId, to, {
-      contactId: input.contactId ?? null,
+      contactId,
       snippet: input.body ?? input.templateName ?? null,
       at: new Date(),
     });
@@ -659,12 +683,25 @@ export class WhatsAppService {
         data: { status: 'SENDING' },
       });
       if (claimed.count === 0) continue;
-      await this.deliverRow(msg.businessId, msg.id, msg.whatsappContact.phoneNumber, {
-        to: msg.whatsappContact.phoneNumber,
-        body: msg.body ?? '',
-        templateName: msg.templateName ?? undefined,
-        templateData: toTemplateData(msg.templateParams as string[] | null),
-      });
+      // One row must never abort the batch or strand itself in SENDING: a throw
+      // here (bad stored data, provider error, config lookup) is caught, the row
+      // is marked FAILED, and the loop moves on to the other tenants' messages.
+      try {
+        await this.deliverRow(msg.businessId, msg.id, msg.whatsappContact.phoneNumber, {
+          to: msg.whatsappContact.phoneNumber,
+          body: msg.body ?? '',
+          templateName: msg.templateName ?? undefined,
+          templateData: toTemplateData(msg.templateParams as string[] | null),
+        });
+      } catch (e) {
+        this.logger.error(`Scheduled WhatsApp ${msg.id} failed to dispatch: ${(e as Error).message}`);
+        await this.prisma.client.whatsAppMessage
+          .update({
+            where: { id: msg.id },
+            data: { status: 'FAILED', errorMessage: ((e as Error).message ?? 'dispatch failed').slice(0, 500) },
+          })
+          .catch(() => undefined);
+      }
     }
   }
 
