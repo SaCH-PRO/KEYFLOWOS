@@ -67,6 +67,7 @@ import { WhatsAppModule } from './modules/whatsapp/whatsapp.module';
 import { SlackModule } from './modules/slack/slack.module';
 import { ShopifyModule } from './modules/shopify/shopify.module';
 import { SentryModule } from './core/sentry/sentry.module';
+import { ObservabilityModule } from './core/observability/observability.module';
 import { GrowthBookModule } from './core/growthbook/growthbook.module';
 import { ConnectorModule } from './core/connectors/connector.module';
 import { KeyflowCommandModule } from './modules/keyflow-command/keyflow-command.module';
@@ -191,6 +192,7 @@ import { RiscModule } from './modules/risc/risc.module';
     ShopifyModule,
     ContinentalOpsModule,
     SentryModule,
+    ObservabilityModule,
     GrowthBookModule,
     KeyflowCommandModule,
     ConnectModule,
