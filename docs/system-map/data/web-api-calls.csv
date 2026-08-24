@@ -150,7 +150,7 @@ apps/web/src/app/app/marketing/case-studies/page.tsx,/site/businesses/:param/cas
 apps/web/src/app/app/marketing/case-studies/page.tsx,/site/businesses/:param/case-studies/:param/publish,/site/businesses/:param/case-studies/:param/publish,FALSE,TRUE,TRUE,SiteController,,,OK
 apps/web/src/app/app/marketing/case-studies/page.tsx,/site/businesses/:param/case-studies/:param/unpublish,/site/businesses/:param/case-studies/:param/unpublish,FALSE,TRUE,TRUE,SiteController,,,OK
 apps/web/src/app/app/marketing/components/unified/channel-selector.tsx,/social/businesses/:param/connections/:param/oauth/start,/social/businesses/:param/connections/:param/oauth/start,FALSE,TRUE,TRUE,SocialController,,,OK
-apps/web/src/app/app/marketing/components/unified/unified-composer.tsx,/upload/businesses/:param/media,/upload/businesses/:param/media,FALSE,FALSE,,,,,NO_SERVER_ROUTE
+apps/web/src/app/app/marketing/components/unified/unified-composer.tsx,/uploads/request-url,/uploads/request-url,FALSE,TRUE,TRUE,UploadsController,,,OK
 apps/web/src/app/app/marketplace/components/inventory-command-center.tsx,/inventory/summary,/inventory/summary,FALSE,FALSE,,,,TRUE,UNVERIFIED
 apps/web/src/app/app/marketplace/components/inventory-command-center.tsx,/inventory/movements,/inventory/movements,FALSE,FALSE,,,,TRUE,UNVERIFIED
 apps/web/src/app/app/marketplace/components/inventory-command-center.tsx,/inventory/alerts,/inventory/alerts,FALSE,FALSE,,,,TRUE,UNVERIFIED
@@ -197,7 +197,7 @@ apps/web/src/app/app/profile/components/business-builder-card.tsx,/bookings/busi
 apps/web/src/app/app/profile/components/business-builder-card.tsx,/crm/businesses/:param/contacts,/crm/businesses/:param/contacts,FALSE,TRUE,TRUE,CrmController,,,OK
 apps/web/src/app/app/profile/components/business-builder-card.tsx,/commerce/businesses/:param/invoices,/commerce/businesses/:param/invoices,FALSE,TRUE,TRUE,CommerceController,,,OK
 apps/web/src/app/app/profile/components/business-builder-card.tsx,/documents/businesses/:param/instances,/documents/businesses/:param/instances,FALSE,TRUE,TRUE,DocumentsController,,,OK
-apps/web/src/app/app/profile/components/business-builder-card.tsx,/expenses/businesses/:param,/expenses/businesses/:param,FALSE,FALSE,,,,,NO_SERVER_ROUTE
+apps/web/src/app/app/profile/components/business-builder-card.tsx,/expenses/businesses/:param/expenses,/expenses/businesses/:param/expenses,FALSE,TRUE,TRUE,ExpensesController,,,OK
 apps/web/src/app/app/profile/components/business-builder-card.tsx,/projects/businesses/:param,/projects/businesses/:param,FALSE,TRUE,TRUE,ProjectsController,,,OK
 apps/web/src/app/app/profile/components/business-builder-card.tsx,/bookings/businesses/:param,/bookings/businesses/:param,FALSE,TRUE,TRUE,BookingsController,,,OK
 apps/web/src/app/app/profile/components/business-builder-card.tsx,/businesses/:param/campaigns,/businesses/:param/campaigns,FALSE,TRUE,TRUE,EmailMarketingController,,,OK

@@ -2384,7 +2384,7 @@ apps/web/src/app/app/marketing/components/unified/audience-selector.tsx,apps/web
 apps/web/src/app/app/marketing/components/unified/channel-preview-panel.tsx,apps/web,,component,201,,4,0,1,0,,,,,FALSE
 apps/web/src/app/app/marketing/components/unified/channel-selector.tsx,apps/web,,component,451,,8,0,1,0,,,,,FALSE
 apps/web/src/app/app/marketing/components/unified/channel-variants-panel.tsx,apps/web,,component,316,,4,0,1,0,,,,,FALSE
-apps/web/src/app/app/marketing/components/unified/unified-composer.tsx,apps/web,,component,1379,,12,0,1,0,,,,,FALSE
+apps/web/src/app/app/marketing/components/unified/unified-composer.tsx,apps/web,,component,1400,,12,0,1,0,,,,,FALSE
 apps/web/src/app/app/marketing/error.tsx,apps/web,,component,8,,1,0,0,0,,,,,TRUE
 apps/web/src/app/app/marketing/hooks/use-marketing-ai-hub.ts,apps/web,,ts,479,,5,0,1,0,,,,,FALSE
 apps/web/src/app/app/marketing/hooks/use-marketing.ts,apps/web,,ts,456,,5,0,4,0,,,,,FALSE
@@ -2491,7 +2491,7 @@ apps/web/src/app/app/profile/components/blueprint-onboarding-chat.tsx,apps/web,,
 apps/web/src/app/app/profile/components/blueprint-tab.tsx,apps/web,,component,275,,7,0,0,0,,,,,TRUE
 apps/web/src/app/app/profile/components/brand-identity-tab.tsx,apps/web,,component,149,,10,0,2,0,,,,,FALSE
 apps/web/src/app/app/profile/components/branding-tab.tsx,apps/web,,component,169,,6,0,1,0,,,,,FALSE
-apps/web/src/app/app/profile/components/business-builder-card.tsx,apps/web,,component,1898,,7,0,1,0,,,,,FALSE
+apps/web/src/app/app/profile/components/business-builder-card.tsx,apps/web,,component,1903,,7,0,1,0,,,,,FALSE
 apps/web/src/app/app/profile/components/business-builder-constants.ts,apps/web,,ts,425,,2,0,1,0,,,,,FALSE
 apps/web/src/app/app/profile/components/business-builder-types.ts,apps/web,,ts,193,,0,0,2,0,,,,,FALSE
 apps/web/src/app/app/profile/components/business-context-card.tsx,apps/web,,component,61,,2,0,0,0,,,,,TRUE
@@ -2880,7 +2880,7 @@ apps/web/src/components/contacts/tasks-tab-panel.tsx,apps/web,,component,491,,6,
 apps/web/src/components/contacts/timeline-tab-panel.tsx,apps/web,,component,912,,6,0,0,0,,,,,TRUE
 apps/web/src/components/dev-hmr-error-suppressor.ts,apps/web,,ts,96,,1,0,0,0,,,,,TRUE
 apps/web/src/components/device/capture-button.tsx,apps/web,,component,87,,4,0,0,0,,,,,TRUE
-apps/web/src/components/device/capture-sheet.tsx,apps/web,,component,535,,7,0,1,0,,,,,FALSE
+apps/web/src/components/device/capture-sheet.tsx,apps/web,,component,544,,8,0,1,0,,,,,FALSE
 apps/web/src/components/dormant-feature-gate.tsx,apps/web,,component,54,,3,0,0,0,,,,,TRUE
 apps/web/src/components/dormant-route.tsx,apps/web,,component,78,,4,0,0,0,,,,,TRUE
 apps/web/src/components/email/compose-context.tsx,apps/web,,component,113,,3,0,0,0,,,,,TRUE
@@ -3099,7 +3099,7 @@ apps/web/src/hooks/use-scroll-lock.ts,apps/web,,ts,15,,1,0,0,0,,,,,TRUE
 apps/web/src/hooks/use-service-worker.ts,apps/web,,ts,115,,1,0,0,0,,,,,TRUE
 apps/web/src/hooks/use-swipe-tabs.ts,apps/web,,ts,86,,1,0,0,0,,,,,TRUE
 apps/web/src/hooks/use-unsaved-changes.ts,apps/web,,ts,17,,1,0,0,0,,,,,TRUE
-apps/web/src/hooks/use-upload.ts,apps/web,,ts,147,,2,0,0,0,,,,,TRUE
+apps/web/src/hooks/use-upload.ts,apps/web,,ts,164,,3,0,0,0,,,,,TRUE
 apps/web/src/hooks/use-username-availability.ts,apps/web,,ts,117,,2,0,0,0,,,,,TRUE
 apps/web/src/hooks/use-workspace-intelligence.ts,apps/web,,ts,5,,0,0,0,0,,,,,TRUE
 apps/web/src/lib/__tests__/api-get-dedupe.test.ts,apps/web,,spec,218,,1,0,0,0,,,,,FALSE
@@ -3114,6 +3114,7 @@ apps/web/src/lib/__tests__/nav-reachability.spec.ts,apps/web,,spec,213,,3,0,0,0,
 apps/web/src/lib/__tests__/no-fabricated-screens.spec.ts,apps/web,,spec,422,,3,0,0,0,,,,,FALSE
 apps/web/src/lib/__tests__/sw-credentialed-cache.test.ts,apps/web,,spec,179,,3,0,0,0,,,,,FALSE
 apps/web/src/lib/__tests__/tool-routes.spec.ts,apps/web,,spec,70,,2,0,0,0,,,,,FALSE
+apps/web/src/lib/__tests__/upload-presign-contract.spec.ts,apps/web,,spec,169,,3,0,0,0,,,,,FALSE
 apps/web/src/lib/__tests__/username-availability.test.ts,apps/web,,spec,129,,2,0,0,0,,,,,FALSE
 apps/web/src/lib/api-base.ts,apps/web,,ts,15,,0,0,0,0,,,,,TRUE
 apps/web/src/lib/api.ts,apps/web,,ts,385,,2,0,23,0,,,,,FALSE

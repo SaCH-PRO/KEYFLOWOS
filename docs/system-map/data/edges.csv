@@ -21557,7 +21557,7 @@ apps/web/src/app/app/marketing/components/unified/unified-composer.tsx,apps/web/
 apps/web/src/app/app/marketing/components/unified/unified-composer.tsx,apps/web/src/app/app/marketing/components/unified/channel-preview-panel.tsx,imports,./channel-preview-panel,high
 apps/web/src/app/app/marketing/components/unified/unified-composer.tsx,apps/web/src/app/app/marketing/components/unified/audience-selector.tsx,imports,./audience-selector,high
 apps/web/src/app/app/marketing/components/unified/unified-composer.tsx,next/image,imports-external,next/image,high
-apps/web/src/app/app/marketing/components/unified/unified-composer.tsx,route:/upload/businesses/:param/media,http-call-unresolved,/upload/businesses/:param/media,medium
+apps/web/src/app/app/marketing/components/unified/unified-composer.tsx,apps/server/src/modules/uploads/uploads.controller.ts,http-call,/uploads/request-url,high
 apps/web/src/app/app/marketing/error.tsx,@/components/ui/module-error-boundary,imports-external,@/components/ui/module-error-boundary,high
 apps/web/src/app/app/marketing/hooks/use-marketing-ai-hub.ts,react,imports-external,react,high
 apps/web/src/app/app/marketing/hooks/use-marketing-ai-hub.ts,@/hooks/use-module-ai,imports-external,@/hooks/use-module-ai,high
@@ -22131,7 +22131,7 @@ apps/web/src/app/app/profile/components/business-builder-card.tsx,apps/server/sr
 apps/web/src/app/app/profile/components/business-builder-card.tsx,apps/server/src/modules/crm/crm.controller.ts,http-call,/crm/businesses/:param/contacts,high
 apps/web/src/app/app/profile/components/business-builder-card.tsx,apps/server/src/modules/commerce/commerce.controller.ts,http-call,/commerce/businesses/:param/invoices,high
 apps/web/src/app/app/profile/components/business-builder-card.tsx,apps/server/src/modules/documents/documents.controller.ts,http-call,/documents/businesses/:param/instances,high
-apps/web/src/app/app/profile/components/business-builder-card.tsx,route:/expenses/businesses/:param,http-call-unresolved,/expenses/businesses/:param,medium
+apps/web/src/app/app/profile/components/business-builder-card.tsx,apps/server/src/modules/expenses/expenses.controller.ts,http-call,/expenses/businesses/:param/expenses,high
 apps/web/src/app/app/profile/components/business-builder-card.tsx,apps/server/src/modules/projects/projects.controller.ts,http-call,/projects/businesses/:param,high
 apps/web/src/app/app/profile/components/business-builder-card.tsx,apps/server/src/modules/bookings/bookings.controller.ts,http-call,/bookings/businesses/:param,high
 apps/web/src/app/app/profile/components/business-builder-card.tsx,apps/server/src/modules/email-marketing/email-marketing.controller.ts,http-call,/businesses/:param/campaigns,high
@@ -24191,6 +24191,7 @@ apps/web/src/components/device/capture-sheet.tsx,@/components/ui/button,imports-
 apps/web/src/components/device/capture-sheet.tsx,@/components/ui/sheet,imports-external,@/components/ui/sheet,high
 apps/web/src/components/device/capture-sheet.tsx,@/lib/api/device,imports-external,@/lib/api/device,high
 apps/web/src/components/device/capture-sheet.tsx,@/lib/api,imports-external,@/lib/api,high
+apps/web/src/components/device/capture-sheet.tsx,@/lib/workspace,imports-external,@/lib/workspace,high
 apps/web/src/components/device/capture-sheet.tsx,apps/server/src/modules/uploads/uploads.controller.ts,http-call,/uploads/request-url,high
 apps/web/src/components/dormant-feature-gate.tsx,next/link,imports-external,next/link,high
 apps/web/src/components/dormant-feature-gate.tsx,lucide-react,imports-external,lucide-react,high
@@ -25032,6 +25033,7 @@ apps/web/src/hooks/use-swipe-tabs.ts,react,imports-external,react,high
 apps/web/src/hooks/use-unsaved-changes.ts,react,imports-external,react,high
 apps/web/src/hooks/use-upload.ts,react,imports-external,react,high
 apps/web/src/hooks/use-upload.ts,@/lib/api,imports-external,@/lib/api,high
+apps/web/src/hooks/use-upload.ts,@/lib/workspace,imports-external,@/lib/workspace,high
 apps/web/src/hooks/use-username-availability.ts,react,imports-external,react,high
 apps/web/src/hooks/use-username-availability.ts,@/lib/username-availability,imports-external,@/lib/username-availability,high
 apps/web/src/lib/__tests__/api-get-dedupe.test.ts,vitest,imports-external,vitest,high
@@ -25067,6 +25069,9 @@ apps/web/src/lib/__tests__/sw-credentialed-cache.test.ts,node:fs,imports-externa
 apps/web/src/lib/__tests__/sw-credentialed-cache.test.ts,node:path,imports-external,node:path,high
 apps/web/src/lib/__tests__/tool-routes.spec.ts,vitest,imports-external,vitest,high
 apps/web/src/lib/__tests__/tool-routes.spec.ts,apps/web/src/lib/tool-route-audit.ts,imports,../tool-route-audit,high
+apps/web/src/lib/__tests__/upload-presign-contract.spec.ts,vitest,imports-external,vitest,high
+apps/web/src/lib/__tests__/upload-presign-contract.spec.ts,node:fs,imports-external,node:fs,high
+apps/web/src/lib/__tests__/upload-presign-contract.spec.ts,node:path,imports-external,node:path,high
 apps/web/src/lib/__tests__/username-availability.test.ts,vitest,imports-external,vitest,high
 apps/web/src/lib/__tests__/username-availability.test.ts,@/lib/username-availability,imports-external,@/lib/username-availability,high
 apps/web/src/lib/api.ts,apps/web/src/lib/fetch-with-retry.ts,imports,./fetch-with-retry,high
