@@ -1,4 +1,5 @@
 import { Logger } from '@nestjs/common';
+import { errorRegistry } from '../observability/error-registry';
 
 /**
  * `setInterval` for background jobs, with the rejection path closed.
@@ -71,6 +72,10 @@ export function runGuarded(label: string, fn: () => unknown, logger: Pick<Logger
     // Logged, never rethrown — rethrowing here would land straight back on the
     // process-level handler this exists to keep unreachable.
     logger.error(`[${label}] background tick failed: ${message}`, stack);
+    // Every background failure in the server passes through here, which makes
+    // this the one place worth recording them. Without it a job can fail on
+    // every tick for days and leave no trace but log lines nobody reads.
+    errorRegistry.record('background', label, err);
   };
 
   let result: unknown;

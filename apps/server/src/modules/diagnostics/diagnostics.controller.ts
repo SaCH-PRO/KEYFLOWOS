@@ -1,4 +1,5 @@
-import { Controller, Get, Post, Body, Param, ForbiddenException, Req, Inject, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query, ForbiddenException, Req, Inject, UseGuards } from '@nestjs/common';
+import { errorRegistry } from '../../core/observability/error-registry';
 import { DiagnosticsService } from './diagnostics.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { Request } from 'express';
@@ -51,6 +52,19 @@ export class DiagnosticsController {
   crossModule(@Req() req: Request) {
     this.assertSuperAdmin(req);
     return this.diagnosticsService.checkCrossModuleFlows();
+  }
+
+  // What has actually been failing, from the two places errors funnel
+  // through: GlobalHttpExceptionFilter (500s only) and runGuarded (every
+  // background tick). Super-admin only, like the rest of this controller —
+  // the entries carry route names and error text.
+  @Get('errors')
+  errors(@Req() req: Request, @Query('limit') limit?: string) {
+    this.assertSuperAdmin(req);
+    const parsed = Number.parseInt(limit ?? '', 10);
+    // NaN from a junk ?limit must not become take:NaN — clamp to a sane range.
+    const n = Number.isFinite(parsed) ? Math.min(Math.max(parsed, 1), 200) : 50;
+    return errorRegistry.snapshot(n);
   }
 
   @Get('env-vars')

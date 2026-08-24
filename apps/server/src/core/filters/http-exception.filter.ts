@@ -7,6 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
+import { errorRegistry } from '../observability/error-registry';
 
 @Catch()
 export class GlobalHttpExceptionFilter implements ExceptionFilter {
@@ -63,6 +64,18 @@ export class GlobalHttpExceptionFilter implements ExceptionFilter {
       this.logger.error(
         `Unhandled exception on ${request.method} ${request.url} [${correlationId ?? '-'}]`,
         exception instanceof Error ? exception.stack : String(exception),
+      );
+      // Only the 500 branch is recorded. A 401 or a 422 is the API working;
+      // recording those would bury the handful of entries that mean something
+      // under thousands that do not.
+      //
+      // Labelled by route PATTERN rather than request.url, so
+      // /crm/contacts/:id cannot become one distinct entry per contact id and
+      // evict the rest of the history.
+      errorRegistry.record(
+        'http',
+        `${request.method} ${(request as { route?: { path?: string } }).route?.path ?? request.url}`,
+        exception,
       );
     }
 
