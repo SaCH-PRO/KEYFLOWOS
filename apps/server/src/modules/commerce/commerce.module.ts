@@ -53,7 +53,6 @@ import { TimeTrackingModule } from '../time-tracking/time-tracking.module';
 import { CatalogModule } from '../catalog/catalog.module';
 import { PlanLimitGuard } from '../subscriptions/plan-limit.guard';
 import { DocumentTemplateModule } from './document-template/document-template.module';
-import { DocumentTemplateController } from './document-template/document-template.controller';
 import { DocumentTemplateService } from './document-template/document-template.service';
 import { GoogleDriveModule } from '../google-drive/google-drive.module';
 import { TaskAssignmentModule } from '../task-assignments/task-assignment.module';
@@ -76,6 +75,11 @@ import type { NotificationsModule as NotificationsModuleType } from '../notifica
     forwardRef(() => AiModule),
     CatalogModule,
     forwardRef(() => FinanceModule),
+    // Registers DocumentTemplateController itself. This module ALSO listed that
+    // controller in its own `controllers` array, so Nest mapped all five of its
+    // routes twice and built two instances of it. Express serves whichever was
+    // registered first, which made the second set of handlers dead weight whose
+    // dependencies resolved through a different injector.
     DocumentTemplateModule,
     GoogleDriveModule,
     TaskAssignmentModule,
@@ -86,7 +90,7 @@ import type { NotificationsModule as NotificationsModuleType } from '../notifica
         (await import('../notifications/notifications.module')).NotificationsModule,
     ),
   ],
-  controllers: [CommerceController, AccountingController, CommerceAiController, CommerceInsightsController, FinancialCopilotController, RecurringInvoiceController, RevenueActionController, RevenueReportingController, RevenueIntelligenceController, LeverageController, DocumentTemplateController, DriveIntakeController],
+  controllers: [CommerceController, AccountingController, CommerceAiController, CommerceInsightsController, FinancialCopilotController, RecurringInvoiceController, RevenueActionController, RevenueReportingController, RevenueIntelligenceController, LeverageController, DriveIntakeController],
   providers: [
     CommerceService,
     CommerceStatsService,

@@ -286,6 +286,7 @@ apps/server/src/core/connectors/connector-health-monitor.service.ts,apps/server/
 apps/server/src/core/connectors/connector-health-monitor.service.ts,apps/server/src/core/connectors/connector-activity.service.ts,imports,./connector-activity.service,high
 apps/server/src/core/connectors/connector-health-monitor.service.ts,apps/server/src/modules/notifications/notifications.service.ts,imports,../../modules/notifications/notifications.service,high
 apps/server/src/core/connectors/connector-health-monitor.service.ts,apps/server/src/core/connectors/connector.interface.ts,imports,./connector.interface,high
+apps/server/src/core/connectors/connector-health-monitor.service.ts,apps/server/src/core/scheduling/safe-interval.ts,imports,../scheduling/safe-interval,high
 apps/server/src/core/connectors/connector-health-monitor.service.ts,apps/server/src/core/prisma/prisma.service.ts,injects,PrismaService,high
 apps/server/src/core/connectors/connector-health-monitor.service.ts,apps/server/src/core/connectors/connector-registry.service.ts,injects,ConnectorRegistryService,high
 apps/server/src/core/connectors/connector-health-monitor.service.ts,apps/server/src/core/connectors/connector-activity.service.ts,injects,ConnectorActivityService,high
@@ -362,6 +363,7 @@ apps/server/src/core/connectors/connector-sync-scheduler.service.ts,apps/server/
 apps/server/src/core/connectors/connector-sync-scheduler.service.ts,apps/server/src/core/connectors/connector-registry.service.ts,imports,./connector-registry.service,high
 apps/server/src/core/connectors/connector-sync-scheduler.service.ts,apps/server/src/core/connectors/connector-activity.service.ts,imports,./connector-activity.service,high
 apps/server/src/core/connectors/connector-sync-scheduler.service.ts,apps/server/src/core/connectors/connector.interface.ts,imports,./connector.interface,high
+apps/server/src/core/connectors/connector-sync-scheduler.service.ts,apps/server/src/core/scheduling/safe-interval.ts,imports,../scheduling/safe-interval,high
 apps/server/src/core/connectors/connector-sync-scheduler.service.ts,apps/server/src/core/prisma/prisma.service.ts,injects,PrismaService,high
 apps/server/src/core/connectors/connector-sync-scheduler.service.ts,apps/server/src/core/connectors/connector-registry.service.ts,injects,ConnectorRegistryService,high
 apps/server/src/core/connectors/connector-sync-scheduler.service.ts,apps/server/src/core/connectors/connector-activity.service.ts,injects,ConnectorActivityService,high
@@ -938,6 +940,9 @@ apps/server/src/core/redis/redis.service.ts,@nestjs/common,imports-external,@nes
 apps/server/src/core/redis/redis.service.ts,@nestjs/common,imports-external,@nestjs/common,high
 apps/server/src/core/redis/redis.service.ts,apps/server/src/core/redis/redis.constants.ts,imports,./redis.constants,high
 apps/server/src/core/redis/redis.service.ts,ioredis,imports-external,ioredis,high
+apps/server/src/core/scheduling/safe-interval.spec.ts,vitest,imports-external,vitest,high
+apps/server/src/core/scheduling/safe-interval.spec.ts,apps/server/src/core/scheduling/safe-interval.ts,imports,./safe-interval,high
+apps/server/src/core/scheduling/safe-interval.ts,@nestjs/common,imports-external,@nestjs/common,high
 apps/server/src/core/security/redaction.spec.ts,vitest,imports-external,vitest,high
 apps/server/src/core/security/redaction.spec.ts,apps/server/src/core/security/redaction.ts,imports,./redaction,high
 apps/server/src/core/security/timing-safe-equal.spec.ts,vitest,imports-external,vitest,high
@@ -1146,6 +1151,7 @@ apps/server/src/modules/ai/agent-health.service.ts,@nestjs/common,imports-extern
 apps/server/src/modules/ai/agent-health.service.ts,apps/server/src/core/prisma/prisma.service.ts,imports,../../core/prisma/prisma.service,high
 apps/server/src/modules/ai/agent-health.service.ts,@nestjs/event-emitter,imports-external,@nestjs/event-emitter,high
 apps/server/src/modules/ai/agent-health.service.ts,apps/server/src/modules/ai/ai-execution-log.service.ts,imports,./ai-execution-log.service,high
+apps/server/src/modules/ai/agent-health.service.ts,apps/server/src/core/scheduling/safe-interval.ts,imports,../../core/scheduling/safe-interval,high
 apps/server/src/modules/ai/agent-health.service.ts,apps/server/src/core/prisma/prisma.service.ts,injects,PrismaService,high
 apps/server/src/modules/ai/agent-health.service.ts,apps/server/src/modules/ai/ai-execution-log.service.ts,injects,AiExecutionLogService,high
 apps/server/src/modules/ai/agent-health.service.ts,plan.stalled,emits,plan.stalled,high
@@ -1456,6 +1462,7 @@ apps/server/src/modules/ai/ai-usage.service.ts,apps/server/src/modules/ai/ai-qua
 apps/server/src/modules/ai/ai-usage.service.ts,apps/server/src/modules/ai/output-template.service.ts,imports,./output-template.service,high
 apps/server/src/modules/ai/ai-usage.service.ts,apps/server/src/modules/ai/model-gateway.service.ts,imports,./model-gateway.service,high
 apps/server/src/modules/ai/ai-usage.service.ts,openai,imports-external,openai,high
+apps/server/src/modules/ai/ai-usage.service.ts,apps/server/src/core/scheduling/safe-interval.ts,imports,../../core/scheduling/safe-interval,high
 apps/server/src/modules/ai/ai-usage.service.ts,apps/server/src/core/prisma/prisma.service.ts,injects,PrismaService,high
 apps/server/src/modules/ai/ai-usage.service.ts,apps/server/src/modules/subscriptions/subscriptions.service.ts,injects,SubscriptionsService,high
 apps/server/src/modules/ai/ai-usage.service.ts,apps/server/src/modules/ai/output-template.service.ts,injects,OutputTemplateService,high
@@ -1900,6 +1907,7 @@ apps/server/src/modules/ai/connector-intelligence.service.ts,apps/server/src/mod
 apps/server/src/modules/ai/connector-intelligence.service.ts,apps/server/src/modules/ai/conversational-ai.service.ts,imports,./conversational-ai.service,high
 apps/server/src/modules/ai/connector-intelligence.service.ts,apps/server/src/modules/google-drive/google-drive.service.ts,imports,../google-drive/google-drive.service,high
 apps/server/src/modules/ai/connector-intelligence.service.ts,apps/server/src/core/connectors/connector-registry.service.ts,imports,../../core/connectors/connector-registry.service,high
+apps/server/src/modules/ai/connector-intelligence.service.ts,apps/server/src/core/scheduling/safe-interval.ts,imports,../../core/scheduling/safe-interval,high
 apps/server/src/modules/ai/connector-intelligence.service.ts,apps/server/src/core/prisma/prisma.service.ts,injects,PrismaService,high
 apps/server/src/modules/ai/connector-intelligence.service.ts,apps/server/src/modules/ai/agent-trigger.service.ts,injects,AgentTriggerService,high
 apps/server/src/modules/ai/connector-intelligence.service.ts,apps/server/src/modules/ai/document-intelligence.service.ts,injects,DocumentIntelligenceService,high
@@ -2552,6 +2560,7 @@ apps/server/src/modules/ai/llm-cost.service.ts,model:lLMProviderCost,reads-model
 apps/server/src/modules/ai/llm-cost.service.ts,model:lLMProviderCost,reads-model,lLMProviderCost.groupBy(),high
 apps/server/src/modules/ai/match-refresh-scheduler.service.ts,@nestjs/common,imports-external,@nestjs/common,high
 apps/server/src/modules/ai/match-refresh-scheduler.service.ts,apps/server/src/modules/ai/business-matching.service.ts,imports,./business-matching.service,high
+apps/server/src/modules/ai/match-refresh-scheduler.service.ts,apps/server/src/core/scheduling/safe-interval.ts,imports,../../core/scheduling/safe-interval,high
 apps/server/src/modules/ai/match-refresh-scheduler.service.ts,apps/server/src/modules/ai/business-matching.service.ts,injects,BusinessMatchingService,high
 apps/server/src/modules/ai/model-gateway.service.spec.ts,vitest,imports-external,vitest,high
 apps/server/src/modules/ai/model-gateway.service.spec.ts,apps/server/src/modules/ai/model-gateway.service.ts,imports,./model-gateway.service,high
@@ -2643,6 +2652,7 @@ apps/server/src/modules/ai/pattern-detector.service.ts,@nestjs/event-emitter,imp
 apps/server/src/modules/ai/pattern-detector.service.ts,apps/server/src/modules/ai/model-gateway.service.ts,imports,./model-gateway.service,high
 apps/server/src/modules/ai/pattern-detector.service.ts,apps/server/src/modules/ai/ai-memory.service.ts,imports,./ai-memory.service,high
 apps/server/src/modules/ai/pattern-detector.service.ts,apps/server/src/modules/ai/ai-usage.service.ts,imports,./ai-usage.service,high
+apps/server/src/modules/ai/pattern-detector.service.ts,apps/server/src/core/scheduling/safe-interval.ts,imports,../../core/scheduling/safe-interval,high
 apps/server/src/modules/ai/pattern-detector.service.ts,apps/server/src/core/prisma/prisma.service.ts,injects,PrismaService,high
 apps/server/src/modules/ai/pattern-detector.service.ts,apps/server/src/modules/ai/model-gateway.service.ts,injects,ModelGatewayService,high
 apps/server/src/modules/ai/pattern-detector.service.ts,apps/server/src/modules/ai/ai-memory.service.ts,injects,AiMemoryService,high
@@ -2678,6 +2688,7 @@ apps/server/src/modules/ai/plan-executor.service.ts,apps/server/src/modules/ai/q
 apps/server/src/modules/ai/plan-executor.service.ts,apps/server/src/modules/ai/agent-state-machine.service.ts,imports,./agent-state-machine.service,high
 apps/server/src/modules/ai/plan-executor.service.ts,apps/server/src/modules/key-autonomy/autonomy-orchestrator.service.ts,imports,../key-autonomy/autonomy-orchestrator.service,high
 apps/server/src/modules/ai/plan-executor.service.ts,apps/server/src/modules/key-autonomy/key-action-proposal.service.ts,imports,../key-autonomy/key-action-proposal.service,high
+apps/server/src/modules/ai/plan-executor.service.ts,apps/server/src/core/scheduling/safe-interval.ts,imports,../../core/scheduling/safe-interval,high
 apps/server/src/modules/ai/plan-executor.service.ts,apps/server/src/core/prisma/prisma.service.ts,injects,PrismaService,high
 apps/server/src/modules/ai/plan-executor.service.ts,apps/server/src/modules/ai/ai-oversight.service.ts,injects,AiOversightService,high
 apps/server/src/modules/ai/plan-executor.service.ts,plan.executed,emits,plan.executed,high
@@ -5079,6 +5090,7 @@ apps/server/src/modules/calendar/calendar-query.service.ts,model:calendarEvent,r
 apps/server/src/modules/calendar/calendar-query.service.ts,model:calendarEvent,reads-model,calendarEvent.findFirst(),high
 apps/server/src/modules/calendar/calendar-sync.scheduler.ts,@nestjs/common,imports-external,@nestjs/common,high
 apps/server/src/modules/calendar/calendar-sync.scheduler.ts,apps/server/src/modules/calendar/calendar-sync.service.ts,imports,./calendar-sync.service,high
+apps/server/src/modules/calendar/calendar-sync.scheduler.ts,apps/server/src/core/scheduling/safe-interval.ts,imports,../../core/scheduling/safe-interval,high
 apps/server/src/modules/calendar/calendar-sync.scheduler.ts,apps/server/src/modules/calendar/calendar-sync.service.ts,injects,CalendarSyncService,high
 apps/server/src/modules/calendar/calendar-sync.service.ts,@nestjs/common,imports-external,@nestjs/common,high
 apps/server/src/modules/calendar/calendar-sync.service.ts,@prisma/client,imports-external,@prisma/client,high
@@ -5461,6 +5473,7 @@ apps/server/src/modules/command/command-scheduler.service.ts,@nestjs/common,impo
 apps/server/src/modules/command/command-scheduler.service.ts,@nestjs/schedule,imports-external,@nestjs/schedule,high
 apps/server/src/modules/command/command-scheduler.service.ts,apps/server/src/modules/command/command-generator.service.ts,imports,./command-generator.service,high
 apps/server/src/modules/command/command-scheduler.service.ts,apps/server/src/core/prisma/prisma.service.ts,imports,../../core/prisma/prisma.service,high
+apps/server/src/modules/command/command-scheduler.service.ts,apps/server/src/core/scheduling/safe-interval.ts,imports,../../core/scheduling/safe-interval,high
 apps/server/src/modules/command/command-scheduler.service.ts,apps/server/src/modules/command/command-generator.service.ts,injects,CommandGeneratorService,high
 apps/server/src/modules/command/command-scheduler.service.ts,apps/server/src/core/prisma/prisma.service.ts,injects,PrismaService,high
 apps/server/src/modules/command/command.controller.ts,@nestjs/common,imports-external,@nestjs/common,high
@@ -5800,7 +5813,6 @@ apps/server/src/modules/commerce/commerce.module.ts,apps/server/src/modules/time
 apps/server/src/modules/commerce/commerce.module.ts,apps/server/src/modules/catalog/catalog.module.ts,imports,../catalog/catalog.module,high
 apps/server/src/modules/commerce/commerce.module.ts,apps/server/src/modules/subscriptions/plan-limit.guard.ts,imports,../subscriptions/plan-limit.guard,high
 apps/server/src/modules/commerce/commerce.module.ts,apps/server/src/modules/commerce/document-template/document-template.module.ts,imports,./document-template/document-template.module,high
-apps/server/src/modules/commerce/commerce.module.ts,apps/server/src/modules/commerce/document-template/document-template.controller.ts,imports,./document-template/document-template.controller,high
 apps/server/src/modules/commerce/commerce.module.ts,apps/server/src/modules/commerce/document-template/document-template.service.ts,imports,./document-template/document-template.service,high
 apps/server/src/modules/commerce/commerce.module.ts,apps/server/src/modules/google-drive/google-drive.module.ts,imports,../google-drive/google-drive.module,high
 apps/server/src/modules/commerce/commerce.module.ts,apps/server/src/modules/task-assignments/task-assignment.module.ts,imports,../task-assignments/task-assignment.module,high
@@ -6001,6 +6013,7 @@ apps/server/src/modules/commerce/financial-briefing-scheduler.service.ts,@nestjs
 apps/server/src/modules/commerce/financial-briefing-scheduler.service.ts,apps/server/src/core/prisma/prisma.service.ts,imports,../../core/prisma/prisma.service,high
 apps/server/src/modules/commerce/financial-briefing-scheduler.service.ts,apps/server/src/modules/commerce/financial-copilot.service.ts,imports,./financial-copilot.service,high
 apps/server/src/modules/commerce/financial-briefing-scheduler.service.ts,apps/server/src/modules/notifications/system-email.service.ts,imports,../notifications/system-email.service,high
+apps/server/src/modules/commerce/financial-briefing-scheduler.service.ts,apps/server/src/core/scheduling/safe-interval.ts,imports,../../core/scheduling/safe-interval,high
 apps/server/src/modules/commerce/financial-briefing-scheduler.service.ts,apps/server/src/core/prisma/prisma.service.ts,injects,PrismaService,high
 apps/server/src/modules/commerce/financial-briefing-scheduler.service.ts,apps/server/src/modules/commerce/financial-copilot.service.ts,injects,FinancialCopilotService,high
 apps/server/src/modules/commerce/financial-briefing-scheduler.service.ts,apps/server/src/modules/notifications/system-email.service.ts,injects,SystemEmailService,high
@@ -6159,6 +6172,7 @@ apps/server/src/modules/commerce/margin-on-payment.listener.ts,model:marginSnaps
 apps/server/src/modules/commerce/margin-snapshot-scheduler.service.ts,@nestjs/common,imports-external,@nestjs/common,high
 apps/server/src/modules/commerce/margin-snapshot-scheduler.service.ts,apps/server/src/core/prisma/prisma.service.ts,imports,../../core/prisma/prisma.service,high
 apps/server/src/modules/commerce/margin-snapshot-scheduler.service.ts,apps/server/src/modules/commerce/landed-cost-engine.service.ts,imports,./landed-cost-engine.service,high
+apps/server/src/modules/commerce/margin-snapshot-scheduler.service.ts,apps/server/src/core/scheduling/safe-interval.ts,imports,../../core/scheduling/safe-interval,high
 apps/server/src/modules/commerce/margin-snapshot-scheduler.service.ts,apps/server/src/core/prisma/prisma.service.ts,injects,PrismaService,high
 apps/server/src/modules/commerce/margin-snapshot-scheduler.service.ts,apps/server/src/modules/commerce/landed-cost-engine.service.ts,injects,LandedCostEngine,high
 apps/server/src/modules/commerce/margin-snapshot-scheduler.service.ts,model:product,reads-model,product.findUnique(),high
@@ -6613,6 +6627,7 @@ apps/server/src/modules/communications/delivery-queue.service.ts,@nestjs/common,
 apps/server/src/modules/communications/delivery-queue.service.ts,@nestjs/event-emitter,imports-external,@nestjs/event-emitter,high
 apps/server/src/modules/communications/delivery-queue.service.ts,apps/server/src/core/prisma/prisma.service.ts,imports,../../core/prisma/prisma.service,high
 apps/server/src/modules/communications/delivery-queue.service.ts,apps/server/src/modules/communications/adapters/adapter-registry.service.ts,imports,./adapters/adapter-registry.service,high
+apps/server/src/modules/communications/delivery-queue.service.ts,apps/server/src/core/scheduling/safe-interval.ts,imports,../../core/scheduling/safe-interval,high
 apps/server/src/modules/communications/delivery-queue.service.ts,apps/server/src/core/prisma/prisma.service.ts,injects,PrismaService,high
 apps/server/src/modules/communications/delivery-queue.service.ts,apps/server/src/modules/communications/adapters/adapter-registry.service.ts,injects,AdapterRegistryService,high
 apps/server/src/modules/communications/delivery-queue.service.ts,content.published,emits,content.published,high
@@ -7724,6 +7739,7 @@ apps/server/src/modules/crm/ai-rate-limit.util.ts,@nestjs/common,imports-externa
 apps/server/src/modules/crm/best-channel-scheduler.service.ts,@nestjs/common,imports-external,@nestjs/common,high
 apps/server/src/modules/crm/best-channel-scheduler.service.ts,apps/server/src/core/prisma/prisma.service.ts,imports,../../core/prisma/prisma.service,high
 apps/server/src/modules/crm/best-channel-scheduler.service.ts,apps/server/src/modules/crm/best-channel.service.ts,imports,./best-channel.service,high
+apps/server/src/modules/crm/best-channel-scheduler.service.ts,apps/server/src/core/scheduling/safe-interval.ts,imports,../../core/scheduling/safe-interval,high
 apps/server/src/modules/crm/best-channel-scheduler.service.ts,apps/server/src/core/prisma/prisma.service.ts,injects,PrismaService,high
 apps/server/src/modules/crm/best-channel-scheduler.service.ts,apps/server/src/modules/crm/best-channel.service.ts,injects,BestChannelService,high
 apps/server/src/modules/crm/best-channel-scheduler.service.ts,model:business,reads-model,business.findMany(),high
@@ -8064,6 +8080,7 @@ apps/server/src/modules/crm/crm-custom-fields.controller.ts,apps/server/src/modu
 apps/server/src/modules/crm/crm-custom-fields.controller.ts,apps/server/src/modules/crm/contact-custom-field-value.service.ts,injects,ContactCustomFieldValueService,high
 apps/server/src/modules/crm/crm-data-quality.scheduler.ts,@nestjs/common,imports-external,@nestjs/common,high
 apps/server/src/modules/crm/crm-data-quality.scheduler.ts,apps/server/src/modules/crm/crm-data-quality.service.ts,imports,./crm-data-quality.service,high
+apps/server/src/modules/crm/crm-data-quality.scheduler.ts,apps/server/src/core/scheduling/safe-interval.ts,imports,../../core/scheduling/safe-interval,high
 apps/server/src/modules/crm/crm-data-quality.scheduler.ts,apps/server/src/modules/crm/crm-data-quality.service.ts,injects,CrmDataQualityService,high
 apps/server/src/modules/crm/crm-data-quality.service.ts,@nestjs/common,imports-external,@nestjs/common,high
 apps/server/src/modules/crm/crm-data-quality.service.ts,@prisma/client,imports-external,@prisma/client,high
@@ -8972,6 +8989,7 @@ apps/server/src/modules/crm/privacy/contact-privacy.service.ts,@aws-sdk/client-s
 apps/server/src/modules/crm/privacy/contact-privacy.service.ts,@aws-sdk/s3-request-presigner,imports-external,@aws-sdk/s3-request-presigner,high
 apps/server/src/modules/crm/privacy/contact-privacy.service.ts,apps/server/src/modules/crm/privacy/contact-audit.service.ts,imports,./contact-audit.service,high
 apps/server/src/modules/crm/privacy/contact-privacy.service.ts,apps/server/src/modules/crm/privacy/contact-zip.util.ts,imports,./contact-zip.util,high
+apps/server/src/modules/crm/privacy/contact-privacy.service.ts,apps/server/src/core/scheduling/safe-interval.ts,imports,../../../core/scheduling/safe-interval,high
 apps/server/src/modules/crm/privacy/contact-privacy.service.ts,apps/server/src/core/prisma/prisma.service.ts,injects,PrismaService,high
 apps/server/src/modules/crm/privacy/contact-privacy.service.ts,apps/server/src/modules/crm/privacy/contact-audit.service.ts,injects,ContactAuditService,high
 apps/server/src/modules/crm/privacy/contact-privacy.service.ts,model:business,reads-model,business.findUnique(),high
@@ -9304,6 +9322,7 @@ apps/server/src/modules/email-marketing/campaign-scheduler.service.ts,@nestjs/co
 apps/server/src/modules/email-marketing/campaign-scheduler.service.ts,apps/server/src/core/prisma/prisma.service.ts,imports,../../core/prisma/prisma.service,high
 apps/server/src/modules/email-marketing/campaign-scheduler.service.ts,apps/server/src/modules/email-marketing/email-marketing.service.ts,imports,./email-marketing.service,high
 apps/server/src/modules/email-marketing/campaign-scheduler.service.ts,apps/server/src/modules/email-marketing/campaign-intelligence.service.ts,imports,./campaign-intelligence.service,high
+apps/server/src/modules/email-marketing/campaign-scheduler.service.ts,apps/server/src/core/scheduling/safe-interval.ts,imports,../../core/scheduling/safe-interval,high
 apps/server/src/modules/email-marketing/campaign-scheduler.service.ts,apps/server/src/core/prisma/prisma.service.ts,injects,PrismaService,high
 apps/server/src/modules/email-marketing/campaign-scheduler.service.ts,apps/server/src/modules/email-marketing/email-marketing.service.ts,injects,EmailMarketingService,high
 apps/server/src/modules/email-marketing/campaign-scheduler.service.ts,apps/server/src/modules/email-marketing/campaign-intelligence.service.ts,injects,CampaignIntelligenceService,high
@@ -10299,6 +10318,7 @@ apps/server/src/modules/finance/recurring-journal-entry.service.ts,@nestjs/commo
 apps/server/src/modules/finance/recurring-journal-entry.service.ts,@prisma/client,imports-external,@prisma/client,high
 apps/server/src/modules/finance/recurring-journal-entry.service.ts,apps/server/src/core/prisma/prisma.service.ts,imports,../../core/prisma/prisma.service,high
 apps/server/src/modules/finance/recurring-journal-entry.service.ts,apps/server/src/modules/finance/posting.service.ts,imports,./posting.service,high
+apps/server/src/modules/finance/recurring-journal-entry.service.ts,apps/server/src/core/scheduling/safe-interval.ts,imports,../../core/scheduling/safe-interval,high
 apps/server/src/modules/finance/recurring-journal-entry.service.ts,apps/server/src/core/prisma/prisma.service.ts,injects,PrismaService,high
 apps/server/src/modules/finance/recurring-journal-entry.service.ts,apps/server/src/modules/finance/posting.service.ts,injects,PostingService,high
 apps/server/src/modules/finance/recurring-journal-entry.service.ts,model:recurringJournalEntry,reads-model,recurringJournalEntry.findMany(),high
@@ -10924,6 +10944,7 @@ apps/server/src/modules/growth-intelligence/growth-intelligence-scheduler.servic
 apps/server/src/modules/growth-intelligence/growth-intelligence-scheduler.service.ts,apps/server/src/core/prisma/prisma.service.ts,imports,../../core/prisma/prisma.service,high
 apps/server/src/modules/growth-intelligence/growth-intelligence-scheduler.service.ts,apps/server/src/modules/growth-intelligence/customer-journey.service.ts,imports,./customer-journey.service,high
 apps/server/src/modules/growth-intelligence/growth-intelligence-scheduler.service.ts,apps/server/src/modules/growth-intelligence/growth-intelligence.service.ts,imports,./growth-intelligence.service,high
+apps/server/src/modules/growth-intelligence/growth-intelligence-scheduler.service.ts,apps/server/src/core/scheduling/safe-interval.ts,imports,../../core/scheduling/safe-interval,high
 apps/server/src/modules/growth-intelligence/growth-intelligence-scheduler.service.ts,apps/server/src/core/prisma/prisma.service.ts,injects,PrismaService,high
 apps/server/src/modules/growth-intelligence/growth-intelligence-scheduler.service.ts,apps/server/src/modules/growth-intelligence/customer-journey.service.ts,injects,CustomerJourneyService,high
 apps/server/src/modules/growth-intelligence/growth-intelligence-scheduler.service.ts,apps/server/src/modules/growth-intelligence/growth-intelligence.service.ts,injects,GrowthIntelligenceService,high
@@ -11523,6 +11544,7 @@ apps/server/src/modules/intelligence/scheduled-scans.service.ts,apps/server/src/
 apps/server/src/modules/intelligence/scheduled-scans.service.ts,apps/server/src/modules/intelligence/signals.service.ts,imports,./signals.service,high
 apps/server/src/modules/intelligence/scheduled-scans.service.ts,apps/server/src/modules/intelligence/command-bridge.service.ts,imports,./command-bridge.service,high
 apps/server/src/modules/intelligence/scheduled-scans.service.ts,apps/server/src/modules/intelligence/health-score.service.ts,imports,./health-score.service,high
+apps/server/src/modules/intelligence/scheduled-scans.service.ts,apps/server/src/core/scheduling/safe-interval.ts,imports,../../core/scheduling/safe-interval,high
 apps/server/src/modules/intelligence/scheduled-scans.service.ts,apps/server/src/core/prisma/prisma.service.ts,injects,PrismaService,high
 apps/server/src/modules/intelligence/scheduled-scans.service.ts,apps/server/src/modules/intelligence/rules.service.ts,injects,RulesService,high
 apps/server/src/modules/intelligence/scheduled-scans.service.ts,apps/server/src/modules/intelligence/signals.service.ts,injects,SignalsService,high
@@ -12933,6 +12955,7 @@ apps/server/src/modules/key-cortex/key-cortex-executor.service.ts,apps/server/sr
 apps/server/src/modules/key-cortex/key-cortex-executor.service.ts,apps/server/src/modules/key-autonomy/autonomy-orchestrator.service.ts,imports,../key-autonomy/autonomy-orchestrator.service,high
 apps/server/src/modules/key-cortex/key-cortex-executor.service.ts,apps/server/src/modules/key-autonomy/key-action-proposal.service.ts,imports,../key-autonomy/key-action-proposal.service,high
 apps/server/src/modules/key-cortex/key-cortex-executor.service.ts,apps/server/src/modules/key-cortex/key-cortex-approval-orchestrator.service.ts,imports,./key-cortex-approval-orchestrator.service,high
+apps/server/src/modules/key-cortex/key-cortex-executor.service.ts,apps/server/src/core/scheduling/safe-interval.ts,imports,../../core/scheduling/safe-interval,high
 apps/server/src/modules/key-cortex/key-cortex-executor.service.ts,apps/server/src/modules/key-cortex/key-cortex-connector.service.ts,injects,KeyCortexConnectorService,high
 apps/server/src/modules/key-cortex/key-cortex-executor.service.ts,key.cortex.execution.started,emits,key.cortex.execution.started,high
 apps/server/src/modules/key-cortex/key-cortex-executor.service.ts,key.cortex.execution.completed,emits,key.cortex.execution.completed,high
@@ -13380,6 +13403,7 @@ apps/server/src/modules/key-cortex/key-cortex-realtime.service.ts,@nestjs/event-
 apps/server/src/modules/key-cortex/key-cortex-realtime.service.ts,@nestjs/schedule,imports-external,@nestjs/schedule,high
 apps/server/src/modules/key-cortex/key-cortex-realtime.service.ts,apps/server/src/modules/key-cortex/key-cortex.gateway.ts,imports,./key-cortex.gateway,high
 apps/server/src/modules/key-cortex/key-cortex-realtime.service.ts,apps/server/src/modules/key-cortex/key-cortex-insight.service.ts,imports,./key-cortex-insight.service,high
+apps/server/src/modules/key-cortex/key-cortex-realtime.service.ts,apps/server/src/core/scheduling/safe-interval.ts,imports,../../core/scheduling/safe-interval,high
 apps/server/src/modules/key-cortex/key-cortex-realtime.service.ts,apps/server/src/modules/key-cortex/key-cortex.gateway.ts,injects,KeyCortexGateway,high
 apps/server/src/modules/key-cortex/key-cortex-realtime.service.ts,apps/server/src/modules/key-cortex/key-cortex-insight.service.ts,injects,KeyCortexInsightService,high
 apps/server/src/modules/key-cortex/key-cortex-realtime.service.ts,key.action.executed,listens,key.action.executed,high
@@ -14898,6 +14922,7 @@ apps/server/src/modules/momentum/momentum-ai.service.ts,model:momentumRecommenda
 apps/server/src/modules/momentum/momentum-scheduler.service.ts,@nestjs/common,imports-external,@nestjs/common,high
 apps/server/src/modules/momentum/momentum-scheduler.service.ts,apps/server/src/core/prisma/prisma.service.ts,imports,../../core/prisma/prisma.service,high
 apps/server/src/modules/momentum/momentum-scheduler.service.ts,apps/server/src/modules/momentum/client-momentum.service.ts,imports,./client-momentum.service,high
+apps/server/src/modules/momentum/momentum-scheduler.service.ts,apps/server/src/core/scheduling/safe-interval.ts,imports,../../core/scheduling/safe-interval,high
 apps/server/src/modules/momentum/momentum-scheduler.service.ts,apps/server/src/core/prisma/prisma.service.ts,injects,PrismaService,high
 apps/server/src/modules/momentum/momentum-scheduler.service.ts,apps/server/src/modules/momentum/client-momentum.service.ts,injects,ClientMomentumService,high
 apps/server/src/modules/momentum/momentum-scheduler.service.ts,model:business,reads-model,business.findMany(),high
@@ -15131,6 +15156,7 @@ apps/server/src/modules/os/os.service.ts,model:ledgerEntry,reads-model,ledgerEnt
 apps/server/src/modules/os/os.service.ts,model:deal,reads-model,deal.aggregate(),high
 apps/server/src/modules/payments/currency-rates.scheduler.ts,@nestjs/common,imports-external,@nestjs/common,high
 apps/server/src/modules/payments/currency-rates.scheduler.ts,apps/server/src/modules/payments/currency-rates.service.ts,imports,./currency-rates.service,high
+apps/server/src/modules/payments/currency-rates.scheduler.ts,apps/server/src/core/scheduling/safe-interval.ts,imports,../../core/scheduling/safe-interval,high
 apps/server/src/modules/payments/currency-rates.scheduler.ts,apps/server/src/modules/payments/currency-rates.service.ts,injects,CurrencyRatesService,high
 apps/server/src/modules/payments/currency-rates.service.spec.ts,vitest,imports-external,vitest,high
 apps/server/src/modules/payments/currency-rates.service.spec.ts,apps/server/src/modules/payments/currency-rates.service.ts,imports,./currency-rates.service,high
@@ -16468,6 +16494,7 @@ apps/server/src/modules/social/social-analytics.service.ts,apps/server/src/modul
 apps/server/src/modules/social/social-analytics.service.ts,model:socialPost,reads-model,socialPost.findMany(),high
 apps/server/src/modules/social/social-connections.service.ts,@nestjs/common,imports-external,@nestjs/common,high
 apps/server/src/modules/social/social-connections.service.ts,apps/server/src/core/prisma/prisma.service.ts,imports,../../core/prisma/prisma.service,high
+apps/server/src/modules/social/social-connections.service.ts,apps/server/src/core/scheduling/safe-interval.ts,imports,../../core/scheduling/safe-interval,high
 apps/server/src/modules/social/social-connections.service.ts,apps/server/src/core/prisma/prisma.service.ts,injects,PrismaService,high
 apps/server/src/modules/social/social-connections.service.ts,model:socialConnection,reads-model,socialConnection.findMany(),high
 apps/server/src/modules/social/social-connections.service.ts,model:socialConnection,reads-model,socialConnection.findFirst(),high
@@ -16975,6 +17002,7 @@ apps/server/src/modules/temporal-flow/temporal-flow-genome-bridge.service.ts,@ne
 apps/server/src/modules/temporal-flow/temporal-flow-genome-bridge.service.ts,@nestjs/schedule,imports-external,@nestjs/schedule,high
 apps/server/src/modules/temporal-flow/temporal-flow-genome-bridge.service.ts,apps/server/src/core/prisma/prisma.service.ts,imports,../../core/prisma/prisma.service,high
 apps/server/src/modules/temporal-flow/temporal-flow-genome-bridge.service.ts,apps/server/src/modules/business-genome/key-genome/genome-signal.service.ts,imports,../business-genome/key-genome/genome-signal.service,high
+apps/server/src/modules/temporal-flow/temporal-flow-genome-bridge.service.ts,apps/server/src/core/scheduling/safe-interval.ts,imports,../../core/scheduling/safe-interval,high
 apps/server/src/modules/temporal-flow/temporal-flow-genome-bridge.service.ts,apps/server/src/core/prisma/prisma.service.ts,injects,PrismaService,high
 apps/server/src/modules/temporal-flow/temporal-flow-genome-bridge.service.ts,apps/server/src/modules/business-genome/key-genome/genome-signal.service.ts,injects,GenomeSignalService,high
 apps/server/src/modules/temporal-flow/temporal-flow-genome-bridge.service.ts,model:temporalFlowEvent,reads-model,temporalFlowEvent.findMany(),high

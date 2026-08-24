@@ -369,7 +369,10 @@ export function routes(src) {
           if (!m) continue;
           const guards = dedupe([...classGuards, ...guardsIn(mrun)]);
           out.push({
-            method: m[1].toUpperCase(),
+            // @Sse registers a GET route in Nest. Recording it as "SSE" made
+            // six streaming endpoints look absent when the map was diffed
+            // against the routes the running server actually maps.
+            method: m[1].toUpperCase() === 'SSE' ? 'GET' : m[1].toUpperCase(),
             path: joinRoute(prefix, (m[2] ?? m[3] ?? m[4] ?? '').trim()),
             handler: member.name,
             guards,

@@ -44,14 +44,14 @@ apps/server/src/core/config/unreachable-provider.spec.ts,apps/server,core/config
 apps/server/src/core/connectors/connector-activity.service.ts,apps/server,core/connectors,service,132,ConnectorActivityService,4,1,11,0,,connector.connected connector.disconnected connector.synced connector.error,,connectorActivityLog,FALSE
 apps/server/src/core/connectors/connector-credentials.service.ts,apps/server,core/connectors,service,213,ConnectorCredentialsService,4,1,24,0,,,,connectorStatus business,FALSE
 apps/server/src/core/connectors/connector-health-monitor.service.spec.ts,apps/server,core/connectors,spec,176,,2,0,0,0,,,,connectorStatus,FALSE
-apps/server/src/core/connectors/connector-health-monitor.service.ts,apps/server,core/connectors,service,304,ConnectorHealthMonitorService,6,4,4,0,,,,connectorStatus notification,FALSE
+apps/server/src/core/connectors/connector-health-monitor.service.ts,apps/server,core/connectors,service,305,ConnectorHealthMonitorService,7,4,4,0,,,,connectorStatus notification,FALSE
 apps/server/src/core/connectors/connector-initializer.service.ts,apps/server,core/connectors,service,88,ConnectorInitializerService,2,23,1,0,,,,,FALSE
 apps/server/src/core/connectors/connector-registry.service.ts,apps/server,core/connectors,service,287,ConnectorRegistryService,4,2,15,0,connector.synced connector.error connector.disconnected connector.connected connector.tested connector.smoke_tested,,,connectorStatus,FALSE
 apps/server/src/core/connectors/connector-sync-modes.spec.ts,apps/server,core/connectors,spec,43,,2,0,0,0,,,,,FALSE
 apps/server/src/core/connectors/connector-sync-modes.ts,apps/server,core/connectors,ts,92,,1,0,1,0,,,,,FALSE
 apps/server/src/core/connectors/connector-sync-not-implemented.spec.ts,apps/server,core/connectors,spec,73,,19,0,0,0,,,,,FALSE
 apps/server/src/core/connectors/connector-sync-scheduler.service.spec.ts,apps/server,core/connectors,spec,112,,2,0,0,0,,,,,FALSE
-apps/server/src/core/connectors/connector-sync-scheduler.service.ts,apps/server,core/connectors,service,154,ConnectorSyncSchedulerService,5,3,2,0,,,,connectorStatus,FALSE
+apps/server/src/core/connectors/connector-sync-scheduler.service.ts,apps/server,core/connectors,service,155,ConnectorSyncSchedulerService,6,3,2,0,,,,connectorStatus,FALSE
 apps/server/src/core/connectors/connector.controller.ts,apps/server,core/connectors,controller,335,ConnectorController,12,5,1,19,,,,connectorStatus,FALSE
 apps/server/src/core/connectors/connector.interface.ts,apps/server,core/connectors,ts,268,,0,0,39,0,,,,,FALSE
 apps/server/src/core/connectors/connector.module.ts,apps/server,core/connectors,nest-module,109,ConnectorModule,15,0,4,0,,,,,FALSE
@@ -119,6 +119,8 @@ apps/server/src/core/redis/redis-degrades.spec.ts,apps/server,core/redis,spec,92
 apps/server/src/core/redis/redis.constants.ts,apps/server,core/redis,ts,2,,0,0,18,0,,,,,FALSE
 apps/server/src/core/redis/redis.module.ts,apps/server,core/redis,nest-module,153,RedisModule,4,0,4,0,,,,,FALSE
 apps/server/src/core/redis/redis.service.ts,apps/server,core/redis,service,61,RedisService,4,1,33,0,,,,,FALSE
+apps/server/src/core/scheduling/safe-interval.spec.ts,apps/server,core/scheduling,spec,163,,2,0,0,0,,,,,FALSE
+apps/server/src/core/scheduling/safe-interval.ts,apps/server,core/scheduling,ts,90,,1,0,27,0,,,,,FALSE
 apps/server/src/core/security/redaction.spec.ts,apps/server,core/security,spec,92,,2,0,0,0,,,,,FALSE
 apps/server/src/core/security/redaction.ts,apps/server,core/security,ts,77,,0,0,2,0,,,,,FALSE
 apps/server/src/core/security/sanitize-business.ts,apps/server,core/security,ts,53,,0,0,2,0,,,,,FALSE
@@ -152,7 +154,7 @@ apps/server/src/modules/admin-platform/admin-user.controller.ts,apps/server,admi
 apps/server/src/modules/admin-platform/gdpr-purge.service.ts,apps/server,admin-platform,service,172,GdprPurgeService,2,1,4,0,,,,,FALSE
 apps/server/src/modules/ai/action-dispatcher.service.ts,apps/server,ai,service,314,ActionDispatcherService,8,7,3,0,action.executed action.blocked,,,aiExecutionLog,FALSE
 apps/server/src/modules/ai/agent-bus.service.ts,apps/server,ai,service,167,AgentBusService,3,2,7,0,agent.message.* agent.message,,,agentMessage,FALSE
-apps/server/src/modules/ai/agent-health.service.ts,apps/server,ai,service,212,AgentHealthService,4,3,3,0,plan.stalled,,,business aiPlan delegationLoop aiApprovalItem aiExecutionLog aiPlanStep,FALSE
+apps/server/src/modules/ai/agent-health.service.ts,apps/server,ai,service,213,AgentHealthService,5,3,3,0,plan.stalled,,,business aiPlan delegationLoop aiApprovalItem aiExecutionLog aiPlanStep,FALSE
 apps/server/src/modules/ai/agent-state-machine.service.ts,apps/server,ai,service,218,AgentStateMachineService,3,2,6,0,agent.state_changed,,,aiPlan,FALSE
 apps/server/src/modules/ai/agent-trigger.service.ts,apps/server,ai,service,249,AgentTriggerService,8,7,3,0,plan.approved,,,agentTrigger autopilotSettings aiExecutionLog aiPlan,FALSE
 apps/server/src/modules/ai/agent.controller.ts,apps/server,ai,controller,333,AgentController,12,8,1,20,,,,aiMemory agentTrigger aiExecutionLog,FALSE
@@ -176,7 +178,7 @@ apps/server/src/modules/ai/ai-usage-alert-scheduler.service.spec.ts,apps/server,
 apps/server/src/modules/ai/ai-usage-alert-scheduler.service.ts,apps/server,ai,service,202,AiUsageAlertSchedulerService,5,4,2,0,,,,aiUsageAlert business user,FALSE
 apps/server/src/modules/ai/ai-usage-feature-coverage.spec.ts,apps/server,ai,spec,107,,4,0,0,0,,,,,FALSE
 apps/server/src/modules/ai/ai-usage.service.spec.ts,apps/server,ai,spec,827,,4,0,0,0,,,,,FALSE
-apps/server/src/modules/ai/ai-usage.service.ts,apps/server,ai,service,1323,AiUsageService,8,4,153,0,,,,aiUsageLog embeddings aiUsageAlert,FALSE
+apps/server/src/modules/ai/ai-usage.service.ts,apps/server,ai,service,1324,AiUsageService,9,4,153,0,,,,aiUsageLog embeddings aiUsageAlert,FALSE
 apps/server/src/modules/ai/ai.controller.ts,apps/server,ai,controller,1680,AiController,37,32,1,98,plan.approved,,,businessPlan aiPlanStep aiApprovalItem user membership keyCommand activity invoice contact booking,FALSE
 apps/server/src/modules/ai/ai.listener.ts,apps/server,ai,listener,177,AiListener,5,2,2,0,graph.cache_invalidated,contact.created contact.updated contact.deleted contact.merged contact.imported invoice.paid invoice.sent invoice.overdue booking.created booking.confirmed booking.completed booking.cancelled booking.rescheduled product.created product.updated product.deactivated expense.created store_order.created store_order.paid store_order.shipped store_order.delivered store_order.cancelled store_order.refunded action.executed action.blocked campaign.created campaign.sent campaign.briefing_generated post.published lead_form.created lead_form.submitted sequence.step_due sequence.step_failed quote.created quote.sent quote.converted content.published content.failed delivery.completed delivery.failed inventory.low inventory.out preorder.delayed purchaseOrder.received,,,FALSE
 apps/server/src/modules/ai/ai.module.ts,apps/server,ai,nest-module,225,AiModule,96,0,35,0,,,,,FALSE
@@ -197,7 +199,7 @@ apps/server/src/modules/ai/capacity-insight.service.ts,apps/server,ai,service,18
 apps/server/src/modules/ai/chaser.service.ts,apps/server,ai,service,196,ChaserService,3,2,1,0,manager.chase_notice,,,contactTask taskAssignment projectTask approvalRequest contentRequest evidence callLog,FALSE
 apps/server/src/modules/ai/code-executor.controller.ts,apps/server,ai,controller,23,CodeExecutorController,2,1,1,1,,,,,FALSE
 apps/server/src/modules/ai/code-executor.service.ts,apps/server,ai,service,397,CodeExecutorService,7,0,5,0,,,,,FALSE
-apps/server/src/modules/ai/connector-intelligence.service.ts,apps/server,ai,service,398,ConnectorIntelligenceService,12,10,4,0,file.uploaded ingestion.item.received message.intake.received social.engagement_received form.submitted,,,business connectorStatus driveSyncCursor driveIntakeFile socialEngagement leadFormSubmission,FALSE
+apps/server/src/modules/ai/connector-intelligence.service.ts,apps/server,ai,service,399,ConnectorIntelligenceService,13,10,4,0,file.uploaded ingestion.item.received message.intake.received social.engagement_received form.submitted,,,business connectorStatus driveSyncCursor driveIntakeFile socialEngagement leadFormSubmission,FALSE
 apps/server/src/modules/ai/contracts-reports-goals-tools.spec.ts,apps/server,ai,spec,163,,4,0,0,0,,,,,FALSE
 apps/server/src/modules/ai/conversation-genome-extractor.service.ts,apps/server,ai,service,155,ConversationGenomeExtractorService,3,2,2,0,,,,,FALSE
 apps/server/src/modules/ai/conversational-ai.service.ts,apps/server,ai,service,413,ConversationalAIService,16,15,3,0,conversation.handled,,,contact whatsAppMessage whatsAppContact business service,FALSE
@@ -251,7 +253,7 @@ apps/server/src/modules/ai/ledger-report-tools.spec.ts,apps/server,ai,spec,247,,
 apps/server/src/modules/ai/llm-cost-coverage.spec.ts,apps/server,ai,spec,99,,4,0,0,0,,,,,FALSE
 apps/server/src/modules/ai/llm-cost.service.spec.ts,apps/server,ai,spec,150,,2,0,0,0,,,,,FALSE
 apps/server/src/modules/ai/llm-cost.service.ts,apps/server,ai,service,166,LLMCostService,3,1,6,0,,,,lLMProviderCost,FALSE
-apps/server/src/modules/ai/match-refresh-scheduler.service.ts,apps/server,ai,service,46,MatchRefreshSchedulerService,2,1,1,0,,,,,FALSE
+apps/server/src/modules/ai/match-refresh-scheduler.service.ts,apps/server,ai,service,45,MatchRefreshSchedulerService,3,1,1,0,,,,,FALSE
 apps/server/src/modules/ai/model-gateway.service.spec.ts,apps/server,ai,spec,858,,4,0,0,0,,,,,FALSE
 apps/server/src/modules/ai/model-gateway.service.ts,apps/server,ai,service,3031,ModelGatewayService,7,3,93,0,,,,aiUsageLog aiMemory,FALSE
 apps/server/src/modules/ai/model-pricing.spec.ts,apps/server,ai,spec,120,,3,0,0,0,,,,,FALSE
@@ -259,11 +261,11 @@ apps/server/src/modules/ai/morning-briefing.service.ts,apps/server,ai,service,54
 apps/server/src/modules/ai/obligation-tools.spec.ts,apps/server,ai,spec,181,,6,0,0,0,,,,,FALSE
 apps/server/src/modules/ai/output-template.controller.ts,apps/server,ai,controller,96,OutputTemplateController,5,1,1,9,,,,,FALSE
 apps/server/src/modules/ai/output-template.service.ts,apps/server,ai,service,230,OutputTemplateService,3,1,5,0,,,,outputTemplate,FALSE
-apps/server/src/modules/ai/pattern-detector.service.ts,apps/server,ai,service,361,PatternDetectorService,6,5,3,0,pattern.detected,,,business supportTicket booking contactEvent invoice,FALSE
+apps/server/src/modules/ai/pattern-detector.service.ts,apps/server,ai,service,362,PatternDetectorService,7,5,3,0,pattern.detected,,,business supportTicket booking contactEvent invoice,FALSE
 apps/server/src/modules/ai/payments-tools.spec.ts,apps/server,ai,spec,151,,4,0,0,0,,,,,FALSE
 apps/server/src/modules/ai/people-tools.spec.ts,apps/server,ai,spec,313,,5,0,0,0,,,,,FALSE
 apps/server/src/modules/ai/perception-join.spec.ts,apps/server,ai,spec,354,,4,0,0,0,,,,,FALSE
-apps/server/src/modules/ai/plan-executor.service.ts,apps/server,ai,service,449,PlanExecutorService,12,3,7,0,plan.executed,plan.approved key.action.approved key.action.rejected,,aiPlan aiPlanStep,FALSE
+apps/server/src/modules/ai/plan-executor.service.ts,apps/server,ai,service,450,PlanExecutorService,13,3,7,0,plan.executed,plan.approved key.action.approved key.action.rejected,,aiPlan aiPlanStep,FALSE
 apps/server/src/modules/ai/planner.service.ts,apps/server,ai,service,370,PlannerService,9,4,19,0,,,,aiPlan aiPlanStep user membership,FALSE
 apps/server/src/modules/ai/portal-tools.spec.ts,apps/server,ai,spec,240,,5,0,0,0,,,,,FALSE
 apps/server/src/modules/ai/pro-auto-monitor.service.ts,apps/server,ai,service,660,ProAutoMonitorService,8,5,5,0,,,,business contact invoice,FALSE
@@ -512,7 +514,7 @@ apps/server/src/modules/calendar/calendar-permission.service.ts,apps/server,cale
 apps/server/src/modules/calendar/calendar-projection.service.spec.ts,apps/server,calendar,spec,119,,3,0,0,0,,,,calendarEvent,FALSE
 apps/server/src/modules/calendar/calendar-projection.service.ts,apps/server,calendar,service,363,CalendarProjectionService,4,1,22,0,,,,calendarEvent booking contactTask projectTask socialPost project,FALSE
 apps/server/src/modules/calendar/calendar-query.service.ts,apps/server,calendar,service,629,CalendarQueryService,6,3,10,0,,,,calendarEvent,FALSE
-apps/server/src/modules/calendar/calendar-sync.scheduler.ts,apps/server,calendar,ts,75,CalendarSyncScheduler,2,1,1,0,,,,,FALSE
+apps/server/src/modules/calendar/calendar-sync.scheduler.ts,apps/server,calendar,ts,76,CalendarSyncScheduler,3,1,1,0,,,,,FALSE
 apps/server/src/modules/calendar/calendar-sync.service.ts,apps/server,calendar,service,471,CalendarSyncService,5,3,6,0,,,,business calendarSyncConflict calendarEvent,FALSE
 apps/server/src/modules/calendar/calendar.controller.spec.ts,apps/server,calendar,spec,588,,19,0,0,0,,,,booking socialPost,FALSE
 apps/server/src/modules/calendar/calendar.controller.ts,apps/server,calendar,controller,676,CalendarController,13,6,2,22,,,,,FALSE
@@ -556,7 +558,7 @@ apps/server/src/modules/chatwoot/chatwoot.controller.ts,apps/server,chatwoot,con
 apps/server/src/modules/chatwoot/chatwoot.module.ts,apps/server,chatwoot,nest-module,13,ChatwootModule,4,0,1,0,,,,,FALSE
 apps/server/src/modules/chatwoot/chatwoot.service.ts,apps/server,chatwoot,service,153,ChatwootService,2,1,3,0,,,,,FALSE
 apps/server/src/modules/command/command-generator.service.ts,apps/server,command,service,263,CommandGeneratorService,2,1,5,0,,,,commandItem invoice quote expense aiApprovalItem projectTask booking,FALSE
-apps/server/src/modules/command/command-scheduler.service.ts,apps/server,command,service,56,CommandSchedulerService,5,2,3,0,,,,,FALSE
+apps/server/src/modules/command/command-scheduler.service.ts,apps/server,command,service,67,CommandSchedulerService,6,2,3,0,,,,,FALSE
 apps/server/src/modules/command/command.controller.ts,apps/server,command,controller,224,CommandController,12,3,1,21,,,,,FALSE
 apps/server/src/modules/command/command.module.ts,apps/server,command,nest-module,29,CommandModule,10,0,8,0,,,,,FALSE
 apps/server/src/modules/command/command.service.spec.ts,apps/server,command,spec,105,,3,0,0,0,,,,commandItem,FALSE
@@ -576,9 +578,9 @@ apps/server/src/modules/commerce/commerce-intelligence.service.ts,apps/server,co
 apps/server/src/modules/commerce/commerce-stats.service.ts,apps/server,commerce,service,214,CommerceStatsService,2,1,8,0,,,,product invoice quote invoiceItem,FALSE
 apps/server/src/modules/commerce/commerce-vision.service.ts,apps/server,commerce,service,190,CommerceVisionService,2,1,4,0,,,,,FALSE
 apps/server/src/modules/commerce/commerce.controller.ts,apps/server,commerce,controller,1473,CommerceController,29,9,2,70,,,,business product productCostProfile marginSnapshot aiApprovalItem invoice,FALSE
-apps/server/src/modules/commerce/commerce.module.ts,apps/server,commerce,nest-module,155,CommerceModule,63,0,13,0,,,,,FALSE
+apps/server/src/modules/commerce/commerce.module.ts,apps/server,commerce,nest-module,159,CommerceModule,62,0,13,0,,,,,FALSE
 apps/server/src/modules/commerce/commerce.service.ts,apps/server,commerce,service,2156,CommerceService,14,9,38,0,invoice.created quote.sent invoice.deleted quote.accepted quote.rejected quote.stale quote.viewed quote.created quote.expiry_changed quote.updated quote.deleted quote.converted invoice.reminder_failed invoice.payment_reminder_sent invoice.due_date_changed invoice.updated,,,invoice quote membership payment quoteItem contactEvent paymentLink invoiceItem,FALSE
-apps/server/src/modules/commerce/document-template/document-template.controller.ts,apps/server,commerce,controller,49,DocumentTemplateController,7,1,2,5,,,,,FALSE
+apps/server/src/modules/commerce/document-template/document-template.controller.ts,apps/server,commerce,controller,49,DocumentTemplateController,7,1,1,5,,,,,FALSE
 apps/server/src/modules/commerce/document-template/document-template.module.ts,apps/server,commerce,nest-module,11,DocumentTemplateModule,3,0,1,0,,,,,FALSE
 apps/server/src/modules/commerce/document-template/document-template.service.ts,apps/server,commerce,service,87,DocumentTemplateService,4,1,4,0,,,,,FALSE
 apps/server/src/modules/commerce/document-template/dto/create-document-template.dto.ts,apps/server,commerce,dto,22,CreateDocumentTemplateDto,1,0,2,0,,,,,FALSE
@@ -594,7 +596,7 @@ apps/server/src/modules/commerce/dto/time-cost.dto.ts,apps/server,commerce,dto,3
 apps/server/src/modules/commerce/dto/update-invoice-status.dto.ts,apps/server,commerce,dto,15,UpdateInvoiceStatusDto,1,0,2,0,,,,,FALSE
 apps/server/src/modules/commerce/dto/update-quote-status.dto.ts,apps/server,commerce,dto,7,UpdateQuoteStatusDto,1,0,1,0,,,,,FALSE
 apps/server/src/modules/commerce/dto/update-revenue-attribution.dto.ts,apps/server,commerce,dto,35,UpdateRevenueAttributionDto,1,0,1,0,,,,,FALSE
-apps/server/src/modules/commerce/financial-briefing-scheduler.service.ts,apps/server,commerce,service,279,FinancialBriefingSchedulerService,4,3,1,0,,,,notification business invoice expense financeActionItem user,FALSE
+apps/server/src/modules/commerce/financial-briefing-scheduler.service.ts,apps/server,commerce,service,278,FinancialBriefingSchedulerService,5,3,1,0,,,,notification business invoice expense financeActionItem user,FALSE
 apps/server/src/modules/commerce/financial-copilot.controller.ts,apps/server,commerce,controller,43,FinancialCopilotController,5,1,1,4,,,,,FALSE
 apps/server/src/modules/commerce/financial-copilot.service.ts,apps/server,commerce,service,758,FinancialCopilotService,4,2,7,0,,,,invoice expense recurringInvoice business financeActionItem expenseCategory,FALSE
 apps/server/src/modules/commerce/gmail.service.ts,apps/server,commerce,service,630,GmailService,5,2,17,0,,,,business,FALSE
@@ -611,7 +613,7 @@ apps/server/src/modules/commerce/landed-cost-engine.service.ts,apps/server,comme
 apps/server/src/modules/commerce/leverage.controller.ts,apps/server,commerce,controller,250,LeverageController,9,3,1,9,,,,invoice marginSnapshot quote,FALSE
 apps/server/src/modules/commerce/margin-analysis.service.ts,apps/server,commerce,service,150,MarginAnalysisService,3,2,7,0,,,,product productCostProfile marginSnapshot,FALSE
 apps/server/src/modules/commerce/margin-on-payment.listener.ts,apps/server,commerce,listener,114,MarginOnPaymentListener,4,2,1,0,,invoice.paid,,invoice marginSnapshot product,FALSE
-apps/server/src/modules/commerce/margin-snapshot-scheduler.service.ts,apps/server,commerce,service,101,MarginSnapshotSchedulerService,3,2,3,0,,,,product marginSnapshot business,FALSE
+apps/server/src/modules/commerce/margin-snapshot-scheduler.service.ts,apps/server,commerce,service,100,MarginSnapshotSchedulerService,4,2,3,0,,,,product marginSnapshot business,FALSE
 apps/server/src/modules/commerce/payment-evidence.service.ts,apps/server,commerce,service,247,PaymentEvidenceService,6,4,4,0,,,,,FALSE
 apps/server/src/modules/commerce/pricing-signals.service.ts,apps/server,commerce,service,162,PricingSignalsService,3,2,5,0,,,,product invoiceItem,FALSE
 apps/server/src/modules/commerce/prompts/client-intelligence.prompt.ts,apps/server,commerce,ts,58,,0,0,0,0,,,,,TRUE
@@ -655,7 +657,7 @@ apps/server/src/modules/communications/communications.service.ts,apps/server,com
 apps/server/src/modules/communications/consent.service.spec.ts,apps/server,communications,spec,91,,2,0,0,0,,,,consentRecord,FALSE
 apps/server/src/modules/communications/consent.service.ts,apps/server,communications,service,98,ConsentService,2,1,4,0,,,,consentRecord,FALSE
 apps/server/src/modules/communications/content-ai.service.ts,apps/server,communications,service,603,ContentAiService,3,2,3,0,,,,business contact invoice booking outboundContent,FALSE
-apps/server/src/modules/communications/delivery-queue.service.ts,apps/server,communications,service,867,DeliveryQueueService,4,3,4,0,content.published delivery.completed content.failed delivery.failed delivery.opened delivery.clicked,,,outboundDelivery deliveryEvent outboundContent channelDestination contact emailCampaign emailCampaignContact,FALSE
+apps/server/src/modules/communications/delivery-queue.service.ts,apps/server,communications,service,868,DeliveryQueueService,5,3,4,0,content.published delivery.completed content.failed delivery.failed delivery.opened delivery.clicked,,,outboundDelivery deliveryEvent outboundContent channelDestination contact emailCampaign emailCampaignContact,FALSE
 apps/server/src/modules/communications/inbound-communications.controller.ts,apps/server,communications,controller,105,InboundCommunicationsController,4,1,1,2,,,,,FALSE
 apps/server/src/modules/communications/inbound-communications.service.ts,apps/server,communications,service,215,InboundCommunicationsService,6,5,3,0,message.intake.received message.received,,,business,FALSE
 apps/server/src/modules/communications/interaction-classifier.service.ts,apps/server,communications,service,223,InteractionClassifierService,2,1,7,0,,,,interactionIntent,FALSE
@@ -740,7 +742,7 @@ apps/server/src/modules/conversion/review-solicitation.service.ts,apps/server,co
 apps/server/src/modules/conversion/sales-team.service.ts,apps/server,conversion,service,145,SalesTeamService,2,1,3,0,,,,contact staffMember business invoice,FALSE
 apps/server/src/modules/conversion/upsell.service.ts,apps/server,conversion,service,68,UpsellService,3,2,3,0,,,,product,FALSE
 apps/server/src/modules/crm/ai-rate-limit.util.ts,apps/server,crm,ts,16,,1,0,6,0,,,,,FALSE
-apps/server/src/modules/crm/best-channel-scheduler.service.ts,apps/server,crm,service,83,BestChannelSchedulerService,3,2,1,0,,,,business,FALSE
+apps/server/src/modules/crm/best-channel-scheduler.service.ts,apps/server,crm,service,84,BestChannelSchedulerService,4,2,1,0,,,,business,FALSE
 apps/server/src/modules/crm/best-channel.listener.ts,apps/server,crm,listener,44,BestChannelListener,4,1,1,0,,crm.contact_event.logged,,,FALSE
 apps/server/src/modules/crm/best-channel.service.ts,apps/server,crm,service,422,BestChannelService,3,1,10,0,,,,contactChannelStat contact contactEvent,FALSE
 apps/server/src/modules/crm/contact-custom-field-value.service.ts,apps/server,crm,service,96,ContactCustomFieldValueService,2,1,5,0,,,,contactCustomFieldValue customFieldDefinition,FALSE
@@ -758,7 +760,7 @@ apps/server/src/modules/crm/crm-ai.service.ts,apps/server,crm,service,1706,CrmAi
 apps/server/src/modules/crm/crm-cache.service.ts,apps/server,crm,service,48,CrmCacheService,3,1,5,0,,,,,FALSE
 apps/server/src/modules/crm/crm-communication.service.ts,apps/server,crm,service,450,CrmCommunicationService,6,4,8,0,crm.contact_event.logged,,,contactEvent contactNote whatsAppContact whatsAppMessage contactReadState contact,FALSE
 apps/server/src/modules/crm/crm-custom-fields.controller.ts,apps/server,crm,controller,117,CrmCustomFieldsController,8,2,1,8,,,,,FALSE
-apps/server/src/modules/crm/crm-data-quality.scheduler.ts,apps/server,crm,ts,67,CrmDataQualityScheduler,2,1,1,0,,,,,FALSE
+apps/server/src/modules/crm/crm-data-quality.scheduler.ts,apps/server,crm,ts,68,CrmDataQualityScheduler,3,1,1,0,,,,,FALSE
 apps/server/src/modules/crm/crm-data-quality.service.ts,apps/server,crm,service,576,CrmDataQualityService,6,2,6,0,,,,business contact contactDataIssue,FALSE
 apps/server/src/modules/crm/crm-data-quality.util.ts,apps/server,crm,ts,234,,1,0,2,0,,,,,FALSE
 apps/server/src/modules/crm/crm-deals-won-event.spec.ts,apps/server,crm,spec,148,,2,0,0,0,,,,,FALSE
@@ -816,7 +818,7 @@ apps/server/src/modules/crm/guards/rate-limit.guard.ts,apps/server,crm,guard,67,
 apps/server/src/modules/crm/lead-scoring.scheduler.ts,apps/server,crm,ts,192,LeadScoringScheduler,2,1,1,0,,,,business contact deal invoice contactEvent,FALSE
 apps/server/src/modules/crm/privacy/contact-audit.service.ts,apps/server,crm,service,214,ContactAuditService,3,1,7,0,,,,contactAuditEntry,FALSE
 apps/server/src/modules/crm/privacy/contact-privacy.controller.ts,apps/server,crm,controller,174,ContactPrivacyController,7,2,1,7,,,,,FALSE
-apps/server/src/modules/crm/privacy/contact-privacy.service.ts,apps/server,crm,service,614,ContactPrivacyService,8,2,3,0,,,,business contactForgetRequest contactExportJob contact contactEvent contactNote contactTask contactMedia invoice quote booking contactAuditEntry contactImportContact,FALSE
+apps/server/src/modules/crm/privacy/contact-privacy.service.ts,apps/server,crm,service,613,ContactPrivacyService,9,2,3,0,,,,business contactForgetRequest contactExportJob contact contactEvent contactNote contactTask contactMedia invoice quote booking contactAuditEntry contactImportContact,FALSE
 apps/server/src/modules/crm/privacy/contact-zip.util.ts,apps/server,crm,ts,114,,2,0,1,0,,,,,FALSE
 apps/server/src/modules/crm/prompts/churn-detection.prompt.ts,apps/server,crm,ts,26,,0,0,1,0,,,,,FALSE
 apps/server/src/modules/crm/prompts/command-interpreter.prompt.ts,apps/server,crm,ts,81,,0,0,1,0,,,,,FALSE
@@ -846,7 +848,7 @@ apps/server/src/modules/education/education.controller.ts,apps/server,education,
 apps/server/src/modules/education/education.module.ts,apps/server,education,nest-module,11,EducationModule,3,0,1,0,,,,,FALSE
 apps/server/src/modules/education/education.service.ts,apps/server,education,service,254,EducationService,3,1,3,0,,,,course courseEnrollment,FALSE
 apps/server/src/modules/email-marketing/campaign-intelligence.service.ts,apps/server,email-marketing,service,763,CampaignIntelligenceService,6,4,5,0,campaign.briefing_generated,,,emailCampaign campaignBriefing contact emailCampaignContact,FALSE
-apps/server/src/modules/email-marketing/campaign-scheduler.service.ts,apps/server,email-marketing,service,71,CampaignSchedulerService,4,3,1,0,,,,emailCampaign,FALSE
+apps/server/src/modules/email-marketing/campaign-scheduler.service.ts,apps/server,email-marketing,service,72,CampaignSchedulerService,5,3,1,0,,,,emailCampaign,FALSE
 apps/server/src/modules/email-marketing/email-marketing.controller.ts,apps/server,email-marketing,controller,252,EmailMarketingController,6,2,1,21,,,,,FALSE
 apps/server/src/modules/email-marketing/email-marketing.module.ts,apps/server,email-marketing,nest-module,22,EmailMarketingModule,13,0,1,0,,,,,FALSE
 apps/server/src/modules/email-marketing/email-marketing.service.ts,apps/server,email-marketing,service,646,EmailMarketingService,8,3,7,0,campaign.created email_campaign.created email_campaign.scheduled email_campaign.updated email_campaign.deleted campaign.sent email_campaign.sent email_campaign.cancelled,,,emailCampaign emailCampaignContact contact business leadForm leadFormSubmission,FALSE
@@ -928,7 +930,7 @@ apps/server/src/modules/finance/posting.service.spec.ts,apps/server,finance,spec
 apps/server/src/modules/finance/posting.service.ts,apps/server,finance,service,329,PostingService,4,1,22,0,,,,financialTransaction chartOfAccount contact,FALSE
 apps/server/src/modules/finance/receivables.service.ts,apps/server,finance,service,435,ReceivablesService,4,2,11,0,,,,ledgerEntry payment business invoice contact,FALSE
 apps/server/src/modules/finance/reconciliation.service.ts,apps/server,finance,service,346,ReconciliationService,5,3,3,0,,,,financialAccount reconciliation bankTransaction ledgerEntry financialTransaction,FALSE
-apps/server/src/modules/finance/recurring-journal-entry.service.ts,apps/server,finance,service,255,RecurringJournalEntryService,4,2,3,0,,,,recurringJournalEntry,FALSE
+apps/server/src/modules/finance/recurring-journal-entry.service.ts,apps/server,finance,service,257,RecurringJournalEntryService,5,2,3,0,,,,recurringJournalEntry,FALSE
 apps/server/src/modules/finance/revenue-posting.service.spec.ts,apps/server,finance,spec,259,,2,0,0,0,,,,,FALSE
 apps/server/src/modules/finance/revenue-posting.service.ts,apps/server,finance,service,408,RevenuePostingService,6,4,13,0,,,,invoice financialTransaction payment,FALSE
 apps/server/src/modules/finance/safe-to-spend.service.ts,apps/server,finance,service,114,SafeToSpendService,3,2,5,0,,,,business financialAccount expense cashReserveBucket ledgerEntry,FALSE
@@ -983,7 +985,7 @@ apps/server/src/modules/governance/governance.service.ts,apps/server,governance,
 apps/server/src/modules/growth-intelligence/attribution.service.ts,apps/server,growth-intelligence,service,236,AttributionService,2,1,5,0,,,,customerJourney attributionResult,FALSE
 apps/server/src/modules/growth-intelligence/customer-journey.service.ts,apps/server,growth-intelligence,service,478,CustomerJourneyService,3,1,9,0,,,,customerJourney journeyTouchpoint contact contactEvent invoice booking leadFormSubmission,FALSE
 apps/server/src/modules/growth-intelligence/growth-intelligence-scheduler.service.spec.ts,apps/server,growth-intelligence,spec,109,,2,0,0,0,,,,,FALSE
-apps/server/src/modules/growth-intelligence/growth-intelligence-scheduler.service.ts,apps/server,growth-intelligence,service,127,GrowthIntelligenceSchedulerService,4,3,2,0,,,,business,FALSE
+apps/server/src/modules/growth-intelligence/growth-intelligence-scheduler.service.ts,apps/server,growth-intelligence,service,128,GrowthIntelligenceSchedulerService,5,3,2,0,,,,business,FALSE
 apps/server/src/modules/growth-intelligence/growth-intelligence.controller.ts,apps/server,growth-intelligence,controller,88,GrowthIntelligenceController,6,3,1,9,,,,,FALSE
 apps/server/src/modules/growth-intelligence/growth-intelligence.module.ts,apps/server,growth-intelligence,nest-module,28,GrowthIntelligenceModule,8,0,2,0,,,,,FALSE
 apps/server/src/modules/growth-intelligence/growth-intelligence.service.ts,apps/server,growth-intelligence,service,569,GrowthIntelligenceService,5,4,8,0,,,,customerJourney journeyTouchpoint growthInsight business,FALSE
@@ -1039,7 +1041,7 @@ apps/server/src/modules/intelligence/key-executive-mode.service.spec.ts,apps/ser
 apps/server/src/modules/intelligence/key-executive-mode.service.ts,apps/server,intelligence,service,546,KeyExecutiveModeService,13,5,10,0,,,,,FALSE
 apps/server/src/modules/intelligence/key-executive-mode.types.ts,apps/server,intelligence,types,92,,2,0,4,0,,,,,FALSE
 apps/server/src/modules/intelligence/rules.service.ts,apps/server,intelligence,service,210,RulesService,2,1,5,0,,,,businessRule,FALSE
-apps/server/src/modules/intelligence/scheduled-scans.service.ts,apps/server,intelligence,service,362,ScheduledScansService,7,5,3,0,,,,business invoice payment contact quote expense booking contactTask projectTask product taxLiability,FALSE
+apps/server/src/modules/intelligence/scheduled-scans.service.ts,apps/server,intelligence,service,373,ScheduledScansService,8,5,3,0,,,,business invoice payment contact quote expense booking contactTask projectTask product taxLiability,FALSE
 apps/server/src/modules/intelligence/signals.service.ts,apps/server,intelligence,service,130,SignalsService,2,1,5,0,,,,businessSignal,FALSE
 apps/server/src/modules/key-autonomy/action-audit.service.ts,apps/server,key-autonomy,service,116,ActionAuditService,3,1,5,0,key_action.executed key_action.blocked key_action.failed,,,,FALSE
 apps/server/src/modules/key-autonomy/authority-grant-rule.service.ts,apps/server,key-autonomy,service,47,AuthorityGrantRuleService,2,1,3,0,,,,authorityGrant,FALSE
@@ -1217,7 +1219,7 @@ apps/server/src/modules/key-cortex/key-cortex-event.service.ts,apps/server,key-c
 apps/server/src/modules/key-cortex/key-cortex-evidence-discipline.spec.ts,apps/server,key-cortex,spec,111,,3,0,0,0,,,,,FALSE
 apps/server/src/modules/key-cortex/key-cortex-evidence.service.ts,apps/server,key-cortex,service,364,KeyCortexEvidenceService,4,1,5,0,,,,,FALSE
 apps/server/src/modules/key-cortex/key-cortex-evolution.service.ts,apps/server,key-cortex,service,2180,KeyCortexEvolutionService,8,6,2,0,,,,,FALSE
-apps/server/src/modules/key-cortex/key-cortex-executor.service.ts,apps/server,key-cortex,service,1526,KeyCortexExecutorService,10,1,16,0,key.cortex.execution.started key.cortex.execution.completed key.cortex.batch.started key.cortex.batch.completed key.cortex.approval.required key.cortex.execution.rollback,,,,FALSE
+apps/server/src/modules/key-cortex/key-cortex-executor.service.ts,apps/server,key-cortex,service,1525,KeyCortexExecutorService,11,1,16,0,key.cortex.execution.started key.cortex.execution.completed key.cortex.batch.started key.cortex.batch.completed key.cortex.approval.required key.cortex.execution.rollback,,,,FALSE
 apps/server/src/modules/key-cortex/key-cortex-expertise-lens.service.spec.ts,apps/server,key-cortex,spec,181,,3,0,0,0,,,,,FALSE
 apps/server/src/modules/key-cortex/key-cortex-expertise-lens.service.ts,apps/server,key-cortex,service,385,KeyCortexExpertiseLensService,3,1,8,0,,,,jobRole,FALSE
 apps/server/src/modules/key-cortex/key-cortex-expertise-lens.types.ts,apps/server,key-cortex,types,63,,0,0,1,0,,,,,FALSE
@@ -1261,7 +1263,7 @@ apps/server/src/modules/key-cortex/key-cortex-provider-selection.service.ts,apps
 apps/server/src/modules/key-cortex/key-cortex-quality.service.spec.ts,apps/server,key-cortex,spec,168,,2,0,0,0,,,,,FALSE
 apps/server/src/modules/key-cortex/key-cortex-quality.service.ts,apps/server,key-cortex,service,190,KeyCortexQualityService,2,1,5,0,,,,,FALSE
 apps/server/src/modules/key-cortex/key-cortex-query-pipeline.service.ts,apps/server,key-cortex,service,1802,KeyCortexQueryPipelineService,40,32,8,0,,,,,FALSE
-apps/server/src/modules/key-cortex/key-cortex-realtime.service.ts,apps/server,key-cortex,service,294,KeyCortexRealtimeService,5,2,1,0,,key.action.executed key.action.failed key.approval.requested key.approval.resolved key.insight.generated key.alert key.suggestion key.health.update key.reasoning.chunk key.stats.requested,,,FALSE
+apps/server/src/modules/key-cortex/key-cortex-realtime.service.ts,apps/server,key-cortex,service,305,KeyCortexRealtimeService,6,2,1,0,,key.action.executed key.action.failed key.approval.requested key.approval.resolved key.insight.generated key.alert key.suggestion key.health.update key.reasoning.chunk key.stats.requested,,,FALSE
 apps/server/src/modules/key-cortex/key-cortex-reasoning-cost.spec.ts,apps/server,key-cortex,spec,210,,2,0,0,0,,,,,FALSE
 apps/server/src/modules/key-cortex/key-cortex-reasoning-engine.service.ts,apps/server,key-cortex,service,1138,KeyCortexReasoningEngineService,4,2,4,0,,,,,FALSE
 apps/server/src/modules/key-cortex/key-cortex-reasoning.service.ts,apps/server,key-cortex,service,1501,KeyCortexReasoningService,36,33,9,0,,,,,FALSE
@@ -1399,7 +1401,7 @@ apps/server/src/modules/mcp/mcp.module.ts,apps/server,mcp,nest-module,9,McpModul
 apps/server/src/modules/mcp/mcp.types.ts,apps/server,mcp,types,60,,0,0,3,0,,,,,FALSE
 apps/server/src/modules/momentum/client-momentum.service.ts,apps/server,momentum,service,826,ClientMomentumService,4,2,6,0,,,,contact booking invoice contactEvent contactMomentum contactMomentumSnapshot momentumRecommendation,FALSE
 apps/server/src/modules/momentum/momentum-ai.service.ts,apps/server,momentum,service,201,MomentumAiService,3,2,3,0,,,,contact business momentumRecommendation,FALSE
-apps/server/src/modules/momentum/momentum-scheduler.service.ts,apps/server,momentum,service,102,MomentumSchedulerService,3,2,0,0,,,,business,TRUE
+apps/server/src/modules/momentum/momentum-scheduler.service.ts,apps/server,momentum,service,101,MomentumSchedulerService,4,2,0,0,,,,business,TRUE
 apps/server/src/modules/momentum/momentum.controller.ts,apps/server,momentum,controller,110,MomentumController,5,2,1,9,,,,,FALSE
 apps/server/src/modules/momentum/momentum.module.ts,apps/server,momentum,nest-module,16,MomentumModule,7,0,2,0,,,,,FALSE
 apps/server/src/modules/notifications/do-not-contact-enforcement.spec.ts,apps/server,notifications,spec,113,,2,0,0,0,,,,,FALSE
@@ -1430,7 +1432,7 @@ apps/server/src/modules/onboarding-concierge/onboarding-state.service.ts,apps/se
 apps/server/src/modules/os/os.controller.ts,apps/server,os,controller,18,OsController,4,1,2,1,,,,,FALSE
 apps/server/src/modules/os/os.module.ts,apps/server,os,nest-module,15,OsModule,6,0,1,0,,,,,FALSE
 apps/server/src/modules/os/os.service.ts,apps/server,os,service,274,OsService,3,2,4,0,,,,business financialAccount invoice expense chartOfAccount booking projectTask contact deal quote project aiApprovalItem ledgerEntry,FALSE
-apps/server/src/modules/payments/currency-rates.scheduler.ts,apps/server,payments,ts,52,CurrencyRatesScheduler,2,1,1,0,,,,,FALSE
+apps/server/src/modules/payments/currency-rates.scheduler.ts,apps/server,payments,ts,53,CurrencyRatesScheduler,3,1,1,0,,,,,FALSE
 apps/server/src/modules/payments/currency-rates.service.spec.ts,apps/server,payments,spec,115,,2,0,0,0,,,,,FALSE
 apps/server/src/modules/payments/currency-rates.service.ts,apps/server,payments,service,168,CurrencyRatesService,1,1,6,0,,,,,FALSE
 apps/server/src/modules/payments/payments-ops.controller.ts,apps/server,payments,controller,115,PaymentsOpsController,5,1,1,9,,,,,FALSE
@@ -1551,7 +1553,7 @@ apps/server/src/modules/social/publishers/linkedin-publisher.ts,apps/server,soci
 apps/server/src/modules/social/publishers/tiktok-publisher.ts,apps/server,social,ts,187,TikTokPublisher,1,0,1,0,,,,,FALSE
 apps/server/src/modules/social/publishers/twitter-publisher.ts,apps/server,social,ts,102,TwitterPublisher,1,0,1,0,,,,,FALSE
 apps/server/src/modules/social/social-analytics.service.ts,apps/server,social,service,435,SocialAnalyticsService,3,2,9,0,,,,socialPost,FALSE
-apps/server/src/modules/social/social-connections.service.ts,apps/server,social,service,172,SocialConnectionsService,2,1,11,0,,,,socialConnection business,FALSE
+apps/server/src/modules/social/social-connections.service.ts,apps/server,social,service,174,SocialConnectionsService,3,1,11,0,,,,socialConnection business,FALSE
 apps/server/src/modules/social/social-gap-detector.service.ts,apps/server,social,service,67,SocialGapDetectorService,3,2,1,0,content_calendar.gap_detected,,,business socialPost,FALSE
 apps/server/src/modules/social/social-publishing.service.ts,apps/server,social,service,102,SocialPublishingService,9,2,8,0,,,,socialPost,FALSE
 apps/server/src/modules/social/social-scheduler.service.ts,apps/server,social,service,104,SocialSchedulerService,4,3,1,0,social.scheduled.dispatched,,,socialPost,FALSE
@@ -1613,7 +1615,7 @@ apps/server/src/modules/temporal-flow/dto/create-temporal-flow-event.dto.ts,apps
 apps/server/src/modules/temporal-flow/dto/temporal-flow-memory-query.dto.ts,apps/server,temporal-flow,dto,26,TemporalFlowMemoryQueryDto,2,0,1,0,,,,,FALSE
 apps/server/src/modules/temporal-flow/dto/temporal-flow-query.dto.ts,apps/server,temporal-flow,dto,36,TemporalFlowQueryDto,1,0,1,0,,,,,FALSE
 apps/server/src/modules/temporal-flow/temporal-flow-genome-bridge.service.spec.ts,apps/server,temporal-flow,spec,61,,4,0,0,0,,,,temporalFlowEvent,FALSE
-apps/server/src/modules/temporal-flow/temporal-flow-genome-bridge.service.ts,apps/server,temporal-flow,service,169,TemporalFlowGenomeBridgeService,4,2,6,0,,,,temporalFlowEvent,FALSE
+apps/server/src/modules/temporal-flow/temporal-flow-genome-bridge.service.ts,apps/server,temporal-flow,service,180,TemporalFlowGenomeBridgeService,5,2,6,0,,,,temporalFlowEvent,FALSE
 apps/server/src/modules/temporal-flow/temporal-flow-key-inbox.listener.spec.ts,apps/server,temporal-flow,spec,86,,3,0,0,0,,,,,FALSE
 apps/server/src/modules/temporal-flow/temporal-flow-key-inbox.listener.ts,apps/server,temporal-flow,listener,293,TemporalFlowKeyInboxListener,5,2,2,0,key_inbox.message_received key_inbox.message_analyzed key_inbox.actions_suggested key_inbox.brief_generated key_inbox.intelligence_generated key_inbox.trend_detected key_inbox.opportunity_detected key_inbox.risk_detected key_inbox.genome_signal_detected,key_inbox.message_received key_inbox.message_analyzed key_inbox.actions_suggested key_inbox.brief_generated key_inbox.intelligence_generated key_inbox.trend_detected key_inbox.opportunity_detected key_inbox.risk_detected key_inbox.genome_signal_detected,,keyInboxThread,FALSE
 apps/server/src/modules/temporal-flow/temporal-flow-memory.queue.service.ts,apps/server,temporal-flow,service,133,TemporalFlowMemoryQueueService,7,4,3,0,,,,temporalFlowEvent,FALSE
@@ -3397,7 +3399,7 @@ scripts/revert-problematic-renames.mjs,(root),,mjs,36,,1,0,0,0,,,,,TRUE
 scripts/set-business-whatsapp-mock.ts,(root),,ts,19,,1,0,0,0,,,,business,TRUE
 scripts/split-client.mjs,(root),,mjs,171,,10,0,0,0,,,,,TRUE
 scripts/system-map/build-xlsx.mjs,(root),,mjs,170,,4,0,0,0,,,,,TRUE
-scripts/system-map/extract.mjs,(root),,mjs,723,,3,0,0,0,,,,,TRUE
+scripts/system-map/extract.mjs,(root),,mjs,726,,3,0,0,0,,,,,TRUE
 scripts/system-map/generate.mjs,(root),,mjs,421,,3,0,0,0,,,,,TRUE
 scripts/test-ai-approval.ts,(root),,ts,41,,1,0,0,0,,,,business aiApprovalItem,TRUE
 scripts/verify-jose.ts,(root),,ts,16,,1,0,0,0,,,,,TRUE
