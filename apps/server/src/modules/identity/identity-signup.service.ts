@@ -332,6 +332,7 @@ export class IdentitySignupService {
       | {
           access_token?: string;
           refresh_token?: string;
+          user?: { id?: string };
           error_description?: string;
           msg?: string;
           error?: string;
@@ -362,7 +363,7 @@ export class IdentitySignupService {
         message: json?.error_description || json?.msg || 'Sign in failed.',
       });
     }
-    return { accessToken: json.access_token, refreshToken: json.refresh_token };
+    return { accessToken: json.access_token, refreshToken: json.refresh_token, userId: json.user?.id };
   }
 
   private translateAndThrow(err: unknown): never {

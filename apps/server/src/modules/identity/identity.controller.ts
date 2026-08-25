@@ -202,6 +202,19 @@ export class IdentityController {
     }
     try {
       const session = await this.signupSvc.signInWithPassword(email, body.password);
+      // A deliberate re-login supersedes a prior logout's revocation marker.
+      // Without this, logging out sets auth:revoked:user:<id> for 24h and the
+      // middleware rejects EVERY request — including ones bearing this fresh
+      // token — so a logged-out user is locked out for a full day. Supabase
+      // signOut('global') at logout already invalidated the old sessions, so
+      // clearing the marker on a proven re-auth is safe.
+      if (session.userId) {
+        try {
+          await this.redis.del(`auth:revoked:user:${session.userId}`);
+        } catch (err: any) {
+          this.logger.warn(`Redis revocation clear failed for ${session.userId}: ${err instanceof Error ? err.message : err}`);
+        }
+      }
       await this.authSec.audit({ event: 'login_success', outcome: 'success', email, ip, userAgent: ua });
       return {
         status: 'authenticated',
