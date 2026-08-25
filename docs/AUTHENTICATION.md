@@ -139,6 +139,11 @@ means a stolen token alone is not enough.
 | Sign-out scope | **`others`**, not `global`. A global sweep would invalidate the session of the person who just changed their password. Recovery uses `global` because there the current session is the suspect; here it is the trusted one |
 | Audit | `password_changed`, on success **and** failure — repeated failures mean something is guessing the current password while holding a valid session |
 
+The UI is `profile/components/security-section.tsx`. It previously PUT
+`{ password }` straight to Supabase **with no current-password field at all**,
+which is the vulnerability described above, shipped and live. It now posts to
+this endpoint and asks for the current password.
+
 ### Password recovery — `POST /identity/forgot-password` → `POST /identity/reset-password`
 
 Both are **necessarily unauthenticated** — the premise is a user who cannot sign
@@ -235,6 +240,11 @@ docker exec keyflowos-db-1 psql -U keyflow -d keyflow -tAc \
 ```
 
 **The gates that fail the build if this drifts:**
+
+- `apps/web/src/lib/__tests__/no-direct-supabase-auth.spec.ts` — the browser
+  performing a credential operation against Supabase instead of the server.
+  Three separate flows had done this; the OAuth redirect handshake is the only
+  allowed exception, pinned by path.
 
 - `apps/server/src/core/auth/public-surface.spec.ts` — an unacknowledged unauthenticated handler
 - `apps/server/src/modules/identity/identity-password.service.spec.ts` — recovery ordering, policy parity, session sweep

@@ -2,12 +2,11 @@
 
 import { useState } from "react";
 import { Lock, Eye, EyeOff, CheckCircle2, AlertCircle, Moon, Sun, Monitor } from "lucide-react";
+import { apiPostSimple } from "@/lib/api";
 import { Button, Input } from "@keyflow/ui";
 import { useTheme } from "next-themes";
 import { AccordionSection, AccordionGroup } from "../../store/components/accordion-section";
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
 function PasswordStrength({ password }: { password: string }) {
   const checks = [
@@ -71,14 +70,14 @@ interface SecuritySectionProps {
 }
 
 export default function SecuritySection({ onStatus }: SecuritySectionProps) {
-  const [passwordForm, setPasswordForm] = useState({ newPassword: "", confirmPassword: "" });
+  const [passwordForm, setPasswordForm] = useState({ currentPassword: "", newPassword: "", confirmPassword: "" });
   const [showPassword, setShowPassword] = useState(false);
   const [savingPassword, setSavingPassword] = useState(false);
   const { theme, setTheme } = useTheme();
 
   const handleChangePassword = async () => {
-    const token = localStorage.getItem("kf_token");
-    if (!token || !SUPABASE_URL || !SUPABASE_ANON_KEY) return;
+    onStatus(null);
+    if (!passwordForm.currentPassword) { onStatus({ type: "error", message: "Enter your current password" }); return; }
     if (!passwordForm.newPassword) { onStatus({ type: "error", message: "Please enter a new password" }); return; }
     if (passwordForm.newPassword !== passwordForm.confirmPassword) { onStatus({ type: "error", message: "Passwords do not match" }); return; }
     if (passwordForm.newPassword.length < 12) { onStatus({ type: "error", message: "Password must be at least 12 characters" }); return; }
@@ -86,17 +85,27 @@ export default function SecuritySection({ onStatus }: SecuritySectionProps) {
     setSavingPassword(true);
     onStatus(null);
     try {
-      const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json", apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ password: passwordForm.newPassword }),
-      });
-      if (res.ok) {
-        onStatus({ type: "success", message: "Password updated successfully" });
-        setPasswordForm({ newPassword: "", confirmPassword: "" });
+      // Through our server, and WITH the current password.
+      //
+      // This form used to PUT { password } straight to Supabase with the access
+      // token as the only credential. That made a leaked token a permanent
+      // account takeover: whoever held it could set a new password and lock the
+      // owner out, because nothing asked them to prove they knew the old one.
+      // It also skipped the password policy — composition and the Pwned
+      // Passwords lookup live on the server, so this screen could set a
+      // breached password that signup would have refused.
+      //
+      // The checks above stay as immediate feedback. The server re-checks
+      // everything and is the thing that decides.
+      const res = await apiPostSimple<{ status: string; message: string }>(
+        "/identity/change-password",
+        { currentPassword: passwordForm.currentPassword, newPassword: passwordForm.newPassword },
+      );
+      if (res.error) {
+        onStatus({ type: "error", message: res.error });
       } else {
-        const err = await res.json();
-        onStatus({ type: "error", message: err.message || "Failed to update password" });
+        onStatus({ type: "success", message: res.data?.message ?? "Password updated successfully" });
+        setPasswordForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
       }
     } catch {
       onStatus({ type: "error", message: "Network error" });
@@ -116,6 +125,21 @@ export default function SecuritySection({ onStatus }: SecuritySectionProps) {
           onSubmit={(e) => { e.preventDefault(); handleChangePassword(); }}
           className="space-y-4 p-1"
         >
+          {/*
+            Re-authentication, not identification — the user is already signed
+            in. This proves they know the password they are replacing, so a
+            leaked access token on its own cannot take the account over.
+          */}
+          <label className="block text-xs text-muted-foreground">
+            <div className="flex items-center gap-1.5 mb-1.5 font-medium">Current Password</div>
+            <Input
+              type="password"
+              autoComplete="current-password"
+              value={passwordForm.currentPassword}
+              onChange={(e) => setPasswordForm((f) => ({ ...f, currentPassword: e.target.value }))}
+              placeholder="Enter your current password"
+            />
+          </label>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <label className="block text-xs text-muted-foreground">
               <div className="flex items-center gap-1.5 mb-1.5 font-medium">New Password</div>
@@ -124,6 +148,7 @@ export default function SecuritySection({ onStatus }: SecuritySectionProps) {
                   type={showPassword ? "text" : "password"}
                   value={passwordForm.newPassword}
                   onChange={(e) => setPasswordForm((f) => ({ ...f, newPassword: e.target.value }))}
+                  autoComplete="new-password"
                   placeholder="Enter new password"
                   className="pr-10"
                 />
@@ -142,6 +167,7 @@ export default function SecuritySection({ onStatus }: SecuritySectionProps) {
                 type="password"
                 value={passwordForm.confirmPassword}
                 onChange={(e) => setPasswordForm((f) => ({ ...f, confirmPassword: e.target.value }))}
+                autoComplete="new-password"
                 placeholder="Confirm new password"
               />
               {passwordForm.confirmPassword && passwordForm.newPassword !== passwordForm.confirmPassword && (
@@ -156,7 +182,7 @@ export default function SecuritySection({ onStatus }: SecuritySectionProps) {
           <div className="flex justify-end pt-2 border-t border-border/30">
             <Button
               type="submit"
-              disabled={savingPassword || !passwordForm.newPassword || passwordForm.newPassword !== passwordForm.confirmPassword}
+              disabled={savingPassword || !passwordForm.currentPassword || !passwordForm.newPassword || passwordForm.newPassword !== passwordForm.confirmPassword}
               className="min-h-[44px]"
             >
               {savingPassword ? "Updating..." : "Update Password"}
