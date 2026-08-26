@@ -1,7 +1,7 @@
 ---
 kind: state
 writers: [truth-cycle]           # §Runtime rows: audit-cycle
-derived: 2026-08-25
+derived: 2026-08-26
 baseline: architecture/VERIFIED_STATE_2026-08-11.md
 ---
 
@@ -15,21 +15,21 @@ timestamp.
 
 ## Shape
 
-| Measure | Value | Prev (2026-08-23) | Command |
+| Measure | Value | Prev (2026-08-25) | Command |
 |---|---:|---:|---|
 | Prisma models | 440 | 440 | `grep -c '^model ' packages/db/prisma/schema.prisma` |
 | Server modules | 110 | 110 | `ls apps/server/src/modules \| wc -l` |
-| `@Injectable` services | 723 | 722 | `grep -rl '@Injectable()' apps/server/src --include=*.ts \| grep -v spec \| wc -l` |
+| `@Injectable` services | 723 | 723 | `grep -rl '@Injectable()' apps/server/src --include=*.ts \| grep -v spec \| wc -l` |
 | KEY tools | 286 | 286 | `node scripts/os/count-flow-tools.mjs` |
 | Web pages | 251 | 251 | `find apps/web/src/app -name page.tsx \| wc -l` |
-| Migrations | 20 | 19 | `find packages/db/prisma/migrations -name migration.sql \| wc -l` |
-| Spec/test files (server) | **416** | 408 | `find apps/server/src apps/server/test -name '*.spec.ts' -o -name '*.test.ts' \| wc -l` |
-| Server tests passing | **3,520 in 361 files, 0 skipped** (unit config) | 3,388 in 353 files, 0 skipped | `cd apps/server && pnpm test:unit` (= `vitest -c vitest.unit.config.ts`; do NOT run bare `npx vitest run` — needs DB, false-reds as skips, see truth.md) |
-| Web tests passing | **201 in 20 files** | 190 in 18 files | `cd apps/web && npx vitest run` |
-| Tests in `packages/*` | **12 in 2 files** (db 7, api 5) | 10 in 2 files (db 7, api 3) | `pnpm --filter @keyflow/db --filter @keyflow/api test:unit` |
+| Migrations | 20 | 20 | `find packages/db/prisma/migrations -name migration.sql \| wc -l` |
+| Spec/test files (server) | **416** | 416 | `find apps/server/src apps/server/test -name '*.spec.ts' -o -name '*.test.ts' \| wc -l` |
+| Server tests passing | **3,520 in 361 files, 0 skipped** (unit config) | 3,520 in 361 files, 0 skipped | `cd apps/server && pnpm test:unit` (= `vitest -c vitest.unit.config.ts`; do NOT run bare `npx vitest run` — needs DB, false-reds as skips, see truth.md) |
+| Web tests passing | **201 in 20 files** | 201 in 20 files | `cd apps/web && npx vitest run` |
+| Tests in `packages/*` | **12 in 2 files** (db 7, api 5) | 12 in 2 files (db 7, api 5) | `pnpm --filter @keyflow/db --filter @keyflow/api test:unit` |
 | Routes mapped at boot | — | 2,179 | `docker logs keyflowos-api-1 \| grep -c 'Mapped {'` (runtime only) |
-| `@Cron` jobs | 28 | 27 | `grep -r '@Cron(' apps/server/src \| wc -l` |
-| `setInterval` schedulers | 36 | 52 | `grep -r 'setInterval(' apps/server/src \| wc -l` |
+| `@Cron` jobs | 28 | 28 | `grep -r '@Cron(' apps/server/src \| wc -l` |
+| `setInterval` schedulers | 36 | 36 | `grep -r 'setInterval(' apps/server/src \| wc -l` |
 
 ## Tenant isolation partition
 
@@ -58,7 +58,7 @@ human decision. Any wrong-direction move: do NOT update the row; open a
 | providers.unreachable | apps/server/src/core/config/unreachable-provider.spec.ts | shrink | 8 | 8 |
 | billing.unpriced | apps/server/src/modules/subscriptions/plans.ts | shrink | 43 | 43 |
 | billing.unenforced_limits | apps/server/src/modules/subscriptions/plan-limit-enforcement.spec.ts | shrink | 19 | 19 |
-| auth.public_handlers | apps/server/src/core/auth/public-surface.spec.ts | shrink | 219 | 220 (commerce.controller.ts 11 -> 10, invoice-creation guard fix, 2026-08-23 — see issue #68) |
+| auth.public_handlers | apps/server/src/core/auth/public-surface.spec.ts | shrink | 219 | 219 |
 | auth.public_controllers | apps/server/src/core/auth/public-surface.spec.ts | shrink | 53 | 53 |
 | web.known_fabricated | apps/web/src/lib/__tests__/no-fabricated-screens.spec.ts | shrink | 1 | 1 |
 | trpc.unchecked | apps/server/src/trpc.module.spec.ts | shrink | 0 | 0 |
@@ -70,10 +70,10 @@ human decision. Any wrong-direction move: do NOT update the row; open a
 
 | Artifact | Generator | Last generated |
 |---|---|---|
-| architecture/{module,route,event,capability,data-ownership}-registry.yaml | `node scripts/architecture/generate-registries.js` | 2026-08-25 |
-| docs/architecture/capability-map/* + apps/server/src/modules/ai/capability-map/capability-map.seed.ts | `node docs/architecture/capability-map/generate.js` | 2026-08-25 (byte-identical to 2026-08-23 output — no drift) |
-| architecture/inventory.json | `python3 .agents/skills/codebase-architect/scripts/inventory.py > architecture/inventory.json` | 2026-08-25 |
-| architecture/dependencies.json | `python3 .agents/skills/codebase-architect/scripts/dependency_scan.py > architecture/dependencies.json` | 2026-08-25 |
+| architecture/{module,route,event,capability,data-ownership}-registry.yaml | `node scripts/architecture/generate-registries.js` | 2026-08-26 (only `generated:` date changed — totals identical to 2026-08-25) |
+| docs/architecture/capability-map/* + apps/server/src/modules/ai/capability-map/capability-map.seed.ts | `node docs/architecture/capability-map/generate.js` | 2026-08-26 (byte-identical to 2026-08-25 output — no drift) |
+| architecture/inventory.json | `python3 .agents/skills/codebase-architect/scripts/inventory.py > architecture/inventory.json` | 2026-08-26 |
+| architecture/dependencies.json | `python3 .agents/skills/codebase-architect/scripts/dependency_scan.py > architecture/dependencies.json` | 2026-08-26 (byte-identical to 2026-08-25 output — no drift) |
 
 ## Runtime (written by audit cycle only)
 

@@ -3159,7 +3159,7 @@
     {
       "extension": ".json",
       "lines": 7,
-      "path": ".claude/coordination/sessions/b98f748a-b330-5095-acde-1671ec8752a2.json",
+      "path": ".claude/coordination/sessions/74e03fd3-a9d5-5c41-b727-fdda95e37c74.json",
       "size_bytes": 173
     },
     {
@@ -20198,9 +20198,9 @@
         "./password-policy.service",
         "@nestjs/common"
       ],
-      "lines": 403,
+      "lines": 404,
       "path": "apps/server/src/modules/identity/identity-signup.service.ts",
-      "size_bytes": 15430
+      "size_bytes": 15487
     },
     {
       "exports": [
@@ -20235,9 +20235,9 @@
         "express",
         "ioredis"
       ],
-      "lines": 707,
+      "lines": 720,
       "path": "apps/server/src/modules/identity/identity.controller.ts",
-      "size_bytes": 27601
+      "size_bytes": 28341
     },
     {
       "exports": [
@@ -56900,7 +56900,7 @@
       "extension": ".json",
       "lines": 0,
       "path": "architecture/dependencies.json",
-      "size_bytes": 4079248
+      "size_bytes": 4101885
     },
     {
       "extension": ".md",
@@ -57012,6 +57012,36 @@
     },
     {
       "extension": ".md",
+      "lines": 104,
+      "path": "architecture/os/journal/2026-08-25-audit-13.md",
+      "size_bytes": 6437
+    },
+    {
+      "extension": ".md",
+      "lines": 91,
+      "path": "architecture/os/journal/2026-08-25-audit-19.md",
+      "size_bytes": 5419
+    },
+    {
+      "extension": ".md",
+      "lines": 154,
+      "path": "architecture/os/journal/2026-08-25-truth.md",
+      "size_bytes": 10038
+    },
+    {
+      "extension": ".md",
+      "lines": 95,
+      "path": "architecture/os/journal/2026-08-26-audit-01.md",
+      "size_bytes": 5900
+    },
+    {
+      "extension": ".md",
+      "lines": 64,
+      "path": "architecture/os/journal/2026-08-26-audit-07.md",
+      "size_bytes": 2762
+    },
+    {
+      "extension": ".md",
       "lines": 123,
       "path": "architecture/os/playbooks/audit.md",
       "size_bytes": 7371
@@ -57050,7 +57080,7 @@
       "extension": ".md",
       "lines": 85,
       "path": "architecture/os/state/STATE.md",
-      "size_bytes": 6387
+      "size_bytes": 6610
     },
     {
       "extension": ".md",
@@ -60859,7 +60889,7 @@
       ".ico": 1,
       ".js": 10,
       ".json": 35,
-      ".md": 460,
+      ".md": 465,
       ".mjs": 23,
       ".patch": 1,
       ".pdf": 1,
@@ -60887,7 +60917,7 @@
     "root": "/home/user/KEYFLOWOS",
     "scanner": "codebase-architect/inventory.py",
     "source_files": 3352,
-    "total_files": 4208,
-    "total_lines": 1030329
+    "total_files": 4213,
+    "total_lines": 1030851
   }
 }
