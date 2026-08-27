@@ -86,7 +86,13 @@ export function useGenomeGate(): GenomeGateState {
         const threePillarMet = data.threePillarMet;
         const onboardingFinished =
           data.onboardingComplete || data.onboardingCompletedAt != null;
-        const gateActive = !threePillarMet || !onboardingFinished;
+        // Gate on ONBOARDING completion only. An incomplete Business Genome
+        // (three pillars not yet met) is encouraged, not required: a returning
+        // user who has finished onboarding lands in their workspace and is
+        // nudged by GenomeIntegrityBanner, never bounced back into onboarding.
+        // Including !threePillarMet here trapped every genome-incomplete
+        // account on the onboarding screen at every login.
+        const gateActive = !onboardingFinished;
 
         setState({
           checking: false,

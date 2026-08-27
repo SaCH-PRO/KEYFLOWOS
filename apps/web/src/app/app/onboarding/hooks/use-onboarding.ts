@@ -130,7 +130,10 @@ export function useOnboarding(): UseOnboardingReturn {
       }
     }
 
-    if (data.onboardingComplete && data.threePillarMet) {
+    // Onboarding done is enough to leave — a returning user with an incomplete
+    // genome belongs in their workspace (nudged by the banner), not held here.
+    // Requiring threePillarMet too kept completed users pinned to onboarding.
+    if (data.onboardingComplete) {
       router.replace("/app/command-center");
     }
 

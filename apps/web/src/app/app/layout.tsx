@@ -33,12 +33,11 @@ import { TtsProvider } from "@/components/tts";
 function AppLayoutInner({ children }: { children: React.ReactNode }) {
   const layout = useAppLayout();
   const isOnboardingRoute = layout.pathname.startsWith("/app/onboarding");
-  // Restored during the 2026-08 fork close. integration/2026-07-consolidation
-  // replaced this with GenomeProvider, but that context only fetches — it has no
-  // redirect and no blocking render, so taking its side dropped the gate outright
-  // and left this hook orphaned with zero consumers. The two are orthogonal:
-  // GenomeProvider supplies genome data, useGenomeGate decides whether the app
-  // may render at all. Both are kept.
+  // GenomeProvider supplies genome data; useGenomeGate gates the app on
+  // ONBOARDING completion only. A user who has NOT finished onboarding is
+  // redirected there; an incomplete Business Genome is a soft nudge via
+  // GenomeIntegrityBanner (below), never a redirect — do not re-add
+  // !threePillarMet to the gate, which trapped returning users on onboarding.
   const genomeGate = useGenomeGate();
   useKeyboardShortcuts();
   useRouteKeyboardShortcuts();
