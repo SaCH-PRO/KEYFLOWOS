@@ -10,7 +10,7 @@ apps/server/eslint.config.mjs,apps/server,,mjs,24,,3,0,0,0,,,,,TRUE
 apps/server/scripts/event-wiring.ts,apps/server,,ts,326,,4,0,1,0,,,,,FALSE
 apps/server/src/app-bootstrap.ts,apps/server,(server root),ts,130,,8,0,2,0,,,,,FALSE
 apps/server/src/app.controller.ts,apps/server,(server root),controller,74,AppController,5,3,1,4,,,,,FALSE
-apps/server/src/app.module.ts,apps/server,(server root),nest-module,284,AppModule,125,0,4,0,,,,,FALSE
+apps/server/src/app.module.ts,apps/server,(server root),nest-module,286,AppModule,126,0,4,0,,,,,FALSE
 apps/server/src/app.service.ts,apps/server,(server root),service,8,AppService,1,0,3,0,,,,,FALSE
 apps/server/src/core/auth/admin-token.util.spec.ts,apps/server,core/auth,spec,103,,2,0,0,0,,,,,FALSE
 apps/server/src/core/auth/admin-token.util.ts,apps/server,core/auth,ts,83,,2,0,6,0,,,,,FALSE
@@ -24,19 +24,20 @@ apps/server/src/core/auth/genome-gate.guard.spec.ts,apps/server,core/auth,spec,7
 apps/server/src/core/auth/genome-gate.guard.ts,apps/server,core/auth,guard,33,GenomeGateGuard,3,1,7,0,,,,,FALSE
 apps/server/src/core/auth/module-scope.guard.ts,apps/server,core/auth,guard,88,ModuleScopeGuard,3,2,49,0,,,,membership,FALSE
 apps/server/src/core/auth/optional-auth.guard.ts,apps/server,core/auth,guard,16,OptionalAuthGuard,1,0,5,0,,,,,FALSE
-apps/server/src/core/auth/public-surface.spec.ts,apps/server,core/auth,spec,226,,3,0,0,0,,,,,FALSE
-apps/server/src/core/auth/supabase-admin.service.ts,apps/server,core/auth,service,234,SupabaseAdminService SupabaseAdminError,2,3,14,0,,,,,FALSE
-apps/server/src/core/auth/supabase-auth.service.ts,apps/server,core/auth,service,164,SupabaseAuthService,3,0,6,0,,,,,FALSE
+apps/server/src/core/auth/public-surface.spec.ts,apps/server,core/auth,spec,244,,3,0,0,0,,,,,FALSE
+apps/server/src/core/auth/supabase-admin.service.ts,apps/server,core/auth,service,280,SupabaseAdminService SupabaseAdminError,2,3,16,0,,,,,FALSE
+apps/server/src/core/auth/supabase-auth.service.ts,apps/server,core/auth,service,164,SupabaseAuthService,3,0,8,0,,,,,FALSE
 apps/server/src/core/auth/system-actor.ts,apps/server,core/auth,ts,54,,0,0,3,0,,,,,FALSE
 apps/server/src/core/auth/tenant-body-override.spec.ts,apps/server,core/auth,spec,134,,3,0,0,0,,,,,FALSE
 apps/server/src/core/config/cast-call-integrity.spec.ts,apps/server,core/config,spec,212,,3,0,0,0,,,,,FALSE
 apps/server/src/core/config/doc-debt-ledger.spec.ts,apps/server,core/config,spec,195,,3,0,0,0,,,,,FALSE
+apps/server/src/core/config/env-documented.spec.ts,apps/server,core/config,spec,177,,3,0,0,0,,,,,FALSE
 apps/server/src/core/config/env.guard.spec.ts,apps/server,core/config,spec,27,,2,0,0,0,,,,,FALSE
 apps/server/src/core/config/env.ts,apps/server,core/config,ts,217,,1,0,2,0,,,,,FALSE
 apps/server/src/core/config/fixture-cleanup-integrity.spec.ts,apps/server,core/config,spec,107,,3,0,0,0,,,,,FALSE
 apps/server/src/core/config/gate-vacuity.spec.ts,apps/server,core/config,spec,157,,3,0,0,0,,,,,FALSE
 apps/server/src/core/config/route-parity-ledger.spec.ts,apps/server,core/config,spec,96,,3,0,0,0,,,,,FALSE
-apps/server/src/core/config/runtime-urls.ts,apps/server,core/config,ts,115,,0,0,16,0,,,,,FALSE
+apps/server/src/core/config/runtime-urls.ts,apps/server,core/config,ts,115,,0,0,17,0,,,,,FALSE
 apps/server/src/core/config/session-guard.spec.ts,apps/server,core/config,spec,373,,5,0,0,0,,,,,FALSE
 apps/server/src/core/config/test-config-coverage.spec.ts,apps/server,core/config,spec,142,,3,0,0,0,,,,,FALSE
 apps/server/src/core/config/test-coverage-gating.spec.ts,apps/server,core/config,spec,115,,3,0,0,0,,,,,FALSE
@@ -95,7 +96,7 @@ apps/server/src/core/decorators/rate-limit.decorator.ts,apps/server,core/decorat
 apps/server/src/core/event-bus/event-bus.module.ts,apps/server,core/event-bus,nest-module,19,EventBusModule,2,0,1,0,,,,,FALSE
 apps/server/src/core/event-bus/event-wiring.spec.ts,apps/server,core/event-bus,spec,181,,2,0,0,0,,,,,FALSE
 apps/server/src/core/event-bus/events.types.ts,apps/server,core/event-bus,types,786,ContactCreatedPayload ContactUpdatedPayload ContactMergedPayload ContactDeletedPayload ContactImportedPayload SequenceStepDuePayload SequenceStepFailedPayload BookingCreatedPayload BookingConfirmedPayload BookingCompletedPayload BookingCancelledPayload BookingRescheduledPayload BookingNoShowPayload BookingWaitlistAddedPayload BookingWaitlistSlotOfferedPayload BookingWaitlistConvertedPayload BookingWaitlistCancelledPayload BookingInvoiceCreatedPayload RecurringInvoiceCreatedPayload RecurringInvoiceUpdatedPayload RecurringInvoiceDeletedPayload RecurringInvoiceGeneratedPayload RecurringInvoiceFailedPayload InvoicePaidPayload InvoiceStatusPayload PostPublishedPayload ProductCreatedPayload ProductUpdatedPayload ProductDeactivatedPayload CatalogProductCreatedPayload CatalogProductUpdatedPayload CatalogProductDeletedPayload CatalogServiceCreatedPayload CatalogServiceUpdatedPayload CatalogServiceDeletedPayload QuoteCreatedPayload QuoteSentPayload QuoteViewedPayload QuoteAcceptedPayload QuoteRejectedPayload QuoteStalePayload QuoteConvertedPayload InvoiceCreatedPayload CampaignCreatedPayload CampaignSentPayload CampaignBriefingGeneratedPayload LeadFormCreatedPayload LeadFormSubmittedPayload ExpenseCreatedPayload BillCreatedPayload BillPaidPayload StoreOrderCreatedPayload StoreOrderPaidPayload StoreOrderShippedPayload StoreOrderDeliveredPayload StoreOrderCancelledPayload StoreOrderRefundedPayload StoreOrderRoutingFailedPayload InventoryLowPayload InventoryOutPayload PurchaseOrderReceivedPayload PreorderDelayedPayload ContentPublishedPayload ContentFailedPayload DeliveryCompletedPayload DeliveryFailedPayload GraphCacheInvalidatedPayload ActionExecutedPayload ActionBlockedPayload RevenueActionCreatedPayload RevenueActionCompletedPayload ConnectorSyncedPayload ConnectorErrorPayload ConnectorDisconnectedPayload ConnectorConnectedPayload MessageReceivedPayload MessageSentPayload PaymentReceivedPayload PaymentFailedPayload CalendarEventCreatedPayload CalendarEventUpdatedPayload FileUploadedPayload FileSyncedPayload SocialPostPublishedPayload SocialEngagementReceivedPayload FormSubmittedPayload EntityResolvedPayload SeoRankingDropPayload SeoIssueDetectedPayload SeoContentBriefCreatedPayload SeoPageIndexedPayload SeoSyncCompletedPayload,2,0,33,0,,,,,FALSE
-apps/server/src/core/filters/http-exception.filter.ts,apps/server,core/filters,filter,89,GlobalHttpExceptionFilter,2,0,1,0,,,,,FALSE
+apps/server/src/core/filters/http-exception.filter.ts,apps/server,core/filters,filter,102,GlobalHttpExceptionFilter,3,0,1,0,,,,,FALSE
 apps/server/src/core/growthbook/growthbook.module.ts,apps/server,core/growthbook,nest-module,14,GrowthBookModule,2,0,1,0,,,,,FALSE
 apps/server/src/core/growthbook/growthbook.service.spec.ts,apps/server,core/growthbook,spec,82,,3,0,0,0,,,,,FALSE
 apps/server/src/core/growthbook/growthbook.service.ts,apps/server,core/growthbook,service,123,GrowthBookService,2,0,2,0,,,,,FALSE
@@ -112,6 +113,12 @@ apps/server/src/core/middleware/correlation-id.middleware.ts,apps/server,core/mi
 apps/server/src/core/object-storage/index.ts,apps/server,core/object-storage,ts,19,,0,0,4,0,,,,,FALSE
 apps/server/src/core/object-storage/objectAcl.ts,apps/server,core/object-storage,ts,129,,1,2,1,0,,,,,FALSE
 apps/server/src/core/object-storage/objectStorage.ts,apps/server,core/object-storage,ts,451,ObjectNotFoundError ObjectStorageService,6,0,2,0,,,,,FALSE
+apps/server/src/core/observability/error-digest.service.spec.ts,apps/server,core/observability,spec,108,,3,0,0,0,,,,,FALSE
+apps/server/src/core/observability/error-digest.service.ts,apps/server,core/observability,service,85,ErrorDigestService,3,0,2,0,,,,,FALSE
+apps/server/src/core/observability/error-registry.spec.ts,apps/server,core/observability,spec,134,,2,0,0,0,,,,,FALSE
+apps/server/src/core/observability/error-registry.ts,apps/server,core/observability,ts,197,ErrorRegistry,0,0,7,0,,,,,FALSE
+apps/server/src/core/observability/error-reporting-wiring.spec.ts,apps/server,core/observability,spec,67,,3,0,0,0,,,,,FALSE
+apps/server/src/core/observability/observability.module.ts,apps/server,core/observability,nest-module,16,ObservabilityModule,2,0,1,0,,,,,FALSE
 apps/server/src/core/prisma/prisma.module.ts,apps/server,core/prisma,nest-module,10,PrismaModule,2,0,54,0,,,,,FALSE
 apps/server/src/core/prisma/prisma.service.ts,apps/server,core/prisma,service,54,PrismaService,2,0,1254,0,,,,,FALSE
 apps/server/src/core/prisma/tenant-model-list.spec.ts,apps/server,core/prisma,spec,248,,3,0,0,0,,,,,FALSE
@@ -120,7 +127,7 @@ apps/server/src/core/redis/redis.constants.ts,apps/server,core/redis,ts,2,,0,0,1
 apps/server/src/core/redis/redis.module.ts,apps/server,core/redis,nest-module,153,RedisModule,4,0,4,0,,,,,FALSE
 apps/server/src/core/redis/redis.service.ts,apps/server,core/redis,service,61,RedisService,4,1,33,0,,,,,FALSE
 apps/server/src/core/scheduling/safe-interval.spec.ts,apps/server,core/scheduling,spec,163,,2,0,0,0,,,,,FALSE
-apps/server/src/core/scheduling/safe-interval.ts,apps/server,core/scheduling,ts,90,,1,0,27,0,,,,,FALSE
+apps/server/src/core/scheduling/safe-interval.ts,apps/server,core/scheduling,ts,95,,2,0,29,0,,,,,FALSE
 apps/server/src/core/security/redaction.spec.ts,apps/server,core/security,spec,92,,2,0,0,0,,,,,FALSE
 apps/server/src/core/security/redaction.ts,apps/server,core/security,ts,77,,0,0,2,0,,,,,FALSE
 apps/server/src/core/security/sanitize-business.ts,apps/server,core/security,ts,53,,0,0,2,0,,,,,FALSE
@@ -834,7 +841,7 @@ apps/server/src/modules/device/device.controller.ts,apps/server,device,controlle
 apps/server/src/modules/device/device.module.ts,apps/server,device,nest-module,18,DeviceModule,9,0,1,0,,,,,FALSE
 apps/server/src/modules/device/device.service.ts,apps/server,device,service,630,DeviceService,7,5,4,0,,,,mediaAsset visualIntake extractedEntity businessEvent contact voiceSession keyVoicePreference,FALSE
 apps/server/src/modules/device/visual-classifier.service.ts,apps/server,device,service,208,VisualClassifierService,1,0,3,0,,,,,FALSE
-apps/server/src/modules/diagnostics/diagnostics.controller.ts,apps/server,diagnostics,controller,79,DiagnosticsController,4,1,1,7,,,,,FALSE
+apps/server/src/modules/diagnostics/diagnostics.controller.ts,apps/server,diagnostics,controller,93,DiagnosticsController,5,1,1,8,,,,,FALSE
 apps/server/src/modules/diagnostics/diagnostics.module.ts,apps/server,diagnostics,nest-module,15,DiagnosticsModule,6,0,2,0,,,,,FALSE
 apps/server/src/modules/diagnostics/diagnostics.service.ts,apps/server,diagnostics,service,1078,DiagnosticsService,6,4,5,0,,,,contact invoice booking business aiUsageLog automation payment notification emailCampaign socialConnection contactEvent service,FALSE
 apps/server/src/modules/directory/directory.controller.ts,apps/server,directory,controller,134,DirectoryController,2,0,1,2,,,,,FALSE
@@ -993,23 +1000,29 @@ apps/server/src/modules/growth-intelligence/journey-listener.service.ts,apps/ser
 apps/server/src/modules/helpdesk/helpdesk.controller.ts,apps/server,helpdesk,controller,68,HelpdeskController,4,1,1,5,,,,,FALSE
 apps/server/src/modules/helpdesk/helpdesk.module.ts,apps/server,helpdesk,nest-module,11,HelpdeskModule,3,0,2,0,,,,,FALSE
 apps/server/src/modules/helpdesk/helpdesk.service.ts,apps/server,helpdesk,service,161,HelpdeskService,3,2,5,0,supportTicket.created,,,supportTicket supportTicketMessage,FALSE
-apps/server/src/modules/identity/auth-security.service.ts,apps/server,identity,service,204,AuthSecurityService,2,1,8,0,,,,authAuditLog authRateLimit,FALSE
+apps/server/src/modules/identity/auth-security.service.ts,apps/server,identity,service,247,AuthSecurityService,2,1,8,0,,,,authAuditLog authRateLimit,FALSE
 apps/server/src/modules/identity/business-context.service.ts,apps/server,identity,service,536,BusinessContextService,2,1,9,0,,,,business service product contact booking invoice businessGuidanceProfile,FALSE
 apps/server/src/modules/identity/document-guidance.util.ts,apps/server,identity,ts,162,,0,0,1,0,,,,,FALSE
 apps/server/src/modules/identity/dto/bootstrap.dto.ts,apps/server,identity,dto,91,UserIdentityDataDto BootstrapDto,2,0,2,0,,,,,FALSE
+apps/server/src/modules/identity/dto/change-password.dto.ts,apps/server,identity,dto,29,ChangePasswordDto,1,0,1,0,,,,,FALSE
 apps/server/src/modules/identity/dto/create-business.dto.ts,apps/server,identity,dto,12,CreateBusinessDto,1,0,1,0,,,,,FALSE
 apps/server/src/modules/identity/dto/generate-field.dto.ts,apps/server,identity,dto,12,GenerateFieldDto,1,0,1,0,,,,,FALSE
 apps/server/src/modules/identity/dto/generate-profile.dto.ts,apps/server,identity,dto,29,GenerateProfileDto,2,0,1,0,,,,,FALSE
 apps/server/src/modules/identity/dto/login.dto.ts,apps/server,identity,dto,13,LoginDto,1,0,1,0,,,,,FALSE
+apps/server/src/modules/identity/dto/password-reset.dto.ts,apps/server,identity,dto,42,ForgotPasswordDto ResetPasswordDto,1,0,1,0,,,,,FALSE
+apps/server/src/modules/identity/dto/refresh-token.dto.ts,apps/server,identity,dto,15,RefreshTokenDto,1,0,1,0,,,,,FALSE
 apps/server/src/modules/identity/dto/signup.dto.ts,apps/server,identity,dto,49,SignupDto ResendVerificationDto,1,0,1,0,,,,,FALSE
 apps/server/src/modules/identity/dto/update-business.dto.ts,apps/server,identity,dto,266,UpdateBusinessDto,2,0,2,0,,,,,FALSE
 apps/server/src/modules/identity/dto/update-user.dto.ts,apps/server,identity,dto,29,UpdateUserDto,1,0,1,0,,,,,FALSE
-apps/server/src/modules/identity/identity-signup.service.ts,apps/server,identity,service,404,IdentitySignupService,6,3,7,0,,,,,FALSE
-apps/server/src/modules/identity/identity.controller.ts,apps/server,identity,controller,708,IdentityController,26,8,5,35,,,,authAuditLog user,FALSE
-apps/server/src/modules/identity/identity.module.ts,apps/server,identity,nest-module,20,IdentityModule,11,0,4,0,,,,,FALSE
+apps/server/src/modules/identity/identity-password.service.spec.ts,apps/server,identity,spec,260,,3,0,0,0,,,,,FALSE
+apps/server/src/modules/identity/identity-password.service.ts,apps/server,identity,service,172,IdentityPasswordService,4,3,4,0,,,,,FALSE
+apps/server/src/modules/identity/identity-signup.service.ts,apps/server,identity,service,462,IdentitySignupService,6,3,8,0,,,,,FALSE
+apps/server/src/modules/identity/identity.controller.ts,apps/server,identity,controller,923,IdentityController,31,9,5,39,,,,authAuditLog user,FALSE
+apps/server/src/modules/identity/identity.module.ts,apps/server,identity,nest-module,21,IdentityModule,12,0,4,0,,,,,FALSE
 apps/server/src/modules/identity/identity.service.ts,apps/server,identity,service,1281,IdentityService,7,3,13,0,,,,business user membership teamActivityLog contactTask session aiExecutionLog aiApprovalItem aiPlan userIdentity businessGuidanceProfile invoice contact booking documentInstance expense campaignBriefing impactRule,FALSE
-apps/server/src/modules/identity/password-policy.service.ts,apps/server,identity,service,152,PasswordPolicyService,2,0,3,0,,,,,FALSE
+apps/server/src/modules/identity/password-policy.service.ts,apps/server,identity,service,152,PasswordPolicyService,2,0,5,0,,,,,FALSE
 apps/server/src/modules/identity/profile-completeness.constants.ts,apps/server,identity,ts,392,,0,0,2,0,,,,,FALSE
+apps/server/src/modules/identity/refresh-session.spec.ts,apps/server,identity,spec,90,,3,0,0,0,,,,,FALSE
 apps/server/src/modules/ingestion/data-inbox.controller.ts,apps/server,ingestion,controller,71,DataInboxController,6,1,1,5,,,,,FALSE
 apps/server/src/modules/ingestion/data-inbox.service.spec.ts,apps/server,ingestion,spec,192,,5,0,0,0,,,,ingestionItem,FALSE
 apps/server/src/modules/ingestion/data-inbox.service.ts,apps/server,ingestion,service,125,DataInboxService,5,2,4,0,,,,ingestionItem,FALSE
@@ -1200,7 +1213,7 @@ apps/server/src/modules/key-cortex/key-cortex-creativity.service.spec.ts,apps/se
 apps/server/src/modules/key-cortex/key-cortex-creativity.service.ts,apps/server,key-cortex,service,1701,KeyCortexCreativityService,8,5,4,0,,,'0 5 * * *',keyCortexMemory business,FALSE
 apps/server/src/modules/key-cortex/key-cortex-digest.service.spec.ts,apps/server,key-cortex,spec,203,,2,0,0,0,,,,,FALSE
 apps/server/src/modules/key-cortex/key-cortex-digest.service.ts,apps/server,key-cortex,service,251,KeyCortexDigestService,5,4,4,0,,,,,FALSE
-apps/server/src/modules/key-cortex/key-cortex-document.service.ts,apps/server,key-cortex,service,1245,KeyCortexDocumentService,7,5,2,0,,,,,FALSE
+apps/server/src/modules/key-cortex/key-cortex-document.service.ts,apps/server,key-cortex,service,1250,KeyCortexDocumentService,7,5,2,0,,,,,FALSE
 apps/server/src/modules/key-cortex/key-cortex-dto-pipe.spec.ts,apps/server,key-cortex,spec,193,,3,0,0,0,,,,,FALSE
 apps/server/src/modules/key-cortex/key-cortex-dto-validation.spec.ts,apps/server,key-cortex,spec,178,,3,0,0,0,,,,,FALSE
 apps/server/src/modules/key-cortex/key-cortex-efferent-bridge.service.ts,apps/server,key-cortex,service,165,KeyCortexEfferentBridgeService,5,3,2,0,,,,,FALSE
@@ -1292,7 +1305,7 @@ apps/server/src/modules/key-cortex/key-cortex-tool-registry.service.spec.ts,apps
 apps/server/src/modules/key-cortex/key-cortex-tool-registry.service.ts,apps/server,key-cortex,service,859,KeyCortexToolRegistryService,11,4,29,0,tool.executed,,,toolOutcomeScore,FALSE
 apps/server/src/modules/key-cortex/key-cortex-trigger.service.spec.ts,apps/server,key-cortex,spec,178,,4,0,0,0,,,,keyCortexTriggerRule,FALSE
 apps/server/src/modules/key-cortex/key-cortex-trigger.service.ts,apps/server,key-cortex,service,188,KeyCortexTriggerService,5,3,5,0,,,,keyCortexTriggerRule,FALSE
-apps/server/src/modules/key-cortex/key-cortex-voice.service.ts,apps/server,key-cortex,service,656,KeyCortexVoiceService,5,2,5,0,,,,,FALSE
+apps/server/src/modules/key-cortex/key-cortex-voice.service.ts,apps/server,key-cortex,service,661,KeyCortexVoiceService,5,2,5,0,,,,,FALSE
 apps/server/src/modules/key-cortex/key-cortex-ws-auth.service.spec.ts,apps/server,key-cortex,spec,182,,3,0,0,0,,,,user business,FALSE
 apps/server/src/modules/key-cortex/key-cortex-ws-auth.service.ts,apps/server,key-cortex,service,137,KeyCortexWsAuthService,8,3,4,0,,,,user business,FALSE
 apps/server/src/modules/key-cortex/key-cortex.controller.spec.ts,apps/server,key-cortex,spec,152,,6,0,0,0,,,,,FALSE
@@ -1661,7 +1674,7 @@ apps/server/src/modules/whatsapp/whatsapp-notifications.listener.ts,apps/server,
 apps/server/src/modules/whatsapp/whatsapp.controller.ts,apps/server,whatsapp,controller,435,WhatsAppController,8,3,3,13,,,,business,FALSE
 apps/server/src/modules/whatsapp/whatsapp.module.ts,apps/server,whatsapp,nest-module,17,WhatsAppModule,8,0,3,0,,,,,FALSE
 apps/server/src/modules/whatsapp/whatsapp.service.spec.ts,apps/server,whatsapp,spec,185,,8,1,0,0,,,,keyInboxMessage business,FALSE
-apps/server/src/modules/whatsapp/whatsapp.service.ts,apps/server,whatsapp,service,797,WhatsAppService,10,5,17,0,entity.resolved message.intake.received message.received,,CronExpression.EVERY_MINUTE,business keyInboxMessage whatsAppContact whatsAppMessage,FALSE
+apps/server/src/modules/whatsapp/whatsapp.service.ts,apps/server,whatsapp,service,834,WhatsAppService,10,5,17,0,entity.resolved message.intake.received message.received,,CronExpression.EVERY_MINUTE,business keyInboxMessage whatsAppContact whatsAppMessage contact,FALSE
 apps/server/src/schema-migration-coverage.spec.ts,apps/server,(server root),spec,127,,3,0,0,0,,,,,FALSE
 apps/server/src/test-meta.ts,apps/server,(server root),ts,13,,1,1,0,0,,,,,TRUE
 apps/server/src/trpc.module.spec.ts,apps/server,(server root),spec,212,,3,0,0,0,,,,,FALSE
@@ -2540,7 +2553,7 @@ apps/web/src/app/app/profile/components/profile-section-error-boundary.tsx,apps/
 apps/web/src/app/app/profile/components/profile-types.ts,apps/web,,ts,53,,0,0,10,0,,,,,FALSE
 apps/web/src/app/app/profile/components/progressive-prompts.tsx,apps/web,,component,121,,5,0,2,0,,,,,FALSE
 apps/web/src/app/app/profile/components/readiness-tab.tsx,apps/web,,component,538,,5,0,1,0,,,,,FALSE
-apps/web/src/app/app/profile/components/security-section.tsx,apps/web,,component,206,,5,0,1,0,,,,,FALSE
+apps/web/src/app/app/profile/components/security-section.tsx,apps/web,,component,232,,6,0,1,0,,,,,FALSE
 apps/web/src/app/app/profile/components/skeleton-profile.tsx,apps/web,,component,74,,0,0,1,0,,,,,FALSE
 apps/web/src/app/app/profile/error.tsx,apps/web,,component,8,,1,0,0,0,,,,,TRUE
 apps/web/src/app/app/profile/page.tsx,apps/web,,page,540,,21,0,0,0,,,,,TRUE
@@ -2728,12 +2741,12 @@ apps/web/src/app/auth/callback/loading.tsx,apps/web,,component,7,,1,0,0,0,,,,,TR
 apps/web/src/app/auth/callback/page.tsx,apps/web,,page,337,,7,0,1,0,,,,,FALSE
 apps/web/src/app/auth/login/error.tsx,apps/web,,component,8,,1,0,0,0,,,,,TRUE
 apps/web/src/app/auth/login/loading.tsx,apps/web,,component,7,,1,0,0,0,,,,,TRUE
-apps/web/src/app/auth/login/login-form.tsx,apps/web,,component,436,,8,0,1,0,,,,,FALSE
+apps/web/src/app/auth/login/login-form.tsx,apps/web,,component,455,,9,0,1,0,,,,,FALSE
 apps/web/src/app/auth/login/page.tsx,apps/web,,page,41,,2,0,0,0,,,,,TRUE
 apps/web/src/app/auth/motion-shim.tsx,apps/web,,component,42,,1,0,1,0,,,,,FALSE
 apps/web/src/app/auth/reset-password/error.tsx,apps/web,,component,8,,1,0,0,0,,,,,TRUE
 apps/web/src/app/auth/reset-password/loading.tsx,apps/web,,component,7,,1,0,0,0,,,,,TRUE
-apps/web/src/app/auth/reset-password/page.tsx,apps/web,,page,260,,4,0,1,0,,,,,FALSE
+apps/web/src/app/auth/reset-password/page.tsx,apps/web,,page,266,,5,0,1,0,,,,,FALSE
 apps/web/src/app/auth/signup/error.tsx,apps/web,,component,8,,1,0,0,0,,,,,TRUE
 apps/web/src/app/auth/signup/loading.tsx,apps/web,,component,7,,1,0,0,0,,,,,TRUE
 apps/web/src/app/auth/signup/page.tsx,apps/web,,page,612,,11,0,0,0,,,,,TRUE
@@ -3113,12 +3126,13 @@ apps/web/src/lib/__tests__/link-targets.spec.ts,apps/web,,spec,179,,3,0,0,0,,,,,
 apps/web/src/lib/__tests__/middleware-redirect-targets.spec.ts,apps/web,,spec,166,,3,0,0,0,,,,,FALSE
 apps/web/src/lib/__tests__/nav-destinations.spec.ts,apps/web,,spec,138,,3,0,0,0,,,,,FALSE
 apps/web/src/lib/__tests__/nav-reachability.spec.ts,apps/web,,spec,213,,3,0,0,0,,,,,FALSE
+apps/web/src/lib/__tests__/no-direct-supabase-auth.spec.ts,apps/web,,spec,128,,3,0,0,0,,,,,FALSE
 apps/web/src/lib/__tests__/no-fabricated-screens.spec.ts,apps/web,,spec,422,,3,0,0,0,,,,,FALSE
 apps/web/src/lib/__tests__/sw-credentialed-cache.test.ts,apps/web,,spec,179,,3,0,0,0,,,,,FALSE
 apps/web/src/lib/__tests__/tool-routes.spec.ts,apps/web,,spec,70,,2,0,0,0,,,,,FALSE
 apps/web/src/lib/__tests__/upload-presign-contract.spec.ts,apps/web,,spec,169,,3,0,0,0,,,,,FALSE
 apps/web/src/lib/__tests__/username-availability.test.ts,apps/web,,spec,129,,2,0,0,0,,,,,FALSE
-apps/web/src/lib/api-base.ts,apps/web,,ts,15,,0,0,0,0,,,,,TRUE
+apps/web/src/lib/api-base.ts,apps/web,,ts,15,,0,0,1,0,,,,,FALSE
 apps/web/src/lib/api.ts,apps/web,,ts,385,,2,0,23,0,,,,,FALSE
 apps/web/src/lib/api/_defaults.ts,apps/web,,ts,3,,0,0,3,0,,,,,FALSE
 apps/web/src/lib/api/admin-analytics.ts,apps/web,,ts,190,,1,0,0,0,,,,,TRUE
@@ -3222,7 +3236,7 @@ apps/web/src/lib/validators.ts,apps/web,,ts,36,,0,0,0,0,,,,,TRUE
 apps/web/src/lib/walkthrough-definitions.ts,apps/web,,ts,478,,1,0,1,0,,,,,FALSE
 apps/web/src/lib/whatsapp.ts,apps/web,,ts,11,,0,0,0,0,,,,,TRUE
 apps/web/src/lib/workflows.ts,apps/web,,ts,35,,1,0,0,0,,,,,TRUE
-apps/web/src/lib/workspace.ts,apps/web,,ts,338,,1,0,3,0,,,,,FALSE
+apps/web/src/lib/workspace.ts,apps/web,,ts,347,,2,0,3,0,,,,,FALSE
 apps/web/src/middleware.ts,apps/web,,ts,146,,1,0,0,0,,,,,TRUE
 apps/web/tailwind.config.js,apps/web,,js,95,,0,0,0,0,,,,,TRUE
 apps/web/vitest.config.ts,apps/web,,ts,19,,3,0,0,0,,,,,TRUE
@@ -3369,6 +3383,7 @@ packages/ui/src/index.ts,packages/ui,,ts,17,,0,0,0,0,,,,,TRUE
 packages/ui/src/lib/utils.ts,packages/ui,,ts,22,,0,0,15,0,,,,,FALSE
 postcss.config.js,(root),,js,6,,0,0,0,0,,,,,TRUE
 scripts/architecture/generate-registries.js,(root),,js,265,,2,0,0,0,,,,,TRUE
+scripts/auth-audit/verify-supabase-keys.mjs,(root),,mjs,58,,2,0,0,0,,,,,TRUE
 scripts/backfill-agent-triggers.ts,(root),,ts,134,,2,0,0,0,,,,business agentTrigger autopilotSettings,TRUE
 scripts/backfill-ai-memory-to-blueprint.ts,(root),,ts,167,,1,0,0,0,,,,business aiMemory businessBlueprint,TRUE
 scripts/backfill-blueprints.ts,(root),,ts,253,,1,0,0,0,,,,business businessBlueprint businessGuidanceProfile,TRUE
@@ -3383,6 +3398,7 @@ scripts/db-query.js,(root),,js,18,,0,0,0,0,,,,business,TRUE
 scripts/dev/gen-admin-token.ts,(root),,ts,27,,1,0,0,0,,,,,TRUE
 scripts/dev/get-dev-user.ts,(root),,ts,28,,1,0,0,0,,,,user,TRUE
 scripts/e2e-ai-approvals.ts,(root),,ts,131,,2,0,0,0,,,,aiApprovalItem,TRUE
+scripts/env-audit/sync-env-example.mjs,(root),,mjs,186,,3,0,0,0,,,,,TRUE
 scripts/extract-bottom-sections.mjs,(root),,mjs,86,,7,0,0,0,,,,,TRUE
 scripts/finance-backfill-expenses.ts,(root),,ts,180,,5,0,0,0,,,,expense financialTransaction purchaseOrder,TRUE
 scripts/finance-backfill-revenue.ts,(root),,ts,206,,7,0,0,0,,,,invoice payment business,TRUE

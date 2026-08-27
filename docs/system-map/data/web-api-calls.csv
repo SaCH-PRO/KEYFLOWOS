@@ -229,7 +229,7 @@ apps/web/src/app/app/profile/components/professional-profile-section.tsx,/identi
 apps/web/src/app/app/profile/components/professional-profile-section.tsx,/identity/businesses/:param/ai-generate-field,/identity/businesses/:param/ai-generate-field,FALSE,TRUE,TRUE,IdentityController,,,OK
 apps/web/src/app/app/profile/components/progressive-prompts.tsx,/identity/businesses/:param/progressive-prompts,/identity/businesses/:param/progressive-prompts,FALSE,TRUE,TRUE,IdentityController,,,OK
 apps/web/src/app/app/profile/components/readiness-tab.tsx,/identity/businesses/:param/tiered-completeness,/identity/businesses/:param/tiered-completeness,FALSE,TRUE,TRUE,IdentityController,,,OK
-apps/web/src/app/app/profile/components/security-section.tsx,/auth/v1/user,/auth/v1/user,TRUE,FALSE,,,,,EXTERNAL
+apps/web/src/app/app/profile/components/security-section.tsx,/identity/change-password,/identity/change-password,FALSE,TRUE,TRUE,IdentityController,,,OK
 apps/web/src/app/app/profile/page.tsx,/identity/profile-completeness-fields,/identity/profile-completeness-fields,FALSE,TRUE,TRUE,IdentityController,,,OK
 apps/web/src/app/app/profile/page.tsx,/documents/businesses/:param/instances,/documents/businesses/:param/instances,FALSE,TRUE,TRUE,DocumentsController,,,OK
 apps/web/src/app/app/profile/page.tsx,/identity/businesses/:param,/identity/businesses/:param,FALSE,TRUE,TRUE,IdentityController,,,OK
@@ -305,8 +305,8 @@ apps/web/src/app/app/whatsapp/page.tsx,/whatsapp/businesses/:param/messages,/wha
 apps/web/src/app/auth/callback/page.tsx,/identity/businesses/:param,/identity/businesses/:param,FALSE,TRUE,TRUE,IdentityController,,,OK
 apps/web/src/app/auth/callback/page.tsx,/auth/v1/token,/auth/v1/token,TRUE,FALSE,,,,,EXTERNAL
 apps/web/src/app/auth/callback/page.tsx,/auth/v1/user,/auth/v1/user,TRUE,FALSE,,,,,EXTERNAL
-apps/web/src/app/auth/login/login-form.tsx,/auth/v1/recover,/auth/v1/recover,TRUE,FALSE,,,,,EXTERNAL
-apps/web/src/app/auth/reset-password/page.tsx,/auth/v1/user,/auth/v1/user,TRUE,FALSE,,,,,EXTERNAL
+apps/web/src/app/auth/login/login-form.tsx,/identity/forgot-password,/identity/forgot-password,FALSE,TRUE,TRUE,IdentityController,,,OK
+apps/web/src/app/auth/reset-password/page.tsx,/identity/reset-password,/identity/reset-password,FALSE,TRUE,TRUE,IdentityController,,,OK
 apps/web/src/app/book/[slug]/components/asset-intake.tsx,/site/storefront/public/qualification/:param/intake,/site/storefront/public/qualification/:param/intake,FALSE,TRUE,TRUE,SiteController,,,OK
 apps/web/src/app/book/[slug]/components/guided-selector.tsx,/site/storefront/public/:param/qualification-flow,/site/storefront/public/:param/qualification-flow,FALSE,TRUE,TRUE,SiteController,,,OK
 apps/web/src/app/book/[slug]/components/guided-selector.tsx,/site/storefront/public/:param/qualification-recommend,/site/storefront/public/:param/qualification-recommend,FALSE,TRUE,TRUE,SiteController,,,OK
@@ -1501,4 +1501,4 @@ apps/web/src/lib/time-tracking.ts,/time-entries/businesses/:param/bill,/time-ent
 apps/web/src/lib/username-availability.ts,/identity/check-username,/identity/check-username,FALSE,TRUE,TRUE,IdentityController,,,OK
 apps/web/src/lib/workflows.ts,/ai/businesses/:param/ai/workflows,/ai/businesses/:param/ai/workflows,FALSE,TRUE,TRUE,AiController,,,OK
 apps/web/src/lib/workflows.ts,/ai/businesses/:param/ai/workflows/:param/instantiate,/ai/businesses/:param/ai/workflows/:param/instantiate,FALSE,TRUE,TRUE,AiController,,,OK
-apps/web/src/lib/workspace.ts,/auth/v1/token,/auth/v1/token,TRUE,FALSE,,,,,EXTERNAL
+apps/web/src/lib/workspace.ts,/identity/refresh,/identity/refresh,FALSE,TRUE,TRUE,IdentityController,,TRUE,OK

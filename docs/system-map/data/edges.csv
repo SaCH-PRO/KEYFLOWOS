@@ -107,6 +107,7 @@ apps/server/src/app.module.ts,apps/server/src/modules/whatsapp/whatsapp.module.t
 apps/server/src/app.module.ts,apps/server/src/modules/slack/slack.module.ts,imports,./modules/slack/slack.module,high
 apps/server/src/app.module.ts,apps/server/src/modules/shopify/shopify.module.ts,imports,./modules/shopify/shopify.module,high
 apps/server/src/app.module.ts,apps/server/src/core/sentry/sentry.module.ts,imports,./core/sentry/sentry.module,high
+apps/server/src/app.module.ts,apps/server/src/core/observability/observability.module.ts,imports,./core/observability/observability.module,high
 apps/server/src/app.module.ts,apps/server/src/core/growthbook/growthbook.module.ts,imports,./core/growthbook/growthbook.module,high
 apps/server/src/app.module.ts,apps/server/src/core/connectors/connector.module.ts,imports,./core/connectors/connector.module,high
 apps/server/src/app.module.ts,apps/server/src/modules/keyflow-command/keyflow-command.module.ts,imports,./modules/keyflow-command/keyflow-command.module,high
@@ -226,6 +227,9 @@ apps/server/src/core/config/cast-call-integrity.spec.ts,node:path,imports-extern
 apps/server/src/core/config/doc-debt-ledger.spec.ts,vitest,imports-external,vitest,high
 apps/server/src/core/config/doc-debt-ledger.spec.ts,node:fs,imports-external,node:fs,high
 apps/server/src/core/config/doc-debt-ledger.spec.ts,node:path,imports-external,node:path,high
+apps/server/src/core/config/env-documented.spec.ts,vitest,imports-external,vitest,high
+apps/server/src/core/config/env-documented.spec.ts,node:fs,imports-external,node:fs,high
+apps/server/src/core/config/env-documented.spec.ts,node:path,imports-external,node:path,high
 apps/server/src/core/config/env.guard.spec.ts,vitest,imports-external,vitest,high
 apps/server/src/core/config/env.guard.spec.ts,apps/server/src/core/config/env.ts,imports,./env,high
 apps/server/src/core/config/env.ts,zod,imports-external,zod,high
@@ -867,6 +871,7 @@ apps/server/src/core/event-bus/events.types.ts,@keyflow/db,imports-external,@key
 apps/server/src/core/event-bus/events.types.ts,apps/server/src/core/connectors/connector.interface.ts,imports,../connectors/connector.interface,high
 apps/server/src/core/filters/http-exception.filter.ts,@nestjs/common,imports-external,@nestjs/common,high
 apps/server/src/core/filters/http-exception.filter.ts,express,imports-external,express,high
+apps/server/src/core/filters/http-exception.filter.ts,apps/server/src/core/observability/error-registry.ts,imports,../observability/error-registry,high
 apps/server/src/core/growthbook/growthbook.module.ts,@nestjs/common,imports-external,@nestjs/common,high
 apps/server/src/core/growthbook/growthbook.module.ts,apps/server/src/core/growthbook/growthbook.service.ts,imports,./growthbook.service,high
 apps/server/src/core/growthbook/growthbook.service.spec.ts,vitest,imports-external,vitest,high
@@ -922,6 +927,19 @@ apps/server/src/core/object-storage/objectStorage.ts,express,imports-external,ex
 apps/server/src/core/object-storage/objectStorage.ts,node:stream,imports-external,node:stream,high
 apps/server/src/core/object-storage/objectStorage.ts,node:crypto,imports-external,node:crypto,high
 apps/server/src/core/object-storage/objectStorage.ts,apps/server/src/core/object-storage/objectAcl.ts,imports,./objectAcl,high
+apps/server/src/core/observability/error-digest.service.spec.ts,vitest,imports-external,vitest,high
+apps/server/src/core/observability/error-digest.service.spec.ts,apps/server/src/core/observability/error-digest.service.ts,imports,./error-digest.service,high
+apps/server/src/core/observability/error-digest.service.spec.ts,apps/server/src/core/observability/error-registry.ts,imports,./error-registry,high
+apps/server/src/core/observability/error-digest.service.ts,@nestjs/common,imports-external,@nestjs/common,high
+apps/server/src/core/observability/error-digest.service.ts,apps/server/src/core/scheduling/safe-interval.ts,imports,../scheduling/safe-interval,high
+apps/server/src/core/observability/error-digest.service.ts,apps/server/src/core/observability/error-registry.ts,imports,./error-registry,high
+apps/server/src/core/observability/error-registry.spec.ts,vitest,imports-external,vitest,high
+apps/server/src/core/observability/error-registry.spec.ts,apps/server/src/core/observability/error-registry.ts,imports,./error-registry,high
+apps/server/src/core/observability/error-reporting-wiring.spec.ts,vitest,imports-external,vitest,high
+apps/server/src/core/observability/error-reporting-wiring.spec.ts,apps/server/src/core/scheduling/safe-interval.ts,imports,../scheduling/safe-interval,high
+apps/server/src/core/observability/error-reporting-wiring.spec.ts,apps/server/src/core/observability/error-registry.ts,imports,./error-registry,high
+apps/server/src/core/observability/observability.module.ts,@nestjs/common,imports-external,@nestjs/common,high
+apps/server/src/core/observability/observability.module.ts,apps/server/src/core/observability/error-digest.service.ts,imports,./error-digest.service,high
 apps/server/src/core/prisma/prisma.module.ts,@nestjs/common,imports-external,@nestjs/common,high
 apps/server/src/core/prisma/prisma.module.ts,apps/server/src/core/prisma/prisma.service.ts,imports,./prisma.service,high
 apps/server/src/core/prisma/prisma.service.ts,@nestjs/common,imports-external,@nestjs/common,high
@@ -943,6 +961,7 @@ apps/server/src/core/redis/redis.service.ts,ioredis,imports-external,ioredis,hig
 apps/server/src/core/scheduling/safe-interval.spec.ts,vitest,imports-external,vitest,high
 apps/server/src/core/scheduling/safe-interval.spec.ts,apps/server/src/core/scheduling/safe-interval.ts,imports,./safe-interval,high
 apps/server/src/core/scheduling/safe-interval.ts,@nestjs/common,imports-external,@nestjs/common,high
+apps/server/src/core/scheduling/safe-interval.ts,apps/server/src/core/observability/error-registry.ts,imports,../observability/error-registry,high
 apps/server/src/core/security/redaction.spec.ts,vitest,imports-external,vitest,high
 apps/server/src/core/security/redaction.spec.ts,apps/server/src/core/security/redaction.ts,imports,./redaction,high
 apps/server/src/core/security/timing-safe-equal.spec.ts,vitest,imports-external,vitest,high
@@ -9148,6 +9167,7 @@ apps/server/src/modules/device/device.service.ts,model:extractedEntity,writes-mo
 apps/server/src/modules/device/device.service.ts,model:mediaAsset,writes-model,mediaAsset.update(),high
 apps/server/src/modules/device/visual-classifier.service.ts,@nestjs/common,imports-external,@nestjs/common,high
 apps/server/src/modules/diagnostics/diagnostics.controller.ts,@nestjs/common,imports-external,@nestjs/common,high
+apps/server/src/modules/diagnostics/diagnostics.controller.ts,apps/server/src/core/observability/error-registry.ts,imports,../../core/observability/error-registry,high
 apps/server/src/modules/diagnostics/diagnostics.controller.ts,apps/server/src/modules/diagnostics/diagnostics.service.ts,imports,./diagnostics.service,high
 apps/server/src/modules/diagnostics/diagnostics.controller.ts,apps/server/src/core/auth/auth.guard.ts,imports,../../core/auth/auth.guard,high
 apps/server/src/modules/diagnostics/diagnostics.controller.ts,express,imports-external,express,high
@@ -11054,15 +11074,28 @@ apps/server/src/modules/identity/business-context.service.ts,model:invoice,reads
 apps/server/src/modules/identity/business-context.service.ts,model:businessGuidanceProfile,reads-model,businessGuidanceProfile.findUnique(),high
 apps/server/src/modules/identity/dto/bootstrap.dto.ts,class-transformer,imports-external,class-transformer,high
 apps/server/src/modules/identity/dto/bootstrap.dto.ts,class-validator,imports-external,class-validator,high
+apps/server/src/modules/identity/dto/change-password.dto.ts,class-validator,imports-external,class-validator,high
 apps/server/src/modules/identity/dto/create-business.dto.ts,class-validator,imports-external,class-validator,high
 apps/server/src/modules/identity/dto/generate-field.dto.ts,class-validator,imports-external,class-validator,high
 apps/server/src/modules/identity/dto/generate-profile.dto.ts,class-validator,imports-external,class-validator,high
 apps/server/src/modules/identity/dto/generate-profile.dto.ts,apps/server/src/modules/identity/dto/update-business.dto.ts,imports,./update-business.dto,high
 apps/server/src/modules/identity/dto/login.dto.ts,class-validator,imports-external,class-validator,high
+apps/server/src/modules/identity/dto/password-reset.dto.ts,class-validator,imports-external,class-validator,high
+apps/server/src/modules/identity/dto/refresh-token.dto.ts,class-validator,imports-external,class-validator,high
 apps/server/src/modules/identity/dto/signup.dto.ts,class-validator,imports-external,class-validator,high
 apps/server/src/modules/identity/dto/update-business.dto.ts,class-validator,imports-external,class-validator,high
 apps/server/src/modules/identity/dto/update-business.dto.ts,class-transformer,imports-external,class-transformer,high
 apps/server/src/modules/identity/dto/update-user.dto.ts,class-validator,imports-external,class-validator,high
+apps/server/src/modules/identity/identity-password.service.spec.ts,vitest,imports-external,vitest,high
+apps/server/src/modules/identity/identity-password.service.spec.ts,@nestjs/common,imports-external,@nestjs/common,high
+apps/server/src/modules/identity/identity-password.service.spec.ts,apps/server/src/modules/identity/identity-password.service.ts,imports,./identity-password.service,high
+apps/server/src/modules/identity/identity-password.service.ts,@nestjs/common,imports-external,@nestjs/common,high
+apps/server/src/modules/identity/identity-password.service.ts,apps/server/src/core/auth/supabase-admin.service.ts,imports,../../core/auth/supabase-admin.service,high
+apps/server/src/modules/identity/identity-password.service.ts,apps/server/src/core/auth/supabase-auth.service.ts,imports,../../core/auth/supabase-auth.service,high
+apps/server/src/modules/identity/identity-password.service.ts,apps/server/src/modules/identity/password-policy.service.ts,imports,./password-policy.service,high
+apps/server/src/modules/identity/identity-password.service.ts,apps/server/src/core/auth/supabase-admin.service.ts,injects,SupabaseAdminService,high
+apps/server/src/modules/identity/identity-password.service.ts,apps/server/src/core/auth/supabase-auth.service.ts,injects,SupabaseAuthService,high
+apps/server/src/modules/identity/identity-password.service.ts,apps/server/src/modules/identity/password-policy.service.ts,injects,PasswordPolicyService,high
 apps/server/src/modules/identity/identity-signup.service.ts,@nestjs/common,imports-external,@nestjs/common,high
 apps/server/src/modules/identity/identity-signup.service.ts,apps/server/src/core/auth/supabase-admin.service.ts,imports,../../core/auth/supabase-admin.service,high
 apps/server/src/modules/identity/identity-signup.service.ts,apps/server/src/modules/notifications/system-email.service.ts,imports,../notifications/system-email.service,high
@@ -11077,9 +11110,14 @@ apps/server/src/modules/identity/identity.controller.ts,express,imports-external
 apps/server/src/modules/identity/identity.controller.ts,apps/server/src/modules/identity/identity.service.ts,imports,./identity.service,high
 apps/server/src/modules/identity/identity.controller.ts,apps/server/src/modules/identity/identity-signup.service.ts,imports,./identity-signup.service,high
 apps/server/src/modules/identity/identity.controller.ts,apps/server/src/modules/identity/auth-security.service.ts,imports,./auth-security.service,high
+apps/server/src/modules/identity/identity.controller.ts,apps/server/src/modules/identity/identity-password.service.ts,imports,./identity-password.service,high
+apps/server/src/modules/identity/identity.controller.ts,apps/server/src/core/config/runtime-urls.ts,imports,../../core/config/runtime-urls,high
 apps/server/src/modules/identity/identity.controller.ts,apps/server/src/core/prisma/prisma.service.ts,imports,../../core/prisma/prisma.service,high
 apps/server/src/modules/identity/identity.controller.ts,apps/server/src/modules/identity/dto/signup.dto.ts,imports,./dto/signup.dto,high
 apps/server/src/modules/identity/identity.controller.ts,apps/server/src/modules/identity/dto/login.dto.ts,imports,./dto/login.dto,high
+apps/server/src/modules/identity/identity.controller.ts,apps/server/src/modules/identity/dto/password-reset.dto.ts,imports,./dto/password-reset.dto,high
+apps/server/src/modules/identity/identity.controller.ts,apps/server/src/modules/identity/dto/refresh-token.dto.ts,imports,./dto/refresh-token.dto,high
+apps/server/src/modules/identity/identity.controller.ts,apps/server/src/modules/identity/dto/change-password.dto.ts,imports,./dto/change-password.dto,high
 apps/server/src/modules/identity/identity.controller.ts,apps/server/src/modules/identity/business-context.service.ts,imports,./business-context.service,high
 apps/server/src/modules/identity/identity.controller.ts,apps/server/src/core/auth/auth.guard.ts,imports,../../core/auth/auth.guard,high
 apps/server/src/modules/identity/identity.controller.ts,apps/server/src/core/auth/business.guard.ts,imports,../../core/auth/business.guard,high
@@ -11103,6 +11141,7 @@ apps/server/src/modules/identity/identity.controller.ts,apps/server/src/modules/
 apps/server/src/modules/identity/identity.controller.ts,apps/server/src/modules/identity/business-context.service.ts,injects,BusinessContextService,high
 apps/server/src/modules/identity/identity.controller.ts,apps/server/src/modules/identity/identity-signup.service.ts,injects,IdentitySignupService,high
 apps/server/src/modules/identity/identity.controller.ts,apps/server/src/modules/identity/auth-security.service.ts,injects,AuthSecurityService,high
+apps/server/src/modules/identity/identity.controller.ts,apps/server/src/modules/identity/identity-password.service.ts,injects,IdentityPasswordService,high
 apps/server/src/modules/identity/identity.controller.ts,apps/server/src/core/prisma/prisma.service.ts,injects,PrismaService,high
 apps/server/src/modules/identity/identity.controller.ts,apps/server/src/core/auth/supabase-admin.service.ts,injects,SupabaseAdminService,high
 apps/server/src/modules/identity/identity.controller.ts,model:authAuditLog,reads-model,authAuditLog.findMany(),high
@@ -11115,6 +11154,7 @@ apps/server/src/modules/identity/identity.module.ts,apps/server/src/modules/iden
 apps/server/src/modules/identity/identity.module.ts,apps/server/src/modules/identity/identity-signup.service.ts,imports,./identity-signup.service,high
 apps/server/src/modules/identity/identity.module.ts,apps/server/src/modules/identity/business-context.service.ts,imports,./business-context.service,high
 apps/server/src/modules/identity/identity.module.ts,apps/server/src/modules/identity/auth-security.service.ts,imports,./auth-security.service,high
+apps/server/src/modules/identity/identity.module.ts,apps/server/src/modules/identity/identity-password.service.ts,imports,./identity-password.service,high
 apps/server/src/modules/identity/identity.module.ts,apps/server/src/modules/identity/password-policy.service.ts,imports,./password-policy.service,high
 apps/server/src/modules/identity/identity.module.ts,apps/server/src/modules/ai/ai.module.ts,imports,../ai/ai.module,high
 apps/server/src/modules/identity/identity.module.ts,apps/server/src/modules/notifications/notifications.module.ts,imports,../notifications/notifications.module,high
@@ -11205,6 +11245,9 @@ apps/server/src/modules/identity/identity.service.ts,model:documentInstance,read
 apps/server/src/modules/identity/identity.service.ts,model:documentInstance,writes-model,documentInstance.update(),high
 apps/server/src/modules/identity/password-policy.service.ts,@nestjs/common,imports-external,@nestjs/common,high
 apps/server/src/modules/identity/password-policy.service.ts,node:crypto,imports-external,node:crypto,high
+apps/server/src/modules/identity/refresh-session.spec.ts,vitest,imports-external,vitest,high
+apps/server/src/modules/identity/refresh-session.spec.ts,@nestjs/common,imports-external,@nestjs/common,high
+apps/server/src/modules/identity/refresh-session.spec.ts,apps/server/src/modules/identity/identity-signup.service.ts,imports,./identity-signup.service,high
 apps/server/src/modules/ingestion/data-inbox.controller.ts,@nestjs/common,imports-external,@nestjs/common,high
 apps/server/src/modules/ingestion/data-inbox.controller.ts,apps/server/src/core/auth/auth.guard.ts,imports,../../core/auth/auth.guard,high
 apps/server/src/modules/ingestion/data-inbox.controller.ts,apps/server/src/core/auth/business.guard.ts,imports,../../core/auth/business.guard,high
@@ -17489,11 +17532,13 @@ apps/server/src/modules/whatsapp/whatsapp.service.ts,model:whatsAppContact,write
 apps/server/src/modules/whatsapp/whatsapp.service.ts,model:whatsAppMessage,writes-model,whatsAppMessage.create(),high
 apps/server/src/modules/whatsapp/whatsapp.service.ts,model:whatsAppContact,reads-model,whatsAppContact.findMany(),high
 apps/server/src/modules/whatsapp/whatsapp.service.ts,model:whatsAppContact,reads-model,whatsAppContact.findFirst(),high
+apps/server/src/modules/whatsapp/whatsapp.service.ts,model:contact,reads-model,contact.findFirst(),high
 apps/server/src/modules/whatsapp/whatsapp.service.ts,model:whatsAppMessage,writes-model,whatsAppMessage.create(),high
 apps/server/src/modules/whatsapp/whatsapp.service.ts,model:whatsAppMessage,writes-model,whatsAppMessage.update(),high
 apps/server/src/modules/whatsapp/whatsapp.service.ts,model:whatsAppMessage,writes-model,whatsAppMessage.update(),high
 apps/server/src/modules/whatsapp/whatsapp.service.ts,model:whatsAppMessage,reads-model,whatsAppMessage.findMany(),high
 apps/server/src/modules/whatsapp/whatsapp.service.ts,model:whatsAppMessage,writes-model,whatsAppMessage.updateMany(),high
+apps/server/src/modules/whatsapp/whatsapp.service.ts,model:whatsAppMessage,writes-model,whatsAppMessage.update(),high
 apps/server/src/schema-migration-coverage.spec.ts,vitest,imports-external,vitest,high
 apps/server/src/schema-migration-coverage.spec.ts,node:fs,imports-external,node:fs,high
 apps/server/src/schema-migration-coverage.spec.ts,node:path,imports-external,node:path,high
@@ -22454,10 +22499,11 @@ apps/web/src/app/app/profile/components/readiness-tab.tsx,apps/web/src/app/app/p
 apps/web/src/app/app/profile/components/readiness-tab.tsx,apps/server/src/modules/identity/identity.controller.ts,http-call,/identity/businesses/:param/tiered-completeness,high
 apps/web/src/app/app/profile/components/security-section.tsx,react,imports-external,react,high
 apps/web/src/app/app/profile/components/security-section.tsx,lucide-react,imports-external,lucide-react,high
+apps/web/src/app/app/profile/components/security-section.tsx,@/lib/api,imports-external,@/lib/api,high
 apps/web/src/app/app/profile/components/security-section.tsx,@keyflow/ui,imports-external,@keyflow/ui,high
 apps/web/src/app/app/profile/components/security-section.tsx,next-themes,imports-external,next-themes,high
 apps/web/src/app/app/profile/components/security-section.tsx,apps/web/src/app/app/store/components/accordion-section.tsx,imports,../../store/components/accordion-section,high
-apps/web/src/app/app/profile/components/security-section.tsx,route:/auth/v1/user,http-call-unresolved,/auth/v1/user,medium
+apps/web/src/app/app/profile/components/security-section.tsx,apps/server/src/modules/identity/identity.controller.ts,http-call,/identity/change-password,high
 apps/web/src/app/app/profile/error.tsx,@/components/ui/module-error-boundary,imports-external,@/components/ui/module-error-boundary,high
 apps/web/src/app/app/profile/page.tsx,react,imports-external,react,high
 apps/web/src/app/app/profile/page.tsx,next/navigation,imports-external,next/navigation,high
@@ -23509,7 +23555,8 @@ apps/web/src/app/auth/login/login-form.tsx,@/lib/client,imports-external,@/lib/c
 apps/web/src/app/auth/login/login-form.tsx,@/lib/workspace,imports-external,@/lib/workspace,high
 apps/web/src/app/auth/login/login-form.tsx,@/lib/oauth-pkce,imports-external,@/lib/oauth-pkce,high
 apps/web/src/app/auth/login/login-form.tsx,@/lib/safe-redirect,imports-external,@/lib/safe-redirect,high
-apps/web/src/app/auth/login/login-form.tsx,route:/auth/v1/recover,http-call-unresolved,/auth/v1/recover,medium
+apps/web/src/app/auth/login/login-form.tsx,@/lib/api,imports-external,@/lib/api,high
+apps/web/src/app/auth/login/login-form.tsx,apps/server/src/modules/identity/identity.controller.ts,http-call,/identity/forgot-password,high
 apps/web/src/app/auth/login/page.tsx,react,imports-external,react,high
 apps/web/src/app/auth/login/page.tsx,apps/web/src/app/auth/login/login-form.tsx,imports,./login-form,high
 apps/web/src/app/auth/motion-shim.tsx,react,imports-external,react,high
@@ -23519,7 +23566,8 @@ apps/web/src/app/auth/reset-password/page.tsx,next/link,imports-external,next/li
 apps/web/src/app/auth/reset-password/page.tsx,next/navigation,imports-external,next/navigation,high
 apps/web/src/app/auth/reset-password/page.tsx,react,imports-external,react,high
 apps/web/src/app/auth/reset-password/page.tsx,lucide-react,imports-external,lucide-react,high
-apps/web/src/app/auth/reset-password/page.tsx,route:/auth/v1/user,http-call-unresolved,/auth/v1/user,medium
+apps/web/src/app/auth/reset-password/page.tsx,@/lib/api,imports-external,@/lib/api,high
+apps/web/src/app/auth/reset-password/page.tsx,apps/server/src/modules/identity/identity.controller.ts,http-call,/identity/reset-password,high
 apps/web/src/app/auth/signup/error.tsx,@/components/ui/route-error-fallback,imports-external,@/components/ui/route-error-fallback,high
 apps/web/src/app/auth/signup/loading.tsx,@/components/ui/page-skeleton,imports-external,@/components/ui/page-skeleton,high
 apps/web/src/app/auth/signup/page.tsx,@/lib/api-base,imports-external,@/lib/api-base,high
@@ -25089,6 +25137,9 @@ apps/web/src/lib/__tests__/nav-destinations.spec.ts,node:path,imports-external,n
 apps/web/src/lib/__tests__/nav-reachability.spec.ts,vitest,imports-external,vitest,high
 apps/web/src/lib/__tests__/nav-reachability.spec.ts,node:fs,imports-external,node:fs,high
 apps/web/src/lib/__tests__/nav-reachability.spec.ts,node:path,imports-external,node:path,high
+apps/web/src/lib/__tests__/no-direct-supabase-auth.spec.ts,vitest,imports-external,vitest,high
+apps/web/src/lib/__tests__/no-direct-supabase-auth.spec.ts,node:fs,imports-external,node:fs,high
+apps/web/src/lib/__tests__/no-direct-supabase-auth.spec.ts,node:path,imports-external,node:path,high
 apps/web/src/lib/__tests__/no-fabricated-screens.spec.ts,vitest,imports-external,vitest,high
 apps/web/src/lib/__tests__/no-fabricated-screens.spec.ts,node:fs,imports-external,node:fs,high
 apps/web/src/lib/__tests__/no-fabricated-screens.spec.ts,node:path,imports-external,node:path,high
@@ -26302,7 +26353,8 @@ apps/web/src/lib/workflows.ts,apps/web/src/lib/api.ts,imports,./api,high
 apps/web/src/lib/workflows.ts,apps/server/src/modules/ai/ai.controller.ts,http-call,/ai/businesses/:param/ai/workflows,high
 apps/web/src/lib/workflows.ts,apps/server/src/modules/ai/ai.controller.ts,http-call,/ai/businesses/:param/ai/workflows/:param/instantiate,high
 apps/web/src/lib/workspace.ts,apps/web/src/lib/client.ts,imports,./client,high
-apps/web/src/lib/workspace.ts,route:/auth/v1/token,http-call-unresolved,/auth/v1/token,medium
+apps/web/src/lib/workspace.ts,apps/web/src/lib/api-base.ts,imports,./api-base,high
+apps/web/src/lib/workspace.ts,apps/server/src/modules/identity/identity.controller.ts,http-call,/identity/refresh,high
 apps/web/src/middleware.ts,next/server,imports-external,next/server,high
 apps/web/vitest.config.ts,vitest/config,imports-external,vitest/config,high
 apps/web/vitest.config.ts,@vitejs/plugin-react,imports-external,@vitejs/plugin-react,high
@@ -26826,6 +26878,8 @@ scripts/architecture/generate-registries.js,"/g)) {
 
   const modules = [];
   const modulesDir = path.join(SERVER_SRC, ",high
+scripts/auth-audit/verify-supabase-keys.mjs,node:crypto,imports-external,node:crypto,high
+scripts/auth-audit/verify-supabase-keys.mjs,node:fs,imports-external,node:fs,high
 scripts/backfill-agent-triggers.ts,@prisma/client,imports-external,@prisma/client,high
 scripts/backfill-agent-triggers.ts,apps/server/src/modules/ai/default-triggers.constants.ts,imports,../apps/server/src/modules/ai/default-triggers.constants,high
 scripts/backfill-agent-triggers.ts,model:business,reads-model,business.findMany(),high
@@ -26871,6 +26925,9 @@ scripts/e2e-ai-approvals.ts,crypto,imports-external,crypto,high
 scripts/e2e-ai-approvals.ts,model:aiApprovalItem,writes-model,aiApprovalItem.create(),high
 scripts/e2e-ai-approvals.ts,model:aiApprovalItem,writes-model,aiApprovalItem.create(),high
 scripts/e2e-ai-approvals.ts,model:aiApprovalItem,reads-model,aiApprovalItem.findUnique(),high
+scripts/env-audit/sync-env-example.mjs,node:child_process,imports-external,node:child_process,high
+scripts/env-audit/sync-env-example.mjs,node:fs,imports-external,node:fs,high
+scripts/env-audit/sync-env-example.mjs,node:path,imports-external,node:path,high
 scripts/extract-bottom-sections.mjs,fs,imports-external,fs,high
 scripts/extract-bottom-sections.mjs,path,imports-external,path,high
 scripts/extract-bottom-sections.mjs,zod,imports-external,zod,high

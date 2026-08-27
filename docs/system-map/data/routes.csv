@@ -1180,6 +1180,7 @@ GET,/api/diagnostics/infrastructure,/api/diagnostics/infrastructure,infrastructu
 GET,/api/diagnostics/modules,/api/diagnostics/modules,modules,DiagnosticsController,apps/server/src/modules/diagnostics/diagnostics.controller.ts,diagnostics,DiagnosticsModule,TRUE,AuthGuard,1,,,FALSE
 GET,/api/diagnostics/integrations,/api/diagnostics/integrations,integrations,DiagnosticsController,apps/server/src/modules/diagnostics/diagnostics.controller.ts,diagnostics,DiagnosticsModule,TRUE,AuthGuard,1,,,FALSE
 GET,/api/diagnostics/cross-module,/api/diagnostics/cross-module,crossModule,DiagnosticsController,apps/server/src/modules/diagnostics/diagnostics.controller.ts,diagnostics,DiagnosticsModule,TRUE,AuthGuard,1,,,FALSE
+GET,/api/diagnostics/errors,/api/diagnostics/errors,errors,DiagnosticsController,apps/server/src/modules/diagnostics/diagnostics.controller.ts,diagnostics,DiagnosticsModule,TRUE,AuthGuard,1,,,FALSE
 GET,/api/diagnostics/env-vars,/api/diagnostics/env-vars,envVars,DiagnosticsController,apps/server/src/modules/diagnostics/diagnostics.controller.ts,diagnostics,DiagnosticsModule,TRUE,AuthGuard,1,,,FALSE
 POST,/api/diagnostics/check/:name,/api/diagnostics/check/:param,runSingleCheck,DiagnosticsController,apps/server/src/modules/diagnostics/diagnostics.controller.ts,diagnostics,DiagnosticsModule,TRUE,AuthGuard,1,,,FALSE
 GET,/directory/businesses,/directory/businesses,listBusinesses,DirectoryController,apps/server/src/modules/directory/directory.controller.ts,directory,DirectoryModule,TRUE,PublicRateLimitGuard,1,,,FALSE
@@ -1502,6 +1503,10 @@ GET,/identity/admin/auth-audit,/identity/admin/auth-audit,getAuthAudit,IdentityC
 POST,/identity/signup,/identity/signup,signup,IdentityController,apps/server/src/modules/identity/identity.controller.ts,identity,IdentityModule,TRUE,,0,,,TRUE
 POST,/identity/login,/identity/login,login,IdentityController,apps/server/src/modules/identity/identity.controller.ts,identity,IdentityModule,TRUE,,0,,,TRUE
 POST,/identity/resend-verification,/identity/resend-verification,resendVerification,IdentityController,apps/server/src/modules/identity/identity.controller.ts,identity,IdentityModule,TRUE,,0,,,TRUE
+POST,/identity/change-password,/identity/change-password,changePassword,IdentityController,apps/server/src/modules/identity/identity.controller.ts,identity,IdentityModule,TRUE,AuthGuard,1,,,FALSE
+POST,/identity/refresh,/identity/refresh,refresh,IdentityController,apps/server/src/modules/identity/identity.controller.ts,identity,IdentityModule,TRUE,,0,,,TRUE
+POST,/identity/forgot-password,/identity/forgot-password,forgotPassword,IdentityController,apps/server/src/modules/identity/identity.controller.ts,identity,IdentityModule,TRUE,,0,,,TRUE
+POST,/identity/reset-password,/identity/reset-password,resetPassword,IdentityController,apps/server/src/modules/identity/identity.controller.ts,identity,IdentityModule,TRUE,,0,,,TRUE
 POST,/identity/logout,/identity/logout,logout,IdentityController,apps/server/src/modules/identity/identity.controller.ts,identity,IdentityModule,TRUE,AuthGuard,1,,,FALSE
 GET,/identity/me,/identity/me,getMe,IdentityController,apps/server/src/modules/identity/identity.controller.ts,identity,IdentityModule,TRUE,AuthGuard,1,,,FALSE
 PATCH,/identity/me,/identity/me,updateMe,IdentityController,apps/server/src/modules/identity/identity.controller.ts,identity,IdentityModule,TRUE,AuthGuard,1,,,FALSE

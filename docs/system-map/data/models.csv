@@ -61,7 +61,7 @@ PayrollRun,TRUE,TRUE,16,1,payroll,payroll,1,FALSE
 PayrollItem,TRUE,TRUE,12,3,,,0,TRUE
 StaffPerformanceSnapshot,TRUE,TRUE,17,2,staff-performance,staff-performance,1,FALSE
 DelegationRule,TRUE,TRUE,13,1,ai structure,structure,2,FALSE
-Contact,TRUE,TRUE,119,4,actions ai analytics apps/server autopilot bookings calendar call-tasks commerce communications connect conversion core/connectors crm diagnostics email-marketing expenses finance flow gamification growth-intelligence identity intelligence key-cortex lead-forms marketplace momentum notifications onboarding-concierge os packages/api packages/db people-flow portal public-events reports retainers security-audit shopify site subscriptions trash,apps/server autopilot calendar commerce connect conversion core/connectors crm device email-marketing flow key-inbox lead-forms onboarding-concierge packages/api packages/db public-events shopify site trash,44,FALSE
+Contact,TRUE,TRUE,119,4,actions ai analytics apps/server autopilot bookings calendar call-tasks commerce communications connect conversion core/connectors crm diagnostics email-marketing expenses finance flow gamification growth-intelligence identity intelligence key-cortex lead-forms marketplace momentum notifications onboarding-concierge os packages/api packages/db people-flow portal public-events reports retainers security-audit shopify site subscriptions trash whatsapp,apps/server autopilot calendar commerce connect conversion core/connectors crm device email-marketing flow key-inbox lead-forms onboarding-concierge packages/api packages/db public-events shopify site trash,45,FALSE
 CustomFieldDefinition,TRUE,TRUE,15,0,crm,crm,1,FALSE
 ContactCustomFieldValue,FALSE,,8,2,crm,crm,1,FALSE
 Tag,TRUE,TRUE,7,0,,,0,TRUE
