@@ -1,7 +1,7 @@
 ---
 kind: state
 writers: [truth-cycle]           # §Runtime rows: audit-cycle
-derived: 2026-08-26
+derived: 2026-08-27
 baseline: architecture/VERIFIED_STATE_2026-08-11.md
 ---
 
@@ -15,7 +15,7 @@ timestamp.
 
 ## Shape
 
-| Measure | Value | Prev (2026-08-25) | Command |
+| Measure | Value | Prev (2026-08-26) | Command |
 |---|---:|---:|---|
 | Prisma models | 440 | 440 | `grep -c '^model ' packages/db/prisma/schema.prisma` |
 | Server modules | 110 | 110 | `ls apps/server/src/modules \| wc -l` |
@@ -27,7 +27,7 @@ timestamp.
 | Server tests passing | **3,520 in 361 files, 0 skipped** (unit config) | 3,520 in 361 files, 0 skipped | `cd apps/server && pnpm test:unit` (= `vitest -c vitest.unit.config.ts`; do NOT run bare `npx vitest run` — needs DB, false-reds as skips, see truth.md) |
 | Web tests passing | **201 in 20 files** | 201 in 20 files | `cd apps/web && npx vitest run` |
 | Tests in `packages/*` | **12 in 2 files** (db 7, api 5) | 12 in 2 files (db 7, api 5) | `pnpm --filter @keyflow/db --filter @keyflow/api test:unit` |
-| Routes mapped at boot | — | 2,179 | `docker logs keyflowos-api-1 \| grep -c 'Mapped {'` (runtime only) |
+| Routes mapped at boot | — | 2,179 | `docker logs keyflowos-api-1 \| grep -c 'Mapped {'` (runtime only; not derivable in this sandbox — no docker) |
 | `@Cron` jobs | 28 | 28 | `grep -r '@Cron(' apps/server/src \| wc -l` |
 | `setInterval` schedulers | 36 | 36 | `grep -r 'setInterval(' apps/server/src \| wc -l` |
 
@@ -66,14 +66,16 @@ human decision. Any wrong-direction move: do NOT update the row; open a
 | docs.debt | architecture/os/state/DOC_DEBT.md | shrink | 2 | 2 |
 | routes.parity_absent | architecture/os/state/ROUTE_PARITY.md | shrink | 6 | 6 |
 
+All 14 rows unmoved vs Prev — zero ledger drift this cycle (`node scripts/os/ledger-sizes.mjs`, 2026-08-27).
+
 ## Generated artifacts freshness
 
 | Artifact | Generator | Last generated |
 |---|---|---|
-| architecture/{module,route,event,capability,data-ownership}-registry.yaml | `node scripts/architecture/generate-registries.js` | 2026-08-26 (only `generated:` date changed — totals identical to 2026-08-25) |
-| docs/architecture/capability-map/* + apps/server/src/modules/ai/capability-map/capability-map.seed.ts | `node docs/architecture/capability-map/generate.js` | 2026-08-26 (byte-identical to 2026-08-25 output — no drift) |
-| architecture/inventory.json | `python3 .agents/skills/codebase-architect/scripts/inventory.py > architecture/inventory.json` | 2026-08-26 |
-| architecture/dependencies.json | `python3 .agents/skills/codebase-architect/scripts/dependency_scan.py > architecture/dependencies.json` | 2026-08-26 (byte-identical to 2026-08-25 output — no drift) |
+| architecture/{module,route,event,capability,data-ownership}-registry.yaml | `node scripts/architecture/generate-registries.js` | 2026-08-27 (only `generated:` date changed — totals identical to 2026-08-26) |
+| docs/architecture/capability-map/* + apps/server/src/modules/ai/capability-map/capability-map.seed.ts | `node docs/architecture/capability-map/generate.js` | 2026-08-27 (byte-identical to 2026-08-26 output — no drift) |
+| architecture/inventory.json | `python3 .agents/skills/codebase-architect/scripts/inventory.py > architecture/inventory.json` | 2026-08-27 (totals shifted only from new journal files landed since 2026-08-26: total_files 4213→4218, total_lines 1,030,851→1,031,163; no code drift) |
+| architecture/dependencies.json | `python3 .agents/skills/codebase-architect/scripts/dependency_scan.py > architecture/dependencies.json` | 2026-08-27 (byte-identical to 2026-08-26 output — no drift) |
 
 ## Runtime (written by audit cycle only)
 
