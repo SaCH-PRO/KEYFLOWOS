@@ -1,7 +1,7 @@
 ---
 kind: state
 writers: [truth-cycle]           # §Runtime rows: audit-cycle
-derived: 2026-08-27
+derived: 2026-08-28
 baseline: architecture/VERIFIED_STATE_2026-08-11.md
 ---
 
@@ -15,7 +15,7 @@ timestamp.
 
 ## Shape
 
-| Measure | Value | Prev (2026-08-26) | Command |
+| Measure | Value | Prev (2026-08-27) | Command |
 |---|---:|---:|---|
 | Prisma models | 440 | 440 | `grep -c '^model ' packages/db/prisma/schema.prisma` |
 | Server modules | 110 | 110 | `ls apps/server/src/modules \| wc -l` |
@@ -66,16 +66,16 @@ human decision. Any wrong-direction move: do NOT update the row; open a
 | docs.debt | architecture/os/state/DOC_DEBT.md | shrink | 2 | 2 |
 | routes.parity_absent | architecture/os/state/ROUTE_PARITY.md | shrink | 6 | 6 |
 
-All 14 rows unmoved vs Prev — zero ledger drift this cycle (`node scripts/os/ledger-sizes.mjs`, 2026-08-27).
+All 14 rows unmoved vs Prev — zero ledger drift this cycle (`node scripts/os/ledger-sizes.mjs`, 2026-08-28).
 
 ## Generated artifacts freshness
 
 | Artifact | Generator | Last generated |
 |---|---|---|
-| architecture/{module,route,event,capability,data-ownership}-registry.yaml | `node scripts/architecture/generate-registries.js` | 2026-08-27 (only `generated:` date changed — totals identical to 2026-08-26) |
-| docs/architecture/capability-map/* + apps/server/src/modules/ai/capability-map/capability-map.seed.ts | `node docs/architecture/capability-map/generate.js` | 2026-08-27 (byte-identical to 2026-08-26 output — no drift) |
-| architecture/inventory.json | `python3 .agents/skills/codebase-architect/scripts/inventory.py > architecture/inventory.json` | 2026-08-27 (totals shifted only from new journal files landed since 2026-08-26: total_files 4213→4218, total_lines 1,030,851→1,031,163; no code drift) |
-| architecture/dependencies.json | `python3 .agents/skills/codebase-architect/scripts/dependency_scan.py > architecture/dependencies.json` | 2026-08-27 (byte-identical to 2026-08-26 output — no drift) |
+| architecture/{module,route,event,capability,data-ownership}-registry.yaml | `node scripts/architecture/generate-registries.js` | 2026-08-28 (only `generated:` date changed — totals identical to 2026-08-27) |
+| docs/architecture/capability-map/* + apps/server/src/modules/ai/capability-map/capability-map.seed.ts | `node docs/architecture/capability-map/generate.js` | 2026-08-28 (byte-identical to 2026-08-27 output — no drift) |
+| architecture/inventory.json | `python3 .agents/skills/codebase-architect/scripts/inventory.py > architecture/inventory.json` | 2026-08-28 (totals shifted from new journal files landed since 2026-08-27 plus the merged `fix(web)` commit (0ac8e539) touching layout.tsx/use-onboarding.ts/use-genome-gate.ts: total_files 4218→4223, total_lines 1,031,163→1,031,529; no undocumented code drift — matches `git diff 30e711f4..HEAD --stat`) |
+| architecture/dependencies.json | `python3 .agents/skills/codebase-architect/scripts/dependency_scan.py > architecture/dependencies.json` | 2026-08-28 (byte-identical to 2026-08-27 output — no drift) |
 
 ## Runtime (written by audit cycle only)
 
