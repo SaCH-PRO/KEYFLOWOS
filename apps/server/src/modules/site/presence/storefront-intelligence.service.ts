@@ -1,5 +1,6 @@
 import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { skipTenantIsolation } from '@keyflow/db';
 import { PrismaService } from '../../../core/prisma/prisma.service';
 import { ModelGatewayService } from '../../ai/model-gateway.service';
 import { AiUsageService } from '../../ai/ai-usage.service';
@@ -279,12 +280,25 @@ export class StorefrontIntelligenceService {
     };
   }
 
-  /** Mark every snapshot stale so the nightly job re-derives. Safe to call. */
+  /**
+   * Mark every snapshot stale so the nightly job re-derives. Safe to call.
+   *
+   * EVERY means every, across all businesses, and it now says so explicitly.
+   * PresenceInsightSnapshot became tenant-scoped on 2026-08-30, so under an
+   * HTTP request carrying a businessId the extension would inject it here and
+   * this would quietly mean "every snapshot belonging to the caller" instead —
+   * the same words, a different sweep, and nothing to reveal the difference.
+   *
+   * It has no callers today, which is exactly why the marker goes on now: the
+   * first one will not be looking for this.
+   */
   async markAllStale(): Promise<{ updated: number }> {
-    const res = await this.db.presenceInsightSnapshot.updateMany({
-      where: { stale: false },
-      data: { stale: true },
-    });
+    const res = await this.db.presenceInsightSnapshot.updateMany(
+      skipTenantIsolation({
+        where: { stale: false },
+        data: { stale: true },
+      }),
+    );
     return { updated: res.count };
   }
 

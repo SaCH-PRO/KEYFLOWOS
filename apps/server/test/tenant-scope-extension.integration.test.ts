@@ -79,6 +79,7 @@ describe('tenant isolation extension (real database)', () => {
     // with deleted_at set. Raw SQL runs underneath the extension, which is what
     // the other integration suites here already do.
     for (const sql of [
+      `DELETE FROM flow_sessions WHERE id LIKE '${P}%'`,
       `DELETE FROM tax_rates WHERE id LIKE '${P}%'`,
       `DELETE FROM businesses WHERE id LIKE '${P}%'`,
       `DELETE FROM users WHERE id LIKE '${P}%'`,
@@ -316,5 +317,103 @@ describe('tenant isolation extension (real database)', () => {
       }
     }
     expect(broken, 'these cannot accept a businessId filter and will throw in production').toEqual([]);
+  });
+
+  /**
+   * The batch scoped on 2026-08-30, proved at the layer that enforces it.
+   *
+   * FlowSession is the concrete reason the batch exists. Its service addressed
+   * a row by a primary key the CLIENT chose, and every client that pins a
+   * conversation sends the same literal "onboarding" — so one row was shared by
+   * every user in every business, and a brand-new user's first onboarding
+   * message overwrote a stranger's.
+   *
+   * That is fixed in flow-orchestrator.service.ts by deriving the key from the
+   * tenant. These assertions are the SECOND layer, and they matter precisely
+   * because the first one is a convention a future edit can quietly drop: they
+   * use a BARE id, the shape the old code used, and require the database to
+   * refuse it whatever the service believes.
+   */
+  describe('the models scoped on 2026-08-30', () => {
+    const SESS_A = `${P}sessA`;
+    const SESS_B = `${P}sessB`;
+
+    beforeAll(async () => {
+      ambient = undefined;
+      for (const [id, biz] of [[SESS_A, BIZ_A], [SESS_B, BIZ_B]] as const) {
+        await db.flowSession.upsert({
+          where: { id },
+          update: { messages: [{ role: 'user', content: `${id}-original` }] },
+          create: { id, businessId: biz, userId: OWNER, messages: [{ role: 'user', content: `${id}-original` }] },
+        });
+      }
+    });
+
+    it('with no tenant context a bare-id read still crosses — the control', async () => {
+      // Without this, every assertion below could pass on a row that simply
+      // is not there.
+      const row = await asTenant(undefined, () => db.flowSession.findUnique({ where: { id: SESS_B } }));
+      expect(row, 'no context means no injection').not.toBeNull();
+      expect(row!.businessId).toBe(BIZ_B);
+    });
+
+    it("under A, B's conversation is not readable by its bare id", async () => {
+      const row = await asTenant(BIZ_A, () => db.flowSession.findUnique({ where: { id: SESS_B } }));
+      expect(row, 'a conversation is the most private thing KEY holds').toBeNull();
+    });
+
+    it('under A, its own conversation is still readable', async () => {
+      const row = await asTenant(BIZ_A, () => db.flowSession.findUnique({ where: { id: SESS_A } }));
+      expect(row, 'scoping must not break the legitimate path').not.toBeNull();
+    });
+
+    it("under A, an upsert cannot overwrite B's conversation — the original bug", async () => {
+      // The exact operation and the exact shape that leaked: upsert addressed
+      // by a bare id the caller chose.
+      await asTenant(BIZ_A, () =>
+        db.flowSession.upsert({
+          where: { id: SESS_B },
+          update: { messages: [{ role: 'user', content: 'hijacked' }] },
+          create: { id: SESS_B, businessId: BIZ_A, userId: OWNER, messages: [] },
+        }),
+      ).catch(() => undefined);
+
+      const b = await asTenant(undefined, () => db.flowSession.findUnique({ where: { id: SESS_B } }));
+      expect(b!.businessId, 'the row must still belong to B').toBe(BIZ_B);
+      expect(JSON.stringify(b!.messages), "B's conversation must be untouched").toContain('-original');
+    });
+
+    it('under A, a create cannot plant a conversation inside B', async () => {
+      const planted = `${P}sessPlant`;
+      await asTenant(BIZ_A, () =>
+        db.flowSession.create({
+          data: { id: planted, businessId: BIZ_B, userId: OWNER, messages: [] },
+        }),
+      ).catch(() => undefined);
+
+      const row = await asTenant(undefined, () => db.flowSession.findUnique({ where: { id: planted } }));
+      if (row) expect(row.businessId, 'the row lands in the caller tenant, not the one it named').toBe(BIZ_A);
+    });
+
+    it('the other six are scoped too, by the same mechanism', async () => {
+      // Named individually so removing one from the set fails here rather than
+      // silently reducing what this file covers.
+      const { default: fs } = await import('node:fs');
+      const client = fs.readFileSync(
+        path.resolve(__dirname, '../../../packages/db/src/client.ts'),
+        'utf8',
+      );
+      const set = client.slice(
+        client.indexOf('const BUSINESS_ID_MODELS = new Set(['),
+        client.indexOf(']);', client.indexOf('const BUSINESS_ID_MODELS = new Set([')),
+      );
+      for (const m of [
+        'AuthorityGrant', 'CampaignBriefing', 'CognitionSession',
+        'ContactInsightSnapshot', 'FlowSession', 'PresenceInsightSnapshot',
+        'ValueConstraint',
+      ]) {
+        expect(set, `${m} left BUSINESS_ID_MODELS`).toContain(`'${m}'`);
+      }
+    });
   });
 });

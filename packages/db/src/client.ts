@@ -276,6 +276,50 @@ const BUSINESS_ID_MODELS = new Set([
   // wrong: it looks like the six harmless empty ones added above, and it is the
   // opposite. The first handler written against it will be a webhook resolving
   // a row it cannot yet attribute to a business.
+  // ── Batch of seven, 2026-08-30 ─────────────────────────────────────────────
+  // Cleared by the protocol this file's gate spells out: does EVERY call site
+  // already name businessId in its own `where`? Where it does, injection
+  // re-states a predicate the caller already wrote and can change nothing.
+  //
+  // 133 production call sites across the seven, one by one. All but eight
+  // already name businessId; those eight were read individually:
+  //
+  //   FlowSession            0 unscoped sites. Every one names businessId as of
+  //                          the session-key fix — which is the same defect this
+  //                          set exists to prevent, arriving because the model
+  //                          was sitting in the debt ledger. A client-chosen
+  //                          `sessionId` addressed one global row and every
+  //                          user's onboarding chat wrote into a stranger's.
+  //   AuthorityGrant         revokeAuthorityGrant: findFirst({id, businessId})
+  //                          proves ownership, then update({where:{id}}).
+  //   CognitionSession       updateSession: getSession(businessId, id) first.
+  //   ValueConstraint        observeFeedback: the preceding findUnique keys on
+  //                          businessId_valueKey_source, businessId included.
+  //   ContactInsightSnapshot the contact is read scoped and throws when absent,
+  //                          so contactId is already proven to be this tenant's.
+  //
+  // Check-then-act, all four: injection closes the window between the ownership
+  // read and the bare-id write, and changes nothing else.
+  //
+  //   CampaignBriefing       NOT a no-op, and the reason it is here.
+  //                          generateBriefing(businessId, campaignId) does
+  //                          findUnique({ where: { campaignId } }) and RETURNS
+  //                          the row — so passing another business's campaignId
+  //                          returned their briefing. Scoping turns that into a
+  //                          miss, which is the point.
+  //   PresenceInsightSnapshot its one unscoped site is markAllStale(), which has
+  //                          no callers at all. It means "every snapshot" on
+  //                          purpose, so it now says so with
+  //                          skipTenantIsolation rather than depending on
+  //                          happening to run without a tenant context.
+  //
+  // SitePageDraft was reviewed in the same pass and deliberately NOT moved:
+  // `getByPreviewToken` keys on previewToken, a GLOBAL @unique with no
+  // businessId, which is the exact shape that returns a silent null. It stays
+  // in the ledger.
+  'AuthorityGrant', 'CampaignBriefing', 'CognitionSession',
+  'ContactInsightSnapshot', 'FlowSession', 'PresenceInsightSnapshot',
+  'ValueConstraint',
 ]);
 
 

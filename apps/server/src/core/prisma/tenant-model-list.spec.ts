@@ -103,9 +103,9 @@ describe('BUSINESS_ID_MODELS describes reality', () => {
  * 2026-08-09 by adding one and watching this file pass.
  *
  * When this was written: 347 models carry a businessId, 77 were scoped, 270
- * were these. Now: 302 scoped, 42 here, 3 in NEVER_SCOPE. The three numbers sum
- * to 347 exactly, and the assertions below are what keep them summing — a model
- * has one status, never two and never none.
+ * were these. Now: 348 carry one, 310 scoped, 35 here, 3 in NEVER_SCOPE. The
+ * three numbers sum to 348 exactly, and the assertions below are what keep them
+ * summing — a model has one status, never two and never none.
  *
  * WHY IT IS NOT SIMPLY EMPTIED. Adding a model here injects businessId into
  * findUnique, and Prisma 6.19 ACCEPTS an extra scalar in a WhereUniqueInput
@@ -131,20 +131,20 @@ describe('BUSINESS_ID_MODELS describes reality', () => {
 const ACKNOWLEDGED_UNSCOPED = new Set([
   'AiMemory',
   'ApiKey',
-  'AuthorityGrant',
+ 
   'BusinessReputation',
   'CalendarSyncConflict',
-  'CampaignBriefing',
+ 
   'ChannelConnection', 'ChannelDestination',
-  'CognitionSession',
+ 
   'ContactChannelStat',
   'ContactExportJob', 'ContactExternalMapping', 'ContactForgetRequest',
-  'ContactInsightSnapshot',
+ 
   'ConversationAIInsight', 'Course',
   'DriveIntakeFile',
   'FinanceActionItem',
   'FlowRun',
-  'FlowSession',
+ 
   'GenomeDepartment',
   'GenomeGrowthChannel',
   'IngestionItem',
@@ -154,7 +154,7 @@ const ACKNOWLEDGED_UNSCOPED = new Set([
   'Membership',
   'MessageIntake',
   'PortalAccess',
-  'PresenceInsightSnapshot',
+ 
   'PromoCode',
   'PushSubscription',
   'SeoKeyword', 'SeoPage',
@@ -162,7 +162,7 @@ const ACKNOWLEDGED_UNSCOPED = new Set([
   'SocialConnection',
   'SupplierConnection',
   'SyncJob',
-  'ValueConstraint',
+ 
   'VoiceSession',
   'WhatsAppMessage',
 ]);
