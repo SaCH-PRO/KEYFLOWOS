@@ -16,6 +16,21 @@ fi
 # Clear any inherited OpenAI keys so the values in .env always take precedence.
 unset AI_INTEGRATIONS_OPENAI_API_KEY OPENAI_API_KEY 2>/dev/null || true
 
+# Same reasoning, and this one stops the API booting at all when it bites.
+#
+# dotenv does NOT overwrite a variable already present in process.env — correct
+# for production, where real env vars should win. But a DATABASE_URL exported in
+# a developer's shell silently outranks .env, and this repo's exported value
+# points at `localhost`. On Windows that resolves to IPv6 ::1 first, Docker's
+# published port accepts the connection and immediately resets it, and the pg
+# Pool in packages/db fails with ECONNRESET. Prisma is built on that pool, so a
+# boot-time query dies with P1017 and NestApplication.listen throws.
+#
+# Measured, not guessed: pg connects fine on 127.0.0.1 and fails on both
+# `localhost` and `[::1]`. The app compiled and type-checked perfectly the whole
+# time it could not start.
+unset DATABASE_URL DIRECT_URL REDIS_URL SUPABASE_URL 2>/dev/null || true
+
 # ── port cleanup ───────────────────────────────────────────────────────────────
 echo "🧹 Cleaning up stale ports..."
 for port in 3001 5000; do
