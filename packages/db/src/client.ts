@@ -347,6 +347,25 @@ const BUSINESS_ID_MODELS = new Set([
   //                         skipTenantIsolation instead of relying on that.
   'AiMemory', 'CalendarSyncConflict', 'ConversationAIInsight',
   'IntegrationSyncRun', 'PromoCode',
+  // ── Batch of five, 2026-08-30 (third pass) ────────────────────────────────
+  // 60 production call sites. Five of the "unscoped" ones were the scanner
+  // reading a variable it cannot see into — `const where = { businessId }`
+  // built up with optional filters, in both genome services and both SEO
+  // reads. That shape is now the most common false positive in this work.
+  //
+  //   GenomeDepartment      seedDepartments and upsert both key the preceding
+  //                         findUnique on businessId_code.
+  //   GenomeGrowthChannel   update and delete both do
+  //                         findFirst({ id: channelId, businessId }) and throw.
+  //   SeoKeyword            removeKeyword does the same with keywordId.
+  //   SeoPage               ingestAnalyticsData keys on businessId_path.
+  //   ContactChannelStat    NOT a no-op. upsertStat receives businessId and
+  //                         then looks the row up by the contactId_channel
+  //                         compound alone, as does the deleteMany. Injection
+  //                         supplies a tenant the method already had and was
+  //                         not using.
+  'ContactChannelStat', 'GenomeDepartment', 'GenomeGrowthChannel',
+  'SeoKeyword', 'SeoPage',
 ]);
 
 

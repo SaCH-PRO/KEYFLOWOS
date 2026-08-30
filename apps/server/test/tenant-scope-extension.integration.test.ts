@@ -409,7 +409,10 @@ describe('tenant isolation extension (real database)', () => {
         client.indexOf('const BUSINESS_ID_MODELS = new Set(['),
         client.indexOf(']);', client.indexOf('const BUSINESS_ID_MODELS = new Set([')),
       );
-      for (const m of ['ApiKey', 'BusinessReputation', 'Payment', 'MarketplaceOrder', 'WebhookEvent']) {
+      for (const m of [
+        'ApiKey', 'BusinessReputation', 'ContactExportJob', 'MarketplaceOrder',
+        'Payment', 'VoiceSession', 'WebhookEvent',
+      ]) {
         expect(set, `${m} must never be tenant-scoped`).not.toContain(`'${m}'`);
       }
     });
@@ -434,6 +437,9 @@ describe('tenant isolation extension (real database)', () => {
         // second pass
         'AiMemory', 'CalendarSyncConflict', 'ConversationAIInsight',
         'IntegrationSyncRun', 'PromoCode',
+        // third pass
+        'ContactChannelStat', 'GenomeDepartment', 'GenomeGrowthChannel',
+        'SeoKeyword', 'SeoPage',
       ]) {
         expect(set, `${m} left BUSINESS_ID_MODELS`).toContain(`'${m}'`);
       }

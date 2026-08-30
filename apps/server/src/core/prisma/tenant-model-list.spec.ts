@@ -103,7 +103,7 @@ describe('BUSINESS_ID_MODELS describes reality', () => {
  * 2026-08-09 by adding one and watching this file pass.
  *
  * When this was written: 347 models carry a businessId, 77 were scoped, 270
- * were these. Now: 348 carry one, 315 scoped, 28 here, 5 in NEVER_SCOPE. The
+ * were these. Now: 348 carry one, 320 scoped, 21 here, 7 in NEVER_SCOPE. The
  * three numbers sum to 348 exactly, and the assertions below are what keep them
  * summing — a model has one status, never two and never none.
  *
@@ -133,16 +133,13 @@ const ACKNOWLEDGED_UNSCOPED = new Set([
  
   'ChannelConnection', 'ChannelDestination',
  
-  'ContactChannelStat',
-  'ContactExportJob', 'ContactExternalMapping', 'ContactForgetRequest',
+  'ContactExternalMapping', 'ContactForgetRequest',
  
   'Course',
   'DriveIntakeFile',
   'FinanceActionItem',
   'FlowRun',
  
-  'GenomeDepartment',
-  'GenomeGrowthChannel',
   'IngestionItem',
   'IntegrationConnection',
   'InventoryStock',
@@ -152,13 +149,11 @@ const ACKNOWLEDGED_UNSCOPED = new Set([
   'PortalAccess',
  
   'PushSubscription',
-  'SeoKeyword', 'SeoPage',
   'SitePageDraft',
   'SocialConnection',
   'SupplierConnection',
   'SyncJob',
  
-  'VoiceSession',
   'WhatsAppMessage',
 ]);
 
@@ -189,6 +184,20 @@ const NEVER_SCOPE = new Set([
   // `total` always 1, so every business reads "rank 1 of 1" — wrong, and
   // wrong quietly, with no error to notice.
   'ApiKey', 'BusinessReputation',
+  //
+  // ContactExportJob and VoiceSession, 2026-08-30 — same shape, found in the
+  // third pass.
+  //
+  // ContactExportJob — `token String @unique`, redeemed by a PUBLIC download
+  // endpoint. The person clicking a GDPR export link has no session and names
+  // no business; resolveDownload finds the job by token and reads the tenant
+  // off it. Scoped, every export link becomes "Download not found".
+  //
+  // VoiceSession — syncRoomSession runs from a LiveKit WEBHOOK and searches
+  // every ACTIVE session for the one whose commandItems carry the finished
+  // room. A webhook has no tenant context and the tenant is the result of the
+  // search, not an input to it.
+  'ContactExportJob', 'VoiceSession',
 ]);
 
 describe('the unscoped set may only shrink', () => {
