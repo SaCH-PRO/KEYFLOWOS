@@ -116,9 +116,51 @@ export class AiSettingsService {
     });
   }
 
-  async deleteSkill(id: string) {
-    const skill = await this.prisma.client.skill.findUnique({ where: { id } });
+  /**
+   * Skill is a GLOBAL catalogue — no businessId, `@@unique([name])` — reached
+   * through a per-business route. So deletion is not a tenancy question, it is
+   * a shared-resource one: the row belongs to everybody, and removing it
+   * detaches it from every membership and staff member on the instance, in
+   * businesses the caller cannot see and did not ask about.
+   *
+   * The rule is therefore not "is this yours" (nothing here is), but "is anyone
+   * ELSE relying on it". A skill only your own business uses is yours to
+   * remove; one another business has assigned to a person is not.
+   *
+   * Deliberately NOT solved by giving Skill a businessId. That would fork the
+   * catalogue per tenant and change what the feature is — the whole point of
+   * `@@unique([name])` is that "Welding" means the same thing everywhere. This
+   * keeps the shared catalogue and stops it being destroyed from inside one
+   * tenant.
+   *
+   * createSkill is left alone: adding a name to a shared list is additive, and
+   * the unique constraint already reports a collision rather than overwriting.
+   */
+  async deleteSkill(businessId: string, id: string) {
+    const skill = await this.prisma.client.skill.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        name: true,
+        memberships: { select: { businessId: true } },
+        staffMembers: { select: { businessId: true } },
+      },
+    });
     if (!skill) throw new NotFoundException('Skill not found');
+
+    const outsiders = new Set(
+      [...skill.memberships, ...skill.staffMembers]
+        .map((holder) => holder.businessId)
+        .filter((owner) => owner !== businessId),
+    );
+
+    if (outsiders.size > 0) {
+      throw new BadRequestException(
+        `"${skill.name}" is assigned to people in ${outsiders.size} other ` +
+          `${outsiders.size === 1 ? 'business' : 'businesses'}, so it cannot be deleted here. ` +
+          'Remove it from your own team instead.',
+      );
+    }
 
     await this.prisma.client.skill.delete({ where: { id } });
     return { deleted: true };

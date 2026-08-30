@@ -80,8 +80,11 @@ export class AiSettingsController {
   @Delete('businesses/:businessId/ai/settings/skills/:id')
   @RateLimit(20, 60_000)
   @RequireModuleScope('operations', 'write')
-  async deleteSkill(@Param('id') id: string) {
-    return this.aiSettings.deleteSkill(id);
+  async deleteSkill(
+    @Param('businessId') businessId: string,
+    @Param('id') id: string,
+  ) {
+    return this.aiSettings.deleteSkill(businessId, id);
   }
 
   @Post('businesses/:businessId/ai/settings/memberships/:membershipId/skills/:skillId')

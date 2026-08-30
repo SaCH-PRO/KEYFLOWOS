@@ -24,7 +24,7 @@
  * so the owner of the link is the only side there is to scope.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { AiSettingsService } from './ai-settings.service';
 
 const BIZ_A = 'biz_a';
@@ -164,4 +164,67 @@ describe('the handlers bind the businessId in their own path', () => {
       );
     });
   }
+});
+
+/**
+ * Skill is a GLOBAL catalogue reached through a per-business route, so deleting
+ * one is a shared-resource question rather than a tenancy one: the row belongs
+ * to everybody, and removing it detaches it from every membership and staff
+ * member on the instance — in businesses the caller cannot see.
+ *
+ * The rule is therefore "is anyone ELSE relying on it", not "is this yours".
+ */
+describe('deleting from the shared skill catalogue', () => {
+  const OTHER = 'biz_someone_else';
+
+  function prismaWith(holders: { memberships: string[]; staffMembers: string[] }) {
+    return {
+      client: {
+        skill: {
+          findUnique: vi.fn(async () => ({
+            id: SKILL,
+            name: 'Welding',
+            memberships: holders.memberships.map((businessId) => ({ businessId })),
+            staffMembers: holders.staffMembers.map((businessId) => ({ businessId })),
+          })),
+          delete: vi.fn(async () => ({})),
+        },
+      },
+    };
+  }
+
+  it('refuses when another business has it assigned to someone', async () => {
+    const prisma = prismaWith({ memberships: [BIZ_A, OTHER], staffMembers: [] });
+    const svc = new AiSettingsService(prisma as never);
+    await expect(svc.deleteSkill(BIZ_A, SKILL)).rejects.toThrow(BadRequestException);
+    expect(prisma.client.skill.delete).not.toHaveBeenCalled();
+  });
+
+  it('counts staff members too, not only memberships', async () => {
+    // Two relations point at Skill. Checking one and forgetting the other is
+    // the obvious way to half-fix this.
+    const prisma = prismaWith({ memberships: [], staffMembers: [OTHER] });
+    const svc = new AiSettingsService(prisma as never);
+    await expect(svc.deleteSkill(BIZ_A, SKILL)).rejects.toThrow(BadRequestException);
+    expect(prisma.client.skill.delete).not.toHaveBeenCalled();
+  });
+
+  it('allows it when only the caller’s own business uses it', async () => {
+    const prisma = prismaWith({ memberships: [BIZ_A], staffMembers: [BIZ_A] });
+    const svc = new AiSettingsService(prisma as never);
+    await expect(svc.deleteSkill(BIZ_A, SKILL)).resolves.toEqual({ deleted: true });
+    expect(prisma.client.skill.delete).toHaveBeenCalled();
+  });
+
+  it('allows it when nobody uses it at all', async () => {
+    const prisma = prismaWith({ memberships: [], staffMembers: [] });
+    const svc = new AiSettingsService(prisma as never);
+    await expect(svc.deleteSkill(BIZ_A, SKILL)).resolves.toEqual({ deleted: true });
+  });
+
+  it('says who is holding it, so the message is actionable', async () => {
+    const prisma = prismaWith({ memberships: [OTHER, 'biz_third'], staffMembers: [] });
+    const svc = new AiSettingsService(prisma as never);
+    await expect(svc.deleteSkill(BIZ_A, SKILL)).rejects.toThrow(/2 other businesses/);
+  });
 });
