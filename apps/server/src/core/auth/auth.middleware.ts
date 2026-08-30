@@ -138,15 +138,48 @@ export class AuthMiddleware implements NestMiddleware {
       return null;
     }
 
+    // Revocation is checked BEFORE the row lookup on purpose: it must apply to
+    // the no-row case too, or logging out would stop protecting a user whose
+    // row was later hard-deleted.
+    //
+    // A REDIS OUTAGE IS NOT A REVOKED USER, AND CONFLATING THEM TOOK THE WHOLE
+    // PRODUCT DOWN. Both lookups used to share one try/catch that returned null
+    // — "reject" — for any error. Measured by stopping the container: the same
+    // valid token went from 200 to 401, and a brand-new signup got its token
+    // and then 401'd on bootstrap. Every user logged out, no new account able
+    // to complete, from a cache being unavailable.
+    //
+    // That is the same failure the long comment above describes, arriving by a
+    // different route: the fix for "no local row" is bypassed entirely when the
+    // step before it throws.
+    //
+    // So the two are now separated, because they are not the same question:
+    //
+    //   Redis unavailable  -> we cannot tell whether this token was revoked.
+    //                         The authoritative checks (deleted, banned) live in
+    //                         Postgres and still run. The exposure is bounded:
+    //                         a user who logged out keeps a working access token
+    //                         until it expires on its own, about an hour. We
+    //                         accept that rather than deny everyone.
+    //   Postgres unavailable -> we cannot tell whether the user is deleted or
+    //                         banned, and that IS the authoritative control.
+    //                         Still fail closed. The app cannot serve anything
+    //                         meaningful without the database anyway.
+    let revoked: string | null = null;
     try {
-      // Revocation is checked BEFORE the row lookup on purpose: it must apply
-      // to the no-row case too, or logging out would stop protecting a user
-      // whose row was later hard-deleted.
-      const revoked = await this.redis.get(`auth:revoked:user:${userId}`);
-      if (revoked) {
-        return null;
-      }
+      revoked = await this.redis.get(`auth:revoked:user:${userId}`);
+    } catch (redisErr) {
+      // warn, not debug: this is a real security degradation and should be
+      // visible without turning on verbose logging.
+      this.logger.warn(
+        `Revocation check unavailable (${(redisErr as Error).message}) — proceeding on the database checks alone. Logged-out tokens stay valid until expiry while this persists.`,
+      );
+    }
+    if (revoked) {
+      return null;
+    }
 
+    try {
       const dbUser = await this.prisma.client.user.findUnique({
         where: { id: userId },
         select: { role: true, deletedAt: true, bannedAt: true },
@@ -159,9 +192,9 @@ export class AuthMiddleware implements NestMiddleware {
       // No row yet — the bootstrap case. Default role, exactly as attachRole did.
       return { role: dbUser?.role ?? 'USER' };
     } catch (lookupErr) {
-      // Fail closed. A Redis or database outage rejects rather than waves
-      // everyone through.
-      this.logger.debug(`Local user lookup failed: ${(lookupErr as Error).message}`);
+      // Fail closed: without the database we cannot establish that this user is
+      // still allowed to be here.
+      this.logger.warn(`Local user lookup failed: ${(lookupErr as Error).message}`);
       return null;
     }
   }
