@@ -366,6 +366,11 @@ const BUSINESS_ID_MODELS = new Set([
   //                         not using.
   'ContactChannelStat', 'GenomeDepartment', 'GenomeGrowthChannel',
   'SeoKeyword', 'SeoPage',
+  // ── One scoped, 2026-08-30 (fourth pass) ──────────────────────────────────
+  // SupplierConnection: 22 production call sites. Both "unscoped" reads are
+  // `const where = { businessId, isActive: true }`, and both writes do
+  // findFirst({ id: connectionId, businessId }) and throw first.
+  'SupplierConnection',
 ]);
 
 

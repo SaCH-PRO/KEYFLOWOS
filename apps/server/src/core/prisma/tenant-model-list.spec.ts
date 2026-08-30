@@ -103,7 +103,7 @@ describe('BUSINESS_ID_MODELS describes reality', () => {
  * 2026-08-09 by adding one and watching this file pass.
  *
  * When this was written: 347 models carry a businessId, 77 were scoped, 270
- * were these. Now: 348 carry one, 320 scoped, 21 here, 7 in NEVER_SCOPE. The
+ * were these. Now: 348 carry one, 321 scoped, 18 here, 9 in NEVER_SCOPE. The
  * three numbers sum to 348 exactly, and the assertions below are what keep them
  * summing — a model has one status, never two and never none.
  *
@@ -146,12 +146,9 @@ const ACKNOWLEDGED_UNSCOPED = new Set([
   'KeyCallSession',
   'Membership',
   'MessageIntake',
-  'PortalAccess',
  
-  'PushSubscription',
   'SitePageDraft',
   'SocialConnection',
-  'SupplierConnection',
   'SyncJob',
  
   'WhatsAppMessage',
@@ -198,6 +195,19 @@ const NEVER_SCOPE = new Set([
   // room. A webhook has no tenant context and the tenant is the result of the
   // search, not an input to it.
   'ContactExportJob', 'VoiceSession',
+  //
+  // PortalAccess and PushSubscription, 2026-08-30 — the public-token and
+  // user-device shapes.
+  //
+  // PortalAccess — `token String @unique` handed to a CUSTOMER. findByToken
+  // includes `business: true` and reads the tenant off the row: the visitor
+  // holds a link, not a session, and names no business.
+  //
+  // PushSubscription — `endpoint String @unique` is a URL minted by the
+  // browser's push service, and every lookup keys on it or on userId. A user's
+  // devices are not a per-business set, and the expired-endpoint sweeps
+  // deliberately clear a dead endpoint everywhere it appears.
+  'PortalAccess', 'PushSubscription',
 ]);
 
 describe('the unscoped set may only shrink', () => {

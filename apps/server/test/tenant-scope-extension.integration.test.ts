@@ -411,7 +411,8 @@ describe('tenant isolation extension (real database)', () => {
       );
       for (const m of [
         'ApiKey', 'BusinessReputation', 'ContactExportJob', 'MarketplaceOrder',
-        'Payment', 'VoiceSession', 'WebhookEvent',
+        'Payment', 'PortalAccess', 'PushSubscription', 'VoiceSession',
+        'WebhookEvent',
       ]) {
         expect(set, `${m} must never be tenant-scoped`).not.toContain(`'${m}'`);
       }
@@ -440,6 +441,7 @@ describe('tenant isolation extension (real database)', () => {
         // third pass
         'ContactChannelStat', 'GenomeDepartment', 'GenomeGrowthChannel',
         'SeoKeyword', 'SeoPage',
+        'SupplierConnection',
       ]) {
         expect(set, `${m} left BUSINESS_ID_MODELS`).toContain(`'${m}'`);
       }
