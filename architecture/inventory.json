@@ -3159,7 +3159,7 @@
     {
       "extension": ".json",
       "lines": 7,
-      "path": ".claude/coordination/sessions/ce90ef91-03a4-5eea-a3dc-c13bd580aa95.json",
+      "path": ".claude/coordination/sessions/43eb8048-bcf3-595f-937c-a2cf37c8a363.json",
       "size_bytes": 173
     },
     {
@@ -57132,6 +57132,36 @@
     },
     {
       "extension": ".md",
+      "lines": 78,
+      "path": "architecture/os/journal/2026-08-29-audit-13.md",
+      "size_bytes": 3785
+    },
+    {
+      "extension": ".md",
+      "lines": 49,
+      "path": "architecture/os/journal/2026-08-29-audit-19.md",
+      "size_bytes": 2361
+    },
+    {
+      "extension": ".md",
+      "lines": 90,
+      "path": "architecture/os/journal/2026-08-29-truth.md",
+      "size_bytes": 4923
+    },
+    {
+      "extension": ".md",
+      "lines": 51,
+      "path": "architecture/os/journal/2026-08-30-audit-01.md",
+      "size_bytes": 2576
+    },
+    {
+      "extension": ".md",
+      "lines": 65,
+      "path": "architecture/os/journal/2026-08-30-audit-07.md",
+      "size_bytes": 2671
+    },
+    {
+      "extension": ".md",
       "lines": 123,
       "path": "architecture/os/playbooks/audit.md",
       "size_bytes": 7371
@@ -57170,7 +57200,7 @@
       "extension": ".md",
       "lines": 87,
       "path": "architecture/os/state/STATE.md",
-      "size_bytes": 7126
+      "size_bytes": 7147
     },
     {
       "extension": ".md",
@@ -60979,7 +61009,7 @@
       ".ico": 1,
       ".js": 10,
       ".json": 35,
-      ".md": 480,
+      ".md": 485,
       ".mjs": 23,
       ".patch": 1,
       ".pdf": 1,
@@ -61007,7 +61037,7 @@
     "root": "/home/user/KEYFLOWOS",
     "scanner": "codebase-architect/inventory.py",
     "source_files": 3352,
-    "total_files": 4228,
-    "total_lines": 1031899
+    "total_files": 4233,
+    "total_lines": 1032232
   }
 }
