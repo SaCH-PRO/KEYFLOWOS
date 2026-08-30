@@ -32,7 +32,16 @@ class PrismaStub {
 
   private match(where: Record<string, unknown>) {
     return this.rows.filter((r) =>
-      Object.entries(where).every(([k, v]) => (r as Record<string, unknown>)[k] === v),
+      Object.entries(where).every(([k, v]) => {
+        const actual = (r as Record<string, unknown>)[k];
+        // `{ id: { in: [...] } }` — the scoped key and the pre-fix one. A stub
+        // that ignored this would silently match everything and turn the
+        // scoping tests below green on any implementation at all.
+        if (v && typeof v === 'object' && Array.isArray((v as { in?: unknown[] }).in)) {
+          return ((v as { in: unknown[] }).in).includes(actual);
+        }
+        return actual === v;
+      }),
     );
   }
 
@@ -70,6 +79,9 @@ function makeService(prisma: PrismaStub) {
   const instance = { prisma } as Record<string, unknown>;
   for (const name of [
     'sessionScope',
+    'storageId',
+    'clientSessionId',
+    'resolveSessionRowId',
     'getConversationHistory',
     'saveConversationHistory',
     'listSessions',
@@ -203,5 +215,164 @@ describe('the identity actually reaches the query', () => {
   it('both chat entry points record the owner on the session they create', () => {
     expect(controller).toMatch(/streamChat\([^)]*user\?\.id\)/);
     expect(controller).toMatch(/user\?\.id,\s*\);/);
+  });
+});
+
+/**
+ * ONE ROW, SHARED BY EVERYONE.
+ *
+ * `saveConversationHistory` upserted on `{ id: sessionId }` — the primary key
+ * alone, with no businessId and no userId. The client picks that id, and every
+ * client that pins a conversation sends a fixed string; both places in the web
+ * app send the same literal `"onboarding"`.
+ *
+ * So `flow_sessions.id = 'onboarding'` was one row shared by every user in
+ * every business. Reproduced against the running stack before this was written:
+ * a brand-new user in a brand-new business sent one onboarding message and it
+ * landed in the row owned by an unrelated business and an unrelated user.
+ *
+ * The reads were already scoped correctly, which is what made it quiet — the
+ * victim keeps reading their own (now overwritten) row, and everyone else's
+ * onboarding chat simply never persists and comes back empty on reload.
+ */
+describe('a client-chosen session id cannot address another tenant row', () => {
+  let prisma: PrismaStub;
+
+  const ONBOARDING = 'onboarding';
+  const A = { biz: 'biz_a', user: 'user_a' };
+  const B = { biz: 'biz_b', user: 'user_b' };
+
+  beforeEach(() => {
+    prisma = new PrismaStub();
+  });
+
+  it('two businesses using the same session name do not share a row', async () => {
+    const svc = makeService(prisma);
+    await svc.saveConversationHistory(A.biz, ONBOARDING, ['A: my bakery is Rise and Crumb'], A.user);
+    await svc.saveConversationHistory(B.biz, ONBOARDING, ['B: my garage is Ace Motors'], B.user);
+
+    expect(prisma.rows).toHaveLength(2);
+    expect(await svc.getConversationHistory(A.biz, ONBOARDING, A.user)).toEqual([
+      'A: my bakery is Rise and Crumb',
+    ]);
+    expect(await svc.getConversationHistory(B.biz, ONBOARDING, B.user)).toEqual([
+      'B: my garage is Ace Motors',
+    ]);
+  });
+
+  it('two users in the SAME business do not share a row either', async () => {
+    // A conversation is private to the person, not the company — the property
+    // the rest of this file exists to protect.
+    const svc = makeService(prisma);
+    await svc.saveConversationHistory(A.biz, ONBOARDING, ['owner: cash is tight'], 'owner');
+    await svc.saveConversationHistory(A.biz, ONBOARDING, ['ana: what is my schedule'], 'ana');
+
+    expect(prisma.rows).toHaveLength(2);
+    expect(await svc.getConversationHistory(A.biz, ONBOARDING, 'ana')).toEqual([
+      'ana: what is my schedule',
+    ]);
+  });
+
+  it('writing does not overwrite a row belonging to someone else', async () => {
+    const svc = makeService(prisma);
+    await svc.saveConversationHistory(A.biz, ONBOARDING, ['A: private'], A.user);
+    const before = JSON.stringify(prisma.rows.find((r) => r.businessId === A.biz));
+
+    await svc.saveConversationHistory(B.biz, ONBOARDING, ['B: unrelated'], B.user);
+
+    expect(JSON.stringify(prisma.rows.find((r) => r.businessId === A.biz))).toEqual(before);
+  });
+
+  it('a second user cannot read the first onboarding by using the same name', async () => {
+    const svc = makeService(prisma);
+    await svc.saveConversationHistory(A.biz, ONBOARDING, ['A: private'], A.user);
+    expect(await svc.getConversationHistory(B.biz, ONBOARDING, B.user)).toEqual([]);
+  });
+
+  it('the conversation survives, which is the whole point for onboarding', async () => {
+    // The user-visible failure was not the leak but the amnesia: reload the
+    // onboarding page and the chat was empty, so the user re-told everything.
+    const svc = makeService(prisma);
+    await svc.saveConversationHistory(B.biz, ONBOARDING, ['B: turn one'], B.user);
+    await svc.saveConversationHistory(A.biz, ONBOARDING, ['A: turn one'], A.user);
+
+    expect(await svc.getConversationHistory(A.biz, ONBOARDING, A.user)).toEqual(['A: turn one']);
+  });
+
+  it('listSessions hands back the name the client sent, not the storage key', async () => {
+    const svc = makeService(prisma);
+    await svc.saveConversationHistory(A.biz, ONBOARDING, ['A: turn one'], A.user);
+
+    const listed = await svc.listSessions(A.biz, A.user);
+    expect(listed.map((r) => r.id)).toEqual([ONBOARDING]);
+  });
+
+  it('clear and delete still reach the caller own scoped row', async () => {
+    const svc = makeService(prisma);
+    await svc.saveConversationHistory(A.biz, ONBOARDING, ['A: turn one'], A.user);
+
+    await svc.clearSession(A.biz, ONBOARDING, A.user);
+    expect(await svc.getConversationHistory(A.biz, ONBOARDING, A.user)).toEqual([]);
+
+    await svc.deleteSession(A.biz, ONBOARDING, A.user);
+    expect(prisma.rows).toHaveLength(0);
+  });
+
+  it('and still cannot reach anybody else', async () => {
+    const svc = makeService(prisma);
+    await svc.saveConversationHistory(A.biz, ONBOARDING, ['A: private'], A.user);
+
+    await svc.clearSession(B.biz, ONBOARDING, B.user);
+    await svc.deleteSession(B.biz, ONBOARDING, B.user);
+
+    expect(await svc.getConversationHistory(A.biz, ONBOARDING, A.user)).toEqual(['A: private']);
+  });
+});
+
+/**
+ * Rows written before the scoped key must keep working, or the fix trades a
+ * leak for silently orphaning every conversation anyone already had.
+ */
+describe('sessions created before the scoped key', () => {
+  const BIZ_L = 'biz_legacy';
+  const USER_L = 'user_legacy';
+  let prisma: PrismaStub;
+
+  beforeEach(() => {
+    prisma = new PrismaStub();
+    prisma.rows = [
+      { id: 'onboarding', businessId: BIZ_L, userId: USER_L, messages: ['said before the fix'] },
+    ];
+  });
+
+  it('are still readable by their owner', async () => {
+    const svc = makeService(prisma);
+    expect(await svc.getConversationHistory(BIZ_L, 'onboarding', USER_L)).toEqual([
+      'said before the fix',
+    ]);
+  });
+
+  it('are appended to rather than forked into a second row', async () => {
+    const svc = makeService(prisma);
+    await svc.saveConversationHistory(BIZ_L, 'onboarding', ['said before the fix', 'and after'], USER_L);
+
+    expect(prisma.rows).toHaveLength(1);
+    expect(await svc.getConversationHistory(BIZ_L, 'onboarding', USER_L)).toHaveLength(2);
+  });
+
+  it('are NOT readable by anyone else, bare id or not', async () => {
+    const svc = makeService(prisma);
+    expect(await svc.getConversationHistory('biz_other', 'onboarding', 'user_other')).toEqual([]);
+    expect(await svc.getConversationHistory(BIZ_L, 'onboarding', 'someone_else')).toEqual([]);
+  });
+
+  it('are not overwritten by another tenant using the same name', async () => {
+    const svc = makeService(prisma);
+    await svc.saveConversationHistory('biz_other', 'onboarding', ['mine'], 'user_other');
+
+    expect(prisma.rows).toHaveLength(2);
+    expect(await svc.getConversationHistory(BIZ_L, 'onboarding', USER_L)).toEqual([
+      'said before the fix',
+    ]);
   });
 });

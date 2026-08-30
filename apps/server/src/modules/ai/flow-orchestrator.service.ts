@@ -6385,13 +6385,95 @@ ${triage.standingContext}`;
     return { businessId, userId: userId ?? null };
   }
 
+  /**
+   * THE CLIENT DOES NOT GET TO NAME A GLOBAL ROW.
+   *
+   * `FlowSession.id` is the primary key and the client chooses it, so
+   * `upsert({ where: { id: sessionId } })` addressed a row by that key ALONE —
+   * no businessId, no userId. Every client that pins a conversation sends a
+   * FIXED string, and both places in the web app send the same literal:
+   *
+   *   key-onboarding-chat-view.tsx   ONBOARDING_SESSION_ID = "onboarding"
+   *   open-genome-conversation.ts    GENOME_SESSION_ID     = "onboarding"
+   *
+   * So one row, `flow_sessions.id = 'onboarding'`, was shared by every user in
+   * every business on the instance. Measured against the running stack: a
+   * brand-new user in a brand-new business sent one onboarding message, and it
+   * landed in the row owned by an unrelated business and an unrelated user,
+   * overwriting what was already there.
+   *
+   * Two consequences from the one cause:
+   *
+   *   1. Whoever created that row first could read everyone else's onboarding
+   *      conversation, and had their own destroyed by the next writer.
+   *   2. Everyone else's onboarding chat NEVER persisted. The reads below are
+   *      correctly scoped, so they never matched a row the caller owned, and
+   *      the chat came back empty on every reload — which is the "onboarding
+   *      loses its state" report, reproduced.
+   *
+   * The comment on saveConversationHistory named this exact risk and guarded
+   * the wrong half of it: it refuses to reassign an existing session's OWNER on
+   * update, which prevents a takeover of the record while leaving the CONTENT
+   * free to be replaced by a stranger.
+   *
+   * The privacy model the reads already implement is that a conversation
+   * belongs to (business, user). The storage identity now says the same thing,
+   * by deriving the primary key from both — neither of which the client
+   * supplies. A caller can still collide with ITS OWN sessions, which is what
+   * naming a session is for, and can no longer reach anybody else's.
+   *
+   * Deliberately not a schema change. Making `id` a cuid and adding
+   * `@@unique([businessId, userId, clientSessionId])` is the tidier model, but
+   * that is a migration plus a backfill on a live table in order to close a
+   * leak, and this is contained entirely in the five accessors below.
+   *
+   * The client contract is unchanged: it sends "onboarding" and `listSessions`
+   * hands back "onboarding". Only the stored key differs.
+   */
+  private static readonly SESSION_KEY_SEP = '::';
+
+  /** The stored primary key for the conversation a client calls `sessionId`. */
+  private storageId(businessId: string, userId: string | undefined, sessionId: string): string {
+    return `${businessId}:${userId ?? 'anon'}${FlowOrchestratorService.SESSION_KEY_SEP}${sessionId}`;
+  }
+
+  /** The name a client knows a stored row by. Inverse of storageId. */
+  private clientSessionId(storedId: string, businessId: string, userId?: string): string {
+    const prefix = `${businessId}:${userId ?? 'anon'}${FlowOrchestratorService.SESSION_KEY_SEP}`;
+    return storedId.startsWith(prefix) ? storedId.slice(prefix.length) : storedId;
+  }
+
+  /**
+   * The row this caller means: the scoped key, or a pre-fix row that is
+   * genuinely theirs.
+   *
+   * The fallback is scope-filtered, so it can only return a row whose
+   * businessId AND userId already match the caller. That is what stops it
+   * reopening the hole it exists to clean up after.
+   */
+  private async resolveSessionRowId(
+    businessId: string,
+    sessionId: string,
+    userId?: string,
+  ): Promise<string | null> {
+    const scoped = this.storageId(businessId, userId, sessionId);
+    const rows = await this.prisma.client.flowSession.findMany({
+      where: { id: { in: [scoped, sessionId] }, ...this.sessionScope(businessId, userId) },
+      select: { id: true },
+    });
+    if (rows.some((r) => r.id === scoped)) return scoped;
+    return rows[0]?.id ?? null;
+  }
+
   async getConversationHistory(
     businessId: string,
     sessionId: string,
     userId?: string,
   ): Promise<FlowMessage[]> {
+    const rowId = await this.resolveSessionRowId(businessId, sessionId, userId);
+    if (!rowId) return [];
     const session = await this.prisma.client.flowSession.findFirst({
-      where: { id: sessionId, ...this.sessionScope(businessId, userId) },
+      where: { id: rowId, ...this.sessionScope(businessId, userId) },
       select: { messages: true },
     });
     if (!session) return [];
@@ -6404,9 +6486,20 @@ ${triage.standingContext}`;
     messages: FlowMessage[],
     userId?: string,
   ): Promise<void> {
+    // Address the row by a key derived from businessId and userId, so a
+    // client-chosen name can only ever collide with this caller's own
+    // sessions. See the note above storageId for what sharing one global row
+    // actually did.
+    //
+    // An existing pre-fix row that is genuinely this caller's keeps being
+    // written to, rather than forking their history into a second row.
+    const rowId =
+      (await this.resolveSessionRowId(businessId, sessionId, userId)) ??
+      this.storageId(businessId, userId, sessionId);
+
     await this.prisma.client.flowSession.upsert({
-      where: { id: sessionId },
-      create: { id: sessionId, businessId, userId: userId ?? null, messages: messages as any },
+      where: { id: rowId },
+      create: { id: rowId, businessId, userId: userId ?? null, messages: messages as any },
       // userId is set on create only. Re-assigning an existing session's owner
       // on every save would let whoever writes last take ownership of someone
       // else's conversation.
@@ -6428,24 +6521,41 @@ ${triage.standingContext}`;
   }
 
   async listSessions(businessId: string, userId?: string) {
-    return this.prisma.client.flowSession.findMany({
+    const rows = await this.prisma.client.flowSession.findMany({
       where: this.sessionScope(businessId, userId),
       orderBy: { updatedAt: 'desc' },
       take: 20,
       select: { id: true, createdAt: true, updatedAt: true, messages: true },
     });
+
+    // Hand back the name the client uses. The web app finds its pinned
+    // conversation with `sessions.find((s) => s.id === "onboarding")`, so
+    // leaking the storage key here would leave it unable to match the row and
+    // reproduce the empty-chat symptom by a second route.
+    return rows.map((row) => ({
+      ...row,
+      id: this.clientSessionId(row.id, businessId, userId),
+    }));
   }
 
   async clearSession(businessId: string, sessionId: string, userId?: string) {
+    // Both keys, so a session created before the scoped key still clears. The
+    // scope filter is what keeps the bare id from reaching anybody else's row.
     await this.prisma.client.flowSession.updateMany({
-      where: { id: sessionId, ...this.sessionScope(businessId, userId) },
+      where: {
+        id: { in: [this.storageId(businessId, userId, sessionId), sessionId] },
+        ...this.sessionScope(businessId, userId),
+      },
       data: { messages: [] },
     });
   }
 
   async deleteSession(businessId: string, sessionId: string, userId?: string) {
     await this.prisma.client.flowSession.deleteMany({
-      where: { id: sessionId, ...this.sessionScope(businessId, userId) },
+      where: {
+        id: { in: [this.storageId(businessId, userId, sessionId), sessionId] },
+        ...this.sessionScope(businessId, userId),
+      },
     });
   }
 
