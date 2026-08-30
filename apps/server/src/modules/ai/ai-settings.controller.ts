@@ -88,40 +88,46 @@ export class AiSettingsController {
   @RateLimit(20, 60_000)
   @RequireModuleScope('operations', 'write')
   async assignSkillToMembership(
+    @Param('businessId') businessId: string,
     @Param('membershipId') membershipId: string,
     @Param('skillId') skillId: string,
   ) {
-    return this.aiSettings.assignSkillToMembership(membershipId, skillId);
+    // businessId is bound and PASSED, not just present in the path. The guard
+    // checks the caller against it; only the service can check the record.
+    return this.aiSettings.assignSkillToMembership(businessId, membershipId, skillId);
   }
 
   @Delete('businesses/:businessId/ai/settings/memberships/:membershipId/skills/:skillId')
   @RateLimit(20, 60_000)
   @RequireModuleScope('operations', 'write')
   async removeSkillFromMembership(
+    @Param('businessId') businessId: string,
     @Param('membershipId') membershipId: string,
     @Param('skillId') skillId: string,
   ) {
-    return this.aiSettings.removeSkillFromMembership(membershipId, skillId);
+    return this.aiSettings.removeSkillFromMembership(businessId, membershipId, skillId);
   }
 
   @Post('businesses/:businessId/ai/settings/staff/:staffId/skills/:skillId')
   @RateLimit(20, 60_000)
   @RequireModuleScope('operations', 'write')
   async assignSkillToStaff(
+    @Param('businessId') businessId: string,
     @Param('staffId') staffId: string,
     @Param('skillId') skillId: string,
   ) {
-    return this.aiSettings.assignSkillToStaff(staffId, skillId);
+    return this.aiSettings.assignSkillToStaff(businessId, staffId, skillId);
   }
 
   @Delete('businesses/:businessId/ai/settings/staff/:staffId/skills/:skillId')
   @RateLimit(20, 60_000)
   @RequireModuleScope('operations', 'write')
   async removeSkillFromStaff(
+    @Param('businessId') businessId: string,
     @Param('staffId') staffId: string,
     @Param('skillId') skillId: string,
   ) {
-    return this.aiSettings.removeSkillFromStaff(staffId, skillId);
+    return this.aiSettings.removeSkillFromStaff(businessId, staffId, skillId);
   }
 
   @Get('businesses/:businessId/ai/settings/authority-grants')

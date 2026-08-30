@@ -124,7 +124,51 @@ export class AiSettingsService {
     return { deleted: true };
   }
 
-  async assignSkillToMembership(membershipId: string, skillId: string) {
+  /**
+   * A route guard proves the CALLER belongs to the business. It cannot prove
+   * the RECORD does, because the record id is a different parameter.
+   *
+   * These four methods took a membershipId or staffId straight from the URL and
+   * wrote to it by bare id. `BusinessGuard` on
+   * `/ai/businesses/:businessId/ai/settings/memberships/:membershipId/skills/:skillId`
+   * passes as long as the caller names their OWN business — and then the
+   * handler discarded that businessId entirely, so any membership id in the
+   * system was reachable.
+   *
+   * What that let one business do to another: skills are what a JobRole syncs
+   * into `Membership.permissionScopes`, so this is not a label. It decides what
+   * KEY is permitted to do on that person's behalf.
+   *
+   * Membership was the live one — it sits in the ACKNOWLEDGED_UNSCOPED ledger,
+   * so the Prisma extension does not scope it either and nothing stood in the
+   * way. StaffMember happens to be in BUSINESS_ID_MODELS, so the extension was
+   * already refusing the cross-tenant write there — as a P2025 that reads like
+   * missing data. It is fixed here too, because relying on that means relying
+   * on a second layer for a check the service should make itself, and the
+   * extension is inert off the HTTP path where these are equally callable.
+   *
+   * Skill itself has NO businessId — it is a global catalogue with
+   * @@unique([name]) — so only the OWNER of the link is scoped here. That is
+   * the whole boundary that exists to enforce.
+   */
+  private async assertMembershipInBusiness(businessId: string, membershipId: string): Promise<void> {
+    const found = await this.prisma.client.membership.findFirst({
+      where: { id: membershipId, businessId },
+      select: { id: true },
+    });
+    if (!found) throw new NotFoundException('Membership not found');
+  }
+
+  private async assertStaffInBusiness(businessId: string, staffId: string): Promise<void> {
+    const found = await this.prisma.client.staffMember.findFirst({
+      where: { id: staffId, businessId },
+      select: { id: true },
+    });
+    if (!found) throw new NotFoundException('Staff member not found');
+  }
+
+  async assignSkillToMembership(businessId: string, membershipId: string, skillId: string) {
+    await this.assertMembershipInBusiness(businessId, membershipId);
     await this.prisma.client.membership.update({
       where: { id: membershipId },
       data: { skills: { connect: { id: skillId } } },
@@ -132,7 +176,8 @@ export class AiSettingsService {
     return { success: true };
   }
 
-  async removeSkillFromMembership(membershipId: string, skillId: string) {
+  async removeSkillFromMembership(businessId: string, membershipId: string, skillId: string) {
+    await this.assertMembershipInBusiness(businessId, membershipId);
     await this.prisma.client.membership.update({
       where: { id: membershipId },
       data: { skills: { disconnect: { id: skillId } } },
@@ -140,7 +185,8 @@ export class AiSettingsService {
     return { success: true };
   }
 
-  async assignSkillToStaff(staffId: string, skillId: string) {
+  async assignSkillToStaff(businessId: string, staffId: string, skillId: string) {
+    await this.assertStaffInBusiness(businessId, staffId);
     await this.prisma.client.staffMember.update({
       where: { id: staffId },
       data: { skills: { connect: { id: skillId } } },
@@ -148,7 +194,8 @@ export class AiSettingsService {
     return { success: true };
   }
 
-  async removeSkillFromStaff(staffId: string, skillId: string) {
+  async removeSkillFromStaff(businessId: string, staffId: string, skillId: string) {
+    await this.assertStaffInBusiness(businessId, staffId);
     await this.prisma.client.staffMember.update({
       where: { id: staffId },
       data: { skills: { disconnect: { id: skillId } } },
