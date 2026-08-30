@@ -103,7 +103,7 @@ describe('BUSINESS_ID_MODELS describes reality', () => {
  * 2026-08-09 by adding one and watching this file pass.
  *
  * When this was written: 347 models carry a businessId, 77 were scoped, 270
- * were these. Now: 348 carry one, 310 scoped, 35 here, 3 in NEVER_SCOPE. The
+ * were these. Now: 348 carry one, 315 scoped, 28 here, 5 in NEVER_SCOPE. The
  * three numbers sum to 348 exactly, and the assertions below are what keep them
  * summing — a model has one status, never two and never none.
  *
@@ -129,18 +129,14 @@ describe('BUSINESS_ID_MODELS describes reality', () => {
  * nothing. Where it does not, a human reads it before it moves.
  */
 const ACKNOWLEDGED_UNSCOPED = new Set([
-  'AiMemory',
-  'ApiKey',
  
-  'BusinessReputation',
-  'CalendarSyncConflict',
  
   'ChannelConnection', 'ChannelDestination',
  
   'ContactChannelStat',
   'ContactExportJob', 'ContactExternalMapping', 'ContactForgetRequest',
  
-  'ConversationAIInsight', 'Course',
+  'Course',
   'DriveIntakeFile',
   'FinanceActionItem',
   'FlowRun',
@@ -148,14 +144,13 @@ const ACKNOWLEDGED_UNSCOPED = new Set([
   'GenomeDepartment',
   'GenomeGrowthChannel',
   'IngestionItem',
-  'IntegrationConnection', 'IntegrationSyncRun',
+  'IntegrationConnection',
   'InventoryStock',
   'KeyCallSession',
   'Membership',
   'MessageIntake',
   'PortalAccess',
  
-  'PromoCode',
   'PushSubscription',
   'SeoKeyword', 'SeoPage',
   'SitePageDraft',
@@ -180,6 +175,20 @@ const NEVER_SCOPE = new Set([
   // that must never be paid belongs here, not in the ledger above, so that the
   // remaining count means "work still owed" and nothing else.
   'WebhookEvent',
+  // Moved out of the debt ledger 2026-08-30, because they are not debt.
+  //
+  // ApiKey — `validateKey` looks a key up by `{ prefix, hashedKey }` and then
+  // DERIVES the tenant from what it finds: `return { businessId: key.businessId
+  // ... }`. The business is the OUTPUT of authentication, so there is no
+  // context to scope by and injecting one turns a valid key into a silent null.
+  // Exactly the Payment shape, one module over.
+  //
+  // BusinessReputation — network analytics computes a percentile rank with
+  // `count({ where: { reputationScore: { gt: mine } } })` across every
+  // business. That comparison IS the feature. Scoped, `higher` is always 0 and
+  // `total` always 1, so every business reads "rank 1 of 1" — wrong, and
+  // wrong quietly, with no error to notice.
+  'ApiKey', 'BusinessReputation',
 ]);
 
 describe('the unscoped set may only shrink', () => {

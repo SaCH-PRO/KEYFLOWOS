@@ -320,6 +320,33 @@ const BUSINESS_ID_MODELS = new Set([
   'AuthorityGrant', 'CampaignBriefing', 'CognitionSession',
   'ContactInsightSnapshot', 'FlowSession', 'PresenceInsightSnapshot',
   'ValueConstraint',
+  // ── Batch of five, 2026-08-30 (second pass) ───────────────────────────────
+  // Same protocol: every call site read, not sampled. 61 production sites
+  // across the five; the eleven that did not already name businessId were:
+  //
+  //   AiMemory              resolveConflicts reads findMany({ businessId })
+  //                         and deletes from that set; loadStructuredMemory's
+  //                         `whereBase` IS `{ businessId }` — a variable the
+  //                         scanner cannot see into, not a missing filter.
+  //   CalendarSyncConflict  resolveConflict does findFirst({ id, businessId })
+  //                         and throws before the bare-id update. The
+  //                         createMany takes businessId by injection.
+  //   PromoCode             update and delete are both preceded by
+  //                         findFirst({ id: promoId, businessId }) that throws.
+  //   ConversationAIInsight the upsert keys on the compound unique
+  //                         businessId_contactId_kind_messageRef. The one real
+  //                         gap is contact-insight.service.ts:382, a findFirst
+  //                         on `{ contactId }` alone while every sibling query
+  //                         in the same Promise.all names businessId — so this
+  //                         entry FIXES an inconsistency rather than restating
+  //                         a predicate.
+  //   IntegrationSyncRun    one site, in admin analytics, with no businessId
+  //                         anywhere in its route. The interceptor needs one in
+  //                         params/body/query, so no context exists there and
+  //                         injection never fires — but it now says so with
+  //                         skipTenantIsolation instead of relying on that.
+  'AiMemory', 'CalendarSyncConflict', 'ConversationAIInsight',
+  'IntegrationSyncRun', 'PromoCode',
 ]);
 
 

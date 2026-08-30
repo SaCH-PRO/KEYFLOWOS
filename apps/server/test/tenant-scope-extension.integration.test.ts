@@ -395,6 +395,25 @@ describe('tenant isolation extension (real database)', () => {
       if (row) expect(row.businessId, 'the row lands in the caller tenant, not the one it named').toBe(BIZ_A);
     });
 
+    it('the deliberately cross-tenant models are NOT scoped', async () => {
+      // ApiKey resolves a caller BY the key and derives the tenant from the row;
+      // BusinessReputation counts across every business to compute a rank.
+      // Scoping either does not harden it, it deletes the feature and leaves a
+      // silent null or a permanent "rank 1 of 1" in its place.
+      const { default: fs } = await import('node:fs');
+      const client = fs.readFileSync(
+        path.resolve(__dirname, '../../../packages/db/src/client.ts'),
+        'utf8',
+      );
+      const set = client.slice(
+        client.indexOf('const BUSINESS_ID_MODELS = new Set(['),
+        client.indexOf(']);', client.indexOf('const BUSINESS_ID_MODELS = new Set([')),
+      );
+      for (const m of ['ApiKey', 'BusinessReputation', 'Payment', 'MarketplaceOrder', 'WebhookEvent']) {
+        expect(set, `${m} must never be tenant-scoped`).not.toContain(`'${m}'`);
+      }
+    });
+
     it('the other six are scoped too, by the same mechanism', async () => {
       // Named individually so removing one from the set fails here rather than
       // silently reducing what this file covers.
@@ -408,9 +427,13 @@ describe('tenant isolation extension (real database)', () => {
         client.indexOf(']);', client.indexOf('const BUSINESS_ID_MODELS = new Set([')),
       );
       for (const m of [
+        // 2026-08-30, first pass
         'AuthorityGrant', 'CampaignBriefing', 'CognitionSession',
         'ContactInsightSnapshot', 'FlowSession', 'PresenceInsightSnapshot',
         'ValueConstraint',
+        // second pass
+        'AiMemory', 'CalendarSyncConflict', 'ConversationAIInsight',
+        'IntegrationSyncRun', 'PromoCode',
       ]) {
         expect(set, `${m} left BUSINESS_ID_MODELS`).toContain(`'${m}'`);
       }

@@ -1,4 +1,5 @@
 import { Injectable, Inject } from '@nestjs/common';
+import { skipTenantIsolation } from '@keyflow/db';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 @Injectable()
@@ -89,10 +90,16 @@ export class AdminAnalyticsService {
       this.prisma.client.integrationConnection.count({
         where: { status: { in: ['ERROR', 'NEEDS_ATTENTION'] } },
       }),
-      this.prisma.client.integrationSyncRun.findMany({
-        orderBy: { startedAt: 'desc' },
-        take: 20,
-      }),
+      // Every tenant's recent syncs — that is what an admin health view is.
+      // IntegrationSyncRun became tenant-scoped on 2026-08-30; this route
+      // carries no businessId so the interceptor never activates and nothing
+      // would be injected, but saying so beats depending on it.
+      this.prisma.client.integrationSyncRun.findMany(
+        skipTenantIsolation({
+          orderBy: { startedAt: 'desc' as const },
+          take: 20,
+        }),
+      ),
       this.prisma.client.integrationProvider.findMany({ where: { status: 'ACTIVE' } }),
     ]);
 
