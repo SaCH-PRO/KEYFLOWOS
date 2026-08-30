@@ -100,6 +100,20 @@ export const AI_CREDIT_COSTS: Record<string, number> = {
   financial_weekly_briefing: 2,
   revenue_briefing: 2,
 
+  // ── Live and never priced, found 2026-08-30 ───────────────────────────────
+  // Same shape as the three above, found the same way: the gate reads the
+  // features actually RECORDED rather than a hand-kept list, and this one has
+  // been billing at the `|| 1` fallback since it shipped.
+  //
+  // Priced at 1 to match contact_summary / ai_lead_score / note_intelligence,
+  // which is what it is: one gpt-4o-mini call capped at 200 tokens producing a
+  // single short CRM recommendation for one contact.
+  //
+  // Deliberately the SAME number the fallback was already charging, so nobody's
+  // bill moves. The change is that the rate is now a decision instead of the
+  // absence of one — which is the whole point of the gate that caught it.
+  momentum_recommendation: 1,
+
   // ── key-cortex background cognition ───────────────────────────────────────
   // Exempt from the customer's allowance (SYSTEM_AI_FEATURES) but still PRICED,
   // because the usage log is the only place the cost of the product thinking
