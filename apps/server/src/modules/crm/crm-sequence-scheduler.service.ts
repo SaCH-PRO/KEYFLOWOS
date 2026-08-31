@@ -94,6 +94,7 @@ export class CrmSequenceSchedulerService implements OnModuleInit, OnModuleDestro
             firstName: true,
             lastName: true,
             email: true,
+            phone: true,
             relationshipHealth: true,
             bestChannel: true,
           },
@@ -344,12 +345,33 @@ export class CrmSequenceSchedulerService implements OnModuleInit, OnModuleDestro
       }
       payload = getVariantContent(node, variantId);
 
+      // Send it. Everything below this line used to run whether or not
+      // anything was dispatched — see dispatchSendNode for what that cost.
+      const dispatch = await this.dispatchSendNode(
+        businessId,
+        enrollment as never,
+        node,
+        payload,
+        variantId,
+      );
+
+      if (!dispatch.queued) {
+        this.logger.warn(
+          `Sequence ${enrollment.sequenceId} step ${currentNodeId} (${node.type}) not delivered ` +
+            `for contact ${enrollment.contactId}: ${dispatch.reason}`,
+        );
+      }
+
       meta.stepEvents = meta.stepEvents ?? {};
       const prior = meta.stepEvents[currentNodeId] ?? {};
       meta.stepEvents[currentNodeId] = {
         ...prior,
         variantId: variantId ?? prior.variantId ?? null,
-        sentAt: prior.sentAt ?? new Date().toISOString(),
+        // ONLY when something was actually queued. A step that could not be
+        // delivered must not read as delivered — a stamped sentAt is what made
+        // a sequence that sent nothing look like one that was running.
+        sentAt: dispatch.queued ? prior.sentAt ?? new Date().toISOString() : prior.sentAt,
+        ...(dispatch.queued ? {} : { notDeliveredReason: dispatch.reason ?? 'unknown' }),
       };
 
       await this.logEvent(businessId, enrollment.contactId, CONTACT_EVENT.SEQUENCE_STEP_DUE, {
@@ -629,6 +651,107 @@ export class CrmSequenceSchedulerService implements OnModuleInit, OnModuleDestro
         data: { metadata: meta as any },
       });
     }
+  }
+
+  /**
+   * ACTUALLY SEND THE STEP.
+   *
+   * A send node used to do everything except send. It picked a variant,
+   * resolved the copy, wrote `sentAt` into the enrollment metadata, logged
+   * SEQUENCE_STEP_DUE to the contact timeline, emitted `sequence.step_due`,
+   * and advanced to the next node. Nothing dispatched anything.
+   *
+   * The three listeners on that event are an AI processor, an insight
+   * staleness marker and a flow logger — all observers. And the scheduler's
+   * constructor injects exactly PrismaService, EventEmitter2 and
+   * CrmTimelineService, so it had nothing to send WITH. That is the tell: not
+   * a broken call, an absent one.
+   *
+   * What it looked like from the outside is the problem. The enrollment
+   * advanced, the timeline showed the step, and `stepEvents[node].sentAt`
+   * carried a timestamp — so a sequence appeared to be running normally while
+   * no customer ever heard from the business.
+   *
+   * The dispatch path already existed and is used by flow automation
+   * (automation-executor.service.ts): create OutboundContent, an
+   * OutboundVariant for the platform, and an OutboundDelivery marked Queued.
+   * DeliveryQueueService polls every 30 seconds and does the rest. This
+   * enqueues onto that, rather than adding a second way to send.
+   *
+   * WHAT IT REFUSES TO DO. If there is no connected channel, no address for
+   * the contact, or the node asks for SMS — for which no provider exists —
+   * this returns `queued: false` with a reason and the caller does NOT stamp
+   * sentAt. A step that could not be delivered must not read as delivered;
+   * that was the whole defect.
+   */
+  private async dispatchSendNode(
+    businessId: string,
+    enrollment: { contactId: string; contact?: { email?: string | null; phone?: string | null } | null },
+    node: SequenceNode,
+    payload: { subject?: string; body?: string },
+    variantId: string | null,
+  ): Promise<{ queued: boolean; reason?: string }> {
+    const channel = node.type as 'email' | 'whatsapp' | 'sms';
+    const body = payload.body ?? '';
+    if (!body.trim()) return { queued: false, reason: 'step has no body' };
+
+    // Only EMAIL and WHATSAPP connections exist in this codebase. An `sms`
+    // node is authorable in the builder and cannot be delivered, so it is
+    // reported rather than silently dropped.
+    if (channel === 'sms') {
+      return { queued: false, reason: 'no SMS provider is connected' };
+    }
+
+    const provider = channel === 'email' ? { in: ['EMAIL', 'GOOGLE'] } : 'WHATSAPP';
+    const recipientEmail = channel === 'email' ? enrollment.contact?.email ?? null : null;
+    const recipientPhone = channel === 'whatsapp' ? enrollment.contact?.phone ?? null : null;
+
+    if (channel === 'email' && !recipientEmail) return { queued: false, reason: 'contact has no email' };
+    if (channel === 'whatsapp' && !recipientPhone) return { queued: false, reason: 'contact has no phone' };
+
+    const connection = await this.prisma.client.channelConnection.findFirst({
+      where: { businessId, provider: provider as never },
+      include: { destinations: { where: { isActive: true }, take: 1 } },
+    });
+    if (!connection || connection.destinations.length === 0) {
+      return { queued: false, reason: `no active ${channel} channel is connected` };
+    }
+
+    const content = await this.prisma.client.outboundContent.create({
+      data: {
+        businessId,
+        contentType: 'direct_message',
+        subject: payload.subject ?? null,
+        body,
+        status: 'Queued',
+        contentMeta: { source: 'crm_sequence', nodeId: node.id, contactId: enrollment.contactId },
+      },
+    });
+
+    const variant = await this.prisma.client.outboundVariant.create({
+      data: {
+        contentId: content.id,
+        platform: channel === 'email' ? 'EMAIL' : 'WHATSAPP',
+        textBody: body,
+        variantMeta: { sequenceVariantId: variantId },
+      },
+    });
+
+    await this.prisma.client.outboundDelivery.create({
+      data: {
+        contentId: content.id,
+        variantId: variant.id,
+        destinationId: connection.destinations[0].id,
+        businessId,
+        contactId: enrollment.contactId,
+        status: 'Queued',
+        scheduledAt: new Date(),
+        recipientEmail,
+        recipientPhone,
+      },
+    });
+
+    return { queued: true };
   }
 
   private async logEvent(
