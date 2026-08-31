@@ -158,6 +158,46 @@ export class ProjectsController {
     return this.projects.getProjectTimeline(projectId, businessId);
   }
 
+  // Deliverables. These had no routes at all — the tab kept them in React
+  // state, so typing one in and switching tabs lost it. Guarded by the same
+  // controller-level AuthGuard/BusinessGuard as everything else here, and the
+  // service re-proves the project belongs to the business on every call.
+  @Get('businesses/:businessId/projects/:projectId/deliverables')
+  listDeliverables(
+    @Param('businessId') businessId: string,
+    @Param('projectId') projectId: string,
+  ) {
+    return this.projects.listDeliverables(projectId, businessId);
+  }
+
+  @Post('businesses/:businessId/projects/:projectId/deliverables')
+  createDeliverable(
+    @Param('businessId') businessId: string,
+    @Param('projectId') projectId: string,
+    @Body() body: { title: string; description?: string; url?: string; kind?: string; dueDate?: string },
+  ) {
+    return this.projects.createDeliverable(projectId, businessId, body);
+  }
+
+  @Patch('businesses/:businessId/projects/:projectId/deliverables/:deliverableId')
+  updateDeliverable(
+    @Param('businessId') businessId: string,
+    @Param('projectId') projectId: string,
+    @Param('deliverableId') deliverableId: string,
+    @Body() body: { title?: string; description?: string; url?: string; kind?: string; status?: string; dueDate?: string | null },
+  ) {
+    return this.projects.updateDeliverable(deliverableId, projectId, businessId, body);
+  }
+
+  @Delete('businesses/:businessId/projects/:projectId/deliverables/:deliverableId')
+  deleteDeliverable(
+    @Param('businessId') businessId: string,
+    @Param('projectId') projectId: string,
+    @Param('deliverableId') deliverableId: string,
+  ) {
+    return this.projects.deleteDeliverable(deliverableId, projectId, businessId);
+  }
+
   @Post('businesses/:businessId/projects/:projectId/milestones')
   createMilestone(
     @Param('businessId') businessId: string,

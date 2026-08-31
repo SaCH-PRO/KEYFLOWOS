@@ -412,6 +412,11 @@ const BUSINESS_ID_MODELS = new Set([
   //                       `const where = { businessId }` — the same variable
   //                       the scanner cannot see into, now for the sixth time.
   'FinanceActionItem', 'SocialConnection',
+  // Added with the model, 2026-08-30, rather than after it. ProjectDeliverable
+  // carries businessId specifically so the extension can scope it — its
+  // sibling ProjectMilestone does not, and is therefore unscoped debt. A new
+  // model arriving on the ledger is a choice, and this one chose otherwise.
+  'ProjectDeliverable',
 ]);
 
 

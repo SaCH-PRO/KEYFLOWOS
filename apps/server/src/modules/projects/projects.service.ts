@@ -381,6 +381,105 @@ export class ProjectsService {
     return project;
   }
 
+  /**
+   * Deliverables — the promised outputs of a project.
+   *
+   * These lived entirely in React state: `useState<Deliverable[]>([])` in
+   * project-detail.tsx, with no model, no routes and nothing persisted. Typing
+   * one in and switching tabs lost it.
+   *
+   * Every method proves the PROJECT belongs to the business before touching a
+   * deliverable, exactly as the milestone methods above do. That is the control
+   * that matters: the deliverable id comes from the client, and a route guard
+   * can only vouch for the caller, not the record.
+   */
+  async listDeliverables(projectId: string, businessId: string) {
+    const project = await this.prisma.client.project.findFirst({
+      where: { id: projectId, businessId },
+      select: { id: true },
+    });
+    if (!project) throw new NotFoundException('Project not found');
+
+    return this.prisma.client.projectDeliverable.findMany({
+      where: { projectId, businessId },
+      orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
+    });
+  }
+
+  async createDeliverable(projectId: string, businessId: string, data: {
+    title: string;
+    description?: string;
+    url?: string;
+    kind?: string;
+    dueDate?: string;
+  }) {
+    const project = await this.prisma.client.project.findFirst({
+      where: { id: projectId, businessId },
+      select: { id: true },
+    });
+    if (!project) throw new NotFoundException('Project not found');
+
+    return this.prisma.client.projectDeliverable.create({
+      data: {
+        projectId,
+        businessId,
+        title: data.title,
+        description: data.description,
+        url: data.url,
+        kind: data.kind ?? 'document',
+        dueDate: data.dueDate ? new Date(data.dueDate) : null,
+      },
+    });
+  }
+
+  async updateDeliverable(deliverableId: string, projectId: string, businessId: string, data: {
+    title?: string;
+    description?: string;
+    url?: string;
+    kind?: string;
+    status?: string;
+    dueDate?: string | null;
+  }) {
+    const existing = await this.prisma.client.projectDeliverable.findFirst({
+      where: { id: deliverableId, projectId, businessId },
+      select: { id: true },
+    });
+    if (!existing) throw new NotFoundException('Deliverable not found');
+
+    // completedAt tracks the status rather than being set independently, so the
+    // two cannot disagree about whether the thing was delivered.
+    const completedAt =
+      data.status === undefined
+        ? undefined
+        : data.status === 'PENDING'
+          ? null
+          : new Date();
+
+    return this.prisma.client.projectDeliverable.update({
+      where: { id: deliverableId },
+      data: {
+        title: data.title,
+        description: data.description,
+        url: data.url,
+        kind: data.kind,
+        status: data.status,
+        completedAt,
+        dueDate: data.dueDate === undefined ? undefined : data.dueDate ? new Date(data.dueDate) : null,
+      },
+    });
+  }
+
+  async deleteDeliverable(deliverableId: string, projectId: string, businessId: string) {
+    const existing = await this.prisma.client.projectDeliverable.findFirst({
+      where: { id: deliverableId, projectId, businessId },
+      select: { id: true },
+    });
+    if (!existing) throw new NotFoundException('Deliverable not found');
+
+    await this.prisma.client.projectDeliverable.delete({ where: { id: deliverableId } });
+    return { deleted: true };
+  }
+
   async createMilestone(projectId: string, businessId: string, data: {
     title: string;
     description?: string;
