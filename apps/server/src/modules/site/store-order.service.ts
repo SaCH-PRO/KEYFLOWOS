@@ -472,15 +472,48 @@ export class StoreOrderService {
     const paymentRef = input.paymentRef ?? order.paymentRef ?? `${provider}_${order.id}_${Date.now()}`;
     const invoiceNumber = `INV-${order.orderNumber}`;
 
-    // Pre-load product inventory mode so we can enforce stock invariants
-    // for tracked products inside the tx. Untracked / virtual products
-    // skip stock decrement explicitly (per-product config), not silently.
+    // Pre-load inventory mode so stock invariants can be enforced inside the
+    // tx. Untracked / virtual products skip the decrement explicitly, not
+    // silently.
+    //
+    // NULL IS NOT "TRACKED", AND TWO SERVICES USED TO DISAGREE ABOUT THAT.
+    // `Product.inventoryMode` is `String?` with no default and nothing on the
+    // create path sets it, so it is NULL for every product whose owner never
+    // opened inventory settings. This file resolved that to 'tracked' and then
+    // failed the whole checkout — invoice and payment rolled back — with
+    // "no active warehouse configured for tracked products".
+    //
+    // inventory-risk.service.ts reads the same column as
+    // `inventoryMode === 'tracked' || stocks.length > 0`, so a product this
+    // file refused to sell was one that file considered untracked. Same field,
+    // opposite meaning, and the merchant sees only that checkout is broken.
+    //
+    // Resolved the risk service's way, because it is the one that matches what
+    // a merchant actually did: a product counts as tracked if they SAID so, or
+    // if stock is being kept for it. Someone who never configured inventory is
+    // not opted into an inventory invariant, and refusing their sales protects
+    // a number nobody is maintaining.
+    //
+    // The protection itself is unchanged. A product that IS tracked still
+    // cannot oversell, still needs a warehouse and a stock row, and still
+    // rolls the checkout back — see the loop below.
     const productIds = order.items.map((i) => i.productId);
     const products = await this.prisma.client.product.findMany({
       where: { id: { in: productIds } },
-      select: { id: true, inventoryMode: true, outOfStockBehavior: true, name: true },
+      select: {
+        id: true,
+        inventoryMode: true,
+        outOfStockBehavior: true,
+        name: true,
+        _count: { select: { inventoryStocks: true } },
+      },
     });
-    const productMode = new Map(products.map((p) => [p.id, p.inventoryMode ?? 'tracked']));
+    const productMode = new Map(
+      products.map((p) => [
+        p.id,
+        p.inventoryMode ?? (p._count.inventoryStocks > 0 ? 'tracked' : 'untracked'),
+      ]),
+    );
     const productOOSBehavior = new Map(
       products.map((p) => [p.id, p.outOfStockBehavior ?? 'hide']),
     );
@@ -548,7 +581,7 @@ export class StoreOrderService {
       //    products are explicitly skipped per their inventoryMode.
       const decrementedProductIds: string[] = [];
       const trackedItems = order.items.filter((i) => {
-        const mode = productMode.get(i.productId) ?? 'tracked';
+        const mode = productMode.get(i.productId) ?? 'untracked';
         return mode === 'tracked';
       });
       if (trackedItems.length > 0 && !defaultWarehouse) {
@@ -557,7 +590,7 @@ export class StoreOrderService {
         );
       }
       for (const item of order.items) {
-        const mode = productMode.get(item.productId) ?? 'tracked';
+        const mode = productMode.get(item.productId) ?? 'untracked';
         if (mode !== 'tracked') {
           this.logger.debug(`[store-order] skipping stock decrement for ${mode} product ${item.productId}`);
           continue;
