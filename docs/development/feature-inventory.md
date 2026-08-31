@@ -376,7 +376,7 @@
 | Migration baseline & deploy | 19 migrations | P0 | ✅ Working | Schema up to date |
 | DB connection / health | Retry + health check | P0 | ✅ Working | `prisma.service.ts:11-37` |
 | Tenant isolation extension | 302 business-scoped models | P0 | ⚠️ Partial | 42 unscoped + 3 never-scope remain |
-| | HTTP-only interceptor | P0 | ❌ Broken | Cron/WebSocket/BullMQ have no ambient tenant |
+| | Background path scoping gate | P0 | ⚠️ Partial | Cron/queue/WebSocket handlers use explicit `businessId`; no static gate catches a missing one |
 | Soft-delete middleware | 15 models | P0 | ⚠️ Partial | Many `deletedAt` models not covered |
 | | `groupBy`/`aggregate` | P0 | ✅ Working | Hooked in `packages/db/src/client.ts:613-616`; integration tests assert tenant scoping |
 | Token encryption at rest | Single-row CRUD on 4 models | P0 | ⚠️ Partial | `createMany`/`updateMany`/`deleteMany` not covered |
@@ -418,11 +418,11 @@
 
 | Tier | Working | Partial | Broken | Stub | Orphaned | Total |
 |------|---------|---------|--------|------|----------|-------|
-| P0 | 43 | 8 | 1 | 0 | 0 | 52 |
+| P0 | 43 | 9 | 0 | 0 | 0 | 52 |
 | P1 | 86 | 18 | 10 | 0 | 0 | 114 |
 | P2 | 50 | 12 | 11 | 5 | 9 | 87 |
 | P3 | 11 | 5 | 1 | 4 | 10 | 31 |
-| **Total** | **190** | **43** | **22** | **9** | **19** | **283** |
+| **Total** | **190** | **44** | **21** | **9** | **19** | **283** |
 
 ---
 
