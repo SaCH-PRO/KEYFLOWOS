@@ -103,7 +103,7 @@ describe('BUSINESS_ID_MODELS describes reality', () => {
  * 2026-08-09 by adding one and watching this file pass.
  *
  * When this was written: 347 models carry a businessId, 77 were scoped, 270
- * were these. Now: 348 carry one, 323 scoped, 15 here, 10 in NEVER_SCOPE. The
+ * were these. Now: 348 carry one, 325 scoped, 13 here, 10 in NEVER_SCOPE. The
  * three numbers sum to 348 exactly, and the assertions below are what keep them
  * summing — a model has one status, never two and never none.
  *
@@ -136,7 +136,6 @@ const ACKNOWLEDGED_UNSCOPED = new Set([
  
   'Course',
   'DriveIntakeFile',
-  'FinanceActionItem',
   'FlowRun',
  
   'IngestionItem',
@@ -147,7 +146,6 @@ const ACKNOWLEDGED_UNSCOPED = new Set([
   'MessageIntake',
  
   'SitePageDraft',
-  'SocialConnection',
   'SyncJob',
  
   'WhatsAppMessage',

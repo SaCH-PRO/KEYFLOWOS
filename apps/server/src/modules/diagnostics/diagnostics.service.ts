@@ -1,4 +1,5 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
+import { skipTenantIsolation } from '@keyflow/db';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { tokenEncryptionKeySource } from '@keyflow/db';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -611,12 +612,17 @@ export class DiagnosticsService {
     const platformKey = platform.toUpperCase();
 
     try {
-      const connectedCount = await this.prisma.client.socialConnection.count({
-        where: { platform: platformKey, status: 'CONNECTED' },
-      });
-      const expiredCount = await this.prisma.client.socialConnection.count({
-        where: { platform: platformKey, status: 'EXPIRED' },
-      });
+      // Every business, deliberately: this is a PLATFORM health check, and a
+      // count scoped to one tenant would answer a different question while
+      // looking like the same one. SocialConnection became tenant-scoped on
+      // 2026-08-30; `api/diagnostics` carries no :businessId today so nothing
+      // would be injected, but saying so beats depending on that.
+      const connectedCount = await this.prisma.client.socialConnection.count(
+        skipTenantIsolation({ where: { platform: platformKey, status: 'CONNECTED' } }),
+      );
+      const expiredCount = await this.prisma.client.socialConnection.count(
+        skipTenantIsolation({ where: { platform: platformKey, status: 'EXPIRED' } }),
+      );
       const total = connectedCount + expiredCount;
 
       if (total === 0) {

@@ -391,6 +391,27 @@ const BUSINESS_ID_MODELS = new Set([
   // will now be scoped by default instead of unscoped by default, which is the
   // right way round for a mistake to lean.
   'ChannelConnection', 'ChannelDestination',
+  // ── Two scoped, 2026-08-30 (sixth pass) ───────────────────────────────────
+  //
+  //   SocialConnection    26 sites. connectSocialAccount and the social service
+  //                       both findFirst({ businessId, platform }) before the
+  //                       bare-id update. The two remaining are
+  //                       diagnostics.checkSocialPlatformConnections, which
+  //                       counts CONNECTED and EXPIRED across every business
+  //                       because that is what a platform health check is —
+  //                       marked with skipTenantIsolation rather than left to
+  //                       depend on `api/diagnostics` never gaining a
+  //                       :businessId route param.
+  //
+  //   FinanceActionItem   14 sites. resolve and dismiss both do
+  //                       findFirst({ id, businessId }) and throw; the
+  //                       supersede pass iterates rows already read under
+  //                       { businessId, status OPEN }; upsertOne keys on the
+  //                       businessId_kind_entityType_entityId compound. The
+  //                       three "unscoped" reads are all
+  //                       `const where = { businessId }` — the same variable
+  //                       the scanner cannot see into, now for the sixth time.
+  'FinanceActionItem', 'SocialConnection',
 ]);
 
 

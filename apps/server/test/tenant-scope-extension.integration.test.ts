@@ -443,6 +443,7 @@ describe('tenant isolation extension (real database)', () => {
         'SeoKeyword', 'SeoPage',
         'SupplierConnection',
         'ChannelConnection', 'ChannelDestination',
+        'FinanceActionItem', 'SocialConnection',
       ]) {
         expect(set, `${m} left BUSINESS_ID_MODELS`).toContain(`'${m}'`);
       }
