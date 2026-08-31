@@ -214,7 +214,7 @@
 | Cash reserve buckets | Schema + UI | P2 | ⚠️ Partial | Service casts `prisma.client as any` |
 | Cashflow forecast | Finance endpoint | P1 | ✅ Working | Now queries `recurringExpense` correctly |
 | Manual journal entries | Backend endpoints | P2 | 🔇 Orphaned | `/app/finance/journal` redirects to ledger |
-| Expense transaction matching | Match button | P2 | ❌ Broken | Fake button removed; reconciliation matching not yet implemented |
+| Expense transaction matching | Match button | P2 | 🚧 Stub | Reconciliation matching not implemented; no action wired |
 | Money moves | Backend endpoint | P2 | 🔇 Orphaned | No UI found |
 | Books reports | P&L/cashflow/balance/AR/AP/tax | P1 | ✅ Working | `BooksReportView` |
 | Recurring expense scheduler | Auto generation | P2 | ✅ Working | Hourly `setInterval` in `RecurringExpenseService` plus run-now endpoint |
@@ -255,7 +255,7 @@
 | WhatsApp two-way inbox | Twilio/Meta/mock | P1 | ✅ Working | `whatsapp.service.ts:74-390` |
 | | 24h window + templates UI | P1 | ✅ Working | |
 | | Booking/invoice/payment event listeners | P1 | ✅ Working | `whatsapp-notifications.listener.ts` |
-| | Template creation in UI | P2 | ❌ Broken | No screen to create/edit templates |
+| | Template creation in UI | P2 | 🚧 Stub | No create/edit screen; never built |
 | Social publishing | FB/IG/LinkedIn/X/TikTok publishers | P1 | ✅ Working | `social/publishers/*.ts` |
 | | OAuth flows | P1 | ⚠️ Partial | Requires self-hosted app credentials |
 | | Scheduler/analytics | P2 | ✅ Working | `social-scheduler.service.ts`, `social-analytics.service.ts` |
@@ -285,13 +285,13 @@
 | Project budget view | Component | P2 | 🔇 Orphaned | Exported but never imported |
 | Task kanban view | Component | P2 | 🔇 Orphaned | Exported but never imported |
 | Task assignments / workload | Backend | P2 | ✅ Working | `task-assignment.service.ts`, recommender |
-| | UI | P2 | ❌ Broken | No assignment UI |
+| | UI | P2 | 🚧 Stub | No assignment picker in UI; never built |
 | Project revenue auto-progression | Invoice.paid/booking.completed | P2 | ✅ Working | `project-revenue.listener.ts` |
 | AI project plan generation | LLM → ProjectPlan | P2 | ✅ Working | `project-planner.service.ts:96-255` |
 | Plan materialization | Create project with tasks/milestones | P2 | ✅ Working | `project-plan-executor.service.ts:24-131` |
 | Plan event execution | Run tool | P2 | ✅ Working | Honest unavailable path: blocked + timeline + no task mutation |
 | Plan detail UI | `/app/projects/plans/[planId]` | P2 | ✅ Working | |
-| | Plans list in Projects tab | P2 | ❌ Broken | Only generator shown |
+| | Plans list in Projects tab | P2 | 🚧 Stub | List view not built; only generator shown |
 | Legacy `/app/plans/[planId]` | Detail page | P3 | 🔇 Orphaned | No index; back link to non-existent `/app/plans` |
 | Time tracking | Timer/entries/summary | P1 | ✅ Working | `time-entry.service.ts` |
 | Time → invoice billing | Invoice unbilled time | P1 | ✅ Working | `time-entry.service.ts:352-460` |
@@ -330,7 +330,7 @@
 | Team management | Invite/role/permissions/remove | P1 | ✅ Working | `identity.controller.ts:588-667` |
 | Billing plan display | UI | P2 | ✅ Working | AI credit numbers aligned with `apps/server/src/modules/subscriptions/plans.ts` |
 | Billing checkout | Manual/bank/cash | P2 | ✅ Working | `subscriptions.service.ts:286-316` |
-| | Card payment (WiPay) | P1 | ❌ Broken | Disabled in UI |
+| | Card payment (WiPay) | P1 | 🚧 Stub | Never built; connector has no charge method, refunds throw `GatewayNotSupportedError` by design, subscription checkout records payments; UI shows "Coming soon" |
 | Customer payment gateways | Config storage | P2 | ⚠️ Partial | Stores secrets in `business.metaData`; no live verification |
 | Admin console pages | UI + REST endpoints | P2 | ✅ Working | `/api/admin/...` |
 | Admin login | Request handling | P0 | ✅ Working | `@IsNotEmpty()` + null-safe validation |
@@ -352,7 +352,7 @@
 | Legacy connector registry | 22 connectors | P2 | ✅ Working | `connector-initializer.service.ts:60-86` |
 | Legacy Google OAuth | Token exchange + verification | P1 | ✅ Working | `google-suite.service.ts:130-258` |
 | Legacy connector pull sync | Gmail/Forms | P1 | ⚠️ Partial | Real |
-| | Other 16 connectors | P2 | ❌ Broken | `PULL_SYNC_NOT_IMPLEMENTED` |
+| | Other 16 connectors | P2 | 🚧 Stub | `PULL_SYNC_NOT_IMPLEMENTED`; never built |
 | New Key Connector backend | `/key-connector` controller | P2 | 🚧 Stub | Credential validation missing |
 | | Sync engine | P2 | 🚧 Stub | Returns zero-row placeholder |
 | | AI gateway | P2 | 🚧 Stub | Returns placeholder objects |
@@ -411,7 +411,7 @@
 | Branch divergence guard | | P3 | ✅ Working | |
 | Uptime monitor | | P3 | ✅ Working | Configured |
 | Env validation | Preflight script | P0 | ⚠️ Partial | `SUPABASE_JWT_SECRET` placeholder in `.env` |
-| Pre-commit hooks | Husky/lint-staged | P3 | ❌ Broken | Missing |
+| Pre-commit hooks | Husky/lint-staged | P3 | 🚧 Stub | Never configured |
 
 ---
 
@@ -420,10 +420,10 @@
 | Tier | Working | Partial | Broken | Stub | Orphaned | Total |
 |------|---------|---------|--------|------|----------|-------|
 | P0 | 43 | 9 | 0 | 0 | 0 | 52 |
-| P1 | 91 | 18 | 6 | 0 | 0 | 115 |
-| P2 | 50 | 12 | 11 | 5 | 9 | 87 |
-| P3 | 11 | 5 | 1 | 4 | 10 | 31 |
-| **Total** | **195** | **44** | **17** | **9** | **19** | **284** |
+| P1 | 91 | 18 | 5 | 1 | 0 | 115 |
+| P2 | 50 | 12 | 6 | 10 | 9 | 87 |
+| P3 | 11 | 5 | 0 | 5 | 10 | 31 |
+| **Total** | **195** | **44** | **11** | **16** | **19** | **284** |
 
 ---
 
