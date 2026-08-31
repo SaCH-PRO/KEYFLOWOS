@@ -1,4 +1,5 @@
 import { Injectable, Inject, NotFoundException, Logger } from '@nestjs/common';
+import { resolveInventoryMode } from '../../core/inventory/inventory-mode';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { db } from '@keyflow/db';
@@ -185,7 +186,11 @@ export class CatalogService {
       outOfStockBehavior: string;
     };
   } {
-    const mode = product.inventoryMode ?? 'tracked';
+    // See core/inventory/inventory-mode.ts. Resolving NULL to 'tracked'
+    // here hid every product whose owner never opened inventory settings:
+    // gated as out_of_stock, and with outOfStockBehavior defaulting to
+    // 'hide', absent from the storefront altogether.
+    const mode = resolveInventoryMode(product.inventoryMode, stock !== undefined);
     const behavior = product.outOfStockBehavior ?? 'hide';
 
     // Untracked / virtual: no inventory gating, always purchasable.

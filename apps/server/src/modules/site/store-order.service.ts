@@ -1,4 +1,5 @@
 import { Injectable, Inject, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
+import { resolveInventoryMode } from '../../core/inventory/inventory-mode';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -511,7 +512,7 @@ export class StoreOrderService {
     const productMode = new Map(
       products.map((p) => [
         p.id,
-        p.inventoryMode ?? (p._count.inventoryStocks > 0 ? 'tracked' : 'untracked'),
+        resolveInventoryMode(p.inventoryMode, p._count.inventoryStocks > 0),
       ]),
     );
     const productOOSBehavior = new Map(

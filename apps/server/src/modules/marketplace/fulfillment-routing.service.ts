@@ -1,4 +1,5 @@
 import { Injectable, Logger, BadRequestException, Inject } from '@nestjs/common';
+import { resolveInventoryMode } from '../../core/inventory/inventory-mode';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -333,10 +334,15 @@ export class FulfillmentRoutingService {
   ): Promise<FulfillmentRouteShape> {
     const product = await this.prisma.client.product.findUnique({
       where: { id: item.productId },
-      select: { inventoryMode: true },
+      select: { inventoryMode: true, _count: { select: { inventoryStocks: true } } },
     });
 
-    const inventoryMode = (product?.inventoryMode ?? 'tracked').toLowerCase();
+    // See core/inventory/inventory-mode.ts. Resolving NULL to 'tracked' routed
+    // every unconfigured product as if stock were being kept for it.
+    const inventoryMode = resolveInventoryMode(
+      product?.inventoryMode,
+      (product?._count.inventoryStocks ?? 0) > 0,
+    ).toLowerCase();
 
     if (inventoryMode === 'untracked' || inventoryMode === 'virtual') {
       const route = await this.prisma.client.fulfillmentRoute.create({
