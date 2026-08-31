@@ -177,7 +177,7 @@
 | PayPal connector | Checkout/capture/webhooks | P1 | ⚠️ Partial | Payment-link list/revoke unsupported |
 | WiPay connector | Checkout/callback/transactions | P1 | ⚠️ Partial | Payment links/refunds unsupported |
 | Storefront order completion | Invoice + payment + stock decrement | P1 | ✅ Working | `store-order.service.ts:540-634` |
-| | Warehouse/stock requirement | P1 | ❌ Broken | Throws if no active warehouse or stock row |
+| | Warehouse/stock requirement | P1 | ✅ Working | `store-order` and inventory-risk disagreed on NULL `inventoryMode`; fixed in `bef9eb85` |
 | Public invoice/pay/quote pages | `/public/invoice/[token]` | P1 | ✅ Working | |
 | | `/pay/[invoiceId]` | P1 | ✅ Working | |
 | | `/pay/link/[token]` | P1 | ✅ Working | |
@@ -419,10 +419,10 @@
 | Tier | Working | Partial | Broken | Stub | Orphaned | Total |
 |------|---------|---------|--------|------|----------|-------|
 | P0 | 43 | 9 | 0 | 0 | 0 | 52 |
-| P1 | 87 | 18 | 9 | 0 | 0 | 114 |
+| P1 | 88 | 18 | 8 | 0 | 0 | 114 |
 | P2 | 50 | 12 | 11 | 5 | 9 | 87 |
 | P3 | 11 | 5 | 1 | 4 | 10 | 31 |
-| **Total** | **191** | **44** | **20** | **9** | **19** | **283** |
+| **Total** | **192** | **44** | **19** | **9** | **19** | **283** |
 
 ---
 

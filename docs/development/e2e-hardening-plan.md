@@ -213,6 +213,18 @@ The remaining gaps fall into five patterns:
 2. Update migration repair docs to reference `0_baseline` and the current folder layout.
 3. Delete or archive orphaned backfill scripts.
 
+### 6.3.2 Nullable-column default strictness
+**Problem:** The schema contains nullable columns with no default (`String?`, `Int?`, etc.) that application code resolves with `??` to a restrictive value. That makes the strict branch the implicit default for any row that was never explicitly configured, which silently breaks downstream flows. Recent examples:
+- `bufferMins` falling back to a strict buffer that blocks ordinary bookings.
+- `inventoryMode` falling back to `"strict"`, causing `store-order` and `inventory-risk` to disagree and block checkout for merchants who never set inventory policy.
+- Tenant-model scoping sets that treat a missing value as a denied model.
+**Evidence:** `packages/db/prisma/schema.prisma`; grep results for `\?\?` in `apps/server/src/modules/**` and `packages/**`.
+**Fix:**
+1. Audit every nullable schema field that lacks a `@default`.
+2. For each field, decide whether the absence should mean permissive, strict, or truly null.
+3. Add explicit `@default` values where the strict fallback is the intended default, or change the code fallback to the permissive value.
+4. Add a lint/snapshot test that flags new nullable columns without a default unless they are explicitly documented as tri-state.
+
 ### 6.4 AI / Cortex decoupling
 **Problem:** `key-cortex` is the largest module (~248 files, ~80 services) with heavy `forwardRef` cycles.  
 **Fix:** This remains a long-term migration per `architecture/migration-plan.md` Phase 3. Do not start until P0–P2 are stable.
