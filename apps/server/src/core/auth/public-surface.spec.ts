@@ -111,7 +111,11 @@ const ACKNOWLEDGED_PUBLIC: Record<string, number> = {
   'modules/ai/code-executor.controller.ts': 1,
   'modules/analytics/analytics.controller.ts': 14,
   'modules/automation/automation.controller.ts': 1,
-  'modules/bookings/bookings.controller.ts': 4,
+  // 5th is publicAvailableSlots: the free-slot list the booking widget needs.
+  // Public because a customer choosing a time has no session. Read-only,
+  // rate limited at 60/min, and it returns timestamps and nothing else — no
+  // contact, no booking, nothing about who holds the slots it leaves out.
+  'modules/bookings/bookings.controller.ts': 5,
   'modules/calendar/calendar.controller.ts': 1,
   'modules/catalog/catalog.controller.ts': 1,
   'modules/chatwoot/chatwoot.controller.ts': 1,

@@ -158,6 +158,43 @@ export class BookingsController {
     });
   }
 
+  /**
+   * The times a customer can actually book, for the public widget.
+   *
+   * Public because the booking form is public — a customer choosing a time has
+   * no session. Rate limited like the other public endpoint, and it exposes
+   * only timestamps: no contact, no existing booking, nothing about who holds
+   * the slots it omits.
+   *
+   * Read-only, so no honeypot: that guard exists to catch bots submitting
+   * forms, and refusing to answer "when are you open" would just push the
+   * widget back to asking people to type an ISO timestamp.
+   */
+  @UseGuards(PublicRateLimitGuard)
+  @PublicRateLimit(60, 60_000)
+  @Get('public/businesses/:businessId/slots')
+  async publicAvailableSlots(
+    @Param('businessId') businessId: string,
+    @Query('serviceId') serviceId: string,
+    @Query('date') date: string,
+    @Query('staffId') staffId?: string,
+  ) {
+    if (!serviceId) throw new BadRequestException('serviceId is required');
+    // Parsed as a LOCAL date, deliberately. `new Date('2026-12-15')` is UTC
+    // midnight, which in this timezone (UTC-4) is the 14th at 20:00 — so the
+    // service then reported the previous day's slots. Measured: asking for
+    // 2026-12-15 returned "date":"2026-12-14".
+    const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date ?? '');
+    if (!parts) throw new BadRequestException('date must be YYYY-MM-DD');
+    const day = new Date(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]));
+    if (Number.isNaN(day.getTime())) throw new BadRequestException('date must be a valid date');
+    return this.bookings.getAvailableSlots({
+      businessId,
+      serviceId: sanitizeRequired(serviceId, 'serviceId', 200),
+      date: day,
+      staffId: staffId ? sanitizeString(staffId, 200) ?? undefined : undefined,
+    });
+  }
   @UseGuards(PublicRateLimitGuard, HoneypotGuard)
   @PublicRateLimit(10, 60_000)
   @Honeypot()

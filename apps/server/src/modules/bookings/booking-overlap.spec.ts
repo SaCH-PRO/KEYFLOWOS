@@ -164,3 +164,70 @@ describe('a service with no buffer still refuses an occupied slot', () => {
     expect(where.endTime).toEqual({ gt: new Date('2026-12-15T13:45:00.000Z') });
   });
 });
+
+/**
+ * The picker and the validator must be the same rule.
+ *
+ * Before this there was no free-slot endpoint at all — the public widget asked
+ * customers to hand-type an ISO timestamp:
+ *
+ *   <Input label="Start Time (ISO)" placeholder="2025-12-01T15:00:00Z" />
+ *
+ * That was survivable while the server accepted almost anything. Once overlap
+ * was enforced on every write path it stopped being survivable: guess, get
+ * "already booked", and have no way to find a time that is not.
+ *
+ * The failure mode being guarded against here is the one this codebase keeps
+ * producing — two sources of truth that agree until they do not. If the picker
+ * computed availability its own way, a slot would be offered and then refused
+ * on submit, and both halves would look correct in isolation.
+ *
+ * Verified live: business hours 09:00-12:00, 60-minute service, 30-minute
+ * interval. Five slots offered. Booking the first removed TWO of them — the
+ * 09:00 and the 09:30 — because a 60-minute booking occupies both.
+ */
+describe('the free-slot API answers with the same rule the writes enforce', () => {
+  const src = (() => {
+    const fs = require('node:fs') as typeof import('node:fs');
+    const path = require('node:path') as typeof import('node:path');
+    return fs.readFileSync(path.join(__dirname, 'bookings.service.ts'), 'utf8');
+  })();
+
+  it('getAvailableSlots exists', () => {
+    expect(src).toContain('async getAvailableSlots(');
+  });
+
+  it('it filters candidates through the shared guard, not its own query', () => {
+    const at = src.indexOf('async getAvailableSlots(');
+    // Bounded at the next method: a fixed-size window runs into assertSlotFree
+    // and finds ITS query, which made this assertion fail on correct code.
+    const body = src.slice(at, src.indexOf('private async assertSlotFree', at));
+    expect(body, 'the picker must use the same rule as the writes').toContain(
+      'this.assertSlotFree(',
+    );
+    expect(body, 'a second overlap query here is how the two drift apart').not.toContain(
+      'startTime: { lt:',
+    );
+  });
+
+  it('it honours lead time and closed days rather than offering unbookable times', () => {
+    const at = src.indexOf('async getAvailableSlots(');
+    const body = src.slice(at, src.indexOf('private async assertSlotFree', at));
+    expect(body).toContain('leadTimeMins');
+    expect(body).toContain('closed');
+  });
+
+  it('the route parses the date as local, not UTC', () => {
+    // `new Date('2026-12-15')` is UTC midnight, which in UTC-4 is the 14th at
+    // 20:00 — measured: asking for the 15th returned the 14th's slots.
+    const fs = require('node:fs') as typeof import('node:fs');
+    const path = require('node:path') as typeof import('node:path');
+    const ctrl = fs.readFileSync(path.join(__dirname, 'bookings.controller.ts'), 'utf8');
+    const at = ctrl.indexOf('async publicAvailableSlots(');
+    expect(at, 'route not found').toBeGreaterThan(-1);
+    const body = ctrl.slice(at, at + 1400);
+    expect(body, 'new Date(yyyy-mm-dd) shifts the day in a negative offset').not.toContain(
+      'new Date(date)',
+    );
+  });
+});

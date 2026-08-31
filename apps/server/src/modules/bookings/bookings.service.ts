@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { BadRequestException, NotFoundException, ForbiddenException, Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { BookingStatus, Prisma } from '@prisma/client';
 import {
@@ -529,6 +529,119 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
    *
    * A zero buffer means "must not overlap". The buffer only widens the window.
    */
+  /**
+   * The times a customer can actually book.
+   *
+   * There was no such endpoint. The public booking widget asked people to
+   * hand-type an ISO 8601 timestamp into a text box —
+   * `<Input label="Start Time (ISO)" placeholder="2025-12-01T15:00:00Z" />` —
+   * so the only way to discover a free time was to guess one and submit.
+   *
+   * That was survivable while the server accepted almost anything. It is not
+   * survivable now that overlap is enforced on every path: a customer guesses,
+   * gets "that time slot has already been booked", and has no way to find one
+   * that is not. Closing the validation hole without this makes the widget
+   * worse, not better, which is why it belongs in the same piece of work.
+   *
+   * THE RULES ARE NOT RE-IMPLEMENTED HERE. Every candidate is put through
+   * `assertSlotFree` — the same guard publicCreateBooking, rescheduleBooking
+   * and createBooking use. A picker that computes availability its own way is
+   * how you get a slot shown as free and rejected on submit, which is the
+   * defect class this codebase keeps producing: two sources of truth that
+   * agree until they do not.
+   *
+   * Lead time, business hours and staff working hours are applied the same way
+   * the validator applies them.
+   */
+  async getAvailableSlots(params: {
+    businessId: string;
+    serviceId: string;
+    date: Date;
+    staffId?: string;
+    slotIntervalMins?: number;
+  }): Promise<{ date: string; slots: string[] }> {
+    const { businessId, serviceId, staffId } = params;
+    const interval = params.slotIntervalMins ?? 30;
+
+    const service = await this.prisma.client.service.findFirst({
+      where: { id: serviceId, businessId, deletedAt: null },
+      select: { duration: true, bufferMins: true, leadTimeMins: true },
+    });
+    if (!service) throw new NotFoundException('Service not found');
+
+    const dayStart = new Date(params.date);
+    dayStart.setHours(0, 0, 0, 0);
+    const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+    const dayKey = dayKeys[dayStart.getDay()];
+
+    // Staff working hours win over business hours when the staff member has
+    // any configured, exactly as the booking validator decides it.
+    let windows: Array<{ openMin: number; closeMin: number }> = [];
+    if (staffId) {
+      const availability = await this.prisma.client.availability.findMany({
+        where: { staffId, staff: { businessId, deletedAt: null } },
+      });
+      if (availability.length > 0) {
+        windows = availability
+          .filter((a) => a.dayOfWeek === dayStart.getDay())
+          .map((a) => {
+            const [sh, sm] = a.startTime.split(':').map(Number);
+            const [eh, em] = a.endTime.split(':').map(Number);
+            return { openMin: sh * 60 + sm, closeMin: eh * 60 + em };
+          });
+        // Configured, but not for this day: the staff member does not work today.
+        if (windows.length === 0) return { date: dayStart.toISOString().slice(0, 10), slots: [] };
+      }
+    }
+
+    if (windows.length === 0) {
+      const business = await this.prisma.client.business.findUnique({
+        where: { id: businessId },
+        select: { businessHours: true },
+      });
+      const hours = business?.businessHours as BusinessHoursMap | null;
+      const dayHours = hours?.[dayKey];
+      if (!dayHours || dayHours.closed || !dayHours.open || !dayHours.close) {
+        return { date: dayStart.toISOString().slice(0, 10), slots: [] };
+      }
+      const [oh, om] = dayHours.open.split(':').map(Number);
+      const [ch, cm] = dayHours.close.split(':').map(Number);
+      windows = [{ openMin: oh * 60 + om, closeMin: ch * 60 + cm }];
+    }
+
+    const earliest = service.leadTimeMins && service.leadTimeMins > 0
+      ? new Date(Date.now() + service.leadTimeMins * 60000)
+      : new Date();
+
+    const slots: string[] = [];
+    for (const w of windows) {
+      for (let m = w.openMin; m + service.duration <= w.closeMin; m += interval) {
+        const start = new Date(dayStart);
+        start.setMinutes(m);
+        const end = new Date(start.getTime() + service.duration * 60000);
+        if (start < earliest) continue;
+
+        // The same guard the write paths use. Throws when taken; a throw here
+        // means "not offerable", which is the whole question being asked.
+        try {
+          await this.assertSlotFree({
+            businessId,
+            serviceId,
+            staffId,
+            start,
+            end,
+            bufferMins: service.bufferMins,
+          });
+          slots.push(start.toISOString());
+        } catch {
+          // taken — omit it
+        }
+      }
+    }
+
+    return { date: dayStart.toISOString().slice(0, 10), slots };
+  }
+
   private async assertSlotFree(params: {
     businessId: string;
     serviceId: string;
