@@ -4723,6 +4723,19 @@ export type Project = {
   createdAt: string;
   updatedAt: string;
   tasks: ProjectTask[];
+  milestones?: ProjectMilestone[];
+};
+
+export type ProjectMilestone = {
+  id: string;
+  title: string;
+  description?: string | null;
+  amount?: number | null;
+  dueDate?: string | null;
+  completedAt?: string | null;
+  invoiceId?: string | null;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type ProjectTask = {
@@ -4794,6 +4807,39 @@ export async function updateProjectTask(
 export async function deleteProjectTask(businessId: string, taskId: string): Promise<ApiResult<unknown>> {
   return apiDelete<unknown>(
     `/projects/businesses/${encodeURIComponent(businessId)}/tasks/${encodeURIComponent(taskId)}`,
+  );
+}
+
+export async function createProjectMilestone(
+  businessId: string,
+  projectId: string,
+  data: { title: string; description?: string; amount?: number; dueDate?: string },
+): Promise<ApiResult<ProjectMilestone>> {
+  return apiPost<ProjectMilestone>({
+    path: `/projects/businesses/${encodeURIComponent(businessId)}/projects/${encodeURIComponent(projectId)}/milestones`,
+    body: data,
+  });
+}
+
+export async function updateProjectMilestone(
+  businessId: string,
+  projectId: string,
+  milestoneId: string,
+  data: Partial<{ title: string; description: string; amount: number; dueDate: string | null; completedAt: string | null }>,
+): Promise<ApiResult<ProjectMilestone>> {
+  return apiPatch<ProjectMilestone>(
+    `/projects/businesses/${encodeURIComponent(businessId)}/projects/${encodeURIComponent(projectId)}/milestones/${encodeURIComponent(milestoneId)}`,
+    data,
+  );
+}
+
+export async function deleteProjectMilestone(
+  businessId: string,
+  projectId: string,
+  milestoneId: string,
+): Promise<ApiResult<unknown>> {
+  return apiDelete<unknown>(
+    `/projects/businesses/${encodeURIComponent(businessId)}/projects/${encodeURIComponent(projectId)}/milestones/${encodeURIComponent(milestoneId)}`,
   );
 }
 

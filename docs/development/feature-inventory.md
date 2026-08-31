@@ -278,7 +278,7 @@
 | Project CRUD | Board/list/detail | P1 | ✅ Working | `projects.controller.ts:20-217` |
 | Tasks within projects | Create/update/delete/toggle | P1 | ⚠️ Partial | `status` not synced with `isCompleted` |
 | Project templates | Create from template | P1 | ✅ Working | `projects.service.ts:449-503` |
-| Project milestones | UI | P1 | ❌ Broken | React state only; server endpoints unused |
+| Project milestones | UI | P1 | ✅ Working | Wired to existing create/update/delete endpoints |
 | Project notes | UI | P1 | ❌ Broken | React state only |
 | Project deliverables | UI | P1 | ❌ Broken | React state only |
 | Project budget view | Component | P2 | 🔇 Orphaned | Exported but never imported |

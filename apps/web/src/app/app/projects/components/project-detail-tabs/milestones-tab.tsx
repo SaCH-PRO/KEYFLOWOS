@@ -10,6 +10,7 @@ import {
   Calendar,
   ChevronRight,
   Sparkles,
+  Loader2,
 } from "lucide-react";
 import { isOverdue, formatDate } from "../project-constants";
 
@@ -23,34 +24,35 @@ export interface Milestone {
 
 interface MilestonesTabProps {
   milestones: Milestone[];
-  onMilestonesChange: (milestones: Milestone[]) => void;
+  onAdd: (title: string, dueDate?: string) => Promise<void>;
+  onToggle: (id: string) => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
 }
 
-export function MilestonesTab({ milestones, onMilestonesChange }: MilestonesTabProps) {
+export function MilestonesTab({ milestones, onAdd, onToggle, onDelete }: MilestonesTabProps) {
   const [newTitle, setNewTitle] = useState("");
   const [newDueDate, setNewDueDate] = useState("");
+  const [working, setWorking] = useState<string | null>(null);
 
-  const handleAdd = () => {
+  const handleAdd = async () => {
     if (!newTitle.trim()) return;
-    const ms: Milestone = {
-      id: crypto.randomUUID(),
-      title: newTitle.trim(),
-      dueDate: newDueDate || undefined,
-      completed: false,
-    };
-    onMilestonesChange([...milestones, ms]);
+    setWorking("add");
+    await onAdd(newTitle.trim(), newDueDate || undefined);
+    setWorking(null);
     setNewTitle("");
     setNewDueDate("");
   };
 
-  const handleToggle = (id: string) => {
-    onMilestonesChange(
-      milestones.map((m) => (m.id === id ? { ...m, completed: !m.completed } : m))
-    );
+  const handleToggle = async (id: string) => {
+    setWorking(id);
+    await onToggle(id);
+    setWorking(null);
   };
 
-  const handleDelete = (id: string) => {
-    onMilestonesChange(milestones.filter((m) => m.id !== id));
+  const handleDelete = async (id: string) => {
+    setWorking(id);
+    await onDelete(id);
+    setWorking(null);
   };
 
   const completed = milestones.filter((m) => m.completed).length;
@@ -125,7 +127,11 @@ export function MilestonesTab({ milestones, onMilestonesChange }: MilestonesTabP
                     : "hsl(var(--card))",
               }}
             >
-              <button onClick={() => handleToggle(ms.id)} className="shrink-0">
+              <button
+                onClick={() => handleToggle(ms.id)}
+                disabled={working === ms.id}
+                className="shrink-0 disabled:opacity-50"
+              >
                 {ms.completed
                   ? <CheckCircle className="w-5 h-5" style={{ color: "hsl(var(--kf-success))" }} />
                   : isCurrent
@@ -167,7 +173,8 @@ export function MilestonesTab({ milestones, onMilestonesChange }: MilestonesTabP
               )}
               <button
                 onClick={() => handleDelete(ms.id)}
-                className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-red-400 transition-opacity shrink-0"
+                disabled={working === ms.id}
+                className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-red-400 transition-opacity shrink-0 disabled:opacity-50"
               >
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
@@ -204,10 +211,14 @@ export function MilestonesTab({ milestones, onMilestonesChange }: MilestonesTabP
         />
         <button
           onClick={handleAdd}
-          disabled={!newTitle.trim()}
+          disabled={!newTitle.trim() || working === "add"}
           className="kf-btn-primary px-3 py-1.5 rounded-lg text-xs font-medium disabled:opacity-40 inline-flex items-center gap-1"
         >
-          <Plus className="w-3 h-3" />
+          {working === "add" ? (
+            <Loader2 className="w-3 h-3 animate-spin" />
+          ) : (
+            <Plus className="w-3 h-3" />
+          )}
           Add
         </button>
       </div>

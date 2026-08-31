@@ -24,11 +24,15 @@ import {
 import {
   Project,
   ProjectTask,
+  ProjectMilestone,
   updateProject,
   deleteProject,
   createProjectTask,
   updateProjectTask,
   deleteProjectTask,
+  createProjectMilestone,
+  updateProjectMilestone,
+  deleteProjectMilestone,
 } from "@/lib/client";
 import { toast } from "sonner";
 import { TabNav } from "@/components/ui/tab-nav";
@@ -107,7 +111,9 @@ export function ProjectDetail({
   const [editDueDate, setEditDueDate] = useState(project.dueDate || "");
   const [editColor, setEditColor] = useState(project.color || PROJECT_COLORS[0]);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [milestones, setMilestones] = useState<Milestone[]>([]);
+  const [milestones, setMilestones] = useState<Milestone[]>(() =>
+    (project.milestones ?? []).map(toUiMilestone),
+  );
   const [notes, setNotes] = useState<string[]>([]);
   const [deliverables, setDeliverables] = useState<Deliverable[]>([]);
 
@@ -220,6 +226,46 @@ export function ProjectDetail({
       }
     } catch { toast.error("Failed to update task"); }
   }, [businessId, project, onProjectUpdate]);
+
+  const handleAddMilestone = useCallback(async (title: string, dueDate?: string) => {
+    if (!businessId) return;
+    try {
+      const res = await createProjectMilestone(businessId, project.id, { title, dueDate });
+      if (res.data) {
+        const next = [...milestones, toUiMilestone(res.data)];
+        setMilestones(next);
+        onProjectUpdate({ ...project, milestones: next.map(toApiMilestone) });
+      }
+    } catch { toast.error("Failed to add milestone"); }
+  }, [businessId, project, milestones, onProjectUpdate]);
+
+  const handleToggleMilestone = useCallback(async (id: string) => {
+    if (!businessId) return;
+    const current = milestones.find((m) => m.id === id);
+    if (!current) return;
+    const completed = !current.completed;
+    try {
+      const res = await updateProjectMilestone(businessId, project.id, id, {
+        completedAt: completed ? new Date().toISOString() : null,
+      });
+      if (res.data) {
+        const updated = res.data;
+        const next = milestones.map((m) => (m.id === id ? toUiMilestone(updated) : m));
+        setMilestones(next);
+        onProjectUpdate({ ...project, milestones: next.map(toApiMilestone) });
+      }
+    } catch { toast.error("Failed to update milestone"); }
+  }, [businessId, project, milestones, onProjectUpdate]);
+
+  const handleDeleteMilestone = useCallback(async (id: string) => {
+    if (!businessId) return;
+    try {
+      await deleteProjectMilestone(businessId, project.id, id);
+      const next = milestones.filter((m) => m.id !== id);
+      setMilestones(next);
+      onProjectUpdate({ ...project, milestones: next.map(toApiMilestone) });
+    } catch { toast.error("Failed to delete milestone"); }
+  }, [businessId, project, milestones, onProjectUpdate]);
 
   return (
     <div className="space-y-4">
@@ -420,7 +466,9 @@ export function ProjectDetail({
         {activeTab === "milestones" && (
           <MilestonesTab
             milestones={milestones}
-            onMilestonesChange={setMilestones}
+            onAdd={handleAddMilestone}
+            onToggle={handleToggleMilestone}
+            onDelete={handleDeleteMilestone}
           />
         )}
         {activeTab === "timeline" && (
@@ -450,4 +498,28 @@ export function ProjectDetail({
       </div>
     </div>
   );
+}
+
+function toUiMilestone(m: ProjectMilestone): Milestone {
+  return {
+    id: m.id,
+    title: m.title,
+    description: m.description ?? undefined,
+    dueDate: m.dueDate ?? undefined,
+    completed: !!m.completedAt,
+  };
+}
+
+function toApiMilestone(m: Milestone): ProjectMilestone {
+  return {
+    id: m.id,
+    title: m.title,
+    description: m.description ?? null,
+    dueDate: m.dueDate ?? null,
+    completedAt: m.completed ? new Date().toISOString() : null,
+    amount: null,
+    invoiceId: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
 }

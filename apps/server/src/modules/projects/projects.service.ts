@@ -31,6 +31,7 @@ export class ProjectsService {
       where: { id: projectId, businessId, deletedAt: null },
       include: {
         tasks: { where: { deletedAt: null }, orderBy: { sortOrder: 'asc' } },
+        milestones: { orderBy: { dueDate: 'asc' } },
         goal: true,
       },
     });
