@@ -151,7 +151,7 @@
 | | Win/lose/forecast/velocity | P1 | ✅ Working | |
 | Pipeline / contact views | Focus/list/kanban/table/data-quality | P1 | ✅ Working | `pipeline-tab-content.tsx:451-503` |
 | Sequences builder | CRUD/enrollment/analytics | P1 | ✅ Working | `crm-sequence.controller.ts` |
-| Sequence execution | Actual send | P1 | ✅ Working | Wires `sequence.step_due` to `dispatchSendNode`; on `origin/main` |
+| Sequence execution | Actual send | P1 | ✅ Working | Wires `sequence.step_due` to `dispatchSendNode`; now works for businesses without Gmail via platform-domain fallback; on `origin/main` |
 | | Sent/open/click/convert analytics | P1 | ✅ Working | `sentAt` stamped only after real dispatch; on `origin/main` |
 | Data-quality scanner | Scan/upsert issues | P1 | ✅ Working | `crm-data-quality.service.ts:65-257` |
 | | Bulk apply/wizard/dismiss | P1 | ✅ Working | `data-quality/page.tsx` |
@@ -248,7 +248,7 @@
 | Feature | Sub-feature | Tier | Status | Evidence / Blocker |
 |---------|-------------|------|--------|--------------------|
 | Email campaigns | CRUD/schedule/send/stats | P1 | ✅ Working | `email-marketing.service.ts:26-645` |
-| | Actual delivery | P1 | ❌ Broken | Sends only via connected Gmail; no default ESP |
+| | Actual delivery | P1 | ✅ Working | Platform-domain ESP fallback; `connect Gmail` remains the recommended path for branded sending; fixed in `c3cec37b` |
 | Transactional customer notifications | 25+ templates | P1 | ✅ Working | `transactional-email.service.ts` |
 | | Preference merge / do-not-contact | P1 | ✅ Working | |
 | | Gmail + Resend fallback | P1 | ✅ Working | |
@@ -420,10 +420,10 @@
 | Tier | Working | Partial | Broken | Stub | Orphaned | Total |
 |------|---------|---------|--------|------|----------|-------|
 | P0 | 43 | 9 | 0 | 0 | 0 | 52 |
-| P1 | 89 | 18 | 8 | 0 | 0 | 115 |
+| P1 | 90 | 18 | 7 | 0 | 0 | 115 |
 | P2 | 50 | 12 | 11 | 5 | 9 | 87 |
 | P3 | 11 | 5 | 1 | 4 | 10 | 31 |
-| **Total** | **193** | **44** | **19** | **9** | **19** | **284** |
+| **Total** | **194** | **44** | **18** | **9** | **19** | **284** |
 
 ---
 
