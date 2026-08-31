@@ -4,7 +4,6 @@ import { CrmSequenceAnalyticsService, type AnalyticsRange } from './crm-sequence
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { CrmRateLimitGuard, CrmRateLimit } from './guards/rate-limit.guard';
-import { FeatureFlagGuard, RequireFeature } from './guards/feature-flag.guard';
 
 function parseRange(from?: string, to?: string): AnalyticsRange {
   const range: AnalyticsRange = {};
@@ -27,16 +26,14 @@ export class CrmSequenceController {
     @Inject(CrmSequenceAnalyticsService) private readonly analytics: CrmSequenceAnalyticsService,
   ) {}
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
-  @RequireFeature('sequences')
+  @UseGuards(AuthGuard, BusinessGuard)
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/sequences')
   listSequences(@Param('businessId') businessId: string) {
     return this.sequences.listSequences(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
-  @RequireFeature('sequences')
+  @UseGuards(AuthGuard, BusinessGuard)
   @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/sequences')
   createSequence(
@@ -46,8 +43,7 @@ export class CrmSequenceController {
     return this.sequences.createSequence(businessId, body);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
-  @RequireFeature('sequences')
+  @UseGuards(AuthGuard, BusinessGuard)
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/sequences/:id')
   getSequence(
@@ -57,8 +53,7 @@ export class CrmSequenceController {
     return this.sequences.getSequence(businessId, id);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
-  @RequireFeature('sequences')
+  @UseGuards(AuthGuard, BusinessGuard)
   @CrmRateLimit(30, 60_000)
   @Patch('businesses/:businessId/sequences/:id')
   updateSequence(
@@ -69,8 +64,7 @@ export class CrmSequenceController {
     return this.sequences.updateSequence(businessId, id, body);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
-  @RequireFeature('sequences')
+  @UseGuards(AuthGuard, BusinessGuard)
   @CrmRateLimit(30, 60_000)
   @Delete('businesses/:businessId/sequences/:id')
   deleteSequence(
@@ -80,8 +74,7 @@ export class CrmSequenceController {
     return this.sequences.deleteSequence(businessId, id);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
-  @RequireFeature('sequences')
+  @UseGuards(AuthGuard, BusinessGuard)
   @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/sequences/:id/duplicate')
   duplicateSequence(
@@ -91,8 +84,7 @@ export class CrmSequenceController {
     return this.sequences.duplicateSequence(businessId, id);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
-  @RequireFeature('sequences')
+  @UseGuards(AuthGuard, BusinessGuard)
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/sequences/:id/enroll')
   enrollContacts(
@@ -103,8 +95,7 @@ export class CrmSequenceController {
     return this.sequences.enrollContacts(businessId, id, body.contactIds);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
-  @RequireFeature('sequences')
+  @UseGuards(AuthGuard, BusinessGuard)
   @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/sequences/:id/enrollments/:enrollmentId/advance')
   advanceEnrollment(
@@ -114,16 +105,14 @@ export class CrmSequenceController {
     return this.sequences.advanceEnrollment(businessId, enrollmentId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
-  @RequireFeature('sequences')
+  @UseGuards(AuthGuard, BusinessGuard)
   @CrmRateLimit(60, 60_000)
   @Get('businesses/:businessId/sequences/variants/report')
   getAllVariantReports(@Param('businessId') businessId: string) {
     return this.sequences.getAllVariantReports(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
-  @RequireFeature('sequences')
+  @UseGuards(AuthGuard, BusinessGuard)
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/sequences/:id/variants/report')
   getVariantReport(
@@ -133,8 +122,7 @@ export class CrmSequenceController {
     return this.sequences.getVariantReport(businessId, id);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
-  @RequireFeature('sequences')
+  @UseGuards(AuthGuard, BusinessGuard)
   @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/sequences/:id/nodes/:nodeId/promote-variant')
   promoteVariant(
@@ -146,8 +134,7 @@ export class CrmSequenceController {
     return this.sequences.promoteVariant(businessId, id, nodeId, body.variantId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
-  @RequireFeature('sequences')
+  @UseGuards(AuthGuard, BusinessGuard)
   @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/sequences/:id/enrollments/:enrollmentId/unenroll')
   unenrollContact(
@@ -159,8 +146,7 @@ export class CrmSequenceController {
 
   // -- Analytics ----------------------------------------------------------
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
-  @RequireFeature('sequences')
+  @UseGuards(AuthGuard, BusinessGuard)
   @CrmRateLimit(60, 60_000)
   @Get('businesses/:businessId/sequences/analytics/summary')
   sequencesSummary(
@@ -171,8 +157,7 @@ export class CrmSequenceController {
     return this.analytics.getSequencesSummary(businessId, parseRange(from, to));
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
-  @RequireFeature('sequences')
+  @UseGuards(AuthGuard, BusinessGuard)
   @CrmRateLimit(60, 60_000)
   @Get('businesses/:businessId/sequences/analytics/lifecycle')
   lifecycleReport(
@@ -183,8 +168,7 @@ export class CrmSequenceController {
     return this.analytics.getLifecycleReport(businessId, parseRange(from, to));
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
-  @RequireFeature('sequences')
+  @UseGuards(AuthGuard, BusinessGuard)
   @CrmRateLimit(60, 60_000)
   @Get('businesses/:businessId/sequences/:id/analytics')
   sequenceAnalytics(
@@ -198,8 +182,7 @@ export class CrmSequenceController {
 
   // -- Attribution settings ----------------------------------------------
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
-  @RequireFeature('sequences')
+  @UseGuards(AuthGuard, BusinessGuard)
   @CrmRateLimit(60, 60_000)
   @Get('businesses/:businessId/sequences/settings/attribution')
   async getAttributionSettings(@Param('businessId') businessId: string) {
@@ -207,8 +190,7 @@ export class CrmSequenceController {
     return { attributionWindowDays: days };
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
-  @RequireFeature('sequences')
+  @UseGuards(AuthGuard, BusinessGuard)
   @CrmRateLimit(20, 60_000)
   @Patch('businesses/:businessId/sequences/settings/attribution')
   async updateAttributionSettings(

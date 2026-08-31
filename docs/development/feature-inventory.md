@@ -159,7 +159,7 @@
 | Duplicate detection | Preview/merge | P1 | ⚠️ Partial | O(n²) in-memory fuzzy; will OOM at scale |
 | Contact intelligence | At-risk/scored contacts | P2 | ✅ Working | `crm/intelligence/page.tsx:130-156` |
 | CRM tRPC router | Basic contacts | P3 | 🚧 Stub | No deals/sequences/quality/duplicates |
-| Sequence feature flag | Guard vs nav mismatch | P2 | ⚠️ Partial | `FeatureFlagGuard` hides API but nav link remains |
+| Sequence feature flag | Guard vs nav mismatch | P2 | ✅ Working | `FeatureFlagGuard` removed from `crm-sequence.controller.ts`; API now matches nav |
 
 ---
 
@@ -420,9 +420,9 @@
 |------|---------|---------|--------|------|----------|-------|
 | P0 | 42 | 8 | 4 | 0 | 0 | 54 |
 | P1 | 85 | 18 | 11 | 0 | 0 | 114 |
-| P2 | 48 | 12 | 12 | 5 | 9 | 86 |
+| P2 | 49 | 11 | 12 | 5 | 9 | 86 |
 | P3 | 9 | 5 | 1 | 4 | 10 | 29 |
-| **Total** | **184** | **43** | **28** | **9** | **19** | **283** |
+| **Total** | **185** | **42** | **28** | **9** | **19** | **283** |
 
 ---
 
