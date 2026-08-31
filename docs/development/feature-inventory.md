@@ -228,7 +228,7 @@
 | | Conflict/availability/business-hours checks | P1 | ❌ Broken | Internal `createBooking` still bypasses checks; public path and rescheduling now enforce overlap/lead-time/staff availability/business hours |
 | Public booking widget | `/book/[slug]` | P1 | ⚠️ Partial | Full checkout flow exists |
 | | Slot generation | P1 | ❌ Broken | Uses `businessHours` only; ignores staff availability/occupancy |
-| Availability / free-slot API | Public/internal endpoint | P1 | ❌ Broken | Does not exist |
+| Availability / free-slot API | Public/internal endpoint | P1 | ✅ Working | `GET /public/businesses/:businessId/slots` is live |
 | Waitlist | Add/list/match/offer/convert/cancel | P2 | ✅ Working | `booking-waitlist.service.ts` |
 | | Auto-offer on cancel/reschedule | P2 | ✅ Working | `booking-waitlist.listener.ts:25` |
 | | Expiry/notification for offered slots | P2 | ❌ Broken | No listener/cron |
@@ -419,10 +419,10 @@
 | Tier | Working | Partial | Broken | Stub | Orphaned | Total |
 |------|---------|---------|--------|------|----------|-------|
 | P0 | 43 | 9 | 0 | 0 | 0 | 52 |
-| P1 | 86 | 18 | 10 | 0 | 0 | 114 |
+| P1 | 87 | 18 | 9 | 0 | 0 | 114 |
 | P2 | 50 | 12 | 11 | 5 | 9 | 87 |
 | P3 | 11 | 5 | 1 | 4 | 10 | 31 |
-| **Total** | **190** | **44** | **21** | **9** | **19** | **283** |
+| **Total** | **191** | **44** | **20** | **9** | **19** | **283** |
 
 ---
 
