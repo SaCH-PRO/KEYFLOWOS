@@ -72,7 +72,7 @@
 | | Q&A flow | P1 | ✅ Working | `questions/next`, `answers` |
 | | Blueprint/Genome sync | P1 | ✅ Working | `business-genesis.service.ts:224-436` |
 | Business Genome intake chat | Section coverage | P1 | ⚠️ Partial | Omits legal/registration/tax/ownership sections |
-| | State durability | P1 | ❌ Broken | In-memory `Map` in `blueprint-onboarding.service.ts:122`; refresh restarts interview |
+| | State durability | P1 | ✅ Working | Now persisted; refresh/restores interview state |
 | | Client history | P1 | ❌ Broken | Local React state only |
 | BusinessBlueprint CRUD | Lazy create/update | P1 | ✅ Working | `blueprint.service.ts:194-355` |
 | | Integrity scoring | P1 | ✅ Working | `key-genome.service.ts:211-355` |
@@ -186,7 +186,7 @@
 | Invoice creation endpoint | Guards | P0 | ✅ Working | Already fixed in source |
 | tRPC `markInvoicePaid` | Direct mutation bypasses workflow | P0 | ✅ Working | Removed dangerous bypass; use server workflow |
 | AI product extraction / CSV import | OpenAI vision | P2 | ⚠️ Partial | Fails if AI key invalid |
-| Currency / FX feed | Auto refresh | P2 | ❌ Broken | `FX provider response missing TTD rate` |
+| Currency / FX feed | Auto refresh | P2 | ✅ Working | TTD rate now available / fallback handled |
 | Inventory migration | `/app/inventory` | P2 | 🔇 Orphaned | Old redirect abandoned |
 
 ---
@@ -208,7 +208,7 @@
 | Credit notes | UI + backend | P1 | ✅ Working | |
 | Fixed assets | UI + depreciation | P1 | ✅ Working | |
 | Exchange rates | Manual CRUD | P2 | ✅ Working | |
-| | Auto FX scheduler | P2 | ❌ Broken | Missing TTD rate |
+| | Auto FX scheduler | P2 | ✅ Working | TTD rate now available / fallback handled |
 | Accounting periods | UI + backend | P2 | ✅ Working | |
 | Safe to Spend | KPI | P2 | ⚠️ Partial | Now explicit about unmodeled payroll/debt; still 0 |
 | Cash reserve buckets | Schema + UI | P2 | ⚠️ Partial | Service casts `prisma.client as any` |
@@ -226,9 +226,9 @@
 | Feature | Sub-feature | Tier | Status | Evidence / Blocker |
 |---------|-------------|------|--------|--------------------|
 | Internal bookings CRUD | Create/read/update/status/notes/location | P1 | ✅ Working | `bookings.controller.ts`, `bookings.service.ts` |
-| | Conflict/availability/business-hours checks | P1 | ❌ Broken | Internal `createBooking` still bypasses checks; public path and rescheduling now enforce overlap/lead-time/staff availability/business hours |
+| | Conflict/availability/business-hours checks | P1 | ✅ Working | Internal `createBooking` now enforces overlap/lead-time/staff availability/business hours |
 | Public booking widget | `/book/[slug]` | P1 | ⚠️ Partial | Full checkout flow exists |
-| | Slot generation | P1 | ❌ Broken | Uses `businessHours` only; ignores staff availability/occupancy |
+| | Slot generation | P1 | ✅ Working | Now accounts for staff availability and occupancy |
 | Availability / free-slot API | Public/internal endpoint | P1 | ✅ Working | `GET /public/businesses/:businessId/slots` is live |
 | Waitlist | Add/list/match/offer/convert/cancel | P2 | ✅ Working | `booking-waitlist.service.ts` |
 | | Auto-offer on cancel/reschedule | P2 | ✅ Working | `booking-waitlist.listener.ts:25` |
@@ -281,7 +281,7 @@
 | Project templates | Create from template | P1 | ✅ Working | `projects.service.ts:449-503` |
 | Project milestones | UI | P1 | ✅ Working | Wired to existing create/update/delete endpoints |
 | Project notes | UI | P1 | ✅ Working | Wired to GET/POST/DELETE `/keyflow/businesses/:businessId/notes` with `targetType: 'Project'` |
-| Project deliverables | UI | P1 | ❌ Broken | React state only |
+| Project deliverables | UI | P1 | ✅ Working | Wired to existing endpoints |
 | Project budget view | Component | P2 | 🔇 Orphaned | Exported but never imported |
 | Task kanban view | Component | P2 | 🔇 Orphaned | Exported but never imported |
 | Task assignments / workload | Backend | P2 | ✅ Working | `task-assignment.service.ts`, recommender |
@@ -420,10 +420,10 @@
 | Tier | Working | Partial | Broken | Stub | Orphaned | Total |
 |------|---------|---------|--------|------|----------|-------|
 | P0 | 43 | 9 | 0 | 0 | 0 | 52 |
-| P1 | 91 | 18 | 5 | 1 | 0 | 115 |
-| P2 | 50 | 12 | 6 | 10 | 9 | 87 |
+| P1 | 95 | 18 | 1 | 1 | 0 | 115 |
+| P2 | 52 | 12 | 4 | 10 | 9 | 87 |
 | P3 | 11 | 5 | 0 | 5 | 10 | 31 |
-| **Total** | **195** | **44** | **11** | **16** | **19** | **284** |
+| **Total** | **201** | **44** | **5** | **16** | **19** | **284** |
 
 ---
 

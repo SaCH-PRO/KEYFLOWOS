@@ -100,14 +100,12 @@ The remaining gaps fall into five patterns:
 ## 4. P1 Core Journey Fixes
 
 ### 4.1 Onboarding first-run experience
-**Problem:** Deep-linking or resuming onboarding at `?step=intake|template|configure` shows an empty chat until the user types. The genome-intake conversation state lives in an in-memory `Map`, so refresh or server restart resets it. The only way to satisfy the contacts setup check is via `seedDemoData`, which also creates a demo invoice.  
+**Problem:** Deep-link empty-chat and genome-intake state durability are now fixed. The remaining friction is that the only way to satisfy the contacts setup check is via `seedDemoData`, which also creates a demo invoice, and the legal/registration/tax/ownership sections may still appear in the completion checklist even though the chat omits them.  
 **Evidence:** `apps/web/src/app/app/onboarding/components/key-onboarding-chat-view.tsx:61-78`; `apps/server/src/modules/ai/blueprint-onboarding.service.ts:122`; `apps/web/src/components/key/chat/key-onboarding-cards/comprehensive-cards.tsx:848-858`.  
 **Fix:**
-1. On mount, if `step !== 'welcome'` and the chat is empty, send a silent prompt to the orchestrator to present the card for the current step.
-2. Persist `BlueprintOnboardingService` state to `GenomeChatMessage` (or reuse `GenomeChatService`) so the interview survives refresh.
-3. Split "add sample contact" out of `seedDemoData` into a dedicated endpoint that does not create a demo invoice.
-4. Decide whether legal/registration/tax/ownership sections are collected in onboarding; if not, remove them from the completion checklist UI.
-5. Add an E2E test for the full `welcome → intake → template → configure → complete` path.
+1. Split "add sample contact" out of `seedDemoData` into a dedicated endpoint that does not create a demo invoice.
+2. Decide whether legal/registration/tax/ownership sections are collected in onboarding; if not, remove them from the completion checklist UI.
+3. Add an E2E test for the full `welcome → intake → template → configure → complete` path.
 
 ### 4.2 KEY AI / model gateway
 **Problem:** Chat, deep-think, TTS, STT, and financial copilot all depend on a working AI provider. The `.env` now contains an OpenAI key, but logs showed repeated 401s with an older key. The full-duplex LiveKit voice component is implemented but never imported, and the voice-agent worker targets `gpt-realtime`, whose availability is unclear. The WebSocket `/key-cortex` gateway has no client.  
@@ -139,25 +137,23 @@ The remaining gaps fall into five patterns:
 4. Add a manual journal-entry UI or restore `/app/finance/journal`.
 
 ### 4.5 Bookings avoid double-booking
-**Problem:** `BookingsService.createBooking` inserts rows without conflict, availability, business-hours, or lead-time checks. The public booking widget derives slots only from `businessHours` and does not query real-time occupancy.  
-**Evidence:** `apps/server/src/modules/bookings/bookings.service.ts:693`; `apps/web/src/app/book/[slug]/components/utils.ts:5`.  
+**Problem:** `BookingsService.createBooking` and public slot generation now enforce conflict, availability, business-hours, and lead-time checks. The remaining gap is public-widget polish and ensuring the waitlist expiry/notification cron is wired.  
+**Evidence:** `apps/server/src/modules/bookings/bookings.service.ts:693`; `apps/web/src/app/book/[slug]/components/utils.ts:5`; `apps/server/src/modules/bookings/booking-waitlist.service.ts`.  
 **Fix:**
-1. Extract a shared `validateBookingSlot` helper and call it from both `createBooking` and `publicCreateBooking`.
-2. Add a `GET /bookings/public/businesses/:businessId/availability` endpoint that returns free slots for a service/staff/date, and wire the public widget to it.
-3. Fix the `PublicCreateBookingDto` / controller mismatch on required contact fields.
+1. Verify the public widget uses the live availability API for all slot rendering.
+2. Wire the waitlist expiry/notification listener or cron for offered slots.
 
 ---
 
 ## 5. P2 Feature Completeness
 
 ### 5.1 Projects
-**Problem:** Milestones and deliverables tabs keep state in React only. Notes are now wired to the Keyflow notes API. Task assignment backend exists but has no UI. Plan event execution is faked. Budget and kanban views are implemented but not imported.  
+**Problem:** Milestones, notes, and deliverables tabs are now wired to the server. Task assignment backend exists but has no UI. Plan event execution is faked. Budget and kanban views are implemented but not imported.  
 **Evidence:** `apps/web/src/app/app/projects/components/project-detail.tsx:110-112`; `apps/web/src/app/app/projects/components/project-detail-tabs/notes-tab.tsx`; `apps/server/src/modules/projects/project-plan-executor.service.ts:172-174`.  
 **Fix:**
-1. Wire milestones/deliverables tabs to the existing server endpoints. Deliverables needs a model decision first (plain links vs. uploaded proof with `storageKey`).
-2. Add an assignee picker to tasks and call the task-assignment API.
-3. Implement real plan event execution via `FlowOrchestrator`.
-4. Import `ProjectBudgetView` and `TaskKanban` into the detail tabs or delete them.
+1. Add an assignee picker to tasks and call the task-assignment API.
+2. Implement real plan event execution via `FlowOrchestrator`.
+3. Import `ProjectBudgetView` and `TaskKanban` into the detail tabs or delete them.
 
 ### 5.2 Documents / Evidence / Content Ops
 **Problem:** `/app/document-intelligence` is a mock page. `/app/documents` is gated off in production. Evidence and content ops are gated by add-on packs. Content-ops deliverable upload is a stub toast.  
@@ -241,11 +237,10 @@ The remaining gaps fall into five patterns:
 5. Fix onboarding empty-chat on deep links and split contact seed from demo invoice.
 
 ### Sprint B — Core Journeys (weeks 2–3)
-1. Persist onboarding genome-chat state.
-2. Implement sequence message dispatch.
-3. Fix cashflow forecast, safe-to-spend, and expense transaction matching.
-4. Add shared booking validation and public availability API.
-5. Wire project milestones/notes/deliverables to the server.
+1. Implement sequence message dispatch.
+2. Fix cashflow forecast, safe-to-spend, and expense transaction matching.
+3. Wire waitlist expiry/notification cron.
+4. Add task assignment UI.
 
 ### Sprint C — Feature Surfaces (weeks 4–5)
 1. Replace document-intelligence mock page with real data.
