@@ -119,7 +119,53 @@ const SECTION_FOCUS: Partial<Record<BlueprintSectionKey, { label: string; goal: 
 @Injectable()
 export class BlueprintOnboardingService {
   private readonly logger = new Logger(BlueprintOnboardingService.name);
-  private readonly stateCache = new Map<string, BlueprintOnboardingState>();
+  /**
+   * Bounded, because this used to grow forever.
+   *
+   * `stateCache` was a plain Map with exactly one eviction path: a user
+   * explicitly hitting reset. Every business that ever opened onboarding left
+   * an entry behind, each holding the full message transcript, in a process
+   * that runs for weeks. Nothing swept it and nothing capped it.
+   *
+   * It was reported as something else — "state durability: in-memory Map,
+   * refresh restarts the interview" — and that part is not right. getState
+   * REBUILDS from the persisted blueprint on a miss: completedSections and
+   * currentSection are derived from saved data, so progress survives a restart.
+   * Only the transcript is cache-resident, and the caller passes that in.
+   *
+   * That rebuild is exactly what makes eviction safe, and it is why this is a
+   * cache and not storage. A miss costs one blueprint read.
+   */
+  private static readonly STATE_TTL_MS = 60 * 60_000;
+  private static readonly STATE_MAX_ENTRIES = 500;
+  private readonly stateCache = new Map<string, { state: BlueprintOnboardingState; touchedAt: number }>();
+
+  /** A live entry, or nothing — an expired one is a miss, not stale data. */
+  private readCache(businessId: string): BlueprintOnboardingState | undefined {
+    const hit = this.stateCache.get(businessId);
+    if (!hit) return undefined;
+    if (Date.now() - hit.touchedAt > BlueprintOnboardingService.STATE_TTL_MS) {
+      this.stateCache.delete(businessId);
+      return undefined;
+    }
+    // A READ counts as use. Without this the cache evicts by insertion order,
+    // so a business part-way through onboarding can be dropped while an idle
+    // one written later survives — which is the opposite of what a cap is for.
+    this.stateCache.delete(businessId);
+    this.stateCache.set(businessId, { state: hit.state, touchedAt: hit.touchedAt });
+    return hit.state;
+  }
+
+  private writeCache(businessId: string, state: BlueprintOnboardingState): void {
+    // Map iterates in insertion order, so the first key is the oldest write.
+    // Deleting before setting keeps a refreshed entry from counting as old.
+    this.stateCache.delete(businessId);
+    if (this.stateCache.size >= BlueprintOnboardingService.STATE_MAX_ENTRIES) {
+      const oldest = this.stateCache.keys().next().value;
+      if (oldest !== undefined) this.stateCache.delete(oldest);
+    }
+    this.stateCache.set(businessId, { state, touchedAt: Date.now() });
+  }
 
   constructor(
     @Inject(BlueprintService) private readonly blueprint: BlueprintService,
@@ -168,7 +214,7 @@ export class BlueprintOnboardingService {
       const nextSection = this.chooseNextSection(updatedBlueprint, state);
       state.currentSection = nextSection;
       state.currentQuestion = nextSection ? this.firstQuestionForSection(nextSection) : null;
-      this.stateCache.set(businessId, state);
+      this.writeCache(businessId, state);
 
       return {
         reply,
@@ -200,7 +246,7 @@ export class BlueprintOnboardingService {
   }
 
   async getState(businessId: string, history?: OnboardingMessage[]): Promise<BlueprintOnboardingState> {
-    const cached = this.stateCache.get(businessId);
+    const cached = this.readCache(businessId);
     if (cached) return cached;
 
     const blueprint = await this.blueprint.getBlueprint(businessId);
@@ -214,7 +260,7 @@ export class BlueprintOnboardingService {
       currentQuestion: nextSection ? this.firstQuestionForSection(nextSection) : null,
     };
 
-    this.stateCache.set(businessId, state);
+    this.writeCache(businessId, state);
     return state;
   }
 
