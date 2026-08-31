@@ -151,8 +151,8 @@
 | | Win/lose/forecast/velocity | P1 | ✅ Working | |
 | Pipeline / contact views | Focus/list/kanban/table/data-quality | P1 | ✅ Working | `pipeline-tab-content.tsx:451-503` |
 | Sequences builder | CRUD/enrollment/analytics | P1 | ✅ Working | `crm-sequence.controller.ts` |
-| Sequence execution | Actual send | P1 | ⚠️ Partial | Fixed locally (wires `sequence.step_due` to flow dispatch); pending push |
-| | Sent/open/click/convert analytics | P1 | ⚠️ Partial | `sentAt` now stamped only after real dispatch; pending push |
+| Sequence execution | Actual send | P1 | ✅ Working | Wires `sequence.step_due` to `dispatchSendNode`; on `origin/main` |
+| | Sent/open/click/convert analytics | P1 | ✅ Working | `sentAt` stamped only after real dispatch; on `origin/main` |
 | Data-quality scanner | Scan/upsert issues | P1 | ✅ Working | `crm-data-quality.service.ts:65-257` |
 | | Bulk apply/wizard/dismiss | P1 | ✅ Working | `data-quality/page.tsx` |
 | | Mark verified | P1 | ✅ Working | Now marks `contact.lastVerifiedAt` and resolves stale issues |
@@ -419,10 +419,10 @@
 | Tier | Working | Partial | Broken | Stub | Orphaned | Total |
 |------|---------|---------|--------|------|----------|-------|
 | P0 | 42 | 8 | 4 | 0 | 0 | 54 |
-| P1 | 83 | 20 | 11 | 0 | 0 | 114 |
+| P1 | 85 | 18 | 11 | 0 | 0 | 114 |
 | P2 | 47 | 13 | 12 | 5 | 9 | 86 |
 | P3 | 8 | 5 | 1 | 4 | 11 | 29 |
-| **Total** | **180** | **46** | **28** | **9** | **20** | **283** |
+| **Total** | **182** | **44** | **28** | **9** | **20** | **283** |
 
 ---
 
