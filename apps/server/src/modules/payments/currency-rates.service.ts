@@ -125,8 +125,51 @@ export class CurrencyRatesService {
     return this.inflight;
   }
 
+  /**
+   * THE PROVIDER HAS NEVER QUOTED TTD, AND THIS DEMANDED IT.
+   *
+   * frankfurter.app serves ECB reference rates — about thirty major
+   * currencies. TTD is not among them, and neither are JMD, BBD, XCD or GYD.
+   * Measured directly against the provider:
+   *
+   *   GET /latest?from=EUR&to=TTD,JMD,BBD,XCD,GYD,USD
+   *   -> {"rates":{"USD":1.1643}}
+   *
+   * The old code read `rates['TTD']`, found nothing, and threw
+   * "FX provider response missing TTD rate" — discarding the rates the
+   * provider HAD returned. So the refresh could never succeed, not once, and
+   * every currency silently stayed on the hardcoded baseline while the
+   * scheduler retried every fifteen minutes forever and logged an error each
+   * time. Observed in the boot log before it was traced.
+   *
+   * That is not a provider outage waiting to clear. The base currency of this
+   * product is one this provider does not carry, which no amount of retrying
+   * fixes.
+   *
+   * SO THE TABLE IS ANCHORED ON USD INSTEAD. TTD is a managed rate against the
+   * US dollar, not a free float, so one anchor plus live cross-rates is both
+   * more accurate and more honest than pretending the whole table is live:
+   *
+   *   rates[code] = (TTD per USD) x (USD per EUR) / (code per EUR)
+   *
+   * Every currency the provider quotes is now live — USD, EUR, GBP, CAD, AUD
+   * today — where previously none of them were. The Caribbean currencies it
+   * does not quote keep their baseline, which is what they had anyway, and
+   * they are pegged or managed so a baseline is defensible for them in a way
+   * it is not for a floating major.
+   *
+   * The anchor is overridable with TTD_PER_USD so a rate move can be corrected
+   * without a deploy. It is a number a human has to maintain, and pretending
+   * otherwise is what produced this bug.
+   */
+  private ttdPerUsd(): number {
+    const override = Number(process.env.TTD_PER_USD);
+    if (Number.isFinite(override) && override > 0) return override;
+    return FALLBACK_FX_TO_TTD.USD;
+  }
+
   private async fetchLive(): Promise<FxRatesSnapshot> {
-    const symbols = SUPPORTED_CURRENCIES.filter((c) => c !== 'EUR').join(',');
+    const symbols = SUPPORTED_CURRENCIES.filter((c) => c !== 'EUR' && c !== 'TTD').join(',');
     const url = `${PROVIDER_URL}?from=EUR&to=${symbols}`;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
@@ -140,25 +183,42 @@ export class CurrencyRatesService {
       if (!raw || typeof raw !== 'object') {
         throw new Error('FX provider response missing `rates` map');
       }
-      const eurToTtdRaw = raw['TTD'];
-      const eurToTtd = typeof eurToTtdRaw === 'number' && Number.isFinite(eurToTtdRaw) ? eurToTtdRaw : null;
-      if (eurToTtd == null || eurToTtd <= 0) {
-        throw new Error('FX provider response missing TTD rate');
+
+      const quoted = (code: string): number | null => {
+        const v = raw[code];
+        return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null;
+      };
+
+      // USD is the anchor, so its absence IS a failure — unlike TTD, this one
+      // the provider does quote, and without it there is nothing to convert
+      // through.
+      const eurToUsd = quoted('USD');
+      if (eurToUsd == null) {
+        throw new Error('FX provider response missing USD rate');
       }
 
-      const rates: Record<string, number> = { TTD: 1, EUR: eurToTtd };
+      const ttdPerUsd = this.ttdPerUsd();
+      const rates: Record<string, number> = {
+        TTD: 1,
+        USD: ttdPerUsd,
+        // 1 EUR buys eurToUsd dollars, each worth ttdPerUsd.
+        EUR: Math.round(ttdPerUsd * eurToUsd * 1_000_000) / 1_000_000,
+      };
+
       for (const code of SUPPORTED_CURRENCIES) {
-        if (code === 'TTD' || code === 'EUR') continue;
-        const value = raw[code];
-        if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
-          // value = EUR -> code, so 1 unit of `code` in TTD = (EUR->TTD) / (EUR->code)
-          rates[code] = Math.round((eurToTtd / value) * 1_000_000) / 1_000_000;
+        if (code === 'TTD' || code === 'USD' || code === 'EUR') continue;
+        const eurToCode = quoted(code);
+        if (eurToCode != null) {
+          // (TTD per USD) x (USD per EUR) / (code per EUR) = TTD per code.
+          rates[code] = Math.round((ttdPerUsd * eurToUsd / eurToCode) * 1_000_000) / 1_000_000;
         } else {
-          // Provider didn't quote this currency — keep last known value, else fallback baseline.
+          // Not quoted — keep what we had, else the baseline. Expected for the
+          // Caribbean currencies, and not an error.
           const previous = this.snapshot.rates[code] ?? FALLBACK_FX_TO_TTD[code];
           if (previous != null) rates[code] = previous;
         }
       }
+
       return { rates, fetchedAt: new Date(), source: 'live' };
     } finally {
       clearTimeout(timeout);

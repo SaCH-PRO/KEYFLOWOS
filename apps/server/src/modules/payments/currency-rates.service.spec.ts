@@ -22,23 +22,31 @@ describe('CurrencyRatesService', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
-  it('uses live rates derived from EUR base after a successful refresh', async () => {
+  it('derives live cross-rates from the USD anchor after a refresh', async () => {
+    // The provider does NOT quote TTD, so the fixture no longer pretends it
+    // does. TTD comes from the anchor; everything else is live and crossed
+    // through USD.
     const fetchImpl = vi.fn().mockResolvedValue(
       okJson({
         amount: 1,
         base: 'EUR',
         date: '2026-05-04',
-        rates: { TTD: 7.5, USD: 1.1, GBP: 0.85 },
+        rates: { USD: 1.1, GBP: 0.85 },
       }),
     );
     const svc = new CurrencyRatesService(fetchImpl);
 
     const usd = await svc.toTtd(100, 'usd');
-    // 1 USD = (EUR->TTD)/(EUR->USD) = 7.5/1.1 ≈ 6.818181 TTD ; 100 USD ≈ 681.82
-    expect(usd).toBeCloseTo(681.82, 2);
+    // The anchor itself: 100 USD = 100 x 6.78 TTD.
+    expect(usd).toBeCloseTo(678, 2);
 
+    // 1 EUR buys 1.1 USD, each worth 6.78 TTD -> 7.458 ; 10 EUR = 74.58
     const eur = await svc.toTtd(10, 'EUR');
-    expect(eur).toBeCloseTo(75, 2);
+    expect(eur).toBeCloseTo(74.58, 2);
+
+    // 1 GBP = (6.78 x 1.1) / 0.85 = 8.7727 ; 10 GBP = 87.73
+    const gbp = await svc.toTtd(10, 'GBP');
+    expect(gbp).toBeCloseTo(87.73, 1);
 
     const ttd = await svc.toTtd(50, 'TTD');
     expect(ttd).toBe(50);
@@ -60,7 +68,7 @@ describe('CurrencyRatesService', () => {
   it('keeps the last successful snapshot when a later refresh fails', async () => {
     const fetchImpl = vi
       .fn()
-      .mockResolvedValueOnce(okJson({ rates: { TTD: 7.5, USD: 1.1 } }))
+      .mockResolvedValueOnce(okJson({ rates: { USD: 1.1 } }))
       .mockRejectedValueOnce(new Error('boom'));
     const svc = new CurrencyRatesService(fetchImpl);
     await svc.refreshNow();
@@ -68,7 +76,7 @@ describe('CurrencyRatesService', () => {
     await svc.refreshNow().catch(() => undefined);
     // Still serves the previously cached live rate.
     const usd = await svc.toTtd(100, 'USD');
-    expect(usd).toBeCloseTo(681.82, 2);
+    expect(usd).toBeCloseTo(678, 2);
   });
 
   it('treats a non-200 response as a failure and falls back', async () => {
@@ -79,11 +87,49 @@ describe('CurrencyRatesService', () => {
     expect(svc.getSnapshot().source).toBe('fallback');
   });
 
-  it('rejects responses missing the TTD rate', async () => {
+  it('accepts a response with no TTD rate, because the provider never sends one', async () => {
+    // THIS TEST USED TO ASSERT THE BUG. It required the refresh to FAIL when
+    // TTD was absent, and TTD is absent from every real response
+    // frankfurter.app has ever returned — ECB reference rates do not include
+    // it. So the behaviour it pinned was "never refresh, ever", and it passed
+    // for exactly that reason.
+    //
+    //   GET /latest?from=EUR&to=TTD,JMD,BBD,XCD,GYD,USD
+    //   -> {"rates":{"USD":1.1643}}
     const fetchImpl = vi.fn().mockResolvedValue(okJson({ rates: { USD: 1.1 } }));
     const svc = new CurrencyRatesService(fetchImpl);
     await svc.toTtd(1, 'USD');
+    expect(svc.getSnapshot().source).toBe('live');
+  });
+
+  it('still fails when the USD anchor is missing', async () => {
+    // USD is the one the provider DOES quote and the one everything crosses
+    // through, so its absence is a real failure rather than an expected gap.
+    const fetchImpl = vi.fn().mockResolvedValue(okJson({ rates: { GBP: 0.85 } }));
+    const svc = new CurrencyRatesService(fetchImpl);
+    await svc.toTtd(1, 'USD');
     expect(svc.getSnapshot().source).toBe('fallback');
+  });
+
+  it('keeps a baseline for currencies the provider does not quote', async () => {
+    // JMD, BBD, XCD and GYD are never quoted. They must not vanish, and their
+    // absence must not fail the refresh for everyone else.
+    const fetchImpl = vi.fn().mockResolvedValue(okJson({ rates: { USD: 1.1 } }));
+    const svc = new CurrencyRatesService(fetchImpl);
+    await svc.refreshNow();
+    expect(svc.getSnapshot().source).toBe('live');
+    expect(await svc.toTtd(100, 'JMD')).toBeCloseTo(4.3, 1);
+  });
+
+  it('the TTD anchor can be corrected without a deploy', async () => {
+    process.env.TTD_PER_USD = '7.00';
+    try {
+      const fetchImpl = vi.fn().mockResolvedValue(okJson({ rates: { USD: 1.1 } }));
+      const svc = new CurrencyRatesService(fetchImpl);
+      expect(await svc.toTtd(100, 'USD')).toBeCloseTo(700, 2);
+    } finally {
+      delete process.env.TTD_PER_USD;
+    }
   });
 
   it('coalesces concurrent refreshes into a single fetch', async () => {
