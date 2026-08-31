@@ -44,34 +44,6 @@
     },
     {
       "resolved": false,
-      "source": ".claude/hooks/session-guard.mjs",
-      "specifier": "node:child_process",
-      "target": "node:child_process",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": ".claude/hooks/session-guard.mjs",
-      "specifier": "node:fs",
-      "target": "node:fs",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": ".claude/hooks/session-guard.mjs",
-      "specifier": "node:path",
-      "target": "node:path",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": ".claude/hooks/session-guard.mjs",
-      "specifier": "node:url",
-      "target": "node:url",
-      "type": "external"
-    },
-    {
-      "resolved": false,
       "source": "apps/server/api/index.ts",
       "specifier": "@nestjs/core",
       "target": "@nestjs/core",
@@ -320,13 +292,6 @@
       "source": "apps/server/src/app.module.ts",
       "specifier": "./core/middleware/correlation-id.middleware",
       "target": "apps/server/src/core/middleware/correlation-id.middleware.ts",
-      "type": "relative"
-    },
-    {
-      "resolved": true,
-      "source": "apps/server/src/app.module.ts",
-      "specifier": "./core/observability/observability.module",
-      "target": "apps/server/src/core/observability/observability.module.ts",
       "type": "relative"
     },
     {
@@ -1478,48 +1443,6 @@
       "type": "external"
     },
     {
-      "resolved": false,
-      "source": "apps/server/src/core/config/doc-debt-ledger.spec.ts",
-      "specifier": "node:fs",
-      "target": "node:fs",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "apps/server/src/core/config/doc-debt-ledger.spec.ts",
-      "specifier": "node:path",
-      "target": "node:path",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "apps/server/src/core/config/doc-debt-ledger.spec.ts",
-      "specifier": "vitest",
-      "target": "vitest",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "apps/server/src/core/config/env-documented.spec.ts",
-      "specifier": "node:fs",
-      "target": "node:fs",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "apps/server/src/core/config/env-documented.spec.ts",
-      "specifier": "node:path",
-      "target": "node:path",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "apps/server/src/core/config/env-documented.spec.ts",
-      "specifier": "vitest",
-      "target": "vitest",
-      "type": "external"
-    },
-    {
       "resolved": true,
       "source": "apps/server/src/core/config/env.guard.spec.ts",
       "specifier": "./env",
@@ -1578,62 +1501,6 @@
     {
       "resolved": false,
       "source": "apps/server/src/core/config/gate-vacuity.spec.ts",
-      "specifier": "vitest",
-      "target": "vitest",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "apps/server/src/core/config/route-parity-ledger.spec.ts",
-      "specifier": "node:fs",
-      "target": "node:fs",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "apps/server/src/core/config/route-parity-ledger.spec.ts",
-      "specifier": "node:path",
-      "target": "node:path",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "apps/server/src/core/config/route-parity-ledger.spec.ts",
-      "specifier": "vitest",
-      "target": "vitest",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "apps/server/src/core/config/session-guard.spec.ts",
-      "specifier": "node:child_process",
-      "target": "node:child_process",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "apps/server/src/core/config/session-guard.spec.ts",
-      "specifier": "node:fs",
-      "target": "node:fs",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "apps/server/src/core/config/session-guard.spec.ts",
-      "specifier": "node:os",
-      "target": "node:os",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "apps/server/src/core/config/session-guard.spec.ts",
-      "specifier": "node:path",
-      "target": "node:path",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "apps/server/src/core/config/session-guard.spec.ts",
       "specifier": "vitest",
       "target": "vitest",
       "type": "external"
@@ -1804,13 +1671,6 @@
       "source": "apps/server/src/core/connectors/connector-health-monitor.service.ts",
       "specifier": "../prisma/prisma.service",
       "target": "apps/server/src/core/prisma/prisma.service.ts",
-      "type": "relative"
-    },
-    {
-      "resolved": true,
-      "source": "apps/server/src/core/connectors/connector-health-monitor.service.ts",
-      "specifier": "../scheduling/safe-interval",
-      "target": "apps/server/src/core/scheduling/safe-interval.ts",
       "type": "relative"
     },
     {
@@ -2070,13 +1930,6 @@
       "source": "apps/server/src/core/connectors/connector-sync-scheduler.service.ts",
       "specifier": "../prisma/prisma.service",
       "target": "apps/server/src/core/prisma/prisma.service.ts",
-      "type": "relative"
-    },
-    {
-      "resolved": true,
-      "source": "apps/server/src/core/connectors/connector-sync-scheduler.service.ts",
-      "specifier": "../scheduling/safe-interval",
-      "target": "apps/server/src/core/scheduling/safe-interval.ts",
       "type": "relative"
     },
     {
@@ -3613,13 +3466,6 @@
       "type": "external"
     },
     {
-      "resolved": true,
-      "source": "apps/server/src/core/filters/http-exception.filter.ts",
-      "specifier": "../observability/error-registry",
-      "target": "apps/server/src/core/observability/error-registry.ts",
-      "type": "relative"
-    },
-    {
       "resolved": false,
       "source": "apps/server/src/core/filters/http-exception.filter.ts",
       "specifier": "express",
@@ -3687,27 +3533,6 @@
       "source": "apps/server/src/core/guards/honeypot.guard.ts",
       "specifier": "@nestjs/core",
       "target": "@nestjs/core",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "apps/server/src/core/guards/public-rate-limit.guard.spec.ts",
-      "specifier": "@nestjs/common",
-      "target": "@nestjs/common",
-      "type": "external"
-    },
-    {
-      "resolved": true,
-      "source": "apps/server/src/core/guards/public-rate-limit.guard.spec.ts",
-      "specifier": "./public-rate-limit.guard",
-      "target": "apps/server/src/core/guards/public-rate-limit.guard.ts",
-      "type": "relative"
-    },
-    {
-      "resolved": false,
-      "source": "apps/server/src/core/guards/public-rate-limit.guard.spec.ts",
-      "specifier": "vitest",
-      "target": "vitest",
       "type": "external"
     },
     {
@@ -3998,97 +3823,6 @@
       "type": "external"
     },
     {
-      "resolved": true,
-      "source": "apps/server/src/core/observability/error-digest.service.spec.ts",
-      "specifier": "./error-digest.service",
-      "target": "apps/server/src/core/observability/error-digest.service.ts",
-      "type": "relative"
-    },
-    {
-      "resolved": true,
-      "source": "apps/server/src/core/observability/error-digest.service.spec.ts",
-      "specifier": "./error-registry",
-      "target": "apps/server/src/core/observability/error-registry.ts",
-      "type": "relative"
-    },
-    {
-      "resolved": false,
-      "source": "apps/server/src/core/observability/error-digest.service.spec.ts",
-      "specifier": "vitest",
-      "target": "vitest",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "apps/server/src/core/observability/error-digest.service.ts",
-      "specifier": "@nestjs/common",
-      "target": "@nestjs/common",
-      "type": "external"
-    },
-    {
-      "resolved": true,
-      "source": "apps/server/src/core/observability/error-digest.service.ts",
-      "specifier": "./error-registry",
-      "target": "apps/server/src/core/observability/error-registry.ts",
-      "type": "relative"
-    },
-    {
-      "resolved": true,
-      "source": "apps/server/src/core/observability/error-digest.service.ts",
-      "specifier": "../scheduling/safe-interval",
-      "target": "apps/server/src/core/scheduling/safe-interval.ts",
-      "type": "relative"
-    },
-    {
-      "resolved": true,
-      "source": "apps/server/src/core/observability/error-registry.spec.ts",
-      "specifier": "./error-registry",
-      "target": "apps/server/src/core/observability/error-registry.ts",
-      "type": "relative"
-    },
-    {
-      "resolved": false,
-      "source": "apps/server/src/core/observability/error-registry.spec.ts",
-      "specifier": "vitest",
-      "target": "vitest",
-      "type": "external"
-    },
-    {
-      "resolved": true,
-      "source": "apps/server/src/core/observability/error-reporting-wiring.spec.ts",
-      "specifier": "./error-registry",
-      "target": "apps/server/src/core/observability/error-registry.ts",
-      "type": "relative"
-    },
-    {
-      "resolved": true,
-      "source": "apps/server/src/core/observability/error-reporting-wiring.spec.ts",
-      "specifier": "../scheduling/safe-interval",
-      "target": "apps/server/src/core/scheduling/safe-interval.ts",
-      "type": "relative"
-    },
-    {
-      "resolved": false,
-      "source": "apps/server/src/core/observability/error-reporting-wiring.spec.ts",
-      "specifier": "vitest",
-      "target": "vitest",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "apps/server/src/core/observability/observability.module.ts",
-      "specifier": "@nestjs/common",
-      "target": "@nestjs/common",
-      "type": "external"
-    },
-    {
-      "resolved": true,
-      "source": "apps/server/src/core/observability/observability.module.ts",
-      "specifier": "./error-digest.service",
-      "target": "apps/server/src/core/observability/error-digest.service.ts",
-      "type": "relative"
-    },
-    {
       "resolved": false,
       "source": "apps/server/src/core/prisma/prisma.module.ts",
       "specifier": "@nestjs/common",
@@ -4209,34 +3943,6 @@
     },
     {
       "resolved": true,
-      "source": "apps/server/src/core/scheduling/safe-interval.spec.ts",
-      "specifier": "./safe-interval",
-      "target": "apps/server/src/core/scheduling/safe-interval.ts",
-      "type": "relative"
-    },
-    {
-      "resolved": false,
-      "source": "apps/server/src/core/scheduling/safe-interval.spec.ts",
-      "specifier": "vitest",
-      "target": "vitest",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "apps/server/src/core/scheduling/safe-interval.ts",
-      "specifier": "@nestjs/common",
-      "target": "@nestjs/common",
-      "type": "external"
-    },
-    {
-      "resolved": true,
-      "source": "apps/server/src/core/scheduling/safe-interval.ts",
-      "specifier": "../observability/error-registry",
-      "target": "apps/server/src/core/observability/error-registry.ts",
-      "type": "relative"
-    },
-    {
-      "resolved": true,
       "source": "apps/server/src/core/security/redaction.spec.ts",
       "specifier": "./redaction",
       "target": "apps/server/src/core/security/redaction.ts",
@@ -4332,13 +4038,6 @@
       "specifier": "../../modules/identity/identity.service",
       "target": "apps/server/src/modules/identity/identity.service.ts",
       "type": "relative"
-    },
-    {
-      "resolved": false,
-      "source": "apps/server/src/core/seed/seed.service.ts",
-      "specifier": "crypto",
-      "target": "crypto",
-      "type": "external"
     },
     {
       "resolved": false,
@@ -4989,13 +4688,6 @@
       "source": "apps/server/src/modules/ai/agent-health.service.ts",
       "specifier": "../../core/prisma/prisma.service",
       "target": "apps/server/src/core/prisma/prisma.service.ts",
-      "type": "relative"
-    },
-    {
-      "resolved": true,
-      "source": "apps/server/src/modules/ai/agent-health.service.ts",
-      "specifier": "../../core/scheduling/safe-interval",
-      "target": "apps/server/src/core/scheduling/safe-interval.ts",
       "type": "relative"
     },
     {
@@ -5759,13 +5451,6 @@
       "source": "apps/server/src/modules/ai/ai-usage.service.ts",
       "specifier": "../../core/prisma/prisma.service",
       "target": "apps/server/src/core/prisma/prisma.service.ts",
-      "type": "relative"
-    },
-    {
-      "resolved": true,
-      "source": "apps/server/src/modules/ai/ai-usage.service.ts",
-      "specifier": "../../core/scheduling/safe-interval",
-      "target": "apps/server/src/core/scheduling/safe-interval.ts",
       "type": "relative"
     },
     {
@@ -7187,13 +6872,6 @@
       "source": "apps/server/src/modules/ai/connector-intelligence.service.ts",
       "specifier": "../../core/prisma/prisma.service",
       "target": "apps/server/src/core/prisma/prisma.service.ts",
-      "type": "relative"
-    },
-    {
-      "resolved": true,
-      "source": "apps/server/src/modules/ai/connector-intelligence.service.ts",
-      "specifier": "../../core/scheduling/safe-interval",
-      "target": "apps/server/src/core/scheduling/safe-interval.ts",
       "type": "relative"
     },
     {
@@ -9278,13 +8956,6 @@
     {
       "resolved": true,
       "source": "apps/server/src/modules/ai/match-refresh-scheduler.service.ts",
-      "specifier": "../../core/scheduling/safe-interval",
-      "target": "apps/server/src/core/scheduling/safe-interval.ts",
-      "type": "relative"
-    },
-    {
-      "resolved": true,
-      "source": "apps/server/src/modules/ai/match-refresh-scheduler.service.ts",
       "specifier": "./business-matching.service",
       "target": "apps/server/src/modules/ai/business-matching.service.ts",
       "type": "relative"
@@ -9565,13 +9236,6 @@
     {
       "resolved": true,
       "source": "apps/server/src/modules/ai/pattern-detector.service.ts",
-      "specifier": "../../core/scheduling/safe-interval",
-      "target": "apps/server/src/core/scheduling/safe-interval.ts",
-      "type": "relative"
-    },
-    {
-      "resolved": true,
-      "source": "apps/server/src/modules/ai/pattern-detector.service.ts",
       "specifier": "./ai-memory.service",
       "target": "apps/server/src/modules/ai/ai-memory.service.ts",
       "type": "relative"
@@ -9700,13 +9364,6 @@
       "source": "apps/server/src/modules/ai/plan-executor.service.ts",
       "specifier": "../../core/prisma/prisma.service",
       "target": "apps/server/src/core/prisma/prisma.service.ts",
-      "type": "relative"
-    },
-    {
-      "resolved": true,
-      "source": "apps/server/src/modules/ai/plan-executor.service.ts",
-      "specifier": "../../core/scheduling/safe-interval",
-      "target": "apps/server/src/core/scheduling/safe-interval.ts",
       "type": "relative"
     },
     {
@@ -18812,13 +18469,6 @@
     {
       "resolved": true,
       "source": "apps/server/src/modules/calendar/calendar-sync.scheduler.ts",
-      "specifier": "../../core/scheduling/safe-interval",
-      "target": "apps/server/src/core/scheduling/safe-interval.ts",
-      "type": "relative"
-    },
-    {
-      "resolved": true,
-      "source": "apps/server/src/modules/calendar/calendar-sync.scheduler.ts",
       "specifier": "./calendar-sync.service",
       "target": "apps/server/src/modules/calendar/calendar-sync.service.ts",
       "type": "relative"
@@ -20191,13 +19841,6 @@
     {
       "resolved": true,
       "source": "apps/server/src/modules/command/command-scheduler.service.ts",
-      "specifier": "../../core/scheduling/safe-interval",
-      "target": "apps/server/src/core/scheduling/safe-interval.ts",
-      "type": "relative"
-    },
-    {
-      "resolved": true,
-      "source": "apps/server/src/modules/command/command-scheduler.service.ts",
       "specifier": "./command-generator.service",
       "target": "apps/server/src/modules/command/command-generator.service.ts",
       "type": "relative"
@@ -21122,6 +20765,13 @@
     {
       "resolved": true,
       "source": "apps/server/src/modules/commerce/commerce.module.ts",
+      "specifier": "./document-template/document-template.controller",
+      "target": "apps/server/src/modules/commerce/document-template/document-template.controller.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/commerce/commerce.module.ts",
       "specifier": "./document-template/document-template.module",
       "target": "apps/server/src/modules/commerce/document-template/document-template.module.ts",
       "type": "relative"
@@ -21892,13 +21542,6 @@
     {
       "resolved": true,
       "source": "apps/server/src/modules/commerce/financial-briefing-scheduler.service.ts",
-      "specifier": "../../core/scheduling/safe-interval",
-      "target": "apps/server/src/core/scheduling/safe-interval.ts",
-      "type": "relative"
-    },
-    {
-      "resolved": true,
-      "source": "apps/server/src/modules/commerce/financial-briefing-scheduler.service.ts",
       "specifier": "./financial-copilot.service",
       "target": "apps/server/src/modules/commerce/financial-copilot.service.ts",
       "type": "relative"
@@ -22340,13 +21983,6 @@
     {
       "resolved": true,
       "source": "apps/server/src/modules/commerce/margin-snapshot-scheduler.service.ts",
-      "specifier": "../../core/scheduling/safe-interval",
-      "target": "apps/server/src/core/scheduling/safe-interval.ts",
-      "type": "relative"
-    },
-    {
-      "resolved": true,
-      "source": "apps/server/src/modules/commerce/margin-snapshot-scheduler.service.ts",
       "specifier": "./landed-cost-engine.service",
       "target": "apps/server/src/modules/commerce/landed-cost-engine.service.ts",
       "type": "relative"
@@ -22504,27 +22140,6 @@
       "specifier": "./commerce.service",
       "target": "apps/server/src/modules/commerce/commerce.service.ts",
       "type": "relative"
-    },
-    {
-      "resolved": false,
-      "source": "apps/server/src/modules/commerce/recurring-invoice-history.spec.ts",
-      "specifier": "@nestjs/common",
-      "target": "@nestjs/common",
-      "type": "external"
-    },
-    {
-      "resolved": true,
-      "source": "apps/server/src/modules/commerce/recurring-invoice-history.spec.ts",
-      "specifier": "./recurring-invoice.service",
-      "target": "apps/server/src/modules/commerce/recurring-invoice.service.ts",
-      "type": "relative"
-    },
-    {
-      "resolved": false,
-      "source": "apps/server/src/modules/commerce/recurring-invoice-history.spec.ts",
-      "specifier": "vitest",
-      "target": "vitest",
-      "type": "external"
     },
     {
       "resolved": false,
@@ -23497,13 +23112,6 @@
       "source": "apps/server/src/modules/communications/delivery-queue.service.ts",
       "specifier": "../../core/prisma/prisma.service",
       "target": "apps/server/src/core/prisma/prisma.service.ts",
-      "type": "relative"
-    },
-    {
-      "resolved": true,
-      "source": "apps/server/src/modules/communications/delivery-queue.service.ts",
-      "specifier": "../../core/scheduling/safe-interval",
-      "target": "apps/server/src/core/scheduling/safe-interval.ts",
       "type": "relative"
     },
     {
@@ -26169,13 +25777,6 @@
     {
       "resolved": true,
       "source": "apps/server/src/modules/crm/best-channel-scheduler.service.ts",
-      "specifier": "../../core/scheduling/safe-interval",
-      "target": "apps/server/src/core/scheduling/safe-interval.ts",
-      "type": "relative"
-    },
-    {
-      "resolved": true,
-      "source": "apps/server/src/modules/crm/best-channel-scheduler.service.ts",
       "specifier": "./best-channel.service",
       "target": "apps/server/src/modules/crm/best-channel.service.ts",
       "type": "relative"
@@ -26781,13 +26382,6 @@
       "specifier": "@nestjs/common",
       "target": "@nestjs/common",
       "type": "external"
-    },
-    {
-      "resolved": true,
-      "source": "apps/server/src/modules/crm/crm-data-quality.scheduler.ts",
-      "specifier": "../../core/scheduling/safe-interval",
-      "target": "apps/server/src/core/scheduling/safe-interval.ts",
-      "type": "relative"
     },
     {
       "resolved": true,
@@ -29151,13 +28745,6 @@
     {
       "resolved": true,
       "source": "apps/server/src/modules/crm/privacy/contact-privacy.service.ts",
-      "specifier": "../../../core/scheduling/safe-interval",
-      "target": "apps/server/src/core/scheduling/safe-interval.ts",
-      "type": "relative"
-    },
-    {
-      "resolved": true,
-      "source": "apps/server/src/modules/crm/privacy/contact-privacy.service.ts",
       "specifier": "./contact-audit.service",
       "target": "apps/server/src/modules/crm/privacy/contact-audit.service.ts",
       "type": "relative"
@@ -29459,20 +29046,6 @@
     {
       "resolved": true,
       "source": "apps/server/src/modules/diagnostics/diagnostics.controller.ts",
-      "specifier": "../../core/auth/auth.guard",
-      "target": "apps/server/src/core/auth/auth.guard.ts",
-      "type": "relative"
-    },
-    {
-      "resolved": true,
-      "source": "apps/server/src/modules/diagnostics/diagnostics.controller.ts",
-      "specifier": "../../core/observability/error-registry",
-      "target": "apps/server/src/core/observability/error-registry.ts",
-      "type": "relative"
-    },
-    {
-      "resolved": true,
-      "source": "apps/server/src/modules/diagnostics/diagnostics.controller.ts",
       "specifier": "./diagnostics.service",
       "target": "apps/server/src/modules/diagnostics/diagnostics.service.ts",
       "type": "relative"
@@ -29525,13 +29098,6 @@
       "specifier": "./diagnostics.service",
       "target": "apps/server/src/modules/diagnostics/diagnostics.service.ts",
       "type": "relative"
-    },
-    {
-      "resolved": true,
-      "source": "apps/server/src/modules/diagnostics/diagnostics.service.ts",
-      "specifier": "@keyflow/db",
-      "target": "@keyflow/db",
-      "type": "workspace"
     },
     {
       "resolved": false,
@@ -29860,13 +29426,6 @@
       "source": "apps/server/src/modules/email-marketing/campaign-scheduler.service.ts",
       "specifier": "../../core/prisma/prisma.service",
       "target": "apps/server/src/core/prisma/prisma.service.ts",
-      "type": "relative"
-    },
-    {
-      "resolved": true,
-      "source": "apps/server/src/modules/email-marketing/campaign-scheduler.service.ts",
-      "specifier": "../../core/scheduling/safe-interval",
-      "target": "apps/server/src/core/scheduling/safe-interval.ts",
       "type": "relative"
     },
     {
@@ -32700,13 +32259,6 @@
     {
       "resolved": true,
       "source": "apps/server/src/modules/finance/recurring-journal-entry.service.ts",
-      "specifier": "../../core/scheduling/safe-interval",
-      "target": "apps/server/src/core/scheduling/safe-interval.ts",
-      "type": "relative"
-    },
-    {
-      "resolved": true,
-      "source": "apps/server/src/modules/finance/recurring-journal-entry.service.ts",
       "specifier": "./posting.service",
       "target": "apps/server/src/modules/finance/posting.service.ts",
       "type": "relative"
@@ -34305,13 +33857,6 @@
       "source": "apps/server/src/modules/growth-intelligence/growth-intelligence-scheduler.service.ts",
       "specifier": "../../core/prisma/prisma.service",
       "target": "apps/server/src/core/prisma/prisma.service.ts",
-      "type": "relative"
-    },
-    {
-      "resolved": true,
-      "source": "apps/server/src/modules/growth-intelligence/growth-intelligence-scheduler.service.ts",
-      "specifier": "../../core/scheduling/safe-interval",
-      "target": "apps/server/src/core/scheduling/safe-interval.ts",
       "type": "relative"
     },
     {
@@ -36216,13 +35761,6 @@
       "source": "apps/server/src/modules/intelligence/scheduled-scans.service.ts",
       "specifier": "../../core/prisma/prisma.service",
       "target": "apps/server/src/core/prisma/prisma.service.ts",
-      "type": "relative"
-    },
-    {
-      "resolved": true,
-      "source": "apps/server/src/modules/intelligence/scheduled-scans.service.ts",
-      "specifier": "../../core/scheduling/safe-interval",
-      "target": "apps/server/src/core/scheduling/safe-interval.ts",
       "type": "relative"
     },
     {
@@ -42017,13 +41555,6 @@
     {
       "resolved": true,
       "source": "apps/server/src/modules/key-cortex/key-cortex-executor.service.ts",
-      "specifier": "../../core/scheduling/safe-interval",
-      "target": "apps/server/src/core/scheduling/safe-interval.ts",
-      "type": "relative"
-    },
-    {
-      "resolved": true,
-      "source": "apps/server/src/modules/key-cortex/key-cortex-executor.service.ts",
       "specifier": "../business-genome/key-genome/genome-autonomy-gate.service",
       "target": "apps/server/src/modules/business-genome/key-genome/genome-autonomy-gate.service.ts",
       "type": "relative"
@@ -43714,13 +43245,6 @@
       "specifier": "@nestjs/schedule",
       "target": "@nestjs/schedule",
       "type": "external"
-    },
-    {
-      "resolved": true,
-      "source": "apps/server/src/modules/key-cortex/key-cortex-realtime.service.ts",
-      "specifier": "../../core/scheduling/safe-interval",
-      "target": "apps/server/src/core/scheduling/safe-interval.ts",
-      "type": "relative"
     },
     {
       "resolved": true,
@@ -49129,13 +48653,6 @@
     {
       "resolved": true,
       "source": "apps/server/src/modules/momentum/momentum-scheduler.service.ts",
-      "specifier": "../../core/scheduling/safe-interval",
-      "target": "apps/server/src/core/scheduling/safe-interval.ts",
-      "type": "relative"
-    },
-    {
-      "resolved": true,
-      "source": "apps/server/src/modules/momentum/momentum-scheduler.service.ts",
       "specifier": "./client-momentum.service",
       "target": "apps/server/src/modules/momentum/client-momentum.service.ts",
       "type": "relative"
@@ -49972,13 +49489,6 @@
       "specifier": "@nestjs/common",
       "target": "@nestjs/common",
       "type": "external"
-    },
-    {
-      "resolved": true,
-      "source": "apps/server/src/modules/payments/currency-rates.scheduler.ts",
-      "specifier": "../../core/scheduling/safe-interval",
-      "target": "apps/server/src/core/scheduling/safe-interval.ts",
-      "type": "relative"
     },
     {
       "resolved": true,
@@ -53754,13 +53264,6 @@
       "type": "relative"
     },
     {
-      "resolved": true,
-      "source": "apps/server/src/modules/social/social-connections.service.ts",
-      "specifier": "../../core/scheduling/safe-interval",
-      "target": "apps/server/src/core/scheduling/safe-interval.ts",
-      "type": "relative"
-    },
-    {
       "resolved": false,
       "source": "apps/server/src/modules/social/social-gap-detector.service.ts",
       "specifier": "@nestjs/common",
@@ -55338,13 +54841,6 @@
     {
       "resolved": true,
       "source": "apps/server/src/modules/temporal-flow/temporal-flow-genome-bridge.service.ts",
-      "specifier": "../../core/scheduling/safe-interval",
-      "target": "apps/server/src/core/scheduling/safe-interval.ts",
-      "type": "relative"
-    },
-    {
-      "resolved": true,
-      "source": "apps/server/src/modules/temporal-flow/temporal-flow-genome-bridge.service.ts",
       "specifier": "../business-genome/key-genome/genome-signal.service",
       "target": "apps/server/src/modules/business-genome/key-genome/genome-signal.service.ts",
       "type": "relative"
@@ -56470,20 +55966,6 @@
       "type": "relative"
     },
     {
-      "resolved": true,
-      "source": "apps/server/src/modules/whatsapp/whatsapp-conversations.spec.ts",
-      "specifier": "./whatsapp.service",
-      "target": "apps/server/src/modules/whatsapp/whatsapp.service.ts",
-      "type": "relative"
-    },
-    {
-      "resolved": false,
-      "source": "apps/server/src/modules/whatsapp/whatsapp-conversations.spec.ts",
-      "specifier": "vitest",
-      "target": "vitest",
-      "type": "external"
-    },
-    {
       "resolved": false,
       "source": "apps/server/src/modules/whatsapp/whatsapp-notifications.listener.ts",
       "specifier": "@nestjs/common",
@@ -56691,13 +56173,6 @@
       "source": "apps/server/src/modules/whatsapp/whatsapp.service.ts",
       "specifier": "@nestjs/event-emitter",
       "target": "@nestjs/event-emitter",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "apps/server/src/modules/whatsapp/whatsapp.service.ts",
-      "specifier": "@nestjs/schedule",
-      "target": "@nestjs/schedule",
       "type": "external"
     },
     {
@@ -99326,13 +98801,6 @@
     {
       "resolved": false,
       "source": "apps/web/src/components/device/capture-sheet.tsx",
-      "specifier": "@/lib/workspace",
-      "target": "@/lib/workspace",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "apps/web/src/components/device/capture-sheet.tsx",
       "specifier": "lucide-react",
       "target": "lucide-react",
       "type": "external"
@@ -99788,6 +99256,41 @@
     {
       "resolved": false,
       "source": "apps/web/src/components/key-talk-panel.tsx",
+      "specifier": "react",
+      "target": "react",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/web/src/components/key/KeyActivityFeed.tsx",
+      "specifier": "@/lib/api-base",
+      "target": "@/lib/api-base",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/web/src/components/key/KeyActivityFeed.tsx",
+      "specifier": "date-fns",
+      "target": "date-fns",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/web/src/components/key/KeyActivityFeed.tsx",
+      "specifier": "framer-motion",
+      "target": "framer-motion",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/web/src/components/key/KeyActivityFeed.tsx",
+      "specifier": "lucide-react",
+      "target": "lucide-react",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/web/src/components/key/KeyActivityFeed.tsx",
       "specifier": "react",
       "target": "react",
       "type": "external"
@@ -104947,13 +104450,6 @@
     {
       "resolved": false,
       "source": "apps/web/src/hooks/use-upload.ts",
-      "specifier": "@/lib/workspace",
-      "target": "@/lib/workspace",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "apps/web/src/hooks/use-upload.ts",
       "specifier": "react",
       "target": "react",
       "type": "external"
@@ -104970,13 +104466,6 @@
       "source": "apps/web/src/hooks/use-username-availability.ts",
       "specifier": "react",
       "target": "react",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "apps/web/src/lib/__tests__/api-get-dedupe.test.ts",
-      "specifier": "vitest",
-      "target": "vitest",
       "type": "external"
     },
     {
@@ -105148,27 +104637,6 @@
       "type": "external"
     },
     {
-      "resolved": false,
-      "source": "apps/web/src/lib/__tests__/sw-credentialed-cache.test.ts",
-      "specifier": "node:fs",
-      "target": "node:fs",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "apps/web/src/lib/__tests__/sw-credentialed-cache.test.ts",
-      "specifier": "node:path",
-      "target": "node:path",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "apps/web/src/lib/__tests__/sw-credentialed-cache.test.ts",
-      "specifier": "vitest",
-      "target": "vitest",
-      "type": "external"
-    },
-    {
       "resolved": true,
       "source": "apps/web/src/lib/__tests__/tool-routes.spec.ts",
       "specifier": "../tool-route-audit",
@@ -105178,27 +104646,6 @@
     {
       "resolved": false,
       "source": "apps/web/src/lib/__tests__/tool-routes.spec.ts",
-      "specifier": "vitest",
-      "target": "vitest",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "apps/web/src/lib/__tests__/upload-presign-contract.spec.ts",
-      "specifier": "node:fs",
-      "target": "node:fs",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "apps/web/src/lib/__tests__/upload-presign-contract.spec.ts",
-      "specifier": "node:path",
-      "target": "node:path",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "apps/web/src/lib/__tests__/upload-presign-contract.spec.ts",
       "specifier": "vitest",
       "target": "vitest",
       "type": "external"
@@ -105968,27 +105415,6 @@
     },
     {
       "resolved": false,
-      "source": "packages/api/src/no-raw-records.spec.ts",
-      "specifier": "node:fs",
-      "target": "node:fs",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "packages/api/src/no-raw-records.spec.ts",
-      "specifier": "node:path",
-      "target": "node:path",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "packages/api/src/no-raw-records.spec.ts",
-      "specifier": "vitest",
-      "target": "vitest",
-      "type": "external"
-    },
-    {
-      "resolved": false,
       "source": "packages/api/src/root.ts",
       "specifier": "@trpc/server",
       "target": "@trpc/server",
@@ -106409,13 +105835,6 @@
     },
     {
       "resolved": false,
-      "source": "packages/api/vitest.config.ts",
-      "specifier": "vitest/config",
-      "target": "vitest/config",
-      "type": "external"
-    },
-    {
-      "resolved": false,
       "source": "packages/db/apply-tag-migration.ts",
       "specifier": "node:fs",
       "target": "node:fs",
@@ -106534,20 +105953,6 @@
       "type": "external"
     },
     {
-      "resolved": true,
-      "source": "packages/db/src/middleware/token-encryption.spec.ts",
-      "specifier": "./token-encryption",
-      "target": "packages/db/src/middleware/token-encryption.ts",
-      "type": "relative"
-    },
-    {
-      "resolved": false,
-      "source": "packages/db/src/middleware/token-encryption.spec.ts",
-      "specifier": "vitest",
-      "target": "vitest",
-      "type": "external"
-    },
-    {
       "resolved": false,
       "source": "packages/db/src/middleware/token-encryption.ts",
       "specifier": "@prisma/client",
@@ -106567,13 +105972,6 @@
       "specifier": "./client",
       "target": "packages/db/src/client.ts",
       "type": "relative"
-    },
-    {
-      "resolved": false,
-      "source": "packages/db/vitest.config.ts",
-      "specifier": "vitest/config",
-      "target": "vitest/config",
-      "type": "external"
     },
     {
       "resolved": false,
@@ -107088,27 +106486,6 @@
     },
     {
       "resolved": false,
-      "source": "scripts/env-audit/sync-env-example.mjs",
-      "specifier": "node:child_process",
-      "target": "node:child_process",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "scripts/env-audit/sync-env-example.mjs",
-      "specifier": "node:fs",
-      "target": "node:fs",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "scripts/env-audit/sync-env-example.mjs",
-      "specifier": "node:path",
-      "target": "node:path",
-      "type": "external"
-    },
-    {
-      "resolved": false,
       "source": "scripts/extract-bottom-sections.mjs",
       "specifier": "fs",
       "target": "fs",
@@ -107242,90 +106619,6 @@
     },
     {
       "resolved": false,
-      "source": "scripts/os/count-flow-tools.mjs",
-      "specifier": "node:fs",
-      "target": "node:fs",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "scripts/os/count-flow-tools.mjs",
-      "specifier": "node:path",
-      "target": "node:path",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "scripts/os/count-flow-tools.mjs",
-      "specifier": "node:url",
-      "target": "node:url",
-      "type": "external"
-    },
-    {
-      "resolved": true,
-      "source": "scripts/os/count-flow-tools.mjs",
-      "specifier": "./lib.mjs",
-      "target": "scripts/os/lib.mjs",
-      "type": "relative"
-    },
-    {
-      "resolved": false,
-      "source": "scripts/os/ledger-sizes.mjs",
-      "specifier": "node:fs",
-      "target": "node:fs",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "scripts/os/ledger-sizes.mjs",
-      "specifier": "node:path",
-      "target": "node:path",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "scripts/os/ledger-sizes.mjs",
-      "specifier": "node:url",
-      "target": "node:url",
-      "type": "external"
-    },
-    {
-      "resolved": true,
-      "source": "scripts/os/ledger-sizes.mjs",
-      "specifier": "./lib.mjs",
-      "target": "scripts/os/lib.mjs",
-      "type": "relative"
-    },
-    {
-      "resolved": false,
-      "source": "scripts/os/probe-routes.mjs",
-      "specifier": "node:fs",
-      "target": "node:fs",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "scripts/os/probe-routes.mjs",
-      "specifier": "node:module",
-      "target": "node:module",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "scripts/os/probe-routes.mjs",
-      "specifier": "node:path",
-      "target": "node:path",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "scripts/os/probe-routes.mjs",
-      "specifier": "node:url",
-      "target": "node:url",
-      "type": "external"
-    },
-    {
-      "resolved": false,
       "source": "scripts/revert-problematic-renames.mjs",
       "specifier": "fs",
       "target": "fs",
@@ -107358,76 +106651,6 @@
       "specifier": "typescript",
       "target": "typescript",
       "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "scripts/system-map/build-xlsx.mjs",
-      "specifier": "node:fs",
-      "target": "node:fs",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "scripts/system-map/build-xlsx.mjs",
-      "specifier": "node:module",
-      "target": "node:module",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "scripts/system-map/build-xlsx.mjs",
-      "specifier": "node:path",
-      "target": "node:path",
-      "type": "external"
-    },
-    {
-      "resolved": true,
-      "source": "scripts/system-map/build-xlsx.mjs",
-      "specifier": "./extract.mjs",
-      "target": "scripts/system-map/extract.mjs",
-      "type": "relative"
-    },
-    {
-      "resolved": false,
-      "source": "scripts/system-map/extract.mjs",
-      "specifier": "node:child_process",
-      "target": "node:child_process",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "scripts/system-map/extract.mjs",
-      "specifier": "node:fs",
-      "target": "node:fs",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "scripts/system-map/extract.mjs",
-      "specifier": "node:path",
-      "target": "node:path",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "scripts/system-map/generate.mjs",
-      "specifier": "node:fs",
-      "target": "node:fs",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "scripts/system-map/generate.mjs",
-      "specifier": "node:path",
-      "target": "node:path",
-      "type": "external"
-    },
-    {
-      "resolved": true,
-      "source": "scripts/system-map/generate.mjs",
-      "specifier": "./extract.mjs",
-      "target": "scripts/system-map/extract.mjs",
-      "type": "relative"
     },
     {
       "resolved": false,
@@ -107487,9 +106710,9 @@
     }
   ],
   "meta": {
-    "edges": 15355,
-    "nodes": 3748,
-    "root": "/home/user/KEYFLOWOS",
+    "edges": 15244,
+    "nodes": 3717,
+    "root": "C:/Users/sachd/Downloads/KEYFLOWOS",
     "scanner": "codebase-architect/dependency_scan.py"
   },
   "nodes": [
@@ -107516,11 +106739,6 @@
     {
       "extension": ".tsx",
       "id": ".agents/skills/remotion-best-practices/rules/assets/text-animations-word-highlight.tsx",
-      "type": "file"
-    },
-    {
-      "extension": ".mjs",
-      "id": ".claude/hooks/session-guard.mjs",
       "type": "file"
     },
     {
@@ -108874,16 +108092,6 @@
     },
     {
       "extension": ".ts",
-      "id": "apps/server/src/core/config/doc-debt-ledger.spec.ts",
-      "type": "file"
-    },
-    {
-      "extension": ".ts",
-      "id": "apps/server/src/core/config/env-documented.spec.ts",
-      "type": "file"
-    },
-    {
-      "extension": ".ts",
       "id": "apps/server/src/core/config/env.guard.spec.ts",
       "type": "file"
     },
@@ -108904,17 +108112,7 @@
     },
     {
       "extension": ".ts",
-      "id": "apps/server/src/core/config/route-parity-ledger.spec.ts",
-      "type": "file"
-    },
-    {
-      "extension": ".ts",
       "id": "apps/server/src/core/config/runtime-urls.ts",
-      "type": "file"
-    },
-    {
-      "extension": ".ts",
-      "id": "apps/server/src/core/config/session-guard.spec.ts",
       "type": "file"
     },
     {
@@ -109229,11 +108427,6 @@
     },
     {
       "extension": ".ts",
-      "id": "apps/server/src/core/guards/public-rate-limit.guard.spec.ts",
-      "type": "file"
-    },
-    {
-      "extension": ".ts",
       "id": "apps/server/src/core/guards/public-rate-limit.guard.ts",
       "type": "file"
     },
@@ -109289,36 +108482,6 @@
     },
     {
       "extension": ".ts",
-      "id": "apps/server/src/core/observability/error-digest.service.spec.ts",
-      "type": "file"
-    },
-    {
-      "extension": ".ts",
-      "id": "apps/server/src/core/observability/error-digest.service.ts",
-      "type": "file"
-    },
-    {
-      "extension": ".ts",
-      "id": "apps/server/src/core/observability/error-registry.spec.ts",
-      "type": "file"
-    },
-    {
-      "extension": ".ts",
-      "id": "apps/server/src/core/observability/error-registry.ts",
-      "type": "file"
-    },
-    {
-      "extension": ".ts",
-      "id": "apps/server/src/core/observability/error-reporting-wiring.spec.ts",
-      "type": "file"
-    },
-    {
-      "extension": ".ts",
-      "id": "apps/server/src/core/observability/observability.module.ts",
-      "type": "file"
-    },
-    {
-      "extension": ".ts",
       "id": "apps/server/src/core/prisma/prisma.module.ts",
       "type": "file"
     },
@@ -109350,16 +108513,6 @@
     {
       "extension": ".ts",
       "id": "apps/server/src/core/redis/redis.service.ts",
-      "type": "file"
-    },
-    {
-      "extension": ".ts",
-      "id": "apps/server/src/core/scheduling/safe-interval.spec.ts",
-      "type": "file"
-    },
-    {
-      "extension": ".ts",
-      "id": "apps/server/src/core/scheduling/safe-interval.ts",
       "type": "file"
     },
     {
@@ -111880,11 +111033,6 @@
     {
       "extension": ".ts",
       "id": "apps/server/src/modules/commerce/quote-stale.scheduler.ts",
-      "type": "file"
-    },
-    {
-      "extension": ".ts",
-      "id": "apps/server/src/modules/commerce/recurring-invoice-history.spec.ts",
       "type": "file"
     },
     {
@@ -117039,11 +116187,6 @@
     },
     {
       "extension": ".ts",
-      "id": "apps/server/src/modules/whatsapp/whatsapp-conversations.spec.ts",
-      "type": "file"
-    },
-    {
-      "extension": ".ts",
       "id": "apps/server/src/modules/whatsapp/whatsapp-notifications.listener.ts",
       "type": "file"
     },
@@ -117495,6 +116638,11 @@
     {
       "extension": ".mjs",
       "id": "apps/web/eslint.config.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/web/next-env.d.ts",
       "type": "file"
     },
     {
@@ -123269,6 +122417,11 @@
     },
     {
       "extension": ".tsx",
+      "id": "apps/web/src/components/key/KeyActivityFeed.tsx",
+      "type": "file"
+    },
+    {
+      "extension": ".tsx",
       "id": "apps/web/src/components/key/KeyAwarenessPanel.tsx",
       "type": "file"
     },
@@ -124279,11 +123432,6 @@
     },
     {
       "extension": ".ts",
-      "id": "apps/web/src/lib/__tests__/api-get-dedupe.test.ts",
-      "type": "file"
-    },
-    {
-      "extension": ".ts",
       "id": "apps/web/src/lib/__tests__/api-refresh-retry.test.ts",
       "type": "file"
     },
@@ -124329,17 +123477,7 @@
     },
     {
       "extension": ".ts",
-      "id": "apps/web/src/lib/__tests__/sw-credentialed-cache.test.ts",
-      "type": "file"
-    },
-    {
-      "extension": ".ts",
       "id": "apps/web/src/lib/__tests__/tool-routes.spec.ts",
-      "type": "file"
-    },
-    {
-      "extension": ".ts",
-      "id": "apps/web/src/lib/__tests__/upload-presign-contract.spec.ts",
       "type": "file"
     },
     {
@@ -125097,14 +124235,6 @@
       "type": "external"
     },
     {
-      "id": "node:module",
-      "type": "external"
-    },
-    {
-      "id": "node:os",
-      "type": "external"
-    },
-    {
       "id": "node:path",
       "type": "external"
     },
@@ -125150,11 +124280,6 @@
     {
       "extension": ".ts",
       "id": "packages/api/src/lib/credentials.ts",
-      "type": "file"
-    },
-    {
-      "extension": ".ts",
-      "id": "packages/api/src/no-raw-records.spec.ts",
       "type": "file"
     },
     {
@@ -125229,11 +124354,6 @@
     },
     {
       "extension": ".ts",
-      "id": "packages/api/vitest.config.ts",
-      "type": "file"
-    },
-    {
-      "extension": ".ts",
       "id": "packages/db/apply-tag-migration.ts",
       "type": "file"
     },
@@ -125284,11 +124404,6 @@
     },
     {
       "extension": ".ts",
-      "id": "packages/db/src/middleware/token-encryption.spec.ts",
-      "type": "file"
-    },
-    {
-      "extension": ".ts",
       "id": "packages/db/src/middleware/token-encryption.ts",
       "type": "file"
     },
@@ -125300,11 +124415,6 @@
     {
       "extension": ".ts",
       "id": "packages/db/src/types/pg.d.ts",
-      "type": "file"
-    },
-    {
-      "extension": ".ts",
-      "id": "packages/db/vitest.config.ts",
       "type": "file"
     },
     {
@@ -125650,11 +124760,6 @@
     },
     {
       "extension": ".mjs",
-      "id": "scripts/env-audit/sync-env-example.mjs",
-      "type": "file"
-    },
-    {
-      "extension": ".mjs",
       "id": "scripts/extract-bottom-sections.mjs",
       "type": "file"
     },
@@ -125695,26 +124800,6 @@
     },
     {
       "extension": ".mjs",
-      "id": "scripts/os/count-flow-tools.mjs",
-      "type": "file"
-    },
-    {
-      "extension": ".mjs",
-      "id": "scripts/os/ledger-sizes.mjs",
-      "type": "file"
-    },
-    {
-      "extension": ".mjs",
-      "id": "scripts/os/lib.mjs",
-      "type": "file"
-    },
-    {
-      "extension": ".mjs",
-      "id": "scripts/os/probe-routes.mjs",
-      "type": "file"
-    },
-    {
-      "extension": ".mjs",
       "id": "scripts/revert-problematic-renames.mjs",
       "type": "file"
     },
@@ -125726,21 +124811,6 @@
     {
       "extension": ".mjs",
       "id": "scripts/split-client.mjs",
-      "type": "file"
-    },
-    {
-      "extension": ".mjs",
-      "id": "scripts/system-map/build-xlsx.mjs",
-      "type": "file"
-    },
-    {
-      "extension": ".mjs",
-      "id": "scripts/system-map/extract.mjs",
-      "type": "file"
-    },
-    {
-      "extension": ".mjs",
-      "id": "scripts/system-map/generate.mjs",
       "type": "file"
     },
     {

@@ -371,6 +371,26 @@ const BUSINESS_ID_MODELS = new Set([
   // `const where = { businessId, isActive: true }`, and both writes do
   // findFirst({ id: connectionId, businessId }) and throw first.
   'SupplierConnection',
+  // ── Two scoped, 2026-08-30 (fifth pass) ───────────────────────────────────
+  // ChannelConnection (19 sites) and ChannelDestination (12), all in
+  // channel-connection.service.ts.
+  //
+  //   update / delete / runHealthCheck   each does
+  //                                      findFirst({ id, businessId }) first.
+  //   upsertDestination                  proves the CONNECTION belongs to the
+  //                                      business, then looks the destination
+  //                                      up within that connection — so
+  //                                      connectionId is already attributed.
+  //   toggleDestination                  findFirst({ id: destId, businessId }).
+  //   listDestinations                   `const where = { businessId }`.
+  //   syncFromSocial                     findFirst({ businessId, provider }).
+  //
+  // Two methods take no businessId at all — `getDestination(id)` and
+  // `updateHealthState(id, ...)`. Both have ZERO callers. They are dead rather
+  // than dangerous, and scoping them costs nothing; if one is ever wired up it
+  // will now be scoped by default instead of unscoped by default, which is the
+  // right way round for a mistake to lean.
+  'ChannelConnection', 'ChannelDestination',
 ]);
 
 

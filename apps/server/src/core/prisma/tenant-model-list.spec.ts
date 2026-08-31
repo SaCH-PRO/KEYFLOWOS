@@ -103,7 +103,7 @@ describe('BUSINESS_ID_MODELS describes reality', () => {
  * 2026-08-09 by adding one and watching this file pass.
  *
  * When this was written: 347 models carry a businessId, 77 were scoped, 270
- * were these. Now: 348 carry one, 321 scoped, 18 here, 9 in NEVER_SCOPE. The
+ * were these. Now: 348 carry one, 323 scoped, 15 here, 10 in NEVER_SCOPE. The
  * three numbers sum to 348 exactly, and the assertions below are what keep them
  * summing — a model has one status, never two and never none.
  *
@@ -131,9 +131,8 @@ describe('BUSINESS_ID_MODELS describes reality', () => {
 const ACKNOWLEDGED_UNSCOPED = new Set([
  
  
-  'ChannelConnection', 'ChannelDestination',
  
-  'ContactExternalMapping', 'ContactForgetRequest',
+  'ContactExternalMapping',
  
   'Course',
   'DriveIntakeFile',
@@ -208,6 +207,20 @@ const NEVER_SCOPE = new Set([
   // devices are not a per-business set, and the expired-endpoint sweeps
   // deliberately clear a dead endpoint everywhere it appears.
   'PortalAccess', 'PushSubscription',
+  //
+  // ContactForgetRequest, 2026-08-30 — the sibling of ContactExportJob above,
+  // in the same file, for a related reason.
+  //
+  // `runPurgeCycle()` takes no businessId and sweeps every tenant's due
+  // erasure requests, because a GDPR erasure obligation is not something one
+  // business's session should bound. Scoped, a run under any tenant context
+  // would purge that business's requests and silently leave every other
+  // business's obligations unmet — no error, no count, nothing to notice, and
+  // the thing left undone is a legal duty.
+  //
+  // This is the one model on the list where the silent-null failure mode is
+  // not merely a bug.
+  'ContactForgetRequest',
 ]);
 
 describe('the unscoped set may only shrink', () => {
