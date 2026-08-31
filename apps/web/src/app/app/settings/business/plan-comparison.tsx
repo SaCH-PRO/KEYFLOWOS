@@ -54,7 +54,7 @@ const FEATURE_GRID: FeatureGroup[] = [
   {
     category: "AI & Automation",
     features: [
-      { label: "AI credits / month", free: "25", flow: "200", keyflow: "Unlimited" },
+      { label: "AI credits / month", free: "50", flow: "500", keyflow: "Unlimited" },
       { label: "AI Command Hub", free: true, flow: true, keyflow: true },
       { label: "Playbook automations", free: "2", flow: "20", keyflow: "Unlimited" },
       { label: "AI cash flow forecast", free: false, flow: true, keyflow: true },

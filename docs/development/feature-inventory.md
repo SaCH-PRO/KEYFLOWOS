@@ -106,7 +106,7 @@
 | KEY awareness/noticed panels | Fetch real endpoints | P2 | ✅ Working | `command-center/page.tsx:454-456` |
 | Snapshot silent degradation | `safeResolve` fallbacks | P2 | ⚠️ Partial | Hides downstream failures; no UI warning |
 | Legacy genome profile links | Command Center links | P3 | ✅ Working | Nav Profile link and integrity banner now point to `/app/genome` |
-| Dead mobile bottom nav v1 | Tests reference unused component | P3 | 🔇 Orphaned | `mobile-bottom-nav.tsx` no longer used |
+| Dead mobile bottom nav v1 | Tests reference unused component | P3 | ✅ Working | `mobile-bottom-nav.tsx` deleted; badge now uses `item.showUnreadBadge` in v2 |
 
 ---
 
@@ -327,7 +327,7 @@
 |---------|-------------|------|--------|--------------------|
 | Settings tab navigation | 18 tabs | P2 | ✅ Working | `settings/layout.tsx`, `page.tsx` |
 | Team management | Invite/role/permissions/remove | P1 | ✅ Working | `identity.controller.ts:588-667` |
-| Billing plan display | UI | P2 | ⚠️ Partial | Credit numbers inconsistent across files |
+| Billing plan display | UI | P2 | ✅ Working | AI credit numbers aligned with `apps/server/src/modules/subscriptions/plans.ts` |
 | Billing checkout | Manual/bank/cash | P2 | ✅ Working | `subscriptions.service.ts:286-316` |
 | | Card payment (WiPay) | P1 | ❌ Broken | Disabled in UI |
 | Customer payment gateways | Config storage | P2 | ⚠️ Partial | Stores secrets in `business.metaData`; no live verification |
@@ -420,9 +420,9 @@
 |------|---------|---------|--------|------|----------|-------|
 | P0 | 42 | 8 | 4 | 0 | 0 | 54 |
 | P1 | 85 | 18 | 11 | 0 | 0 | 114 |
-| P2 | 47 | 13 | 12 | 5 | 9 | 86 |
-| P3 | 8 | 5 | 1 | 4 | 11 | 29 |
-| **Total** | **182** | **44** | **28** | **9** | **20** | **283** |
+| P2 | 48 | 12 | 12 | 5 | 9 | 86 |
+| P3 | 9 | 5 | 1 | 4 | 10 | 29 |
+| **Total** | **184** | **43** | **28** | **9** | **19** | **283** |
 
 ---
 

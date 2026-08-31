@@ -148,7 +148,7 @@ describe('the mobile unread badge is attached to something that exists', () => {
   // drift from itself the way two copies of a route string can.
   const nav = readFileSync(join(__dirname, '..', 'nav-config.ts'), 'utf8');
   const component = readFileSync(
-    join(__dirname, '..', '..', 'components', 'layout', 'mobile-bottom-nav.tsx'),
+    join(__dirname, '..', '..', 'components', 'layout', 'mobile-bottom-nav-v2.tsx'),
     'utf8',
   );
 

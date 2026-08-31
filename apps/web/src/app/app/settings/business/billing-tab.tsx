@@ -132,9 +132,9 @@ const planPricing: Record<string, { ttd: number; usd: number }> = {
 };
 
 const planFeatures: Record<string, string[]> = {
-  FREE: ["50 contacts", "5 invoices/month", "10 bookings/month", "10 AI credits/month", "Basic CRM"],
+  FREE: ["50 contacts", "5 invoices/month", "10 bookings/month", "50 AI credits/month", "Basic CRM"],
   FLOW: [
-    "500 contacts", "Unlimited invoices", "100 bookings/month", "100 AI credits/month",
+    "500 contacts", "Unlimited invoices", "100 bookings/month", "500 AI credits/month",
     "AI business advisor", "Quotes & proposals", "5 automations", "Online store", "Custom branding",
   ],
   KEYFLOW: [
