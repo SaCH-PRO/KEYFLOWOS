@@ -4804,6 +4804,17 @@ export async function updateProjectTask(
   );
 }
 
+export async function updateProjectTaskStatus(
+  businessId: string,
+  taskId: string,
+  data: { status: string; position?: number },
+): Promise<ApiResult<ProjectTask>> {
+  return apiPatch<ProjectTask>(
+    `/projects/businesses/${encodeURIComponent(businessId)}/tasks/${encodeURIComponent(taskId)}/status`,
+    data,
+  );
+}
+
 export async function deleteProjectTask(businessId: string, taskId: string): Promise<ApiResult<unknown>> {
   return apiDelete<unknown>(
     `/projects/businesses/${encodeURIComponent(businessId)}/tasks/${encodeURIComponent(taskId)}`,

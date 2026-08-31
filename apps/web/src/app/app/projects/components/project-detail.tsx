@@ -29,6 +29,7 @@ import {
   deleteProject,
   createProjectTask,
   updateProjectTask,
+  updateProjectTaskStatus,
   deleteProjectTask,
   createProjectMilestone,
   updateProjectMilestone,
@@ -191,12 +192,13 @@ export function ProjectDetail({
   const handleToggleTask = useCallback(async (projectId: string, task: ProjectTask) => {
     if (!businessId) return;
     const updated = !task.isCompleted;
+    const nextStatus = updated ? "DONE" : "TODO";
     try {
-      const res = await updateProjectTask(businessId, task.id, { isCompleted: updated });
+      const res = await updateProjectTaskStatus(businessId, task.id, { status: nextStatus });
       if (res.data) {
         onProjectUpdate({
           ...project,
-          tasks: project.tasks.map((t) => (t.id === task.id ? { ...t, isCompleted: updated } : t)),
+          tasks: project.tasks.map((t) => (t.id === task.id ? res.data! : t)),
         });
       }
     } catch { toast.error("Failed to update task"); }

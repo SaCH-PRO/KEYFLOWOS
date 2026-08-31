@@ -277,7 +277,7 @@
 | Feature | Sub-feature | Tier | Status | Evidence / Blocker |
 |---------|-------------|------|--------|--------------------|
 | Project CRUD | Board/list/detail | P1 | ✅ Working | `projects.controller.ts:20-217` |
-| Tasks within projects | Create/update/delete/toggle | P1 | ⚠️ Partial | `status` not synced with `isCompleted` |
+| Tasks within projects | Create/update/delete/toggle | P1 | ✅ Working | Toggle uses `PATCH .../tasks/:taskId/status`; `status` and `isCompleted` stay synced |
 | Project templates | Create from template | P1 | ✅ Working | `projects.service.ts:449-503` |
 | Project milestones | UI | P1 | ✅ Working | Wired to existing create/update/delete endpoints |
 | Project notes | UI | P1 | ✅ Working | Wired to GET/POST/DELETE `/keyflow/businesses/:businessId/notes` with `targetType: 'Project'` |
@@ -420,10 +420,10 @@
 | Tier | Working | Partial | Broken | Stub | Orphaned | Total |
 |------|---------|---------|--------|------|----------|-------|
 | P0 | 43 | 9 | 0 | 0 | 0 | 52 |
-| P1 | 95 | 18 | 1 | 1 | 0 | 115 |
+| P1 | 96 | 17 | 1 | 1 | 0 | 115 |
 | P2 | 52 | 12 | 4 | 10 | 9 | 87 |
 | P3 | 11 | 5 | 0 | 5 | 10 | 31 |
-| **Total** | **201** | **44** | **5** | **16** | **19** | **284** |
+| **Total** | **202** | **43** | **5** | **16** | **19** | **284** |
 
 ---
 
