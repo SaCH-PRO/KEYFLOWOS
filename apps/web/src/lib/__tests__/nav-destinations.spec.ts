@@ -62,6 +62,7 @@ function navItems(): Array<{ label: string; href: string }> {
  */
 const INTENTIONAL_ALIASES: Record<string, string> = {
   '/app/key-inbox': 'drawer says "Inbox" under KEY, mobile bottom nav says "Inbox"',
+  '/app/profile': 'Build section labels it "Business Profile"; ME hub labels it "Profile"',
 };
 describe('every nav item goes somewhere real', () => {
   const items = navItems();

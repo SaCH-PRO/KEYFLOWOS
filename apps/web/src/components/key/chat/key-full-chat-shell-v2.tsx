@@ -126,7 +126,17 @@ export function KeyFullChatShellV2() {
 
   const isLoading = status === "streaming" || status === "loading";
 
-  const MODES_ORDER: ChatMode[] = ["general", "genome_onboarding", "executive", "finance", "sales", "operations"];
+  const MODES_ORDER: ChatMode[] = [
+    "general",
+    "genome_onboarding",
+    "executive",
+    "finance",
+    "sales",
+    "operations",
+    "support",
+    "marketing",
+    "operator",
+  ];
   const { swipeHandlers } = useSwipeTabs({
     tabs: MODES_ORDER,
     activeTab: mode,

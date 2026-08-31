@@ -105,7 +105,7 @@
 | Genome gate redirect | Blocks `/app/*` until onboarding complete | P0 | ✅ Working | `use-genome-gate.ts:89-100` |
 | KEY awareness/noticed panels | Fetch real endpoints | P2 | ✅ Working | `command-center/page.tsx:454-456` |
 | Snapshot silent degradation | `safeResolve` fallbacks | P2 | ⚠️ Partial | Hides downstream failures; no UI warning |
-| Legacy genome profile links | Command Center links | P3 | ⚠️ Partial | Still point to `/app/profile?tab=business-genome` instead of `/app/genome` |
+| Legacy genome profile links | Command Center links | P3 | ✅ Working | Nav Profile link and integrity banner now point to `/app/genome` |
 | Dead mobile bottom nav v1 | Tests reference unused component | P3 | 🔇 Orphaned | `mobile-bottom-nav.tsx` no longer used |
 
 ---
@@ -115,7 +115,7 @@
 | Feature | Sub-feature | Tier | Status | Evidence / Blocker |
 |---------|-------------|------|--------|--------------------|
 | KEY Chat page (`/app/key/chat`) | V2 shell | P1 | ⚠️ Partial | `key-full-chat-shell-v2.tsx:79` |
-| | Mode tabs | P1 | ⚠️ Partial | Only 6 of 9 roles exposed |
+| | Mode tabs | P1 | ✅ Working | All 9 roles exposed in `KeyChatModeTabs` |
 | | Slash commands | P1 | ✅ Working | `key-chat-command-bar.tsx:25-31` |
 | | Attachments | P1 | ✅ Working | |
 | | Approvals rail | P1 | ✅ Working | Fetches `/ai/businesses/:id/ai/approvals` |
@@ -134,7 +134,7 @@
 | | Voice agent worker | P2 | ❌ Broken | Uses model `gpt-realtime`; realtime access unclear |
 | | LiveKit room/token dispatch | P2 | ✅ Working | `livekit.service.ts:14-85` |
 | Chat simulator | Dev-only canned scenarios | P3 | ✅ Working | `key/chat/simulator/page.tsx:39-134` |
-| Missing chat modes | support / marketing / operator | P2 | ❌ Broken | Defined in `types.ts:170-179` but not in UI |
+| Missing chat modes | support / marketing / operator | P2 | ✅ Working | Rendered in `KeyChatModeTabs` and `key-full-chat-shell-v2` |
 | Finance intelligence scans | `groupBy` soft-delete crash | P1 | ✅ Working | `detectOverspending` now uses `findMany` + in-memory aggregation |
 
 ---
@@ -307,9 +307,9 @@
 | Document versioning & editing | Update/tweak/compare/delete | P1 | ✅ Working | `documents.service.ts:335-474` |
 | Document health / impact detection | Health status updates | P2 | ✅ Working | `documents.service.ts:505-565` |
 | Google Drive round-trip sync | Link/import/pull/status | P2 | ⚠️ Partial | Requires Drive connector |
-| `/app/documents` top-level | Production gate | P2 | 🔇 Orphaned | Gated off by `featureFlags.documents` |
-| | Index redirect | P2 | 🔇 Orphaned | Redirects to `/app/document-intelligence` |
-| `/app/document-intelligence` dashboard | Stats/templates/recent/insights | P1 | ✅ Working | Now redirects to `/app/profile?tab=documents` |
+| `/app/documents` top-level | Production gate | P2 | ✅ Working | Gate removed; canonical entry point |
+| | Index redirect | P2 | ✅ Working | Redirects to `/app/profile?tab=outputs` |
+| `/app/document-intelligence` dashboard | Stats/templates/recent/insights | P1 | ✅ Working | Now redirects to `/app/documents` |
 | Evidence backend | Submit/verify/list | P1 | ✅ Working | `evidence.service.ts` |
 | Evidence UI | `/app/evidence` | P2 | 🔇 Orphaned | Gated by `compliancePack` |
 | Evidence client path | `/evidence/check` | P2 | ✅ Working | Path now matches server route |
@@ -419,10 +419,10 @@
 | Tier | Working | Partial | Broken | Stub | Orphaned | Total |
 |------|---------|---------|--------|------|----------|-------|
 | P0 | 42 | 8 | 4 | 0 | 0 | 54 |
-| P1 | 82 | 21 | 11 | 0 | 0 | 114 |
-| P2 | 45 | 13 | 12 | 5 | 11 | 86 |
-| P3 | 7 | 6 | 1 | 4 | 11 | 29 |
-| **Total** | **176** | **48** | **28** | **9** | **22** | **283** |
+| P1 | 83 | 20 | 11 | 0 | 0 | 114 |
+| P2 | 47 | 13 | 12 | 5 | 9 | 86 |
+| P3 | 8 | 5 | 1 | 4 | 11 | 29 |
+| **Total** | **180** | **46** | **28** | **9** | **20** | **283** |
 
 ---
 

@@ -1,7 +1,5 @@
-"use client";
-
 import { redirect } from "next/navigation";
 
-export default function DocumentsRedirectPage() {
-  redirect("/app/document-intelligence");
+export default function DocumentsPage() {
+  redirect("/app/profile?tab=outputs");
 }

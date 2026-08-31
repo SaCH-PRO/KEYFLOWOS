@@ -303,7 +303,7 @@ export const buildSections: NavSection[] = [
     label: "Business",
     icon: Building,
     items: [
-      { label: "Profile", href: "/app/profile?tab=business-genome", icon: BrainCircuit },
+      { label: "Business Profile", href: "/app/profile", icon: BrainCircuit },
       // The consolidated genome hub. Every card in the command centre links
       // here; the nav did not.
       { label: "Business Genome", href: "/app/genome", icon: Dna },

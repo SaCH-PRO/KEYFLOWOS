@@ -110,7 +110,7 @@ export function GenomeIntegrityBanner() {
             <div className="flex items-center gap-2 flex-shrink-0">
               <button
                 type="button"
-                onClick={() => router.push("/app/profile?tab=business-genome")}
+                onClick={() => router.push("/app/genome")}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors"
                 style={{
                   background: "hsl(var(--kf-accent1))",

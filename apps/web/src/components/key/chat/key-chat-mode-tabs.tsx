@@ -1,6 +1,6 @@
 "use client";
 
-import { LayoutGrid, Dna, Shield, TrendingUp, Users, Settings } from "lucide-react";
+import { LayoutGrid, Dna, Shield, TrendingUp, Users, Settings, LifeBuoy, Megaphone, Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { KeyChatMode } from "./types";
 
@@ -11,6 +11,9 @@ const MODES: { id: KeyChatMode; label: string; icon: React.ElementType; tone: st
   { id: "finance", label: "Finance", icon: TrendingUp, tone: "text-mint" },
   { id: "sales", label: "Sales", icon: Users, tone: "text-orange" },
   { id: "operations", label: "Operations", icon: Settings, tone: "text-sky" },
+  { id: "support", label: "Support", icon: LifeBuoy, tone: "text-rose" },
+  { id: "marketing", label: "Marketing", icon: Megaphone, tone: "text-teal" },
+  { id: "operator", label: "Operator", icon: Wrench, tone: "text-orange" },
 ];
 
 interface KeyChatModeTabsProps {
