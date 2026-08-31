@@ -105,16 +105,34 @@ describe('the source enforces overlap unconditionally', () => {
     expect(src).not.toContain('if (bufferMins > 0) {');
   });
 
-  it('both paths default a missing buffer to zero rather than skipping', () => {
-    const occurrences = src.split('bufferMins ?? 0').length - 1;
-    expect(occurrences, 'create and reschedule both need it').toBeGreaterThanOrEqual(2);
+  it('a missing buffer defaults to zero rather than skipping the check', () => {
+    expect(src).toContain('params.bufferMins ?? 0');
   });
 
-  it('both overlap queries exclude soft-deleted bookings', () => {
-    // A cancelled or deleted booking must not block a slot; a live one must.
+  it('ALL THREE booking paths call the one guard', () => {
+    // publicCreateBooking and rescheduleBooking had a copy each;
+    // createBooking — staff booking from inside the app — had none at all, so
+    // an internal user could double-book a slot the public widget refused.
+    for (const method of ['publicCreateBooking', 'rescheduleBooking', 'createBooking']) {
+      const at = src.indexOf(`async ${method}(`);
+      expect(at, `${method} not found`).toBeGreaterThan(-1);
+      const body = src.slice(at, at + 4000);
+      expect(body, `${method} must check the slot is free`).toContain('this.assertSlotFree(');
+    }
+  });
+
+  it('there is exactly one overlap query, not a copy per path', () => {
+    // Two copies is how one of them drifted out of step in the first place.
     const queries = src.split('startTime: { lt:').length - 1;
-    expect(queries).toBeGreaterThanOrEqual(2);
-    expect(src).toContain('deletedAt: null');
+    expect(queries, 'the guard should be the only place this query lives').toBe(1);
+  });
+
+  it('the overlap query excludes cancelled and soft-deleted bookings', () => {
+    // A cancelled or deleted booking must not block a slot; a live one must.
+    const at = src.indexOf('private async assertSlotFree');
+    const guard = src.slice(at, at + 1800);
+    expect(guard).toContain('deletedAt: null');
+    expect(guard).toContain("notIn: ['CANCELLED', 'NO_SHOW']");
   });
 });
 
