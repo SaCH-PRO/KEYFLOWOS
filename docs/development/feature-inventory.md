@@ -280,7 +280,7 @@
 | Tasks within projects | Create/update/delete/toggle | P1 | ⚠️ Partial | `status` not synced with `isCompleted` |
 | Project templates | Create from template | P1 | ✅ Working | `projects.service.ts:449-503` |
 | Project milestones | UI | P1 | ✅ Working | Wired to existing create/update/delete endpoints |
-| Project notes | UI | P1 | ❌ Broken | React state only |
+| Project notes | UI | P1 | ✅ Working | Wired to GET/POST/DELETE `/keyflow/businesses/:businessId/notes` with `targetType: 'Project'` |
 | Project deliverables | UI | P1 | ❌ Broken | React state only |
 | Project budget view | Component | P2 | 🔇 Orphaned | Exported but never imported |
 | Task kanban view | Component | P2 | 🔇 Orphaned | Exported but never imported |
@@ -420,10 +420,10 @@
 | Tier | Working | Partial | Broken | Stub | Orphaned | Total |
 |------|---------|---------|--------|------|----------|-------|
 | P0 | 43 | 9 | 0 | 0 | 0 | 52 |
-| P1 | 90 | 18 | 7 | 0 | 0 | 115 |
+| P1 | 91 | 18 | 6 | 0 | 0 | 115 |
 | P2 | 50 | 12 | 11 | 5 | 9 | 87 |
 | P3 | 11 | 5 | 1 | 4 | 10 | 31 |
-| **Total** | **194** | **44** | **18** | **9** | **19** | **284** |
+| **Total** | **195** | **44** | **17** | **9** | **19** | **284** |
 
 ---
 

@@ -475,7 +475,12 @@ export function ProjectDetail({
           <TimelineTab project={project} notes={notes} milestones={milestones} />
         )}
         {activeTab === "notes" && (
-          <NotesTab notes={notes} onNotesChange={setNotes} />
+          <NotesTab
+            businessId={businessId}
+            projectId={project.id}
+            projectName={project.name}
+            onNotesChange={setNotes}
+          />
         )}
         {activeTab === "client" && (
           <ClientTab contactId={project.contactId} />

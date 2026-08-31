@@ -151,10 +151,10 @@ The remaining gaps fall into five patterns:
 ## 5. P2 Feature Completeness
 
 ### 5.1 Projects
-**Problem:** Milestones, notes, and deliverables tabs keep state in React only. Task assignment backend exists but has no UI. Plan event execution is faked. Budget and kanban views are implemented but not imported.  
-**Evidence:** `apps/web/src/app/app/projects/components/project-detail.tsx:110-112`; `apps/server/src/modules/projects/project-plan-executor.service.ts:172-174`.  
+**Problem:** Milestones and deliverables tabs keep state in React only. Notes are now wired to the Keyflow notes API. Task assignment backend exists but has no UI. Plan event execution is faked. Budget and kanban views are implemented but not imported.  
+**Evidence:** `apps/web/src/app/app/projects/components/project-detail.tsx:110-112`; `apps/web/src/app/app/projects/components/project-detail-tabs/notes-tab.tsx`; `apps/server/src/modules/projects/project-plan-executor.service.ts:172-174`.  
 **Fix:**
-1. Wire milestones/notes/deliverables tabs to the existing server endpoints.
+1. Wire milestones/deliverables tabs to the existing server endpoints. Deliverables needs a model decision first (plain links vs. uploaded proof with `storageKey`).
 2. Add an assignee picker to tasks and call the task-assignment API.
 3. Implement real plan event execution via `FlowOrchestrator`.
 4. Import `ProjectBudgetView` and `TaskKanban` into the detail tabs or delete them.
