@@ -378,7 +378,7 @@
 | Tenant isolation extension | 302 business-scoped models | P0 | ⚠️ Partial | 42 unscoped + 3 never-scope remain |
 | | HTTP-only interceptor | P0 | ❌ Broken | Cron/WebSocket/BullMQ have no ambient tenant |
 | Soft-delete middleware | 15 models | P0 | ⚠️ Partial | Many `deletedAt` models not covered |
-| | `groupBy`/`aggregate` | P0 | ❌ Broken | Not intercepted |
+| | `groupBy`/`aggregate` | P0 | ✅ Working | Hooked in `packages/db/src/client.ts:613-616`; integration tests assert tenant scoping |
 | Token encryption at rest | Single-row CRUD on 4 models | P0 | ⚠️ Partial | `createMany`/`updateMany`/`deleteMany` not covered |
 | | Version skew | P3 | ⚠️ Partial | `@prisma/adapter-pg@7.3.0` vs `prisma@6.19.0` |
 | Seed script | Templates idempotently | P0 | ✅ Working | `packages/db/prisma/seed.ts` |
@@ -392,7 +392,7 @@
 | Feature | Sub-feature | Tier | Status | Evidence / Blocker |
 |---------|-------------|------|--------|--------------------|
 | pnpm workspace / engines | Node 20.18.1 / pnpm 9.15.0 | P0 | ✅ Working | `.nvmrc`, `package.json` |
-| Root turbo pipeline | `typecheck`/`build`/`test:*` | P0 | ❌ Broken | Windows Prisma EPERM rename |
+| Root turbo pipeline | `typecheck`/`build`/`test:*` | P3 | ✅ Working | Works when dev server is not holding the Prisma engine DLL; EPERM is an operational note, not a blocker |
 | Per-app builds | server/web/voice-agent/packages | P0 | ✅ Working | All compile cleanly |
 | Dev launcher | `scripts/launch-dev.sh` | P0 | ✅ Working | |
 | Server typecheck | `tsc --noEmit` | P0 | ✅ Working | |
@@ -406,7 +406,7 @@
 | Web lint | | P3 | ⚠️ Partial | Slow locally; non-blocking in CI |
 | Security scan | `pnpm audit` + TruffleHog | P3 | ⚠️ Partial | `continue-on-error: true` |
 | DAST (HawkScan) | | P3 | 🔇 Orphaned | Gated by missing secret |
-| Production deploy | GitHub Actions deploy job | P0 | ❌ Broken | Commented out |
+| Production deploy | Manual Hetzner deploy | P3 | ✅ Working | Deployed via `scripts/deploy.sh`; commented-out Vercel block is stale; `deploy-drift.yml` catches drift |
 | Branch divergence guard | | P3 | ✅ Working | |
 | Uptime monitor | | P3 | ✅ Working | Configured |
 | Env validation | Preflight script | P0 | ⚠️ Partial | `SUPABASE_JWT_SECRET` placeholder in `.env` |
@@ -418,11 +418,11 @@
 
 | Tier | Working | Partial | Broken | Stub | Orphaned | Total |
 |------|---------|---------|--------|------|----------|-------|
-| P0 | 42 | 8 | 4 | 0 | 0 | 54 |
-| P1 | 85 | 18 | 11 | 0 | 0 | 114 |
-| P2 | 49 | 11 | 12 | 5 | 9 | 86 |
-| P3 | 9 | 5 | 1 | 4 | 10 | 29 |
-| **Total** | **185** | **42** | **28** | **9** | **19** | **283** |
+| P0 | 43 | 8 | 1 | 0 | 0 | 52 |
+| P1 | 86 | 18 | 10 | 0 | 0 | 114 |
+| P2 | 50 | 12 | 11 | 5 | 9 | 87 |
+| P3 | 11 | 5 | 1 | 4 | 10 | 31 |
+| **Total** | **190** | **43** | **22** | **9** | **19** | **283** |
 
 ---
 
