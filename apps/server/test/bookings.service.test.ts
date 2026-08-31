@@ -57,6 +57,16 @@ class PrismaMock {
           if (!match) throw new Error('not found');
           return match;
         }),
+        // createBooking now reads the service to find its buffer before
+        // checking the slot is free — the in-app path used to have no overlap
+        // check of any kind.
+        findFirst: vi.fn(({ where }: any) => {
+          return (
+            self.services.find(
+              (s) => s.id === where.id && s.businessId === where.businessId && s.deletedAt === null,
+            ) ?? null
+          );
+        }),
       },
       contact: {
         findFirst: vi.fn(() => null),

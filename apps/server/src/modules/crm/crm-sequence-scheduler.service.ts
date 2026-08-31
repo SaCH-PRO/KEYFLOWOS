@@ -347,13 +347,21 @@ export class CrmSequenceSchedulerService implements OnModuleInit, OnModuleDestro
 
       // Send it. Everything below this line used to run whether or not
       // anything was dispatched — see dispatchSendNode for what that cost.
+      // A delivery-layer failure must not strand the enrollment. Sending is
+      // one step of a sequence; if it throws, the step is undelivered and the
+      // sequence carries on, rather than the whole run dying on a channel
+      // lookup. Caught here rather than inside dispatchSendNode so that
+      // method stays a straight line to read.
       const dispatch = await this.dispatchSendNode(
         businessId,
         enrollment as never,
         node,
         payload,
         variantId,
-      );
+      ).catch((err) => ({
+        queued: false,
+        reason: `dispatch failed: ${(err as Error).message}`,
+      }));
 
       if (!dispatch.queued) {
         this.logger.warn(

@@ -9,6 +9,7 @@ import { IdentitySignupService } from '../src/modules/identity/identity-signup.s
 import { BusinessContextService } from '../src/modules/identity/business-context.service';
 import { AiUsageService } from '../src/modules/ai/ai-usage.service';
 import { AuthSecurityService } from '../src/modules/identity/auth-security.service';
+import { IdentityPasswordService } from '../src/modules/identity/identity-password.service';
 import { PrismaService } from '../src/core/prisma/prisma.service';
 import { AuthMiddleware } from '../src/core/auth/auth.middleware';
 import { SupabaseAuthService } from '../src/core/auth/supabase-auth.service';
@@ -59,6 +60,9 @@ describe('Auth callback -> /identity/bootstrap (server middleware path)', () => 
         { provide: BusinessContextService, useValue: {} },
         { provide: AiUsageService, useValue: {} },
         { provide: AuthSecurityService, useValue: { enforce: vi.fn(async () => undefined), audit: vi.fn(async () => undefined) } },
+        // Added when IdentityController gained password recovery; these suites
+        // do not exercise it, but Nest still has to resolve it.
+        { provide: IdentityPasswordService, useValue: {} },
         // `get` returning null is the not-revoked path: AuthMiddleware reads
         // `auth:revoked:user:<id>` on every request, and this suite exercises
         // the real middleware. The revoked path is covered by

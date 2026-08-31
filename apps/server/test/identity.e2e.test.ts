@@ -9,6 +9,7 @@ import { IdentitySignupService } from '../src/modules/identity/identity-signup.s
 import { BusinessContextService } from '../src/modules/identity/business-context.service';
 import { AiUsageService } from '../src/modules/ai/ai-usage.service';
 import { AuthSecurityService } from '../src/modules/identity/auth-security.service';
+import { IdentityPasswordService } from '../src/modules/identity/identity-password.service';
 import { PrismaService } from '../src/core/prisma/prisma.service';
 import { AuthGuard } from '../src/core/auth/auth.guard';
 import { BusinessGuard } from '../src/core/auth/business.guard';
@@ -63,6 +64,9 @@ describe('Identity e2e', () => {
         { provide: BusinessContextService, useValue: {} },
         { provide: AiUsageService, useValue: {} },
         { provide: AuthSecurityService, useValue: { enforce: async () => undefined, audit: async () => undefined } },
+        // Added when IdentityController gained password recovery; these suites
+        // do not exercise it, but Nest still has to resolve it.
+        { provide: IdentityPasswordService, useValue: {} },
         { provide: PrismaService, useValue: { client: {} } },
         { provide: SupabaseAdminService, useValue: supabaseAdminStub },
         { provide: REDIS_CLIENT, useValue: redisStub },
