@@ -225,7 +225,7 @@
 | Feature | Sub-feature | Tier | Status | Evidence / Blocker |
 |---------|-------------|------|--------|--------------------|
 | Internal bookings CRUD | Create/read/update/status/notes/location | P1 | ✅ Working | `bookings.controller.ts`, `bookings.service.ts` |
-| | Conflict/availability/business-hours checks | P1 | ❌ Broken | `createBooking` bypasses all checks |
+| | Conflict/availability/business-hours checks | P1 | ❌ Broken | Internal `createBooking` still bypasses checks; public path and rescheduling now enforce overlap/lead-time/staff availability/business hours |
 | Public booking widget | `/book/[slug]` | P1 | ⚠️ Partial | Full checkout flow exists |
 | | Slot generation | P1 | ❌ Broken | Uses `businessHours` only; ignores staff availability/occupancy |
 | Availability / free-slot API | Public/internal endpoint | P1 | ❌ Broken | Does not exist |
