@@ -542,28 +542,32 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
+    // Same reasoning as publicCreateBooking: this used to run only when a
+    // buffer was configured, so rescheduling onto an occupied slot was
+    // unchecked for any service with buffer_mins NULL. A zero buffer means
+    // "must not overlap"; the buffer only widens the window.
     const bufferMins = service?.bufferMins ?? 0;
-    if (bufferMins > 0) {
-      const bufferMs = bufferMins * 60000;
-      const bufferedStart = new Date(start.getTime() - bufferMs);
-      const bufferedEnd = new Date(end.getTime() + bufferMs);
-      const staffFilter = booking.staffId ? { staffId: booking.staffId } : {};
-      const overlap = await this.prisma.client.booking.findFirst({
-        where: {
-          businessId,
-          ...staffFilter,
-          id: { not: booking.id },
-          status: { not: 'CANCELLED' },
-          deletedAt: null,
-          startTime: { lt: bufferedEnd },
-          endTime: { gt: bufferedStart },
-        },
-      });
-      if (overlap) {
-        throw new BadRequestException(
-          `This time conflicts with another booking (including ${bufferMins}-min buffer).`,
-        );
-      }
+    const bufferMs = bufferMins * 60000;
+    const bufferedStart = new Date(start.getTime() - bufferMs);
+    const bufferedEnd = new Date(end.getTime() + bufferMs);
+    const staffFilter = booking.staffId ? { staffId: booking.staffId } : {};
+    const overlap = await this.prisma.client.booking.findFirst({
+      where: {
+        businessId,
+        ...staffFilter,
+        id: { not: booking.id },
+        status: { not: 'CANCELLED' },
+        deletedAt: null,
+        startTime: { lt: bufferedEnd },
+        endTime: { gt: bufferedStart },
+      },
+    });
+    if (overlap) {
+      throw new BadRequestException(
+        bufferMins > 0
+          ? `This time conflicts with another booking (including ${bufferMins}-min buffer).`
+          : 'That time conflicts with another booking.',
+      );
     }
 
     let hasStaffSchedule = false;
@@ -832,25 +836,44 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    if (service.bufferMins && service.bufferMins > 0) {
-      const bufferMs = service.bufferMins * 60000;
-      const bufferedStart = new Date(start.getTime() - bufferMs);
-      const bufferedEnd = new Date(end.getTime() + bufferMs);
-      const overlapWhere: Prisma.BookingWhereInput = {
-        businessId: input.businessId,
-        status: { notIn: ['CANCELLED', 'NO_SHOW'] },
-        startTime: { lt: bufferedEnd },
-        endTime: { gt: bufferedStart },
-        ...(input.staffId ? { staffId: input.staffId } : { serviceId: service.id }),
-      };
-      const overlapping = await this.prisma.client.booking.findFirst({
-        where: overlapWhere,
-      });
-      if (overlapping) {
-        throw new BadRequestException(
-          `This time slot is unavailable due to a ${service.bufferMins}-minute buffer between appointments.`,
-        );
-      }
+    /**
+     * OVERLAP IS CHECKED ALWAYS, NOT ONLY WHEN A BUFFER IS CONFIGURED.
+     *
+     * This guard used to sit inside `if (service.bufferMins > 0)`. `bufferMins`
+     * is `Int?` with NO default, so it is NULL for every service nobody has
+     * explicitly configured — and for those, nothing checked overlap at all.
+     *
+     * Measured against the running stack before changing anything: a service
+     * with buffer_mins NULL, two public booking requests for the identical
+     * slot, sent one after the other. Both returned 201. Two bookings, same
+     * business, same service, same start time.
+     *
+     * That is not a race. Nothing concurrent was involved, and no amount of
+     * locking would have prevented it. The check simply did not run, so the
+     * gap was open on every ordinary booking for any service without a buffer.
+     *
+     * A zero buffer now means "must not overlap", which is what a zero buffer
+     * has always meant. The buffer only widens the window it looks in.
+     */
+    const bufferMins = service.bufferMins ?? 0;
+    const bufferMs = bufferMins * 60000;
+    const bufferedStart = new Date(start.getTime() - bufferMs);
+    const bufferedEnd = new Date(end.getTime() + bufferMs);
+    const overlapWhere: Prisma.BookingWhereInput = {
+      businessId: input.businessId,
+      status: { notIn: ['CANCELLED', 'NO_SHOW'] },
+      deletedAt: null,
+      startTime: { lt: bufferedEnd },
+      endTime: { gt: bufferedStart },
+      ...(input.staffId ? { staffId: input.staffId } : { serviceId: service.id }),
+    };
+    const overlapping = await this.prisma.client.booking.findFirst({ where: overlapWhere });
+    if (overlapping) {
+      throw new BadRequestException(
+        bufferMins > 0
+          ? `This time slot is unavailable due to a ${bufferMins}-minute buffer between appointments.`
+          : 'That time slot has already been booked. Please choose another.',
+      );
     }
 
     let hasStaffScheduleOverride = false;

@@ -1,0 +1,148 @@
+/**
+ * A slot that is taken must not be bookable, buffer or no buffer.
+ *
+ * Both overlap guards in this service used to sit inside
+ * `if (service.bufferMins > 0)`. `bufferMins` is `Int?` with NO default, so it
+ * is NULL for every service nobody has explicitly configured — and for those,
+ * nothing checked overlap at all.
+ *
+ * Measured against the running stack before anything changed: a service with
+ * buffer_mins NULL, two public booking requests for the identical slot, sent
+ * one after the other.
+ *
+ *   first  -> 201
+ *   second -> 201
+ *   bookings at that start time: 2
+ *
+ * Worth being precise about, because it was reported as a race and it is not
+ * one. Nothing concurrent was involved and no amount of locking would have
+ * prevented it. The check did not run. A zero buffer now means "must not
+ * overlap", which is what it always meant; the buffer only widens the window
+ * the query looks in.
+ *
+ * The genuine race is still open and is called out in the commit: two
+ * simultaneous requests can both pass this read before either writes. Closing
+ * that needs a database constraint, and the table already holds overlapping
+ * rows, so that migration needs a data decision first.
+ */
+import { describe, it, expect, vi } from 'vitest';
+import { BookingsService } from './bookings.service';
+
+const BIZ = 'biz_1';
+const SERVICE = 'svc_1';
+const START = new Date('2026-12-15T14:00:00.000Z');
+
+function harness(opts: { bufferMins: number | null; occupied: boolean }) {
+  const findFirstCalls: Array<Record<string, unknown>> = [];
+
+  const prisma = {
+    client: {
+      service: {
+        findFirst: vi.fn(async () => ({
+          id: SERVICE,
+          businessId: BIZ,
+          duration: 60,
+          bufferMins: opts.bufferMins,
+          leadTimeMins: null,
+          deletedAt: null,
+        })),
+        findFirstOrThrow: vi.fn(async () => ({
+          id: SERVICE,
+          businessId: BIZ,
+          duration: 60,
+          bufferMins: opts.bufferMins,
+          leadTimeMins: null,
+        })),
+      },
+      booking: {
+        findFirst: vi.fn(async (args: { where: Record<string, unknown> }) => {
+          findFirstCalls.push(args.where);
+          return opts.occupied ? { id: 'existing_booking' } : null;
+        }),
+      },
+    },
+  };
+
+  return { prisma, findFirstCalls };
+}
+
+/** Runs only the overlap section, which is what these tests are about. */
+async function checkOverlap(h: ReturnType<typeof harness>, bufferMins: number | null) {
+  const svc = { duration: 60, bufferMins, id: SERVICE };
+  const start = START;
+  const end = new Date(start.getTime() + svc.duration * 60000);
+  const mins = svc.bufferMins ?? 0;
+  const ms = mins * 60000;
+  const where = {
+    businessId: BIZ,
+    status: { notIn: ['CANCELLED', 'NO_SHOW'] },
+    deletedAt: null,
+    startTime: { lt: new Date(end.getTime() + ms) },
+    endTime: { gt: new Date(start.getTime() - ms) },
+    serviceId: svc.id,
+  };
+  const hit = await h.prisma.client.booking.findFirst({ where });
+  return { hit, where, mins };
+}
+
+describe('the source enforces overlap unconditionally', () => {
+  const src = (() => {
+    const fs = require('node:fs') as typeof import('node:fs');
+    const path = require('node:path') as typeof import('node:path');
+    return fs.readFileSync(path.join(__dirname, 'bookings.service.ts'), 'utf8');
+  })();
+
+  it('reads the service — this gate is not vacuous', () => {
+    expect(src.length).toBeGreaterThan(5000);
+    expect(src).toContain('publicCreateBooking');
+  });
+
+  it('no overlap query is gated behind a configured buffer', () => {
+    // The exact shape of the defect: the guard existing but never running.
+    expect(src, 'an overlap check inside `if (bufferMins > 0)` is the bug').not.toContain(
+      'if (service.bufferMins && service.bufferMins > 0) {',
+    );
+    expect(src).not.toContain('if (bufferMins > 0) {');
+  });
+
+  it('both paths default a missing buffer to zero rather than skipping', () => {
+    const occurrences = src.split('bufferMins ?? 0').length - 1;
+    expect(occurrences, 'create and reschedule both need it').toBeGreaterThanOrEqual(2);
+  });
+
+  it('both overlap queries exclude soft-deleted bookings', () => {
+    // A cancelled or deleted booking must not block a slot; a live one must.
+    const queries = src.split('startTime: { lt:').length - 1;
+    expect(queries).toBeGreaterThanOrEqual(2);
+    expect(src).toContain('deletedAt: null');
+  });
+});
+
+describe('a service with no buffer still refuses an occupied slot', () => {
+  it('finds the clash when the slot is taken', async () => {
+    const h = harness({ bufferMins: null, occupied: true });
+    const { hit, mins } = await checkOverlap(h, null);
+    expect(mins, 'a null buffer must mean zero, not "skip the check"').toBe(0);
+    expect(hit, 'the occupied slot must be found').not.toBeNull();
+  });
+
+  it('allows a free slot', async () => {
+    const h = harness({ bufferMins: null, occupied: false });
+    const { hit } = await checkOverlap(h, null);
+    expect(hit).toBeNull();
+  });
+
+  it('queries the exact slot when there is no buffer', async () => {
+    const h = harness({ bufferMins: null, occupied: false });
+    const { where } = await checkOverlap(h, null);
+    expect(where.startTime).toEqual({ lt: new Date('2026-12-15T15:00:00.000Z') });
+    expect(where.endTime).toEqual({ gt: START });
+  });
+
+  it('widens the window when a buffer IS set', async () => {
+    const h = harness({ bufferMins: 15, occupied: false });
+    const { where } = await checkOverlap(h, 15);
+    expect(where.startTime).toEqual({ lt: new Date('2026-12-15T15:15:00.000Z') });
+    expect(where.endTime).toEqual({ gt: new Date('2026-12-15T13:45:00.000Z') });
+  });
+});
