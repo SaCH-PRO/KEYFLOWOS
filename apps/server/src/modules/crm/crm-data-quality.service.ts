@@ -322,6 +322,27 @@ export class CrmDataQualityService {
     return { upserted, resolved };
   }
 
+  async markContactVerified(businessId: string, contactId: string): Promise<{ ok: boolean }> {
+    const contact = await this.prisma.client.contact.findFirst({
+      where: contactWhereWithId(businessId, contactId),
+      select: { id: true },
+    });
+    if (!contact) {
+      throw new NotFoundException('Contact not found');
+    }
+    await this.prisma.client.contact.update({
+      where: { id: contactId },
+      data: { lastVerifiedAt: new Date() },
+    });
+    // Resolve any open stale_data issues for this contact since the user
+    // explicitly verified the record.
+    await this.prisma.client.contactDataIssue.updateMany({
+      where: { businessId, contactId, kind: 'stale_data', status: 'open' },
+      data: { status: 'resolved', resolvedAt: new Date(), resolvedBy: 'user' },
+    });
+    return { ok: true };
+  }
+
   async listIssues(filters: IssueListFilters) {
     const limit = Math.min(Math.max(filters.limit ?? 50, 1), 200);
     const offset = Math.max(filters.offset ?? 0, 0);

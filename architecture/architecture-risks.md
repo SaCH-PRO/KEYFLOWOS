@@ -116,3 +116,18 @@ This document records critical, high, medium, and low risks identified during ba
 - Plaintext token storage and Supabase revocation bypass are the highest-severity security issues and should be treated as production blockers.
 - GDPR hard-purge has four critical completeness bugs that make the erasure flow fail or leave PII behind.
 - Dead routes and dead events are low-hanging fruit for cleanup sprints.
+
+## 2026-08-30 Deep-Scan Follow-up
+
+A full-domain read-only scan identified additional correctness and completeness risks that map to the E2E hardening plan in `docs/development/e2e-hardening-plan.md`:
+
+| ID | Severity | Risk | Evidence | Tracking |
+|----|----------|------|----------|----------|
+| R57 | High | Onboarding deep links show an empty chat and genome-intake state is not persisted, blocking resume. | `apps/web/src/app/app/onboarding/components/key-onboarding-chat-view.tsx:61-78`; `apps/server/src/modules/ai/blueprint-onboarding.service.ts:122` | E2E plan §4.1 |
+| R58 | High | CRM sequences advance enrollments but never dispatch email/WhatsApp/SMS. | `apps/server/src/modules/crm/crm-sequence-scheduler.service.ts:367`; no `sequence.step_due` listener | E2E plan §4.3 |
+| R59 | High | Finance cashflow forecast queries `expense.nextRunDate`, which does not exist; the field is on `RecurringExpense`. | `apps/server/src/modules/finance/cashflow-forecast.service.ts:68-75` | E2E plan §4.4 |
+| R60 | Medium | Project plan event execution is faked (`// TODO: Integrate with FlowOrchestrator`). | `apps/server/src/modules/projects/project-plan-executor.service.ts:172-174` | E2E plan §5.1 |
+| R61 | Medium | Project milestones, notes, and deliverables tabs keep state in React only. | `apps/web/src/app/app/projects/components/project-detail.tsx:110-112` | E2E plan §5.1 |
+| R62 | Medium | `/app/document-intelligence` renders hard-coded mock data with no real API calls. | `apps/web/src/app/app/document-intelligence/page.tsx:119-151` | E2E plan §5.2 |
+| R63 | Medium | New `/key-connector` module is a backend shell; UI still uses legacy `/connectors` routes and 16 of 22 legacy connectors return `PULL_SYNC_NOT_IMPLEMENTED`. | `apps/server/src/modules/key-connector/key-connector.service.ts:134-202`; `apps/server/src/modules/key-connector/sync/sync-engine.service.ts:298-334` | E2E plan §5.3 |
+| R64 | Low | Root `pnpm` commands fail on Windows with a Prisma query-engine EPERM rename. | `turbo.json`; `packages/db/prisma.config.ts` | E2E plan §6.2 |

@@ -46,6 +46,7 @@ import {
   fetchContentDeliveryStatus,
   ContentDeliveryStatus,
   generateInvoiceFromContentRequest,
+  uploadDeliverables,
 } from "@/lib/client";
 import { getStoredBusinessId } from "@/lib/workspace";
 
@@ -186,10 +187,25 @@ export default function ContentRequestDetailPage() {
           await reviewContentRequest(businessId, requestId, { approved: false, comment: reviewComment });
           toast.success("Revision requested");
           break;
-        case "upload":
-          // Would open a file picker / asset selector in a real implementation
-          toast.info("Upload deliverables — select files from Assets");
+        case "upload": {
+          const raw = window.prompt("Enter asset file IDs to upload as deliverables (comma-separated):");
+          if (raw === null) break;
+          const fileIds = raw
+            .split(",")
+            .map((id) => id.trim())
+            .filter(Boolean);
+          if (fileIds.length === 0) {
+            toast.info("No file IDs provided.");
+            break;
+          }
+          const uploadRes = await uploadDeliverables(businessId, requestId, { fileIds });
+          if (uploadRes.data) {
+            toast.success(`Uploaded ${fileIds.length} deliverable(s)`);
+          } else {
+            toast.error(uploadRes.error ?? "Upload failed");
+          }
           break;
+        }
         case "deliver":
           await deliverContentRequest(businessId, requestId);
           toast.success("Delivered to client");

@@ -110,7 +110,29 @@ This document tracks the planned migration from the current architecture to the 
 - `prisma migrate dev` succeeds.
 - Integration tests pass.
 
+### Phase 2B — End-to-End Feature Hardening (new)
+
+**Goal:** Move all user-facing features from "implemented / partially working" to verifiable end-to-end working.
+
+**Source document:** `docs/development/e2e-hardening-plan.md`
+
+**Priority order:**
+
+1. P0 stop-the-line fixes (admin auth, unguarded endpoints, token encryption/tenant isolation gaps).
+2. P1 core journey fixes (onboarding durability, AI provider, CRM sequence dispatch, finance correctness, booking validation).
+3. P2 feature completeness (projects, documents/evidence/content ops, integrations, marketing polish).
+4. P3 polish and architecture (dead code, build/test CI, database hygiene, AI/Cortex decoupling).
+
+**Verification:** Each deliverable in `docs/development/e2e-hardening-plan.md` has explicit acceptance criteria and file references.
+
 ## Changelog
+
+### 2026-08-30 — Deep scan and E2E hardening plan
+
+- Ran deterministic scanners (`inventory.py`, `dependency_scan.py`) and refreshed `architecture/inventory.json` and `architecture/dependencies.json`.
+- Performed read-only deep scans of 15 domains via parallel agents.
+- Wrote `docs/development/e2e-hardening-plan.md` with P0–P3 priorities, sprint schedule, and verification criteria.
+- Added Phase 2B to the migration plan referencing the new hardening document.
 
 ### 2026-08-09 — Baseline seeded
 

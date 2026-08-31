@@ -88,7 +88,7 @@ const ORPHANED_BY_DESIGN: Record<string, Reason> = {
   "/app/continental-ops/stock-counts":   'todo-connect',
   "/app/control-tower":                  'deliberately-unlinked',
   "/app/crm/intake":                     'deliberately-unlinked',
-  "/app/document-intelligence":          'fabricated-do-not-link',
+  "/app/document-intelligence":          'deliberately-unlinked',
   "/app/documents":                      'deliberately-unlinked',
   "/app/documents/[instanceId]":         'detail-route-of:/app/documents',
   "/app/finance/accounts":               'deliberately-unlinked',

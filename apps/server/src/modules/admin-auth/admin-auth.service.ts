@@ -47,6 +47,10 @@ export class AdminAuthService {
       return null;
     }
 
+    if (!email || !password) {
+      return null;
+    }
+
     const normalizedEmail = email.trim().toLowerCase();
     if (normalizedEmail !== getAdminEmail().toLowerCase()) {
       return null;

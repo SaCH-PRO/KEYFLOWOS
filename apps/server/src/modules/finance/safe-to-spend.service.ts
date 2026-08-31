@@ -65,7 +65,8 @@ export class SafeToSpendService {
 
     const billsDueNext30Days = billsDue.reduce((sum, b) => sum + Number(b.amount ?? 0), 0);
 
-    // Placeholder: payroll and debt not yet modeled
+    // Payroll and debt schedules are not yet modeled; reserve these as 0 and
+    // surface that fact in the explanation so the KPI is not overstated.
     const payrollReserved = 0;
     const debtPaymentsDue = 0;
 
@@ -86,8 +87,8 @@ export class SafeToSpendService {
       `Operating buffer: ${currency} ${operatingBuffer.toFixed(2)}`,
     ];
 
-    if (payrollReserved > 0) explanation.push(`Payroll reserved: ${currency} ${payrollReserved.toFixed(2)}`);
-    if (debtPaymentsDue > 0) explanation.push(`Debt payments due: ${currency} ${debtPaymentsDue.toFixed(2)}`);
+    explanation.push(`Payroll reserved: ${currency} ${payrollReserved.toFixed(2)} (not yet modeled)`);
+    explanation.push(`Debt payments due: ${currency} ${debtPaymentsDue.toFixed(2)} (not yet modeled)`);
     if (otherReserves > 0) explanation.push(`Other reserves: ${currency} ${otherReserves.toFixed(2)}`);
     if (reserveBuckets.length > 0) {
       for (const rb of reserveBuckets) {

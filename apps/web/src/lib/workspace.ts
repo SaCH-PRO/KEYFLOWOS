@@ -11,6 +11,7 @@ const TOKEN_KEY = "kf_token";
 const REFRESH_TOKEN_KEY = "kf_refresh_token";
 const BUSINESS_CACHE_KEY = "kf_business_cache";
 const USER_CACHE_KEY = "kf_user_cache";
+const ADMIN_USER_CACHE_KEY = "kf_admin_user_cache";
 
 const TOKEN_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
 
@@ -317,8 +318,21 @@ export async function refreshWorkspace(): Promise<string | null> {
   return null;
 }
 
+export function getCachedAdminUser(): CachedUser | null {
+  if (typeof window === "undefined") return null;
+  const cached = window.localStorage.getItem(ADMIN_USER_CACHE_KEY);
+  if (cached) {
+    try {
+      return JSON.parse(cached) as CachedUser;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
 export function isSuperAdmin(): boolean {
-  const user = getCachedUser();
+  const user = getCachedUser() ?? getCachedAdminUser();
   return user?.role === "SUPER_ADMIN";
 }
 

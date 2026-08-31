@@ -28,7 +28,7 @@ We performed a **baseline reset**:
 
 ```text
 packages/db/prisma/migrations/
-└── 20251128000000_baseline_full_schema/
+└── 0_baseline/
     └── migration.sql
 
 packages/db/prisma/migrations-archived/
@@ -72,7 +72,7 @@ For production databases (e.g., Supabase), use `prisma migrate deploy` after the
 baseline has been marked as applied:
 
 ```bash
-npx prisma migrate resolve --applied 20251128000000_baseline_full_schema --schema prisma/schema.prisma
+npx prisma migrate resolve --applied 0_baseline --schema prisma/schema.prisma
 npx prisma migrate deploy --schema prisma/schema.prisma
 ```
 

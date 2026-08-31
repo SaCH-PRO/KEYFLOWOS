@@ -160,15 +160,7 @@ const METRIC_THRESHOLD = 3;
  * already exists, or delete it — and three of those is a separate piece of
  * work from stopping a fourth. The list may only shrink.
  */
-const KNOWN_FABRICATED = [
-  // The only survivor, and only because deleting it is not free: two KEY tools
-  // name it as their manualEquivalentRoute, so removing the page drops
-  // check-tool-routes off 173/173 unless those tools are repointed or retired.
-  // That makes it a three-way decision — wire it to KeyCortexDocumentService,
-  // repoint the tools, or remove them — rather than the one-line delete the
-  // other two were.
-  '/app/document-intelligence',
-];
+const KNOWN_FABRICATED: string[] = [];
 
 /** Every route whose page fakes a load and has no data behind it. */
 function fabricatedRoutes(): string[] {

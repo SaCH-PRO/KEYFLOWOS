@@ -2,34 +2,21 @@
 
 import { useState } from "react";
 import { Button, Card, Input, Badge } from "@keyflow/ui";
-import { apiPost, API_BASE } from "@/lib/api";
-import { Invoice, DEFAULT_BUSINESS_ID } from "@/lib/client";
+import { DEFAULT_BUSINESS_ID } from "@/lib/client";
 import { motion } from "framer-motion";
 import { PresenceTracker } from "@/app/_lib/PresenceTracker";
 
 export default function PublicPayPage() {
   const [invoiceId, setInvoiceId] = useState("");
   const [status, setStatus] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
-  const [paidInvoiceId, setPaidInvoiceId] = useState<string | null>(null);
-  const [copyMsg, setCopyMsg] = useState<string | null>(null);
 
-  const markPaid = async (e: React.FormEvent) => {
+  const goToPayment = async (e: React.FormEvent) => {
     e.preventDefault();
-    setStatus("Marking paid...");
-    setSuccess(false);
-    setPaidInvoiceId(null);
-    const { data, error } = await apiPost<Invoice>({
-      path: `/commerce/invoices/${encodeURIComponent(invoiceId)}/paid`,
-      body: {},
-    });
-    if (error) {
-      setStatus(`Error: ${error}`);
-    } else {
-      setStatus(`Invoice ${data?.id ?? invoiceId} marked PAID.`);
-      setSuccess(true);
-      setPaidInvoiceId(data?.id ?? invoiceId);
+    if (!invoiceId.trim()) {
+      setStatus("Please enter an invoice ID.");
+      return;
     }
+    window.location.href = `/pay/${encodeURIComponent(invoiceId.trim())}`;
   };
 
   return (
@@ -40,68 +27,25 @@ export default function PublicPayPage() {
           <Badge tone="info">Public Payment</Badge>
           <h1 className="text-3xl font-semibold">Pay Invoice</h1>
           <p className="text-sm text-slate-300">
-            Minimalist payment UI with frosted glass. Calls the mark-paid endpoint at{" "}
-            <code className="font-mono">{API_BASE}</code>.
+            Enter an invoice ID to pay through the secure checkout flow.
           </p>
         </div>
 
         <Card title="Payment" badge="Live" className="bg-[rgba(0,0,0,0.35)] border border-[var(--kf-border)]">
-          <form onSubmit={markPaid} className="grid grid-cols-1 gap-4">
+          <form onSubmit={goToPayment} className="grid grid-cols-1 gap-4">
             <Input label="Invoice ID" value={invoiceId} onChange={(e) => setInvoiceId(e.target.value)} required placeholder="inv_xxx" />
             <div className="flex justify-end">
-              <Button type="submit">Mark Paid</Button>
+              <Button type="submit">Pay Invoice</Button>
             </div>
           </form>
           {status && (
-            <div className="relative mt-3">
-              {success && (
-                <motion.span
-                  className="pointer-events-none absolute inset-0 rounded-2xl border border-emerald-400/50"
-                  initial={{ opacity: 0, scale: 0.9 }}
-                  animate={{ opacity: [0.6, 0], scale: [1, 1.2] }}
-                  transition={{ duration: 0.8, ease: "easeOut", repeat: 1 }}
-                />
-              )}
-              <motion.div
-                initial={{ opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                className={`rounded-2xl border px-3 py-2 text-sm ${
-                  success ? "border-emerald-400/50 bg-emerald-400/10 text-emerald-200" : "border-amber-300/50 bg-amber-300/10 text-amber-100"
-                }`}
-              >
-                {status}
-              </motion.div>
-              {success && paidInvoiceId && (
-                <div className="mt-2 text-xs text-slate-200 space-y-1">
-                  <div>
-                    Invoice ID: <code className="font-mono">{paidInvoiceId}</code>
-                  </div>
-                  <button
-                    type="button"
-                    className="inline-flex items-center gap-1 rounded-full border border-primary/60 px-3 py-1 text-[11px] text-primary hover:bg-primary/10"
-                    onClick={() => window.open(`${API_BASE}/commerce/invoices/${paidInvoiceId}/receipt`, "_blank")}
-                  >
-                    Download receipt
-                  </button>
-                  <button
-                    type="button"
-                    className="inline-flex items-center gap-1 rounded-full border border-border px-3 py-1 text-[11px] text-muted-foreground hover:border-primary/60 hover:text-primary"
-                    onClick={async () => {
-                      try {
-                        await navigator.clipboard.writeText(`${window.location.origin}/commerce/invoices/${paidInvoiceId}/receipt`);
-                        setCopyMsg("Receipt link copied");
-                        setTimeout(() => setCopyMsg(null), 1500);
-                      } catch {
-                        setCopyMsg("Copy failed");
-                      }
-                    }}
-                  >
-                    Share receipt
-                  </button>
-                  {copyMsg && <div className="text-[11px] text-emerald-300">{copyMsg}</div>}
-                </div>
-              )}
-            </div>
+            <motion.div
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mt-3 rounded-2xl border border-amber-300/50 bg-amber-300/10 px-3 py-2 text-sm text-amber-100"
+            >
+              {status}
+            </motion.div>
           )}
         </Card>
       </div>

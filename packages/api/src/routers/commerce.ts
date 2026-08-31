@@ -40,15 +40,4 @@ export const commerceRouter: AnyRouter = router({
         },
       });
     }),
-  markInvoicePaid: protectedProcedure
-    .input(z.object({ invoiceId: z.string() }))
-    .mutation(async ({ input, ctx }) => {
-      const invoice = await ctx.db.invoice.update({
-        where: { id: input.invoiceId },
-        data: { status: 'PAID', paidAt: new Date() },
-      });
-      await assertBusinessAccess(ctx, invoice.businessId);
-      ctx.eventBus.emit('invoice.paid', { invoiceId: input.invoiceId, businessId: invoice.businessId });
-      return invoice;
-    }),
 });

@@ -1,11 +1,13 @@
-import { IsEmail, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsEmail, IsNotEmpty, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 
 export class SignupDto {
   @IsEmail({}, { message: 'email must be a valid email address' })
+  @IsNotEmpty()
   @MaxLength(255)
   email!: string;
 
   @IsString()
+  @IsNotEmpty()
   @MinLength(12, { message: 'password must be at least 12 characters' })
   @MaxLength(256)
   password!: string;
@@ -43,6 +45,7 @@ export class SignupDto {
 
 export class ResendVerificationDto {
   @IsEmail({}, { message: 'email must be a valid email address' })
+  @IsNotEmpty()
   @MaxLength(255)
   email!: string;
 }

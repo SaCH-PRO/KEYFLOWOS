@@ -439,14 +439,18 @@ export class FinanceIntelligenceService {
     });
     if (budgets.length === 0) return [];
     const ids = budgets.map((b) => b.categoryId).filter((x): x is string => !!x);
-    const actuals = await this.prisma.client.expense.groupBy({
-      by: ['categoryId'],
+    // Avoid groupBy: the soft-delete middleware injects orderBy on a non-grouped
+    // field and Prisma throws P2019. Aggregate in-memory; the budgeted category
+    // set is small.
+    const expenses = await this.prisma.client.expense.findMany({
       where: { businessId, deletedAt: null, date: { gte: monthStart }, categoryId: { in: ids } },
-      _sum: { amount: true },
+      select: { categoryId: true, amount: true },
     });
-    const actualMap = new Map(
-      actuals.map((g) => [g.categoryId, Number(g._sum.amount ?? 0)]),
-    );
+    const actualMap = new Map<string, number>();
+    for (const e of expenses) {
+      if (!e.categoryId) continue;
+      actualMap.set(e.categoryId, (actualMap.get(e.categoryId) ?? 0) + Number(e.amount ?? 0));
+    }
     const cats = await this.prisma.client.expenseCategory.findMany({
       where: { businessId, id: { in: ids } },
       select: { id: true, name: true },

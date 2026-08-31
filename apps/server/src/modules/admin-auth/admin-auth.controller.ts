@@ -4,7 +4,7 @@ import { CurrentUser } from '../../core/decorators/current-user.decorator';
 import type { AuthenticatedUser } from '../../core/decorators/current-user.decorator';
 import { RateLimit } from '../../core/decorators/rate-limit.decorator';
 import { RateLimitGuard } from '../../core/guards/rate-limit.guard';
-import { IsEmail, IsString } from 'class-validator';
+import { IsEmail, IsNotEmpty, IsString } from 'class-validator';
 
 /**
  * Admin login credentials.
@@ -20,9 +20,11 @@ import { IsEmail, IsString } from 'class-validator';
  */
 class AdminLoginDto {
   @IsEmail()
+  @IsNotEmpty()
   email!: string;
 
   @IsString()
+  @IsNotEmpty()
   password!: string;
 }
 

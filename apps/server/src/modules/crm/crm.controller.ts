@@ -612,8 +612,7 @@ export class CrmController {
   @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/contacts/:contactId/data-quality/mark-verified')
   async dqMarkVerified(@Param('businessId') businessId: string, @Param('contactId') contactId: string) {
-    await this.dataQuality.scanBusiness(businessId);
-    return { ok: true };
+    return this.dataQuality.markContactVerified(businessId, contactId);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)

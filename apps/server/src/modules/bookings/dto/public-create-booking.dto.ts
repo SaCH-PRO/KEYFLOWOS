@@ -34,28 +34,28 @@ export class PublicCreateBookingDto {
   startTime!: string;
 
   @IsString()
-  @IsOptional()
+  @IsNotEmpty()
   @MaxLength(100)
   @Transform(stripHtml)
-  firstName?: string | null;
+  firstName!: string;
 
   @IsString()
-  @IsOptional()
+  @IsNotEmpty()
   @MaxLength(100)
   @Transform(stripHtml)
-  lastName?: string | null;
+  lastName!: string;
 
   @IsString()
-  @IsOptional()
+  @IsNotEmpty()
   @MaxLength(255)
   @Transform(stripHtml)
-  email?: string | null;
+  email!: string;
 
   @IsString()
-  @IsOptional()
+  @IsNotEmpty()
   @MaxLength(50)
   @Transform(stripHtml)
-  phone?: string | null;
+  phone!: string;
 
   @IsString()
   @IsOptional()

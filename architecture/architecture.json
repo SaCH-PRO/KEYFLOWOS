@@ -1,9 +1,10 @@
 {
   "meta": {
     "schema": "codebase-architect/v1",
-    "generated": "2026-08-11T03:45:00Z",
-    "source": "baseline exploration output + inventory.py + dependency_scan.py",
-    "root": "C:/Users/sachd/Downloads/KEYFLOWOS"
+    "generated": "2026-08-30T20:45:00Z",
+    "source": "baseline exploration output + inventory.py + dependency_scan.py + 2026-08-30 full-domain deep scan",
+    "root": "C:/Users/sachd/Downloads/KEYFLOWOS",
+    "plan": "docs/development/e2e-hardening-plan.md"
   },
   "nodes": [
     {
@@ -912,9 +913,9 @@
       "category": "Data / Tenant Isolation",
       "title": "Tenant isolation Prisma extension does not intercept create/createMany/upsert/aggregate/groupBy and covers only 77 of 337 businessId-bearing models",
       "evidence": [
-        "packages/db/src/client.ts:81-153 \u2014 BUSINESS_ID_MODELS contains 77 entries",
-        "packages/db/src/client.ts:234-278 \u2014 extension hooks only ten operations and omits writes",
-        "packages/db/prisma/schema.prisma \u2014 schema scan shows 337 models define businessId String"
+        "packages/db/src/client.ts:81-153 — BUSINESS_ID_MODELS contains 77 entries",
+        "packages/db/src/client.ts:234-278 — extension hooks only ten operations and omits writes",
+        "packages/db/prisma/schema.prisma — schema scan shows 337 models define businessId String"
       ],
       "fix": "Extend extension to reject/rewrite businessId on create/createMany/upsert or add CI lint/spec; generate BUSINESS_ID_MODELS from schema and backfill high-risk tables."
     },
@@ -924,11 +925,11 @@
       "category": "Data / Tenant Isolation",
       "title": "Cron, BullMQ workers, WebSocket handlers, and webhooks run without tenant context; WebSocket approvals and TemporalFlowMemory updates are cross-tenant",
       "evidence": [
-        "apps/server/src/core/tenant/tenant.interceptor.ts:13-31 \u2014 HTTP-only interceptor",
-        "apps/server/src/modules/ai/queue.service.ts:60-87 \u2014 BullMQ workers without tenant context",
-        "apps/server/src/modules/key-cortex/key-cortex.gateway.ts:232-347 \u2014 WebSocket handlers without tenant context; lines 308-347 approve/reject without clientInfo.businessId",
-        "packages/db/src/client.ts:121-127 \u2014 comment documenting unprotected paths",
-        "apps/server/src/modules/temporal-flow/temporal-flow-memory.service.ts:130-150 \u2014 updates memory by id only"
+        "apps/server/src/core/tenant/tenant.interceptor.ts:13-31 — HTTP-only interceptor",
+        "apps/server/src/modules/ai/queue.service.ts:60-87 — BullMQ workers without tenant context",
+        "apps/server/src/modules/key-cortex/key-cortex.gateway.ts:232-347 — WebSocket handlers without tenant context; lines 308-347 approve/reject without clientInfo.businessId",
+        "packages/db/src/client.ts:121-127 — comment documenting unprotected paths",
+        "apps/server/src/modules/temporal-flow/temporal-flow-memory.service.ts:130-150 — updates memory by id only"
       ],
       "fix": "Provide runWithTenant wrapper for background/edge handlers; validate clientInfo.businessId in WebSocket handlers; add KeyActionProposal and TemporalFlowMemory to BUSINESS_ID_MODELS."
     },
@@ -938,10 +939,10 @@
       "category": "Cryptography / Data Leak",
       "title": "OAuth, bank, social, and channel access/refresh tokens stored in plaintext at rest",
       "evidence": [
-        "packages/db/prisma/schema.prisma:506-565 \u2014 Business token columns",
-        "packages/db/prisma/schema.prisma:3823-3824 \u2014 SocialConnection.token / refreshToken plaintext",
-        "packages/db/prisma/schema.prisma:3874-3875 \u2014 ChannelConnection.token / refreshToken plaintext",
-        "packages/db/prisma/schema.prisma:10061 \u2014 BankConnection.accessToken plaintext",
+        "packages/db/prisma/schema.prisma:506-565 — Business token columns",
+        "packages/db/prisma/schema.prisma:3823-3824 — SocialConnection.token / refreshToken plaintext",
+        "packages/db/prisma/schema.prisma:3874-3875 — ChannelConnection.token / refreshToken plaintext",
+        "packages/db/prisma/schema.prisma:10061 — BankConnection.accessToken plaintext",
         "apps/server/src/core/connectors/google-suite.service.ts:193-196",
         "apps/server/src/modules/connect/microsoft-oauth.service.ts:108-116",
         "apps/server/src/modules/social/social-connections.service.ts:61-113",
@@ -955,9 +956,9 @@
       "category": "Session Management",
       "title": "Supabase JWT local verification never checks revocation or user state",
       "evidence": [
-        "apps/server/src/core/auth/supabase-auth.service.ts:101-120 \u2014 returns user from verifyLocal without calling Supabase",
-        "apps/server/src/core/auth/auth.middleware.ts:88-104 \u2014 only looks up role, no status/banned check",
-        "packages/db/prisma/schema.prisma:101-130 \u2014 User model has no status/bannedAt/deletedAt"
+        "apps/server/src/core/auth/supabase-auth.service.ts:101-120 — returns user from verifyLocal without calling Supabase",
+        "apps/server/src/core/auth/auth.middleware.ts:88-104 — only looks up role, no status/banned check",
+        "packages/db/prisma/schema.prisma:101-130 — User model has no status/bannedAt/deletedAt"
       ],
       "fix": "Remove local verification or add a Redis revocation cache; add bannedAt/status column and check it in AuthMiddleware."
     },
@@ -967,10 +968,10 @@
       "category": "Authentication / Audit",
       "title": "Password reset and change flows are handled client-side against Supabase, bypassing backend controls",
       "evidence": [
-        "apps/web/src/app/auth/login/login-form.tsx:33-34, 53-64 \u2014 calls /auth/v1/recover directly",
-        "apps/web/src/app/auth/reset-password/page.tsx:13-17 \u2014 client-side policy only",
-        "apps/web/src/app/app/profile/components/security-section.tsx:79-105 \u2014 calls /auth/v1/user directly",
-        "apps/server/src/modules/identity/password-policy.service.ts \u2014 only invoked at signup"
+        "apps/web/src/app/auth/login/login-form.tsx:33-34, 53-64 — calls /auth/v1/recover directly",
+        "apps/web/src/app/auth/reset-password/page.tsx:13-17 — client-side policy only",
+        "apps/web/src/app/app/profile/components/security-section.tsx:79-105 — calls /auth/v1/user directly",
+        "apps/server/src/modules/identity/password-policy.service.ts — only invoked at signup"
       ],
       "fix": "Add server endpoints that apply AuthSecurityService rate limits, AuthAuditLog, and PasswordPolicyService."
     },
@@ -980,8 +981,8 @@
       "category": "Authorization / Middleware Bypass",
       "title": "Admin console routes (/admin/*) have no server-side gate",
       "evidence": [
-        "apps/web/src/middleware.ts:143-145 \u2014 matcher only /app/:path*",
-        "apps/web/src/app/admin/layout.tsx:40-62 \u2014 client-side useEffect auth check"
+        "apps/web/src/middleware.ts:143-145 — matcher only /app/:path*",
+        "apps/web/src/app/admin/layout.tsx:40-62 — client-side useEffect auth check"
       ],
       "fix": "Extend middleware to gate /admin/:path* and add server-side admin auth check in admin/layout.tsx."
     },
@@ -994,7 +995,7 @@
         "apps/server/src/modules/key-cortex/key-cortex.gateway.ts:308-347",
         "apps/server/src/modules/key-cortex/key-cortex-approval.service.ts:81-98",
         "apps/server/src/modules/key-autonomy/key-action-proposal.service.ts:110-116",
-        "packages/db/src/client.ts:81-153 \u2014 KeyActionProposal not in BUSINESS_ID_MODELS"
+        "packages/db/src/client.ts:81-153 — KeyActionProposal not in BUSINESS_ID_MODELS"
       ],
       "fix": "Pass and validate clientInfo.businessId against proposal; add KeyActionProposal to BUSINESS_ID_MODELS; remove unscoped getById."
     },
@@ -1004,8 +1005,8 @@
       "category": "Tenant Isolation / Misconfiguration",
       "title": "Tenant isolation extension covers only ~23% of business-scoped tables",
       "evidence": [
-        "packages/db/src/client.ts:81-153 \u2014 BUSINESS_ID_MODELS contains 77 entries",
-        "packages/db/prisma/schema.prisma \u2014 337 models define businessId String",
+        "packages/db/src/client.ts:81-153 — BUSINESS_ID_MODELS contains 77 entries",
+        "packages/db/prisma/schema.prisma — 337 models define businessId String",
         "Missing examples: KeyActionProposal, Event, EventAttendee, TemporalFlowMemory, Payment, MarketplaceOrder, SubscriptionPayment, Membership, ApiKey, SocialConnection, Webhook, Task, Message, Document, Lead, Campaign, HelpdeskTicket, ActivityLog"
       ],
       "fix": "Generate BUSINESS_ID_MODELS from schema; backfill high-risk tables first."
@@ -1017,7 +1018,7 @@
       "title": "GDPR hard-purge fails for contacts with invoices, quotes, bookings, or recurring invoices",
       "evidence": [
         "apps/server/src/modules/crm/privacy/contact-privacy.service.ts:448-523",
-        "migration.sql:10481, 10496, 10532, 10745 \u2014 ON DELETE NO ACTION FKs"
+        "migration.sql:10481, 10496, 10532, 10745 — ON DELETE NO ACTION FKs"
       ],
       "fix": "Delete or anonymize financial rows before tx.contact.delete(); test all four child types."
     },
@@ -1040,9 +1041,9 @@
       "category": "Privacy / Data Deletion",
       "title": "MediaAsset and ContactMedia files survive contact erasure",
       "evidence": [
-        "packages/db/prisma/schema.prisma:11191-11215 \u2014 MediaAsset contactId without FK",
-        "packages/db/prisma/schema.prisma:3299-3313 \u2014 ContactMedia lacks cascade",
-        "migration.sql:10460 \u2014 contact_media_contact_id_fkey ON DELETE SET NULL",
+        "packages/db/prisma/schema.prisma:11191-11215 — MediaAsset contactId without FK",
+        "packages/db/prisma/schema.prisma:3299-3313 — ContactMedia lacks cascade",
+        "migration.sql:10460 — contact_media_contact_id_fkey ON DELETE SET NULL",
         "apps/server/src/modules/crm/privacy/contact-privacy.service.ts:448-523"
       ],
       "fix": "Delete MediaAsset/ContactMedia rows and their S3 objects before deleting the contact."
@@ -1053,7 +1054,7 @@
       "category": "Privacy / Data Deletion",
       "title": "SET-NULL child tables retain contact PII after purge",
       "evidence": [
-        "migration.sql:10292, 10301, 10583, 10655, 11384 \u2014 ON DELETE SET NULL FKs",
+        "migration.sql:10292, 10301, 10583, 10655, 11384 — ON DELETE SET NULL FKs",
         "apps/server/src/modules/crm/privacy/contact-privacy.service.ts:448-523"
       ],
       "fix": "Delete or anonymize message_intakes, ingestion_items, whatsapp_contacts, support_tickets, financial_transactions rows as part of purgeOne."
@@ -1119,8 +1120,8 @@
       "category": "Session Management / Cookie Security",
       "title": "Session cookies are non-HttpOnly, JavaScript-accessible, and long-lived",
       "evidence": [
-        "apps/web/src/lib/workspace.ts:11, 18-27 \u2014 kf_token cookie via document.cookie, Max-Age 7 days",
-        "apps/web/src/app/admin/login/page.tsx:48 \u2014 kf_admin_token via document.cookie",
+        "apps/web/src/lib/workspace.ts:11, 18-27 — kf_token cookie via document.cookie, Max-Age 7 days",
+        "apps/web/src/app/admin/login/page.tsx:48 — kf_admin_token via document.cookie",
         "Refresh token stored only in localStorage"
       ],
       "fix": "Move to HttpOnly Secure SameSite=Lax server-set cookies; remove refresh token from localStorage."
@@ -1131,7 +1132,7 @@
       "category": "Cryptography / Authentication",
       "title": "Local JWT verification ignores standard claims (iss, aud, iat, nbf) and header algorithm",
       "evidence": [
-        "apps/server/src/core/auth/supabase-auth.service.ts:41-77 \u2014 verifies only signature and exp"
+        "apps/server/src/core/auth/supabase-auth.service.ts:41-77 — verifies only signature and exp"
       ],
       "fix": "Validate alg === 'HS256', require iss/aud match Supabase project, reject future nbf."
     },
@@ -1143,7 +1144,7 @@
       "evidence": [
         "apps/server/src/modules/temporal-flow/temporal-flow-memory.service.ts:130-150",
         "apps/server/src/modules/key-cortex/adapters/temporal-adapter.service.ts:58-89",
-        "packages/db/src/client.ts:81-153 \u2014 TemporalFlowMemory not in BUSINESS_ID_MODELS"
+        "packages/db/src/client.ts:81-153 — TemporalFlowMemory not in BUSINESS_ID_MODELS"
       ],
       "fix": "Enforce businessId in service; add TemporalFlowMemory to BUSINESS_ID_MODELS."
     },
@@ -1178,7 +1179,7 @@
         "apps/server/src/core/security/redaction.ts:13-76",
         "apps/server/src/modules/key-autonomy/action-audit.service.ts:89-108",
         "apps/server/src/modules/key-cortex/key-cortex-audit.service.ts:26-55",
-        "apps/server/src/modules/business-events/business-event.interceptor.ts:30-92 \u2014 redaction only on HTTP paths"
+        "apps/server/src/modules/business-events/business-event.interceptor.ts:30-92 — redaction only on HTTP paths"
       ],
       "fix": "Apply safeRedactedSnapshot() inside BusinessEventService.emit() and ContactAuditService.write()."
     },
@@ -1189,7 +1190,7 @@
       "title": "AI execution logs store raw tool payloads without redaction",
       "evidence": [
         "apps/server/src/modules/ai/ai-execution-log.service.ts:82-101",
-        "apps/server/src/modules/ai/ai-execution-log.service.ts:169-180 \u2014 sanitizePayload only truncates"
+        "apps/server/src/modules/ai/ai-execution-log.service.ts:169-180 — sanitizePayload only truncates"
       ],
       "fix": "Run payloads through deepRedact() before storing."
     },
@@ -1199,10 +1200,10 @@
       "category": "Privacy / Data Retention",
       "title": "No retention cleanup for export jobs, notification logs, activity logs, or sessions",
       "evidence": [
-        "apps/server/src/modules/crm/privacy/contact-privacy.service.ts:188-200 \u2014 ContactExportJob created, no cleanup",
-        "apps/server/src/modules/notifications/transactional-email.service.ts:262-293 \u2014 customerNotificationLog, no cleanup",
-        "apps/server/src/core/interceptors/team-audit.interceptor.ts:44 \u2014 TeamActivityLog, no cleanup",
-        "apps/server/src/modules/risc/risc.service.ts:318, 371 \u2014 Session purged only on RISC/user deletion"
+        "apps/server/src/modules/crm/privacy/contact-privacy.service.ts:188-200 — ContactExportJob created, no cleanup",
+        "apps/server/src/modules/notifications/transactional-email.service.ts:262-293 — customerNotificationLog, no cleanup",
+        "apps/server/src/core/interceptors/team-audit.interceptor.ts:44 — TeamActivityLog, no cleanup",
+        "apps/server/src/modules/risc/risc.service.ts:318, 371 — Session purged only on RISC/user deletion"
       ],
       "fix": "Add cron-driven retention worker with configurable windows and S3 cleanup."
     },
@@ -1222,8 +1223,8 @@
       "category": "Secrets in Code",
       "title": "Hardcoded development password and native-AI fallback API key in source",
       "evidence": [
-        "apps/server/src/core/seed/seed.service.ts:58 \u2014 DEV_PASSWORD = 'keyflowdev123'",
-        "apps/server/src/modules/ai/model-gateway.service.ts:1452, 2423 \u2014 'native-key' fallback"
+        "apps/server/src/core/seed/seed.service.ts:58 — DEV_PASSWORD = 'keyflowdev123'",
+        "apps/server/src/modules/ai/model-gateway.service.ts:1452, 2423 — 'native-key' fallback"
       ],
       "fix": "Randomize dev password at first seed; remove 'native-key' fallback."
     },
@@ -1244,7 +1245,7 @@
       "title": "RISC receiver endpoint exists but is not registered with Google",
       "evidence": [
         "apps/server/src/modules/risc/risc.controller.ts",
-        "apps/server/src/modules/risc/risc.service.ts \u2014 ingestion only",
+        "apps/server/src/modules/risc/risc.service.ts — ingestion only",
         "No calls to Google's RISC Configuration Admin API"
       ],
       "fix": "Add boot-time registration using the service account to subscribe RISC_RECEIVER_URL."
@@ -1265,8 +1266,8 @@
       "category": "Authentication / OAuth",
       "title": "Social OAuth flows use in-memory sessions and lack PKCE",
       "evidence": [
-        "apps/server/src/modules/social/social.controller.ts:351-377 \u2014 random hex state, no PKCE except Twitter",
-        "apps/server/src/modules/social/social-connections.service.ts:14 \u2014 oauthSessions = new Map()"
+        "apps/server/src/modules/social/social.controller.ts:351-377 — random hex state, no PKCE except Twitter",
+        "apps/server/src/modules/social/social-connections.service.ts:14 — oauthSessions = new Map()"
       ],
       "fix": "Use signed+HMAC state, store state/PKCE in Redis, add PKCE to all flows."
     },
@@ -1308,7 +1309,7 @@
       "title": "AuthMiddleware swallows invalid bearer tokens and continues as anonymous",
       "evidence": [
         "apps/server/src/core/auth/auth.middleware.ts:60-86",
-        "apps/server/src/core/auth/auth.middleware.ts:81-85 \u2014 logs debug only"
+        "apps/server/src/core/auth/auth.middleware.ts:81-85 — logs debug only"
       ],
       "fix": "Set req.authFailed flag when a token was provided but invalid; log invalid attempts at warn."
     },
@@ -1394,6 +1395,90 @@
         "apps/server/src/modules/crm/privacy/contact-privacy.service.ts:170-186"
       ],
       "fix": "Add ACL: 'private' and ServerSideEncryption: 'AES256' (or KMS) to all PutObjectCommand calls; enforce bucket policy."
+    },
+    {
+      "id": "R57",
+      "severity": "high",
+      "category": "Onboarding",
+      "title": "Onboarding deep links show empty chat and genome intake state is not persisted",
+      "evidence": [
+        "apps/web/src/app/app/onboarding/components/key-onboarding-chat-view.tsx:61-78",
+        "apps/server/src/modules/ai/blueprint-onboarding.service.ts:122"
+      ],
+      "fix": "Seed cards for non-welcome steps and persist BlueprintOnboardingService state to GenomeChatMessage."
+    },
+    {
+      "id": "R58",
+      "severity": "high",
+      "category": "CRM",
+      "title": "CRM sequences advance enrollments but never dispatch messages",
+      "evidence": [
+        "apps/server/src/modules/crm/crm-sequence-scheduler.service.ts:367"
+      ],
+      "fix": "Add a listener for sequence.step_due that creates OutboundDelivery and dispatches via email/WhatsApp/SMS."
+    },
+    {
+      "id": "R59",
+      "severity": "high",
+      "category": "Finance",
+      "title": "Cashflow forecast queries non-existent expense.nextRunDate",
+      "evidence": [
+        "apps/server/src/modules/finance/cashflow-forecast.service.ts:68-75"
+      ],
+      "fix": "Query RecurringExpense.nextRunDate plus scheduled bills."
+    },
+    {
+      "id": "R60",
+      "severity": "medium",
+      "category": "Projects",
+      "title": "Project plan event execution is faked",
+      "evidence": [
+        "apps/server/src/modules/projects/project-plan-executor.service.ts:172-174"
+      ],
+      "fix": "Integrate with FlowOrchestrator for real tool execution."
+    },
+    {
+      "id": "R61",
+      "severity": "medium",
+      "category": "Projects",
+      "title": "Project milestones, notes, and deliverables tabs keep state in React only",
+      "evidence": [
+        "apps/web/src/app/app/projects/components/project-detail.tsx:110-112"
+      ],
+      "fix": "Wire tabs to existing server endpoints."
+    },
+    {
+      "id": "R62",
+      "severity": "medium",
+      "category": "Documents",
+      "title": "/app/document-intelligence renders hard-coded mock data",
+      "evidence": [
+        "apps/web/src/app/app/document-intelligence/page.tsx:119-151"
+      ],
+      "fix": "Replace mock data with real API calls to Documents and DocumentIntelligenceService."
+    },
+    {
+      "id": "R63",
+      "severity": "medium",
+      "category": "Integrations",
+      "title": "Key Connector module is a backend shell while legacy connectors are mostly unimplemented",
+      "evidence": [
+        "apps/server/src/modules/key-connector/key-connector.service.ts:134-202",
+        "apps/server/src/modules/key-connector/sync/sync-engine.service.ts:298-334",
+        "apps/server/src/core/connectors/connector-sync-not-implemented.spec.ts:28-71"
+      ],
+      "fix": "Decide Key Connector vs legacy framework and implement credential validation, sync, and dispatch."
+    },
+    {
+      "id": "R64",
+      "severity": "low",
+      "category": "Tooling",
+      "title": "Root pnpm commands fail on Windows with Prisma query-engine EPERM rename",
+      "evidence": [
+        "turbo.json",
+        "packages/db/prisma.config.ts"
+      ],
+      "fix": "Document WSL/Docker as supported dev environment or add Windows store exclusion guidance."
     }
   ]
 }

@@ -10,8 +10,7 @@ import { ChartOfAccountsSeederService } from './chart-of-accounts-seeder.service
  * Sources of truth (cash basis MVP):
  *   - taxable sales / tax collected = SUM(Invoice.subtotal / Invoice.taxAmount)
  *     for invoices PAID in the period (paidAt window).
- *   - tax paid on purchases = 0 (Expense schema does not yet carry taxAmount;
- *     TODO once FIN3 grows an expense.taxAmount column).
+ *   - tax paid on purchases = SUM(Expense.taxAmount) for expenses in the period.
  *   - amountDue = taxCollected - taxPaid.
  *
  * Open periods are recomputed in place. Once a period is FILED, recompute

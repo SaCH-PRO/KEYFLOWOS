@@ -8,7 +8,6 @@ import {
   ArrowLeft,
   CheckCircle,
   X,
-  Receipt,
   Download,
   Loader2,
   FileText,
@@ -204,13 +203,6 @@ export default function ExpenseDetailPage() {
                 </button>
               </>
             )}
-            <button
-              onClick={() => toast.info("Transaction matching coming soon.")}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-foreground border border-border hover:bg-muted transition-colors"
-            >
-              <Receipt className="w-4 h-4" />
-              Match transaction
-            </button>
           </div>
         </div>
 

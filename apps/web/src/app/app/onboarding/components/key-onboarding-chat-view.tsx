@@ -56,23 +56,30 @@ function OnboardingChatInner({ step, goToStep }: KeyOnboardingChatViewProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Seed the welcome only for a genuinely fresh funnel — never re-greet a
-  // resumed session or offer a backward step to a user past "welcome".
+  // Seed the welcome for a fresh funnel, or prompt the orchestrator to present
+  // the card for the current step when deep-linking/resuming into any other step.
   useEffect(() => {
     if (!restored || seededRef.current) return;
-    if (chat.messages.length === 0 && step === "welcome") {
+    if (chat.messages.length === 0) {
       seededRef.current = true;
-      chat.appendMessage({
-        id: nanoid(),
-        role: "assistant",
-        content:
-          "Hi! I’m KEY. Tell me what you’re building and I’ll set up the rest — your blueprint, concierge template, storefront, and payment details. A few sentences is enough to start.",
-        timestamp: Date.now(),
-        card: {
-          type: "welcome",
-          title: "Welcome to KeyFlowOS",
-        },
-      });
+      if (step === "welcome") {
+        chat.appendMessage({
+          id: nanoid(),
+          role: "assistant",
+          content:
+            "Hi! I’m KEY. Tell me what you’re building and I’ll set up the rest — your blueprint, concierge template, storefront, and payment details. A few sentences is enough to start.",
+          timestamp: Date.now(),
+          card: {
+            type: "welcome",
+            title: "Welcome to KeyFlowOS",
+          },
+        });
+      } else {
+        void sendMessage(
+          `The user is on the ${step} onboarding step. Present the card for this step.`,
+          { silent: true },
+        );
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [restored, chat.messages.length, step]);

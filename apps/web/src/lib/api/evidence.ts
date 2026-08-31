@@ -71,9 +71,13 @@ export async function verifyEvidence(
   );
 }
 
-export async function checkTaskEvidence(linkedType: string, linkedId: string) {
+export async function checkTaskEvidence(
+  businessId: string,
+  taskType: string,
+  taskId: string
+) {
   return apiGetSimple<{ hasEvidence: boolean; evidence: Evidence[] }>(
-    `/evidence/check?linkedType=${encodeURIComponent(linkedType)}&linkedId=${encodeURIComponent(linkedId)}`
+    `/evidence/businesses/${encodeURIComponent(businessId)}/tasks/${encodeURIComponent(taskType)}/${encodeURIComponent(taskId)}/evidence-check`
   );
 }
 
