@@ -170,36 +170,66 @@ export class ProjectPlanExecutorService {
     });
 
     try {
-      // TODO: Integrate with FlowOrchestrator or PlanExecutorService for actual tool execution
-      // For now, simulate successful execution and mark complete
-      this.logger.log(`Would execute tool ${event.automationTool} for event ${eventId}`);
+    /**
+     * THE TOOL IS NOT EXECUTED, AND SAYING SO IS THE FIX.
+     *
+     * What stood here logged "Would execute tool X", and then:
+     *
+     *   - marked the event `completed` with a completedAt
+     *   - marked the linked ProjectTask DONE, isCompleted: true
+     *   - wrote a timeline entry reading "Auto-executed: <title>"
+     *   - returned { status: 'completed' }
+     *
+     * So the plan showed a finished step, the board showed a finished task,
+     * and the timeline showed a record of an automation that never ran. Every
+     * surface a user could check agreed with every other, and all of them were
+     * wrong — which is worse than an error, because there is nothing to notice.
+     *
+     * The integration this needs (FlowOrchestrator / PlanExecutorService) is a
+     * real piece of work and is not smuggled in here. What IS in scope is
+     * refusing to report success for it. This reuses the `blocked` status and
+     * the impactAnalysis payload the catch block below already uses, so the UI
+     * renders it through a path that exists.
+     *
+     * The task is deliberately left alone. Marking someone's task DONE on
+     * behalf of an automation that did not run is the part of the old
+     * behaviour that actually loses information: you cannot tell afterwards
+     * whether it was really done.
+     */
+    this.logger.warn(
+      `Event ${eventId} requests tool "${event.automationTool}", which has no executor wired. ` +
+        'Marking blocked rather than completed.',
+    );
 
-      // Mark event as completed
-      await this.prisma.client.projectPlanEvent.update({
-        where: { id: eventId },
-        data: { status: 'completed', completedAt: new Date() },
-      });
+    await this.prisma.client.projectPlanEvent.update({
+      where: { id: eventId },
+      data: {
+        status: 'blocked',
+        impactAnalysis: {
+          notImplemented: true,
+          tool: event.automationTool,
+          reason: 'No executor is wired for in-app automation tools yet.',
+        },
+      },
+    });
 
-      // Mark linked task as DONE if materialized
-      if (event.projectTaskId) {
-        await this.prisma.client.projectTask.update({
-          where: { id: event.projectTaskId },
-          data: { status: 'DONE', isCompleted: true },
-        });
-      }
+    await this.timeline.recordEvent({
+      businessId,
+      module: 'PROJECT',
+      action: 'event_execution_unavailable',
+      entityType: 'project_plan_event',
+      entityId: eventId,
+      title: `Cannot auto-execute: ${event.title}`,
+      data: { tool: event.automationTool, planId: event.planId, reason: 'no_executor' },
+      occurredAt: new Date(),
+    });
 
-      await this.timeline.recordEvent({
-        businessId,
-        module: 'PROJECT',
-        action: 'event_executed',
-        entityType: 'project_plan_event',
-        entityId: eventId,
-        title: `Auto-executed: ${event.title}`,
-        data: { tool: event.automationTool, planId: event.planId },
-        occurredAt: new Date(),
-      });
-
-      return { status: 'completed', tool: event.automationTool };
+    return {
+      status: 'unavailable' as const,
+      tool: event.automationTool,
+      message:
+        'This step cannot run automatically yet — no executor is wired for it. Complete it manually and mark the task done.',
+    };
     } catch (err: any) {
       const errorMessage = (err as Error).message;
       this.logger.error(`Execution failed for event ${eventId}: ${errorMessage}`);
