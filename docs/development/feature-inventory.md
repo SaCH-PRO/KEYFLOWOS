@@ -173,6 +173,7 @@
 | | CRUD/pause/resume/cancel | P1 | ✅ Working | |
 | Product catalog | CRUD | P1 | ✅ Working | `catalog.service.ts` |
 | | Public product list w/ stock | P1 | ✅ Working | |
+| | Unconfigured inventory hides products | P1 | ✅ Working | `catalog.service.ts` treated NULL inventory config as restrictive; fixed in `37b2400a` |
 | Stripe connector | Checkout/webhooks/refunds | P1 | ✅ Working | `stripe.connector.ts:97-490` |
 | PayPal connector | Checkout/capture/webhooks | P1 | ⚠️ Partial | Payment-link list/revoke unsupported |
 | WiPay connector | Checkout/callback/transactions | P1 | ⚠️ Partial | Payment links/refunds unsupported |
@@ -419,10 +420,10 @@
 | Tier | Working | Partial | Broken | Stub | Orphaned | Total |
 |------|---------|---------|--------|------|----------|-------|
 | P0 | 43 | 9 | 0 | 0 | 0 | 52 |
-| P1 | 88 | 18 | 8 | 0 | 0 | 114 |
+| P1 | 89 | 18 | 8 | 0 | 0 | 115 |
 | P2 | 50 | 12 | 11 | 5 | 9 | 87 |
 | P3 | 11 | 5 | 1 | 4 | 10 | 31 |
-| **Total** | **192** | **44** | **19** | **9** | **19** | **283** |
+| **Total** | **193** | **44** | **19** | **9** | **19** | **284** |
 
 ---
 

@@ -217,7 +217,7 @@ The remaining gaps fall into five patterns:
 **Problem:** The schema contains nullable columns with no default (`String?`, `Int?`, etc.) that application code resolves with `??` to a restrictive value. That makes the strict branch the implicit default for any row that was never explicitly configured, which silently breaks downstream flows. Recent examples:
 - `bufferMins` falling back to a strict buffer that blocks ordinary bookings.
 - `inventoryMode` falling back to `"strict"`, causing `store-order` and `inventory-risk` to disagree and block checkout for merchants who never set inventory policy.
-- Tenant-model scoping sets that treat a missing value as a denied model.
+- Product catalog visibility falling back to hidden when inventory is unconfigured, so products silently disappear from the storefront (`catalog.service.ts`; fixed in `37b2400a`).
 **Evidence:** `packages/db/prisma/schema.prisma`; grep results for `\?\?` in `apps/server/src/modules/**` and `packages/**`.
 **Fix:**
 1. Audit every nullable schema field that lacks a `@default`.
