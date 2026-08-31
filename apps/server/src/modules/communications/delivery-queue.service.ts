@@ -144,7 +144,15 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    const adapter = this.adapters.resolveByPlatform(destination.platform);
+    // Email picks its adapter from the CONNECTION, not just the platform: Gmail
+    // when there is a usable token, the platform ESP when there is not. A
+    // business that never connected an account, or whose token expired, used to
+    // fail every email delivery with MISSING_CREDENTIALS while a working
+    // fallback sat unreachable. See adapters/resend-email-adapter.ts.
+    const isEmailPlatform = destination.platform === 'EMAIL' || destination.platform === 'GOOGLE';
+    const adapter = isEmailPlatform
+      ? this.adapters.resolveEmailFor(destination.connection)
+      : this.adapters.resolveByPlatform(destination.platform);
     if (!adapter) {
       await this.failDelivery(delivery.id, delivery.contentId, delivery.businessId, 'NO_ADAPTER', `No adapter for platform: ${destination.platform}`, 'Sending');
       return;
