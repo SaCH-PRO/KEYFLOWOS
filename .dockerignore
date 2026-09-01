@@ -1,5 +1,15 @@
 # Dependencies
+# BOTH patterns are required. Docker matches a bare `node_modules` at the
+# CONTEXT ROOT ONLY, so packages/db/node_modules and apps/*/node_modules were
+# copied into the image — on Windows complete with symlinks pointing at
+# C:/Users/... , which resolve to nothing on Linux. They then clobbered the
+# links pnpm had just built inside the container, and tsc lost @prisma/client
+# entirely: 130 errors, every one downstream of two unresolvable imports.
+#
+# A clean clone builds fine, so this only bites when building from a machine
+# that has installed dependencies — which is every developer's.
 node_modules
+**/node_modules
 .pnpm-store
 
 # Build outputs
