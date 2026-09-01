@@ -3164,7 +3164,7 @@
     {
       "extension": ".json",
       "lines": 7,
-      "path": ".claude/coordination/sessions/8ec13316-4a0e-580e-b6b4-a7c939802049.json",
+      "path": ".claude/coordination/sessions/a11e9ef8-fbba-5b4f-88a4-04c15e3e842e.json",
       "size_bytes": 173
     },
     {
@@ -57155,7 +57155,7 @@
       "extension": ".json",
       "lines": 0,
       "path": "architecture/dependencies.json",
-      "size_bytes": 4074051
+      "size_bytes": 4118790
     },
     {
       "extension": ".md",
@@ -57441,6 +57441,42 @@
     },
     {
       "extension": ".md",
+      "lines": 51,
+      "path": "architecture/os/journal/2026-08-31-audit-07.md",
+      "size_bytes": 2503
+    },
+    {
+      "extension": ".md",
+      "lines": 73,
+      "path": "architecture/os/journal/2026-08-31-audit-13.md",
+      "size_bytes": 3027
+    },
+    {
+      "extension": ".md",
+      "lines": 87,
+      "path": "architecture/os/journal/2026-08-31-audit-19.md",
+      "size_bytes": 4232
+    },
+    {
+      "extension": ".md",
+      "lines": 152,
+      "path": "architecture/os/journal/2026-08-31-truth.md",
+      "size_bytes": 9421
+    },
+    {
+      "extension": ".md",
+      "lines": 47,
+      "path": "architecture/os/journal/2026-09-01-audit-01.md",
+      "size_bytes": 2311
+    },
+    {
+      "extension": ".md",
+      "lines": 55,
+      "path": "architecture/os/journal/2026-09-01-audit-07.md",
+      "size_bytes": 2815
+    },
+    {
+      "extension": ".md",
       "lines": 123,
       "path": "architecture/os/playbooks/audit.md",
       "size_bytes": 7371
@@ -57477,9 +57513,9 @@
     },
     {
       "extension": ".md",
-      "lines": 87,
+      "lines": 101,
       "path": "architecture/os/state/STATE.md",
-      "size_bytes": 7600
+      "size_bytes": 9117
     },
     {
       "extension": ".md",
@@ -61351,7 +61387,7 @@
       ".ico": 1,
       ".js": 10,
       ".json": 35,
-      ".md": 493,
+      ".md": 499,
       ".mjs": 25,
       ".patch": 1,
       ".pdf": 1,
@@ -61379,7 +61415,7 @@
     "root": "/home/user/KEYFLOWOS",
     "scanner": "codebase-architect/inventory.py",
     "source_files": 3374,
-    "total_files": 4266,
-    "total_lines": 1038623
+    "total_files": 4272,
+    "total_lines": 1039102
   }
 }
