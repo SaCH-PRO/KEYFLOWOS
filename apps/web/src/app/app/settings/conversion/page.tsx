@@ -27,13 +27,13 @@ interface FeatureToggle {
 
 export default function ConversionSettingsPage() {
   const _businessId = getStoredBusinessId() ?? "";
-  const [saving, setSaving] = useState<string | null>(null);
+  const [saving] = useState<string | null>(null);
   // `enabled` is presentation only while this screen is unwired. It was
   // hardcoded true for abandoned_cart and review_solicitation, which rendered
   // an "Active" badge asserting a state nothing had read. All false until
   // something actually reports it — an unknown shown as off is a smaller lie
   // than an unknown shown as on.
-  const [features, setFeatures] = useState<FeatureToggle[]>([
+  const [features] = useState<FeatureToggle[]>([
     {
       key: "abandoned_cart",
       label: "Abandoned Cart Recovery",

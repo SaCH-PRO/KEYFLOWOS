@@ -67,7 +67,7 @@ export function useOnboarding(): UseOnboardingReturn {
   const [step, setStep] = useState<OnboardingStep>("welcome");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [isTransitioning, setIsTransitioning] = useState(false);
+  const [, setIsTransitioning] = useState(false);
 
   const businessId = getStoredBusinessId();
 
@@ -76,6 +76,13 @@ export function useOnboarding(): UseOnboardingReturn {
   const pendingStepRef = useRef<OnboardingStep | null>(null);
   const requestIdRef = useRef(0);
   const loadedRef = useRef(false);
+  // goToStep drains a queued navigation by calling itself. Referring to the
+  // binding from inside its own useCallback initializer is a temporal-dead-zone
+  // hazard — it happens to work because the call is asynchronous, but the
+  // React compiler flags it as "Cannot access variable before it is declared"
+  // and it is one refactor away from being true. The ref always holds the
+  // latest callback, so the recursive step goes through it instead.
+  const goToStepRef = useRef<((next: OnboardingStep) => Promise<void>) | null>(null);
 
   const syncUrl = useCallback(
     (next: OnboardingStep) => {
@@ -87,15 +94,27 @@ export function useOnboarding(): UseOnboardingReturn {
     [router, searchParams],
   );
 
-  const load = useCallback(async () => {
+  // `showSpinner` is false on the mount path and true for an explicit refresh.
+  //
+  // The mount effect calls this, and everything before the first await runs
+  // synchronously inside that effect — the cascading render
+  // react-hooks/set-state-in-effect exists to catch. On mount those calls were
+  // no-ops anyway: `loading` already starts true and `error` starts null. A
+  // user-triggered refresh is a different matter and still wants the spinner,
+  // so it asks for one.
+  const load = useCallback(async (showSpinner = false) => {
     if (!businessId) {
-      setLoading(false);
-      setError("No business selected.");
+      if (showSpinner) {
+        setLoading(false);
+        setError("No business selected.");
+      }
       return;
     }
 
-    setLoading(true);
-    setError(null);
+    if (showSpinner) {
+      setLoading(true);
+      setError(null);
+    }
 
     const { data, error: apiError } = await fetchOnboardingState(businessId);
     if (apiError || !data) {
@@ -143,9 +162,9 @@ export function useOnboarding(): UseOnboardingReturn {
 
   useEffect(() => {
     if (!loadedRef.current) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- async hydration: load() without a spinner sets no state before its first await, which this rule does not model
       void load();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [load]);
 
   const goToStep = useCallback(
@@ -196,11 +215,18 @@ export function useOnboarding(): UseOnboardingReturn {
       const pending = pendingStepRef.current;
       pendingStepRef.current = null;
       if (pending && pending !== next) {
-        void goToStep(pending);
+        void goToStepRef.current?.(pending);
       }
     },
     [businessId, step, syncUrl],
   );
+
+  // Assigned in an effect rather than during render: a ref write during render
+  // is a side effect, and this only has to be correct by the time an async
+  // continuation runs.
+  useEffect(() => {
+    goToStepRef.current = goToStep;
+  }, [goToStep]);
 
   const nextStep = useCallback(async () => {
     const idx = STEP_ORDER.indexOf(step);
@@ -216,5 +242,5 @@ export function useOnboarding(): UseOnboardingReturn {
     }
   }, [step, goToStep]);
 
-  return { step, loading, error, goToStep, nextStep, prevStep, refresh: load };
+  return { step, loading, error, goToStep, nextStep, prevStep, refresh: () => load(true) };
 }

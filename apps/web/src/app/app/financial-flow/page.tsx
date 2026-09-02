@@ -50,7 +50,7 @@ export default function FinancialFlowPage() {
   const [saving, setSaving] = useState(false);
 
   // KEY FLOWS: AR Clerk proof-of-concept queue
-  const [roleKey, setRoleKey] = useState("ACCOUNTS_RECEIVABLE_CLERK");
+  const [roleKey] = useState("ACCOUNTS_RECEIVABLE_CLERK");
   const [signals, setSignals] = useState<FlowSignal[]>([]);
   const [signalsLoading, setSignalsLoading] = useState(false);
   const [actingId, setActingId] = useState<string | null>(null);

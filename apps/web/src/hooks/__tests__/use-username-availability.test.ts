@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } fr
 import { renderHook, waitFor, act } from "@testing-library/react";
 import { useUsernameAvailability } from "@/hooks/use-username-availability";
 
-const API_BASE = "http://localhost:3001";
 
 describe("useUsernameAvailability", () => {
   let fetchSpy: MockInstance<typeof fetch>;

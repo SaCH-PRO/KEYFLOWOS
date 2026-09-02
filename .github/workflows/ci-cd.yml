@@ -106,12 +106,14 @@ jobs:
   # tenant boundary still hold". This job goes red on its own and blocks
   # nothing; the type checks still gate everything downstream.
   #
-  # It is red TODAY: apps/web has 6 pre-existing errors — five
-  # react-hooks/set-state-in-effect (inventory:62,91, store customers:132,
-  # orders:258, promos:212) and one in core-channels-section:163. --max-warnings
-  # cannot suppress an error, so leaving lint in the gating job would have kept
-  # every gate skipped until five components were refactored. Fix them and this
-  # job goes green; until then it is honest and it is loud.
+  # It is GREEN as of 2026-09-01, and the ceilings below are set to the exact
+  # current counts so it can only go down. Raising one is a deliberate act
+  # with a diff to point at, which is the whole purpose of a ratchet.
+  #
+  # It had been red all day and was being stepped around because the name says
+  # it blocks nothing — which is how a real failure ends up hiding behind an
+  # expected red. The two errors were worth having: a deliberate lazy require()
+  # that needed saying so, and a genuine cascading render in an effect.
   lint:
     name: Lint (debt ratchet — blocks nothing)
     runs-on: ubuntu-latest
@@ -161,7 +163,7 @@ jobs:
       # which is the point: this job can be red without a security suite going
       # unrun for it.
       - name: Lint server
-        run: pnpm --filter server lint --max-warnings 3397
+        run: pnpm --filter server lint --max-warnings 3343
 
       # Web drifted the same way while the step was skipped: 33 errors accumulated
       # against a config that documents the app as fully `any`-free. All 33 are now
@@ -180,7 +182,7 @@ jobs:
       # a reviewer, and the run that proves it is the one where it broke a file
       # while removing a comment.
       - name: Lint web
-        run: pnpm --filter web lint --max-warnings 34
+        run: pnpm --filter web lint --max-warnings 26
 
   security-scan:
     name: Security Scan

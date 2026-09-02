@@ -11,8 +11,8 @@ interface KeyChatShellProps {
 }
 
 export function KeyChatShell({ className }: KeyChatShellProps) {
-  const { messages, status, showHistory, setShowHistory, activeSessionId, sessions } = useKeyChat();
-  const { sendMessage, deepThink, stop, confirmAction, loadSessions, createNewSession, selectSession, deleteSession } = useKeyChatActions();
+  const { status, showHistory, setShowHistory, activeSessionId, sessions } = useKeyChat();
+  const { sendMessage, deepThink, stop, confirmAction, loadSessions, createNewSession, selectSession } = useKeyChatActions();
 
   useEffect(() => {
     void loadSessions();
