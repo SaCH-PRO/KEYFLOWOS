@@ -210,9 +210,6 @@ export function getStoredTokenExpiry(): number | null {
   return Number.isNaN(ms) ? null : ms;
 }
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
 let isRefreshing = false;
 let refreshPromise: Promise<boolean> | null = null;
 

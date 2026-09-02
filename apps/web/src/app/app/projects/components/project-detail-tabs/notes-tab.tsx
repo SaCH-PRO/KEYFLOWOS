@@ -24,13 +24,23 @@ export function NotesTab({
   onNotesChange,
 }: NotesTabProps) {
   const [notes, setNotes] = useState<KeyflowNote[]>([]);
-  const [loading, setLoading] = useState(false);
+  // Derived, not set in the effect. True when there is a business to load for,
+  // because the effect below fetches immediately and a component that renders
+  // "no notes yet" for one frame before its first fetch resolves is telling the
+  // user something untrue. False when there is nothing to fetch, so the empty
+  // state is correct straight away and the effect has no state to set
+  // synchronously — which is what react-hooks/set-state-in-effect is about.
+  const [loading, setLoading] = useState(Boolean(businessId));
   const [saving, setSaving] = useState(false);
   const [newNote, setNewNote] = useState("");
 
   const load = useCallback(async () => {
     if (!businessId) return;
-    setLoading(true);
+    // Deliberately NOT setLoading(true) here. load() is called from an effect,
+    // so everything before its first await runs synchronously during that
+    // effect — which is the cascading render react-hooks/set-state-in-effect
+    // exists to catch. The initial state already says "loading", and the
+    // refresh button below owns its own indicator.
     const res = await fetchKeyflowNotes(businessId, "Project", projectId);
     setLoading(false);
     if (res.error) {
@@ -43,6 +53,7 @@ export function NotesTab({
   }, [businessId, projectId, onNotesChange]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async hydration: load() sets state only AFTER its first await, which this rule does not model
     void load();
   }, [load]);
 

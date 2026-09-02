@@ -1,6 +1,5 @@
 "use client";
 
-import { getApiBase } from "@/lib/api-base";
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -37,7 +36,6 @@ import {
 import { useUsernameAvailability } from "@/hooks/use-username-availability";
 import { checkUsernameAvailability } from "@/lib/username-availability";
 
-const API_BASE = getApiBase();
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? (typeof window !== "undefined" ? window.location.origin : "http://localhost:3000");
 /** Placeholder env values (your-project.supabase.co) would navigate the user into a dead end. */

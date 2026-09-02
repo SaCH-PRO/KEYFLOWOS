@@ -6,9 +6,6 @@ import { FormEvent, Suspense, useEffect, useMemo, useState } from "react";
 import { Lock, Eye, EyeOff, AlertCircle, CheckCircle2, Loader2, ArrowRight, ShieldCheck } from "lucide-react";
 import { API_BASE } from "@/lib/api";
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
 type Status = "loading" | "ready" | "invalid" | "submitting" | "done";
 
 function clientPasswordIssue(pw: string): string | null {
