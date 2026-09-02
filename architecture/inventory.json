@@ -874,7 +874,6 @@
     "packages/db/prisma/migrations/20260811040000_add_booking_waitlist",
     "packages/db/prisma/migrations/20260823170000_business_id_indexes",
     "packages/db/prisma/migrations/20260830220000_add_project_deliverables",
-    "packages/db/scripts",
     "packages/db/src",
     "packages/db/src/middleware",
     "packages/db/src/types",
@@ -3164,7 +3163,7 @@
     {
       "extension": ".json",
       "lines": 7,
-      "path": ".claude/coordination/sessions/a11e9ef8-fbba-5b4f-88a4-04c15e3e842e.json",
+      "path": ".claude/coordination/sessions/13ac3e4d-5aa2-585e-8186-f1e1683c0f09.json",
       "size_bytes": 173
     },
     {
@@ -3194,9 +3193,9 @@
     },
     {
       "extension": "",
-      "lines": 34,
+      "lines": 44,
       "path": ".dockerignore",
-      "size_bytes": 319
+      "size_bytes": 934
     },
     {
       "extension": ".example",
@@ -3242,9 +3241,9 @@
     },
     {
       "extension": ".yml",
-      "lines": 470,
+      "lines": 472,
       "path": ".github/workflows/ci-cd.yml",
-      "size_bytes": 20297
+      "size_bytes": 20393
     },
     {
       "extension": ".yml",
@@ -5399,9 +5398,9 @@
       ],
       "extension": ".ts",
       "imports": [],
-      "lines": 196,
+      "lines": 197,
       "path": "apps/server/src/core/observability/error-registry.ts",
-      "size_bytes": 7714
+      "size_bytes": 7864
     },
     {
       "exports": [],
@@ -40727,7 +40726,7 @@
       ],
       "lines": 511,
       "path": "apps/web/src/app/app/financial-flow/page.tsx",
-      "size_bytes": 24501
+      "size_bytes": 24489
     },
     {
       "exports": [
@@ -43961,9 +43960,9 @@
         "next/navigation",
         "react"
       ],
-      "lines": 220,
+      "lines": 246,
       "path": "apps/web/src/app/app/onboarding/hooks/use-onboarding.ts",
-      "size_bytes": 6725
+      "size_bytes": 8229
     },
     {
       "exports": [
@@ -45683,9 +45682,9 @@
         "react",
         "sonner"
       ],
-      "lines": 176,
+      "lines": 187,
       "path": "apps/web/src/app/app/projects/components/project-detail-tabs/notes-tab.tsx",
-      "size_bytes": 5901
+      "size_bytes": 6884
     },
     {
       "exports": [
@@ -46626,7 +46625,7 @@
       ],
       "lines": 189,
       "path": "apps/web/src/app/app/settings/conversion/page.tsx",
-      "size_bytes": 6491
+      "size_bytes": 6467
     },
     {
       "exports": [
@@ -48563,9 +48562,9 @@
         "next/navigation",
         "react"
       ],
-      "lines": 265,
+      "lines": 262,
       "path": "apps/web/src/app/auth/reset-password/page.tsx",
-      "size_bytes": 11730
+      "size_bytes": 11601
     },
     {
       "exports": [
@@ -48599,7 +48598,6 @@
       "imports": [
         "../motion-shim",
         "@/hooks/use-username-availability",
-        "@/lib/api-base",
         "@/lib/client",
         "@/lib/oauth-pkce",
         "@/lib/username-availability",
@@ -48609,9 +48607,9 @@
         "next/navigation",
         "react"
       ],
-      "lines": 611,
+      "lines": 609,
       "path": "apps/web/src/app/auth/signup/page.tsx",
-      "size_bytes": 34435
+      "size_bytes": 34359
     },
     {
       "exports": [
@@ -51679,7 +51677,7 @@
       ],
       "lines": 125,
       "path": "apps/web/src/components/key/chat/key-chat-shell.tsx",
-      "size_bytes": 4594
+      "size_bytes": 4569
     },
     {
       "exports": [
@@ -53902,9 +53900,9 @@
         "@testing-library/react",
         "vitest"
       ],
-      "lines": 175,
+      "lines": 174,
       "path": "apps/web/src/hooks/__tests__/use-username-availability.test.ts",
-      "size_bytes": 4916
+      "size_bytes": 4874
     },
     {
       "exports": [
@@ -57056,9 +57054,9 @@
         "./api-base",
         "./client"
       ],
-      "lines": 360,
+      "lines": 357,
       "path": "apps/web/src/lib/workspace.ts",
-      "size_bytes": 11696
+      "size_bytes": 11567
     },
     {
       "exports": [
@@ -57477,6 +57475,36 @@
     },
     {
       "extension": ".md",
+      "lines": 75,
+      "path": "architecture/os/journal/2026-09-01-audit-13.md",
+      "size_bytes": 3560
+    },
+    {
+      "extension": ".md",
+      "lines": 90,
+      "path": "architecture/os/journal/2026-09-01-audit-19.md",
+      "size_bytes": 3951
+    },
+    {
+      "extension": ".md",
+      "lines": 106,
+      "path": "architecture/os/journal/2026-09-01-truth.md",
+      "size_bytes": 5982
+    },
+    {
+      "extension": ".md",
+      "lines": 40,
+      "path": "architecture/os/journal/2026-09-02-audit-01.md",
+      "size_bytes": 4644
+    },
+    {
+      "extension": ".md",
+      "lines": 41,
+      "path": "architecture/os/journal/2026-09-02-audit-07.md",
+      "size_bytes": 2983
+    },
+    {
+      "extension": ".md",
       "lines": 123,
       "path": "architecture/os/playbooks/audit.md",
       "size_bytes": 7371
@@ -57513,9 +57541,9 @@
     },
     {
       "extension": ".md",
-      "lines": 101,
+      "lines": 108,
       "path": "architecture/os/state/STATE.md",
-      "size_bytes": 9117
+      "size_bytes": 9161
     },
     {
       "extension": ".md",
@@ -59110,7 +59138,7 @@
       "extension": ".json",
       "lines": 38,
       "path": "packages/db/package.json",
-      "size_bytes": 878
+      "size_bytes": 900
     },
     {
       "exports": [],
@@ -59999,16 +60027,6 @@
       "lines": 15,
       "path": "packages/db/restore-tags-column.ts",
       "size_bytes": 327
-    },
-    {
-      "exports": [],
-      "extension": ".mjs",
-      "imports": [
-        "node:child_process"
-      ],
-      "lines": 55,
-      "path": "packages/db/scripts/generate.mjs",
-      "size_bytes": 2318
     },
     {
       "exports": [
@@ -61387,8 +61405,8 @@
       ".ico": 1,
       ".js": 10,
       ".json": 35,
-      ".md": 499,
-      ".mjs": 25,
+      ".md": 504,
+      ".mjs": 24,
       ".patch": 1,
       ".pdf": 1,
       ".pid": 3,
@@ -61414,8 +61432,8 @@
     },
     "root": "/home/user/KEYFLOWOS",
     "scanner": "codebase-architect/inventory.py",
-    "source_files": 3374,
-    "total_files": 4272,
-    "total_lines": 1039102
+    "source_files": 3373,
+    "total_files": 4276,
+    "total_lines": 1039447
   }
 }
