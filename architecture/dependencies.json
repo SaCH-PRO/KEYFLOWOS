@@ -95308,13 +95308,6 @@
     {
       "resolved": false,
       "source": "apps/web/src/app/auth/signup/page.tsx",
-      "specifier": "@/lib/api-base",
-      "target": "@/lib/api-base",
-      "type": "external"
-    },
-    {
-      "resolved": false,
-      "source": "apps/web/src/app/auth/signup/page.tsx",
       "specifier": "@/lib/client",
       "target": "@/lib/client",
       "type": "external"
@@ -106892,13 +106885,6 @@
     },
     {
       "resolved": false,
-      "source": "packages/db/scripts/generate.mjs",
-      "specifier": "node:child_process",
-      "target": "node:child_process",
-      "type": "external"
-    },
-    {
-      "resolved": false,
       "source": "packages/db/src/client.ts",
       "specifier": "@prisma/adapter-pg",
       "target": "@prisma/adapter-pg",
@@ -107907,8 +107893,8 @@
     }
   ],
   "meta": {
-    "edges": 15415,
-    "nodes": 3770,
+    "edges": 15413,
+    "nodes": 3769,
     "root": "/home/user/KEYFLOWOS",
     "scanner": "codebase-architect/dependency_scan.py"
   },
@@ -125785,11 +125771,6 @@
     {
       "extension": ".ts",
       "id": "packages/db/restore-tags-column.ts",
-      "type": "file"
-    },
-    {
-      "extension": ".mjs",
-      "id": "packages/db/scripts/generate.mjs",
       "type": "file"
     },
     {
