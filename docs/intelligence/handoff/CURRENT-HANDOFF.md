@@ -6,62 +6,192 @@ Last updated: 2026-09-03
 
 Read `docs/intelligence/00-START-HERE.md`, then the canonical files it lists.
 
-## Active analytical unit
+Also read:
 
-`KF-JOURNEY-001 — Business Birth`
+- `docs/intelligence/sessions/2026-09-03-exhausted-thread-recovery.md`
+- `docs/intelligence/journeys/KF-JOURNEY-001-BUSINESS-BIRTH.md`
+- `docs/intelligence/journeys/KF-JOURNEY-002-KEY-REQUEST-GOVERNED-ACTION.md`
+- `docs/intelligence/journeys/KF-JOURNEY-025-HUMAN-AUTHORITY-LIFECYCLE.md`
+
+## Context integrity
+
+`PASS`
+
+The previous long conversation's unique work has been recovered and durably persisted. Do not restart from first-pass J1 scoping.
+
+## Active analytical mesh
+
+```text
+KF-JOURNEY-001 — Business Birth
+        ↕
+KF-JOURNEY-025 — Human Authority Lifecycle
+        ↕
+KF-JOURNEY-002 — KEY Request → Governed Action
+```
 
 ## Exact continuation point
 
-The macroscopic model and methodology are already established. Do not restart them. The next work is the first microscopic pass: **Boundary & Reality Reconstruction**.
+Remain inside this mesh. Do **not** fully open J15 yet.
 
-## What has already been established
+The immediate work is convergence across three foundational problems:
 
-- KeyFlowOS should be understood as a causal operating system, not merely a collection of modules.
-- The macro model centers on Business Genesis, Business Blueprint, Business Genome, Living Business Constitution, Business Graph, Temporal Flow, KEY, and readiness/governance.
-- The microscopic model should be journey-based and computable.
-- Business Birth is the first journey.
-- Durable intelligence belongs in `docs/intelligence/`, not only in chat.
+### A. Tenant relationship
 
-## Repository evidence already seen
+Resolve:
 
-- `apps/server/src/modules/identity/identity.service.ts`
-  - creates Business records;
-  - attempts to seed default autopilot triggers/settings during creation;
-  - mirrors relevant later Business profile changes into Blueprint inference.
-- `docs/system-map/06-business-genome.md`
-  - documents current Business Blueprint/Genome/Genesis/Constitution/readiness/Command Center implementation and known wiring realities.
+```text
+Business.ownerId + Membership
+  -> safe Membership-first tenancy
+```
 
-## Next investigation target
+without breaking ownership semantics/data.
 
-Build a complete inventory of every code/document/runtime surface that participates in Business Birth before deciding where the journey begins or ends.
+Trace/revalidate:
 
-Prioritize searches/fetches around:
+- all Business creation/bootstrap paths;
+- OWNER Membership invariants;
+- `listBusinesses`/workspace discovery;
+- BusinessGuard vs scoped authorization;
+- active workspace selection;
+- invitation placeholder identity behavior;
+- JobRole/OrgAssignment authority materialization.
 
-- signup/login/auth/bootstrap
-- identity/user creation
-- business creation
-- business bootstrap endpoints/DTOs
-- onboarding-concierge
-- business-genesis
-- blueprint creation/inference/update
-- Genome fact/evidence backfill/scoring
-- Constitution initialization/version generation
-- Genome/module readiness and autonomy gates
-- default/autopilot trigger seeding
-- business-created or equivalent events
-- frontend onboarding/business creation flows
-- tests proving these pathways
+### B. Effective human authority
 
-## Required output of the next pass
+Construct and challenge a candidate algebra:
 
-Update `journeys/KF-JOURNEY-001-BUSINESS-BIRTH.md` with:
+```text
+principal
++ business
++ Membership/base role
++ JobRole/position
++ explicit grants/overrides
++ explicit denials
++ delegations
++ approval tier
++ capability
++ resource/context
++ validity/revocation
+-> effective authority
+```
 
-1. evidence inventory;
-2. candidate semantic entry states;
-3. candidate semantic exit states;
-4. implementation execution paths;
-5. first-pass state/mutation graph;
-6. contradictions and open questions;
-7. evidence references.
+Determine:
 
-Do not redesign yet.
+- source precedence;
+- expansion vs narrowing rules;
+- explicit-denial semantics;
+- delegation/grant bounds;
+- explainability/provenance;
+- revocation effects on approval/clearance.
+
+### C. Execution claim / dispatcher
+
+Revalidate all materially distinct execution regimes:
+
+- KeyActionProposal execution;
+- AI plan approval/execution;
+- PlanExecutor/BullMQ;
+- direct Flow plan execution;
+- GraphActions/direct Flow action execution;
+- ActionDispatcherService;
+- KeyIdempotencyService;
+- SafetyShell;
+- provider-side idempotency/retries.
+
+Construct candidate target:
+
+```text
+exact capability/action
+  -> clearance
+  -> atomic execution claim
+  -> canonical post-clearance dispatcher
+  -> domain/provider execution
+  -> durable outcome
+```
+
+## What is already recovered
+
+### Journey programme
+
+Canonical programme recovered through `KF-JOURNEY-025`. See `03-ANALYSIS-MAP.md`.
+
+### Method
+
+Journey analyses are recursive/bidirectional. Findings in J25/J2 must feed back into J1 and vice versa.
+
+### Macro thesis
+
+KeyFlowOS is being modelled as a governed business-state transition system:
+
+```text
+observation
+-> Business Graph
+-> Genome
+-> KEY
+-> capability
+-> authority/policy/readiness
+-> clearance
+-> execution claim
+-> execution
+-> state transition
+-> evidence/outcome
+```
+
+### Critical distinctions already established
+
+- Business Graph != database
+- Blueprint != Genome
+- Membership != mere relationship
+- human authority != KEY autonomy
+- impact tier != control requirement
+- module readiness != action authorization
+- approval != portable clearance
+- clearance != execution claim
+- idempotency key != single-executor claim
+- invitation != authenticated User
+
+## Existing seams to evaluate before inventing replacements
+
+- `CapabilityContractService`
+- `ActionDispatcherService`
+- Membership
+- AuthorityGrant
+
+Do not create parallel v2 systems until these are proven insufficient.
+
+## Recovered implementation-findings caution
+
+Historical findings F003–F043 and C005–C021 are preserved in the recovery source. They are valuable leads but commit-sensitive code facts must be revalidated against the current repository before they become execution premises.
+
+Do not assign historical F-numbers beyond F043 unless an original source is recovered.
+
+## J15 admission rule
+
+Only perform a full `KF-JOURNEY-015 — Approval / Governance Lifecycle` pass after the J1/J25/J2 convergence establishes sufficiently stable:
+
+- tenant identity/relationship;
+- human authority algebra;
+- capability identity;
+- approval-to-clearance binding;
+- concurrency-safe execution claim;
+- post-clearance execution semantics.
+
+## Required output of next convergence pass
+
+1. current-code revalidation table for the three convergence axes;
+2. candidate Membership-first tenancy invariant/migration model;
+3. candidate Effective Authority Resolver algebra with worked scenarios;
+4. candidate clearance + action-fingerprint + invalidation semantics;
+5. candidate execution-claim state machine and dispatcher topology;
+6. explicit changes to J1/J25/J2 conclusions;
+7. updated finding/contradiction/recommendation registers;
+8. J15 admission verdict: `NOT_READY` or `READY_FOR_SCOPING`.
+
+## Constraints
+
+- No production code modifications yet.
+- No premature implementation tickets from provisional recommendations.
+- No legacy deletion without consumer proof.
+- No assumption that a test file means a test passed.
+- No assumption that UI non-navigation means code is dead.
+- Preserve evidence -> interpretation -> decision.
