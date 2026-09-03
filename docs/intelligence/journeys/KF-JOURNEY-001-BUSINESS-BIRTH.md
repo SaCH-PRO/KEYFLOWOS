@@ -1,155 +1,451 @@
 # KF-JOURNEY-001 — Business Birth
 
-Status: SCOPING / BOUNDARY & REALITY RECONSTRUCTION
+Status: SUBSTANTIALLY_MODELLED / ACTIVE CROSS-JOURNEY CONVERGENCE
 
-## Purpose
+Source basis: recovered prior-thread analysis plus continuation-thread revalidation. Commit-sensitive implementation claims must still be checked against the current default branch before implementation work.
 
-Reconstruct the complete current-state transition from a person/founder without an operational KeyFlowOS business context to a newly established business state that the platform can safely understand and begin operating upon.
+## A. Definition
 
-This file is evidence-first. It must distinguish current implementation, intended architecture, accepted decisions, working hypotheses, and unresolved questions.
+Business Birth is the transition from a prospective/unknown founder state into an operating KeyFlowOS business context that has coherent human identity, tenant relationship, foundational business knowledge, enough operating configuration/readiness for the post-birth experience, and a legitimate authority baseline.
 
-## 1. Semantic definition
+It is broader than inserting a `Business` row.
 
-**Current working definition:** Business Birth is broader than inserting a `Business` row. It is the transition that establishes the minimum coherent business identity, foundational machine-readable understanding, and safe operating context required for downstream KeyFlowOS capabilities.
+Recovered refinement treats Business Birth as interlocking initialization dimensions:
 
-**Boundary status:** NOT YET FINAL.
+- **Human birth** — authentication / local identity.
+- **Tenant birth** — Business + Membership + founding authority.
+- **Knowledge birth** — Blueprint -> observations/assertions/evidence -> resolved knowledge / Genome.
+- **Operating birth** — products/services/hours/public asset/connectors and other initial operational configuration.
 
-See `KF-Q-002` and `KF-Q-003`.
+Then readiness -> Command Center / operating business.
 
-## 2. Candidate entry boundaries
+The exact canonical exit boundary remains open (`KF-Q-002`).
 
-To be validated:
+## B. Product intent
 
-- anonymous founder/business idea before account creation;
-- signup/authentication intent;
-- local User creation/bootstrap;
-- explicit Create Business action;
-- Business Genesis initiation.
+A founder should move from “I have an idea/business” to “KeyFlowOS knows enough about my business, has established the correct workspace/authority, and can help me operate safely” without requiring the founder to manually assemble an internal system model.
 
-## 3. Candidate exit boundaries
+Business Birth should produce both:
 
-To be validated:
+1. machine-usable business understanding;
+2. visible real value/activation proof early enough that onboarding does not feel like paperwork.
 
-- Business database record exists;
-- default operational/autopilot settings initialized;
-- baseline onboarding state initialized;
-- BusinessBlueprint exists;
-- minimum GenomeFacts/evidence exist;
-- Three-Pillar Minimum reached;
-- module readiness established;
-- initial Constitution generated/versioned;
-- KEY has minimum safe operating context.
+## C. Actors
 
-## 4. Evidence inventory
+- prospective founder/operator
+- Supabase/external auth identity
+- local User
+- Business
+- founding Membership / owner
+- onboarding/Genesis surfaces
+- KEY / model gateway
+- Blueprint / Genome services
+- setup/template/catalog/storefront systems
+- readiness/gating systems
+- Command Center
 
-### Confirmed so far
+## D. Recovered high-level implementation spine
 
-#### IdentityService business creation
+```text
+PROSPECT
+  -> /auth/signup
+  -> POST /identity/signup
+  -> Supabase auth
+  -> authenticated external identity
+  -> POST /identity/bootstrap
+  -> local User
+  -> Business
+  -> OWNER Membership
+  -> active business/workspace
+  -> /app
+  -> onboarding gate
+       incomplete -> /app/onboarding
+       complete   -> /app/command-center
+```
 
-Current `apps/server/src/modules/identity/identity.service.ts` evidence shows that `createBusiness()`:
+Important: alternate Business creation paths were also recovered historically and did not necessarily satisfy equivalent founding Membership/initialization semantics. These must be revalidated.
 
-- validates an owner ID;
-- creates a Business row;
-- then attempts `defaultTriggers.seedForBusiness(business.id)`;
-- deliberately allows business creation to succeed even if default-trigger seeding fails;
-- notes that no `business.created` event exists at this creation point;
-- returns the created Business.
+## E. Recovered onboarding / knowledge / operating flow
 
-**Interpretation:** database creation and secondary operational initialization are already partially coupled, but initialization is explicitly best-effort rather than atomic.
+```text
+/app/onboarding
+  -> persistent KEY onboarding session/state
+  -> welcome
+  -> intake
+  -> business description
+  -> ModelGateway / Genesis extraction
+  -> preview/review
+  -> BusinessBlueprint mutation
+  -> selected Business-field mirroring
+  -> compliance/projection/readiness work
+  -> GenomeFact + GenomeEvidence attempts
+  -> template selection
+  -> configure products/hours/payments/storefront/contacts
+  -> Blueprint/Genome reconciliation
+  -> DNA/integrity/stage/readiness
+  -> Three-Pillar Minimum
+  -> markOnboardingComplete()
+  -> onboardingComplete=true
+  -> onboardingCompletedAt
+  -> demo seed / milestone / legal side effects
+  -> /app/command-center
+```
 
-**Open implication:** whether this best-effort seed belongs to the canonical semantic Business Birth contract remains unresolved (`KF-Q-008`).
+## F. Recovered state machine
 
-#### Business profile -> Blueprint mirroring
+```text
+S0  PROSPECT
+S1  AUTH_PROVISIONED
+S2  AUTHENTICATED
+S3  LOCAL_IDENTITY_READY
+S4  TENANT_READY
+S5  ONBOARDING_WELCOME
+S6  ONBOARDING_INTAKE
+S7  BUSINESS_CONCEPT_CAPTURED
+S8  BLUEPRINT_POPULATING
+S9  TEMPLATE_SELECTED
+S10 BUSINESS_CONFIGURING
+S11 GENOME_MINIMUM_PENDING
+S12 THREE_PILLAR_MINIMUM_MET
+S13 ONBOARDING_COMPLETE
+S14 OPERATING
+```
 
-The same service's `updateBusiness()` maps selected profile fields into onboarding-answer keys and calls Blueprint inference asynchronously/best-effort after material profile changes.
+This is a working semantic state machine reconstructed from the prior analysis, not yet a claim that current code enforces one single formal state machine.
 
-**Interpretation:** ordinary Business profile state participates in AI/Genome grounding after creation, so Business and Blueprint cannot be treated as unrelated stores.
+## G. Onboarding-step semantics
 
-#### Current Genome/Genesis system map
+Recovered current/recent implementation semantics:
 
-`docs/system-map/06-business-genome.md` documents a current architecture where:
+```text
+welcome -> intake -> template -> configure -> complete
+```
 
-- `BusinessBlueprint` is lazily seeded by Blueprint reads;
-- Blueprint updates rescore/backfill Genome state and can emit Genome/Temporal effects;
-- Genome facts/evidence and scoring feed readiness and autonomy;
-- Constitution versions can be generated after Genome integrity changes;
-- Business Genesis and Genome Chat provide structured/inferred/verified write paths;
-- Business Command Center aggregates readiness, Genome, risk, approval, and cross-domain signals.
+Legacy aliases:
 
-**Interpretation:** semantic Business Birth may involve more than Identity because the downstream intelligence system has its own initialization lifecycle.
+- `genesis -> intake`
+- `genome -> configure`
 
-## 5. Implementation execution paths
+`saveStep('complete')` is intentionally rejected; the dedicated completion command owns transition to complete.
 
-Not yet fully reconstructed.
+Recovered Three-Pillar threshold:
 
-Required traces:
+- founder >= 50
+- business >= 50
+- market >= 50
 
-1. frontend signup/bootstrap;
-2. auth callback/session bootstrap;
-3. User creation/synchronization;
-4. Business create endpoint/controller/service;
-5. onboarding-concierge state initialization;
-6. Genesis entry/write paths;
-7. Blueprint lazy creation and update paths;
-8. GenomeFact/GenomeEvidence creation/backfill/scoring;
-9. Constitution initial generation/versioning;
-10. module readiness/autonomy initialization;
-11. default trigger/autopilot settings initialization;
-12. emitted events/Temporal Flow/business-events/audit;
-13. frontend transition to normal app/Command Center.
+Continuation-thread repository inspection also confirmed the slim onboarding state service normalizes legacy steps and dedicated `markOnboardingComplete()` gates completion through Genome integrity before transactionally updating completion state plus demo/milestone/legal side effects.
 
-## 6. State / mutation graph
+## H. Tenant / identity model
 
-PLACEHOLDER — to be constructed from evidence during Pass 1.
+### Current/recovered core distinction
 
-## 7. Human / UX journey
+External authentication identity, local User, Business, Membership, ownership and active workspace are distinct concepts.
 
-PLACEHOLDER — frontend surfaces have not yet been fully inventoried.
+### Founding authority concern
 
-## 8. KEY knowledge and authority
+Recovered analysis found multiple creation semantics:
 
-PLACEHOLDER — to map before/after state and readiness gates.
+- `bootstrapUser()` ensured/reused a default Business and upserted OWNER Membership;
+- explicit `createBusiness()` historically created the Business and initialized some operational defaults, but did not necessarily create equivalent OWNER Membership;
+- a tRPC creation path was also recovered as underinitialized.
 
-## 9. Security / tenancy invariants
+Thus “Business exists” did not guarantee “founding tenant authority is coherent.”
 
-PLACEHOLDER — Identity, Membership/owner semantics, BusinessGuard/context, and data-scoping behaviour require tracing.
+### Active convergence with J25
 
-## 10. Events / jobs / side effects
+Working target:
 
-Known preliminary side effect:
+```text
+Tenant Genesis
+  -> Business
+  -> founding OWNER Membership
+  -> owner semantics preserved
+  -> discoverable authorized workspace
+  -> Effective Authority Resolver can explain founding authority
+```
 
-- default trigger/autopilot seeding after Business row creation.
+Open: long-term role of `Business.ownerId` versus Membership-first tenant relationship (`KF-Q-010`).
 
-Known preliminary absence:
+## I. Workspace selection
 
-- no canonical `business.created` event at the current IdentityService creation point, according to source comments.
+Recovered/confirmed `apps/web/src/lib/workspace.ts` behavior stores `kf_business_id` as active browser workspace selection and can bootstrap/refresh workspace state from identity bootstrap.
 
-Full event map pending.
+Invariant:
 
-## 11. Failure / degraded states
+> `kf_business_id` is selection context, not authorization.
 
-Known preliminary degraded state:
+Recovered product gap: no mature first-class multi-business switcher had been identified. Workspace candidates should eventually derive from authorized relationships.
 
-- Business creation may succeed while autopilot default seeding fails. The code treats the seed as idempotent/retriable but the recovery caller/path must be found.
+## J. Invitation lifecycle
 
-Other failure paths pending.
+Recovered defect class:
 
-## 12. Implementation vs canonical architecture
+```text
+invite email
+  -> create placeholder local User
+  -> create Membership
+  -> later authenticated external identity may collide/reconcile poorly
+```
 
-Not yet resolved.
+Working target:
 
-## 13. Open questions
+```text
+Invitation claim
+  -> authenticated identity proves claim
+  -> Membership activated/created
+  -> intended role/scopes/tier preserved
+```
 
-Primary references:
+This remains active J1/J25 work. Existing placeholder invitation identities require migration planning.
 
-- `KF-Q-002` Business Birth exit boundary
-- `KF-Q-003` Business Birth entry boundary
-- `KF-Q-004` onboarding vs Genesis semantics
-- `KF-Q-005` knowledge/evidence write-path consistency
-- `KF-Q-007` readiness/authority coherence
-- `KF-Q-008` missing `business.created` event
-- `KF-Q-009` initialization relationship across Business/Blueprint/Genome/Readiness/Constitution
+## K. Business knowledge formation
 
-## 14. Next pass
+Recovered architecture increasingly distinguishes:
 
-Perform repository-wide Boundary & Reality Reconstruction and replace placeholders with an evidence-backed first-pass journey map before recommending architectural changes.
+```text
+SOURCE
+  -> observation / signal
+  -> semantic normalization
+  -> FactDefinition
+  -> assertion
+  -> evidence / confidence / verification / freshness / risk
+  -> resolution policy
+  -> resolved fact
+  -> Genome interpretation/readiness
+```
+
+### Business Blueprint
+
+Primarily founder/operator declaration/configuration.
+
+### Business Graph
+
+Factual business state KeyFlowOS may treat as reality; not merely database rows.
+
+### Genome
+
+What KEY should currently believe about the business, including interpretation, confidence, gaps, stage, readiness, risk and actionability.
+
+### Recovered knowledge-integrity concerns
+
+- multiple source-specific/noncanonical fact producers;
+- weaker assertion replacing value while stronger verification metadata remains;
+- Blueprint update/readiness ordering can produce stale projection;
+- competing legacy business-knowledge projections remain active;
+- scoring paths can disagree;
+- tests do not automatically prove ontology compatibility.
+
+## L. Readiness model
+
+Business Birth historically used Three-Pillar Minimum and setup/onboarding checks, but recovered analysis rejected treating any one flag as final action safety.
+
+Working readiness lattice:
+
+1. Knowledge Readiness
+2. Operational Readiness
+3. Connectivity Readiness
+4. Compliance Readiness
+5. Authority Readiness
+6. Action Readiness
+
+Invariant:
+
+`onboardingComplete != Genome healthy != module ready != action authorized != automation safe`.
+
+Business Birth's exact readiness exit requirement remains unresolved.
+
+## M. Operating configuration
+
+Recovered onboarding/template paths could establish:
+
+- products/services
+- business hours
+- payment recommendations/configuration state
+- storefront slug/public asset
+- contacts/demo state
+- selected business profile fields
+
+Recovered concern: some setup/readiness semantics were stronger in naming than the underlying configuration proof (e.g. recommended payments vs real connector/payment readiness).
+
+## N. Activation proof / first live asset
+
+Recovered product finding F019/C016:
+
+KeyFlowOS already had machinery capable of generating/configuring a customer-facing storefront/public booking surface during onboarding, but the result was not prominently surfaced as the moment of first value.
+
+Working product direction:
+
+```text
+Template/configuration
+  -> live/previewable asset
+  -> Preview / Copy link / Publish / Share
+  -> first tangible value
+```
+
+Hypothesis: this should happen before requiring maximal Genome completeness, subject to safety/product constraints.
+
+## O. Onboarding completion transition
+
+Dedicated completion command is semantically stronger than generic field mutation.
+
+Recovered completion concerns historically included:
+
+- generic Business patch could bypass lifecycle semantics (revalidate current code);
+- dedicated completion enforced Three-Pillar Minimum;
+- completion also seeded demo data / milestone / legal-disclaimer side effects;
+- synthetic data introduced here could contaminate later intelligence.
+
+Working direction: one explicit idempotent lifecycle transition owns completion gates, side effects and lifecycle event(s).
+
+## P. Synthetic data
+
+Recovered finding F018/F027 indicates persisted demo data could influence Cortex/operational counts/ecommerce inference.
+
+Working invariant:
+
+> Synthetic bootstrap examples must be explicitly classified and must not silently become canonical business truth.
+
+Need universal provenance/classification (`KF-Q-021`).
+
+## Q. Events / lifecycle
+
+Recovered finding F025: no reliable single semantic Business-creation lifecycle event had been established.
+
+Earlier continuation-thread inspection also found `createBusiness()` directly seeded default triggers/settings because no `business.created` hook was available there.
+
+Open question: should Tenant Genesis own an explicit committed lifecycle event, and what downstream initialization should be synchronous vs event-driven?
+
+## R. Default trigger/autopilot initialization
+
+Continuation-thread source inspection confirmed explicit business creation attempted `defaultTriggers.seedForBusiness(business.id)` after creating the Business, with failure tolerated so the Business could still be created.
+
+This demonstrates a degraded state:
+
+```text
+Business exists
+  + default operational/autopilot initialization may have failed
+```
+
+Whether this seed belongs in canonical Tenant Genesis or a repairable post-commit subscriber remains unresolved.
+
+## S. Business self-model authority
+
+Recovered J1/J25 finding: ordinary members could reach multiple Blueprint/onboarding/Genesis/Genome mutation surfaces.
+
+Required distinction:
+
+- contribution / signal
+- proposal to change canonical business knowledge
+- authoritative canonical business-truth mutation
+
+This authority model must reuse J25/J2 capability/principal semantics rather than inventing isolated onboarding permissions.
+
+## T. Legacy / duplicate knowledge models
+
+Recovered active/legacy concerns:
+
+- modern GenomeFact/evidence architecture
+- mutable legacy BusinessGenome consumed by Cortex
+- live BusinessGuidanceProfile used by AI/documents
+- Business/Blueprint fields and mirrors
+
+Rule: classify active consumers before migration/deletion.
+
+## U. Recovered J1 findings
+
+Historical IDs preserved in `08-FINDING-REGISTER.md`:
+
+F003–F028.
+
+Especially relevant to current convergence:
+
+- F003 ownerId and OWNER Membership dual authority
+- F004 explicit createBusiness lacks OWNER Membership
+- F005 creation paths initialize differently
+- F006 discovery owner-based vs Membership access
+- F018 synthetic contamination
+- F020 business self-model mutation under-scoped
+- F021 missing semantic fact normalization
+- F022 weak module readiness
+- F024 underinitialized alternate tenant creation
+- F025 no reliable business lifecycle event
+- F026 weak assertion can replace stronger-verified value state
+- F028 modern Genome vs legacy BusinessGenome divergence
+
+## V. Recovered contradictions
+
+See `09-CONTRADICTION-REGISTER.md`, especially:
+
+- C005 founding Membership discovery vs ownerId
+- C006 Business + OWNER Membership invariant vs partial creation paths
+- C007 completion transition vs generic patch
+- C008/C014 modern vs legacy Genome
+- C009 Blueprint vs BusinessGuidanceProfile
+- C010 ontology vs source-specific producers
+- C012 self-model mutation authority
+- C013 readiness naming vs trust semantics
+- C015 synthetic data treated as live
+- C016 first live asset exists but activation proof discarded
+
+## W. Current open questions
+
+Primary J1 questions now include:
+
+- `KF-Q-002` Business Birth exit condition
+- `KF-Q-003` Business Birth semantic entry
+- `KF-Q-004` onboarding vs Genesis partition
+- `KF-Q-005` canonical knowledge/evidence write semantics
+- `KF-Q-008` lifecycle creation event
+- `KF-Q-009` authoritative initialization graph
+- `KF-Q-010` ownerId + Membership migration
+- `KF-Q-011` invitation placeholder migration
+- `KF-Q-012` effective authority algebra
+- `KF-Q-021` synthetic data classification
+- `KF-Q-022` business-knowledge write authority
+
+## X. Cross-journey dependencies
+
+J1 cannot be frozen independently.
+
+```text
+J1 Business Birth
+  <-> J25 Human Authority Lifecycle
+  <-> J2 KEY Request -> Governed Action
+```
+
+### J1 needs from J25
+
+- Membership-first tenant relationship
+- founding OWNER authority envelope
+- invitation claim lifecycle
+- effective authority semantics
+- business-self-model mutation authority
+
+### J1 needs from J2
+
+- distinction between readiness and final action clearance
+- capability identity
+- human authority vs KEY autonomy
+- what “safe operating context” must exist at birth for KEY to act
+
+## Y. Provisional recommendations
+
+Recovered J1 recommendations remain provisional in `10-RECOMMENDATION-REGISTER.md`, including Tenant Genesis, Membership-first workspace resolution, invitation claim lifecycle, canonical fact normalization, precedence, Genome reconciliation, trust-aware readiness, synthetic-data exclusion, activation proof and explicit lifecycle events.
+
+Do not implement them directly until convergence is accepted.
+
+## Z. Immediate next pass
+
+Do not restart broad Boundary & Reality Reconstruction.
+
+Current J1 work is a targeted convergence pass:
+
+1. revalidate all current Business creation/bootstrap paths and founding Membership behavior;
+2. trace ownerId/Membership/business discovery/BusinessGuard/scoped auth semantics;
+3. trace invitation and JobRole authority behavior;
+4. construct Membership-first Tenant Genesis invariants and migration options;
+5. feed J25 authority algebra into founding authority/self-model mutation;
+6. feed J2 action-readiness/clearance requirements back into Business Birth exit semantics;
+7. update findings/contradictions/recommendations;
+8. only after convergence decide whether J1's semantic entry/exit can be frozen.
