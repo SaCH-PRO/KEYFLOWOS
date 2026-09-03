@@ -1,26 +1,54 @@
 # KeyFlowOS Analysis Map
 
-Status: CANONICAL WORK PROGRAMME — recovered through KF-JOURNEY-025; journey content remains subject to evidence-driven refinement.
+Status: CANONICAL WORK PROGRAMME — 25 journeys + 12 pooled architectural kernels; all content remains evidence-driven and reopenable.
 
-## Governing analysis cycle
+## Governing recursive programme
 
-```text
-MAP
-  -> CROSS-REFERENCE
-  -> RE-ANALYZE
-  -> CONCEPTUALIZE
-  -> VALUE ENGINEER
-  -> DESIGN TARGET STATE
-  -> BUILD EXECUTION PLAN
-  -> EXECUTE
-  -> PROVE
-  -> INGRAIN INTO KEYFLOWOS
-  -> RE-CROSS-REFERENCE
-```
+The full operating model is defined in:
+
+- `11-RECURSIVE-ASSURANCE-PROGRAMME.md`
+- `12-KERNEL-PROGRAMME.md`
 
 Repository rule: **MAP BEFORE MODIFYING**.
 
-Journey work is recursive rather than one-pass. A journey may reopen assumptions in previously analysed journeys.
+Canonical loop:
+
+```text
+RECOVER / BASELINE
+-> MACRO MAP
+-> MICROSCOPIC JOURNEY RECONSTRUCTION
+-> CROSS-JOURNEY / CROSS-KERNEL REFERENCE
+-> POOL + NORMALIZE INTELLIGENCE
+-> RE-CONCEPTUALIZE + VALUE ENGINEER
+-> DESIGN / REFINE TARGET STATE
+-> BACKWARD RE-AUDIT IMPACTED JOURNEYS
+-> EXECUTION PLANNING
+-> IMPLEMENTATION
+-> PROOF / ADVERSARIAL VALIDATION
+-> INGRAIN INTO KEYFLOWOS
+-> WHOLE-SYSTEM RE-AUDIT
+-> repeat from earliest invalidated layer
+```
+
+The analysis is recursive rather than one-pass. A later journey or kernel finding may reopen any earlier conclusion.
+
+## Four simultaneous analytical levels
+
+```text
+LEVEL 1 — JOURNEY
+What does this user/business journey actually do?
+
+LEVEL 2 — SHARED KERNEL
+Which reusable system makes that journey possible?
+
+LEVEL 3 — JOURNEY LOOP / CONSTELLATION
+Which other journeys alter or consume the same state?
+
+LEVEL 4 — WHOLE OS
+Does the combined architecture still behave like one coherent operating system?
+```
+
+Journeys are the vertical end-to-end views. Kernels are the horizontal shared architecture.
 
 ## Completed macro work
 
@@ -31,8 +59,11 @@ Journey work is recursive rather than one-pass. A journey may reopen assumptions
 - [x] Business Graph / Blueprint / Genome / Evidence distinctions refined
 - [x] Decision to proceed to a computable microscopic model
 - [x] Journey dossiers selected as the primary microscopic unit
-- [x] Canonical journey programme recovered
+- [x] Canonical 25-journey programme recovered
 - [x] Durable intelligence persistence established under `docs/intelligence/`
+- [x] Recursive assurance programme established
+- [x] Twelve-kernel pooled architecture programme established
+- [x] Multi-agent implementation handoff protocol established
 
 ## Canonical journey programme
 
@@ -62,11 +93,28 @@ Journey work is recursive rather than one-pass. A journey may reopen assumptions
 24. `KF-JOURNEY-024 — System Change / Engineering Safety`
 25. `KF-JOURNEY-025 — Human Authority Lifecycle`
 
-`KF-JOURNEY-025` was introduced after J1/J2 analysis showed that human authority required a first-class lifecycle before the Approval / Governance journey could be safely frozen.
+Exactly 25 canonical journeys are currently defined. Do not create J26+ merely to hold a shared architecture concern; use a kernel when the concern is horizontal.
 
-## Active journey mesh
+## Canonical working kernel programme
 
-The active analytical unit is not a single isolated journey. It is the convergence mesh:
+1. `KF-KERNEL-001 — Tenant Genesis & Identity`
+2. `KF-KERNEL-002 — Human Authority & Organization`
+3. `KF-KERNEL-003 — KEY Authority & Governance`
+4. `KF-KERNEL-004 — Business Knowledge`
+5. `KF-KERNEL-005 — Capability Fabric`
+6. `KF-KERNEL-006 — State Transition`
+7. `KF-KERNEL-007 — Temporal / Event / Workflow`
+8. `KF-KERNEL-008 — Evidence & Outcome`
+9. `KF-KERNEL-009 — Integration & External Reality`
+10. `KF-KERNEL-010 — Financial Truth`
+11. `KF-KERNEL-011 — Recovery & Reliability`
+12. `KF-KERNEL-012 — Engineering Control Plane`
+
+See `12-KERNEL-PROGRAMME.md` for scope, primary journeys, dossier schema and convergence rules.
+
+## Active constellation
+
+The active analytical unit is currently:
 
 ```text
 KF-JOURNEY-001 — Business Birth
@@ -74,24 +122,23 @@ KF-JOURNEY-001 — Business Birth
 KF-JOURNEY-025 — Human Authority Lifecycle
         ↕
 KF-JOURNEY-002 — KEY Request → Governed Action
+        ↕
+KF-JOURNEY-015 — Approval / Governance Lifecycle
 ```
 
-### Why this mesh exists
+J15 has already passed its original admission gate and is in active forensic analysis. Its findings may reopen J1/J25/J2 foundations.
 
-- J1 exposes how tenant identity and founding authority are created.
-- J25 exposes how human authority is derived, changed, delegated and revoked.
-- J2 exposes how capability identity, human authority, KEY autonomy, policy, approval, clearance and execution interact.
+Likely next constellation member after governance convergence:
+
+`KF-JOURNEY-006 — Proactive KEY / Autonomy`
+
+## Why this constellation exists
+
+- J1 establishes tenant identity, founding authority, initial knowledge/readiness and initial AI policy.
+- J25 changes Membership, role, position, delegation, approval authority and revocation.
+- J2 consumes principal + capability + authority + KEY autonomy + readiness + policy to govern execution.
+- J15 stress-tests approval/control evidence, approver authority, exact-action binding, invalidation and clearance.
 - Findings in any one may invalidate assumptions in the others.
-
-### Admission rule for J15
-
-Do **not** fully open `KF-JOURNEY-015 — Approval / Governance Lifecycle` until these three convergence problems are sufficiently stable:
-
-1. tenant relationship semantics: `ownerId + Membership → Membership-first tenancy` without breaking ownership/data;
-2. effective authority algebra: role + JobRole/position + overrides + denials + delegations + approval tier + resource/capability context;
-3. execution-claim convergence: proposal + plan + queue + direct Flow + retries + provider idempotency → one concurrency-safe claim/dispatcher model.
-
-After convergence, re-run J1/J25/J2, then perform a J15 admission review.
 
 ## Canonical journey dossier schema
 
@@ -127,6 +174,12 @@ AA. Findings
 AB. Canonical Journey Graph
 AC. Machine-readable record
 
+## Kernel dossier schema
+
+Each kernel should eventually receive a dossier under `docs/intelligence/kernels/` using the schema in `12-KERNEL-PROGRAMME.md`.
+
+Kernel dossiers own shared semantics; journey dossiers reference and stress-test them.
+
 ## Journey-analysis rules
 
 - Model explicit states and transitions, including invalid transitions, bypasses, transaction boundaries, asynchronous transitions and stale states.
@@ -137,60 +190,81 @@ AC. Machine-readable record
 - Tenant/identity analysis records external identity, local User, Business, Membership, owner semantics, active workspace, multi-business selection, invited vs founder and principal provenance.
 - Event analysis tracks payload identity, consumers, committed-state semantics, sync/async behavior and duplicate/lost-event risks.
 - KEY analysis separates observation, reasoning, proposal, capability selection, governance, approval, execution and learning.
-- Governance analysis asks who requested/proposed/approves/executes, which capability/risk/policy/readiness/delegation applies, and what exact action was approved.
+- Governance analysis asks who requested/proposed/approves/executes, which capability/risk/policy/readiness/delegation applies, what exact action is governed, and what durable evidence satisfies the control.
 - Failure analysis includes validation, authorization, stale data, duplicate requests, concurrency, connector failure, partial transactions, timeout, policy changes, revocation, retries and compensation.
-- Proof analysis distinguishes implementation exists, test source exists, test currently passes, runtime behavior reproduced, and generated-state claims.
+- Proof analysis distinguishes implementation exists, test source exists, test currently passes, runtime behavior reproduced, concurrency invariant proven and system invariant proven.
 - Reachability distinguishes mounted, reachable, called, UI-linked, externally callable, orphaned, legacy and compatibility-only.
 
-## Cross-cutting kernels
+## Finding and recommendation propagation
 
-Working groupings, not yet frozen as official subsystem names:
+A material cross-cutting defect should be recorded once at the best architectural level, then linked to every affected journey/kernel.
 
-- Tenant / Identity Kernel
-- Knowledge Kernel
-- Genome / Readiness Kernel
-- Capability Kernel
-- Authority Kernel
-- Governance / Clearance Kernel
-- Execution Claim / Idempotency Kernel
-- Evidence / Outcome Kernel
+When significant new evidence appears, explicitly identify:
 
-## Planned domain analyses
+1. what it changes;
+2. which previous conclusions survive;
+3. which findings are strengthened, narrowed, unchanged, superseded or refuted;
+4. which kernels and journeys are affected;
+5. whether target architecture/recommendations must change;
+6. what remains unresolved.
 
-- Business Genesis
-- Blueprint
-- Business Genome
-- Living Business Constitution
-- Business Graph
-- Temporal Flow
-- KEY / AI orchestration
-- Autonomy and governance
-- Identity and tenancy
-- CRM / relationship intelligence
-- Commerce / finance
-- Bookings / time
-- Projects / work execution
-- Communications / inbound-outbound messaging
-- Social/content/attention
-- People / structure / delegation
-- Momentum / relationship scoring
-- Capabilities / module readiness
-- Command Center / operating surfaces
-- Integrations
-- Security
-- Observability / audit / business events
+Preserve uncertainty classifications and the evidence → interpretation → decision chain.
 
-## Status vocabulary
+## Layered improvement model
 
-- `NOT_STARTED`
-- `SCOPING`
-- `ANALYSING`
-- `PARTIALLY_MODELLED`
-- `VALIDATING`
-- `CANONICAL`
-- `NEEDS_REVISIT`
-- `DEPRECATED`
+For each journey/kernel:
+
+```text
+L0 Correctness
+L1 Mandatory production standard
+L2 Strong KeyFlow architecture
+L3 Advanced architecture
+L4 KeyFlow-specific differentiation
+```
+
+Basic security, authorization, idempotency and audit are production standards, not innovation.
+
+## Convergence maturity
+
+Use the programme maturity scale where useful:
+
+```text
+L0  DISCOVERED
+L1  MAPPED
+L2  RECONSTRUCTED
+L3  CROSS-REFERENCED
+L4  SEMANTICALLY RECONCILED
+L5  VALUE-ENGINEERED
+L6  TARGET-CONVERGED
+L7  EXECUTION-READY
+L8  IMPLEMENTED
+L9  PROVEN
+L10 INGRAINED
+```
+
+Any layer can return to `NEEDS_REVISIT` when new evidence invalidates an assumption.
+
+## Implementation control
+
+No production code changes are authorized by analytical maturity alone.
+
+Before implementation, use `13-IMPLEMENTATION-HANDOFF-PROTOCOL.md` to create bounded implementation packets with:
+
+- objective;
+- current-state evidence;
+- accepted invariant;
+- journey/kernel impact;
+- target contract;
+- existing seams to strengthen;
+- prohibited shortcuts;
+- migration concerns;
+- characterization tests;
+- proof ratchets;
+- explicit non-goals;
+- return evidence requirements.
 
 ## Current state
 
-J1 and J2 have substantial recovered first/second-pass analysis. J25 is partially analysed. Current work is **CONVERGENCE**, not first-pass J1 scoping.
+J1/J25/J2 have directionally converged around tenancy, effective authority and clearance/execution-claim semantics. J15 is actively stress-testing the Governance/Clearance model and has already produced additional findings on control evidence, approver principals, confirmation binding, approval workflows and concurrency.
+
+Current work is **JOURNEY + KERNEL CONVERGENCE**, not sequential journey completion and not production implementation.
