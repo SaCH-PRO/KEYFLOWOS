@@ -8,7 +8,7 @@ Last updated: 2026-09-03
 
 ## Status
 
-`J15 ACTIVE FORENSICS — JOURNEY + KERNEL MESH CONVERGENCE`
+`J15 L4 SEMANTICALLY RECONCILED — J6 ADMITTED AS GOVERNANCE/AUTONOMY STRESS TEST`
 
 Production implementation remains blocked.
 
@@ -18,30 +18,33 @@ Context integrity: `PASS`
 
 Current revalidated `main` baseline:
 
-`e1203b34d0b3091a73657dc358508d7a14109575`
+`d7c5b86cfa276d75ffa42d5f1707c43704dc9f21`
 
-Revalidate if `main` materially advances before relying on commit-sensitive implementation facts.
+The latest movement from the earlier code-bearing baseline was audit-only in the inspected range. Revalidate again if `main` materially advances.
 
 ## Canonical operating model
 
-The digital twin now has two primary dimensions:
-
 ```text
-VERTICAL
-= 25 end-to-end journey dossiers
+25 JOURNEYS
+  = vertical end-to-end business/system views
 
-HORIZONTAL
-= 12 pooled architectural kernels
+12 KERNELS
+  = horizontal shared architecture
+
+JOURNEY MESH + KERNEL MESH
+  = computable digital twin
 ```
 
-See:
+Core durable methods:
 
-- `03-ANALYSIS-MAP.md`
 - `11-RECURSIVE-ASSURANCE-PROGRAMME.md`
 - `12-KERNEL-PROGRAMME.md`
 - `13-IMPLEMENTATION-HANDOFF-PROTOCOL.md`
+- `14-STANDARDS-RESEARCH-INNOVATION-METHOD.md`
+- `15-EXPORTABLE-DIGITAL-TWIN-SPEC.md`
+- `16-KEYFLOWOS-ARCHITECT-AGENT-CONTRACT.md`
 
-Core thesis:
+Prime thesis:
 
 > KeyFlowOS is a governed business-state transition system.
 
@@ -49,283 +52,207 @@ Working causal model:
 
 ```text
 External reality
--> observation/signal
--> Business Graph
--> Genome interpretation
--> KEY reasoning
--> Capability Contract
--> Effective Authority + KEY autonomy + readiness + policy
--> Control Requirement
--> Control Evidence when required
--> exact-action Clearance
--> atomic Execution Claim
--> canonical post-clearance dispatch
--> domain/provider execution
--> durable Evidence / Outcome
--> Business Graph
--> Genome evolution
+→ observation/signal
+→ Business Graph
+→ Genome interpretation
+→ KEY reasoning
+→ CapabilityContract
+→ ActionEnvelope
+→ Effective Human Authority + KEY autonomy + readiness + policy
+→ ControlRequirement
+→ ControlPresentation
+→ specialized control workflow/channel
+→ typed ControlEvidence
+→ exact-action Clearance
+→ atomic ExecutionClaim
+→ canonical post-clearance ActionDispatcher
+→ domain/provider execution
+→ durable OutcomeEvidence
+→ Business Graph
+→ Genome evolution
 ```
 
 ## Active constellation
 
 ```text
-KF-JOURNEY-001 — Business Birth
-        ↕
-KF-JOURNEY-025 — Human Authority Lifecycle
-        ↕
-KF-JOURNEY-002 — KEY Request → Governed Action
-        ↕
-KF-JOURNEY-015 — Approval / Governance Lifecycle
+J1 Business Birth
+  ↕
+J25 Human Authority Lifecycle
+  ↕
+J2 KEY Request → Governed Action
+  ↕
+J15 Approval / Governance Lifecycle
+  ↕
+J6 Proactive KEY / Autonomy  ← admitted for stress-test scoping
 ```
 
-J15 has passed the original admission gate and is actively stress-testing the prior J1/J25/J2 convergence.
+J6 is not an independent expansion. It must stress the shared governance model and feed findings back into J15/J2/J25/J1.
 
-Likely next natural member after governance convergence: `J6 — Proactive KEY / Autonomy`.
+## Active kernels
 
-## Active kernels most involved
+Highest current activity:
 
 - K1 Tenant Genesis & Identity
 - K2 Human Authority & Organization
 - K3 KEY Authority & Governance
 - K5 Capability Fabric
 - K6 State Transition
+- K7 Temporal / Event / Workflow
 - K8 Evidence & Outcome
 - K11 Recovery & Reliability
 
-Other kernels remain cross-reference targets as J15 expands.
+## J15 maturity
 
-## J1/J25/J2 convergence retained
+`L4 SEMANTICALLY RECONCILED / ENTERING L5 VALUE-ENGINEERED`
 
-### Tenant relationship
+J15 is not closed and not target-converged. Its remaining major questions are target/migration questions rather than undefined foundation:
 
-Direction remains:
+1. final migration relationship among AiApprovalItem, KeyActionProposal and ApprovalRequest after shared ControlEvidence exists;
+2. persistence shape for ControlEvidence / Clearance / ExecutionClaim;
+3. complete mapping of manual direct actions intentionally outside proposal workflows;
+4. invalidation strategy: event-driven vs evaluation-time authority/policy fingerprints vs hybrid;
+5. AutopilotSettings vs BusinessAutonomyProfile target convergence;
+6. step-up-auth policy by capability/impact/origin;
+7. ControlPresentation/channel rules;
+8. migration sequencing preserving live approval UI and compatibility consumers.
 
-```text
-Business.ownerId
-= distinguished ownership identity
+J15 dossier:
 
-Membership
-= canonical authenticated-human ↔ Business relationship
-  + baseline authority envelope
-```
+`journeys/KF-JOURNEY-015-APPROVAL-GOVERNANCE-LIFECYCLE.md`
 
-Open migration work remains around ownerId discovery/access, founding Membership repair and invitation identity claim.
+## Current finding state
 
-### Effective human authority
+Historical recovered findings: `F003–F043`.
 
-Working algebra:
+Current revalidated findings now extend through `F089`.
 
-```text
-Membership baseline
-+ active OrgAssignment/JobRole
-+ explicit bounded grants/overrides
-+ valid bounded delegation
-- explicit denials
-∩ capability/resource/value/time/business/policy constraints
--> EffectiveAuthorityResult
-```
+Canonical storage:
 
-J15 has refined the principal model: not every legitimate human approver is necessarily a `User + Membership`. Position-bound external approvers may be represented by active OrgAssignment + verified contact/channel identity + JobRole authority.
+- `08-FINDING-REGISTER.md` through F084;
+- `08A-FINDING-REGISTER-CURRENT-SUPPLEMENT.md` for F085–F089 and lifecycle corrections.
 
-Routing/delegation fields are not themselves authority proof.
+Important newest findings:
 
-### Capability / clearance / execution
+- F076: real plan-step Tier 3/4 risk can collapse to MEDIUM under EXECUTE_TOOL proposal wrapper;
+- F077: proposal execution re-evaluates wrapper identity before unwrapping exact tool;
+- F078: executing plans can acquire new AI-generated child steps after approval;
+- F079: bare YES/NO reply is not exact approval/action-bound;
+- F080: staff approval reply is processed before inbound event dedupe;
+- F081: approved proposal has no observed human-authority version/approval expiry binding;
+- F082: delegation expiry does not invalidate already-routed AiApprovalItem;
+- F083: BusinessAutonomyProfile hard-safety mutation uses only broad Business access;
+- F084: approval-history learning can automatically raise standing KEY maxAutoTier up to tier 2;
+- F085: `team:write` can construct authority stronger than the caller through multiple paths;
+- F086: ending/deleting OrgAssignment leaves copied Membership authority behind;
+- F087: KEY Action approval can occur without viewing significant structured action data;
+- F088: ApprovalRequest payload is available to client but not rendered;
+- F089: AI Plan approval omits exact tool/input payload already available to browser.
 
-Direction remains:
+Finding lifecycle corrections:
 
-```text
-CapabilityContract
--> ActionEnvelope
--> action fingerprint
--> EffectiveAuthority + KEY autonomy + readiness/policy
--> ControlRequirement
--> ControlEvidence
--> CLEARANCE_GRANTED
--> atomic CLAIMED
--> ActionDispatcher
--> domain/provider execution
--> durable outcome
-```
+- the old invitation “unavoidable email conflict” conclusion is `NARROWED / PARTIALLY SUPERSEDED` by current transactional `reconcileUserId()` behavior;
+- F067 quick-confirm is `RE-ANALYZED / NARROWED`: shipped client displays/passes the same action object and Flow re-governs; remaining defect is durable server-side exact-action binding.
 
-`CapabilityContractService` and `ActionDispatcherService` remain preferred existing seams to strengthen before creating replacements.
+## Contradiction state
 
-## J15 current forensic conclusions
+Historical contradictions: `C005–C021`.
 
-J15 has now established or strengthened the following working distinctions:
+Current contradictions now extend through `C051`.
 
-```text
-Impact Tier != Control Requirement
-Approval != Clearance
-Control Evidence != workflow state
-Routing != authority
-Delegation pointer != delegated authority
-Clearance != Execution Claim
-Workflow action type != exact business Capability identity
-```
+Canonical storage:
 
-### Specialized workflows vs unified semantics
+- `09-CONTRADICTION-REGISTER.md` through C047;
+- `09A-CONTRADICTION-REGISTER-CURRENT-SUPPLEMENT.md` for C048–C051.
 
-Current strongest convergence model:
+Newest contradiction themes:
 
-```text
-A. Control-requirement resolver
-   current seams: AiOversight / AutonomyOrchestrator
+- authority editor vs alternate `team:write` authority constructors;
+- backend-significant structured payload vs human-visible approval data;
+- KeyActionProposal convergence direction vs live AiApprovalItem UI;
+- optional detail availability vs actual authorization-moment acknowledgement.
 
-B. Single-action proposal/control workflow
-   KeyActionProposal + KeyCortexApprovalOrchestrator
+## Current pooled recommendations
 
-C. Multi-step human approval workflow
-   ApprovalRequest + ApprovalStep
+`10-RECOMMENDATION-REGISTER.md` now contains current provisional recommendations through `KF-REC-034`.
 
-D. Approval routing
-   ApprovalRouting + DelegationRule + JobRole
-
-E. Normalized ControlEvidence
-   target missing primitive
-
-F. Clearance
-   target missing primitive
-```
-
-Target shape:
+Highest-leverage current directions:
 
 ```text
-CapabilityContract + ActionEnvelope
--> ControlRequirement
-
-specialized workflow:
-  QuickConfirm
-  OR KeyActionProposal
-  OR ApprovalRequest/Steps
-  OR position reply
-
--> normalized ControlEvidence
--> Clearance
--> ExecutionClaim
+KF-REC-019 load-bearing CapabilityContractService
+KF-REC-020 canonical capability/permission vocabulary
+KF-REC-021 Effective Authority Resolver
+KF-REC-022 bounded grantability/delegation
+KF-REC-023 ActionEnvelope + fingerprint
+KF-REC-024 Impact/Risk != ControlRequirement
+KF-REC-025 typed ControlEvidence from specialized workflows
+KF-REC-026 exact-action Clearance + invalidation
+KF-REC-027 atomic ExecutionClaim
+KF-REC-028 ActionDispatcher as post-clearance seam
+KF-REC-029 hierarchical plan clearance
+KF-REC-030 exact conversational challenge + ingress idempotency
+KF-REC-031 proportional control-plane authority
+KF-REC-032 learning recommends authority changes; does not self-grant
+KF-REC-033 explicit principal lineage
+KF-REC-034 position-bound external human principal + assurance levels
 ```
 
-Do not collapse all approval/workflow records into one mega-table. Unify shared authorization/control/evidence semantics while retaining legitimate specialized workflow models.
+All remain recommendations, not execution authorization.
 
-## Current J15 findings
+## External standards / reference properties incorporated
 
-Historical findings remain recovered through F043.
+Current research has cross-referenced:
 
-Current convergence/J15 findings now extend through:
+- OWASP Authorization guidance;
+- OWASP Transaction Authorization guidance;
+- OWASP GenAI Excessive Agency / agent controls;
+- NIST SP 800-63B-4 out-of-band/replay-resistance principles;
+- Kubernetes RBAC anti-escalation `escalate`/`bind` semantics;
+- provider retry/idempotency behavior such as Twilio webhook retries.
 
-`F044–F075`
+These are design properties to adapt, not systems to cargo-cult.
 
-Important recent J15 additions include:
+## J6 admission purpose
 
-- F060: logged-in AiApprovalItem resolution does not require routed approver identity;
-- F061: contact-only OrgAssignments can approve without Membership/User;
-- F062: AiApprovalItem resolution is read-then-update, not pending-state CAS;
-- F063: approval resolution and dependent plan-step release are non-transactional;
-- F064: stale low-tier approvals can become autonomous timeout approvals;
-- F065: AiApprovalItem remains live despite proposal migration direction;
-- F066: plan-level approval uses different authority semantics from item approval;
-- F067: Flow quick-confirm trusts client-returned toolName/toolArgs rather than server-side immutable pending action;
-- F068: approval artifacts lack canonical exact-action fingerprint binding;
-- F069: KeyCortexApprovalOrchestrator is a strong convergence seam but not a complete governance boundary;
-- F070: ApprovalRequest is a legitimate multi-step human workflow primitive;
-- F071: ApprovalRequest progression is transactionally grouped but lacks observed expected-state CAS;
-- F072: ApprovalRequest delegation does not centrally prove delegate/grantability bounds;
-- F073: threshold auto-approval uses heuristic payload amount extraction;
-- F074: ApprovalRequest shadow proposal migration does not synchronize canonical state;
-- F075: proposal actionType represents governance choreography more reliably than exact business capability.
+J6 must stress-test whether the J15/J2 governance model works when there is **no fresh human command initiating the action**.
 
-These are not all yet pooled into the global finding register; register pooling is a priority next action.
-
-## Contradictions
-
-Historical contradictions recovered through C021.
-
-Current candidate contradictions extend through:
-
-`C022–C039`
-
-J15 additions include routed approver vs tier-qualified resolver, authenticated-Membership vs position-bound principal, approval-vs-plan atomicity, human-approval label vs timeout auto-approval, proposal migration vs live legacy consumers, plan-vs-item authority semantics, confirmation intent vs client-reconstructed action, shadow proposal desynchronization, transaction grouping vs expected-state ownership, delegation assignment vs authority, and workflow action type vs Capability identity.
-
-These candidates also require pooling into the canonical contradiction register.
-
-## J15 candidate invariants
-
-1. Governed mutation is evaluated as an exact capability invocation.
-2. Approval/confirmation binds immutable materially relevant action identity.
-3. Material mutation invalidates prior control evidence.
-4. Approval authority is checked for the exact action/control.
-5. Grant/delegation cannot exceed grantor/delegator grantable authority.
-6. Expiry/revocation invalidates dependent unconsumed clearance.
-7. Material authority changes invalidate or force re-evaluation.
-8. Approval artifact is not an open-ended execution token.
-9. Parent plan coverage is valid only inside immutable approved bounds.
-10. Approval is not execution claim.
-11. Execution claim is atomic.
-12. Principal lineage is preserved.
-13. Typed control evidence identifies how a control was satisfied.
-14. Position-bound external approval requires verifiable principal/channel evidence.
-15. Routing/delegation workflow fields are not sufficient authority proof.
-
-## ControlEvidence working target
+Priority J6 questions:
 
 ```text
-ControlEvidence {
-  id
-  businessId
-  actionFingerprint
-  capabilityName
-  capabilityVersion
-  controlRequirement
-  evidenceType
-  decision
-
-  requestedFromPrincipal?
-  satisfiedByPrincipal?
-  satisfiedByAssignment?
-  authorityVersion
-  authorityTraceRef
-
-  policyVersion
-  readinessVersion?
-
-  createdAt
-  satisfiedAt?
-  expiresAt?
-  revokedAt?
-  invalidatedAt?
-  invalidationReason?
-
-  parentEvidenceId?
-  approvedBounds?
-}
+What causes KEY to act proactively?
+What principal/origin does a proactive action run for?
+Which standing authority actually permits it?
+How is capability identity resolved?
+Which readiness/business-state evidence is required?
+How do autonomy settings/profile/grants interact?
+Can learning expand authority?
+How is spend/action budget enforced before side effects?
+What control is required when origin is proactive rather than direct-human?
+What stops/revokes in-flight or queued proactive work?
+Does every proactive effect pass Clearance + ExecutionClaim + Dispatcher?
+What OutcomeEvidence feeds future learning?
 ```
-
-Candidate evidence types include HUMAN_CONFIRMATION, HUMAN_FORMAL_APPROVAL, HUMAN_ADMIN_APPROVAL, POSITION_REPLY_APPROVAL, POLICY_AUTO_APPROVAL, TIMEOUT_AUTO_APPROVAL, AUTHORITY_GRANT_AUTO_APPROVAL and POLICY_THRESHOLD_AUTO_APPROVAL.
 
 ## Immediate next work
 
-Remain read-only with respect to production code.
-
-Priority forensic slices:
-
-1. proposal capability/risk derivation and mutation/CAS semantics;
-2. reply-channel identity proof for position-bound approvers;
-3. post-approval AiPlan/AiPlanStep material mutation and version/fingerprint behavior;
-4. approval/AuthorityGrant/Delegation expiry, revocation and invalidation;
-5. control-plane authority for autonomy/governance/role/grant mutation;
-6. frontend evidence: what exact action/parameters/affected entities approvers see and stale-tab behavior;
-7. pool F044–F075 into `08-FINDING-REGISTER.md`;
-8. pool C022–C039 into `09-CONTRADICTION-REGISTER.md`;
-9. update mature recommendations in `10-RECOMMENDATION-REGISTER.md`;
-10. begin dedicated active kernel dossiers under `docs/intelligence/kernels/`;
-11. feed J15 changes back into J1/J25/J2 before freezing target architecture.
+1. open/revalidate J6 dossier;
+2. map every proactive trigger/scheduler/listener/watch mechanism;
+3. trace Autopilot / DelegationLoop / KeyCortex proactive paths;
+4. map AutopilotSettings vs BusinessAutonomyProfile vs AuthorityGrant hierarchy;
+5. trace proactive principal lineage and capability identity;
+6. test spend/action caps including estimated-cost plumbing;
+7. map proactive governance/approval paths;
+8. map execution gateway/claim/retry/recovery;
+9. map outcome/learning feedback;
+10. cross-reference findings back into J15/J2/J25 and relevant kernels;
+11. apply L0→L5 standards/reference/innovation assessment;
+12. keep all outputs exportable/machine-readable.
 
 ## Do not yet
 
 - modify production code;
-- issue implementation packets as if recommendations were accepted decisions;
 - freeze target persistence schemas;
-- create parallel v2 capability/authority/approval/dispatcher systems before existing seams are disproven;
-- delete legacy systems without consumer proof;
-- claim tests pass unless actually executed;
-- infer dead code from UI non-navigation;
-- treat current kernel names or persistence shapes as irreversible.
+- turn recommendations directly into implementation packets;
+- create v2 capability/authority/approval/dispatcher systems before existing seams are disproven;
+- remove legacy approval models without consumer proof;
+- allow J6 to redefine settled distinctions silently—explicitly reopen prior journeys/kernels when evidence demands it;
+- claim tests/runtime behavior unless actually executed.
