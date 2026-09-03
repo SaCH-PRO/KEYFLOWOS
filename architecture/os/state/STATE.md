@@ -1,7 +1,7 @@
 ---
 kind: state
 writers: [truth-cycle]           # §Runtime rows: audit-cycle
-derived: 2026-09-02
+derived: 2026-09-03
 baseline: architecture/VERIFIED_STATE_2026-08-11.md
 ---
 
@@ -15,7 +15,7 @@ timestamp.
 
 ## Shape
 
-| Measure | Value | Prev (2026-09-01) | Command |
+| Measure | Value | Prev (2026-09-02) | Command |
 |---|---:|---:|---|
 | Prisma models | 441 | 441 | `grep -c '^model ' packages/db/prisma/schema.prisma` |
 | Server modules | 110 | 110 | `ls apps/server/src/modules \| wc -l` |
@@ -24,7 +24,7 @@ timestamp.
 | Web pages | 251 | 251 | `find apps/web/src/app -name page.tsx \| wc -l` |
 | Migrations | 21 | 21 | `find packages/db/prisma/migrations -name migration.sql \| wc -l` |
 | Spec/test files (server) | 428 | 428 | `find apps/server/src apps/server/test -name '*.spec.ts' -o -name '*.test.ts' \| wc -l` |
-| Server tests passing | **3,658 in 373 files, 0 skipped** (unit config) | 3,658 in 373 files, 0 skipped | `cd apps/server && pnpm test:unit` (= `vitest -c vitest.unit.config.ts`; do NOT run bare `npx vitest run` — needs DB, false-reds as skips, see truth.md); seed `1788333616494` |
+| Server tests passing | **3,658 in 373 files, 0 skipped** (unit config) | 3,658 in 373 files, 0 skipped | `cd apps/server && pnpm test:unit` (= `vitest -c vitest.unit.config.ts`; do NOT run bare `npx vitest run` — needs DB, false-reds as skips, see truth.md); seed `1788419812825` |
 | Web tests passing | **210 in 22 files** | 210 in 22 files | `cd apps/web && npx vitest run` |
 | Tests in `packages/*` | **12 in 2 files** (db 7, api 5) | 12 in 2 files (db 7, api 5) | `pnpm --filter @keyflow/db --filter @keyflow/api test:unit` |
 | Routes mapped at boot | — | — | `docker logs keyflowos-api-1 \| grep -c 'Mapped {'` (runtime only; not derivable in this sandbox — no docker) |
@@ -75,16 +75,14 @@ human decision. Any wrong-direction move: do NOT update the row; open a
 (12 because their real re-derived count matched last cycle exactly; 2 because
 they stay frozen regardless of the real count underneath). **2 rows remain
 frozen** from 2026-08-31 —
-`node scripts/os/ledger-sizes.mjs` (2026-09-02) again reports
+`node scripts/os/ledger-sizes.mjs` (2026-09-03) again reports
 `tenant.never_scope` at 10 (a `fixed` ledger, still diverged from its frozen
 3) and `auth.public_handlers` at 223 (a `shrink` ledger, still diverged from
 its frozen 219) — **identical to last cycle's real values, no further
-movement**. `git diff --name-only d6760222..HEAD` (last truth commit → this
-run's start) touched exactly one `*.test.ts` file
-(`apps/web/src/hooks/__tests__/use-username-availability.test.ts`, part of
-the 2f3c7826/ab34d295 lint-fix commits), which does **not** intersect any
-gate file named in this ledger table, so step 7's attribution check has
-nothing to flag and no gate-integrity issue was opened. The existing issues,
+movement**. `git diff --name-only 0f8d8cf3..768ebe6d` (last truth commit →
+this run's start) touched zero `*.spec.ts`/`*.test.ts` files, so step 7's
+attribution check has nothing to flag and no gate-integrity issue was opened.
+The existing issues,
 [#71](https://github.com/SaCH-PRO/KEYFLOWOS/issues/71) (`tenant.never_scope`)
 and [#72](https://github.com/SaCH-PRO/KEYFLOWOS/issues/72)
 (`auth.public_handlers`), were checked this cycle and remain **open**,
@@ -95,10 +93,10 @@ awaiting human review. Both rows above keep their frozen Value/Prev (3/3,
 
 | Artifact | Generator | Last generated |
 |---|---|---|
-| architecture/{module,route,event,capability,data-ownership}-registry.yaml | `node scripts/architecture/generate-registries.js` | 2026-09-02 (no real drift — only `generated:` date changed on all five files; totals identical to 2026-09-01: modules 110, routes 209, events 280, capabilities 286, models 441) |
-| docs/architecture/capability-map/* + apps/server/src/modules/ai/capability-map/capability-map.seed.ts | `node docs/architecture/capability-map/generate.js` | 2026-09-02 (byte-identical output to 2026-09-01 — no drift; 286 flowTools, 207 cortexCapabilities unchanged) |
-| architecture/inventory.json | `python3 .agents/skills/codebase-architect/scripts/inventory.py > architecture/inventory.json` | 2026-09-02 (small, fully-attributable delta: total_files 4272→4276 (+4), total_lines 1,039,102→1,039,447 (+345) — 6 files added (4 audit/truth journal files the `git pull` brought in — `2026-09-01-audit-13`, `2026-09-01-audit-19`, `2026-09-01-truth`, `2026-09-02-audit-01`, `2026-09-02-audit-07`, i.e. 5, plus this run's own `.claude/coordination/sessions/<uuid>.json`) minus 2 removed (the retired `packages/db/scripts/generate.mjs` and the prior session's coordination file), net +4 files / +345 lines, verified file-by-file against the diff — no unexplained movement) |
-| architecture/dependencies.json | `python3 .agents/skills/codebase-architect/scripts/dependency_scan.py > architecture/dependencies.json` | 2026-09-02 (small, fully-attributable delta: nodes 3770→3769 (-1), edges 15415→15413 (-2) — the removed `packages/db/scripts/generate.mjs` node plus its `node:child_process` edge, and one dead `@/lib/api-base` import edge dropped from `apps/web/src/app/auth/signup/page.tsx`; both changes ride in on the same `git pull`, no drift from this run) |
+| architecture/{module,route,event,capability,data-ownership}-registry.yaml | `node scripts/architecture/generate-registries.js` | 2026-09-03 (no real drift — only `generated:` date changed on all five files; totals identical to 2026-09-02: modules 110, routes 209, events 280, capabilities 286, models 441) |
+| docs/architecture/capability-map/* + apps/server/src/modules/ai/capability-map/capability-map.seed.ts | `node docs/architecture/capability-map/generate.js` | 2026-09-03 (byte-identical output to 2026-09-02 — no drift; 286 flowTools, 207 cortexCapabilities unchanged) |
+| architecture/inventory.json | `python3 .agents/skills/codebase-architect/scripts/inventory.py > architecture/inventory.json` | 2026-09-03 (small, fully-attributable delta: total_files 4276→4283 (+7), total_lines 1,039,447→1,040,112 (+665) — the `git pull` at step 1 brought in 5 journal files (`2026-09-02-audit-13`, `2026-09-02-audit-19`, `2026-09-02-truth`, `2026-09-03-audit-01`, `2026-09-03-audit-07` = 273 lines), `deploy-prod.ps1` (33 lines) and `docs/KEYFLOWOS_APP_SPEC.md` (357 lines) — 7 files / 663 lines — plus STATE.md's own audit-cycle-written §Runtime growth (108→110 lines, +2), for 7 files / 665 lines total; this run's own `.claude/coordination/sessions/<uuid>.json` rename is a net-zero swap; verified file-by-file against the diff — no unexplained movement) |
+| architecture/dependencies.json | `python3 .agents/skills/codebase-architect/scripts/dependency_scan.py > architecture/dependencies.json` | 2026-09-03 (byte-identical to the committed 2026-09-02 file — nodes 3769, edges 15413 unchanged — no drift from this run) |
 
 ## Runtime (written by audit cycle only)
 

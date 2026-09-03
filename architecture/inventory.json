@@ -3163,7 +3163,7 @@
     {
       "extension": ".json",
       "lines": 7,
-      "path": ".claude/coordination/sessions/13ac3e4d-5aa2-585e-8186-f1e1683c0f09.json",
+      "path": ".claude/coordination/sessions/4bf2705e-613c-5ed7-afc9-b7db6e2dee50.json",
       "size_bytes": 173
     },
     {
@@ -57153,7 +57153,7 @@
       "extension": ".json",
       "lines": 0,
       "path": "architecture/dependencies.json",
-      "size_bytes": 4118790
+      "size_bytes": 4118296
     },
     {
       "extension": ".md",
@@ -57505,6 +57505,36 @@
     },
     {
       "extension": ".md",
+      "lines": 39,
+      "path": "architecture/os/journal/2026-09-02-audit-13.md",
+      "size_bytes": 2594
+    },
+    {
+      "extension": ".md",
+      "lines": 39,
+      "path": "architecture/os/journal/2026-09-02-audit-19.md",
+      "size_bytes": 2716
+    },
+    {
+      "extension": ".md",
+      "lines": 113,
+      "path": "architecture/os/journal/2026-09-02-truth.md",
+      "size_bytes": 6453
+    },
+    {
+      "extension": ".md",
+      "lines": 41,
+      "path": "architecture/os/journal/2026-09-03-audit-01.md",
+      "size_bytes": 2967
+    },
+    {
+      "extension": ".md",
+      "lines": 41,
+      "path": "architecture/os/journal/2026-09-03-audit-07.md",
+      "size_bytes": 3202
+    },
+    {
+      "extension": ".md",
       "lines": 123,
       "path": "architecture/os/playbooks/audit.md",
       "size_bytes": 7371
@@ -57541,9 +57571,9 @@
     },
     {
       "extension": ".md",
-      "lines": 108,
+      "lines": 110,
       "path": "architecture/os/state/STATE.md",
-      "size_bytes": 9161
+      "size_bytes": 9427
     },
     {
       "extension": ".md",
@@ -57598,6 +57628,12 @@
       "lines": 187,
       "path": "audit.py",
       "size_bytes": 8123
+    },
+    {
+      "extension": ".ps1",
+      "lines": 33,
+      "path": "deploy-prod.ps1",
+      "size_bytes": 1582
     },
     {
       "extension": ".yml",
@@ -57712,6 +57748,12 @@
       "lines": 1988,
       "path": "docs/KEYFLOWOS_10_OUT_OF_10_CONSTRUCTION_MANUAL.md",
       "size_bytes": 50519
+    },
+    {
+      "extension": ".md",
+      "lines": 357,
+      "path": "docs/KEYFLOWOS_APP_SPEC.md",
+      "size_bytes": 64920
     },
     {
       "extension": ".md",
@@ -61405,14 +61447,14 @@
       ".ico": 1,
       ".js": 10,
       ".json": 35,
-      ".md": 504,
+      ".md": 510,
       ".mjs": 24,
       ".patch": 1,
       ".pdf": 1,
       ".pid": 3,
       ".png": 13,
       ".prisma": 1,
-      ".ps1": 1,
+      ".ps1": 2,
       ".py": 43,
       ".pyc": 2,
       ".sh": 28,
@@ -61433,7 +61475,7 @@
     "root": "/home/user/KEYFLOWOS",
     "scanner": "codebase-architect/inventory.py",
     "source_files": 3373,
-    "total_files": 4276,
-    "total_lines": 1039447
+    "total_files": 4283,
+    "total_lines": 1040112
   }
 }
