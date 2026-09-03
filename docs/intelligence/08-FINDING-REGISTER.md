@@ -195,7 +195,7 @@ Global-sounding autonomy controls are not universally consumed by every direct e
 
 ---
 
-# Current revalidated findings F044–F080
+# Current revalidated findings F044–F084
 
 ## Authority convergence — F044–F049
 
@@ -353,6 +353,24 @@ StaffChatBridge parses bare YES/NO and selects the oldest pending AiApprovalItem
 **Status:** VERIFIED CODE-LEVEL REPLAY/IDEMPOTENCY FINDING
 WhatsApp and generic SMS staff bridges process the approval decision before normal external-message dedupe; staff-handled WhatsApp returns before that dedupe path entirely. A duplicate authentic provider delivery can therefore approve successive pending items for the same assignment. Runtime reproduction has not been performed.
 
+## J15 invalidation / control-plane — F081–F084
+
+### F081 — approved KeyActionProposal has no observed expiry or human-authority version binding
+**Status:** VERIFIED CODE-LEVEL / DATA-CONTRACT FINDING
+Proposal approval records who/when approved but no approval expiry, authority version, policy version, action fingerprint or explicit invalidation metadata was observed. Execution rechecks KEY autonomy/readiness but does not re-prove the approver's human authority freshness.
+
+### F082 — DelegationRule expiry/revocation does not invalidate or re-route an already-routed AiApprovalItem
+**Status:** VERIFIED CODE-LEVEL FINDING
+ApprovalRouting respects DelegationRule temporal bounds when initially routing, but reply resolution later trusts the persisted `approverAssignmentId` and current assignment/tier. It does not revalidate the DelegationRule that originally produced that route.
+
+### F083 — BusinessAutonomyProfile hard-safety mutation is protected only by broad Business access
+**Status:** VERIFIED CODE-LEVEL AUTHORITY FINDING
+`PATCH /api/v1/cortex/autonomy-profile` is under `AuthGuard + BusinessGuard` with no observed capability/module authority guard; `KeyAutonomySafetyService.updateProfile()` performs no actor authorization. Numeric hard-ceiling fields are type-validated but have no observed range constraints in the DTO.
+
+### F084 — approval-history learning can automatically increase standing KEY maxAutoTier
+**Status:** VERIFIED CODE-LEVEL / ARCHITECTURAL FINDING
+DelegationLoop governance adaptation can raise `maxAutoTier` to a tool tier <=2 when approval rate is >=90% over >=15 observations. It calls `updateAutonomySettings()` without a userId, bypassing the method's conditional OWNER/ADMIN check. Historical approval evidence can therefore become higher standing autonomy without a contemporaneous human policy transition.
+
 ---
 
 # Pooled architectural implications
@@ -367,12 +385,14 @@ These findings currently support, but do not by themselves authorize implementat
 - exact CapabilityContract identity through ActionEnvelope/fingerprint;
 - ControlRequirement separate from impact/risk tier;
 - normalized typed ControlEvidence;
-- exact-action Clearance with expiry/revocation/invalidation;
+- exact-action Clearance with authority/policy versioning, expiry/revocation/invalidation;
 - hierarchical plan clearance distinct from mutable workflow state;
 - atomic ExecutionClaim;
 - ActionDispatcher as preferred post-clearance execution seam;
 - server-generated conversational approval challenge with exact action binding, one-time consumption and ingress-event dedupe;
 - proportional step-up authentication for selected high-impact controls;
+- control-plane mutation capabilities at least as strong as behavior enabled;
+- learning may recommend autonomy changes but must not silently self-grant standing authority;
 - explicit principal lineage.
 
 Production implementation remains unauthorized until relevant journey/kernel clusters reach target convergence and execution-readiness gates.
