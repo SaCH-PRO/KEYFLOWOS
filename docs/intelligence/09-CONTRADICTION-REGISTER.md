@@ -80,7 +80,7 @@ Membership contains role/scope/approval-tier concepts while approval controllers
 
 ---
 
-# Current contradiction candidates C022–C043
+# Current contradiction candidates C022–C047
 
 ## Authority / tenancy convergence
 
@@ -162,7 +162,7 @@ A workflow delegation pointer identifies who should act but does not itself prov
 **Status:** ACTIVE CANDIDATE
 Values such as REQUEST_APPROVAL/EXECUTE_TOOL describe governance choreography while target authorization needs stable exact business capability identity.
 
-## Latest capability / plan / reply binding
+## Capability / plan / reply binding
 
 ### C040 — real plan-step risk vs proposal wrapper risk
 **Status:** VERIFIED ACTIVE CONTRADICTION
@@ -180,16 +180,35 @@ A user's `YES` is naturally interpreted as approval of the presented action, whi
 **Status:** VERIFIED ACTIVE CONTRADICTION
 Valid webhook signatures prove provider/transport authenticity but do not prove the same inbound governance event has not already been consumed. Staff approval processing currently precedes normal inbound deduplication.
 
+## Invalidation / control plane
+
+### C044 — historical human approval vs standing autonomous authority
+**Status:** VERIFIED ACTIVE CONTRADICTION
+Historical approvals are evidence of likely preference, while DelegationLoop adaptation can convert high approval rates directly into a higher standing `maxAutoTier` without a fresh authorized-human policy transition.
+
+### C045 — temporal delegation authority vs persisted approval routing
+**Status:** VERIFIED ACTIVE CONTRADICTION
+DelegationRule has active/expiry semantics at routing time, while a pending AiApprovalItem derived from it can remain resolvable by the old assignment after the rule expires or is disabled.
+
+### C046 — hard autonomy policy importance vs BusinessGuard-only mutation
+**Status:** VERIFIED ACTIVE CONTRADICTION
+BusinessAutonomyProfile is enforced/described as a hard autonomy safety ceiling, while its mutation route uses only broad Business access and no capability-level authority proof.
+
+### C047 — approval timestamp vs durable approval validity
+**Status:** VERIFIED ACTIVE CONTRADICTION
+KeyActionProposal records who/when approved but has no observed authority/policy version, action fingerprint, expiry or invalidation semantics that establish whether approval remains valid later.
+
 ---
 
 # Current contradiction-resolution priorities
 
 1. **C005 + C006** → Membership-first tenancy + founding OWNER Membership invariant + safe migration.
-2. **C022 + C023 + C024 + C029 + C030 + C038** → canonical permission vocabulary + Effective Authority Resolver + explicit principal classes + bounded grantability.
-3. **C017 + C018 + C019 + C020 + C025 + C028 + C035 + C039 + C040** → load-bearing CapabilityContract + ActionEnvelope/fingerprint + ControlRequirement + normalized ControlEvidence + exact-action Clearance.
+2. **C022 + C023 + C024 + C029 + C030 + C038 + C045** → canonical permission vocabulary + Effective Authority Resolver + explicit principal classes + bounded grantability + temporal provenance.
+3. **C017 + C018 + C019 + C020 + C025 + C028 + C035 + C039 + C040 + C047** → load-bearing CapabilityContract + ActionEnvelope/fingerprint + ControlRequirement + normalized ControlEvidence + exact-action Clearance + invalidation/version semantics.
 4. **C026 + C027 + C031 + C037 + C043** → atomic state/ExecutionClaim + event-consumption idempotency + canonical post-clearance dispatcher.
 5. **C032 + C033 + C034 + C036** → approval-regime convergence without destroying legitimate specialized workflows.
 6. **C041** → explicit distinction between mutable orchestration plan and immutable hierarchical clearance bounds.
-7. **C010 + C013 + C015** → trusted knowledge/readiness/evidence semantics.
+7. **C044 + C046** → control-plane authority model in which learning can recommend policy but cannot silently grant standing authority, and policy mutation requires authority proportional to behavior enabled.
+8. **C010 + C013 + C015** → trusted knowledge/readiness/evidence semantics.
 
 Resolution must be backward-tested through all affected journeys and kernels before execution planning.
