@@ -1,0 +1,38 @@
+project: KEYFLOWOS
+analysis_version: 1
+last_updated: 2026-09-03
+phase: computable-microscopic-model
+active_unit:
+  type: journey
+  id: KF-JOURNEY-001
+  name: Business Birth
+status: scoping-boundary-reality-reconstruction
+canonical_branch: docs/keyflow-intelligence-foundation
+known_continuity_gaps:
+  - KF-Q-001
+open_questions:
+  - KF-Q-001
+  - KF-Q-002
+  - KF-Q-003
+  - KF-Q-004
+  - KF-Q-005
+  - KF-Q-006
+  - KF-Q-007
+  - KF-Q-008
+  - KF-Q-009
+next_actions:
+  - inventory frontend entry surfaces
+  - trace auth bootstrap and identity paths
+  - trace business creation and default initialization
+  - trace onboarding concierge and Business Genesis
+  - trace Blueprint initialization and inference
+  - trace Genome fact evidence scoring and readiness
+  - trace Constitution and autonomy initialization
+  - trace events queues jobs and side effects
+  - identify duplicated legacy paths
+  - update KF-JOURNEY-001 with evidence-backed boundary map
+constraints:
+  - do_not_redesign_yet
+  - do_not_modify_production_code
+  - do_not_invent_unrecovered_journey_catalogue
+  - distinguish_fact_decision_hypothesis_question_deprecated_implementation_reality
