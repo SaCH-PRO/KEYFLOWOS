@@ -14,45 +14,23 @@ KF-JOURNEY-001 — Business Birth
 KF-JOURNEY-025 — Human Authority Lifecycle
         ↕
 KF-JOURNEY-002 — KEY Request → Governed Action
+        ↓
+KF-JOURNEY-015 — Approval / Governance Lifecycle (READY FOR SCOPING)
 ```
 
 ## Status
 
-`CONVERGENCE — FOUNDATIONS BEFORE J15`
+`THREE-AXIS CONVERGENCE DIRECTIONALLY COMPLETE — J15 READY FOR SCOPING`
 
-## Major continuity recovery completed
+Production implementation remains blocked.
 
-The exhausted prior conversation produced a structured recovery packet that restored substantially more work than the initial continuation checkpoint had access to.
+## Context integrity
 
-Recovered with high confidence:
+`PASS`
 
-- canonical 25-journey programme;
-- recursive/bidirectional journey methodology;
-- full journey-dossier schema;
-- substantial J1 first/second-pass work;
-- substantial J2 first/second-pass work;
-- partial J25 work;
-- findings F003–F043 where historical IDs were recoverable;
-- contradictions C005–C021;
-- provisional recommendations KF-REC-001–018;
-- refined macro model around facts, capabilities, authority, clearance, execution claims and evidence;
-- exact immediate continuation anchor from the exhausted thread.
+The exhausted prior conversation has been recovered and persisted. The active convergence has now also been revalidated against current `main` implementation evidence at `e1203b34d0b3091a73657dc358508d7a14109575`.
 
-The source packet is durably preserved at:
-
-`docs/intelligence/sessions/2026-09-03-exhausted-thread-recovery.md`
-
-## Previous gap resolved
-
-`KF-Q-001` — unrecovered journey catalogue — is now resolved by recovery.
-
-The programme is recorded in `03-ANALYSIS-MAP.md` through:
-
-`KF-JOURNEY-025 — Human Authority Lifecycle`.
-
-No J26+ identifier should be inferred from the recovery.
-
-## Current canonical macro thesis
+## Canonical macro thesis
 
 > KeyFlowOS is a governed business-state transition system.
 
@@ -62,158 +40,199 @@ External reality
   -> Business Graph
   -> Genome interpretation
   -> KEY reasoning
-  -> capability
-  -> human authority + KEY autonomy + readiness + policy
-  -> clearance
-  -> execution claim
-  -> execution
-  -> business state transition
-  -> event/evidence/outcome
+  -> Capability Contract
+  -> Effective Authority + KEY autonomy + readiness + policy
+  -> control requirement
+  -> approval/confirmation evidence when required
+  -> exact-action clearance
+  -> atomic execution claim
+  -> canonical post-clearance dispatch
+  -> domain/provider execution
+  -> durable evidence/outcome
   -> Business Graph
   -> Genome evolution
 ```
 
-## J1 recovered state
+## Three-axis convergence outcome
 
-Business Birth is no longer at first-pass scoping. Recovered work models a high-level implementation spine:
+### Axis A — Tenant relationship
 
-```text
-PROSPECT
-  -> auth provisioning/authentication
-  -> local User
-  -> Business
-  -> OWNER Membership
-  -> active workspace
-  -> onboarding
-  -> Genesis/Blueprint population
-  -> operating configuration
-  -> Genome/readiness
-  -> Three-Pillar Minimum
-  -> markOnboardingComplete
-  -> Command Center / operating business
-```
+Status: `DIRECTIONALLY_CONVERGED / NOT_FROZEN`
 
-Recovered semantic refinement treats Business Birth as interlocking human, tenant, knowledge and operating initialization.
+Investigation:
 
-Remaining J1 foundations are now tightly coupled to J25/J2 rather than requiring a broad repository inventory from zero.
+`docs/intelligence/investigations/J1-J25-J2-CONVERGENCE-TENANCY.md`
 
-## J25 recovered state
+Revalidated implementation facts include:
 
-Human Authority Lifecycle exists because current tenancy/authorization behavior appears fragmented across:
+- bootstrap establishes/repairs founding OWNER Membership;
+- explicit `createBusiness()` still creates Business without equivalent OWNER Membership;
+- `listBusinesses()` remains ownerId-based;
+- `BusinessGuard` accepts ownerId or Membership;
+- `ModuleScopeGuard` requires Membership.
 
-- `Business.ownerId`;
-- Membership;
-- Membership role/scopes/maxApprovalTier;
-- JobRole/OrgAssignment-derived permissions;
-- explicit grants/delegations;
-- approval semantics;
-- resource/capability context.
-
-Working missing primitive: a central explainable Effective Authority Resolver.
-
-## J2 recovered state
-
-Governed action analysis exposed:
-
-- capability identity collapse through generic wrappers;
-- multiple governance regimes;
-- human authority vs KEY autonomy conflation in some paths;
-- approval state not equivalent to exact-action clearance;
-- plan/proposal execution concurrency weaknesses;
-- idempotency not equivalent to an execution claim;
-- promising existing seams such as CapabilityContractService and ActionDispatcherService that may be strengthened rather than replaced.
-
-## Immediate unresolved convergence
-
-### A. Tenant relationship migration
-
-Resolve:
+Working target:
 
 ```text
-Business.ownerId + Membership
-  -> safe Membership-first tenancy
+Business.ownerId
+  = distinguished ownership identity
+
+Membership
+  = canonical authenticated-human ↔ Business relationship
+    + baseline human authority envelope
 ```
 
-without breaking existing ownership/data semantics.
+Business Birth semantic postcondition should include founding OWNER Membership even if ownerId remains durable ownership metadata.
 
-Need establish:
+### Axis B — Effective human authority
 
-- founding OWNER Membership invariant;
-- ownerId long-term role;
-- tenant discovery semantics;
-- BusinessGuard/scoped authorization convergence;
-- active workspace resolution;
-- invitation claim lifecycle and migration.
+Status: `DIRECTIONALLY_CONVERGED / NOT_FROZEN`
 
-### B. Effective human-authority algebra
+Investigation:
 
-Resolve:
+`docs/intelligence/investigations/J1-J25-J2-CONVERGENCE-AUTHORITY.md`
+
+Current implementation was revalidated across Membership scopes/tier, JobRole/OrgAssignment, DelegationRule, AuthorityGrant, ApprovalRouting and CapabilityContract.
+
+Working model:
 
 ```text
-principal
-+ business
-+ Membership/base role
-+ JobRole/position
-+ explicit grants/overrides
-+ explicit denials
-+ delegations
-+ approval tier
-+ capability
-+ resource/context
-+ validity/revocation
--> effective authority
+Membership baseline grants
++ active JobRole/OrgAssignment grants
++ valid explicit bounded grants
++ valid bounded delegations
+- explicit denials
+∩ resource/value/time/business/policy constraints
+-> EffectiveAuthorityResult
 ```
 
-Need define source precedence, expansion/narrowing rules, explainability and revocation behavior.
+Key distinctions:
 
-### C. Execution claim / dispatcher convergence
+- Membership is relationship + baseline authority, not the final flattened permission set.
+- JobRole/OrgAssignment is a dynamic organizational authority source.
+- Delegation cannot create authority the delegator does not possess/delegably control.
+- explicit denial is a first-class target narrowing source and normally dominates additive grants.
+- approval authority is distinct from request/execute authority.
+- CapabilityContract permission identity should become the exact action permission vocabulary.
+- a central explainable Effective Authority Resolver is still missing from implementation.
 
-Resolve:
+New current findings from this pass: F044–F049.
+New contradiction candidates: C022–C024.
+
+### Axis C — Clearance / execution claim / dispatcher
+
+Status: `DIRECTIONALLY_CONVERGED / NOT_FROZEN`
+
+Investigation:
+
+`docs/intelligence/investigations/J1-J25-J2-CONVERGENCE-EXECUTION.md`
+
+Revalidated implementation facts include:
+
+- ActionDispatcher has useful circuit-breaker/retry/logging/idempotency/feedback mechanics but consumes fresh governance decisions rather than a durable exact-action clearance;
+- dispatcher idempotency lookup is not an atomic pre-side-effect claim;
+- KeyIdempotencyService explicitly lets another caller proceed when a key is pending;
+- PlanExecutor + BullMQ re-evaluate governance at multiple layers;
+- deterministic BullMQ job IDs provide transport-local dedupe, not platform-wide execution ownership;
+- proposal execution and plan/dispatcher execution remain separate fabrics;
+- FlowOrchestrator direct execution remains reachable from multiple callers;
+- proposal read/status/update transitions do not yet prove atomic expected-state execution claiming.
+
+Working target:
 
 ```text
-proposal execution
-+ plan execution
-+ queue/BullMQ
-+ direct Flow execution
-+ retries
-+ provider idempotency
--> one concurrency-safe execution claim and post-clearance dispatch model
+CapabilityContract
+  -> ActionEnvelope
+  -> action fingerprint
+  -> EffectiveAuthority + KEY autonomy + readiness/policy
+  -> control requirement
+  -> approval/confirmation evidence
+  -> CLEARANCE_GRANTED
+  -> atomic CLAIMED transition
+  -> canonical post-clearance ActionDispatcher
+  -> domain/provider execution
+  -> durable outcome
 ```
 
-Need decide whether ActionDispatcherService should become the load-bearing post-clearance executor and whether direct Flow plan execution remains.
+`ActionDispatcherService` is the preferred existing seam to evolve before inventing a parallel replacement.
 
-## Current recommendation posture
+New current findings from this pass: F050–F056.
+New contradiction candidates: C025–C028.
 
-Recovered `KF-REC-001`–`KF-REC-018` remain **provisional**, not implementation tickets.
+## J1 feed-back
 
-Important recovered revisions:
+Business Birth now has a sharper semantic completion requirement:
 
-- Tenant Genesis must include founding authority, not merely Business creation.
-- Business self-model authority should converge on platform capability/principal authority semantics.
-- Knowledge/module readiness must remain separate from final governed-action clearance.
-- Invitation should become a claim lifecycle, preserving intended scopes/tier.
+```text
+Business
++ founding OWNER Membership
++ discoverability through authorized relationships
++ owner baseline resolvable through EffectiveAuthorityResolver
++ initialized knowledge/readiness state
+```
+
+`Business.ownerId` may remain explicit ultimate-ownership identity, but should not be the ordinary tenant-access mechanism.
+
+## J25 feed-back
+
+J25 now has a candidate authority algebra and a new requirement:
+
+`EffectiveAuthorityResult` should expose an `authorityVersion` / fingerprint suitable for binding approvals and clearances so later authority mutation can invalidate unconsumed authorization.
+
+## J2 feed-back
+
+Governed Action is now better modeled around one exact capability invocation rather than proposal/plan/tool wrappers as primary governance identities:
+
+```text
+request/proposal
+  -> exact Capability Contract
+  -> canonical ActionEnvelope
+  -> effective authority / autonomy / readiness / policy
+  -> control requirement
+  -> evidence-backed approval or confirmation
+  -> exact-action clearance
+  -> atomic execution claim
+  -> dispatcher
+  -> outcome
+```
+
+## J15 admission verdict
+
+`READY_FOR_SCOPING`
+
+This does **not** mean J15 is ready for implementation design.
+
+The conceptual distinctions are now stable enough to perform a full forensic Approval / Governance Lifecycle analysis without the foundational questions being undefined.
+
+J15 must now resolve at least:
+
+- approval request identity and exact action binding;
+- who may approve and how EffectiveAuthority is consumed;
+- control requirement calculation vs risk tier;
+- confirmation vs formal approval vs admin approval vs step-up auth;
+- approval evidence durability;
+- approval expiration/revocation;
+- action mutation and fingerprint invalidation;
+- authority-version invalidation;
+- hierarchical plan approval bounds;
+- approval-to-clearance issuance;
+- clearance expiry/revocation;
+- claim admission semantics;
+- principal lineage.
 
 ## Do not yet
 
 - modify production code;
-- freeze target schemas for authority/clearance/execution claim;
-- fully open J15;
-- create parallel `v2` registries/services before proving existing seams insufficient;
-- delete legacy BusinessGenome/BusinessGuidanceProfile or other residue without consumer proof;
-- assign historical F-numbers beyond F043 without source evidence;
-- treat recovered commit-sensitive implementation facts as current without revalidation.
+- freeze target persistence schemas;
+- convert provisional recommendations directly into implementation tickets;
+- delete legacy systems without consumer proof;
+- create parallel v2 registries/resolvers/dispatchers before proving existing seams insufficient;
+- claim tests pass unless actually executed;
+- infer dead code from UI non-navigation;
+- treat J15 scoping admission as implementation authorization.
 
 ## Next analytical pass
 
-Perform a **three-axis convergence pass** rather than opening a new journey:
+Open `KF-JOURNEY-015 — Approval / Governance Lifecycle` for microscopic scoping/forensics only.
 
-1. revalidate current repository implementation for tenant identity / ownerId / Membership / invitation / JobRole authority;
-2. construct candidate effective-authority algebra and test it against J1 and J2 scenarios;
-3. revalidate proposal/plan/direct/queue execution paths and construct candidate clearance -> atomic claim -> dispatcher semantics;
-4. feed findings backward into J1/J25/J2;
-5. update contradictions/recommendations;
-6. perform J15 admission review only if foundations stabilize.
-
-## Context-integrity status
-
-`PASS — PRIOR THREAD CONTINUATION SUBSTANTIALLY RECOVERED AND PERSISTED`
+Use J15 to challenge and refine the three-axis model, especially approval-to-clearance binding and invalidation. Any J15 finding that changes tenancy, authority, capability identity or execution claim semantics must feed backward into J1/J25/J2 before target architecture is frozen.
