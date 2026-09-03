@@ -1,96 +1,76 @@
 # KeyFlowOS Intelligence — START HERE
 
-This directory is the durable source of truth for the architectural and product intelligence developed across ChatGPT, Claude Code, Kimi Code, repository analysis, source documents, and human review.
+This directory is the durable source of truth for the architectural and product intelligence developed across ChatGPT, Claude Code, Kimi/Gemini Code, repository analysis, source documents and human review.
 
 ## Prime directive
 
 Conversations are working memory. This repository is durable memory.
 
-No materially important conclusion about KeyFlowOS is considered preserved until it has been written into the appropriate canonical file in this directory.
+No materially important conclusion about KeyFlowOS is considered preserved until written into the appropriate canonical intelligence artifact.
 
 ## Governing analysis rule
 
 **MAP BEFORE MODIFYING.**
 
-The active architecture-analysis process is forensic and evidence-first. Production behavior must not be changed merely because a local problem appears obvious; first identify the relevant journey, state transitions, authority, capability, data/evidence effects, dependencies, contradictions, compatibility surfaces and proof requirements.
+The architecture/research session is the command center. Production behavior must not be changed merely because a local problem appears obvious. First determine the affected journeys, kernels, state transitions, authority, capability, evidence, dependencies, contradictions, compatibility surfaces and proof requirements.
 
 ## Required load order for a new agent/session
 
-Before continuing KeyFlowOS analysis, read in this order:
+Read in this order:
 
-1. `01-MASTER-CONTEXT.md`
-2. `02-SYSTEM-MODEL.md`
-3. `03-ANALYSIS-MAP.md`
-4. `04-CONCEPT-REGISTRY.md`
-5. `05-DECISION-REGISTER.md`
-6. `06-OPEN-QUESTIONS.md`
-7. `07-CURRENT-STATE.md`
-8. `08-FINDING-REGISTER.md`
-9. `09-CONTRADICTION-REGISTER.md`
-10. `10-RECOMMENDATION-REGISTER.md`
-11. `handoff/CURRENT-HANDOFF.md`
-12. The active journey/domain/investigation referenced by `CURRENT-STATE`.
+1. `AGENTS.md`
+2. `docs/intelligence/AGENT-CONTINUITY.md`
+3. `docs/intelligence/00-START-HERE.md`
+4. `docs/intelligence/01-MASTER-CONTEXT.md`
+5. `docs/intelligence/02-SYSTEM-MODEL.md`
+6. `docs/intelligence/03-ANALYSIS-MAP.md`
+7. `docs/intelligence/04-CONCEPT-REGISTRY.md`
+8. `docs/intelligence/05-DECISION-REGISTER.md`
+9. `docs/intelligence/06-OPEN-QUESTIONS.md`
+10. `docs/intelligence/07-CURRENT-STATE.md`
+11. `docs/intelligence/08-FINDING-REGISTER.md`
+12. `docs/intelligence/09-CONTRADICTION-REGISTER.md`
+13. `docs/intelligence/10-RECOMMENDATION-REGISTER.md`
+14. `docs/intelligence/11-RECURSIVE-ASSURANCE-PROGRAMME.md`
+15. `docs/intelligence/12-KERNEL-PROGRAMME.md`
+16. `docs/intelligence/13-IMPLEMENTATION-HANDOFF-PROTOCOL.md`
+17. `docs/intelligence/handoff/CURRENT-HANDOFF.md`
+18. `docs/intelligence/handoff/CURRENT-STATE.yaml`
+19. active journey/kernel/investigation files referenced by current state.
 
-For continuity-sensitive work, also read the most recent relevant session journal. The exhausted-thread recovery source is:
+For continuity-sensitive work, also read the most recent relevant session journal.
 
-`docs/intelligence/sessions/2026-09-03-exhausted-thread-recovery.md`
+Do not continue substantive work until required context is loaded or a missing-file condition is explicitly reported.
 
-Do not continue substantive work until the required context has been loaded or a missing-file condition has been explicitly reported.
+## Core operating model
 
-## Knowledge classification
-
-Every material statement should be classified when ambiguity matters:
-
-- **FACT / IMPLEMENTATION FACT** — directly supported by repository/source/runtime evidence.
-- **ACCEPTED DECISION** — explicitly adopted architectural/product/methodological decision.
-- **WORKING HYPOTHESIS / WORKING DIRECTION** — plausible interpretation or target direction not yet accepted as canonical implementation architecture.
-- **OPEN QUESTION** — unresolved issue requiring validation or decision.
-- **DEPRECATED / SUPERSEDED** — previously considered/implemented idea that has been replaced or materially refined.
-- **IMPLEMENTATION REALITY** — what the current code does, whether or not it is intentional, ideal, documented, legacy, duplicated or incomplete.
-- **RECOVERY UNCERTAIN** — historical continuity information that could not be reconstructed with sufficient confidence.
-
-Never silently promote a hypothesis into a decision.
-Never silently treat historical documentation as current implementation truth.
-Never silently treat current implementation as the final intended architecture.
-Never invent historical identifiers or continuity to fill a gap.
-
-## Evidence discipline
-
-Preserve the chain:
+KeyFlowOS analysis now runs as a **Journey Mesh + Kernel Mesh**.
 
 ```text
-evidence
-  -> interpretation
-  -> architectural implication / recommendation
-  -> accepted decision
+VERTICAL
+= 25 end-to-end journey dossiers
+
+HORIZONTAL
+= 12 pooled architectural kernels
+
+LOOPS
+= constellations of journeys that repeatedly stress-test shared kernels
+
+WHOLE OS
+= recursive re-audit of the integrated architecture
 ```
 
-Do not collapse these layers.
+Journeys are not independent checklists. Kernels are not abstract replacements for journey evidence.
 
-Evidence classes should remain distinguishable where relevant:
+See:
 
-- implementation source
-- runtime reproduction
-- test source
-- personally executed test result
-- generated architecture/state artifact
-- maintained architecture document
-- historical/stale document
-- product/source vision
-- analyst inference
-- recovered prior-thread context
+- `03-ANALYSIS-MAP.md`
+- `11-RECURSIVE-ASSURANCE-PROGRAMME.md`
+- `12-KERNEL-PROGRAMME.md`
 
-A test file existing is not equivalent to the test currently passing. A generated report claiming green is not equivalent to personally reproducing runtime behavior.
+## Active constellation
 
-## Journey-first microscopic model
-
-The primary microscopic unit is the end-to-end journey dossier, not the isolated module.
-
-The canonical programme currently runs through `KF-JOURNEY-025` and is listed in `03-ANALYSIS-MAP.md`.
-
-Journey analysis is recursive/bidirectional: findings in later journeys may force earlier journeys to be re-analysed.
-
-Current active mesh:
+Current active analytical mesh:
 
 ```text
 KF-JOURNEY-001 — Business Birth
@@ -98,35 +78,134 @@ KF-JOURNEY-001 — Business Birth
 KF-JOURNEY-025 — Human Authority Lifecycle
         ↕
 KF-JOURNEY-002 — KEY Request → Governed Action
+        ↕
+KF-JOURNEY-015 — Approval / Governance Lifecycle
 ```
 
-Do not fully open J15 until the admission conditions in current state/handoff are met.
+J15 has already passed its original admission gate and is in active forensic analysis. Do **not** regress to earlier instructions saying J15 must remain unopened.
 
-## Finding, contradiction and recommendation discipline
+J15 may still reopen J1/J25/J2 if it exposes a foundational flaw.
 
-### Findings
+Production implementation remains unauthorized.
 
-`08-FINDING-REGISTER.md` tracks material evidence/interpretation discoveries. Findings can be provisional, verified, re-analysed, narrowed, strengthened, superseded or refuted.
+## Canonical kernel programme
 
-### Contradictions
+Current working kernels:
 
-`09-CONTRADICTION-REGISTER.md` tracks places where two apparently valid implementation/architectural models cannot both remain canonical without reconciliation.
+1. Tenant Genesis & Identity
+2. Human Authority & Organization
+3. KEY Authority & Governance
+4. Business Knowledge
+5. Capability Fabric
+6. State Transition
+7. Temporal / Event / Workflow
+8. Evidence & Outcome
+9. Integration & External Reality
+10. Financial Truth
+11. Recovery & Reliability
+12. Engineering Control Plane
 
-A contradiction is not automatically a bug; it is an architectural reconciliation obligation.
+Shared semantic defects should normally be recorded once at kernel/system level and referenced by affected journeys rather than duplicated under every journey.
 
-### Recommendations
+## Knowledge classification
 
-`10-RECOMMENDATION-REGISTER.md` contains provisional architectural recommendations. **These are not implementation tickets.** A recommendation must be revalidated and explicitly promoted through decision/execution planning before code changes.
+Use these classes when ambiguity matters:
+
+- **IMPLEMENTATION FACT / FACT** — directly supported by repository/source/runtime evidence.
+- **TEST SOURCE** — test code exists; not proof that it was executed or passed.
+- **GENERATED STATE** — generated architecture/audit state.
+- **MAINTAINED ARCHITECTURE DOC** — maintained design/documentation evidence.
+- **HISTORICAL / STALE DOC** — historical intent/context, not current implementation truth.
+- **PRODUCT SOURCE** — founding/product intent source.
+- **INFERENCE** — analyst reasoning from evidence.
+- **WORKING HYPOTHESIS / WORKING DIRECTION** — not yet accepted architecture.
+- **OPEN QUESTION** — unresolved.
+- **ACCEPTED DECISION** — explicitly adopted.
+- **DEPRECATED / SUPERSEDED** — replaced/refined.
+- **RECOVERY UNCERTAIN** — reconstructed continuity with insufficient confidence.
+
+Never silently promote hypothesis to decision.
+Never silently treat historical documentation as current implementation truth.
+Never silently treat current implementation as final intended architecture.
+Never invent historical identifiers.
+
+## Evidence discipline
+
+Preserve:
+
+```text
+evidence
+-> interpretation
+-> architectural implication / recommendation
+-> accepted decision
+```
+
+Distinguish:
+
+```text
+implementation exists
+!= test source exists
+!= test executed successfully
+!= runtime behavior reproduced
+!= concurrency invariant proven
+!= system invariant proven
+```
+
+## Current reality vs target KeyFlowOS
+
+Maintain both views at all times:
+
+```text
+CURRENT REALITY
+= what the current repository/runtime actually does
+
+TARGET KEYFLOWOS
+= the architecture accepted after evidence, product intent, standards, contradictions, value engineering and cross-journey testing converge
+```
+
+Never allow target-state concepts to contaminate current-state claims.
+
+## Finding lifecycle
+
+Important findings should remain reopenable:
+
+```text
+PROVISIONAL
+-> VERIFIED
+-> RE-ANALYZED
+   -> STRENGTHENED
+   -> NARROWED
+   -> UNCHANGED
+   -> SUPERSEDED
+   -> REFUTED
+```
+
+Truth outranks preservation of earlier conclusions.
+
+## Existing-seam rule
+
+Prefer strengthening coherent existing machinery before creating parallel `v2` systems.
+
+Important existing seams requiring continued evaluation include:
+
+- Membership
+- CapabilityContractService
+- ActionDispatcherService
+- AuthorityGrant
+- KeyCortexApprovalOrchestrator
+- ApprovalRequest
+
+Do not assume these are sufficient; prove or disprove suitability first.
 
 ## Legacy / reachability discipline
 
-Do not classify something as dead merely because the UI does not navigate to it.
+Do not classify code as dead merely because UI navigation does not expose it.
 
-Distinguish at least:
+Distinguish:
 
 - mounted
 - reachable
-- called by current code
+- called
 - UI-linked
 - externally callable
 - orphaned
@@ -135,56 +214,67 @@ Distinguish at least:
 
 Legacy residue must be consumer-proven before deletion.
 
-## Existing-seam rule
+## Layered improvement rule
 
-Prefer strengthening an existing coherent seam before inventing a parallel `v2` system.
+For each journey/kernel distinguish:
 
-Recovered seams explicitly requiring evaluation include:
+```text
+L0 Correctness
+L1 Mandatory production standard
+L2 Strong KeyFlow architecture
+L3 Advanced architecture
+L4 KeyFlow-specific differentiation
+```
 
-- `CapabilityContractService`
-- `ActionDispatcherService`
-- Membership
-- AuthorityGrant
+Basic authorization, audit, idempotency and security are production standards, not innovation.
 
-Do not assume they are sufficient; prove or disprove their suitability first.
+## Implementation control
+
+Do not turn findings directly into coding tasks.
+
+Before coding, relevant clusters should approach:
+
+```text
+mapped
+-> cross-referenced
+-> semantically reconciled
+-> value-engineered
+-> target-converged
+-> migration understood
+-> proof designed
+-> execution-ready
+```
+
+Then use `13-IMPLEMENTATION-HANDOFF-PROTOCOL.md` to issue bounded `KF-EXEC-*` packets to Claude Code or another implementer.
+
+Kimi/Gemini or another reviewer may independently adversarially review the same accepted invariant and resulting diff.
 
 ## Persistence rule
 
-If an insight materially changes our understanding of KeyFlowOS, update at least one relevant canonical artifact:
+Material progress must update the relevant canonical artifacts and then continuity state:
 
-- `01-MASTER-CONTEXT.md`
-- `02-SYSTEM-MODEL.md`
-- `03-ANALYSIS-MAP.md`
-- `04-CONCEPT-REGISTRY.md`
-- `05-DECISION-REGISTER.md`
-- `06-OPEN-QUESTIONS.md`
-- `08-FINDING-REGISTER.md`
-- `09-CONTRADICTION-REGISTER.md`
-- `10-RECOMMENDATION-REGISTER.md`
-- the active `journeys/`, `domains/`, or `investigations/` file
+- system/analysis/kernel/journey artifacts;
+- concepts/decisions/questions;
+- findings/contradictions/recommendations;
+- current state;
+- handoff;
+- machine-readable state;
+- session journal where appropriate.
 
-before the analytical cycle is considered complete.
-
-Then update:
-
-- `07-CURRENT-STATE.md`
-- `handoff/CURRENT-HANDOFF.md`
-- `handoff/CURRENT-STATE.yaml`
-- a dated session journal under `sessions/`
+Chats can expire. KeyFlowOS knowledge should not.
 
 ## Continuation protocol
 
-A fresh agent should be able to answer, after loading this directory:
+A fresh agent should be able to answer:
 
 - What is KeyFlowOS?
-- What do we currently believe about its architecture?
-- What journey mesh is active?
-- What has been explicitly decided?
-- What findings are historical/recovered versus currently revalidated?
-- What contradictions remain unresolved?
+- What does current implementation actually do?
+- What target architecture is working versus accepted?
+- Which journeys and kernels are active?
+- Which findings/contradictions are unresolved?
 - Which recommendations are provisional?
-- What exact work was completed last?
+- What changed most recently?
 - What should happen next?
-- What must not be changed yet?
+- What must not be implemented yet?
 
-If any of those cannot be answered, context integrity is not sufficient and work should pause for recovery rather than inventing continuity.
+If those cannot be answered, context integrity is insufficient and recovery should occur before substantive work.
