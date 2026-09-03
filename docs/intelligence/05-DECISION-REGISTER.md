@@ -1,8 +1,8 @@
 # KeyFlowOS Decision Register
 
-Status: INITIAL CANONICAL REGISTER
+Status: CANONICAL REGISTER
 
-Material architectural/product/methodological decisions belong here. Rejected alternatives should be preserved when known.
+Material architectural/product/methodological decisions belong here. Rejected alternatives and superseded assumptions should be preserved when known.
 
 ---
 
@@ -26,8 +26,6 @@ Material architectural/product/methodological decisions belong here. Rejected al
 
 **Rationale:** Version control provides explicit files, history, diffability, reversibility, and cross-agent access.
 
-**Consequence:** ChatGPT Project sources may mirror canonical material but are not the sole source of truth.
-
 ---
 
 ## KF-DEC-003 — Analyse KeyFlowOS macroscopically before microscopic modelling
@@ -36,17 +34,15 @@ Material architectural/product/methodological decisions belong here. Rejected al
 
 **Decision:** Build and refine the system-level model first, then proceed into microscopic causal journeys.
 
-**Rationale:** Local code analysis without a system model risks optimizing or documenting components without understanding their role in the whole operating system.
-
 ---
 
-## KF-DEC-004 — Microscopic modelling should be journey-based and computable
+## KF-DEC-004 — Microscopic modelling is journey-based and computable
 
 **Status:** ACCEPTED
 
-**Decision:** The microscopic model should trace causal end-to-end business journeys rather than merely documenting modules in isolation.
+**Decision:** The microscopic model traces causal end-to-end business journeys rather than merely documenting modules in isolation.
 
-**Rationale:** KeyFlowOS's value and complexity arise from cross-domain state transitions, intelligence, governance, and automation.
+**Rationale:** Journeys expose UX, authorization, state transitions, mutations, events, AI behavior, failures, concurrency, and cross-module contradictions that module inventories hide.
 
 ---
 
@@ -56,17 +52,13 @@ Material architectural/product/methodological decisions belong here. Rejected al
 
 **Decision:** Begin the microscopic programme with `KF-JOURNEY-001 — Business Birth`.
 
-**Rationale:** Business Birth establishes identity, initial business state, foundational knowledge, readiness, and the context upon which downstream journeys depend.
-
 ---
 
-## KF-DEC-006 — Business Genome is living operating DNA
+## KF-DEC-006 — Business Genome is living operating understanding
 
 **Status:** ACCEPTED DIRECTION
 
-**Decision:** The Business Genome is not a one-time onboarding profile. It is a living, evidence-backed operating understanding of the business.
-
-**Consequence:** Genome lifecycle, evidence, scoring, decay, readiness, and evolution require dedicated microscopic validation.
+**Decision:** The Business Genome is not a one-time onboarding profile. It is a living, evidence-backed interpretation of the business used for confidence, readiness, gaps, stage, risk and actionability.
 
 ---
 
@@ -74,7 +66,7 @@ Material architectural/product/methodological decisions belong here. Rejected al
 
 **Status:** ACCEPTED
 
-**Decision:** Treat the Business Blueprint as structured business facts and the Business Genome as the wider evidence-backed/scored interpretation unless future evidence justifies a revised canonical distinction.
+**Decision:** Treat the Blueprint primarily as structured founder/operator declaration/configuration and the Genome as evidence-aware resolved/interpreted business understanding.
 
 ---
 
@@ -82,9 +74,7 @@ Material architectural/product/methodological decisions belong here. Rejected al
 
 **Status:** ACCEPTED
 
-**Decision:** KEY's execution authority must be bounded by business context, evidence, permissions, readiness, governance, and risk.
-
-**Consequence:** Microscopic analyses must track not only what KEY can technically do, but what KEY is legitimately authorized to do at each state.
+**Decision:** KEY's execution authority must be bounded by business context, evidence, readiness, human authority, KEY autonomy/delegation, governance, policy and risk.
 
 ---
 
@@ -92,9 +82,7 @@ Material architectural/product/methodological decisions belong here. Rejected al
 
 **Status:** ACCEPTED
 
-**Decision:** Modular isolation remains valuable for implementation and testing, but controlled synchronous coupling is permitted where a critical user experience requires immediate cross-domain orchestration.
-
-**Rationale:** Architectural dogma must not break essential user flows.
+**Decision:** Modular isolation remains valuable for implementation and testing, but controlled cross-domain coupling is permitted where a critical user journey requires it.
 
 ---
 
@@ -102,9 +90,7 @@ Material architectural/product/methodological decisions belong here. Rejected al
 
 **Status:** ACCEPTED
 
-**Decision:** Repository/source/runtime evidence must remain distinguishable from analyst interpretation and from accepted architectural decisions.
-
-**Consequence:** A repository observation cannot silently become canonical architecture without analysis and acceptance.
+**Decision:** Repository/source/runtime evidence must remain distinguishable from analyst interpretation and accepted architecture.
 
 ---
 
@@ -114,4 +100,131 @@ Material architectural/product/methodological decisions belong here. Rejected al
 
 **Decision:** If prior-thread details cannot be reliably recovered, record the gap and proceed only through explicit re-acceptance or later recovery.
 
-**Current application:** the exact previously proposed `KF-JOURNEY-002+` sequence remains unrecovered and will not be recreated as though it were historical fact.
+**Update:** the previous `KF-JOURNEY-002+` recovery gap was subsequently resolved through an explicit recovery packet. The recovered programme through J25 is now recorded in `03-ANALYSIS-MAP.md` and the source packet is preserved under `sessions/`.
+
+---
+
+## KF-DEC-012 — Journey analysis is recursive and bidirectional
+
+**Status:** ACCEPTED
+
+**Decision:** A journey is not considered permanently closed after one pass. Findings in later journeys may reopen assumptions in earlier journeys.
+
+**Recovered progression:** `J1 -> J2 -> J1 -> J2`, later `J1 <-> J25 <-> J2`.
+
+**Rejected alternative:** analyze each journey independently once and freeze it.
+
+---
+
+## KF-DEC-013 — No production changes before architectural convergence
+
+**Status:** ACCEPTED
+
+**Decision:** The current forensic analysis remains read-only until relevant journey architecture converges sufficiently to define coherent target-state execution packets.
+
+**Rationale:** Premature fixes can harden contradictions or optimize the wrong abstraction.
+
+**Consequence:** Recommendations remain provisional until cross-journey validation and explicit acceptance.
+
+---
+
+## KF-DEC-014 — J1/J25/J2 convergence precedes full J15 analysis
+
+**Status:** ACCEPTED
+
+**Decision:** Do not fully open `KF-JOURNEY-015 — Approval / Governance Lifecycle` yet.
+
+First converge:
+
+```text
+KF-JOURNEY-001 — Business Birth
+        ↕
+KF-JOURNEY-025 — Human Authority Lifecycle
+        ↕
+KF-JOURNEY-002 — KEY Request → Governed Action
+```
+
+Required stabilization topics:
+
+1. Membership-first tenant relationship and owner semantics;
+2. effective human-authority algebra;
+3. stable capability identity and exact-action clearance;
+4. concurrency-safe execution claim / post-clearance execution semantics.
+
+Then re-run the mesh and perform a J15 admission review.
+
+---
+
+## KF-DEC-015 — Distinguish human authority from KEY autonomy
+
+**Status:** ACCEPTED
+
+**Decision:** Human permission and KEY autonomy/delegation are separate authority axes and must not substitute for each other.
+
+**Consequence:** A governed action must evaluate both where relevant.
+
+---
+
+## KF-DEC-016 — Capability identity must survive governance and execution
+
+**Status:** ACCEPTED DIRECTION
+
+**Decision:** The underlying business capability must remain identifiable from proposal through policy evaluation, approval/confirmation, clearance, execution and outcome.
+
+**Invariant direction:** **THE THING APPROVED = THE THING EXECUTED.**
+
+**Consequence:** generic wrappers such as `EXECUTE_TOOL` must not erase the underlying capability's material risk/permission identity.
+
+---
+
+## KF-DEC-017 — Clearance and execution claim are distinct concepts
+
+**Status:** ACCEPTED DIRECTION
+
+**Decision:** Permission to execute an exact action is distinct from which execution process has exclusive right to consume that permission.
+
+- Clearance: this exact action may execute.
+- Execution claim: this execution process is the permitted claimant/consumer.
+
+This distinction exists to address concurrency, duplicate proposal/plan execution, queue/direct races, retries and crash recovery.
+
+---
+
+## KF-DEC-018 — Prefer strengthening existing architectural seams before inventing replacements
+
+**Status:** ACCEPTED METHODOLOGICAL RULE
+
+**Decision:** Before creating parallel v2 registries/services, determine whether existing seams can be made canonical/load-bearing.
+
+Recovered examples requiring evaluation rather than automatic replacement:
+
+- `CapabilityContractService`
+- `ActionDispatcherService`
+- Membership
+- AuthorityGrant
+
+---
+
+## KF-DEC-019 — Legacy residue requires consumer proof before retirement
+
+**Status:** ACCEPTED
+
+**Decision:** A legacy/duplicate model is not deleted merely because a newer architecture exists. Active consumers, reachability and compatibility requirements must be proven first.
+
+Recovered examples: `BusinessGenome`, `BusinessGuidanceProfile`, older approval/governance paths.
+
+---
+
+## KF-DEC-020 — Tests and verification claims must be evidence-specific
+
+**Status:** ACCEPTED METHODOLOGICAL RULE
+
+**Decision:** Distinguish at least:
+
+- implementation exists;
+- test source exists;
+- test currently passes;
+- runtime behavior was reproduced;
+- generated state reports a condition.
+
+Never state “verified” when only test source or narrative documentation was inspected.
