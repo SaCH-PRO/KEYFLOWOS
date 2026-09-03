@@ -8,7 +8,9 @@ Read `docs/intelligence/00-START-HERE.md`, then the canonical files it lists.
 
 Also read:
 
-- `docs/intelligence/sessions/2026-09-03-exhausted-thread-recovery.md`
+- `docs/intelligence/investigations/J1-J25-J2-CONVERGENCE-TENANCY.md`
+- `docs/intelligence/investigations/J1-J25-J2-CONVERGENCE-AUTHORITY.md`
+- `docs/intelligence/investigations/J1-J25-J2-CONVERGENCE-EXECUTION.md`
 - `docs/intelligence/journeys/KF-JOURNEY-001-BUSINESS-BIRTH.md`
 - `docs/intelligence/journeys/KF-JOURNEY-002-KEY-REQUEST-GOVERNED-ACTION.md`
 - `docs/intelligence/journeys/KF-JOURNEY-025-HUMAN-AUTHORITY-LIFECYCLE.md`
@@ -17,9 +19,15 @@ Also read:
 
 `PASS`
 
-The previous long conversation's unique work has been recovered and durably persisted. Do not restart from first-pass J1 scoping.
+The prior exhausted conversation has been recovered, continuity infrastructure has been installed, and all three J1/J25/J2 convergence axes have now been revalidated against current `main` implementation evidence and checkpointed.
 
-## Active analytical mesh
+## Current implementation evidence baseline
+
+`main` at `e1203b34d0b3091a73657dc358508d7a14109575`
+
+Revalidate if `main` materially advances before relying on commit-sensitive implementation facts.
+
+## Analytical state
 
 ```text
 KF-JOURNEY-001 — Business Birth
@@ -27,171 +35,163 @@ KF-JOURNEY-001 — Business Birth
 KF-JOURNEY-025 — Human Authority Lifecycle
         ↕
 KF-JOURNEY-002 — KEY Request → Governed Action
+        ↓
+KF-JOURNEY-015 — Approval / Governance Lifecycle
+             READY FOR SCOPING
 ```
 
-## Exact continuation point
-
-Remain inside this mesh. Do **not** fully open J15 yet.
-
-The immediate work is convergence across three foundational problems:
+## Three-axis convergence
 
 ### A. Tenant relationship
 
-Resolve:
+`DIRECTIONALLY_CONVERGED / NOT_FROZEN`
+
+Working direction:
 
 ```text
-Business.ownerId + Membership
-  -> safe Membership-first tenancy
+Business.ownerId
+  = distinguished ownership identity
+
+Membership
+  = canonical authenticated-human ↔ Business relationship
+    + baseline authority envelope
 ```
 
-without breaking ownership semantics/data.
+Current contradictions revalidated:
 
-Trace/revalidate:
-
-- all Business creation/bootstrap paths;
-- OWNER Membership invariants;
-- `listBusinesses`/workspace discovery;
-- BusinessGuard vs scoped authorization;
-- active workspace selection;
-- invitation placeholder identity behavior;
-- JobRole/OrgAssignment authority materialization.
+- bootstrap creates/repairs OWNER Membership;
+- explicit business creation still does not;
+- listBusinesses is ownerId-based;
+- BusinessGuard accepts ownerId or Membership;
+- ModuleScopeGuard requires Membership.
 
 ### B. Effective human authority
 
-Construct and challenge a candidate algebra:
+`DIRECTIONALLY_CONVERGED / NOT_FROZEN`
+
+Working composition:
 
 ```text
-principal
-+ business
-+ Membership/base role
-+ JobRole/position
-+ explicit grants/overrides
-+ explicit denials
-+ delegations
-+ approval tier
-+ capability
-+ resource/context
-+ validity/revocation
--> effective authority
+Membership baseline
++ active JobRole/OrgAssignment
++ explicit bounded grants
++ valid bounded delegation
+- explicit deny
+∩ resource/value/time/policy constraints
+-> EffectiveAuthorityResult
 ```
 
-Determine:
+Important:
 
-- source precedence;
-- expansion vs narrowing rules;
-- explicit-denial semantics;
-- delegation/grant bounds;
-- explainability/provenance;
-- revocation effects on approval/clearance.
+- JobRole authority is currently copied into Membership, losing provenance.
+- ApprovalRouting routes approvers but is not a complete authority resolver.
+- AuthorityGrant provenance/bounds are incomplete end-to-end.
+- coarse Membership module scopes and fine CapabilityContract permissions are not canonically bridged.
+- no first-class explicit-denial layer was found in inspected paths.
+- no central Effective Authority Resolver was found.
 
-### C. Execution claim / dispatcher
+New current findings: F044–F049.
+Contradiction candidates: C022–C024.
 
-Revalidate all materially distinct execution regimes:
+### C. Clearance / execution claim / dispatcher
 
-- KeyActionProposal execution;
-- AI plan approval/execution;
-- PlanExecutor/BullMQ;
-- direct Flow plan execution;
-- GraphActions/direct Flow action execution;
-- ActionDispatcherService;
-- KeyIdempotencyService;
-- SafetyShell;
-- provider-side idempotency/retries.
+`DIRECTIONALLY_CONVERGED / NOT_FROZEN`
 
-Construct candidate target:
+Working target:
 
 ```text
-exact capability/action
-  -> clearance
+CapabilityContract
+  -> ActionEnvelope
+  -> action fingerprint
+  -> EffectiveAuthority + KEY autonomy + readiness/policy
+  -> control requirement
+  -> approval/confirmation evidence
+  -> exact-action clearance
   -> atomic execution claim
   -> canonical post-clearance dispatcher
   -> domain/provider execution
   -> durable outcome
 ```
 
-## What is already recovered
+Important:
 
-### Journey programme
+- ActionDispatcher is the preferred existing seam to evolve.
+- dispatcher outcome lookup is not an atomic pre-side-effect claim.
+- KeyIdempotency pending state explicitly allows another caller to proceed.
+- BullMQ dedupe is transport-local.
+- proposal and plan/dispatcher execution remain separate fabrics.
+- FlowOrchestrator direct execution is reachable outside dispatcher.
+- proposal EXECUTING transition is not proven atomic/CAS.
 
-Canonical programme recovered through `KF-JOURNEY-025`. See `03-ANALYSIS-MAP.md`.
+New current findings: F050–F056.
+Contradiction candidates: C025–C028.
 
-### Method
+## J15 admission verdict
 
-Journey analyses are recursive/bidirectional. Findings in J25/J2 must feed back into J1 and vice versa.
+`READY_FOR_SCOPING`
 
-### Macro thesis
+This means a full microscopic forensic analysis of `KF-JOURNEY-015 — Approval / Governance Lifecycle` may now begin.
 
-KeyFlowOS is being modelled as a governed business-state transition system:
+It does NOT authorize production implementation.
+
+## Exact next action
+
+Create/open the J15 journey dossier and trace every materially distinct governance path end to end.
+
+At minimum inspect:
+
+1. KeyActionProposal approval/rejection/execution;
+2. AI plan approval and step-level approval;
+3. AiOversightService decision model;
+4. AutonomyOrchestrator controls;
+5. ApprovalRoutingService and DelegationRule;
+6. Membership maxApprovalTier consumption;
+7. confirmation booleans / user confirmation surfaces;
+8. admin/tier-4 controls;
+9. KEY AuthorityGrant consumption;
+10. CapabilityContract risk/approval metadata;
+11. approval events/evidence persistence;
+12. approval expiration/revocation or absence thereof;
+13. parameter mutation after approval;
+14. plan-parent/child approval semantics;
+15. execution entry following approval;
+16. authority changes after approval;
+17. direct/manual actions that bypass approval objects.
+
+J15 must answer:
 
 ```text
-observation
--> Business Graph
--> Genome
--> KEY
--> capability
--> authority/policy/readiness
--> clearance
--> execution claim
--> execution
--> state transition
--> evidence/outcome
+What exact action is being governed?
+What control is required?
+Who can satisfy that control?
+What durable evidence proves it was satisfied?
+What mutations invalidate it?
+When does it become exact-action clearance?
+When/how can that clearance be claimed?
 ```
 
-### Critical distinctions already established
+## Required J15 outputs
 
-- Business Graph != database
-- Blueprint != Genome
-- Membership != mere relationship
-- human authority != KEY autonomy
-- impact tier != control requirement
-- module readiness != action authorization
-- approval != portable clearance
-- clearance != execution claim
-- idempotency key != single-executor claim
-- invitation != authenticated User
-
-## Existing seams to evaluate before inventing replacements
-
-- `CapabilityContractService`
-- `ActionDispatcherService`
-- Membership
-- AuthorityGrant
-
-Do not create parallel v2 systems until these are proven insufficient.
-
-## Recovered implementation-findings caution
-
-Historical findings F003–F043 and C005–C021 are preserved in the recovery source. They are valuable leads but commit-sensitive code facts must be revalidated against the current repository before they become execution premises.
-
-Do not assign historical F-numbers beyond F043 unless an original source is recovered.
-
-## J15 admission rule
-
-Only perform a full `KF-JOURNEY-015 — Approval / Governance Lifecycle` pass after the J1/J25/J2 convergence establishes sufficiently stable:
-
-- tenant identity/relationship;
-- human authority algebra;
-- capability identity;
-- approval-to-clearance binding;
-- concurrency-safe execution claim;
-- post-clearance execution semantics.
-
-## Required output of next convergence pass
-
-1. current-code revalidation table for the three convergence axes;
-2. candidate Membership-first tenancy invariant/migration model;
-3. candidate Effective Authority Resolver algebra with worked scenarios;
-4. candidate clearance + action-fingerprint + invalidation semantics;
-5. candidate execution-claim state machine and dispatcher topology;
-6. explicit changes to J1/J25/J2 conclusions;
-7. updated finding/contradiction/recommendation registers;
-8. J15 admission verdict: `NOT_READY` or `READY_FOR_SCOPING`.
+- microscopic A–AC journey dossier;
+- current implementation governance-regime map;
+- approval/control state machine;
+- control-requirement model distinct from risk tier;
+- approval evidence model;
+- exact-action approval binding/fingerprint analysis;
+- approval expiry/revocation/invalidation model;
+- hierarchical plan-approval analysis;
+- authority-version interaction;
+- approval → clearance issuance candidate;
+- contradictions/findings/recommendations;
+- backward feed into J1/J25/J2;
+- verdict on whether target architecture is stable enough to move toward execution planning.
 
 ## Constraints
 
-- No production code modifications yet.
-- No premature implementation tickets from provisional recommendations.
-- No legacy deletion without consumer proof.
-- No assumption that a test file means a test passed.
-- No assumption that UI non-navigation means code is dead.
-- Preserve evidence -> interpretation -> decision.
+- no production code modifications;
+- no implementation tickets from provisional findings;
+- no parallel v2 systems before existing seams are proven insufficient;
+- no legacy deletion without consumer proof;
+- no claim that tests passed unless executed;
+- preserve evidence -> interpretation -> decision;
+- J15 findings may reopen A/B/C convergence if evidence requires it.
