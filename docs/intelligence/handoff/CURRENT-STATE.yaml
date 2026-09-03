@@ -1,69 +1,80 @@
 project: KEYFLOWOS
-analysis_version: 2
+analysis_version: 3
 last_updated: 2026-09-03
 phase: computable-microscopic-model-cross-journey-convergence
+status: j15-ready-for-scoping
+canonical_branch: docs/keyflow-intelligence-foundation
+implementation_evidence:
+  branch: main
+  commit: e1203b34d0b3091a73657dc358508d7a14109575
+context_integrity: PASS
 active_mesh:
   - id: KF-JOURNEY-001
     name: Business Birth
-    status: substantially-modelled-needs-convergence
+    status: substantially-modelled-directionally-converged
   - id: KF-JOURNEY-025
     name: Human Authority Lifecycle
-    status: partially-modelled-active
+    status: directionally-converged-not-frozen
   - id: KF-JOURNEY-002
     name: KEY Request -> Governed Action
-    status: substantially-modelled-needs-convergence
-status: foundations-before-j15
-canonical_branch: docs/keyflow-intelligence-foundation
-context_integrity: PASS
+    status: substantially-modelled-directionally-converged
+  - id: KF-JOURNEY-015
+    name: Approval / Governance Lifecycle
+    status: ready-for-scoping
 recovery:
   exhausted_thread_packet: docs/intelligence/sessions/2026-09-03-exhausted-thread-recovery.md
   journey_catalogue_recovered_through: KF-JOURNEY-025
   historical_findings_recovered_through: F043
   historical_contradictions_recovered_through: C021
-resolved_questions:
-  - KF-Q-001
-open_questions:
-  - KF-Q-002
-  - KF-Q-003
-  - KF-Q-004
-  - KF-Q-005
-  - KF-Q-006
-  - KF-Q-007
-  - KF-Q-008
-  - KF-Q-009
-  - KF-Q-010
-  - KF-Q-011
-  - KF-Q-012
-  - KF-Q-013
-  - KF-Q-014
-  - KF-Q-015
-  - KF-Q-016
-  - KF-Q-017
-  - KF-Q-018
-  - KF-Q-019
-  - KF-Q-020
-  - KF-Q-021
-  - KF-Q-022
-  - KF-Q-023
-  - KF-Q-024
+current_findings_added:
+  - F044
+  - F045
+  - F046
+  - F047
+  - F048
+  - F049
+  - F050
+  - F051
+  - F052
+  - F053
+  - F054
+  - F055
+  - F056
+current_contradiction_candidates:
+  - C022
+  - C023
+  - C024
+  - C025
+  - C026
+  - C027
+  - C028
 convergence_axes:
-  - tenant_relationship_ownerId_membership
-  - effective_human_authority_algebra
-  - execution_claim_and_dispatcher
+  tenant_relationship_ownerId_membership: directionally-converged-not-frozen
+  effective_human_authority_algebra: directionally-converged-not-frozen
+  execution_claim_and_dispatcher: directionally-converged-not-frozen
+investigations:
+  tenancy: docs/intelligence/investigations/J1-J25-J2-CONVERGENCE-TENANCY.md
+  authority: docs/intelligence/investigations/J1-J25-J2-CONVERGENCE-AUTHORITY.md
+  execution: docs/intelligence/investigations/J1-J25-J2-CONVERGENCE-EXECUTION.md
+j15_admission:
+  verdict: READY_FOR_SCOPING
+  implementation_authorized: false
 next_actions:
-  - revalidate current tenant creation discovery membership invitation and JobRole paths
-  - build candidate Membership-first tenancy invariant and migration model
-  - build candidate Effective Authority Resolver algebra and test scenarios
-  - revalidate proposal plan queue direct Flow and dispatcher execution paths
-  - build candidate exact-action clearance and invalidation semantics
-  - build atomic execution claim state machine and dispatcher topology
-  - feed results backward into J1 J25 and J2
-  - update findings contradictions recommendations and handoff
-  - perform J15 admission review
+  - create_or_open_KF_JOURNEY_015_dossier
+  - trace_all_current_approval_and_governance_regimes
+  - separate_control_requirement_from_risk_tier
+  - map_approval_evidence_and_state_machine
+  - determine_exact_action_fingerprint_binding
+  - determine_approval_expiry_revocation_and_invalidation
+  - analyze_hierarchical_plan_approval_bounds
+  - bind_effective_authority_version_to_approval_and_clearance
+  - construct_approval_to_clearance_issuance_model
+  - feed_J15_findings_back_into_J1_J25_J2
+  - update_findings_contradictions_recommendations_and_handoff
 constraints:
   - do_not_modify_production_code
-  - do_not_fully_open_J15_until_admission_ready
-  - revalidate_commit_sensitive_recovered_findings
+  - j15_scoping_does_not_authorize_implementation
+  - revalidate_commit_sensitive_findings_if_main_advances
   - do_not_invent_historical_finding_numbers_beyond_F043
   - do_not_delete_legacy_without_consumer_proof
   - prefer_strengthening_existing_seams_before_v2_replacements
