@@ -1,24 +1,20 @@
 # KeyFlowOS Finding Register — Workflow Control Plane Supplement
 
-Status: CANONICAL CONTINUATION OF `08G-FINDING-REGISTER-CANCELLATION-SUPERSESSION-SUPPLEMENT.md`
+Status: CANONICAL CONTINUATION AFTER `08H-FINDING-REGISTER-MISSED-SCHEDULE-SUPPLEMENT.md`
 
 Implementation baseline: `main@5ec358e9b792817eda1e37fd80a0574eb7905a8a`
 
-The move from `d7c5b86c...` to `5ec358e9...` contains only audit/state documentation changes; inspected implementation code is unchanged.
-
-Canonical sequence continues after F144.
+Identifier correction: an earlier concurrent intelligence write had already canonically allocated F145 to missed-schedule semantics. This supplement therefore continues at F146. Git history preserves the superseded draft allocation; current IDs below are canonical.
 
 ---
 
-## F145 — Cross-Module workflow enable/disable control is not load-bearing for observed commerce-backed workflow paths
+## F146 — Cross-Module workflow enable/disable control is not load-bearing for observed commerce-backed workflow paths
 
 **Status:** VERIFIED CROSS-SURFACE / CONTROL-PLANE FINDING
 
-The shipped Cross-Module Intelligence UI states:
+The shipped Cross-Module Intelligence UI states that disabling a workflow stops it from running while preserving configuration.
 
-> Disabling a workflow stops it from running but preserves your configuration.
-
-The UI writes `CrossModuleWorkflow.enabled` through `updateCrossModuleWorkflow()`.
+The UI writes `CrossModuleWorkflow.enabled`.
 
 `WORKFLOW_DEFINITIONS` exposes commerce workflow keys including:
 
@@ -34,15 +30,11 @@ purchase_order_expense
 preorder_delay_notice
 ```
 
-Observed execution for these concepts is implemented in `CommerceIntegrationService` event handlers / scheduled-job processors.
-
-No `CrossModuleWorkflow.enabled` / `isWorkflowEnabled()` check was observed in that service.
+Observed execution for these concepts is implemented in `CommerceIntegrationService` event handlers / scheduled-job processors. No `CrossModuleWorkflow.enabled` / `isWorkflowEnabled()` check was observed in that service.
 
 For post-purchase jobs, `CrossModuleAgentService.processScheduledJobs()` also consumes the same ScheduledAgentJob types without rechecking the workflow enabled state at execution time.
 
 Therefore a workflow can be shown as disabled in the control UI while corresponding commerce event/scheduled paths remain able to run.
-
-This is not merely a stale-job question. It is a declared-control-plane vs execution-plane disconnect.
 
 Target law:
 
@@ -53,7 +45,7 @@ Affected journeys: J6, J9, J10, J18, J23.
 
 ---
 
-## F146 — Post-purchase workflow timing configuration is exposed to users but bypassed by the live scheduler
+## F147 — Post-purchase workflow timing configuration is exposed to users but bypassed by the live scheduler
 
 **Status:** VERIFIED PRODUCT-CONTRACT / TEMPORAL-CONFIGURATION FINDING
 
