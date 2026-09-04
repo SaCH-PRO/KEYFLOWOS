@@ -4,11 +4,11 @@ Last updated: 2026-09-03 local / 2026-09-04 UTC
 
 ## Analytical phase
 
-`COMPUTABLE_DIGITAL_TWIN / JOURNEY_KERNEL_CONVERGENCE / J23_TARGET_CONVERGENCE`
+`COMPUTABLE_DIGITAL_TWIN / JOURNEY_KERNEL_CONVERGENCE / J18_RECOVERY_FORENSICS`
 
 ## Status
 
-`J23 L5 VALUE-ENGINEERED / ENTERING L6 TARGET-CONVERGENCE — J18 NEXT MICROSCOPIC RECOVERY PRESSURE TEST`
+`J23 L5 VALUE-ENGINEERED / ENTERING L6 TARGET-CONVERGENCE — J18 ACTIVE MICROSCOPIC RECOVERY PASS ADVANCED`
 
 Production implementation remains blocked.
 
@@ -35,8 +35,8 @@ The inspected implementation paths remain semantically unchanged. Revalidate aga
 + KERNEL CONSTELLATIONS
 + GLOBAL INVARIANTS
 + FINDINGS / CONTRADICTIONS / OPEN QUESTIONS
-+ STANDARDS / OPEN-SOURCE / WORKING-MODEL RESEARCH
-+ TARGET-STATE / MIGRATION / PROOF
++ STANDARDS / OSS / WORKING-MODEL RESEARCH
++ TARGET STATE / MIGRATION / PROOF
 + DEPENDENCY / IMPACT GRAPH
 = COMPUTABLE KEYFLOWOS DIGITAL TWIN
 ```
@@ -57,8 +57,6 @@ External reality
 → ActionEnvelope
 → Effective Human Authority + KEY autonomy/delegation + readiness + policy
 → ControlRequirement
-→ ControlPresentation
-→ specialized control workflow/channel
 → typed ControlEvidence
 → exact-action Clearance
 → durable WorkOccurrence / temporal eligibility where needed
@@ -66,9 +64,12 @@ External reality
 → atomic ExecutionClaim
 → ActionDispatcher
 → domain/provider effect
-→ AWAITING_EXTERNAL / OutcomeEvidence / reconciliation
-→ Business Graph
-→ Genome evolution
+→ AWAITING_EXTERNAL / OUTCOME_UNKNOWN where needed
+→ OutcomeEvidence / reconciliation
+→ terminal execution outcome
+→ optional recovery/reversal/compensation effect
+→ RecoveryOutcomeEvidence
+→ Business Graph / Genome evolution
 ```
 
 ## Active constellation
@@ -91,97 +92,67 @@ J23 Temporal Flow / Long-Running Workflow
 J18 Failure / Recovery
 ```
 
-J23 has moved from open forensic discovery into value-engineered target convergence. J18 is now sufficiently pressured by J23/K9/K11 to justify the next dedicated microscopic recovery pass.
-
 ## Active kernel cluster
 
 ```text
-K3 KEY Authority / Governance
-      ↓
-K5 Capability Fabric
-      ↓
-K6 State Transition
-      ↓
-K7 Temporal / Event / Workflow
-      ↓
-K11 Recovery / Reliability
-      ↓
-K8 Evidence / Outcome
-      ↓
-K9 Integration / External Reality
+K3 Governance
+→ K5 Capability
+→ K6 State Transition
+→ K7 Temporal / Workflow
+→ K11 Recovery / Reliability
+→ K8 Evidence / Outcome
+→ K9 Integration / External Reality
 ```
 
-K7/K11/K9 boundary:
+Boundary:
 
 ```text
-K7
-= what logical work exists, waits, becomes eligible, expires, cancels, supersedes and terminalizes
-
-K11
-= who owns the attempt/effect, retry/crash/claim semantics, cancellation-vs-claim linearization
-
-K9
-= what the external provider actually accepted/did, external uncertainty, point-of-no-return and reconciliation
+K7  = what logical work exists, waits, becomes eligible, expires/cancels/supersedes and terminalizes
+K11 = attempt/effect ownership, retry/crash/recovery/compensation semantics
+K9  = provider/external reality, point-of-no-return and reconciliation
+K8  = what evidence makes execution and recovery claims truthful
 ```
 
 ## Journey state
 
-- J15: `L4 SEMANTICALLY RECONCILED / ENTERING L5 VALUE-ENGINEERED`; reopened by temporal clearance/version invalidation but no new approval root required.
-- J6: active autonomy/governance stress-test; J23 strengthens stop/kill/misfire/version/descendant invalidation semantics.
-- J14: microscopic ingress pass completed far enough for durable target recommendations; provider lifecycle events now explicitly connect to J23 `AWAITING_EXTERNAL` reconciliation.
+- J15: `L4 SEMANTICALLY RECONCILED / ENTERING L5`; recovery now adds a fresh question: retry/reverse/compensate may require new Clearance, not inherited stale approval.
+- J6: active autonomy/governance stress-test; recovery authority must respect stop/pause/kill, expiry, source-state and current policy.
+- J14: provider lifecycle/correction events remain a primary reconciliation input.
 - J23: `L5 VALUE-ENGINEERED / ENTERING L6 TARGET-CONVERGENCE`.
-- J18: admitted as next dedicated microscopic recovery pressure test; not yet converged.
+- J18: `ACTIVE FORENSICS / MICROSCOPIC RECOVERY PASS ADVANCED`.
 
 ## Canonical register ranges
 
-Canonical findings now extend through `F149`.
-
-Latest sequence:
-
 ```text
-F137 FlowRunner long delay false completion
-F138 DelegationLoop approval-wait false completion
-F139 BullMQ retryable attempt persisted as terminal AiPlanStep failure
-F140 AI plan logical/transport state compression
-F141 stale post-purchase future work survives order cancel/refund
-F142 EmailCampaign cancel vs SENDING claim race
-F143 upstream ScheduledAgentJob complete while descendant customer effect queued
-F144 TransactionalEmail queue drain ownership/dedupe loss
-F145 implicit unbounded scheduler catch-up / missing lateness semantics
-F146 CrossModuleWorkflow pending occurrences lack explicit version/migration policy
-F147 scheduled EmailCampaign action can drift under mutable latest state
-F148 WhatsApp provider/API acceptance persisted as coarse SENT without observed delivery/read reconciliation
-F149 ambiguous transport failure and confirmed provider rejection collapse into FAILED
+Findings:        F154
+Contradictions:  C104
+Recommendations: KF-REC-047
 ```
 
-Canonical contradiction sequence now extends through `C099`.
-
-Canonical provisional recommendation sequence now extends through `KF-REC-047`.
-
-Key J23 recommendations:
+Latest recovery sequence:
 
 ```text
-KF-REC-038 Durable WorkOccurrence semantic contract
-KF-REC-039 first-class durable waits
-KF-REC-040 logical workflow state != transport/attempt state
-KF-REC-041 no universal workflow runtime yet
-KF-REC-042 first-class cancellation/supersession + descendant invalidation
-KF-REC-043 execution-time current eligibility revalidation
-KF-REC-044 lineage-preserving durable queue-to-queue handoff
-KF-REC-045 per-work missed-schedule/lateness policy
-KF-REC-046 workflow-definition/action version binding + explicit waiting-occurrence migration
-KF-REC-047 cross-domain Temporal Work Projection read model
+F150 failed ActionDispatcher idempotency tombstone defeats BullMQ retry
+F151 UndoService eligibility is process-local/non-replicated
+F152 saga compensation can falsely report `compensated`
+F153 KeyCortex approval wait can become parent plan/saga failure
+F154 planner overwrites saga compensation outcome with generic failed
+
+C100 retry policy vs idempotency terminality
+C101 recovery promise vs recovery-state durability
+C102 compensated claim vs confirmed inverse effect
+C103 child control wait vs parent workflow failure
+C104 recovery outcome vs generic failed overwrite
 ```
 
-Existing `KF-REC-037 provider lifecycle reconciliation` is strengthened by J23 rather than duplicated.
+Canonical continuations:
+
+- `08K-FINDING-REGISTER-RECOVERY-SUPPLEMENT.md`
+- `09K-CONTRADICTION-REGISTER-RECOVERY-SUPPLEMENT.md`
+
+No new recovery recommendation has been accepted yet. Pool J18 first. Existing KF-REC-037, KF-REC-040, KF-REC-044 and KF-REC-047 remain directly relevant.
 
 ## J23 target-convergence verdict
-
-Durable synthesis:
-
-`investigations/J23-TARGET-CONVERGENCE-AND-MIGRATION-MAP.md`
-
-Decision:
 
 ```text
 SHARED DURABLE-WORK SEMANTIC CONTRACT     = YES
@@ -190,7 +161,7 @@ UNIVERSAL NEW WorkOccurrence TABLE        = NOT JUSTIFIED YET
 UNIVERSAL NEW WORKFLOW RUNTIME             = NOT JUSTIFIED YET
 ```
 
-Target logical states include:
+Target work states remain:
 
 ```text
 SCHEDULED
@@ -210,148 +181,136 @@ SUPERSEDED
 EXPIRED
 ```
 
-These are semantic states; current domain models may implement them differently during migration.
+## J18 recovery model
 
-## Core J23 laws
-
-```text
-Definition != Occurrence
-Occurrence != Attempt
-Waiting != Completed
-Queued != Running
-Attempt Failed != Logical Step Failed
-Worker Claim != ExecutionClaim
-Approval != Clearance
-Handoff Complete != Effect Complete
-Cancel Requested != Cancellation Proven
-Overdue != Still Valid
-Definition ID != immutable action semantics
-Provider Acceptance != Delivery/Settlement
-Ambiguous External Outcome != Confirmed Failure
-Workflow Completion != Business Outcome
-```
-
-## J23 value-engineered migration direction
-
-### Preserve and strengthen
-
-- FlowRun graph/run identity and idempotency seam;
-- AiPlan/AiPlanStep dependency identity + BullMQ lock/retry/stall machinery;
-- ScheduledAgentJob checkpoint uniqueness;
-- DelegationLoop recurrence definition/history;
-- WhatsApp `SCHEDULED -> SENDING` CAS + provider message ID;
-- EmailCampaign sender CAS;
-- OutboundDelivery/DeliveryEvent as strong external-effect attempt seam;
-- Saga evidence/compensation concepts where reachable;
-- quote-followup cancellation + current-state revalidation pattern.
-
-### Migration waves
+Failure-certainty axis:
 
 ```text
-A characterize current statuses + build proof harness
-B strengthen local ownership/claim boundaries
-C add cancel/version/lateness semantics
-D add external outcome/reconciliation semantics
-E build Temporal Work Projection
-F only then reconsider common WorkOccurrence persistence/runtime
+RETRYABLE_ATTEMPT_FAILURE
+FAILED_FINAL_CONFIRMED
+AWAITING_EXTERNAL
+OUTCOME_UNKNOWN
+EXPIRED
+CANCELLED
+SUPERSEDED
+SUCCEEDED
 ```
 
-No `WorkflowEngine2` or mega-table is accepted.
-
-## J23 backward reinjection
-
-Durable artifacts:
-
-- `investigations/J23-CANCELLATION-BACKWARD-REINJECTION-J6-J14-J15-K8-K9.md`
-- `investigations/J23-BACKWARD-REINJECTION-LATENESS-VERSIONING-EXTERNAL-OUTCOME.md`
-
-Effects:
+Recovery-outcome axis:
 
 ```text
-J15
-→ Clearance freshness can depend on time/capability
-→ material action/version change invalidates stale exact-action clearance
-
-J6
-→ STOP/PAUSE/KILL must dominate not-yet-effective descendants
-→ recurrence needs misfire policy
-→ standing-definition changes need waiting-occurrence policy
-
-J14
-→ provider lifecycle/correction events can resume/reconcile/invalidate downstream work
-
-J18
-→ recovery must distinguish retryable, failed-final, expired, cancelled, superseded, awaiting-external and outcome-unknown
+RECOVERY_AVAILABLE
+RECOVERY_REQUESTED
+RECOVERY_ATTEMPTED
+RECOVERY_SUCCEEDED_CONFIRMED
+RECOVERY_FAILED
+RECOVERY_UNAVAILABLE
+MITIGATION_ONLY
 ```
 
-No duplicate root findings were created by these backward passes.
-
-## K9 status
-
-`KF-KERNEL-009-INTEGRATION-EXTERNAL-REALITY.md` is now instantiated and already aligns with J23's core external-truth laws:
+Core recovery laws:
 
 ```text
-provider request != provider acceptance != external outcome
-timeout != failure
-OUTCOME_UNKNOWN → reconcile before unsafe retry
+Attempt failure != logical-work failure
+Failed idempotency evidence != retry exhaustion
+Provider timeout != confirmed non-effect
+Control wait != failure
+Undo != retry != reversal != compensation
+Compensation handler return != confirmed inverse effect
+Original execution outcome != recovery outcome
+Recovery must revalidate cancellation/supersession/expiry/version/source-state/authority
 ```
 
-J23 F148/F149 sharpen channel-level evidence and status-reconciliation requirements but do not require a new integration fabric.
+## J18 forensic progress
+
+### Completed microscopic traces
+
+1. **ActionDispatcher + BullMQ retry algebra**
+   - F150 confirmed end-to-end.
+   - Inner dispatcher retry failure can tombstone the stable idempotency key and neutralize later BullMQ attempts.
+
+2. **OutboundDelivery + adapters + operator retry**
+   - strong stable delivery identity, expected-state `Sending` claim, retry/backoff and DeliveryEvent evidence;
+   - manual retry/retry-all-failed surfaces exist;
+   - `success/isTransient` lacks `OUTCOME_UNKNOWN` and provider-native effect identity requirements;
+   - strengthens F149/KF-REC-037 rather than creating a duplicate.
+
+3. **ScheduledAgentJob**
+   - F122/F123 revalidated;
+   - generic `FAILED` has no observed generic retry/dead-letter consumer;
+   - producer job-type breadth exceeds generic consumer routing; unknown work can be falsely completed.
+
+4. **CustomerNotificationLog drain**
+   - F144 revalidated: no atomic drain claim and original queued dedupe/effect identity is dropped on replay.
+
+5. **SagaExecution / compensation first pass**
+   - production KeyCortex planner itself creates SagaExecution/SagaStep and compensation metadata before effect; this is a real seam to preserve;
+   - F152 false compensation success;
+   - F153 approval wait -> parent failure;
+   - F154 compensation outcome overwritten by `failSaga()`.
+
+### Positive seams to preserve
+
+- BullMQ durable job identity / attempts / backoff / locks / stalled recovery;
+- ActionDispatcher central effect boundary;
+- OutboundDelivery + DeliveryEvent;
+- SagaExecution + SagaStep durable evidence;
+- quote-followup cancellation + source-state revalidation;
+- K9 provider reconciliation;
+- Temporal Work Projection as future operator/recovery read model.
 
 ## Immediate next work
 
-### P0 — J18 microscopic recovery pass
+### P0 — continue J18 microscopic recovery pass
 
-1. map every major retry/recovery owner and failure state across AiPlan/BullMQ, ActionDispatcher, ScheduledAgentJob, OutboundDelivery, notification queues and provider calls;
-2. classify each failure as retryable, final, expired, cancelled/superseded, awaiting external, or outcome unknown;
-3. trace crash windows before/after worker claim, ExecutionClaim, provider acceptance and local persistence;
-4. map dead-letter/operator recovery/repair surfaces;
-5. map compensation/undo/reversal semantics vs true recovery;
-6. prove whether retry preserves logical/effect identity across fabrics;
-7. feed J18 results backward into J23/K11/K9/K8.
+1. trace provider/domain reversal, refund and cancellation semantics across payments, invoices, bookings, messages/social and other material effects;
+2. trace operator diagnostics/repair endpoints across AI plans, ScheduledAgentJob, ingress and sagas;
+3. classify dead-letter semantics by work family;
+4. build per-fabric recovery matrix: `certainty → effect identity → point-of-no-return → retry/reconcile/reverse action → terminal evidence`;
+5. trace representative crash windows after possible provider effect but before local persistence;
+6. define recovery authority/control requirements and whether retry/reverse/compensate needs fresh Clearance;
+7. compare with external standards/OSS and adopt properties rather than products;
+8. pool and reinject J18 into J23/K11/K9/K8/J15/J6.
 
-### P1 — finish J23 L6 blockers
+### P1 — finish J23 L6 blockers after J18 pressure stabilizes
 
-8. exact current-model field/status mapping;
-9. live-row migration compatibility;
-10. work-family lateness policy validation;
-11. definition-edit policy by product family;
-12. provider-specific terminal evidence/reconciliation mechanisms;
-13. exact J15 Clearance integration;
-14. exact J6 stop/pause integration;
-15. Temporal Work Projection query/materialization strategy;
-16. characterization/proof plan sufficient for bounded KF-EXEC packets.
-
-### P2 — digital-twin compilation
-
-17. continue stable-ID graph export for new `INVALIDATES`, `SUPERSEDES`, `AWAITS_EXTERNAL`, `RESOLVED_BY`, `CREATED_FROM_VERSION`, `EXPIRES_AT`, `MISFIRE_POLICY`, `RECONCILES` edges;
-18. keep journey/kernel constellations first-class export entities;
-19. instantiate/converge K10/K12 only when evidence pressure justifies it;
-20. continue remaining 25-journey whole-system audit after this constellation stabilizes.
+9. exact current-model field/status mapping;
+10. live-row migration compatibility;
+11. work-family lateness policy validation;
+12. definition-edit policy by product family;
+13. provider-specific terminal evidence/reconciliation;
+14. exact J15 Clearance integration;
+15. exact J6 stop/pause integration;
+16. Temporal Work Projection query/materialization strategy;
+17. characterization/proof plan sufficient for bounded KF-EXEC packets.
 
 ## Still unresolved system-wide
 
-- final persistence shape for ControlEvidence / Clearance / ExecutionClaim;
+- final persistence for ControlEvidence / Clearance / ExecutionClaim;
 - Effective Authority Resolver implementation/migration;
 - capability/permission vocabulary convergence;
-- KeyActionProposal / AiApprovalItem / ApprovalRequest migration;
-- ActionDispatcher as universal post-clearance boundary;
+- approval-regime migration;
+- ActionDispatcher universal post-clearance boundary;
 - canonical EventEnvelope / consequence ownership;
 - durable IngressOccurrence implementation;
 - provider/financial reconciliation breadth;
+- recovery-effect and recovery-evidence persistence shape;
+- operator repair/dead-letter UX and authority;
 - Business Graph / Genome / readiness feedback integrity;
-- full 25-journey / 12-kernel / constellation convergence;
-- K12 engineering-control-plane convergence;
-- machine-readable execution compiler and bounded KF-EXEC generation.
+- remaining journey/kernel/constellation convergence;
+- K10/K12 convergence when evidence pressure justifies;
+- execution compiler + bounded KF-EXEC packets only after convergence.
 
 ## Do not yet
 
 - modify production code;
 - freeze persistence schemas prematurely;
 - create parallel `*2`/`v2` sources of truth;
-- install Temporal/Camunda because J23 exposed temporal defects;
+- install Temporal/Camunda because temporal/recovery defects exist;
 - treat transport state as logical work truth;
-- treat scheduled time as perpetual authority/relevance;
 - treat provider acceptance as delivery/settlement evidence;
-- blindly retry OUTCOME_UNKNOWN external effects;
+- blindly retry OUTCOME_UNKNOWN;
+- treat a non-throwing compensation handler as confirmed reversal;
+- treat AWAITING_CONTROL as failure;
+- erase recovery outcome with original failure;
 - claim runtime/tests passed unless actually executed.
