@@ -1,5 +1,5 @@
 project: KEYFLOWOS
-rollover_version: 3
+rollover_version: 4
 last_updated: 2026-09-04
 status: LIVE_CONTINUITY_ARTIFACT
 canonical_branch: docs/keyflow-intelligence-foundation
@@ -21,29 +21,15 @@ canonical_ranges:
   findings_through: F160
   contradictions_through: C110
   recommendations_through: KF-REC-048
-unified_l6:
-  artifact: docs/intelligence/investigations/J23-J18-L6-UNIFIED-CONVERGENCE-MATRIX.md
-  status: CREATED_ACTIVE
-  semantic_dimensions:
-    - work_state
-    - original_outcome
-    - consequence_state
-    - failure_certainty
-    - recovery_action
-    - recovery_state
-    - identity
-    - authority
-  migration_sequence:
-    - characterize
-    - identity_ownership
-    - logical_state_separation
-    - temporal_validity
-    - external_outcome
-    - post_effect_consequence_convergence
-    - recovery_authority
-    - operator_projection
-    - proof_live_migration
-    - physical_convergence_reassessment
+completed_l6_artifacts:
+  unified_convergence: docs/intelligence/investigations/J23-J18-L6-UNIFIED-CONVERGENCE-MATRIX.md
+  exact_field_status_mapping: docs/intelligence/investigations/J23-J18-L6-EXACT-FIELD-STATUS-MAPPING.md
+  live_row_migration: docs/intelligence/investigations/J23-J18-L6-LIVE-ROW-MIGRATION-COMPATIBILITY.md
+mapping_verdicts:
+  status_enum_rename_safe: false
+  blind_universal_backfill_safe: false
+  migration_direction: source_specific_semantic_adapters_then_projection_then_reader_writer_convergence
+  historical_ambiguity_policy: preserve_raw_and_map_unknown_when_evidence_insufficient
 architecture_decisions:
   shared_durable_work_semantic_contract: YES
   shared_temporal_work_projection: YES
@@ -58,25 +44,40 @@ architecture_decisions:
   per_destination_recovery_outcome: YES
   financial_truth_kernel: KF-KERNEL-010
 exact_next_action:
-  title: exact_current_target_field_status_maps
-  instruction: Build exact current-to-target field/status mappings for the seven major fabrics in the unified J23/J18 L6 matrix, starting with AiPlan/AiPlanStep, ActionDispatcher/AiExecutionLog and OutboundDelivery/DeliveryEvent, then ScheduledAgentJob, WebhookEvent, Payment/Invoice/Ledger and SocialPost/provider artifacts.
-  target_artifact: docs/intelligence/investigations/J23-J18-L6-EXACT-FIELD-STATUS-MAPPING.md
-  requirements:
-    - current_schema_fields
-    - current_status_values_and_writers
-    - current_readers_consumers
-    - target_semantic_dimensions
-    - auto_map_vs_evidence_lookup_vs_unknown
-    - live_row_compatibility
-    - legacy_reader_compatibility
-    - proof_requirements
-next_after_field_mapping:
-  - exact_live_row_migration_map
-  - provider_contract_idempotency_reconciliation_matrix
+  title: provider_contract_idempotency_reconciliation_matrix
+  artifact: docs/intelligence/investigations/J23-J18-L6-PROVIDER-CONTRACT-IDEMPOTENCY-RECONCILIATION-MATRIX.md
+  instruction: Map current primary provider contracts against KeyFlow seams for safe retry, provider operation identity, lifecycle reconciliation, point-of-no-return and native reversal/cancel capability.
+  priority_providers:
+    - stripe
+    - paypal
+    - twilio_sms_whatsapp
+    - meta_whatsapp_cloud
+    - google_calendar
+    - gmail_or_google_mail_send
+    - resend
+    - wipay
+    - material_social_publishers
+  required_dimensions:
+    - effect_family
+    - create_send_capture_api
+    - client_idempotency_support
+    - idempotency_retention_scope
+    - provider_operation_id
+    - synchronous_response_semantics
+    - lifecycle_webhook_callback
+    - authoritative_status_lookup
+    - external_point_of_no_return
+    - safe_retry_condition
+    - reversal_cancel_delete_support
+    - current_keyflow_seam
+    - current_keyflow_gap
+    - adopted_target_property
+next_after_provider_matrix:
+  - exact_j15_clearance_recovery_scope_and_j6_recovery_policy_representation
   - temporal_work_projection_recovery_materialization
-  - exact_j15_j6_recovery_authority_representation
-  - characterization_proof_inventory
+  - characterization_concurrency_crash_proof_inventory
   - backward_reaudit_active_constellation
+  - bounded_kf_exec_readiness_assessment
 continuity_files:
   - docs/intelligence/handoff/NEXT-CHAT-ROLLOVER.md
   - docs/intelligence/handoff/NEXT-CHAT-ROLLOVER.yaml
