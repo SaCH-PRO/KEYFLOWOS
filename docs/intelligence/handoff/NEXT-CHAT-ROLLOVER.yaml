@@ -1,5 +1,5 @@
 project: KEYFLOWOS
-rollover_version: 4
+rollover_version: 5
 last_updated: 2026-09-04
 status: LIVE_CONTINUITY_ARTIFACT
 canonical_branch: docs/keyflow-intelligence-foundation
@@ -11,6 +11,7 @@ implementation_evidence:
   current_head: 168732d0e2226e11ed033c14fbdf7b3ea5344a41
   code_bearing_baseline: d7c5b86cfa276d75ffa42d5f1707c43704dc9f21
   current_head_change_class: audit-only
+intelligence_head_before_this_refresh: ca4f8e4d75a96a8fc60ac57e7320bb6e1162eeff
 analytical_state:
   j23: L5_VALUE_ENGINEERED_ENTERING_L6
   j18: L5_VALUE_ENGINEERED_ENTERING_L6
@@ -25,6 +26,21 @@ completed_l6_artifacts:
   unified_convergence: docs/intelligence/investigations/J23-J18-L6-UNIFIED-CONVERGENCE-MATRIX.md
   exact_field_status_mapping: docs/intelligence/investigations/J23-J18-L6-EXACT-FIELD-STATUS-MAPPING.md
   live_row_migration: docs/intelligence/investigations/J23-J18-L6-LIVE-ROW-MIGRATION-COMPATIBILITY.md
+  provider_contract_matrix: docs/intelligence/investigations/J23-J18-L6-PROVIDER-CONTRACT-IDEMPOTENCY-RECONCILIATION-MATRIX.md
+provider_contract_verdicts:
+  durable_effect_identity_outlives_provider_idempotency_window: true
+  provider_operation_id_is_outcome_evidence: true
+  callback_dedupe_does_not_equal_consequence_complete: true
+  ambiguous_external_outcome_requires_reconciliation_before_duplicate_effect: true
+  provider_reversal_is_capability_specific: true
+  stripe_idempotency_currently_not_adopted: true
+  paypal_request_id_currently_not_adopted: true
+  resend_idempotency_currently_not_adopted: true
+  twilio_lifecycle_underused: true
+  gmail_ambiguous_send_generic_retry_risk: true
+  wipay_modern_lifecycle_refund_capability_not_adopted: true
+  social_provider_reversal_capability_still_requires_per_provider_mapping: true
+  meta_direct_primary_contract_verification_pending: true
 mapping_verdicts:
   status_enum_rename_safe: false
   blind_universal_backfill_safe: false
@@ -43,37 +59,35 @@ architecture_decisions:
   provider_native_reversal_where_available: YES
   per_destination_recovery_outcome: YES
   financial_truth_kernel: KF-KERNEL-010
+innovation_method:
+  canonical: docs/intelligence/14-STANDARDS-RESEARCH-INNOVATION-METHOD.md
+  rule: standards_and_reference_architectures_are_floor_and_evidence_not_default_destination
+  convergence_requires_anti_normalization_pressure_test: true
+  horizons: [FLOOR, FRONTIER, KEYFLOW_SYNTHESIS]
+  preferred_shape: novel_synthesis_over_novel_primitives
+  normal_solution_must_be_justified_not_assumed: true
 exact_next_action:
-  title: provider_contract_idempotency_reconciliation_matrix
-  artifact: docs/intelligence/investigations/J23-J18-L6-PROVIDER-CONTRACT-IDEMPOTENCY-RECONCILIATION-MATRIX.md
-  instruction: Map current primary provider contracts against KeyFlow seams for safe retry, provider operation identity, lifecycle reconciliation, point-of-no-return and native reversal/cancel capability.
-  priority_providers:
-    - stripe
-    - paypal
-    - twilio_sms_whatsapp
-    - meta_whatsapp_cloud
-    - google_calendar
-    - gmail_or_google_mail_send
-    - resend
-    - wipay
-    - material_social_publishers
+  title: recovery_authority_representation
+  artifact: docs/intelligence/investigations/J23-J18-L6-RECOVERY-AUTHORITY-REPRESENTATION.md
+  instruction: Converge exact J15 Clearance RecoveryScope plus J6 Standing RecoveryPolicy representation without creating a parallel recovery approval system or prematurely freezing physical schema.
   required_dimensions:
-    - effect_family
-    - create_send_capture_api
-    - client_idempotency_support
-    - idempotency_retention_scope
-    - provider_operation_id
-    - synchronous_response_semantics
-    - lifecycle_webhook_callback
-    - authoritative_status_lookup
-    - external_point_of_no_return
-    - safe_retry_condition
-    - reversal_cancel_delete_support
-    - current_keyflow_seam
-    - current_keyflow_gap
-    - adopted_target_property
-next_after_provider_matrix:
-  - exact_j15_clearance_recovery_scope_and_j6_recovery_policy_representation
+    - clearance_identity_fingerprint_expiry_invalidation
+    - allowed_recovery_actions
+    - same_effect_retry_budget
+    - max_elapsed_and_expiry
+    - allowed_failure_certainty_classes
+    - reconcile_before_retry
+    - source_state_version_lateness_revalidation
+    - authority_delegation_revision_binding
+    - stop_pause_revoke_precedence
+    - reversal_compensation_amount_risk_resource_bounds
+    - historical_control_evidence_vs_current_clearance
+    - operator_stop_authority_vs_execute_authority
+    - j6_automatic_reconcile_and_retry_policy
+    - j6_financial_communication_provider_spend_resource_budgets
+    - human_escalation_thresholds
+    - anti_normalization_innovation_pressure_test
+next_after_authority_representation:
   - temporal_work_projection_recovery_materialization
   - characterization_concurrency_crash_proof_inventory
   - backward_reaudit_active_constellation
@@ -95,6 +109,7 @@ constraints:
   - do_not_treat_local_delete_as_external_reversal
   - do_not_replay_completed_children_on_parent_resume
   - do_not_treat_failure_or_time_as_new_authority
+  - do_not_converge_on_conventional_architecture_without_anti_normalization_pressure_test
   - do_not_claim_tests_or_runtime_proof_unless_executed
 rollover_protocol:
   update_after_each_major_tranche: true
