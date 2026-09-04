@@ -1,40 +1,28 @@
 # KF-JOURNEY-018 — Failure → Recovery
 
-Status: ACTIVE FORENSICS / MICROSCOPIC RECOVERY PASS ADVANCED
+Status: ACTIVE FORENSICS / MICROSCOPIC RECOVERY PASS ADVANCED / ENTERING TARGET POOLING
 Implementation baseline: `main@d7c5b86cfa276d75ffa42d5f1707c43704dc9f21`
 Current audit-only head: `5ec358e9b792817eda1e37fd80a0574eb7905a8a`
 Last evidence pass: 2026-09-03 local / 2026-09-04 UTC
 Primary kernels: K11 Recovery/Reliability, K7 Temporal/Event/Workflow
 Secondary kernels: K8 Evidence/Outcome, K9 Integration/External Reality, K10 Financial Truth, K6 State Transition, K3 Governance
-Primary adjacent journeys: J2 Governed Action, J6 Proactive KEY, J14 External Event Ingress, J15 Governance, J23 Temporal Flow
+Adjacent journeys: J2, J6, J14, J15, J23
 
-> J18 asks how KEYFLOWOS restores truthful, valid business work after failure. It is not a generic infrastructure uptime checklist. No production implementation is authorized.
+> J18 asks how KEYFLOWOS restores truthful, valid business work after failure. No production implementation is authorized.
 
 ---
 
 ## A. Central question
 
-> **After something fails, what truthful state remains, who owns recovery, is the original work still valid to execute, and what evidence proves the recovery outcome?**
+> **After failure, timeout, crash or correction, what truthful state remains, who owns recovery, is the original work still valid, and what evidence proves the recovery outcome?**
 
-J18 covers:
-
-- scheduler/poller failure;
-- worker crash/stall;
-- retry/backoff;
-- partial domain mutation;
-- provider timeout/uncertain outcome;
-- provider-declared failure;
-- local persistence failure after possible effect;
-- dead-letter/operator intervention;
-- cancellation/supersession during recovery;
-- refund/reversal/compensation/undo;
-- state/evidence repair.
+Recovery is not “run the worker again.” It is restoration of truthful business state under current authority and external reality.
 
 ---
 
-## B. Recovery taxonomy
+## B. Shared recovery model
 
-Failure-certainty axis:
+### Failure-certainty axis
 
 ```text
 RETRYABLE_ATTEMPT_FAILURE
@@ -47,7 +35,7 @@ SUPERSEDED
 SUCCEEDED
 ```
 
-Recovery-outcome axis:
+### Recovery-outcome axis
 
 ```text
 RECOVERY_AVAILABLE
@@ -59,12 +47,37 @@ RECOVERY_UNAVAILABLE
 MITIGATION_ONLY
 ```
 
-These are orthogonal.
+### Recovery-action taxonomy
+
+```text
+RETRY
+  same WorkOccurrenceId + EffectId
+  new AttemptId
+
+RECONCILE
+  observe authoritative state; no fresh business effect
+
+CANCEL
+  prevent not-yet-effective work
+
+VOID
+  domain-native cancellation where legal
+
+REVERSAL
+  new inverse RecoveryEffectId
+
+COMPENSATION
+  new mitigating RecoveryEffectId
+
+MITIGATION_ONLY
+  follow-up/annotation where inverse effect is impossible
+```
+
+Core distinction:
 
 ```text
 ORIGINAL EXECUTION OUTCOME
-!=
-RECOVERY / REVERSAL / COMPENSATION OUTCOME
+!= RECOVERY OUTCOME
 ```
 
 ---
@@ -72,308 +85,217 @@ RECOVERY / REVERSAL / COMPENSATION OUTCOME
 ## C. Recovery algorithm
 
 ```text
-failure / crash / timeout
-→ identify WorkOccurrenceId + exact EffectId
-→ establish current ownership/attempt state
+failure / crash / timeout / correction
+→ identify WorkOccurrenceId + EffectId
+→ identify latest AttemptId / ownership
 → classify certainty
-→ did effect possibly cross point of no return?
-   yes + uncertain → OUTCOME_UNKNOWN → reconcile first
-→ is work still live?
+→ possible external point-of-no-return?
+   yes + unknown → OUTCOME_UNKNOWN → reconcile first
+→ verify occurrence still live
    cancellation / supersession / expiry / lateness
-→ is original action still valid?
-   definition/action version + source state + authority/policy/clearance
-→ retry/resume only if valid
-→ preserve same logical/effect identity for retry
-→ if reversing/compensating, create distinct RecoveryEffectId
-→ preserve original OutcomeEvidence AND RecoveryOutcomeEvidence
+→ verify action still current
+   definition version / source state / authority / policy / Clearance
+→ if RETRY: preserve EffectId, increment AttemptId
+→ if REVERSAL/COMPENSATION: create RecoveryEffectId
+→ execute under explicit recovery ownership
+→ preserve original OutcomeEvidence + RecoveryOutcomeEvidence
 → terminalize truthfully
 ```
 
-Recovery means restoring truthful business state, not merely making a worker run again.
-
 ---
 
-## D. Microscopic recovery fabrics
+## D. Microscopic findings
 
-### AI plan / BullMQ + ActionDispatcher
-
-Strong seams:
-
-- durable Redis queue;
-- stable plan-step job identity;
-- attempts/backoff;
-- worker lock/stalled recovery;
-- centralized ActionDispatcher effect seam;
-- AiExecutionLog evidence.
-
-F150:
+### F150 — ActionDispatcher failed-idempotency tombstone defeats BullMQ retry
 
 ```text
 BullMQ attempt 1, key K
-→ ActionDispatcher inline retries exhaust
-→ failed AiExecutionLog with K
-→ BullMQ schedules attempt 2
-→ dispatcher idempotency lookup finds failed K
+→ ActionDispatcher inner retries exhaust
+→ failed AiExecutionLog(K)
+→ BullMQ schedules later attempt
+→ dispatcher sees failed K as idempotent hit
 → stored failure returned
 → no new effect attempt
 ```
 
-Thus failed attempt evidence is acting as an effect-key tombstone even while the logical retry policy remains live.
+Queue retry policy and effect terminality conflict.
 
-Reference comparison with BullMQ reinforces that queue retry/job identity is coordination state, not business-effect terminality.
+### F151 — UndoService eligibility is process-local
 
-### OutboundDelivery / DeliveryEvent
+Undo state lives in a process-local map with a five-minute timer. Restart/replica change loses eligibility.
 
-Strongest generic outbound recovery seam:
+`UNDO != RETRY != REVERSAL != COMPENSATION`.
+
+### F152 — Saga compensation can falsely claim success
+
+A non-throwing compensation handler becomes durable `compensated`, even when the handler no-ops or only mitigates an irreversible external effect.
 
 ```text
-Queued/Scheduled/RetryPending
-→ expected-state claim → Sending
-→ adapter attempt
-→ Published | RetryPending | Failed
-→ durable DeliveryEvent
+handler returned
+!= inverse effect confirmed
 ```
 
-Positive:
+### F153 — control wait can become parent failure
 
-- stable delivery identity;
-- retry count/backoff;
-- provider IDs/result snapshots;
-- attempt evidence;
-- authenticated manual retry/retry-all-failed.
+Planner writes `AiPlanStep=waiting_approval`, then computes parent status from stale pre-execution step objects and can set AiPlan/Saga to `failed`.
 
-Remaining external-truth defect reuses F149:
+`AWAITING_CONTROL != FAILURE`.
 
-- adapter contract reduces failure to `success/isTransient`;
-- no first-class `OUTCOME_UNKNOWN`;
-- no provider-native effect-idempotency key requirement;
-- manual retry can be unsafe if `Failed` actually means “possible external effect”.
+### F154 — recovery outcome overwritten by generic failure
 
-### TransactionalEmail / CustomerNotificationLog
-
-F144 revalidated:
+Saga compensation can persist:
 
 ```text
-QUEUED row selected
-→ no atomic drain claim
-→ send() without original messageId as dedupeKey
-→ provider effect
-→ mark original row DRAINED
+compensated | compensation_failed | compensation_unavailable
 ```
 
-Concurrent drains or crash after provider send can duplicate.
+then planner finalization calls `failSaga()` and erases that saga-level recovery classification.
 
-### ScheduledAgentJob
+### F155 — provider refund can diverge from ledger/invoice truth
 
-F122/F123 remain canonical.
-
-- generic `FAILED` has no observed generic retry/dead-letter consumer;
-- consumer routing recognizes only a subset of live produced job types;
-- unknown type can log-and-return and then be marked `COMPLETED`.
-
-### UndoService
-
-F151:
+Provider-backed manual refund:
 
 ```text
-successful action
-→ process-local recentActions Map
-→ five-minute setTimeout
-```
-
-Restart/replica change loses undo eligibility.
-
-```text
-UNDO != RETRY != ROLLBACK != REVERSAL != COMPENSATION
-```
-
-### SagaExecution / SagaStep
-
-Important positive refinement:
-
-The production `KeyCortexPlannerService.executePlan()` itself creates durable SagaExecution/SagaStep records and stores compensation metadata before effect. This is a real seam to preserve even though the separate generic SagaExecutor remains weakly reached.
-
-Defects:
-
-- F152 — non-throwing compensation handler can be recorded as `compensated` even when no inverse effect occurred or only local mitigation happened;
-- F153 — a persisted `waiting_approval` step can lead to parent AiPlan/Saga `failed` because final status reads a stale pre-execution step snapshot;
-- F154 — saga compensation result (`compensated|compensation_failed|compensation_unavailable`) is later overwritten by `failSaga()` to generic `failed`.
-
-### Provider-backed refunds / financial reversal
-
-F155:
-
-```text
-PaymentsOps.refundCharge()
-→ real Stripe/PayPal refund succeeds
-→ provider refund ID R returned
-→ best-effort local Payment.create(REFUNDED, providerPaymentId=R)
-→ NO ledger reversal
-→ NO invoice reconciliation
-
-later provider refund webhook R
-→ sees Payment(providerPaymentId=R)
+Stripe/PayPal refund succeeds, refund id R
+→ PaymentsOps creates Payment REFUNDED with R
+→ no ledger reversal
+→ no invoice reconciliation
+→ later refund webhook sees existing R
 → returns as duplicate
-→ stronger createRefundWithPosting + invoice reconciliation path suppressed
+→ stronger repair path suppressed
 ```
 
-Possible durable truth split:
+Core law:
 
 ```text
-provider = refunded
-Payment row = REFUNDED
-ledger = original posting still present
-invoice = still paid/unreconciled
+EFFECT DEDUPE
+!= CONSEQUENCE COMPLETENESS
 ```
 
-Positive seam:
+A known effect ID should block a second refund but must not block idempotent repair of missing Payment/ledger/invoice consequences.
 
-`CommerceService.markPaymentRefunded()` couples local refund status with ledger reversal transactionally and then reconciles the invoice. Provider webhook paths also contain a stronger `createRefundWithPosting()` seam.
+### F156 — payment “retry” has no observed executable recovery owner
 
-Target is convergence onto those stronger existing financial-truth patterns, not another refund subsystem.
-
----
-
-## E. Recovery action taxonomy
+Authenticated Commerce API exposes payment retry. `CommerceService.retryPayment()` changes `FAILED -> PENDING` and logs a CRM event, but does not initiate a provider operation or create a durable recovery occurrence. No generic consumer for those newly-PENDING rows was observed in this pass.
 
 ```text
-RETRY
-  same intended EffectId, new AttemptId
-
-RECONCILE
-  observe authoritative external/domain state
-
-CANCEL
-  prevent not-yet-effective work
-
-VOID
-  domain-native cancellation of an obligation/document where legal
-
-REVERSAL
-  provider/domain-native inverse transaction of a completed effect
-  new RecoveryEffectId
-
-COMPENSATION
-  new action intended to mitigate/offset prior effect
-  new RecoveryEffectId
-
-MITIGATION_ONLY
-  local annotation/follow-up where original effect is irreversible
+PENDING STATUS
+!= EXECUTABLE RECOVERY WORK
 ```
 
-Examples:
+### F157 — plan re-execution can replay completed steps
+
+Live route:
 
 ```text
-booking before service occurs → CANCEL
-unpaid invoice created in error → VOID if state machine permits
-captured payment → REFUND / financial REVERSAL
-sent external message → usually MITIGATION_ONLY, not unsend
+POST /api/v1/cortex/plans/:planId/execute
+```
+
+`executePlan()` reloads all stored steps, sets parent `running`, starts a new saga and executes every sorted step without excluding already-completed steps.
+
+Thus a repair/re-execute call can replay confirmed-success effects.
+
+```text
+RE-EXECUTE PARENT
+!= RESUME UNRESOLVED CHILDREN
 ```
 
 ---
 
-## F. Provider-native idempotency research
+## E. Reused findings strengthened by J18
 
-Durable investigation:
+Do not duplicate:
+
+- F122/F123 — ScheduledAgentJob ownership/routing; FAILED rows lack observed generic recovery owner and unknown job types can false-complete.
+- F127 — WebhookEvent first-seen identity can suppress provider redelivery after downstream failure because processing lifecycle is absent.
+- F136 — Chatwoot acknowledges before durable acceptance.
+- F144 — TransactionalEmail drain lacks atomic claim and loses original effect/dedupe identity.
+- F149 — provider rejection and ambiguous transport failure collapse; OutboundDelivery automatic/manual retry needs certainty typing.
+- F137–F147 — temporal waits, retries, cancellation, lateness and versioning remain recovery prerequisites.
+
+---
+
+## F. Strong seams to preserve
+
+- BullMQ job identity / attempts / backoff / locks / stalled recovery;
+- ActionDispatcher as central effect boundary;
+- OutboundDelivery stable identity + DeliveryEvent + operator retry;
+- SagaExecution/SagaStep durable step history;
+- `CommerceService.markPaymentRefunded()` local refund + ledger reversal transaction;
+- provider refund webhook `createRefundWithPosting()` + invoice reconciliation;
+- provider operation IDs and lifecycle callbacks;
+- quote-followup cancellation/current-state revalidation;
+- KF-REC-047 Temporal Work Projection as operator read model.
+
+Do not create `ActionDispatcherV2`, `WorkflowEngine2`, or a universal recovery table from findings alone.
+
+---
+
+## G. Provider/reference properties adopted
+
+Durable comparison:
 
 `docs/intelligence/investigations/J18-RECOVERY-CERTAINTY-REVERSAL-AND-IDEMPOTENCY-MATRIX.md`
 
 Adopted properties:
 
-### Stripe
+- Stripe POST idempotency keys support safe retry after connection failure;
+- PayPal `PayPal-Request-Id` provides retry/idempotency semantics for modifying requests, including refunds;
+- provider operation/refund IDs are reconciliation evidence;
+- BullMQ attempts/backoff/job IDs are queue lifecycle semantics, not business-effect terminality.
 
-Stripe supports idempotency keys on POST requests to allow safe retry after connection errors without performing the operation twice.
-
-Current KeyFlow `StripeConnector.stripeRequest()` does not expose/send an `Idempotency-Key`, including `POST /refunds`.
-
-### PayPal
-
-PayPal recommends `PayPal-Request-Id` on POST/PUT operations and explicitly supports retrying timeout/500 cases with the same request ID, including refund scenarios.
-
-Current KeyFlow PayPal refund request does not send `PayPal-Request-Id`.
-
-Target property:
+Target:
 
 ```text
-stable KeyFlow EffectId / RecoveryEffectId
+EffectId / RecoveryEffectId
 → provider-native idempotency token where supported
-→ SAME token across safe retry
-→ provider operation/refund ID captured when known
-→ callback/status lookup reconciles final external state
+→ SAME token on safe retry
+→ provider operation ID captured
+→ webhook/status lookup reconciles outcome
 ```
 
-This strengthens F149 / KF-REC-037; no duplicate external-uncertainty finding is required.
-
-Provider token retention is not KeyFlow durable truth; KeyFlow retains its own stable effect identity independently.
+Provider retention windows do not replace KeyFlow durable effect identity.
 
 ---
 
-## G. Consequence-aware idempotency
+## H. Operator / dead-letter map
 
-J18 now requires a distinction not previously explicit enough:
+Durable artifact:
 
-```text
-EFFECT DEDUPE
-!=
-CONSEQUENCE COMPLETENESS
-```
+`docs/intelligence/investigations/J18-OPERATOR-RECOVERY-AND-DEAD-LETTER-MAP.md`
 
-Example:
-
-A provider refund ID R should prevent another refund effect R2 from being created accidentally.
-
-But R must not block repair of missing consequences:
+Current verdict:
 
 ```text
-refund occurrence R exists
-→ ensure Payment evidence
-→ ensure ledger reversal
-→ ensure invoice/balance reconciliation
-→ ensure OutcomeEvidence links them
+ONE RECOVERY SEMANTIC CONTRACT       YES
+ONE CROSS-DOMAIN OPERATOR PROJECTION YES, via KF-REC-047
+ONE UNIVERSAL DEAD-LETTER TABLE      NOT JUSTIFIED YET
+ONE UNIVERSAL RECOVERY WORKER        NOT JUSTIFIED YET
 ```
 
-Therefore recovery/idempotency asks two separate questions:
+Current failure sinks differ:
 
-1. Has the external/business effect already occurred?
-2. Have all required local consequences of that same effect converged?
+- BullMQ failed jobs: transport-native failed set, native retry machinery;
+- OutboundDelivery Failed: strongest domain/operator retry seam;
+- ScheduledAgentJob FAILED: terminal row with no observed generic recovery owner;
+- WebhookEvent: occurrence identity but no failed-processing lifecycle;
+- Saga/AiExecutionLog: durable evidence sinks, not sufficient recovery queues;
+- Payment FAILED->PENDING: status mutation without observed provider recovery owner.
 
-This law also applies to ingress events, provider callbacks and workflow descendants.
-
----
-
-## H. Identity layers
-
-Recovery must preserve:
-
-```text
-WorkOccurrenceId
-AttemptId
-WorkerClaimId
-ExecutionClaimId / EffectId
-ProviderOperationId
-ProviderIdempotencyToken
-OutcomeEvidenceId
-RecoveryEffectId
-RecoveryAttemptId
-RecoveryOutcomeEvidenceId
-```
-
-A retry is not a new business effect.
-
-A reversal/compensation is a distinct effect and needs separate authority/evidence.
+Seeing a failure is not the same as owning safe recovery.
 
 ---
 
 ## I. Recovery authority
 
-Candidate law for J15/J6 reinjection:
+Working law for J15/J6 reinjection:
 
 ```text
 original Clearance
 → exact original EffectId
 
 retry same still-valid EffectId
-→ may inherit bounded retry authority ONLY if policy explicitly permits
+→ may continue bounded retry authority ONLY if policy explicitly permits
 
 REVERSAL / COMPENSATION / materially changed retry
 → new ActionEnvelope
@@ -381,112 +303,100 @@ REVERSAL / COMPENSATION / materially changed retry
 → fresh Clearance where material
 ```
 
-Time/failure does not create recovery authority.
+Failure/time does not create authority.
 
 ---
 
-## J. Operator recovery
+## J. Canonical recovery recommendation
 
-Observed positive seam:
+`KF-REC-048 — Establish a certainty-aware Recovery Contract across existing execution fabrics.`
 
-- OutboundDelivery event history;
-- authenticated manual retry;
-- retry-all-failed.
-
-But target operator surfaces must be certainty-aware:
+This recommendation closes the semantic gap between:
 
 ```text
-what WorkOccurrence / EffectId?
-what failed?
-what is strongest known external outcome?
-is retry safe?
-is reconciliation available?
-has work expired/cancelled/superseded?
-is reversal available?
-is compensation only mitigation?
-what authority is required?
-what evidence proves recovery outcome?
+KF-REC-038 Durable WorkOccurrence
+→ KF-REC-040 logical != attempt state
+→ KF-REC-048 recovery/retry/reversal/compensation
+→ KF-REC-037 provider reconciliation
+→ KF-REC-047 operator/Temporal Work Projection
 ```
 
-Temporal Work Projection (KF-REC-047) remains the natural cross-domain read model; domain records remain sources of truth.
-
-No universal dead-letter table is accepted yet.
+It explicitly rejects premature universal DLQ/recovery-engine convergence.
 
 ---
 
 ## K. J18 invariants
 
-1. attempt failure does not imply logical-work failure;
-2. retry preserves WorkOccurrenceId + EffectId and increments AttemptId;
-3. failed idempotency evidence must not defeat a live retry policy;
-4. successful effect evidence must prevent duplicate external effect;
-5. ambiguous external outcome is reconciled before unsafe retry;
-6. cancellation/supersession/expiry/version/source-state are checked before recovery executes;
-7. material recovery revalidates authority/autonomy/Clearance;
-8. durable recovery survives process restart where business semantics require it;
-9. horizontal replicas do not multiply effects/retries;
-10. error containment is not durable recovery;
-11. undo is not reversal/compensation;
-12. compensation/reversal has its own EffectId and OutcomeEvidence;
-13. control wait is not failure;
-14. compensation-handler return is not proof of inverse effect;
-15. irreversible effects cannot be represented as undone by local annotation;
-16. original outcome and recovery outcome remain independently durable;
-17. parent workflow state derives from durable current child state;
-18. provider-native idempotency should bind to stable KeyFlow effect identity where available;
-19. effect dedupe must not suppress completion of missing local consequences;
-20. confirmed financial reversal converges payment + ledger + invoice truth.
+1. Attempt failure does not imply logical-work failure.
+2. Retry preserves WorkOccurrenceId + EffectId and increments AttemptId.
+3. Failed idempotency evidence must not defeat a live retry policy.
+4. Successful effect evidence prevents duplicate effect.
+5. Ambiguous external outcome is reconciled before retry.
+6. Recovery checks cancellation/supersession/expiry/lateness/version/source state.
+7. Material recovery revalidates authority/Clearance.
+8. Recovery required by product semantics survives process restart/replicas.
+9. Error containment is not durable recovery.
+10. Undo is not reversal/compensation.
+11. Reversal/compensation has its own RecoveryEffectId and OutcomeEvidence.
+12. Control wait is not failure.
+13. Compensation handler return is not proof of inverse effect.
+14. Irreversible effect may be mitigation-only.
+15. Original and recovery outcomes remain independently durable.
+16. Parent state derives from durable current child state.
+17. Provider-native idempotency binds to stable KeyFlow effect identity where available.
+18. Effect dedupe does not suppress missing consequence repair.
+19. Financial reversal converges Payment + ledger + invoice truth.
+20. Operator retry requires actual recovery ownership and certainty.
+21. Parent re-execution preserves confirmed-success child terminality.
+22. No universal DLQ/runtime is justified until semantic convergence proves physical value.
 
 ---
 
-## L. Findings / contradictions
+## L. Canonical ranges from this pass
 
-New J18 findings:
+New findings:
 
-- F150 — failed ActionDispatcher idempotency record defeats later BullMQ retry.
-- F151 — UndoService eligibility is process-local/non-replicated.
-- F152 — Saga compensation can falsely report `compensated`.
-- F153 — KeyCortex approval wait can terminalize parent plan/saga as failure.
-- F154 — planner overwrites saga compensation outcome with generic `failed`.
-- F155 — provider-backed manual refund can succeed externally while bypassing ledger reversal/invoice reconciliation and then suppress webhook repair.
+```text
+F150 F151 F152 F153 F154 F155 F156 F157
+```
 
 New contradictions:
 
-- C100 — queue retry vs failed idempotency terminality.
-- C101 — recovery promise vs recovery-state durability.
-- C102 — `compensated` claim vs confirmed inverse effect.
-- C103 — child control wait vs parent workflow failure.
-- C104 — recovery outcome vs generic failure overwrite.
-- C105 — confirmed provider refund vs split Payment/ledger/invoice truth.
+```text
+C100 C101 C102 C103 C104 C105 C106 C107
+```
 
-Canonical supplements:
+New recommendation:
 
-- `docs/intelligence/08K-FINDING-REGISTER-RECOVERY-SUPPLEMENT.md`
-- `docs/intelligence/09K-CONTRADICTION-REGISTER-RECOVERY-SUPPLEMENT.md`
+```text
+KF-REC-048
+```
 
-Reused, do not duplicate:
+Canonical artifacts:
 
-- F050/F051 execution/idempotency ownership;
-- F097 proactive scheduled occurrence claim;
-- F122/F123 ScheduledAgentJob ownership/routing;
-- F127 failed ingress recovery suppression;
-- F136 non-durable Chatwoot acceptance;
-- F137–F149 J23 temporal/cancellation/lateness/version/external-outcome findings.
+- `08K-FINDING-REGISTER-RECOVERY-SUPPLEMENT.md`
+- `09K-CONTRADICTION-REGISTER-RECOVERY-SUPPLEMENT.md`
+- `10G-RECOMMENDATION-REGISTER-RECOVERY-CONTINUATION.md`
+- `investigations/J18-RECOVERY-CERTAINTY-REVERSAL-AND-IDEMPOTENCY-MATRIX.md`
+- `investigations/J18-OPERATOR-RECOVERY-AND-DEAD-LETTER-MAP.md`
 
 ---
 
 ## M. Proof requirements
 
-- BullMQ live retry reaches a genuinely new ActionDispatcher attempt without a failed tombstone blocking it;
-- successful effect evidence still prevents duplicate effect;
-- ambiguous provider outcome cannot be manually/blindly retried;
-- Stripe/PayPal refund retry reuses one provider-native idempotency identity;
-- provider-confirmed refund converges Payment, ledger and invoice even if one local consequence initially fails;
-- replayed refund webhook repairs missing local consequences without duplicating provider reversal;
-- waiting approval remains resumable parent/child workflow state;
-- compensation result remains durable after plan finalization;
-- compensation cannot be confirmed from a no-op/mitigation-only handler;
-- reversal/compensation uses fresh governance where it creates a new material effect.
+- live BullMQ retry can reach a new ActionDispatcher attempt without failed-tombstone short circuit;
+- successful effect evidence still blocks duplicate effect;
+- ambiguous provider outcome cannot be blindly/operator retried;
+- Stripe/PayPal retry uses one provider-native idempotency identity;
+- provider-confirmed refund converges Payment/ledger/invoice after partial local failure;
+- provider redelivery repairs missing local consequences without duplicating external effect;
+- AWAITING_CONTROL remains resumable parent/child state;
+- compensation result survives parent finalization;
+- no-op/mitigation-only compensation cannot become confirmed inverse effect;
+- `retryPayment`-class command cannot claim retry unless executable recovery work exists;
+- plan resume cannot replay completed steps;
+- recovery actions record current authority and fresh Clearance where required;
+- KF-REC-047 can project actionable failed/unknown work without becoming source of truth.
 
 No runtime tests were executed in this forensic pass.
 
@@ -497,27 +407,28 @@ No runtime tests were executed in this forensic pass.
 Completed:
 
 ```text
-[done] ActionDispatcher + BullMQ retry/idempotency algebra
-[done] OutboundDelivery adapter failure / operator retry seam
-[done] ScheduledAgentJob FAILED/routing trace
-[done] CustomerNotificationLog crash-recovery revalidation
-[done] Saga reachability + compensation first pass
-[done] provider/domain reversal taxonomy first pass
-[done] Stripe/PayPal/BullMQ reference comparison for retry/idempotency
+[done] ActionDispatcher/BullMQ retry algebra
+[done] OutboundDelivery retry/operator seam
+[done] ScheduledAgentJob failure/routing trace
+[done] TransactionalEmail crash-recovery trace
+[done] Saga/compensation first pass
+[done] reversal/refund/cancel taxonomy first pass
+[done] provider idempotency standards comparison
 [done] financial refund convergence trace
+[done] operator recovery surface trace
+[done] dead-letter-by-fabric classification
+[done] initial recovery target pooling → KF-REC-048
 ```
 
 Next:
 
 ```text
-1. trace operator diagnostics/repair surfaces across AI plans, ScheduledAgentJob, ingress and sagas
-2. classify dead-letter semantics by work family
-3. trace representative post-provider/pre-local-persistence crash windows beyond refunds
-4. complete provider reversal/cancel matrix for remaining material integrations
-5. define exact recovery authority / fresh Clearance policy
-6. pool J18 findings into K11/K9/K8 target laws/recommendations
-7. backward re-audit J15/J6 for recovery-created effects
-8. reinject J18 into J23 and finish remaining L6 migration/proof blockers
+1. trace provider-effect-succeeded / local-persistence-failed crash windows beyond refunds
+2. complete remaining material provider reversal/cancel matrix
+3. harden the recovery authority model by back-auditing J15/J6
+4. reinject KF-REC-048 into K11/K9/K8/K10
+5. feed J18 recovery laws back into J23 L6 field/status/migration/proof mapping
+6. decide whether J18 is mature enough to enter L5 value-engineering / target convergence
 ```
 
 ---
@@ -526,13 +437,13 @@ Next:
 
 ```yaml
 id: KF-JOURNEY-018
-status: ACTIVE_FORENSICS_MICROSCOPIC_PASS_ADVANCED
+status: ACTIVE_FORENSICS_ENTERING_TARGET_POOLING
 implementation_baseline: d7c5b86cfa276d75ffa42d5f1707c43704dc9f21
 current_audit_head: 5ec358e9b792817eda1e37fd80a0574eb7905a8a
-primary_kernels: [KF-KERNEL-011, KF-KERNEL-007]
-affected_kernels: [KF-KERNEL-003, KF-KERNEL-006, KF-KERNEL-008, KF-KERNEL-009, KF-KERNEL-010]
-new_findings: [F150,F151,F152,F153,F154,F155]
-new_contradictions: [C100,C101,C102,C103,C104,C105]
+new_findings: [F150,F151,F152,F153,F154,F155,F156,F157]
+new_contradictions: [C100,C101,C102,C103,C104,C105,C106,C107]
+new_recommendations: [KF-REC-048]
 recovery_matrix: docs/intelligence/investigations/J18-RECOVERY-CERTAINTY-REVERSAL-AND-IDEMPOTENCY-MATRIX.md
+operator_map: docs/intelligence/investigations/J18-OPERATOR-RECOVERY-AND-DEAD-LETTER-MAP.md
 implementation_authorized: false
 ```
