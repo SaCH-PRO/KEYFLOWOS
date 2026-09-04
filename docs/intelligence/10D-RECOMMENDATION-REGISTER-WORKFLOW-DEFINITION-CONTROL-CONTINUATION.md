@@ -1,14 +1,14 @@
 # KeyFlowOS Recommendation Register — Workflow Definition Control Continuation
 
-Status: CANONICAL CONTINUATION OF `10C-RECOMMENDATION-REGISTER-CANCELLATION-SUPERSESSION-CONTINUATION.md`
+Status: CANONICAL CONTINUATION AFTER `10D-RECOMMENDATION-REGISTER-MISSED-SCHEDULE-CONTINUATION.md`
 
 Implementation baseline: `main@5ec358e9b792817eda1e37fd80a0574eb7905a8a`
 
-Canonical recommendation sequence continues after KF-REC-044.
+Identifier correction: KF-REC-045 was already canonically allocated to per-work missed-schedule/lateness policy. This continuation therefore begins at KF-REC-046.
 
 ---
 
-## KF-REC-045 — Make WorkDefinition / workflow policy a load-bearing control-plane contract
+## KF-REC-046 — Make WorkDefinition / workflow policy a load-bearing control-plane contract
 
 **Status:** PROVISIONAL / HIGH-CONFIDENCE TARGET
 
@@ -44,7 +44,7 @@ Affected journeys: J6, J9, J10, J15, J18, J23.
 
 ---
 
-## KF-REC-046 — Version workflow definitions and define pending-occurrence behavior explicitly
+## KF-REC-047 — Version workflow definitions and define pending-occurrence behavior explicitly
 
 **Status:** PROVISIONAL / TARGET-STATE REFINEMENT
 
