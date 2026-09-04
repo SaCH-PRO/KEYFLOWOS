@@ -2,11 +2,13 @@
 
 Status: CANONICAL CONTINUATION OF `09H-CONTRADICTION-REGISTER-WORKFLOW-CONTROL-PLANE-SUPPLEMENT.md`
 
-Canonical sequence continues after C097.
+Canonical sequence continues after C098.
+
+Identifier correction: C098 is now canonically used by the workflow configuration/runtime contradiction after resolving the concurrent C096 allocation. This provenance contradiction is therefore C099.
 
 ---
 
-## C098 — mutable workflow definition vs unversioned long-lived occurrence provenance
+## C099 — mutable workflow definition vs unversioned long-lived occurrence provenance
 
 **Status:** VERIFIED ACTIVE CONTRADICTION
 
