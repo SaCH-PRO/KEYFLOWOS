@@ -1,6 +1,6 @@
 # KeyFlowOS Current State
 
-Last updated: 2026-09-03
+Last updated: 2026-09-03 local / 2026-09-04 UTC
 
 ## Analytical phase
 
@@ -8,29 +8,36 @@ Last updated: 2026-09-03
 
 ## Status
 
-`J23 ACTIVE FORENSICS — K7/K11 DURABLE-WORK SEMANTICS CONVERGING`
+`J23 ACTIVE FORENSICS — CANCELLATION CONVERGED PROVISIONALLY / MISSED-SCHEDULE POLICY ACTIVE`
 
 Production implementation remains blocked.
 
-Context integrity: `PASS`, with continuity files refreshed from previously stale J15-era state.
+Context integrity: `PASS`.
 
 ## Implementation evidence baseline
 
-Current revalidated `main` baseline:
+Current `main`:
+
+`5ec358e9b792817eda1e37fd80a0574eb7905a8a`
+
+This is an audit-only commit directly on top of code-bearing baseline:
 
 `d7c5b86cfa276d75ffa42d5f1707c43704dc9f21`
 
-Main still points at the same implementation/audit baseline. Revalidate before implementation-sensitive claims if it advances.
+The inspected implementation paths remain semantically unchanged. Revalidate again if `main` gains code-bearing changes.
 
 ## Canonical operating model
 
 ```text
 25 JOURNEYS
 + 12 KERNELS
++ JOURNEY CONSTELLATIONS
++ KERNEL CONSTELLATIONS
 + GLOBAL INVARIANTS
-+ FINDINGS / CONTRADICTIONS / RECOMMENDATIONS
-+ STANDARDS / REFERENCE RESEARCH
++ FINDINGS / CONTRADICTIONS / OPEN QUESTIONS
++ STANDARDS / OPEN-SOURCE / WORKING-MODEL RESEARCH
 + TARGET-STATE / MIGRATION / PROOF
++ DEPENDENCY / IMPACT GRAPH
 = COMPUTABLE KEYFLOWOS DIGITAL TWIN
 ```
 
@@ -54,18 +61,17 @@ External reality
 → specialized control workflow/channel
 → typed ControlEvidence
 → exact-action Clearance
-→ logical WorkOccurrence / temporal eligibility where needed
+→ durable WorkOccurrence / temporal eligibility where needed
+→ worker/coordination claim
 → atomic ExecutionClaim
 → ActionDispatcher
-→ domain/provider execution
+→ domain/provider effect
 → durable OutcomeEvidence / reconciliation
 → Business Graph
 → Genome evolution
 ```
 
 ## Active constellation
-
-Current high-leverage mesh:
 
 ```text
 J1 Business Birth
@@ -87,75 +93,97 @@ J18 Failure / Recovery
 
 J23 is currently the active convergence pressure test. It is not permission to create a universal workflow engine.
 
-## Active kernels
-
-Highest current activity:
-
-- K1 Tenant Genesis & Identity
-- K2 Human Authority & Organization
-- K3 KEY Authority & Governance
-- K5 Capability Fabric
-- K6 State Transition
-- K7 Temporal / Event / Workflow
-- K8 Evidence & Outcome
-- K9 Integration & External Reality
-- K10 Financial Truth where provider/money consequences apply
-- K11 Recovery & Reliability
-
-K7/K11 boundary now:
+## Active kernel cluster
 
 ```text
-K7 = what logical work exists, why/when it waits or becomes eligible, and when it is terminal
-K11 = who owns an attempt/effect, retry/crash/reconciliation semantics, and atomic execution ownership
+K3 KEY Authority / Governance
+      ↓
+K5 Capability Fabric
+      ↓
+K6 State Transition
+      ↓
+K7 Temporal / Event / Workflow
+      ↓
+K11 Recovery / Reliability
+      ↓
+K8 Evidence / Outcome
+      ↓
+K9 Integration / External Reality
 ```
 
-## Journey maturity / state
+K7/K11 boundary:
+
+```text
+K7
+= what logical work exists
+= why/when it waits
+= when it is eligible
+= what cancels/supersedes/expires it
+= when it is terminal
+
+K11
+= who owns the current attempt/effect
+= cancellation-vs-claim linearization
+= retry/crash/stall/reconciliation semantics
+= stable effect identity / atomic execution ownership
+```
+
+## Journey state
 
 - J15: `L4 SEMANTICALLY RECONCILED / ENTERING L5 VALUE-ENGINEERED`; not target-converged.
-- J6: active autonomy/governance stress-test with distributed-execution and evidence findings pooled.
-- J14: microscopic external-ingress pass completed far enough to produce durable target recommendations; still re-openable through J23/K9/K11.
-- J23: `ACTIVE FORENSICS / CROSS-KERNEL TARGET REFINEMENT`; not implementation-ready.
+- J6: active autonomy/governance stress-test; stop/kill semantics strengthened by J23 descendant invalidation.
+- J14: external-ingress target refined; causal consequence lineage now explicitly connected to J23 invalidation.
+- J23: `ACTIVE FORENSICS / CROSS-KERNEL TARGET REFINEMENT`; cancellation and missed-schedule semantics now materially converged but workflow versioning/external uncertainty/persistence decisions remain.
 
-## Current finding / contradiction / recommendation range
+## Canonical finding / contradiction / recommendation range
 
-Canonical finding sequence now extends through `F140`.
+Canonical findings now extend through `F145`.
 
-Storage:
+Latest supplements:
 
-- `08-FINDING-REGISTER.md`
-- `08A-FINDING-REGISTER-CURRENT-SUPPLEMENT.md`
-- `08B-FINDING-REGISTER-EVENT-AGENCY-SUPPLEMENT.md`
-- `08C-FINDING-REGISTER-CONSEQUENCE-OWNERSHIP-SUPPLEMENT.md`
-- `08D-FINDING-REGISTER-BOOKING-TEMPORAL-SUPPLEMENT.md`
-- `08E-FINDING-REGISTER-EXTERNAL-INGRESS-SUPPLEMENT.md`
-- `08F-FINDING-REGISTER-TEMPORAL-WORK-SUPPLEMENT.md`
+- `08F-FINDING-REGISTER-TEMPORAL-WORK-SUPPLEMENT.md` — F137–F140
+- `08G-FINDING-REGISTER-CANCELLATION-SUPERSESSION-SUPPLEMENT.md` — F141–F144 + F123 strengthening
+- `08H-FINDING-REGISTER-MISSED-SCHEDULE-SUPPLEMENT.md` — F145
 
-Canonical contradiction sequence now extends through `C091`, including `09F-CONTRADICTION-REGISTER-TEMPORAL-WORK-SUPPLEMENT.md`.
+Canonical contradictions now extend through `C096`.
 
-Canonical provisional recommendation sequence now extends through `KF-REC-041`, including:
+Latest supplements:
 
-- KF-REC-035 Durable IngressOccurrence with resumable processing ownership
-- KF-REC-036 compatibility ingress URLs delegate to one canonical processor
-- KF-REC-037 provider lifecycle reconciliation as first-class external-truth loop
-- KF-REC-038 durable WorkOccurrence semantic contract
-- KF-REC-039 first-class durable waits
-- KF-REC-040 separate logical workflow state from queue/attempt state
-- KF-REC-041 do not adopt a universal workflow runtime until existing seams are proven insufficient
+- `09F-CONTRADICTION-REGISTER-TEMPORAL-WORK-SUPPLEMENT.md` — C088–C091
+- `09G-CONTRADICTION-REGISTER-CANCELLATION-SUPERSESSION-SUPPLEMENT.md` — C092–C095
+- `09H-CONTRADICTION-REGISTER-MISSED-SCHEDULE-SUPPLEMENT.md` — C096
 
-These are architecture recommendations, not execution authorization.
+Canonical recommendations now extend through `KF-REC-045`.
+
+Latest continuations:
+
+```text
+KF-REC-038 Durable WorkOccurrence semantic contract
+KF-REC-039 first-class durable waits
+KF-REC-040 logical workflow state != worker/transport attempt state
+KF-REC-041 no universal new workflow runtime yet
+KF-REC-042 first-class cancellation/supersession + descendant invalidation
+KF-REC-043 execution-time current eligibility revalidation
+KF-REC-044 lineage-preserving durable queue-to-queue handoff
+KF-REC-045 per-work missed-schedule/lateness policy
+```
+
+All remain recommendations, not execution authorization.
 
 ## J23 current target
 
 ```text
 Work Definition
 → stable logical WorkOccurrence
-→ SCHEDULED / waiting condition
+→ scheduled/waiting state
+→ missed-schedule policy if late
+→ cancellation/supersession/expiry check
 → ELIGIBLE
 → worker/coordination claim
-→ attempt
-→ exact ActionEnvelope + current governance
+→ current business/authority/policy eligibility
+→ exact ActionEnvelope
 → Clearance
-→ K11 ExecutionClaim
+→ ExecutionClaim
 → domain/provider effect
 → OutcomeEvidence / reconciliation
 → terminal state or next durable wait/retry
@@ -171,101 +199,145 @@ Queued != Running
 Attempt Failed != Logical Step Failed
 Worker Claim != ExecutionClaim
 Approval != Clearance
+Handoff Complete != Effect Complete
+Cancel Requested != Cancellation Proven
 Workflow Completion != Business Outcome
+Overdue != Still Valid
+Retry != New Effect Identity
 ```
 
-## J23 canonical findings
+## Latest canonical J23 findings
 
-- F137: FlowRunner completes long delay nodes immediately rather than durably suspending.
-- F138: DelegationLoop approval-required occurrence is finalized instead of suspended.
-- F139: BullMQ retryable attempt is persisted as terminal AiPlanStep failure.
-- F140: AI plan persistence compresses transport/workflow state and can make dependency/finalization decisions from transient queue state.
+- F137 FlowRunner long delays are completed instead of durably suspended.
+- F138 DelegationLoop approval-required occurrence is finalized instead of suspended.
+- F139 BullMQ retryable attempt is persisted as terminal AiPlanStep failure.
+- F140 AI plan persistence compresses transport/workflow state.
+- F141 post-purchase future work can survive order cancellation/refund and later execute from stale payload.
+- F142 EmailCampaign cancellation can lose a race to sender claim yet report cancellation success.
+- F143 ScheduledAgentJob can be completed while descendant customer email remains queued.
+- F144 TransactionalEmail queue drain lacks atomic ownership and loses original dedupe identity during drain replay.
+- F145 representative scheduled work lacks explicit business lateness/misfire semantics; scheduler mechanics can imply catch-up beyond useful validity.
 
 Relevant earlier findings remain F097, F112, F122, F123, F127/F136 and J15 invalidation/clearance findings; do not duplicate them under new numbers.
 
-## Positive temporal seams to preserve
+## Positive seams to preserve
 
-- BullMQ delayed job, worker lock, retry and stalled recovery mechanics;
-- WhatsApp scheduled-message CAS claim `SCHEDULED -> SENDING`;
-- EmailCampaign CAS claim `DRAFT|SCHEDULED -> SENDING`;
+- BullMQ delayed work, worker locking, retries and stalled recovery;
+- WhatsApp scheduled-message CAS claim `SCHEDULED → SENDING`;
+- EmailCampaign sender CAS `DRAFT|SCHEDULED → SENDING`;
+- quote-conversion cancellation of pending quote-followup ScheduledAgentJobs;
+- quote-followup current-state revalidation before effect;
 - ScheduledAgentJob checkpoint uniqueness;
-- FlowRun idempotency key;
-- Saga step/evidence/compensation concepts where reachable;
-- quote-conversion handler that explicitly marks pending quote-followup ScheduledAgentJobs `CANCELLED`.
+- TransactionalEmailService tenant-scoped `Contact.doNotContact` recheck;
+- FlowRun idempotency-key seam;
+- Saga evidence/compensation ideas where reachable.
 
-## Active cancellation / supersession trace
+These are reference seams to strengthen, not justification for a parallel `v2` stack.
 
-Current status: `OPEN / SEARCH-SCOPED / NOT YET F141`.
+## Cancellation / supersession — current verdict
 
-Current evidence:
+`PROVISIONALLY CONVERGED AT SEMANTIC LEVEL / NOT IMPLEMENTATION-READY`
 
-- no general AiPlan cancellation endpoint was observed; exposed plan routes are get/list/approve plus step undo;
-- PlannerService has generic status mutation but no dedicated cancel/supersede semantics;
-- no plan-linked BullMQ job removal path observed;
-- no general FlowRun cancellation primitive found in scoped search;
-- quote conversion provides a positive domain-specific cancellation pattern for pending ScheduledAgentJobs;
-- EmailCampaign supports cancellation while still `SCHEDULED`;
-- WhatsApp scheduled-message service has a durable SCHEDULED/SENDING claim path, but no cancellation method was observed in the inspected service;
-- approval rejection before queue admission correctly marks the waiting plan step failed and resumes plan evaluation, rather than needing queue cancellation;
-- ActionDispatcher has retry/idempotency/undo support but no observed active cancellation/abort contract.
+Target law:
 
-Before promoting a new finding, complete source-state revalidation, queue-withdrawal, active-claim, and OUTCOME_UNKNOWN cases.
+```text
+SOURCE/POLICY/AUTHORITY CHANGE
+→ CancellationIntent / Supersession
+→ compete atomically with work/effect ownership
+→ invalidate every not-yet-effective causal descendant whose execution right depended on invalidated state
+→ revalidate current eligibility immediately before material effect
+→ if point-of-no-return already crossed:
+     do not falsely claim prevention
+     reconcile / compensate / mark too-late or outcome-unknown
+→ preserve history
+```
+
+Recursive reinjection is durable in:
+
+`investigations/J23-CANCELLATION-BACKWARD-REINJECTION-J6-J14-J15-K8-K9.md`
+
+No new duplicate root findings were created by that backward pass.
+
+## Missed-schedule / lateness — current verdict
+
+`ACTIVE TARGET-POLICY REFINEMENT`
+
+Representative scheduler behavior differs by implementation. Canonical F145 focuses on the larger law:
+
+> Original scheduled time is not perpetual permission to execute. Lateness/misfire policy and current business eligibility belong to durable work semantics.
+
+Target policy classes can include:
+
+```text
+CATCH_UP
+CATCH_UP_UNTIL(deadline)
+COALESCE
+LATEST_WINS
+SKIP
+EXPIRE
+MANUAL_REVIEW
+```
+
+Per-work policy, not a mandatory universal enum.
+
+Reference properties incorporated from Quartz, Kubernetes CronJob and BullMQ-style scheduler behavior: missed-run behavior should be explicit and exact-time scheduling does not itself guarantee later business validity.
 
 ## Outstanding work — ordered
 
 ### P0 — finish J23 semantic convergence
 
-1. complete cancellation/supersession trace across AiPlan, FlowRun, ScheduledAgentJob, DelegationLoop, campaigns/messages and active dispatcher attempts;
-2. trace stale scheduled payloads against changed domain state/consent/authority at execution time;
-3. define missed-schedule policy classes: catch-up, coalesce, skip, expire, manual review;
-4. define workflow-definition/version change semantics for already-waiting work;
-5. trace `AWAITING_EXTERNAL` / provider uncertainty / reconciliation into J18 and K9/K11;
-6. define minimal operator-visible temporal state and evidence contract;
-7. decide whether existing per-domain models can implement WorkOccurrence semantics without a new shared table;
-8. establish explicit criteria for when a Temporal/Camunda-class engine would actually be justified.
+1. workflow-definition/version mutation while occurrences are waiting;
+2. `AWAITING_EXTERNAL` / provider uncertainty / point-of-no-return reconciliation into J18/K9/K11;
+3. operator-visible temporal truth: scheduled / waiting / retrying / cancelled / too-late / outcome-unknown / expired / coalesced;
+4. classify major existing scheduled-work families against KF-REC-045 misfire policy;
+5. determine whether existing domain models can satisfy WorkOccurrence semantics without a common new table;
+6. define explicit decision threshold for adopting Temporal/Camunda-class durable workflow technology later;
+7. finalize J23 target/migration/proof map and maturity verdict.
 
-### P1 — re-inject J23 into prior journeys/kernels
+### P1 — recursive backward re-audit
 
-9. backward re-audit J15 clearance expiry/revocation while work waits;
-10. backward re-audit J6 stop/kill/pause semantics against queued/waiting work;
-11. backward re-audit J14 durable ingress occurrences that create delayed/retryable consequences;
-12. strengthen K7/K11/K8/K9 dossiers with final temporal laws and outcome-unknown semantics.
+8. J15: clearance/version expiry across long waits and definition changes;
+9. J6: stop/kill/pause across queued descendants and late catch-up;
+10. J14: ingress correction/reversal events invalidating delayed consequences;
+11. J18: crashes around cancellation/effect point-of-no-return and OUTCOME_UNKNOWN;
+12. strengthen K7/K8/K9/K11 dossiers with final laws.
 
-### P2 — digital-twin continuity / compilation
+### P2 — digital-twin compilation
 
-13. keep CURRENT-HANDOFF, CURRENT-STATE.yaml and 00-START-HERE aligned with the active mesh and supplements;
-14. compile active findings/contradictions/recommendations into machine-readable graph records with stable IDs and dependency edges;
-15. instantiate still-needed kernels only when shared evidence justifies them, especially K9/K10/K12 if not already fully instantiated;
-16. continue whole-system journey activation rather than declaring the architecture complete after the current constellation.
+13. refresh `CURRENT-HANDOFF.md`, `CURRENT-STATE.yaml`, `00-START-HERE.md` as frontier advances;
+14. compile new invalidation/supersession/misfire graph edges into machine-readable export records;
+15. make journey and kernel constellations explicit first-class export entities if still incomplete;
+16. instantiate K9/K10/K12 only when shared evidence justifies full dossiers;
+17. continue remaining journey/constellation audit rather than treating the active mesh as the whole OS.
 
 ### P3 — execution readiness later
 
-17. no KF-EXEC packet until the affected cluster reaches target convergence, migration mapping and proof design;
-18. then issue bounded Claude Code packet(s), followed by Kimi/Gemini adversarial review;
-19. re-ingest implementation evidence and repeat from the earliest invalidated architecture layer.
+18. no KF-EXEC packet until target persistence/migration/proof is understood;
+19. then issue bounded Claude Code packet(s);
+20. Kimi/Gemini adversarially review bypasses/races/stale authority/duplicate truth;
+21. re-ingest implementation evidence and restart from the earliest invalidated layer.
 
-## Not yet resolved system-wide
+## Still unresolved system-wide
 
-Even beyond J23, major architecture decisions remain provisional:
-
-- final persistence shape for ControlEvidence / Clearance / ExecutionClaim;
-- final effective-authority projection/resolution implementation;
-- capability/permission vocabulary migration;
-- approval regime migration relationship among KeyActionProposal, AiApprovalItem and ApprovalRequest;
-- ActionDispatcher migration from partial seam to universal post-clearance execution boundary;
-- explicit event/consequence ownership and canonical EventEnvelope adoption;
-- ingress occurrence lifecycle persistence;
-- financial/provider reconciliation breadth;
-- final Business Graph / Genome / readiness integration;
-- remaining 25-journey whole-system audit coverage;
-- K12 engineering-control-plane convergence and eventual execution compiler.
+- persistence shape for ControlEvidence / Clearance / ExecutionClaim;
+- Effective Authority Resolver implementation/migration;
+- capability/permission vocabulary convergence;
+- KeyActionProposal / AiApprovalItem / ApprovalRequest migration;
+- ActionDispatcher as universal post-clearance boundary;
+- canonical EventEnvelope / consequence ownership;
+- durable IngressOccurrence implementation;
+- provider/financial reconciliation breadth;
+- Business Graph / Genome / readiness feedback integrity;
+- full 25-journey / 12-kernel / constellation convergence;
+- K12 engineering-control-plane convergence;
+- machine-readable execution compiler and bounded KF-EXEC generation.
 
 ## Do not yet
 
 - modify production code;
-- freeze target persistence schemas prematurely;
-- create `WorkflowEngine2`, `Authority2`, `Approval2`, `Dispatcher2`, etc.;
-- install Temporal/Camunda because J23 found workflow defects;
-- treat queue state as workflow truth;
-- delete legacy consumers without reachability proof;
-- claim runtime/test proof that has not been executed.
+- freeze persistence schemas prematurely;
+- introduce WorkflowEngine2/Authority2/Approval2/Dispatcher2-style parallel truths;
+- install Temporal/Camunda merely because current workflow semantics are incomplete;
+- treat transport state as workflow truth;
+- treat scheduled time as perpetual authority/relevance;
+- claim runtime/tests passed unless actually executed.
