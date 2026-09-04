@@ -5,33 +5,15 @@ Last refreshed: 2026-09-04
 Canonical intelligence branch: `docs/keyflow-intelligence-foundation`
 Production implementation authorized: **NO**
 
-> This file is maintained proactively so a new ChatGPT/Claude/Kimi/Codex session can continue the exact frontier from repository state alone.
-
----
+> Repository continuity is the source of truth. A fresh session must be able to continue without this chat.
 
 ## Fresh-chat instruction
 
 ```text
-Continue KEYFLOWOS from the canonical repository intelligence. Do not restart or summarize from scratch.
+Continue KEYFLOWOS from canonical repository intelligence. Do not restart from scratch.
 
-Load:
-1. AGENTS.md
-2. docs/intelligence/AGENT-CONTINUITY.md
-3. docs/intelligence/00-START-HERE.md
-4. docs/intelligence/07-CURRENT-STATE.md
-5. docs/intelligence/handoff/CURRENT-HANDOFF.md
-6. docs/intelligence/handoff/CURRENT-STATE.yaml
-7. docs/intelligence/handoff/NEXT-CHAT-ROLLOVER.md
-8. docs/intelligence/handoff/NEXT-CHAT-ROLLOVER.yaml
-9. docs/intelligence/investigations/J23-J18-L6-UNIFIED-CONVERGENCE-MATRIX.md
-10. active J23/J18 target maps, K7/K8/K9/K10/K11, J15/J6 reinjection and current 08*/09*/10* continuations.
-
-Run the Context Integrity Check first.
-Production code is read-only.
-Continue the exact next action below.
+Load AGENTS.md, docs/intelligence/AGENT-CONTINUITY.md, 00-START-HERE.md, 07-CURRENT-STATE.md, CURRENT-HANDOFF.md, CURRENT-STATE.yaml, NEXT-CHAT-ROLLOVER.md, NEXT-CHAT-ROLLOVER.yaml, then the J23/J18 unified L6 artifacts named below. Run the Context Integrity Check first. Production code is read-only. Continue the exact next action from this packet.
 ```
-
----
 
 ## Context integrity
 
@@ -46,11 +28,7 @@ Context integrity:       PASS
 Implementation:          UNAUTHORIZED
 ```
 
-`5ec358e... → 168732d...` was explicitly compared; intervening changes were architecture/state artifacts rather than production code. Revalidate again if `main` gains code-bearing changes.
-
----
-
-## Current programme state
+## Current frontier
 
 ```text
 J23 = L5 VALUE-ENGINEERED / ENTERING L6 TARGET-CONVERGENCE
@@ -58,49 +36,64 @@ J18 = L5 VALUE-ENGINEERED / ENTERING L6 TARGET-CONVERGENCE
 J15 = L4 SEMANTICALLY RECONCILED / ENTERING L5
 J6  = ACTIVE STRESS TEST — recovery authority reinjected
 K10 = ACTIVE / INITIAL CONVERGENCE
-```
 
-Canonical frontier:
-
-```text
 Findings:        F160
 Contradictions:  C110
 Recommendations: KF-REC-048
 ```
 
-Prime thesis:
+## Completed unified L6 tranches
 
-> **KeyFlowOS is a governed business-state transition system.**
+1. `docs/intelligence/investigations/J23-J18-L6-UNIFIED-CONVERGENCE-MATRIX.md`
+2. `docs/intelligence/investigations/J23-J18-L6-EXACT-FIELD-STATUS-MAPPING.md`
+3. `docs/intelligence/investigations/J23-J18-L6-LIVE-ROW-MIGRATION-COMPATIBILITY.md`
+4. `docs/intelligence/investigations/J18-TARGET-CONVERGENCE-AND-MIGRATION-MAP.md`
+5. `docs/intelligence/kernels/KF-KERNEL-010-FINANCIAL-TRUTH.md`
 
----
-
-## Latest durable convergence
-
-### Unified J23/J18 L6 model
-
-`docs/intelligence/investigations/J23-J18-L6-UNIFIED-CONVERGENCE-MATRIX.md`
-
-Long-lived/effecting work now separates:
+The exact mapping/migration verdict is now:
 
 ```text
-work_state
-original_outcome
-consequence_state
-failure_certainty
-recovery_action
-recovery_state
-identity
-current authority / Clearance
+CURRENT STATUS COLUMNS CANNOT BE SAFELY NORMALIZED BY ENUM RENAME.
+HISTORICAL AMBIGUITY MUST MAP TO UNKNOWN WHEN EVIDENCE IS INSUFFICIENT.
 ```
 
-Unified laws include:
+Preferred migration direction:
 
 ```text
-Definition != Occurrence
-Occurrence != Attempt
-Attempt != Effect
-Waiting != Completed
-Attempt Failed != Logical Failed Final
+preserve source rows
+→ source-specific semantic adapters
+→ additive identity/evidence at write boundaries
+→ derivative Temporal Work Projection
+→ conservative historical classification
+→ reader migration
+→ writer convergence
+→ optional physical cleanup only after consumer proof
+```
+
+Unsafe approaches already rejected:
+
+```text
+mass status rename/replace
+blind universal WorkOccurrence/RecoveryOccurrence backfill
+universal DLQ/recovery worker/table before semantic/proof convergence
+```
+
+## Critical current mapping facts
+
+- AiPlan/AiPlanStep carry multiple status dialects (`executing/awaiting_approval` and `running/waiting_approval`).
+- `AiPlanStep.executing` is written after enqueue, before BullMQ worker execution, so it cannot auto-map to target RUNNING.
+- AiExecutionLog `success=false` cannot auto-map to final effect failure; a failed log cannot remain a retry tombstone.
+- OutboundDelivery `Sending`, `RetryPending`, and `Failed` require provider/attempt evidence before target classification.
+- ScheduledAgentJob `COMPLETED/FAILED` are not sufficient business-outcome truth.
+- WebhookEvent only proves occurrence seen/claimed; it does not prove processing applied successfully.
+- Payment `FAILED/PENDING/REFUNDED` are not sufficient provider/recovery/consequence truth.
+- FinancialTransaction `externalRef` and `reversalOfId` are strong existing K10 repair/reversal identities.
+- SocialPost `POSTED` is any-success aggregate across destinations; `deletedAt` is local deletion only.
+
+## Core target laws
+
+```text
+Attempt Failure != Logical Work Failure
 Provider Success + Local Failure != Provider Failure
 Effect Dedupe != Consequence Completeness
 Original Outcome != Recovery Outcome
@@ -110,184 +103,76 @@ Parent Resume != Replay Confirmed Child Success
 Failure / Time != New Authority
 ```
 
-Unified migration sequence:
-
-```text
-U-A characterize
-U-B identity + ownership
-U-C logical-state separation
-U-D temporal validity
-U-E external outcome
-U-F post-effect consequence convergence
-U-G recovery authority
-U-H operator projection
-U-I proof + live migration
-U-J physical convergence reassessment
-```
-
-No universal WorkOccurrence/RecoveryOccurrence table, workflow runtime, DLQ or recovery worker is justified yet.
-
----
-
-## Latest J18 evidence
-
-```text
-F158 PayPal capture can be confirmed externally, then local persistence failure is misreported as FAILED and repair lineage is lost.
-F159 OutboundDelivery can see provider success, then local persistence/evidence failure falls into adapter retry/failure and may repeat the external effect.
-F160 published SocialPost delete is local-only while provider artifact may remain live.
-```
-
-Positive counterpattern:
-
-Stripe invoice checkout binds `invoiceId/businessId` into provider-owned metadata and `client_reference_id` before provider PONR, allowing signed webhook reconstruction without a pre-existing Payment row.
-
----
-
-## K10 Financial Truth
-
-Canonical file:
-
-`docs/intelligence/kernels/KF-KERNEL-010-FINANCIAL-TRUTH.md`
-
-Core law:
-
-```text
-provider financial outcome
-+ Payment evidence
-+ ledger posting/reversal
-+ invoice/order reconciliation
-= FINANCIAL_TRUTH_CONVERGED
-```
-
-Known provider effect + missing local consequence:
-
-```text
-PROVIDER_SUCCESS_CONFIRMED
-→ CONSEQUENCE_INCOMPLETE
-→ idempotent repair/reconciliation
-→ never repeat provider effect solely because local consequence failed
-```
-
----
-
-## Recovery authority
-
-Canonical reinjection:
-
-`docs/intelligence/investigations/J18-BACKWARD-REINJECTION-RECOVERY-AUTHORITY-J15-J6.md`
-
-```text
-RETRY same EffectId
-→ may use explicitly bounded/current recovery scope in Clearance
-
-REVERSAL / COMPENSATION
-→ new ActionEnvelope
-→ new RecoveryEffectId
-→ current proportional control / fresh Clearance where material
-
-PAUSE / KILL / REVOKE
-→ dominates not-yet-effective retries/descendants
-```
-
-Failure itself creates no authority.
-
----
-
 ## Exact next action — DO THIS NEXT
 
-Create:
+Create/converge:
 
-`docs/intelligence/investigations/J23-J18-L6-EXACT-FIELD-STATUS-MAPPING.md`
+`docs/intelligence/investigations/J23-J18-L6-PROVIDER-CONTRACT-IDEMPOTENCY-RECONCILIATION-MATRIX.md`
 
-Map exact current → target fields/statuses for, in order:
-
-1. AiPlan / AiPlanStep + BullMQ;
-2. ActionDispatcher / AiExecutionLog;
-3. OutboundDelivery / DeliveryEvent;
-4. ScheduledAgentJob;
-5. WebhookEvent;
-6. Payment / Invoice / Ledger;
-7. SocialPost / provider artifacts.
-
-For each fabric record:
+Map current primary provider contracts against current KeyFlow seams for:
 
 ```text
-current schema fields
-current status values
-writers/transitions
-readers/consumers
-current identity keys
-current retry/cancel/version/provider fields
-target semantic dimensions
-auto-map vs evidence lookup vs UNKNOWN
-live-row compatibility risk
-legacy reader compatibility
-proof requirements
+client idempotency support + retention
+provider operation identity
+synchronous response semantics
+lifecycle webhook/status callback
+status/reconciliation lookup
+external point-of-no-return
+safe retry condition
+native reversal/cancel/delete capability
+current KeyFlow implementation seam/gap
+adopted target property
 ```
 
-Migration rule:
-
-> **Never invent certainty.** A historical overloaded `FAILED`, `COMPLETED`, `SENT`, `PUBLISHED`, `PENDING`, `REFUNDED`, or local `deletedAt` may require evidence lookup or UNKNOWN rather than automatic target terminality.
-
----
-
-## After exact field mapping
+Priority providers/effects:
 
 ```text
-exact live-row migration map
-→ provider idempotency/reconciliation/reversal capability matrix
-→ Temporal Work Projection recovery materialization strategy
-→ exact J15 Clearance recovery-scope + J6 recovery-policy representation
+Stripe payments/refunds/payment links
+PayPal orders/captures/refunds
+Twilio SMS/WhatsApp send/status
+Meta WhatsApp Cloud send/status
+Google Calendar create/delete
+Gmail/Google mail send
+Resend email
+WiPay payment/lifecycle/reversal
+material social publishing providers
+```
+
+Use current primary provider documentation. Adopt properties, not products. Do not claim a provider lacks a feature merely because an initial search failed; mark it unconfirmed until primary evidence is found.
+
+## After provider matrix
+
+```text
+exact J15 Clearance recovery-scope + J6 recovery-policy representation
+→ Temporal Work Projection recovery materialization/query strategy
 → characterization/concurrency/crash proof inventory
 → backward re-audit active constellation
-→ only then evaluate bounded KF-EXEC packet readiness
+→ bounded KF-EXEC readiness assessment only if target + migration + proof converge
 ```
 
----
+## Chat-length policy
 
-## Mandatory current artifacts
-
-- `docs/intelligence/investigations/J23-J18-L6-UNIFIED-CONVERGENCE-MATRIX.md`
-- `docs/intelligence/investigations/J18-TARGET-CONVERGENCE-AND-MIGRATION-MAP.md`
-- `docs/intelligence/investigations/J18-KERNEL-REINJECTION-K11-K9-K8-K10.md`
-- `docs/intelligence/investigations/J18-BACKWARD-REINJECTION-RECOVERY-AUTHORITY-J15-J6.md`
-- `docs/intelligence/investigations/J18-REVERSAL-CANCELLATION-CAPABILITY-MATRIX.md`
-- `docs/intelligence/kernels/KF-KERNEL-010-FINANCIAL-TRUTH.md`
-- `docs/intelligence/08K-FINDING-REGISTER-RECOVERY-SUPPLEMENT.md`
-- `docs/intelligence/08L-FINDING-REGISTER-REVERSAL-SUPPLEMENT.md`
-- `docs/intelligence/09K-CONTRADICTION-REGISTER-RECOVERY-SUPPLEMENT.md`
-- `docs/intelligence/09L-CONTRADICTION-REGISTER-REVERSAL-SUPPLEMENT.md`
-- `docs/intelligence/10G-RECOMMENDATION-REGISTER-RECOVERY-CONTINUATION.md`
-- J23 dossier + J23 target convergence map.
-
----
-
-## Chat-length rollover policy
-
-The exact platform hard cutoff is not observable/reliable enough to plan against a numeric threshold. Therefore use repository checkpoints, not guessed remaining tokens.
+The platform hard cutoff is not a reliable visible value. Do not wait for a guessed threshold.
 
 ```text
-major tranche completes
-→ persist canonical artifacts
+major tranche
+→ persist canonical result
 → refresh CURRENT + ROLLOVER
-→ start next broad tranche
+→ then begin next broad tranche
 ```
 
-If context-loss/compaction symptoms appear, finish only the current atomic trace, refresh this packet, and move to a new chat.
+If context-loss/compaction symptoms appear, finish only the current atomic trace, update these files, and move to a new chat.
 
 Invariant:
 
-> **If this conversation disappears after the next message, the repository still contains enough state to continue without analytical loss.**
-
----
+> **If this chat disappears after the next message, the repository is sufficient to continue without analytical loss.**
 
 ## Do not
 
 - modify production code;
-- create parallel `*2`/`v2` truth systems;
+- create parallel v2 sources of truth;
 - install Temporal/Camunda from findings alone;
-- create universal DLQ/recovery worker/table prematurely;
-- invent migration certainty;
+- invent historical certainty;
 - blindly retry OUTCOME_UNKNOWN;
 - treat provider success + local failure as provider failure;
 - treat local delete as provider reversal;
