@@ -1,12 +1,12 @@
 project: KEYFLOWOS
-analysis_version: 9
-last_updated: 2026-09-03
-phase: computable-digital-twin-journey-kernel-convergence-j18-recovery
-status: j23-L5-entering-L6-j18-active-entering-target-pooling
+analysis_version: 10
+last_updated: 2026-09-04
+phase: computable-digital-twin-j23-j18-unified-l6-convergence
+status: j23-L5-entering-L6-j18-L5-entering-L6
 canonical_branch: docs/keyflow-intelligence-foundation
 implementation_evidence:
   branch: main
-  current_head: 5ec358e9b792817eda1e37fd80a0574eb7905a8a
+  current_head: 168732d0e2226e11ed033c14fbdf7b3ea5344a41
   code_bearing_baseline: d7c5b86cfa276d75ffa42d5f1707c43704dc9f21
   current_head_change_class: audit-only
 context_integrity: PASS
@@ -22,18 +22,22 @@ active_mesh:
   - { id: KF-JOURNEY-025, name: Human Authority Lifecycle }
   - { id: KF-JOURNEY-002, name: KEY Request -> Governed Action }
   - { id: KF-JOURNEY-015, name: Approval / Governance Lifecycle, status: L4-entering-L5 }
-  - { id: KF-JOURNEY-006, name: Proactive KEY / Autonomy, status: active-stress-test }
+  - { id: KF-JOURNEY-006, name: Proactive KEY / Autonomy, status: active-stress-test-recovery-reinjected }
   - { id: KF-JOURNEY-014, name: Webhook / External Event Ingress, status: microscopic-pass-reopenable }
   - { id: KF-JOURNEY-023, name: Temporal Flow / Long-Running Workflow, status: L5-value-engineered-entering-L6 }
-  - { id: KF-JOURNEY-018, name: Failure -> Recovery, status: active-entering-target-pooling }
+  - { id: KF-JOURNEY-018, name: Failure -> Recovery, status: L5-value-engineered-entering-L6 }
 active_kernels: [KF-KERNEL-003,KF-KERNEL-005,KF-KERNEL-006,KF-KERNEL-007,KF-KERNEL-008,KF-KERNEL-009,KF-KERNEL-010,KF-KERNEL-011]
 canonical_ranges:
-  findings_through: F157
-  contradictions_through: C107
+  findings_through: F160
+  contradictions_through: C110
   recommendations_through: KF-REC-048
 canonical_supplements:
-  findings_latest: docs/intelligence/08K-FINDING-REGISTER-RECOVERY-SUPPLEMENT.md
-  contradictions_latest: docs/intelligence/09K-CONTRADICTION-REGISTER-RECOVERY-SUPPLEMENT.md
+  findings_latest:
+    - docs/intelligence/08K-FINDING-REGISTER-RECOVERY-SUPPLEMENT.md
+    - docs/intelligence/08L-FINDING-REGISTER-REVERSAL-SUPPLEMENT.md
+  contradictions_latest:
+    - docs/intelligence/09K-CONTRADICTION-REGISTER-RECOVERY-SUPPLEMENT.md
+    - docs/intelligence/09L-CONTRADICTION-REGISTER-REVERSAL-SUPPLEMENT.md
   recommendations_latest: docs/intelligence/10G-RECOMMENDATION-REGISTER-RECOVERY-CONTINUATION.md
 j23:
   maturity: L5_VALUE_ENGINEERED_ENTERING_L6
@@ -42,6 +46,7 @@ j23:
     shared_temporal_projection: YES
     universal_workoccurrence_table: NOT_JUSTIFIED_YET
     universal_workflow_runtime: NOT_JUSTIFIED_YET
+  target_convergence: docs/intelligence/investigations/J23-TARGET-CONVERGENCE-AND-MIGRATION-MAP.md
   remaining_L6_blockers:
     - exact_model_status_mapping
     - live_row_migration_compatibility
@@ -53,66 +58,84 @@ j23:
     - temporal_projection_query_materialization_strategy
     - characterization_and_proof_plan
 j18:
-  maturity: ACTIVE_FORENSICS_ENTERING_TARGET_POOLING
+  maturity: L5_VALUE_ENGINEERED_ENTERING_L6
   dossier: docs/intelligence/journeys/KF-JOURNEY-018-FAILURE-RECOVERY.md
+  target_convergence: docs/intelligence/investigations/J18-TARGET-CONVERGENCE-AND-MIGRATION-MAP.md
   recovery_matrix: docs/intelligence/investigations/J18-RECOVERY-CERTAINTY-REVERSAL-AND-IDEMPOTENCY-MATRIX.md
   operator_map: docs/intelligence/investigations/J18-OPERATOR-RECOVERY-AND-DEAD-LETTER-MAP.md
+  reversal_matrix: docs/intelligence/investigations/J18-REVERSAL-CANCELLATION-CAPABILITY-MATRIX.md
+  authority_reinjection: docs/intelligence/investigations/J18-BACKWARD-REINJECTION-RECOVERY-AUTHORITY-J15-J6.md
+  kernel_reinjection: docs/intelligence/investigations/J18-KERNEL-REINJECTION-K11-K9-K8-K10.md
   recommendation: KF-REC-048
-  latest_findings: [F150,F151,F152,F153,F154,F155,F156,F157]
-  latest_contradictions: [C100,C101,C102,C103,C104,C105,C106,C107]
-  failure_certainty:
-    - retryable_attempt_failure
-    - final_confirmed_failure
-    - awaiting_external
-    - outcome_unknown
-    - expired
-    - cancelled
-    - superseded
-    - succeeded
-  recovery_outcome:
-    - recovery_available
-    - recovery_requested
-    - recovery_attempted
-    - recovery_succeeded_confirmed
-    - recovery_failed
-    - recovery_unavailable
-    - mitigation_only
-  recovery_actions:
-    - retry_same_effect
-    - reconcile
-    - cancel
-    - void
-    - reversal_new_recovery_effect
-    - compensation_new_recovery_effect
-    - mitigation_only
+  latest_findings: [F150,F151,F152,F153,F154,F155,F156,F157,F158,F159,F160]
+  latest_contradictions: [C100,C101,C102,C103,C104,C105,C106,C107,C108,C109,C110]
   target_decisions:
-    one_recovery_semantic_contract: YES
-    one_cross_domain_operator_projection: YES_VIA_KF_REC_047
-    one_universal_dead_letter_table: NOT_JUSTIFIED_YET
-    one_universal_recovery_worker: NOT_JUSTIFIED_YET
-  core_laws:
-    - attempt_failure_not_logical_failure
-    - effect_dedupe_not_consequence_completeness
-    - original_outcome_not_recovery_outcome
-    - pending_status_not_executable_recovery_work
-    - reexecute_parent_not_resume_unresolved_children
-    - failure_or_time_does_not_create_authority
-  next_actions:
-    - trace_post_provider_pre_persistence_crash_windows_beyond_refunds
-    - complete_remaining_provider_cancel_reversal_matrix
-    - backward_reaudit_j15_j6_recovery_authority
-    - reinject_kf_rec_048_into_k11_k9_k8_k10
-    - reinject_j18_into_j23_l6_mapping_migration_proof
-    - assess_j18_l5_value_engineering_readiness
+    shared_recovery_semantic_contract: YES
+    shared_failure_certainty_taxonomy: YES
+    shared_recovery_action_taxonomy: YES
+    shared_operator_projection: YES_VIA_KF_REC_047
+    universal_dead_letter_table: NOT_JUSTIFIED_YET
+    universal_recovery_worker: NOT_JUSTIFIED_YET
+    universal_recovery_occurrence_table: NOT_JUSTIFIED_YET
+    generic_undo_semantic: NO
+    provider_native_reversal_where_available: YES
+    per_destination_recovery_outcome: YES
+    financial_truth_kernel: KF-KERNEL-010
+  remaining_L6_blockers:
+    - exact_recovery_field_status_mapping
+    - exact_retry_budget_backoff_expiry_by_work_family
+    - provider_idempotency_reconciliation_matrix
+    - live_row_migration_for_overloaded_statuses
+    - consequence_incomplete_representation
+    - exact_j15_clearance_recovery_scope
+    - exact_j6_recovery_policy_budget
+    - remaining_provider_reversal_delete_cancel_support
+    - operator_permission_action_model
+    - temporal_projection_recovery_query_materialization
+    - characterization_concurrency_crash_proof_plan
+    - legacy_provider_ingress_compatibility
+    - bounded_kf_exec_packet_boundaries
+k10:
+  status: ACTIVE_INITIAL_CONVERGENCE
+  dossier: docs/intelligence/kernels/KF-KERNEL-010-FINANCIAL-TRUTH.md
+  central_law: provider_outcome_plus_payment_evidence_plus_ledger_consequence_plus_invoice_order_reconciliation_equals_financial_truth_converged
+exact_next_action:
+  artifact: docs/intelligence/investigations/J23-J18-L6-UNIFIED-CONVERGENCE-MATRIX.md
+  purpose: merge temporal-work and recovery L6 blockers into one exact mapping migration authority provider projection and proof plan
+  fabrics:
+    - AiPlan_AiPlanStep
+    - ActionDispatcher_AiExecutionLog
+    - OutboundDelivery_DeliveryEvent
+    - ScheduledAgentJob
+    - WebhookEvent
+    - Payment_Invoice_Ledger
+    - SocialPost_provider_artifacts
+  dimensions:
+    - work_state
+    - original_outcome
+    - failure_certainty
+    - consequence_state
+    - recovery_action
+    - recovery_state
+    - occurrence_effect_attempt_recovery_identity
+    - provider_operation_identity
+    - clearance_recovery_scope
+    - temporal_cancel_supersede_lateness_version_policy
+    - live_row_migration_compatibility
+    - operator_projection
+    - characterization_concurrency_crash_proof
 constraints:
   - do_not_modify_production_code
   - revalidate_if_main_gets_code_bearing_changes
+  - map_before_modifying
   - do_not_create_parallel_v2_sources_of_truth
   - do_not_install_workflow_engine_from_findings_alone
+  - do_not_create_universal_recovery_dlq_worker_table_prematurely
   - do_not_treat_transport_state_as_logical_work_truth
   - do_not_blind_retry_outcome_unknown
-  - do_not_treat_compensation_handler_return_as_confirmed_inverse_effect
+  - do_not_treat_provider_success_plus_local_failure_as_provider_failure
+  - do_not_treat_local_delete_as_external_reversal
   - do_not_let_effect_dedupe_suppress_missing_consequence_repair
-  - do_not_treat_status_flip_as_retry_without_recovery_owner
   - do_not_replay_completed_children_on_parent_resume
+  - do_not_treat_failure_or_time_as_new_authority
   - do_not_claim_tests_or_runtime_proof_unless_executed
