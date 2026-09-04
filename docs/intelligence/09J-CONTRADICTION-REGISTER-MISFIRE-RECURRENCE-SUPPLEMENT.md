@@ -1,25 +1,10 @@
-# KeyFlowOS Contradiction Register — Misfire / Recurrence Supplement
+# KeyFlowOS Contradiction Register — Recurrence Semantics Supplement
 
 Status: CANONICAL CONTINUATION OF `09I-CONTRADICTION-REGISTER-WORK-DEFINITION-PROVENANCE-SUPPLEMENT.md`
 
-Canonical sequence continues after C098.
+Canonical sequence continues after C099.
 
----
-
-## C099 — scheduled business intent vs scheduler-specific accidental late-start semantics
-
-**Status:** VERIFIED SYSTEMIC CONTRADICTION
-
-Material KeyFlow schedulers do not share an explicit WorkDefinition-level missed-start contract.
-
-Some overdue work catches up without a lateness bound, TransactionalEmail explicitly expires queued work after 48 hours, and DelegationLoop silently coalesces missed intervals.
-
-Thus the business meaning of "run at/after this time" depends on which subsystem owns the work rather than an explicit policy.
-
-Target resolution: each scheduled WorkDefinition declares late-start/misfire semantics such as `CATCH_UP`, `COALESCE`, `SKIP`, `EXPIRE`, or `MANUAL_REVIEW`, plus a catch-up window/latest useful start where relevant.
-
-Affected kernels: K5, K7, K8, K11.
-Affected journeys: J4, J6, J9, J10, J18, J23.
+Identifier correction: the draft C099 in this file duplicated canonical C096 (`09H-CONTRADICTION-REGISTER-MISSED-SCHEDULE-SUPPLEMENT.md`). It is removed from current canonical content rather than creating a duplicate semantic root.
 
 ---
 
@@ -53,16 +38,13 @@ Affected journeys: J7, J10, J18, J23.
 
 ---
 
+# Canonical misfire root reused
+
+C096 already establishes time-sensitive business meaning vs implicit scheduler catch-up. This supplement records only the distinct recurrence-phase and financial-occurrence contradictions.
+
 # Pool law
 
 ```text
-SCHEDULED TIME
-!= LATEST USEFUL START
-
-MISSED OCCURRENCE
-!= AUTOMATICALLY CATCH UP
-!= AUTOMATICALLY SKIP
-
 RECURRENCE PHASE
 != WORKER RECOVERY TIME
 
