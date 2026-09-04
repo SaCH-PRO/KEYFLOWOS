@@ -3,7 +3,7 @@
 Status: CANONICAL CONTINUATION OF `08J-FINDING-REGISTER-EXTERNAL-OUTCOME-SUPPLEMENT.md`
 
 Implementation baseline: `main@d7c5b86cfa276d75ffa42d5f1707c43704dc9f21`
-Current audit-only head: `5ec358e9b792817eda1e37fd80a0574eb7905a8a`
+Current audit-only head: `168732d0e2226e11ed033c14fbdf7b3ea5344a41`
 
 Canonical sequence continues after F149.
 
@@ -17,20 +17,7 @@ AI plan-step queue jobs are configured with BullMQ attempts/backoff and reuse a 
 
 `ActionDispatcher.dispatch()` also performs inline retries. After its retry budget is exhausted it writes a failed `AiExecutionLog` containing the same idempotency key.
 
-On the next BullMQ attempt, `ActionDispatcher.findIdempotentExecution()` finds that failed log and returns the stored failure immediately:
-
-```text
-BullMQ attempt 1
-→ ActionDispatcher inner attempts exhaust
-→ AiExecutionLog(success=false, idempotencyKey=K)
-→ throw to BullMQ
-→ BullMQ schedules attempt 2 with K
-→ ActionDispatcher sees existing K
-→ returns previous failure
-→ no new business-effect attempt occurs
-```
-
-Thus the outer durable retry policy is effectively defeated by a failed idempotency tombstone.
+On the next BullMQ attempt, `ActionDispatcher.findIdempotentExecution()` finds that failed log and returns the stored failure immediately.
 
 Target law: failed attempt evidence must not masquerade as terminal consumption of a live effect identity.
 
@@ -133,37 +120,13 @@ Affected journeys: commerce/payment journeys, J14, J18, J23.
 
 **Status:** VERIFIED CODE-LEVEL + SEARCH-SCOPED RECOVERY-SURFACE FINDING
 
-The authenticated Commerce API exposes:
+The authenticated Commerce API exposes a payment retry action. `CommerceService.retryPayment()` verifies `FAILED`, then only changes `Payment.status = PENDING`, optionally logs a CRM event, and returns the row.
 
-```text
-POST businesses/:businessId/payments/:paymentId/retry
-```
-
-`CommerceService.retryPayment()` verifies that the current row is `FAILED`, then only:
-
-```text
-Payment.status = PENDING
-→ optional CRM timeline event: invoice.payment_retry_initiated
-→ return updated row
-```
-
-No provider charge/capture/payment-link operation is invoked by this method. Repository search in this pass found no generic worker/consumer that treats an existing `Payment.status=PENDING` row produced by this method as executable provider work.
-
-Therefore the operator-facing recovery verb can create local state suggesting a retry is pending without establishing:
-
-- an EffectId / new AttemptId;
-- a provider operation;
-- queue/work owner;
-- next eligible time;
-- retry budget;
-- external outcome certainty;
-- terminal recovery evidence.
-
-This is not merely a missing UI label. The API mutation itself encodes a recovery claim without recovery execution ownership.
+No provider charge/capture/payment-link operation is invoked by this method. Repository search in this pass found no generic worker/consumer that treats that newly-pending row as executable provider work.
 
 Target law:
 
-> A recovery command must either create/claim executable recovery work or state explicitly that it is only a bookkeeping/status repair. `PENDING` must not imply an external retry exists when no recovery owner exists.
+> A recovery command must either create/claim executable recovery work or state explicitly that it is only a bookkeeping/status repair.
 
 Affected kernels: K7, K8, K9, K10, K11.
 Affected journeys: commerce/payment journeys, J18, J23.
@@ -174,47 +137,116 @@ Affected journeys: commerce/payment journeys, J18, J23.
 
 **Status:** VERIFIED CROSS-LAYER / OPERATOR-RECOVERY FINDING
 
-The live HTTP surface exposes:
+The live HTTP surface exposes `POST /api/v1/cortex/plans/:planId/execute`.
 
-```text
-POST /api/v1/cortex/plans/:planId/execute
-```
+`KeyCortexPlannerService.executePlan(planId)` loads all stored steps, resets the parent plan to `running`, starts a new saga, and loops through all steps. It does not exclude steps already persisted as `completed`.
 
-and repository system mapping records this route as called by the web application.
-
-`KeyCortexPlannerService.executePlan(planId)`:
-
-1. loads the plan with all stored steps;
-2. unconditionally sets the parent plan status to `running`;
-3. starts a new saga;
-4. topologically sorts **all** stored steps;
-5. loops through every step and sets it `running` before executing it.
-
-The loop does not exclude steps already persisted as `completed`, nor does the entrypoint require the plan to be in a specifically resumable state.
-
-Therefore a second execute call against a partially failed, waiting, or even already executed plan can create a fresh saga and re-run previously successful business effects.
-
-Recovery topology:
-
-```text
-step A succeeded
-step B failed
-plan retained
-operator/user invokes execute again
-→ new SagaExecution
-→ step A set running again
-→ step A business effect may execute again
-→ step B then executes
-```
-
-Whether a particular repeated effect duplicates externally depends on downstream idempotency, but the workflow layer itself does not preserve “resume unresolved work on the same logical occurrence” semantics.
+Therefore parent re-execution can replay confirmed-success effects.
 
 Target law:
 
-> Resume/retry must continue the same logical WorkOccurrence and must not replay confirmed-success descendants unless the target recovery policy explicitly creates a new effect. Parent re-execution is not a substitute for per-step recovery state.
+> Resume/retry continues the same logical WorkOccurrence and preserves confirmed-success descendants unless an explicit new-effect policy says otherwise.
 
 Affected kernels: K6, K7, K8, K11.
 Affected journeys: J2, J15, J18, J23.
+
+---
+
+## F158 — Confirmed PayPal capture can be reclassified as local `FAILED` after persistence failure, while the fallback failure row loses the lineage needed for webhook repair
+
+**Status:** VERIFIED CROSS-LAYER / POST-PROVIDER-PERSISTENCE CRASH-WINDOW FINDING
+
+`PaymentsService.capturePaypalOrder(orderId, invoiceId)` calls PayPal capture inside one broad `try` block.
+
+When PayPal returns `COMPLETED`, the method derives `captureId` and then attempts local `Payment.create()`.
+
+If that local persistence throws **after PayPal has already confirmed the capture**, the broad `catch` logs `PayPal capture failed`, creates a synthetic local row:
+
+```text
+providerPaymentId = paypal_fail_<orderId>_<timestamp>
+status = FAILED
+invoiceId = local invoice
+```
+
+and throws `Failed to capture PayPal order`.
+
+This compresses:
+
+```text
+provider truth: CAPTURE COMPLETED, captureId C
+local consequence: persistence failed
+```
+
+into:
+
+```text
+local recovery truth: payment FAILED
+```
+
+The later `PAYMENT.CAPTURE.COMPLETED` webhook can only repair if `processPaypalCaptureCompleted()` can link the provider capture back to local business state.
+
+For capture events PayPal does not reliably echo the original purchase-unit custom ID, so KeyFlow's fallback resolver searches an existing Payment by the related PayPal order ID in `providerPaymentId` or `reference`.
+
+The synthetic failure row preserves neither:
+
+```text
+providerPaymentId = synthetic paypal_fail_* value
+reference = null
+```
+
+Thus the recovery row created by the catch can fail to provide the very order/capture lineage required by webhook repair. The provider capture may remain complete while KeyFlow persists only a failed local payment and later logs that the capture webhook could not be linked.
+
+Target law:
+
+> After provider success is confirmed, downstream local persistence failure must be represented as **confirmed external success with incomplete local consequences**, not as provider failure. Provider operation/order/capture lineage must survive the crash window so reconciliation can complete the missing consequences.
+
+Affected kernels: K8, K9, K10, K11.
+Affected journeys: payment/commerce journeys, J14, J18, J23.
+
+---
+
+## F159 — OutboundDelivery can observe provider success, then reinterpret a local persistence failure as adapter failure and schedule a duplicate external attempt
+
+**Status:** VERIFIED CROSS-LAYER / POST-PROVIDER-PERSISTENCE CRASH-WINDOW FINDING
+
+`DeliveryQueueService.executeDelivery()` wraps both the provider call and all subsequent local persistence/evidence work in the same `try/catch`.
+
+Success path:
+
+```text
+adapter.publish(...)
+→ result.success = true
+→ outboundDelivery.update(status=Published, provider IDs/result)
+→ DeliveryEvent(success)
+→ emit local events / update contact/content state
+```
+
+If `adapter.publish()` has already returned success but a later local operation throws — for example `outboundDelivery.update(Published)` or `recordEvent()` — execution falls into the catch intended for adapter errors:
+
+```text
+catch(err)
+→ adapter.normalizeError(err)
+→ if transient: status = RetryPending
+→ else: status = Failed
+```
+
+A local database/evidence failure can therefore become:
+
+```text
+provider truth: effect accepted/published successfully
+local truth: RetryPending | Failed
+```
+
+and the retry scheduler can call the provider again for the same delivery.
+
+This is distinct from F149's ambiguous transport failure: here provider success was already observed before local persistence failed.
+
+Target law:
+
+> Once provider success is observed, local persistence failure transitions to **provider-success / consequence-incomplete reconciliation**, never back into an execution-failure branch that may repeat the external effect. Provider call errors and post-provider local errors require separate exception boundaries.
+
+Affected kernels: K8, K9, K11.
+Affected journeys: outbound communication/content journeys, J14, J18, J23.
 
 ---
 
@@ -222,7 +254,9 @@ Affected journeys: J2, J15, J18, J23.
 
 ## F149 — strengthened by OutboundDelivery retry tracing
 
-`OutboundDelivery` preserves stable delivery identity, atomic-ish expected-state `Sending` claim, retry/backoff and durable `DeliveryEvent` attempts. But `success/isTransient` lacks first-class `OUTCOME_UNKNOWN`, so manual/automatic retry remains unsafe where prior external effect may exist.
+`OutboundDelivery` preserves stable delivery identity, expected-state `Sending` claim, retry/backoff and durable `DeliveryEvent` attempts. But `success/isTransient` lacks first-class `OUTCOME_UNKNOWN`, so manual/automatic retry remains unsafe where prior external effect may exist.
+
+F159 now separately covers the stronger case where provider success is already observed before a local persistence failure is misclassified as adapter failure.
 
 ## F144 — revalidated
 
@@ -235,6 +269,8 @@ Affected journeys: J2, J15, J18, J23.
 ## F127 — operator-recovery implication strengthened
 
 `WebhookEvent` first-seen identity remains a useful ingress occurrence seam, but no processing lifecycle/repair surface was observed that lets a failed-after-claim event resume safely.
+
+F158 composes dangerously with F127: even when a provider capture webhook exists, a failed first processing attempt can become unrecoverable if the occurrence was already claimed.
 
 ---
 
@@ -263,6 +299,8 @@ ORIGINAL OUTCOME != RECOVERY OUTCOME
 EFFECT DEDUPE != CONSEQUENCE COMPLETENESS
 PENDING STATUS != EXECUTABLE RECOVERY WORK
 RE-EXECUTE PARENT != RESUME UNRESOLVED CHILDREN
+PROVIDER SUCCESS + LOCAL PERSISTENCE FAILURE != PROVIDER FAILURE
+POST-PROVIDER LOCAL ERROR != SAFE PERMISSION TO REPEAT EXTERNAL EFFECT
 ```
 
 No production implementation is authorized by this supplement.
