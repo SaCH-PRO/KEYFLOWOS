@@ -4,19 +4,22 @@ Last updated: 2026-09-03
 
 ## Load first
 
-Read `docs/intelligence/00-START-HERE.md`, then the canonical files it lists.
+Read:
+
+1. `docs/intelligence/00-START-HERE.md`
+2. `docs/intelligence/07-CURRENT-STATE.md`
+3. `docs/intelligence/handoff/CURRENT-STATE.yaml`
+4. active J23/K7/K11 files below
 
 Especially load:
 
-- `docs/intelligence/11-RECURSIVE-ASSURANCE-PROGRAMME.md`
-- `docs/intelligence/12-KERNEL-PROGRAMME.md`
-- `docs/intelligence/13-IMPLEMENTATION-HANDOFF-PROTOCOL.md`
-- `docs/intelligence/investigations/J1-J25-J2-CONVERGENCE-TENANCY.md`
-- `docs/intelligence/investigations/J1-J25-J2-CONVERGENCE-AUTHORITY.md`
-- `docs/intelligence/investigations/J1-J25-J2-CONVERGENCE-EXECUTION.md`
-- `docs/intelligence/journeys/KF-JOURNEY-015-APPROVAL-GOVERNANCE-LIFECYCLE.md`
-- `docs/intelligence/investigations/J15-APPROVAL-EVIDENCE-AND-INVALIDATION.md`
-- `docs/intelligence/investigations/J15-APPROVAL-REGIME-CONVERGENCE.md`
+- `docs/intelligence/journeys/KF-JOURNEY-023-TEMPORAL-FLOW-LONG-RUNNING-WORKFLOW.md`
+- `docs/intelligence/investigations/J23-K7-K11-TEMPORAL-REINJECTION.md`
+- `docs/intelligence/investigations/J23-CANCELLATION-SUPERSESSION-OPEN-TRACE.md`
+- `docs/intelligence/08F-FINDING-REGISTER-TEMPORAL-WORK-SUPPLEMENT.md`
+- `docs/intelligence/09F-CONTRADICTION-REGISTER-TEMPORAL-WORK-SUPPLEMENT.md`
+- `docs/intelligence/10B-RECOMMENDATION-REGISTER-TEMPORAL-WORK-CONTINUATION.md`
+- J15, J6 and J14 dossiers/investigations when tracing authority, proactive work or external-event consequences.
 
 ## Context integrity
 
@@ -24,164 +27,157 @@ Especially load:
 
 ## Implementation evidence baseline
 
-`main` at `e1203b34d0b3091a73657dc358508d7a14109575`
+`main@d7c5b86cfa276d75ffa42d5f1707c43704dc9f21`
 
-Revalidate if `main` materially advances before using commit-sensitive implementation facts.
+Revalidated during the current pass. Production implementation remains unauthorized.
 
-## Analytical state
+## Active analytical mesh
 
 ```text
 J1 Business Birth
-  ↕
-J25 Human Authority Lifecycle
-  ↕
-J2 KEY Request → Governed Action
-  ↕
-J15 Approval / Governance Lifecycle
+↕
+J25 Human Authority
+↕
+J2 Governed Action
+↕
+J15 Approval / Governance
+↕
+J6 Proactive KEY / Autonomy
+↕
+J14 External Event Ingress
+↕
+J23 Temporal Flow / Long-Running Workflow
+↕
+J18 Failure / Recovery
 ```
 
-J15 is **ACTIVE FORENSICS**, not merely ready for scoping.
+J23 is the active convergence pressure test.
 
-Production implementation is **NOT AUTHORIZED**.
-
-## Digital-twin structure
-
-The programme now uses:
+## Current architecture direction
 
 ```text
-25 vertical journey dossiers
-+ 12 horizontal architectural kernels
-+ recursive constellation re-audit
+Business/Event/Standing Intent
+→ Work Definition
+→ stable WorkOccurrence
+→ SCHEDULED / durable wait
+→ ELIGIBLE
+→ coordination/worker claim
+→ attempt
+→ exact ActionEnvelope
+→ current authority/readiness/policy
+→ ControlRequirement / ControlEvidence / Clearance
+→ K11 ExecutionClaim
+→ ActionDispatcher
+→ domain/provider effect
+→ OutcomeEvidence / reconciliation
+→ terminal state or next wait/retry
 ```
 
-The kernel catalogue is defined in `12-KERNEL-PROGRAMME.md`.
-
-Active/high-leverage kernels are currently K1 Tenant/Identity, K2 Human Authority, K3 KEY Governance, K5 Capability Fabric, K6 State Transition, K8 Evidence/Outcome and K11 Recovery/Reliability.
-
-## Current architectural direction
+Critical distinctions:
 
 ```text
-CapabilityContract
--> ActionEnvelope
--> action fingerprint
--> EffectiveAuthority + KEY autonomy + readiness/policy
--> ControlRequirement
--> specialized approval/confirmation workflow as needed
--> normalized ControlEvidence
--> exact-action Clearance
--> atomic ExecutionClaim
--> ActionDispatcher
--> domain/provider execution
--> durable Outcome/Evidence
--> Business Graph / Genome evolution
+Definition != Occurrence
+Occurrence != Attempt
+Waiting != Completed
+Queued != Running
+Attempt Failed != Logical Step Failed
+Worker Claim != ExecutionClaim
+Approval != Clearance
+Workflow Completion != Business Outcome
 ```
 
-Important distinctions:
+## J23 current findings
 
-```text
-Membership relationship != final effective authority
-routing != authority
-impact/risk != control requirement
-approval != clearance
-workflow state != normalized control evidence
-clearance != execution claim
-idempotency != atomic execution ownership
-workflow actionType != exact Capability identity
-```
+Canonical sequence now extends through `F140`.
 
-## J15 regime convergence
+Newest J23 roots:
 
-Current classification:
+- F137 FlowRunner long delay is falsely completed rather than durably suspended.
+- F138 DelegationLoop approval-required occurrence is completed rather than suspended.
+- F139 BullMQ retryable attempt is persisted as terminal AiPlanStep failure.
+- F140 AI plan persistence compresses queue/attempt/workflow states and can drive wrong dependency/finalization decisions.
 
-1. **Control requirement resolver** — AiOversight / AutonomyOrchestrator.
-2. **Single-action proposal/control workflow** — KeyActionProposal + KeyCortexApprovalOrchestrator.
-3. **Multi-step human approval workflow** — ApprovalRequest + ApprovalStep.
-4. **Approval routing** — ApprovalRouting + DelegationRule + JobRole.
-5. **Normalized ControlEvidence** — missing target primitive.
-6. **Clearance** — missing target primitive.
+Relevant earlier findings include F097, F112, F122, F123, F127, F136 and J15 invalidation findings.
 
-Do not collapse all specialized workflow records into one mega-table.
+Contradictions extend through `C091`.
+Recommendations extend through `KF-REC-041`.
 
-## Current findings / contradictions
+## Accepted working direction — not yet execution-ready
 
-Historical findings recovered through F043.
+1. KEYFLOWOS needs one durable-work semantic contract.
+2. It does not yet need one universal workflow runtime.
+3. Waiting is a durable state.
+4. Retryable attempt failure is not terminal work failure.
+5. Logical occurrence identity, worker claim, ExecutionClaim and effect idempotency/reconciliation are distinct.
+6. Cancellation/supersession must preserve history while preventing new execution.
+7. Time never creates authority.
 
-Current investigation findings now extend through `F075`.
+## Strong existing seams to preserve
 
-Historical contradictions recovered through C021.
+- BullMQ delayed jobs, worker locking, retries and stalled recovery;
+- WhatsApp scheduled-message CAS claim `SCHEDULED -> SENDING`;
+- EmailCampaign CAS claim `DRAFT|SCHEDULED -> SENDING`;
+- ScheduledAgentJob checkpoint uniqueness;
+- FlowRun idempotency key;
+- quote-conversion cancellation of pending ScheduledAgentJob followups;
+- Saga evidence/compensation concepts where genuinely reachable.
 
-Current contradiction candidates extend through `C039`.
+## Cancellation / supersession trace
 
-Important: F044–F075 and C022–C039 are not yet fully pooled into the canonical global registers. They live in the convergence/J15 investigation artifacts and require a formal pooling pass.
+Still `OPEN / SEARCH-SCOPED / NOT YET F141`.
 
-## J15 key recent conclusions
+Evidence currently shows:
 
-- normal logged-in AiApprovalItem resolution does not enforce routed approver identity;
-- contact-only OrgAssignments can satisfy some approvals without User/Membership;
-- AiApprovalItem pending resolution lacks atomic expected-state CAS;
-- AiApprovalItem resolution and plan-step release are separate writes;
-- low-tier stale approvals may be autonomously approved after timeout;
-- AiApprovalItem remains live despite proposal migration direction;
-- plan approval and approval-item authority semantics differ;
-- Flow quick-confirm is not bound to a durable immutable server-side pending action;
-- current approval artifacts lack a canonical exact-action fingerprint;
-- KeyCortexApprovalOrchestrator is a useful convergence seam but not a complete governance boundary;
-- ApprovalRequest is a legitimate multi-step workflow primitive;
-- ApprovalRequest progression is transactionally grouped but still lacks observed expected-state ownership CAS;
-- ApprovalRequest delegation does not centrally prove delegate authority/grantability;
-- threshold approval derives amount heuristically from payload;
-- ApprovalRequest shadow proposal state is not synchronized after creation;
-- proposal actionType is governance choreography, not a reliable exact capability identity.
+- no general AiPlan cancellation endpoint observed; plan API exposes get/list/approve and step undo;
+- no plan-linked BullMQ job withdrawal path observed;
+- no general FlowRun cancellation primitive found in scoped search;
+- quote conversion cancels pending quote-followup ScheduledAgentJobs as a positive domain-specific pattern;
+- EmailCampaign supports unscheduling while still SCHEDULED;
+- WhatsApp scheduled-message path has a SCHEDULED/SENDING CAS claim, but no cancellation method was observed in the inspected service;
+- approval rejection before queue admission fails the waiting step and resumes plan evaluation;
+- ActionDispatcher has retries/idempotency/undo but no active cancellation/abort contract observed.
 
-## Principal model refinement
-
-Membership-first human authority remains appropriate for authenticated workspace humans, but J15 proves it is not sufficient for every approver.
-
-Working distinction:
-
-```text
-AuthenticatedHumanPrincipal
-  = User + Membership
-
-PositionBoundHumanPrincipal
-  = active OrgAssignment
-  + verified contact/channel identity
-  + JobRole authority
-```
-
-Position-bound external approval requires strong channel/principal verification and exact business binding.
+Do not promote a cancellation finding until source-state, queued transport, active claim and OUTCOME_UNKNOWN cases are traced sufficiently.
 
 ## Exact next actions
 
-Remain in read-only architecture/research mode.
+Remain read-only for production code.
 
-1. Trace proposal capability/risk derivation, wrapper behavior, confirm booleans, action mutation and CAS semantics.
-2. Trace reply-channel identity proof into `resolveApprovalByAssignment` including spoof/replay/business binding.
-3. Trace all post-approval material writes to AiPlan/AiPlanStep.
-4. Trace expiry/revocation/invalidation across approvals, AuthorityGrant and DelegationRule.
-5. Trace control-plane authority for autonomy/governance/role/grant mutation.
-6. Trace frontend approval/confirmation evidence and stale-tab/version behavior.
-7. Pool F044–F075 into the finding register.
-8. Pool C022–C039 into the contradiction register.
-9. Update mature recommendation candidates.
-10. Build dedicated dossiers for the active kernels and link their journey impact.
-11. Re-run J1/J25/J2 implications after each material J15/kernel refinement.
+1. Finish J23 cancellation/supersession trace.
+2. Trace stale scheduled payloads when domain state, consent, authority or policy changes before execution.
+3. Define missed-schedule classes: catch-up, coalesce, skip, expire, manual review.
+4. Define workflow-definition/version changes for already-waiting work.
+5. Trace AWAITING_EXTERNAL / OUTCOME_UNKNOWN into J18/K9/K11.
+6. Define minimum operator temporal-control/read-model semantics.
+7. Decide whether existing models can implement WorkOccurrence semantics without a new shared persistence object.
+8. Define criteria that would justify a Temporal/Camunda-class engine later.
+9. Re-audit J15 clearance invalidation while work waits.
+10. Re-audit J6 pause/kill/revocation against queued/waiting work.
+11. Re-audit J14 delayed/retryable consequences from durable ingress occurrences.
+12. Keep machine-readable state and start-here continuity current.
 
-## Implementation protocol
+## Broader outstanding programme
 
-When a cluster becomes execution-ready, do not hand a coding agent a vague request.
+Beyond J23, still unresolved before whole-system target convergence:
 
-Use `13-IMPLEMENTATION-HANDOFF-PROTOCOL.md` to issue bounded `KF-EXEC-*` packets including objective, evidence, accepted invariant, affected journeys/kernels, target contract, prohibited shortcuts, migration, proof ratchets and return evidence requirements.
+- ControlEvidence / Clearance / ExecutionClaim final persistence shape;
+- Effective Authority Resolver and grantability migration;
+- canonical capability/permission vocabulary;
+- approval-regime migration among KeyActionProposal, AiApprovalItem and ApprovalRequest;
+- ActionDispatcher migration to universal post-clearance seam;
+- canonical EventEnvelope + consequence ownership;
+- durable IngressOccurrence lifecycle;
+- provider/financial reconciliation breadth;
+- Business Graph / Genome / readiness integration;
+- remaining journey microscopic passes and backward re-audits;
+- K9/K10/K12 full convergence where still incomplete;
+- execution compiler and bounded KF-EXEC packets only after target convergence.
 
-Claude Code is the preferred primary implementer. Kimi/Gemini may act as independent adversarial reviewers. GitHub remains the implementation source of truth.
+## Do not
 
-## Constraints
-
-- no production code modification until explicitly authorized;
-- no parallel v2 source of truth without disproving existing seams;
-- no legacy deletion without consumer proof;
-- no claim that tests passed unless executed;
-- preserve current reality vs target architecture;
-- preserve evidence → interpretation → decision;
-- propagate important kernel findings through every affected journey;
-- convergence, not file count or finding count, is progress.
+- modify production code;
+- create parallel v2 systems;
+- install a workflow engine merely because J23 exposed workflow defects;
+- treat queue state as logical work state;
+- delete legacy consumers without reachability proof;
+- claim tests/runtime proof unless actually executed.
