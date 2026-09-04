@@ -4,28 +4,16 @@ Last updated: 2026-09-03 local / 2026-09-04 UTC
 
 ## Load first
 
-Read in order:
-
 1. `docs/intelligence/00-START-HERE.md`
 2. `docs/intelligence/07-CURRENT-STATE.md`
 3. `docs/intelligence/handoff/CURRENT-STATE.yaml`
 4. `docs/intelligence/journeys/KF-JOURNEY-018-FAILURE-RECOVERY.md`
 5. `docs/intelligence/investigations/J18-RECOVERY-CERTAINTY-REVERSAL-AND-IDEMPOTENCY-MATRIX.md`
-6. `docs/intelligence/08K-FINDING-REGISTER-RECOVERY-SUPPLEMENT.md`
-7. `docs/intelligence/09K-CONTRADICTION-REGISTER-RECOVERY-SUPPLEMENT.md`
-8. active J23/K7/K8/K9/K10/K11 materials referenced by current state.
-
-Also keep loaded:
-
-- `docs/intelligence/journeys/KF-JOURNEY-023-TEMPORAL-FLOW-LONG-RUNNING-WORKFLOW.md`
-- `docs/intelligence/investigations/J23-TARGET-CONVERGENCE-AND-MIGRATION-MAP.md`
-- `docs/intelligence/investigations/J23-EXTERNAL-OUTCOME-UNCERTAINTY-AND-RECONCILIATION.md`
-- `docs/intelligence/kernels/KF-KERNEL-007-TEMPORAL-EVENT-WORKFLOW.md`
-- `docs/intelligence/kernels/KF-KERNEL-008-EVIDENCE-OUTCOME.md`
-- `docs/intelligence/kernels/KF-KERNEL-009-INTEGRATION-EXTERNAL-REALITY.md`
-- `docs/intelligence/kernels/KF-KERNEL-010-FINANCIAL-TRUTH.md` if instantiated/current
-- `docs/intelligence/kernels/KF-KERNEL-011-RECOVERY-RELIABILITY.md`
-- all canonical `08*`, `09*`, `10*` continuations.
+6. `docs/intelligence/investigations/J18-OPERATOR-RECOVERY-AND-DEAD-LETTER-MAP.md`
+7. `docs/intelligence/08K-FINDING-REGISTER-RECOVERY-SUPPLEMENT.md`
+8. `docs/intelligence/09K-CONTRADICTION-REGISTER-RECOVERY-SUPPLEMENT.md`
+9. `docs/intelligence/10G-RECOMMENDATION-REGISTER-RECOVERY-CONTINUATION.md`
+10. active J23/K7/K8/K9/K10/K11/J15/J6 materials referenced by current state.
 
 ## Context integrity
 
@@ -39,49 +27,26 @@ code-bearing base:   d7c5b86cfa276d75ffa42d5f1707c43704dc9f21
 head change class:   audit-only
 ```
 
-Revalidate if `main` gains code-bearing changes.
-
 Production implementation remains unauthorized.
 
 ## Current analytical position
 
 ```text
-J23 Temporal Flow / Long-Running Workflow
-  = L5 VALUE-ENGINEERED / ENTERING L6 TARGET-CONVERGENCE
-        ↓ pressure/reinjection
-J18 Failure → Recovery
-  = ACTIVE FORENSICS / MICROSCOPIC PASS ADVANCED
+J23 = L5 VALUE-ENGINEERED / ENTERING L6 TARGET-CONVERGENCE
+J18 = ACTIVE FORENSICS / ENTERING TARGET POOLING
 ```
 
-## Canonical ranges
+Canonical ranges:
 
 ```text
-Findings:        F155
-Contradictions:  C105
-Recommendations: KF-REC-047
+Findings:        F157
+Contradictions:  C107
+Recommendations: KF-REC-048
 ```
 
-Latest J18 sequence:
+## J18 current target
 
-```text
-F150 failed ActionDispatcher idempotency tombstone defeats BullMQ retry
-F151 UndoService eligibility is process-local/non-replicated
-F152 saga compensation can falsely report `compensated`
-F153 KeyCortex approval wait can become parent plan/saga failure
-F154 planner overwrites saga compensation outcome with generic failed
-F155 provider-backed refund can bypass ledger/invoice reconciliation and suppress webhook repair
-
-C100 retry policy vs idempotency terminality
-C101 recovery promise vs recovery-state durability
-C102 compensated claim vs confirmed inverse effect
-C103 child control wait vs parent workflow failure
-C104 recovery outcome vs generic failed overwrite
-C105 confirmed provider refund vs split Payment/ledger/invoice truth
-```
-
-No new recovery recommendation is accepted yet. Pool/value-engineer J18 first.
-
-## Recovery model now established
+KF-REC-048 establishes one certainty-aware Recovery Contract across existing fabrics.
 
 Failure certainty:
 
@@ -111,98 +76,90 @@ MITIGATION_ONLY
 Recovery action:
 
 ```text
-RETRY      = same EffectId, new AttemptId
-RECONCILE  = observe truth, no fresh business effect
-CANCEL     = prevent not-yet-effective work
-VOID       = domain-native cancellation where legal
-REVERSAL   = new inverse RecoveryEffectId
-COMPENSATE = new mitigating RecoveryEffectId
-MITIGATION = annotation/follow-up where inverse effect impossible
+RETRY      same EffectId, new AttemptId
+RECONCILE  observe authoritative state
+CANCEL     prevent not-yet-effective work
+VOID       domain cancellation where legal
+REVERSAL   new inverse RecoveryEffectId
+COMPENSATE new mitigating RecoveryEffectId
+MITIGATION local follow-up where inverse effect impossible
 ```
 
 Core laws:
 
 ```text
-original execution outcome != recovery outcome
+attempt failure != logical-work failure
+original outcome != recovery outcome
 effect dedupe != consequence completeness
 provider timeout != confirmed non-effect
 control wait != failure
-compensation handler return != confirmed inverse effect
-financial reversal must converge Payment + ledger + invoice truth
+pending status != executable recovery work
+re-execute parent != resume unresolved children
+failure/time != recovery authority
 ```
 
-## Current strong seams
+## Latest findings
 
-Preserve/strengthen:
+```text
+F150 failed ActionDispatcher idempotency tombstone defeats BullMQ retry
+F151 UndoService eligibility process-local
+F152 saga compensation can falsely report compensated
+F153 KeyCortex approval wait can become parent failure
+F154 planner overwrites saga recovery outcome with generic failed
+F155 provider refund can bypass ledger/invoice reconciliation and suppress webhook repair
+F156 payment retry flips FAILED->PENDING without observed provider recovery owner
+F157 plan execute-again can replay completed steps
+```
 
-- BullMQ stable job identity / attempts / backoff / locks / stalled recovery;
+Latest contradictions:
+
+```text
+C100 retry policy vs idempotency terminality
+C101 recovery promise vs recovery-state durability
+C102 compensated claim vs confirmed inverse effect
+C103 child control wait vs parent failure
+C104 recovery outcome vs generic failure overwrite
+C105 provider refund vs split payment/ledger/invoice truth
+C106 retry verb vs absence of executable recovery work
+C107 parent re-execution vs confirmed child terminality
+```
+
+## Operator/dead-letter verdict
+
+```text
+ONE RECOVERY SEMANTIC CONTRACT       YES — KF-REC-048
+ONE CROSS-DOMAIN OPERATOR PROJECTION YES — extend KF-REC-047
+ONE UNIVERSAL DEAD-LETTER TABLE      NOT JUSTIFIED YET
+ONE UNIVERSAL RECOVERY WORKER        NOT JUSTIFIED YET
+```
+
+Current fabrics differ materially:
+
+- BullMQ failed set = transport-native retry machinery;
+- OutboundDelivery Failed = strongest domain/operator retry seam;
+- ScheduledAgentJob FAILED = terminal row without observed generic recovery owner;
+- WebhookEvent = occurrence identity without failed-processing lifecycle;
+- Saga/AiExecutionLog = evidence sinks, not complete recovery queues;
+- Payment FAILED->PENDING = status repair without observed provider work.
+
+## Strong seams to preserve
+
+- BullMQ attempts/backoff/locks/stalled recovery;
 - ActionDispatcher central effect boundary;
 - OutboundDelivery + DeliveryEvent;
-- SagaExecution + SagaStep durable evidence;
-- `CommerceService.markPaymentRefunded()` local refund + ledger reversal transaction;
-- provider refund webhook `createRefundWithPosting()` + invoice reconciliation;
-- quote-followup cancellation + current source-state revalidation;
-- K9 provider reconciliation;
-- Temporal Work Projection as future operator/recovery read model.
+- SagaExecution + SagaStep;
+- provider IDs/idempotency/reconciliation;
+- `CommerceService.markPaymentRefunded()` + ledger reversal;
+- provider refund `createRefundWithPosting()` + invoice reconciliation;
+- quote-followup cancellation/current-state revalidation;
+- KF-REC-047 Temporal Work Projection.
 
-## Current defects / refinements
+## External properties adopted
 
-### ActionDispatcher + BullMQ — F150
-
-```text
-BullMQ retry remains live
-→ failed AiExecutionLog with stable key K
-→ next BullMQ attempt reuses K
-→ ActionDispatcher returns stored failure
-→ no new effect attempt
-```
-
-Queue retry state does not own business-effect terminality.
-
-### OutboundDelivery / provider ambiguity — strengthen F149
-
-`success/isTransient` is insufficient when request may have crossed external point of no return. Manual retry is unsafe without certainty typing.
-
-### Saga — F152/F153/F154
-
-```text
-handler returned != inverse effect confirmed
-AWAITING_CONTROL != FAILED
-recovery result must not be overwritten by original failure
-```
-
-### Financial reversal — F155
-
-Provider-backed manual refund:
-
-```text
-Stripe/PayPal refund succeeds → refund id R
-→ PaymentsOps creates local REFUNDED Payment R
-→ no ledger reversal / no invoice reconcile
-→ provider webhook R sees existing Payment
-→ returns as duplicate
-→ repair suppressed
-```
-
-This is not a generic “refunds broken” finding: `CommerceService.markPaymentRefunded()` and provider webhook paths already contain stronger financial-truth seams.
-
-## External reference properties adopted
-
-### Stripe
-
-- POST idempotency keys permit safe retry after connection errors;
-- refund events provide lifecycle/reconciliation evidence.
-
-### PayPal
-
-- `PayPal-Request-Id` is recommended for modifying POST/PUT requests and can safely bind retries, including refund operations.
-
-### BullMQ
-
-- attempts/backoff and manual job retry are transport/job lifecycle semantics;
-- custom job ID is queue-scoped dedupe, not proof of business-effect terminality.
-
-Current KeyFlow Stripe/PayPal refund connectors do not send the provider-native idempotency headers observed in these reference contracts.
+- Stripe `Idempotency-Key` safe retry semantics;
+- PayPal `PayPal-Request-Id` retry/idempotency semantics;
+- provider operation IDs as reconciliation evidence;
+- BullMQ job retry/ID as queue lifecycle, not business-effect finality.
 
 Adopt properties, not products.
 
@@ -210,14 +167,12 @@ Adopt properties, not products.
 
 Remain read-only for production code.
 
-1. Trace operator diagnostics/repair endpoints across AI plans, ScheduledAgentJob, ingress and sagas.
-2. Classify dead-letter semantics by work family; do not assume one global DLQ.
-3. Trace representative **provider effect succeeded / local persistence failed** windows beyond refunds.
-4. Complete provider/domain cancel/reversal matrix for remaining material integrations.
-5. Define exact recovery authority: when retry may continue prior bounded authority vs when reversal/compensation needs a fresh ActionEnvelope + Clearance.
-6. Pool J18 into K11/K9/K8/K10 target laws and decide whether a new recommendation ID is justified.
-7. Backward re-audit J15/J6 for recovery-created effects.
-8. Reinject J18 into J23 and finish remaining L6 migration/proof blockers.
+1. Trace provider-effect-succeeded / local-persistence-failed crash windows beyond refunds.
+2. Complete remaining material provider/domain cancellation/reversal matrix.
+3. Backward re-audit J15/J6 specifically for recovery authority and fresh Clearance.
+4. Reinject KF-REC-048 into K11/K9/K8/K10.
+5. Reinject J18 into J23 L6 field/status, live-row migration and proof mapping.
+6. Decide whether J18 has enough pooled evidence to promote from active forensics into L5 value-engineering/target convergence.
 
 ## J23 decisions still in force
 
@@ -225,7 +180,7 @@ Remain read-only for production code.
 shared durable-work semantic contract     YES
 shared Temporal Work Projection           YES
 universal WorkOccurrence table            NOT JUSTIFIED YET
-universal workflow runtime                NOT JUSTIFIED YET
+universal workflow runtime                 NOT JUSTIFIED YET
 ```
 
 ## Do not
@@ -234,10 +189,9 @@ universal workflow runtime                NOT JUSTIFIED YET
 - create parallel v2 sources of truth;
 - install Temporal/Camunda from findings alone;
 - treat queue/transport state as logical-work truth;
-- treat provider acceptance as delivery/settlement;
 - blindly retry OUTCOME_UNKNOWN;
-- treat non-throwing compensation as confirmed reversal;
-- treat AWAITING_CONTROL as failure;
-- erase recovery outcome with original failure;
+- treat compensation handler return as confirmed reversal;
 - let effect dedupe suppress missing consequence repair;
+- treat status flip as real retry without an execution owner;
+- replay completed children during parent resume;
 - claim tests/runtime proof unless executed.
