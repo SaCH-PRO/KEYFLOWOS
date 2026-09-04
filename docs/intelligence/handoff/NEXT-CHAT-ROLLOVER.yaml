@@ -1,0 +1,113 @@
+project: KEYFLOWOS
+rollover_version: 1
+last_updated: 2026-09-04
+status: LIVE_CONTINUITY_ARTIFACT
+canonical_branch: docs/keyflow-intelligence-foundation
+implementation_authorized: false
+context_integrity: PASS
+repository: SaCH-PRO/KEYFLOWOS
+implementation_evidence:
+  branch: main
+  current_head: 5ec358e9b792817eda1e37fd80a0574eb7905a8a
+  code_bearing_baseline: d7c5b86cfa276d75ffa42d5f1707c43704dc9f21
+  current_head_change_class: audit-only
+analytical_state:
+  j23: L5_VALUE_ENGINEERED_ENTERING_L6
+  j18: ACTIVE_FORENSICS_ENTERING_TARGET_POOLING
+canonical_ranges:
+  findings_through: F157
+  contradictions_through: C107
+  recommendations_through: KF-REC-048
+active_mesh:
+  - KF-JOURNEY-001
+  - KF-JOURNEY-025
+  - KF-JOURNEY-002
+  - KF-JOURNEY-015
+  - KF-JOURNEY-006
+  - KF-JOURNEY-014
+  - KF-JOURNEY-023
+  - KF-JOURNEY-018
+j18:
+  recommendation: KF-REC-048
+  failure_certainty:
+    - RETRYABLE_ATTEMPT_FAILURE
+    - FAILED_FINAL_CONFIRMED
+    - AWAITING_EXTERNAL
+    - OUTCOME_UNKNOWN
+    - EXPIRED
+    - CANCELLED
+    - SUPERSEDED
+    - SUCCEEDED
+  recovery_outcome:
+    - RECOVERY_AVAILABLE
+    - RECOVERY_REQUESTED
+    - RECOVERY_ATTEMPTED
+    - RECOVERY_SUCCEEDED_CONFIRMED
+    - RECOVERY_FAILED
+    - RECOVERY_UNAVAILABLE
+    - MITIGATION_ONLY
+  action_taxonomy:
+    RETRY: same_effect_new_attempt
+    RECONCILE: observe_authoritative_state
+    CANCEL: prevent_not_yet_effective_work
+    VOID: domain_native_cancellation
+    REVERSAL: new_inverse_recovery_effect
+    COMPENSATION: new_mitigating_recovery_effect
+    MITIGATION_ONLY: no_inverse_possible
+  latest_findings: [F150,F151,F152,F153,F154,F155,F156,F157]
+  latest_contradictions: [C100,C101,C102,C103,C104,C105,C106,C107]
+architecture_decisions:
+  shared_durable_work_semantic_contract: YES
+  shared_temporal_work_projection: YES
+  universal_workoccurrence_table: NOT_JUSTIFIED_YET
+  universal_workflow_runtime: NOT_JUSTIFIED_YET
+  shared_recovery_semantic_contract: YES
+  shared_operator_projection: YES
+  universal_dead_letter_table: NOT_JUSTIFIED_YET
+  universal_recovery_worker: NOT_JUSTIFIED_YET
+exact_next_action:
+  title: post_provider_pre_local_persistence_crash_windows
+  instruction: Trace representative provider-effect-succeeded / local-persistence-failed crash windows beyond refunds.
+  candidates:
+    - paypal_capture_success_then_local_payment_persistence_failure
+    - payment_link_or_provider_order_creation_success_then_local_lineage_failure
+    - outbound_message_provider_success_then_local_delivery_persistence_failure
+    - booking_or_calendar_external_effect_then_local_consequence_failure
+    - catch_paths_marking_failed_after_external_point_of_no_return
+  classify:
+    - EffectId
+    - AttemptId
+    - provider_idempotency_token
+    - provider_operation_id
+    - external_point_of_no_return
+    - local_persistence_boundary
+    - reconciliation_path
+    - dedupe_vs_consequence_repair
+    - safe_retry_vs_outcome_unknown
+    - operator_repair_surface
+    - recovery_authority
+next_after_crash_windows:
+  - complete_provider_domain_reversal_matrix
+  - backward_reaudit_j15_j6_recovery_authority_clearance
+  - reinject_kf_rec_048_into_k11_k9_k8_k10
+  - reinject_j18_into_j23_l6_migration_proof
+  - decide_j18_promotion_to_value_engineering_target_convergence
+continuity_files:
+  - docs/intelligence/handoff/NEXT-CHAT-ROLLOVER.md
+  - docs/intelligence/handoff/NEXT-CHAT-ROLLOVER.yaml
+  - docs/intelligence/handoff/CURRENT-HANDOFF.md
+  - docs/intelligence/handoff/CURRENT-STATE.yaml
+constraints:
+  - do_not_modify_production_code
+  - map_before_modifying
+  - do_not_create_parallel_v2_sources_of_truth
+  - do_not_install_workflow_engine_from_findings_alone
+  - do_not_blind_retry_outcome_unknown
+  - do_not_replay_completed_children_during_parent_resume
+  - do_not_treat_status_flip_as_real_retry_without_execution_owner
+  - do_not_claim_tests_or_runtime_proof_unless_executed
+rollover_protocol:
+  update_after_each_major_tranche: true
+  update_when_exact_next_action_changes: true
+  update_before_context_risk: true
+  invariant: fresh_chat_can_recover_frontier_from_repo_only
