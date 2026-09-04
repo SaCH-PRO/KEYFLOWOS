@@ -1,12 +1,12 @@
 # KeyFlowOS Contradiction Register — Workflow Control Plane Supplement
 
-Status: CANONICAL CONTINUATION OF `09G-CONTRADICTION-REGISTER-CANCELLATION-SUPERSESSION-SUPPLEMENT.md`
+Status: CANONICAL CONTINUATION AFTER `09H-CONTRADICTION-REGISTER-MISSED-SCHEDULE-SUPPLEMENT.md`
 
-Canonical sequence continues after C095.
+Identifier correction: C096 was already canonically allocated to missed-schedule semantics. This supplement therefore continues at C097.
 
 ---
 
-## C096 — user-visible workflow disabled state vs still-live commerce execution paths
+## C097 — user-visible workflow disabled state vs still-live commerce execution paths
 
 **Status:** VERIFIED ACTIVE CONTRADICTION
 
@@ -28,7 +28,7 @@ Affected journeys: J6, J9, J10, J18, J23.
 
 ---
 
-## C097 — user-configurable workflow delay vs hard-coded runtime schedule
+## C098 — user-configurable workflow delay vs hard-coded runtime schedule
 
 **Status:** VERIFIED ACTIVE CONTRADICTION
 
