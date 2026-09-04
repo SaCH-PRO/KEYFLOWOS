@@ -1,91 +1,144 @@
 project: KEYFLOWOS
-analysis_version: 4
+analysis_version: 5
 last_updated: 2026-09-03
-phase: computable-digital-twin-journey-kernel-convergence
-status: j15-active-forensics
+phase: computable-digital-twin-journey-kernel-convergence-j23
+status: j23-active-forensics
 canonical_branch: docs/keyflow-intelligence-foundation
 implementation_evidence:
   branch: main
-  commit: e1203b34d0b3091a73657dc358508d7a14109575
+  commit: d7c5b86cfa276d75ffa42d5f1707c43704dc9f21
 context_integrity: PASS
+implementation_authorized: false
 methodology:
   journey_count: 25
   kernel_count: 12
   recursive_assurance: docs/intelligence/11-RECURSIVE-ASSURANCE-PROGRAMME.md
   kernel_programme: docs/intelligence/12-KERNEL-PROGRAMME.md
   implementation_handoff: docs/intelligence/13-IMPLEMENTATION-HANDOFF-PROTOCOL.md
+  digital_twin_spec: docs/intelligence/15-EXPORTABLE-DIGITAL-TWIN-SPEC.md
+  architect_agent_contract: docs/intelligence/16-KEYFLOWOS-ARCHITECT-AGENT-CONTRACT.md
 active_mesh:
   - id: KF-JOURNEY-001
     name: Business Birth
-    status: directionally-converged-needs-revisit-as-kernels-change
   - id: KF-JOURNEY-025
     name: Human Authority Lifecycle
-    status: directionally-converged-needs-revisit-as-kernels-change
   - id: KF-JOURNEY-002
     name: KEY Request -> Governed Action
-    status: directionally-converged-needs-revisit-as-kernels-change
   - id: KF-JOURNEY-015
     name: Approval / Governance Lifecycle
-    status: active-forensics
+    status: L4-semantic-reconciliation-entering-L5
+  - id: KF-JOURNEY-006
+    name: Proactive KEY / Autonomy
+    status: active-stress-test
+  - id: KF-JOURNEY-014
+    name: Webhook / External Event Ingress
+    status: microscopic-pass-reopenable
+  - id: KF-JOURNEY-023
+    name: Temporal Flow / Long-Running Workflow
+    status: active-forensics-cross-kernel-target-refinement
+  - id: KF-JOURNEY-018
+    name: Failure -> Recovery
+    status: active-adjacent
 active_kernels:
-  - id: KF-KERNEL-001
-    name: Tenant Genesis & Identity
-  - id: KF-KERNEL-002
-    name: Human Authority & Organization
-  - id: KF-KERNEL-003
-    name: KEY Authority & Governance
-  - id: KF-KERNEL-005
-    name: Capability Fabric
-  - id: KF-KERNEL-006
-    name: State Transition
-  - id: KF-KERNEL-008
-    name: Evidence & Outcome
-  - id: KF-KERNEL-011
-    name: Recovery & Reliability
-recovery:
-  exhausted_thread_packet: docs/intelligence/sessions/2026-09-03-exhausted-thread-recovery.md
-  journey_catalogue_recovered_through: KF-JOURNEY-025
-  historical_findings_recovered_through: F043
-  historical_contradictions_recovered_through: C021
-current_findings_range: F044-F075
-current_contradiction_candidate_range: C022-C039
-register_pooling_required:
-  findings: true
-  contradictions: true
-  recommendations: true
-convergence_axes:
-  tenant_relationship_ownerId_membership: directionally-converged-not-frozen
-  effective_human_authority_algebra: directionally-converged-not-frozen
-  capability_contract_load_bearing: strong-direction-not-frozen
-  governance_control_evidence: active-convergence
-  exact_action_clearance: active-convergence
-  execution_claim_and_dispatcher: directionally-converged-not-frozen
-j15:
-  admission_verdict: ADMITTED
-  forensic_status: ACTIVE
-  implementation_authorized: false
-  investigations:
-    - docs/intelligence/journeys/KF-JOURNEY-015-APPROVAL-GOVERNANCE-LIFECYCLE.md
-    - docs/intelligence/investigations/J15-APPROVAL-EVIDENCE-AND-INVALIDATION.md
-    - docs/intelligence/investigations/J15-APPROVAL-REGIME-CONVERGENCE.md
+  - KF-KERNEL-001
+  - KF-KERNEL-002
+  - KF-KERNEL-003
+  - KF-KERNEL-005
+  - KF-KERNEL-006
+  - KF-KERNEL-007
+  - KF-KERNEL-008
+  - KF-KERNEL-009
+  - KF-KERNEL-010
+  - KF-KERNEL-011
+canonical_ranges:
+  findings_through: F140
+  contradictions_through: C091
+  recommendations_through: KF-REC-041
+canonical_supplements:
+  findings:
+    - docs/intelligence/08A-FINDING-REGISTER-CURRENT-SUPPLEMENT.md
+    - docs/intelligence/08B-FINDING-REGISTER-EVENT-AGENCY-SUPPLEMENT.md
+    - docs/intelligence/08C-FINDING-REGISTER-CONSEQUENCE-OWNERSHIP-SUPPLEMENT.md
+    - docs/intelligence/08D-FINDING-REGISTER-BOOKING-TEMPORAL-SUPPLEMENT.md
+    - docs/intelligence/08E-FINDING-REGISTER-EXTERNAL-INGRESS-SUPPLEMENT.md
+    - docs/intelligence/08F-FINDING-REGISTER-TEMPORAL-WORK-SUPPLEMENT.md
+  contradictions:
+    - docs/intelligence/09A-CONTRADICTION-REGISTER-CURRENT-SUPPLEMENT.md
+    - docs/intelligence/09B-CONTRADICTION-REGISTER-EVENT-AGENCY-SUPPLEMENT.md
+    - docs/intelligence/09C-CONTRADICTION-REGISTER-CONSEQUENCE-OWNERSHIP-SUPPLEMENT.md
+    - docs/intelligence/09D-CONTRADICTION-REGISTER-BOOKING-TEMPORAL-SUPPLEMENT.md
+    - docs/intelligence/09E-CONTRADICTION-REGISTER-EXTERNAL-INGRESS-SUPPLEMENT.md
+    - docs/intelligence/09F-CONTRADICTION-REGISTER-TEMPORAL-WORK-SUPPLEMENT.md
+  recommendations:
+    - docs/intelligence/10A-RECOMMENDATION-REGISTER-INGRESS-CONTINUATION.md
+    - docs/intelligence/10B-RECOMMENDATION-REGISTER-TEMPORAL-WORK-CONTINUATION.md
+j23:
+  dossier: docs/intelligence/journeys/KF-JOURNEY-023-TEMPORAL-FLOW-LONG-RUNNING-WORKFLOW.md
+  reinjection: docs/intelligence/investigations/J23-K7-K11-TEMPORAL-REINJECTION.md
+  cancellation_trace: docs/intelligence/investigations/J23-CANCELLATION-SUPERSESSION-OPEN-TRACE.md
+  core_findings:
+    - F137
+    - F138
+    - F139
+    - F140
+  core_invariants:
+    - definition_not_occurrence
+    - occurrence_not_attempt
+    - waiting_not_completion
+    - queued_not_running
+    - attempt_failure_not_logical_terminal_failure
+    - worker_claim_not_execution_claim
+    - workflow_completion_not_business_outcome
+    - cancellation_preserves_history_prevents_future_claim
+  technology_verdict:
+    shared_durable_work_semantic_contract: STRONGLY_SUPPORTED
+    universal_new_workflow_runtime: NOT_JUSTIFIED_YET
+  positive_seams:
+    - bullmq_delayed_lock_retry_stalled
+    - whatsapp_scheduled_cas_claim
+    - email_campaign_scheduled_cas_claim
+    - scheduled_agent_job_checkpoint_uniqueness
+    - flowrun_idempotency_key
+    - quote_followup_domain_cancellation
+  open_axes:
+    - cancellation_supersession
+    - stale_scheduled_payload_revalidation
+    - missed_schedule_policy
+    - workflow_definition_versioning
+    - awaiting_external_outcome_unknown
+    - temporal_operator_read_model
+    - workoccurrence_persistence_decision
+    - durable_workflow_engine_threshold
 next_actions:
-  - trace_proposal_capability_risk_and_mutation_semantics
-  - trace_reply_channel_identity_proof
-  - trace_post_approval_plan_step_mutations
-  - trace_expiry_revocation_invalidation
-  - trace_control_plane_authority
-  - trace_frontend_approval_evidence_and_stale_state
-  - pool_F044_F075_into_finding_register
-  - pool_C022_C039_into_contradiction_register
-  - update_mature_recommendations
-  - create_active_kernel_dossiers
-  - feed_material_kernel_changes_back_into_J1_J25_J2
+  - finish_j23_cancellation_supersession_trace
+  - trace_stale_scheduled_payload_revalidation
+  - define_missed_schedule_policy_classes
+  - define_workflow_definition_version_semantics
+  - trace_awaiting_external_and_outcome_unknown_into_j18_k9_k11
+  - define_minimum_operator_temporal_state
+  - decide_existing_models_vs_shared_workoccurrence_persistence
+  - define_engine_adoption_threshold
+  - backward_reaudit_j15_waiting_clearance_invalidation
+  - backward_reaudit_j6_stop_kill_pause_against_waiting_work
+  - backward_reaudit_j14_delayed_retryable_consequences
+  - keep_start_here_handoff_machine_state_current
+broader_outstanding:
+  - control_evidence_clearance_execution_claim_persistence
+  - effective_authority_resolver_and_grantability_migration
+  - capability_permission_vocabulary_migration
+  - approval_regime_migration
+  - action_dispatcher_universal_post_clearance_migration
+  - canonical_event_envelope_and_consequence_ownership
+  - durable_ingress_occurrence_lifecycle
+  - financial_provider_reconciliation
+  - business_graph_genome_readiness_integration
+  - remaining_journey_microscopic_passes
+  - kernel_9_10_12_convergence_where_incomplete
+  - execution_compiler_and_kf_exec_packets_after_target_convergence
 constraints:
   - do_not_modify_production_code
   - revalidate_commit_sensitive_findings_if_main_advances
-  - do_not_invent_historical_finding_numbers_beyond_F043
+  - do_not_create_parallel_v2_sources_of_truth
+  - do_not_install_workflow_engine_from_findings_alone
   - do_not_delete_legacy_without_consumer_proof
-  - prefer_strengthening_existing_seams_before_v2_replacements
-  - preserve_current_reality_vs_target_state
-  - preserve_evidence_interpretation_decision
-  - use_implementation_handoff_protocol_before_coding
+  - do_not_claim_tests_or_runtime_proof_unless_executed
