@@ -12,11 +12,9 @@ No materially important conclusion about KeyFlowOS is considered preserved until
 
 **MAP BEFORE MODIFYING.**
 
-The architecture/research session is the command center. Production behavior must not be changed merely because a local problem appears obvious. First determine the affected journeys, kernels, state transitions, authority, capability, evidence, dependencies, contradictions, compatibility surfaces and proof requirements.
+The architecture/research session is the command center. Production behavior must not be changed merely because a local problem appears obvious. First determine affected journeys, constellations, kernels, state transitions, authority, capability, evidence, dependencies, contradictions, compatibility surfaces, migration and proof requirements.
 
-## Required load order for a new agent/session
-
-Read in this order:
+## Required load order
 
 1. `AGENTS.md`
 2. `docs/intelligence/AGENT-CONTINUITY.md`
@@ -28,18 +26,19 @@ Read in this order:
 8. `docs/intelligence/05-DECISION-REGISTER.md`
 9. `docs/intelligence/06-OPEN-QUESTIONS.md`
 10. `docs/intelligence/07-CURRENT-STATE.md`
-11. canonical finding register + all current supplements (`08*`)
-12. canonical contradiction register + all current supplements (`09*`)
-13. canonical recommendation register + all current continuations (`10*`)
+11. canonical finding register + **all current `08*` supplements**
+12. canonical contradiction register + **all current `09*` supplements**
+13. canonical recommendation register + **all current `10*` continuations**
 14. `docs/intelligence/11-RECURSIVE-ASSURANCE-PROGRAMME.md`
 15. `docs/intelligence/12-KERNEL-PROGRAMME.md`
 16. `docs/intelligence/13-IMPLEMENTATION-HANDOFF-PROTOCOL.md`
 17. `docs/intelligence/14-STANDARDS-RESEARCH-INNOVATION-METHOD.md`
 18. `docs/intelligence/15-EXPORTABLE-DIGITAL-TWIN-SPEC.md`
 19. `docs/intelligence/16-KEYFLOWOS-ARCHITECT-AGENT-CONTRACT.md`
-20. `docs/intelligence/handoff/CURRENT-HANDOFF.md`
-21. `docs/intelligence/handoff/CURRENT-STATE.yaml`
-22. active journey/kernel/investigation files referenced by current state.
+20. `docs/intelligence/16-SYSTEM-DYNAMICS-QUALITY-DIMENSIONS.md`
+21. `docs/intelligence/handoff/CURRENT-HANDOFF.md`
+22. `docs/intelligence/handoff/CURRENT-STATE.yaml`
+23. active journey/kernel/investigation files referenced by current state.
 
 For continuity-sensitive work, also read the most recent relevant session journal.
 
@@ -47,27 +46,29 @@ Do not continue substantive work until required context is loaded or a missing-f
 
 ## Core operating model
 
-KeyFlowOS analysis runs as a **Journey Mesh + Kernel Mesh**.
-
 ```text
-VERTICAL
-= 25 end-to-end journey dossiers
+25 JOURNEYS
+= vertical end-to-end views
 
-HORIZONTAL
-= 12 pooled architectural kernels
+JOURNEY CONSTELLATIONS
+= interacting closed-system loops
 
-LOOPS
-= constellations of journeys that repeatedly stress-test shared kernels
+12 KERNELS
+= horizontal shared architecture
 
-WHOLE OS
-= recursive re-audit of the integrated architecture
+KERNEL CONSTELLATIONS
+= interacting invariant clusters
+
+GLOBAL INVARIANTS + FINDINGS + RESEARCH
+= pooled architecture truth
+
+TARGET STATE + MIGRATION + PROOF + GRAPH
+= computable digital twin
 ```
 
-Journeys are not independent checklists. Kernels are not abstract replacements for journey evidence.
+Journeys are not independent checklists. Kernels are not abstract replacements for journey evidence. Constellations are first-class analytical/export entities.
 
-## Active constellation
-
-Current high-leverage analytical mesh:
+## Active analytical mesh
 
 ```text
 KF-JOURNEY-001 — Business Birth
@@ -87,11 +88,16 @@ KF-JOURNEY-023 — Temporal Flow / Long-Running Workflow
 KF-JOURNEY-018 — Failure → Recovery
 ```
 
-J23 is the active convergence pressure test. Production implementation remains unauthorized.
+Current frontier:
+
+```text
+J23 = L5 VALUE-ENGINEERED / ENTERING L6 TARGET-CONVERGENCE
+J18 = next dedicated microscopic recovery pressure test
+```
+
+Production implementation remains unauthorized.
 
 ## Canonical kernel programme
-
-Current working kernels:
 
 1. Tenant Genesis & Identity
 2. Human Authority & Organization
@@ -106,13 +112,23 @@ Current working kernels:
 11. Recovery & Reliability
 12. Engineering Control Plane
 
-Shared semantic defects should normally be recorded once at kernel/system level and referenced by affected journeys rather than duplicated under every journey.
+Current active cluster:
+
+```text
+K3 Governance
+→ K5 Capability
+→ K6 State Transition
+→ K7 Temporal / Workflow
+→ K11 Recovery / Reliability
+→ K8 Evidence / Outcome
+→ K9 Integration / External Reality
+```
+
+Shared semantic defects should normally be recorded once and referenced by affected journeys rather than duplicated.
 
 ## Current architectural thesis
 
 > **KeyFlowOS is a governed business-state transition system.**
-
-Current causal model:
 
 ```text
 External reality
@@ -128,125 +144,181 @@ External reality
 → specialized control workflow/channel
 → typed ControlEvidence
 → exact-action Clearance
-→ logical WorkOccurrence / temporal eligibility where needed
+→ durable WorkOccurrence / temporal eligibility where needed
+→ worker/coordination claim
 → atomic ExecutionClaim
-→ canonical post-clearance ActionDispatcher
+→ canonical ActionDispatcher
 → domain/provider execution
-→ durable OutcomeEvidence / reconciliation
+→ AWAITING_EXTERNAL / OutcomeEvidence / reconciliation
 → Business Graph
 → Genome evolution
 ```
 
-Important distinctions:
+## Current canonical ranges
 
 ```text
-Membership != final effective authority
-Human authority != KEY autonomy
-Risk/impact != ControlRequirement
-Approval != Clearance
-Clearance != ExecutionClaim
-Workflow state != ControlEvidence
-Event delivery != event consumption
-Mutable plan != hierarchical clearance
-Definition != WorkOccurrence
-WorkOccurrence != Attempt
+Findings:        F149
+Contradictions:  C099
+Recommendations: KF-REC-047
+```
+
+Current `08A` through `08J`, `09A` through `09J`, and `10A` through `10F` are canonical continuations, not optional notes.
+
+Do not silently ignore supplements because an older monolithic register stops earlier.
+
+## Active J23 target
+
+Load especially:
+
+- `journeys/KF-JOURNEY-023-TEMPORAL-FLOW-LONG-RUNNING-WORKFLOW.md`
+- `investigations/J23-TARGET-CONVERGENCE-AND-MIGRATION-MAP.md`
+- `investigations/J23-CANCELLATION-SUPERSESSION-AND-DESCENDANT-INVALIDATION.md`
+- `investigations/J23-MISSED-SCHEDULE-AND-LATENESS-POLICY.md`
+- `investigations/J23-WORKFLOW-DEFINITION-VERSIONING.md`
+- `investigations/J23-EXTERNAL-OUTCOME-UNCERTAINTY-AND-RECONCILIATION.md`
+- `investigations/J23-CANCELLATION-BACKWARD-REINJECTION-J6-J14-J15-K8-K9.md`
+- `investigations/J23-BACKWARD-REINJECTION-LATENESS-VERSIONING-EXTERNAL-OUTCOME.md`
+
+Target logical lifecycle:
+
+```text
+Definition(version)
+→ WorkOccurrence
+→ SCHEDULED / durable wait
+→ lateness/misfire policy
+→ cancellation/supersession/expiry
+→ ELIGIBLE
+→ worker claim
+→ attempt
+→ current source/authority/policy eligibility
+→ ActionEnvelope + Clearance
+→ ExecutionClaim
+→ effect
+→ AWAITING_EXTERNAL / OUTCOME_UNKNOWN where necessary
+→ OutcomeEvidence / reconciliation
+→ SUCCEEDED | FAILED_FINAL | CANCELLED | SUPERSEDED | EXPIRED
+```
+
+Core distinctions:
+
+```text
+Definition != Occurrence
+Occurrence != Attempt
 Waiting != Completed
 Queued != Running
 Attempt Failed != Logical Step Failed
+Worker Claim != ExecutionClaim
+Approval != Clearance
+Handoff Complete != Effect Complete
+Cancel Requested != Cancellation Proven
+Overdue != Still Valid
+Definition ID != immutable action semantics
+Provider Acceptance != Delivery/Settlement
+Ambiguous External Outcome != Confirmed Failure
 Workflow Completion != Business Outcome
 ```
 
-## Current canonical register ranges
-
-Current canonical sequence extends through:
+## J23 convergence decision
 
 ```text
-Findings:        F140
-Contradictions:  C091
-Recommendations: KF-REC-041
-```
+ONE SHARED DURABLE-WORK SEMANTIC CONTRACT
+= YES
 
-Current continuation files are part of the canonical register, not optional notes:
+ONE CROSS-DOMAIN TEMPORAL WORK PROJECTION
+= YES, as derivative read model
 
-- `08A-FINDING-REGISTER-CURRENT-SUPPLEMENT.md`
-- `08B-FINDING-REGISTER-EVENT-AGENCY-SUPPLEMENT.md`
-- `08C-FINDING-REGISTER-CONSEQUENCE-OWNERSHIP-SUPPLEMENT.md`
-- `08D-FINDING-REGISTER-BOOKING-TEMPORAL-SUPPLEMENT.md`
-- `08E-FINDING-REGISTER-EXTERNAL-INGRESS-SUPPLEMENT.md`
-- `08F-FINDING-REGISTER-TEMPORAL-WORK-SUPPLEMENT.md`
-- `09A-CONTRADICTION-REGISTER-CURRENT-SUPPLEMENT.md`
-- `09B-CONTRADICTION-REGISTER-EVENT-AGENCY-SUPPLEMENT.md`
-- `09C-CONTRADICTION-REGISTER-CONSEQUENCE-OWNERSHIP-SUPPLEMENT.md`
-- `09D-CONTRADICTION-REGISTER-BOOKING-TEMPORAL-SUPPLEMENT.md`
-- `09E-CONTRADICTION-REGISTER-EXTERNAL-INGRESS-SUPPLEMENT.md`
-- `09F-CONTRADICTION-REGISTER-TEMPORAL-WORK-SUPPLEMENT.md`
-- `10A-RECOMMENDATION-REGISTER-INGRESS-CONTINUATION.md`
-- `10B-RECOMMENDATION-REGISTER-TEMPORAL-WORK-CONTINUATION.md`
-
-Do not silently ignore supplements because the original monolithic registers have older ranges.
-
-## Active J23 temporal model
-
-Load:
-
-- `journeys/KF-JOURNEY-023-TEMPORAL-FLOW-LONG-RUNNING-WORKFLOW.md`
-- `investigations/J23-K7-K11-TEMPORAL-REINJECTION.md`
-- `investigations/J23-CANCELLATION-SUPERSESSION-OPEN-TRACE.md`
-
-Working law:
-
-```text
-Work Definition
-→ stable logical WorkOccurrence
-→ durable wait / SCHEDULED
-→ ELIGIBLE
-→ worker/coordination claim
-→ attempt
-→ exact ActionEnvelope + current governance
-→ Clearance
-→ ExecutionClaim
-→ domain/provider effect
-→ OutcomeEvidence / reconciliation
-→ terminal state or next wait/retry
-```
-
-Technology verdict:
-
-```text
-ONE DURABLE-WORK SEMANTIC CONTRACT
-= strongly supported
+ONE UNIVERSAL WorkOccurrence TABLE
+= not justified yet
 
 ONE UNIVERSAL WORKFLOW RUNTIME
 = not justified yet
 ```
 
-Do not install Temporal/Camunda merely because J23 exposes temporal defects. Existing BullMQ, DB compare-and-set, domain schedulers and saga/evidence seams must first be evaluated and strengthened.
+Do not install Temporal/Camunda merely because J23 found temporal defects. BullMQ, DB compare-and-set, OutboundDelivery, domain schedulers, ActionDispatcher, provider IDs and existing evidence seams should be strengthened first.
+
+## Strong existing seams
+
+Prefer evolving rather than replacing:
+
+- Membership
+- CapabilityContractService
+- ActionDispatcherService
+- AuthorityGrant
+- KeyCortexApprovalOrchestrator
+- ApprovalRequest
+- BullMQ delayed/lock/retry/stall machinery
+- FlowRun run/idempotency identity
+- ScheduledAgentJob checkpoint identity
+- WhatsApp scheduled CAS + provider message ID
+- EmailCampaign sender CAS
+- OutboundDelivery / DeliveryEvent
+- quote-followup cancellation + current-state revalidation
+- K9 provider reconciliation semantics
+- Saga evidence/compensation concepts where genuinely reachable
+
+## J23 migration sequence
+
+```text
+A characterize statuses + proof harness
+B strengthen claim/ownership boundaries
+C cancellation/version/lateness
+D provider outcome/reconciliation
+E Temporal Work Projection
+F reassess physical persistence/runtime convergence
+```
+
+A shared semantic contract comes before a shared physical table.
+
+## Next frontier — J18 Failure → Recovery
+
+J23 has materially reopened J18.
+
+Target recovery taxonomy:
+
+```text
+RETRYABLE_ATTEMPT_FAILURE
+FAILED_FINAL_CONFIRMED
+EXPIRED
+CANCELLED
+SUPERSEDED
+AWAITING_EXTERNAL
+OUTCOME_UNKNOWN
+```
+
+Recovery law:
+
+```text
+failure/crash
+→ establish logical occurrence/effect identity
+→ classify certainty
+→ re-check cancellation/supersession/lateness/version/governance/current business state
+→ reconcile external ambiguity before unsafe retry
+→ resume/retry/expire/repair/compensate as appropriate
+→ preserve truthful OutcomeEvidence
+```
+
+J18 should now be reconstructed microscopically across the live retry/recovery fabrics rather than treated as generic reliability boilerplate.
 
 ## Knowledge classification
 
-Use these classes when ambiguity matters:
+Use:
 
-- **IMPLEMENTATION FACT / FACT** — directly supported by repository/source/runtime evidence.
-- **TEST SOURCE** — test code exists; not proof that it was executed or passed.
-- **GENERATED STATE** — generated architecture/audit state.
-- **MAINTAINED ARCHITECTURE DOC** — maintained design/documentation evidence.
-- **HISTORICAL / STALE DOC** — historical intent/context, not current implementation truth.
-- **PRODUCT SOURCE** — founding/product intent source.
-- **INFERENCE** — analyst reasoning from evidence.
-- **WORKING HYPOTHESIS / WORKING DIRECTION** — not yet accepted architecture.
-- **OPEN QUESTION** — unresolved.
-- **ACCEPTED DECISION** — explicitly adopted.
-- **DEPRECATED / SUPERSEDED** — replaced/refined.
-- **RECOVERY UNCERTAIN** — reconstructed continuity with insufficient confidence.
+- **IMPLEMENTATION FACT / FACT**
+- **TEST SOURCE**
+- **GENERATED STATE**
+- **MAINTAINED ARCHITECTURE DOC**
+- **HISTORICAL / STALE DOC**
+- **PRODUCT SOURCE**
+- **INFERENCE**
+- **WORKING HYPOTHESIS / WORKING DIRECTION**
+- **OPEN QUESTION**
+- **ACCEPTED DECISION**
+- **DEPRECATED / SUPERSEDED**
+- **RECOVERY UNCERTAIN**
 
-Never silently promote hypothesis to decision.
-Never silently treat historical documentation as current implementation truth.
-Never silently treat current implementation as final intended architecture.
-Never invent historical identifiers.
+Never silently promote hypothesis to decision, historical docs to implementation truth, or implementation truth to intended architecture.
 
 ## Evidence discipline
-
-Preserve:
 
 ```text
 evidence
@@ -255,86 +327,26 @@ evidence
 → accepted decision
 ```
 
-Distinguish:
+And:
 
 ```text
 implementation exists
 != test source exists
 != test executed successfully
-!= runtime behavior reproduced
+!= runtime reproduced
 != concurrency invariant proven
 != system invariant proven
 ```
 
-## Current reality vs target KeyFlowOS
-
-Maintain both views at all times:
-
-```text
-CURRENT REALITY
-= what the current repository/runtime actually does
-
-TARGET KEYFLOWOS
-= the architecture accepted after evidence, product intent, standards, contradictions, value engineering and cross-journey testing converge
-```
-
-Never allow target-state concepts to contaminate current-state claims.
-
-## Finding lifecycle
-
-Important findings should remain reopenable:
-
-```text
-PROVISIONAL
-→ VERIFIED
-→ RE-ANALYZED
-   → STRENGTHENED
-   → NARROWED
-   → UNCHANGED
-   → SUPERSEDED
-   → REFUTED
-```
-
-Truth outranks preservation of earlier conclusions.
-
-## Existing-seam rule
+## Existing-seam / legacy discipline
 
 Prefer strengthening coherent existing machinery before creating parallel `v2` systems.
 
-Important existing seams requiring continued evaluation include:
-
-- Membership
-- CapabilityContractService
-- ActionDispatcherService
-- AuthorityGrant
-- KeyCortexApprovalOrchestrator
-- ApprovalRequest
-- BullMQ queue/worker machinery
-- ScheduledAgentJob checkpoint identity
-- domain compare-and-set claims such as WhatsApp/EmailCampaign scheduling
-
-Do not assume these are sufficient; prove or disprove suitability first.
-
-## Legacy / reachability discipline
-
-Do not classify code as dead merely because UI navigation does not expose it.
-
-Distinguish:
-
-- mounted
-- reachable
-- called
-- UI-linked
-- externally callable
-- orphaned
-- legacy
-- compatibility-only
+Do not classify code as dead merely because UI navigation does not expose it. Distinguish mounted, reachable, called, UI-linked, externally callable, orphaned, legacy and compatibility-only.
 
 Legacy residue must be consumer-proven before deletion.
 
-## Layered improvement rule
-
-For each journey/kernel distinguish:
+## Improvement layers
 
 ```text
 L0 Correctness
@@ -345,13 +357,11 @@ L4 KeyFlow-specific differentiation
 L5 Novel value above the reference floor
 ```
 
-Basic authorization, audit, idempotency and security are production standards, not innovation.
+Basic authorization, audit, idempotency and security are not innovation.
 
 ## Implementation control
 
 Do not turn findings directly into coding tasks.
-
-Before coding, relevant clusters should approach:
 
 ```text
 mapped
@@ -364,15 +374,13 @@ mapped
 → execution-ready
 ```
 
-Then use `13-IMPLEMENTATION-HANDOFF-PROTOCOL.md` to issue bounded `KF-EXEC-*` packets to Claude Code or another implementer.
-
-Kimi/Gemini or another reviewer may independently adversarially review the same accepted invariant and resulting diff.
+Only then use `13-IMPLEMENTATION-HANDOFF-PROTOCOL.md` for bounded `KF-EXEC-*` packets to Claude Code. Kimi/Gemini may adversarially review the same accepted invariant and resulting diff.
 
 ## Persistence rule
 
-Material progress must update the relevant canonical artifacts and then continuity state:
+Material progress must update relevant canonical artifacts and then continuity state:
 
-- system/analysis/kernel/journey artifacts;
+- journey/kernel/system artifacts;
 - concepts/decisions/questions;
 - findings/contradictions/recommendations;
 - current state;
@@ -382,18 +390,14 @@ Material progress must update the relevant canonical artifacts and then continui
 
 Chats can expire. KeyFlowOS knowledge should not.
 
-## Continuation protocol
+## Do not
 
-A fresh agent should be able to answer:
-
-- What is KeyFlowOS?
-- What does current implementation actually do?
-- What target architecture is working versus accepted?
-- Which journeys and kernels are active?
-- Which findings/contradictions are unresolved?
-- Which recommendations are provisional?
-- What changed most recently?
-- What should happen next?
-- What must not be implemented yet?
-
-If those cannot be answered, context integrity is insufficient and recovery should occur before substantive work.
+- modify production code without explicit authorization;
+- create parallel `*2`/`v2` sources of truth;
+- freeze target persistence prematurely;
+- treat queue/transport state as logical work truth;
+- treat scheduled time as perpetual authority/relevance;
+- treat provider acceptance as delivery/settlement;
+- blindly retry `OUTCOME_UNKNOWN`;
+- delete legacy consumers without reachability proof;
+- claim tests/runtime success unless actually executed.
