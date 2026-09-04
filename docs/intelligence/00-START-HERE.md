@@ -12,7 +12,7 @@ No materially important conclusion about KeyFlowOS is preserved until written in
 
 **MAP BEFORE MODIFYING.**
 
-The architecture/research session is the command center. Production behavior must not be changed merely because a local problem appears obvious. First determine affected journeys, constellations, kernels, state transitions, authority, capability, evidence, dependencies, contradictions, compatibility surfaces, migration and proof requirements.
+Production behavior must not be changed merely because a local problem appears obvious. First determine affected journeys, constellations, kernels, state transitions, authority, capability, evidence, dependencies, contradictions, compatibility surfaces, migration and proof requirements.
 
 ## Required load order
 
@@ -26,9 +26,9 @@ The architecture/research session is the command center. Production behavior mus
 8. `docs/intelligence/05-DECISION-REGISTER.md`
 9. `docs/intelligence/06-OPEN-QUESTIONS.md`
 10. `docs/intelligence/07-CURRENT-STATE.md`
-11. canonical finding register + **all current `08*` supplements**
-12. canonical contradiction register + **all current `09*` supplements**
-13. canonical recommendation register + **all current `10*` continuations**
+11. canonical finding register + all current `08*` supplements
+12. canonical contradiction register + all current `09*` supplements
+13. canonical recommendation register + all current `10*` continuations
 14. `docs/intelligence/11-RECURSIVE-ASSURANCE-PROGRAMME.md`
 15. `docs/intelligence/12-KERNEL-PROGRAMME.md`
 16. `docs/intelligence/13-IMPLEMENTATION-HANDOFF-PROTOCOL.md`
@@ -40,186 +40,85 @@ The architecture/research session is the command center. Production behavior mus
 22. `docs/intelligence/handoff/CURRENT-STATE.yaml`
 23. active journey/kernel/investigation files referenced by current state.
 
-For continuity-sensitive work, also read the most recent relevant session journal.
-
 Do not continue substantive work until required context is loaded or a missing-file condition is explicitly reported.
 
 ## Core operating model
 
 ```text
 25 JOURNEYS
-= vertical end-to-end views
-
-JOURNEY CONSTELLATIONS
-= interacting closed-system loops
-
-12 KERNELS
-= horizontal shared architecture
-
-KERNEL CONSTELLATIONS
-= interacting invariant clusters
-
-GLOBAL INVARIANTS + FINDINGS + RESEARCH
-= pooled architecture truth
-
-TARGET STATE + MIGRATION + PROOF + GRAPH
-= computable digital twin
++ JOURNEY CONSTELLATIONS
++ 12 KERNELS
++ KERNEL CONSTELLATIONS
++ GLOBAL INVARIANTS / FINDINGS / RESEARCH
++ TARGET STATE / MIGRATION / PROOF / GRAPH
+= COMPUTABLE KEYFLOWOS DIGITAL TWIN
 ```
-
-Journeys are not independent checklists. Kernels are not abstract replacements for journey evidence. Constellations are first-class analytical/export entities.
 
 ## Active analytical mesh
 
 ```text
-KF-JOURNEY-001 — Business Birth
-        ↕
-KF-JOURNEY-025 — Human Authority Lifecycle
-        ↕
-KF-JOURNEY-002 — KEY Request → Governed Action
-        ↕
-KF-JOURNEY-015 — Approval / Governance Lifecycle
-        ↕
-KF-JOURNEY-006 — Proactive KEY / Autonomy
-        ↕
-KF-JOURNEY-014 — Webhook / External Event Ingress
-        ↕
-KF-JOURNEY-023 — Temporal Flow / Long-Running Workflow
-        ↕
-KF-JOURNEY-018 — Failure → Recovery
+J1 Business Birth
+↕ J25 Human Authority
+↕ J2 Governed Action
+↕ J15 Approval / Governance
+↕ J6 Proactive KEY / Autonomy
+↕ J14 External Event Ingress
+↕ J23 Temporal Flow / Long-Running Workflow
+↕ J18 Failure / Recovery
 ```
 
 Current frontier:
 
 ```text
 J23 = L5 VALUE-ENGINEERED / ENTERING L6 TARGET-CONVERGENCE
-J18 = ACTIVE MICROSCOPIC RECOVERY PASS ADVANCED
+J18 = ACTIVE FORENSICS / ENTERING TARGET POOLING
 ```
 
 Production implementation remains unauthorized.
 
-## Canonical kernel programme
-
-1. Tenant Genesis & Identity
-2. Human Authority & Organization
-3. KEY Authority & Governance
-4. Business Knowledge
-5. Capability Fabric
-6. State Transition
-7. Temporal / Event / Workflow
-8. Evidence & Outcome
-9. Integration & External Reality
-10. Financial Truth
-11. Recovery & Reliability
-12. Engineering Control Plane
-
-Current active cluster:
+## Current canonical ranges
 
 ```text
-K3 Governance
-→ K5 Capability
-→ K6 State Transition
-→ K7 Temporal / Workflow
-→ K11 Recovery / Reliability
-→ K8 Evidence / Outcome
-→ K9 Integration / External Reality
-→ K10 Financial Truth where recovery is monetary
+Findings:        F157
+Contradictions:  C107
+Recommendations: KF-REC-048
 ```
 
-Shared semantic defects should normally be recorded once and referenced by affected journeys rather than duplicated.
+Current `08A` through `08K`, `09A` through `09K`, and `10A` through `10G` are canonical continuations, not optional notes.
 
-## Current architectural thesis
+## Architectural thesis
 
 > **KeyFlowOS is a governed business-state transition system.**
 
 ```text
 External reality
-→ observation / signal
-→ Business Graph
-→ Genome interpretation
+→ observation / Business Graph / Genome
 → KEY reasoning
-→ CapabilityContract
-→ ActionEnvelope
-→ Effective Human Authority + KEY autonomy/delegation + readiness + policy
-→ ControlRequirement
-→ typed ControlEvidence
-→ exact-action Clearance
-→ durable WorkOccurrence / temporal eligibility where needed
-→ worker/coordination claim
-→ atomic ExecutionClaim / EffectId
-→ canonical ActionDispatcher
-→ domain/provider execution
+→ CapabilityContract / ActionEnvelope
+→ current authority + policy
+→ ControlRequirement / ControlEvidence / Clearance
+→ durable WorkOccurrence / eligibility
+→ worker claim / AttemptId
+→ ExecutionClaim / EffectId
+→ domain/provider effect
 → AWAITING_EXTERNAL / OUTCOME_UNKNOWN where needed
 → OutcomeEvidence / reconciliation
 → terminal original outcome
-→ retry or distinct RecoveryEffectId for reversal/compensation
+→ RETRY same EffectId OR new RecoveryEffectId for reversal/compensation
 → RecoveryOutcomeEvidence
 → Business Graph / Genome evolution
 ```
 
-## Current canonical ranges
+## J23 decisions
 
 ```text
-Findings:        F155
-Contradictions:  C105
-Recommendations: KF-REC-047
+ONE SHARED DURABLE-WORK SEMANTIC CONTRACT = YES
+ONE CROSS-DOMAIN TEMPORAL WORK PROJECTION = YES
+ONE UNIVERSAL WorkOccurrence TABLE        = NOT JUSTIFIED YET
+ONE UNIVERSAL WORKFLOW RUNTIME             = NOT JUSTIFIED YET
 ```
 
-Current `08A` through `08K`, `09A` through `09K`, and `10A` through `10F` are canonical continuations, not optional notes.
-
-Do not silently ignore supplements because an older monolithic register stops earlier.
-
-## J23 convergence decision
-
-```text
-ONE SHARED DURABLE-WORK SEMANTIC CONTRACT
-= YES
-
-ONE CROSS-DOMAIN TEMPORAL WORK PROJECTION
-= YES, as derivative read model
-
-ONE UNIVERSAL WorkOccurrence TABLE
-= not justified yet
-
-ONE UNIVERSAL WORKFLOW RUNTIME
-= not justified yet
-```
-
-Do not install Temporal/Camunda merely because J23/J18 found temporal or recovery defects. BullMQ, DB compare-and-set, OutboundDelivery, domain schedulers, ActionDispatcher, Saga evidence, provider IDs and existing reconciliation seams should be strengthened first.
-
-## Active J23 target
-
-Load especially:
-
-- `journeys/KF-JOURNEY-023-TEMPORAL-FLOW-LONG-RUNNING-WORKFLOW.md`
-- `investigations/J23-TARGET-CONVERGENCE-AND-MIGRATION-MAP.md`
-- `investigations/J23-CANCELLATION-SUPERSESSION-AND-DESCENDANT-INVALIDATION.md`
-- `investigations/J23-MISSED-SCHEDULE-AND-LATENESS-POLICY.md`
-- `investigations/J23-WORKFLOW-DEFINITION-VERSIONING.md`
-- `investigations/J23-EXTERNAL-OUTCOME-UNCERTAINTY-AND-RECONCILIATION.md`
-- `investigations/J23-CANCELLATION-BACKWARD-REINJECTION-J6-J14-J15-K8-K9.md`
-- `investigations/J23-BACKWARD-REINJECTION-LATENESS-VERSIONING-EXTERNAL-OUTCOME.md`
-
-Target logical lifecycle:
-
-```text
-Definition(version)
-→ WorkOccurrence
-→ SCHEDULED / durable wait
-→ lateness/misfire policy
-→ cancellation/supersession/expiry
-→ ELIGIBLE
-→ worker claim
-→ attempt
-→ current source/authority/policy eligibility
-→ ActionEnvelope + Clearance
-→ ExecutionClaim
-→ effect
-→ AWAITING_EXTERNAL / OUTCOME_UNKNOWN where necessary
-→ OutcomeEvidence / reconciliation
-→ SUCCEEDED | FAILED_FINAL | CANCELLED | SUPERSEDED | EXPIRED
-```
-
-Core distinctions:
+Target J23 distinctions remain:
 
 ```text
 Definition != Occurrence
@@ -229,25 +128,25 @@ Queued != Running
 Attempt Failed != Logical Step Failed
 Worker Claim != ExecutionClaim
 Approval != Clearance
-Handoff Complete != Effect Complete
 Cancel Requested != Cancellation Proven
 Overdue != Still Valid
-Definition ID != immutable action semantics
 Provider Acceptance != Delivery/Settlement
 Ambiguous External Outcome != Confirmed Failure
 Workflow Completion != Business Outcome
 ```
 
-## Active J18 target
+## J18 recovery target
 
 Load especially:
 
 - `journeys/KF-JOURNEY-018-FAILURE-RECOVERY.md`
 - `investigations/J18-RECOVERY-CERTAINTY-REVERSAL-AND-IDEMPOTENCY-MATRIX.md`
+- `investigations/J18-OPERATOR-RECOVERY-AND-DEAD-LETTER-MAP.md`
 - `08K-FINDING-REGISTER-RECOVERY-SUPPLEMENT.md`
 - `09K-CONTRADICTION-REGISTER-RECOVERY-SUPPLEMENT.md`
+- `10G-RECOMMENDATION-REGISTER-RECOVERY-CONTINUATION.md`
 
-Failure-certainty taxonomy:
+Failure certainty:
 
 ```text
 RETRYABLE_ATTEMPT_FAILURE
@@ -260,7 +159,7 @@ SUPERSEDED
 SUCCEEDED
 ```
 
-Recovery-outcome taxonomy:
+Recovery outcome:
 
 ```text
 RECOVERY_AVAILABLE
@@ -272,125 +171,104 @@ RECOVERY_UNAVAILABLE
 MITIGATION_ONLY
 ```
 
-Recovery action taxonomy:
+Recovery action:
 
 ```text
 RETRY      same EffectId, new AttemptId
 RECONCILE  observe authoritative state
 CANCEL     prevent not-yet-effective work
 VOID       domain cancellation where legal
-REVERSAL   distinct inverse RecoveryEffectId
-COMPENSATE distinct mitigating RecoveryEffectId
-MITIGATION local follow-up when inverse effect impossible
+REVERSAL   new inverse RecoveryEffectId
+COMPENSATE new mitigating RecoveryEffectId
+MITIGATION follow-up where inverse effect impossible
 ```
 
-Current recovery laws:
+Core laws:
 
 ```text
 attempt failure != logical-work failure
-failed idempotency evidence != retry exhaustion
-control wait != failure
-provider timeout != confirmed non-effect
-undo != retry != reversal != compensation
-compensation handler return != confirmed inverse effect
-original execution outcome != recovery outcome
+original outcome != recovery outcome
 effect dedupe != consequence completeness
-financial reversal must converge Payment + ledger + invoice truth
+provider timeout != confirmed non-effect
+control wait != failure
+pending status != executable recovery work
+re-execute parent != resume unresolved children
+failure/time != recovery authority
 ```
 
-Latest recovery findings:
+Latest J18 findings:
 
 ```text
-F150 ActionDispatcher failed idempotency tombstone defeats BullMQ retry
-F151 UndoService eligibility is process-local/non-replicated
+F150 failed ActionDispatcher idempotency tombstone defeats BullMQ retry
+F151 UndoService eligibility is process-local
 F152 saga compensation can falsely report compensated
-F153 KeyCortex approval wait can become parent plan/saga failure
-F154 planner overwrites saga compensation outcome with generic failed
-F155 provider-backed refund can bypass ledger/invoice reconciliation and suppress webhook repair
+F153 KeyCortex approval wait can become parent failure
+F154 planner overwrites recovery outcome with generic failed
+F155 provider refund can bypass ledger/invoice reconciliation and suppress webhook repair
+F156 payment retry flips FAILED -> PENDING without observed provider recovery owner
+F157 plan execute-again can replay completed steps
 ```
 
-No new recovery recommendation is accepted yet. Pool and value-engineer J18 first.
+## KF-REC-048
 
-## Adopted external reference properties
+`Establish a certainty-aware Recovery Contract across existing execution fabrics.`
 
-- Stripe idempotency keys for safe POST retry after connection failures;
-- Stripe refund lifecycle events as reconciliation evidence;
-- PayPal `PayPal-Request-Id` for safe retry of modifying requests, including refunds;
-- BullMQ retry/job identity as queue lifecycle semantics rather than business-effect truth.
+Relationship:
 
-Current Stripe/PayPal refund connectors do not send the provider-native idempotency headers observed in those contracts.
+```text
+KF-REC-038 Durable WorkOccurrence
+→ KF-REC-040 logical != attempt state
+→ KF-REC-048 certainty-aware recovery contract
+→ KF-REC-037 provider reconciliation
+→ KF-REC-047 Temporal Work Projection / operator visibility
+```
+
+Recovery target decision:
+
+```text
+ONE RECOVERY SEMANTIC CONTRACT       = YES
+ONE CROSS-DOMAIN OPERATOR PROJECTION = YES, via KF-REC-047
+ONE UNIVERSAL DEAD-LETTER TABLE      = NOT JUSTIFIED YET
+ONE UNIVERSAL RECOVERY WORKER        = NOT JUSTIFIED YET
+```
+
+## Strong seams
+
+Prefer strengthening rather than replacing:
+
+- BullMQ delayed/attempt/lock/stalled machinery;
+- ActionDispatcher central effect boundary;
+- OutboundDelivery / DeliveryEvent;
+- SagaExecution / SagaStep evidence;
+- provider operation IDs + lifecycle callbacks;
+- `CommerceService.markPaymentRefunded()` + ledger reversal;
+- provider refund `createRefundWithPosting()` + invoice reconciliation;
+- quote-followup cancellation + current-state revalidation;
+- KF-REC-047 Temporal Work Projection.
+
+## External properties adopted
+
+- Stripe idempotency-key safe retry semantics;
+- PayPal `PayPal-Request-Id` retry/idempotency semantics;
+- provider operation IDs as reconciliation evidence;
+- BullMQ retry/job identity as transport/job lifecycle rather than business-effect finality.
 
 Adopt properties, not products.
 
-## Strong existing seams
-
-Prefer evolving rather than replacing:
-
-- Membership
-- CapabilityContractService
-- ActionDispatcherService
-- AuthorityGrant
-- KeyCortexApprovalOrchestrator
-- ApprovalRequest
-- BullMQ delayed/lock/retry/stall machinery
-- FlowRun run/idempotency identity
-- ScheduledAgentJob checkpoint identity
-- WhatsApp scheduled CAS + provider message ID
-- EmailCampaign sender CAS
-- OutboundDelivery / DeliveryEvent
-- SagaExecution / SagaStep evidence
-- `CommerceService.markPaymentRefunded()` + ledger reversal
-- provider webhook `createRefundWithPosting()` + invoice reconciliation
-- quote-followup cancellation + current-state revalidation
-- K9 provider reconciliation semantics
-
-## J23 migration sequence
+## Exact next work
 
 ```text
-A characterize statuses + proof harness
-B strengthen claim/ownership boundaries
-C cancellation/version/lateness
-D provider outcome/reconciliation
-E Temporal Work Projection
-F reassess physical persistence/runtime convergence
-```
-
-A shared semantic contract comes before a shared physical table.
-
-## J18 exact next work
-
-```text
-operator repair/dead-letter surfaces
-→ provider-effect-success/local-persistence-failure crash windows
+provider-effect-success / local-persistence-failure crash windows beyond refunds
 → remaining provider/domain cancellation + reversal matrix
-→ recovery authority / fresh Clearance requirements
-→ pool into K11/K9/K8/K10 target laws
-→ backward re-audit J15/J6
-→ reinject J18 into J23 L6
+→ J15/J6 backward re-audit for recovery authority / fresh Clearance
+→ KF-REC-048 reinjection into K11/K9/K8/K10
+→ J18 → J23 L6 field/status/migration/proof reinjection
+→ decide J18 L5 value-engineering readiness
 ```
 
-## Knowledge classification
+## Knowledge discipline
 
-Use:
-
-- **IMPLEMENTATION FACT / FACT**
-- **RUNTIME EVIDENCE**
-- **TEST SOURCE**
-- **EXECUTED TEST RESULT**
-- **GENERATED STATE**
-- **MAINTAINED ARCHITECTURE DOC**
-- **HISTORICAL / STALE DOC**
-- **PRODUCT SOURCE**
-- **INFERENCE**
-- **WORKING HYPOTHESIS / WORKING DIRECTION**
-- **OPEN QUESTION**
-- **ACCEPTED DECISION**
-- **DEPRECATED / SUPERSEDED**
-- **RECOVERY UNCERTAIN**
-
-Never silently promote hypothesis to decision, historical docs to implementation truth, or implementation truth to intended architecture.
-
-## Evidence discipline
+Use evidence classification and preserve:
 
 ```text
 evidence
@@ -399,28 +277,9 @@ evidence
 → accepted decision
 ```
 
-And:
-
-```text
-implementation exists
-!= test source exists
-!= test executed successfully
-!= runtime reproduced
-!= concurrency invariant proven
-!= system invariant proven
-```
-
-## Existing-seam / legacy discipline
-
-Prefer strengthening coherent existing machinery before creating parallel `v2` systems.
-
-Do not classify code as dead merely because UI navigation does not expose it. Distinguish mounted, reachable, called, UI-linked, externally callable, orphaned, legacy and compatibility-only.
-
-Legacy residue must be consumer-proven before deletion.
+Never claim runtime/tests passed unless actually executed.
 
 ## Implementation control
-
-Do not turn findings directly into coding tasks.
 
 ```text
 mapped
@@ -433,26 +292,18 @@ mapped
 → execution-ready
 ```
 
-Only then use `13-IMPLEMENTATION-HANDOFF-PROTOCOL.md` for bounded `KF-EXEC-*` packets to Claude Code. Kimi/Gemini may adversarially review the same accepted invariant and resulting diff.
-
-## Persistence rule
-
-Material progress must update relevant canonical artifacts and then continuity state.
-
-Chats can expire. KeyFlowOS knowledge should not.
+Only then create bounded `KF-EXEC-*` packets for Claude Code; Kimi/Gemini may adversarially review accepted invariants and resulting diffs.
 
 ## Do not
 
 - modify production code without explicit authorization;
-- create parallel `*2`/`v2` sources of truth;
-- freeze target persistence prematurely;
-- treat queue/transport state as logical work truth;
-- treat scheduled time as perpetual authority/relevance;
-- treat provider acceptance as delivery/settlement;
+- create parallel `v2` sources of truth;
+- install Temporal/Camunda from findings alone;
+- treat transport state as logical-work truth;
 - blindly retry `OUTCOME_UNKNOWN`;
-- treat a non-throwing compensation handler as confirmed reversal;
-- treat `AWAITING_CONTROL` as failure;
-- erase recovery outcome with original execution failure;
+- treat non-throwing compensation as confirmed reversal;
 - let effect dedupe suppress missing consequence repair;
-- delete legacy consumers without reachability proof;
-- claim tests/runtime success unless actually executed.
+- treat a status flip as provider retry;
+- replay completed children during parent resume;
+- delete legacy without consumer proof;
+- claim tests/runtime success unless executed.
