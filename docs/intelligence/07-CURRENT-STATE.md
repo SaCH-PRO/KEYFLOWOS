@@ -4,15 +4,15 @@ Last updated: 2026-09-03
 
 ## Analytical phase
 
-`COMPUTABLE_DIGITAL_TWIN / JOURNEY_KERNEL_CONVERGENCE`
+`COMPUTABLE_DIGITAL_TWIN / JOURNEY_KERNEL_CONVERGENCE / J23_TEMPORAL_WORK`
 
 ## Status
 
-`J15 L4 SEMANTICALLY RECONCILED — J6 ADMITTED AS GOVERNANCE/AUTONOMY STRESS TEST`
+`J23 ACTIVE FORENSICS — K7/K11 DURABLE-WORK SEMANTICS CONVERGING`
 
 Production implementation remains blocked.
 
-Context integrity: `PASS`
+Context integrity: `PASS`, with continuity files refreshed from previously stale J15-era state.
 
 ## Implementation evidence baseline
 
@@ -20,35 +20,25 @@ Current revalidated `main` baseline:
 
 `d7c5b86cfa276d75ffa42d5f1707c43704dc9f21`
 
-The latest movement from the earlier code-bearing baseline was audit-only in the inspected range. Revalidate again if `main` materially advances.
+Main still points at the same implementation/audit baseline. Revalidate before implementation-sensitive claims if it advances.
 
 ## Canonical operating model
 
 ```text
 25 JOURNEYS
-  = vertical end-to-end business/system views
-
-12 KERNELS
-  = horizontal shared architecture
-
-JOURNEY MESH + KERNEL MESH
-  = computable digital twin
++ 12 KERNELS
++ GLOBAL INVARIANTS
++ FINDINGS / CONTRADICTIONS / RECOMMENDATIONS
++ STANDARDS / REFERENCE RESEARCH
++ TARGET-STATE / MIGRATION / PROOF
+= COMPUTABLE KEYFLOWOS DIGITAL TWIN
 ```
-
-Core durable methods:
-
-- `11-RECURSIVE-ASSURANCE-PROGRAMME.md`
-- `12-KERNEL-PROGRAMME.md`
-- `13-IMPLEMENTATION-HANDOFF-PROTOCOL.md`
-- `14-STANDARDS-RESEARCH-INNOVATION-METHOD.md`
-- `15-EXPORTABLE-DIGITAL-TWIN-SPEC.md`
-- `16-KEYFLOWOS-ARCHITECT-AGENT-CONTRACT.md`
 
 Prime thesis:
 
 > KeyFlowOS is a governed business-state transition system.
 
-Working causal model:
+Current causal model:
 
 ```text
 External reality
@@ -58,35 +48,44 @@ External reality
 → KEY reasoning
 → CapabilityContract
 → ActionEnvelope
-→ Effective Human Authority + KEY autonomy + readiness + policy
+→ Effective Human Authority + KEY autonomy/delegation + readiness + policy
 → ControlRequirement
 → ControlPresentation
 → specialized control workflow/channel
 → typed ControlEvidence
 → exact-action Clearance
+→ logical WorkOccurrence / temporal eligibility where needed
 → atomic ExecutionClaim
-→ canonical post-clearance ActionDispatcher
+→ ActionDispatcher
 → domain/provider execution
-→ durable OutcomeEvidence
+→ durable OutcomeEvidence / reconciliation
 → Business Graph
 → Genome evolution
 ```
 
 ## Active constellation
 
+Current high-leverage mesh:
+
 ```text
 J1 Business Birth
   ↕
-J25 Human Authority Lifecycle
+J25 Human Authority
   ↕
-J2 KEY Request → Governed Action
+J2 Governed Action
   ↕
-J15 Approval / Governance Lifecycle
+J15 Approval / Governance
   ↕
-J6 Proactive KEY / Autonomy  ← admitted for stress-test scoping
+J6 Proactive KEY / Autonomy
+  ↕
+J14 External Event Ingress
+  ↕
+J23 Temporal Flow / Long-Running Workflow
+  ↕
+J18 Failure / Recovery
 ```
 
-J6 is not an independent expansion. It must stress the shared governance model and feed findings back into J15/J2/J25/J1.
+J23 is currently the active convergence pressure test. It is not permission to create a universal workflow engine.
 
 ## Active kernels
 
@@ -99,160 +98,174 @@ Highest current activity:
 - K6 State Transition
 - K7 Temporal / Event / Workflow
 - K8 Evidence & Outcome
+- K9 Integration & External Reality
+- K10 Financial Truth where provider/money consequences apply
 - K11 Recovery & Reliability
 
-## J15 maturity
-
-`L4 SEMANTICALLY RECONCILED / ENTERING L5 VALUE-ENGINEERED`
-
-J15 is not closed and not target-converged. Its remaining major questions are target/migration questions rather than undefined foundation:
-
-1. final migration relationship among AiApprovalItem, KeyActionProposal and ApprovalRequest after shared ControlEvidence exists;
-2. persistence shape for ControlEvidence / Clearance / ExecutionClaim;
-3. complete mapping of manual direct actions intentionally outside proposal workflows;
-4. invalidation strategy: event-driven vs evaluation-time authority/policy fingerprints vs hybrid;
-5. AutopilotSettings vs BusinessAutonomyProfile target convergence;
-6. step-up-auth policy by capability/impact/origin;
-7. ControlPresentation/channel rules;
-8. migration sequencing preserving live approval UI and compatibility consumers.
-
-J15 dossier:
-
-`journeys/KF-JOURNEY-015-APPROVAL-GOVERNANCE-LIFECYCLE.md`
-
-## Current finding state
-
-Historical recovered findings: `F003–F043`.
-
-Current revalidated findings now extend through `F089`.
-
-Canonical storage:
-
-- `08-FINDING-REGISTER.md` through F084;
-- `08A-FINDING-REGISTER-CURRENT-SUPPLEMENT.md` for F085–F089 and lifecycle corrections.
-
-Important newest findings:
-
-- F076: real plan-step Tier 3/4 risk can collapse to MEDIUM under EXECUTE_TOOL proposal wrapper;
-- F077: proposal execution re-evaluates wrapper identity before unwrapping exact tool;
-- F078: executing plans can acquire new AI-generated child steps after approval;
-- F079: bare YES/NO reply is not exact approval/action-bound;
-- F080: staff approval reply is processed before inbound event dedupe;
-- F081: approved proposal has no observed human-authority version/approval expiry binding;
-- F082: delegation expiry does not invalidate already-routed AiApprovalItem;
-- F083: BusinessAutonomyProfile hard-safety mutation uses only broad Business access;
-- F084: approval-history learning can automatically raise standing KEY maxAutoTier up to tier 2;
-- F085: `team:write` can construct authority stronger than the caller through multiple paths;
-- F086: ending/deleting OrgAssignment leaves copied Membership authority behind;
-- F087: KEY Action approval can occur without viewing significant structured action data;
-- F088: ApprovalRequest payload is available to client but not rendered;
-- F089: AI Plan approval omits exact tool/input payload already available to browser.
-
-Finding lifecycle corrections:
-
-- the old invitation “unavoidable email conflict” conclusion is `NARROWED / PARTIALLY SUPERSEDED` by current transactional `reconcileUserId()` behavior;
-- F067 quick-confirm is `RE-ANALYZED / NARROWED`: shipped client displays/passes the same action object and Flow re-governs; remaining defect is durable server-side exact-action binding.
-
-## Contradiction state
-
-Historical contradictions: `C005–C021`.
-
-Current contradictions now extend through `C051`.
-
-Canonical storage:
-
-- `09-CONTRADICTION-REGISTER.md` through C047;
-- `09A-CONTRADICTION-REGISTER-CURRENT-SUPPLEMENT.md` for C048–C051.
-
-Newest contradiction themes:
-
-- authority editor vs alternate `team:write` authority constructors;
-- backend-significant structured payload vs human-visible approval data;
-- KeyActionProposal convergence direction vs live AiApprovalItem UI;
-- optional detail availability vs actual authorization-moment acknowledgement.
-
-## Current pooled recommendations
-
-`10-RECOMMENDATION-REGISTER.md` now contains current provisional recommendations through `KF-REC-034`.
-
-Highest-leverage current directions:
+K7/K11 boundary now:
 
 ```text
-KF-REC-019 load-bearing CapabilityContractService
-KF-REC-020 canonical capability/permission vocabulary
-KF-REC-021 Effective Authority Resolver
-KF-REC-022 bounded grantability/delegation
-KF-REC-023 ActionEnvelope + fingerprint
-KF-REC-024 Impact/Risk != ControlRequirement
-KF-REC-025 typed ControlEvidence from specialized workflows
-KF-REC-026 exact-action Clearance + invalidation
-KF-REC-027 atomic ExecutionClaim
-KF-REC-028 ActionDispatcher as post-clearance seam
-KF-REC-029 hierarchical plan clearance
-KF-REC-030 exact conversational challenge + ingress idempotency
-KF-REC-031 proportional control-plane authority
-KF-REC-032 learning recommends authority changes; does not self-grant
-KF-REC-033 explicit principal lineage
-KF-REC-034 position-bound external human principal + assurance levels
+K7 = what logical work exists, why/when it waits or becomes eligible, and when it is terminal
+K11 = who owns an attempt/effect, retry/crash/reconciliation semantics, and atomic execution ownership
 ```
 
-All remain recommendations, not execution authorization.
+## Journey maturity / state
 
-## External standards / reference properties incorporated
+- J15: `L4 SEMANTICALLY RECONCILED / ENTERING L5 VALUE-ENGINEERED`; not target-converged.
+- J6: active autonomy/governance stress-test with distributed-execution and evidence findings pooled.
+- J14: microscopic external-ingress pass completed far enough to produce durable target recommendations; still re-openable through J23/K9/K11.
+- J23: `ACTIVE FORENSICS / CROSS-KERNEL TARGET REFINEMENT`; not implementation-ready.
 
-Current research has cross-referenced:
+## Current finding / contradiction / recommendation range
 
-- OWASP Authorization guidance;
-- OWASP Transaction Authorization guidance;
-- OWASP GenAI Excessive Agency / agent controls;
-- NIST SP 800-63B-4 out-of-band/replay-resistance principles;
-- Kubernetes RBAC anti-escalation `escalate`/`bind` semantics;
-- provider retry/idempotency behavior such as Twilio webhook retries.
+Canonical finding sequence now extends through `F140`.
 
-These are design properties to adapt, not systems to cargo-cult.
+Storage:
 
-## J6 admission purpose
+- `08-FINDING-REGISTER.md`
+- `08A-FINDING-REGISTER-CURRENT-SUPPLEMENT.md`
+- `08B-FINDING-REGISTER-EVENT-AGENCY-SUPPLEMENT.md`
+- `08C-FINDING-REGISTER-CONSEQUENCE-OWNERSHIP-SUPPLEMENT.md`
+- `08D-FINDING-REGISTER-BOOKING-TEMPORAL-SUPPLEMENT.md`
+- `08E-FINDING-REGISTER-EXTERNAL-INGRESS-SUPPLEMENT.md`
+- `08F-FINDING-REGISTER-TEMPORAL-WORK-SUPPLEMENT.md`
 
-J6 must stress-test whether the J15/J2 governance model works when there is **no fresh human command initiating the action**.
+Canonical contradiction sequence now extends through `C091`, including `09F-CONTRADICTION-REGISTER-TEMPORAL-WORK-SUPPLEMENT.md`.
 
-Priority J6 questions:
+Canonical provisional recommendation sequence now extends through `KF-REC-041`, including:
+
+- KF-REC-035 Durable IngressOccurrence with resumable processing ownership
+- KF-REC-036 compatibility ingress URLs delegate to one canonical processor
+- KF-REC-037 provider lifecycle reconciliation as first-class external-truth loop
+- KF-REC-038 durable WorkOccurrence semantic contract
+- KF-REC-039 first-class durable waits
+- KF-REC-040 separate logical workflow state from queue/attempt state
+- KF-REC-041 do not adopt a universal workflow runtime until existing seams are proven insufficient
+
+These are architecture recommendations, not execution authorization.
+
+## J23 current target
 
 ```text
-What causes KEY to act proactively?
-What principal/origin does a proactive action run for?
-Which standing authority actually permits it?
-How is capability identity resolved?
-Which readiness/business-state evidence is required?
-How do autonomy settings/profile/grants interact?
-Can learning expand authority?
-How is spend/action budget enforced before side effects?
-What control is required when origin is proactive rather than direct-human?
-What stops/revokes in-flight or queued proactive work?
-Does every proactive effect pass Clearance + ExecutionClaim + Dispatcher?
-What OutcomeEvidence feeds future learning?
+Work Definition
+→ stable logical WorkOccurrence
+→ SCHEDULED / waiting condition
+→ ELIGIBLE
+→ worker/coordination claim
+→ attempt
+→ exact ActionEnvelope + current governance
+→ Clearance
+→ K11 ExecutionClaim
+→ domain/provider effect
+→ OutcomeEvidence / reconciliation
+→ terminal state or next durable wait/retry
 ```
 
-## Immediate next work
+Required distinctions:
 
-1. open/revalidate J6 dossier;
-2. map every proactive trigger/scheduler/listener/watch mechanism;
-3. trace Autopilot / DelegationLoop / KeyCortex proactive paths;
-4. map AutopilotSettings vs BusinessAutonomyProfile vs AuthorityGrant hierarchy;
-5. trace proactive principal lineage and capability identity;
-6. test spend/action caps including estimated-cost plumbing;
-7. map proactive governance/approval paths;
-8. map execution gateway/claim/retry/recovery;
-9. map outcome/learning feedback;
-10. cross-reference findings back into J15/J2/J25 and relevant kernels;
-11. apply L0→L5 standards/reference/innovation assessment;
-12. keep all outputs exportable/machine-readable.
+```text
+Definition != Occurrence
+Occurrence != Attempt
+Waiting != Completed
+Queued != Running
+Attempt Failed != Logical Step Failed
+Worker Claim != ExecutionClaim
+Approval != Clearance
+Workflow Completion != Business Outcome
+```
+
+## J23 canonical findings
+
+- F137: FlowRunner completes long delay nodes immediately rather than durably suspending.
+- F138: DelegationLoop approval-required occurrence is finalized instead of suspended.
+- F139: BullMQ retryable attempt is persisted as terminal AiPlanStep failure.
+- F140: AI plan persistence compresses transport/workflow state and can make dependency/finalization decisions from transient queue state.
+
+Relevant earlier findings remain F097, F112, F122, F123, F127/F136 and J15 invalidation/clearance findings; do not duplicate them under new numbers.
+
+## Positive temporal seams to preserve
+
+- BullMQ delayed job, worker lock, retry and stalled recovery mechanics;
+- WhatsApp scheduled-message CAS claim `SCHEDULED -> SENDING`;
+- EmailCampaign CAS claim `DRAFT|SCHEDULED -> SENDING`;
+- ScheduledAgentJob checkpoint uniqueness;
+- FlowRun idempotency key;
+- Saga step/evidence/compensation concepts where reachable;
+- quote-conversion handler that explicitly marks pending quote-followup ScheduledAgentJobs `CANCELLED`.
+
+## Active cancellation / supersession trace
+
+Current status: `OPEN / SEARCH-SCOPED / NOT YET F141`.
+
+Current evidence:
+
+- no general AiPlan cancellation endpoint was observed; exposed plan routes are get/list/approve plus step undo;
+- PlannerService has generic status mutation but no dedicated cancel/supersede semantics;
+- no plan-linked BullMQ job removal path observed;
+- no general FlowRun cancellation primitive found in scoped search;
+- quote conversion provides a positive domain-specific cancellation pattern for pending ScheduledAgentJobs;
+- EmailCampaign supports cancellation while still `SCHEDULED`;
+- WhatsApp scheduled-message service has a durable SCHEDULED/SENDING claim path, but no cancellation method was observed in the inspected service;
+- approval rejection before queue admission correctly marks the waiting plan step failed and resumes plan evaluation, rather than needing queue cancellation;
+- ActionDispatcher has retry/idempotency/undo support but no observed active cancellation/abort contract.
+
+Before promoting a new finding, complete source-state revalidation, queue-withdrawal, active-claim, and OUTCOME_UNKNOWN cases.
+
+## Outstanding work — ordered
+
+### P0 — finish J23 semantic convergence
+
+1. complete cancellation/supersession trace across AiPlan, FlowRun, ScheduledAgentJob, DelegationLoop, campaigns/messages and active dispatcher attempts;
+2. trace stale scheduled payloads against changed domain state/consent/authority at execution time;
+3. define missed-schedule policy classes: catch-up, coalesce, skip, expire, manual review;
+4. define workflow-definition/version change semantics for already-waiting work;
+5. trace `AWAITING_EXTERNAL` / provider uncertainty / reconciliation into J18 and K9/K11;
+6. define minimal operator-visible temporal state and evidence contract;
+7. decide whether existing per-domain models can implement WorkOccurrence semantics without a new shared table;
+8. establish explicit criteria for when a Temporal/Camunda-class engine would actually be justified.
+
+### P1 — re-inject J23 into prior journeys/kernels
+
+9. backward re-audit J15 clearance expiry/revocation while work waits;
+10. backward re-audit J6 stop/kill/pause semantics against queued/waiting work;
+11. backward re-audit J14 durable ingress occurrences that create delayed/retryable consequences;
+12. strengthen K7/K11/K8/K9 dossiers with final temporal laws and outcome-unknown semantics.
+
+### P2 — digital-twin continuity / compilation
+
+13. keep CURRENT-HANDOFF, CURRENT-STATE.yaml and 00-START-HERE aligned with the active mesh and supplements;
+14. compile active findings/contradictions/recommendations into machine-readable graph records with stable IDs and dependency edges;
+15. instantiate still-needed kernels only when shared evidence justifies them, especially K9/K10/K12 if not already fully instantiated;
+16. continue whole-system journey activation rather than declaring the architecture complete after the current constellation.
+
+### P3 — execution readiness later
+
+17. no KF-EXEC packet until the affected cluster reaches target convergence, migration mapping and proof design;
+18. then issue bounded Claude Code packet(s), followed by Kimi/Gemini adversarial review;
+19. re-ingest implementation evidence and repeat from the earliest invalidated architecture layer.
+
+## Not yet resolved system-wide
+
+Even beyond J23, major architecture decisions remain provisional:
+
+- final persistence shape for ControlEvidence / Clearance / ExecutionClaim;
+- final effective-authority projection/resolution implementation;
+- capability/permission vocabulary migration;
+- approval regime migration relationship among KeyActionProposal, AiApprovalItem and ApprovalRequest;
+- ActionDispatcher migration from partial seam to universal post-clearance execution boundary;
+- explicit event/consequence ownership and canonical EventEnvelope adoption;
+- ingress occurrence lifecycle persistence;
+- financial/provider reconciliation breadth;
+- final Business Graph / Genome / readiness integration;
+- remaining 25-journey whole-system audit coverage;
+- K12 engineering-control-plane convergence and eventual execution compiler.
 
 ## Do not yet
 
 - modify production code;
-- freeze target persistence schemas;
-- turn recommendations directly into implementation packets;
-- create v2 capability/authority/approval/dispatcher systems before existing seams are disproven;
-- remove legacy approval models without consumer proof;
-- allow J6 to redefine settled distinctions silently—explicitly reopen prior journeys/kernels when evidence demands it;
-- claim tests/runtime behavior unless actually executed.
+- freeze target persistence schemas prematurely;
+- create `WorkflowEngine2`, `Authority2`, `Approval2`, `Dispatcher2`, etc.;
+- install Temporal/Camunda because J23 found workflow defects;
+- treat queue state as workflow truth;
+- delete legacy consumers without reachability proof;
+- claim runtime/test proof that has not been executed.
