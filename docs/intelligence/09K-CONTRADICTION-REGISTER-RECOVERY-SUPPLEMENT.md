@@ -17,8 +17,6 @@ queue truth: logical job has attempts remaining
 execution truth: effect key already returns terminal stored failure
 ```
 
-Target resolution: idempotency/effect identity must distinguish successful terminal consumption, retryable failed attempt and final failure.
-
 ---
 
 ## C101 — user-visible undo/recovery window vs process-local non-replicated eligibility state
@@ -27,22 +25,16 @@ Target resolution: idempotency/effect identity must distinguish successful termi
 
 UndoService exposes a five-minute undo window but stores eligibility only in process memory.
 
-Target resolution: where undo/compensation is a real product promise, eligibility/provenance/state must match the required process/replica durability.
-
 ---
 
 ## C102 — durable `compensated` claim vs handler semantics that may perform no inverse effect
 
 **Status:** VERIFIED ACTIVE CONTRADICTION
 
-Saga compensation treats a non-throwing handler as successful compensation, while handlers may no-op or perform mitigation-only work.
-
 ```text
 saga truth: compensated
 external/domain truth: inverse effect may be absent or impossible
 ```
-
-Target resolution: typed recovery evidence must distinguish requested, attempted, confirmed, unavailable, mitigated and failed.
 
 ---
 
@@ -55,8 +47,6 @@ child truth: waiting for valid control
 parent truth: failed
 ```
 
-Target resolution: `AWAITING_CONTROL` must be a resumable parent/child workflow state derived from durable current state.
-
 ---
 
 ## C104 — compensation outcome persisted by SagaService vs planner finalization overwriting it with generic failure
@@ -67,8 +57,6 @@ Target resolution: `AWAITING_CONTROL` must be a resumable parent/child workflow 
 recovery truth: compensated | compensation_failed | compensation_unavailable
 final saga truth: failed
 ```
-
-Target resolution: original execution outcome and recovery outcome remain orthogonal durable dimensions.
 
 ---
 
@@ -84,15 +72,11 @@ invoice truth: may remain paid/unreconciled
 webhook repair: suppressed as duplicate
 ```
 
-Target resolution: external effect dedupe must still allow idempotent completion of missing local consequences.
-
 ---
 
 ## C106 — operator-visible payment “retry” vs absence of executable provider recovery work
 
 **Status:** VERIFIED ACTIVE CONTRADICTION
-
-The Commerce API exposes a payment retry action and changes a `FAILED` Payment to `PENDING`, but the inspected mutation does not initiate a provider operation or create durable recovery work, and no generic consumer for that newly-pending row was observed in this pass.
 
 ```text
 operator/API truth: retry initiated
@@ -100,18 +84,11 @@ local row truth: PENDING
 execution truth: no observed provider retry owner
 ```
 
-Target resolution: recovery verbs and states must identify the actual recovery occurrence/owner. If an action only repairs bookkeeping state, it must be named/evidenced as such rather than represented as executable retry.
-
-Affected kernels: K7, K8, K9, K10, K11.
-Affected journeys: commerce/payment journeys, J18, J23.
-
 ---
 
 ## C107 — plan-level re-execution vs step-level confirmed-success preservation
 
 **Status:** VERIFIED ACTIVE CONTRADICTION
-
-The live KeyCortex plan execute endpoint can run a stored plan again. `executePlan()` resets the plan to `running`, starts a new saga and executes all stored steps without filtering already-completed steps.
 
 ```text
 step truth: previously succeeded
@@ -119,10 +96,47 @@ recovery intent: continue/repair unresolved plan
 planner behavior: execute successful step again
 ```
 
-Target resolution: recovery/resume must preserve per-step terminal truth and continue the same logical occurrence. Confirmed-success steps may only execute again under an explicit new-effect policy, not as an accidental consequence of parent re-execution.
+---
 
-Affected kernels: K6, K7, K8, K11.
-Affected journeys: J2, J15, J18, J23.
+## C108 — confirmed PayPal capture vs catch-path persistence of local payment failure
+
+**Status:** VERIFIED ACTIVE CONTRADICTION
+
+`capturePaypalOrder()` can receive a provider-confirmed `COMPLETED` capture, then fail while persisting the local Payment row. The broad catch records a synthetic `FAILED` payment and throws a capture failure.
+
+```text
+provider truth: capture completed
+local consequence truth: persistence failed
+catch-path truth: payment failed
+```
+
+The synthetic failure row also does not preserve the PayPal order/capture lineage used by the webhook fallback resolver, so later provider evidence may be unable to repair the local contradiction.
+
+Target resolution: once provider success is known, represent the state as confirmed external success with incomplete local consequences and preserve provider lineage for reconciliation.
+
+Affected kernels: K8, K9, K10, K11.
+Affected journeys: payment/commerce journeys, J14, J18, J23.
+
+---
+
+## C109 — provider-successful OutboundDelivery vs local retry/failure state after post-provider persistence error
+
+**Status:** VERIFIED ACTIVE CONTRADICTION
+
+`DeliveryQueueService.executeDelivery()` wraps provider publish and later local persistence in the same catch boundary.
+
+If the provider call returns success and a later local database/evidence operation throws, that local error is normalized as an adapter error and can transition the durable delivery to `RetryPending` or `Failed`.
+
+```text
+provider truth: published/accepted successfully
+local recovery truth: RetryPending | Failed
+next scheduler action: provider may be called again
+```
+
+Target resolution: separate provider-call failure from post-provider consequence failure. Confirmed provider success must transition to reconciliation/consequence repair, never generic execution retry.
+
+Affected kernels: K8, K9, K11.
+Affected journeys: outbound communication/content journeys, J14, J18, J23.
 
 ---
 
@@ -137,6 +151,8 @@ EXECUTION FAILURE must not erase RECOVERY OUTCOME
 PROVIDER FINANCIAL REVERSAL must converge PAYMENT + LEDGER + INVOICE TRUTH
 RETRY VERB must correspond to EXECUTABLE RECOVERY WORK
 PARENT RESUME must preserve CONFIRMED CHILD TERMINALITY
+CONFIRMED PROVIDER SUCCESS must not regress into PROVIDER FAILURE because a local consequence failed
+POST-PROVIDER LOCAL FAILURE must not authorize DUPLICATE EXTERNAL EFFECT
 ```
 
 No production implementation is authorized by this supplement.
