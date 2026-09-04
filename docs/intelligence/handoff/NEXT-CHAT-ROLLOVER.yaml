@@ -1,5 +1,5 @@
 project: KEYFLOWOS
-rollover_version: 6
+rollover_version: 7
 last_updated: 2026-09-04
 status: LIVE_CONTINUITY_ARTIFACT
 canonical_branch: docs/keyflow-intelligence-foundation
@@ -12,8 +12,8 @@ implementation_evidence:
   code_bearing_baseline: d7c5b86cfa276d75ffa42d5f1707c43704dc9f21
   current_head_change_class: audit-only
 analytical_state:
-  j23: L5_VALUE_ENGINEERED_ENTERING_L6
-  j18: L5_VALUE_ENGINEERED_ENTERING_L6
+  j23: L6_SEMANTIC_TARGET_CONVERGENCE_PROOF_REMAINING
+  j18: L6_SEMANTIC_TARGET_CONVERGENCE_PROOF_REMAINING
   j15: L5_RECOVERY_AUTHORITY_SEMANTICALLY_CONVERGED
   j6: ACTIVE_STRESS_TEST_RECOVERY_POLICY_SEMANTICALLY_CONVERGED
   k10: ACTIVE_INITIAL_CONVERGENCE
@@ -27,45 +27,53 @@ completed_l6_artifacts:
   live_row_migration: docs/intelligence/investigations/J23-J18-L6-LIVE-ROW-MIGRATION-COMPATIBILITY.md
   provider_contract_matrix: docs/intelligence/investigations/J23-J18-L6-PROVIDER-CONTRACT-IDEMPOTENCY-RECONCILIATION-MATRIX.md
   recovery_authority_representation: docs/intelligence/investigations/J23-J18-L6-RECOVERY-AUTHORITY-REPRESENTATION.md
+  temporal_projection_materialization: docs/intelligence/investigations/J23-J18-L6-TEMPORAL-WORK-PROJECTION-MATERIALIZATION.md
 innovation_method:
   canonical: docs/intelligence/14-STANDARDS-RESEARCH-INNOVATION-METHOD.md
   convergence_requires_anti_normalization_pressure_test: true
   horizons: [FLOOR, FRONTIER, KEYFLOW_SYNTHESIS]
   preferred_shape: novel_synthesis_over_novel_primitives
-recovery_authority_decisions:
-  recovery_clearance_loop: ACCEPTED_DIRECTION
-  recovery_control_twin: TARGET_CANDIDATE
-  adaptive_multidimensional_recovery_budget: TARGET_CANDIDATE
-  recovery_authority_repricing: ACCEPTED_DIRECTION_SEMANTIC
-  counterfactual_recovery_simulation: RESEARCH_DEFER
-  parallel_recovery_approval_service: REJECT
-  universal_policy_engine_adoption: NOT_JUSTIFIED
-  learning_can_expand_live_authority: false
-  stop_authority_may_be_broader_than_execute_authority: true
-  outcome_unknown_narrows_to_reconcile_before_duplicate_mutation: true
-  reversal_compensation_are_new_governed_effects: true
+accepted_innovation_directions:
+  recovery_clearance_loop: true
+  recovery_authority_repricing: true
+  contradiction_aware_projection: true
+  projection_generated_legal_next_actions: true
+target_candidates:
+  recovery_control_twin: true
+  adaptive_multidimensional_recovery_budget: true
+  attention_gradient: true
+  causal_recovery_horizon: true
+research_deferred:
+  counterfactual_recovery_simulation: true
+projection_decisions:
+  shared_semantic_projection_contract: YES
+  preferred_materialization: HYBRID_MATERIALIZED_INDEX_PLUS_LIVE_REVALIDATION
+  source_specific_adapters: YES
+  projection_authoritative: NO
+  explicit_freshness: YES
+  rebuildable: YES
+  contradiction_visibility: YES
+  universal_workoccurrence_table: NOT_JUSTIFIED_YET
+  universal_recoveryoccurrence_table: NOT_JUSTIFIED_YET
+  global_event_bus_rewrite: NOT_JUSTIFIED_YET
 exact_next_action:
-  title: temporal_work_projection_materialization
-  artifact: docs/intelligence/investigations/J23-J18-L6-TEMPORAL-WORK-PROJECTION-MATERIALIZATION.md
-  instruction: Converge the derivative Temporal Work Projection and Recovery Control Twin materialization/query strategy without creating a parallel authoritative workflow state machine.
-  required_dimensions:
-    - source_specific_adapters
-    - unified_semantic_projection_fields
-    - derivative_not_authoritative_contract
-    - live_vs_materialized_vs_hybrid_value_engineering
-    - freshness_and_staleness_semantics
-    - incremental_refresh
-    - rebuild_and_reconciliation
-    - degraded_source_behavior
-    - tenant_isolation
-    - sensitive_evidence_minimization
-    - operator_queries_and_actionability
-    - recovery_control_twin
-    - provider_and_financial_consequence_visibility
-    - migration_compatibility
-    - anti_normalization_innovation_pressure_test
-next_after_projection:
-  - characterization_concurrency_crash_proof_inventory
+  title: characterization_concurrency_crash_proof_inventory
+  artifact: docs/intelligence/investigations/J23-J18-L6-CHARACTERIZATION-CONCURRENCY-CRASH-PROOF-INVENTORY.md
+  instruction: Inventory existing tests and proof seams without claiming execution, then define exact characterization/concurrency/crash/adversarial proof obligations needed before bounded implementation readiness.
+  required_scenarios:
+    - provider_point_of_no_return_then_local_crash
+    - bullmq_retry_failed_idempotency_interaction
+    - parent_resume_preserves_successful_children
+    - webhook_claimed_then_processing_failure_and_redelivery
+    - financial_consequence_repair_without_provider_replay
+    - stop_revoke_during_retry_backoff
+    - reversal_requires_current_clearance
+    - local_delete_vs_provider_delete
+    - migration_ambiguous_rows
+    - projection_staleness_cannot_authorize_mutation
+    - projection_rebuild_and_adapter_reclassification
+    - tenant_isolation_cross_domain_projection
+next_after_proof_inventory:
   - backward_reaudit_active_constellation
   - bounded_kf_exec_readiness_assessment
 constraints:
