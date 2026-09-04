@@ -1,5 +1,5 @@
 project: KEYFLOWOS
-rollover_version: 1
+rollover_version: 2
 last_updated: 2026-09-04
 status: LIVE_CONTINUITY_ARTIFACT
 canonical_branch: docs/keyflow-intelligence-foundation
@@ -8,15 +8,21 @@ context_integrity: PASS
 repository: SaCH-PRO/KEYFLOWOS
 implementation_evidence:
   branch: main
-  current_head: 5ec358e9b792817eda1e37fd80a0574eb7905a8a
+  current_head: 168732d0e2226e11ed033c14fbdf7b3ea5344a41
   code_bearing_baseline: d7c5b86cfa276d75ffa42d5f1707c43704dc9f21
   current_head_change_class: audit-only
+intelligence_evidence:
+  branch: docs/keyflow-intelligence-foundation
+  checkpoint_head_before_this_refresh: 74aa9e181acb7470c81a147633851a7f8731a8d7
 analytical_state:
   j23: L5_VALUE_ENGINEERED_ENTERING_L6
-  j18: ACTIVE_FORENSICS_ENTERING_TARGET_POOLING
+  j18: L5_VALUE_ENGINEERED_ENTERING_L6
+  j15: L4_SEMANTICALLY_RECONCILED_ENTERING_L5
+  j6: ACTIVE_STRESS_TEST_RECOVERY_REINJECTED
+  k10: ACTIVE_INITIAL_CONVERGENCE
 canonical_ranges:
-  findings_through: F157
-  contradictions_through: C107
+  findings_through: F160
+  contradictions_through: C110
   recommendations_through: KF-REC-048
 active_mesh:
   - KF-JOURNEY-001
@@ -27,71 +33,98 @@ active_mesh:
   - KF-JOURNEY-014
   - KF-JOURNEY-023
   - KF-JOURNEY-018
-j18:
-  recommendation: KF-REC-048
-  failure_certainty:
-    - RETRYABLE_ATTEMPT_FAILURE
-    - FAILED_FINAL_CONFIRMED
-    - AWAITING_EXTERNAL
-    - OUTCOME_UNKNOWN
-    - EXPIRED
-    - CANCELLED
-    - SUPERSEDED
-    - SUCCEEDED
-  recovery_outcome:
-    - RECOVERY_AVAILABLE
-    - RECOVERY_REQUESTED
-    - RECOVERY_ATTEMPTED
-    - RECOVERY_SUCCEEDED_CONFIRMED
-    - RECOVERY_FAILED
-    - RECOVERY_UNAVAILABLE
-    - MITIGATION_ONLY
-  action_taxonomy:
-    RETRY: same_effect_new_attempt
-    RECONCILE: observe_authoritative_state
-    CANCEL: prevent_not_yet_effective_work
-    VOID: domain_native_cancellation
-    REVERSAL: new_inverse_recovery_effect
-    COMPENSATION: new_mitigating_recovery_effect
-    MITIGATION_ONLY: no_inverse_possible
-  latest_findings: [F150,F151,F152,F153,F154,F155,F156,F157]
-  latest_contradictions: [C100,C101,C102,C103,C104,C105,C106,C107]
+active_kernels:
+  - KF-KERNEL-003
+  - KF-KERNEL-005
+  - KF-KERNEL-006
+  - KF-KERNEL-007
+  - KF-KERNEL-008
+  - KF-KERNEL-009
+  - KF-KERNEL-010
+  - KF-KERNEL-011
 architecture_decisions:
   shared_durable_work_semantic_contract: YES
   shared_temporal_work_projection: YES
   universal_workoccurrence_table: NOT_JUSTIFIED_YET
   universal_workflow_runtime: NOT_JUSTIFIED_YET
   shared_recovery_semantic_contract: YES
+  shared_failure_certainty_taxonomy: YES
+  shared_recovery_action_taxonomy: YES
   shared_operator_projection: YES
   universal_dead_letter_table: NOT_JUSTIFIED_YET
   universal_recovery_worker: NOT_JUSTIFIED_YET
+  universal_recovery_occurrence_table: NOT_JUSTIFIED_YET
+  generic_undo_semantic: NO
+  provider_native_reversal_where_available: YES
+  per_destination_recovery_outcome: YES
+  financial_truth_kernel: KF-KERNEL-010
+j18:
+  recommendation: KF-REC-048
+  target_convergence: docs/intelligence/investigations/J18-TARGET-CONVERGENCE-AND-MIGRATION-MAP.md
+  recovery_matrix: docs/intelligence/investigations/J18-RECOVERY-CERTAINTY-REVERSAL-AND-IDEMPOTENCY-MATRIX.md
+  operator_map: docs/intelligence/investigations/J18-OPERATOR-RECOVERY-AND-DEAD-LETTER-MAP.md
+  reversal_matrix: docs/intelligence/investigations/J18-REVERSAL-CANCELLATION-CAPABILITY-MATRIX.md
+  authority_reinjection: docs/intelligence/investigations/J18-BACKWARD-REINJECTION-RECOVERY-AUTHORITY-J15-J6.md
+  kernel_reinjection: docs/intelligence/investigations/J18-KERNEL-REINJECTION-K11-K9-K8-K10.md
+  latest_findings: [F150,F151,F152,F153,F154,F155,F156,F157,F158,F159,F160]
+  latest_contradictions: [C100,C101,C102,C103,C104,C105,C106,C107,C108,C109,C110]
+  core_laws:
+    - attempt_failure_not_logical_failure
+    - original_outcome_not_recovery_outcome
+    - effect_dedupe_not_consequence_completeness
+    - provider_success_plus_local_failure_not_provider_failure
+    - post_provider_local_error_not_safe_permission_to_repeat_effect
+    - local_delete_not_provider_delete
+    - pending_status_not_executable_recovery_work
+    - reexecute_parent_not_resume_unresolved_children
+    - failure_or_time_does_not_create_authority
+  remaining_L6_blockers:
+    - exact_recovery_field_status_mapping
+    - exact_retry_budget_backoff_expiry_by_work_family
+    - provider_idempotency_reconciliation_matrix
+    - live_row_migration_for_overloaded_statuses
+    - consequence_incomplete_representation
+    - exact_j15_clearance_recovery_scope
+    - exact_j6_recovery_policy_budget
+    - remaining_provider_reversal_delete_cancel_support
+    - operator_permission_action_model
+    - temporal_projection_recovery_query_materialization
+    - characterization_concurrency_crash_proof_plan
+    - legacy_provider_ingress_compatibility
+    - bounded_kf_exec_packet_boundaries
+k10:
+  dossier: docs/intelligence/kernels/KF-KERNEL-010-FINANCIAL-TRUTH.md
+  central_law: provider_outcome_plus_payment_evidence_plus_ledger_consequence_plus_invoice_order_reconciliation_equals_financial_truth_converged
 exact_next_action:
-  title: post_provider_pre_local_persistence_crash_windows
-  instruction: Trace representative provider-effect-succeeded / local-persistence-failed crash windows beyond refunds.
-  candidates:
-    - paypal_capture_success_then_local_payment_persistence_failure
-    - payment_link_or_provider_order_creation_success_then_local_lineage_failure
-    - outbound_message_provider_success_then_local_delivery_persistence_failure
-    - booking_or_calendar_external_effect_then_local_consequence_failure
-    - catch_paths_marking_failed_after_external_point_of_no_return
-  classify:
-    - EffectId
-    - AttemptId
-    - provider_idempotency_token
-    - provider_operation_id
-    - external_point_of_no_return
-    - local_persistence_boundary
-    - reconciliation_path
-    - dedupe_vs_consequence_repair
-    - safe_retry_vs_outcome_unknown
-    - operator_repair_surface
-    - recovery_authority
-next_after_crash_windows:
-  - complete_provider_domain_reversal_matrix
-  - backward_reaudit_j15_j6_recovery_authority_clearance
-  - reinject_kf_rec_048_into_k11_k9_k8_k10
-  - reinject_j18_into_j23_l6_migration_proof
-  - decide_j18_promotion_to_value_engineering_target_convergence
+  title: j23_j18_unified_l6_convergence
+  instruction: Build one unified J23/J18 L6 convergence matrix covering exact semantic dimensions, current-model mappings, live-row migration compatibility, recovery/consequence-incomplete semantics, authority integration, provider evidence, Temporal Work Projection and proof boundaries.
+  proposed_artifact: docs/intelligence/investigations/J23-J18-L6-UNIFIED-CONVERGENCE-MATRIX.md
+  first_scope:
+    - AiPlan_AiPlanStep
+    - ActionDispatcher_AiExecutionLog
+    - OutboundDelivery_DeliveryEvent
+    - ScheduledAgentJob
+    - WebhookEvent
+    - Payment_Invoice_Ledger
+    - SocialPost_provider_artifacts
+  required_dimensions:
+    - work_state
+    - original_outcome
+    - failure_certainty
+    - consequence_state
+    - recovery_action
+    - recovery_state
+    - EffectId_AttemptId_RecoveryEffectId
+    - provider_operation_identity
+    - clearance_recovery_scope
+    - migration_compatibility
+    - characterization_and_proof
+next_after_unified_matrix:
+  - exact_live_row_migration_map
+  - temporal_work_projection_recovery_materialization
+  - unified_j15_j6_clearance_stop_integration
+  - proof_plan_and_kf_exec_boundary_assessment
+  - backward_reaudit_active_constellation
 continuity_files:
   - docs/intelligence/handoff/NEXT-CHAT-ROLLOVER.md
   - docs/intelligence/handoff/NEXT-CHAT-ROLLOVER.yaml
@@ -105,6 +138,8 @@ constraints:
   - do_not_blind_retry_outcome_unknown
   - do_not_replay_completed_children_during_parent_resume
   - do_not_treat_status_flip_as_real_retry_without_execution_owner
+  - do_not_treat_provider_success_plus_local_failure_as_provider_failure
+  - do_not_treat_local_delete_as_external_reversal
   - do_not_claim_tests_or_runtime_proof_unless_executed
 rollover_protocol:
   update_after_each_major_tranche: true
