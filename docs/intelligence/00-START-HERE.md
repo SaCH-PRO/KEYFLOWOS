@@ -1,12 +1,12 @@
 # KeyFlowOS Intelligence — START HERE
 
-This directory is the durable source of truth for the architectural and product intelligence developed across ChatGPT, Claude Code, Kimi/Gemini Code, repository analysis, source documents and human review.
+This directory is the durable source of truth for architectural and product intelligence developed across ChatGPT, Claude Code, Kimi/Gemini Code, repository analysis, source documents and human review.
 
 ## Prime directive
 
 Conversations are working memory. This repository is durable memory.
 
-No materially important conclusion about KeyFlowOS is considered preserved until written into the appropriate canonical intelligence artifact.
+No materially important conclusion about KeyFlowOS is preserved until written into the appropriate canonical intelligence artifact.
 
 ## Governing analysis rule
 
@@ -92,7 +92,7 @@ Current frontier:
 
 ```text
 J23 = L5 VALUE-ENGINEERED / ENTERING L6 TARGET-CONVERGENCE
-J18 = next dedicated microscopic recovery pressure test
+J18 = ACTIVE MICROSCOPIC RECOVERY PASS ADVANCED
 ```
 
 Production implementation remains unauthorized.
@@ -140,8 +140,6 @@ External reality
 → ActionEnvelope
 → Effective Human Authority + KEY autonomy/delegation + readiness + policy
 → ControlRequirement
-→ ControlPresentation
-→ specialized control workflow/channel
 → typed ControlEvidence
 → exact-action Clearance
 → durable WorkOccurrence / temporal eligibility where needed
@@ -149,22 +147,43 @@ External reality
 → atomic ExecutionClaim
 → canonical ActionDispatcher
 → domain/provider execution
-→ AWAITING_EXTERNAL / OutcomeEvidence / reconciliation
-→ Business Graph
-→ Genome evolution
+→ AWAITING_EXTERNAL / OUTCOME_UNKNOWN where needed
+→ OutcomeEvidence / reconciliation
+→ terminal execution outcome
+→ optional recovery/reversal/compensation effect
+→ RecoveryOutcomeEvidence
+→ Business Graph / Genome evolution
 ```
 
 ## Current canonical ranges
 
 ```text
-Findings:        F149
-Contradictions:  C099
+Findings:        F154
+Contradictions:  C104
 Recommendations: KF-REC-047
 ```
 
-Current `08A` through `08J`, `09A` through `09J`, and `10A` through `10F` are canonical continuations, not optional notes.
+Current `08A` through `08K`, `09A` through `09K`, and `10A` through `10F` are canonical continuations, not optional notes.
 
 Do not silently ignore supplements because an older monolithic register stops earlier.
+
+## J23 convergence decision
+
+```text
+ONE SHARED DURABLE-WORK SEMANTIC CONTRACT
+= YES
+
+ONE CROSS-DOMAIN TEMPORAL WORK PROJECTION
+= YES, as derivative read model
+
+ONE UNIVERSAL WorkOccurrence TABLE
+= not justified yet
+
+ONE UNIVERSAL WORKFLOW RUNTIME
+= not justified yet
+```
+
+Do not install Temporal/Camunda merely because J23/J18 found temporal or recovery defects. BullMQ, DB compare-and-set, OutboundDelivery, domain schedulers, ActionDispatcher, Saga evidence, provider IDs and existing reconciliation seams should be strengthened first.
 
 ## Active J23 target
 
@@ -218,23 +237,62 @@ Ambiguous External Outcome != Confirmed Failure
 Workflow Completion != Business Outcome
 ```
 
-## J23 convergence decision
+## Active J18 target
+
+Load especially:
+
+- `journeys/KF-JOURNEY-018-FAILURE-RECOVERY.md`
+- `08K-FINDING-REGISTER-RECOVERY-SUPPLEMENT.md`
+- `09K-CONTRADICTION-REGISTER-RECOVERY-SUPPLEMENT.md`
+
+Failure-certainty taxonomy:
 
 ```text
-ONE SHARED DURABLE-WORK SEMANTIC CONTRACT
-= YES
-
-ONE CROSS-DOMAIN TEMPORAL WORK PROJECTION
-= YES, as derivative read model
-
-ONE UNIVERSAL WorkOccurrence TABLE
-= not justified yet
-
-ONE UNIVERSAL WORKFLOW RUNTIME
-= not justified yet
+RETRYABLE_ATTEMPT_FAILURE
+FAILED_FINAL_CONFIRMED
+AWAITING_EXTERNAL
+OUTCOME_UNKNOWN
+EXPIRED
+CANCELLED
+SUPERSEDED
+SUCCEEDED
 ```
 
-Do not install Temporal/Camunda merely because J23 found temporal defects. BullMQ, DB compare-and-set, OutboundDelivery, domain schedulers, ActionDispatcher, provider IDs and existing evidence seams should be strengthened first.
+Recovery-outcome taxonomy:
+
+```text
+RECOVERY_AVAILABLE
+RECOVERY_REQUESTED
+RECOVERY_ATTEMPTED
+RECOVERY_SUCCEEDED_CONFIRMED
+RECOVERY_FAILED
+RECOVERY_UNAVAILABLE
+MITIGATION_ONLY
+```
+
+Current recovery laws:
+
+```text
+attempt failure != logical-work failure
+failed idempotency evidence != retry exhaustion
+control wait != failure
+provider timeout != confirmed non-effect
+undo != retry != reversal != compensation
+compensation handler return != confirmed inverse effect
+original execution outcome != recovery outcome
+```
+
+Latest recovery findings:
+
+```text
+F150 ActionDispatcher failed idempotency tombstone defeats BullMQ retry
+F151 UndoService eligibility is process-local/non-replicated
+F152 saga compensation can falsely report compensated
+F153 KeyCortex approval wait can become parent plan/saga failure
+F154 planner overwrites saga compensation outcome with generic failed
+```
+
+No new recovery recommendation is accepted yet. Pool and value-engineer J18 first.
 
 ## Strong existing seams
 
@@ -252,9 +310,9 @@ Prefer evolving rather than replacing:
 - WhatsApp scheduled CAS + provider message ID
 - EmailCampaign sender CAS
 - OutboundDelivery / DeliveryEvent
+- SagaExecution / SagaStep evidence
 - quote-followup cancellation + current-state revalidation
 - K9 provider reconciliation semantics
-- Saga evidence/compensation concepts where genuinely reachable
 
 ## J23 migration sequence
 
@@ -269,42 +327,27 @@ F reassess physical persistence/runtime convergence
 
 A shared semantic contract comes before a shared physical table.
 
-## Next frontier — J18 Failure → Recovery
-
-J23 has materially reopened J18.
-
-Target recovery taxonomy:
+## J18 exact next work
 
 ```text
-RETRYABLE_ATTEMPT_FAILURE
-FAILED_FINAL_CONFIRMED
-EXPIRED
-CANCELLED
-SUPERSEDED
-AWAITING_EXTERNAL
-OUTCOME_UNKNOWN
+provider/domain reversal + refund + cancel semantics
+→ operator repair/dead-letter surfaces
+→ per-fabric certainty/retry/reconciliation matrix
+→ crash windows after possible provider effect before local persistence
+→ recovery authority / fresh Clearance requirements
+→ standards/OSS comparison
+→ pool into K11/K9/K8/J23
+→ backward re-audit J15/J6
 ```
-
-Recovery law:
-
-```text
-failure/crash
-→ establish logical occurrence/effect identity
-→ classify certainty
-→ re-check cancellation/supersession/lateness/version/governance/current business state
-→ reconcile external ambiguity before unsafe retry
-→ resume/retry/expire/repair/compensate as appropriate
-→ preserve truthful OutcomeEvidence
-```
-
-J18 should now be reconstructed microscopically across the live retry/recovery fabrics rather than treated as generic reliability boilerplate.
 
 ## Knowledge classification
 
 Use:
 
 - **IMPLEMENTATION FACT / FACT**
+- **RUNTIME EVIDENCE**
 - **TEST SOURCE**
+- **EXECUTED TEST RESULT**
 - **GENERATED STATE**
 - **MAINTAINED ARCHITECTURE DOC**
 - **HISTORICAL / STALE DOC**
@@ -346,19 +389,6 @@ Do not classify code as dead merely because UI navigation does not expose it. Di
 
 Legacy residue must be consumer-proven before deletion.
 
-## Improvement layers
-
-```text
-L0 Correctness
-L1 Mandatory production standard
-L2 Strong KeyFlow architecture
-L3 Advanced architecture
-L4 KeyFlow-specific differentiation
-L5 Novel value above the reference floor
-```
-
-Basic authorization, audit, idempotency and security are not innovation.
-
 ## Implementation control
 
 Do not turn findings directly into coding tasks.
@@ -399,5 +429,8 @@ Chats can expire. KeyFlowOS knowledge should not.
 - treat scheduled time as perpetual authority/relevance;
 - treat provider acceptance as delivery/settlement;
 - blindly retry `OUTCOME_UNKNOWN`;
+- treat a non-throwing compensation handler as confirmed reversal;
+- treat `AWAITING_CONTROL` as failure;
+- erase recovery outcome with original execution failure;
 - delete legacy consumers without reachability proof;
 - claim tests/runtime success unless actually executed.
