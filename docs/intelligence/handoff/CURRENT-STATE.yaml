@@ -1,12 +1,14 @@
 project: KEYFLOWOS
-analysis_version: 5
+analysis_version: 6
 last_updated: 2026-09-03
-phase: computable-digital-twin-journey-kernel-convergence-j23
-status: j23-active-forensics
+phase: computable-digital-twin-journey-kernel-convergence-j23-target
+status: j23-L5-entering-L6-j18-next
 canonical_branch: docs/keyflow-intelligence-foundation
 implementation_evidence:
   branch: main
-  commit: d7c5b86cfa276d75ffa42d5f1707c43704dc9f21
+  current_head: 5ec358e9b792817eda1e37fd80a0574eb7905a8a
+  code_bearing_baseline: d7c5b86cfa276d75ffa42d5f1707c43704dc9f21
+  current_head_change_class: audit-only
 context_integrity: PASS
 implementation_authorized: false
 methodology:
@@ -15,30 +17,18 @@ methodology:
   recursive_assurance: docs/intelligence/11-RECURSIVE-ASSURANCE-PROGRAMME.md
   kernel_programme: docs/intelligence/12-KERNEL-PROGRAMME.md
   implementation_handoff: docs/intelligence/13-IMPLEMENTATION-HANDOFF-PROTOCOL.md
+  standards_research: docs/intelligence/14-STANDARDS-RESEARCH-INNOVATION-METHOD.md
   digital_twin_spec: docs/intelligence/15-EXPORTABLE-DIGITAL-TWIN-SPEC.md
   architect_agent_contract: docs/intelligence/16-KEYFLOWOS-ARCHITECT-AGENT-CONTRACT.md
 active_mesh:
-  - id: KF-JOURNEY-001
-    name: Business Birth
-  - id: KF-JOURNEY-025
-    name: Human Authority Lifecycle
-  - id: KF-JOURNEY-002
-    name: KEY Request -> Governed Action
-  - id: KF-JOURNEY-015
-    name: Approval / Governance Lifecycle
-    status: L4-semantic-reconciliation-entering-L5
-  - id: KF-JOURNEY-006
-    name: Proactive KEY / Autonomy
-    status: active-stress-test
-  - id: KF-JOURNEY-014
-    name: Webhook / External Event Ingress
-    status: microscopic-pass-reopenable
-  - id: KF-JOURNEY-023
-    name: Temporal Flow / Long-Running Workflow
-    status: active-forensics-cross-kernel-target-refinement
-  - id: KF-JOURNEY-018
-    name: Failure -> Recovery
-    status: active-adjacent
+  - { id: KF-JOURNEY-001, name: Business Birth }
+  - { id: KF-JOURNEY-025, name: Human Authority Lifecycle }
+  - { id: KF-JOURNEY-002, name: KEY Request -> Governed Action }
+  - { id: KF-JOURNEY-015, name: Approval / Governance Lifecycle, status: L4-entering-L5 }
+  - { id: KF-JOURNEY-006, name: Proactive KEY / Autonomy, status: active-stress-test }
+  - { id: KF-JOURNEY-014, name: Webhook / External Event Ingress, status: microscopic-pass-reopenable }
+  - { id: KF-JOURNEY-023, name: Temporal Flow / Long-Running Workflow, status: L5-value-engineered-entering-L6 }
+  - { id: KF-JOURNEY-018, name: Failure -> Recovery, status: next-microscopic-pressure-test }
 active_kernels:
   - KF-KERNEL-001
   - KF-KERNEL-002
@@ -51,9 +41,9 @@ active_kernels:
   - KF-KERNEL-010
   - KF-KERNEL-011
 canonical_ranges:
-  findings_through: F140
-  contradictions_through: C091
-  recommendations_through: KF-REC-041
+  findings_through: F149
+  contradictions_through: C099
+  recommendations_through: KF-REC-047
 canonical_supplements:
   findings:
     - docs/intelligence/08A-FINDING-REGISTER-CURRENT-SUPPLEMENT.md
@@ -62,6 +52,10 @@ canonical_supplements:
     - docs/intelligence/08D-FINDING-REGISTER-BOOKING-TEMPORAL-SUPPLEMENT.md
     - docs/intelligence/08E-FINDING-REGISTER-EXTERNAL-INGRESS-SUPPLEMENT.md
     - docs/intelligence/08F-FINDING-REGISTER-TEMPORAL-WORK-SUPPLEMENT.md
+    - docs/intelligence/08G-FINDING-REGISTER-CANCELLATION-SUPERSESSION-SUPPLEMENT.md
+    - docs/intelligence/08H-FINDING-REGISTER-MISSED-SCHEDULE-SUPPLEMENT.md
+    - docs/intelligence/08I-FINDING-REGISTER-WORKFLOW-VERSIONING-SUPPLEMENT.md
+    - docs/intelligence/08J-FINDING-REGISTER-EXTERNAL-OUTCOME-SUPPLEMENT.md
   contradictions:
     - docs/intelligence/09A-CONTRADICTION-REGISTER-CURRENT-SUPPLEMENT.md
     - docs/intelligence/09B-CONTRADICTION-REGISTER-EVENT-AGENCY-SUPPLEMENT.md
@@ -69,76 +63,94 @@ canonical_supplements:
     - docs/intelligence/09D-CONTRADICTION-REGISTER-BOOKING-TEMPORAL-SUPPLEMENT.md
     - docs/intelligence/09E-CONTRADICTION-REGISTER-EXTERNAL-INGRESS-SUPPLEMENT.md
     - docs/intelligence/09F-CONTRADICTION-REGISTER-TEMPORAL-WORK-SUPPLEMENT.md
+    - docs/intelligence/09G-CONTRADICTION-REGISTER-CANCELLATION-SUPERSESSION-SUPPLEMENT.md
+    - docs/intelligence/09H-CONTRADICTION-REGISTER-MISSED-SCHEDULE-SUPPLEMENT.md
+    - docs/intelligence/09I-CONTRADICTION-REGISTER-WORKFLOW-VERSIONING-SUPPLEMENT.md
+    - docs/intelligence/09J-CONTRADICTION-REGISTER-EXTERNAL-OUTCOME-SUPPLEMENT.md
   recommendations:
     - docs/intelligence/10A-RECOMMENDATION-REGISTER-INGRESS-CONTINUATION.md
     - docs/intelligence/10B-RECOMMENDATION-REGISTER-TEMPORAL-WORK-CONTINUATION.md
+    - docs/intelligence/10C-RECOMMENDATION-REGISTER-CANCELLATION-SUPERSESSION-CONTINUATION.md
+    - docs/intelligence/10D-RECOMMENDATION-REGISTER-MISSED-SCHEDULE-CONTINUATION.md
+    - docs/intelligence/10E-RECOMMENDATION-REGISTER-WORKFLOW-VERSIONING-CONTINUATION.md
+    - docs/intelligence/10F-RECOMMENDATION-REGISTER-TEMPORAL-PROJECTION-CONTINUATION.md
 j23:
+  maturity: L5_VALUE_ENGINEERED_ENTERING_L6
   dossier: docs/intelligence/journeys/KF-JOURNEY-023-TEMPORAL-FLOW-LONG-RUNNING-WORKFLOW.md
-  reinjection: docs/intelligence/investigations/J23-K7-K11-TEMPORAL-REINJECTION.md
-  cancellation_trace: docs/intelligence/investigations/J23-CANCELLATION-SUPERSESSION-OPEN-TRACE.md
-  core_findings:
-    - F137
-    - F138
-    - F139
-    - F140
-  core_invariants:
-    - definition_not_occurrence
-    - occurrence_not_attempt
-    - waiting_not_completion
-    - queued_not_running
-    - attempt_failure_not_logical_terminal_failure
-    - worker_claim_not_execution_claim
-    - workflow_completion_not_business_outcome
-    - cancellation_preserves_history_prevents_future_claim
-  technology_verdict:
-    shared_durable_work_semantic_contract: STRONGLY_SUPPORTED
-    universal_new_workflow_runtime: NOT_JUSTIFIED_YET
-  positive_seams:
-    - bullmq_delayed_lock_retry_stalled
-    - whatsapp_scheduled_cas_claim
-    - email_campaign_scheduled_cas_claim
-    - scheduled_agent_job_checkpoint_uniqueness
-    - flowrun_idempotency_key
-    - quote_followup_domain_cancellation
-  open_axes:
-    - cancellation_supersession
-    - stale_scheduled_payload_revalidation
-    - missed_schedule_policy
-    - workflow_definition_versioning
-    - awaiting_external_outcome_unknown
-    - temporal_operator_read_model
-    - workoccurrence_persistence_decision
-    - durable_workflow_engine_threshold
-next_actions:
-  - finish_j23_cancellation_supersession_trace
-  - trace_stale_scheduled_payload_revalidation
-  - define_missed_schedule_policy_classes
-  - define_workflow_definition_version_semantics
-  - trace_awaiting_external_and_outcome_unknown_into_j18_k9_k11
-  - define_minimum_operator_temporal_state
-  - decide_existing_models_vs_shared_workoccurrence_persistence
-  - define_engine_adoption_threshold
-  - backward_reaudit_j15_waiting_clearance_invalidation
-  - backward_reaudit_j6_stop_kill_pause_against_waiting_work
-  - backward_reaudit_j14_delayed_retryable_consequences
-  - keep_start_here_handoff_machine_state_current
-broader_outstanding:
-  - control_evidence_clearance_execution_claim_persistence
-  - effective_authority_resolver_and_grantability_migration
-  - capability_permission_vocabulary_migration
-  - approval_regime_migration
-  - action_dispatcher_universal_post_clearance_migration
-  - canonical_event_envelope_and_consequence_ownership
-  - durable_ingress_occurrence_lifecycle
-  - financial_provider_reconciliation
-  - business_graph_genome_readiness_integration
-  - remaining_journey_microscopic_passes
-  - kernel_9_10_12_convergence_where_incomplete
-  - execution_compiler_and_kf_exec_packets_after_target_convergence
+  target_convergence: docs/intelligence/investigations/J23-TARGET-CONVERGENCE-AND-MIGRATION-MAP.md
+  investigations:
+    - docs/intelligence/investigations/J23-CANCELLATION-SUPERSESSION-AND-DESCENDANT-INVALIDATION.md
+    - docs/intelligence/investigations/J23-MISSED-SCHEDULE-AND-LATENESS-POLICY.md
+    - docs/intelligence/investigations/J23-WORKFLOW-DEFINITION-VERSIONING.md
+    - docs/intelligence/investigations/J23-EXTERNAL-OUTCOME-UNCERTAINTY-AND-RECONCILIATION.md
+  reinjections:
+    - docs/intelligence/investigations/J23-K7-K11-TEMPORAL-REINJECTION.md
+    - docs/intelligence/investigations/J23-CANCELLATION-BACKWARD-REINJECTION-J6-J14-J15-K8-K9.md
+    - docs/intelligence/investigations/J23-BACKWARD-REINJECTION-LATENESS-VERSIONING-EXTERNAL-OUTCOME.md
+  core_findings: [F137,F138,F139,F140,F141,F142,F143,F144,F145,F146,F147,F148,F149]
+  target_states:
+    - SCHEDULED
+    - ELIGIBLE
+    - WAITING_TIME
+    - AWAITING_CONTROL
+    - AWAITING_DEPENDENCY
+    - CLAIMED
+    - RUNNING
+    - RETRYING
+    - AWAITING_EXTERNAL
+    - OUTCOME_UNKNOWN
+    - SUCCEEDED
+    - FAILED_FINAL
+    - CANCELLED
+    - SUPERSEDED
+    - EXPIRED
+  architecture_decision:
+    shared_durable_work_semantic_contract: YES
+    shared_temporal_projection: YES
+    universal_workoccurrence_table: NOT_JUSTIFIED_YET
+    universal_workflow_runtime: NOT_JUSTIFIED_YET
+  migration_waves:
+    - characterize_and_proof
+    - strengthen_claim_ownership
+    - cancellation_version_lateness
+    - external_outcome_reconciliation
+    - temporal_work_projection
+    - physical_convergence_reassessment
+  remaining_L6_blockers:
+    - exact_model_status_mapping
+    - live_row_migration_compatibility
+    - work_family_lateness_policy_validation
+    - definition_edit_policy_by_product_family
+    - provider_specific_terminal_evidence
+    - exact_j15_clearance_integration
+    - exact_j6_stop_pause_integration
+    - temporal_projection_query_materialization_strategy
+    - characterization_and_proof_plan
+j18_next:
+  admitted: true
+  purpose: recovery_truth_pressure_test
+  required_failure_classes:
+    - retryable_attempt_failure
+    - final_confirmed_failure
+    - expired
+    - cancelled
+    - superseded
+    - awaiting_external
+    - outcome_unknown
+  next_actions:
+    - map_retry_recovery_owners
+    - trace_crash_windows
+    - map_dead_letter_operator_recovery
+    - distinguish_compensation_undo_reversal
+    - verify_logical_effect_identity_across_retry
+    - reinject_into_j23_k11_k9_k8
 constraints:
   - do_not_modify_production_code
-  - revalidate_commit_sensitive_findings_if_main_advances
+  - revalidate_if_main_gets_code_bearing_changes
   - do_not_create_parallel_v2_sources_of_truth
   - do_not_install_workflow_engine_from_findings_alone
+  - do_not_treat_transport_state_as_logical_work_truth
+  - do_not_treat_provider_acceptance_as_delivery_or_settlement
+  - do_not_blind_retry_outcome_unknown
   - do_not_delete_legacy_without_consumer_proof
   - do_not_claim_tests_or_runtime_proof_unless_executed
