@@ -12,17 +12,12 @@ Canonical sequence continues after C099.
 
 BullMQ plan-step jobs are configured to retry after failure, but ActionDispatcher persists the failed idempotency key and later treats that failed record as an idempotent hit.
 
-Therefore:
-
 ```text
 queue truth: logical job has attempts remaining
 execution truth: effect key already returns terminal stored failure
 ```
 
 Target resolution: idempotency/effect identity must distinguish successful terminal consumption, retryable failed attempt and final failure.
-
-Affected kernels: K7, K8, K11.
-Affected journeys: J2, J6, J18, J23.
 
 ---
 
@@ -32,12 +27,7 @@ Affected journeys: J2, J6, J18, J23.
 
 UndoService exposes a five-minute undo window but stores eligibility only in process memory.
 
-Thus the product concept is time-bounded durable recovery while the implementation concept is instance-local ephemeral memory.
-
-Target resolution: where undo/compensation is a real product promise, persist the eligibility/provenance/state or explicitly scope the UX promise to what the infrastructure can guarantee.
-
-Affected kernels: K6, K8, K11.
-Affected journeys: J2, J6, J18, J23.
+Target resolution: where undo/compensation is a real product promise, eligibility/provenance/state must match the required process/replica durability.
 
 ---
 
@@ -45,21 +35,14 @@ Affected journeys: J2, J6, J18, J23.
 
 **Status:** VERIFIED ACTIVE CONTRADICTION
 
-Saga compensation currently treats a non-throwing handler as successful compensation.
-
-But handlers may return early when required identifiers/services are unavailable, and message recall may only annotate local state even though the external provider effect is irreversible.
-
-Therefore:
+Saga compensation treats a non-throwing handler as successful compensation, while handlers may no-op or perform mitigation-only work.
 
 ```text
 saga truth: compensated
 external/domain truth: inverse effect may be absent or impossible
 ```
 
-Target resolution: compensation needs typed outcome evidence distinguishing requested, attempted, confirmed, unavailable, mitigated and failed states.
-
-Affected kernels: K6, K8, K9, K11.
-Affected journeys: J2, J18, J23.
+Target resolution: typed recovery evidence must distinguish requested, attempted, confirmed, unavailable, mitigated and failed.
 
 ---
 
@@ -67,19 +50,12 @@ Affected journeys: J2, J18, J23.
 
 **Status:** VERIFIED ACTIVE CONTRADICTION
 
-KeyCortexPlanner persists the current step as `waiting_approval`, but computes parent final status from a stale pre-execution step snapshot and can therefore mark the enclosing plan and saga `failed`.
-
-Thus:
-
 ```text
 child truth: waiting for valid control
 parent truth: failed
 ```
 
-Target resolution: `AWAITING_CONTROL` must be a resumable parent/child workflow state derived from durable current state, with an explicit resume path after valid clearance.
-
-Affected kernels: K3, K7, K8, K11.
-Affected journeys: J2, J15, J18, J23.
+Target resolution: `AWAITING_CONTROL` must be a resumable parent/child workflow state derived from durable current state.
 
 ---
 
@@ -87,19 +63,12 @@ Affected journeys: J2, J15, J18, J23.
 
 **Status:** VERIFIED ACTIVE CONTRADICTION
 
-SagaService can persist `compensated`, `compensation_failed` or `compensation_unavailable` after recovery processing. The planner then invokes `failSaga()` and replaces that status with `failed`.
-
-Thus:
-
 ```text
 recovery truth: compensated | compensation_failed | compensation_unavailable
 final saga truth: failed
 ```
 
-Target resolution: original execution outcome and recovery/compensation outcome must remain orthogonal durable dimensions rather than competing for one status field.
-
-Affected kernels: K6, K8, K11.
-Affected journeys: J2, J18, J23.
+Target resolution: original execution outcome and recovery outcome remain orthogonal durable dimensions.
 
 ---
 
@@ -107,53 +76,67 @@ Affected journeys: J2, J18, J23.
 
 **Status:** VERIFIED ACTIVE CONTRADICTION
 
-The provider-backed `PaymentsOpsService.refundCharge()` obtains a real refund from Stripe/PayPal and records a local negative `Payment` using the provider refund ID, but does not reverse the ledger posting or reconcile the invoice.
-
-The subsequent Stripe/PayPal refund webhook path is capable of those stronger financial consequences, but its first idempotency check returns immediately when the refund provider ID is already present.
-
-Therefore:
-
 ```text
 provider truth: refund confirmed
 payment-row truth: REFUNDED
 ledger truth: original posting may remain unreversed
-invoice truth: may remain paid / unreconciled
+invoice truth: may remain paid/unreconciled
 webhook repair: suppressed as duplicate
 ```
 
-Target resolution: financial reversal idempotency must be consequence-aware. Existing effect identity should prevent duplicate provider refund, while allowing missing local consequences (payment evidence, ledger reversal, invoice reconciliation) to converge idempotently.
+Target resolution: external effect dedupe must still allow idempotent completion of missing local consequences.
 
-Affected kernels: K8, K9, K10, K11.
-Affected journeys: commerce/payment journeys, J14, J18, J23.
+---
+
+## C106 — operator-visible payment “retry” vs absence of executable provider recovery work
+
+**Status:** VERIFIED ACTIVE CONTRADICTION
+
+The Commerce API exposes a payment retry action and changes a `FAILED` Payment to `PENDING`, but the inspected mutation does not initiate a provider operation or create durable recovery work, and no generic consumer for that newly-pending row was observed in this pass.
+
+```text
+operator/API truth: retry initiated
+local row truth: PENDING
+execution truth: no observed provider retry owner
+```
+
+Target resolution: recovery verbs and states must identify the actual recovery occurrence/owner. If an action only repairs bookkeeping state, it must be named/evidenced as such rather than represented as executable retry.
+
+Affected kernels: K7, K8, K9, K10, K11.
+Affected journeys: commerce/payment journeys, J18, J23.
+
+---
+
+## C107 — plan-level re-execution vs step-level confirmed-success preservation
+
+**Status:** VERIFIED ACTIVE CONTRADICTION
+
+The live KeyCortex plan execute endpoint can run a stored plan again. `executePlan()` resets the plan to `running`, starts a new saga and executes all stored steps without filtering already-completed steps.
+
+```text
+step truth: previously succeeded
+recovery intent: continue/repair unresolved plan
+planner behavior: execute successful step again
+```
+
+Target resolution: recovery/resume must preserve per-step terminal truth and continue the same logical occurrence. Confirmed-success steps may only execute again under an explicit new-effect policy, not as an accidental consequence of parent re-execution.
+
+Affected kernels: K6, K7, K8, K11.
+Affected journeys: J2, J15, J18, J23.
 
 ---
 
 # Pool law
 
 ```text
-RETRY POLICY
-must agree with
-IDEMPOTENCY TERMINALITY
-
-PRODUCT RECOVERY PROMISE
-must agree with
-RECOVERY STATE DURABILITY
-
-COMPENSATION CLAIM
-must agree with
-CONFIRMED RECOVERY EFFECT
-
-CHILD WAIT STATE
-must agree with
-PARENT WORKFLOW STATE
-
-EXECUTION FAILURE
-must not erase
-RECOVERY OUTCOME
-
-PROVIDER FINANCIAL REVERSAL
-must converge with
-PAYMENT + LEDGER + INVOICE TRUTH
+RETRY POLICY must agree with IDEMPOTENCY TERMINALITY
+PRODUCT RECOVERY PROMISE must agree with RECOVERY STATE DURABILITY
+COMPENSATION CLAIM must agree with CONFIRMED RECOVERY EFFECT
+CHILD WAIT STATE must agree with PARENT WORKFLOW STATE
+EXECUTION FAILURE must not erase RECOVERY OUTCOME
+PROVIDER FINANCIAL REVERSAL must converge PAYMENT + LEDGER + INVOICE TRUTH
+RETRY VERB must correspond to EXECUTABLE RECOVERY WORK
+PARENT RESUME must preserve CONFIRMED CHILD TERMINALITY
 ```
 
 No production implementation is authorized by this supplement.
