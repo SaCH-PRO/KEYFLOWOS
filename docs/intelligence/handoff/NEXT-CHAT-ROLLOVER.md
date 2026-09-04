@@ -5,16 +5,16 @@ Last refreshed: 2026-09-04
 Canonical intelligence branch: `docs/keyflow-intelligence-foundation`
 Production implementation authorized: **NO**
 
-> This is the proactive rollover packet. It is maintained so a fresh ChatGPT/Claude/Kimi/Codex session can recover the exact analytical frontier from repository state alone, without relying on chat memory.
+> This file is maintained proactively so a new ChatGPT/Claude/Kimi/Codex session can continue the exact frontier from repository state alone.
 
 ---
 
-## 1. Fresh-chat instruction
+## Fresh-chat instruction
 
 ```text
 Continue KEYFLOWOS from the canonical repository intelligence. Do not restart or summarize from scratch.
 
-Load in this order:
+Load:
 1. AGENTS.md
 2. docs/intelligence/AGENT-CONTINUITY.md
 3. docs/intelligence/00-START-HERE.md
@@ -23,67 +23,44 @@ Load in this order:
 6. docs/intelligence/handoff/CURRENT-STATE.yaml
 7. docs/intelligence/handoff/NEXT-CHAT-ROLLOVER.md
 8. docs/intelligence/handoff/NEXT-CHAT-ROLLOVER.yaml
-9. active J23/J18 target-convergence and kernel files referenced below.
+9. docs/intelligence/investigations/J23-J18-L6-UNIFIED-CONVERGENCE-MATRIX.md
+10. active J23/J18 target maps, K7/K8/K9/K10/K11, J15/J6 reinjection and current 08*/09*/10* continuations.
 
-Run the Context Integrity Check before substantive work.
-Production code is read-only. Preserve MAP BEFORE MODIFYING, evidence classification, stable finding/contradiction/recommendation IDs, repository-first persistence and existing-seam-first architecture.
-Continue the exact next action from this rollover packet.
+Run the Context Integrity Check first.
+Production code is read-only.
+Continue the exact next action below.
 ```
-
-If a newer canonical file conflicts with this packet, explicitly reconcile the conflict and use the newest durable repository evidence. Do not invent continuity.
 
 ---
 
-## 2. Context integrity snapshot
+## Context integrity
 
 ```text
-Repository:              SaCH-PRO/KEYFLOWOS
-Implementation branch:   main
-Current main head:        168732d0e2226e11ed033c14fbdf7b3ea5344a41
-Code-bearing baseline:   d7c5b86cfa276d75ffa42d5f1707c43704dc9f21
-Main change class:        audit-only since prior forensic baseline
-Intelligence branch:      docs/keyflow-intelligence-foundation
-Context integrity:        PASS
+Repository:             SaCH-PRO/KEYFLOWOS
+Implementation branch:  main
+Current main head:       168732d0e2226e11ed033c14fbdf7b3ea5344a41
+Code-bearing baseline:  d7c5b86cfa276d75ffa42d5f1707c43704dc9f21
+Main delta class:        audit-only
+Intelligence branch:     docs/keyflow-intelligence-foundation
+Context integrity:       PASS
+Implementation:          UNAUTHORIZED
 ```
 
-The move from `5ec358e...` to `168732d...` was explicitly compared. The intervening files were architecture registries/journals/state, not production implementation paths, so existing code forensics remain valid. Revalidate again if `main` gains code-bearing changes.
+`5ec358e... → 168732d...` was explicitly compared; intervening changes were architecture/state artifacts rather than production code. Revalidate again if `main` gains code-bearing changes.
 
 ---
 
-## 3. Current programme position
-
-Prime thesis:
-
-> **KeyFlowOS is a governed business-state transition system.**
-
-Active mesh:
-
-```text
-J1 Business Birth
-↕ J25 Human Authority
-↕ J2 Governed Action
-↕ J15 Approval / Governance
-↕ J6 Proactive KEY / Autonomy
-↕ J14 External Event Ingress
-↕ J23 Temporal Flow / Long-Running Workflow
-↕ J18 Failure / Recovery
-```
-
-Current maturity:
+## Current programme state
 
 ```text
 J23 = L5 VALUE-ENGINEERED / ENTERING L6 TARGET-CONVERGENCE
 J18 = L5 VALUE-ENGINEERED / ENTERING L6 TARGET-CONVERGENCE
 J15 = L4 SEMANTICALLY RECONCILED / ENTERING L5
-J6  = ACTIVE STRESS TEST, recovery semantics reinjected
-K10 = ACTIVE / INITIAL CONVERGENCE, now instantiated
+J6  = ACTIVE STRESS TEST — recovery authority reinjected
+K10 = ACTIVE / INITIAL CONVERGENCE
 ```
 
-Production implementation remains blocked.
-
----
-
-## 4. Canonical frontier
+Canonical frontier:
 
 ```text
 Findings:        F160
@@ -91,388 +68,186 @@ Contradictions:  C110
 Recommendations: KF-REC-048
 ```
 
-Do not reuse these IDs.
+Prime thesis:
 
-Latest recovery/reversal findings:
-
-```text
-F150 ActionDispatcher failed idempotency tombstone defeats BullMQ retry
-F151 UndoService eligibility is process-local/non-replicated
-F152 Saga compensation may falsely claim compensated
-F153 KeyCortex control wait can become parent failure
-F154 planner overwrites Saga recovery outcome with generic failed
-F155 provider refund may bypass ledger/invoice convergence and suppress webhook repair
-F156 payment retry changes FAILED→PENDING without executable provider recovery owner
-F157 plan execute-again may replay completed steps
-F158 confirmed PayPal capture can become local FAILED after persistence failure and lose repair lineage
-F159 OutboundDelivery provider success can fall into generic retry after local persistence/evidence failure
-F160 deleting a published SocialPost deletes only local state while provider artifact may remain live
-```
-
-Latest contradictions:
-
-```text
-C100 retry policy vs failed-idempotency terminality
-C101 recovery promise vs process-local recovery state
-C102 compensated claim vs confirmed inverse effect
-C103 child control wait vs parent failure
-C104 recovery outcome vs generic failure overwrite
-C105 provider refund vs split Payment/ledger/invoice truth
-C106 retry verb vs absence of executable provider recovery work
-C107 parent re-execution vs confirmed child terminality
-C108 provider-confirmed PayPal capture vs local FAILED truth
-C109 provider-successful delivery vs local RetryPending/Failed after post-provider error
-C110 local SocialPost deletion vs external provider post remaining live
-```
-
-Recommendation frontier stays at `KF-REC-048`; F158–F160 strengthen it and K10 rather than requiring recommendation inflation.
+> **KeyFlowOS is a governed business-state transition system.**
 
 ---
 
-## 5. J18 target now converged enough for L6
+## Latest durable convergence
 
-Durable target map:
+### Unified J23/J18 L6 model
 
-`docs/intelligence/investigations/J18-TARGET-CONVERGENCE-AND-MIGRATION-MAP.md`
+`docs/intelligence/investigations/J23-J18-L6-UNIFIED-CONVERGENCE-MATRIX.md`
 
-Architecture decisions:
-
-```text
-ONE SHARED RECOVERY SEMANTIC CONTRACT         = YES
-ONE SHARED FAILURE-CERTAINTY TAXONOMY         = YES
-ONE SHARED RECOVERY-ACTION TAXONOMY           = YES
-ONE CROSS-DOMAIN OPERATOR/RECOVERY PROJECTION = YES, extend KF-REC-047
-ONE UNIVERSAL DEAD-LETTER TABLE               = NOT JUSTIFIED YET
-ONE UNIVERSAL RECOVERY WORKER                 = NOT JUSTIFIED YET
-ONE UNIVERSAL RecoveryOccurrence TABLE        = NOT JUSTIFIED YET
-ONE GENERIC UNDO/COMPENSATION SEMANTIC         = NO
-PROVIDER-NATIVE REVERSAL WHERE AVAILABLE      = YES
-PER-EFFECT/PER-DESTINATION RECOVERY OUTCOME   = YES
-K10 FINANCIAL TRUTH AS FIRST-CLASS KERNEL      = YES
-```
-
-Failure certainty:
+Long-lived/effecting work now separates:
 
 ```text
-RETRYABLE_ATTEMPT_FAILURE
-FAILED_FINAL_CONFIRMED
-AWAITING_EXTERNAL
-OUTCOME_UNKNOWN
-SUCCEEDED_CONFIRMED
-EXPIRED
-CANCELLED
-SUPERSEDED
+work_state
+original_outcome
+consequence_state
+failure_certainty
+recovery_action
+recovery_state
+identity
+current authority / Clearance
 ```
 
-Recovery actions:
+Unified laws include:
 
 ```text
-RETRY       same EffectId, new AttemptId
-RECONCILE   observe authoritative truth
-CANCEL      prevent not-yet-effective work
-VOID        domain-native cancellation
-REVERSAL    new inverse RecoveryEffectId
-COMPENSATE  new mitigating RecoveryEffectId
-MITIGATION  no true inverse possible
+Definition != Occurrence
+Occurrence != Attempt
+Attempt != Effect
+Waiting != Completed
+Attempt Failed != Logical Failed Final
+Provider Success + Local Failure != Provider Failure
+Effect Dedupe != Consequence Completeness
+Original Outcome != Recovery Outcome
+Retry != Reversal != Compensation
+Local Delete != External Reversal
+Parent Resume != Replay Confirmed Child Success
+Failure / Time != New Authority
 ```
 
-Core laws:
+Unified migration sequence:
 
 ```text
-ATTEMPT FAILURE != LOGICAL-WORK FAILURE
-ORIGINAL OUTCOME != RECOVERY OUTCOME
-EFFECT DEDUPE != CONSEQUENCE COMPLETENESS
-PROVIDER SUCCESS + LOCAL FAILURE != PROVIDER FAILURE
-POST-PROVIDER LOCAL ERROR != PERMISSION TO REPEAT EXTERNAL EFFECT
-LOCAL DELETE != PROVIDER DELETE
-PENDING STATUS != EXECUTABLE RECOVERY WORK
-RE-EXECUTE PARENT != RESUME UNRESOLVED CHILDREN
-FAILURE / ELAPSED TIME != RECOVERY AUTHORITY
+U-A characterize
+U-B identity + ownership
+U-C logical-state separation
+U-D temporal validity
+U-E external outcome
+U-F post-effect consequence convergence
+U-G recovery authority
+U-H operator projection
+U-I proof + live migration
+U-J physical convergence reassessment
 ```
+
+No universal WorkOccurrence/RecoveryOccurrence table, workflow runtime, DLQ or recovery worker is justified yet.
 
 ---
 
-## 6. New K10 Financial Truth kernel
+## Latest J18 evidence
+
+```text
+F158 PayPal capture can be confirmed externally, then local persistence failure is misreported as FAILED and repair lineage is lost.
+F159 OutboundDelivery can see provider success, then local persistence/evidence failure falls into adapter retry/failure and may repeat the external effect.
+F160 published SocialPost delete is local-only while provider artifact may remain live.
+```
+
+Positive counterpattern:
+
+Stripe invoice checkout binds `invoiceId/businessId` into provider-owned metadata and `client_reference_id` before provider PONR, allowing signed webhook reconstruction without a pre-existing Payment row.
+
+---
+
+## K10 Financial Truth
 
 Canonical file:
 
 `docs/intelligence/kernels/KF-KERNEL-010-FINANCIAL-TRUTH.md`
 
-K10 was intentionally instantiated only after evidence pressure justified it.
-
-Central financial invariant:
+Core law:
 
 ```text
-provider payment/refund outcome
+provider financial outcome
 + Payment evidence
 + ledger posting/reversal
 + invoice/order reconciliation
 = FINANCIAL_TRUTH_CONVERGED
 ```
 
-If provider outcome is known but a local consequence failed:
+Known provider effect + missing local consequence:
 
 ```text
 PROVIDER_SUCCESS_CONFIRMED
 → CONSEQUENCE_INCOMPLETE
-→ idempotent local repair/reconciliation
-→ DO NOT repeat provider effect
-```
-
-K10 complements rather than replaces:
-
-```text
-K9 = external provider reality
-K8 = normalized evidence/outcome
-K11 = recovery attempt ownership
-K10 = financial consequence convergence
-K3/J15/J6 = recovery authority
-K6 = legal domain transition
-K7 = logical work/wake state
+→ idempotent repair/reconciliation
+→ never repeat provider effect solely because local consequence failed
 ```
 
 ---
 
-## 7. Key evidence added in latest tranche
+## Recovery authority
 
-### F158 PayPal post-provider crash window
-
-```text
-PayPal capture returns COMPLETED + captureId
-→ local Payment.create fails
-→ broad catch records synthetic paypal_fail_* Payment FAILED
-→ synthetic row loses real order/capture lineage
-→ later PAYMENT.CAPTURE.COMPLETED webhook may be unable to correlate/repair
-```
-
-Target: provider-confirmed success + incomplete consequences, never provider failure.
-
-### F159 OutboundDelivery post-provider crash window
-
-```text
-adapter.publish returns success
-→ local Published/DeliveryEvent persistence fails
-→ same catch as adapter error
-→ RetryPending | Failed
-→ scheduler may call provider again
-```
-
-Target: provider-call failure and post-provider local-consequence failure require separate semantic/exception phases.
-
-### Positive counterpattern — Stripe checkout
-
-Before crossing provider boundary, invoice checkout embeds `invoiceId` / `businessId` in Stripe-owned metadata and `client_reference_id`. A later signed webhook can reconstruct the local business lineage without relying on a pre-existing Payment row.
-
-Adopt property:
-
-> Bind recoverable local lineage into provider-owned operation metadata before point-of-no-return where available.
-
-### F160 Social delete
-
-```text
-published SocialPost with external provider artifacts
-→ deletePost()
-→ local deletedAt only
-→ provider post remains unless separately removed
-→ UI can say “Post deleted”
-```
-
-Target: local deletion and external reversal are distinct, with per-provider recovery outcome.
-
----
-
-## 8. Reversal/cancellation convergence
-
-Durable matrix:
-
-`docs/intelligence/investigations/J18-REVERSAL-CANCELLATION-CAPABILITY-MATRIX.md`
-
-Current classes:
-
-```text
-true provider REVERSAL
-  Stripe/PayPal refund; Google Calendar provider delete
-
-domain CANCEL / VOID
-  booking cancellation; invoice void where legal
-
-RECOVERY_UNAVAILABLE / provider capability gap
-  provider-specific unsupported operations such as current generic WiPay refund or PayPal link revoke
-
-MITIGATION / LOCAL DELETE ONLY
-  sent-message recall annotation; current published SocialPost local delete
-```
-
-Do not flatten these into generic `undo`.
-
----
-
-## 9. Recovery authority reinjection
-
-Durable artifact:
+Canonical reinjection:
 
 `docs/intelligence/investigations/J18-BACKWARD-REINJECTION-RECOVERY-AUTHORITY-J15-J6.md`
 
-J15 refinement:
-
 ```text
-Clearance gains explicit recovery scope.
-```
+RETRY same EffectId
+→ may use explicitly bounded/current recovery scope in Clearance
 
-A same-effect retry may reuse bounded retry authority only when explicitly covered and still current.
-
-```text
-retry same EffectId
-→ bounded recovery scope possible
-
-reversal / compensation
+REVERSAL / COMPENSATION
 → new ActionEnvelope
 → new RecoveryEffectId
-→ current proportional authority/control
-→ fresh Clearance where material
+→ current proportional control / fresh Clearance where material
+
+PAUSE / KILL / REVOKE
+→ dominates not-yet-effective retries/descendants
 ```
 
-J6 refinement:
-
-```text
-standing autonomy includes explicit recovery policy/budget
-pause / kill / revoke dominates not-yet-effective retries
-OUTCOME_UNKNOWN blocks blind autonomous repeat effect
-reversal/compensation must be separately bounded
-```
-
-Failure creates no new authority.
+Failure itself creates no authority.
 
 ---
 
-## 10. Horizontal kernel convergence
+## Exact next action — DO THIS NEXT
 
-Durable artifact:
+Create:
 
-`docs/intelligence/investigations/J18-KERNEL-REINJECTION-K11-K9-K8-K10.md`
+`docs/intelligence/investigations/J23-J18-L6-EXACT-FIELD-STATUS-MAPPING.md`
 
-Boundary:
+Map exact current → target fields/statuses for, in order:
+
+1. AiPlan / AiPlanStep + BullMQ;
+2. ActionDispatcher / AiExecutionLog;
+3. OutboundDelivery / DeliveryEvent;
+4. ScheduledAgentJob;
+5. WebhookEvent;
+6. Payment / Invoice / Ledger;
+7. SocialPost / provider artifacts.
+
+For each fabric record:
 
 ```text
-K7  logical work existence / eligibility / waits
-K11 attempt and recovery ownership
-K9  external provider truth / PONR / reconciliation
-K8  original + recovery OutcomeEvidence
-K10 monetary consequence convergence
-K3  recovery authority / Clearance
-K6  legal business-state transition
+current schema fields
+current status values
+writers/transitions
+readers/consumers
+current identity keys
+current retry/cancel/version/provider fields
+target semantic dimensions
+auto-map vs evidence lookup vs UNKNOWN
+live-row compatibility risk
+legacy reader compatibility
+proof requirements
 ```
 
-Important digital-twin edges now include:
+Migration rule:
+
+> **Never invent certainty.** A historical overloaded `FAILED`, `COMPLETED`, `SENT`, `PUBLISHED`, `PENDING`, `REFUNDED`, or local `deletedAt` may require evidence lookup or UNKNOWN rather than automatic target terminality.
+
+---
+
+## After exact field mapping
 
 ```text
-ATTEMPT_OF
-RETRY_OF_EFFECT
-RECOVERY_OF
-REVERSAL_OF
-COMPENSATES
-MITIGATES
-PROVIDER_OPERATION_FOR
-PROVIDER_ACCEPTED_AS
-OUTCOME_EVIDENCE_FOR
-RECOVERY_EVIDENCE_FOR
-CONSEQUENCE_OF
-RECONCILES
-REPAIRS_CONSEQUENCE
-AUTHORIZED_BY_CLEARANCE
-RECOVERY_AUTHORIZED_BY
-PAYMENT_EVIDENCE_FOR
-LEDGER_POSTING_FOR
-LEDGER_REVERSAL_OF
-BALANCE_RECONCILED_BY
+exact live-row migration map
+→ provider idempotency/reconciliation/reversal capability matrix
+→ Temporal Work Projection recovery materialization strategy
+→ exact J15 Clearance recovery-scope + J6 recovery-policy representation
+→ characterization/concurrency/crash proof inventory
+→ backward re-audit active constellation
+→ only then evaluate bounded KF-EXEC packet readiness
 ```
 
 ---
 
-## 11. Exact next action — DO THIS NEXT
+## Mandatory current artifacts
 
-Do **not** reopen the completed crash-window/reversal tranche first.
-
-Build:
-
-`docs/intelligence/investigations/J23-J18-L6-UNIFIED-CONVERGENCE-MATRIX.md`
-
-Purpose:
-
-> Merge J23 temporal-work target convergence and J18 recovery target convergence into one L6 migration/proof map.
-
-First current fabrics to map:
-
-```text
-AiPlan / AiPlanStep
-ActionDispatcher / AiExecutionLog
-OutboundDelivery / DeliveryEvent
-ScheduledAgentJob
-WebhookEvent
-Payment / Invoice / Ledger
-SocialPost / provider artifacts
-```
-
-For each fabric map exact current → target dimensions:
-
-```text
-work_state
-original_outcome
-failure_certainty
-consequence_state
-recovery_action
-recovery_state
-WorkOccurrenceId / EffectId / AttemptId / RecoveryEffectId
-provider operation identity
-Clearance recovery scope
-cancellation/supersession/lateness/version rules
-live-row migration compatibility
-operator projection fields
-characterization/concurrency/crash proof
-```
-
-The unified matrix should deduplicate J23/J18 blockers and identify which are:
-
-```text
-semantic blocker
-field/status mapping blocker
-migration blocker
-provider-contract blocker
-authority blocker
-projection blocker
-proof blocker
-```
-
-Do not generate KF-EXEC packets merely because this matrix exists. Execution packets remain blocked until target architecture + live migration + proof boundaries converge.
-
----
-
-## 12. Remaining J18 L6 blockers
-
-```text
-exact recovery field/status mapping
-retry budget/backoff/expiry by work family
-provider idempotency/reconciliation matrix
-live-row migration for overloaded FAILED/PENDING/SENT/PUBLISHED
-CONSEQUENCE_INCOMPLETE representation
-exact J15 Clearance recovery-scope representation
-exact J6 recovery-policy/budget representation
-remaining material provider reversal/delete/cancel support
-operator permission/action model
-Temporal Work Projection recovery materialization
-characterization/concurrency/crash proof plan
-legacy provider/ingress compatibility
-bounded future KF-EXEC boundaries
-```
-
-These should now be merged with J23 L6 blockers rather than worked as a separate programme.
-
----
-
-## 13. Files to load for next frontier
-
-Mandatory additions to normal continuity load:
-
+- `docs/intelligence/investigations/J23-J18-L6-UNIFIED-CONVERGENCE-MATRIX.md`
 - `docs/intelligence/investigations/J18-TARGET-CONVERGENCE-AND-MIGRATION-MAP.md`
 - `docs/intelligence/investigations/J18-KERNEL-REINJECTION-K11-K9-K8-K10.md`
 - `docs/intelligence/investigations/J18-BACKWARD-REINJECTION-RECOVERY-AUTHORITY-J15-J6.md`
@@ -483,50 +258,40 @@ Mandatory additions to normal continuity load:
 - `docs/intelligence/09K-CONTRADICTION-REGISTER-RECOVERY-SUPPLEMENT.md`
 - `docs/intelligence/09L-CONTRADICTION-REGISTER-REVERSAL-SUPPLEMENT.md`
 - `docs/intelligence/10G-RECOMMENDATION-REGISTER-RECOVERY-CONTINUATION.md`
-- J23 target-convergence/migration map and J23 dossier.
+- J23 dossier + J23 target convergence map.
 
 ---
 
-## 14. Chat rollover policy
+## Chat-length rollover policy
 
-There is no reliable visible platform value for the exact hard chat/context cutoff, so do **not** wait for a guessed token threshold.
-
-Operate on this rule:
+The exact platform hard cutoff is not observable/reliable enough to plan against a numeric threshold. Therefore use repository checkpoints, not guessed remaining tokens.
 
 ```text
-major tranche completed
-→ persist findings/decisions
-→ refresh CURRENT state + rollover
-→ only then start next broad tranche
+major tranche completes
+→ persist canonical artifacts
+→ refresh CURRENT + ROLLOVER
+→ start next broad tranche
 ```
 
-If compaction/context-loss symptoms appear:
+If context-loss/compaction symptoms appear, finish only the current atomic trace, refresh this packet, and move to a new chat.
 
-```text
-stop broad analysis
-→ refresh rollover immediately
-→ finish only the current atomic trace
-→ start a new chat from this packet
-```
+Invariant:
 
-Target invariant:
-
-> **The repository must be sufficient to continue if this chat disappears after the next message.**
+> **If this conversation disappears after the next message, the repository still contains enough state to continue without analytical loss.**
 
 ---
 
-## 15. Do not
+## Do not
 
 - modify production code;
-- create parallel `*2`/`v2` sources of truth;
-- install Temporal/Camunda because temporal/recovery defects exist;
-- create a universal DLQ/recovery worker/table before physical convergence is justified;
+- create parallel `*2`/`v2` truth systems;
+- install Temporal/Camunda from findings alone;
+- create universal DLQ/recovery worker/table prematurely;
+- invent migration certainty;
+- blindly retry OUTCOME_UNKNOWN;
 - treat provider success + local failure as provider failure;
-- blindly retry `OUTCOME_UNKNOWN`;
-- treat local delete as external reversal;
-- treat compensation handler return as proof of inverse effect;
+- treat local delete as provider reversal;
 - let effect dedupe suppress missing consequence repair;
-- treat a status flip as real retry without executable recovery ownership;
-- replay completed children on parent resume;
+- replay completed children during parent resume;
 - treat failure/time as new authority;
-- claim tests/runtime proof unless actually executed in the relevant environment.
+- claim tests/runtime proof unless actually executed.
