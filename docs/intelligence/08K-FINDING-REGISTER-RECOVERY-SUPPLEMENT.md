@@ -196,6 +196,53 @@ Affected journeys: J2, J18, J23.
 
 ---
 
+## F155 — Provider-backed manual refunds can succeed externally while permanently bypassing local ledger reversal and invoice reconciliation
+
+**Status:** VERIFIED CROSS-LAYER / FINANCIAL-RECOVERY FINDING
+
+`PaymentsOpsService.refundCharge()` calls the real gateway refund operation for Stripe or PayPal and receives a provider refund ID.
+
+After provider success it performs a best-effort local `Payment.create()` with:
+
+```text
+status = REFUNDED
+amount = negative refund amount
+providerPaymentId = provider refund id
+```
+
+That local write does **not** call `RevenuePostingService.onPaymentRefunded()` and does not call `InvoiceWorkflowService.reconcileFromPayments()`.
+
+The normal Stripe and PayPal refund webhook handlers contain the stronger financial-truth path: they create refund evidence with ledger reversal and then reconcile the invoice. However both handlers begin by checking whether a `Payment` with the refund's provider ID already exists and return early when it does.
+
+Therefore the common successful manual-refund path can produce:
+
+```text
+provider refund SUCCEEDED
+→ PaymentsOps creates local REFUNDED Payment row R
+→ ledger reversal NOT posted
+→ invoice NOT reconciled/reopened
+→ provider refund webhook arrives with refund id R
+→ webhook sees existing providerPaymentId R
+→ returns without posting/reconciling
+```
+
+The very local row intended to preserve refund evidence suppresses the stronger reconciliation path.
+
+If the best-effort local row itself fails after provider success, later webhook processing may still repair state if delivered; but when the row succeeds, the webhook dedupe makes the ledger/invoice divergence persistent absent separate repair.
+
+Positive comparison seam:
+
+`CommerceService.markPaymentRefunded()` explicitly performs a local status change and `onPaymentRefunded()` inside one transaction, then reconciles the invoice. The defect is therefore specific to the provider-backed `PaymentsOpsService.refundCharge()` path bypassing the established financial-truth seam.
+
+Target law:
+
+> A confirmed external financial reversal must atomically or reconcilably produce matching local payment evidence, ledger reversal and invoice/balance state. Dedupe must suppress duplicate effects, not suppress missing consequences of the same effect.
+
+Affected kernels: K8, K9, K10, K11.
+Affected journeys: J3/J4 commerce/payment surfaces where applicable, J14, J18, J23.
+
+---
+
 # Reused / strengthened findings — do not duplicate
 
 ## F149 — strengthened by OutboundDelivery retry tracing
@@ -226,6 +273,8 @@ Multiple live producers also create job types outside the three types handled by
 - ActionDispatcher as the central effect seam to strengthen rather than replace;
 - OutboundDelivery stable durable identity, expected-state claim, attempt events, backoff and operator retry UI;
 - SagaExecution/SagaStep durable step history and compensation metadata where correctly wired;
+- `CommerceService.markPaymentRefunded()` transactionally couples local refund state with ledger reversal and then invoice reconciliation;
+- provider refund webhook paths that use `createRefundWithPosting()` + invoice reconciliation;
 - quote follow-up cancellation + current-source-state revalidation;
 - typed delivery/event histories as inputs to a future operator recovery projection.
 
@@ -253,6 +302,10 @@ FAILURE OUTCOME
 and
 RECOVERY OUTCOME
 must both remain durable
+
+EXTERNAL FINANCIAL REVERSAL
+must reconcile
+PAYMENT + LEDGER + INVOICE TRUTH
 ```
 
 No production implementation is authorized by this supplement.
