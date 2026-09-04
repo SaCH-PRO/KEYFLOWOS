@@ -1,10 +1,12 @@
 # KeyFlowOS Recommendation Register — External Outcome Reconciliation Continuation
 
-Status: CANONICAL CONTINUATION OF `10E-RECOMMENDATION-REGISTER-MISFIRE-POLICY-CONTINUATION.md`
+Status: CANONICAL CONTINUATION OF `10D-RECOMMENDATION-REGISTER-WORKFLOW-DEFINITION-CONTROL-CONTINUATION.md`
 
 Implementation baseline: `main@5ec358e9b792817eda1e37fd80a0574eb7905a8a`
 
 Canonical recommendation sequence continues after KF-REC-047.
+
+Note: the draft `10E-RECOMMENDATION-REGISTER-MISFIRE-POLICY-CONTINUATION.md` was removed because it duplicated the pre-existing canonical KF-REC-045 missed-schedule recommendation. Git history preserves the superseded draft.
 
 ---
 
