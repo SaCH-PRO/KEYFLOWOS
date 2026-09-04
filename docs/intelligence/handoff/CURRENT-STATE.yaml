@@ -1,8 +1,8 @@
 project: KEYFLOWOS
-analysis_version: 7
+analysis_version: 8
 last_updated: 2026-09-03
 phase: computable-digital-twin-journey-kernel-convergence-j18-recovery
-status: j23-L5-entering-L6-j18-active-microscopic-pass
+status: j23-L5-entering-L6-j18-active-microscopic-pass-advanced
 canonical_branch: docs/keyflow-intelligence-foundation
 implementation_evidence:
   branch: main
@@ -29,17 +29,10 @@ active_mesh:
   - { id: KF-JOURNEY-014, name: Webhook / External Event Ingress, status: microscopic-pass-reopenable }
   - { id: KF-JOURNEY-023, name: Temporal Flow / Long-Running Workflow, status: L5-value-engineered-entering-L6 }
   - { id: KF-JOURNEY-018, name: Failure -> Recovery, status: active-microscopic-pass-advanced }
-active_kernels:
-  - KF-KERNEL-003
-  - KF-KERNEL-005
-  - KF-KERNEL-006
-  - KF-KERNEL-007
-  - KF-KERNEL-008
-  - KF-KERNEL-009
-  - KF-KERNEL-011
+active_kernels: [KF-KERNEL-003,KF-KERNEL-005,KF-KERNEL-006,KF-KERNEL-007,KF-KERNEL-008,KF-KERNEL-009,KF-KERNEL-010,KF-KERNEL-011]
 canonical_ranges:
-  findings_through: F154
-  contradictions_through: C104
+  findings_through: F155
+  contradictions_through: C105
   recommendations_through: KF-REC-047
 canonical_supplements:
   findings_latest: docs/intelligence/08K-FINDING-REGISTER-RECOVERY-SUPPLEMENT.md
@@ -49,28 +42,11 @@ j23:
   maturity: L5_VALUE_ENGINEERED_ENTERING_L6
   dossier: docs/intelligence/journeys/KF-JOURNEY-023-TEMPORAL-FLOW-LONG-RUNNING-WORKFLOW.md
   target_convergence: docs/intelligence/investigations/J23-TARGET-CONVERGENCE-AND-MIGRATION-MAP.md
-  core_findings: [F137,F138,F139,F140,F141,F142,F143,F144,F145,F146,F147,F148,F149]
   architecture_decision:
     shared_durable_work_semantic_contract: YES
     shared_temporal_projection: YES
     universal_workoccurrence_table: NOT_JUSTIFIED_YET
     universal_workflow_runtime: NOT_JUSTIFIED_YET
-  target_states:
-    - SCHEDULED
-    - ELIGIBLE
-    - WAITING_TIME
-    - AWAITING_CONTROL
-    - AWAITING_DEPENDENCY
-    - CLAIMED
-    - RUNNING
-    - RETRYING
-    - AWAITING_EXTERNAL
-    - OUTCOME_UNKNOWN
-    - SUCCEEDED
-    - FAILED_FINAL
-    - CANCELLED
-    - SUPERSEDED
-    - EXPIRED
   remaining_L6_blockers:
     - exact_model_status_mapping
     - live_row_migration_compatibility
@@ -82,19 +58,20 @@ j23:
     - temporal_projection_query_materialization_strategy
     - characterization_and_proof_plan
 j18:
-  admitted: true
   maturity: ACTIVE_FORENSICS_MICROSCOPIC_PASS_ADVANCED
   dossier: docs/intelligence/journeys/KF-JOURNEY-018-FAILURE-RECOVERY.md
-  latest_findings: [F150,F151,F152,F153,F154]
-  latest_contradictions: [C100,C101,C102,C103,C104]
+  recovery_matrix: docs/intelligence/investigations/J18-RECOVERY-CERTAINTY-REVERSAL-AND-IDEMPOTENCY-MATRIX.md
+  latest_findings: [F150,F151,F152,F153,F154,F155]
+  latest_contradictions: [C100,C101,C102,C103,C104,C105]
   recovery_failure_classes:
     - retryable_attempt_failure
     - final_confirmed_failure
+    - awaiting_external
+    - outcome_unknown
     - expired
     - cancelled
     - superseded
-    - awaiting_external
-    - outcome_unknown
+    - succeeded
   recovery_outcome_axis:
     - recovery_available
     - recovery_requested
@@ -103,38 +80,44 @@ j18:
     - recovery_failed
     - recovery_unavailable
     - mitigation_only
+  action_taxonomy:
+    - retry_same_effect
+    - reconcile
+    - cancel
+    - void
+    - reversal_new_recovery_effect
+    - compensation_new_recovery_effect
+    - mitigation_only
   completed_traces:
     - actiondispatcher_bullmq_retry_idempotency
     - outbounddelivery_failure_retry_operator_surface
     - scheduledagentjob_failed_routing
     - customernotificationlog_crash_recovery_revalidation
     - saga_reachability_compensation_first_pass
+    - provider_domain_reversal_taxonomy_first_pass
+    - stripe_paypal_bullmq_idempotency_reference_comparison
+    - financial_refund_convergence_trace
   verified_defects:
     - failed_idempotency_tombstone_defeats_outer_retry
     - undo_eligibility_process_local
     - compensation_success_can_be_false
     - approval_wait_can_terminalize_parent_as_failed
     - compensation_outcome_overwritten_by_generic_failed
-  reinforced_existing_roots:
-    - F122
-    - F123
-    - F144
-    - F149
-  positive_seams:
-    - bullmq_stable_job_identity_and_stalled_recovery
-    - actiondispatcher_central_effect_boundary
-    - outbounddelivery_atomic_claim_attempt_events_operator_retry
-    - sagaexecution_sagastep_durable_recovery_evidence
-    - quote_followup_cancel_and_revalidation
+    - provider_refund_can_bypass_ledger_invoice_reconciliation_and_suppress_webhook_repair
+  adopted_reference_properties:
+    - provider_native_idempotency_token_bound_to_stable_effect_id
+    - provider_operation_id_as_reconciliation_evidence
+    - queue_job_identity_not_business_effect_terminal_truth
+    - effect_dedupe_distinct_from_consequence_completeness
   next_actions:
-    - trace_provider_domain_reversal_refund_cancel_semantics
     - trace_operator_repair_surfaces_across_ai_scheduled_ingress_saga
     - classify_dead_letter_semantics_by_work_family
-    - build_per_fabric_recovery_certainty_matrix
-    - trace_post_provider_pre_persistence_crash_windows
-    - define_recovery_authority_control_requirements
-    - standards_oss_compare_recovery_models
-    - pool_and_reinject_into_j23_k11_k9_k8_j15_j6
+    - trace_post_provider_pre_persistence_crash_windows_beyond_refunds
+    - complete_remaining_provider_reversal_cancel_matrix
+    - define_recovery_authority_and_fresh_clearance_policy
+    - pool_into_k11_k9_k8_target_laws
+    - backward_reaudit_j15_j6
+    - reinject_j18_into_j23_l6
 constraints:
   - do_not_modify_production_code
   - revalidate_if_main_gets_code_bearing_changes
@@ -146,5 +129,6 @@ constraints:
   - do_not_treat_compensation_handler_return_as_confirmed_inverse_effect
   - do_not_treat_control_wait_as_failure
   - do_not_erase_recovery_outcome_with_execution_failure
+  - do_not_allow_effect_dedupe_to_suppress_missing_consequence_repair
   - do_not_delete_legacy_without_consumer_proof
   - do_not_claim_tests_or_runtime_proof_unless_executed
