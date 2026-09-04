@@ -122,6 +122,7 @@ K3 Governance
 → K11 Recovery / Reliability
 → K8 Evidence / Outcome
 → K9 Integration / External Reality
+→ K10 Financial Truth where recovery is monetary
 ```
 
 Shared semantic defects should normally be recorded once and referenced by affected journeys rather than duplicated.
@@ -144,13 +145,13 @@ External reality
 → exact-action Clearance
 → durable WorkOccurrence / temporal eligibility where needed
 → worker/coordination claim
-→ atomic ExecutionClaim
+→ atomic ExecutionClaim / EffectId
 → canonical ActionDispatcher
 → domain/provider execution
 → AWAITING_EXTERNAL / OUTCOME_UNKNOWN where needed
 → OutcomeEvidence / reconciliation
-→ terminal execution outcome
-→ optional recovery/reversal/compensation effect
+→ terminal original outcome
+→ retry or distinct RecoveryEffectId for reversal/compensation
 → RecoveryOutcomeEvidence
 → Business Graph / Genome evolution
 ```
@@ -158,8 +159,8 @@ External reality
 ## Current canonical ranges
 
 ```text
-Findings:        F154
-Contradictions:  C104
+Findings:        F155
+Contradictions:  C105
 Recommendations: KF-REC-047
 ```
 
@@ -242,6 +243,7 @@ Workflow Completion != Business Outcome
 Load especially:
 
 - `journeys/KF-JOURNEY-018-FAILURE-RECOVERY.md`
+- `investigations/J18-RECOVERY-CERTAINTY-REVERSAL-AND-IDEMPOTENCY-MATRIX.md`
 - `08K-FINDING-REGISTER-RECOVERY-SUPPLEMENT.md`
 - `09K-CONTRADICTION-REGISTER-RECOVERY-SUPPLEMENT.md`
 
@@ -270,6 +272,18 @@ RECOVERY_UNAVAILABLE
 MITIGATION_ONLY
 ```
 
+Recovery action taxonomy:
+
+```text
+RETRY      same EffectId, new AttemptId
+RECONCILE  observe authoritative state
+CANCEL     prevent not-yet-effective work
+VOID       domain cancellation where legal
+REVERSAL   distinct inverse RecoveryEffectId
+COMPENSATE distinct mitigating RecoveryEffectId
+MITIGATION local follow-up when inverse effect impossible
+```
+
 Current recovery laws:
 
 ```text
@@ -280,6 +294,8 @@ provider timeout != confirmed non-effect
 undo != retry != reversal != compensation
 compensation handler return != confirmed inverse effect
 original execution outcome != recovery outcome
+effect dedupe != consequence completeness
+financial reversal must converge Payment + ledger + invoice truth
 ```
 
 Latest recovery findings:
@@ -290,9 +306,21 @@ F151 UndoService eligibility is process-local/non-replicated
 F152 saga compensation can falsely report compensated
 F153 KeyCortex approval wait can become parent plan/saga failure
 F154 planner overwrites saga compensation outcome with generic failed
+F155 provider-backed refund can bypass ledger/invoice reconciliation and suppress webhook repair
 ```
 
 No new recovery recommendation is accepted yet. Pool and value-engineer J18 first.
+
+## Adopted external reference properties
+
+- Stripe idempotency keys for safe POST retry after connection failures;
+- Stripe refund lifecycle events as reconciliation evidence;
+- PayPal `PayPal-Request-Id` for safe retry of modifying requests, including refunds;
+- BullMQ retry/job identity as queue lifecycle semantics rather than business-effect truth.
+
+Current Stripe/PayPal refund connectors do not send the provider-native idempotency headers observed in those contracts.
+
+Adopt properties, not products.
 
 ## Strong existing seams
 
@@ -311,6 +339,8 @@ Prefer evolving rather than replacing:
 - EmailCampaign sender CAS
 - OutboundDelivery / DeliveryEvent
 - SagaExecution / SagaStep evidence
+- `CommerceService.markPaymentRefunded()` + ledger reversal
+- provider webhook `createRefundWithPosting()` + invoice reconciliation
 - quote-followup cancellation + current-state revalidation
 - K9 provider reconciliation semantics
 
@@ -330,14 +360,13 @@ A shared semantic contract comes before a shared physical table.
 ## J18 exact next work
 
 ```text
-provider/domain reversal + refund + cancel semantics
-→ operator repair/dead-letter surfaces
-→ per-fabric certainty/retry/reconciliation matrix
-→ crash windows after possible provider effect before local persistence
+operator repair/dead-letter surfaces
+→ provider-effect-success/local-persistence-failure crash windows
+→ remaining provider/domain cancellation + reversal matrix
 → recovery authority / fresh Clearance requirements
-→ standards/OSS comparison
-→ pool into K11/K9/K8/J23
+→ pool into K11/K9/K8/K10 target laws
 → backward re-audit J15/J6
+→ reinject J18 into J23 L6
 ```
 
 ## Knowledge classification
@@ -408,15 +437,7 @@ Only then use `13-IMPLEMENTATION-HANDOFF-PROTOCOL.md` for bounded `KF-EXEC-*` pa
 
 ## Persistence rule
 
-Material progress must update relevant canonical artifacts and then continuity state:
-
-- journey/kernel/system artifacts;
-- concepts/decisions/questions;
-- findings/contradictions/recommendations;
-- current state;
-- handoff;
-- machine-readable state;
-- session journal where appropriate.
+Material progress must update relevant canonical artifacts and then continuity state.
 
 Chats can expire. KeyFlowOS knowledge should not.
 
@@ -432,5 +453,6 @@ Chats can expire. KeyFlowOS knowledge should not.
 - treat a non-throwing compensation handler as confirmed reversal;
 - treat `AWAITING_CONTROL` as failure;
 - erase recovery outcome with original execution failure;
+- let effect dedupe suppress missing consequence repair;
 - delete legacy consumers without reachability proof;
 - claim tests/runtime success unless actually executed.
