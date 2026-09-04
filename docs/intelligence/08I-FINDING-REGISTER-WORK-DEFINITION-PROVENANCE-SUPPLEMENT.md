@@ -4,11 +4,13 @@ Status: CANONICAL CONTINUATION OF `08H-FINDING-REGISTER-WORKFLOW-CONTROL-PLANE-S
 
 Implementation baseline: `main@5ec358e9b792817eda1e37fd80a0574eb7905a8a`
 
-Canonical sequence continues after F146.
+Canonical sequence continues after F147.
+
+Identifier correction: F147 is now canonically used by workflow timing-configuration bypass after resolving a concurrent F145 allocation. This provenance finding is therefore F148.
 
 ---
 
-## F147 — CrossModuleWorkflow mutations are unversioned and ScheduledAgentJob occurrences do not preserve definition/config provenance
+## F148 — CrossModuleWorkflow mutations are unversioned and ScheduledAgentJob occurrences do not preserve definition/config provenance
 
 **Status:** VERIFIED DATA-MODEL / TEMPORAL-PROVENANCE FINDING
 
@@ -64,7 +66,7 @@ Affected journeys: J6, J9, J10, J18, J23.
 
 # Existing target linkage
 
-This finding directly supports KF-REC-045 and KF-REC-046.
+This finding directly supports KF-REC-046 and KF-REC-047.
 
 Do not create a new versioning subsystem automatically. First determine whether existing definition rows can gain immutable revision/provenance semantics without creating a parallel workflow source of truth.
 
