@@ -103,6 +103,31 @@ Affected journeys: J2, J18, J23.
 
 ---
 
+## C105 — confirmed provider refund vs local payment/ledger/invoice truth split by manual refund dedupe
+
+**Status:** VERIFIED ACTIVE CONTRADICTION
+
+The provider-backed `PaymentsOpsService.refundCharge()` obtains a real refund from Stripe/PayPal and records a local negative `Payment` using the provider refund ID, but does not reverse the ledger posting or reconcile the invoice.
+
+The subsequent Stripe/PayPal refund webhook path is capable of those stronger financial consequences, but its first idempotency check returns immediately when the refund provider ID is already present.
+
+Therefore:
+
+```text
+provider truth: refund confirmed
+payment-row truth: REFUNDED
+ledger truth: original posting may remain unreversed
+invoice truth: may remain paid / unreconciled
+webhook repair: suppressed as duplicate
+```
+
+Target resolution: financial reversal idempotency must be consequence-aware. Existing effect identity should prevent duplicate provider refund, while allowing missing local consequences (payment evidence, ledger reversal, invoice reconciliation) to converge idempotently.
+
+Affected kernels: K8, K9, K10, K11.
+Affected journeys: commerce/payment journeys, J14, J18, J23.
+
+---
+
 # Pool law
 
 ```text
@@ -125,6 +150,10 @@ PARENT WORKFLOW STATE
 EXECUTION FAILURE
 must not erase
 RECOVERY OUTCOME
+
+PROVIDER FINANCIAL REVERSAL
+must converge with
+PAYMENT + LEDGER + INVOICE TRUTH
 ```
 
 No production implementation is authorized by this supplement.
