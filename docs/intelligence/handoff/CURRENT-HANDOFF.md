@@ -1,7 +1,31 @@
 # KeyFlowOS Current Handoff
 
 Last updated: 2026-09-05
-Status: CURRENT — BOUNDED IMPLEMENTATION PACKET READY, EXECUTION UNAUTHORIZED
+Status: CURRENT — WHOLE-SYSTEM VIRTUAL MODEL / POOLING / RE-AUDIT PROGRAMME
+
+## Programme identity
+
+The active programme is repository-backed architecture forensics and convergence, not immediate implementation.
+
+We are building a progressively richer virtual architectural / causal model of the complete KeyFlowOS system, then repeatedly pooling, synthesizing and backward-re-auditing journeys, constellations and kernels until the model is strong enough to produce a comprehensive code-level transformation programme.
+
+Canonical loop:
+
+```text
+MAP
+→ MICROSCOPIC TRACE
+→ JOURNEY
+→ CONSTELLATION
+→ KERNELS
+→ DYNAMIC / CAUSAL / FEEDBACK GRAPHS
+→ STANDARDS / OSS / FRONTIER RESEARCH
+→ FINDINGS / CONTRADICTIONS / OPTIONS
+→ POOL
+→ TARGET SYNTHESIS
+→ BACKWARD RE-AUDIT
+→ REOPEN / REFINE
+→ LOOP AGAIN AT A LARGER SCALE
+```
 
 ## Load first
 
@@ -14,10 +38,7 @@ Status: CURRENT — BOUNDED IMPLEMENTATION PACKET READY, EXECUTION UNAUTHORIZED
 7. `docs/intelligence/handoff/NEXT-CHAT-ROLLOVER.yaml`
 8. `docs/intelligence/13-IMPLEMENTATION-HANDOFF-PROTOCOL.md`
 9. `docs/intelligence/14-STANDARDS-RESEARCH-INNOVATION-METHOD.md`
-10. `docs/intelligence/investigations/J23-J18-L6-CHARACTERIZATION-CONCURRENCY-CRASH-PROOF-INVENTORY.md`
-11. `docs/intelligence/investigations/J1-J25-J2-J15-J6-J14-J23-J18-BACKWARD-REAUDIT.md`
-12. `docs/intelligence/investigations/J23-J18-BOUNDED-KF-EXEC-READINESS-ASSESSMENT.md`
-13. `docs/intelligence/execution/KF-EXEC-EXTFX-001-OUTBOUND-DELIVERY-RESEND-EFFECT-CERTAINTY.md`
+10. current active journey / kernel / investigation files referenced by state
 
 ## Context integrity
 
@@ -27,11 +48,11 @@ main head:             168732d0e2226e11ed033c14fbdf7b3ea5344a41
 code-bearing baseline: d7c5b86cfa276d75ffa42d5f1707c43704dc9f21
 main change class:     audit-only
 intelligence branch:   docs/keyflow-intelligence-foundation
-implementation:        UNAUTHORIZED
+production code:       READ-ONLY
 context integrity:     PASS
 ```
 
-Canonical ranges remain:
+Canonical ranges:
 
 ```text
 Findings:        F160
@@ -39,107 +60,112 @@ Contradictions:  C110
 Recommendations: KF-REC-048
 ```
 
-## Convergence state
+## Mature pooled evidence
 
-```text
-J23/J18 semantic target         = CONVERGED
-migration direction             = CONVERGED
-provider contract direction     = CONVERGED
-recovery authority semantics    = CONVERGED
-Temporal Work Projection target = CONVERGED
-proof design                     = COMPLETE (39 obligations / 16 deterministic fault points)
-backward re-audit                = PASSED
-runtime proof                    = NOT EXECUTED
-production implementation        = NOT AUTHORIZED
-```
+The J23/J18 temporal/recovery/external-reality work is one of the most mature pools and includes:
 
-Backward re-audit added no new finding/contradiction IDs. It clarified:
+- semantic convergence;
+- migration direction;
+- provider-contract direction;
+- recovery-authority semantics;
+- Temporal Work Projection target;
+- 39 proof obligations;
+- 16 deterministic fault-injection points;
+- backward re-audit through J1/J25/J2/J15/J6/J14/J23/J18.
 
-```text
-EffectExecutionClaim != AttemptOwnership
-Webhook occurrence identity != application completeness
-Recovery Control Twin = derived lens, not second truth store
-Adaptive Recovery Budget cannot expand hard authority envelope
-Attention Gradient = prioritization only
-Causal Recovery Horizon = durable evidence edges only
-```
+This work is now an input to broader system convergence, not a reason to stop the global analysis loop.
 
-## Bounded readiness result
-
-Selected first falsification slice:
-
-```text
-OutboundDelivery → Resend email only
-```
-
-Why:
-- reuses strong existing delivery/adapter seams;
-- directly attacks F159/C109;
-- proves a real irreversible external effect without financial blast radius;
-- can exercise stable EffectId, immutable effect snapshot, durable AttemptId, provider idempotency, post-provider crash certainty and consequence repair;
-- has a provider disable seam and strong deterministic simulator potential;
-- does not require a universal workflow/recovery table.
-
-## Draft implementation packet
+## KF-EXEC-EXTFX-001 classification
 
 `docs/intelligence/execution/KF-EXEC-EXTFX-001-OUTBOUND-DELIVERY-RESEND-EFFECT-CERTAINTY.md`
 
-Packet status:
+is retained as:
 
 ```text
-ARCHITECTURE READY = YES
-DRAFTED            = YES
-AUTHORIZED          = NO
-IMPLEMENTED         = NO
-TESTED              = NO
+POOLED IMPLEMENTATION-SHAPE EVIDENCE
+ARCHITECTURALLY READY AS A BOUNDED PROBE
+NOT THE PROGRAMME FRONTIER
+NOT AUTHORIZED
+NOT IMPLEMENTED
+NOT TESTED
 ```
 
-Core packet decisions:
+It demonstrates how a mature architecture concept could translate into real repository work and can be used to pressure-test later global synthesis.
+
+## Active mesh
+
+Current high-leverage mesh includes:
 
 ```text
-WorkOccurrenceId = OutboundDelivery.id for this slice
-EffectId         = OutboundDelivery.id for this slice
-same EffectId requires immutable provider effect snapshot/fingerprint
-AttemptId must exist durably before provider PONR
-same-effect Resend retries reuse stable provider idempotency identity
-provider success is monotonic evidence
-post-provider local failure → consequence repair, not provider re-send
-historical ambiguous delivery rows remain ambiguous
-no universal WorkOccurrence/Attempt/RecoveryOccurrence table
+J1  — Business Birth
+J25 — Human Authority Lifecycle
+J2  — KEY Request → Governed Action
+J15 — Approval / Governance Lifecycle
+J6  — recurring / proactive autonomous execution
+J14 — webhook / external event ingestion
+J23 — temporal / long-running workflow
+J18 — failure / recovery / reversal
 ```
 
-The packet explicitly requires current `resend@^4.8.0` SDK signature + current primary provider documentation to be reverified before coding the idempotency call; no guessing from memory.
+Kernel pressure currently spans:
 
-## Authorization boundary — EXACT FRONTIER
+```text
+K3 authority/control
+K5 temporal/state coordination
+K6 domain legality
+K7 ingress/processing lifecycle
+K8 evidence
+K9 provider/external truth
+K10 financial truth
+K11 consequence/application completion
+```
 
-Do **not** modify production code unless the user explicitly authorizes implementation of:
+## Exact frontier
 
-`KF-EXEC-EXTFX-001`
+Continue expanding the virtual model beyond the mature J23/J18 pool.
 
-An earlier generic “continue/proceed” used to advance architecture analysis does not count as retroactive production-code authorization.
+Choose the next highest-leverage adjacent journey/constellation/kernel pressure point using:
 
-If implementation is authorized:
+- cross-journey leverage;
+- duplicated or ambiguous truth ownership;
+- material user/product value;
+- ability to refine kernel boundaries;
+- likelihood of changing the eventual target architecture;
+- usefulness to the final migration/proof/execution programme.
 
-1. revalidate `main` head and packet-affected paths;
-2. use Claude Code as primary bounded implementer if desired;
-3. require structured implementation return packet;
-4. inspect actual GitHub diff independently;
-5. run adversarial Kimi/Gemini review against the same packet;
-6. re-ingest evidence into J23/J18/K7/K8/K9/K11.
+Then:
 
-If implementation is **not** authorized, remain read-only. Do not silently move to a broader code slice.
+```text
+MICROSCOPIC REPOSITORY TRACE
+→ FINDINGS / CONTRADICTIONS
+→ POOL WITH EXISTING KERNELS
+→ TARGET SYNTHESIS
+→ BACKWARD RE-AUDIT MATURE AREAS
+→ REFRESH CONTINUITY
+```
 
-## Anti-normalization law
+Do not modify production code during this programme phase.
 
-Standards/famous architectures are floor/evidence, not default destination. The selected first slice intentionally proves the KeyFlow-specific semantic model inside an existing domain seam before extracting generic infrastructure.
+## Continuity law
 
-## Do not
+Every material tranche must be persisted before the next broad tranche begins.
 
-- edit production code without explicit authorization;
-- treat packet readiness as test proof;
-- introduce generic workflow/attempt/recovery infrastructure in the first slice;
-- make provider/local statuses overwrite external truth;
-- use mutable content on same-EffectId retry;
-- blindly resend OUTCOME_UNKNOWN outside verified provider-safe replay semantics;
-- make derivative projection/innovation state authoritative;
-- claim tests passed unless actually executed.
+Refresh CURRENT + ROLLOVER after any material frontier/target/pool change.
+
+All ChatGPT project threads, Claude Code sessions and Kimi Code sessions are ephemeral working views over the same repository-backed programme.
+
+Target invariant:
+
+> If this chat disappears after the next message, a fresh thread can recover the exact working flow from the repository without restarting.
+
+## Final destination
+
+The programme is complete only when we have converged:
+
+1. whole-system target architecture;
+2. migration architecture;
+3. proof/test architecture;
+4. compatibility and rollout sequencing;
+5. exact repository transformation plan across models, services, workers, routes, integrations, events, tests and migrations;
+6. bounded implementation packets that Claude Code/Kimi Code can execute without architectural drift;
+7. independent re-audit and implementation evidence loops.
