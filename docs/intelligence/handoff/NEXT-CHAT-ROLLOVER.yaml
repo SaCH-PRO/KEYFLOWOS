@@ -1,5 +1,5 @@
 project: KEYFLOWOS
-rollover_version: 10
+rollover_version: 11
 last_updated: 2026-09-05
 status: LIVE_CONTINUITY_ARTIFACT
 canonical_branch: docs/keyflow-intelligence-foundation
@@ -14,34 +14,37 @@ canonical_ranges:
   findings_through: F160
   contradictions_through: C110
   recommendations_through: KF-REC-048
-completed_frontier:
-  proof_inventory: docs/intelligence/investigations/J23-J18-L6-CHARACTERIZATION-CONCURRENCY-CRASH-PROOF-INVENTORY.md
-  backward_reaudit: docs/intelligence/investigations/J1-J25-J2-J15-J6-J14-J23-J18-BACKWARD-REAUDIT.md
-  bounded_readiness: docs/intelligence/investigations/J23-J18-BOUNDED-KF-EXEC-READINESS-ASSESSMENT.md
-execution_packet:
+programme:
+  phase: whole-system-virtual-model-expansion-pooling-loop
+  objective: converge whole-system target migration proof and repository transformation architecture before production implementation
+  loop: [MAP,MICROSCOPIC_TRACE,JOURNEY,CONSTELLATION,KERNELS,DYNAMIC_CAUSAL_FEEDBACK_GRAPHS,STANDARDS_OSS_FRONTIER_RESEARCH,FINDINGS_CONTRADICTIONS_OPTIONS,POOL,TARGET_SYNTHESIS,BACKWARD_REAUDIT,REOPEN_REFINE]
+active_mesh:
+  journeys: [J1,J25,J2,J15,J6,J14,J23,J18]
+  kernels: [K3,K5,K6,K7,K8,K9,K10,K11]
+mature_pool:
+  name: temporal_recovery_external_reality_authority
+  j23_j18_semantics: substantially_converged
+  proof_obligations: 39
+  deterministic_fault_points: 16
+  backward_reaudit: passed
+  programme_role: input_to_broader_convergence
+execution_probe:
   id: KF-EXEC-EXTFX-001
-  artifact: docs/intelligence/execution/KF-EXEC-EXTFX-001-OUTBOUND-DELIVERY-RESEND-EFFECT-CERTAINTY.md
-  selected_slice: OutboundDelivery_Resend_effect_certainty
-  architecture_ready: true
+  classification: POOLED_IMPLEMENTATION_SHAPE_EVIDENCE
+  programme_frontier: false
   authorized: false
   implemented: false
   tested: false
-  reasons_selected:
-    - real_irreversible_external_effect
-    - strong_existing_domain_seams
-    - provider_native_idempotency
-    - deterministic_crash_falsification
-    - lower_blast_radius_than_money
-    - no_universal_runtime_required
 exact_next_action:
-  title: explicit_implementation_authorization_gate
-  instruction: Remain production read-only until the user explicitly authorizes KF-EXEC-EXTFX-001. A prior generic continue/proceed is not retroactive authorization. On authorization, revalidate main, implement only packet scope, return structured implementation evidence, then run architecture and adversarial review.
+  title: continue_whole_system_forensics_and_pooling
+  instruction: Select the next highest-leverage adjacent journey/constellation/kernel pressure point, trace it microscopically from repository evidence, pool the findings with the existing kernel mesh, synthesize target implications, backward-reaudit affected mature areas, persist results, then refresh CURRENT and ROLLOVER before another broad tranche.
+continuity:
+  all_threads_ephemeral_views_of_one_repo_programme: true
+  rollover_always_active: true
+  refresh_after_material_tranche: true
+  invariant: fresh_thread_can_resume_exact_working_flow_without_restart
 constraints:
-  - do_not_modify_production_code_without_explicit_authorization
-  - do_not_expand_packet_scope_silently
-  - do_not_create_universal_work_attempt_recovery_tables
-  - do_not_claim_tests_passed_unless_executed
-  - preserve_provider_truth_and_historical_ambiguity
-  - innovation_overlays_remain_deferred_until_deterministic_core_proven
-rollover_protocol:
-  invariant: fresh_chat_can_recover_frontier_from_repo_only
+  - production_code_read_only
+  - do_not_promote_execution_probe_to_frontier_without_programme_convergence
+  - do_not_treat_local_convergence_as_permanent_closure
+  - preserve_anti_normalization_method
