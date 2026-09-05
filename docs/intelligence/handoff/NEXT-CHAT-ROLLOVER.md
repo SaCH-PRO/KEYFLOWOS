@@ -11,10 +11,10 @@ Production implementation authorized: **NO**
 
 ```text
 Continue KEYFLOWOS from canonical repository intelligence. Do not restart from scratch.
-Load AGENTS.md, docs/intelligence/AGENT-CONTINUITY.md, 00-START-HERE.md, 07-CURRENT-STATE.md,
-CURRENT-HANDOFF.md, CURRENT-STATE.yaml, NEXT-CHAT-ROLLOVER.md, NEXT-CHAT-ROLLOVER.yaml,
-then the current J23/J18 L6 artifacts including the proof inventory. Run Context Integrity Check first.
-Production code is read-only. Continue the exact next action from this packet.
+Load AGENTS.md, AGENT-CONTINUITY.md, CURRENT-STATE/HANDOFF/ROLLOVER, the J23/J18 proof inventory,
+the backward re-audit, bounded readiness assessment, and KF-EXEC-EXTFX-001.
+Run Context Integrity Check first.
+Production code remains read-only unless the user explicitly authorizes KF-EXEC-EXTFX-001.
 ```
 
 ## Context integrity
@@ -33,125 +33,93 @@ Implementation:          UNAUTHORIZED
 ## Current frontier
 
 ```text
-J23 = L6 semantic target converged; proof design complete; runtime proof not executed
-J18 = L6 semantic target converged; proof design complete; runtime proof not executed
-J15 = L5 recovery-authority semantics converged
-J6  = recovery-policy semantics converged inside active stress test
-K10 = ACTIVE / INITIAL CONVERGENCE
+J23/J18 semantic target      = CONVERGED
+migration                    = CONVERGED DIRECTION
+provider contract            = CONVERGED DIRECTION
+recovery authority           = CONVERGED
+Temporal Work Projection     = CONVERGED TARGET
+proof design                 = COMPLETE — 39 obligations / 16 fault points
+backward re-audit             = PASSED
+bounded packet readiness      = PASSED FOR ONE SLICE
+runtime proof                 = NOT EXECUTED
+production implementation     = NOT AUTHORIZED
 
 Findings:        F160
 Contradictions:  C110
 Recommendations: KF-REC-048
 ```
 
-## Completed L6 tranches
+## Latest completed artifacts
 
-1. `docs/intelligence/investigations/J23-J18-L6-UNIFIED-CONVERGENCE-MATRIX.md`
-2. `docs/intelligence/investigations/J23-J18-L6-EXACT-FIELD-STATUS-MAPPING.md`
-3. `docs/intelligence/investigations/J23-J18-L6-LIVE-ROW-MIGRATION-COMPATIBILITY.md`
-4. `docs/intelligence/investigations/J23-J18-L6-PROVIDER-CONTRACT-IDEMPOTENCY-RECONCILIATION-MATRIX.md`
-5. `docs/intelligence/investigations/J23-J18-L6-RECOVERY-AUTHORITY-REPRESENTATION.md`
-6. `docs/intelligence/investigations/J23-J18-L6-TEMPORAL-WORK-PROJECTION-MATERIALIZATION.md`
-7. `docs/intelligence/investigations/J23-J18-L6-CHARACTERIZATION-CONCURRENCY-CRASH-PROOF-INVENTORY.md`
-8. `docs/intelligence/kernels/KF-KERNEL-010-FINANCIAL-TRUTH.md`
+- `docs/intelligence/investigations/J23-J18-L6-CHARACTERIZATION-CONCURRENCY-CRASH-PROOF-INVENTORY.md`
+- `docs/intelligence/investigations/J1-J25-J2-J15-J6-J14-J23-J18-BACKWARD-REAUDIT.md`
+- `docs/intelligence/investigations/J23-J18-BOUNDED-KF-EXEC-READINESS-ASSESSMENT.md`
+- `docs/intelligence/execution/KF-EXEC-EXTFX-001-OUTBOUND-DELIVERY-RESEND-EFFECT-CERTAINTY.md`
 
-The proof inventory defines 39 exact proof obligations and 16 deterministic fault-injection points. It does **not** claim any runtime tests were executed.
+## Backward re-audit result
 
-Critical proof transition:
+No new canonical finding/contradiction ID was justified.
+
+Precision refinements:
 
 ```text
-WebhookEvent occurrence identity / dedupe
-!=
-application / consequence completeness
+EffectExecutionClaim != AttemptOwnership
+Webhook occurrence identity != application completeness
+Recovery Control Twin = derived lens, not second truth store
+Adaptive Recovery Budget remains inside hard authority envelope
+Attention Gradient is prioritization, not truth/authority
+Causal Recovery Horizon uses durable evidence-bound edges only
 ```
 
-A duplicate occurrence is a no-op only when prior application is complete. If application is incomplete, the same occurrence must permit idempotent consequence repair without repeating already-complete business/provider effects.
+## First bounded implementation slice selected
 
-## Anti-normalization / innovation rule
+`KF-EXEC-EXTFX-001 — OutboundDelivery + Resend Effect Certainty`
 
-Canonical method: `docs/intelligence/14-STANDARDS-RESEARCH-INNOVATION-METHOD.md`
+The packet uses a real irreversible external effect to falsify the architecture while remaining below financial blast radius.
+
+Core packet laws:
 
 ```text
-STANDARDS + BEST PRACTICES + FAMOUS ARCHITECTURES = FLOOR / EVIDENCE
-NOT DEFAULT DESTINATION.
+WorkOccurrenceId = OutboundDelivery.id for this slice
+EffectId         = OutboundDelivery.id for this slice
+same EffectId → immutable provider-effect snapshot + fingerprint
+AttemptId must be durable before provider PONR
+same-effect replay uses stable Resend provider idempotency identity
+provider success is monotonic evidence
+post-provider local failure → consequence repair, never generic provider re-send
+historical ambiguous rows remain ambiguous
+no universal WorkOccurrence / Attempt / RecoveryOccurrence table
 ```
 
-Every high-impact target pressure-tests:
+The packet requires current installed `resend@^4.8.0` SDK signature and current primary provider docs to be revalidated at implementation time before coding idempotency-key usage.
+
+## EXACT NEXT ACTION — AUTHORIZATION GATE
 
 ```text
-H1 FLOOR
-H2 FRONTIER
-H3 KEYFLOW SYNTHESIS
+DO NOT MODIFY PRODUCTION CODE.
 ```
 
-Prefer novel synthesis over novelty-by-new-primitive. Innovation overlays must remain derivative, bounded, explainable, measurable, recoverable and kill-switchable.
+Wait for an explicit user instruction authorizing implementation of:
 
-## Accepted target direction
+`KF-EXEC-EXTFX-001`
 
-Recovery uses a Recovery Clearance Loop rather than a generic retry permission. Temporal Work Projection is a hybrid materialized index + live authoritative revalidation, never a source of truth or authority. Contradictions remain visible rather than flattened.
+An earlier generic `continue`/`proceed` that advanced architecture work is **not** retroactive production implementation authorization.
 
-Accepted innovation directions include Recovery Authority Re-pricing, contradiction-aware projection and projection-generated legal next-action controls. Recovery Control Twin, adaptive multidimensional recovery budgets, Attention Gradient and Causal Recovery Horizon remain target candidates under proof. Counterfactual recovery simulation remains research/deferred.
+When explicitly authorized:
 
-## Exact next action — DO THIS NEXT
+1. fetch/revalidate current `main` head;
+2. if code-bearing paths changed, stop and compare before editing;
+3. implement only the bounded packet;
+4. return the mandatory structured implementation evidence packet;
+5. inspect the actual GitHub diff from architecture command center;
+6. run independent adversarial review with Kimi/Gemini/another reviewer against the same packet;
+7. re-ingest implementation evidence into J23/J18 and K7/K8/K9/K11;
+8. do not expand to AI plans/webhooks/K10 until first-slice proof is accepted.
 
-Create the backward re-audit artifact, suggested:
+## Anti-normalization rule
 
-`docs/intelligence/investigations/J1-J25-J2-J15-J6-J14-J23-J18-BACKWARD-REAUDIT.md`
+Standards/known architectures are the floor, not the target. The first implementation slice deliberately strengthens an existing domain seam and proves uncertainty/consequence semantics before extracting generic infrastructure.
 
-Stress the converged J23/J18 target and proof specification backward through:
+## Chat-length invariant
 
-```text
-J1, J25, J2, J15, J6, J14, J23, J18
-K3, K6, K7, K8, K9, K10, K11
-```
-
-Required questions:
-
-```text
-webhook occurrence identity vs application-completeness ownership
-recovery Clearance invalidation on authority/delegation change
-stop authority vs execute authority
-effect/attempt/recovery identity ownership
-projection authority/truth leakage
-missing-consequence repair ownership
-provider truth vs local truth
-migration ambiguity preservation
-cross-domain tenant binding
-innovation overlays remain derivative/bounded/explainable/kill-switchable
-```
-
-Only create new findings/contradictions if the re-audit uncovers a genuinely distinct root. Prefer strengthening existing roots.
-
-## After backward re-audit
-
-```text
-bounded KF-EXEC readiness assessment
-```
-
-Only assess readiness if target + migration + provider contract + authority + projection + proof design survive the re-audit. Production implementation remains unauthorized and runtime proof remains unexecuted.
-
-## Chat-length policy
-
-```text
-major tranche
-→ persist canonical result
-→ refresh CURRENT + ROLLOVER
-→ then begin next broad tranche
-```
-
-Invariant: **If this chat disappears after the next message, the repository is sufficient to continue without analytical loss.**
-
-## Do not
-
-- modify production code;
-- create parallel v2 sources of truth;
-- make projection state authoritative;
-- invent historical certainty;
-- blindly retry OUTCOME_UNKNOWN;
-- treat provider success + local failure as provider failure;
-- let webhook occurrence dedupe suppress missing consequence repair;
-- replay completed children during parent resume;
-- treat failure/time as new authority;
-- let innovation overlays widen deterministic authority or become canonical truth;
-- converge on known/boring architecture merely because it is familiar;
-- claim runtime/test proof unless actually executed.
+> If this chat disappears after the next message, the repository is sufficient to continue without analytical loss.
