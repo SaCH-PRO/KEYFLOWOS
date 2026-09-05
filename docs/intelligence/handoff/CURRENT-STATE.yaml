@@ -1,8 +1,8 @@
 project: KEYFLOWOS
-analysis_version: 12
+analysis_version: 13
 last_updated: 2026-09-05
-phase: j23-j18-l6-proof-design-complete-backward-reaudit
-status: backward-reaudit-next
+phase: j23-j18-l6-backward-reaudit-complete-exec-readiness
+status: bounded-kf-exec-readiness-assessment-next
 canonical_branch: docs/keyflow-intelligence-foundation
 implementation_evidence:
   branch: main
@@ -11,26 +11,14 @@ implementation_evidence:
   current_head_change_class: audit-only
 context_integrity: PASS
 implementation_authorized: false
-methodology:
-  implementation_handoff: docs/intelligence/13-IMPLEMENTATION-HANDOFF-PROTOCOL.md
-  standards_research: docs/intelligence/14-STANDARDS-RESEARCH-INNOVATION-METHOD.md
-  anti_normalization_required: true
-  innovation_horizons: [FLOOR, FRONTIER, KEYFLOW_SYNTHESIS]
-  preferred_innovation_shape: novel_synthesis_over_novel_primitives
-active_mesh:
-  - { id: KF-JOURNEY-001, name: Business Birth }
-  - { id: KF-JOURNEY-025, name: Human Authority Lifecycle }
-  - { id: KF-JOURNEY-002, name: KEY Request -> Governed Action }
-  - { id: KF-JOURNEY-015, name: Approval / Governance Lifecycle, status: L5-recovery-authority-semantically-converged }
-  - { id: KF-JOURNEY-006, name: Proactive KEY / Autonomy, status: recovery-policy-semantically-converged-active-stress-test }
-  - { id: KF-JOURNEY-014, name: Webhook / External Event Ingress, status: microscopic-pass-reopenable }
-  - { id: KF-JOURNEY-023, name: Temporal Flow / Long-Running Workflow, status: L6-semantic-target-converged-proof-designed }
-  - { id: KF-JOURNEY-018, name: Failure -> Recovery, status: L6-semantic-target-converged-proof-designed }
-active_kernels: [KF-KERNEL-003,KF-KERNEL-005,KF-KERNEL-006,KF-KERNEL-007,KF-KERNEL-008,KF-KERNEL-009,KF-KERNEL-010,KF-KERNEL-011]
 canonical_ranges:
   findings_through: F160
   contradictions_through: C110
   recommendations_through: KF-REC-048
+methodology:
+  standards_research: docs/intelligence/14-STANDARDS-RESEARCH-INNOVATION-METHOD.md
+  anti_normalization_required: true
+  innovation_horizons: [FLOOR, FRONTIER, KEYFLOW_SYNTHESIS]
 completed_l6:
   unified_convergence: docs/intelligence/investigations/J23-J18-L6-UNIFIED-CONVERGENCE-MATRIX.md
   exact_field_status_mapping: docs/intelligence/investigations/J23-J18-L6-EXACT-FIELD-STATUS-MAPPING.md
@@ -39,76 +27,50 @@ completed_l6:
   recovery_authority: docs/intelligence/investigations/J23-J18-L6-RECOVERY-AUTHORITY-REPRESENTATION.md
   temporal_projection: docs/intelligence/investigations/J23-J18-L6-TEMPORAL-WORK-PROJECTION-MATERIALIZATION.md
   proof_inventory: docs/intelligence/investigations/J23-J18-L6-CHARACTERIZATION-CONCURRENCY-CRASH-PROOF-INVENTORY.md
+  backward_reaudit: docs/intelligence/investigations/J1-J25-J2-J15-J6-J14-J23-J18-BACKWARD-REAUDIT.md
+backward_reaudit:
+  target_root_invalidated: false
+  new_universal_runtime_required: false
+  new_finding_id_required: false
+  new_contradiction_id_required: false
+  refinements:
+    - effect_execution_claim_vs_attempt_ownership
+    - webhook_occurrence_vs_application_completeness
+    - recovery_control_twin_is_derived_lens
+    - adaptive_recovery_budget_cannot_expand_authority_envelope
+    - attention_gradient_is_prioritization_only
+    - causal_recovery_horizon_uses_evidence_bound_edges_only
 proof_state:
   proof_obligations_defined: 39
   deterministic_fault_injection_points_defined: 16
   runtime_proof_executed: false
   kf_exec_ready: false
-  critical_semantic_rewrite:
-    webhook_occurrence_dedupe: occurrence_seen_must_not_imply_application_complete
-j23_j18_target_decisions:
-  shared_durable_work_semantic_contract: YES
-  shared_recovery_semantic_contract: YES
-  shared_temporal_projection: YES
-  projection_materialization: HYBRID_INDEX_PLUS_LIVE_REVALIDATION
-  source_specific_adapters: YES
-  projection_authoritative: NO
-  contradiction_visibility: YES
-  universal_workoccurrence_table: NOT_JUSTIFIED_YET
-  universal_recoveryoccurrence_table: NOT_JUSTIFIED_YET
-  universal_dead_letter_table: NOT_JUSTIFIED_YET
-  universal_recovery_worker: NOT_JUSTIFIED_YET
-  universal_workflow_runtime: NOT_JUSTIFIED_YET
-  generic_undo_semantic: NO
-  provider_native_reversal_where_available: YES
-  financial_truth_kernel: KF-KERNEL-010
-recovery_authority:
-  recovery_clearance_loop: ACCEPTED_DIRECTION
-  recovery_authority_repricing: ACCEPTED_DIRECTION
-  stop_authority_may_be_broader_than_execute_authority: true
-  outcome_unknown_requires_reconcile_before_duplicate_mutation: true
-  reversal_and_compensation_are_new_governed_effects: true
-  learning_may_expand_live_authority: false
-innovation:
-  accepted_directions:
-    - recovery_clearance_loop
-    - recovery_authority_repricing
-    - contradiction_aware_projection
-    - projection_generated_legal_next_actions
-  target_candidates:
-    - recovery_control_twin
-    - adaptive_multidimensional_recovery_budget
-    - attention_gradient
-    - causal_recovery_horizon
-  research_deferred:
-    - counterfactual_recovery_simulation
+active_mesh: [J1,J25,J2,J15,J6,J14,J23,J18]
+active_kernels: [K3,K5,K6,K7,K8,K9,K10,K11]
 exact_next_action:
-  title: backward_reaudit_active_constellation
-  suggested_artifact: docs/intelligence/investigations/J1-J25-J2-J15-J6-J14-J23-J18-BACKWARD-REAUDIT.md
-  purpose: stress the converged J23/J18 target and proof design backward through authority, business birth, governed action, proactive autonomy, ingress, temporal work and recovery; identify contradictions, duplicated ownership, parallel truth, impossible migration assumptions and innovation invariant violations.
-  journeys: [J1,J25,J2,J15,J6,J14,J23,J18]
-  kernels: [K3,K6,K7,K8,K9,K10,K11]
-  mandatory_questions:
-    - webhook_occurrence_dedupe_vs_application_completeness_ownership
-    - recovery_clearance_invalidation_on_authority_change
-    - stop_authority_vs_execute_authority
-    - effect_attempt_recovery_lineage_ownership
-    - projection_authority_leakage
-    - financial_consequence_repair_ownership
-    - provider_truth_vs_local_truth
-    - migration_ambiguity_preservation
-    - innovation_overlays_remain_derivative_bounded_explainable_and_kill_switchable
-next_after:
-  - bounded_kf_exec_readiness_assessment
+  title: bounded_kf_exec_readiness_assessment
+  suggested_artifact: docs/intelligence/investigations/J23-J18-BOUNDED-KF-EXEC-READINESS-ASSESSMENT.md
+  purpose: compare candidate first vertical implementation/proof slices and decide whether any bounded packet can be generated without authorizing production implementation broadly.
+  candidate_slices:
+    - outbound_delivery_one_provider
+    - ai_plan_actiondispatcher_bullmq_retry_identity
+    - webhook_apply_state_one_payment_provider
+    - payment_refund_k10_consequence_convergence
+  evaluation_dimensions:
+    - existing_seam_reuse
+    - known_defect_pressure
+    - falsification_value
+    - provider_simulator_or_sandbox_feasibility
+    - migration_blast_radius
+    - authority_relevance
+    - tenant_isolation_proofability
+    - rollback_feature_gateability
+    - innovation_enablement_without_scope_creep
 constraints:
   - do_not_modify_production_code
-  - revalidate_if_main_gets_code_bearing_changes
-  - do_not_create_parallel_v2_sources_of_truth
+  - readiness_assessment_is_not_implementation_authorization
+  - choose_smallest_vertical_slice_that_falsifies_core_architecture_early
+  - do_not_create_parallel_sources_of_truth
   - do_not_make_projection_authoritative
-  - do_not_install_workflow_or_policy_engine_from_findings_alone
-  - do_not_invent_certainty
-  - do_not_blind_retry_outcome_unknown
-  - do_not_treat_provider_success_plus_local_failure_as_provider_failure
-  - do_not_treat_failure_or_time_as_new_authority
-  - do_not_converge_on_conventional_architecture_without_anti_normalization_pressure_test
-  - do_not_claim_tests_or_runtime_proof_unless_executed
+  - do_not_enable_innovation_overlays_before_deterministic_core
+  - do_not_claim_runtime_proof_unless_executed
