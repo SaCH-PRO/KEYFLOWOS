@@ -1,30 +1,23 @@
 # KeyFlowOS Current Handoff
 
 Last updated: 2026-09-05
-Status: CURRENT — WHOLE-SYSTEM VIRTUAL MODEL / POOLING / RE-AUDIT PROGRAMME
+Status: CURRENT — WHOLE-SYSTEM VIRTUAL MODEL / J16 + K4 EPISTEMIC-INTEGRITY POOL ACTIVE
 
 ## Programme identity
 
 The active programme is repository-backed architecture forensics and convergence, not immediate implementation.
 
-We are building a progressively richer virtual architectural / causal model of the complete KeyFlowOS system, then repeatedly pooling, synthesizing and backward-re-auditing journeys, constellations and kernels until the model is strong enough to produce a comprehensive code-level transformation programme.
+We are building a progressively richer virtual architectural / causal model of the complete KeyFlowOS system, repeatedly pooling, synthesizing and backward-re-auditing journeys, constellations and kernels until the model supports a comprehensive code-level transformation programme.
 
 Canonical loop:
 
 ```text
-MAP
-→ MICROSCOPIC TRACE
-→ JOURNEY
-→ CONSTELLATION
-→ KERNELS
+MAP → MICROSCOPIC TRACE → JOURNEY → CONSTELLATION → KERNELS
 → DYNAMIC / CAUSAL / FEEDBACK GRAPHS
 → STANDARDS / OSS / FRONTIER RESEARCH
 → FINDINGS / CONTRADICTIONS / OPTIONS
-→ POOL
-→ TARGET SYNTHESIS
-→ BACKWARD RE-AUDIT
-→ REOPEN / REFINE
-→ LOOP AGAIN AT A LARGER SCALE
+→ POOL → TARGET SYNTHESIS → BACKWARD RE-AUDIT
+→ REOPEN / REFINE → LOOP AGAIN AT A LARGER SCALE
 ```
 
 ## Load first
@@ -38,7 +31,12 @@ MAP
 7. `docs/intelligence/handoff/NEXT-CHAT-ROLLOVER.yaml`
 8. `docs/intelligence/13-IMPLEMENTATION-HANDOFF-PROTOCOL.md`
 9. `docs/intelligence/14-STANDARDS-RESEARCH-INNOVATION-METHOD.md`
-10. current active journey / kernel / investigation files referenced by state
+10. `docs/intelligence/journeys/KF-JOURNEY-016-BUSINESS-GENOME-EVOLUTION.md`
+11. `docs/intelligence/kernels/KF-KERNEL-004-BUSINESS-KNOWLEDGE.md`
+12. `docs/intelligence/08L-FINDING-REGISTER-GENOME-EVOLUTION-SUPPLEMENT.md`
+13. `docs/intelligence/09L-CONTRADICTION-REGISTER-GENOME-EVOLUTION-SUPPLEMENT.md`
+14. `docs/intelligence/10H-RECOMMENDATION-REGISTER-BUSINESS-KNOWLEDGE-CONTINUATION.md`
+15. prior mature J23/J18 pool artifacts when backward-re-auditing learning/outcome semantics.
 
 ## Context integrity
 
@@ -55,117 +53,135 @@ context integrity:     PASS
 Canonical ranges:
 
 ```text
-Findings:        F160
-Contradictions:  C110
-Recommendations: KF-REC-048
+Findings:        F166
+Contradictions:  C116
+Recommendations: KF-REC-049
 ```
 
-## Mature pooled evidence
+## Mature pool feeding this work
 
-The J23/J18 temporal/recovery/external-reality work is one of the most mature pools and includes:
+J23/J18 temporal/recovery/external-reality/authority remains substantially converged and provides:
 
-- semantic convergence;
-- migration direction;
-- provider-contract direction;
-- recovery-authority semantics;
-- Temporal Work Projection target;
-- 39 proof obligations;
-- 16 deterministic fault-injection points;
-- backward re-audit through J1/J25/J2/J15/J6/J14/J23/J18.
+- outcome/failure certainty;
+- provider/external truth boundaries;
+- Recovery Clearance semantics;
+- consequence completeness;
+- Temporal Work Projection;
+- 39 proof obligations / 16 deterministic fault points;
+- passed backward re-audit through J1/J25/J2/J15/J6/J14/J23/J18.
 
-This work is now an input to broader system convergence, not a reason to stop the global analysis loop.
+Its new role in J16 is crucial: ambiguous execution/recovery evidence must not become clean causal learning.
 
-## KF-EXEC-EXTFX-001 classification
+## Active J16 / K4 pool
 
-`docs/intelligence/execution/KF-EXEC-EXTFX-001-OUTBOUND-DELIVERY-RESEND-EFFECT-CERTAINTY.md`
+### Journey
+`J16 — Business Genome Evolution`
 
-is retained as:
+### Newly activated kernel
+`K4 — Business Knowledge`
+
+### Core thesis
+
+Business knowledge must preserve exact revision provenance, verification, authority, conflict, materialization state and outcome-qualified learning before it may change future KEY behavior.
+
+### Initial current topology
 
 ```text
-POOLED IMPLEMENTATION-SHAPE EVIDENCE
-ARCHITECTURALLY READY AS A BOUNDED PROBE
-NOT THE PROGRAMME FRONTIER
-NOT AUTHORIZED
-NOT IMPLEMENTED
-NOT TESTED
+Human / onboarding / Genesis / evolution proposal
+→ BusinessBlueprint
+→ async best-effort Blueprint backfill
+→ GenomeFact
 ```
 
-It demonstrates how a mature architecture concept could translate into real repository work and can be used to pressure-test later global synthesis.
-
-## Active mesh
-
-Current high-leverage mesh includes:
+and independently:
 
 ```text
-J1  — Business Birth
-J25 — Human Authority Lifecycle
-J2  — KEY Request → Governed Action
-J15 — Approval / Governance Lifecycle
-J6  — recurring / proactive autonomous execution
-J14 — webhook / external event ingestion
-J23 — temporal / long-running workflow
-J18 — failure / recovery / reversal
+Temporal / inbox / executive / domain observations
+→ GenomeSignal
+→ accept / merge
+→ GenomeFact
 ```
 
-Kernel pressure currently spans:
+No reverse GenomeFact → Blueprint materialization was observed in this initial trace.
+
+Therefore Blueprint and GenomeFact can become asymmetric legitimate-looking truths.
+
+### New findings
+
+- F161 — replacement GenomeFact value/source can inherit obsolete `USER_VERIFIED` state.
+- F162 — Genome mutation authority currently maps mainly to business access/completeness, not effective knowledge-change authority.
+- F163 — Blueprint + GenomeFact are asymmetric dual truths with non-atomic one-way convergence.
+- F164 — evolution proposal application and approval evidence are not atomic.
+- F165 — evolution proposals are not bound to current/base Genome revision.
+- F166 — Genome learning compresses process/control events into success/failure semantics stronger than evidence supports.
+
+### New contradictions
+
+C111–C116 correspond to the above epistemic/governance/truth conflicts.
+
+### New recommendation
+
+`KF-REC-049 — Establish a provenance- and revision-aware Business Knowledge Contract for Genome evolution and learning.`
+
+Key target laws:
 
 ```text
-K3 authority/control
-K5 temporal/state coordination
-K6 domain legality
-K7 ingress/processing lifecycle
-K8 evidence
-K9 provider/external truth
-K10 financial truth
-K11 consequence/application completion
+VERIFICATION belongs to an exact KnowledgeRevision
+OLD VERIFICATION does not transfer to a materially new value
+BUSINESS ACCESS != KNOWLEDGE VERIFICATION AUTHORITY
+ONE authoritative revision owner per concept
+PROJECTIONS expose materialization freshness/completeness
+KNOWLEDGE CHANGE INTENT revalidates its base revision
+MATERIAL MUTATION + GOVERNANCE EVIDENCE are crash-consistent
+PROCESS / CONTROL / EXECUTION / BUSINESS OUTCOME / CAUSAL LEARNING remain distinct
+OUTCOME CERTAINTY gates LearningEligibility
+LEARNING may suggest policy but must never silently expand authority
 ```
+
+## Why this matters to the whole system
+
+`GenomeAutonomyGateService` feeds `AutonomyOrchestratorService`. Therefore epistemic defects are not merely profile/data quality problems: incorrect or misverified knowledge can alter readiness, risk and autonomous-action decisions.
+
+K4 must consume K8/K9/K11 outcome certainty while remaining separate from K3 authority.
 
 ## Exact frontier
 
-Continue expanding the virtual model beyond the mature J23/J18 pool.
+Do not jump to another broad journey yet.
 
-Choose the next highest-leverage adjacent journey/constellation/kernel pressure point using:
+Deepen J16/K4 through:
 
-- cross-journey leverage;
-- duplicated or ambiguous truth ownership;
-- material user/product value;
-- ability to refine kernel boundaries;
-- likelihood of changing the eventual target architecture;
-- usefulness to the final migration/proof/execution programme.
+1. GenomeFact consumers + prompt/context injection;
+2. Blueprint consumers that bypass the fact kernel;
+3. GenomeMemoryEvent consumers and real adaptation effects;
+4. domain snapshot → recommendation → action → outcome-learning linkage;
+5. constitution/value versioning relationship;
+6. J19 correction/deletion/privacy lineage;
+7. standards/OSS/frontier research for provenance, temporal knowledge, belief revision and policy-safe adaptive systems;
+8. pool results into KF-REC-049;
+9. backward-re-audit J1/J25/J2/J15/J6/J14/J23/J18 through K4 invariants.
 
-Then:
+Then decide whether J16/K4 has enough pressure coverage for a larger constellation synthesis.
+
+## KF-EXEC-EXTFX-001 classification
+
+Still:
 
 ```text
-MICROSCOPIC REPOSITORY TRACE
-→ FINDINGS / CONTRADICTIONS
-→ POOL WITH EXISTING KERNELS
-→ TARGET SYNTHESIS
-→ BACKWARD RE-AUDIT MATURE AREAS
-→ REFRESH CONTINUITY
+POOLED IMPLEMENTATION-SHAPE EVIDENCE
+PROGRAMME FRONTIER = NO
+AUTHORIZED = NO
+IMPLEMENTED = NO
+TESTED = NO
 ```
 
-Do not modify production code during this programme phase.
+## Proof discipline
+
+Existing Genome tests inspected in this tranche are TEST SOURCE, not executed runtime proof.
+
+No production tests were executed.
 
 ## Continuity law
 
-Every material tranche must be persisted before the next broad tranche begins.
+Every material tranche must be persisted, then CURRENT + ROLLOVER refreshed before another broad tranche.
 
-Refresh CURRENT + ROLLOVER after any material frontier/target/pool change.
-
-All ChatGPT project threads, Claude Code sessions and Kimi Code sessions are ephemeral working views over the same repository-backed programme.
-
-Target invariant:
-
-> If this chat disappears after the next message, a fresh thread can recover the exact working flow from the repository without restarting.
-
-## Final destination
-
-The programme is complete only when we have converged:
-
-1. whole-system target architecture;
-2. migration architecture;
-3. proof/test architecture;
-4. compatibility and rollout sequencing;
-5. exact repository transformation plan across models, services, workers, routes, integrations, events, tests and migrations;
-6. bounded implementation packets that Claude Code/Kimi Code can execute without architectural drift;
-7. independent re-audit and implementation evidence loops.
+> If this chat disappears after the next message, a fresh thread must recover the exact J16/K4 working flow from repository intelligence without restarting.
