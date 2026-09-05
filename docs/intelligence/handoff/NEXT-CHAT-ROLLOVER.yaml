@@ -1,6 +1,6 @@
 project: KEYFLOWOS
-rollover_version: 7
-last_updated: 2026-09-04
+rollover_version: 8
+last_updated: 2026-09-05
 status: LIVE_CONTINUITY_ARTIFACT
 canonical_branch: docs/keyflow-intelligence-foundation
 implementation_authorized: false
@@ -12,8 +12,8 @@ implementation_evidence:
   code_bearing_baseline: d7c5b86cfa276d75ffa42d5f1707c43704dc9f21
   current_head_change_class: audit-only
 analytical_state:
-  j23: L6_SEMANTIC_TARGET_CONVERGENCE_PROOF_REMAINING
-  j18: L6_SEMANTIC_TARGET_CONVERGENCE_PROOF_REMAINING
+  j23: L6_SEMANTIC_TARGET_CONVERGED_PROOF_DESIGNED
+  j18: L6_SEMANTIC_TARGET_CONVERGED_PROOF_DESIGNED
   j15: L5_RECOVERY_AUTHORITY_SEMANTICALLY_CONVERGED
   j6: ACTIVE_STRESS_TEST_RECOVERY_POLICY_SEMANTICALLY_CONVERGED
   k10: ACTIVE_INITIAL_CONVERGENCE
@@ -28,6 +28,13 @@ completed_l6_artifacts:
   provider_contract_matrix: docs/intelligence/investigations/J23-J18-L6-PROVIDER-CONTRACT-IDEMPOTENCY-RECONCILIATION-MATRIX.md
   recovery_authority_representation: docs/intelligence/investigations/J23-J18-L6-RECOVERY-AUTHORITY-REPRESENTATION.md
   temporal_projection_materialization: docs/intelligence/investigations/J23-J18-L6-TEMPORAL-WORK-PROJECTION-MATERIALIZATION.md
+  characterization_concurrency_crash_proof_inventory: docs/intelligence/investigations/J23-J18-L6-CHARACTERIZATION-CONCURRENCY-CRASH-PROOF-INVENTORY.md
+proof_inventory:
+  proof_obligations: 39
+  deterministic_fault_injection_points: 16
+  runtime_tests_executed_in_forensic_pass: false
+  kf_exec_generation: BLOCKED
+  key_transition: duplicate_webhook_occurrence_is_noop_only_when_application_complete
 innovation_method:
   canonical: docs/intelligence/14-STANDARDS-RESEARCH-INNOVATION-METHOD.md
   convergence_requires_anti_normalization_pressure_test: true
@@ -45,36 +52,22 @@ target_candidates:
   causal_recovery_horizon: true
 research_deferred:
   counterfactual_recovery_simulation: true
-projection_decisions:
-  shared_semantic_projection_contract: YES
-  preferred_materialization: HYBRID_MATERIALIZED_INDEX_PLUS_LIVE_REVALIDATION
-  source_specific_adapters: YES
-  projection_authoritative: NO
-  explicit_freshness: YES
-  rebuildable: YES
-  contradiction_visibility: YES
-  universal_workoccurrence_table: NOT_JUSTIFIED_YET
-  universal_recoveryoccurrence_table: NOT_JUSTIFIED_YET
-  global_event_bus_rewrite: NOT_JUSTIFIED_YET
 exact_next_action:
-  title: characterization_concurrency_crash_proof_inventory
-  artifact: docs/intelligence/investigations/J23-J18-L6-CHARACTERIZATION-CONCURRENCY-CRASH-PROOF-INVENTORY.md
-  instruction: Inventory existing tests and proof seams without claiming execution, then define exact characterization/concurrency/crash/adversarial proof obligations needed before bounded implementation readiness.
-  required_scenarios:
-    - provider_point_of_no_return_then_local_crash
-    - bullmq_retry_failed_idempotency_interaction
-    - parent_resume_preserves_successful_children
-    - webhook_claimed_then_processing_failure_and_redelivery
-    - financial_consequence_repair_without_provider_replay
-    - stop_revoke_during_retry_backoff
-    - reversal_requires_current_clearance
-    - local_delete_vs_provider_delete
-    - migration_ambiguous_rows
-    - projection_staleness_cannot_authorize_mutation
-    - projection_rebuild_and_adapter_reclassification
-    - tenant_isolation_cross_domain_projection
-next_after_proof_inventory:
-  - backward_reaudit_active_constellation
+  title: backward_reaudit_active_constellation
+  suggested_artifact: docs/intelligence/investigations/J1-J25-J2-J15-J6-J14-J23-J18-BACKWARD-REAUDIT.md
+  instruction: Stress the converged J23/J18 target and proof specification backward through J1/J25/J2/J15/J6/J14/J23/J18 and K3/K6/K7/K8/K9/K10/K11. Detect contradictions, duplicated ownership, parallel truth, impossible migration assumptions, authority invalidation gaps and innovation overlays that violate deterministic invariants.
+  required_checks:
+    - webhook_occurrence_dedupe_vs_apply_completeness
+    - recovery_clearance_invalidation
+    - stop_vs_execute_authority
+    - effect_attempt_recovery_lineage
+    - projection_non_authority
+    - consequence_repair_ownership
+    - provider_vs_local_truth
+    - migration_ambiguity
+    - tenant_isolation
+    - innovation_derivative_bounded_explainable_kill_switch
+next_after_backward_reaudit:
   - bounded_kf_exec_readiness_assessment
 constraints:
   - do_not_modify_production_code
