@@ -1,5 +1,5 @@
 project: KEYFLOWOS
-rollover_version: 9
+rollover_version: 10
 last_updated: 2026-09-05
 status: LIVE_CONTINUITY_ARTIFACT
 canonical_branch: docs/keyflow-intelligence-foundation
@@ -14,47 +14,34 @@ canonical_ranges:
   findings_through: F160
   contradictions_through: C110
   recommendations_through: KF-REC-048
-completed_l6_artifacts:
-  - docs/intelligence/investigations/J23-J18-L6-UNIFIED-CONVERGENCE-MATRIX.md
-  - docs/intelligence/investigations/J23-J18-L6-EXACT-FIELD-STATUS-MAPPING.md
-  - docs/intelligence/investigations/J23-J18-L6-LIVE-ROW-MIGRATION-COMPATIBILITY.md
-  - docs/intelligence/investigations/J23-J18-L6-PROVIDER-CONTRACT-IDEMPOTENCY-RECONCILIATION-MATRIX.md
-  - docs/intelligence/investigations/J23-J18-L6-RECOVERY-AUTHORITY-REPRESENTATION.md
-  - docs/intelligence/investigations/J23-J18-L6-TEMPORAL-WORK-PROJECTION-MATERIALIZATION.md
-  - docs/intelligence/investigations/J23-J18-L6-CHARACTERIZATION-CONCURRENCY-CRASH-PROOF-INVENTORY.md
-  - docs/intelligence/investigations/J1-J25-J2-J15-J6-J14-J23-J18-BACKWARD-REAUDIT.md
-proof_state:
-  proof_obligations: 39
-  fault_injection_points: 16
-  runtime_tests_executed: false
-backward_reaudit:
-  passed: true
-  target_root_invalidated: false
-  new_ids_added: false
-  key_refinements:
-    - EffectExecutionClaim_vs_AttemptOwnership
-    - webhook_occurrence_vs_application_completeness
-    - Recovery_Control_Twin_as_derived_lens
-    - adaptive_budget_inside_hard_authority_envelope
-    - attention_is_prioritization_only
-    - causal_horizon_uses_durable_evidence_edges
+completed_frontier:
+  proof_inventory: docs/intelligence/investigations/J23-J18-L6-CHARACTERIZATION-CONCURRENCY-CRASH-PROOF-INVENTORY.md
+  backward_reaudit: docs/intelligence/investigations/J1-J25-J2-J15-J6-J14-J23-J18-BACKWARD-REAUDIT.md
+  bounded_readiness: docs/intelligence/investigations/J23-J18-BOUNDED-KF-EXEC-READINESS-ASSESSMENT.md
+execution_packet:
+  id: KF-EXEC-EXTFX-001
+  artifact: docs/intelligence/execution/KF-EXEC-EXTFX-001-OUTBOUND-DELIVERY-RESEND-EFFECT-CERTAINTY.md
+  selected_slice: OutboundDelivery_Resend_effect_certainty
+  architecture_ready: true
+  authorized: false
+  implemented: false
+  tested: false
+  reasons_selected:
+    - real_irreversible_external_effect
+    - strong_existing_domain_seams
+    - provider_native_idempotency
+    - deterministic_crash_falsification
+    - lower_blast_radius_than_money
+    - no_universal_runtime_required
 exact_next_action:
-  title: bounded_kf_exec_readiness_assessment
-  suggested_artifact: docs/intelligence/investigations/J23-J18-BOUNDED-KF-EXEC-READINESS-ASSESSMENT.md
-  instruction: Compare the smallest candidate vertical slices by seam reuse, defect pressure, architecture-falsification value, provider simulation feasibility, migration blast radius, authority/tenant proof, rollback/feature-gating and innovation enablement. Decide whether a bounded implementation packet is architecturally ready; do not implement.
-  candidates:
-    - outbound_delivery_one_provider
-    - ai_plan_actiondispatcher_bullmq_retry_identity
-    - webhook_apply_state_one_payment_provider
-    - payment_refund_k10_consequence_convergence
+  title: explicit_implementation_authorization_gate
+  instruction: Remain production read-only until the user explicitly authorizes KF-EXEC-EXTFX-001. A prior generic continue/proceed is not retroactive authorization. On authorization, revalidate main, implement only packet scope, return structured implementation evidence, then run architecture and adversarial review.
 constraints:
-  - do_not_modify_production_code
-  - readiness_is_not_implementation_authorization
-  - anti_normalization_required
-  - no_parallel_sources_of_truth
-  - projection_non_authoritative
-  - innovation_overlays_after_deterministic_core
-  - do_not_claim_runtime_proof_unless_executed
+  - do_not_modify_production_code_without_explicit_authorization
+  - do_not_expand_packet_scope_silently
+  - do_not_create_universal_work_attempt_recovery_tables
+  - do_not_claim_tests_passed_unless_executed
+  - preserve_provider_truth_and_historical_ambiguity
+  - innovation_overlays_remain_deferred_until_deterministic_core_proven
 rollover_protocol:
-  update_after_each_major_tranche: true
   invariant: fresh_chat_can_recover_frontier_from_repo_only
