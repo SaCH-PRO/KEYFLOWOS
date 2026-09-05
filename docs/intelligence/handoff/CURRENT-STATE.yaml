@@ -1,5 +1,5 @@
 project: KEYFLOWOS
-analysis_version: 16
+analysis_version: 17
 last_updated: 2026-09-05
 phase: whole-system-virtual-model-expansion-j16-k4-epistemic-integrity
 status: CONTINUE_ARCHITECTURE_FORENSICS_AND_CONVERGENCE
@@ -15,6 +15,13 @@ programme_identity:
   mode: repository_backed_virtual_architectural_digital_twin
   objective: converge whole-system understanding through repeated journey_constellation_kernel pooling and backward_reaudits before comprehensive code transformation planning
   loop: [MAP,MICROSCOPIC_TRACE,JOURNEY,CONSTELLATION,KERNELS,DYNAMIC_CAUSAL_FEEDBACK_GRAPHS,STANDARDS_OSS_FRONTIER_RESEARCH,FINDINGS_CONTRADICTIONS_OPTIONS,POOL,TARGET_SYNTHESIS,BACKWARD_REAUDIT,REOPEN_AND_REFINE,LOOP_AT_LARGER_SCALE]
+taxonomy_integrity:
+  governor: docs/intelligence/04A-CANONICAL-TAXONOMY-AND-NAMING-REGISTRY.md
+  invariant: one_semantic_concept_one_canonical_id_one_canonical_name_one_home_register_zero_duplicate_canonical_entries
+  create_rule: SEARCH_REUSE_REFINE_CROSS_REFERENCE_BEFORE_NEW_ID_OR_NAME
+  duplicate_detection: intelligence_integrity_defect_must_be_repaired_before_next_broad_tranche
+  candidate_terms: reserve_name_before_permanent_concept_id_when_boundaries_not_yet_stable
+  concept_range_through: KF-CONCEPT-042
 canonical_ranges:
   findings_through: F166
   contradictions_through: C116
@@ -37,6 +44,7 @@ active_pool:
   findings: [F161,F162,F163,F164,F165,F166]
   contradictions: [C111,C112,C113,C114,C115,C116]
   recommendation: KF-REC-049
+  reserved_vocabulary: [KnowledgeSubject,KnowledgeRevision,KnowledgeAssertion,KnowledgeInference,KnowledgeChangeIntent,KnowledgeVerification,KnowledgeConflict,MaterializationState,LearningEligibility]
   key_laws:
     - verification_belongs_to_exact_knowledge_revision_not_field_forever
     - knowledge_edit_authority_differs_from_verification_and_autonomy_relevant_change_authority
@@ -53,6 +61,7 @@ active_pool:
     implication: asymmetric_dual_truth_requires_ownership_and_materialization_convergence
   proof_state: SOURCE_TESTS_INSPECTED_RUNTIME_NOT_EXECUTED
 latest_artifacts:
+  taxonomy_governor: docs/intelligence/04A-CANONICAL-TAXONOMY-AND-NAMING-REGISTRY.md
   j16_dossier: docs/intelligence/journeys/KF-JOURNEY-016-BUSINESS-GENOME-EVOLUTION.md
   k4_kernel: docs/intelligence/kernels/KF-KERNEL-004-BUSINESS-KNOWLEDGE.md
   j16_findings: docs/intelligence/08L-FINDING-REGISTER-GENOME-EVOLUTION-SUPPLEMENT.md
@@ -72,11 +81,12 @@ continuity:
   cross_thread_rule: all_chat_threads_are_ephemeral_views_over_one_repository_backed_programme
   rollover_always_active: true
   update_after_major_tranche: true
+  taxonomy_check_after_major_tranche: true
   emergency_rule: finish_atomic_trace_persist_refresh_current_and_rollover_before_context_risk
   invariant: fresh_thread_can_resume_exact_working_flow_without_restart
 exact_next_action:
   title: deepen_j16_k4_then_backward_reaudit
-  instruction: Continue J16/K4 microscopic reconstruction through GenomeFact and Blueprint consumers, prompt/context injection, GenomeMemoryEvent/adaptation consumers, domain snapshot to recommendation to execution to outcome linkage, constitution/value versioning and privacy/deletion lineage. Then perform standards/OSS/frontier research for provenance temporal knowledge belief revision and policy-safe adaptive systems, pool the results into KF-REC-049, and backward-reaudit J1/J25/J2/J15/J6/J14/J23/J18 before moving to another broad journey.
+  instruction: Continue J16/K4 microscopic reconstruction through GenomeFact and Blueprint consumers, prompt/context injection, GenomeMemoryEvent/adaptation consumers, domain snapshot to recommendation to execution to outcome linkage, constitution/value versioning and privacy/deletion lineage. Then perform standards/OSS/frontier research for provenance temporal knowledge belief revision and policy-safe adaptive systems, pool the results into KF-REC-049, run taxonomy/duplicate integrity checks, and backward-reaudit J1/J25/J2/J15/J6/J14/J23/J18 before moving to another broad journey.
   pressure_questions:
     - which_representation_owns_each_business_knowledge_concept
     - can_prompt_or_autonomy_consumers_read_stale_disputed_or_misverified_knowledge_as_current_truth
@@ -97,5 +107,6 @@ constraints:
   - do_not_create_parallel_genome_authority_engine
   - do_not_treat_process_success_as_business_outcome
   - do_not_allow_learning_to_expand_authority
+  - do_not_create_duplicate_canonical_concepts_or_ids
   - preserve_anti_normalization_method
   - continuously_refresh_cross_thread_continuity
