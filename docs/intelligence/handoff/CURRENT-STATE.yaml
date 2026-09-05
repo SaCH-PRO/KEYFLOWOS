@@ -1,8 +1,8 @@
 project: KEYFLOWOS
-analysis_version: 14
+analysis_version: 15
 last_updated: 2026-09-05
-phase: bounded-kf-exec-packet-ready-authorization-gate
-status: KF-EXEC-EXTFX-001_READY_UNAUTHORIZED
+phase: whole-system-virtual-model-expansion-pooling-loop
+status: CONTINUE_ARCHITECTURE_FORENSICS_AND_CONVERGENCE
 canonical_branch: docs/keyflow-intelligence-foundation
 implementation_evidence:
   branch: main
@@ -11,52 +11,73 @@ implementation_evidence:
   current_head_change_class: audit-only
 context_integrity: PASS
 implementation_authorized: false
+programme_identity:
+  mode: repository_backed_virtual_architectural_digital_twin
+  objective: converge whole-system understanding through repeated journey_constellation_kernel pooling and backward_reaudits before comprehensive code transformation planning
+  loop:
+    - MAP
+    - MICROSCOPIC_TRACE
+    - JOURNEY
+    - CONSTELLATION
+    - KERNELS
+    - DYNAMIC_CAUSAL_FEEDBACK_GRAPHS
+    - STANDARDS_OSS_FRONTIER_RESEARCH
+    - FINDINGS_CONTRADICTIONS_OPTIONS
+    - POOL
+    - TARGET_SYNTHESIS
+    - BACKWARD_REAUDIT
+    - REOPEN_AND_REFINE
+    - LOOP_AT_LARGER_SCALE
 canonical_ranges:
   findings_through: F160
   contradictions_through: C110
   recommendations_through: KF-REC-048
-convergence:
-  semantic_target: CONVERGED
-  migration_direction: CONVERGED
-  provider_contract_direction: CONVERGED
-  recovery_authority: CONVERGED
-  temporal_projection: CONVERGED
-  proof_design: COMPLETE
+active_mesh:
+  journeys: [J1,J25,J2,J15,J6,J14,J23,J18]
+  kernels: [K3,K5,K6,K7,K8,K9,K10,K11]
+latest_mature_pool:
+  name: temporal_recovery_external_reality_authority
+  j23_j18_semantic_target: SUBSTANTIALLY_CONVERGED
+  proof_design: COMPLETE_NOT_EXECUTED
   backward_reaudit: PASSED
-  runtime_proof: NOT_EXECUTED
-proof_state:
-  obligations_defined: 39
-  deterministic_fault_injection_points: 16
-backward_reaudit:
-  artifact: docs/intelligence/investigations/J1-J25-J2-J15-J6-J14-J23-J18-BACKWARD-REAUDIT.md
-  new_findings: 0
-  new_contradictions: 0
-bounded_readiness:
-  artifact: docs/intelligence/investigations/J23-J18-BOUNDED-KF-EXEC-READINESS-ASSESSMENT.md
-  selected_first_slice: outbound_delivery_resend_effect_certainty
-execution_packet:
+  role_now: pooled_input_to_broader_system_model
+latest_artifacts:
+  proof_inventory: docs/intelligence/investigations/J23-J18-L6-CHARACTERIZATION-CONCURRENCY-CRASH-PROOF-INVENTORY.md
+  backward_reaudit: docs/intelligence/investigations/J1-J25-J2-J15-J6-J14-J23-J18-BACKWARD-REAUDIT.md
+  bounded_readiness_probe: docs/intelligence/investigations/J23-J18-BOUNDED-KF-EXEC-READINESS-ASSESSMENT.md
+  implementation_shape_probe: docs/intelligence/execution/KF-EXEC-EXTFX-001-OUTBOUND-DELIVERY-RESEND-EFFECT-CERTAINTY.md
+execution_probe_status:
   id: KF-EXEC-EXTFX-001
-  artifact: docs/intelligence/execution/KF-EXEC-EXTFX-001-OUTBOUND-DELIVERY-RESEND-EFFECT-CERTAINTY.md
-  architecture_ready: true
-  drafted: true
+  classification: POOLED_IMPLEMENTATION_SHAPE_EVIDENCE
+  architecture_ready_as_bounded_probe: true
+  programme_frontier: false
   authorized: false
   implemented: false
   tested: false
-  core_identity:
-    work_occurrence_id: OutboundDelivery.id_for_this_slice
-    effect_id: OutboundDelivery.id_for_this_slice
-    attempt_id: durable_before_provider_PONR
-  core_laws:
-    - same_effect_retry_uses_immutable_effect_snapshot_and_stable_provider_idempotency
-    - provider_success_is_monotonic
-    - post_provider_local_failure_becomes_consequence_repair
-    - historical_ambiguity_is_preserved
-    - no_universal_work_attempt_recovery_table_in_first_slice
+continuity:
+  cross_thread_rule: all_chat_threads_are_ephemeral_views_over_one_repository_backed_programme
+  rollover_always_active: true
+  update_after_major_tranche: true
+  emergency_rule: finish_atomic_trace_persist_refresh_current_and_rollover_before_context_risk
+  invariant: fresh_thread_can_resume_exact_working_flow_without_restart
 exact_next_action:
-  title: explicit_implementation_authorization_gate
-  instruction: Do not modify production code unless the user explicitly authorizes implementation of KF-EXEC-EXTFX-001. If authorized, revalidate main and follow the packet exactly; if not authorized, remain read-only.
+  title: continue_whole_system_forensics_and_pooling
+  instruction: Continue expanding the virtual model beyond the mature J23/J18 pool. Select the next highest-leverage adjacent journey/constellation/kernel pressure point, map it microscopically from repository evidence, pool findings with existing kernels, then backward-reaudit affected mature areas. Do not treat KF-EXEC-EXTFX-001 as the active frontier.
+  selection_criteria:
+    - high_cross_journey_leverage
+    - likely_to_refine_kernel_ownership
+    - material_product_user_value
+    - architecture_ambiguity_or_duplicated_truth
+    - improves_eventual_comprehensive_repo_transformation_plan
+final_destination:
+  - whole_system_target_architecture
+  - migration_architecture
+  - proof_architecture
+  - sequenced_repository_transformation_plan
+  - bounded_execution_packets_only_after_programme_convergence
 constraints:
-  - generic_continue_or_proceed_before_packet_drafting_is_not_retroactive_implementation_authorization
-  - do_not_modify_production_code_without_explicit_authorization
-  - do_not_claim_runtime_proof_unless_executed
+  - do_not_modify_production_code
+  - do_not_treat_local_convergence_as_permanent_closure
+  - do_not_make_execution_probe_the_programme_frontier
   - preserve_anti_normalization_method
+  - continuously_refresh_cross_thread_continuity
