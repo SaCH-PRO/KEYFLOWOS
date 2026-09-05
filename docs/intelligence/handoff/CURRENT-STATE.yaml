@@ -1,8 +1,8 @@
 project: KEYFLOWOS
-analysis_version: 11
-last_updated: 2026-09-04
-phase: j23-j18-l6-semantic-target-converged-proof-frontier
-status: proof-and-backward-reaudit-remaining
+analysis_version: 12
+last_updated: 2026-09-05
+phase: j23-j18-l6-proof-design-complete-backward-reaudit
+status: backward-reaudit-next
 canonical_branch: docs/keyflow-intelligence-foundation
 implementation_evidence:
   branch: main
@@ -24,8 +24,8 @@ active_mesh:
   - { id: KF-JOURNEY-015, name: Approval / Governance Lifecycle, status: L5-recovery-authority-semantically-converged }
   - { id: KF-JOURNEY-006, name: Proactive KEY / Autonomy, status: recovery-policy-semantically-converged-active-stress-test }
   - { id: KF-JOURNEY-014, name: Webhook / External Event Ingress, status: microscopic-pass-reopenable }
-  - { id: KF-JOURNEY-023, name: Temporal Flow / Long-Running Workflow, status: L6-semantic-target-converged-proof-remaining }
-  - { id: KF-JOURNEY-018, name: Failure -> Recovery, status: L6-semantic-target-converged-proof-remaining }
+  - { id: KF-JOURNEY-023, name: Temporal Flow / Long-Running Workflow, status: L6-semantic-target-converged-proof-designed }
+  - { id: KF-JOURNEY-018, name: Failure -> Recovery, status: L6-semantic-target-converged-proof-designed }
 active_kernels: [KF-KERNEL-003,KF-KERNEL-005,KF-KERNEL-006,KF-KERNEL-007,KF-KERNEL-008,KF-KERNEL-009,KF-KERNEL-010,KF-KERNEL-011]
 canonical_ranges:
   findings_through: F160
@@ -38,6 +38,14 @@ completed_l6:
   provider_contract_matrix: docs/intelligence/investigations/J23-J18-L6-PROVIDER-CONTRACT-IDEMPOTENCY-RECONCILIATION-MATRIX.md
   recovery_authority: docs/intelligence/investigations/J23-J18-L6-RECOVERY-AUTHORITY-REPRESENTATION.md
   temporal_projection: docs/intelligence/investigations/J23-J18-L6-TEMPORAL-WORK-PROJECTION-MATERIALIZATION.md
+  proof_inventory: docs/intelligence/investigations/J23-J18-L6-CHARACTERIZATION-CONCURRENCY-CRASH-PROOF-INVENTORY.md
+proof_state:
+  proof_obligations_defined: 39
+  deterministic_fault_injection_points_defined: 16
+  runtime_proof_executed: false
+  kf_exec_ready: false
+  critical_semantic_rewrite:
+    webhook_occurrence_dedupe: occurrence_seen_must_not_imply_application_complete
 j23_j18_target_decisions:
   shared_durable_work_semantic_contract: YES
   shared_recovery_semantic_contract: YES
@@ -75,23 +83,22 @@ innovation:
   research_deferred:
     - counterfactual_recovery_simulation
 exact_next_action:
-  artifact: docs/intelligence/investigations/J23-J18-L6-CHARACTERIZATION-CONCURRENCY-CRASH-PROOF-INVENTORY.md
-  purpose: inventory existing tests and define exact proof obligations without claiming execution
-  scenarios:
-    - provider_PONR_then_local_crash
-    - bullmq_retry_failed_idempotency_interaction
-    - parent_resume_preserves_successful_children
-    - webhook_claim_processing_failure_redelivery
-    - k10_consequence_repair_without_provider_replay
-    - stop_revoke_during_retry_backoff
-    - reversal_requires_current_clearance
-    - local_delete_vs_provider_delete
-    - migration_ambiguous_rows
-    - projection_staleness_cannot_authorize_mutation
-    - projection_rebuild_adapter_reclassification
-    - cross_domain_tenant_isolation
+  title: backward_reaudit_active_constellation
+  suggested_artifact: docs/intelligence/investigations/J1-J25-J2-J15-J6-J14-J23-J18-BACKWARD-REAUDIT.md
+  purpose: stress the converged J23/J18 target and proof design backward through authority, business birth, governed action, proactive autonomy, ingress, temporal work and recovery; identify contradictions, duplicated ownership, parallel truth, impossible migration assumptions and innovation invariant violations.
+  journeys: [J1,J25,J2,J15,J6,J14,J23,J18]
+  kernels: [K3,K6,K7,K8,K9,K10,K11]
+  mandatory_questions:
+    - webhook_occurrence_dedupe_vs_application_completeness_ownership
+    - recovery_clearance_invalidation_on_authority_change
+    - stop_authority_vs_execute_authority
+    - effect_attempt_recovery_lineage_ownership
+    - projection_authority_leakage
+    - financial_consequence_repair_ownership
+    - provider_truth_vs_local_truth
+    - migration_ambiguity_preservation
+    - innovation_overlays_remain_derivative_bounded_explainable_and_kill_switchable
 next_after:
-  - backward_reaudit_active_constellation
   - bounded_kf_exec_readiness_assessment
 constraints:
   - do_not_modify_production_code
