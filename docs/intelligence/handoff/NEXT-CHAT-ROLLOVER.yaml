@@ -1,5 +1,5 @@
 project: KEYFLOWOS
-rollover_version: 8
+rollover_version: 9
 last_updated: 2026-09-05
 status: LIVE_CONTINUITY_ARTIFACT
 canonical_branch: docs/keyflow-intelligence-foundation
@@ -10,78 +10,51 @@ implementation_evidence:
   branch: main
   current_head: 168732d0e2226e11ed033c14fbdf7b3ea5344a41
   code_bearing_baseline: d7c5b86cfa276d75ffa42d5f1707c43704dc9f21
-  current_head_change_class: audit-only
-analytical_state:
-  j23: L6_SEMANTIC_TARGET_CONVERGED_PROOF_DESIGNED
-  j18: L6_SEMANTIC_TARGET_CONVERGED_PROOF_DESIGNED
-  j15: L5_RECOVERY_AUTHORITY_SEMANTICALLY_CONVERGED
-  j6: ACTIVE_STRESS_TEST_RECOVERY_POLICY_SEMANTICALLY_CONVERGED
-  k10: ACTIVE_INITIAL_CONVERGENCE
 canonical_ranges:
   findings_through: F160
   contradictions_through: C110
   recommendations_through: KF-REC-048
 completed_l6_artifacts:
-  unified_convergence: docs/intelligence/investigations/J23-J18-L6-UNIFIED-CONVERGENCE-MATRIX.md
-  exact_field_status_mapping: docs/intelligence/investigations/J23-J18-L6-EXACT-FIELD-STATUS-MAPPING.md
-  live_row_migration: docs/intelligence/investigations/J23-J18-L6-LIVE-ROW-MIGRATION-COMPATIBILITY.md
-  provider_contract_matrix: docs/intelligence/investigations/J23-J18-L6-PROVIDER-CONTRACT-IDEMPOTENCY-RECONCILIATION-MATRIX.md
-  recovery_authority_representation: docs/intelligence/investigations/J23-J18-L6-RECOVERY-AUTHORITY-REPRESENTATION.md
-  temporal_projection_materialization: docs/intelligence/investigations/J23-J18-L6-TEMPORAL-WORK-PROJECTION-MATERIALIZATION.md
-  characterization_concurrency_crash_proof_inventory: docs/intelligence/investigations/J23-J18-L6-CHARACTERIZATION-CONCURRENCY-CRASH-PROOF-INVENTORY.md
-proof_inventory:
+  - docs/intelligence/investigations/J23-J18-L6-UNIFIED-CONVERGENCE-MATRIX.md
+  - docs/intelligence/investigations/J23-J18-L6-EXACT-FIELD-STATUS-MAPPING.md
+  - docs/intelligence/investigations/J23-J18-L6-LIVE-ROW-MIGRATION-COMPATIBILITY.md
+  - docs/intelligence/investigations/J23-J18-L6-PROVIDER-CONTRACT-IDEMPOTENCY-RECONCILIATION-MATRIX.md
+  - docs/intelligence/investigations/J23-J18-L6-RECOVERY-AUTHORITY-REPRESENTATION.md
+  - docs/intelligence/investigations/J23-J18-L6-TEMPORAL-WORK-PROJECTION-MATERIALIZATION.md
+  - docs/intelligence/investigations/J23-J18-L6-CHARACTERIZATION-CONCURRENCY-CRASH-PROOF-INVENTORY.md
+  - docs/intelligence/investigations/J1-J25-J2-J15-J6-J14-J23-J18-BACKWARD-REAUDIT.md
+proof_state:
   proof_obligations: 39
-  deterministic_fault_injection_points: 16
-  runtime_tests_executed_in_forensic_pass: false
-  kf_exec_generation: BLOCKED
-  key_transition: duplicate_webhook_occurrence_is_noop_only_when_application_complete
-innovation_method:
-  canonical: docs/intelligence/14-STANDARDS-RESEARCH-INNOVATION-METHOD.md
-  convergence_requires_anti_normalization_pressure_test: true
-  horizons: [FLOOR, FRONTIER, KEYFLOW_SYNTHESIS]
-  preferred_shape: novel_synthesis_over_novel_primitives
-accepted_innovation_directions:
-  recovery_clearance_loop: true
-  recovery_authority_repricing: true
-  contradiction_aware_projection: true
-  projection_generated_legal_next_actions: true
-target_candidates:
-  recovery_control_twin: true
-  adaptive_multidimensional_recovery_budget: true
-  attention_gradient: true
-  causal_recovery_horizon: true
-research_deferred:
-  counterfactual_recovery_simulation: true
+  fault_injection_points: 16
+  runtime_tests_executed: false
+backward_reaudit:
+  passed: true
+  target_root_invalidated: false
+  new_ids_added: false
+  key_refinements:
+    - EffectExecutionClaim_vs_AttemptOwnership
+    - webhook_occurrence_vs_application_completeness
+    - Recovery_Control_Twin_as_derived_lens
+    - adaptive_budget_inside_hard_authority_envelope
+    - attention_is_prioritization_only
+    - causal_horizon_uses_durable_evidence_edges
 exact_next_action:
-  title: backward_reaudit_active_constellation
-  suggested_artifact: docs/intelligence/investigations/J1-J25-J2-J15-J6-J14-J23-J18-BACKWARD-REAUDIT.md
-  instruction: Stress the converged J23/J18 target and proof specification backward through J1/J25/J2/J15/J6/J14/J23/J18 and K3/K6/K7/K8/K9/K10/K11. Detect contradictions, duplicated ownership, parallel truth, impossible migration assumptions, authority invalidation gaps and innovation overlays that violate deterministic invariants.
-  required_checks:
-    - webhook_occurrence_dedupe_vs_apply_completeness
-    - recovery_clearance_invalidation
-    - stop_vs_execute_authority
-    - effect_attempt_recovery_lineage
-    - projection_non_authority
-    - consequence_repair_ownership
-    - provider_vs_local_truth
-    - migration_ambiguity
-    - tenant_isolation
-    - innovation_derivative_bounded_explainable_kill_switch
-next_after_backward_reaudit:
-  - bounded_kf_exec_readiness_assessment
+  title: bounded_kf_exec_readiness_assessment
+  suggested_artifact: docs/intelligence/investigations/J23-J18-BOUNDED-KF-EXEC-READINESS-ASSESSMENT.md
+  instruction: Compare the smallest candidate vertical slices by seam reuse, defect pressure, architecture-falsification value, provider simulation feasibility, migration blast radius, authority/tenant proof, rollback/feature-gating and innovation enablement. Decide whether a bounded implementation packet is architecturally ready; do not implement.
+  candidates:
+    - outbound_delivery_one_provider
+    - ai_plan_actiondispatcher_bullmq_retry_identity
+    - webhook_apply_state_one_payment_provider
+    - payment_refund_k10_consequence_convergence
 constraints:
   - do_not_modify_production_code
-  - do_not_create_parallel_v2_sources_of_truth
-  - do_not_make_projection_authoritative
-  - do_not_install_workflow_engine_or_generic_policy_engine_from_findings_alone
-  - do_not_invent_historical_certainty
-  - do_not_blind_retry_outcome_unknown
-  - do_not_treat_provider_success_plus_local_failure_as_provider_failure
-  - do_not_treat_failure_or_time_as_new_authority
-  - do_not_converge_on_conventional_architecture_without_anti_normalization_pressure_test
-  - do_not_claim_tests_or_runtime_proof_unless_executed
+  - readiness_is_not_implementation_authorization
+  - anti_normalization_required
+  - no_parallel_sources_of_truth
+  - projection_non_authoritative
+  - innovation_overlays_after_deterministic_core
+  - do_not_claim_runtime_proof_unless_executed
 rollover_protocol:
   update_after_each_major_tranche: true
-  update_when_exact_next_action_changes: true
-  update_before_context_risk: true
   invariant: fresh_chat_can_recover_frontier_from_repo_only
