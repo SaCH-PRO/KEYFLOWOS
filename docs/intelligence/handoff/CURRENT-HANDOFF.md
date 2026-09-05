@@ -25,18 +25,49 @@ MAP → MICROSCOPIC TRACE → JOURNEY → CONSTELLATION → KERNELS
 1. `AGENTS.md`
 2. `docs/intelligence/AGENT-CONTINUITY.md`
 3. `docs/intelligence/00-START-HERE.md`
-4. `docs/intelligence/07-CURRENT-STATE.md`
-5. `docs/intelligence/handoff/CURRENT-STATE.yaml`
-6. `docs/intelligence/handoff/NEXT-CHAT-ROLLOVER.md`
-7. `docs/intelligence/handoff/NEXT-CHAT-ROLLOVER.yaml`
-8. `docs/intelligence/13-IMPLEMENTATION-HANDOFF-PROTOCOL.md`
-9. `docs/intelligence/14-STANDARDS-RESEARCH-INNOVATION-METHOD.md`
-10. `docs/intelligence/journeys/KF-JOURNEY-016-BUSINESS-GENOME-EVOLUTION.md`
-11. `docs/intelligence/kernels/KF-KERNEL-004-BUSINESS-KNOWLEDGE.md`
-12. `docs/intelligence/08L-FINDING-REGISTER-GENOME-EVOLUTION-SUPPLEMENT.md`
-13. `docs/intelligence/09L-CONTRADICTION-REGISTER-GENOME-EVOLUTION-SUPPLEMENT.md`
-14. `docs/intelligence/10H-RECOMMENDATION-REGISTER-BUSINESS-KNOWLEDGE-CONTINUATION.md`
-15. prior mature J23/J18 pool artifacts when backward-re-auditing learning/outcome semantics.
+4. `docs/intelligence/04-CONCEPT-REGISTRY.md`
+5. `docs/intelligence/04A-CANONICAL-TAXONOMY-AND-NAMING-REGISTRY.md`
+6. `docs/intelligence/07-CURRENT-STATE.md`
+7. `docs/intelligence/handoff/CURRENT-STATE.yaml`
+8. `docs/intelligence/handoff/NEXT-CHAT-ROLLOVER.md`
+9. `docs/intelligence/handoff/NEXT-CHAT-ROLLOVER.yaml`
+10. `docs/intelligence/13-IMPLEMENTATION-HANDOFF-PROTOCOL.md`
+11. `docs/intelligence/14-STANDARDS-RESEARCH-INNOVATION-METHOD.md`
+12. `docs/intelligence/journeys/KF-JOURNEY-016-BUSINESS-GENOME-EVOLUTION.md`
+13. `docs/intelligence/kernels/KF-KERNEL-004-BUSINESS-KNOWLEDGE.md`
+14. `docs/intelligence/08L-FINDING-REGISTER-GENOME-EVOLUTION-SUPPLEMENT.md`
+15. `docs/intelligence/09L-CONTRADICTION-REGISTER-GENOME-EVOLUTION-SUPPLEMENT.md`
+16. `docs/intelligence/10H-RECOMMENDATION-REGISTER-BUSINESS-KNOWLEDGE-CONTINUATION.md`
+17. prior mature J23/J18 pool artifacts when backward-re-auditing learning/outcome semantics.
+
+## Naming / taxonomy integrity — mandatory
+
+`04A-CANONICAL-TAXONOMY-AND-NAMING-REGISTRY.md` is a mandatory programme-control artifact.
+
+Governing law:
+
+```text
+ONE SEMANTIC CONCEPT
+→ ONE CANONICAL ID
+→ ONE CANONICAL NAME
+→ ONE CANONICAL OWNER / HOME REGISTER
+→ ZERO DUPLICATE CANONICAL ENTRIES
+→ MANY ALIASES / REFERENCES PERMITTED
+```
+
+Every agent must:
+
+```text
+SEARCH → REUSE → REFINE → CROSS-REFERENCE
+before
+CREATE NEW ID / NAME
+```
+
+Do not allocate a new J/K/KF-CONCEPT/F/C/KF-REC/KF-DEC/KF-EXEC identity because an implementation class, alternate phrase or new journey trace uses different wording.
+
+If the same defect/concept appears in another journey, reuse the canonical ID and add cross-links. If a candidate term is not yet stable, reserve the name without allocating a permanent `KF-CONCEPT-*` ID.
+
+Any discovered duplicate canonical entry is an intelligence-integrity defect and should be repaired before another broad tranche begins.
 
 ## Context integrity
 
@@ -56,6 +87,7 @@ Canonical ranges:
 Findings:        F166
 Contradictions:  C116
 Recommendations: KF-REC-049
+Concepts:        KF-CONCEPT-001 through KF-CONCEPT-042 currently allocated
 ```
 
 ## Mature pool feeding this work
@@ -138,6 +170,20 @@ OUTCOME CERTAINTY gates LearningEligibility
 LEARNING may suggest policy but must never silently expand authority
 ```
 
+Reserved J16/K4 target vocabulary is governed by `04A` and should be reused exactly until convergence:
+
+```text
+KnowledgeSubject
+KnowledgeRevision
+KnowledgeAssertion
+KnowledgeInference
+KnowledgeChangeIntent
+KnowledgeVerification
+KnowledgeConflict
+MaterializationState
+LearningEligibility
+```
+
 ## Why this matters to the whole system
 
 `GenomeAutonomyGateService` feeds `AutonomyOrchestratorService`. Therefore epistemic defects are not merely profile/data quality problems: incorrect or misverified knowledge can alter readiness, risk and autonomous-action decisions.
@@ -158,7 +204,8 @@ Deepen J16/K4 through:
 6. J19 correction/deletion/privacy lineage;
 7. standards/OSS/frontier research for provenance, temporal knowledge, belief revision and policy-safe adaptive systems;
 8. pool results into KF-REC-049;
-9. backward-re-audit J1/J25/J2/J15/J6/J14/J23/J18 through K4 invariants.
+9. backward-re-audit J1/J25/J2/J15/J6/J14/J23/J18 through K4 invariants;
+10. run taxonomy/duplicate check before allocating any new canonical IDs.
 
 Then decide whether J16/K4 has enough pressure coverage for a larger constellation synthesis.
 
@@ -182,6 +229,6 @@ No production tests were executed.
 
 ## Continuity law
 
-Every material tranche must be persisted, then CURRENT + ROLLOVER refreshed before another broad tranche.
+Every material tranche must be persisted, taxonomy/index integrity checked, then CURRENT + ROLLOVER refreshed before another broad tranche.
 
-> If this chat disappears after the next message, a fresh thread must recover the exact J16/K4 working flow from repository intelligence without restarting.
+> If this chat disappears after the next message, a fresh thread must recover the exact J16/K4 working flow and canonical naming rules from repository intelligence without restarting.
