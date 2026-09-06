@@ -1,76 +1,72 @@
 project: KEYFLOWOS
-analysis_version: 22
+analysis_version: 23
 last_updated: 2026-09-06
-phase: whole-system-pooling-post-j16-k4-backward-reaudit
-status: SELECT_AND_VERIFY_NEXT_HIGH_LEVERAGE_FRONTIER
+phase: whole-system-virtual-model-expansion-j17-command-center-priority-action
+status: CONTINUE_J17_MICROSCOPIC_FORENSICS
 canonical_branch: docs/keyflow-intelligence-foundation
 implementation_evidence:
   branch: main
-  current_head: 168732d0e2226e11ed033c14fbdf7b3ea5344a41
+  current_head: 9bff44f8f9a5195e06af3669ccb1a8f4c47ccd76
+  previous_head: 168732d0e2226e11ed033c14fbdf7b3ea5344a41
   code_bearing_baseline: d7c5b86cfa276d75ffa42d5f1707c43704dc9f21
-  current_head_change_class: audit-only
+  previous_to_current_change_class: audit_architecture_journal_only
+  code_bearing_files_changed_since_previous_head: false
 context_integrity: PASS
 implementation_authorized: false
 taxonomy_integrity:
   governor: docs/intelligence/04A-CANONICAL-TAXONOMY-AND-NAMING-REGISTRY.md
   allocator: docs/intelligence/04B-CANONICAL-ID-ALLOCATION-LEDGER.md
   create_rule: LOAD_04A_04B_SEARCH_REUSE_REFINE_CROSS_REFERENCE_BEFORE_NEW_ID
-  historical_collision_band_reconciled: true
 canonical_ranges:
-  findings_through: F178
-  contradictions_through: C128
+  findings_through: F179
+  contradictions_through: C129
   recommendations_through: KF-REC-050
   concepts_through: KF-CONCEPT-042
 active_mesh:
-  journeys: [J1,J25,J2,J15,J6,J14,J23,J18,J16,J19]
+  journeys: [J1,J25,J2,J15,J6,J14,J23,J18,J16,J19,J17]
   kernels: [K2,K3,K4,K5,K6,K7,K8,K9,K10,K11]
+active_frontier:
+  journey: J17
+  name: Command_Center_to_Priority_to_Action
+  stage: INITIAL_ENTRY_AGGREGATION_AND_PROJECTION_TRACE
+  dossier: docs/intelligence/journeys/KF-JOURNEY-017-COMMAND-CENTER-PRIORITY-ACTION.md
+  primary_kernels: [K3,K4,K7,K8,K11]
+  hypothesis_confirmed: true
+  current_topology:
+    - aggregate_executive_intelligence_modes_approvals_temporal_genome_assets_constitution
+    - normalize_to_CommandCenterItem
+    - rank_by_priority_then_static_type_weight_then_recency
+    - top_priorities_first_7
+    - recommended_actions_from_first_5_ranked_items
+    - mostly_navigation_review_control_surface_not_direct_effect_executor
+  finding: F179
+  contradiction: C129
+  finding_summary: source_failure_can_be_substituted_with_empty_zero_fallback_without_projection_degradation_semantics_and_can_make_health_priority_outputs_more_reassuring
+  candidate_questions:
+    - heterogeneous_priority_semantics_and_ranking_dimensions
+    - source_freshness_supersession_and_recovery_state_in_priority
+    - approved_status_vs_current_executable_Clearance_at_action_time
+    - ranking_to_action_explainability
+    - actual_CommandItem_universal_spine_runtime_authority_vs_documented_intent
 latest_converged_pool:
   name: business_knowledge_genome_evolution_epistemic_integrity
   primary_journey: J16
   primary_kernel: K4
   adjacent_pressure: J19
-  stage: RESEARCH_PRESSURE_TEST_AND_BACKWARD_REAUDIT_COMPLETE
-  recommendation: KF-REC-049
+  stage: RESEARCH_AND_BACKWARD_REAUDIT_COMPLETE_RETURNED_TO_BROADER_POOL
   findings: [F161,F162,F163,F164,F165,F166,F175,F176,F177,F178]
   contradictions: [C111,C112,C113,C114,C115,C116,C125,C126,C127,C128]
-  backward_reaudit: PASSED_NO_NEW_IDS
-  target_status: SUBSTANTIALLY_STRENGTHENED_RETURNED_TO_BROADER_POOL
-  key_laws:
-    - verification_belongs_to_exact_KnowledgeRevision
-    - valid_business_time_and_system_known_time_are_distinct_where_material
-    - consumer_specific_EpistemicEligibility_derives_from_one_knowledge_state
-    - OutcomeCertainty_precedes_LearningEligibility
-    - causal_learning_requires_exact_enough_pattern_action_effect_outcome_recovery_lineage
-    - correction_withdrawal_erasure_propagates_through_influence_closure
-    - retained_history_must_not_remain_active_truth
-    - learning_never_expands_authority
-  research_artifact: docs/intelligence/investigations/J16-K4-STANDARDS-FRONTIER-PRESSURE-TEST.md
-  backward_reaudit_artifact: docs/intelligence/investigations/J1-J25-J2-J15-J6-J14-J23-J18-J16-J19-K4-BACKWARD-REAUDIT.md
+  recommendation: KF-REC-049
 mature_temporal_recovery_pool:
   name: temporal_recovery_external_reality_authority
-  proof_design: COMPLETE_NOT_EXECUTED
-  backward_reaudit: PASSED
   proof_obligations: 39
   deterministic_fault_points: 16
+  backward_reaudit: passed
+  runtime_proof_executed: false
 reconciled_parallel_pool:
   findings: [F167,F168,F169,F170,F171,F172,F173,F174]
   contradictions: [C117,C118,C119,C120,C121,C122,C123,C124]
   recommendation: KF-REC-050
-  role: pooled_historical_evidence_not_active_frontier
-next_frontier_candidate:
-  journey: J17
-  name: Command Center_to_Priority_to_Action
-  status: CANDIDATE_REQUIRES_REPOSITORY_VERIFICATION
-  hypothesis: user_operational_control_surface_where_K4_knowledge_K7_temporal_work_K8_evidence_K3_governance_and_recovery_state_converge
-  selection_reasons:
-    - high_cross_journey_leverage
-    - material_user_product_centrality
-    - likely_multiple_projection_and_priority_truths
-    - can_stress_epistemic_eligibility_ranking_action_bridge_and_authority_together
-    - likely_to_refine_final_whole_system_control_surface_and_migration_order
-exact_next_action:
-  title: verify_J17_as_next_frontier
-  instruction: Inspect current repository entry surfaces, aggregators, ranking/prioritization logic, Command Center bridges and action execution links for canonical J17. Compare its cross-kernel leverage against alternative candidates. If confirmed, open the J17 microscopic dossier and pool it with K3/K4/K7/K8/K11. Do not allocate new IDs until 04A/04B semantic duplicate check passes.
 execution_probe_status:
   id: KF-EXEC-EXTFX-001
   classification: POOLED_IMPLEMENTATION_SHAPE_EVIDENCE
@@ -84,11 +80,14 @@ continuity:
   update_after_major_tranche: true
   taxonomy_check_after_major_tranche: true
   invariant: fresh_thread_can_resume_exact_working_flow_without_restart
+exact_next_action:
+  title: trace_J17_approved_to_execution_and_priority_semantics
+  instruction: Trace KeyActionProposal APPROVED through actual execute endpoint/service and prove whether current authority Clearance source state knowledge readiness and action fingerprint are revalidated before material effect. In parallel trace source-specific priority/urgency/freshness into CommandCenterItem ranking and inspect whether an actual persistent CommandItem universal spine is load-bearing. Reuse existing F/C roots where causal semantics already exist; load 04A/04B before any new allocation.
 constraints:
   - do_not_modify_production_code
-  - do_not_promote_local_semantic_maturity_to_implementation_authorization
-  - do_not_create_parallel_authority_knowledge_or_workflow_truth_stores
-  - do_not_allow_learning_to_expand_authority
+  - do_not_treat_Command_Center_projection_as_authoritative_truth
+  - priority_or_recommended_action_is_not_Clearance
+  - fail_soft_projection_must_not_hide_unknown_as_healthy_absence_in_target
   - do_not_create_duplicate_canonical_concepts_or_ids
   - preserve_anti_normalization_method
   - continuously_refresh_cross_thread_continuity
