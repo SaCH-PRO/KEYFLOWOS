@@ -1,5 +1,5 @@
 project: KEYFLOWOS
-rollover_version: 13
+rollover_version: 14
 last_updated: 2026-09-06
 status: LIVE_CONTINUITY_ARTIFACT
 canonical_branch: docs/keyflow-intelligence-foundation
@@ -13,37 +13,36 @@ implementation_evidence:
 taxonomy:
   governor: docs/intelligence/04A-CANONICAL-TAXONOMY-AND-NAMING-REGISTRY.md
   allocator: docs/intelligence/04B-CANONICAL-ID-ALLOCATION-LEDGER.md
-  discovered_collision_band_reconciled: true
   mandatory_rule: LOAD_04A_04B_SEARCH_REUSE_REFINE_CROSS_REFERENCE_BEFORE_NEW_ID
+  historical_collision_band_reconciled: true
 canonical_ranges:
-  findings_through: F174
-  contradictions_through: C124
+  findings_through: F177
+  contradictions_through: C127
   recommendations_through: KF-REC-050
   concepts_through: KF-CONCEPT-042
 programme:
   phase: whole-system-virtual-model-expansion-j16-k4-epistemic-integrity
   objective: converge whole-system target migration proof and repository transformation architecture before production implementation
-active_mesh:
-  journeys: [J1,J25,J2,J15,J6,J14,J23,J18,J16]
-  kernels: [K2,K3,K4,K5,K6,K7,K8,K9,K10,K11]
 active_pool:
   name: business_knowledge_genome_evolution_epistemic_integrity
   journey: J16
   kernel: K4
-  canonical_findings: [F161,F162,F163,F164,F165,F166]
-  canonical_contradictions: [C111,C112,C113,C114,C115,C116]
+  findings: [F161,F162,F163,F164,F165,F166,F175,F176,F177]
+  contradictions: [C111,C112,C113,C114,C115,C116,C125,C126,C127]
   recommendation: KF-REC-049
-  stage: consumer_trace_in_progress_after_taxonomy_repair
-  current_evidence:
-    - genome_memory_is_consumed_by_unified_memory_retrieval_and_cortex_prompt_paths
-    - autonomy_can_compose_genomefact_readiness_with_blueprint_and_constitution_knowledge
-    - module_readiness_epistemic_quality_filters_require_deeper_proof
-    - top_fact_prompt_epistemic_filters_require_deeper_proof
-reconciled_parallel_pool:
-  findings: [F167,F168,F169,F170,F171,F172,F173,F174]
-  contradictions: [C117,C118,C119,C120,C121,C122,C123,C124]
-  recommendation: KF-REC-050
-  role: pooled_historical_evidence_not_active_frontier
+  current_convergence:
+    - revision_specific_verification
+    - semantic_single_knowledge_ownership_with_honest_materializations
+    - consumer_specific_epistemic_contracts
+    - deterministic_readiness_cannot_use_row_existence_as_truth
+    - prompt_context_preserves_stale_disputed_expired_uncertainty
+    - process_control_execution_business_outcome_and_causal_learning_remain_distinct
+    - LearningEligibility_requires_specific_action_effect_outcome_recovery_lineage
+    - learning_never_expands_authority
+  latest_findings:
+    F175: weak_or_invalid_fact_can_satisfy_module_automation_readiness
+    F176: stale_disputed_expired_or_weak_fact_can_enter_KEY_working_prompt
+    F177: domain_wide_outcome_learning_can_modify_unrelated_recommendation_patterns
 mature_pool:
   name: temporal_recovery_external_reality_authority
   j23_j18_semantics: substantially_converged
@@ -59,8 +58,8 @@ execution_probe:
   implemented: false
   tested: false
 exact_next_action:
-  title: resume_j16_k4_epistemic_consumer_trace
-  instruction: Prove or disprove epistemic filters in module readiness and top-fact prompt retrieval; map Blueprint vs GenomeFact vs Constitution read authority; trace GenomeMemory ranking/adaptation; trace snapshot-to-recommendation-to-action-to-outcome learning; inspect correction/deletion/privacy propagation; then research provenance temporal knowledge belief revision and policy-safe adaptive systems, refine KF-REC-049, and backward-reaudit J1/J25/J2/J15/J6/J14/J23/J18. Load 04A/04B before any new ID.
+  title: trace_j16_correction_deletion_privacy_lineage
+  instruction: Load the canonical journey map and reuse J19 if it owns correction/deletion/privacy. Trace propagation through Blueprint, GenomeFact, GenomeEvidence, GenomeMemoryEvent, semantic/vector memory, snapshots and recommendations. Then standards/frontier research and backward re-audit J1/J25/J2/J15/J6/J14/J23/J18 through K4. Load 04A/04B before any new ID.
 continuity:
   all_threads_ephemeral_views_of_one_repo_programme: true
   rollover_always_active: true
