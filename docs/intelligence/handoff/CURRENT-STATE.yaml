@@ -1,5 +1,5 @@
 project: KEYFLOWOS
-analysis_version: 18
+analysis_version: 19
 last_updated: 2026-09-06
 phase: whole-system-virtual-model-expansion-j16-k4-epistemic-integrity
 status: CONTINUE_ARCHITECTURE_FORENSICS_AND_CONVERGENCE
@@ -14,60 +14,56 @@ implementation_authorized: false
 programme_identity:
   mode: repository_backed_virtual_architectural_digital_twin
   objective: converge whole-system understanding through repeated journey_constellation_kernel pooling and backward_reaudits before comprehensive code transformation planning
-  loop: [MAP,MICROSCOPIC_TRACE,JOURNEY,CONSTELLATION,KERNELS,DYNAMIC_CAUSAL_FEEDBACK_GRAPHS,STANDARDS_OSS_FRONTIER_RESEARCH,FINDINGS_CONTRADICTIONS_OPTIONS,POOL,TARGET_SYNTHESIS,BACKWARD_REAUDIT,REOPEN_AND_REFINE,LOOP_AT_LARGER_SCALE]
 taxonomy_integrity:
   governor: docs/intelligence/04A-CANONICAL-TAXONOMY-AND-NAMING-REGISTRY.md
   allocator: docs/intelligence/04B-CANONICAL-ID-ALLOCATION-LEDGER.md
   invariant: one_semantic_concept_one_canonical_id_one_canonical_name_one_home_register_zero_duplicate_canonical_entries
   create_rule: LOAD_04A_04B_SEARCH_REUSE_REFINE_CROSS_REFERENCE_BEFORE_NEW_ID
-  collision_reconciliation: COMPLETE_FOR_DISCOVERED_HISTORICAL_BAND
-  historical_evidence_preserved: true
+  discovered_collision_band_reconciled: true
   concept_range_through: KF-CONCEPT-042
 canonical_ranges:
-  findings_through: F174
-  contradictions_through: C124
+  findings_through: F176
+  contradictions_through: C126
   recommendations_through: KF-REC-050
 active_mesh:
   journeys: [J1,J25,J2,J15,J6,J14,J23,J18,J16]
   kernels: [K2,K3,K4,K5,K6,K7,K8,K9,K10,K11]
-latest_mature_pool:
-  name: temporal_recovery_external_reality_authority
-  j23_j18_semantic_target: SUBSTANTIALLY_CONVERGED
-  proof_design: COMPLETE_NOT_EXECUTED
-  backward_reaudit: PASSED
-  role_now: pooled_input_to_broader_system_model
 active_pool:
   name: business_knowledge_genome_evolution_epistemic_integrity
   journey: J16
   kernel: K4
-  stage: CONSUMER_TRACE_IN_PROGRESS_AFTER_TAXONOMY_REPAIR
-  thesis: business knowledge must preserve exact revision provenance verification authority conflict materialization state and outcome-qualified learning before it may change future KEY behavior
-  findings: [F161,F162,F163,F164,F165,F166]
-  contradictions: [C111,C112,C113,C114,C115,C116]
+  stage: KNOWLEDGE_CONSUMER_TRACE_PERSISTED_CONTINUING_LEARNING_LINEAGE
   recommendation: KF-REC-049
+  findings: [F161,F162,F163,F164,F165,F166,F175,F176]
+  contradictions: [C111,C112,C113,C114,C115,C116,C125,C126]
   reserved_vocabulary: [KnowledgeSubject,KnowledgeRevision,KnowledgeAssertion,KnowledgeInference,KnowledgeChangeIntent,KnowledgeVerification,KnowledgeConflict,MaterializationState,LearningEligibility]
-  new_consumer_evidence:
-    - genome_memory_is_consumed_by_unified_memory_retrieval_and_cortex_prompt_paths
-    - one_autonomy_verdict_can_compose_genomefact_readiness_with_blueprint_and_constitution_knowledge
-    - module_readiness_fact_presence_does_not_obviously_require_verified_fresh_undisputed_unexpired_confident_fact
-    - top_fact_prompt_selection_requires_deeper_epistemic_filter_audit
-  allocation_status: NO_NEW_J16_IDS_YET_AFTER_REPAIR
-reconciled_parallel_evidence:
+  established_consumer_evidence:
+    - F175_module_readiness_counts_matching_fact_presence_without_epistemic_acceptance_predicate_and_is_load_bearing_for_KeyActionGenomePolicy
+    - F176_listTopFacts_prompt_path_does_not_filter_stale_disputed_expired_or_weak_facts_before_KEY_working_knowledge
+    - F166_strengthened_genome_memory_is_high_weight_active_Cortex_prompt_input_and_retrieval_can_amplify_process_control_semantics
+    - F163_strengthened_one_autonomy_verdict_can_compose_GenomeFact_readiness_with_Blueprint_and_Constitution_knowledge
+  key_target_refinement:
+    - consumer_specific_epistemic_contracts_derive_from_one_canonical_knowledge_revision_state
+    - deterministic_control_prompt_recommendation_and_learning_consumers_have_different_acceptance_predicates
+    - no_parallel_truth_store_per_consumer
+reconciled_parallel_pool:
   findings: [F167,F168,F169,F170,F171,F172,F173,F174]
   contradictions: [C117,C118,C119,C120,C121,C122,C123,C124]
   recommendation: KF-REC-050
-  role: recovered_distinct_historical_evidence_not_active_frontier
+  role: pooled_historical_evidence_not_active_frontier
+latest_mature_pool:
+  name: temporal_recovery_external_reality_authority
+  proof_design: COMPLETE_NOT_EXECUTED
+  backward_reaudit: PASSED
+  role_in_j16: supplies_outcome_certainty_recovery_external_truth_constraints_for_learning
 latest_artifacts:
   taxonomy_governor: docs/intelligence/04A-CANONICAL-TAXONOMY-AND-NAMING-REGISTRY.md
   id_allocator: docs/intelligence/04B-CANONICAL-ID-ALLOCATION-LEDGER.md
-  reconciliation_findings: docs/intelligence/08O-FINDING-REGISTER-TAXONOMY-RECONCILIATION-SUPPLEMENT.md
-  reconciliation_contradictions: docs/intelligence/09O-CONTRADICTION-REGISTER-TAXONOMY-RECONCILIATION-SUPPLEMENT.md
-  reconciliation_recommendation: docs/intelligence/10I-RECOMMENDATION-REGISTER-TAXONOMY-RECONCILIATION-CONTINUATION.md
+  knowledge_consumer_findings: docs/intelligence/08P-FINDING-REGISTER-KNOWLEDGE-CONSUMPTION-SUPPLEMENT.md
+  knowledge_consumer_contradictions: docs/intelligence/09P-CONTRADICTION-REGISTER-KNOWLEDGE-CONSUMPTION-SUPPLEMENT.md
+  j16_recommendation: docs/intelligence/10H-RECOMMENDATION-REGISTER-BUSINESS-KNOWLEDGE-CONTINUATION.md
   j16_dossier: docs/intelligence/journeys/KF-JOURNEY-016-BUSINESS-GENOME-EVOLUTION.md
   k4_kernel: docs/intelligence/kernels/KF-KERNEL-004-BUSINESS-KNOWLEDGE.md
-  j16_findings: docs/intelligence/08L-FINDING-REGISTER-GENOME-EVOLUTION-SUPPLEMENT.md
-  j16_contradictions: docs/intelligence/09L-CONTRADICTION-REGISTER-GENOME-EVOLUTION-SUPPLEMENT.md
-  j16_recommendation: docs/intelligence/10H-RECOMMENDATION-REGISTER-BUSINESS-KNOWLEDGE-CONTINUATION.md
 execution_probe_status:
   id: KF-EXEC-EXTFX-001
   classification: POOLED_IMPLEMENTATION_SHAPE_EVIDENCE
@@ -80,17 +76,10 @@ continuity:
   rollover_always_active: true
   update_after_major_tranche: true
   taxonomy_check_after_major_tranche: true
-  emergency_rule: finish_atomic_trace_persist_refresh_current_and_rollover_before_context_risk
   invariant: fresh_thread_can_resume_exact_working_flow_without_restart
 exact_next_action:
-  title: resume_deep_j16_k4_consumer_and_learning_trace
-  instruction: Resume J16/K4 now that discovered namespace collisions are reconciled. Deepen GenomeFact prompt/readiness consumers, Blueprint and Constitution bypasses, GenomeMemory adaptation consumers, snapshot-to-recommendation-to-action-to-outcome linkage, and correction/deletion/privacy lineage. Search 04A/04B before any new ID. Then standards/frontier research, pool into KF-REC-049, and backward-reaudit J1/J25/J2/J15/J6/J14/J23/J18.
-  pressure_questions:
-    - can_readiness_or_prompts_treat_stale_disputed_expired_or_misverified_facts_as_current_truth
-    - can_one_action_be_governed_by_inconsistent_knowledge_revisions
-    - how_do_genome_memory_success_failure_labels_change_future_reasoning
-    - how_should_outcome_certainty_and_recovery_state_gate_learning
-    - how_do_corrections_deletion_and_retention_propagate_through_derived_knowledge_and_memory
+  title: trace_j16_recommendation_action_outcome_learning_lineage
+  instruction: Continue J16/K4 by tracing Genome recommendation/snapshot generation through acceptance/application/action execution/outcome observation into GenomeMemory and later retrieval. Distinguish process status from measured business outcome and recovery certainty. Then inspect Blueprint/Constitution revision mixing and J19 correction/deletion lineage. Load 04A/04B before any new ID.
 constraints:
   - do_not_modify_production_code
   - do_not_treat_local_convergence_as_permanent_closure
