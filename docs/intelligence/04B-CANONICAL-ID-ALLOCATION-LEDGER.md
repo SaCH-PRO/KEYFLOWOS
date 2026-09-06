@@ -23,6 +23,7 @@ F175–F176 J16/K4 knowledge-consumption findings
 F177 J16/K4 causal-learning attribution
 F178 J16/J19 correction lineage
 F179 J17 Command Center projection completeness
+F180 J17 CommandItem false-terminal execution semantics
 ```
 
 ```text
@@ -33,6 +34,7 @@ C125–C126 J16/K4 knowledge-consumption contradictions
 C127 J16/K4 causal-learning attribution
 C128 J16/J19 correction lineage
 C129 J17 Command Center projection completeness
+C130 J17 CommandItem projection vs source/effect truth
 ```
 
 ```text
@@ -107,11 +109,29 @@ The Command Center's fail-soft aggregation can currently substitute empty/zero f
 
 This is not generic service availability; the canonical defect is semantic misrepresentation in a derived operator projection.
 
+### F180 / C130 — Command spine false-terminal execution semantics
+
+Canonical home:
+- `08T-FINDING-REGISTER-COMMAND-SPINE-SEMANTICS-SUPPLEMENT.md`
+- `09T-CONTRADICTION-REGISTER-COMMAND-SPINE-SEMANTICS-SUPPLEMENT.md`
+
+Distinct root:
+
+```text
+CommandItem.status = EXECUTED
+!= source approval resolved
+!= executionTool ran
+!= business effect occurred
+!= OutcomeEvidence
+```
+
+The visible persistent Command Queue's `Approve` and `Execute` controls currently terminalize the projection row without an observed canonical source/control/effect transition. This differs from F143 because F143 has a real descendant handoff; F180 can claim terminal execution with no observed effect or handoff at all.
+
 ## Current ranges
 
 ```text
-Findings:        F001–F179
-Contradictions:  C001–C129
+Findings:        F001–F180
+Contradictions:  C001–C130
 Recommendations: KF-REC-001–KF-REC-050
 ```
 
