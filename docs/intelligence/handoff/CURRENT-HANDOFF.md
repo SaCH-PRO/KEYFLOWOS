@@ -1,11 +1,11 @@
 # KeyFlowOS Current Handoff
 
 Last updated: 2026-09-06
-Status: CURRENT — WHOLE-SYSTEM VIRTUAL MODEL / J16 + K4 EPISTEMIC-INTEGRITY POOL ACTIVE
+Status: CURRENT — J16/K4 RESEARCH + BACKWARD RE-AUDIT COMPLETE / RETURNING TO WHOLE-SYSTEM POOL
 
 ## Programme identity
 
-Repository-backed architecture forensics and convergence remain the active programme. Production code is read-only. The goal is whole-system target + migration + proof + dependency-ordered repository transformation architecture before implementation.
+Repository-backed architecture forensics and convergence remain the active programme. Production code is read-only. The destination is whole-system target + migration + proof + dependency-ordered repository transformation architecture before implementation.
 
 ```text
 MAP → MICROSCOPIC TRACE → JOURNEY → CONSTELLATION → KERNELS
@@ -14,22 +14,21 @@ MAP → MICROSCOPIC TRACE → JOURNEY → CONSTELLATION → KERNELS
 → BACKWARD RE-AUDIT → REOPEN / REFINE → LOOP AT LARGER SCALE
 ```
 
-## Mandatory load order additions
+## Mandatory load order
 
-Before substantive work or any ID allocation load:
+Before substantive work or ID allocation:
 
-1. `04-CONCEPT-REGISTRY.md`
-2. `04A-CANONICAL-TAXONOMY-AND-NAMING-REGISTRY.md`
-3. `04B-CANONICAL-ID-ALLOCATION-LEDGER.md`
-4. CURRENT / ROLLOVER
-5. active J16/K4 artifacts
-6. relevant mature J23/J18 evidence when outcome/recovery certainty is involved.
+1. `AGENTS.md`
+2. `AGENT-CONTINUITY.md`
+3. `00-START-HERE.md`
+4. `04-CONCEPT-REGISTRY.md`
+5. `04A-CANONICAL-TAXONOMY-AND-NAMING-REGISTRY.md`
+6. `04B-CANONICAL-ID-ALLOCATION-LEDGER.md`
+7. `07-CURRENT-STATE.md`
+8. CURRENT / ROLLOVER files
+9. active journey/kernel/investigation artifacts.
 
-## Taxonomy integrity checkpoint
-
-A historical parallel-analysis collision band has now been reconciled.
-
-Canonical law:
+## Taxonomy integrity
 
 ```text
 ONE SEMANTIC CONCEPT
@@ -39,26 +38,16 @@ ONE SEMANTIC CONCEPT
 → ZERO DUPLICATE CANONICAL MEANINGS
 ```
 
-`04B` overrides stale `CANONICAL` labels in colliding historical supplements.
-Historical evidence remains preserved; only canonical identifier ownership was repaired.
+`04B` is the allocator for F/C/KF-REC ranges and overrides historical colliding headings.
 
-Current canonical ranges:
+Current ranges:
 
 ```text
-Findings:        F174
-Contradictions:  C124
+Findings:        F178
+Contradictions:  C128
 Recommendations: KF-REC-050
 Concepts:        KF-CONCEPT-042
 ```
-
-Reconciliation artifacts:
-
-- `04B-CANONICAL-ID-ALLOCATION-LEDGER.md`
-- `08O-FINDING-REGISTER-TAXONOMY-RECONCILIATION-SUPPLEMENT.md` — F167–F174
-- `09O-CONTRADICTION-REGISTER-TAXONOMY-RECONCILIATION-SUPPLEMENT.md` — C117–C124
-- `10I-RECOMMENDATION-REGISTER-TAXONOMY-RECONCILIATION-CONTINUATION.md` — KF-REC-050
-
-Recovered distinct historical roots include workflow-control load bearing, recurrence semantics, provider idempotency/checkpoints and recovery ownership. They are pooled evidence, **not the active frontier**.
 
 ## Context integrity
 
@@ -72,82 +61,119 @@ production code:       READ-ONLY
 context integrity:     PASS
 ```
 
-## Active frontier — J16 / K4
+## J16 / K4 tranche status
 
-Journey: `J16 — Business Genome Evolution`
+Primary journey: `J16 — Business Genome Evolution`
 Kernel: `K4 — Business Knowledge`
-Recommendation: `KF-REC-049`
+Adjacent pressure: `J19 — Privacy / Deletion / Exit`
+Target recommendation: `KF-REC-049`
 
-Core thesis:
-
-> Business knowledge must preserve exact revision provenance, verification, authority, conflict, materialization state and outcome-qualified learning before it may change future KEY behavior.
-
-Current J16 canonical roots remain F161–F166 / C111–C116. Do not create additional J16 IDs until a 04A/04B semantic duplicate check passes.
-
-### Consumer trace now established
-
-1. **GenomeMemory is active reasoning input.** `GenomeMemoryEvent` is retrieved through UnifiedMemoryRetrieval/Cortex context paths, so overclaimed `SUCCESS`, `FAILURE` or “verified insight” can affect later reasoning without mutating a GenomeFact.
-
-2. **One autonomy verdict can consume multiple knowledge representations.** GenomeFact-derived readiness/confidence can be composed with Blueprint and Constitution-derived values. If these representations diverge, one action can be governed by inconsistent knowledge revisions. This strengthens F163/C113.
-
-3. **Module readiness needs epistemic-quality pressure testing.** Required-fact presence appears driven by identifier matching without an obvious requirement for verified/fresh/undisputed/unexpired/confidence-qualified knowledge before `automationAllowed` can emerge. Validate fully before allocating a new finding.
-
-4. **Top-fact prompt selection needs epistemic filter audit.** `listTopFacts()` prioritizes confidence/recency; deeper trace must determine whether stale/disputed/expired/misverified knowledge is excluded before prompt injection.
-
-### Reserved target vocabulary
+Canonical J16/K4 findings now include:
 
 ```text
-KnowledgeSubject
+F161 old verification survives replacement
+F162 knowledge mutation authority too close to membership/completeness
+F163 Blueprint / GenomeFact asymmetric truth/materialization
+F164 proposal application + approval evidence non-atomic
+F165 proposal not bound to base revision
+F166 process/control evidence over-promoted into learning
+F175 weak fact can satisfy deterministic readiness
+F176 weak/stale/disputed fact can enter KEY working prompt
+F177 domain-wide outcome can alter unrelated recommendation confidence
+F178 source correction can leave active derived knowledge/learning behind
+```
+
+Contradictions: C111–C116, C125–C128.
+
+## Research / frontier result
+
+Artifact:
+`investigations/J16-K4-STANDARDS-FRONTIER-PRESSURE-TEST.md`
+
+Adopted properties:
+
+- W3C PROV revision/derivation/attribution/invalidation semantics;
+- exact-enough lineage property from OpenLineage;
+- AI lifecycle traceability/monitoring from ISO/IEC 42001 and NIST AI RMF;
+- valid/business time vs system-known time where bitemporal semantics are material;
+- correction/erasure influence verification property inspired by machine-unlearning research.
+
+KeyFlow synthesis retained inside K4/KF-REC-049, not minted as a new architecture system:
+
+```text
 KnowledgeRevision
-KnowledgeAssertion
-KnowledgeInference
-KnowledgeChangeIntent
-KnowledgeVerification
-KnowledgeConflict
-MaterializationState
-LearningEligibility
++ provenance/evidence
++ valid/system time where material
++ verification/freshness/conflict
+→ consumer-specific EpistemicEligibility
+→ current K3 authority remains separate
+→ action/effect/outcome/recovery evidence
+→ OutcomeCertainty
+→ LearningEligibility
+→ bounded adaptive confidence
+→ correction/withdrawal influence closure + verified convergence
 ```
 
-Do not mint synonyms or permanent concept IDs until boundaries are stable.
+Rejected as unjustified now:
 
-## Key J16/K4 laws
+- universal RDF/PROV store;
+- dedicated temporal/knowledge graph database solely for K4;
+- generic ML-unlearning platform;
+- heavyweight governance for every profile edit;
+- embeddings as canonical truth.
+
+## Backward re-audit result
+
+Artifact:
+`investigations/J1-J25-J2-J15-J6-J14-J23-J18-J16-J19-K4-BACKWARD-REAUDIT.md`
+
+Verdict:
 
 ```text
-VERIFICATION belongs to an exact KnowledgeRevision
-OLD VERIFICATION does not transfer to a materially new value
-BUSINESS ACCESS != KNOWLEDGE VERIFICATION AUTHORITY
-ONE authoritative revision owner per concept
-PROJECTIONS expose materialization freshness/completeness
-KNOWLEDGE CHANGE INTENT revalidates base revision
-MATERIAL MUTATION + GOVERNANCE EVIDENCE are crash-consistent
-PROCESS / CONTROL / EXECUTION / BUSINESS OUTCOME / CAUSAL LEARNING remain distinct
-OUTCOME CERTAINTY gates LearningEligibility
-LEARNING may suggest policy but never silently expand authority
+K4 TARGET ROOT INVALIDATED                       = NO
+NEW PARALLEL AUTHORITY SYSTEM                    = NO
+NEW UNIVERSAL KNOWLEDGE GRAPH/RDF STORE          = NO
+NEW UNIVERSAL WORKFLOW/RECOVERY RUNTIME          = NO
+NEW FINDING/CONTRADICTION FROM RE-AUDIT          = NO
+J19 MATERIAL K4 CONSTELLATION MEMBER             = YES
+PRODUCTION IMPLEMENTATION                        = NO
 ```
 
-## Exact next action
+The re-audit strengthened existing roots only.
 
-Resume J16/K4 microscopic tracing now that discovered namespace collisions are repaired:
+## Mature J23/J18 pool
 
-1. prove/disprove epistemic filters in module readiness and top-fact prompt retrieval;
-2. map Blueprint vs GenomeFact vs Constitution read authority by consumer;
-3. trace GenomeMemory ranking and downstream prompt/adaptation effect;
-4. trace domain snapshot → recommendation → action → execution → outcome-learning lineage;
-5. inspect correction/deletion/privacy propagation through facts/evidence/memory/materializations;
-6. standards/frontier research on provenance, temporal knowledge, belief revision and policy-safe adaptive systems;
-7. refine KF-REC-049;
-8. backward-re-audit J1/J25/J2/J15/J6/J14/J23/J18 through K4;
-9. run 04A/04B duplicate check before every new ID.
+Still substantially converged and supplies OutcomeCertainty/recovery/external-reality constraints to K4 learning. Proof inventory remains specification only: 39 obligations / 16 deterministic fault points.
 
-## Existing mature pool
+## Reconciled historical pool
 
-J23/J18 remains substantially converged and supplies failure/outcome certainty, provider/external truth, Recovery Clearance and consequence-completeness constraints to J16 learning eligibility. Its proof inventory remains specification only: 39 obligations / 16 deterministic fault points; no runtime proof execution claimed.
+F167–F174 / C117–C124 and KF-REC-050 preserve distinct earlier work on load-bearing WorkDefinition controls, recurrence, provider idempotency/checkpoints and recovery ownership. This pool is not the active frontier.
+
+## Current whole-system frontier
+
+The J16/K4 tranche is mature enough to return to the broader pool. Do **not** convert it directly into a KF-EXEC packet.
+
+The highest-value next candidate is:
+
+`J17 — Command Center → Priority → Action`
+
+Reason: it appears to be the product/control surface where K4 knowledge + Genome recommendations + K7 temporal work + K8 evidence + K3 authority + J18 recovery/operator state converge into what the user is told matters now and what action KEY proposes next.
+
+Before making J17 canonical active frontier:
+
+```text
+repo verify J17 entry surfaces / aggregators / ranking / action bridges
+→ compare leverage against other candidates
+→ if confirmed, open microscopic J17 dossier
+→ pool with K3/K4/K7/K8/K11
+```
 
 ## Execution boundary
 
-`KF-EXEC-EXTFX-001` remains pooled implementation-shape evidence only:
+`KF-EXEC-EXTFX-001` remains:
 
 ```text
+POOLED IMPLEMENTATION-SHAPE EVIDENCE
 PROGRAMME FRONTIER = NO
 AUTHORIZED = NO
 IMPLEMENTED = NO
@@ -155,8 +181,6 @@ TESTED = NO
 ```
 
 ## Continuity invariant
-
-Every material tranche:
 
 ```text
 PERSIST
@@ -167,4 +191,4 @@ PERSIST
 → ONLY THEN OPEN NEXT BROAD TRANCHE
 ```
 
-If this chat disappears, repository intelligence must be sufficient to resume the exact J16/K4 frontier without analytical restart.
+If this chat disappears, repository intelligence must recover the exact post-K4 frontier without restart.
