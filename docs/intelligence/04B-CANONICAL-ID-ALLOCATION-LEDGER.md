@@ -25,6 +25,7 @@ F150–F160 mature J18 recovery/external-reality findings
 F161–F166 initial J16/K4 epistemic-integrity findings
 F167–F174 recovered distinct historical collision-band findings
 F175–F176 J16/K4 knowledge-consumption findings
+F177 J16/K4 causal-learning attribution finding
 ```
 
 ```text
@@ -36,6 +37,7 @@ C100–C110 mature J18 recovery/external-reality contradictions
 C111–C116 initial J16/K4 epistemic-integrity contradictions
 C117–C124 recovered distinct historical collision-band contradictions
 C125–C126 J16/K4 knowledge-consumption contradictions
+C127 J16/K4 causal-learning attribution contradiction
 ```
 
 ```text
@@ -95,27 +97,21 @@ Canonical definitions C117–C124: `09O-CONTRADICTION-REGISTER-TAXONOMY-RECONCIL
 
 Canonical KF-REC-050: `10I-RECOMMENDATION-REGISTER-TAXONOMY-RECONCILIATION-CONTINUATION.md`.
 
-## Post-reconciliation allocations
+## Post-reconciliation J16 allocations
 
 ### F175 / C125 — epistemic readiness eligibility
 
-Canonical home:
-- `08P-FINDING-REGISTER-KNOWLEDGE-CONSUMPTION-SUPPLEMENT.md`
-- `09P-CONTRADICTION-REGISTER-KNOWLEDGE-CONSUMPTION-SUPPLEMENT.md`
-
-Distinct root:
+Home: `08P-FINDING-REGISTER-KNOWLEDGE-CONSUMPTION-SUPPLEMENT.md` / `09P-CONTRADICTION-REGISTER-KNOWLEDGE-CONSUMPTION-SUPPLEMENT.md`.
 
 ```text
 matching GenomeFact row exists
 !=
-knowledge is epistemically acceptable to satisfy an automation-readiness requirement
+knowledge is epistemically acceptable for an automation-readiness requirement
 ```
 
 ### F176 / C126 — epistemic prompt eligibility
 
-Canonical home: same `08P` / `09P` pair.
-
-Distinct root:
+Home: same `08P` / `09P` pair.
 
 ```text
 stored/high-ranked GenomeFact
@@ -123,13 +119,25 @@ stored/high-ranked GenomeFact
 current canonical knowledge eligible for KEY prompt reasoning
 ```
 
-These are intentionally separate because deterministic control/readiness and probabilistic reasoning context have different consequences and acceptance policies.
+### F177 / C127 — causal learning attribution
+
+Home:
+- `08Q-FINDING-REGISTER-CAUSAL-LEARNING-SUPPLEMENT.md`
+- `09Q-CONTRADICTION-REGISTER-CAUSAL-LEARNING-SUPPLEMENT.md`
+
+```text
+one observed/domain outcome
+!=
+causal evidence for every recommendation pattern in that domain
+```
+
+F177 is distinct from F166: F166 concerns incorrect semantic labeling of process/control evidence; F177 concerns broad propagation without sufficiently specific causal/action-pattern lineage even when outcome observations exist.
 
 ## Current ranges
 
 ```text
-Findings:        F001–F176
-Contradictions:  C001–C126
+Findings:        F001–F177
+Contradictions:  C001–C127
 Recommendations: KF-REC-001–KF-REC-050
 ```
 
