@@ -1,8 +1,8 @@
 project: KEYFLOWOS
-analysis_version: 21
+analysis_version: 22
 last_updated: 2026-09-06
-phase: whole-system-virtual-model-expansion-j16-k4-with-j19-pressure
-status: CONTINUE_ARCHITECTURE_FORENSICS_AND_CONVERGENCE
+phase: whole-system-pooling-post-j16-k4-backward-reaudit
+status: SELECT_AND_VERIFY_NEXT_HIGH_LEVERAGE_FRONTIER
 canonical_branch: docs/keyflow-intelligence-foundation
 implementation_evidence:
   branch: main
@@ -24,51 +24,53 @@ canonical_ranges:
 active_mesh:
   journeys: [J1,J25,J2,J15,J6,J14,J23,J18,J16,J19]
   kernels: [K2,K3,K4,K5,K6,K7,K8,K9,K10,K11]
-active_frontier:
+latest_converged_pool:
+  name: business_knowledge_genome_evolution_epistemic_integrity
   primary_journey: J16
   primary_kernel: K4
-  adjacent_pressure_journey: J19
-  pool: business_knowledge_genome_evolution_epistemic_integrity
+  adjacent_pressure: J19
+  stage: RESEARCH_PRESSURE_TEST_AND_BACKWARD_REAUDIT_COMPLETE
   recommendation: KF-REC-049
-  stage: KNOWLEDGE_CONSUMPTION_CAUSAL_LEARNING_AND_CORRECTION_LINEAGE_MAPPED
   findings: [F161,F162,F163,F164,F165,F166,F175,F176,F177,F178]
   contradictions: [C111,C112,C113,C114,C115,C116,C125,C126,C127,C128]
-  latest_results:
-    F175: module_readiness_can_accept_epistemically_invalid_fact_presence_and_feed_execution_policy
-    F176: stale_disputed_expired_or_weak_GenomeFacts_can_enter_KEY_working_knowledge_prompt
-    F177: outcome_learning_can_propagate_confidence_to_unrelated_patterns_by_domain_only
-    F178: fine_grained_correction_withdrawal_lacks_lineage_aware_invalidation_of_active_derivatives
-  j19_positive_seam:
-    whole_business_gdpr_purge: database_cascade_plus_post_delete_self_verification
-    active_concern: fine_grained_correction_withdrawal_and_derived_state_convergence_not_full_tenant_purge
-  target_synthesis:
-    - KnowledgeRevision_is_canonical_epistemic_basis
-    - consumer_specific_epistemic_contracts_derive_from_same_knowledge_state
+  backward_reaudit: PASSED_NO_NEW_IDS
+  target_status: SUBSTANTIALLY_STRENGTHENED_RETURNED_TO_BROADER_POOL
+  key_laws:
+    - verification_belongs_to_exact_KnowledgeRevision
+    - valid_business_time_and_system_known_time_are_distinct_where_material
+    - consumer_specific_EpistemicEligibility_derives_from_one_knowledge_state
     - OutcomeCertainty_precedes_LearningEligibility
-    - LearningEligibility_requires_specific_pattern_action_effect_outcome_recovery_lineage
-    - correction_withdrawal_erasure_propagates_through_derivation_lineage
-    - required_audit_history_can_remain_without_remaining_active_truth
+    - causal_learning_requires_exact_enough_pattern_action_effect_outcome_recovery_lineage
+    - correction_withdrawal_erasure_propagates_through_influence_closure
+    - retained_history_must_not_remain_active_truth
     - learning_never_expands_authority
+  research_artifact: docs/intelligence/investigations/J16-K4-STANDARDS-FRONTIER-PRESSURE-TEST.md
+  backward_reaudit_artifact: docs/intelligence/investigations/J1-J25-J2-J15-J6-J14-J23-J18-J16-J19-K4-BACKWARD-REAUDIT.md
+mature_temporal_recovery_pool:
+  name: temporal_recovery_external_reality_authority
+  proof_design: COMPLETE_NOT_EXECUTED
+  backward_reaudit: PASSED
+  proof_obligations: 39
+  deterministic_fault_points: 16
 reconciled_parallel_pool:
   findings: [F167,F168,F169,F170,F171,F172,F173,F174]
   contradictions: [C117,C118,C119,C120,C121,C122,C123,C124]
   recommendation: KF-REC-050
   role: pooled_historical_evidence_not_active_frontier
-mature_temporal_recovery_pool:
-  name: temporal_recovery_external_reality_authority
-  proof_design: COMPLETE_NOT_EXECUTED
-  backward_reaudit: PASSED
-  role_in_j16: supplies_outcome_certainty_recovery_external_truth_constraints_for_learning
-latest_artifacts:
-  allocator: docs/intelligence/04B-CANONICAL-ID-ALLOCATION-LEDGER.md
-  j16_dossier: docs/intelligence/journeys/KF-JOURNEY-016-BUSINESS-GENOME-EVOLUTION.md
-  j19_dossier: docs/intelligence/journeys/KF-JOURNEY-019-PRIVACY-DELETION-EXIT.md
-  k4_kernel: docs/intelligence/kernels/KF-KERNEL-004-BUSINESS-KNOWLEDGE.md
-  knowledge_consumer_findings: docs/intelligence/08P-FINDING-REGISTER-KNOWLEDGE-CONSUMPTION-SUPPLEMENT.md
-  causal_learning_findings: docs/intelligence/08Q-FINDING-REGISTER-CAUSAL-LEARNING-SUPPLEMENT.md
-  correction_lineage_findings: docs/intelligence/08R-FINDING-REGISTER-KNOWLEDGE-CORRECTION-LINEAGE-SUPPLEMENT.md
-  correction_lineage_contradictions: docs/intelligence/09R-CONTRADICTION-REGISTER-KNOWLEDGE-CORRECTION-LINEAGE-SUPPLEMENT.md
-  j16_recommendation: docs/intelligence/10H-RECOMMENDATION-REGISTER-BUSINESS-KNOWLEDGE-CONTINUATION.md
+next_frontier_candidate:
+  journey: J17
+  name: Command Center_to_Priority_to_Action
+  status: CANDIDATE_REQUIRES_REPOSITORY_VERIFICATION
+  hypothesis: user_operational_control_surface_where_K4_knowledge_K7_temporal_work_K8_evidence_K3_governance_and_recovery_state_converge
+  selection_reasons:
+    - high_cross_journey_leverage
+    - material_user_product_centrality
+    - likely_multiple_projection_and_priority_truths
+    - can_stress_epistemic_eligibility_ranking_action_bridge_and_authority_together
+    - likely_to_refine_final_whole_system_control_surface_and_migration_order
+exact_next_action:
+  title: verify_J17_as_next_frontier
+  instruction: Inspect current repository entry surfaces, aggregators, ranking/prioritization logic, Command Center bridges and action execution links for canonical J17. Compare its cross-kernel leverage against alternative candidates. If confirmed, open the J17 microscopic dossier and pool it with K3/K4/K7/K8/K11. Do not allocate new IDs until 04A/04B semantic duplicate check passes.
 execution_probe_status:
   id: KF-EXEC-EXTFX-001
   classification: POOLED_IMPLEMENTATION_SHAPE_EVIDENCE
@@ -82,15 +84,10 @@ continuity:
   update_after_major_tranche: true
   taxonomy_check_after_major_tranche: true
   invariant: fresh_thread_can_resume_exact_working_flow_without_restart
-exact_next_action:
-  title: standards_frontier_pressure_test_k4_then_backward_reaudit
-  instruction: Use current web research to pressure-test KF-REC-049 against provenance/temporal knowledge/belief revision/data lineage/adaptive-system safety standards and frontier designs. Separate floor properties from frontier properties and KeyFlow synthesis. Then backward-reaudit J1/J25/J2/J15/J6/J14/J23/J18 plus the new J19 pressure through K4. Load 04A/04B before any new ID.
 constraints:
   - do_not_modify_production_code
-  - do_not_treat_local_convergence_as_permanent_closure
-  - do_not_make_execution_probe_the_programme_frontier
-  - do_not_create_parallel_genome_authority_engine
-  - do_not_treat_process_success_as_business_outcome
+  - do_not_promote_local_semantic_maturity_to_implementation_authorization
+  - do_not_create_parallel_authority_knowledge_or_workflow_truth_stores
   - do_not_allow_learning_to_expand_authority
   - do_not_create_duplicate_canonical_concepts_or_ids
   - preserve_anti_normalization_method
