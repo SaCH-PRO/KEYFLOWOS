@@ -26,6 +26,7 @@ F161–F166 initial J16/K4 epistemic-integrity findings
 F167–F174 recovered distinct historical collision-band findings
 F175–F176 J16/K4 knowledge-consumption findings
 F177 J16/K4 causal-learning attribution finding
+F178 J16/J19 knowledge-correction lineage finding
 ```
 
 ```text
@@ -38,6 +39,7 @@ C111–C116 initial J16/K4 epistemic-integrity contradictions
 C117–C124 recovered distinct historical collision-band contradictions
 C125–C126 J16/K4 knowledge-consumption contradictions
 C127 J16/K4 causal-learning attribution contradiction
+C128 J16/J19 knowledge-correction lineage contradiction
 ```
 
 ```text
@@ -49,7 +51,11 @@ KF-REC-049 provenance/revision-aware Business Knowledge Contract
 KF-REC-050 load-bearing WorkDefinition control contract
 ```
 
-## Historical finding collision reconciliation
+## Historical collision reconciliation
+
+The discovered historical parallel-analysis collision band is reconciled as follows. These mappings remain authoritative unless a later explicit decision supersedes them.
+
+### Findings
 
 | Historical source / old ID | Resolution | Canonical identity |
 |---|---|---|
@@ -68,7 +74,7 @@ KF-REC-050 load-bearing WorkDefinition control contract
 
 Canonical definitions F167–F174: `08O-FINDING-REGISTER-TAXONOMY-RECONCILIATION-SUPPLEMENT.md`.
 
-## Historical contradiction collision reconciliation
+### Contradictions
 
 | Historical source / old ID | Resolution | Canonical identity |
 |---|---|---|
@@ -87,7 +93,7 @@ Canonical definitions F167–F174: `08O-FINDING-REGISTER-TAXONOMY-RECONCILIATION
 
 Canonical definitions C117–C124: `09O-CONTRADICTION-REGISTER-TAXONOMY-RECONCILIATION-SUPPLEMENT.md`.
 
-## Recommendation collision reconciliation
+### Recommendations
 
 | Historical source / old ID | Resolution | Canonical identity |
 |---|---|---|
@@ -121,9 +127,7 @@ current canonical knowledge eligible for KEY prompt reasoning
 
 ### F177 / C127 — causal learning attribution
 
-Home:
-- `08Q-FINDING-REGISTER-CAUSAL-LEARNING-SUPPLEMENT.md`
-- `09Q-CONTRADICTION-REGISTER-CAUSAL-LEARNING-SUPPLEMENT.md`
+Home: `08Q-FINDING-REGISTER-CAUSAL-LEARNING-SUPPLEMENT.md` / `09Q-CONTRADICTION-REGISTER-CAUSAL-LEARNING-SUPPLEMENT.md`.
 
 ```text
 one observed/domain outcome
@@ -133,11 +137,23 @@ causal evidence for every recommendation pattern in that domain
 
 F177 is distinct from F166: F166 concerns incorrect semantic labeling of process/control evidence; F177 concerns broad propagation without sufficiently specific causal/action-pattern lineage even when outcome observations exist.
 
+### F178 / C128 — knowledge correction lineage
+
+Home: `08R-FINDING-REGISTER-KNOWLEDGE-CORRECTION-LINEAGE-SUPPLEMENT.md` / `09R-CONTRADICTION-REGISTER-KNOWLEDGE-CORRECTION-LINEAGE-SUPPLEMENT.md`.
+
+```text
+current/source knowledge corrected or withdrawn
+!=
+all active derived recommendations, memories, readiness and prompt context have converged
+```
+
+F178 is deliberately scoped to fine-grained correction/withdrawal lineage. It does not assert whole-business GDPR purge failure.
+
 ## Current ranges
 
 ```text
-Findings:        F001–F177
-Contradictions:  C001–C127
+Findings:        F001–F178
+Contradictions:  C001–C128
 Recommendations: KF-REC-001–KF-REC-050
 ```
 
