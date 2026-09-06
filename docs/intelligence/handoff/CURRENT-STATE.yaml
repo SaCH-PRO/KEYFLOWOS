@@ -1,7 +1,7 @@
 project: KEYFLOWOS
-analysis_version: 20
+analysis_version: 21
 last_updated: 2026-09-06
-phase: whole-system-virtual-model-expansion-j16-k4-epistemic-integrity
+phase: whole-system-virtual-model-expansion-j16-k4-with-j19-pressure
 status: CONTINUE_ARCHITECTURE_FORENSICS_AND_CONVERGENCE
 canonical_branch: docs/keyflow-intelligence-foundation
 implementation_evidence:
@@ -11,73 +11,64 @@ implementation_evidence:
   current_head_change_class: audit-only
 context_integrity: PASS
 implementation_authorized: false
-programme_identity:
-  mode: repository_backed_virtual_architectural_digital_twin
-  objective: converge whole-system understanding through repeated journey_constellation_kernel pooling and backward_reaudits before comprehensive code transformation planning
 taxonomy_integrity:
   governor: docs/intelligence/04A-CANONICAL-TAXONOMY-AND-NAMING-REGISTRY.md
   allocator: docs/intelligence/04B-CANONICAL-ID-ALLOCATION-LEDGER.md
-  invariant: one_semantic_concept_one_canonical_id_one_canonical_name_one_home_register_zero_duplicate_canonical_entries
   create_rule: LOAD_04A_04B_SEARCH_REUSE_REFINE_CROSS_REFERENCE_BEFORE_NEW_ID
-  discovered_collision_band_reconciled: true
-  concept_range_through: KF-CONCEPT-042
+  historical_collision_band_reconciled: true
 canonical_ranges:
-  findings_through: F177
-  contradictions_through: C127
+  findings_through: F178
+  contradictions_through: C128
   recommendations_through: KF-REC-050
+  concepts_through: KF-CONCEPT-042
 active_mesh:
-  journeys: [J1,J25,J2,J15,J6,J14,J23,J18,J16]
+  journeys: [J1,J25,J2,J15,J6,J14,J23,J18,J16,J19]
   kernels: [K2,K3,K4,K5,K6,K7,K8,K9,K10,K11]
-active_pool:
-  name: business_knowledge_genome_evolution_epistemic_integrity
-  journey: J16
-  kernel: K4
-  stage: CAUSAL_LEARNING_TRACE_PERSISTED_NEXT_PRIVACY_CORRECTION_AND_REAUDIT
+active_frontier:
+  primary_journey: J16
+  primary_kernel: K4
+  adjacent_pressure_journey: J19
+  pool: business_knowledge_genome_evolution_epistemic_integrity
   recommendation: KF-REC-049
-  findings: [F161,F162,F163,F164,F165,F166,F175,F176,F177]
-  contradictions: [C111,C112,C113,C114,C115,C116,C125,C126,C127]
-  established_laws:
-    - verification_belongs_to_exact_knowledge_revision
-    - consumer_knowledge_eligibility_is_not_row_existence
-    - stored_fact_is_not_automatically_prompt_current_truth
-    - one_observed_domain_outcome_is_not_causal_evidence_for_every_domain_pattern
-    - outcome_certainty_precedes_learning_eligibility
-    - learning_never_grants_authority
-  consumer_trace:
-    deterministic_readiness: F175_C125
-    prompt_working_knowledge: F176_C126
-    memory_process_semantics: F166_C116_strengthened
-    causal_recommendation_adaptation: F177_C127
-  positive_seams:
-    - GenomeFact_verification_freshness_risk_metadata
-    - GenomeRecommendationOutcome_pre_post_observation_fields
-    - linkedActionType_and_linkedActionId
-    - configurable_learning_windows
-    - impactScore_and_impactEvidence
-    - outcome_learning_time_decay
-  target_refinement:
-    - consumer_specific_epistemic_contracts_derive_from_one_canonical_KnowledgeRevision
-    - LearningEligibility_binds_recommendation_pattern_action_effect_outcome_and_recovery_lineage
-    - weak_correlation_remains_contextual_evidence_not_broad_confidence_mutation
+  stage: KNOWLEDGE_CONSUMPTION_CAUSAL_LEARNING_AND_CORRECTION_LINEAGE_MAPPED
+  findings: [F161,F162,F163,F164,F165,F166,F175,F176,F177,F178]
+  contradictions: [C111,C112,C113,C114,C115,C116,C125,C126,C127,C128]
+  latest_results:
+    F175: module_readiness_can_accept_epistemically_invalid_fact_presence_and_feed_execution_policy
+    F176: stale_disputed_expired_or_weak_GenomeFacts_can_enter_KEY_working_knowledge_prompt
+    F177: outcome_learning_can_propagate_confidence_to_unrelated_patterns_by_domain_only
+    F178: fine_grained_correction_withdrawal_lacks_lineage_aware_invalidation_of_active_derivatives
+  j19_positive_seam:
+    whole_business_gdpr_purge: database_cascade_plus_post_delete_self_verification
+    active_concern: fine_grained_correction_withdrawal_and_derived_state_convergence_not_full_tenant_purge
+  target_synthesis:
+    - KnowledgeRevision_is_canonical_epistemic_basis
+    - consumer_specific_epistemic_contracts_derive_from_same_knowledge_state
+    - OutcomeCertainty_precedes_LearningEligibility
+    - LearningEligibility_requires_specific_pattern_action_effect_outcome_recovery_lineage
+    - correction_withdrawal_erasure_propagates_through_derivation_lineage
+    - required_audit_history_can_remain_without_remaining_active_truth
+    - learning_never_expands_authority
 reconciled_parallel_pool:
   findings: [F167,F168,F169,F170,F171,F172,F173,F174]
   contradictions: [C117,C118,C119,C120,C121,C122,C123,C124]
   recommendation: KF-REC-050
   role: pooled_historical_evidence_not_active_frontier
-latest_artifacts:
-  allocator: docs/intelligence/04B-CANONICAL-ID-ALLOCATION-LEDGER.md
-  knowledge_consumer_findings: docs/intelligence/08P-FINDING-REGISTER-KNOWLEDGE-CONSUMPTION-SUPPLEMENT.md
-  knowledge_consumer_contradictions: docs/intelligence/09P-CONTRADICTION-REGISTER-KNOWLEDGE-CONSUMPTION-SUPPLEMENT.md
-  causal_learning_findings: docs/intelligence/08Q-FINDING-REGISTER-CAUSAL-LEARNING-SUPPLEMENT.md
-  causal_learning_contradictions: docs/intelligence/09Q-CONTRADICTION-REGISTER-CAUSAL-LEARNING-SUPPLEMENT.md
-  j16_recommendation: docs/intelligence/10H-RECOMMENDATION-REGISTER-BUSINESS-KNOWLEDGE-CONTINUATION.md
-  j16_dossier: docs/intelligence/journeys/KF-JOURNEY-016-BUSINESS-GENOME-EVOLUTION.md
-  k4_kernel: docs/intelligence/kernels/KF-KERNEL-004-BUSINESS-KNOWLEDGE.md
-latest_mature_pool:
+mature_temporal_recovery_pool:
   name: temporal_recovery_external_reality_authority
   proof_design: COMPLETE_NOT_EXECUTED
   backward_reaudit: PASSED
   role_in_j16: supplies_outcome_certainty_recovery_external_truth_constraints_for_learning
+latest_artifacts:
+  allocator: docs/intelligence/04B-CANONICAL-ID-ALLOCATION-LEDGER.md
+  j16_dossier: docs/intelligence/journeys/KF-JOURNEY-016-BUSINESS-GENOME-EVOLUTION.md
+  j19_dossier: docs/intelligence/journeys/KF-JOURNEY-019-PRIVACY-DELETION-EXIT.md
+  k4_kernel: docs/intelligence/kernels/KF-KERNEL-004-BUSINESS-KNOWLEDGE.md
+  knowledge_consumer_findings: docs/intelligence/08P-FINDING-REGISTER-KNOWLEDGE-CONSUMPTION-SUPPLEMENT.md
+  causal_learning_findings: docs/intelligence/08Q-FINDING-REGISTER-CAUSAL-LEARNING-SUPPLEMENT.md
+  correction_lineage_findings: docs/intelligence/08R-FINDING-REGISTER-KNOWLEDGE-CORRECTION-LINEAGE-SUPPLEMENT.md
+  correction_lineage_contradictions: docs/intelligence/09R-CONTRADICTION-REGISTER-KNOWLEDGE-CORRECTION-LINEAGE-SUPPLEMENT.md
+  j16_recommendation: docs/intelligence/10H-RECOMMENDATION-REGISTER-BUSINESS-KNOWLEDGE-CONTINUATION.md
 execution_probe_status:
   id: KF-EXEC-EXTFX-001
   classification: POOLED_IMPLEMENTATION_SHAPE_EVIDENCE
@@ -92,8 +83,8 @@ continuity:
   taxonomy_check_after_major_tranche: true
   invariant: fresh_thread_can_resume_exact_working_flow_without_restart
 exact_next_action:
-  title: trace_correction_deletion_privacy_lineage_then_standards_and_backward_reaudit
-  instruction: Continue J16/K4 by tracing how correction/deletion/privacy requests propagate through Blueprint, GenomeFact, GenomeEvidence, GenomeMemoryEvent, semantic/vector memory, snapshots and recommendations. Reuse J19 if this is its existing journey boundary rather than minting a duplicate journey. Then perform standards/frontier research, refine KF-REC-049, and backward-reaudit J1/J25/J2/J15/J6/J14/J23/J18. Load 04A/04B before any new ID.
+  title: standards_frontier_pressure_test_k4_then_backward_reaudit
+  instruction: Use current web research to pressure-test KF-REC-049 against provenance/temporal knowledge/belief revision/data lineage/adaptive-system safety standards and frontier designs. Separate floor properties from frontier properties and KeyFlow synthesis. Then backward-reaudit J1/J25/J2/J15/J6/J14/J23/J18 plus the new J19 pressure through K4. Load 04A/04B before any new ID.
 constraints:
   - do_not_modify_production_code
   - do_not_treat_local_convergence_as_permanent_closure
