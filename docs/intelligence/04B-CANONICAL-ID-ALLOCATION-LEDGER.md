@@ -16,35 +16,28 @@ Never delete or reuse an allocated identity. Historical collisions resolve as:
 ## Preserved mature lineage
 
 ```text
-F145 missed-schedule semantics
-F146 workflow-definition mutation/versioning of waiting work
-F147 scheduled EmailCampaign mutable-latest drift
-F148 WhatsApp provider acceptance != final delivery
-F149 ambiguous provider outcome != confirmed failure
-F150–F160 mature J18 recovery/external-reality findings
+F145–F160 temporal/external/recovery lineage
 F161–F166 initial J16/K4 epistemic-integrity findings
 F167–F174 recovered distinct historical collision-band findings
 F175–F176 J16/K4 knowledge-consumption findings
-F177 J16/K4 causal-learning attribution finding
-F178 J16/J19 knowledge-correction lineage finding
+F177 J16/K4 causal-learning attribution
+F178 J16/J19 correction lineage
+F179 J17 Command Center projection completeness
 ```
 
 ```text
-C096 missed-schedule semantics
-C097 workflow-versioning inconsistency
-C098 provider acceptance vs local SENT
-C099 ambiguous external outcome vs definite FAILED
-C100–C110 mature J18 recovery/external-reality contradictions
-C111–C116 initial J16/K4 epistemic-integrity contradictions
+C096–C110 temporal/external/recovery lineage
+C111–C116 initial J16/K4 contradictions
 C117–C124 recovered distinct historical collision-band contradictions
 C125–C126 J16/K4 knowledge-consumption contradictions
-C127 J16/K4 causal-learning attribution contradiction
-C128 J16/J19 knowledge-correction lineage contradiction
+C127 J16/K4 causal-learning attribution
+C128 J16/J19 correction lineage
+C129 J17 Command Center projection completeness
 ```
 
 ```text
 KF-REC-045 missed-schedule/lateness policy
-KF-REC-046 workflow-definition versioning / waiting-occurrence binding
+KF-REC-046 workflow-definition versioning
 KF-REC-047 Temporal Work Projection
 KF-REC-048 certainty-aware Recovery Contract
 KF-REC-049 provenance/revision-aware Business Knowledge Contract
@@ -53,107 +46,72 @@ KF-REC-050 load-bearing WorkDefinition control contract
 
 ## Historical collision reconciliation
 
-The discovered historical parallel-analysis collision band is reconciled as follows. These mappings remain authoritative unless a later explicit decision supersedes them.
+The discovered historical parallel-analysis collision band remains governed by the mappings persisted in:
 
-### Findings
+- `08O-FINDING-REGISTER-TAXONOMY-RECONCILIATION-SUPPLEMENT.md` — F167–F174;
+- `09O-CONTRADICTION-REGISTER-TAXONOMY-RECONCILIATION-SUPPLEMENT.md` — C117–C124;
+- `10I-RECOMMENDATION-REGISTER-TAXONOMY-RECONCILIATION-CONTINUATION.md` — KF-REC-050.
 
-| Historical source / old ID | Resolution | Canonical identity |
-|---|---|---|
-| workflow-control F146 — disabled workflow not load-bearing | REMAP | F167 |
-| workflow-control F147 — visible delay config bypassed | REMAP | F168 |
-| work-definition provenance F148 | ALIAS / strengthens version provenance | F146 |
-| recurrence F149 — DelegationLoop coalesces/drifts | REMAP | F169 |
-| recurrence F150 — RecurringInvoice distributed claim missing | REMAP | F170 |
-| cross-provider ambiguous-outcome F151 | ALIAS / strengthens ambiguous-outcome root | F149 |
-| control/recurrence refinement F152–F155 | ALIAS | F167–F170 |
-| provider-recovery F152 — provider idempotency identity missing | REMAP | F171 |
-| provider-recovery F153 — Instagram checkpoint missing | REMAP | F172 |
-| scheduled-recovery F154 — no durable recovery owner | REMAP | F173 |
-| compensation F155 — two compensation owners | REMAP | F174 |
-| compensation F156 — recovery result overwritten | ALIAS | F154 |
-
-Canonical definitions F167–F174: `08O-FINDING-REGISTER-TAXONOMY-RECONCILIATION-SUPPLEMENT.md`.
-
-### Contradictions
-
-| Historical source / old ID | Resolution | Canonical identity |
-|---|---|---|
-| workflow-control C097 | REMAP | C117 |
-| workflow-control C098 | REMAP | C118 |
-| work-definition provenance C099 | ALIAS / specialization | C097 |
-| recurrence C100 | REMAP | C119 |
-| recurrence C101 | REMAP | C120 |
-| cross-provider ambiguous outcome C102 | ALIAS / strengthening | C099 |
-| control/recurrence refinement IDs | ALIAS | C117–C120 |
-| provider recovery C102 — delivery vs provider idempotency | REMAP | C121 |
-| provider recovery C103 — Instagram checkpoint | REMAP | C122 |
-| scheduled recovery C104 | REMAP | C123 |
-| compensation C105 — two compensation owners | REMAP | C124 |
-| compensation C106 — recovery result overwritten | ALIAS | C104 |
-
-Canonical definitions C117–C124: `09O-CONTRADICTION-REGISTER-TAXONOMY-RECONCILIATION-SUPPLEMENT.md`.
-
-### Recommendations
-
-| Historical source / old ID | Resolution | Canonical identity |
-|---|---|---|
-| workflow-definition-control old KF-REC-046 | REMAP | KF-REC-050 |
-| workflow-versioning KF-REC-046 | PRESERVE | KF-REC-046 |
-| external-outcome old KF-REC-048 | ALIAS / precursor subsumed by broader recovery contract | KF-REC-048 |
-
-Canonical KF-REC-050: `10I-RECOMMENDATION-REGISTER-TAXONOMY-RECONCILIATION-CONTINUATION.md`.
+Key aliases/remaps include workflow-control, recurrence, provider-recovery, scheduled-recovery and compensation collisions. Historical files retain evidence but do not re-own the numeric IDs.
 
 ## Post-reconciliation J16 allocations
 
 ### F175 / C125 — epistemic readiness eligibility
-
-Home: `08P-FINDING-REGISTER-KNOWLEDGE-CONSUMPTION-SUPPLEMENT.md` / `09P-CONTRADICTION-REGISTER-KNOWLEDGE-CONSUMPTION-SUPPLEMENT.md`.
+Home: `08P` / `09P` knowledge-consumption supplements.
 
 ```text
 matching GenomeFact row exists
-!=
-knowledge is epistemically acceptable for an automation-readiness requirement
+!= knowledge is epistemically acceptable for automation readiness
 ```
 
 ### F176 / C126 — epistemic prompt eligibility
-
 Home: same `08P` / `09P` pair.
 
 ```text
 stored/high-ranked GenomeFact
-!=
-current canonical knowledge eligible for KEY prompt reasoning
+!= current canonical knowledge eligible for KEY prompt reasoning
 ```
 
 ### F177 / C127 — causal learning attribution
-
-Home: `08Q-FINDING-REGISTER-CAUSAL-LEARNING-SUPPLEMENT.md` / `09Q-CONTRADICTION-REGISTER-CAUSAL-LEARNING-SUPPLEMENT.md`.
+Home: `08Q` / `09Q` causal-learning supplements.
 
 ```text
 one observed/domain outcome
-!=
-causal evidence for every recommendation pattern in that domain
+!= causal evidence for every recommendation pattern in that domain
 ```
-
-F177 is distinct from F166: F166 concerns incorrect semantic labeling of process/control evidence; F177 concerns broad propagation without sufficiently specific causal/action-pattern lineage even when outcome observations exist.
 
 ### F178 / C128 — knowledge correction lineage
-
-Home: `08R-FINDING-REGISTER-KNOWLEDGE-CORRECTION-LINEAGE-SUPPLEMENT.md` / `09R-CONTRADICTION-REGISTER-KNOWLEDGE-CORRECTION-LINEAGE-SUPPLEMENT.md`.
+Home: `08R` / `09R` correction-lineage supplements.
 
 ```text
-current/source knowledge corrected or withdrawn
-!=
-all active derived recommendations, memories, readiness and prompt context have converged
+source/current knowledge corrected or withdrawn
+!= all active derivatives have converged
 ```
 
-F178 is deliberately scoped to fine-grained correction/withdrawal lineage. It does not assert whole-business GDPR purge failure.
+## J17 allocations
+
+### F179 / C129 — Command Center projection completeness
+
+Canonical home:
+- `08S-FINDING-REGISTER-COMMAND-CENTER-PROJECTION-SUPPLEMENT.md`
+- `09S-CONTRADICTION-REGISTER-COMMAND-CENTER-PROJECTION-SUPPLEMENT.md`
+
+Distinct root:
+
+```text
+SOURCE UNAVAILABLE / UNKNOWN
+!= SOURCE HEALTHY + ZERO IMPORTANT ITEMS
+```
+
+The Command Center's fail-soft aggregation can currently substitute empty/zero fallback values for unavailable sources without exposing source-health/projection-completeness semantics, allowing incomplete inputs to alter health/priority conclusions.
+
+This is not generic service availability; the canonical defect is semantic misrepresentation in a derived operator projection.
 
 ## Current ranges
 
 ```text
-Findings:        F001–F178
-Contradictions:  C001–C128
+Findings:        F001–F179
+Contradictions:  C001–C129
 Recommendations: KF-REC-001–KF-REC-050
 ```
 
