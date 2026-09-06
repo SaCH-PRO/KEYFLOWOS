@@ -4,6 +4,7 @@ import { CrmService } from '../crm.service';
 import { contactWhereWithId } from '../crm.helpers';
 import { resolveCrmAccess } from '../crm-permissions.helper';
 import { ApolloEnrichmentProvider } from './apollo-enrichment.provider';
+import { PublicDataEnrichmentProvider } from './public-data-enrichment.provider';
 import type { EnrichmentProvider } from './enrichment-provider';
 
 /** Fields an enrichment result may fill. Each maps to a Contact column and is
@@ -55,11 +56,17 @@ export class ContactEnrichmentService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     private readonly crm: CrmService,
     private readonly apollo: ApolloEnrichmentProvider,
+    private readonly publicData: PublicDataEnrichmentProvider,
   ) {}
 
-  /** The active provider. A single adapter today; swap-point for a registry. */
+  /**
+   * Free-by-default, paid-optional: the public-data provider always runs, and a
+   * business only gets the paid Apollo depth if APOLLO_API_KEY is set. So the
+   * baseline (company from domain) costs nothing, and no one pays unless they
+   * opt into verified person-level data.
+   */
   private get provider(): EnrichmentProvider {
-    return this.apollo;
+    return this.apollo.enabled ? this.apollo : this.publicData;
   }
 
   async enrichContact(input: {
