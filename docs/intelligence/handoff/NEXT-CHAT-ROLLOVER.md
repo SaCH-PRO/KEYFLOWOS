@@ -17,8 +17,8 @@ Load AGENTS.md, AGENT-CONTINUITY.md, 00-START-HERE.md,
 CURRENT-HANDOFF.md, CURRENT-STATE.yaml and both ROLLOVER files.
 Run Context Integrity Check first.
 Production code remains read-only.
-The J16/K4 research + backward re-audit tranche is complete and pooled.
-Verify J17 — Command Center → Priority → Action as the next highest-leverage frontier before activating it.
+J17 — Command Center → Priority → Action is the active frontier.
+Resume at the dual-projection/runtime-materialization proof after F180/C130.
 ```
 
 ## Context integrity
@@ -26,9 +26,9 @@ Verify J17 — Command Center → Priority → Action as the next highest-levera
 ```text
 Repository:             SaCH-PRO/KEYFLOWOS
 Implementation branch:  main
-Current main head:       168732d0e2226e11ed033c14fbdf7b3ea5344a41
+Current main head:       9bff44f8f9a5195e06af3669ccb1a8f4c47ccd76
 Code-bearing baseline:  d7c5b86cfa276d75ffa42d5f1707c43704dc9f21
-Main delta class:        audit-only
+Main delta class:        audit / architecture-journal only
 Intelligence branch:     docs/keyflow-intelligence-foundation
 Context integrity:       PASS
 Implementation:          UNAUTHORIZED / READ-ONLY
@@ -37,8 +37,8 @@ Implementation:          UNAUTHORIZED / READ-ONLY
 ## Canonical taxonomy
 
 ```text
-Findings:        F178
-Contradictions:  C128
+Findings:        F180
+Contradictions:  C130
 Recommendations: KF-REC-050
 Concepts:        KF-CONCEPT-042
 ```
@@ -54,105 +54,114 @@ LOAD 04A + 04B
 → only then allocate if genuinely distinct
 ```
 
-## J16 / K4 tranche — pooled
+## Active frontier — J17
 
-`J16 — Business Genome Evolution` activated and substantially strengthened `K4 — Business Knowledge`.
+J17 is confirmed and active.
 
-Adjacent pressure:
-`J19 — Privacy / Deletion / Exit`.
-
-Primary target:
-`KF-REC-049 — provenance- and revision-aware Business Knowledge Contract`.
-
-Key findings:
+The Command Center currently exposes two operational universes on the same page:
 
 ```text
-F161 replacement can inherit obsolete verification
-F162 knowledge mutation authority is too close to membership/completeness
-F163 Blueprint / GenomeFact can diverge as legitimate-looking truths
-F164 proposal mutation + approval evidence are non-atomic
-F165 proposal is not bound to base/current knowledge revision
-F166 process/control evidence can be over-promoted into learning
-F175 epistemically weak facts can satisfy deterministic readiness
-F176 weak/stale/disputed facts can enter KEY working prompt
-F177 domain outcome learning can alter unrelated recommendation patterns
-F178 source correction/withdrawal can leave active derived knowledge behind
+BusinessCommandCenter snapshot
+→ transient CommandCenterItems
+→ Top Priorities / briefing / recommended actions
+
+persistent CommandItem spine
+→ Command Queue / Due obligations
+→ durable disposition / assignment / priority / due state
 ```
 
-Contradictions: C111–C116, C125–C128.
+### F179 / C129
 
-## Research/frontier result
-
-Artifact:
-`investigations/J16-K4-STANDARDS-FRONTIER-PRESSURE-TEST.md`
-
-Accepted target properties:
+Fail-soft aggregation can convert source failure into empty/zero fallback without exposing degraded completeness:
 
 ```text
-KnowledgeRevision identity
-revision-specific provenance / verification
-business-valid time vs system-known time where material
-consumer-specific EpistemicEligibility from one canonical knowledge state
-OutcomeCertainty before LearningEligibility
-exact-enough derivation/action/effect/outcome/recovery lineage for learning
-influence-aware correction/withdrawal propagation
-verified convergence for material correction
-historical truth retained separately from active truth
-learning never creates authority
+SOURCE UNKNOWN
+!= HEALTHY ZERO
 ```
 
-No dedicated temporal DB, RDF/PROV store or generic ML-unlearning platform is justified from current evidence.
+### F180 / C130
 
-## Backward re-audit
-
-Artifact:
-`investigations/J1-J25-J2-J15-J6-J14-J23-J18-J16-J19-K4-BACKWARD-REAUDIT.md`
-
-Verdict:
+Persistent CommandItem `Approve` and `Execute` currently terminalize the projection as `EXECUTED` without an observed source approval resolution, executionTool invocation, canonical governed effect, Effect/Attempt lineage or OutcomeEvidence.
 
 ```text
-K4 TARGET ROOT INVALIDATED                       = NO
-NEW PARALLEL AUTHORITY SYSTEM                    = NO
-NEW UNIVERSAL KNOWLEDGE GRAPH/RDF STORE          = NO
-NEW UNIVERSAL WORKFLOW/RECOVERY RUNTIME          = NO
-NEW FINDING/CONTRADICTION FROM RE-AUDIT          = NO
-J19 MATERIAL K4 CONSTELLATION MEMBER             = YES
-PRODUCTION IMPLEMENTATION                        = NO
+CommandItem EXECUTED
+!= source resolved
+!= effect executed
+!= outcome proven
 ```
 
-J16/K4 now returns to the whole-system pool instead of moving to implementation.
+The visible web controls call these status-only endpoints directly. Unit tests currently assert the status-only behavior.
 
-## Mature J23/J18 pool
+`HealthScoreService` consumes CommandItem status as risk truth, so false terminalization can affect downstream intelligence.
 
-Still contributes OutcomeCertainty, provider/external truth, Recovery Clearance, consequence completeness and Temporal Work Projection. Proof inventory remains 39 obligations / 16 deterministic fault points; no runtime proof execution is claimed.
+## Positive seams
 
-## Historical taxonomy reconciliation pool
+- canonical KeyActionProposal execution revalidates AutonomyOrchestrator + Genome policy at effect time;
+- CommandItem `SUGGESTION` vs `OBLIGATION` distinction is useful;
+- obligation due/overdue/snooze/discharge semantics are being made load-bearing;
+- obligation writer uses stable upsert identity;
+- deterministic snapshot ranking remains explainable.
 
-F167–F174 / C117–C124 and KF-REC-050 preserve distinct earlier findings on WorkDefinition controls, recurrence, provider idempotency/checkpoints and recovery ownership. These are pooled evidence, not the active frontier.
+## Exact unresolved proof
 
-## Next-frontier candidate
+Candidate F181/C131 is **NOT allocated**.
 
-`J17 — Command Center → Priority → Action`
+Need prove/reject whether one same business condition is load-bearing in both persistent and synthesized priority projections.
 
-Hypothesis:
-
-> J17 is the user-facing operational control surface where K4 knowledge/Genome, K7 temporal work, K8 evidence/outcomes, K3 authority/governance and J18 recovery state are aggregated, ranked and turned into proposed action.
-
-Before activating J17:
+Best trace:
 
 ```text
-inspect repository entry surfaces
-→ map aggregators / priority ranking / projections / action bridges
-→ compare leverage against alternative candidates
-→ if confirmed, open J17 dossier
-→ pool with K3/K4/K7/K8/K11
+Invoice becomes OVERDUE
+→ CommandGenerator scans Invoice.status=OVERDUE into CommandItem
+→ invoice.overdue event emitted
+→ ? runtime bridge ?
+→ TemporalFlowEvent(source=APP,type=invoice.overdue)
+→ BusinessCommandCenter Temporal urgent/risk item
 ```
 
-Do not allocate findings merely because the candidate is selected.
+Repository evidence already proves each side except the runtime materialization bridge marked `?`.
 
-## KF-EXEC-EXTFX-001
+If proven, then trace whether:
+- snooze;
+- dismiss;
+- complete;
+- discharge;
+- source resolution
 
-Still:
+converge both projections or allow resurfacing/contradictory operator state.
+
+Do not allocate F181 until duplicate-checking F120, F141–F144, F179 and F180.
+
+## Next priority pressure
+
+After dual-projection proof, trace how both control surfaces represent:
+
+```text
+urgency
+deadline/lateness
+impact/expected value
+confidence / epistemic eligibility
+authority / actionability
+recovery / consequence state
+freshness / supersession
+user disposition
+```
+
+Target principle:
+
+> Multiple display projections are allowed. Multiple independent execution truths are not.
+
+CommandItem may become/retain a durable operator-attention/work projection for suitable classes, especially obligations, without becoming canonical authority/effect/business truth.
+
+## Pooled prior work
+
+J16/K4 Business Knowledge: pooled through F178/C128 / KF-REC-049.
+J23/J18 temporal/recovery pool: 39 proof obligations / 16 deterministic fault points, no runtime proof executed.
+Historical reconciliation pool: F167–F174 / C117–C124 / KF-REC-050.
+
+## KF-EXEC boundary
+
+`KF-EXEC-EXTFX-001` remains:
 
 ```text
 POOLED IMPLEMENTATION-SHAPE EVIDENCE
@@ -174,4 +183,4 @@ material tranche
 → only then begin next broad tranche
 ```
 
-> If this chat disappears after the next message, the repository is sufficient to resume at J17 frontier verification without analytical loss.
+> If this chat disappears, resume at J17 invoice-overdue dual-projection materialization proof after F180/C130. Do not restart from J16 and do not implement production code.
