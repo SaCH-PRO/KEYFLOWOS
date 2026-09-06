@@ -1,5 +1,5 @@
 project: KEYFLOWOS
-rollover_version: 15
+rollover_version: 16
 last_updated: 2026-09-06
 status: LIVE_CONTINUITY_ARTIFACT
 canonical_branch: docs/keyflow-intelligence-foundation
@@ -20,39 +20,44 @@ canonical_ranges:
   recommendations_through: KF-REC-050
   concepts_through: KF-CONCEPT-042
 programme:
-  phase: whole-system-virtual-model-expansion-j16-k4-with-j19-pressure
+  phase: whole-system-pooling-post-j16-k4-backward-reaudit
   objective: whole_system_target_migration_proof_and_repository_transformation_architecture_before_implementation
-active_frontier:
+latest_pool:
+  name: business_knowledge_genome_evolution_epistemic_integrity
   primary_journey: J16
   kernel: K4
   adjacent_pressure: J19
   recommendation: KF-REC-049
   findings: [F161,F162,F163,F164,F165,F166,F175,F176,F177,F178]
   contradictions: [C111,C112,C113,C114,C115,C116,C125,C126,C127,C128]
-  latest_results:
-    - deterministic_readiness_needs_epistemic_acceptance_predicates_not_row_presence
-    - KEY_prompt_context_needs_explicit_current_inferred_stale_disputed_expired_semantics
-    - causal_learning_cannot_propagate_by_domain_only
-    - fine_grained_knowledge_correction_needs_derivation_lineage_invalidation
-    - whole_business_GDPR_purge_is_strong_positive_database_cascade_and_self_verification_seam
-  target_distinctions:
-    - EpistemicEligibility
-    - OutcomeCertainty
-    - LearningEligibility
-    - KnowledgeRevision
-    - MaterializationState
-    - correction_retention_and_active_truth_are_separate_dimensions
-mature_pool:
-  name: temporal_recovery_external_reality_authority
+  research_pressure_test: complete
+  backward_reaudit: passed_no_new_ids
+  role_now: pooled_input_to_broader_system_model
+  key_target_properties:
+    - revision_specific_provenance_and_verification
+    - valid_business_time_vs_system_known_time_where_material
+    - consumer_specific_EpistemicEligibility
+    - OutcomeCertainty_before_LearningEligibility
+    - exact_enough_causal_and_effect_lineage_for_learning
+    - correction_influence_closure_and_verified_convergence
+    - retained_history_not_active_truth
+    - learning_never_expands_authority
+mature_temporal_recovery_pool:
   proof_obligations: 39
   deterministic_fault_points: 16
   backward_reaudit: passed
-  role_in_j16: outcome_certainty_and_recovery_constraints
-reconciled_parallel_pool:
-  findings: [F167,F168,F169,F170,F171,F172,F173,F174]
-  contradictions: [C117,C118,C119,C120,C121,C122,C123,C124]
-  recommendation: KF-REC-050
-  role: pooled_historical_evidence
+  runtime_proof_executed: false
+next_frontier_candidate:
+  journey: J17
+  name: Command_Center_to_Priority_to_Action
+  status: VERIFY_FROM_REPOSITORY_BEFORE_ACTIVATION
+  hypothesis: user_operational_control_surface_combining_K4_knowledge_K7_temporal_work_K8_evidence_K3_governance_and_J18_recovery_state
+  first_actions:
+    - inspect_entry_surfaces_and_command_center_aggregators
+    - trace_priority_ranking_and_freshness
+    - trace_recommendation_action_bridges
+    - trace_authority_and_clearance_before_mutation
+    - compare_cross_kernel_leverage_against_alternative_frontiers
 execution_probe:
   id: KF-EXEC-EXTFX-001
   classification: POOLED_IMPLEMENTATION_SHAPE_EVIDENCE
@@ -60,9 +65,6 @@ execution_probe:
   authorized: false
   implemented: false
   tested: false
-exact_next_action:
-  title: standards_frontier_pressure_test_then_backward_reaudit
-  instruction: Research current provenance, temporal knowledge, belief revision, data lineage, deletion propagation and adaptive-system safety standards/frontier architectures. Compare H1 floor, H2 frontier and H3 KeyFlow synthesis against KF-REC-049. Then backward-reaudit J1/J25/J2/J15/J6/J14/J23/J18/J19 through K4. Persist before opening another broad journey. Load 04A/04B before any new ID.
 continuity:
   all_threads_ephemeral_views_of_one_repo_programme: true
   rollover_always_active: true
@@ -71,8 +73,7 @@ continuity:
   invariant: fresh_thread_can_resume_exact_working_flow_without_restart
 constraints:
   - production_code_read_only
-  - no_runtime_tests_claimed_for_j16_or_j19
-  - do_not_treat_local_convergence_as_permanent_closure
+  - do_not_promote_local_maturity_to_implementation_authorization
   - do_not_allow_learning_to_expand_authority
   - do_not_create_duplicate_canonical_ids
   - preserve_anti_normalization_method
