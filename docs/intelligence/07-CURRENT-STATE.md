@@ -1,20 +1,18 @@
 # KeyFlowOS Current State
 
-Last updated: 2026-09-05
+Last updated: 2026-09-06
 
 ## Analytical phase
 
-`WHOLE-SYSTEM VIRTUAL MODEL / J16 BUSINESS GENOME EVOLUTION / K4 BUSINESS KNOWLEDGE EPISTEMIC-INTEGRITY POOL`
+`WHOLE-SYSTEM VIRTUAL MODEL / J16-K4 BUSINESS KNOWLEDGE CONVERGENCE / J19 CORRECTION PRESSURE / BACKWARD RE-AUDIT COMPLETE`
 
-Production implementation remains read-only.
+Production implementation remains read-only and unauthorized.
 
 Context integrity: `PASS`.
 
 ## Programme identity
 
-> KeyFlowOS analysis is constructing a repository-grounded virtual architectural / causal model of the entire application, not marching local findings directly into implementation.
-
-Canonical loop:
+> KeyFlowOS analysis is constructing a repository-grounded virtual architectural / causal model of the entire application, repeatedly pooling and backward-re-auditing it before a comprehensive code transformation programme is allowed to become the frontier.
 
 ```text
 MAP → MICROSCOPIC TRACE → JOURNEY → CONSTELLATION → KERNELS
@@ -32,7 +30,7 @@ whole-system target architecture
 + migration architecture
 + proof architecture
 + compatibility/rollout sequencing
-+ exact repository transformation programme
++ exact dependency-ordered repository transformation programme
 ```
 
 ## Implementation evidence baseline
@@ -45,172 +43,177 @@ head class:         audit-only
 
 Revalidate if `main` gains code-bearing changes.
 
+## Taxonomy integrity
+
+Mandatory governors:
+
+- `04A-CANONICAL-TAXONOMY-AND-NAMING-REGISTRY.md`
+- `04B-CANONICAL-ID-ALLOCATION-LEDGER.md`
+
+Law:
+
+```text
+ONE SEMANTIC CONCEPT
+→ ONE CANONICAL ID
+→ ONE CANONICAL NAME
+→ ONE HOME REGISTER
+→ ZERO DUPLICATE CANONICAL MEANINGS
+```
+
+Before any new ID/name:
+
+```text
+LOAD 04A + 04B
+→ SEARCH
+→ REUSE
+→ REFINE
+→ CROSS-REFERENCE
+→ only then allocate if genuinely distinct
+```
+
+A historical parallel-analysis collision band was reconciled without deleting evidence.
+
+## Current canonical ranges
+
+```text
+Findings:        F178
+Contradictions:  C128
+Recommendations: KF-REC-050
+Concepts:        KF-CONCEPT-042
+```
+
 ## Current system thesis
 
-> KeyFlowOS is a governed business-state transition system whose safe autonomy depends not only on authority and effect certainty, but on epistemically trustworthy business knowledge.
+> KeyFlowOS is a governed business-state transition system whose safe autonomy depends on trustworthy business knowledge, current authority, exact effect identity, external outcome certainty, recoverable consequence completion and bounded learning.
 
-Current enlarged causal model:
+Enlarged causal model:
 
 ```text
 External / domain / human reality
-→ observation / evidence
-→ Business Graph / Genome knowledge
-→ inference / recommendation
+→ Observation / Assertion / Evidence
+→ KnowledgeRevision
+→ verification / freshness / conflict / temporal validity
+→ consumer-specific EpistemicEligibility
+→ KEY reasoning / recommendation
 → CapabilityContract / ActionEnvelope
 → current authority + policy
 → ControlRequirement / Clearance
 → WorkOccurrence / Effect / Attempt
 → domain/provider consequence
 → OutcomeEvidence / reconciliation / recovery
-→ business outcome
+→ OutcomeCertainty
 → LearningEligibility
-→ Business Knowledge revision / confidence / recommendation priors
+→ bounded knowledge confidence / recommendation priors
 → future reasoning
 ```
 
-Critical law:
+Hard law:
 
 ```text
 LEARNING MAY ALTER BELIEF / RANKING / CANDIDATE POLICY
-LEARNING MUST NOT SILENTLY ALTER AUTHORITY
+LEARNING MUST NOT CREATE OR EXPAND AUTHORITY
 ```
 
-## Active constellation
+## Active / mature constellation
 
 ```text
-J1 ↔ J25 ↔ J2 ↔ J15 ↔ J6 ↔ J14 ↔ J23 ↔ J18
-                              ↑                  ↓
-                              └──── J16 / K4 ───┘
+J1  Business Birth
+J25 Human Authority Lifecycle
+J2  KEY Request → Governed Action
+J15 Approval / Governance Lifecycle
+J6  Proactive KEY / Autonomy
+J14 External Event Ingress
+J23 Temporal Flow / Long-Running Workflow
+J18 Failure / Recovery
+J16 Business Genome Evolution
+J19 Privacy / Deletion / Exit     ← current adjacent K4 pressure
 ```
 
-J16 closes the feedback loop from outcomes back into future business knowledge and autonomous behavior.
-
-## Active kernel pressure
+Kernel pressure:
 
 ```text
 K2 Human Authority
 K3 KEY Authority / Governance
-K4 Business Knowledge        ← newly activated
+K4 Business Knowledge
 K5 Capability
 K6 State Transition
-K7 Temporal / Workflow
+K7 Temporal / Event / Workflow
 K8 Evidence / Outcome
-K9 External Reality
+K9 Integration / External Reality
 K10 Financial Truth
 K11 Recovery / Reliability
 ```
 
-## Canonical ranges
+## Mature J23/J18 pool
 
-```text
-Findings:        F166
-Contradictions:  C116
-Recommendations: KF-REC-049
-```
-
-## Mature pool — temporal / recovery / external reality / authority
-
-J23/J18 remains substantially converged and contributes:
+Still substantially converged and retained as a major input:
 
 - failure/outcome certainty;
-- stable effect vs attempt identity;
+- stable EffectId vs AttemptId;
 - provider success vs consequence completeness;
 - Recovery Clearance;
 - Temporal Work Projection;
-- provider/external truth reconciliation;
-- financial truth convergence;
+- financial/provider reconciliation semantics;
 - 39 proof obligations;
 - 16 deterministic fault-injection points;
-- passed backward re-audit through J1/J25/J2/J15/J6/J14/J23/J18.
+- passed prior backward re-audit.
 
-No runtime proof has been executed.
+No runtime proof execution is claimed.
 
-`KF-EXEC-EXTFX-001` remains pooled implementation-shape evidence, not the active programme frontier.
+`KF-EXEC-EXTFX-001` remains pooled implementation-shape evidence, not programme frontier.
 
-## Active pool — J16 Business Genome Evolution / K4 Business Knowledge
+## J16 / K4 Business Knowledge pool
 
-Initial microscopic reconstruction found two principal evolution paths:
-
-```text
-Blueprint edit / GenomeEvolutionProposal
-→ BusinessBlueprint
-→ async best-effort Blueprint → GenomeFact backfill
-```
-
-and:
+### Initial roots
 
 ```text
-Temporal / inbox / executive / domain observation
-→ GenomeSignal
-→ review / accept / merge
-→ GenomeFact
+F161 old verification can survive a replacement value/source
+F162 knowledge mutation authority is mainly access/completeness rather than effective authority
+F163 Blueprint and GenomeFact are asymmetric coexisting truths/materializations
+F164 proposal application and approval evidence are non-atomic
+F165 proposal application is not base-revision bound
+F166 process/control events can become learning semantics stronger than evidence
 ```
 
-No reverse GenomeFact → Blueprint materialization was observed in the initial trace.
-
-### F161–F166
+### Consumer / learning / correction roots
 
 ```text
-F161 replacement fact value/source can inherit obsolete USER_VERIFIED state
-F162 material Genome mutation authority is mainly business access/completeness, not effective knowledge-change authority
-F163 BusinessBlueprint and GenomeFact are asymmetric dual truths with non-atomic one-way convergence
-F164 proposal application and approval evidence are not atomic
-F165 proposal application is not bound to base/current Genome revision
-F166 learning memory compresses process/control states into outcome semantics stronger than evidence supports
+F175 weak/stale/disputed/expired facts can satisfy deterministic module readiness
+F176 weak/stale/disputed/expired facts can enter KEY working-knowledge prompt context
+F177 observed/domain outcomes can change confidence for unrelated recommendation patterns
+F178 fine-grained correction/withdrawal lacks lineage-aware convergence of active derivatives
 ```
 
-### C111–C116
+Contradictions are C111–C116 and C125–C128.
 
-These capture the corresponding contradictions:
-
-- verified label vs unverified replacement value;
-- governance language vs access/completeness authorization;
-- Blueprint truth vs GenomeFact truth;
-- applied mutation vs still-unapproved proposal after partial failure;
-- stale proposal vs current Genome revision;
-- process/control success/failure vs actual business outcome.
-
-## K4 Business Knowledge thesis
-
-K4 owns:
-
-> how assertions about the business become durable, provenance-bound, revisable knowledge that KEY may safely use.
-
-Core distinctions:
-
-```text
-OBSERVATION != ASSERTION != INFERENCE != ACCEPTANCE != VERIFICATION
-VERIFICATION != CANONICAL KNOWLEDGE
-CANONICAL KNOWLEDGE != PROJECTION
-PROCESS DECISION != BUSINESS OUTCOME != CAUSAL LEARNING
-```
-
-Initial K4 invariants include:
-
-```text
-verification belongs to exact revision/value
-material value change does not inherit old verification automatically
-conflict beats silent last-write-wins where ordering is unsafe
-one authoritative revision owner per concept
-materializations expose freshness/completeness and are repairable
-current authority governs material knowledge mutation
-learning cannot grant authority
-outcome certainty gates learning
-revision-safe proposal application
-knowledge mutation + governance evidence are crash-consistent
-```
-
-## KF-REC-049
+### KF-REC-049
 
 `Establish a provenance- and revision-aware Business Knowledge Contract for Genome evolution and learning.`
 
-Target semantic roles include, without mandating universal new tables:
+Current accepted target properties:
+
+```text
+KnowledgeSubject != KnowledgeRevision
+verification belongs to exact revision
+old verification does not transfer to material replacement
+business-valid time != system-known time where material
+one authoritative knowledge owner per concept + explicit materializations
+consumer-specific EpistemicEligibility derives from one canonical knowledge/evidence state
+OutcomeCertainty precedes LearningEligibility
+LearningEligibility requires exact-enough recommendation/action/effect/outcome/recovery lineage
+correction/withdrawal computes derivation influence closure
+active derivatives are invalidated/recomputed/retracted
+required historical/audit evidence may remain without remaining active truth
+learning never expands authority
+```
+
+Reserved vocabulary remains unallocated as independent concepts until stable:
 
 ```text
 KnowledgeSubject
 KnowledgeRevision
-KnowledgeAssertion / KnowledgeInference
-KnowledgeEvidence
+KnowledgeAssertion
+KnowledgeInference
 KnowledgeChangeIntent
 KnowledgeVerification
 KnowledgeConflict
@@ -218,69 +221,148 @@ MaterializationState
 LearningEligibility
 ```
 
-Important target synthesis:
+## Standards / frontier pressure test
+
+Artifact:
+`investigations/J16-K4-STANDARDS-FRONTIER-PRESSURE-TEST.md`
+
+Research properties adopted:
+
+- W3C PROV: revision as new entity, derivation, attribution, invalidation, provenance chains;
+- OpenLineage: exact-enough typed/namespaced derivation, including field-level lineage where valuable;
+- ISO/IEC 42001 / NIST AI RMF: lifecycle governance, traceability, monitoring and continual evaluation;
+- current bitemporal systems/research: valid/application time distinct from transaction/system time;
+- machine-unlearning research: deleting a source is not equivalent to removing its downstream influence; verification matters.
+
+KeyFlow-specific synthesis retained inside K4/KF-REC-049 rather than minted as a new system:
 
 ```text
-Effect / Provider / Recovery / Consequence truth
-→ K8/K9/K11 certainty
-→ LearningEligibility
-→ only then adjust knowledge confidence / recommendation priors
+Governed epistemic loop
+Epistemic time travel for governed actions
+Verified Influence Closure for material correction/erasure
+Adaptive confidence budget
+Contradiction-preserving reasoning
 ```
 
-## Positive seams to preserve
+Not justified:
 
-- explicit GenomeFact verification vocabulary;
-- first-class GenomeEvidence;
-- signal review lifecycle;
-- GenomeEvolutionProposal human-review seam;
-- fact freshness and risk-if-wrong concepts;
-- readiness separate from completeness;
-- source event/entity lineage;
-- durable GenomeMemoryEvent;
-- conservative AutonomyOrchestrator composition;
-- BusinessBlueprint compatibility/product surface during migration.
+- dedicated temporal/knowledge-graph database solely for K4;
+- universal RDF/PROV store;
+- generic ML-unlearning platform now;
+- heavyweight approval for all facts;
+- embeddings/vector memory as canonical truth.
 
-## Exact next work
+## J19 correction/privacy pressure
 
-Remain on J16/K4 for the next pressure pass:
+A first microscopic J19 dossier now exists:
+`journeys/KF-JOURNEY-019-PRIVACY-DELETION-EXIT.md`
 
-1. map GenomeFact consumers and all prompt/context injection;
-2. map material Blueprint readers that bypass facts;
-3. map GenomeMemoryEvent consumers and determine what learning actually changes behavior;
-4. trace domain snapshot → recommendation → action → execution → outcome-learning;
-5. map constitution/value versioning relative to ordinary Genome facts;
-6. incorporate J19 correction/deletion/privacy/retention lineage;
-7. research standards/OSS/frontier work on provenance, temporal knowledge, belief revision, contradiction handling and policy-safe adaptive systems;
-8. refine KF-REC-049;
-9. backward-re-audit J1/J25/J2/J15/J6/J14/J23/J18 through K4;
-10. persist and refresh continuity before opening another broad journey.
+Strong positive seam:
 
-## Still unresolved system-wide
+`GdprPurgeService` uses database cascade plus post-delete verification across all `business_id` tables before claiming tenant erasure success.
 
-- exact Business Graph / Blueprint / GenomeFact concept ownership;
-- canonical KnowledgeRevision persistence/migration shape;
-- effective authority for material knowledge verification/mutation;
-- prompt/retrieval handling of stale/disputed/misverified facts;
-- causal learning eligibility;
-- correction/deletion propagation into derived memories/embeddings/snapshots;
-- ControlEvidence / Clearance / ExecutionClaim persistence;
-- Effective Authority Resolver migration;
-- capability vocabulary convergence;
-- canonical EventEnvelope / consequence ownership;
-- durable IngressOccurrence lifecycle;
-- recovery-effect / recovery-evidence persistence shape;
-- broader financial/provider reconciliation;
-- remaining journey/kernel/constellation convergence;
-- K12 engineering-control-plane convergence;
-- eventual execution compiler / KF-EXEC generation after programme convergence.
+Current K4/J19 concern is narrower:
+
+```text
+current fact corrected/withdrawn
+!=
+all derived recommendations, memories, readiness, prompt context and learning have converged
+```
+
+Target property:
+
+```text
+correction / withdrawal / erasure
+→ classify retention obligation
+→ resolve new revision / invalidate source evidence
+→ compute influence closure
+→ invalidate/recompute/retract active descendants
+→ preserve required historical evidence separately
+→ verify active convergence
+```
+
+## K4 backward re-audit
+
+Artifact:
+`investigations/J1-J25-J2-J15-J6-J14-J23-J18-J16-J19-K4-BACKWARD-REAUDIT.md`
+
+Verdict:
+
+```text
+K4 TARGET ROOT INVALIDATED                       = NO
+NEW PARALLEL AUTHORITY SYSTEM                    = NO
+NEW UNIVERSAL KNOWLEDGE GRAPH/RDF STORE          = NO
+NEW UNIVERSAL WORKFLOW/RECOVERY RUNTIME          = NO
+NEW ML UNLEARNING PLATFORM                       = NO
+NEW FINDING/CONTRADICTION FROM RE-AUDIT          = NO
+J19 ADMITTED AS MATERIAL K4 CONSTELLATION MEMBER = YES
+PRODUCTION IMPLEMENTATION                        = NO
+```
+
+K4 strengthens rather than replaces mature journey semantics.
+
+## Reconciled historical parallel pool
+
+Canonical remapped roots F167–F174 / C117–C124 preserve distinct earlier work on:
+
+- load-bearing workflow controls;
+- runtime/config delay divergence;
+- recurrence phase/misfire semantics;
+- distributed recurring-financial claims;
+- provider idempotency;
+- multi-stage provider checkpoints;
+- scheduled recovery ownership;
+- compensation ownership.
+
+`KF-REC-050` owns load-bearing versioned WorkDefinition controls.
+
+This pool is not the active frontier.
+
+## Proof implications for K4
+
+Do not allocate proof IDs until the dedicated proof tranche. Minimum future obligations now include:
+
+```text
+material value replacement cannot inherit old verification
+stale proposal cannot silently overwrite newer revision
+weak/disputed/expired fact cannot satisfy high-impact readiness
+uncertain prompt fact is explicitly represented as uncertain
+knowledge representations obey declared ownership/materialization contracts
+knowledge mutation + decision evidence are crash-consistent
+retroactive correction preserves valid/system temporal semantics where enabled
+process/control event cannot become business-success learning
+OUTCOME_UNKNOWN cannot produce causal positive/negative learning
+one outcome cannot update unrelated recommendation patterns by domain alone
+correction converges active descendants
+retained history cannot remain active truth
+material correction completion is verifiable
+learning confidence cannot expand authority
+whole-business erasure continues to verify tenant rows are gone
+```
+
+## Immediate programme frontier
+
+The J16/K4 tranche is now sufficiently mature to return to the broader pool rather than being turned into an implementation packet.
+
+Next broad pressure point should be selected using:
+
+- cross-journey leverage;
+- user/product centrality;
+- duplicated/ambiguous truth ownership;
+- ability to stress K3/K4/K7/K8/K11 simultaneously;
+- likelihood of changing whole-system migration/proof sequencing.
+
+High-value candidate now is **J17 — Command Center → Priority → Action**, because it is where Genome/recommendations, temporal work, memory, risk/readiness and governed actions converge into the user's operational control surface. Selection should be verified against repository evidence before it is made the active frontier.
 
 ## Do not yet
 
 - modify production code;
-- treat Blueprint or GenomeFact as globally canonical without concept-by-concept ownership analysis;
-- transfer verification across material value changes;
-- equate Genome completeness with mutation authority;
-- let process/control outcomes train causal business conclusions directly;
+- promote K4 semantic maturity into execution authorization;
+- treat Blueprint, GenomeFact, Constitution, memory or projections as globally canonical without explicit concept ownership;
+- let weak knowledge satisfy high-impact deterministic controls;
+- let uncertain prompt context masquerade as current truth;
+- infer causality from domain correlation;
+- claim correction complete before active derivatives converge or are explicitly stale/incomplete;
 - let learning expand authority;
-- create a generic knowledge database/graph/vector runtime merely because K4 is now active;
-- claim runtime/tests passed unless executed.
+- create duplicate IDs or concepts;
+- claim runtime tests/proofs passed unless executed.
