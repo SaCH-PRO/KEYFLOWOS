@@ -11,14 +11,14 @@ Production implementation authorized: **NO**
 
 ```text
 Continue KEYFLOWOS from canonical repository intelligence. Do not restart from scratch.
-Load AGENTS.md, AGENT-CONTINUITY.md, 00-START-HERE.md,
-04-CONCEPT-REGISTRY.md, 04A-CANONICAL-TAXONOMY-AND-NAMING-REGISTRY.md,
-04B-CANONICAL-ID-ALLOCATION-LEDGER.md, 07-CURRENT-STATE.md,
-CURRENT-HANDOFF.md, CURRENT-STATE.yaml and both ROLLOVER files.
+Load 04-CONCEPT-REGISTRY.md, 04A-CANONICAL-TAXONOMY-AND-NAMING-REGISTRY.md,
+04B-CANONICAL-ID-ALLOCATION-LEDGER.md, CURRENT-HANDOFF.md,
+CURRENT-STATE.yaml and both ROLLOVER files.
 Run Context Integrity Check first.
 Production code remains read-only.
-J7 — Financial Truth is active through F189/C139/KF-REC-052.
-Resume at payment consequence completeness → CreditNote reversal → reconciliation locks → currentBalance/FX valuation.
+J7 Financial Truth is pooled through F196/C146/KF-REC-052 with 32 proof obligations and 16 deterministic fault points.
+Active frontier is the J3/J4 commercial-to-cash constellation.
+Resume at J3 Lead→Customer→Cash microscopic reconstruction, with J4 Booking→Service→Payment as the paired secondary journey.
 ```
 
 ## Context integrity
@@ -26,7 +26,8 @@ Resume at payment consequence completeness → CreditNote reversal → reconcili
 ```text
 Repository:             SaCH-PRO/KEYFLOWOS
 Implementation branch:  main
-Current main head:       9bff44f8f9a5195e06af3669ccb1a8f4c47ccd76
+Current main head:       4e9f60c65bdb78fbdadcb08731c5dab95b3645c7
+Previous main head:      9bff44f8f9a5195e06af3669ccb1a8f4c47ccd76
 Code-bearing baseline:  d7c5b86cfa276d75ffa42d5f1707c43704dc9f21
 Main delta class:        audit / architecture-journal only
 Intelligence branch:     docs/keyflow-intelligence-foundation
@@ -37,8 +38,8 @@ Implementation:          UNAUTHORIZED / READ-ONLY
 ## Canonical taxonomy
 
 ```text
-Findings:        F189
-Contradictions:  C139
+Findings:        F196
+Contradictions:  C146
 Recommendations: KF-REC-052
 Concepts:        KF-CONCEPT-042
 ```
@@ -47,85 +48,84 @@ Before new IDs:
 
 ```text
 LOAD 04A + 04B
-→ SEARCH
+→ SEARCH exact term + synonyms + implementation names + target names
 → REUSE / REFINE / CROSS-REFERENCE
-→ only then allocate if genuinely new
+→ allocate only if genuinely distinct
 ```
 
-## Pooled fronts
+## Mature / pooled fronts
 
 - J16/K4 Business Knowledge: through F178/C128 / KF-REC-049.
-- J17 Operator Attention: through F184/C134 / KF-REC-051 / 20 local proof obligations.
+- J17 Operator Attention: through F184/C134 / KF-REC-051 / 20 proof obligations.
 - J23/J18 temporal/recovery: 39 proof obligations / 16 deterministic fault points; runtime proof not executed.
+- J7 Financial Truth: F185–F196 / C135–C146 / KF-REC-052 / 32 proof obligations / 16 deterministic fault points; runtime proof not executed.
 
-## Active J7 frontier
+## J7 retained architecture
 
-Dossier: `docs/intelligence/journeys/KF-JOURNEY-007-FINANCIAL-TRUTH.md`
-Recommendation: `KF-REC-052 — Financial Truth & Valuation Contract`
+Key artifacts:
 
-Canonical J7 roots:
+- `docs/intelligence/investigations/J7-FINANCIAL-TRUTH-STANDARDS-FRONTIER-PRESSURE-TEST.md`
+- `docs/intelligence/investigations/J3-J4-J17-J18-J23-J7-FINANCIAL-TRUTH-BACKWARD-REAUDIT.md`
+- `docs/intelligence/investigations/J7-FINANCIAL-TRUTH-PROOF-ARCHITECTURE.md`
+
+Retained laws:
 
 ```text
-F185 / C135 — currentBalance competes with ledger-derived live cash
-F186 / C136 — currency-tagged ledger entries aggregate without valuation/FX
-F187 / C137 — PayrollRun PAID without proven disbursement/accounting consequence
-F188 / C138 — direct PayPal capture can yield SUCCESSFUL Payment + PAID Invoice without payment ledger leg, then dedupe blocks webhook repair
-F189 / C139 — CreditNote reversal looks up INVOICE while canonical posting uses Invoice
+operational financial state
+!= external money reality
+!= KeyFlow money-movement record
+!= accounting truth
+!= reconciliation truth
+!= valuation truth
+
+receipt idempotency != consequence completion
+effect dedupe != missing-descendant repair completion
+gross receipts != refunds != net receipts != outstanding balance != accounting revenue
+closed historical evidence != inability to represent later current-period correction
+correction accepted != descendant convergence complete
+one Invoice lifecycle → one canonical state owner/algebra
 ```
 
-Reused root:
+Candidate terms remain inside KF-REC-052 rather than new concepts:
 
 ```text
-F155 — direct provider refund may create REFUNDED Payment while ledger/invoice consequences remain incomplete; do not duplicate
+FinancialConsequenceVector
+ValuationEvidence
+CanonicalInvoiceBalance
+CanonicalCashPosition
 ```
 
-Financial truth layers:
+## Active frontier — J3 + J4
 
 ```text
-commercial / operational document state
-→ external money reality
-→ KeyFlow money-movement record
-→ accounting truth
-→ reconciliation truth
-→ valuation truth
-→ derived operator/reporting projection
+J3 — Lead → Customer → Cash
+J4 — Booking → Service → Payment
 ```
 
-Core laws:
+Stage:
 
 ```text
-Payment / Invoice terminal status != mandatory financial consequences complete
-occurrence / Payment dedupe != descendant consequence completeness
-financial source identity must be canonical, typed and stable
-strong PAID / REFUNDED / SETTLED claims require declared evidence contracts
-heterogeneous currencies are not directly additive without valuation
+COMMERCIAL_TO_CASH_MICROSCOPIC_RECONSTRUCTION
 ```
 
-## Strong positive seams
+Inherited pressure:
 
-- one `PostingService` ledger door;
-- Decimal balanced postings;
-- deterministic business-scoped posting idempotency;
-- transactional Payment+posting where canonical wrapper is used;
-- transactional refund Payment+reversal where canonical helper is used;
-- history-preserving reversal;
-- reconciliation locks;
-- Invoice state recomputed from all Payment rows;
-- PAID+COGS transactional coupling;
-- ledger-native reporting;
-- AR invoice-vs-ledger drift visibility.
+- KF-REC-052 financial truth/completion;
+- KF-REC-048 recovery certainty;
+- KF-REC-051 attention basis/completeness;
+- KF-REC-047 temporal work projection.
 
-## Exact next work
+Exact next work:
 
 ```text
-1. verify Stripe/WiPay/manual successful-payment paths against createPaymentWithPosting;
-2. trace CreditNote apply/void posting and bookkeeping;
-3. characterize reconciliation-lock interaction with refund/reversal and any reopen/unlock mechanism;
-4. map all FinancialAccount.currentBalance consumers to ledger/materialized-projection target;
-5. trace ExchangeRate, provider currency behavior and report valuation intent;
-6. pressure-test KF-REC-052 against current accounting/payment/reconciliation standards and frontier architecture;
-7. backward re-audit J3/J4/J17/J18/J23 + K8/K9/K10/K11/K3;
-8. reuse mature roots before allocating anything new.
+1. reconstruct J3 from lead/contact → quote/proposal → invoice → payment → accounting/reconciliation/valuation → customer/cash projections;
+2. reconstruct J4 from booking → service delivery → amount owed/invoice → payment → refund/correction;
+3. locate exact business-complete vs financially-complete boundaries;
+4. trace how refund, credit note, void, chargeback and payment failure reopen or fail to reopen commercial/service state;
+5. trace customer value, revenue, paid-progress and cash projections for reuse of canonical J7 reads;
+6. trace which transitions require current K3 authority vs deterministic bookkeeping;
+7. reuse F185–F196/F155/F158 whenever semantics overlap; only create new IDs for distinct commercial/service lifecycle roots;
+8. persist before moving to another broad tranche.
 ```
 
 ## KF-EXEC boundary
@@ -139,4 +139,4 @@ IMPLEMENTED = NO
 TESTED = NO
 ```
 
-> If this chat disappears, resume at J7 after F189/C139. Do not implement production code.
+> If this chat disappears, resume at **J3/J4 commercial-to-cash reconstruction after J7 pooled through F196/C146**. Do not implement production code.
