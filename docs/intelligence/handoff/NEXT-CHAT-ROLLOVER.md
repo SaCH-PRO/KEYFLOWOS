@@ -13,9 +13,10 @@ Load 04-CONCEPT-REGISTRY.md, 04A, 04B, 07-CURRENT-STATE.md,
 CURRENT-HANDOFF.md, CURRENT-STATE.yaml and both ROLLOVER files.
 Run Context Integrity Check first. Production code remains read-only.
 J11 is provisionally converged through F218/C168/KF-REC-055.
-J12 is ACTIVE through F221/C171 at the pre-pooling convergence gate.
-Next free IDs: F222 / C172 / KF-REC-056 — UNALLOCATED.
-Exact frontier: trace downstream descendants after source correction/supersession/destruction; compare against F178/C128; then decide whether F219-F221 are sufficient for a bounded J12 target and standards pressure test before KF-REC-056.
+J12 is provisionally converged through F221/C171/KF-REC-056.
+Do NOT resume J12 pressure testing or F219-F221 discovery.
+Next free IDs: F222 / C172 / KF-REC-057 — UNALLOCATED.
+Exact frontier: select the next genuinely under-covered/high-leverage journey from the 25-journey programme, verify reachable native implementation footprint, activate it, and begin microscopic tracing from native write/effect paths.
 ```
 
 ## Baseline / ranges
@@ -26,59 +27,45 @@ main:              8f173bfe79f1418159cf4099ea18b0d60d203ec2
 intelligence:      docs/keyflow-intelligence-foundation
 Findings:          F221
 Contradictions:    C171
-Recommendations:  KF-REC-055
+Recommendations:  KF-REC-056
 Concepts:          KF-CONCEPT-042
-next free:         F222 / C172 / KF-REC-056
+next free:         F222 / C172 / KF-REC-057
 runtime proof:     NOT EXECUTED
 ```
 
-## J12 canonical roots
+## J12 durable result
 
 ```text
-F219/C169 — document assertion → successful payment evidence without explicit consumer-specific admission
-F220/C170 — new external document revision suppressed as prior ingestion occurrence by object-id-only dedupe
-F221/C171 — DocumentInstance hard delete destroys/detaches version-review proof without disposition decision
-```
-
-Homes:
-
-```text
-F219/C169 → 08AV / 09AV
-F220/C170 → 08AW / 09AW
-F221/C171 → 08AX / 09AX
+F219/C169 — evidence admission
+F220/C170 — source-revision / ingestion-occurrence identity
+F221/C171 — destructive document disposition
+KF-REC-056 — Document Evidence & Revision Integrity Contract
 ```
 
 Dossier:
 `docs/intelligence/journeys/KF-JOURNEY-012-DOCUMENT-EVIDENCE-LIFECYCLE.md`
 
-Consumer trace:
-`docs/intelligence/investigations/J12-DOCUMENT-INTELLIGENCE-CONSUMER-REVISION-LINEAGE-TRACE.md`
+Pressure test:
+`docs/intelligence/investigations/J12-DOCUMENT-EVIDENCE-LIFECYCLE-STANDARDS-FRONTIER-PRESSURE-TEST.md`
 
-## Reuse checkpoint
+Backward re-audit:
+`docs/intelligence/investigations/J12-J16-J14-J18-J7-J11-J19-J17-DOCUMENT-EVIDENCE-INTEGRITY-BACKWARD-REAUDIT.md`
 
-```text
-manual DocumentSection edit approved through stale version → F161 / KF-REC-049
-Device reviewed-state reprocessing → F161 / KF-REC-049
-AI tweak mutation before version evidence → F164 / KF-REC-049
-Drive import replacement without version → F161 + F164 pressure
-contract extraction → F216/C166 + KF-REC-055
-payment evidence replay → KF-REC-048
-Expense extraction → explicit editable human submit; provenance pressure only
-Direct AI document processing → extraction-only boundary
-Drive R2 suppressed as duplicate R1 → F220/C170
-DocumentInstance destructive delete → F221/C171 + J19 pressure
-```
+Recommendation:
+`docs/intelligence/10O-RECOMMENDATION-REGISTER-DOCUMENT-EVIDENCE-REVISION-INTEGRITY-CONTINUATION.md`
+
+Backward re-audit found no parallel provenance, ingress, recovery, financial, contract, operator-attention, privacy or document runtime; no new F222/C172; universal EDMS not required.
 
 ## Exact next work
 
 ```text
-1. trace dependent domain/ingestion/AI state after evidence revision correction, supersession or destruction;
-2. compare stale descendants against F178/C128 before F222/C172;
-3. update the J12 consumer investigation;
-4. pool F219-F221 with reused F161/F164/F178/KF-REC-035/048/049/052;
-5. if stable, run standards/frontier pressure test;
-6. allocate KF-REC-056 only if a bounded irreducible J12 contract remains;
+1. load 03-ANALYSIS-MAP + journey dossier inventory;
+2. identify genuinely unpooled / under-covered journeys after J12;
+3. compare reachable implementation footprint and cross-kernel leverage;
+4. activate the highest-leverage next frontier;
+5. begin microscopic tracing at native write/effect paths;
+6. reuse F001-F221 / C001-C171 / KF-REC-001-056 before new allocation;
 7. keep production untouched and do not claim runtime proof.
 ```
 
-If continuity is lost, resume from **J12 F221/C171 pre-pooling convergence gate**.
+If continuity is lost, resume from **next-frontier selection after J12 convergence**.
