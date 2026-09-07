@@ -1,5 +1,5 @@
 project: KEYFLOWOS
-rollover_version: 28
+rollover_version: 29
 last_updated: 2026-09-06
 status: LIVE_CONTINUITY_ARTIFACT
 canonical_branch: docs/keyflow-intelligence-foundation
@@ -11,74 +11,46 @@ implementation_evidence:
   current_head: 4e9f60c65bdb78fbdadcb08731c5dab95b3645c7
   code_bearing_baseline: d7c5b86cfa276d75ffa42d5f1707c43704dc9f21
   delta_class: audit_architecture_journal_only
-
-taxonomy:
-  governor: docs/intelligence/04A-CANONICAL-TAXONOMY-AND-NAMING-REGISTRY.md
-  allocator: docs/intelligence/04B-CANONICAL-ID-ALLOCATION-LEDGER.md
-  mandatory_rule: LOAD_04_CONCEPT_04A_04B_SEARCH_REUSE_REFINE_CROSS_REFERENCE_BEFORE_NEW_ID
 canonical_ranges:
-  findings_through: F209
-  contradictions_through: C159
+  findings_through: F213
+  contradictions_through: C163
   recommendations_through: KF-REC-053
   concepts_through: KF-CONCEPT-042
-
-programme:
-  phase: whole_system_virtual_model_expansion_j10_commerce_fulfilment
-  objective: whole_system_target_migration_proof_and_repository_transformation_architecture_before_implementation
-
-mature_pools:
-  J16_K4: { recommendation: KF-REC-049 }
-  J17: { recommendation: KF-REC-051, findings: F179-F184, contradictions: C129-C134 }
-  J23_J18: { proof_obligations: 39, deterministic_fault_points: 16, runtime_proof_executed: false }
-  J7: { recommendation: KF-REC-052, findings: F185-F196, contradictions: C135-C146, runtime_proof_executed: false }
-  J3_J4:
-    recommendation: KF-REC-053
-    findings: F197-F205
-    contradictions: C147-C155
-    status: PROVISIONALLY_CONVERGED_TARGET_ALIGNED_INGRAINED
-    runtime_proof_executed: false
 
 active_frontier:
   primary_journey: J10
   constellation: [J10,J3,J7,J14,J17,J18,J23]
   dossier: docs/intelligence/journeys/KF-JOURNEY-010-COMMERCE-FULFILMENT.md
-  stage: FULFILMENT_RECOVERY_AND_EXTERNAL_IDENTITY_MICROSCOPIC_TRACE
-  findings: [F206,F207,F208,F209]
-  contradictions: [C156,C157,C158,C159]
+  stage: RECOMMENDATION_OWNERSHIP_CHECK_AND_STRATEGY_DESCENDANT_IDEMPOTENCY
+  findings: [F206,F207,F208,F209,F210,F211,F212,F213]
+  contradictions: [C156,C157,C158,C159,C160,C161,C162,C163]
   primary_kernels: [K6,K7,K8,K9,K10,K11,K4]
 
-j10_findings:
-  F206:
-    meaning: duplicate_paid_invoice_descendant_ownership_for_one_storefront_order
-    target_owner: KF-REC-053
-    financial_delegation: KF-REC-052
-  F207:
-    meaning: operational_CONFIRMED_emits_store_order_paid_while_payment_state_can_remain_unpaid
-    target_owner: [KF-REC-052,KF-REC-053]
-  F208:
-    meaning: paid_checkout_decrements_tracked_stock_then_post_payment_fulfilment_reserves_same_units_again
-    target_pressure: one_inventory_allocation_lineage_state_machine
-  F209:
-    meaning: aggregate_fulfillment_routed_emitted_even_when_required_item_route_is_FAILED
-    target_owner: [K8,K11,K7]
+j10_roots:
+  F206: duplicate_paid_invoice_descendant_ownership
+  F207: order_confirmation_paid_semantic_conflation
+  F208: inventory_allocation_consumption_correction_effect_ownership_conflict
+  F209: aggregate_fulfilment_outcome_false_success_and_failure_evidence_mismatch
+  F210: Shopify_Product_external_identity_repeat_sync_failure
+  F211: partial_route_set_blocks_required_descendant_recovery
+  F212: Shopify_Contact_identity_multi_writer_disagreement
+  F213: Shopify_order_operational_materialization_missing_native_OrderItems
 
-positive_seam_to_preserve:
-  - completeCheckout_transaction_couples_invoice_workflow_payment_ledger_tracked_inventory_attribution_and_paid_order_state
-  - invoice_events_buffered_until_after_transaction_commit
-
-refund_classification:
-  store_order_surface_missing_local_convergence: [provider_refund,negative_Payment,invoice_reconciliation,ledger_reversal,inventory_restore]
-  stronger_existing_primitive: PaymentsService_createRefundWithPosting
-  classification: REUSE_J7_KF_REC_052_UNLESS_DISTINCT_ROOT_PROVEN
-
-shopify_pressure:
-  products: synthetic_shopify_variant_identity_lookup_vs_real_provider_SKU_persistence_repeat_sync_under_investigation
-  orders: external_financial_status_maps_to_order_paymentStatus_but_is_not_local_financial_truth
-  customers: CUSTOMER_LEAD_direct_writes_reuse_F205_C155
+recommendation_ownership_check:
+  status: ACTIVE
+  no_new_recommendation_yet: true
+  do_not_allocate: KF-REC-054
+  partitions:
+    commercial_obligation_effect_identity: KF-REC-053
+    financial_truth: KF-REC-052
+    recovery_completeness: KF-REC-048
+    operator_attention: KF-REC-051
+    external_identity_materialization: K9_EARLIER_RECOMMENDATION_CORPUS_UNDER_REVIEW
+    inventory_allocation_effect_lineage: J10_OWNER_NOT_FROZEN
 
 exact_next_action:
-  title: continue_fulfilment_recovery_then_shopify_identity
-  instruction: Trace all FulfillmentRoutingService strategies, retry/idempotency, required-route completeness, and consumers of fulfillment_routed/routing_failed. Determine whether failed required routing becomes durable recoverable/projectable/operator work. Then inspect Product schema SKU constraints and CatalogService create/update behavior to prove Shopify product repeat-sync identity when a real provider SKU exists. Continue external order/customer identity and correction semantics. Reuse F001-F209 C001-C159 KF-REC-001-053 before new IDs. Do not modify production code.
+  title: search_existing_integration_contract_then_trace_strategy_descendants
+  instruction: Search existing recommendation registers for external identity provider reconciliation integration/external reality and operational materialization ownership. Classify F210 F212 F213 before considering KF-REC-054. Then inspect DROPSHIP PREORDER HYBRID MANUAL SERVICE route descendants for semantic idempotency and partial-failure recovery. Trace F207 F209 propagation into CRM calendar webhooks KEY temporal/operator consumers. Continue inventory correction under F208 unless a distinct root is proven. Reuse F001-F213 C001-C163 KF-REC-001-053 before new identities. Do not modify production code.
 
 constraints:
   - production_code_read_only
@@ -86,6 +58,8 @@ constraints:
   - order_fulfilment_state_not_equal_payment_truth
   - one_order_item_inventory_effect_must_compose_exactly_once
   - route_process_return_not_equal_required_outcome_success
-  - provider_state_not_equal_local_financial_convergence
-  - do_not_duplicate_mature_J7_J18_J23_J3_J4_roots
+  - partial_child_set_not_equal_complete_required_descendant_set
+  - merchant_SKU_and_mutable_email_not_equal_provider_external_identity
+  - provider_metadata_line_items_not_equal_native_operational_OrderItems
+  - do_not_duplicate_mature_recommendations
   - continuously_refresh_cross_thread_continuity
