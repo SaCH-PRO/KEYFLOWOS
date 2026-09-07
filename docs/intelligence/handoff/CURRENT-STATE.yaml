@@ -1,12 +1,13 @@
 project: KEYFLOWOS
-analysis_version: 32
+analysis_version: 33
 last_updated: 2026-09-06
 phase: whole-system-virtual-model-expansion-j7-financial-truth
-status: CONTINUE_J7_FINANCIAL_PROJECTION_VALUATION_AND_STATUS_CONVERGENCE
+status: CONTINUE_J7_BACKWARD_REAUDIT_AND_PROOF_ARCHITECTURE
 canonical_branch: docs/keyflow-intelligence-foundation
 implementation_evidence:
   branch: main
-  current_head: 9bff44f8f9a5195e06af3669ccb1a8f4c47ccd76
+  current_head: 4e9f60c65bdb78fbdadcb08731c5dab95b3645c7
+  previous_head: 9bff44f8f9a5195e06af3669ccb1a8f4c47ccd76
   code_bearing_baseline: d7c5b86cfa276d75ffa42d5f1707c43704dc9f21
   current_head_change_class: audit_architecture_journal_only
 context_integrity: PASS
@@ -15,9 +16,10 @@ taxonomy_integrity:
   governor: docs/intelligence/04A-CANONICAL-TAXONOMY-AND-NAMING-REGISTRY.md
   allocator: docs/intelligence/04B-CANONICAL-ID-ALLOCATION-LEDGER.md
   create_rule: LOAD_04A_04B_SEARCH_REUSE_REFINE_CROSS_REFERENCE_BEFORE_NEW_ID
+  allocator_authoritative_if_04A_range_lags: true
 canonical_ranges:
-  findings_through: F193
-  contradictions_through: C143
+  findings_through: F196
+  contradictions_through: C146
   recommendations_through: KF-REC-052
   concepts_through: KF-CONCEPT-042
 active_mesh:
@@ -26,24 +28,29 @@ active_mesh:
 active_frontier:
   journey: J7
   name: Financial_Truth
-  stage: FINANCIAL_PROJECTION_VALUATION_AND_STATUS_CONVERGENCE
+  stage: BACKWARD_REAUDIT_AND_PROOF_ARCHITECTURE
   dossier: docs/intelligence/journeys/KF-JOURNEY-007-FINANCIAL-TRUTH.md
   recommendation: KF-REC-052
+  standards_frontier_pressure_test: docs/intelligence/investigations/J7-FINANCIAL-TRUTH-STANDARDS-FRONTIER-PRESSURE-TEST.md
   primary_kernels: [K10,K8,K9,K6,K11,K3]
-  findings: [F185,F186,F187,F188,F189,F190,F191,F192,F193]
-  contradictions: [C135,C136,C137,C138,C139,C140,C141,C142,C143]
+  findings: [F185,F186,F187,F188,F189,F190,F191,F192,F193,F194,F195,F196]
+  contradictions: [C135,C136,C137,C138,C139,C140,C141,C142,C143,C144,C145,C146]
   finding_supplements:
     - docs/intelligence/08Y-FINDING-REGISTER-FINANCIAL-TRUTH-SUPPLEMENT.md
     - docs/intelligence/08Z-FINDING-REGISTER-FINANCIAL-CONSEQUENCE-COMPLETENESS-SUPPLEMENT.md
     - docs/intelligence/08AA-FINDING-REGISTER-FINANCIAL-CONSUMPTION-AND-CLOSED-PERIOD-SUPPLEMENT.md
     - docs/intelligence/08AB-FINDING-REGISTER-ACCOUNTING-PERIOD-ENFORCEMENT-SUPPLEMENT.md
     - docs/intelligence/08AC-FINDING-REGISTER-LEDGER-WRITER-INTEGRITY-SUPPLEMENT.md
+    - docs/intelligence/08AD-FINDING-REGISTER-PAYMENT-PROJECTION-SEMANTICS-SUPPLEMENT.md
+    - docs/intelligence/08AE-FINDING-REGISTER-CREDIT-NOTE-REVERSAL-AND-INVOICE-STATE-SUPPLEMENT.md
   contradiction_supplements:
     - docs/intelligence/09Y-CONTRADICTION-REGISTER-FINANCIAL-TRUTH-SUPPLEMENT.md
     - docs/intelligence/09Z-CONTRADICTION-REGISTER-FINANCIAL-CONSEQUENCE-COMPLETENESS-SUPPLEMENT.md
     - docs/intelligence/09AA-CONTRADICTION-REGISTER-FINANCIAL-CONSUMPTION-AND-CLOSED-PERIOD-SUPPLEMENT.md
     - docs/intelligence/09AB-CONTRADICTION-REGISTER-ACCOUNTING-PERIOD-ENFORCEMENT-SUPPLEMENT.md
     - docs/intelligence/09AC-CONTRADICTION-REGISTER-LEDGER-WRITER-INTEGRITY-SUPPLEMENT.md
+    - docs/intelligence/09AD-CONTRADICTION-REGISTER-PAYMENT-PROJECTION-SEMANTICS-SUPPLEMENT.md
+    - docs/intelligence/09AE-CONTRADICTION-REGISTER-CREDIT-NOTE-REVERSAL-AND-INVOICE-STATE-SUPPLEMENT.md
   core_layers:
     - commercial_operational_document_state
     - external_money_reality
@@ -76,11 +83,15 @@ active_frontier:
     F191: reconciliation_lock_on_original_entry_blocks_new_current_period_reversal_for_later_real_refund_without_observed_reconciliation_unlock_or_adjustment_path
     F192: AccountingPeriod_CLOSED_is_not_load_bearing_at_PostingService_and_new_backdated_entries_can_enter_closed_period
     F193: ExpensesService_voidExpense_raw_writes_FinancialTransaction_and_LedgerEntry_reversals_bypassing_PostingService_controls
+    F194: SUCCESSFUL_only_payment_projections_diverge_from_canonical_SUCCESSFUL_minus_REFUNDED_invoice_balance
+    F195: applied_CreditNote_can_be_VOID_without_reversing_accounting_consequence_or_recomputing_invoice_state
+    F196: CreditNoteService_writes_PARTIALLY_CREDITED_FULLY_CREDITED_outside_canonical_InvoiceWorkflow_state_machine
   reused_mature_roots:
     F155: direct_provider_refund_can_write_REFUNDED_Payment_then_suppress_missing_ledger_and_invoice_consequence_repair
     F158: provider_capture_success_plus_local_Payment_persistence_failure_remains_separate_from_F188
   strengthened_roots:
-    F186: ExchangeRateService_exists_but_no_accounting_reporting_consumer_found
+    F186: ExchangeRateService_exists_but_no_accounting_reporting_consumer_found_and_IAS21_pressure_requires_explicit_functional_presentation_rate_semantics
+    F190: current_PayPal_webhook_guidance_assumes_at_least_once_delivery_and_retry_so_receipt_dedupe_must_not_equal_completion
   target_laws:
     - operational_document_state_not_equal_external_money_not_equal_payment_record_not_equal_ledger_truth
     - one_successful_financial_occurrence_must_have_checkable_mandatory_consequence_completeness
@@ -91,11 +102,22 @@ active_frontier:
     - AccountingPeriod_CLOSED_must_be_enforced_at_the_canonical_ledger_write_door
     - all_ordinary_ledger_writes_and_reversals_flow_through_one_governed_posting_contract
     - stored_cash_projection_must_not_compete_silently_with_ledger_balance
+    - gross_receipts_not_equal_refunds_not_equal_net_receipts_not_equal_outstanding_balance_not_equal_accounting_revenue
+    - derived_financial_reads_reuse_or_prove_equivalence_to_canonical_balance_semantics
+    - financial_document_void_or_correction_requires_descendant_accounting_and_document_state_convergence
+    - one_invoice_lifecycle_owner_and_one_declared_state_algebra
     - strong_paid_refunded_settled_states_require_declared_evidence_contracts
     - multi_currency_aggregation_requires_explicit_valuation_basis_or_currency_separation
+    - native_functional_and_presentation_currency_semantics_remain_distinct_where_applicable
     - reversal_refund_is_new_financial_consequence_not_history_deletion
     - derived_financial_figures_expose_basis_asOf_currency_completeness_and_known_exclusions
     - financial_importance_does_not_grant_money_movement_authority
+  target_candidates_inside_KF_REC_052_not_new_concepts:
+    - FinancialConsequenceVector
+    - ValuationEvidence
+    - CanonicalInvoiceBalance
+    - CanonicalCashPosition
+    - CorrectionCompletionClosure_financial_specialization
 latest_j17_pool:
   journey: J17
   recommendation: KF-REC-051
@@ -126,8 +148,8 @@ continuity:
   taxonomy_check_after_major_tranche: true
   invariant: fresh_thread_can_resume_exact_working_flow_without_restart
 exact_next_action:
-  title: continue_J7_projection_valuation_and_strong_status_convergence
-  instruction: Continue J7 from F185-F193. Trace user-facing payment/refund summaries for divergence from reconcileFromPayments; map all FinancialAccount.currentBalance consumers to ledger alternatives; map ExchangeRate into or outside all balance/report paths; trace strong PAID/REFUNDED/VOID/SETTLED states across payroll/AP/credit notes/payment operations; inspect direct ledger writes and ensure F193 scope is complete; then pressure-test KF-REC-052 and run backward re-audit into J3/J4/J17/J18/J23 and K8/K9/K10/K11/K3. Reuse mature roots before allocating new IDs. Do not modify production code.
+  title: run_J7_backward_reaudit_and_build_proof_architecture
+  instruction: Backward re-audit KF-REC-052 and F185-F196 into J3/J4/J17/J18/J23 and K8/K9/K10/K11/K3. Reopen any earlier target whose assumptions are invalidated by FinancialConsequenceVector, canonical financial read semantics, closed-period correction, or single-owner invoice lifecycle. Then draft J7 proof obligations and deterministic fault-injection points. Reuse mature roots before allocating new IDs. Do not modify production code.
 constraints:
   - do_not_modify_production_code
   - do_not_treat_financial_projection_as_ledger_or_provider_truth
